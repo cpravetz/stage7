@@ -1,7 +1,7 @@
 import { User } from '../models/User';
 import { Role, SystemRoles, DEFAULT_ROLES } from '../models/Role';
 import { Permission, matchesPermission } from '../models/Permission';
-import { analyzeError } from '@cktmcs/errorhandler';
+import { analyzeError } from '@cktmcs/shared';
 import { updateUser, findUserById, findUserByEmail } from '../services/userService';
 
 /**

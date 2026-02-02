@@ -13,26 +13,26 @@ export class OpenRouterInterface extends BaseInterface {
         this.converters.set(LLMConversationType.TextToImage, {
             conversationType: LLMConversationType.TextToImage,
             requiredParams: ['service','prompt'],
-            converter: this.convertTextToImage,
+            converter: this.convertTextToImage.bind(this),
         });this.converters.set(LLMConversationType.TextToText, {
             conversationType: LLMConversationType.TextToText,
             requiredParams: ['service', 'prompt'],
-            converter: this.convertTextToText,
+            converter: this.convertTextToText.bind(this),
         });
         this.converters.set(LLMConversationType.ImageToText, {
             conversationType: LLMConversationType.ImageToText,
             requiredParams: ['service', 'image', 'prompt'],
-            converter: this.convertImageToText,
+            converter: this.convertImageToText.bind(this),
         });
         this.converters.set(LLMConversationType.TextToCode, {
             conversationType: LLMConversationType.TextToCode,
             requiredParams: ['service', 'prompt'],
-            converter: this.convertTextToCode,
+            converter: this.convertTextToCode.bind(this),
         });
         this.converters.set(LLMConversationType.TextToJSON, {
             conversationType: LLMConversationType.TextToJSON,
             requiredParams: ['service', 'prompt'],
-            converter: this.convertTextToJSON,
+            converter: this.convertTextToJSON.bind(this),
         });
     }
 

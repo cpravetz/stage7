@@ -5,7 +5,19 @@ import { AgentPersistenceManager } from '../utils/AgentPersistenceManager';
 import { RuntimeForeachDetector, ForeachModification } from '../utils/RuntimeForeachDetector.js';
 import { DelegationRecord } from '../types/DelegationTypes';
 import { CrossAgentDependencyResolver } from '../utils/CrossAgentDependencyResolver';
-import { Agent } from './Agent.js';
+
+/**
+ * Interface defining the Agent context needed by Step for execution.
+ * This decouples Step from the full Agent class to avoid circular dependencies.
+ */
+export interface StepExecutionAgentContext {
+    id: string;
+    agentSetUrl: string;
+    steps: Step[];
+    agentSet: {
+        registerStepLocation: (stepId: string, agentId: string, agentSetUrl: string) => void;
+    };
+}
 
 interface ExtendedActionVerbTask extends ActionVerbTask {
     scope_id?: string;
@@ -891,7 +903,7 @@ export class Step {
         delegateAction: (inputValues: Map<string, InputValue>) => Promise<PluginOutput[]>,
         askAction: (inputValues: Map<string, InputValue>) => Promise<PluginOutput[]>,
         allSteps: Step[],
-        agent: Agent,
+        agent: StepExecutionAgentContext,
     ): Promise<PluginOutput[]> {
         this.status = StepStatus.RUNNING;
         this.logEvent({
@@ -932,6 +944,29 @@ export class Step {
                     result = await this.handleTimeout(agent);
                     break;
                 
+                // New verb for direct tool execution from L3
+                case 'EXECUTE_TOOL':
+                    const toolName = this.inputValues.get('toolName')?.value;
+                    const toolAction = this.inputValues.get('action')?.value;
+                    const toolPayload = this.inputValues.get('payload')?.value;
+
+                    if (!toolName || !toolAction) {
+                        return this.createErrorResponse('EXECUTE_TOOL requires "toolName" and "action" inputs.', '[Step]Error in EXECUTE_TOOL step');
+                    }
+
+                    // Construct a synthetic step to pass to the capabilities manager
+                    const syntheticStep = new Step({
+                        ...this.toJSON(), // Inherit properties from the current step
+                        actionVerb: `${toolName}_${toolAction}`, // e.g., "JiraTool_getIssueDetails"
+                        inputValues: new Map(Object.entries(toolPayload || {})), // Use the payload as the inputs for the target tool
+                        persistenceManager: this.persistenceManager,
+                        crossAgentResolver: this.crossAgentResolver,
+                    });
+                    
+                    console.log(`[Step ${this.id}] EXECUTE_TOOL: Invoking capabilities manager with synthetic verb: ${syntheticStep.actionVerb}`);
+                    result = await executeAction(syntheticStep);
+                    break;
+
                 // Verbs handled by Agent methods
                 case 'THINK':
                 case 'GENERATE':

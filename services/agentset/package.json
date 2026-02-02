@@ -15,7 +15,7 @@
     "body-parser": "^1.19.0",
     "cors": "^2.8.5",
     "dotenv": "^16.5.0",
-    "express": "^4.21.1",
+    "express": "^5.0.0",
     "mime-types": "^2.1.35",
     "uuid": "^10.0.0"
   },
@@ -38,7 +38,7 @@
     "testEnvironment": "node"
   },
   "overrides": {
-    "glob": "^11.10",
+    "glob": "^13.0.0",
     "inflight": "^2.0.0"
   }
 }

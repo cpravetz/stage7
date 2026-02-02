@@ -1,5 +1,5 @@
 import express from 'express';
-import { analyzeError } from '@cktmcs/errorhandler';
+import { analyzeError } from '@cktmcs/shared';
 import { AxiosInstance } from 'axios';
 
 export class PluginManager {

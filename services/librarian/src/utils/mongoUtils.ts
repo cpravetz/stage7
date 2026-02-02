@@ -1,6 +1,6 @@
 import { MongoClient, Db, Collection, DeleteResult } from 'mongodb';
 import dotenv from 'dotenv';
-import { analyzeError } from '@cktmcs/errorhandler';
+import { analyzeError } from '@cktmcs/shared';
 
 dotenv.config();
 

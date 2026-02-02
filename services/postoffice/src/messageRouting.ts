@@ -1,7 +1,6 @@
 import { Message, MessageType } from '@cktmcs/shared';
-import { analyzeError } from '@cktmcs/errorhandler';
+import { analyzeError } from '@cktmcs/shared';
 import axios from 'axios';
-import WebSocket from 'ws';
 import { WebSocketHandler } from './webSocketHandler'; // Import WebSocketHandler
 
 // Create an axios instance for HTTP communication
@@ -48,25 +47,52 @@ export class MessageRouter {
    * @param message Message to route
    */
   async routeMessage(message: Message): Promise<void> {
-    console.log(`Routing message of type ${message.type} to ${message.recipient}`);
-    const { clientId } = message;
+    const messageId = (message as any).id || `${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+    (message as any).id = messageId; // Add unique ID for tracking
+    console.log(`[ROUTING_DEBUG] Routing message ${messageId} of type ${message.type} to ${message.recipient}`);
+    
+    // Extract clientId from either top level OR from content (SDK sends it in content)
+    let clientId = (message as any).clientId;
+    if (!clientId && message.content && typeof message.content === 'object') {
+      clientId = (message.content as any).clientId;
+    }
+    console.log(`[ROUTING_DEBUG] Extracted clientId: ${clientId}, recipient: ${message.recipient}`);
 
     // Handle statistics messages (always sent directly to clients)
     if (message.type === MessageType.STATISTICS || (message.type as any) === 'agentStatistics') {
+      console.log(`[ROUTING_DEBUG] Message ${messageId} is statistics, handling via handleStatisticsMessage`);
       await this.handleStatisticsMessage(message, clientId);
       return;
     }
 
+    // Handle user messages (should be routed to MissionControl, not directly to client)
+    if ((message.type as any) === 'userMessage' && message.recipient === 'MissionControl') {
+      console.log(`[ROUTING_DEBUG] Message ${messageId} is a userMessage for MissionControl, routing to service not client`);
+      await this.handleServiceMessage(message, message.recipient, clientId);
+      return;
+    }
+
+    // Handle messages addressed to PostOffice with a clientId - forward to the client via WebSocket
+    // This handles messages from backend services (SDK assistants) intended for frontend clients
+    if (clientId && (message.recipient === 'PostOffice' || message.recipient === this.id)) {
+      console.log(`[ROUTING_DEBUG] Message ${messageId} addressed to PostOffice with clientId ${clientId}, forwarding to client via WebSocket`);
+      this.webSocketHandler.sendToClient(clientId, message);
+      return;
+    }
+
     // Handle messages to users (via WebSocket)
-    if (clientId) {
+    if (clientId && message.recipient === 'user') {
+        console.log(`[ROUTING_DEBUG] Message ${messageId} has clientId ${clientId} and recipient is user, sending directly to client`);
         this.webSocketHandler.sendToClient(clientId, message); // Delegate to WebSocketHandler
         return;
     }
 
     if (message.recipient === 'user') {
         if (message.missionId) {
+            console.log(`[ROUTING_DEBUG] Message ${messageId} is for user with missionId ${message.missionId}, broadcasting to mission clients`);
             this.webSocketHandler.broadcastToMissionClients(message.missionId, message);
         } else {
+            console.log(`[ROUTING_DEBUG] Message ${messageId} is for user with no missionId, broadcasting to all clients`);
             this.webSocketHandler.broadcastToClients(message); // Delegate to WebSocketHandler
         }
         return;
@@ -243,6 +269,12 @@ export class MessageRouter {
    * @param message Message received from the queue
    */
   async handleQueueMessage(message: Message): Promise<void> {
+    console.log('[RABBITMQ_DEBUG] ========= RabbitMQ message received =========');
+    console.log('[RABBITMQ_DEBUG] Message type:', message.type);
+    console.log('[RABBITMQ_DEBUG] Message recipient:', message.recipient);
+    console.log('[RABBITMQ_DEBUG] Message sender:', message.sender);
+    console.log('[RABBITMQ_DEBUG] Full message:', JSON.stringify(message, null, 2));
+    console.log('[RABBITMQ_DEBUG] =============================================');
     console.log('Received message from RabbitMQ queue:', message.type);
 
     try {

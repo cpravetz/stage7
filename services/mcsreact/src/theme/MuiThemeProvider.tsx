@@ -1,6 +1,6 @@
 import React from 'react';
-import { ThemeProvider as MuiThemeProvider, createTheme, Theme, ThemeOptions } from '@mui/material/styles';
-import CssBaseline from '@mui/material/CssBaseline';
+import { ThemeProvider as MuiThemeProvider, createTheme, Theme, ThemeOptions } from '@mui/material/styles/index.js';
+import CssBaseline from '@mui/material/CssBaseline/index.js';
 import { useTheme } from './ThemeContext';
 
 // Define common theme options

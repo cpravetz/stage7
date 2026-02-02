@@ -1,5 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useMemo } from 'react';
-import { Box, Typography, useTheme } from '@mui/material';
+import { Box, Typography, useTheme } from '@mui/material/index.js';
 import MessageItem from './MessageItem';
 import { ConversationMessage } from '../shared-browser';
 

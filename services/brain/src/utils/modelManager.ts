@@ -6,7 +6,7 @@ import { interfaceManager } from './interfaceManager';
 import { BaseInterface } from '../interfaces/baseInterface';
 import { LLMConversationType } from '@cktmcs/shared';
 import { BaseService } from '../services/baseService';
-import { analyzeError } from '@cktmcs/errorhandler';
+import { analyzeError } from '@cktmcs/shared';
 import { ModelPerformanceTracker } from './performanceTracker';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -700,6 +700,117 @@ export class ModelManager {
         }
 
         return summary;
+    }
+
+    /**
+     * Register models from ModelConfiguration objects (seed data)
+     * This bridges the gap between the new config-based system and the legacy BaseModel system
+     */
+    async registerModelsFromConfig(configs: Array<{
+        id: string;
+        name: string;
+        provider: string;
+        providerModelId: string;
+        supportedConversationTypes: LLMConversationType[];
+        tokenLimit: number;
+        metadata?: any;
+    }>): Promise<number> {
+        await interfaceManager.ready();
+        
+        let registeredCount = 0;
+        
+        for (const config of configs) {
+            try {
+                // Find the interface by provider name
+                const interfaceInstance = interfaceManager.getInterface(config.provider);
+                
+                // Find the service - try different naming conventions
+                const serviceNames = [
+                    `${config.provider.charAt(0).toUpperCase()}${config.provider.slice(1)}Service`,  // e.g., GroqService
+                    `${config.provider.toUpperCase()}Service`,  // e.g., GROQService
+                    config.provider,  // e.g., groq
+                    `${config.provider.charAt(0).toUpperCase()}${config.provider.slice(1).toLowerCase()}Service`  // e.g., GroqService
+                ];
+                
+                let serviceInstance: BaseService | undefined;
+                for (const serviceName of serviceNames) {
+                    serviceInstance = serviceManager.getService(serviceName);
+                    if (serviceInstance) break;
+                }
+                
+                // Also try common service name mappings
+                if (!serviceInstance) {
+                    const serviceNameMap: Record<string, string> = {
+                        'openai': 'OAService',
+                        'anthropic': 'AntService',
+                        'google': 'GeminiService',
+                        'gemini': 'GeminiService',
+                        'groq': 'GroqService',
+                        'openrouter': 'ORService',
+                        'huggingface': 'HFService',
+                        'mistral': 'MistralService',
+                        'openwebui': 'OWService',
+                        'openweb': 'OWService',
+                        'cloudflare': 'cloudflare-workers-ai',
+                        'aiml': 'AIMLService',
+                        'gg': 'GGService'
+                    };
+                    const mappedName = serviceNameMap[config.provider.toLowerCase()];
+                    if (mappedName) {
+                        serviceInstance = serviceManager.getService(mappedName);
+                    }
+                }
+
+                if (!interfaceInstance) {
+                    console.warn(`[ModelManager] No interface found for provider "${config.provider}", skipping model ${config.name}`);
+                    continue;
+                }
+
+                if (!serviceInstance) {
+                    console.warn(`[ModelManager] No service found for provider "${config.provider}", skipping model ${config.name}`);
+                    continue;
+                }
+
+                if (!serviceInstance.isAvailable()) {
+                    console.warn(`[ModelManager] Service for provider "${config.provider}" is not available, skipping model ${config.name}`);
+                    continue;
+                }
+
+                // Build scores map from metadata
+                const scoresMap = new Map<LLMConversationType, { costScore: number; accuracyScore: number; creativityScore: number; speedScore: number }>();
+                if (config.metadata?.scores) {
+                    for (const [typeKey, score] of Object.entries(config.metadata.scores)) {
+                        const convType = (LLMConversationType as Record<string, any>)[typeKey] || typeKey;
+                        scoresMap.set(convType, score as { costScore: number; accuracyScore: number; creativityScore: number; speedScore: number });
+                    }
+                }
+
+                // Create the BaseModel instance
+                const modelInstance = new BaseModel({
+                    name: config.name,
+                    modelName: config.providerModelId,
+                    interfaceName: config.provider,
+                    serviceName: serviceInstance.serviceName,
+                    tokenLimit: config.tokenLimit,
+                    scoresByConversationType: scoresMap,
+                    contentConversation: config.supportedConversationTypes
+                });
+
+                // Set the providers
+                modelInstance.setProviders(interfaceInstance as BaseInterface, serviceInstance);
+
+                // Register the model
+                this.models.set(config.name.toLowerCase(), modelInstance);
+                registeredCount++;
+                console.log(`[ModelManager] Registered model from config: ${config.name}`);
+                
+            } catch (error) {
+                console.error(`[ModelManager] Error registering model ${config.name}:`, error);
+            }
+        }
+
+        console.log(`[ModelManager] Registered ${registeredCount} models from configuration`);
+        return registeredCount;
     }
 }
 

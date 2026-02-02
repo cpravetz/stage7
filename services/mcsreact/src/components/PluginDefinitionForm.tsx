@@ -17,8 +17,8 @@ import {
   FormGroup,
   FormLabel,
   Paper,
-} from '@mui/material';
-import { Add as AddIcon, Delete as DeleteIcon } from '@mui/icons-material';
+} from '@mui/material/index.js';
+import { Delete as DeleteIcon, Add as AddIcon } from '@mui/icons-material';
 import {
   PluginManifest,
 } from './../shared-browser/PluginManifest'; // Assuming these types are available from shared

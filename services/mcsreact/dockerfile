@@ -27,7 +27,7 @@ COPY shared/src/types/PluginRepository.ts ./src/shared-browser
 COPY shared/src/types/PluginStatus.ts ./src/shared-browser
 
 # Set environment variables
-ENV NODE_ENV=production
+ENV NODE_ENV=development
 ENV REACT_APP_API_BASE_URL=http://localhost:5020
 ENV REACT_APP_WS_URL=ws://localhost:5020
 ENV CI=false

@@ -20,7 +20,7 @@
         "cors": "^2.8.5",
         "dockerode": "^4.0.7",
         "dotenv": "^16.5.0",
-        "express": "^4.21.1",
+        "express": "^5.0.0",
         "extract-zip": "^2.0.1",
         "isolated-vm": "^5.0.4",
         "simple-git": "^3.27.0",

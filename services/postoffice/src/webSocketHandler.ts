@@ -1,7 +1,7 @@
 import WebSocket from 'ws';
 import http from 'http';
 import { Message, MessageType } from '@cktmcs/shared';
-import { analyzeError } from '@cktmcs/errorhandler';
+import { analyzeError } from '@cktmcs/shared';
 
 /**
  * WebSocketHandler class handles WebSocket connections and messages
@@ -11,6 +11,7 @@ export class WebSocketHandler {
   private clientMessageQueue: Map<string, Message[]>;
   private clientMissions: Map<string, string>;
   private missionClients: Map<string, Set<string>>;
+  private assistantClients: Set<string>;
   private authenticatedApi: any;
   private getComponentUrl: (type: string) => string | undefined;
   private handleWebSocketMessage: (message: any, token: string) => Promise<void>;
@@ -20,6 +21,7 @@ export class WebSocketHandler {
     clientMessageQueue: Map<string, Message[]>,
     clientMissions: Map<string, string>,
     missionClients: Map<string, Set<string>>,
+    assistantClients: Set<string>,
     authenticatedApi: any,
     getComponentUrl: (type: string) => string | undefined,
     handleWebSocketMessage: (message: any, token: string) => Promise<void>
@@ -28,6 +30,7 @@ export class WebSocketHandler {
     this.clientMessageQueue = clientMessageQueue;
     this.clientMissions = clientMissions;
     this.missionClients = missionClients;
+    this.assistantClients = assistantClients;
     this.authenticatedApi = authenticatedApi;
     this.getComponentUrl = getComponentUrl;
     this.handleWebSocketMessage = handleWebSocketMessage;
@@ -221,27 +224,33 @@ export class WebSocketHandler {
    * @param message Message to send
    */
   sendToClient(clientId: string, message: any): void {
-    console.log(`Attempting to send message of type ${message.type} to client ${clientId}`);
+    if (this.assistantClients.has(clientId) && message.visibility === 'developer') {
+        console.log(`[ASSISTANT_FILTER] Dropping developer-only message for client ${clientId} of type ${message.type}`);
+        return;
+    }
+    const messageId = message.id || `${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+    message.id = messageId; // Add unique ID for tracking
+    console.log(`[WS_DEBUG] Attempting to send message ${messageId} of type ${message.type} to client ${clientId}`);
 
     const client = this.clients.get(clientId);
     if (client && client.readyState === WebSocket.OPEN) {
       try {
         const messageJson = JSON.stringify(message);
         client.send(messageJson);
-        console.log(`Message sent to client ${clientId}. Message type: ${message.type}`);
+        console.log(`[WS_DEBUG] Message ${messageId} sent to client ${clientId}. Message type: ${message.type}`);
 
       } catch (error) {
-        console.error(`Error sending message to client ${clientId}:`, error instanceof Error ? error.message : 'Unknown error');
+        console.error(`[WS_DEBUG] Error sending message ${messageId} to client ${clientId}:`, error instanceof Error ? error.message : 'Unknown error');
       }
     } else {
-      console.log(`Client ${clientId} not found or not ready. ReadyState: ${client ? client.readyState : 'Client not found'}`);
+      console.log(`[WS_DEBUG] Client ${clientId} not found or not ready. ReadyState: ${client ? client.readyState : 'Client not found'}. Queueing message ${messageId}`);
 
       // Queue the message for when the client connects
       if (!this.clientMessageQueue.has(clientId)) {
         this.clientMessageQueue.set(clientId, []);
       }
       this.clientMessageQueue.get(clientId)!.push(message);
-      console.log(`Message queued for client ${clientId}. Queue size: ${this.clientMessageQueue.get(clientId)!.length}`);
+      console.log(`[WS_DEBUG] Message ${messageId} queued for client ${clientId}. Queue size: ${this.clientMessageQueue.get(clientId)!.length}`);
 
       if (client) {
         console.log(`Attempting to reconnect client ${clientId}`);
@@ -255,17 +264,21 @@ export class WebSocketHandler {
    * @param message Message to broadcast
    */
   broadcastToMissionClients(missionId: string, message: any): void {
-    console.log(`Broadcasting message of type ${message.type} to clients of mission ${missionId}`);
+    const messageId = message.id || `${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+    message.id = messageId; // Add unique ID for tracking
+    console.log(`[WS_DEBUG] Broadcasting message ${messageId} of type ${message.type} to clients of mission ${missionId}`);
     const clientIds = this.missionClients.get(missionId);
 
     if (clientIds) {
+      console.log(`[WS_DEBUG] Mission ${missionId} has ${clientIds.size} clients:`, Array.from(clientIds));
       clientIds.forEach(clientId => {
         // The sendToClient method already handles queuing if the client is not connected
+        console.log(`[WS_DEBUG] Sending broadcast message ${messageId} to client ${clientId}`);
         this.sendToClient(clientId, message);
       });
-      console.log(`Broadcast to mission ${missionId} complete: sent to ${clientIds.size} clients.`);
+      console.log(`[WS_DEBUG] Broadcast to mission ${missionId} complete: sent message ${messageId} to ${clientIds.size} clients.`);
     } else {
-      console.log(`No clients found for mission ${missionId} to broadcast message.`);
+      console.log(`[WS_DEBUG] No clients found for mission ${missionId} to broadcast message ${messageId}.`);
     }
   }
 
@@ -274,23 +287,25 @@ export class WebSocketHandler {
    * @param message Message to broadcast
    */
   broadcastToClients(message: any): void {
-    console.log(`Broadcasting message of type ${message.type} to all clients`);
+    const messageId = message.id || `${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+    message.id = messageId; // Add unique ID for tracking
+    console.log(`[WS_DEBUG] Broadcasting message ${messageId} of type ${message.type} to all ${this.clients.size} clients`);
     let sentCount = 0;
 
     this.clients.forEach((client, clientId) => {
       if (client.readyState === WebSocket.OPEN) {
         try {
           client.send(JSON.stringify(message));
-          console.log(`Broadcast message sent to client ${clientId}`);
+          console.log(`[WS_DEBUG] Broadcast message ${messageId} sent to client ${clientId}`);
           sentCount++;
         } catch (error) {
-          console.error(`Error broadcasting message to client ${clientId}:`, error instanceof Error ? error.message : 'Unknown error');
+          console.error(`[WS_DEBUG] Error broadcasting message ${messageId} to client ${clientId}:`, error instanceof Error ? error.message : 'Unknown error');
         }
       } else {
-        console.log(`Client ${clientId} not ready for broadcast, readyState: ${client.readyState}`);
+        console.log(`[WS_DEBUG] Client ${clientId} not ready for broadcast, readyState: ${client.readyState}`);
       }
     });
 
-    console.log(`Broadcast complete: sent to ${sentCount} of ${this.clients.size} clients`);
+    console.log(`[WS_DEBUG] Broadcast complete: sent message ${messageId} to ${sentCount} of ${this.clients.size} clients`);
   }
 }

@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { Box, Typography, Paper, List, ListItem, ListItemText, Divider, Chip } from '@mui/material';
+import { Box, Typography, Paper, List, ListItem, ListItemText, Divider, Chip } from '@mui/material/index.js';
 import { MissionStatistics } from '../shared-browser';
 
 interface Props {

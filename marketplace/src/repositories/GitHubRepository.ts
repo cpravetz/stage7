@@ -208,8 +208,6 @@ export class GitHubRepository implements PluginRepository {
 
                 const messageDetails = responseData ? ( (typeof responseData === 'string' ? responseData : JSON.stringify(responseData)) || "No additional details from API.") : (error.message || "Unknown Axios error");
 
-                console.error(new Error(`GitHub API Error for ${method} ${url}. Status: ${status}. Details: ${messageDetails}`));
-                console.error(`GitHubRepository: Failed request URL: ${url}, Status: ${status}`);
                 return {
                     data: { message: `GitHub API Error: ${messageDetails}` },
                     status: status,
@@ -297,7 +295,6 @@ export class GitHubRepository implements PluginRepository {
         const manifestContent = await this.getFileContent(manifestPath, effectiveBranch);
 
         if (!manifestContent) {
-            console.log(`GitHubRepository.fetch: Manifest not found for pluginId '${pluginId}' ${version ? `version '${version}'` : '(default/latest)'} at path '${manifestPath}' on branch '${effectiveBranch}'.`);
             return undefined;
         }
 
@@ -359,8 +356,6 @@ export class GitHubRepository implements PluginRepository {
             const manifest = await this.fetch(pluginId, version);
             if (manifest) { // Only add if manifest was successfully fetched
                 manifests.push(manifest);
-            } else {
-                console.warn(`GitHubRepository.fetchAllVersionsOfPlugin: Skipping invalid or unfetchable manifest for plugin ${pluginId} version ${version}.`);
             }
         }
         return manifests.length > 0 ? manifests : undefined;
@@ -432,12 +427,6 @@ export class GitHubRepository implements PluginRepository {
         const response = await this.makeGitHubRequest('GET', `${this.baseContentUrl}/${path}`, undefined, { ref: ref || await this._getEffectiveBranch() });
         if (response.status === 200 && response.data.content) {
             return Buffer.from(response.data.content, 'base64').toString('utf-8');
-        }
-        // Log if it's a 404, otherwise just return undefined
-        if (response.status === 404) {
-            console.log(`GitHubRepository.getFileContent: Path '${path}' not found (404).`);
-        } else {
-                console.warn(`GitHubRepository.getFileContent: Failed to get content for path '${path}'. Status: ${response.status}`);
         }
         return undefined;
     }

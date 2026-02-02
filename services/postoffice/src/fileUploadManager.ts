@@ -1,7 +1,7 @@
 import express from 'express';
 import multer from 'multer';
 import { MissionFile } from '@cktmcs/shared';
-import { analyzeError } from '@cktmcs/errorhandler';
+import { analyzeError } from '@cktmcs/shared';
 import { FileUploadService } from './fileUploadService';
 import path from 'path';
 import axios, { AxiosInstance } from 'axios';

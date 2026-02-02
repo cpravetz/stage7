@@ -16,6 +16,19 @@ import axios, { AxiosInstance } from 'axios';
 const rawLibrarianUrl = process.env.LIBRARIAN_URL || 'librarian:5040';
 const correctedLibrarianUrl = rawLibrarianUrl.startsWith('http') ? rawLibrarianUrl : `http://${rawLibrarianUrl}`;
 
+/**
+ * Normalizes an ID to always be a string.
+ * @param Id The ID which could be a string or string array.
+ * @returns A normalized string ID.
+ */
+function normalizeId(Id: string | string[]): string {
+  if (Array.isArray(Id)) {
+    // If it's an array, use the first element or generate a fallback
+    return Id.length > 0 ? Id[0] : `id-${Date.now()}`;
+  }
+  return Id;
+}
+
 const librarianApi = axios.create({
     baseURL: correctedLibrarianUrl,
     headers: {
@@ -188,23 +201,8 @@ export class CapabilitiesManager extends BaseEntity {
                 // Core routes
                 app.post('/executeAction', (req: Request, res: Response) => this.executeActionVerb(req, res));
 
-                // Health check endpoints
-                app.get('/health', (req: Request, res: Response) => {
-                    res.json({
-                        status: 'ok',
-                        service: 'CapabilitiesManager',
-                        initialization: this.initializationStatus
-                    });
-                });
-
-                app.get('/ready', (req: Request, res: Response) => {
-                    const isReady = this.initializationStatus.overall;
-                    res.status(isReady ? 200 : 503).json({
-                        ready: isReady,
-                        service: 'CapabilitiesManager',
-                        initialization: this.initializationStatus
-                    });
-                });
+                // Set up unified health check endpoints (/health, /healthy, /ready, /status)
+                this.setupHealthCheck(app);
 
                 // --- Plugin CRUD API ---
                 app.get('/plugins', async (req: Request, res: Response) => {
@@ -230,7 +228,7 @@ export class CapabilitiesManager extends BaseEntity {
                     const trace_id = (req as any).trace_id || `${trace_id_parent}-plugins-get-${uuidv4().substring(0,8)}`;
                     try {
                         const repository = req.query.repository as PluginRepositoryType | undefined;
-                        const plugin = await this.pluginRegistry.fetchOne(req.params.id, undefined, repository);
+                        const plugin = await this.pluginRegistry.fetchOne(normalizeId(req.params.id), undefined, repository);
                         if (!plugin) {
                             const sError = generateStructuredError({
                                 error_code: GlobalErrorCodes.PLUGIN_NOT_FOUND,
@@ -295,7 +293,7 @@ export class CapabilitiesManager extends BaseEntity {
                         const repository = req.query.repository as string | undefined;
                         // Only librarian-definition repos support delete
                         if (repository === 'librarian-definition' && typeof this.pluginRegistry.delete === 'function') {
-                            await this.pluginRegistry.delete(req.params.id, undefined, repository);
+                            await this.pluginRegistry.delete(normalizeId(req.params.id), undefined, repository);
                         } else {
                             const sError = generateStructuredError({
                                 error_code: GlobalErrorCodes.CAPABILITIES_MANAGER_INVALID_REQUEST_GENERIC,
@@ -683,6 +681,19 @@ export class CapabilitiesManager extends BaseEntity {
                         if (!step.inputValues) {
                             step.inputValues = new Map<string, InputValue>();
                         }
+                        
+                        // --- CRITICAL FIX: Inject availablePlugins into inputs ---
+                        const allAvailablePlugins = await this._getAvailablePluginManifests();
+                        // availablePlugins should be a JSON string when passed to Python
+                        step.inputValues.set('availablePlugins', {
+                            inputName: 'availablePlugins',
+                            value: JSON.stringify(allAvailablePlugins),
+                            valueType: PluginParameterType.STRING, // Treat as string for Python deserialization
+                            args: {}
+                        });
+                        console.log(`[${trace_id}] ${source_component}: Injected ${allAvailablePlugins.length} available plugins into inputs for ${step.actionVerb}.`);
+                        // --- END CRITICAL FIX ---
+
                         console.log(`[${trace_id}] ${source_component}: Input values before validation for ${step.actionVerb}:`, JSON.stringify(Array.from(step.inputValues.entries())));
 
                         // Pass the full inputValues Map to validation (it expects InputValue objects, not raw values)

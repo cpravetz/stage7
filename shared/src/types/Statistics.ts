@@ -48,7 +48,7 @@ export interface AgentSetStatistics {
 }
 
 
-export interface TrafficManagerStatistics {
+export interface AgentSetStatistics {
     agentStatisticsByType: {
         totalAgents: number; // Changed from Number
         agentCountByStatus: Record<string, number>; // Changed from Object

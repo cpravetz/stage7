@@ -15,7 +15,6 @@ export interface AgentState {
     dependencies: string[];
     capabilitiesManagerUrl: string;
     brainUrl: string;
-    trafficManagerUrl: string;
     librarianUrl: string;
     conversation: any[];
     missionContext: string;

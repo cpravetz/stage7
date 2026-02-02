@@ -551,19 +551,17 @@ describe('BaseEntity', () => {
             jest.spyOn(entity, 'getServiceUrl')
                 .mockResolvedValueOnce('cap:1')
                 .mockResolvedValueOnce('brain:2')
-                .mockResolvedValueOnce('traffic:3')
-                .mockResolvedValueOnce('librarian:4')
-                .mockResolvedValueOnce('mission:5')
-                .mockResolvedValueOnce('engineer:6');
+                .mockResolvedValueOnce('librarian:3')
+                .mockResolvedValueOnce('mission:4')
+                .mockResolvedValueOnce('engineer:5');
 
             const urls = await entity.getServiceUrls();
             expect(urls).toEqual({
                 capabilitiesManagerUrl: 'cap:1',
                 brainUrl: 'brain:2',
-                trafficManagerUrl: 'traffic:3',
-                librarianUrl: 'librarian:4',
-                missionControlUrl: 'mission:5',
-                engineerUrl: 'engineer:6',
+                librarianUrl: 'librarian:3',
+                missionControlUrl: 'mission:4',
+                engineerUrl: 'engineer:5',
             });
         });
 
@@ -574,7 +572,6 @@ describe('BaseEntity', () => {
             expect(urls).toEqual({
                 capabilitiesManagerUrl: 'capabilitiesmanager:5060',
                 brainUrl: 'brain:5070',
-                trafficManagerUrl: 'trafficmanager:5080',
                 librarianUrl: 'librarian:5040',
                 missionControlUrl: 'missioncontrol:5030',
                 engineerUrl: 'engineer:5050',

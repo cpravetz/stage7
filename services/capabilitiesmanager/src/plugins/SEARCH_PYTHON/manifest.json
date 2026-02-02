@@ -1,6 +1,6 @@
 {
   "id": "plugin-SEARCH_PYTHON",
-  "verb": "SEARCH",
+  "verb": "SEARCH_PYTHON",
   "description": "Searches the internet using multiple providers with intelligent fallback strategy",
   "explanation": "This plugin takes a search term and returns a JSON array of search results using a prioritized fallback strategy: LangSearch (primary), Google Custom Search, DuckDuckGo, SearXNG, and Brain/LLM as final fallback. Python version with enhanced functionality and maintainability.",
   "inputDefinitions": [
@@ -9,7 +9,13 @@
       "required": true,
       "type": "string",
       "description": "The term to search for using intelligent provider fallback",
-            "aliases": ["query","keywords","terms","q", "search_query"]
+      "aliases": [
+        "query",
+        "keywords",
+        "terms",
+        "q",
+        "search_query"
+      ]
     }
   ],
   "outputDefinitions": [

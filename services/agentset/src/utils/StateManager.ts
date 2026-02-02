@@ -26,7 +26,6 @@ export class StateManager {
                 dependencies: agent.dependencies,
                 capabilitiesManagerUrl: agent.capabilitiesManagerUrl,
                 brainUrl: agent.brainUrl,
-                trafficManagerUrl: agent.trafficManagerUrl,
                 librarianUrl: agent.librarianUrl,
                 conversation: agent.conversation,
                 missionContext: agent.missionContext,
@@ -105,7 +104,6 @@ export class StateManager {
                 agent.dependencies = state.dependencies;
                 agent.capabilitiesManagerUrl = state.capabilitiesManagerUrl;
                 agent.brainUrl = state.brainUrl;
-                agent.trafficManagerUrl = state.trafficManagerUrl;
                 agent.librarianUrl = state.librarianUrl;
                 agent.conversation = state.conversation || [];
                 agent.missionContext = state.missionContext;

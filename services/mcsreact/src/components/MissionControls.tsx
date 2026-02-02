@@ -1,11 +1,6 @@
 import React from 'react';
-import { Box, Button, ButtonGroup, Typography, Chip, useTheme } from '@mui/material';
-import PlayArrowIcon from '@mui/icons-material/PlayArrow';
-import PauseIcon from '@mui/icons-material/Pause';
-import StopIcon from '@mui/icons-material/Stop';
-import SaveIcon from '@mui/icons-material/Save';
-import FolderOpenIcon from '@mui/icons-material/FolderOpen';
-import ListIcon from '@mui/icons-material/List';
+import { Box, Button, ButtonGroup, Typography, Chip, useTheme } from '@mui/material/index.js';
+import { List as ListIcon, FolderOpen as FolderOpenIcon, Save as SaveIcon, Stop as StopIcon, Pause as PauseIcon, PlayArrow as PlayArrowIcon } from '@mui/icons-material';
 
 interface Props {
   onControl: (action: string) => void;

@@ -1,5 +1,5 @@
 import { PluginConfigurationItem, PluginMetadata, createAuthenticatedAxios } from '@cktmcs/shared';
-import { analyzeError } from '@cktmcs/errorhandler';
+import { analyzeError } from '@cktmcs/shared';
 import axios from 'axios';
 
 interface SystemConfig {

@@ -55,21 +55,6 @@ describe('HealthCheckManager', () => {
         jest.restoreAllMocks();
     });
 
-    describe('GET /healthy', () => {
-        it('should always return 200 status with ok status', () => {
-            const healthyHandler = mockApp.get.mock.calls.find(call => call[0] === '/healthy')[1];
-            const mockRes = { status: jest.fn().mockReturnThis(), json: jest.fn() } as any;
-
-            healthyHandler({} as express.Request, mockRes);
-
-            expect(mockRes.status).toHaveBeenCalledWith(200);
-            expect(mockRes.json).toHaveBeenCalledWith(expect.objectContaining({
-                status: 'ok',
-                message: 'PostOffice service is running',
-            }));
-        });
-    });
-
     describe('GET /ready', () => {
         let readyHandler: Function;
 

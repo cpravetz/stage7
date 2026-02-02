@@ -1,4 +1,5 @@
 export interface ConversationMessage {
+  id?: string;
   content: string;
   persistent?: boolean;
   sender: 'user' | 'system' | 'agent';

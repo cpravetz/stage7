@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Box, Button, Typography, CircularProgress, Alert, Paper } from '@mui/material';
+import { Box, Button, Typography, CircularProgress, Alert, Paper } from '@mui/material/index.js';
 import { useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
 

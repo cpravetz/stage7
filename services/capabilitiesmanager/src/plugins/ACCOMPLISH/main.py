@@ -161,6 +161,50 @@ def _extract_keywords(text: str) -> str:
     # Join keywords back into a string
     return ' '.join(keywords)
 
+def _enrich_prompt_with_context(base_prompt: str, mission_context: Dict[str, Any]) -> str:
+    """
+    Enriches a given prompt with structured information from the mission context.
+    This helps the LLM incorporate relevant details like Jira tickets and parsed file contents.
+    """
+    if not mission_context:
+        return base_prompt
+
+    context_additions: List[str] = []
+
+    # Add Jira tickets
+    jira_tickets = mission_context.get('jiraTickets', [])
+    if jira_tickets:
+        context_additions.append(f"Relevant Jira Tickets: {', '.join(jira_tickets)}")
+
+    # Add parsed file contents
+    file_contents = mission_context.get('fileContents', [])
+    if file_contents:
+        file_summaries: List[str] = []
+        for file_data in file_contents:
+            filename = file_data.get('filename', 'unknown_file')
+            parsed = file_data.get('parsed')
+            
+            summary_parts: List[str] = [f"File: {filename}"]
+            if parsed:
+                if parsed.get('title'):
+                    summary_parts.append(f"Title: {parsed['title']}")
+                if parsed.get('description'):
+                    summary_parts.append(f"Description: {parsed['description'][:200]}{'...' if len(parsed['description']) > 200 else ''}")
+                if parsed.get('schema_arguments'):
+                    summary_parts.append(f"Schema Arguments: {len(parsed['schema_arguments'])} found.")
+                elif parsed.get('arguments'):
+                    summary_parts.append(f"Arguments: {len(parsed['arguments'])} found.")
+            else:
+                summary_parts.append(f"Content snippet: {file_data.get('content', '')[:200]}{'...' if len(file_data.get('content', '')) > 200 else ''}")
+            
+            file_summaries.append(" - ".join(summary_parts))
+        
+        context_additions.append("Relevant File Contents:\n" + "\n".join(file_summaries))
+
+    if context_additions:
+        return base_prompt + "\n\n--- ADDITIONAL CONTEXT ---\n" + "\n".join(context_additions) + "\n--------------------------"
+    return base_prompt
+
 def discover_verbs_for_planning(goal: str, inputs: Dict[str, Any]) -> Dict[str, Any]:
     """
     Discover verbs for planning by querying the Librarian service, with caching.
@@ -202,33 +246,55 @@ def discover_verbs_for_planning(goal: str, inputs: Dict[str, Any]) -> Dict[str, 
         logger.warning(f"Verb discovery via /verbs/discover-for-planning failed: {e}. Planning will proceed without discovered capabilities.")
         return {"relevantVerbs": [], "relevantTools": [], "discoveryContext": {"error": str(e)}}
 
-def create_token_efficient_prompt(goal: str, plugin_guidance: str, max_tokens: int = 4000) -> str:
-    """Create a token-efficient prompt by intelligently truncating and summarizing content."""
-    # Estimate token count (rough approximation: 4 chars per token)
-    current_token_estimate = len(goal) // 4 + len(plugin_guidance) // 4
+def create_token_efficient_prompt(elements: List[str], max_tokens: int) -> List[str]:
+    """
+    Creates a token-efficient prompt by intelligently truncating elements from the end
+    to fit within max_tokens. Prioritizes preserving earlier elements.
+    """
+    if not elements:
+        return []
+
+    # Rough approximation: 4 chars per token
+    token_multiplier = 4
+    
+    current_elements = list(elements)
+    
+    # First, calculate initial token usage
+    current_token_estimate = sum(len(el) // token_multiplier for el in current_elements)
     
     if current_token_estimate <= max_tokens:
-        return goal + "\n\n" + plugin_guidance
+        return current_elements
     
-    # If we're over the token limit, try to reduce plugin guidance first
-    plugin_lines = plugin_guidance.split('\n')
-    if len(plugin_lines) > 3:  # Keep header, some plugins, and footer
-        # Keep first 2 lines (header) and last line (footer), reduce middle
-        header_lines = plugin_lines[:2]
-        footer_line = plugin_lines[-1]
-        middle_lines = plugin_lines[2:-1]
+    # If over, try to reduce elements from the end
+    for i in range(len(current_elements) - 1, -1, -1): # Iterate backwards
+        if current_token_estimate <= max_tokens:
+            break
         
-        # Reduce middle lines by 50% but keep at least 5
-        reduced_middle = middle_lines[:max(5, len(middle_lines) // 2)]
+        original_element_tokens = len(current_elements[i]) // token_multiplier
+        if original_element_tokens == 0:
+            continue
+            
+        # Calculate how many tokens we need to cut from this element
+        tokens_to_cut = current_token_estimate - max_tokens
         
-        truncated_guidance = '\n'.join(header_lines + reduced_middle + [footer_line])
-        return goal + "\n\n" + truncated_guidance
-    
-    # If still too long, truncate goal
-    max_goal_tokens = max_tokens // 2  # Allocate half to goal
-    truncated_goal = goal[:max_goal_tokens * 4] + "..."  # Convert tokens back to chars
-    
-    return truncated_goal + "\n\n" + plugin_guidance
+        # Ensure we don't cut more than the element has
+        actual_tokens_to_cut = min(tokens_to_cut, original_element_tokens)
+        
+        # Truncate the element (chars_to_cut = tokens_to_cut * token_multiplier)
+        chars_to_cut = actual_tokens_to_cut * token_multiplier
+        
+        if chars_to_cut >= len(current_elements[i]):
+            # If cutting this element entirely still doesn't fix it, remove it
+            current_token_estimate -= original_element_tokens
+            current_elements[i] = "" # Or remove it completely from the list
+        else:
+            current_elements[i] = current_elements[i][:len(current_elements[i]) - chars_to_cut] + "..."
+            current_token_estimate -= actual_tokens_to_cut
+            
+    # If after truncation we still exceed, it means individual elements are too long
+    # This simplified version just returns what it managed to do. More advanced would
+    # involve proportional reduction or erroring out.
+    return [el for el in current_elements if el]
 
 
 def get_mission_goal(mission_id: str, inputs: Dict[str, Any]) -> Optional[str]:
@@ -544,6 +610,25 @@ def _create_detailed_plugin_guidance(goal: str, inputs: Dict[str, Any]) -> str:
                     description = verb.get('description', 'No description available.')
                     concise_desc = description.split('.')[0] if '.' in description else description
                     guidance_lines.append(f"- **{action_verb}**: {concise_desc}")
+                    
+                    input_defs = verb.get('inputDefinitions')
+                    if input_defs:
+                        guidance_lines.append("  Inputs:")
+                        for input_def in input_defs:
+                            name = input_def.get('name', 'UNKNOWN')
+                            required = input_def.get('required', False)
+                            type_ = input_def.get('type', 'any')
+                            input_desc = input_def.get('description', 'No description.')
+                            guidance_lines.append(f"    - {name} (Type: {type_}, Required: {required}): {input_desc}")
+                    
+                    output_defs = verb.get('outputDefinitions')
+                    if output_defs:
+                        guidance_lines.append("  Outputs:")
+                        for output_def in output_defs:
+                            name = output_def.get('name', 'UNKNOWN')
+                            type_ = output_def.get('type', 'any')
+                            output_desc = output_def.get('description', 'No description.')
+                            guidance_lines.append(f"    - {name} (Type: {type_}): {output_desc}")
 
         if relevant_tools:
             guidance_lines.append("\n**Discovered Tools:**")
@@ -583,6 +668,7 @@ class RobustMissionPlanner:
             report_logic_failure_call=report_logic_failure_to_brain,
             librarian_info=librarian_info # Pass librarian_info
         )
+        self._last_attempt_single_step = False
     
     def _get_next_retry_strategy(self) -> Optional[str]:
         """Get the next retry strategy or None if all strategies exhausted"""
@@ -623,7 +709,17 @@ class RobustMissionPlanner:
                 logger.error(f"Missing required 'goal' or a valid 'missionId' that resolves in {inputs}")
                 raise AccomplishError("Missing required 'goal' or a valid 'missionId' that resolves to a goal.", "input_error")
         
-        plan = self.create_plan(goal, mission_goal, mission_id, inputs)
+        # Extract and parse mission_context_payload if available
+        mission_context_payload_input = inputs.get('mission_context_payload')
+        mission_context = {}
+        if mission_context_payload_input and mission_context_payload_input.get('value'):
+            try:
+                mission_context = json.loads(mission_context_payload_input['value'])
+            except json.JSONDecodeError:
+                logger.warning("Failed to parse mission_context_payload as JSON. Proceeding without enriched context.")
+                mission_context = {}
+        
+        plan = self.create_plan(goal, mission_goal, mission_id, inputs, mission_context)
 
         plugin_output = {
             "success": True,
@@ -718,13 +814,13 @@ class RobustMissionPlanner:
 
         return plan
 
-    def create_plan(self, goal: str, mission_goal: Optional[str], mission_id: Optional[str], inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def create_plan(self, goal: str, mission_goal: Optional[str], mission_id: Optional[str], inputs: Dict[str, Any], mission_context: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Create plan with mission-level awareness"""
         progress.checkpoint("planning_start")
         
         logger.info(f"ACCOMPLISH: Generating role-specific plan using two-phase process.")
         agent_role = inputs.get('agentRole', {}).get('value', 'General')
-        structured_plan = self._generate_role_specific_plan(goal, mission_goal, mission_id, agent_role, inputs)
+        structured_plan = self._generate_role_specific_plan(goal, mission_goal, mission_id, agent_role, inputs, mission_context)
         
         logger.debug("Before calling validator.validate_and_repair.")
         validation_result = self.validator.validate_and_repair(structured_plan, goal, inputs)
@@ -747,7 +843,7 @@ class RobustMissionPlanner:
             logger.exception(f"❌ Failed to inject progress checks: {e}")
             return validated_plan
 
-    def _generate_role_specific_plan(self, goal: str, mission_goal: Optional[str], mission_id: str, agent_role: str, inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def _generate_role_specific_plan(self, goal: str, mission_goal: Optional[str], mission_id: str, agent_role: str, inputs: Dict[str, Any], mission_context: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Generates a plan tailored for a specific agent role with enhanced error recovery."""
         
         # Enhanced error recovery loop
@@ -761,7 +857,7 @@ class RobustMissionPlanner:
             
             try:
                 if strategy in ['original_prompt', 'simplified_prompt']:
-                    prose_plan = self._get_prose_plan_with_strategy(goal, mission_goal, inputs, strategy)
+                    prose_plan = self._get_prose_plan_with_strategy(goal, mission_goal, inputs, strategy, mission_context)
                     structured_plan = self._convert_to_structured_plan_with_recovery(prose_plan, goal, mission_goal, mission_id, inputs, strategy)
                     
                     # Validate the plan before returning
@@ -778,7 +874,7 @@ class RobustMissionPlanner:
                         continue
                 elif strategy == 'step_by_step_guidance':
                     # Try a more structured approach
-                    structured_plan = self._generate_step_by_step_plan(goal, mission_goal, mission_id, inputs)
+                    structured_plan = self._generate_step_by_step_plan(goal, mission_goal, mission_id, inputs, mission_context)
                     validation_result = self.validator.validate_and_repair(structured_plan, goal, inputs)
                     
                     if validation_result.is_valid:
@@ -787,7 +883,7 @@ class RobustMissionPlanner:
                         return validation_result.plan
                 elif strategy == 'alternative_approach':
                     # Try a completely different approach
-                    structured_plan = self._generate_alternative_plan(goal, mission_goal, mission_id, inputs)
+                    structured_plan = self._generate_alternative_plan(goal, mission_goal, mission_id, inputs, mission_context)
                     validation_result = self.validator.validate_and_repair(structured_plan, goal, inputs)
                     
                     if validation_result.is_valid:
@@ -810,57 +906,63 @@ class RobustMissionPlanner:
         logger.error(error_message)
         raise AccomplishError(error_message, "plan_generation_failure")
     
-    def _get_prose_plan_with_strategy(self, goal: str, mission_goal: Optional[str], inputs: Dict[str, Any], strategy: str) -> str:
+    def _get_prose_plan_with_strategy(self, goal: str, mission_goal: Optional[str], inputs: Dict[str, Any], strategy: str, mission_context: Dict[str, Any]) -> str:
         """Get prose plan with different strategies based on retry attempt"""
         if strategy == 'simplified_prompt':
             # Use a simpler, more direct prompt
-            return self._get_simplified_prose_plan(goal, mission_goal, inputs)
+            return self._get_simplified_prose_plan(goal, mission_goal, inputs, mission_context)
         else:
             # Use the original approach
-            return self._get_prose_plan(goal, mission_goal, inputs)
+            return self._get_prose_plan(goal, mission_goal, inputs, mission_context)
     
-    def _get_simplified_prose_plan(self, goal: str, mission_goal: Optional[str], inputs: Dict[str, Any]) -> str:
+    def _get_simplified_prose_plan(self, goal: str, mission_goal: Optional[str], inputs: Dict[str, Any], mission_context: Dict[str, Any]) -> str:
         """Generate a prose plan with simplified instructions"""
         # Detect if this is a multi-phase goal and focus on current phase
         focused_goal, current_phase, total_phases = self._detect_and_focus_on_current_phase(goal)
         
-        if current_phase:
-            phase_context = f"\n\n[MULTI-PHASE MISSION: You are planning Phase {current_phase} of {total_phases}. Do NOT include steps for other phases - they will be planned separately.]"
-        else:
-            phase_context = ""
-        
         context_input = inputs.get('context')
         context = context_input['value'] if isinstance(context_input, dict) and 'value' in context_input else (context_input or '')
-        full_goal = f"MISSION: {mission_goal}\n\nTASK: {focused_goal}" if mission_goal and mission_goal != goal else focused_goal
         
-        # Simplified prompt for better reliability
-        prompt = f"""You are an expert strategic planner. Create a concise, actionable plan to achieve this goal:
+        full_goal = focused_goal
+        if mission_goal and mission_goal != focused_goal:
+            full_goal = f"MISSION: {mission_goal}\n\nTASK: {focused_goal}"
+
+        prompt = f"""You are an expert strategic planner and an autonomous agent. Your core purpose is to accomplish the user's mission by breaking it down into logical, functional steps. Your goal is to be resourceful and solve problems independently.
 
 GOAL: {full_goal}
 
-CONTEXT: {context}{phase_context}
+CONTEXT:
+{context}
 
-Create a clear, step-by-step plan with 3-7 actionable steps. Each step should:
-1. Be a specific, executable action
-2. Produce a tangible output or result
-3. Use simple, direct language
+**SIMPLIFIED STRATEGY:** Create a concise, high-level prose plan to achieve the given goal. Focus on 3-5 clear, actionable steps.
+The plan should describe *what* needs to be done, not low-level implementation details.
 
-Focus on practical execution, not abstract planning. Return only the prose plan, no formatting."""
+Return ONLY plain text for the plan. NO markdown formatting, NO code blocks, NO special formatting.
+"""
+        prompt = _enrich_prompt_with_context(prompt, mission_context)
         
         for attempt in range(self.max_retries):
             try:
                 response, request_id = call_brain(prompt, inputs, "text")
                 if not response or len(response.strip()) < 50:
-                    logger.warning(f"Attempt {attempt + 1}: LLM returned an insufficient prose plan.")
-                    report_logic_failure_to_brain(request_id, inputs, "LLM returned insufficient prose plan (too short or empty)")
+                    logger.warning(f"Attempt {attempt + 1}: LLM returned an insufficient simplified prose plan.")
+                    report_logic_failure_to_brain(request_id, inputs, "LLM returned insufficient simplified prose plan (too short or empty)")
                     continue
-                return response.strip()[:128000]
+                return response.strip()
             except Exception as e:
-                logger.warning(f"Attempt {attempt + 1} to get prose plan failed: {e}")
+                logger.warning(f"Attempt {attempt + 1} to get simplified prose plan failed: {e}")
                 if attempt == self.max_retries - 1:
                     raise
-        
-        raise AccomplishError("Could not generate a valid prose plan after multiple attempts.", "prose_plan_error")
+        raise AccomplishError("Could not generate a valid simplified prose plan after multiple attempts.", "prose_plan_error")
+    
+    def _detect_and_focus_on_current_phase(self, goal: str) -> Tuple[str, Optional[int], Optional[int]]:
+        """
+        Detects if the goal indicates a multi-phase mission and extracts relevant phase info.
+        For now, this is a placeholder. It returns the original goal and no phase info.
+        """
+        # A more sophisticated implementation would parse the goal for "Phase X of Y" patterns.
+        # For current purposes, assume no multi-phasing unless explicitly handled.
+        return goal, None, None
     
     def _convert_to_structured_plan_with_recovery(self, prose_plan: str, goal: str, mission_goal: Optional[str], mission_id: Optional[str], inputs: Dict[str, Any], strategy: str) -> List[Dict[str, Any]]:
         """Convert prose to structured plan with enhanced error recovery"""
@@ -870,46 +972,30 @@ Focus on practical execution, not abstract planning. Return only the prose plan,
         # Add strategy-specific guidance
         strategy_guidance = self._get_strategy_specific_guidance(strategy)
         
-        # Create token-efficient prompt
-        full_goal = f"MISSION: {mission_goal}\n\nTASK: {goal}" if mission_goal and mission_goal != goal else goal
-        token_efficient_context = create_token_efficient_prompt(full_goal, plugin_guidance, max_tokens=3500)
-        
-        prompt = f"""You are an expert system for converting prose plans into structured JSON according to a strict schema.
+        # Initialize feedback message for current attempt
+        feedback_message = ""
 
-**1. THE GOAL:**
----
-{full_goal}
----
+        for attempt in range(self.max_retries):
+            # If this is a retry attempt, check if there's feedback to provide
+            if attempt > 0 and self._last_attempt_single_step:
+                feedback_message = "\nCRITICAL FEEDBACK: Your previous response was a single-step plan, but a detailed plan with multiple distinct steps is required to accomplish the goal. Please break down the task into several logical, actionable steps."
+                self._last_attempt_single_step = False # Reset for next check
+                
+            full_goal = f"MISSION: {mission_goal}\n\nTASK: {goal}" if mission_goal and mission_goal != goal else goal
 
-**2. THE PROSE PLAN:**
----
-{prose_plan}
----
-
-{strategy_guidance}
-
-{token_efficient_context}
-
-**3. THE JSON SCHEMA FOR THE ENTIRE PLAN (ARRAY OF STEPS):**
----
-{schema_json}
----
-
-**4. YOUR TASK:**
-Follow these steps to create the final JSON output:
-
-**STEP A: Internal Analysis & Self-Correction (Your Internal Monologue)**
-1. **Analyze:** Read the Goal and Prose Plan to fully understand the user's intent and the required sequence of actions.
-2. **Verify Schema:** Carefully study the JSON SCHEMA. Your output must follow it perfectly.
-3. **Restate the Plan as Explicit Steps:** Identify a list of steps that will be taken to achieve the Goal. Each Step should be a clear, actionable task with one or more outputs.
-4. **Check Dependencies & Data Types:** For each step, ensure its `inputs` correctly reference the `outputName` and `sourceStep`. Crucially, verify that the `valueType` of the source output matches the expected `valueType` of the target input.
-5. **CRITICAL - USE UNIQUE STRING IDs:** Every single step in the plan MUST have a unique string identifier in the "id" field. This ID does NOT have to be a UUID, but it MUST be unique within the entire plan. For example: "step_1", "step_2", etc. Do NOT reuse IDs.
-6. **Final Check:** Before generating the output, perform a final check to ensure the entire JSON structure is valid and fully compliant with the schema.
-
-**STEP B: Generate Final JSON (Your Final Output)**
-After your internal analysis and self-correction is complete, provide ONLY the final, valid JSON output. The root of the JSON object MUST be a key named "steps" containing the JSON array of plan steps.
-
-Example format:
+            # Fixed parts of the prompt that don't change
+            fixed_header = "You are an expert system for converting prose plans into structured JSON according to a strict schema."
+            task_intro = "**4. YOUR TASK:**\nFollow these steps to create the final JSON output:\n\n**STEP A: Internal Analysis & Self-Correction (Your Internal Monologue)**"
+            step_a_points = [
+                "1. **Analyze:** Read the Goal and Prose Plan to fully understand the user's intent and the required sequence of actions.",
+                "2. **Verify Schema:** Carefully study the JSON SCHEMA. Your output must follow it perfectly.",
+                "3. **Restate the Plan as Explicit Steps:** Identify a list of steps that will be taken to achieve the Goal. Each Step should be a clear, actionable task with one or more outputs.",
+                "4. **Check Dependencies & Data Types:** For each step, ensure its `inputs` correctly reference the `outputName` and `sourceStep`. Crucially, verify that the `valueType` of the source output matches the expected `valueType` of the target input.",
+                "5. **CRITICAL - USE UNIQUE STRING IDs:** Every single step in the plan MUST have a unique string identifier in the \"id\" field. This ID does NOT have to be a UUID, but it MUST be unique within the entire plan. For example: \"step_1\", \"step_2\", etc. Do NOT reuse IDs.",
+                "6. **Final Check:** Before generating the output, perform a final check to ensure the entire JSON structure is valid and fully compliant with the schema.",
+            ]
+            step_b = "\n**STEP B: Generate Final JSON (Your Final Output)**\nAfter your internal analysis and self-correction is complete, provide ONLY the final, valid JSON output. The root of the JSON object MUST be a key named \"steps\" containing the JSON array of plan steps."
+            example_format = """Example format:
 ```json
 {{
   "steps": [
@@ -925,33 +1011,61 @@ Example format:
     }}
   ]
 }}
-```
+```"""
+            critical_principles_header = "\n**CRITICAL PLANNING PRINCIPLES (STRICTLY ENFORCED):**\n---"
+            critical_principles = [
+                "- **Direct, Actionable Plans:** Prioritize using concrete, executable `actionVerbs` from the `AVAILABLE PLUGINS` list. Your goal is to produce the most direct and actionable plan possible. Avoid creating abstract or novel verbs if the task can be accomplished with a sequence of known verbs.",
+                "- **Autonomy is Paramount:** Your goal is to *solve* the mission, not to delegate research or information gathering back to the user.",
+                "- **Resourcefulness:** Exhaust all available tools (`SEARCH`, `SCRAPE`, `QUERY_KNOWLEDGE_BASE`, `FILE_OPERATION`, `API_CLIENT`, `RUN_CODE`) to find answers and create deliverables *before* ever considering asking the user.",
+                "- **Create Deliverables with `FILE_OPERATION`:** If a step's output is marked with `isDeliverable: true`, you **MUST** add a subsequent step using `FILE_OPERATION` with the `write` operation to save the output to the specified `filename`. This is essential for the user to see the work.",
+                "- **Share Work Before Asking:** Before generating an `ASK_USER_QUESTION` step that refers to a work product, you **MUST** ensure a preceding `FILE_OPERATION` step saves that product to a file for the user to review.",
+                "- **`ASK_USER_QUESTION` is a Last Resort:** This tool is exclusively for obtaining subjective opinions, approvals, or choices from the user. It is *never* for offloading tasks. Generating a plan that asks the user for information you can find yourself is a critical failure.",
+                "- **Dependencies are Crucial:** Every step that uses an output from a previous step MUST declare this in its `inputs` using `sourceStep` and `outputName`. A plan with disconnected steps is invalid.",
+                "- **Role Assignment:** Assign `recommendedRole` at the deliverable level, not per individual step. All steps contributing to a single output (e.g., a research report) should share the same role.",
+                "- **Type Compatibility & Serialization:**",
+                "  - If a step output is an `object` or `array` and is to be used as an input that expects a `string`, you MUST explicitly serialize the object/array to a JSON string within the plan. For example, use a `TRANSFORM` step to `json.dumps()` the object before passing it to the `string` input.",
+                "  - If an `array` or `list` output is to be used as a `string` input, consider if the intention is to iterate over each item. If so, a `FOREACH` control flow verb will be automatically injected by the system.",
+                "- **Novel Action Verb Description:** If you propose a novel `actionVerb` (one not in the provided `AVAILABLE PLUGINS` list), you MUST provide a comprehensive `description` for that step, clearly explaining *what* the novel action verb does and *why* it's needed.",
+                "\n- **CRITICAL: Respect Input Definitions:** For *every* `actionVerb` in your plan, you MUST consult its `inputDefinitions` (provided within `DISCOVERED CAPABILITIES`) and ensure *all* inputs marked as `\"required\": true` are explicitly provided in the step's `inputs` object. Failure to provide required inputs is a critical error.",
+                "  - Provide values using either a concrete `\"value\"` (if available from the GOAL/CONTEXT) or by referencing an output from a previous step using `\"sourceStep\"` and `\"outputName\"`.",
+                "  - If an input has a complex `type` like `object` or `array`, its `value` should be a JSON string representation if passed to a `string` input, or a direct JSON object/array if the input `valueType` matches.",
+            ]
+            deliverable_identification_header = "\n**DELIVERABLE IDENTIFICATION:**\nWhen defining outputs, you MUST identify which ones are deliverables for the user:"
+            deliverable_identification_points = [
+                "- For reports, analyses, or completed files that are meant for the user, you MUST use the enhanced format including `\"isDeliverable\": true` and a `\"filename\"`.",
+                "- For intermediate data or outputs only used within the plan, use the simple format (DO NOT include `isDeliverable` or `filename`).",
+                "- Guidelines for deliverable filenames:\n  * Use descriptive, professional names\n  * Use appropriate file extensions (.md, .txt, .json, .csv, .pdf, etc.)\n  * Avoid generic names like \"output.txt\" or \"result.json\"",
+                "- **CRITICAL - LINKING STEPS:** You MUST explicitly connect steps. Any step that uses the output of a previous step MUST declare this in its `inputs` using `sourceStep` and `outputName`. DO NOT simply refer to previous outputs in a `prompt` string without also adding the formal dependency in the `inputs` object. For verbs like `THINK`, `CHAT`, or `ASK_USER_QUESTION`, if the `prompt` or `question` text refers to a file or work product from a previous step, you MUST add an input that references the output of that step using `sourceStep` and `outputName`.",
+                " A plan with no connections between steps is invalid and will be rejected.",
+                "- **CRITICAL - `sourceStep: '0'` Usage:**",
+                "  - Use `sourceStep: '0'` ONLY for inputs that are explicitly provided in the initial mission context (the \"PARENT STEP INPUTS\" section if applicable, or the overall mission goal). This is primarily for sub-steps within a `FOREACH` or similar control flow structure to reference an item from their direct parent.",
+                "  - DO NOT use `sourceStep: '0'` for top-level steps that are not nested within another step. Top-level steps should reference other preceding top-level steps by their actual UUID.",
+            ]
 
-**CRITICAL PLANNING PRINCIPLES (STRICTLY ENFORCED):**
----
-- **Direct, Actionable Plans:** Prioritize using concrete, executable `actionVerbs` from the `AVAILABLE PLUGINS` list. Your goal is to produce the most direct and actionable plan possible. Avoid creating abstract or novel verbs if the task can be accomplished with a sequence of known verbs.
-- **Autonomy is Paramount:** Your goal is to *solve* the mission, not to delegate research or information gathering back to the user.
-- **Resourcefulness:** Exhaust all available tools (`SEARCH`, `SCRAPE`, `QUERY_KNOWLEDGE_BASE`, `FILE_OPERATION`, `API_CLIENT`, `RUN_CODE`) to find answers and create deliverables *before* ever considering asking the user.
-- **Create Deliverables with `FILE_OPERATION`:** If a step's output is marked with `isDeliverable: true`, you **MUST** add a subsequent step using `FILE_OPERATION` with the `write` operation to save the output to the specified `filename`. This is essential for the user to see the work.
-- **Share Work Before Asking:** Before generating an `ASK_USER_QUESTION` step that refers to a work product, you **MUST** ensure a preceding `FILE_OPERATION` step saves that product to a file for the user to review.
-- **`ASK_USER_QUESTION` is a Last Resort:** This tool is exclusively for obtaining subjective opinions, approvals, or choices from the user. It is *never* for offloading tasks. Generating a plan that asks the user for information you can find yourself is a critical failure.
-- **Dependencies are Crucial:** Every step that uses an output from a previous step MUST declare this in its `inputs` using `sourceStep` and `outputName`. A plan with disconnected steps is invalid.
-- **Role Assignment:** Assign `recommendedRole` at the deliverable level, not per individual step. All steps contributing to a single output (e.g., a research report) should share the same role.
-- **Type Compatibility & Serialization:**
-  - If a step output is an `object` or `array` and is to be used as an input that expects a `string`, you MUST explicitly serialize the object/array to a JSON string within the plan. For example, use a `TRANSFORM` step to `json.dumps()` the object before passing it to the `string` input.
-  - If an `array` or `list` output is to be used as a `string` input, consider if the intention is to iterate over each item. If so, a `FOREACH` control flow verb will be automatically injected by the system.
+            all_prompt_elements = [
+                fixed_header,
+                f"**1. THE GOAL:**\n---\n{full_goal}\n---",
+                f"**2. THE PROSE PLAN:**\n---\n{prose_plan}\n---",
+                strategy_guidance,
+                plugin_guidance,
+                feedback_message,
+                f"**3. THE JSON SCHEMA FOR THE ENTIRE PLAN (ARRAY OF STEPS):**\n---\n{schema_json}\n---",
+                task_intro,
+            ] + step_a_points + [
+                step_b,
+                example_format,
+                critical_principles_header,
+            ] + critical_principles + [
+                deliverable_identification_header,
+            ] + deliverable_identification_points
+            
+            # Apply token efficiency to the combined elements
+            # Groq Llama-3.1-8b-instant has 8192 context window. Let's aim for a safe buffer.
+            # Max tokens for the model is 6000 according to logs, so target 5500 for prompt
+            truncated_elements = create_token_efficient_prompt(all_prompt_elements, 5500) 
 
-**DELIVERABLE IDENTIFICATION:**
-When defining outputs, you MUST identify which ones are deliverables for the user:
-- For final reports, analyses, or completed files, you MUST use the enhanced format:
-  `"outputs": {{"final_report": {{"description": "A comprehensive analysis", "isDeliverable": true, "filename": "market_analysis_2025.md"}}}}`
-
-- **CRITICAL - LINKING STEPS:** You MUST explicitly connect steps. Any step that uses the output of a previous step MUST declare this in its `inputs` using `sourceStep` and `outputName`. DO NOT simply refer to previous outputs in a `prompt` string without also adding the formal dependency in the `inputs` object. For verbs like `THINK`, `CHAT`, or `ASK_USER_QUESTION`, if the `prompt` or `question` text refers to a file or work product from a previous step, you MUST add an input that references the output of that step using `sourceStep` and `outputName`.
- A plan with no connections between steps is invalid and will be rejected.
-- **CRITICAL - `sourceStep: '0'` Usage:**
-  - Use `sourceStep: '0'` ONLY for inputs that are explicitly provided in the initial mission context (the "PARENT STEP INPUTS" section if applicable, or the overall mission goal). This is primarily for sub-steps within a `FOREACH` or similar control flow structure to reference an item from their direct parent.
-  - DO NOT use `sourceStep: '0'` for top-level steps that are not nested within another step. Top-level steps should reference other preceding top-level steps by their actual UUID.
-"""
+            # Reconstruct the prompt
+            prompt = "\n\n".join([el for el in truncated_elements if el.strip()]) # Filter out empty strings
         
         for attempt in range(self.max_retries):
             try:
@@ -978,15 +1092,13 @@ When defining outputs, you MUST identify which ones are deliverables for the use
                     if 'steps' in plan and isinstance(plan['steps'], list):
                         logger.info(f"ACCOMPLISH: Extracting plan from 'steps' key in response ({len(plan['steps'])} steps)")
                         plan_array = plan['steps']
-                    # Check if this dict is itself a step (has actionVerb or id) - TREAT AS ERROR
+                    # Check if this dict is itself a step (has actionVerb or id)
                     elif 'actionVerb' in plan or 'id' in plan:
-                        logger.error(f"ACCOMPLISH: LLM returned a single step object instead of a plan array. This is an error that needs correction.")
-                        # Report as critical - this is a schema violation that needs to be fixed
-                        report_logic_failure_to_brain(request_id, inputs, "LLM returned single step instead of plan array - schema violation", severity="critical")
-                        # TREAT AS ERROR: Don't wrap, fail instead
-                        logger.error(f"Attempt {attempt + 1}: LLM returned single step instead of plan array - schema violation")
-                        if attempt == self.max_retries - 1:
-                            raise AccomplishError("LLM returned single step instead of plan array - schema violation", "invalid_plan_format")
+                        logger.error(f"ACCOMPLISH: LLM returned a single step object instead of a plan array. This is an error that needs correction. Triggering retry with feedback.")
+                        self._last_attempt_single_step = True
+                        report_logic_failure_to_brain(request_id, inputs, "LLM returned single step instead of plan array - schema violation. Retrying with explicit feedback.", severity="critical")
+                        if attempt == self.max_retries - 1: # If this was the last attempt, then fail
+                             raise AccomplishError("LLM returned single step instead of plan array and retries exhausted.", "invalid_plan_format")
                         continue
                     else:
                         # Otherwise, check if any property contains an array of step-like objects
@@ -1029,7 +1141,7 @@ When defining outputs, you MUST identify which ones are deliverables for the use
         else:
             return "**STRATEGY: STANDARD APPROACH**\nCreate a comprehensive plan using the best available action verbs and logical sequencing."
     
-    def _generate_step_by_step_plan(self, goal: str, mission_goal: Optional[str], mission_id: Optional[str], inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def _generate_step_by_step_plan(self, goal: str, mission_goal: Optional[str], mission_id: Optional[str], inputs: Dict[str, Any], mission_context: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Generate a plan using a more structured, step-by-step approach"""
         # This would implement a different planning strategy
         # For now, we'll use the standard approach but could be enhanced
@@ -1038,7 +1150,7 @@ When defining outputs, you MUST identify which ones are deliverables for the use
             goal, mission_goal, mission_id, inputs, 'step_by_step_guidance'
         )
     
-    def _generate_alternative_plan(self, goal: str, mission_goal: Optional[str], mission_id: Optional[str], inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def _generate_alternative_plan(self, goal: str, mission_goal: Optional[str], mission_id: Optional[str], inputs: Dict[str, Any], mission_context: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Generate a plan using an alternative approach"""
         # This would implement a different planning strategy
         # For now, we'll use the standard approach but could be enhanced
@@ -1047,12 +1159,16 @@ When defining outputs, you MUST identify which ones are deliverables for the use
             goal, mission_goal, mission_id, inputs, 'alternative_approach'
         )
 
-    def _get_prose_plan(self, goal: str, mission_goal: Optional[str], inputs: Dict[str, Any]) -> str:
+    def _get_prose_plan(self, goal: str, mission_goal: Optional[str], inputs: Dict[str, Any], mission_context: Dict[str, Any]) -> str:
         """Phase 1: Get a well-thought prose plan from LLM with retries."""
        
         context_input = inputs.get('context')
         context = context_input['value'] if isinstance(context_input, dict) and 'value' in context_input else (context_input or '')
-        full_goal = f"MISSION: {mission_goal}\n\nTASK: {goal}" if mission_goal and mission_goal != goal else goal
+        
+        # Ensure full_goal is always initialized
+        full_goal = goal
+        if mission_goal and mission_goal != goal:
+            full_goal = f"MISSION: {mission_goal}\n\nTASK: {goal}"
         prompt = f"""You are an expert strategic planner and an autonomous agent. Your core purpose is to accomplish the user's mission by breaking it down into logical, functional steps. Your goal is to be resourceful and solve problems independently.
 
 GOAL: {full_goal}
@@ -1077,6 +1193,8 @@ EXAMPLE OF GOOD HIGH-LEVEL STEPS:
 
 IMPORTANT: Return ONLY plain text for the plan. NO markdown formatting, NO code blocks, NO special formatting.
 """
+        prompt = _enrich_prompt_with_context(prompt, mission_context)
+        
         for attempt in range(self.max_retries):
             try:
                 response, request_id = call_brain(prompt, inputs, "text")
@@ -1084,7 +1202,7 @@ IMPORTANT: Return ONLY plain text for the plan. NO markdown formatting, NO code 
                     logger.warning(f"Attempt {attempt + 1}: LLM returned an insufficient prose plan.")
                     report_logic_failure_to_brain(request_id, inputs, "LLM returned insufficient prose plan (too short or empty)")
                     continue
-                return response.strip()[:128000]
+                return response.strip()
             except Exception as e:
                 logger.warning(f"Attempt {attempt + 1} to get prose plan failed: {e}")
                 if attempt == self.max_retries - 1:
@@ -1111,8 +1229,16 @@ IMPORTANT: Return ONLY plain text for the plan. NO markdown formatting, NO code 
         full_goal = f"MISSION: {mission_goal}\n\nTASK: {goal}" if mission_goal and mission_goal != goal else goal
         token_efficient_context = create_token_efficient_prompt(full_goal, plugin_guidance, max_tokens=3500)
         
-        full_goal = f"MISSION: {mission_goal}\n\nTASK: {goal}" if mission_goal and mission_goal != goal else goal
-        prompt = f"""You are an expert system for converting prose plans into structured JSON according to a strict schema.
+        # Initialize feedback message for current attempt
+        feedback_message = ""
+
+        for attempt in range(self.max_retries):
+            # If this is a retry attempt, check if there's feedback to provide
+            if attempt > 0 and self._last_attempt_single_step:
+                feedback_message = "\nCRITICAL FEEDBACK: Your previous response was a single-step plan, but a detailed plan with multiple distinct steps is required to accomplish the goal. Please break down the task into several logical, actionable steps."
+                self._last_attempt_single_step = False # Reset for next check
+
+            prompt = f"""You are an expert system for converting prose plans into structured JSON according to a strict schema.
 
 **1. THE GOAL:**
 ---
@@ -1127,6 +1253,8 @@ IMPORTANT: Return ONLY plain text for the plan. NO markdown formatting, NO code 
 {internal_verbs_guidance}
 
 {token_efficient_context}
+
+{feedback_message}
 
 **3. THE JSON SCHEMA FOR THE ENTIRE PLAN (ARRAY OF STEPS):**
 ---
@@ -1215,15 +1343,13 @@ When defining outputs, you MUST identify which ones are deliverables for the use
                     if 'steps' in plan and isinstance(plan['steps'], list):
                         logger.info(f"ACCOMPLISH: Extracting plan from 'steps' key in response ({len(plan['steps'])} steps)")
                         plan_array = plan['steps']
-                    # Check if this dict is itself a step (has actionVerb or id) - TREAT AS ERROR
+                    # Check if this dict is itself a step (has actionVerb or id)
                     elif 'actionVerb' in plan or 'id' in plan:
-                        logger.error(f"ACCOMPLISH: LLM returned a single step object instead of a plan array. This is an error that needs correction.")
-                        # Report as critical - this is a schema violation that needs to be fixed
-                        report_logic_failure_to_brain(request_id, inputs, "LLM returned single step instead of plan array - schema violation", severity="critical")
-                        # TREAT AS ERROR: Don't wrap, fail instead
-                        logger.error(f"Attempt {attempt + 1}: LLM returned single step instead of plan array - schema violation")
-                        if attempt == self.max_retries - 1:
-                            raise AccomplishError("LLM returned single step instead of plan array - schema violation", "invalid_plan_format")
+                        logger.error(f"ACCOMPLISH: LLM returned a single step object instead of a plan array. This is an error that needs correction. Triggering retry with feedback.")
+                        self._last_attempt_single_step = True
+                        report_logic_failure_to_brain(request_id, inputs, "LLM returned single step instead of plan array - schema violation. Retrying with explicit feedback.", severity="critical")
+                        if attempt == self.max_retries - 1: # If this was the last attempt, then fail
+                             raise AccomplishError("LLM returned single step instead of plan array and retries exhausted.", "invalid_plan_format")
                         continue
                     else:
                         # Otherwise, check if any property contains an array of step-like objects
@@ -1367,68 +1493,84 @@ class NovelVerbHandler:
         schema_json = json.dumps(PLAN_ARRAY_SCHEMA, indent=2)
         plugin_guidance = _create_detailed_plugin_guidance(verb_info.get('description', ''), inputs)
         
-        # Create token-efficient context for novel verb handling
-        verb_context = f"VERB: {verb}\nDESCRIPTION: {description}\nCONTEXT: {context}"
-        token_efficient_context = create_token_efficient_prompt(verb_context, plugin_guidance, max_tokens=3000)
-
-        prompt = f"""You are an expert system analyst. A user wants to use a novel action verb "{verb}" that is not currently supported.
-
-VERB: {verb}
+        # Max tokens for the model is 6000 according to logs, so target 5500 for prompt
+        # Leaving a buffer for system messages and other fixed parts.
+        
+        # Fixed parts of the prompt
+        fixed_intro = f"""You are an expert system analyst. A user wants to use a novel action verb "{verb}" that is not currently supported."""
+        verb_details = f"""VERB: {verb}
 DESCRIPTION: {description}
-CONTEXT: {context}
+CONTEXT: {context}"""
+        parent_inputs = f"PARENT STEP INPUTS: {json.dumps(inputs)}"
+        task_instruction = f"""Your task is to create a plan to accomplish the goal of the novel verb "{verb}" using available tools."""
+        
+        critical_output_format = """**CRITICAL OUTPUT FORMAT:**
+        - Your response MUST be a JSON array of step objects
+        - Even if the plan has only one step, it MUST be wrapped in an array: [{{"actionVerb": "...", ...}}]
+        - Do NOT return a single step object without the array wrapper
+        - Do NOT return any text outside the JSON array
+        - Return ONLY the JSON array, nothing else"""
 
-PARENT STEP INPUTS: {json.dumps(inputs)}
+        critical_uuid_requirements = """**CRITICAL UUID REQUIREMENTS:**
+        - Each step MUST have a globally unique random UUID (version 4) in the "id" field
+        - Use random UUIDs like "a3f2c8d1-4b7e-4c9a-8f1d-2e5b6c7d8e9f"
+        - Do NOT use sequential patterns like "00000000-0000-4000-8000-000000000001"
+        - Do NOT reuse UUIDs anywhere in the plan"""
 
-{token_efficient_context}
+        critical_constraints = f"""**CRITICAL CONSTRAINTS:**
+        - You MUST NOT use the novel verb "{verb}" in your plan - use available plugins instead
+        - Use existing action verbs from the available plugins listed below
+        - Break down the task into granular, atomic steps using available tools
+        - You are an autonomous agent - solve problems independently
+        - Do not use `ASK_USER_QUESTION` to seek information that can be found using `SEARCH` or `SCRAPE`
+        - **If you create a new actionVerb not listed in the AVAILABLE PLUGINS section, you MUST provide a comprehensive `description` for that step.** This description should clearly explain the purpose and functionality of the new action verb.
+- **CRITICAL: Respect Input Definitions:** For *every* `actionVerb` in your plan, you MUST consult its `inputDefinitions` (provided within `DISCOVERED CAPABILITIES`) and ensure *all* inputs marked as `\"required\": true` are explicitly provided in the step's `inputs` object. Failure to provide required inputs is a critical error.
+  - Provide values using either a concrete `\"value\"` (if available from the VERB's CONTEXT or DESCRIPTION) or by referencing an output from a previous step using `\"sourceStep\"` and `\"outputName\"`."""
 
-Your task is to create a plan to accomplish the goal of the novel verb "{verb}" using available tools.
+        plan_schema_section = f"""**Plan Schema (JSON Array of Steps):**
+        {schema_json}"""
 
-**CRITICAL OUTPUT FORMAT:**
-- Your response MUST be a JSON array of step objects
-- Even if the plan has only one step, it MUST be wrapped in an array: [{{"actionVerb": "...", ...}}]
-- Do NOT return a single step object without the array wrapper
-- Do NOT return any text outside the JSON array
-- Return ONLY the JSON array, nothing else
+        input_rules = """- **CRITICAL for REQUIRED Inputs:** For each step, you MUST examine the `inputDefinitions` for the corresponding `actionVerb` and ensure that all `required` inputs are present in the step's `inputs` object. If an input is marked `required: true`, it MUST be provided.
+        - **CRITICAL for JSON compliance:** Ensure all string literals within the generated JSON, including any nested ones, strictly adhere to JSON standards by using double quotes.
+        - **CRITICAL for Plan Inputs, sourceStep:**
+            - All inputs for each step must be explicitly defined either as a constant `value` or by referencing an `outputName` from a `sourceStep` within the plan or from the `PARENT STEP INPUTS`. Do not assume implicit data structures or properties of inputs.
+            - Use `sourceStep: '0'` ONLY for inputs that are explicitly provided in the initial mission context (the "PARENT STEP INPUTS" section if applicable, or the overall mission goal). This is primarily for sub-steps within a `FOREACH` or similar control flow structure to reference an item from their direct parent.
+            - For any other input, it MUST be the `outputName` from a *preceding step* in this plan, and `sourceStep` MUST be the `id` of that preceding step.
+            - Every input in your plan MUST be resolvable either from a given constant value, a "PARENT STEP INPUT" (using `sourceStep: '0'`) or from an output of a previous step in the plan.
+        - **Mapping Outputs to Inputs:** When the output of one step is used as the input to another, the `outputName` in the input of the second step must match the `name` of the output of the first step.
+        - **CRITICAL: Embedded References in Input Values:** If you use placeholders like `{{output_name}}` within a longer string value (e.g., a prompt that refers to previous outputs), you MUST also declare each referenced `output_name` as a separate input with proper `sourceStep` and `outputName`. For example, if a `prompt` refers to `competitor_details`, you need an input entry for `competitor_details` with `outputName` and `sourceStep`."""
 
-**CRITICAL UUID REQUIREMENTS:**
-- Each step MUST have a globally unique random UUID (version 4) in the "id" field
-- Use random UUIDs like "a3f2c8d1-4b7e-4c9a-8f1d-2e5b6c7d8e9f"
-- Do NOT use sequential patterns like "00000000-0000-4000-8000-000000000001"
-- Do NOT reuse UUIDs anywhere in the plan
+        action_verb_rule = f"""CRITICAL: The actionVerb for each step MUST be a valid, existing plugin actionVerb (from the provided list) or a descriptive, new actionVerb (e.g., 'ANALYZE_DATA', 'GENERATE_REPORT'). It MUST NOT be 'UNKNOWN' or 'NOVEL_VERB'."""
 
-**CRITICAL CONSTRAINTS:**
-- You MUST NOT use the novel verb "{verb}" in your plan - use available plugins instead
-- Use existing action verbs from the available plugins listed below
-- Break down the task into granular, atomic steps using available tools
-- You are an autonomous agent - solve problems independently
-- Do not use `ASK_USER_QUESTION` to seek information that can be found using `SEARCH` or `SCRAPE`
-- **If you create a new actionVerb not listed in the AVAILABLE PLUGINS section, you MUST provide a comprehensive `description` for that step.** This description should clearly explain the purpose and functionality of the new action verb.
-
-**Plan Schema (JSON Array of Steps):**
-{schema_json}
-
-- **CRITICAL for REQUIRED Inputs:** For each step, you MUST examine the `inputDefinitions` for the corresponding `actionVerb` and ensure that all `required` inputs are present in the step's `inputs` object. If an input is marked `required: true`, it MUST be provided.
-- **CRITICAL for JSON compliance:** Ensure all string literals within the generated JSON, including any nested ones, strictly adhere to JSON standards by using double quotes.
-- **CRITICAL for Plan Inputs, sourceStep:**
-    - All inputs for each step must be explicitly defined either as a constant `value` or by referencing an `outputName` from a `sourceStep` within the plan or from the `PARENT STEP INPUTS`. Do not assume implicit data structures or properties of inputs.
-    - Use `sourceStep: '0'` ONLY for inputs that are explicitly provided in the initial mission context (the "PARENT STEP INPUTS" section if applicable, or the overall mission goal). This is primarily for sub-steps within a `FOREACH` or similar control flow structure to reference an item from their direct parent.
-    - For any other input, it MUST be the `outputName` from a *preceding step* in this plan, and `sourceStep` MUST be the `id` of that preceding step.
-    - Every input in your plan MUST be resolvable either from a given constant value, a "PARENT STEP INPUT" (using `sourceStep: '0'`) or from an output of a previous step in the plan.
-- **Mapping Outputs to Inputs:** When the output of one step is used as the input to another, the `outputName` in the input of the second step must match the `name` of the output of the first step.
-- **CRITICAL: Embedded References in Input Values:** If you use placeholders like `{{output_name}}` within a longer string value (e.g., a prompt that references previous outputs), you MUST also declare each referenced `output_name` as a separate input with proper `sourceStep` and `outputName`. For example, if a `prompt` refers to `competitor_details`, you need an input entry for `competitor_details` with `outputName` and `sourceStep`.
-
-CRITICAL: The actionVerb for each step MUST be a valid, existing plugin actionVerb (from the provided list) or a descriptive, new actionVerb (e.g., 'ANALYZE_DATA', 'GENERATE_REPORT'). It MUST NOT be 'UNKNOWN' or 'NOVEL_VERB'.
-
-CRITICAL: DELIVERABLE IDENTIFICATION - VERY IMPORTANT
-When defining outputs, you MUST identify which ones are deliverables for the user. These are the key results that the user expects to receive.
-
-- For reports, analyses, or completed files that are meant for the user, you MUST use the enhanced format including `"isDeliverable": true` and a `"filename"`.
-- For intermediate data or outputs only used within the plan, use the simple format (DO NOT include `isDeliverable` or `filename`).
-- Guidelines for deliverable filenames:
-  * Use descriptive, professional names
-  * Use appropriate file extensions (.md, .txt, .json, .csv, .pdf, etc.)
-  * Avoid generic names like "output.txt" or "result.json"
-"""
+        deliverable_rules_header = """CRITICAL: DELIVERABLE IDENTIFICATION - VERY IMPORTANT"""
+        deliverable_rules_points = """- For reports, analyses, or completed files that are meant for the user, you MUST use the enhanced format including `"isDeliverable": true` and a `"filename"`.
+        - For intermediate data or outputs only used within the plan, use the simple format (DO NOT include `isDeliverable` or `filename`).
+        - Guidelines for deliverable filenames:
+          * Use descriptive, professional names
+          * Use appropriate file extensions (.md, .txt, .json, .csv, .pdf, etc.)
+          * Avoid generic names like "output.txt" or "result.json"
+        """
+        all_prompt_elements = [
+            fixed_intro,
+            verb_details,
+            parent_inputs,
+            plugin_guidance,
+            task_instruction,
+            critical_output_format,
+            critical_uuid_requirements,
+            critical_constraints,
+            plan_schema_section,
+            input_rules,
+            action_verb_rule,
+            deliverable_rules_header,
+            deliverable_rules_points
+        ]
+        
+        # Apply token efficiency to the combined elements
+        truncated_elements = create_token_efficient_prompt(all_prompt_elements, 5500)
+        
+        # Reconstruct the prompt
+        prompt = "\n\n".join([el for el in truncated_elements if el.strip()])
 
         for attempt in range(self.max_retries):
             try:

@@ -1,5 +1,6 @@
 export * from './types/PluginStatus';
 export * from './BaseEntity';
+export * from './BaseService';
 //export * from './SecurityMiddleware';
 export * from './interfaces/IBaseEntity';
 export * from './AuthenticatedApiClient';
@@ -35,4 +36,6 @@ export * from './security/ServiceTokenManager';
 //export * from './security/authMiddleware';
 export * from './errorhandler';
 export * from './caching/RedisCache';
+export * from './utils/ReliabilityLogger';
+export * from './health/HealthCheckManager';
 // Add any other exports here

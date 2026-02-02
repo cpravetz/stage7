@@ -1,0 +1,2611 @@
+{
+  "version": "1.0.0",
+  "lastUpdated": "2026-01-29",
+  "description": "Comprehensive seed data for Brain service: models, services, and interfaces",
+  "services": [
+    {
+      "id": "openai-service",
+      "name": "OpenAI Service",
+      "serviceName": "OAService",
+      "provider": "openai",
+      "apiUrlBase": "https://api.openai.com/v1/",
+      "credentialName": "openai-api-key-prod",
+      "keyVault": "AWS_SECRETS_MANAGER",
+      "healthCheckEndpoint": "https://api.openai.com/v1/models",
+      "healthCheckMethod": "GET",
+      "status": "active",
+      "supportedInterfaces": [
+        "openai"
+      ],
+      "metadata": {
+        "description": "OpenAI API service provider",
+        "documentation": "https://platform.openai.com/docs/api-reference",
+        "rateLimit": "3500 requests per minute",
+        "authentication": "Bearer token"
+      }
+    },
+    {
+      "id": "anthropic-service",
+      "name": "Anthropic Service",
+      "serviceName": "AntService",
+      "provider": "anthropic",
+      "apiUrlBase": "https://api.anthropic.com/v1/",
+      "credentialName": "anthropic-api-key-prod",
+      "keyVault": "AWS_SECRETS_MANAGER",
+      "healthCheckEndpoint": "https://api.anthropic.com/v1/messages",
+      "healthCheckMethod": "POST",
+      "status": "active",
+      "supportedInterfaces": [
+        "anthropic"
+      ],
+      "metadata": {
+        "description": "Anthropic API service provider",
+        "documentation": "https://docs.anthropic.com/claude/reference",
+        "rateLimit": "50000 requests per minute",
+        "authentication": "Bearer token"
+      }
+    },
+    {
+      "id": "google-service",
+      "name": "Google Service",
+      "serviceName": "GeminiService",
+      "provider": "google",
+      "apiUrlBase": "https://generativelanguage.googleapis.com/v1/",
+      "credentialName": "google-api-key-prod",
+      "keyVault": "AWS_SECRETS_MANAGER",
+      "healthCheckEndpoint": "https://generativelanguage.googleapis.com/v1/models?key={apiKey}",
+      "healthCheckMethod": "GET",
+      "status": "active",
+      "supportedInterfaces": [
+        "gemini"
+      ],
+      "metadata": {
+        "description": "Google Generative AI service provider",
+        "documentation": "https://ai.google.dev/docs",
+        "rateLimit": "60 requests per minute",
+        "authentication": "API Key"
+      }
+    },
+    {
+      "id": "groq-service",
+      "name": "Groq Service",
+      "serviceName": "GroqService",
+      "provider": "groq",
+      "apiUrlBase": "https://api.groq.com/v1/",
+      "credentialName": "groq-api-key-prod",
+      "keyVault": "AWS_SECRETS_MANAGER",
+      "healthCheckEndpoint": "https://api.groq.com/v1/models",
+      "healthCheckMethod": "GET",
+      "status": "active",
+      "supportedInterfaces": [
+        "groq"
+      ],
+      "metadata": {
+        "description": "Groq API service provider",
+        "documentation": "https://console.groq.com/docs",
+        "rateLimit": "30 requests per minute",
+        "authentication": "Bearer token"
+      }
+    },
+    {
+      "id": "openrouter-service",
+      "name": "OpenRouter Service",
+      "serviceName": "ORService",
+      "provider": "openrouter",
+      "apiUrlBase": "https://openrouter.ai/api/v1/",
+      "credentialName": "openrouter-api-key-prod",
+      "keyVault": "AWS_SECRETS_MANAGER",
+      "healthCheckEndpoint": "https://openrouter.ai/api/v1/models",
+      "healthCheckMethod": "GET",
+      "status": "active",
+      "supportedInterfaces": [
+        "openrouter"
+      ],
+      "metadata": {
+        "description": "OpenRouter API aggregator service provider",
+        "documentation": "https://openrouter.ai/docs",
+        "rateLimit": "200 requests per minute",
+        "authentication": "Bearer token"
+      }
+    },
+    {
+      "id": "huggingface-service",
+      "name": "HuggingFace Service",
+      "serviceName": "HFService",
+      "provider": "huggingface",
+      "apiUrlBase": "https://api-inference.huggingface.co/",
+      "credentialName": "huggingface-api-key-prod",
+      "keyVault": "AWS_SECRETS_MANAGER",
+      "healthCheckEndpoint": "https://api-inference.huggingface.co/models/",
+      "healthCheckMethod": "GET",
+      "status": "active",
+      "supportedInterfaces": [
+        "huggingface"
+      ],
+      "metadata": {
+        "description": "HuggingFace API service provider",
+        "documentation": "https://huggingface.co/docs/api-inference",
+        "rateLimit": "unlimited",
+        "authentication": "Bearer token"
+      }
+    },
+    {
+      "id": "mistral-service",
+      "name": "Mistral Service",
+      "serviceName": "MistralService",
+      "provider": "mistral",
+      "apiUrlBase": "https://api.mistral.ai/v1/",
+      "credentialName": "mistral-api-key-prod",
+      "keyVault": "AWS_SECRETS_MANAGER",
+      "healthCheckEndpoint": "https://api.mistral.ai/v1/models",
+      "healthCheckMethod": "GET",
+      "status": "active",
+      "supportedInterfaces": [
+        "mistral"
+      ],
+      "metadata": {
+        "description": "Mistral API service provider",
+        "documentation": "https://docs.mistral.ai/capabilities/function_calling/",
+        "rateLimit": "90 requests per minute",
+        "authentication": "Bearer token"
+      }
+    },
+    {
+      "id": "openwebui-service",
+      "name": "Open WebUI Service",
+      "serviceName": "OWService",
+      "provider": "openwebui",
+      "apiUrlBase": "${OPENWEB_URL}/api/v1/",
+      "credentialName": "openwebui-api-key",
+      "keyVault": "ENV",
+      "healthCheckEndpoint": "${OPENWEB_URL}/api/v1/models",
+      "healthCheckMethod": "GET",
+      "status": "active",
+      "supportedInterfaces": [
+        "openwebui"
+      ],
+      "metadata": {
+        "description": "Open WebUI local service provider",
+        "documentation": "https://github.com/open-webui/open-webui",
+        "rateLimit": "unlimited",
+        "authentication": "Bearer token"
+      }
+    },
+    {
+      "id": "cloudflare-service",
+      "name": "Cloudflare Workers AI Service",
+      "serviceName": "CloudflareWorkersAIService",
+      "provider": "cloudflare",
+      "apiUrlBase": "https://api.cloudflare.com/client/v4/accounts/",
+      "credentialName": "cloudflare-api-key-prod",
+      "keyVault": "AWS_SECRETS_MANAGER",
+      "healthCheckEndpoint": "https://api.cloudflare.com/client/v4/accounts/{accountId}/ai/models",
+      "healthCheckMethod": "GET",
+      "status": "active",
+      "supportedInterfaces": [
+        "cloudflare"
+      ],
+      "metadata": {
+        "description": "Cloudflare Workers AI service provider",
+        "documentation": "https://developers.cloudflare.com/workers-ai/",
+        "rateLimit": "1200 requests per hour",
+        "authentication": "Bearer token"
+      }
+    },
+    {
+      "id": "aiml-service",
+      "name": "AI/ML Service",
+      "serviceName": "AIMLService",
+      "provider": "aiml",
+      "apiUrlBase": "https://api.aiml.com/v1/",
+      "credentialName": "aiml-api-key-prod",
+      "keyVault": "AWS_SECRETS_MANAGER",
+      "healthCheckEndpoint": "https://api.aiml.com/v1/models",
+      "healthCheckMethod": "GET",
+      "status": "active",
+      "supportedInterfaces": [
+        "aiml"
+      ],
+      "metadata": {
+        "description": "AI/ML service provider",
+        "documentation": "https://docs.aiml.com",
+        "rateLimit": "unlimited",
+        "authentication": "Bearer token"
+      }
+    },
+    {
+      "id": "gg-service",
+      "name": "GG Service",
+      "serviceName": "GGService",
+      "provider": "gg",
+      "apiUrlBase": "https://api.gg.com/v1/",
+      "credentialName": "gg-api-key-prod",
+      "keyVault": "AWS_SECRETS_MANAGER",
+      "healthCheckEndpoint": "https://api.gg.com/v1/models",
+      "healthCheckMethod": "GET",
+      "status": "active",
+      "supportedInterfaces": [
+        "gg"
+      ],
+      "metadata": {
+        "description": "GG service provider",
+        "documentation": "https://docs.gg.com",
+        "rateLimit": "unlimited",
+        "authentication": "Bearer token"
+      }
+    }
+  ],
+  "interfaces": [
+    {
+      "id": "openai-interface",
+      "name": "OpenAI Interface",
+      "interfaceName": "openai",
+      "serviceName": "OAService",
+      "supportedConversationTypes": [
+        "TextToText",
+        "TextToCode",
+        "CodeToText",
+        "ImageToText",
+        "TextToJSON",
+        "TextToImage",
+        "TextToAudio",
+        "AudioToText",
+        "ImageToImage"
+      ],
+      "status": "active",
+      "metadata": {
+        "description": "OpenAI API interface for chat, code, image generation, and audio",
+        "models": [
+          "gpt-4-turbo",
+          "gpt-4",
+          "gpt-3.5-turbo"
+        ],
+        "capabilities": [
+          "chat",
+          "vision",
+          "function_calling",
+          "image_generation",
+          "speech_synthesis"
+        ]
+      }
+    },
+    {
+      "id": "anthropic-interface",
+      "name": "Anthropic Interface",
+      "interfaceName": "anthropic",
+      "serviceName": "AntService",
+      "supportedConversationTypes": [
+        "TextToText",
+        "TextToCode",
+        "TextToJSON",
+        "CodeToText"
+      ],
+      "status": "active",
+      "metadata": {
+        "description": "Anthropic Claude API interface for text and code generation",
+        "models": [
+          "claude-sonnet",
+          "claude-haiku"
+        ],
+        "capabilities": [
+          "chat",
+          "function_calling",
+          "vision"
+        ]
+      }
+    },
+    {
+      "id": "gemini-interface",
+      "name": "Gemini Interface",
+      "interfaceName": "gemini",
+      "serviceName": "GeminiService",
+      "supportedConversationTypes": [
+        "TextToText",
+        "TextToCode",
+        "CodeToText",
+        "ImageToText",
+        "TextToJSON",
+        "TextToImage"
+      ],
+      "status": "active",
+      "metadata": {
+        "description": "Google Gemini API interface",
+        "models": [
+          "gemini-2.5-flash",
+          "gemini-pro"
+        ],
+        "capabilities": [
+          "chat",
+          "vision",
+          "image_generation"
+        ]
+      }
+    },
+    {
+      "id": "groq-interface",
+      "name": "Groq Interface",
+      "interfaceName": "groq",
+      "serviceName": "GroqService",
+      "supportedConversationTypes": [
+        "TextToText",
+        "TextToCode",
+        "TextToJSON"
+      ],
+      "status": "active",
+      "metadata": {
+        "description": "Groq API interface for fast inference",
+        "models": [
+          "llama-3.1-8b-instant",
+          "llama-3.3-70b-instruct"
+        ],
+        "capabilities": [
+          "chat",
+          "fast_inference"
+        ]
+      }
+    },
+    {
+      "id": "openrouter-interface",
+      "name": "OpenRouter Interface",
+      "interfaceName": "openrouter",
+      "serviceName": "ORService",
+      "supportedConversationTypes": [
+        "TextToText",
+        "TextToCode",
+        "CodeToText",
+        "TextToJSON"
+      ],
+      "status": "active",
+      "metadata": {
+        "description": "OpenRouter API aggregator interface",
+        "models": [
+          "claude-2",
+          "mistral-small",
+          "kat-coder-pro"
+        ],
+        "capabilities": [
+          "chat",
+          "function_calling",
+          "multiple_providers"
+        ]
+      }
+    },
+    {
+      "id": "huggingface-interface",
+      "name": "HuggingFace Interface",
+      "interfaceName": "huggingface",
+      "serviceName": "HFService",
+      "supportedConversationTypes": [
+        "TextToText",
+        "ImageToText",
+        "TextToCode",
+        "TextToJSON"
+      ],
+      "status": "active",
+      "metadata": {
+        "description": "HuggingFace inference API interface",
+        "models": [
+          "llava-v1.5-13b",
+          "code-llama-34b"
+        ],
+        "capabilities": [
+          "chat",
+          "inference",
+          "open_source_models"
+        ]
+      }
+    },
+    {
+      "id": "mistral-interface",
+      "name": "Mistral Interface",
+      "interfaceName": "mistral",
+      "serviceName": "MistralService",
+      "supportedConversationTypes": [
+        "TextToText",
+        "TextToCode",
+        "TextToJSON"
+      ],
+      "status": "active",
+      "metadata": {
+        "description": "Mistral API interface",
+        "models": [
+          "mistral-small-latest"
+        ],
+        "capabilities": [
+          "chat",
+          "function_calling"
+        ]
+      }
+    },
+    {
+      "id": "openwebui-interface",
+      "name": "Open WebUI Interface",
+      "interfaceName": "openwebui",
+      "serviceName": "OWService",
+      "supportedConversationTypes": [
+        "TextToText",
+        "TextToCode",
+        "CodeToText",
+        "ImageToText",
+        "TextToJSON"
+      ],
+      "status": "active",
+      "metadata": {
+        "description": "Open WebUI local inference interface",
+        "models": [
+          "llama4",
+          "dolphin324B"
+        ],
+        "capabilities": [
+          "chat",
+          "local_inference",
+          "multi_modal"
+        ]
+      }
+    },
+    {
+      "id": "cloudflare-interface",
+      "name": "Cloudflare Workers AI Interface",
+      "interfaceName": "cloudflare",
+      "serviceName": "CloudflareWorkersAIService",
+      "supportedConversationTypes": [
+        "TextToText",
+        "TextToCode",
+        "ImageToText",
+        "TextToImage"
+      ],
+      "status": "active",
+      "metadata": {
+        "description": "Cloudflare Workers AI interface",
+        "models": [
+          "cloudflare-workers-ai"
+        ],
+        "capabilities": [
+          "serverless",
+          "edge_computing",
+          "low_latency"
+        ]
+      }
+    },
+    {
+      "id": "aiml-interface",
+      "name": "AI/ML Interface",
+      "interfaceName": "aiml",
+      "serviceName": "AIMLService",
+      "supportedConversationTypes": [
+        "TextToText",
+        "ImageToText"
+      ],
+      "status": "active",
+      "metadata": {
+        "description": "AI/ML service interface",
+        "models": [
+          "gpt4o"
+        ],
+        "capabilities": [
+          "chat",
+          "vision"
+        ]
+      }
+    },
+    {
+      "id": "gg-interface",
+      "name": "GG Interface",
+      "interfaceName": "gg",
+      "serviceName": "GGService",
+      "supportedConversationTypes": [
+        "TextToText"
+      ],
+      "status": "active",
+      "metadata": {
+        "description": "GG service interface",
+        "models": [],
+        "capabilities": [
+          "chat"
+        ]
+      }
+    }
+  ],
+  "models": [
+    {
+      "id": "llama-3.3-70b",
+      "name": "Llama 3.3 70B Instruct",
+      "provider": "groq",
+      "providerModelId": "llama-3.3-70b-instruct",
+      "interfaceName": "groq",
+      "serviceName": "GroqService",
+      "tokenLimit": 100000,
+      "costPer1kTokens": {
+        "input": 0.27,
+        "output": 0.27
+      },
+      "supportedConversationTypes": [
+        "TextToText",
+        "TextToCode",
+        "TextToJSON"
+      ],
+      "status": "active",
+      "rolloutPercentage": 50,
+      "scoresByConversationType": {
+        "TextToText": {
+          "costScore": 100,
+          "accuracyScore": 100,
+          "creativityScore": 80,
+          "speedScore": 80
+        },
+        "TextToCode": {
+          "costScore": 100,
+          "accuracyScore": 100,
+          "creativityScore": 80,
+          "speedScore": 80
+        },
+        "TextToJSON": {
+          "costScore": 100,
+          "accuracyScore": 100,
+          "creativityScore": 80,
+          "speedScore": 80
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "llama-3.2-3b",
+      "name": "Llama 3.2 3B Instruct",
+      "provider": "huggingface",
+      "providerModelId": "meta-llama/Llama-3.2-3B-Instruct",
+      "interfaceName": "huggingface",
+      "serviceName": "HFService",
+      "tokenLimit": 8192,
+      "costPer1kTokens": {
+        "input": 0,
+        "output": 0
+      },
+      "supportedConversationTypes": [
+        "TextToText",
+        "TextToCode"
+      ],
+      "status": "active",
+      "rolloutPercentage": 40,
+      "scoresByConversationType": {
+        "TextToText": {
+          "costScore": 100,
+          "accuracyScore": 75,
+          "creativityScore": 70,
+          "speedScore": 90
+        },
+        "TextToCode": {
+          "costScore": 100,
+          "accuracyScore": 70,
+          "creativityScore": 65,
+          "speedScore": 88
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "gpt4o-aiml",
+      "name": "GPT-4o (AIML)",
+      "provider": "aiml",
+      "providerModelId": "gpt4o",
+      "interfaceName": "aiml",
+      "serviceName": "AIMLService",
+      "tokenLimit": 128000,
+      "costPer1kTokens": {
+        "input": 0.015,
+        "output": 0.06
+      },
+      "supportedConversationTypes": [
+        "TextToText",
+        "ImageToText"
+      ],
+      "status": "active",
+      "rolloutPercentage": 5,
+      "scoresByConversationType": {
+        "TextToText": {
+          "costScore": 50,
+          "accuracyScore": 95,
+          "creativityScore": 90,
+          "speedScore": 85
+        },
+        "ImageToText": {
+          "costScore": 60,
+          "accuracyScore": 92,
+          "creativityScore": 88,
+          "speedScore": 83
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "claude-haiku",
+      "name": "Claude 3 Haiku",
+      "provider": "anthropic",
+      "providerModelId": "claude-haiku-3-5-20250514",
+      "interfaceName": "anthropic",
+      "serviceName": "AntService",
+      "tokenLimit": 200000,
+      "costPer1kTokens": {
+        "input": 0.0008,
+        "output": 0.0024
+      },
+      "supportedConversationTypes": [
+        "TextToText",
+        "TextToCode",
+        "TextToJSON"
+      ],
+      "status": "active",
+      "rolloutPercentage": 100,
+      "scoresByConversationType": {
+        "TextToText": {
+          "costScore": 100,
+          "accuracyScore": 75,
+          "creativityScore": 75,
+          "speedScore": 90
+        },
+        "TextToCode": {
+          "costScore": 100,
+          "accuracyScore": 72,
+          "creativityScore": 70,
+          "speedScore": 88
+        },
+        "TextToJSON": {
+          "costScore": 100,
+          "accuracyScore": 60,
+          "creativityScore": 30,
+          "speedScore": 85
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "claude-sonnet",
+      "name": "Claude 3 Sonnet",
+      "provider": "anthropic",
+      "providerModelId": "claude-sonnet-4-20250514",
+      "interfaceName": "anthropic",
+      "serviceName": "AntService",
+      "tokenLimit": 200000,
+      "costPer1kTokens": {
+        "input": 0.003,
+        "output": 0.015
+      },
+      "supportedConversationTypes": [
+        "TextToText",
+        "TextToCode",
+        "TextToJSON"
+      ],
+      "status": "active",
+      "rolloutPercentage": 100,
+      "scoresByConversationType": {
+        "TextToText": {
+          "costScore": 20,
+          "accuracyScore": 90,
+          "creativityScore": 90,
+          "speedScore": 80
+        },
+        "TextToCode": {
+          "costScore": 20,
+          "accuracyScore": 90,
+          "creativityScore": 90,
+          "speedScore": 80
+        },
+        "TextToJSON": {
+          "costScore": 20,
+          "accuracyScore": 10,
+          "creativityScore": 10,
+          "speedScore": 50
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "cloudflare-workers-ai",
+      "name": "Cloudflare Workers AI",
+      "provider": "cloudflare",
+      "providerModelId": "cloudflare/workers-ai",
+      "interfaceName": "cloudflare",
+      "serviceName": "CloudflareWorkersAIService",
+      "tokenLimit": 2048,
+      "costPer1kTokens": {
+        "input": 0.015,
+        "output": 0.06
+      },
+      "supportedConversationTypes": [
+        "TextToText",
+        "TextToCode",
+        "ImageToText",
+        "TextToImage"
+      ],
+      "status": "beta",
+      "rolloutPercentage": 10,
+      "scoresByConversationType": {
+        "TextToText": {
+          "costScore": 80,
+          "accuracyScore": 75,
+          "creativityScore": 75,
+          "speedScore": 95
+        },
+        "TextToCode": {
+          "costScore": 80,
+          "accuracyScore": 70,
+          "creativityScore": 65,
+          "speedScore": 93
+        },
+        "ImageToText": {
+          "costScore": 80,
+          "accuracyScore": 70,
+          "creativityScore": 70,
+          "speedScore": 90
+        },
+        "TextToImage": {
+          "costScore": 80,
+          "accuracyScore": 75,
+          "creativityScore": 80,
+          "speedScore": 90
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "code-llama-34b",
+      "name": "Code Llama 34B",
+      "provider": "huggingface",
+      "providerModelId": "meta-llama/CodeLlama-34b-Instruct-hf",
+      "interfaceName": "huggingface",
+      "serviceName": "HFService",
+      "tokenLimit": 16000,
+      "costPer1kTokens": {
+        "input": 0,
+        "output": 0
+      },
+      "supportedConversationTypes": [
+        "TextToCode",
+        "CodeToText",
+        "TextToText",
+        "TextToJSON"
+      ],
+      "status": "active",
+      "rolloutPercentage": 50,
+      "scoresByConversationType": {
+        "TextToCode": {
+          "costScore": 100,
+          "accuracyScore": 88,
+          "creativityScore": 85,
+          "speedScore": 75
+        },
+        "CodeToText": {
+          "costScore": 100,
+          "accuracyScore": 85,
+          "creativityScore": 80,
+          "speedScore": 80
+        },
+        "TextToText": {
+          "costScore": 100,
+          "accuracyScore": 75,
+          "creativityScore": 65,
+          "speedScore": 80
+        },
+        "TextToJSON": {
+          "costScore": 100,
+          "accuracyScore": 70,
+          "creativityScore": 35,
+          "speedScore": 75
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "cogvlm",
+      "name": "CogVLM",
+      "provider": "huggingface",
+      "providerModelId": "THUDM/cogvlm-chat-hf",
+      "interfaceName": "huggingface",
+      "serviceName": "HFService",
+      "tokenLimit": 8192,
+      "costPer1kTokens": {
+        "input": 0,
+        "output": 0
+      },
+      "supportedConversationTypes": [
+        "ImageToText"
+      ],
+      "status": "active",
+      "rolloutPercentage": 25,
+      "scoresByConversationType": {
+        "ImageToText": {
+          "costScore": 90,
+          "accuracyScore": 85,
+          "creativityScore": 80,
+          "speedScore": 75
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "dalle2",
+      "name": "DALL-E 2",
+      "provider": "openai",
+      "providerModelId": "image-alpha-001",
+      "interfaceName": "openai",
+      "serviceName": "OAService",
+      "tokenLimit": 4096,
+      "costPer1kTokens": {
+        "input": 0.02,
+        "output": 0.02
+      },
+      "supportedConversationTypes": [
+        "TextToImage"
+      ],
+      "status": "active",
+      "rolloutPercentage": 10,
+      "scoresByConversationType": {
+        "TextToImage": {
+          "costScore": 50,
+          "accuracyScore": 85,
+          "creativityScore": 90,
+          "speedScore": 80
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "dalle3",
+      "name": "DALL-E 3",
+      "provider": "openai",
+      "providerModelId": "dall-e-3",
+      "interfaceName": "openai",
+      "serviceName": "OAService",
+      "tokenLimit": 4096,
+      "costPer1kTokens": {
+        "input": 0.04,
+        "output": 0.04
+      },
+      "supportedConversationTypes": [
+        "TextToImage"
+      ],
+      "status": "active",
+      "rolloutPercentage": 20,
+      "scoresByConversationType": {
+        "TextToImage": {
+          "costScore": 40,
+          "accuracyScore": 95,
+          "creativityScore": 95,
+          "speedScore": 85
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "deepseek-r1",
+      "name": "DeepSeek R1",
+      "provider": "openrouter",
+      "providerModelId": "deepseek/deepseek-r1",
+      "interfaceName": "openrouter",
+      "serviceName": "ORService",
+      "tokenLimit": 1000000,
+      "costPer1kTokens": {
+        "input": 0.55,
+        "output": 1.1
+      },
+      "supportedConversationTypes": [
+        "TextToText",
+        "TextToCode"
+      ],
+      "status": "active",
+      "rolloutPercentage": 5,
+      "scoresByConversationType": {
+        "TextToText": {
+          "costScore": 30,
+          "accuracyScore": 98,
+          "creativityScore": 90,
+          "speedScore": 60
+        },
+        "TextToCode": {
+          "costScore": 30,
+          "accuracyScore": 95,
+          "creativityScore": 90,
+          "speedScore": 55
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "Mistral7B",
+      "name": "Mistral 7B",
+      "provider": "openwebui",
+      "providerModelId": "mistral:7b",
+      "interfaceName": "openwebui",
+      "serviceName": "OWService",
+      "tokenLimit": 8192,
+      "costPer1kTokens": {
+        "input": 0,
+        "output": 0
+      },
+      "supportedConversationTypes": [
+        "TextToText",
+        "TextToCode",
+        "TextToJSON"
+      ],
+      "status": "active",
+      "rolloutPercentage": 25,
+      "scoresByConversationType": {
+        "TextToText": {
+          "costScore": 100,
+          "accuracyScore": 70,
+          "creativityScore": 70,
+          "speedScore": 85
+        },
+        "TextToCode": {
+          "costScore": 100,
+          "accuracyScore": 65,
+          "creativityScore": 60,
+          "speedScore": 80
+        },
+        "TextToJSON": {
+          "costScore": 100,
+          "accuracyScore": 60,
+          "creativityScore": 30,
+          "speedScore": 80
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "faster-whisper",
+      "name": "Faster Whisper",
+      "provider": "huggingface",
+      "providerModelId": "openai/faster-whisper-large-v3",
+      "interfaceName": "huggingface",
+      "serviceName": "HFService",
+      "tokenLimit": 1024,
+      "costPer1kTokens": {
+        "input": 0,
+        "output": 0
+      },
+      "supportedConversationTypes": [
+        "AudioToText"
+      ],
+      "status": "active",
+      "rolloutPercentage": 50,
+      "scoresByConversationType": {
+        "AudioToText": {
+          "costScore": 100,
+          "accuracyScore": 90,
+          "creativityScore": 0,
+          "speedScore": 85
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "llama-2-7b",
+      "name": "Llama 2 7B",
+      "provider": "huggingface",
+      "providerModelId": "meta-llama/Llama-2-7b-hf",
+      "interfaceName": "huggingface",
+      "serviceName": "HFService",
+      "tokenLimit": 4096,
+      "costPer1kTokens": {
+        "input": 0,
+        "output": 0
+      },
+      "supportedConversationTypes": [
+        "TextToText",
+        "TextToCode"
+      ],
+      "status": "active",
+      "rolloutPercentage": 30,
+      "scoresByConversationType": {
+        "TextToText": {
+          "costScore": 100,
+          "accuracyScore": 70,
+          "creativityScore": 70,
+          "speedScore": 85
+        },
+        "TextToCode": {
+          "costScore": 100,
+          "accuracyScore": 65,
+          "creativityScore": 60,
+          "speedScore": 80
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "llama-ag4",
+      "name": "Llama AG4",
+      "provider": "huggingface",
+      "providerModelId": "meta-llama/Llama-ag4",
+      "interfaceName": "huggingface",
+      "serviceName": "HFService",
+      "tokenLimit": 8192,
+      "costPer1kTokens": {
+        "input": 0,
+        "output": 0
+      },
+      "supportedConversationTypes": [
+        "TextToText"
+      ],
+      "status": "active",
+      "rolloutPercentage": 10,
+      "scoresByConversationType": {
+        "TextToText": {
+          "costScore": 100,
+          "accuracyScore": 75,
+          "creativityScore": 70,
+          "speedScore": 80
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "gemini-flash-1.5",
+      "name": "Gemini Flash 1.5",
+      "provider": "google",
+      "providerModelId": "gemini-1.5-flash",
+      "interfaceName": "gemini",
+      "serviceName": "GeminiService",
+      "tokenLimit": 1000000,
+      "costPer1kTokens": {
+        "input": 0.075,
+        "output": 0.3
+      },
+      "supportedConversationTypes": [
+        "TextToText",
+        "ImageToText"
+      ],
+      "status": "active",
+      "rolloutPercentage": 50,
+      "scoresByConversationType": {
+        "TextToText": {
+          "costScore": 80,
+          "accuracyScore": 85,
+          "creativityScore": 85,
+          "speedScore": 90
+        },
+        "ImageToText": {
+          "costScore": 80,
+          "accuracyScore": 85,
+          "creativityScore": 85,
+          "speedScore": 90
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "gemini-flash-2.0",
+      "name": "Gemini Flash 2.0 Exp",
+      "provider": "google",
+      "providerModelId": "gemini-2.0-flash-exp",
+      "interfaceName": "gemini",
+      "serviceName": "GeminiService",
+      "tokenLimit": 1000000,
+      "costPer1kTokens": {
+        "input": 0.075,
+        "output": 0.3
+      },
+      "supportedConversationTypes": [
+        "TextToText",
+        "ImageToText"
+      ],
+      "status": "beta",
+      "rolloutPercentage": 10,
+      "scoresByConversationType": {
+        "TextToText": {
+          "costScore": 75,
+          "accuracyScore": 90,
+          "creativityScore": 90,
+          "speedScore": 95
+        },
+        "ImageToText": {
+          "costScore": 75,
+          "accuracyScore": 90,
+          "creativityScore": 90,
+          "speedScore": 95
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "gemini-flash-latest",
+      "name": "Gemini Flash Latest",
+      "provider": "google",
+      "providerModelId": "gemini-2.0-flash-latest",
+      "interfaceName": "gemini",
+      "serviceName": "GeminiService",
+      "tokenLimit": 1000000,
+      "costPer1kTokens": {
+        "input": 0.075,
+        "output": 0.3
+      },
+      "supportedConversationTypes": [
+        "TextToText",
+        "ImageToText"
+      ],
+      "status": "active",
+      "rolloutPercentage": 30,
+      "scoresByConversationType": {
+        "TextToText": {
+          "costScore": 80,
+          "accuracyScore": 88,
+          "creativityScore": 88,
+          "speedScore": 92
+        },
+        "ImageToText": {
+          "costScore": 80,
+          "accuracyScore": 88,
+          "creativityScore": 88,
+          "speedScore": 92
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "gemini-flash-lite",
+      "name": "Gemini Flash Lite",
+      "provider": "google",
+      "providerModelId": "gemini-2.0-flash-lite-latest",
+      "interfaceName": "gemini",
+      "serviceName": "GeminiService",
+      "tokenLimit": 100000,
+      "costPer1kTokens": {
+        "input": 0.0375,
+        "output": 0.15
+      },
+      "supportedConversationTypes": [
+        "TextToText"
+      ],
+      "status": "active",
+      "rolloutPercentage": 20,
+      "scoresByConversationType": {
+        "TextToText": {
+          "costScore": 90,
+          "accuracyScore": 80,
+          "creativityScore": 80,
+          "speedScore": 95
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "gemini-pro",
+      "name": "Gemini Pro",
+      "provider": "google",
+      "providerModelId": "gemini-pro",
+      "interfaceName": "gemini",
+      "serviceName": "GeminiService",
+      "tokenLimit": 32000,
+      "costPer1kTokens": {
+        "input": 0.0005,
+        "output": 0.0015
+      },
+      "supportedConversationTypes": [
+        "TextToText",
+        "TextToCode",
+        "TextToJSON"
+      ],
+      "status": "active",
+      "rolloutPercentage": 50,
+      "scoresByConversationType": {
+        "TextToText": {
+          "costScore": 100,
+          "accuracyScore": 80,
+          "creativityScore": 85,
+          "speedScore": 88
+        },
+        "TextToCode": {
+          "costScore": 100,
+          "accuracyScore": 78,
+          "creativityScore": 75,
+          "speedScore": 86
+        },
+        "TextToJSON": {
+          "costScore": 100,
+          "accuracyScore": 75,
+          "creativityScore": 40,
+          "speedScore": 85
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "gemma-27b",
+      "name": "Gemma 27B",
+      "provider": "huggingface",
+      "providerModelId": "google/gemma-2-27b",
+      "interfaceName": "huggingface",
+      "serviceName": "HFService",
+      "tokenLimit": 8192,
+      "costPer1kTokens": {
+        "input": 0,
+        "output": 0
+      },
+      "supportedConversationTypes": [
+        "TextToText",
+        "TextToCode"
+      ],
+      "status": "active",
+      "rolloutPercentage": 25,
+      "scoresByConversationType": {
+        "TextToText": {
+          "costScore": 100,
+          "accuracyScore": 80,
+          "creativityScore": 75,
+          "speedScore": 80
+        },
+        "TextToCode": {
+          "costScore": 100,
+          "accuracyScore": 78,
+          "creativityScore": 70,
+          "speedScore": 78
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "gpt-oss",
+      "name": "GPT OSS",
+      "provider": "openwebui",
+      "providerModelId": "gpt-oss:20b",
+      "interfaceName": "openwebui",
+      "serviceName": "OWService",
+      "tokenLimit": 8192,
+      "costPer1kTokens": {
+        "input": 0,
+        "output": 0
+      },
+      "supportedConversationTypes": [
+        "TextToText"
+      ],
+      "status": "active",
+      "rolloutPercentage": 15,
+      "scoresByConversationType": {
+        "TextToText": {
+          "costScore": 100,
+          "accuracyScore": 70,
+          "creativityScore": 65,
+          "speedScore": 85
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "llama-3.1-8b",
+      "name": "Llama 3.1 8B Instant",
+      "provider": "groq",
+      "providerModelId": "llama-3.1-8b-instant",
+      "interfaceName": "groq",
+      "serviceName": "GroqService",
+      "tokenLimit": 100000,
+      "costPer1kTokens": {
+        "input": 0.05,
+        "output": 0.1
+      },
+      "supportedConversationTypes": [
+        "TextToText",
+        "TextToCode",
+        "TextToJSON"
+      ],
+      "status": "active",
+      "rolloutPercentage": 100,
+      "scoresByConversationType": {
+        "TextToText": {
+          "costScore": 100,
+          "accuracyScore": 100,
+          "creativityScore": 80,
+          "speedScore": 80
+        },
+        "TextToCode": {
+          "costScore": 100,
+          "accuracyScore": 100,
+          "creativityScore": 80,
+          "speedScore": 80
+        },
+        "TextToJSON": {
+          "costScore": 100,
+          "accuracyScore": 100,
+          "creativityScore": 80,
+          "speedScore": 80
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "llama-4-scout",
+      "name": "Llama 4 Scout 17B",
+      "provider": "huggingface",
+      "providerModelId": "meta-llama/Llama-4-scout-17b-instruct",
+      "interfaceName": "huggingface",
+      "serviceName": "HFService",
+      "tokenLimit": 16000,
+      "costPer1kTokens": {
+        "input": 0,
+        "output": 0
+      },
+      "supportedConversationTypes": [
+        "TextToText",
+        "TextToCode"
+      ],
+      "status": "active",
+      "rolloutPercentage": 20,
+      "scoresByConversationType": {
+        "TextToText": {
+          "costScore": 100,
+          "accuracyScore": 85,
+          "creativityScore": 80,
+          "speedScore": 85
+        },
+        "TextToCode": {
+          "costScore": 100,
+          "accuracyScore": 83,
+          "creativityScore": 78,
+          "speedScore": 83
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "gpt-4",
+      "name": "GPT-4",
+      "provider": "openai",
+      "providerModelId": "gpt-4.1-nano-2025-04-14",
+      "interfaceName": "openai",
+      "serviceName": "OAService",
+      "tokenLimit": 4096,
+      "costPer1kTokens": {
+        "input": 0.03,
+        "output": 0.06
+      },
+      "supportedConversationTypes": [
+        "TextToText",
+        "TextToCode",
+        "CodeToText",
+        "ImageToText",
+        "TextToJSON"
+      ],
+      "status": "active",
+      "rolloutPercentage": 100,
+      "scoresByConversationType": {
+        "TextToText": {
+          "costScore": 55,
+          "accuracyScore": 55,
+          "creativityScore": 53,
+          "speedScore": 85
+        },
+        "TextToCode": {
+          "costScore": 65,
+          "accuracyScore": 52,
+          "creativityScore": 50,
+          "speedScore": 83
+        },
+        "CodeToText": {
+          "costScore": 65,
+          "accuracyScore": 53,
+          "creativityScore": 51,
+          "speedScore": 84
+        },
+        "ImageToText": {
+          "costScore": 70,
+          "accuracyScore": 50,
+          "creativityScore": 58,
+          "speedScore": 82
+        },
+        "TextToJSON": {
+          "costScore": 65,
+          "accuracyScore": 52,
+          "creativityScore": 50,
+          "speedScore": 83
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "hermes-3-405b",
+      "name": "Hermes 3 Llama 3.1 405B",
+      "provider": "openrouter",
+      "providerModelId": "nousresearch/nous-hermes-3-llama-405b",
+      "interfaceName": "openrouter",
+      "serviceName": "ORService",
+      "tokenLimit": 128000,
+      "costPer1kTokens": {
+        "input": 1.35,
+        "output": 2.7
+      },
+      "supportedConversationTypes": [
+        "TextToText",
+        "TextToCode"
+      ],
+      "status": "active",
+      "rolloutPercentage": 10,
+      "scoresByConversationType": {
+        "TextToText": {
+          "costScore": 30,
+          "accuracyScore": 95,
+          "creativityScore": 90,
+          "speedScore": 70
+        },
+        "TextToCode": {
+          "costScore": 30,
+          "accuracyScore": 93,
+          "creativityScore": 88,
+          "speedScore": 68
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "rnj-1",
+      "name": "rnj-1",
+      "provider": "openwebui",
+      "providerModelId": "rnj-1:8b",
+      "interfaceName": "openwebui",
+      "serviceName": "OWService",
+      "tokenLimit": 4096,
+      "costPer1kTokens": {
+        "input": 0,
+        "output": 0
+      },
+      "supportedConversationTypes": [
+        "TextToText"
+      ],
+      "status": "active",
+      "rolloutPercentage": 10,
+      "scoresByConversationType": {
+        "TextToText": {
+          "costScore": 100,
+          "accuracyScore": 70,
+          "creativityScore": 65,
+          "speedScore": 80
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "knllm",
+      "name": "KNLLM",
+      "provider": "openwebui",
+      "providerModelId": "knownow:latest",
+      "interfaceName": "openwebui",
+      "serviceName": "OWService",
+      "tokenLimit": 32000,
+      "costPer1kTokens": {
+        "input": 0,
+        "output": 0
+      },
+      "supportedConversationTypes": [
+        "TextToText",
+        "TextToCode"
+      ],
+      "status": "active",
+      "rolloutPercentage": 15,
+      "scoresByConversationType": {
+        "TextToText": {
+          "costScore": 100,
+          "accuracyScore": 75,
+          "creativityScore": 70,
+          "speedScore": 85
+        },
+        "TextToCode": {
+          "costScore": 100,
+          "accuracyScore": 72,
+          "creativityScore": 68,
+          "speedScore": 83
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "liquid-lfm-40b",
+      "name": "Liquid LFM 40B",
+      "provider": "huggingface",
+      "providerModelId": "liquid-foundation/liquid-lfm-40b",
+      "interfaceName": "huggingface",
+      "serviceName": "HFService",
+      "tokenLimit": 32000,
+      "costPer1kTokens": {
+        "input": 0,
+        "output": 0
+      },
+      "supportedConversationTypes": [
+        "TextToText",
+        "TextToCode"
+      ],
+      "status": "active",
+      "rolloutPercentage": 15,
+      "scoresByConversationType": {
+        "TextToText": {
+          "costScore": 100,
+          "accuracyScore": 82,
+          "creativityScore": 80,
+          "speedScore": 82
+        },
+        "TextToCode": {
+          "costScore": 100,
+          "accuracyScore": 80,
+          "creativityScore": 78,
+          "speedScore": 80
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "llama-3.2-11b-vision",
+      "name": "Llama 3.2 11B Vision Instruct",
+      "provider": "huggingface",
+      "providerModelId": "meta-llama/Llama-3.2-11B-Vision-Instruct",
+      "interfaceName": "huggingface",
+      "serviceName": "HFService",
+      "tokenLimit": 8192,
+      "costPer1kTokens": {
+        "input": 0,
+        "output": 0
+      },
+      "supportedConversationTypes": [
+        "TextToText",
+        "ImageToText"
+      ],
+      "status": "active",
+      "rolloutPercentage": 30,
+      "scoresByConversationType": {
+        "TextToText": {
+          "costScore": 100,
+          "accuracyScore": 80,
+          "creativityScore": 75,
+          "speedScore": 85
+        },
+        "ImageToText": {
+          "costScore": 100,
+          "accuracyScore": 82,
+          "creativityScore": 78,
+          "speedScore": 85
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "llama-4",
+      "name": "Llama 4",
+      "provider": "openwebui",
+      "providerModelId": "openweb/llama4:latest",
+      "interfaceName": "openwebui",
+      "serviceName": "OWService",
+      "tokenLimit": 128000,
+      "costPer1kTokens": {
+        "input": 0,
+        "output": 0
+      },
+      "supportedConversationTypes": [
+        "TextToCode",
+        "CodeToText",
+        "ImageToText",
+        "TextToText",
+        "TextToJSON"
+      ],
+      "status": "active",
+      "rolloutPercentage": 100,
+      "scoresByConversationType": {
+        "TextToCode": {
+          "costScore": 100,
+          "accuracyScore": 90,
+          "creativityScore": 85,
+          "speedScore": 70
+        },
+        "CodeToText": {
+          "costScore": 100,
+          "accuracyScore": 85,
+          "creativityScore": 75,
+          "speedScore": 75
+        },
+        "ImageToText": {
+          "costScore": 100,
+          "accuracyScore": 80,
+          "creativityScore": 75,
+          "speedScore": 70
+        },
+        "TextToText": {
+          "costScore": 100,
+          "accuracyScore": 85,
+          "creativityScore": 80,
+          "speedScore": 70
+        },
+        "TextToJSON": {
+          "costScore": 100,
+          "accuracyScore": 80,
+          "creativityScore": 40,
+          "speedScore": 70
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "llava-v1.5-13b",
+      "name": "LLaVA v1.5 13B",
+      "provider": "huggingface",
+      "providerModelId": "liuhaotian/llava-v1.5-13b",
+      "interfaceName": "huggingface",
+      "serviceName": "HFService",
+      "tokenLimit": 4096,
+      "costPer1kTokens": {
+        "input": 0,
+        "output": 0
+      },
+      "supportedConversationTypes": [
+        "ImageToText"
+      ],
+      "status": "active",
+      "rolloutPercentage": 75,
+      "scoresByConversationType": {
+        "ImageToText": {
+          "costScore": 90,
+          "accuracyScore": 83,
+          "creativityScore": 80,
+          "speedScore": 88
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "phi-3.5-vision",
+      "name": "Microsoft Phi 3.5 Vision",
+      "provider": "huggingface",
+      "providerModelId": "microsoft/Phi-3.5-vision-instruct",
+      "interfaceName": "huggingface",
+      "serviceName": "HFService",
+      "tokenLimit": 128000,
+      "costPer1kTokens": {
+        "input": 0,
+        "output": 0
+      },
+      "supportedConversationTypes": [
+        "TextToText",
+        "ImageToText"
+      ],
+      "status": "active",
+      "rolloutPercentage": 20,
+      "scoresByConversationType": {
+        "TextToText": {
+          "costScore": 100,
+          "accuracyScore": 82,
+          "creativityScore": 78,
+          "speedScore": 88
+        },
+        "ImageToText": {
+          "costScore": 100,
+          "accuracyScore": 84,
+          "creativityScore": 80,
+          "speedScore": 88
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "mistral-small-latest",
+      "name": "Mistral Small Latest",
+      "provider": "mistral",
+      "providerModelId": "mistral-small-latest",
+      "interfaceName": "mistral",
+      "serviceName": "MistralService",
+      "tokenLimit": 32000,
+      "costPer1kTokens": {
+        "input": 0.14,
+        "output": 0.42
+      },
+      "supportedConversationTypes": [
+        "TextToText",
+        "TextToCode",
+        "TextToJSON"
+      ],
+      "status": "active",
+      "rolloutPercentage": 25,
+      "scoresByConversationType": {
+        "TextToText": {
+          "costScore": 80,
+          "accuracyScore": 85,
+          "creativityScore": 80,
+          "speedScore": 85
+        },
+        "TextToCode": {
+          "costScore": 80,
+          "accuracyScore": 82,
+          "creativityScore": 75,
+          "speedScore": 83
+        },
+        "TextToJSON": {
+          "costScore": 80,
+          "accuracyScore": 80,
+          "creativityScore": 40,
+          "speedScore": 82
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "mistral-nemo",
+      "name": "Mistral Nemo",
+      "provider": "mistral",
+      "providerModelId": "mistral-nemo-latest",
+      "interfaceName": "mistral",
+      "serviceName": "MistralService",
+      "tokenLimit": 262000,
+      "costPer1kTokens": {
+        "input": 0.14,
+        "output": 0.42
+      },
+      "supportedConversationTypes": [
+        "TextToText",
+        "TextToCode"
+      ],
+      "status": "active",
+      "rolloutPercentage": 15,
+      "scoresByConversationType": {
+        "TextToText": {
+          "costScore": 80,
+          "accuracyScore": 85,
+          "creativityScore": 80,
+          "speedScore": 85
+        },
+        "TextToCode": {
+          "costScore": 80,
+          "accuracyScore": 82,
+          "creativityScore": 75,
+          "speedScore": 83
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "musicgen",
+      "name": "MusicGen",
+      "provider": "huggingface",
+      "providerModelId": "facebook/musicgen-large",
+      "interfaceName": "huggingface",
+      "serviceName": "HFService",
+      "tokenLimit": 2048,
+      "costPer1kTokens": {
+        "input": 0,
+        "output": 0
+      },
+      "supportedConversationTypes": [
+        "TextToAudio"
+      ],
+      "status": "active",
+      "rolloutPercentage": 10,
+      "scoresByConversationType": {
+        "TextToAudio": {
+          "costScore": 90,
+          "accuracyScore": 80,
+          "creativityScore": 90,
+          "speedScore": 70
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "deepseek-r1-or",
+      "name": "DeepSeek R1 (OpenRouter)",
+      "provider": "openrouter",
+      "providerModelId": "deepseek/deepseek-r1",
+      "interfaceName": "openrouter",
+      "serviceName": "ORService",
+      "tokenLimit": 1000000,
+      "costPer1kTokens": {
+        "input": 0.55,
+        "output": 1.1
+      },
+      "supportedConversationTypes": [
+        "TextToText",
+        "TextToCode"
+      ],
+      "status": "active",
+      "rolloutPercentage": 5,
+      "scoresByConversationType": {
+        "TextToText": {
+          "costScore": 30,
+          "accuracyScore": 98,
+          "creativityScore": 90,
+          "speedScore": 60
+        },
+        "TextToCode": {
+          "costScore": 30,
+          "accuracyScore": 95,
+          "creativityScore": 90,
+          "speedScore": 55
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "deva-stral-or",
+      "name": "DeVa Stral (OpenRouter)",
+      "provider": "openrouter",
+      "providerModelId": "deva/deva-stral",
+      "interfaceName": "openrouter",
+      "serviceName": "ORService",
+      "tokenLimit": 8192,
+      "costPer1kTokens": {
+        "input": 0.1,
+        "output": 0.3
+      },
+      "supportedConversationTypes": [
+        "TextToText"
+      ],
+      "status": "active",
+      "rolloutPercentage": 5,
+      "scoresByConversationType": {
+        "TextToText": {
+          "costScore": 90,
+          "accuracyScore": 75,
+          "creativityScore": 70,
+          "speedScore": 85
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "glm4-5-or",
+      "name": "GLM 4.5 (OpenRouter)",
+      "provider": "openrouter",
+      "providerModelId": "zhipu/glm-4-5-turbo",
+      "interfaceName": "openrouter",
+      "serviceName": "ORService",
+      "tokenLimit": 8192,
+      "costPer1kTokens": {
+        "input": 0.1,
+        "output": 0.3
+      },
+      "supportedConversationTypes": [
+        "TextToText",
+        "ImageToText"
+      ],
+      "status": "active",
+      "rolloutPercentage": 10,
+      "scoresByConversationType": {
+        "TextToText": {
+          "costScore": 85,
+          "accuracyScore": 80,
+          "creativityScore": 78,
+          "speedScore": 85
+        },
+        "ImageToText": {
+          "costScore": 85,
+          "accuracyScore": 80,
+          "creativityScore": 78,
+          "speedScore": 85
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "kat-coder-or",
+      "name": "KatCoder (OpenRouter)",
+      "provider": "openrouter",
+      "providerModelId": "or/kwaipilot/kat-coder-pro:free",
+      "interfaceName": "openrouter",
+      "serviceName": "ORService",
+      "tokenLimit": 250000,
+      "costPer1kTokens": {
+        "input": 0,
+        "output": 0
+      },
+      "supportedConversationTypes": [
+        "TextToCode",
+        "CodeToText"
+      ],
+      "status": "active",
+      "rolloutPercentage": 50,
+      "scoresByConversationType": {
+        "TextToCode": {
+          "costScore": 100,
+          "accuracyScore": 95,
+          "creativityScore": 85,
+          "speedScore": 80
+        },
+        "CodeToText": {
+          "costScore": 100,
+          "accuracyScore": 90,
+          "creativityScore": 80,
+          "speedScore": 85
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "nvidia-or",
+      "name": "NVIDIA (OpenRouter)",
+      "provider": "openrouter",
+      "providerModelId": "nvidia/nemotron-4-340b-instruct",
+      "interfaceName": "openrouter",
+      "serviceName": "ORService",
+      "tokenLimit": 256000,
+      "costPer1kTokens": {
+        "input": 0.4,
+        "output": 0.4
+      },
+      "supportedConversationTypes": [
+        "TextToText",
+        "TextToCode"
+      ],
+      "status": "active",
+      "rolloutPercentage": 15,
+      "scoresByConversationType": {
+        "TextToText": {
+          "costScore": 70,
+          "accuracyScore": 88,
+          "creativityScore": 85,
+          "speedScore": 80
+        },
+        "TextToCode": {
+          "costScore": 70,
+          "accuracyScore": 86,
+          "creativityScore": 83,
+          "speedScore": 78
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "qwen-3-coder-or",
+      "name": "Qwen3 Coder (OpenRouter)",
+      "provider": "openrouter",
+      "providerModelId": "qwen/qwen-max-2024-09-19",
+      "interfaceName": "openrouter",
+      "serviceName": "ORService",
+      "tokenLimit": 8192,
+      "costPer1kTokens": {
+        "input": 0.1,
+        "output": 0.3
+      },
+      "supportedConversationTypes": [
+        "TextToCode"
+      ],
+      "status": "active",
+      "rolloutPercentage": 10,
+      "scoresByConversationType": {
+        "TextToCode": {
+          "costScore": 85,
+          "accuracyScore": 90,
+          "creativityScore": 85,
+          "speedScore": 85
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "codewriter-ow",
+      "name": "CodeWriter (OpenWebUI)",
+      "provider": "openwebui",
+      "providerModelId": "codewriter/codewriter-latest",
+      "interfaceName": "openwebui",
+      "serviceName": "OWService",
+      "tokenLimit": 16000,
+      "costPer1kTokens": {
+        "input": 0,
+        "output": 0
+      },
+      "supportedConversationTypes": [
+        "TextToCode"
+      ],
+      "status": "active",
+      "rolloutPercentage": 20,
+      "scoresByConversationType": {
+        "TextToCode": {
+          "costScore": 100,
+          "accuracyScore": 85,
+          "creativityScore": 80,
+          "speedScore": 80
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "deepseek-r1-ow",
+      "name": "DeepSeek R1 (OpenWebUI)",
+      "provider": "openwebui",
+      "providerModelId": "deepseek-r1:latest",
+      "interfaceName": "openwebui",
+      "serviceName": "OWService",
+      "tokenLimit": 1000000,
+      "costPer1kTokens": {
+        "input": 0,
+        "output": 0
+      },
+      "supportedConversationTypes": [
+        "TextToText",
+        "TextToCode"
+      ],
+      "status": "active",
+      "rolloutPercentage": 10,
+      "scoresByConversationType": {
+        "TextToText": {
+          "costScore": 100,
+          "accuracyScore": 95,
+          "creativityScore": 88,
+          "speedScore": 70
+        },
+        "TextToCode": {
+          "costScore": 100,
+          "accuracyScore": 93,
+          "creativityScore": 86,
+          "speedScore": 68
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "gemma-3n-ow",
+      "name": "Gemma 3N (OpenWebUI)",
+      "provider": "openwebui",
+      "providerModelId": "gemma3n:latest",
+      "interfaceName": "openwebui",
+      "serviceName": "OWService",
+      "tokenLimit": 8192,
+      "costPer1kTokens": {
+        "input": 0,
+        "output": 0
+      },
+      "supportedConversationTypes": [
+        "TextToText"
+      ],
+      "status": "active",
+      "rolloutPercentage": 15,
+      "scoresByConversationType": {
+        "TextToText": {
+          "costScore": 100,
+          "accuracyScore": 78,
+          "creativityScore": 75,
+          "speedScore": 85
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "gpt-oss-20b-ow",
+      "name": "GPT OSS 20B (OpenWebUI)",
+      "provider": "openwebui",
+      "providerModelId": "gpt-oss-20b:latest",
+      "interfaceName": "openwebui",
+      "serviceName": "OWService",
+      "tokenLimit": 8192,
+      "costPer1kTokens": {
+        "input": 0,
+        "output": 0
+      },
+      "supportedConversationTypes": [
+        "TextToText",
+        "TextToCode"
+      ],
+      "status": "active",
+      "rolloutPercentage": 20,
+      "scoresByConversationType": {
+        "TextToText": {
+          "costScore": 100,
+          "accuracyScore": 75,
+          "creativityScore": 70,
+          "speedScore": 85
+        },
+        "TextToCode": {
+          "costScore": 100,
+          "accuracyScore": 72,
+          "creativityScore": 68,
+          "speedScore": 83
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "gpt-oss-ow",
+      "name": "GPT OSS (OpenWebUI)",
+      "provider": "openwebui",
+      "providerModelId": "gpt-oss:latest",
+      "interfaceName": "openwebui",
+      "serviceName": "OWService",
+      "tokenLimit": 8192,
+      "costPer1kTokens": {
+        "input": 0,
+        "output": 0
+      },
+      "supportedConversationTypes": [
+        "TextToText"
+      ],
+      "status": "active",
+      "rolloutPercentage": 15,
+      "scoresByConversationType": {
+        "TextToText": {
+          "costScore": 100,
+          "accuracyScore": 70,
+          "creativityScore": 65,
+          "speedScore": 85
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "llama-3.2-ow",
+      "name": "Llama 3.2 (OpenWebUI)",
+      "provider": "openwebui",
+      "providerModelId": "llama3.2:latest",
+      "interfaceName": "openwebui",
+      "serviceName": "OWService",
+      "tokenLimit": 8192,
+      "costPer1kTokens": {
+        "input": 0,
+        "output": 0
+      },
+      "supportedConversationTypes": [
+        "TextToText"
+      ],
+      "status": "active",
+      "rolloutPercentage": 30,
+      "scoresByConversationType": {
+        "TextToText": {
+          "costScore": 100,
+          "accuracyScore": 75,
+          "creativityScore": 70,
+          "speedScore": 90
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "mistral-ow",
+      "name": "Mistral (OpenWebUI)",
+      "provider": "openwebui",
+      "providerModelId": "mistral:latest",
+      "interfaceName": "openwebui",
+      "serviceName": "OWService",
+      "tokenLimit": 32000,
+      "costPer1kTokens": {
+        "input": 0,
+        "output": 0
+      },
+      "supportedConversationTypes": [
+        "TextToText",
+        "TextToCode"
+      ],
+      "status": "active",
+      "rolloutPercentage": 25,
+      "scoresByConversationType": {
+        "TextToText": {
+          "costScore": 100,
+          "accuracyScore": 80,
+          "creativityScore": 75,
+          "speedScore": 85
+        },
+        "TextToCode": {
+          "costScore": 100,
+          "accuracyScore": 78,
+          "creativityScore": 73,
+          "speedScore": 83
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "pixtral-12b",
+      "name": "Pixtral 12B",
+      "provider": "mistral",
+      "providerModelId": "pixtral-12b-2409",
+      "interfaceName": "mistral",
+      "serviceName": "MistralService",
+      "tokenLimit": 131072,
+      "costPer1kTokens": {
+        "input": 0.14,
+        "output": 0.42
+      },
+      "supportedConversationTypes": [
+        "TextToText",
+        "ImageToText"
+      ],
+      "status": "active",
+      "rolloutPercentage": 20,
+      "scoresByConversationType": {
+        "TextToText": {
+          "costScore": 80,
+          "accuracyScore": 82,
+          "creativityScore": 80,
+          "speedScore": 85
+        },
+        "ImageToText": {
+          "costScore": 80,
+          "accuracyScore": 85,
+          "creativityScore": 82,
+          "speedScore": 85
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "seamless-m4t",
+      "name": "Seamless M4T",
+      "provider": "huggingface",
+      "providerModelId": "facebook/seamless-m4t-v2-large",
+      "interfaceName": "huggingface",
+      "serviceName": "HFService",
+      "tokenLimit": 2048,
+      "costPer1kTokens": {
+        "input": 0,
+        "output": 0
+      },
+      "supportedConversationTypes": [
+        "AudioToText",
+        "TextToAudio"
+      ],
+      "status": "active",
+      "rolloutPercentage": 15,
+      "scoresByConversationType": {
+        "AudioToText": {
+          "costScore": 100,
+          "accuracyScore": 85,
+          "creativityScore": 0,
+          "speedScore": 80
+        },
+        "TextToAudio": {
+          "costScore": 100,
+          "accuracyScore": 80,
+          "creativityScore": 75,
+          "speedScore": 75
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "stable-diffusion-xl",
+      "name": "Stable Diffusion XL",
+      "provider": "huggingface",
+      "providerModelId": "stabilityai/stable-diffusion-xl-base-1.0",
+      "interfaceName": "huggingface",
+      "serviceName": "HFService",
+      "tokenLimit": 77,
+      "costPer1kTokens": {
+        "input": 0,
+        "output": 0
+      },
+      "supportedConversationTypes": [
+        "TextToImage"
+      ],
+      "status": "active",
+      "rolloutPercentage": 30,
+      "scoresByConversationType": {
+        "TextToImage": {
+          "costScore": 90,
+          "accuracyScore": 85,
+          "creativityScore": 92,
+          "speedScore": 75
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "starcoder",
+      "name": "StarCoder",
+      "provider": "huggingface",
+      "providerModelId": "bigcode/starcoder",
+      "interfaceName": "huggingface",
+      "serviceName": "HFService",
+      "tokenLimit": 8192,
+      "costPer1kTokens": {
+        "input": 0,
+        "output": 0
+      },
+      "supportedConversationTypes": [
+        "TextToCode"
+      ],
+      "status": "active",
+      "rolloutPercentage": 20,
+      "scoresByConversationType": {
+        "TextToCode": {
+          "costScore": 100,
+          "accuracyScore": 80,
+          "creativityScore": 75,
+          "speedScore": 85
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "tts",
+      "name": "Text-to-Speech",
+      "provider": "openai",
+      "providerModelId": "tts-1",
+      "interfaceName": "openai",
+      "serviceName": "OAService",
+      "tokenLimit": 4096,
+      "costPer1kTokens": {
+        "input": 0.015,
+        "output": 0.015
+      },
+      "supportedConversationTypes": [
+        "TextToAudio"
+      ],
+      "status": "active",
+      "rolloutPercentage": 50,
+      "scoresByConversationType": {
+        "TextToAudio": {
+          "costScore": 80,
+          "accuracyScore": 85,
+          "creativityScore": 70,
+          "speedScore": 95
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "whisper-large-v3",
+      "name": "Whisper Large V3",
+      "provider": "openai",
+      "providerModelId": "whisper-1",
+      "interfaceName": "openai",
+      "serviceName": "OAService",
+      "tokenLimit": 1024,
+      "costPer1kTokens": {
+        "input": 0.02,
+        "output": 0.02
+      },
+      "supportedConversationTypes": [
+        "AudioToText"
+      ],
+      "status": "active",
+      "rolloutPercentage": 60,
+      "scoresByConversationType": {
+        "AudioToText": {
+          "costScore": 100,
+          "accuracyScore": 95,
+          "creativityScore": 0,
+          "speedScore": 90
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    },
+    {
+      "id": "whisper",
+      "name": "Whisper",
+      "provider": "openai",
+      "providerModelId": "whisper-1",
+      "interfaceName": "openai",
+      "serviceName": "OAService",
+      "tokenLimit": 1024,
+      "costPer1kTokens": {
+        "input": 0.02,
+        "output": 0.02
+      },
+      "supportedConversationTypes": [
+        "AudioToText"
+      ],
+      "status": "active",
+      "rolloutPercentage": 40,
+      "scoresByConversationType": {
+        "AudioToText": {
+          "costScore": 100,
+          "accuracyScore": 90,
+          "creativityScore": 0,
+          "speedScore": 85
+        }
+      },
+      "metadata": {
+        "version": "1.0.0",
+        "releaseDate": "2024-01-01",
+        "knownLimitations": ""
+      }
+    }
+  ]
+}

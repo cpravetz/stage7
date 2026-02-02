@@ -1,7 +1,7 @@
 import { MongoClient, Collection } from 'mongodb';
 import { v4 as uuidv4 } from 'uuid';
 import { User } from '../models/User';
-import { analyzeError } from '@cktmcs/errorhandler';
+import { analyzeError } from '@cktmcs/shared';
 
 /**
  * User repository for interacting with MongoDB directly

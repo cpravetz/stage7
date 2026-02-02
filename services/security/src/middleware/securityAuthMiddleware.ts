@@ -3,7 +3,7 @@ import { AsyncRequestHandler } from '../types/express';
 import { TokenService } from '../services/TokenService';
 import { AuthorizationService } from '../services/AuthorizationService';
 import { TokenType, TokenPayload } from '../models/Token';
-import { analyzeError } from '@cktmcs/errorhandler';
+import { analyzeError } from '@cktmcs/shared';
 import { User } from '../models/User';
 import { findUserById } from '../services/userService';
 

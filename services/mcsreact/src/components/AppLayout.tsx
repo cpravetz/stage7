@@ -1,18 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { Outlet } from 'react-router-dom';
-import { WebSocketProvider } from '../context/WebSocketContext';
 import { AuthProvider, useAuth } from '../context/AuthContext';
 import { SnackbarProvider } from 'notistack';
-import { CircularProgress, Box, Typography } from '@mui/material';
+import { CircularProgress, Box, Typography } from '@mui/material/index.js';
 
 const AppLayout: React.FC = () => {
   return (
     <SnackbarProvider maxSnack={3}>
       <AuthProvider>
         <AuthInitializer>
-          <WebSocketProvider>
-            <Outlet />
-          </WebSocketProvider>
+          {/* WebSocketProvider is already at the root level in index.tsx, do not wrap again */}
+          <Outlet />
         </AuthInitializer>
       </AuthProvider>
     </SnackbarProvider>

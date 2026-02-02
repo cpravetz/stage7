@@ -1,47 +1,57 @@
 ```json
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "Combined Planning Response Schema",
-  "description": "Schema for responses from planning-related LLM calls, which can be a plan, a direct answer, or a plugin recommendation.",
-  "oneOf": [
-    {
-      "title": "Plan Response",
-      "description": "A plan consisting of an array of steps.",
-      "$ref": "#/definitions/PlanArray"
-    },
-    {
-      "title": "Direct Answer Response",
-      "description": "A direct textual answer to the query.",
-      "$ref": "#/definitions/DirectAnswer"
-    },
-    {
-      "title": "Plugin Recommendation Response",
-      "description": "A recommendation for a new plugin to be developed.",
-      "$ref": "#/definitions/PluginRecommendation"
-    }
-  ],
+  "title": "Planning Response Schema",
+  "description": "A plan consisting of an array of steps. This schema reflects the structure validated by the core Python PlanValidator.",
+  "type": "array",
+  "items": { "$ref": "#/definitions/PlanStep" },
   "definitions": {
     "PlanStep": {
       "type": "object",
       "properties": {
-        "number": {"type": "integer", "minimum": 1, "description": "Unique step number"},
-        "actionVerb": {"type": "string", "description": "The action to be performed in this step. It may be one of the plugin actionVerbs or a new actionVerb for a new type of task."},
-        "description": {"type": "string", "description": "A thorough description of the task to be performed in this step so that an agent or LLM can execute without needing external context beyond the inputs and output specification."},
+        "id": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Unique step ID (UUID). This is required and used for dependency tracking."
+        },
+        "actionVerb": {
+          "type": "string",
+          "description": "The action to be performed. Can be a known plugin verb or a novel verb requiring further planning."
+        },
+        "description": {
+          "type": "string",
+          "description": "A thorough description of the task for this step, sufficient for an agent to execute it."
+        },
         "inputs": {
           "type": "object",
           "patternProperties": {
             "^[a-zA-Z][a-zA-Z0-9_]*$": {
               "type": "object",
               "properties": {
-                "value": {"type": "string", "description": "Constant string value for this input"},
-                "valueType": {"type": "string", "enum": ["string", "number", "boolean", "array", "object", "plan", "plugin", "any"], "description": "The natural type of the Constant input value"},
-                "outputName": {"type": "string", "description": "Reference to an output from a previous step at the same level or higher"},
-                "sourceStep": {"type": "integer", "minimum": 0, "description": "The step number that produces the output for this input. Use 0 to refer to an input from the parent step."},
-                "args": {"type": "object", "description": "Additional arguments for the input"}
+                "value": {
+                  "description": "Constant string value for this input. Note: Complex objects or arrays should be JSON-stringified."
+                },
+                "valueType": {
+                  "type": "string",
+                  "enum": ["string", "number", "boolean", "array", "object", "plan", "plugin", "any"],
+                  "description": "The natural type of the constant 'value'."
+                },
+                "outputName": {
+                  "type": "string",
+                  "description": "The name of an output from a previous step."
+                },
+                "sourceStep": {
+                  "type": "string",
+                  "description": "The 'id' (UUID) of the step that produces the output. Use '0' to refer to an input from the parent context (e.g., the main inputs to ACCOMPLISH, or the 'item' from a FOREACH loop)."
+                },
+                "args": {
+                  "type": "object",
+                  "description": "Additional arguments for the input, rarely used."
+                }
               },
               "oneOf": [
-                {"required": ["value", "valueType"]},
-                {"required": ["outputName", "sourceStep"]}
+                { "required": ["value", "valueType"] },
+                { "required": ["outputName", "sourceStep"] }
               ],
               "additionalProperties": false
             }
@@ -52,64 +62,38 @@
           "type": "object",
           "patternProperties": {
             "^[a-zA-Z][a-zA-Z0-9_]*$": {
-              "oneOf": [
-                {"type": "string", "description": "Thorough description of the expected output"},
-                {
-                  "type": "object",
-                  "properties": {
-                    "description": {"type": "string", "description": "Thorough description of the expected output"},
-                    "isDeliverable": {"type": "boolean", "description": "Whether this output is a final deliverable for the user"},
-                    "filename": {"type": "string", "description": "User-friendly filename for the deliverable"}
-                  },
-                  "required": ["description"],
-                  "additionalProperties": false
+              "type": "object",
+              "properties": {
+                "description": {
+                  "type": "string",
+                  "description": "Thorough description of the expected output."
+                },
+                "type": {
+                  "type": "string",
+                  "enum": ["string", "number", "boolean", "array", "object", "plan", "plugin", "any", "list", "list[string]", "list[number]", "list[boolean]", "list[object]", "list[any]"],
+                  "description": "The data type of the output."
+                },
+                "isDeliverable": {
+                  "type": "boolean",
+                  "description": "Whether this output is a final deliverable for the user."
+                },
+                "filename": {
+                  "type": "string",
+                  "description": "User-friendly filename for the deliverable. If omitted for a deliverable, a name will be auto-generated."
                 }
-              ]
+              },
+              "required": ["description", "type"],
+              "additionalProperties": false
             }
           },
           "additionalProperties": false
         },
-        "recommendedRole": {"type": "string", "description": "Suggested role type for the agent executing this step. Allowed values are Coordinator, Researcher, Coder, Creative, Critic, Executor, and Domain Expert"}
-      },
-      "required": ["number", "actionVerb", "inputs", "outputs"],
-      "additionalProperties": false
-    },
-    "PlanArray": {
-      "type": "array",
-      "items": { "$ref": "#/definitions/PlanStep" },
-      "description": "A list of sequential steps to accomplish a goal."
-    },
-    "DirectAnswer": {
-      "type": "object",
-      "properties": {
-        "direct_answer": {
+        "recommendedRole": {
           "type": "string",
-          "description": "A direct answer or result, to be used only if the goal can be fully accomplished in a single step without requiring a plan."
+          "description": "Suggested agent role. Allowed values (lowercase): coordinator, researcher, coder, creative, critic, executor, domain expert. This is sparsely used."
         }
       },
-      "required": ["direct_answer"],
-      "additionalProperties": false
-    },
-    "PluginRecommendation": {
-      "type": "object",
-      "properties": {
-        "plugin": {
-          "type": "object",
-          "properties": {
-            "id": {
-              "type": "string",
-              "description": "The ID of the new plugin to be developed."
-            },
-            "description": {
-              "type": "string",
-              "description": "A detailed description of the new plugin's functionality."
-            }
-          },
-          "required": ["id", "description"],
-          "additionalProperties": false
-        }
-      },
-      "required": ["plugin"],
+      "required": ["id", "actionVerb", "inputs", "outputs"],
       "additionalProperties": false
     }
   }

@@ -14,6 +14,19 @@ import { ConflictResolution } from './collaboration/ConflictResolution';
 import { v4 as uuidv4 } from 'uuid';
 import { OwnershipTransferManager } from './utils/OwnershipTransferManager';
 
+/**
+ * Normalizes an ID to always be a string.
+ * @param Id The ID which could be a string or string array.
+ * @returns A normalized string ID.
+ */
+function normalizeId(Id: string | string[]): string {
+  if (Array.isArray(Id)) {
+    // If it's an array, use the first element or generate a fallback
+    return Id.length > 0 ? Id[0] : `id-${Date.now()}`;
+  }
+  return Id;
+}
+
 export class AgentSet extends BaseEntity {
     agents: Map<string, Agent> = new Map(); // Store agents by their ID
     private specializationFramework: SpecializationFramework;
@@ -26,34 +39,29 @@ export class AgentSet extends BaseEntity {
 
     // Missing properties
     public persistenceManager: AgentPersistenceManager;
-    private trafficManagerUrl: string;
     private librarianUrl: string;
     private brainUrl: string;
     private maxAgents: number = 100; // Default max agents
     private lastMemoryCheck: string = new Date().toISOString();
     private app: express.Application;
 
+  
     constructor() {
         super('primary-agentset', 'AgentSet', process.env.HOST || 'agentset', process.env.PORT || '5100');
         this.app = express();
         // Initialize URLs from environment variables or defaults, ensuring http:// prefix
-        this.trafficManagerUrl = process.env.TRAFFIC_MANAGER_URL || 'trafficmanager:5000';
         this.librarianUrl = process.env.LIBRARIAN_URL || 'librarian:5040';
         this.brainUrl = process.env.BRAIN_URL || 'brain:5015';
-        this.postOfficeUrl = process.env.POST_OFFICE_URL || 'postoffice:5020';
-
-        // The authenticatedApi and securityManagerUrl are initialized by BaseEntity.
-        // We can access them directly after super() call.
         // Initialize persistence manager
         this.persistenceManager = new AgentPersistenceManager(this.librarianUrl, this.authenticatedApi);
 
         // Initialize memory and lifecycle management
-        this.lifecycleManager = new AgentLifecycleManager(this.persistenceManager, this.trafficManagerUrl);
+        this.lifecycleManager = new AgentLifecycleManager(this.persistenceManager);
 
         // Initialize agent systems
         this.ownershipTransferManager = new OwnershipTransferManager(this);
-        this.taskDelegation = new TaskDelegation(this.agents, this.trafficManagerUrl, this.ownershipTransferManager);
-        this.conflictResolution = new ConflictResolution(this.agents, this.trafficManagerUrl, this.brainUrl);
+        this.taskDelegation = new TaskDelegation(this.agents, this.ownershipTransferManager);
+        this.conflictResolution = new ConflictResolution(this.agents, this.brainUrl);
         this.collaborationManager = new CollaborationManager(
             this,
             this.taskDelegation,
@@ -91,23 +99,8 @@ export class AgentSet extends BaseEntity {
 
     // Initialize Express server to manage agent lifecycle
     private initializeServer(): void {
-        this.app.get('/health', (req: express.Request, res: express.Response): void => {
-            res.status(200).json({
-                status: 'healthy',
-                timestamp: new Date().toISOString(),
-                message: 'AgentSet service is healthy',
-                agentCount: this.agents.size
-            });
-        });
-
-        this.app.get('/ready', (req: express.Request, res: express.Response): void => {
-            res.status(200).json({
-                ready: true,
-                timestamp: new Date().toISOString(),
-                message: 'AgentSet service is ready',
-                registeredWithPostOffice: this.registeredWithPostOffice
-            });
-        });
+        // Set up unified health check endpoints (/health, /healthy, /ready, /status)
+        this.setupHealthCheck(this.app);
 
         // Apply JSON parsing middleware
         this.app.use(express.json());
@@ -157,7 +150,7 @@ export class AgentSet extends BaseEntity {
             }
             try {
                 console.log(`Agentset Pausing agents for mission ${missionId}`);
-                const agents = Array.from(this.agents.values()).filter(agent => agent.getMissionId() === missionId);
+                const agents = Array.from(this.agents.values()).filter(agent => agent.missionId === missionId);
                 for (const agent of agents) {
                     await agent.pause();
                 }
@@ -219,7 +212,7 @@ export class AgentSet extends BaseEntity {
        this.app.get('/agent/:agentId/conflicts', (req: express.Request, res: express.Response): void => {
             try {
                 const { agentId } = req.params;
-                const conflicts = this.collaborationManager.getConflictResolution().getConflictsInvolvingAgent(agentId);
+                const conflicts = this.collaborationManager.getConflictResolution().getConflictsInvolvingAgent(normalizeId(agentId));
                 res.status(200).send({ conflicts });
             } catch (error) {
                 analyzeError(error as Error);
@@ -249,7 +242,7 @@ export class AgentSet extends BaseEntity {
             try {
                 const { agentId } = req.params;
                 const { roleId, customizations } = req.body;
-                const specialization = await this.specializationFramework.assignRole(agentId, roleId, customizations);
+                const specialization = await this.specializationFramework.assignRole(normalizeId(agentId), roleId, customizations);
                 res.status(200).send({ specialization });
             } catch (error) {
                 analyzeError(error as Error);
@@ -270,7 +263,7 @@ export class AgentSet extends BaseEntity {
                     return;
                 }
 
-                const specialization = await this.specializationFramework.updateSystemPrompt(agentId, lessonLearned);
+                const specialization = await this.specializationFramework.updateSystemPrompt(normalizeId(agentId), lessonLearned);
 
                 if (!specialization) {
                     res.status(404).send({ error: `Agent ${agentId} not found or has no specialization` });
@@ -294,7 +287,7 @@ export class AgentSet extends BaseEntity {
         this.app.get('/agent/:agentId/performance', async (req: express.Request, res: express.Response): Promise<void> => {
             try {
                 const { agentId } = req.params;
-                const performanceData = this.specializationFramework.getAgentPerformanceData(agentId);
+                const performanceData = this.specializationFramework.getAgentPerformanceData(normalizeId(agentId));
 
                 if (!performanceData) {
                     res.status(404).send({ error: `Agent ${agentId} not found or has no performance data` });
@@ -320,7 +313,7 @@ export class AgentSet extends BaseEntity {
        this.app.get('/agent/:agentId/specialization', (req: express.Request, res: express.Response): void => {
             try {
                 const { agentId } = req.params;
-                const specialization = this.specializationFramework.getAgentSpecialization(agentId);
+                const specialization = this.specializationFramework.getAgentSpecialization(normalizeId(agentId));
                 res.status(200).send({ specialization });
             } catch (error) {
                 analyzeError(error as Error);
@@ -334,7 +327,7 @@ export class AgentSet extends BaseEntity {
        this.app.get('/role/:roleId/agents', (req: express.Request, res: express.Response): void => {
             try {
                 const { roleId } = req.params;
-                const agents = this.specializationFramework.getAgentsWithRole(roleId);
+                const agents = this.specializationFramework.getAgentsWithRole(normalizeId(roleId));
                 res.status(200).send({ agents });
             } catch (error) {
                 analyzeError(error as Error);
@@ -391,8 +384,8 @@ export class AgentSet extends BaseEntity {
         
                 // Find an existing agent with the same role and mission that is in an active state
                 const existingAgent = Array.from(this.agents.values()).find(agent =>
-                    agent.getRole() === roleId &&
-                    agent.getMissionId() === missionId &&
+                    agent.role === roleId &&
+                    agent.missionId === missionId &&
                     (agent.getStatus() === 'running' || agent.getStatus() === 'waiting')
                 );
         
@@ -416,7 +409,7 @@ export class AgentSet extends BaseEntity {
             try {
                 const { agentId } = req.params;
                 const { taskDescription } = req.body;
-                const prompt = await this.specializationFramework.generateSpecializedPrompt(agentId, taskDescription);
+                const prompt = await this.specializationFramework.generateSpecializedPrompt(normalizeId(agentId), taskDescription);
                 res.status(200).send({ prompt });
             } catch (error) {
                 analyzeError(error as Error);
@@ -529,7 +522,7 @@ export class AgentSet extends BaseEntity {
             }
             try {
                 console.log(`Agentset Resuming agents for mission ${missionId}`);
-                const agents = Array.from(this.agents.values()).filter(agent => agent.getMissionId() === missionId);
+                const agents = Array.from(this.agents.values()).filter(agent => agent.missionId === missionId);
                 for (const agent of agents) {
                     await agent.resume();
                 }
@@ -636,7 +629,7 @@ export class AgentSet extends BaseEntity {
                        return;
                    }
                    try {
-                       await this.updateStepLocation(stepId, agentId, agentSetUrl);
+                       await this.updateStepLocation(normalizeId(stepId), agentId, agentSetUrl);
                        res.status(200).send({ message: `Step ${stepId} location updated` });
                    } catch (error) {
                        analyzeError(error as Error);
@@ -647,7 +640,7 @@ export class AgentSet extends BaseEntity {
                this.app.get('/step-location/:stepId', async (req: express.Request, res: express.Response) => {
                    const { stepId } = req.params;
                    try {
-                       const location = await this.getStepLocation(stepId);
+                       const location = await this.getStepLocation(normalizeId(stepId));
                        if (location) {
                            res.status(200).send(location);
                        } else {
@@ -694,21 +687,6 @@ export class AgentSet extends BaseEntity {
 
     
 
-    private async notifyTrafficManager(agentId: string, status: string): Promise<void> {
-        try {
-            const response = await this.authenticatedApi.post(`http://${this.trafficManagerUrl}/agent/status`, {
-                agentId,
-                status,
-                timestamp: new Date().toISOString()
-            });
-            console.log(`Successfully notified TrafficManager about agent ${agentId} status: ${status}`);
-            return response.data;
-        } catch (error) {
-            console.error(`Failed to notify TrafficManager about agent ${agentId}:`, error);
-            throw error;
-        }
-    }
-
     private async removeAgentFromSet(agentId: string, status: string): Promise<void> {
         console.log(`Attempting to remove agent ${agentId} with status ${status} from AgentSet.`);
         const agent = this.agents.get(agentId);
@@ -728,13 +706,6 @@ export class AgentSet extends BaseEntity {
                 this.agents.delete(agentId);
 
                 console.log(`Agent ${agentId} removed from AgentSet. Current agent count: ${this.agents.size}`);
-
-                // Notify TrafficManager
-                try {
-                    await this.notifyTrafficManager(agentId, status);
-                } catch (error) {
-                    console.warn(`Failed to notify TrafficManager about agent ${agentId} removal:`, error);
-                }
             } catch (error) {
                 console.error(`Error during cleanup for agent ${agentId}:`, error);
                 // Continue with removal even if cleanup fails
@@ -759,7 +730,7 @@ export class AgentSet extends BaseEntity {
 
         try {
             for (const agent of this.agents.values()) {
-                if (agent.getMissionId() === missionId) {
+                if (agent.missionId === missionId) {
                     console.log(`AgentSet: Aborting agent ${agent.id} for mission ${missionId}.`);
                     promises.push(agent.abort()); // agent.abort() is async and will notify for removal
                     abortedCount++;
@@ -978,7 +949,7 @@ export class AgentSet extends BaseEntity {
     private async handleAgentMessage(req: express.Request, res: express.Response): Promise<void> {
         const { agentId } = req.params;
         const message = req.body;
-        const agent = this.agents.get(agentId);
+        const agent = this.agents.get(normalizeId(agentId));
 
         if (agent) {
             try {
@@ -999,7 +970,7 @@ export class AgentSet extends BaseEntity {
 
     private async getAgent(req: express.Request, res: express.Response): Promise<void> {
         const { agentId } = req.params;
-        const agent = this.agents.get(agentId);
+        const agent = this.agents.get(normalizeId(agentId));
 
         if (!agent) {
             res.status(404).send({ error: `Agent with id ${agentId} not found` });
@@ -1007,7 +978,7 @@ export class AgentSet extends BaseEntity {
         }
         else {
             try {
-                const agentState = await agent.getAgentState();
+                const agentState = await agent.toAgentState();
                 res.status(200).send(agentState);
             } catch (error) { analyzeError(error as Error);
                 console.error('Error fetching agent state for agent %s:', agentId, error instanceof Error ? error.message : error);
@@ -1020,7 +991,7 @@ export class AgentSet extends BaseEntity {
 
     private async getAgentOutput(req: express.Request, res: express.Response): Promise<void> {
         const { agentId } = req.params;
-        const agent = this.agents.get(agentId);
+        const agent = this.agents.get(normalizeId(agentId));
 
         if (agent) {
             try {
@@ -1041,7 +1012,21 @@ export class AgentSet extends BaseEntity {
 
     private async handleMessage(req: express.Request, res: express.Response): Promise<void> {
         const message = req.body;
-        await super.handleBaseMessage(message);
+
+        // Handle USER_MESSAGE
+        if (message.type === 'userMessage') {
+            const missionId = message.content?.missionId;
+            if (missionId) {
+                const agents = Array.from(this.agents.values()).filter(agent => agent.missionId === missionId);
+                for (const agent of agents) {
+                    await agent.handleMessage(message);
+                }
+            }
+            if (!res.headersSent) {
+                res.status(200).send({ status: 'Message received and processed by AgentSet for relevant agents or self' });
+            }
+            return;
+        }
 
         // Handle USER_INPUT_RESPONSE messages specially
         if (message.type === 'USER_INPUT_RESPONSE') {
@@ -1110,7 +1095,7 @@ export class AgentSet extends BaseEntity {
             }
 
             if (missionId) {
-                const agents = Array.from(this.agents.values()).filter(agent => agent.getMissionId() === missionId);
+                const agents = Array.from(this.agents.values()).filter(agent => agent.missionId === missionId);
                 for (const agent of agents) {
                     // This part is tricky, if multiple agents, can't send multiple res.send
                     // This looks like it should be a message distribution, not an HTTP response per agent.
@@ -1121,6 +1106,7 @@ export class AgentSet extends BaseEntity {
 
           // Handle messages for the AgentSet itself
           console.log('Processing message in AgentSet (broadcast or general)');
+          await super.handleBaseMessage(message);
           if (!res.headersSent) {
             res.status(200).send({ status: 'Message received and processed by AgentSet for relevant agents or self' });
           }
@@ -1143,7 +1129,7 @@ export class AgentSet extends BaseEntity {
 
             for (const agent of this.agents.values()) {
                 //console.log(`AgentSet: Checking agent ${agent.id} for mission ${missionId}`);
-                if (agent.getMissionId() === missionId) {
+                if (agent.missionId === missionId) {
                     const status = agent.getStatus();
                     totalAgentCount++;
 
@@ -1189,14 +1175,6 @@ export class AgentSet extends BaseEntity {
             if (agent) {
                 try {
                     await agent.saveAgentState();
-                    if (statistics) {
-                        await this.authenticatedApi.post(`http://${this.trafficManagerUrl}/agentStatisticsUpdate`, {
-                            agentId,
-                            status,
-                            statistics,
-                            timestamp: new Date().toISOString()
-                        });
-                    }
                     res.status(200).send({ message: 'Agent updated' });
                 } catch (error) {
                     analyzeError(error as Error);
@@ -1221,7 +1199,7 @@ export class AgentSet extends BaseEntity {
         }
 
         try {
-            const stepDetails = await this.getStepDetails(stepId);
+            const stepDetails = await this.getStepDetails(normalizeId(stepId));
             if (!stepDetails) {
                 res.status(404).send({ error: `Step with id ${stepId} not found` });
                 return;

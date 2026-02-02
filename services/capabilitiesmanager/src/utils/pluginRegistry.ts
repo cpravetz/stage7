@@ -879,8 +879,20 @@ export class PluginRegistry {
 
                     for (const locator of locators) {
                         try {
+                            // Prevent duplicates and prioritize the first-loaded repository (e.g., local)
+                            if (this.verbIndex.has(locator.verb) || this.cache.has(locator.id)) {
+                                console.log(`Skipping duplicate plugin from ${repoType}: ${locator.id} (${locator.verb})`);
+                                continue;
+                            }
+
                             const manifest = await repository.fetch(locator.id);
                             if (manifest) {
+                                // Final check after fetching manifest to avoid race conditions
+                                if (this.verbIndex.has(manifest.verb) || this.cache.has(manifest.id)) {
+                                    console.log(`Skipping duplicate plugin from ${repoType} after fetch: ${manifest.id} (${manifest.verb})`);
+                                    continue;
+                                }
+                                
                                 // Set initial status for newly discovered plugins
                                 if (!manifest.metadata) {
                                     manifest.metadata = {};

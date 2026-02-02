@@ -1,105 +1,49 @@
 {
   "id": "plugin-QUERY_KNOWLEDGE_BASE",
-  "verb": "QUERY_KNOWLEDGE_BASE",
-  "description": "Query a knowledge base collection using semantic search",
-  "explanation": "This plugin searches a knowledge base collection using semantic similarity to find the most relevant content. It uses vector embeddings to understand the meaning of the query and return conceptually related information, even if the exact words don't match.",
-  "inputDefinitions": [
-    {
-      "name": "queryText",
-      "required": true,
-      "type": "string",
-      "description": "The search query text to find relevant content",
-      "aliases": ["query", "searchText", "text"]
-    },
-    {
-      "name": "domains",
-      "required": false,
-      "type": "array",
-      "description": "Array of knowledge domain/collection names to search in (e.g., ['ai_development', 'research_findings'])",
-      "aliases": ["collections", "collectionNames"]
-    },
-    {
-      "name": "maxResults",
-      "required": false,
-      "type": "number",
-      "description": "Maximum number of results to return (default: 5)",
-      "aliases": ["limit"]
-    }
-  ],
-  "outputDefinitions": [
-    {
-      "name": "results",
-      "required": true,
-      "type": "array",
-      "description": "Array of search results with content, metadata, and relevance scores"
-    },
-    {
-      "name": "summary",
-      "required": true,
-      "type": "object",
-      "description": "Summary information about the search including query, domains searched, and result count"
-    }
-  ],
-  "inputGuidance": "Use 'queryText' for the search query and 'domains' as an array of collection names to search",
-  "language": "python",
-  "entryPoint": {
-    "main": "main.py",
-    "function": "execute_plugin"
-  },
-  "repository": {
-    "type": "local"
-  },
-  "security": {
-    "permissions": [
-      "net.fetch"
-    ],
-    "sandboxOptions": {
-      "allowEval": false,
-      "timeout": 10000,
-      "memory": 67108864,
-      "allowedModules": [
-        "json",
-        "sys",
-        "os",
-        "typing",
-        "requests",
-        "urllib3"
-      ],
-      "allowedAPIs": [
-        "print"
-      ]
-    },
-    "trust": {
-      "publisher": "stage7-core",
-      "signature": null
-    }
-  },
+  "name": "QUERY_KNOWLEDGE_BASE",
   "version": "1.0.0",
-  "metadata": {
-    "author": "Stage7 Development Team",
-    "tags": [
-      "knowledge",
-      "search",
-      "semantic",
-      "retrieval"
-    ],
-    "category": "knowledge-management",
-    "license": "MIT",
-    "documentation": "README.md"
-  },
-  "configuration": [
+  "description": "QUERY_KNOWLEDGE_BASE plugin for cktMCS backend services",
+  "author": "Backend Services",
+  "license": "MIT",
+  "type": "backend",
+  "category": "knowledge",
+  "actions": [
     {
-      "name": "timeout",
-      "type": "number",
-      "description": "Request timeout in milliseconds",
-      "defaultValue": 10000,
-      "required": false
+      "id": "search_articles",
+      "name": "Search Articles",
+      "description": "Execute search articles operation"
+    },
+    {
+      "id": "get_article",
+      "name": "Get Article",
+      "description": "Execute get article operation"
+    },
+    {
+      "id": "search_by_tags",
+      "name": "Search By Tags",
+      "description": "Execute search by tags operation"
+    },
+    {
+      "id": "full_text_search",
+      "name": "Full Text Search",
+      "description": "Execute full text search operation"
+    },
+    {
+      "id": "get_popular",
+      "name": "Get Popular",
+      "description": "Execute get popular operation"
+    },
+    {
+      "id": "search_similar",
+      "name": "Search Similar",
+      "description": "Execute search similar operation"
     }
   ],
-  "distribution": {
-    "downloads": 0,
-    "rating": 0
+  "capabilities": {
+    "error_handling": true,
+    "logging": true,
+    "in_memory_storage": true,
+    "thread_safe": true
   },
-  "createdAt": "2024-12-01T00:00:00Z",
-  "updatedAt": "2024-12-01T00:00:00Z"
+  "verb": "QUERY_KNOWLEDGE_BASE"
 }

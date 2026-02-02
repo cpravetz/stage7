@@ -1,0 +1,49 @@
+{
+  "id": "plugin-EMAIL",
+  "name": "EMAIL",
+  "version": "1.0.0",
+  "description": "EMAIL plugin for cktMCS backend services",
+  "author": "Backend Services",
+  "license": "MIT",
+  "type": "backend",
+  "category": "communication",
+  "actions": [
+    {
+      "id": "send_email",
+      "name": "Send Email",
+      "description": "Execute send email operation"
+    },
+    {
+      "id": "send_template",
+      "name": "Send Template",
+      "description": "Execute send template operation"
+    },
+    {
+      "id": "create_template",
+      "name": "Create Template",
+      "description": "Execute create template operation"
+    },
+    {
+      "id": "get_emails",
+      "name": "Get Emails",
+      "description": "Execute get emails operation"
+    },
+    {
+      "id": "delete_email",
+      "name": "Delete Email",
+      "description": "Execute delete email operation"
+    },
+    {
+      "id": "mark_read",
+      "name": "Mark Read",
+      "description": "Execute mark read operation"
+    }
+  ],
+  "capabilities": {
+    "error_handling": true,
+    "logging": true,
+    "in_memory_storage": true,
+    "thread_safe": true
+  },
+  "verb": "EMAIL"
+}

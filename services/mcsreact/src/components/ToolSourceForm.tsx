@@ -10,7 +10,7 @@ import {
     InputLabel, 
     Select, 
     MenuItem 
-} from '@mui/material';
+} from '@mui/material/index.js';
 
 interface ToolSourceFormProps {
     open: boolean;

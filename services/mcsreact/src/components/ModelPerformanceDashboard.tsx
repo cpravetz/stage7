@@ -27,9 +27,15 @@ import {
   SelectChangeEvent,
   Button,
   AppBar,
-  Toolbar
-} from '@mui/material';
-import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+  Toolbar,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  TextField,
+  Stack
+} from '@mui/material/index.js';
+import { ArrowBack as ArrowBackIcon } from '@mui/icons-material';
 import { useWebSocket, useMission } from '../context/WebSocketContext';
 import { API_BASE_URL } from '../config';
 import { SecurityClient } from '../SecurityClient';
@@ -78,6 +84,59 @@ interface ModelRanking {
   score?: number;
 }
 
+interface ModelConfiguration {
+  id: string;
+  name: string;
+  provider: string;
+  providerModelId: string;
+  tokenLimit: number;
+  costPer1kTokens: {
+    input: number;
+    output: number;
+  };
+  supportedConversationTypes: LLMConversationType[];
+  status: 'active' | 'beta' | 'deprecated' | 'retired';
+  deployedAt: string;
+  retiredAt?: string;
+  rolloutPercentage: number;
+  providerCredentials: {
+    keyVault: string;
+    credentialName: string;
+    validated: boolean;
+    validatedAt?: string;
+    validationError?: string;
+  };
+  availability: {
+    status: 'available' | 'degraded' | 'unavailable' | 'unknown';
+    checkedAt?: string;
+    reason?: string;
+    nextCheckAt?: string;
+  };
+  healthChecks: {
+    endpoint: string;
+    method: 'GET' | 'POST';
+    timeout: number;
+    expectedStatusCodes: number[];
+    expectedResponseBody?: string;
+    frequency: number;
+  };
+  sla?: {
+    successRateMinimum: number;
+    p99LatencyMs: number;
+    availabilityPercentage: number;
+  };
+  metadata: {
+    version: string;
+    releaseNotes: string;
+    knownLimitations: string[];
+    optimizations: string[];
+  };
+  createdBy: string;
+  createdAt: string;
+  updatedBy: string;
+  updatedAt: string;
+}
+
 interface TabPanelProps {
   children?: React.ReactNode;
   index: number;
@@ -123,6 +182,16 @@ const ModelPerformanceDashboard: React.FC = () => {
   const [rankings, setRankings] = useState<ModelRanking[]>([]);  // Initialize with empty array
   const [conversationType, setConversationType] = useState<LLMConversationType>(LLMConversationType.TextToText);
   const [rankingMetric, setRankingMetric] = useState<'successRate' | 'averageLatency' | 'overall'>('overall');
+  const [modelConfigs, setModelConfigs] = useState<ModelConfiguration[]>([]);
+  const [configLoading, setConfigLoading] = useState(false);
+  const [configError, setConfigError] = useState<string | null>(null);
+  const [configDialogOpen, setConfigDialogOpen] = useState(false);
+  const [configDialogMode, setConfigDialogMode] = useState<'create' | 'edit'>('create');
+  const [configDraftJson, setConfigDraftJson] = useState('');
+  const [configReason, setConfigReason] = useState('');
+  const [configActionLoading, setConfigActionLoading] = useState(false);
+  const [configActionError, setConfigActionError] = useState<string | null>(null);
+  const [selectedConfig, setSelectedConfig] = useState<ModelConfiguration | null>(null);
 
   // Log connection status and mission info for debugging
   useEffect(() => {
@@ -375,6 +444,228 @@ const ModelPerformanceDashboard: React.FC = () => {
     return () => clearInterval(refreshInterval);
   }, [conversationType, rankingMetric]);
 
+  const getConfigTemplate = (): ModelConfiguration => {
+    const now = new Date().toISOString();
+    return {
+      id: '',
+      name: '',
+      provider: '',
+      providerModelId: '',
+      tokenLimit: 8192,
+      costPer1kTokens: {
+        input: 0,
+        output: 0
+      },
+      supportedConversationTypes: [LLMConversationType.TextToText],
+      status: 'active',
+      deployedAt: now,
+      rolloutPercentage: 100,
+      providerCredentials: {
+        keyVault: 'ENV',
+        credentialName: '',
+        validated: false
+      },
+      availability: {
+        status: 'unknown'
+      },
+      healthChecks: {
+        endpoint: '',
+        method: 'GET',
+        timeout: 5000,
+        expectedStatusCodes: [200],
+        frequency: 300000
+      },
+      sla: {
+        successRateMinimum: 0.98,
+        p99LatencyMs: 3000,
+        availabilityPercentage: 0.99
+      },
+      metadata: {
+        version: '1.0.0',
+        releaseNotes: '',
+        knownLimitations: [],
+        optimizations: []
+      },
+      createdBy: 'ui',
+      createdAt: now,
+      updatedBy: 'ui',
+      updatedAt: now
+    };
+  };
+
+  const fetchModelConfigs = async () => {
+    const securityClient = SecurityClient.getInstance(API_BASE_URL);
+    try {
+      setConfigLoading(true);
+      setConfigError(null);
+      const token = securityClient.getAccessToken();
+      if (!token) {
+        setConfigError('Authentication failed. Please log in again.');
+        setConfigLoading(false);
+        return;
+      }
+
+      const response = await fetch(`${API_BASE_URL}/brain/models/config`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        credentials: 'include',
+        mode: 'cors'
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch model configs: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      setModelConfigs(Array.isArray(data?.models) ? data.models : []);
+      setConfigLoading(false);
+    } catch (configFetchError) {
+      console.error('Error fetching model configs:', configFetchError);
+      setConfigError('Failed to fetch model configurations. Please try again later.');
+      setConfigLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchModelConfigs();
+  }, []);
+
+  const openCreateDialog = () => {
+    setConfigDialogMode('create');
+    setSelectedConfig(null);
+    setConfigReason('');
+    setConfigActionError(null);
+    setConfigDraftJson(JSON.stringify(getConfigTemplate(), null, 2));
+    setConfigDialogOpen(true);
+  };
+
+  const openEditDialog = (config: ModelConfiguration) => {
+    setConfigDialogMode('edit');
+    setSelectedConfig(config);
+    setConfigReason('');
+    setConfigActionError(null);
+    setConfigDraftJson(JSON.stringify(config, null, 2));
+    setConfigDialogOpen(true);
+  };
+
+  const closeConfigDialog = () => {
+    setConfigDialogOpen(false);
+    setConfigActionError(null);
+  };
+
+  const handleSaveConfig = async () => {
+    const securityClient = SecurityClient.getInstance(API_BASE_URL);
+    try {
+      setConfigActionLoading(true);
+      setConfigActionError(null);
+
+      const token = securityClient.getAccessToken();
+      if (!token) {
+        setConfigActionError('Authentication failed. Please log in again.');
+        setConfigActionLoading(false);
+        return;
+      }
+
+      let parsedConfig: ModelConfiguration;
+      try {
+        parsedConfig = JSON.parse(configDraftJson);
+      } catch (parseError) {
+        setConfigActionError('Invalid JSON. Please fix the configuration payload.');
+        setConfigActionLoading(false);
+        return;
+      }
+
+      if (!parsedConfig?.id || !parsedConfig?.name || !parsedConfig?.provider) {
+        setConfigActionError('Model configuration must include id, name, and provider.');
+        setConfigActionLoading(false);
+        return;
+      }
+
+      if (configDialogMode === 'create') {
+        const response = await fetch(`${API_BASE_URL}/brain/models`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          credentials: 'include',
+          mode: 'cors',
+          body: JSON.stringify({ config: parsedConfig })
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to create model: ${response.status} ${response.statusText}`);
+        }
+      } else if (configDialogMode === 'edit') {
+        const targetId = selectedConfig?.id || parsedConfig.id;
+        const response = await fetch(`${API_BASE_URL}/brain/models/${targetId}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          credentials: 'include',
+          mode: 'cors',
+          body: JSON.stringify({ updates: parsedConfig, reason: configReason || 'Updated via dashboard' })
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to update model: ${response.status} ${response.statusText}`);
+        }
+      }
+
+      setConfigActionLoading(false);
+      setConfigDialogOpen(false);
+      await fetchModelConfigs();
+    } catch (saveError) {
+      console.error('Error saving model config:', saveError);
+      setConfigActionError('Failed to save model configuration. Please review the payload and try again.');
+      setConfigActionLoading(false);
+    }
+  };
+
+  const handleDeleteConfig = async (config: ModelConfiguration) => {
+    const securityClient = SecurityClient.getInstance(API_BASE_URL);
+    const confirmed = window.confirm(`Archive model "${config.name}"? This will remove it from active models.`);
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setConfigActionLoading(true);
+      const token = securityClient.getAccessToken();
+      if (!token) {
+        setConfigActionError('Authentication failed. Please log in again.');
+        setConfigActionLoading(false);
+        return;
+      }
+
+      const response = await fetch(`${API_BASE_URL}/brain/models/${config.id}`, {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        credentials: 'include',
+        mode: 'cors'
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to archive model: ${response.status} ${response.statusText}`);
+      }
+
+      setConfigActionLoading(false);
+      await fetchModelConfigs();
+    } catch (deleteError) {
+      console.error('Error deleting model config:', deleteError);
+      setConfigActionError('Failed to archive model configuration. Please try again.');
+      setConfigActionLoading(false);
+    }
+  };
+
   const formatDate = (dateString: string | null) => {
     if (!dateString) return 'N/A';
     return new Date(dateString).toLocaleString();
@@ -425,6 +716,7 @@ const ModelPerformanceDashboard: React.FC = () => {
             <Tab label="Performance Metrics" {...a11yProps(0)} />
             <Tab label="Model Rankings" {...a11yProps(1)} />
             <Tab label="Usage Statistics" {...a11yProps(2)} />
+            <Tab label="Model Configurations" {...a11yProps(3)} />
           </Tabs>
         </Box>
 
@@ -483,7 +775,7 @@ const ModelPerformanceDashboard: React.FC = () => {
           <TabPanel value={tabValue} index={1}>
             <Box sx={{ mb: 3 }}>
               <Grid container spacing={2}>
-                <Grid item xs={12} sm={6}>
+                <Grid {...({ xs: 12, sm: 6, item: true } as any)}>
                   <FormControl fullWidth>
                     <InputLabel id="conversation-type-label">Conversation Type</InputLabel>
                     <Select
@@ -503,7 +795,7 @@ const ModelPerformanceDashboard: React.FC = () => {
                     </Select>
                   </FormControl>
                 </Grid>
-                <Grid item xs={12} sm={6}>
+                <Grid {...({ xs: 12, sm: 6, item: true } as any)}>
                   <FormControl fullWidth>
                     <InputLabel id="ranking-metric-label">Ranking Metric</InputLabel>
                     <Select
@@ -557,7 +849,7 @@ const ModelPerformanceDashboard: React.FC = () => {
 
           <TabPanel value={tabValue} index={2}>
             <Grid container spacing={3}>
-              <Grid item xs={12} md={6}>
+              <Grid {...({ xs: 12, md: 6, item: true } as any)}>
                 <Card>
                   <CardHeader title="Total Usage by Model" />
                   <Divider />
@@ -589,7 +881,7 @@ const ModelPerformanceDashboard: React.FC = () => {
                   </CardContent>
                 </Card>
               </Grid>
-              <Grid item xs={12} md={6}>
+              <Grid {...({ xs: 12, md: 6, item: true } as any)}>
                 <Card>
                   <CardHeader title="Feedback Scores" />
                   <Divider />
@@ -623,7 +915,7 @@ const ModelPerformanceDashboard: React.FC = () => {
                   </CardContent>
                 </Card>
               </Grid>
-              <Grid item xs={12}>
+              <Grid {...({ xs: 12, item: true } as any)}>
                 <Card>
                   <CardHeader title="Performance Metrics" />
                   <Divider />
@@ -657,7 +949,7 @@ const ModelPerformanceDashboard: React.FC = () => {
                   </CardContent>
                 </Card>
               </Grid>
-              <Grid item xs={12}>
+              <Grid {...({ xs: 12, item: true } as any)}>
                 <Card>
                   <CardHeader title="Usage Summary" />
                   <Divider />
@@ -684,9 +976,123 @@ const ModelPerformanceDashboard: React.FC = () => {
               </Grid>
             </Grid>
           </TabPanel>
+
+          <TabPanel value={tabValue} index={3}>
+            <Stack direction="row" spacing={2} sx={{ mb: 2 }}>
+              <Button variant="contained" onClick={openCreateDialog}>
+                Add Model
+              </Button>
+              <Button variant="outlined" onClick={fetchModelConfigs} disabled={configLoading}>
+                Refresh
+              </Button>
+            </Stack>
+
+            {configError && (
+              <Alert severity="error" sx={{ mb: 2 }}>
+                {configError}
+              </Alert>
+            )}
+
+            {configActionError && (
+              <Alert severity="error" sx={{ mb: 2 }}>
+                {configActionError}
+              </Alert>
+            )}
+
+            {configLoading ? (
+              <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
+                <CircularProgress />
+              </Box>
+            ) : (
+              <TableContainer component={Paper}>
+                <Table sx={{ minWidth: 650 }} aria-label="model configurations table">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>ID</TableCell>
+                      <TableCell>Name</TableCell>
+                      <TableCell>Provider</TableCell>
+                      <TableCell>Provider Model</TableCell>
+                      <TableCell align="right">Token Limit</TableCell>
+                      <TableCell align="right">Rollout</TableCell>
+                      <TableCell>Status</TableCell>
+                      <TableCell align="right">Actions</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {modelConfigs.length > 0 ? (
+                      modelConfigs.map(config => (
+                        <TableRow key={config.id}>
+                          <TableCell>{config.id}</TableCell>
+                          <TableCell>{config.name}</TableCell>
+                          <TableCell>{config.provider}</TableCell>
+                          <TableCell>{config.providerModelId}</TableCell>
+                          <TableCell align="right">{config.tokenLimit}</TableCell>
+                          <TableCell align="right">{config.rolloutPercentage}%</TableCell>
+                          <TableCell>
+                            <Chip label={config.status} size="small" />
+                          </TableCell>
+                          <TableCell align="right">
+                            <Stack direction="row" spacing={1} justifyContent="flex-end">
+                              <Button size="small" variant="outlined" onClick={() => openEditDialog(config)}>
+                                Edit
+                              </Button>
+                              <Button size="small" variant="outlined" color="error" onClick={() => handleDeleteConfig(config)}>
+                                Archive
+                              </Button>
+                            </Stack>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    ) : (
+                      <TableRow>
+                        <TableCell colSpan={8} align="center">No model configurations found</TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            )}
+          </TabPanel>
         </>
       )}
       </Box>
+
+      <Dialog open={configDialogOpen} onClose={closeConfigDialog} maxWidth="md" fullWidth>
+        <DialogTitle>
+          {configDialogMode === 'create' ? 'Add Model Configuration' : 'Edit Model Configuration'}
+        </DialogTitle>
+        <DialogContent sx={{ pt: 2 }}>
+          <Stack spacing={2}>
+            {configDialogMode === 'edit' && (
+              <TextField
+                label="Change Reason"
+                value={configReason}
+                onChange={(event) => setConfigReason(event.target.value)}
+                placeholder="Describe why this change is being made"
+                fullWidth
+              />
+            )}
+            <TextField
+              label="Model Configuration (JSON)"
+              value={configDraftJson}
+              onChange={(event) => setConfigDraftJson(event.target.value)}
+              multiline
+              minRows={12}
+              fullWidth
+              helperText="Edit the full model configuration JSON. Required fields: id, name, provider, tokenLimit, rolloutPercentage, supportedConversationTypes, providerCredentials."
+            />
+            {configActionError && (
+              <Alert severity="error">{configActionError}</Alert>
+            )}
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeConfigDialog} disabled={configActionLoading}>Cancel</Button>
+          <Button variant="contained" onClick={handleSaveConfig} disabled={configActionLoading}>
+            {configActionLoading ? 'Saving...' : 'Save'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };

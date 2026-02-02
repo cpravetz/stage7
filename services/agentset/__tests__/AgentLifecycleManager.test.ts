@@ -19,14 +19,23 @@ describe('AgentLifecycleManager', () => {
 
   beforeEach(() => {
     mockPersistenceManager = new AgentPersistenceManager() as jest.Mocked<AgentPersistenceManager>;
-    lifecycleManager = new AgentLifecycleManager(mockPersistenceManager, 'trafficmanager:5080');
+    lifecycleManager = new AgentLifecycleManager(mockPersistenceManager);
 
     // Create a mock agent
+    const mockAgentSet = {
+        id: 'mock-agentset-id',
+        port: '9001',
+        url: 'http://localhost:9001',
+        ownershipTransferManager: { // Mock minimal properties for OwnershipTransferManager
+            transferStep: jest.fn().mockResolvedValue({ success: true })
+        }
+    };
     mockAgent = new Agent({
       id: 'test-agent',
       missionId: 'test-mission',
       actionVerb: 'TEST',
       agentSetUrl: 'http://localhost:9001',
+      agentSet: mockAgentSet as any, // Cast to any to bypass strict type checking for mock
     }) as jest.Mocked<Agent>;
 
     // Mock agent methods

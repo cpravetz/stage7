@@ -17,14 +17,8 @@ import {
   DialogContent,
   DialogActions,
   TextField
-} from '@mui/material';
-import {
-  CloudUpload as UploadIcon,
-  Delete as DeleteIcon,
-  Download as DownloadIcon,
-  AttachFile as AttachFileIcon,
-  Description as FileIcon
-} from '@mui/icons-material';
+} from '@mui/material/index.js';
+import { Upload as UploadIcon, Delete as DeleteIcon, Download as DownloadIcon, AttachFile as AttachFileIcon, InsertDriveFile as FileIcon } from '@mui/icons-material';
 import { SecurityClient } from '../SecurityClient';
 import { API_BASE_URL } from '../config';
 import { useAuth } from '../context/AuthContext';

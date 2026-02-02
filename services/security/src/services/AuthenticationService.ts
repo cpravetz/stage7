@@ -7,7 +7,7 @@ import { TokenService } from './TokenService';
 import { Token, TokenType } from '../models/Token';
 import { SystemRoles } from '../models/Role';
 import { emailService } from './EmailService';
-import { analyzeError } from '@cktmcs/errorhandler';
+import { analyzeError } from '@cktmcs/shared';
 import { findUserById, findUserByEmail, createUser, updateUser } from './userService';
 
 /**

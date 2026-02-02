@@ -1,0 +1,49 @@
+{
+  "id": "plugin-DATABASE_OPERATIONS",
+  "name": "DATABASE_OPERATIONS",
+  "version": "1.0.0",
+  "description": "DATABASE_OPERATIONS plugin for cktMCS backend services",
+  "author": "Backend Services",
+  "license": "MIT",
+  "type": "backend",
+  "category": "database",
+  "actions": [
+    {
+      "id": "execute_query",
+      "name": "Execute Query",
+      "description": "Execute execute query operation"
+    },
+    {
+      "id": "create_record",
+      "name": "Create Record",
+      "description": "Execute create record operation"
+    },
+    {
+      "id": "update_record",
+      "name": "Update Record",
+      "description": "Execute update record operation"
+    },
+    {
+      "id": "delete_record",
+      "name": "Delete Record",
+      "description": "Execute delete record operation"
+    },
+    {
+      "id": "bulk_import",
+      "name": "Bulk Import",
+      "description": "Execute bulk import operation"
+    },
+    {
+      "id": "optimize_query",
+      "name": "Optimize Query",
+      "description": "Execute optimize query operation"
+    }
+  ],
+  "capabilities": {
+    "error_handling": true,
+    "logging": true,
+    "in_memory_storage": true,
+    "thread_safe": true
+  },
+  "verb": "DATABASE_OPERATIONS"
+}

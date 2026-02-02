@@ -3,7 +3,7 @@ import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
 import cors from 'cors';
 import { v4 as uuidv4 } from 'uuid';
-import { analyzeError } from '@cktmcs/errorhandler';
+import { analyzeError } from '@cktmcs/shared';
 
 /**
  * Rate limiting middleware

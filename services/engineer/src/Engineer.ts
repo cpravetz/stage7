@@ -24,7 +24,7 @@ import {
     MCPTool,
     MCPToolRegistrationRequest
 } from '@cktmcs/shared';
-import { analyzeError } from '@cktmcs/errorhandler';
+import { analyzeError } from '@cktmcs/shared';
 import { PluginMarketplace } from '@cktmcs/marketplace';
 import { redisCache } from '@cktmcs/shared';
 import crypto from 'crypto';
@@ -33,9 +33,39 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import os from 'os';
-import { Worker, isMainThread, parentPort, workerData } from 'worker_threads';
+
+// New utility imports
+import logger, { ScopedLogger } from './utils/Logger';
+import {
+    EngineerErrorHandler,
+    ErrorSeverity,
+    withRetry,
+    DEFAULT_RETRY_STRATEGY,
+    RetryStrategy
+} from './utils/ErrorHandler';
+import {
+    serviceClientManager,
+    BrainClient,
+    LibrarianClient
+} from './utils/ServiceClient';
+import {
+    generatePluginPrompt,
+    generateWrapperPluginPrompt,
+    generateContainerPluginPrompt,
+    generateRepairPrompt
+} from './utils/PromptTemplates';
+import {
+    cacheManager,
+    validationCache,
+    generatedCodeCache,
+    ValidationCache,
+    GeneratedCodeCache
+} from './utils/CacheManager';
 
 const execAsync = promisify(exec);
+
+// Log service initialization
+logger.info('Engineer service module loaded');
 
 export class Engineer extends BaseEntity {
     private brainUrl: string = process.env.BRAIN_URL || 'brain:5070';
@@ -45,7 +75,10 @@ export class Engineer extends BaseEntity {
     private ajv: Ajv;
     private pluginSchema: object;
     private containerPluginSchema: object;
-    private validationCache: Map<string, { valid: boolean; issues: string[] }>;
+    private validationCache: ValidationCache;
+    private generatedCodeCache: GeneratedCodeCache;
+    private brainClient!: BrainClient;
+    private librarianClient!: LibrarianClient;
     private performanceMetrics: {
         validationTime: number;
         generationTime: number;
@@ -58,7 +91,8 @@ export class Engineer extends BaseEntity {
         this.ajv = new Ajv({ allErrors: true, strict: false });
         this.pluginSchema = {};
         this.containerPluginSchema = {};
-        this.validationCache = new Map();
+        this.validationCache = new ValidationCache();
+        this.generatedCodeCache = new GeneratedCodeCache();
         this.performanceMetrics = {
             validationTime: 0,
             generationTime: 0,
@@ -250,6 +284,17 @@ export class Engineer extends BaseEntity {
     }
 
     private async initialize() {
+        // Initialize service clients with retry strategies
+        serviceClientManager.initialize(this.brainUrl, this.librarianUrl);
+        this.brainClient = serviceClientManager.getBrainClient();
+        this.librarianClient = serviceClientManager.getLibrarianClient();
+        
+        logger.info('Engineer service initializing', { 
+            port: this.port,
+            brainUrl: this.brainUrl,
+            librarianUrl: this.librarianUrl
+        });
+        
         await this.setupServer();
     }
 
@@ -257,70 +302,81 @@ export class Engineer extends BaseEntity {
         const app = express();
         app.use(express.json());
 
+        // Request logging middleware with correlation IDs
         app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
+            const context = logger.createContext(`${req.method} ${req.path}`, {
+                method: req.method,
+                path: req.path,
+                ip: req.ip
+            });
+
             if (req.path === '/health' || req.path === '/ready') {
                 return next();
             }
+
+            logger.info(`Incoming request: ${req.method} ${req.path}`);
             this.verifyToken(req, res, next);
         });
 
         app.post('/createPlugin', async (req, res) => {
-            // Ensure req.body is properly deserialized if it's not auto-parsed as JSON
-            // For MapSerializer, it expects a specific structure if inputs are Maps.
-            // Assuming 'verb', 'context', 'guidance', 'language' are top-level properties in req.body.
-            const { verb, context, guidance, language } = req.body; // Include language parameter
-
+            const scoped = logger.createScoped('POST /createPlugin');
+            
             try {
-                // If context is expected to be a Map and is serialized, deserialize it
-                const deserializedContext = context instanceof Map ? context : MapSerializer.transformFromSerialization(context || {});
+                const { verb, context, guidance, language } = req.body;
+                scoped.debug('Creating plugin', { verb, language });
 
-                const plugin = await this.createPlugin(verb, deserializedContext, guidance, language);
-                res.json(plugin || {}); // Ensure to send a valid JSON response even if plugin is undefined
+                const deserializedContext = context instanceof Map ? context : MapSerializer.transformFromSerialization(context || {});
+                const plugin = await this.createPlugin(verb, deserializedContext, guidance, language, scoped);
+                
+                scoped.complete('Plugin created successfully');
+                res.json(plugin || {});
             } catch (error) {
-                analyzeError(error as Error);
-                console.error('Failed to create plugin:', error instanceof Error ? error.message : error);
-                res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+                this.handleErrorResponse(res, error as Error, scoped);
             }
         });
 
         // OpenAPI tool registration endpoints
         app.post('/tools/openapi', async (req, res) => {
+            const scoped = logger.createScoped('POST /tools/openapi');
             try {
                 const registrationRequest: OpenAPIToolRegistrationRequest = req.body;
-                const result = await this.registerOpenAPITool(registrationRequest);
+                scoped.debug('Registering OpenAPI tool', { toolName: registrationRequest.name });
+                
+                const result = await this.registerOpenAPITool(registrationRequest, scoped);
+                scoped.complete('OpenAPI tool registered');
                 res.json(result);
             } catch (error) {
-                analyzeError(error as Error);
-                console.error('Failed to register OpenAPI tool:', error instanceof Error ? error.message : error);
-                res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+                this.handleErrorResponse(res, error as Error, scoped);
             }
         });
 
         app.post('/validate', async (req, res) => {
+            const scoped = logger.createScoped('POST /validate');
             try {
                 const { manifest, code } = req.body;
-                const result = await this.validateTool(manifest, code);
+                scoped.debug('Validating tool', { toolId: manifest.id });
+                
+                const result = await this.validateTool(manifest, code, scoped);
+                scoped.complete('Tool validation complete');
                 res.json(result);
             } catch (error) {
-                analyzeError(error as Error);
-                console.error('Failed to validate tool:', error instanceof Error ? error.message : error);
-                res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+                this.handleErrorResponse(res, error as Error, scoped);
             }
         });
 
         app.get('/tools/openapi/:id', async (req, res) => {
+            const scoped = logger.createScoped('GET /tools/openapi/:id');
             try {
                 const { id } = req.params;
-                const tool = await this.getOpenAPITool(id);
+                scoped.debug('Retrieving OpenAPI tool', { id });
+                
+                const tool = await this.getOpenAPITool(id, scoped);
                 if (!tool) {
-                    res.status(404).json({ error: 'OpenAPI tool not found' });
-                    return;
+                    return res.status(404).json({ error: 'OpenAPI tool not found' });
                 }
                 res.json(tool);
             } catch (error) {
-                analyzeError(error as Error);
-                console.error('Failed to get OpenAPI tool:', error instanceof Error ? error.message : error);
-                res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+                this.handleErrorResponse(res, error as Error, scoped);
             }
         });
 
@@ -335,18 +391,21 @@ export class Engineer extends BaseEntity {
         app.get('/statistics', (req, res) => { this.getStatistics(req, res) });
 
         app.post('/tools/onboard', async (req, res) => {
+            const scoped = logger.createScoped('POST /tools/onboard');
             try {
                 const { toolManifest, policyConfig } = req.body;
-                const result = await this.onboardTool(toolManifest, policyConfig);
+                scoped.debug('Onboarding tool', { toolId: toolManifest.id });
+                
+                const result = await this.onboardTool(toolManifest, policyConfig, scoped);
+                scoped.complete('Tool onboarded successfully');
                 res.json(result);
             } catch (error) {
-                analyzeError(error as Error);
-                console.error('Failed to onboard tool:', error instanceof Error ? error.message : error);
-                res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+                this.handleErrorResponse(res, error as Error, scoped);
             }
         });
 
         app.post('/createPluginFromOpenAPI', async (req, res) => {
+            const scoped = logger.createScoped('POST /createPluginFromOpenAPI');
             const { specUrl, name, description, authentication, baseUrl } = req.body;
 
             if (!specUrl || !name) {
@@ -354,57 +413,95 @@ export class Engineer extends BaseEntity {
             }
 
             try {
-                const result = await this.createPluginFromOpenAPI(specUrl, name, description, authentication, baseUrl);
+                scoped.debug('Creating plugin from OpenAPI', { name, specUrl });
+                const result = await this.createPluginFromOpenAPI(specUrl, name, description, authentication, baseUrl, scoped);
+                scoped.complete('Plugin created from OpenAPI');
                 res.json(result);
             } catch (error) {
-                analyzeError(error as Error);
-                console.error('Failed to create plugin from OpenAPI spec:', error instanceof Error ? error.message : error);
-                res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+                this.handleErrorResponse(res, error as Error, scoped);
             }
         });
 
         app.post('/repair', async (req, res) => {
+            const scoped = logger.createScoped('POST /repair');
             try {
                 const { errorMessage, code } = req.body;
-                const codeString = Array.isArray(code) ? code.join('\n') : code;
-                const prompt = `The following code has an error: "${errorMessage}". Please repair the code and return only the fixed code with no additional text or explanation.\n\nCode:\n${codeString}`;
-
-                const response = await this.authenticatedApi.post(`http://${this.brainUrl}/chat`, {
-                    exchanges: [{ role: 'user', content: prompt }],
-                    optimization: 'accuracy',
-                    responseType: 'text'
-                });
-
-                const repairedCode = response.data.result || response.data.response || '';
-                res.send(repairedCode);
+                scoped.debug('Repairing code', { errorLength: String(code).length });
+                
+                const result = await this.repairCode(errorMessage, code, scoped);
+                scoped.complete('Code repaired successfully');
+                res.send(result);
             } catch (error) {
-                analyzeError(error as Error);
-                console.error('Failed to repair code:', error instanceof Error ? error.message : error);
-                res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+                this.handleErrorResponse(res, error as Error, scoped);
             }
         });
 
         app.listen(this.port, () => {
-            console.log(`Engineer listening at ${this.url}`);
+            logger.info(`Engineer listening at ${this.url}`);
         });
     }
 
     private getStatistics(req: express.Request, res: express.Response) {
-        res.status(200).json({ newPlugins: this.newPlugins });
+        const stats = {
+            newPlugins: this.newPlugins,
+            cache: cacheManager.getStatistics(),
+            performanceMetrics: this.performanceMetrics
+        };
+        res.status(200).json(stats);
     }
 
-    async createPlugin(verb: string, context: Map<string, InputValue>, guidance: string, language?: string): Promise<PluginDefinition | undefined> {
-        return await this.createPluginWithRecovery(verb, context, guidance, language);
+    /**
+     * Centralized error response handler
+     */
+    private handleErrorResponse(
+        res: express.Response,
+        error: Error,
+        scoped?: ScopedLogger
+    ): void {
+        const engineerError = error as any;
+        const statusCode = EngineerErrorHandler.extractStatusCode(engineerError);
+        const message = EngineerErrorHandler.extractMessage(engineerError);
+
+        if (scoped) {
+            scoped.error('Operation failed', error);
+        } else {
+            logger.error('Operation failed', error);
+        }
+
+        res.status(statusCode).json({
+            error: message,
+            code: engineerError.code || 'UNKNOWN',
+            severity: engineerError.severity || ErrorSeverity.MEDIUM,
+            retryable: engineerError.retryable ?? false
+        });
+    }
+
+    async createPlugin(
+        verb: string,
+        context: Map<string, InputValue>,
+        guidance: string,
+        language?: string,
+        scoped?: ScopedLogger
+    ): Promise<PluginDefinition | undefined> {
+        return await this.createPluginWithRecovery(verb, context, guidance, language, 1, scoped);
     }
 
 
 
 
     private async handleMessage(req: express.Request, res: express.Response) {
-        const message = req.body;
-        console.log('Received message:', message);
-        await super.handleBaseMessage(message);
-        res.status(200).send({ status: 'Message received and processed' });
+        const scoped = logger.createScoped('POST /message');
+        try {
+            const message = req.body;
+            scoped.debug('Processing message', { messageType: message.type });
+            
+            const result = await super.handleBaseMessage(message);
+            scoped.complete('Message processed');
+            
+            res.status(200).send({ status: 'Message received and processed', result });
+        } catch (error) {
+            this.handleErrorResponse(res, error as Error, scoped);
+        }
     }
 
     private determineRequiredPermissions(plugin: PluginDefinition): string[] {
@@ -510,8 +607,17 @@ Context: ${contextString}`;
         }
     }
 
-    async createPluginFromOpenAPI(specUrl: string, name: string, description: string = '', authentication?: any, baseUrl?: string): Promise<any> {
-        console.log(`Creating plugin from OpenAPI spec: ${specUrl}`);
+    async createPluginFromOpenAPI(
+        specUrl: string,
+        name: string,
+        description: string = '',
+        authentication?: any,
+        baseUrl?: string,
+        scoped?: ScopedLogger
+    ): Promise<any> {
+        if (scoped) {
+            scoped.debug(`Creating plugin from OpenAPI spec: ${specUrl}`);
+        }
 
         const registrationRequest: OpenAPIToolRegistrationRequest = {
             name,
@@ -521,20 +627,28 @@ Context: ${contextString}`;
             baseUrl,
         };
 
-        const parsingResult = await this.registerOpenAPITool(registrationRequest);
+        const parsingResult = await this.registerOpenAPITool(registrationRequest, scoped);
 
         if (!parsingResult.success || !parsingResult.tool) {
-            throw new Error(`Failed to parse OpenAPI spec: ${parsingResult.errors?.join(', ')}`);
+            throw EngineerErrorHandler.createError(
+                'OPENAPI_PARSING_FAILED',
+                `Failed to parse OpenAPI spec: ${parsingResult.errors?.join(', ')}`,
+                ErrorSeverity.HIGH
+            );
         }
 
         const toolManifest = parsingResult.tool;
         const policyConfig = {}; // Add policy config if needed
         const wrapperLanguage = 'typescript'; // Or make this configurable
 
-        const generatedPlugin = await this.generateWrapperPlugin(toolManifest, policyConfig, wrapperLanguage);
+        const generatedPlugin = await this.generateWrapperPlugin(toolManifest, policyConfig, wrapperLanguage, scoped);
 
         if (!generatedPlugin) {
-            throw new Error('Failed to generate wrapper plugin from OpenAPI tool manifest.');
+            throw EngineerErrorHandler.createError(
+                'PLUGIN_GENERATION_FAILED',
+                'Failed to generate wrapper plugin from OpenAPI tool manifest.',
+                ErrorSeverity.HIGH
+            );
         }
 
         return this.finalizePlugin(generatedPlugin, generatedPlugin.explanation);
@@ -576,11 +690,6 @@ Context: ${contextString}`;
     }
 
     private validatePluginStructure(plugin: any): { valid: boolean; issues: string[] } {
-        const cacheKey = JSON.stringify(plugin);
-        if (this.validationCache.has(cacheKey)) {
-            return this.validationCache.get(cacheKey)!;
-        }
-
         const startTime = Date.now();
         const issues: string[] = [];
 
@@ -616,16 +725,13 @@ Context: ${contextString}`;
 
             const result = { valid: issues.length === 0, issues };
 
-            // Cache the result
-            this.validationCache.set(cacheKey, result);
-
             // Update performance metrics
             this.performanceMetrics.validationTime += Date.now() - startTime;
 
             return result;
         } catch (error) {
-            console.error('Error during plugin validation:', error instanceof Error ? error.message : String(error));
-            issues.push(`Validation error: ${error instanceof Error ? error.message : String(error)}`);
+            logger.error('Error during plugin validation', error as Error);
+            issues.push(`Validation error: ${(error as Error).message}`);
             return { valid: false, issues };
         }
     }
@@ -752,51 +858,91 @@ Context: ${contextString}`;
     private async generateExplanation(verb: string, context: Map<string, InputValue>): Promise<string> {
         const contextString = JSON.stringify(Array.from(context.entries()));
         const prompt = `Given the action verb "${verb}" and the context (inputs for the current step) "${contextString}", provide a detailed explanation of what a plugin for this verb should do. Include expected inputs it would define and typical outputs it would produce.`;
+        
         try {
-            const response = await this.authenticatedApi.post(`http://${this.brainUrl}/chat`, {
-                exchanges: [{ role: 'user', content: prompt }],
-                optimization: 'accuracy',
-                responseType: 'text'
-            });
-            return response.data.result || response.data.response || ''; // Adjust based on Brain response
+            const response = await this.brainClient.chat(
+                {
+                    exchanges: [{ role: 'user', content: prompt }],
+                    optimization: 'accuracy',
+                    responseType: 'text'
+                }
+            );
+            return response.result || response.response || '';
         } catch (error) {
-            analyzeError(error as Error);
-            console.error('Error querying Brain for explanation:', error instanceof Error ? error.message : String(error));
-            return ''; // Return empty string or throw, depending on how critical this is
+            logger.error('Error generating explanation', error as Error);
+            return '';
+        }
+    }
+
+    private async repairCode(errorMessage: string, code: string | string[], scoped?: ScopedLogger): Promise<string> {
+        const prompt = generateRepairPrompt(errorMessage, code);
+
+        try {
+            const response = await this.brainClient.chat(
+                {
+                    exchanges: [{ role: 'user', content: prompt }],
+                    optimization: 'accuracy',
+                    responseType: 'text'
+                },
+                scoped
+            );
+
+            return response.result || response.response || '';
+        } catch (error) {
+            logger.error('Failed to repair code', error as Error);
+            throw EngineerErrorHandler.createError(
+                'CODE_REPAIR_FAILED',
+                `Failed to repair code: ${EngineerErrorHandler.extractMessage(error)}`,
+                ErrorSeverity.HIGH
+            );
         }
     }
 
     // OpenAPI Tool Management Methods
 
-    async registerOpenAPITool(request: OpenAPIToolRegistrationRequest): Promise<OpenAPIParsingResult> {
-        console.log('Registering OpenAPI tool:', request.name);
+    async registerOpenAPITool(
+        request: OpenAPIToolRegistrationRequest,
+        scoped?: ScopedLogger
+    ): Promise<OpenAPIParsingResult> {
+        if (scoped) {
+            scoped.info('Registering OpenAPI tool', { name: request.name });
+        }
 
         try {
             // Fetch and parse the OpenAPI specification
-            const specResponse = await axios.get(request.specUrl);
+            const specResponse = await withRetry(
+                () => axios.get(request.specUrl),
+                `Fetch OpenAPI spec from ${request.specUrl}`,
+                { ...DEFAULT_RETRY_STRATEGY, timeoutMs: 15000 }
+            );
             const spec = specResponse.data;
 
             // Parse the OpenAPI specification
-            const parsingResult = await this.parseOpenAPISpec(spec, request);
+            const parsingResult = await this.parseOpenAPISpec(spec, request, scoped);
 
             if (parsingResult.success && parsingResult.tool) {
                 // Store the tool in the librarian
-                await this.storeOpenAPITool(parsingResult.tool);
-                console.log(`OpenAPI tool ${parsingResult.tool.id} registered successfully`);
+                await this.storeOpenAPITool(parsingResult.tool, scoped);
+                if (scoped) {
+                    scoped.info(`OpenAPI tool ${parsingResult.tool.id} registered successfully`);
+                }
             }
 
             return parsingResult;
         } catch (error) {
-            analyzeError(error as Error);
-            console.error('Error registering OpenAPI tool:', error instanceof Error ? error.message : error);
+            logger.error('Error registering OpenAPI tool', error as Error);
             return {
                 success: false,
-                errors: [error instanceof Error ? error.message : String(error)]
+                errors: [EngineerErrorHandler.extractMessage(error)]
             };
         }
     }
 
-    private async parseOpenAPISpec(spec: any, request: OpenAPIToolRegistrationRequest): Promise<OpenAPIParsingResult> {
+    private async parseOpenAPISpec(
+        spec: any,
+        request: OpenAPIToolRegistrationRequest,
+        scoped?: ScopedLogger
+    ): Promise<OpenAPIParsingResult> {
         const errors: string[] = [];
         const warnings: string[] = [];
         const discoveredOperations: any[] = [];
@@ -815,6 +961,10 @@ Context: ${contextString}`;
             if (!isV2 && !isV3) {
                 errors.push(`Unsupported OpenAPI version: ${specVersion}`);
                 return { success: false, errors };
+            }
+
+            if (scoped) {
+                scoped.debug('Parsing OpenAPI spec', { version: specVersion });
             }
 
             // Extract basic info
@@ -888,8 +1038,8 @@ Context: ${contextString}`;
             };
 
         } catch (error) {
-            analyzeError(error as Error);
-            errors.push(`Error parsing OpenAPI spec: ${error instanceof Error ? error.message : String(error)}`);
+            logger.error('Error parsing OpenAPI spec', error as Error);
+            errors.push(`Error parsing OpenAPI spec: ${EngineerErrorHandler.extractMessage(error)}`);
             return { success: false, errors };
         }
     }
@@ -1023,47 +1173,52 @@ Context: ${contextString}`;
             .toUpperCase();
     }
 
-    private async storeOpenAPITool(tool: OpenAPITool): Promise<void> {
+    private async storeOpenAPITool(tool: OpenAPITool, scoped?: ScopedLogger): Promise<void> {
         try {
-            await this.authenticatedApi.post(`http://${this.librarianUrl}/storeData`, {
-                collection: 'openApiTools',
-                id: tool.id,
-                data: tool,
-                storageType: 'mongo'
-            });
-            console.log(`Stored OpenAPI tool: ${tool.id}`);
+            await this.librarianClient.storeData(
+                {
+                    collection: 'openApiTools',
+                    id: tool.id,
+                    data: tool,
+                    storageType: 'mongo'
+                },
+                scoped
+            );
+            if (scoped) {
+                scoped.debug(`Stored OpenAPI tool: ${tool.id}`);
+            }
         } catch (error) {
-            analyzeError(error as Error);
-            throw new Error(`Failed to store OpenAPI tool: ${error instanceof Error ? error.message : String(error)}`);
+            logger.error('Failed to store OpenAPI tool', error as Error);
+            throw EngineerErrorHandler.createError(
+                'LIBRARIAN_STORAGE_FAILED',
+                `Failed to store OpenAPI tool: ${EngineerErrorHandler.extractMessage(error)}`,
+                ErrorSeverity.HIGH
+            );
         }
     }
 
-    async getOpenAPITool(id: string): Promise<OpenAPITool | null> {
+    async getOpenAPITool(id: string, scoped?: ScopedLogger): Promise<OpenAPITool | null> {
         try {
-            const response = await this.authenticatedApi.get(`http://${this.librarianUrl}/loadData/${id}`, {
-                params: {
-                    collection: 'openApiTools',
-                    storageType: 'mongo'
-                }
-            });
-            return response.data?.data || null;
+            const data = await this.librarianClient.loadData(id, 'openApiTools', scoped);
+            return data?.data || null;
         } catch (error) {
-            analyzeError(error as Error);
-            console.error('Error retrieving OpenAPI tool:', error instanceof Error ? error.message : error);
+            logger.error('Error retrieving OpenAPI tool', error as Error);
             return null;
         }
     }
 
-    async validateTool(manifest: any, code?: string): Promise<{ valid: boolean; issues: string[] }> {
-        const cacheKey = `validate-tool-${crypto.createHash('sha256').update(JSON.stringify({ manifest, code })).digest('hex')}`;
+    async validateTool(manifest: any, code?: string, scoped?: ScopedLogger): Promise<{ valid: boolean; issues: string[] }> {
         try {
-            const cachedResult = await redisCache.get<{ valid: boolean; issues: string[] }>(cacheKey);
+            // Check cache first
+            const cachedResult = await validationCache.getValidationResult({ manifest, code });
             if (cachedResult) {
-                console.log(`[Engineer] Cache hit for tool validation: ${manifest.id}`);
+                if (scoped) {
+                    scoped.debug('Validation result from cache');
+                }
                 return cachedResult;
             }
         } catch (error) {
-            analyzeError(error as Error);
+            logger.warn('Cache lookup failed', error as Error);
         }
 
         const issues: string[] = [];
@@ -1091,17 +1246,18 @@ Context: ${contextString}`;
                 issues
             };
 
+            // Cache the result
             try {
-                await redisCache.set(cacheKey, result, 3600); // Cache for 1 hour
+                await validationCache.cacheValidationResult({ manifest, code }, result);
             } catch (error) {
-                analyzeError(error as Error);
+                logger.warn('Failed to cache validation result', error as Error);
             }
 
             return result;
 
         } catch (error) {
-            analyzeError(error as Error);
-            issues.push(`Validation error: ${error instanceof Error ? error.message : String(error)}`);
+            logger.error('Validation error', error as Error);
+            issues.push(`Validation error: ${EngineerErrorHandler.extractMessage(error)}`);
             return { valid: false, issues };
         }
     }
@@ -1128,86 +1284,100 @@ Context: ${contextString}`;
         }
     }
 
-    private async onboardTool(toolManifest: any, policyConfig: any): Promise<any> {
-        console.log(`Onboarding tool: ${toolManifest.id}`);
+    private async onboardTool(toolManifest: any, policyConfig: any, scoped?: ScopedLogger): Promise<any> {
+        if (scoped) {
+            scoped.info(`Onboarding tool: ${toolManifest.id}`);
+        }
 
         try {
-            // 1. Determine wrapper language (e.g., TypeScript for web APIs, Python for others)
-            const wrapperLanguage = 'typescript'; // Default for now, can be dynamic
+            // 1. Determine wrapper language
+            const wrapperLanguage = 'typescript';
 
             // 2. Generate wrapper plugin code and unit tests using the Brain
-            const generatedPlugin = await this.generateWrapperPlugin(toolManifest, policyConfig, wrapperLanguage);
+            const generatedPlugin = await this.generateWrapperPlugin(toolManifest, policyConfig, wrapperLanguage, scoped);
 
             if (!generatedPlugin) {
-                throw new Error('Failed to generate wrapper plugin.');
+                throw EngineerErrorHandler.createError(
+                    'WRAPPER_GENERATION_FAILED',
+                    'Failed to generate wrapper plugin.',
+                    ErrorSeverity.HIGH
+                );
             }
 
             // 3. Validate and execute generated unit tests
-            const testResult = await this.executeWrapperTests(generatedPlugin);
+            const testResult = await this.executeWrapperTests(generatedPlugin, scoped);
             if (!testResult.valid) {
-                throw new Error(`Wrapper plugin tests failed: ${testResult.issues.join(', ')}`);
+                throw EngineerErrorHandler.createError(
+                    'WRAPPER_TESTS_FAILED',
+                    `Wrapper plugin tests failed: ${testResult.issues.join(', ')}`,
+                    ErrorSeverity.HIGH
+                );
             }
 
-            // 4. Register the new wrapper plugin with the PluginMarketplace/CapabilitiesManager
-            // The finalizePlugin method already handles signing and returns a PluginDefinition
+            // 4. Register the new wrapper plugin with the PluginMarketplace
             const finalPluginDefinition = this.finalizePlugin(generatedPlugin, generatedPlugin.explanation);
-
-            // Assuming PluginMarketplace.store takes a PluginDefinition
             await this.pluginMarketplace.store(finalPluginDefinition);
-            console.log(`Wrapper plugin ${finalPluginDefinition.id} registered with PluginMarketplace.`);
-
-            // 5. Update the status of the tool in the Librarian's database (from approved to active)
-            // This would be an API call to Librarian, e.g., PUT /tools/pending/:id/activate
-            // For now, we'll assume the Librarian handles this after receiving the approval response.
+            
+            if (scoped) {
+                scoped.info(`Wrapper plugin ${finalPluginDefinition.id} registered with PluginMarketplace.`);
+            }
 
             return { success: true, message: `Tool ${toolManifest.id} onboarded successfully.` };
 
         } catch (error) {
-            console.error('Error in onboardTool:', error instanceof Error ? error.message : error);
-            throw error; // Re-throw for API endpoint to catch and return 500
-        }
-    }
-
-    private async generateWrapperPlugin(toolManifest: any, policyConfig: any, language: string): Promise<any> {
-        console.log(`Generating wrapper plugin for ${toolManifest.id} in ${language}...`);
-        const prompt = `Generate a ${language} wrapper plugin for the following tool manifest:
-${JSON.stringify(toolManifest, null, 2)}
-
-Apply the following policy configurations:
-${JSON.stringify(policyConfig, null, 2)}
-
-The wrapper should:
-1. Act as a client for the external API defined in the toolManifest.
-2. Enforce the provided policy configurations (e.g., rate limits, access control).
-3. Include input/output schema validation.
-4. Provide a basic unit test suite for the wrapper.
-5. Return a PluginDefinition JSON object, including entryPoint.files for the wrapper code and tests.
-`;
-
-        try {
-            const response = await this.authenticatedApi.post(`http://${this.brainUrl}/chat`, {
-                exchanges: [{ role: 'user', content: prompt }],
-                optimization: 'accuracy',
-                responseType: 'json'
-            });
-            const generatedPlugin = JSON.parse(response.data.result || response.data.response || response.data);
-            const validationResult = this.validatePluginStructure(generatedPlugin);
-            if (!validationResult.valid) {
-                throw new Error(`Generated wrapper plugin structure is invalid: ${validationResult.issues.join(', ')}`);
-            }
-            return generatedPlugin;
-        } catch (error) {
-            console.error('Error generating wrapper plugin:', error instanceof Error ? error.message : error);
+            logger.error('Error in onboardTool', error as Error);
             throw error;
         }
     }
 
-    private async executeWrapperTests(generatedPlugin: any): Promise<{ valid: boolean; issues: string[] }> {
-        console.log(`Executing wrapper tests for ${generatedPlugin.id}...`);
+    private async generateWrapperPlugin(
+        toolManifest: any,
+        policyConfig: any,
+        language: string,
+        scoped?: ScopedLogger
+    ): Promise<any> {
+        if (scoped) {
+            scoped.debug(`Generating wrapper plugin for ${toolManifest.id} in ${language}...`);
+        }
+
+        const prompt = generateWrapperPluginPrompt(toolManifest, policyConfig, language);
+
+        try {
+            const response = await this.brainClient.chat(
+                {
+                    exchanges: [{ role: 'user', content: prompt }],
+                    optimization: 'accuracy',
+                    responseType: 'json'
+                },
+                scoped
+            );
+
+            const generatedPlugin = JSON.parse(response.result || response.response || response);
+            const validationResult = this.validatePluginStructure(generatedPlugin);
+            
+            if (!validationResult.valid) {
+                throw EngineerErrorHandler.createError(
+                    'INVALID_PLUGIN_STRUCTURE',
+                    `Generated wrapper plugin structure is invalid: ${validationResult.issues.join(', ')}`,
+                    ErrorSeverity.MEDIUM
+                );
+            }
+
+            return generatedPlugin;
+        } catch (error) {
+            logger.error('Error generating wrapper plugin', error as Error);
+            throw error;
+        }
+    }
+
+    private async executeWrapperTests(generatedPlugin: any, scoped?: ScopedLogger): Promise<{ valid: boolean; issues: string[] }> {
+        if (scoped) {
+            scoped.debug(`Executing wrapper tests for ${generatedPlugin.id}...`);
+        }
+
         const issues: string[] = [];
         const startTime = Date.now();
 
-        // Assuming generatedPlugin has entryPoint.files and language
         if (!generatedPlugin.entryPoint || !generatedPlugin.entryPoint.files || !generatedPlugin.language) {
             issues.push('Generated plugin missing entryPoint, files, or language for testing.');
             return { valid: false, issues };
@@ -1222,23 +1392,22 @@ The wrapper should:
             }
 
             // Implement actual test execution logic
-            const testExecutionResult = await this.executeTestRunner(generatedPlugin);
+            const testExecutionResult = await this.executeTestRunner(generatedPlugin, scoped);
             if (!testExecutionResult.valid) {
                 issues.push(...testExecutionResult.issues);
             }
 
-            // Update performance metrics
             this.performanceMetrics.testExecutionTime += Date.now() - startTime;
 
             return { valid: issues.length === 0, issues };
         } catch (error) {
-            console.error('Error executing wrapper tests:', error instanceof Error ? error.message : error);
-            issues.push(`Test execution failed: ${error instanceof Error ? error.message : String(error)}`);
+            logger.error('Error executing wrapper tests', error as Error);
+            issues.push(`Test execution failed: ${EngineerErrorHandler.extractMessage(error)}`);
             return { valid: false, issues };
         }
     }
 
-    private async executeTestRunner(generatedPlugin: any): Promise<{ valid: boolean; issues: string[] }> {
+    private async executeTestRunner(generatedPlugin: any, scoped?: ScopedLogger): Promise<{ valid: boolean; issues: string[] }> {
         const issues: string[] = [];
         const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), `plugin-test-${generatedPlugin.id}-`));
 
@@ -1256,7 +1425,6 @@ The wrapper should:
             let testPattern = '';
 
             if (language === 'javascript' || language === 'typescript') {
-                // Look for test files (Jest/Mocha)
                 const testFiles = Object.keys(generatedPlugin.entryPoint.files || {})
                     .filter(f => f.includes('test') || f.includes('spec'));
 
@@ -1268,7 +1436,6 @@ The wrapper should:
                 testCommand = 'npx jest --passWithNoTests';
                 testPattern = testFiles.join(' ');
             } else if (language === 'python') {
-                // Look for Python test files
                 const testFiles = Object.keys(generatedPlugin.entryPoint.files || {})
                     .filter(f => f.startsWith('test_') || f.endsWith('_test.py'));
 
@@ -1286,7 +1453,9 @@ The wrapper should:
 
             // Execute tests
             const fullCommand = `${testCommand} ${testPattern}`;
-            console.log(`Executing test command: ${fullCommand}`);
+            if (scoped) {
+                scoped.debug(`Executing test command: ${fullCommand}`);
+            }
 
             const { stdout, stderr } = await execAsync(fullCommand, { cwd: tempDir });
 
@@ -1297,7 +1466,9 @@ The wrapper should:
             }
 
             if (stdout && (stdout.includes('PASS') || stdout.includes('passed'))) {
-                console.log(`Tests passed successfully for ${generatedPlugin.id}`);
+                if (scoped) {
+                    scoped.debug(`Tests passed successfully for ${generatedPlugin.id}`);
+                }
                 return { valid: true, issues };
             }
 
@@ -1306,49 +1477,126 @@ The wrapper should:
             return { valid: false, issues };
 
         } catch (error) {
-            console.error(`Test execution error for ${generatedPlugin.id}:`, error);
-            issues.push(`Test execution error: ${error instanceof Error ? error.message : String(error)}`);
+            logger.error(`Test execution error for ${generatedPlugin.id}`, error as Error);
+            issues.push(`Test execution error: ${EngineerErrorHandler.extractMessage(error)}`);
             return { valid: false, issues };
         } finally {
             // Clean up temporary directory
             try {
                 await fs.rm(tempDir, { recursive: true, force: true });
             } catch (cleanupError) {
-                console.error(`Error cleaning up test directory ${tempDir}:`, cleanupError);
+                logger.warn(`Error cleaning up test directory ${tempDir}`, cleanupError as Error);
             }
         }
     }
 
-    private async createPluginWithRecovery(verb: string, context: Map<string, InputValue>, guidance: string, language?: string, attempt: number = 1): Promise<PluginDefinition | undefined> {
+    private async createPluginWithRecovery(
+        verb: string,
+        context: Map<string, InputValue>,
+        guidance: string,
+        language?: string,
+        attempt: number = 1,
+        scoped?: ScopedLogger
+    ): Promise<PluginDefinition | undefined> {
         const maxAttempts = 3;
-        const maxBackoff = 5000; // 5 seconds
+        const maxBackoff = 5000;
 
         try {
-            console.log(`Attempt ${attempt} to create plugin for verb: ${verb}`);
-            return await this.createPlugin(verb, context, guidance, language);
+            if (scoped) {
+                scoped.debug(`Attempt ${attempt} to create plugin for verb: ${verb}`);
+            }
+
+            const startTime = Date.now();
+            
+            // Check cache first
+            const cached = await generatedCodeCache.getGeneratedCode(verb, context, language || 'typescript');
+            if (cached) {
+                if (scoped) {
+                    scoped.debug('Retrieved plugin from cache');
+                }
+                return cached;
+            }
+
+            // Generate using enhanced prompts
+            const prompt = generatePluginPrompt(verb, context, guidance, language);
+            const response = await this.brainClient.chat(
+                {
+                    exchanges: [{ role: 'user', content: prompt }],
+                    optimization: 'accuracy',
+                    responseType: 'json'
+                },
+                scoped
+            );
+
+            const pluginStructure = JSON.parse(response.result || response.response || response);
+            const validationResult = this.validatePluginStructure(pluginStructure);
+
+            if (!validationResult.valid) {
+                throw EngineerErrorHandler.createError(
+                    'INVALID_PLUGIN_STRUCTURE',
+                    `Generated plugin structure is invalid: ${validationResult.issues.join(', ')}`,
+                    ErrorSeverity.MEDIUM,
+                    { issues: validationResult.issues }
+                );
+            }
+
+            const plugin = this.finalizePlugin(pluginStructure, await this.generateExplanation(verb, context));
+            
+            // Cache the result
+            await generatedCodeCache.cacheGeneratedCode(verb, context, language || 'typescript', plugin);
+            
+            this.performanceMetrics.generationTime += Date.now() - startTime;
+            
+            if (scoped) {
+                scoped.debug(`Plugin created successfully in ${Date.now() - startTime}ms`);
+            }
+            
+            return plugin;
+
         } catch (error) {
+            const engineerError = error as any;
+            
             if (attempt >= maxAttempts) {
-                console.error(`Failed to create plugin after ${maxAttempts} attempts:`, error);
+                logger.error(`Failed to create plugin after ${maxAttempts} attempts`, error as Error);
                 return undefined;
             }
 
-            // Exponential backoff with jitter
-            const backoff = Math.min(
-                maxBackoff,
-                Math.pow(2, attempt) * 1000 + Math.random() * 1000
-            );
+            const isRetryable = engineerError.retryable ?? true;
+            if (!isRetryable) {
+                throw error;
+            }
 
-            console.warn(`Plugin creation attempt ${attempt} failed. Retrying in ${backoff}ms...`, error);
+            const backoff = EngineerErrorHandler.calculateBackoff(attempt - 1, maxBackoff);
+
+            if (scoped) {
+                scoped.warn(`Plugin creation attempt ${attempt} failed. Retrying in ${backoff}ms...`, {
+                    error: (error as Error).message
+                });
+            }
 
             await new Promise(resolve => setTimeout(resolve, backoff));
 
-            // Try to recover by generating a simpler version
+            // Try with simplified guidance on first retry
             if (attempt === 1) {
                 const simplifiedGuidance = `Create a simpler version of: ${guidance}`;
-                return await this.createPluginWithRecovery(verb, context, simplifiedGuidance, language, attempt + 1);
+                return await this.createPluginWithRecovery(
+                    verb,
+                    context,
+                    simplifiedGuidance,
+                    language,
+                    attempt + 1,
+                    scoped
+                );
             }
 
-            return await this.createPluginWithRecovery(verb, context, guidance, language, attempt + 1);
+            return await this.createPluginWithRecovery(
+                verb,
+                context,
+                guidance,
+                language,
+                attempt + 1,
+                scoped
+            );
         }
     }
 

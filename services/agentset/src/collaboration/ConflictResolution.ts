@@ -3,7 +3,7 @@ import { analyzeError } from '@cktmcs/errorhandler';
 import axios from 'axios';
 import { Agent } from '../agents/Agent';
 import { CollaborationMessageType, ConflictResolutionRequest, ConflictResolutionResponse, createCollaborationMessage } from './CollaborationProtocol';
-import { ServiceTokenManager } from '@cktmcs/shared';
+import { ServiceTokenManager, createAuthenticatedAxios } from '@cktmcs/shared';
 
 /**
  * Conflict status
@@ -53,13 +53,13 @@ export interface Conflict {
 export class ConflictResolution {
   private conflicts: Map<string, Conflict> = new Map();
   private agents: Map<string, Agent>;
-  private trafficManagerUrl: string;
   private brainUrl: string;
   private tokenManager: ServiceTokenManager;
+  private missionControlUrl: string;
+  private authenticatedApi: any;
 
-  constructor(agents: Map<string, Agent>, trafficManagerUrl: string, brainUrl: string) {
+  constructor(agents: Map<string, Agent>, brainUrl: string) {
     this.agents = agents;
-    this.trafficManagerUrl = trafficManagerUrl;
     this.brainUrl = brainUrl;
 
     // Initialize token manager for service-to-service authentication
@@ -71,6 +71,14 @@ export class ConflictResolution {
         serviceId,
         serviceSecret
     );
+
+    this.authenticatedApi = createAuthenticatedAxios({
+        serviceId: serviceId,
+        securityManagerUrl: `http://${securityManagerUrl}`,
+        clientSecret: serviceSecret,
+    });
+
+    this.missionControlUrl = process.env.MISSIONCONTROL_URL?.startsWith('http') ? process.env.MISSIONCONTROL_URL : `http://${process.env.MISSIONCONTROL_URL || 'missioncontrol:5030'}`;
   }
 
   /**
@@ -147,7 +155,7 @@ export class ConflictResolution {
           await participantAgent.handleCollaborationMessage(properMessage);
         } else {
           // Try to find participant agent in other agent sets
-          const agentLocation = await this.findAgentLocation(participantId);
+          const agentLocation = await this.findAgentLocation(participantId, this.agents.get(conflict.initiatedBy)?.missionId || '');
 
           if (agentLocation) {
             // Get a token for authentication
@@ -179,29 +187,24 @@ export class ConflictResolution {
   /**
    * Find the location of an agent
    * @param agentId Agent ID
+   * @param missionId Mission ID
    * @returns Agent set URL or undefined if not found
    */
-  private async findAgentLocation(agentId: string): Promise<string | undefined> {
+  private async findAgentLocation(agentId: string, missionId: string): Promise<string | undefined> {
     try {
-      // Get a token for authentication
-      const token = await this.tokenManager.getToken();
-
-      const response = await axios.get(`http://${this.trafficManagerUrl}/getAgentLocation/${agentId}`, {
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
+        const response = await this.authenticatedApi.get(`${this.missionControlUrl}/agentSetUrlForAgent/${agentId}`, {
+            params: {
+                missionId: missionId
+            }
+        });
+        if (response.status === 200 && response.data.url) {
+            return response.data.url;
         }
-      });
-
-      if (response.data && response.data.agentSetUrl) {
-        return response.data.agentSetUrl;
-      }
-
-      return undefined;
+        return undefined;
     } catch (error) {
-      analyzeError(error as Error);
-      console.error('Error finding agent location:', error);
-      return undefined;
+        analyzeError(error as Error);
+        console.error(`Error finding agent location for ${agentId} via MissionControl:`, error instanceof Error ? error.message : error);
+        return undefined;
     }
   }
 
@@ -226,12 +229,12 @@ export class ConflictResolution {
 
     // Check if agent is a participant
     if (!conflict.participants.includes(agentId)) {
-      throw new Error(`Agent ${agentId} is not a participant in conflict ${conflictId}`);
+      throw new Error(`Agent ${agentId} is not a participant in conflict ${conflict.id}`);
     }
 
     // Check if conflict is still open
     if (conflict.status !== ConflictStatus.PENDING && conflict.status !== ConflictStatus.IN_PROGRESS) {
-      throw new Error(`Conflict ${conflictId} is already ${conflict.status}`);
+      throw new Error(`Conflict ${conflict.id} is already ${conflict.status}`);
     }
 
     // Initialize votes if needed
@@ -527,7 +530,7 @@ export class ConflictResolution {
 
         } else {
           // Try to find participant agent in other agent sets
-          const agentLocation = await this.findAgentLocation(participantId);
+          const agentLocation = await this.findAgentLocation(participantId, this.agents.get(conflict.initiatedBy)?.missionId || '');
 
           if (agentLocation) {
             // Get a token for authentication
@@ -560,21 +563,15 @@ export class ConflictResolution {
    */
   private async notifyEscalation(conflict: Conflict): Promise<void> {
     try {
-      // Get a token for authentication
-      const token = await this.tokenManager.getToken();
-
-      // Notify TrafficManager about escalation
-      await axios.post(`http://${this.trafficManagerUrl}/escalateConflict`, {
+      // Send escalation notification to MissionControl
+      await this.authenticatedApi.post(`${this.missionControlUrl}/escalateConflict`, {
         conflictId: conflict.id,
+        missionId: this.agents.get(conflict.initiatedBy)?.missionId || '',
+        status: conflict.status,
+        escalatedTo: conflict.escalatedTo,
         description: conflict.description,
         conflictingData: conflict.conflictingData,
-        participants: conflict.participants,
-        votes: conflict.votes
-      }, {
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        }
+        initiatedBy: conflict.initiatedBy
       });
 
       // Notify participants about escalation
@@ -601,6 +598,21 @@ export class ConflictResolution {
             message.content
           );
           await participantAgent.handleCollaborationMessage(properEscalationMessage);
+        } else {
+            const agentLocation = await this.findAgentLocation(participantId, this.agents.get(conflict.initiatedBy)?.missionId || '');
+            if (agentLocation) {
+                const token = await this.tokenManager.getToken();
+                await axios.post(`http://${agentLocation}/escalateConflictNotification`, {
+                    conflictId: conflict.id,
+                    status: conflict.status,
+                    escalatedTo: conflict.escalatedTo
+                }, {
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+            }
         }
       }
     } catch (error) {

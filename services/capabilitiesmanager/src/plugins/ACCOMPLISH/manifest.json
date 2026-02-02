@@ -20,6 +20,12 @@
             "aliases": ["mission_id","mission","missionID"]
         },
         {
+            "name": "mission_context_payload",
+            "required": false,
+            "type": "string",
+            "description": "A JSON string containing enriched context from the L3 service, such as Jira tickets and parsed file contents. This context is used to inform the planning process."
+        },
+        {
             "name": "novel_actionVerb",
             "required": false,
             "type": "object",

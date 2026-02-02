@@ -56,6 +56,7 @@ constructor(params: {
     maxRetries?: number,
     maxRecoverableRetries?: number
     currentOwnerAgentId?: string;
+    delegatingAgentId?: string;
     delegationHistory?: DelegationRecord[];
     lastOwnershipChange?: string;
     crossAgentResolver: CrossAgentDependencyResolver;

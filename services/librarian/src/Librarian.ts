@@ -9,7 +9,7 @@ import { storeInMongo, loadFromMongo, loadManyFromMongo, aggregateInMongo, delet
 import { WorkProduct, Deliverable } from '@cktmcs/shared';
 import { BaseEntity, MapSerializer } from '@cktmcs/shared';
 import { ToolSource, PendingTool } from '@cktmcs/shared';
-import { analyzeError } from '@cktmcs/errorhandler';
+import { analyzeError } from '@cktmcs/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { knowledgeStore } from './knowledgeStore';
 import rateLimit from 'express-rate-limit';
@@ -20,6 +20,18 @@ const CAPABILITIES_MANAGER_SERVICE_URL = process.env.CAPABILITIES_MANAGER_SERVIC
 const MISSIONCONTROL_SERVICE_URL = process.env.MISSIONCONTROL_URL || 'http://missioncontrol:5030';
 
 dotenv.config();
+/**
+ * Normalizes an ID to always be a string.
+ * @param Id The ID which could be a string or string array.
+ * @returns A normalized string ID.
+ */
+function normalizeId(Id: string | string[]): string {
+  if (Array.isArray(Id)) {
+    // If it's an array, use the first element or generate a fallback
+    return Id.length > 0 ? Id[0] : `id-${Date.now()}`;
+  }
+  return Id;
+}
 
 interface DataVersion {
     id: string;
@@ -59,13 +71,8 @@ export class Librarian extends BaseEntity {
       }
 
     private setupRoutes() {
-        this.app.get('/health', (req: express.Request, res: express.Response): void => {
-            res.status(200).json({
-                status: 'healthy',
-                timestamp: new Date().toISOString(),
-                message: 'Librarian service is healthy',
-            });
-        });
+        // Set up unified health check endpoints (/health, /healthy, /ready, /status)
+        this.setupHealthCheck(this.app);
 
         // --- Large Asset Streaming Routes ---
         // These routes handle raw data streams and must be defined *before* bodyParser.json() is used.
@@ -289,11 +296,11 @@ export class Librarian extends BaseEntity {
 
     private async storeLargeAsset(req: express.Request, res: express.Response) {
         const { collection, id } = req.params;
-        const assetDir = path.join(LARGE_ASSET_PATH, collection);
+        const assetDir = path.join(LARGE_ASSET_PATH, normalizeId(collection));
 
         try {
             await fs.promises.mkdir(assetDir, { recursive: true });
-            const filePath = path.join(assetDir, id);
+            const filePath = path.join(assetDir, normalizeId(id));
 
             const writeStream = fs.createWriteStream(filePath);
             req.pipe(writeStream);
@@ -331,8 +338,8 @@ export class Librarian extends BaseEntity {
 
     private async loadLargeAsset(req: express.Request, res: express.Response) {
         const { collection, id } = req.params;
-        const assetDir = path.join(LARGE_ASSET_PATH, collection);
-        const filePath = path.join(assetDir, id);
+        const assetDir = path.join(LARGE_ASSET_PATH, normalizeId(collection));
+        const filePath = path.join(assetDir, normalizeId(id));
 
         try {
             // Check if the file exists
@@ -1047,15 +1054,6 @@ export class Librarian extends BaseEntity {
                 return { ...result, context_score };
             });
 
-            // Sort by context_score (descending) then by original distance (ascending)
-            results.sort((a: any, b: any) => {
-                if (b.context_score !== a.context_score) {
-                    return b.context_score - a.context_score;
-                }
-                return a.distance - b.distance;
-            });
-            
-            // Remap results to prioritize the canonical verb for discovery
             const finalResults = results.map((result: any) => {
                 if (result.metadata && result.metadata.verb) {
                     return {
@@ -1063,7 +1061,7 @@ export class Librarian extends BaseEntity {
                         id: result.metadata.verb, // Use canonical verb as primary ID
                         verb: result.metadata.verb, // Ensure top-level verb is the canonical one
                         metadata: {
-                            ...result.metadata,
+                            ...result.metadata, // Keep all original metadata
                             original_id: result.id // Preserve original ID
                         }
                     };
@@ -1250,6 +1248,8 @@ export class Librarian extends BaseEntity {
                     verb: result.metadata.verb,
                     description: result.metadata.description || '',
                     capabilities: result.metadata.capabilityKeywords || [],
+                    inputDefinitions: result.metadata.inputDefinitions || [], // Include inputDefinitions
+                    outputDefinitions: result.metadata.outputDefinitions || [], // Include outputDefinitions
                 }));
             
             // Build relevantTools array from all healthy results

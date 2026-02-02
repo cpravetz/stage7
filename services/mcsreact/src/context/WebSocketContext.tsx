@@ -135,40 +135,125 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       STATUS_UPDATE: "statusUpdate",
       AGENT_UPDATE: "agentUpdate",
       LIST_MISSIONS: "listMissions",
-      // Backwards/forwards compatible: backend currently sends 'sharedFilesUpdate' (camelCase)
-      // but older frontend code expected 'shared_files_update'. Accept both when handling.
+      // Frontend expects these types directly from PostOffice
+      // Not userMessage/assistant as I previously thought
+      MESSAGE: "message", // Generic message from PostOffice containing ConversationMessage
+      USER_INPUT_REQUEST: "USER_INPUT_REQUEST",
+      // ... (other types)
       SHARED_FILES_UPDATE: "sharedFilesUpdate"
     };
 
-    console.log('Processing WebSocket message:', data.type);
+    const messageId = data.id || 'NO_ID';
+    console.log(`[Frontend WS] Raw incoming WebSocket message ${messageId}:`, data); // ADD THIS LOG
+    console.log(`[Frontend WS] Message ${messageId} type:`, data.type); // ADD THIS LOG
 
     switch (data.type) {
       case 'say':
-        setConversationHistory((prev) => {
-          let newMessage = data.content;
-          let isPersistent = false;
-          if (typeof newMessage === 'object' && newMessage !== null) {
-            isPersistent = newMessage.persistent === true;
-            newMessage = newMessage.message || JSON.stringify(newMessage);
+      case MessageType.MESSAGE: {
+        // INCLUSION LOGIC: Only add to chat history if message meets ALL criteria:
+        // 1. Has visibility === 'user' (for 'say' messages)
+        // 2. Has extractable text content (string message)
+        // 3. Sender is 'assistant', 'agent', or 'system' (not internal types)
+        
+        console.log('[Frontend WS] Handling MESSAGE or SAY type');
+        
+        // For 'say' messages: ONLY include if visibility === 'user'
+        if (data.type === 'say') {
+          const visibility = data.visibility;
+          if (visibility !== 'user') {
+            console.log(`[Frontend WS] Ignoring say message - visibility is '${visibility}', not 'user'`);
+            return;
           }
-          const finalMessage: ConversationMessage = { content: `${newMessage}`, persistent: isPersistent, sender: 'system' };
+        }
+        
+        // Extract the message text content
+        let messageText: string | null = null;
+        let sender: 'user' | 'system' | 'agent' = 'agent';
+        
+        // For 'say' messages: extract content.message
+        if (data.type === 'say' && data.content?.message && typeof data.content.message === 'string') {
+          messageText = data.content.message;
+          sender = data.sender === 'user' ? 'user' : (data.sender === 'system' ? 'system' : 'agent');
+        }
+        // For 'message' type: check if content has a displayable message
+        else if (data.type === 'message' && data.content) {
+          const content = data.content;
+          // Check for direct string content
+          if (typeof content === 'string') {
+            messageText = content;
+          }
+          // Check for content.message string
+          else if (content.message && typeof content.message === 'string') {
+            messageText = content.message;
+          }
+          // Check for content.text string
+          else if (content.text && typeof content.text === 'string') {
+            messageText = content.text;
+          }
+          // Check for content.content string (nested)
+          else if (content.content && typeof content.content === 'string') {
+            messageText = content.content;
+          }
+          
+          sender = content.sender === 'user' ? 'user' : (content.sender === 'system' ? 'system' : 'agent');
+        }
+        
+        // Only add to history if we extracted a valid text message
+        if (!messageText || messageText.trim() === '') {
+          console.log('[Frontend WS] Ignoring message - no displayable text content found');
+          return;
+        }
+        
+        const receivedMessage: ConversationMessage = {
+          sender,
+          content: messageText,
+          persistent: data.content?.persistent === true,
+          id: data.id,
+          timestamp: data.timestamp || new Date().toISOString()
+        };
 
-          if (prev.length > 0 && prev[prev.length - 1].content === finalMessage.content) return prev;
-          return [...prev, finalMessage];
+        console.log(`[Frontend WS] Created message object:`, {
+          sender: receivedMessage.sender,
+          content: receivedMessage.content?.substring(0, 50),
+          persistent: receivedMessage.persistent,
+          id: receivedMessage.id,
+          'data.content.persistent': data.content?.persistent
+        });
+
+        setConversationHistory((prev) => {
+          const msgId = receivedMessage.id || 'NO_ID';
+          
+          // Check for duplicates
+          const isDuplicate = prev.some((msg) => {
+            if (msg.id && receivedMessage.id && msg.id === receivedMessage.id) return true;
+            return msg.sender === receivedMessage.sender && msg.content === receivedMessage.content;
+          });
+
+          if (isDuplicate) {
+            console.log(`[Frontend WS] Duplicate message ${msgId} detected, not adding to history`);
+            return prev;
+          }
+
+          console.log(`[Frontend WS] Adding message to chat history: "${messageText?.substring(0, 50)}..." | persistent: ${receivedMessage.persistent}`);
+          return [...prev, receivedMessage];
         });
         break;
-        
-      case MessageType.REQUEST:
+      }
+
+      case MessageType.USER_INPUT_REQUEST: // Corrected to use the actual USER_INPUT_REQUEST type
+        console.log('[Frontend WS] Handling USER_INPUT_REQUEST type'); // ADD THIS LOG
         setPendingUserInputQueue((queue) => [
           ...queue,
           {
-            request_id: data.content.questionGuid,
-            question: data.content.question,
-            answerType: data.content.answerType || 'text',
-            choices: data.content.choices
+            request_id: data.request_id,
+            question: data.question,
+            answerType: data.answerType || 'text',
+            choices: data.choices
           }
         ]);
         break;
+
+      case MessageType.WORK_PRODUCT_UPDATE:
         
       case MessageType.WORK_PRODUCT_UPDATE:
         console.log('[WebSocketContext.tsx] WORK_PRODUCT_UPDATE received:', data.content);
@@ -341,12 +426,19 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         connectWebSocket();
       }
 
-      if (pendingUserInput) {
-        setConversationHistory((prev) => [...prev, { content: `Question: ${pendingUserInput.question}`, sender: 'system', persistent: true }, { content: `Answer: ${message}`, sender: 'user', persistent: true }]);
-      } else if (currentQuestion) {
-        setConversationHistory((prev) => [...prev, { content: `Answer: ${message}`, sender: 'user', persistent: true }]);
-      } else {
-        setConversationHistory((prev) => [...prev, { content: `${message}`, sender: 'user', persistent: true }]);
+      // Determine if this is a plain text user message (should be added to chat)
+      // or a structured tool invocation (should NOT be added to chat)
+      const isPlainTextMessage = !message.startsWith('{') && !message.startsWith('[');
+      
+      // Add plain text user messages to chat history immediately on Send
+      if (isPlainTextMessage) {
+        if (pendingUserInput) {
+          setConversationHistory((prev) => [...prev, { content: `Question: ${pendingUserInput.question}`, sender: 'system', persistent: true, timestamp: new Date().toISOString() }, { content: `Answer: ${message}`, sender: 'user', persistent: true, timestamp: new Date().toISOString() }]);
+        } else if (currentQuestion) {
+          setConversationHistory((prev) => [...prev, { content: `Answer: ${message}`, sender: 'user', persistent: true, timestamp: new Date().toISOString() }]);
+        } else {
+          setConversationHistory((prev) => [...prev, { content: message, sender: 'user', persistent: true, timestamp: new Date().toISOString() }]);
+        }
       }
 
       try {
@@ -355,7 +447,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
         if (!accessToken) {
           console.error('No authentication token available. Please log in again.');
-          setConversationHistory((prev) => [...prev, { content: 'Authentication failed. Please log in again.', sender: 'system', persistent: false }]);
+          setConversationHistory((prev) => [...prev, { content: 'Authentication failed. Please log in again.', sender: 'system', persistent: false, timestamp: new Date().toISOString() }]);
           return;
         }
 
@@ -401,24 +493,27 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
               type: "answer",
               sender: 'user',
               content: { missionId: activeMissionId, answer: message, asker: currentQuestion.asker, questionGuid: currentQuestion.guid },
-              recipient: 'missionControl',
+              recipient: 'MissionControl',
               clientId
             }, { headers });
             setCurrentQuestion(null);
           } else {
-            console.log(`[WebSocketContext] Sending user message to active mission ${activeMissionId}`);
-            await api.post('/sendMessage', {
-              type: "userMessage",
-              sender: 'user',
-              recipient: 'MissionControl',
-              content: { missionId: activeMissionId, message: message},
-              clientId
-            }, { headers });
-          }
+           console.log(`[WebSocketContext] Sending user message to active mission ${activeMissionId}`);
+           const messageId = `${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+           await api.post('/sendMessage', {
+             type: "userMessage",
+             sender: 'user',
+             recipient: 'MissionControl',
+             content: { missionId: activeMissionId, message: message},
+             clientId,
+             id: messageId
+           }, { headers });
+           // User message already added to chat history above when Send was clicked
+         }
         }
       } catch (error) {
         console.error('[WebSocketContext] Failed to send message:', error instanceof Error ? error.message : error);
-        setConversationHistory((prev) => [...prev, { content: 'Failed to send message. Please try again.', sender: 'system', persistent: false }]);
+        setConversationHistory((prev) => [...prev, { content: 'Failed to send message. Please try again.', sender: 'system', persistent: false, timestamp: new Date().toISOString() }]);
       }
     },
     handleControlAction: async (action: string) => {
@@ -519,10 +614,10 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             'Authorization': `Bearer ${accessToken}`
           }
         });
-        setConversationHistory((prev) => [...prev, { content: `Mission ${missionId} loaded.`, sender: 'system', persistent: false }]);
+        setConversationHistory((prev) => [...prev, { content: `Mission ${missionId} loaded.`, sender: 'system', persistent: false, timestamp: new Date().toISOString() }]);
       } catch (error) {
         console.error('[WebSocketContext] Failed to load mission:', error instanceof Error ? error.message : error);
-        setConversationHistory((prev) => [...prev, { content: 'Failed to load mission. Please try again.', sender: 'system', persistent: false }]);
+        setConversationHistory((prev) => [...prev, { content: 'Failed to load mission. Please try again.', sender: 'system', persistent: false, timestamp: new Date().toISOString() }]);
       }
     },
     listMissions: async () => {

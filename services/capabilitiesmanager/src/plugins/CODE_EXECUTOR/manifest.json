@@ -1,6 +1,6 @@
 {
   "id": "plugin-CODE_EXECUTOR",
-  "verb": "RUN_CODE",
+  "verb": "CODE_EXECUTOR",
   "description": "Executes code snippets in a sandboxed environment.",
   "explanation": "This plugin takes a code snippet and a language, and executes it in a secure, isolated Docker container. It returns the standard output, standard error, and exit code.",
   "inputDefinitions": [
@@ -8,17 +8,22 @@
       "name": "language",
       "required": true,
       "type": "string",
-      "description": "The programming language of the code snippet. Supported: 'python', 'javascript'."
-    ,
-      "aliases": ["lang","languageName"]
+      "description": "The programming language of the code snippet. Supported: 'python', 'javascript'.",
+      "aliases": [
+        "lang",
+        "languageName"
+      ]
     },
     {
       "name": "code",
       "required": true,
       "type": "string",
-      "description": "The code snippet to execute."
-    ,
-      "aliases": ["snippet","program","source"]
+      "description": "The code snippet to execute.",
+      "aliases": [
+        "snippet",
+        "program",
+        "source"
+      ]
     }
   ],
   "outputDefinitions": [
@@ -69,7 +74,13 @@
   "version": "1.0.0",
   "metadata": {
     "author": "Stage7 Development Team",
-    "tags": ["code", "execution", "sandbox", "python", "javascript"],
+    "tags": [
+      "code",
+      "execution",
+      "sandbox",
+      "python",
+      "javascript"
+    ],
     "category": "utility",
     "license": "MIT"
   }

@@ -1,8 +1,7 @@
 import { BrowserRouter as Router, Routes, Route, Navigate, Link } from 'react-router-dom';
-import { Box, Button, Container, Paper, Typography, Drawer, AppBar, Toolbar, IconButton } from '@mui/material';
+import { Box, Button, Container, Paper, Typography, Drawer, AppBar, Toolbar, IconButton, Select, MenuItem, FormControl, InputLabel, SelectChangeEvent } from '@mui/material/index.js';
 import React, { useState, useEffect, useRef } from 'react';
-import MenuIcon from '@mui/icons-material/Menu';
-import CloseIcon from '@mui/icons-material/Close';
+import { Menu as MenuIcon, Close as CloseIcon } from '@mui/icons-material';
 import TabbedPanel from './components/TabbedPanel';
 import TextInput from './components/TextInput';
 import MissionControls from './components/MissionControls';
@@ -16,6 +15,7 @@ import PasswordReset from './components/PasswordReset';
 import RequestPasswordReset from './components/RequestPasswordReset';
 import ModelPerformanceDashboard from './components/ModelPerformanceDashboard';
 import PluginManager from './components/PluginManager';
+import AppLayout from './components/AppLayout';
 import { ThemeToggle } from './components/ThemeToggle';
 import { AppThemeProvider } from './theme/AppThemeProvider';
 
@@ -25,10 +25,10 @@ import { useWebSocket, useMission, useData } from './context/WebSocketContext';
 import { useAuth } from './context/AuthContext';
 import { API_BASE_URL } from './config';
 import './App.css';
-import { AnswerType, ConversationMessage } from './shared-browser'; // Import AnswerType and ConversationMessage
+import { AnswerType } from './shared-browser'; // Import AnswerType and ConversationMessage
 import { ActiveQuestion } from './components/TextInput'; // Import ActiveQuestion
 
-const MainApp: React.FC = () => {
+const MainApp: React.FC<{ clientId: string }> = ({ clientId }) => {
   const { isAuthenticated, login, logout } = useAuth();
   const [showSavedMissions, setShowSavedMissions] = useState<boolean>(false);
   const [showMissionList, setShowMissionList] = useState<boolean>(false);
@@ -333,16 +333,15 @@ const MainApp: React.FC = () => {
   );
 };
 
-// Import the AppLayout component
-import AppLayout from './components/AppLayout';
 
 const App: React.FC = () => {
+  const { clientId } = useWebSocket(); // Get clientId from context
   return (
     <AppThemeProvider>
       <Router>
         <Routes>
           <Route element={<AppLayout />}>
-            <Route path="/" element={<MainApp />} />
+            <Route path="/" element={<MainApp clientId={clientId} />} />
             <Route path="/verify-email" element={<EmailVerification />} />
             <Route path="/reset-password" element={<PasswordReset />} />
             <Route path="/forgot-password" element={<RequestPasswordReset />} />

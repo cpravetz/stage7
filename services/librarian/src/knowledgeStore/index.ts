@@ -1,10 +1,13 @@
-import { ChromaClient, Collection, Metadata, IEmbeddingFunction } from 'chromadb';
+import { ChromaClient, Collection, Metadata, EmbeddingFunction } from 'chromadb';
 
 // Use dynamic import for @xenova/transformers
 let Transformers: any;
 let pipeline: any;
 
-class TransformerEmbeddingFunction implements IEmbeddingFunction {
+// Global collection creation lock to prevent race conditions
+const collectionCreationLocks = new Map<string, Promise<Collection>>();
+
+class TransformerEmbeddingFunction implements EmbeddingFunction {
     private pipe: any;
 
     private constructor(pipe: any) {
@@ -30,7 +33,7 @@ class TransformerEmbeddingFunction implements IEmbeddingFunction {
 
 class KnowledgeStore {
     private client: ChromaClient;
-    private embeddingFunction: IEmbeddingFunction | null = null;
+    private embeddingFunction: EmbeddingFunction | null = null;
     private initializationPromise: Promise<void> | null = null;
 
     constructor() {
@@ -51,7 +54,7 @@ class KnowledgeStore {
         }
     }
 
-    private async getEmbeddingFunction(): Promise<IEmbeddingFunction> {
+    private async getEmbeddingFunction(): Promise<EmbeddingFunction> {
         if (!this.initializationPromise) {
             throw new Error("KnowledgeStore embedding function not initialized.");
         }
@@ -63,6 +66,31 @@ class KnowledgeStore {
     }
 
     private async getOrCreateCollection(name: string): Promise<Collection> {
+        // Check if another process is already creating this collection
+        if (collectionCreationLocks.has(name)) {
+            console.log(`Collection ${name} is being created by another process, waiting for completion...`);
+            return collectionCreationLocks.get(name)!;
+        }
+
+        // Create a promise that will be resolved when this collection is created
+        const creationPromise = this._createCollectionWithLock(name);
+        
+        // Store the promise so other requests can wait for it
+        collectionCreationLocks.set(name, creationPromise);
+
+        try {
+            const collection = await creationPromise;
+            // Clean up the lock after a brief delay to allow any lingering operations
+            setTimeout(() => collectionCreationLocks.delete(name), 100);
+            return collection;
+        } catch (error) {
+            // Remove lock on error so retries can try again
+            collectionCreationLocks.delete(name);
+            throw error;
+        }
+    }
+
+    private async _createCollectionWithLock(name: string): Promise<Collection> {
         const embeddingFunction = await this.getEmbeddingFunction();
         try {
             const collection = await this.client.getCollection({
@@ -78,6 +106,7 @@ class KnowledgeStore {
                     name,
                     embeddingFunction,
                 });
+                console.log(`Successfully created collection: ${name}`);
                 return collection;
             } catch (createError) {
                 if (createError instanceof Error && createError.message.includes('already exists')) {

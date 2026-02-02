@@ -55,12 +55,10 @@ export class AgentLifecycleManager {
   private persistenceManager: AgentPersistenceManager;
   private checkpointIntervals: Map<string, NodeJS.Timeout> = new Map();
   private monitoringInterval: NodeJS.Timeout;
-  private trafficManagerUrl: string;
   private tokenManager: ServiceTokenManager;
 
-  constructor(persistenceManager: AgentPersistenceManager, trafficManagerUrl: string) {
+  constructor(persistenceManager: AgentPersistenceManager) {
     this.persistenceManager = persistenceManager;
-    this.trafficManagerUrl = trafficManagerUrl;
 
     // Initialize token manager for service-to-service authentication
     const securityManagerUrl = process.env.SECURITYMANAGER_URL || 'securitymanager:5010';
@@ -106,7 +104,7 @@ export class AgentLifecycleManager {
         timestamp: new Date().toISOString(),
         details: {
           missionId: agent.missionId,
-          actionVerb: agent.getActionVerb()
+          actionVerb: agent.steps[0]?.actionVerb || 'UNKNOWN'
         }
       }]);
     }
@@ -431,20 +429,6 @@ export class AgentLifecycleManager {
 
       // Unregister agent from this agent set
       this.unregisterAgent(agentId);
-
-      // Get a token for authentication
-      const updateToken = await this.tokenManager.getToken();
-
-      // Notify TrafficManager about migration
-      await axios.post(`http://${this.trafficManagerUrl}/updateAgentLocation`, {
-        agentId,
-        agentSetUrl: targetAgentSetUrl
-      }, {
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${updateToken}`
-        }
-      });
 
       console.log(`Migrated agent ${agentId} to ${targetAgentSetUrl}`);
     } catch (error) {

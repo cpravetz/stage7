@@ -1,5 +1,5 @@
 import nodemailer from 'nodemailer';
-import { analyzeError } from '@cktmcs/errorhandler';
+import { analyzeError } from '@cktmcs/shared';
 
 /**
  * Email service for sending emails

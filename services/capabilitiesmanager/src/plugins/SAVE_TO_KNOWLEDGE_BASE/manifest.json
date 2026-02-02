@@ -1,110 +1,49 @@
 {
   "id": "plugin-SAVE_TO_KNOWLEDGE_BASE",
-  "verb": "SAVE_TO_KNOWLEDGE_BASE",
-  "description": "Save content to a knowledge base collection using semantic embeddings",
-  "explanation": "This plugin takes content and saves it to a specified knowledge base collection in the Librarian service. The content is automatically embedded using semantic vectors for later retrieval. This enables agents to build and share collective knowledge.",
-  "inputDefinitions": [
-    {
-      "name": "domain",
-      "required": true,
-      "type": "string",
-      "description": "The knowledge domain/collection name to save to (e.g., 'ai_development', 'research_findings')",
-      "aliases": ["collectionName", "collection"]
-    },
-    {
-      "name": "keywords",
-      "required": true,
-      "type": "array",
-      "description": "Array of keywords that describe the content for better categorization",
-      "aliases": ["tags"]
-    },
-    {
-      "name": "content",
-      "required": true,
-      "type": "string",
-      "description": "The actual content to save to the knowledge base"
-    },
-    {
-      "name": "metadata",
-      "required": false,
-      "type": "object",
-      "description": "Additional metadata to associate with the content (optional)"
-    }
-  ],
-  "outputDefinitions": [
-    {
-      "name": "status",
-      "required": true,
-      "type": "string",
-      "description": "Status message indicating success or failure of the save operation"
-    },
-    {
-      "name": "id",
-      "required": false,
-      "type": "string",
-      "description": "Unique identifier assigned to the saved content"
-    }
-  ],
-  "inputGuidance": "Use 'domain' for the collection name, 'keywords' for categorization tags, and 'content' for the actual text to save",
-  "language": "python",
-  "entryPoint": {
-    "main": "main.py",
-    "function": "execute_plugin"
-  },
-  "repository": {
-    "type": "local"
-  },
-  "security": {
-    "permissions": [
-      "net.fetch"
-    ],
-    "sandboxOptions": {
-      "allowEval": false,
-      "timeout": 10000,
-      "memory": 67108864,
-      "allowedModules": [
-        "json",
-        "sys",
-        "os",
-        "typing",
-        "requests",
-        "urllib3"
-      ],
-      "allowedAPIs": [
-        "print"
-      ]
-    },
-    "trust": {
-      "publisher": "stage7-core",
-      "signature": null
-    }
-  },
+  "name": "SAVE_TO_KNOWLEDGE_BASE",
   "version": "1.0.0",
-  "metadata": {
-    "author": "Stage7 Development Team",
-    "tags": [
-      "knowledge",
-      "storage",
-      "semantic",
-      "learning"
-    ],
-    "category": "knowledge-management",
-    "license": "MIT",
-    "documentation": "README.md"
-  },
-  "configuration": [
+  "description": "SAVE_TO_KNOWLEDGE_BASE plugin for cktMCS backend services",
+  "author": "Backend Services",
+  "license": "MIT",
+  "type": "backend",
+  "category": "knowledge",
+  "actions": [
     {
-      "name": "timeout",
-      "type": "number",
-      "description": "Request timeout in milliseconds",
-      "defaultValue": 10000,
-      "required": false
+      "id": "save_article",
+      "name": "Save Article",
+      "description": "Execute save article operation"
+    },
+    {
+      "id": "update_article",
+      "name": "Update Article",
+      "description": "Execute update article operation"
+    },
+    {
+      "id": "delete_article",
+      "name": "Delete Article",
+      "description": "Execute delete article operation"
+    },
+    {
+      "id": "tag_article",
+      "name": "Tag Article",
+      "description": "Execute tag article operation"
+    },
+    {
+      "id": "create_collection",
+      "name": "Create Collection",
+      "description": "Execute create collection operation"
+    },
+    {
+      "id": "add_to_collection",
+      "name": "Add To Collection",
+      "description": "Execute add to collection operation"
     }
   ],
-  "distribution": {
-    "downloads": 0,
-    "rating": 0
+  "capabilities": {
+    "error_handling": true,
+    "logging": true,
+    "in_memory_storage": true,
+    "thread_safe": true
   },
-  "createdAt": "2024-12-01T00:00:00Z",
-  "updatedAt": "2024-12-01T00:00:00Z"
+  "verb": "SAVE_TO_KNOWLEDGE_BASE"
 }

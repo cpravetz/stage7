@@ -1,9 +1,34 @@
 import Redis from 'ioredis';
-import { reportError } from '../errorhandler';
+
+function reportError(error: Error): void {
+  console.error('Error details:');
+  console.error(`- Message: ${error.message}`);
+  console.error(`- Name: ${error.name}`);
+  
+  if (error.stack) {
+    console.error(`- Stack trace: ${error.stack}`);
+  }
+  
+  // Additional error properties that might be available
+  const anyError = error as any;
+  if (anyError.code) {
+    console.error(`- Error code: ${anyError.code}`);
+  }
+  
+  if (anyError.statusCode) {
+    console.error(`- Status code: ${anyError.statusCode}`);
+  }
+  
+  if (anyError.response) {
+    console.error('- Response data:', anyError.response.data);
+    console.error(`- Response status: ${anyError.response.status}`);
+  }
+}
 
 class RedisCache {
     private client: Redis;
     private static instance: RedisCache;
+    private connectionPromise: Promise<void> | null = null;
 
     private constructor() {
         try {
@@ -40,6 +65,9 @@ class RedisCache {
                 console.log('[RedisCache] Redis client is ready.');
             });
 
+            // Auto-connect immediately in the background (non-blocking)
+            this.connectionPromise = this._autoConnect();
+
         } catch (error) {
             console.error('[RedisCache] Failed to create Redis client:', error);
             // In case of a startup error, we'll use a mock client to prevent crashes
@@ -53,6 +81,17 @@ class RedisCache {
         }
     }
 
+    private async _autoConnect(): Promise<void> {
+        try {
+            console.log('[RedisCache] Auto-connecting to Redis...');
+            await this.client.connect();
+            console.log('[RedisCache] Auto-connect completed.');
+        } catch (error) {
+            console.error('[RedisCache] Auto-connect failed:', error);
+            // Don't throw - let operations handle the disconnected state
+        }
+    }
+
     public static getInstance(): RedisCache {
         if (!RedisCache.instance) {
             RedisCache.instance = new RedisCache();
@@ -61,7 +100,12 @@ class RedisCache {
     }
 
     public async get<T>(key: string): Promise<T | null> {
-        if (this.client.status !== 'ready') {
+        // Wait for auto-connect to complete if in progress
+        if (this.connectionPromise && (this.client.status as string) === 'wait') {
+            await this.connectionPromise;
+        }
+
+        if ((this.client.status as string) !== 'ready') {
             console.warn(`[RedisCache] Cannot get key '${key}': Redis client status is '${this.client.status}', not 'ready'`);
             return null;
         }
@@ -79,7 +123,12 @@ class RedisCache {
     }
 
     public async set<T>(key: string, value: T, ttlSeconds: number = 3600): Promise<boolean> {
-        if (this.client.status !== 'ready') {
+        // Wait for auto-connect to complete if in progress
+        if (this.connectionPromise && (this.client.status as string) === 'wait') {
+            await this.connectionPromise;
+        }
+
+        if ((this.client.status as string) !== 'ready') {
             console.warn(`[RedisCache] Cannot set key '${key}': Redis client status is '${this.client.status}', not 'ready'`);
             return false;
         }
@@ -95,7 +144,12 @@ class RedisCache {
     }
 
     public async del(key: string): Promise<boolean> {
-        if (this.client.status !== 'ready') {
+        // Wait for auto-connect to complete if in progress
+        if (this.connectionPromise && (this.client.status as string) === 'wait') {
+            await this.connectionPromise;
+        }
+
+        if ((this.client.status as string) !== 'ready') {
             console.warn(`[RedisCache] Cannot delete key '${key}': Redis client status is '${this.client.status}', not 'ready'`);
             return false;
         }
@@ -110,15 +164,28 @@ class RedisCache {
     }
 
     public async connect(): Promise<void> {
-        if (this.client.status === 'ready') {
+        if ((this.client.status as string) === 'ready') {
             console.log('[RedisCache] Already connected to Redis.');
             return;
         }
 
+        // If auto-connect is in progress, wait for it
+        if (this.connectionPromise) {
+            try {
+                await this.connectionPromise;
+                if ((this.client.status as string) === 'ready') {
+                    console.log('[RedisCache] Connected via auto-connect.');
+                    return;
+                }
+            } catch (error) {
+                console.warn('[RedisCache] Auto-connect promise failed:', error);
+            }
+        }
+
         try {
-            console.log('[RedisCache] Attempting to connect to Redis...');
+            console.log('[RedisCache] Manually connecting to Redis...');
             await this.client.connect();
-            console.log('[RedisCache] Connection attempt completed.');
+            console.log('[RedisCache] Manual connection attempt completed.');
         } catch (error) {
             console.error('[RedisCache] Failed to connect to Redis:', error);
             throw error;

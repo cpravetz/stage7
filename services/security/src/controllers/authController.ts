@@ -3,7 +3,7 @@ import { AsyncRequestHandler } from '../types/express';
 import { AuthenticationService } from '../services/AuthenticationService';
 import { TokenService } from '../services/TokenService';
 import { TokenType } from '../models/Token';
-import { analyzeError } from '@cktmcs/errorhandler';
+import { analyzeError } from '@cktmcs/shared';
 import { MongoUserRepository } from '../repositories/MongoUserRepository';
 import { MongoTokenRepository } from '../repositories/MongoTokenRepository';
 import { MongoTokenBlacklistRepository } from '../repositories/MongoTokenBlacklistRepository';

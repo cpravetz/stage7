@@ -13,7 +13,9 @@
     "baseUrl": ".",
     "paths": {
       "@cktmcs/shared": ["../../shared/dist"],
-      "@cktmcs/shared/*": ["../../shared/dist/*"]
+      "@cktmcs/shared/*": ["../../shared/dist/*"],
+      "@cktmcs/sdk": ["../../sdk/dist"],
+      "@cktmcs/sdk/*": ["../../sdk/dist/*"]
     },
 
     "resolveJsonModule": true,           // Allow importing JSON modules

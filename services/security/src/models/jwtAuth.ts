@@ -7,100 +7,10 @@ import path from 'path';
 import jwt from 'jsonwebtoken';
 import axios from 'axios';
 import { setTimeout } from 'timers/promises';
+import { serviceRegistry } from './serviceRegistry';
 
-// Service Registry
-interface ServiceCredential {
-  id: string;
-  secret: string;
-  roles: string[];
-}
-
-// Define service types and their credentials
-const serviceRegistry: Record<string, ServiceCredential> = {
-  'PostOffice': {
-    id: 'PostOffice',
-    secret: process.env.POSTOFFICE_SECRET || 'stage7AuthSecret',
-    roles: ['message:send', 'message:receive', 'service:discover']
-  },
-  'MissionControl': {
-    id: 'MissionControl',
-    secret: process.env.MISSIONCONTROL_SECRET || 'stage7AuthSecret',
-    roles: ['mission:manage', 'agent:control']
-  },
-  'Brain': {
-    id: 'Brain',
-    secret: process.env.BRAIN_SECRET || 'stage7AuthSecret',
-    roles: ['llm:invoke']
-  },
-  'Librarian': {
-    id: 'Librarian',
-    secret: process.env.LIBRARIAN_SECRET || 'stage7AuthSecret',
-    roles: ['data:read', 'data:write']
-  },
-  'Engineer': {
-    id: 'Engineer',
-    secret: process.env.ENGINEER_SECRET || 'stage7AuthSecret',
-    roles: ['plugin:execute']
-  },
-  'TrafficManager': {
-    id: 'TrafficManager',
-    secret: process.env.TRAFFICMANAGER_SECRET || 'stage7AuthSecret',
-    roles: ['traffic:manage']
-  },
-  'CapabilitiesManager': {
-    id: 'CapabilitiesManager',
-    secret: process.env.CAPABILITIESMANAGER_SECRET || 'stage7AuthSecret',
-    roles: ['capability:manage']
-  },
-  'AgentSet': {
-    id: 'AgentSet',
-    secret: process.env.AGENTSET_SECRET || 'stage7AuthSecret',
-    roles: ['agent:manage']
-  },
-  'ServiceDiscovery': {
-    id: 'ServiceDiscovery',
-    secret: process.env.CAPABILITIESMANAGER_SECRET || 'stage7AuthSecret',
-    roles: ['service:discover']
-  },
-  'MarketplaceMongoRepository': {
-    id: 'MarketplaceMongoRepository',
-    secret: process.env.CAPABILITIESMANAGER_SECRET || 'stage7AuthSecret',
-    roles: ['data:read', 'data:write']
-  },
-  'LibrarianDefinitionRepository': {
-    id: 'LibrarianDefinitionRepository',
-    secret: process.env.LIBRARIAN_SECRET || 'stage7AuthSecret',
-    roles: ['data:read', 'data:write']
-  },
-  'Agent': {
-    id: 'Agent',
-    secret: process.env.AGENTSET_SECRET || 'stage7AuthSecret',
-    roles: ['service:basic']
-  },
-  'CapabilitiesManagerConfig': {
-    id: 'CapabilitiesManagerConfig',
-    secret: process.env.CAPABILITIESMANAGER_SECRET || 'stage7AuthSecret',
-    roles: ['service:basic']
-  },
-  // Add other services as needed
-  'ErrorHandler': {
-    id: 'ErrorHandler',
-    secret: process.env.ERRORHANDLER_SECRET || 'stage7AuthSecret',
-    roles: ['error:assess']
-  },
-  'SecurityManager': {
-    id: 'SecurityManager',
-    secret: process.env.SECURITYMANAGER_SECRET || 'stage7AuthSecret',
-    roles: ['user:manage', 'token:manage', 'auth:manage']
-  },
-  'TestClient': {
-    id: 'TestClient',
-    secret: 'stage7AuthSecret',
-    roles: ['test:run']
-  },
-  
-  
-};
+// Removed duplicate serviceRegistry definition - now imported from serviceRegistry.ts
+// This is the single source of truth for service credentials and roles
 
 // Load keys
 let PRIVATE_KEY: string;

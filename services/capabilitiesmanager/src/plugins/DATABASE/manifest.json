@@ -1,0 +1,49 @@
+{
+  "id": "plugin-DATABASE",
+  "name": "DATABASE",
+  "version": "1.0.0",
+  "description": "DATABASE plugin for cktMCS backend services",
+  "author": "Backend Services",
+  "license": "MIT",
+  "type": "backend",
+  "category": "database",
+  "actions": [
+    {
+      "id": "create_table",
+      "name": "Create Table",
+      "description": "Execute create table operation"
+    },
+    {
+      "id": "alter_table",
+      "name": "Alter Table",
+      "description": "Execute alter table operation"
+    },
+    {
+      "id": "drop_table",
+      "name": "Drop Table",
+      "description": "Execute drop table operation"
+    },
+    {
+      "id": "run_migration",
+      "name": "Run Migration",
+      "description": "Execute run migration operation"
+    },
+    {
+      "id": "rollback",
+      "name": "Rollback",
+      "description": "Execute rollback operation"
+    },
+    {
+      "id": "list_tables",
+      "name": "List Tables",
+      "description": "Execute list tables operation"
+    }
+  ],
+  "capabilities": {
+    "error_handling": true,
+    "logging": true,
+    "in_memory_storage": true,
+    "thread_safe": true
+  },
+  "verb": "DATABASE"
+}

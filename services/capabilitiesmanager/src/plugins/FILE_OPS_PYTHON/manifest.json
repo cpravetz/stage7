@@ -1,6 +1,6 @@
 {
   "id": "plugin-FILE_OPS_PYTHON",
-  "verb": "FILE_OPERATION",
+  "verb": "FILE_OPS_PYTHON",
   "description": "Provides services for file operations: read, write, append",
   "explanation": "This plugin takes a path and optional content and executes the selected operation. Python version with enhanced security and error handling.",
   "inputGuidance": "**CRITICAL for FILE_OPERATION content:** The `content` input for `FILE_OPERATION` MUST always be a `string`. Do NOT use boolean outputs (e.g., `success` from `CHAT` verbs) as content for `FILE_OPERATION`. FILE_OPERATION requires 'path' or 'fileId' and 'operation' inputs.  The path or file MUST be created in this step or confirmed to be created by a previous step. Ensure your plans do not refer to files or folders that you are not sure exist. Written files are shared with the user and this is the best way to share workproducts.",
@@ -9,17 +9,24 @@
       "name": "path",
       "required": false,
       "type": "string",
-      "description": "The path for the filename to read, write, or append content (relative paths only for security)"
-    ,
-      "aliases": ["filePath", "fileName", "filename", "pathName"]
+      "description": "The path for the filename to read, write, or append content (relative paths only for security)",
+      "aliases": [
+        "filePath",
+        "fileName",
+        "filename",
+        "pathName"
+      ]
     },
     {
       "name": "fileId",
       "required": false,
       "type": "string",
-      "description": "File ID from MissionFile system (alternative to path). When provided, the file will be read from the Librarian service using this ID."
-    ,
-      "aliases": ["file_id", "id", "missionFileId"]
+      "description": "File ID from MissionFile system (alternative to path). When provided, the file will be read from the Librarian service using this ID.",
+      "aliases": [
+        "file_id",
+        "id",
+        "missionFileId"
+      ]
     },
     {
       "name": "operation",
@@ -31,9 +38,13 @@
       "name": "content",
       "required": false,
       "type": "string",
-      "description": "For write and append operations, the content to write or append"
-    ,
-      "aliases": ["body", "text", "data", "fileContent"]
+      "description": "For write and append operations, the content to write or append",
+      "aliases": [
+        "body",
+        "text",
+        "data",
+        "fileContent"
+      ]
     }
   ],
   "outputDefinitions": [
@@ -75,7 +86,13 @@
       "fileSystemAccess": {
         "allowAbsolutePaths": false,
         "allowPathTraversal": false,
-        "allowedExtensions": [".txt", ".json", ".md", ".csv", ".log"],
+        "allowedExtensions": [
+          ".txt",
+          ".json",
+          ".md",
+          ".csv",
+          ".log"
+        ],
         "maxFileSize": 10485760
       }
     },

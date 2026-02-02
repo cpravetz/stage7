@@ -1,19 +1,23 @@
 # Use an official Node.js runtime as the base image
-FROM node:20-slim
+FROM node:20-bullseye
+
+# Install wget for healthchecks
+RUN apt-get update && apt-get install -y wget --no-install-recommends && rm -rf /var/lib/apt/lists/*
 
 # Set the working directory in the container
 WORKDIR /usr/src/app
 
-# Install wget for healthcheck
-RUN apt-get update && apt-get install -y wget && rm -rf /var/lib/apt/lists/*
-
 # Copy package.json and package-lock.json to the container
 COPY package*.json ./
+COPY package-lock.json ./
 COPY services/librarian/package*.json ./services/librarian/
+COPY errorhandler/package*.json ./errorhandler/
 COPY shared/package*.json ./shared/
 
-# Install dependencies
-RUN npm install --workspace=shared
+# Install the application dependencies
+RUN npm install
+RUN cd shared && npm install
+RUN cd errorhandler && npm install
 RUN npm install --workspace=services/librarian
 
 # Copy the shared module

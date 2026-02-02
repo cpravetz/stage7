@@ -10,7 +10,7 @@ import {
   Alert,
   Grid,
   Divider
-} from '@mui/material';
+} from '@mui/material/index.js';
 import { API_BASE_URL } from '../config';
 import { SecurityClient } from '../SecurityClient';
 
@@ -111,13 +111,13 @@ const ModelFeedbackForm: React.FC<ModelFeedbackFormProps> = ({
 
       <Box component="form" onSubmit={handleSubmit}>
         <Grid container spacing={2}>
-          <Grid item xs={12}>
+          <Grid {...({ xs: 12, item: true } as any)}>
             <Typography variant="subtitle2" gutterBottom>
               Model: {modelName}
             </Typography>
           </Grid>
 
-          <Grid item xs={12} sm={6}>
+          <Grid {...({ xs: 12, sm: 6, item: true } as any)}>
             <Box sx={{ mb: 2 }}>
               <Typography component="legend">Relevance</Typography>
               <Rating
@@ -131,7 +131,7 @@ const ModelFeedbackForm: React.FC<ModelFeedbackFormProps> = ({
             </Box>
           </Grid>
 
-          <Grid item xs={12} sm={6}>
+          <Grid {...({ xs: 12, sm: 6, item: true } as any)}>
             <Box sx={{ mb: 2 }}>
               <Typography component="legend">Accuracy</Typography>
               <Rating
@@ -145,7 +145,7 @@ const ModelFeedbackForm: React.FC<ModelFeedbackFormProps> = ({
             </Box>
           </Grid>
 
-          <Grid item xs={12} sm={6}>
+          <Grid {...({ xs: 12, sm: 6, item: true } as any)}>
             <Box sx={{ mb: 2 }}>
               <Typography component="legend">Helpfulness</Typography>
               <Rating
@@ -159,7 +159,7 @@ const ModelFeedbackForm: React.FC<ModelFeedbackFormProps> = ({
             </Box>
           </Grid>
 
-          <Grid item xs={12} sm={6}>
+          <Grid {...({ xs: 12, sm: 6, item: true } as any)}>
             <Box sx={{ mb: 2 }}>
               <Typography component="legend">Creativity</Typography>
               <Rating
@@ -173,7 +173,7 @@ const ModelFeedbackForm: React.FC<ModelFeedbackFormProps> = ({
             </Box>
           </Grid>
 
-          <Grid item xs={12}>
+          <Grid {...({ xs: 12, item: true } as any)}>
             <Box sx={{ mb: 2 }}>
               <Typography component="legend">Overall</Typography>
               <Rating
@@ -188,7 +188,7 @@ const ModelFeedbackForm: React.FC<ModelFeedbackFormProps> = ({
             </Box>
           </Grid>
 
-          <Grid item xs={12}>
+          <Grid {...({ xs: 12, item: true } as any)}>
             <TextField
               fullWidth
               label="Comments"
@@ -200,7 +200,7 @@ const ModelFeedbackForm: React.FC<ModelFeedbackFormProps> = ({
             />
           </Grid>
 
-          <Grid item xs={12}>
+          <Grid {...({ xs: 12, item: true } as any)}>
             <Button
               type="submit"
               variant="contained"

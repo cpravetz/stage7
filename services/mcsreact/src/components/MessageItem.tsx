@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, Typography, Paper, Divider, useTheme } from '@mui/material';
+import { Box, Typography, Paper, Divider, useTheme } from '@mui/material/index.js';
 import ReactMarkdown from 'react-markdown';
 import { ConversationMessage } from '../shared-browser';
 
@@ -12,6 +12,20 @@ const MessageItem: React.FC<MessageItemProps> = ({ message }) => {
 
   // Determine if it's a user message based on the sender property
   const isUser = message.sender === 'user';
+  
+  // Extract string content if message.content is an object with a message property
+  let displayContent = message.content;
+  if (typeof message.content === 'object' && message.content !== null) {
+    if ('message' in message.content && typeof (message.content as any).message === 'string') {
+      displayContent = (message.content as any).message;
+    } else if ('text' in message.content && typeof (message.content as any).text === 'string') {
+      displayContent = (message.content as any).text;
+    } else {
+      // If it's still an object and not a simple message, stringify it
+      // This shouldn't happen for user-intended messages after filtering
+      displayContent = JSON.stringify(message.content);
+    }
+  }
 
   return (
     <Paper
@@ -125,7 +139,7 @@ const MessageItem: React.FC<MessageItemProps> = ({ message }) => {
           }
         }}
       >
-        {message.content}
+        {String(displayContent)}
       </ReactMarkdown>
     </Paper>
   );

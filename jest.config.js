@@ -13,6 +13,7 @@ module.exports = {
   ],
   moduleNameMapper: {
     '^@cktmcs/shared$': '<rootDir>/shared/src',
+    '^@cktmcs/sdk$': '<rootDir>/sdk/src',
     '^@cktmcs/errorhandler$': '<rootDir>/errorhandler/src',
     '^@cktmcs/marketplace/(.*)$': '<rootDir>/marketplace/src/$1',
     '^../src/(.*)$': '<rootDir>/marketplace/src/$1',

@@ -37,7 +37,6 @@ describe('AgentPersistenceManager', () => {
         dependencies: [],
         capabilitiesManagerUrl: '',
         brainUrl: '',
-        trafficManagerUrl: '',
         librarianUrl: '',
         conversation: [],
         missionContext: '',

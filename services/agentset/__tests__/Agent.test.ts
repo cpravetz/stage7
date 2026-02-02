@@ -58,6 +58,14 @@ const createMockAgentConfig = (id = mockUuidv4(), overrides: Partial<AgentConfig
     inputs: new Map(),
     agentSetUrl: 'http://localhost:9001', // Mock agentSetUrl
     dependencies: [],
+    agentSet: { // Mock AgentSet
+        agents: new Map(),
+        registerStepLocation: jest.fn(),
+        url: 'http://localhost:9001',
+        ownershipTransferManager: { // Mock minimal properties for OwnershipTransferManager
+            transferStep: jest.fn().mockResolvedValue({ success: true })
+        }
+    },
     ...overrides,
 });
 
@@ -85,8 +93,8 @@ describe('Agent', () => {
         mockGetSvcUrls.mockResolvedValue({
             capabilitiesManagerUrl: 'http://localhost:9002',
             brainUrl: 'http://localhost:9003',
-            trafficManagerUrl: 'http://localhost:9004',
             librarianUrl: 'http://localhost:9005',
+            missionControlUrl: 'http://localhost:9006', // Add missionControlUrl
         });
 
         // Ensure AgentPersistenceManager and StateManager mocks are clean and provide basic functionality
@@ -129,6 +137,10 @@ describe('Agent', () => {
         mockConfig = createMockAgentConfig();
         // @ts-ignore // BaseEntity constructor expects different params, simplify for test
         agent = new Agent(mockConfig);
+        // Set up the agents map for agent.agentSet for tests that access agent.agentSet.agents
+        (agent as any).agentSet.agents.set(agent.id, agent);
+        // Set up the agents map for agent.agentSet for tests that access agent.agentSet.agents
+        (agent as any).agentSet.agents.set(agent.id, agent);
         // agent.authenticatedApi is initialized within BaseEntity's constructor,
         // which calls new AuthenticatedApiClient(), which calls createAuthenticatedAxios(),
         // which calls axios.create(). So agent.authenticatedApi should be the mockAxiosInstance.
@@ -145,7 +157,7 @@ describe('Agent', () => {
         // jest.spyOn(console, 'warn').mockImplementation(() => {});
         // jest.spyOn(console, 'error').mockImplementation(() => {});
         jest.spyOn(agent, 'say').mockImplementation(() => {});
-        jest.spyOn(agent, 'notifyTrafficManager').mockImplementation(async () => {});
+
         jest.spyOn(agent, 'saveAgentState').mockImplementation(async () => {});
     });
 
@@ -196,7 +208,6 @@ describe('Agent', () => {
             expect(mockStep.status).toBe(StepStatus.COMPLETED);
             expect(mockStep.description).toBe('New description');
             expect(mockStep.inputs.get('newInput')?.inputValue).toBe('newValue');
-            expect(agent.notifyTrafficManager).toHaveBeenCalled();
             expect(agent.saveAgentState).toHaveBeenCalled();
         });
 
@@ -227,7 +238,6 @@ describe('Agent', () => {
             expect(mockStep.status).toBe(StepStatus.RUNNING);
             expect(mockStep.description).toBe(originalDescription); // Description should not change
             expect(mockLogEvent).toHaveBeenCalledWith(expect.objectContaining({ eventType: 'collaboration_task_updated' }));
-            expect(agent.notifyTrafficManager).toHaveBeenCalled();
             expect(agent.saveAgentState).toHaveBeenCalled();
         });
 
@@ -356,7 +366,6 @@ describe('Agent', () => {
 
             expect(mockStep.status).toBe(originalStatus);
             expect(mockStep.description).toBe(originalDescription);
-            expect(agent.notifyTrafficManager).not.toHaveBeenCalled();
             expect(agent.saveAgentState).not.toHaveBeenCalled();
              expect(mockLogEvent).not.toHaveBeenCalledWith(expect.objectContaining({ eventType: 'collaboration_task_updated' }));
         });
@@ -400,7 +409,6 @@ describe('Agent', () => {
             expect(step1.applyModifications).toHaveBeenCalledWith(modifications);
             expect(step1.status).toBe(StepStatus.PENDING);
             expect(mockLogEvent).toHaveBeenCalledWith(expect.objectContaining({ eventType: 'conflict_step_modified', stepId: 's1' }));
-            expect(agent.notifyTrafficManager).toHaveBeenCalled();
             expect(agent.saveAgentState).toHaveBeenCalled();
         });
 
@@ -446,7 +454,6 @@ describe('Agent', () => {
             expect(agent.steps[1].actionVerb).toBe('NEW_VERB_1');
             expect(agent.status).toBe(AgentStatus.RUNNING);
             expect(mockLogEvent).toHaveBeenCalledWith(expect.objectContaining({ eventType: 'conflict_plan_replaced' }));
-            expect(agent.notifyTrafficManager).toHaveBeenCalled();
             createFromPlanSpy.mockRestore(); // Clean up spy
         });
 
@@ -459,7 +466,6 @@ describe('Agent', () => {
             expect(step1.status).toBe(StepStatus.PENDING);
             expect(step1.clearTempData).toHaveBeenCalled();
             expect(mockLogEvent).toHaveBeenCalledWith(expect.objectContaining({ eventType: 'conflict_step_retry', stepId: 's1' }));
-            expect(agent.notifyTrafficManager).toHaveBeenCalled();
         });
 
         it('should log error if RETRY_STEP is for a non-existent stepId', async () => {
@@ -575,7 +581,6 @@ describe('Agent', () => {
                 await agent.handleCoordination(coordination);
                 expect(step1.status).toBe(StepStatus.PENDING);
                 expect(mockLogEvent).toHaveBeenCalledWith(expect.objectContaining({ eventType: 'step_unpaused_by_signal', stepId: 's1' }));
-                expect(agent.notifyTrafficManager).toHaveBeenCalled();
             });
 
             it('should unpause multiple steps awaiting the same signal', async () => {
@@ -594,7 +599,6 @@ describe('Agent', () => {
                 expect(step3.status).toBe(StepStatus.PENDING);
                 expect(mockLogEvent).toHaveBeenCalledWith(expect.objectContaining({ eventType: 'step_unpaused_by_signal', stepId: 's1' }));
                 expect(mockLogEvent).toHaveBeenCalledWith(expect.objectContaining({ eventType: 'step_unpaused_by_signal', stepId: 's3' }));
-                expect(agent.notifyTrafficManager).toHaveBeenCalledTimes(1); // Should be called once even if multiple steps unpaused
             });
 
             it('should not change step status if signal is not for it or step not PAUSED', async () => {
@@ -609,7 +613,6 @@ describe('Agent', () => {
                 await agent.handleCoordination(coordination);
                 expect(step1.status).toBe(StepStatus.PAUSED); // s1 was waiting for sig123
                 expect(step2.status).toBe(originalStep2status); // s2 was not PAUSED
-                expect(agent.notifyTrafficManager).not.toHaveBeenCalled();
             });
 
             it('should log if AWAIT_SIGNAL is received (not the signal itself)', async () => {
@@ -764,7 +767,6 @@ describe('Agent', () => {
             expect(step1.status).toBe(StepStatus.PENDING);
             expect(mockLogEvent).toHaveBeenCalledWith(expect.objectContaining({ eventType: 'step_inputs_updated_by_resource', stepId: 's1' }));
             expect(mockLogEvent).toHaveBeenCalledWith(expect.objectContaining({ eventType: 'step_unblocked_by_resource', stepId: 's1' }));
-            expect(agent.notifyTrafficManager).toHaveBeenCalled();
             expect(agent.pendingResourceRequests.has(requestId)).toBe(false);
             expect(agent.saveAgentState).toHaveBeenCalled();
         });
@@ -776,7 +778,6 @@ describe('Agent', () => {
             expect(step1.status).toBe(StepStatus.PENDING);
              expect(mockLogEvent).not.toHaveBeenCalledWith(expect.objectContaining({ eventType: 'step_inputs_updated_by_resource'})); // No data to update inputs with
             expect(mockLogEvent).toHaveBeenCalledWith(expect.objectContaining({ eventType: 'step_unblocked_by_resource', stepId: 's1' }));
-            expect(agent.notifyTrafficManager).toHaveBeenCalled();
         });
 
         it('should not change step status if step was not PAUSED for granted response', async () => {
@@ -785,7 +786,6 @@ describe('Agent', () => {
             await agent.processResourceResponse(response);
 
             expect(step1.status).toBe(StepStatus.RUNNING); // Status should remain unchanged
-            expect(agent.notifyTrafficManager).not.toHaveBeenCalled(); // Not called if step wasn't unblocked from PAUSED
         });
 
         it('should process denied response, set step to ERROR, and agent to PLANNING', async () => {
@@ -795,7 +795,6 @@ describe('Agent', () => {
             expect(step1.status).toBe(StepStatus.ERROR);
             expect(agent.status).toBe(AgentStatus.PLANNING);
             expect(mockLogEvent).toHaveBeenCalledWith(expect.objectContaining({ eventType: 'step_failed_resource_denial', stepId: 's1' }));
-            expect(agent.notifyTrafficManager).toHaveBeenCalled();
             expect(agent.pendingResourceRequests.has(requestId)).toBe(false);
         });
 
@@ -837,7 +836,6 @@ describe('Agent', () => {
             // The code `const affectedStep = this.steps.find(s => s.id === pendingRequestInfo.stepId);` will result in affectedStep being undefined.
             // So, agent status will not change to PLANNING, and step status won't change.
             expect(agent.status).toBe(AgentStatus.RUNNING);
-            expect(agent.notifyTrafficManager).not.toHaveBeenCalled(); // No step was directly affected to trigger this in that path
             expect(agent.pendingResourceRequests.has('reqDeniedNoStep')).toBe(false); // Request should still be cleared
         });
 

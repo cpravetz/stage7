@@ -1,6 +1,6 @@
 import { MongoClient, Collection } from 'mongodb';
 import { Token } from '../models/Token';
-import { analyzeError } from '@cktmcs/errorhandler';
+import { analyzeError } from '@cktmcs/shared';
 
 /**
  * Token repository for interacting with MongoDB directly

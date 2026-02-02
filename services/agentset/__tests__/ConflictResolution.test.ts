@@ -6,7 +6,18 @@ import axios from 'axios';
 
 // Mock dependencies
 jest.mock('axios');
-jest.mock('../src/agents/Agent');
+jest.mock('../src/agents/Agent', () => {
+    return {
+        Agent: jest.fn().mockImplementation((config) => {
+            return {
+                id: config.id || 'mock-agent-id',
+                missionId: config.missionId || 'mock-mission-id',
+                handleCollaborationMessage: jest.fn(),
+                // Add other methods that might be called on Agent instances
+            };
+        }),
+    };
+});
 
 const mockAxios = axios as jest.Mocked<typeof axios>;
 
@@ -16,21 +27,51 @@ describe('ConflictResolution', () => {
   let mockAgent: jest.Mocked<Agent>;
 
   beforeEach(() => {
-    mockAgents = new Map<string, Agent>();
-    conflictResolution = new ConflictResolution(mockAgents, 'trafficmanager:5080', 'brain:5070');
+    jest.clearAllMocks();
 
-    // Create a mock agent
+    mockAgents = new Map<string, Agent>();
+    conflictResolution = new ConflictResolution(mockAgents, 'brain:5070');
+
+    // Mock the get method of mockAgents to return mockAgent with missionId
+    jest.spyOn(mockAgents, 'get').mockImplementation((agentId) => {
+        if (agentId === 'participant-agent') {
+            return {
+                id: 'participant-agent',
+                missionId: 'test-mission',
+                handleCollaborationMessage: jest.fn().mockResolvedValue(undefined)
+            } as any;
+        }
+        if (agentId === 'initiator-agent') {
+            return {
+                id: 'initiator-agent',
+                missionId: 'test-mission'
+            } as any;
+        }
+        return undefined;
+    });
+
+    // Create a mock agent for direct access in tests
     mockAgent = new Agent({
-      id: 'participant-agent',
-      missionId: 'test-mission',
-      actionVerb: 'TEST',
-      agentSetUrl: 'http://localhost:9001',
+        id: 'participant-agent',
+        missionId: 'test-mission',
     }) as jest.Mocked<Agent>;
 
-    // Mock agent methods
-    mockAgent.handleCollaborationMessage.mockResolvedValue(undefined);
-
     mockAgents.set('participant-agent', mockAgent);
+
+    // Suppress console logs
+    consoleLogSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+    consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    // Mock findAgentLocation and authenticatedApi.post for MissionControl calls
+    jest.spyOn(conflictResolution as any, 'findAgentLocation').mockResolvedValue('http://mock-agentset-url');
+    (conflictResolution as any).authenticatedApi.post.mockImplementation((url: string, data: any) => {
+        if (url.includes('escalateConflict')) {
+            return Promise.resolve({ status: 200, data: {} });
+        }
+        // Default behavior for other authenticatedApi.post calls
+        return Promise.resolve({ status: 200, data: {} });
+    });
   });
 
   describe('createConflict', () => {

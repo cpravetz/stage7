@@ -5,7 +5,7 @@ import { Agent } from '../agents/Agent';
 import { CollaborationMessageType, TaskDelegationRequest, TaskDelegationResponse, TaskResult, createCollaborationMessage } from './CollaborationProtocol';
 import * as amqp from 'amqplib';
 import * as amqp_connection_manager from 'amqp-connection-manager';
-import { ServiceTokenManager } from '@cktmcs/shared';
+import { ServiceTokenManager, createAuthenticatedAxios } from '@cktmcs/shared';
 
 
 // Import AgentStatus from utils
@@ -27,17 +27,17 @@ export enum TaskStatus {
 
 export class TaskDelegation {
   private agents: Map<string, Agent>;
-  private trafficManagerUrl: string;
   private tokenManager: ServiceTokenManager;
   private ownershipTransferManager: OwnershipTransferManager;
+  private missionControlUrl: string;
+  private authenticatedApi: any;
 
   private connection: amqp_connection_manager.AmqpConnectionManager | null = null;
   private channel: amqp_connection_manager.ChannelWrapper | null = null;
   private pendingDelegations: Map<string, { request: TaskDelegationRequest, delegatorId: string, recipientId: string, resolve: (response: TaskDelegationResponse) => void, reject: (error: Error) => void, timeout: NodeJS.Timeout }> = new Map(); // Map<taskId, delegationInfo>
 
-  constructor(agents: Map<string, Agent>, trafficManagerUrl: string, ownershipTransferManager: OwnershipTransferManager) {
+  constructor(agents: Map<string, Agent>, ownershipTransferManager: OwnershipTransferManager) {
     this.agents = agents;
-    this.trafficManagerUrl = trafficManagerUrl;
     this.ownershipTransferManager = ownershipTransferManager;
 
     // Initialize token manager for service-to-service authentication
@@ -49,6 +49,14 @@ export class TaskDelegation {
         serviceId,
         serviceSecret
     );
+
+    this.authenticatedApi = createAuthenticatedAxios({
+        serviceId: serviceId,
+        securityManagerUrl: `http://${securityManagerUrl}`,
+        clientSecret: serviceSecret,
+    });
+
+    this.missionControlUrl = process.env.MISSIONCONTROL_URL?.startsWith('http') ? process.env.MISSIONCONTROL_URL : `http://${process.env.MISSIONCONTROL_URL || 'missioncontrol:5030'}`;
 
     // Initialize RabbitMQ
     this.initRabbitMQ();
@@ -81,6 +89,7 @@ export class TaskDelegation {
     if (!msg) return;
 
     try {
+      console.log('TaskDelegation received raw status update message:', msg.content.toString());
       const { agentId, status } = JSON.parse(msg.content.toString());
 
       console.log(`TaskDelegation received status update for agent ${agentId}: ${status}`);
@@ -144,7 +153,7 @@ export class TaskDelegation {
       const recipientAgent = this.agents.get(recipientId);
 
       if (!recipientAgent) {
-        const agentLocation = await this.findAgentLocation(recipientId);
+        const agentLocation = await this.findAgentLocation(recipientId, delegatorId);
         if (!agentLocation) {
           return { taskId: request.taskId, accepted: false, reason: `Agent ${recipientId} not found` };
         }
@@ -244,31 +253,24 @@ export class TaskDelegation {
   /**
    * Find the location of an agent
    * @param agentId Agent ID
+   * @param missionId Mission ID
    * @returns Agent set URL or undefined if not found
    */
-  private async findAgentLocation(agentId: string): Promise<string | undefined> {
+  private async findAgentLocation(agentId: string, missionId: string): Promise<string | undefined> {
     try {
-      // Get a token for authentication
-      const token = await this.tokenManager.getToken();
-
-      const response = await axios.get(`http://${this.trafficManagerUrl}/getAgentLocation/${agentId}`, {
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
+        const response = await this.authenticatedApi.get(`${this.missionControlUrl}/agentSetUrlForAgent/${agentId}`, {
+            params: {
+                missionId: missionId
+            }
+        });
+        if (response.status === 200 && response.data.url) {
+            return response.data.url;
         }
-      });
-
-      if (response.data && response.data.agentSetUrl) {
-        return response.data.agentSetUrl;
-      }
-
-      return undefined;
+        return undefined;
     } catch (error) {
-      analyzeError(error as Error);
-      console.error('Error finding agent location:', error);
-      return undefined;
+        analyzeError(error as Error);
+        console.error(`Error finding agent location for ${agentId} via MissionControl:`, error instanceof Error ? error.message : error);
+        return undefined;
     }
   }
-
-
 }

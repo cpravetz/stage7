@@ -205,7 +205,6 @@ describe('ServiceDiscoveryManager', () => {
             expect(services).toEqual({
                 capabilitiesManagerUrl: MOCK_CAPABILITIES_URL, // From local registry
                 brainUrl: MOCK_BRAIN_URL, // From env
-                trafficManagerUrl: 'trafficmanager:5080', // From default
                 librarianUrl: 'librarian:5040',
                 missionControlUrl: 'missioncontrol:5030',
                 engineerUrl: 'engineer:5050',
@@ -223,7 +222,6 @@ describe('ServiceDiscoveryManager', () => {
             expect(services).toEqual({
                 capabilitiesManagerUrl: 'capabilitiesmanager:5060',
                 brainUrl: 'brain:5070',
-                trafficManagerUrl: 'trafficmanager:5080',
                 librarianUrl: 'librarian:5040',
                 missionControlUrl: 'missioncontrol:5030',
                 engineerUrl: 'engineer:5050',

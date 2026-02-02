@@ -3,7 +3,7 @@ import { AsyncRequestHandler } from '../types/express';
 import { User } from '../models/User';
 import { updateUser, findUserById, findUserByEmail } from '../services/userService';
 import { AuthorizationService } from '../services/AuthorizationService';
-import { analyzeError } from '@cktmcs/errorhandler';
+import { analyzeError } from '@cktmcs/shared';
 
 // Initialize services
 const authorizationService = new AuthorizationService();

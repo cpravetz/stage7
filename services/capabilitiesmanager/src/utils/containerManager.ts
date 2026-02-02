@@ -109,6 +109,7 @@ export class ContainerManager {
      */
     async startPluginContainer(
         pluginManifest: ContainerPluginManifest,
+        environment: any,
         trace_id: string
     ): Promise<ContainerInstance> {
         const source_component = "ContainerManager.startPluginContainer";
@@ -122,13 +123,26 @@ export class ContainerManager {
                 ports: {
                     [`${pluginManifest.container.ports[0]?.container || 8080}/tcp`]: hostPort
                 },
-                environment: pluginManifest.container.environment,
+                // We will build the environment array manually below
+                environment: {}, 
                 memory: pluginManifest.container.resources.memory,
                 cpu: pluginManifest.container.resources.cpu,
                 name: `stage7-plugin-${pluginManifest.id}-${uuidv4().substring(0, 8)}`,
                 detach: true,
                 autoRemove: false
             };
+
+            // Combine environment variables from manifest, execution context, and credentials
+            const combinedEnv = {
+                ...(pluginManifest.container.environment || {}),
+                ...(environment.env || {})
+            };
+            const credsArray = (environment.credentials || []).map((cred: {key: string, value: string}) => `${cred.key}=${cred.value}`);
+            const finalEnv = [
+                ...Object.entries(combinedEnv).map(([key, value]) => `${key}=${value}`),
+                ...credsArray
+            ];
+
 
             console.log(`[${trace_id}] ${source_component}: Starting container for plugin ${pluginManifest.id} on port ${hostPort}`);
 
@@ -144,7 +158,7 @@ export class ContainerManager {
                     CpuShares: this.parseCpuShares(runOptions.cpu),
                     AutoRemove: runOptions.autoRemove
                 },
-                Env: Object.entries(runOptions.environment).map(([key, value]) => `${key}=${value}`),
+                Env: finalEnv,
                 name: runOptions.name
             });
 

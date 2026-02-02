@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
-import { Box, Paper, Typography, TextField, Button, Link, Alert, Container, Avatar, useTheme } from '@mui/material';
-import LockOutlinedIcon from '@mui/icons-material/LockOutlined';
-import PersonAddIcon from '@mui/icons-material/PersonAdd';
+import { Box, Paper, Typography, TextField, Button, Link, Alert, Container, Avatar, useTheme } from '@mui/material/index.js';
+import { LockOutlined as LockOutlinedIcon, PersonAdd as PersonAddIcon  } from '@mui/icons-material';
 import { motion } from 'framer-motion';
 
 interface LoginProps {

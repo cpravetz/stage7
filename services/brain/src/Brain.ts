@@ -10,6 +10,12 @@ import { analyzeError } from '@cktmcs/errorhandler';
 import { v4 as uuidv4 } from 'uuid';
 import { redisCache } from '@cktmcs/shared';
 import crypto from 'crypto';
+
+// Import new model management components
+import { serviceHealthChecker, ServiceHealthChecker } from './utils/ServiceHealthChecker';
+import { modelConfigService, ModelConfigService } from './services/ModelConfigService';
+import { ModelConfiguration } from './types/ModelConfig';
+
 dotenv.config();
 
 interface Thread {
@@ -38,10 +44,19 @@ export class Brain extends BaseEntity {
     private librarianUrl: string | null = null;
     private performanceDataSyncInterval: NodeJS.Timeout | null = null;
     private enrichmentCache: Map<string, any> = new Map<string, any>;
+    
+    // New components for model management
+    private healthChecker: ServiceHealthChecker;
+    private configService: ModelConfigService;
+    private loadedModels: ModelConfiguration[] = [];
+    private modelTimeoutCounts: Record<string, number> = {};
 
     constructor() {
-        super('Brain', 'Brain', `brain`, process.env.PORT || '5020');
+        // Skip initial Consul registration - will register after models are loaded
+        super('Brain', 'Brain', `brain`, process.env.PORT || '5020', false, true);
         this.modelManager = modelManagerInstance;
+        this.healthChecker = serviceHealthChecker;
+        this.configService = modelConfigService;
 
         (async () => {
             try {
@@ -76,9 +91,8 @@ export class Brain extends BaseEntity {
             this.verifyToken(req, res, next);
         });
 
-        app.get('/health', (_req: express.Request, res: express.Response) => {
-            res.json({ status: 'ok', message: 'Brain service is running' });
-        });
+        // Set up unified health check endpoints (/health, /healthy, /ready, /status)
+        this.setupHealthCheck(app);
 
         app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
             console.error('Express error in Brain:', err instanceof Error ? err.message : String(err));
@@ -130,6 +144,218 @@ export class Brain extends BaseEntity {
             }
         });
 
+        // Model Configuration Endpoints
+        app.get('/models/config', async (_req: express.Request, res: express.Response) => {
+            try {
+                const models = await this.configService.getActiveModels();
+                res.json({ models });
+            } catch (error) {
+                console.error('[Brain] Error fetching model configs:', error);
+                res.status(500).json({ error: 'Failed to fetch model configurations' });
+            }
+        });
+
+        app.post('/models', async (req: express.Request, res: express.Response) => {
+            try {
+                const userId = (req as any).user?.id || 'anonymous';
+                const config = req.body?.config || req.body;
+
+                if (!config) {
+                    res.status(400).json({ error: 'Missing model configuration payload' });
+                    return;
+                }
+
+                const created = await this.configService.createModel(config, userId);
+
+                // Refresh in-memory models
+                this.loadedModels = await this.configService.getActiveModels();
+                await this.modelManager.registerModelsFromConfig(this.loadedModels);
+
+                res.status(201).json({ success: true, model: created });
+            } catch (error) {
+                console.error('[Brain] Error creating model config:', error);
+                res.status(500).json({ error: 'Failed to create model configuration' });
+            }
+        });
+
+        app.get('/models/:id', async (req: express.Request, res: express.Response) => {
+            try {
+                const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+                const model = await this.configService.getModel(id);
+                if (!model) {
+                    res.status(404).json({ error: `Model ${id} not found` });
+                    return;
+                }
+                res.json({ model });
+            } catch (error) {
+                console.error('[Brain] Error fetching model config:', error);
+                res.status(500).json({ error: 'Failed to fetch model configuration' });
+            }
+        });
+
+        app.put('/models/:id', async (req: express.Request, res: express.Response) => {
+            try {
+                const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+                const userId = (req as any).user?.id || 'anonymous';
+                const updates = req.body?.updates || req.body?.config || req.body;
+                const reason = req.body?.reason || 'Updated via API';
+
+                if (!updates) {
+                    res.status(400).json({ error: 'Missing updates payload' });
+                    return;
+                }
+
+                const updated = await this.configService.updateModel(id, updates, reason, userId);
+
+                // Refresh in-memory models
+                this.loadedModels = await this.configService.getActiveModels();
+                await this.modelManager.registerModelsFromConfig(this.loadedModels);
+
+                res.json({ success: true, model: updated });
+            } catch (error) {
+                console.error('[Brain] Error updating model config:', error);
+                res.status(500).json({ error: 'Failed to update model configuration' });
+            }
+        });
+
+        app.delete('/models/:id', async (req: express.Request, res: express.Response) => {
+            try {
+                const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+                const userId = (req as any).user?.id || 'anonymous';
+
+                await this.configService.archiveModel(id, userId);
+
+                // Refresh in-memory models
+                this.loadedModels = await this.configService.getActiveModels();
+                await this.modelManager.registerModelsFromConfig(this.loadedModels);
+
+                res.json({ success: true, message: `Model ${id} archived` });
+            } catch (error) {
+                console.error('[Brain] Error archiving model config:', error);
+                res.status(500).json({ error: 'Failed to archive model configuration' });
+            }
+        });
+
+        app.get('/models/health', (_req: express.Request, res: express.Response) => {
+            const allHealth = this.healthChecker.getAllHealthStatus();
+            const healthArray = Array.from(allHealth.values());
+            res.json({ 
+                models: healthArray,
+                timestamp: new Date().toISOString()
+            });
+        });
+
+        app.get('/models/:name/health', (req: express.Request, res: express.Response) => {
+            const name = Array.isArray(req.params.name) ? req.params.name[0] : req.params.name;
+            const health = this.healthChecker.getHealthStatus(name);
+            if (!health) {
+                res.status(404).json({ error: `Model ${name} not found` });
+                return;
+            }
+            res.json(health);
+        });
+
+        app.post('/models/:name/validate', async (req: express.Request, res: express.Response) => {
+            try {
+                const name = Array.isArray(req.params.name) ? req.params.name[0] : req.params.name;
+                const model = await this.configService.getModel(name);
+                if (!model) {
+                    res.status(404).json({ error: `Model ${name} not found` });
+                    return;
+                }
+
+                const isValid = await this.healthChecker.validateModelCredentials(model);
+                const health = this.healthChecker.getHealthStatus(name);
+                
+                res.json({
+                    valid: isValid,
+                    health: health,
+                    timestamp: new Date().toISOString()
+                });
+            } catch (error) {
+                console.error('[Brain] Error validating model:', error);
+                res.status(500).json({ error: 'Failed to validate model' });
+            }
+        });
+
+        app.put('/models/:name/rollout', async (req: express.Request, res: express.Response) => {
+            try {
+                const name = Array.isArray(req.params.name) ? req.params.name[0] : req.params.name;
+                const { percentage } = req.body;
+                const userId = (req as any).user?.id || 'anonymous';
+
+                if (typeof percentage !== 'number' || percentage < 0 || percentage > 100) {
+                    res.status(400).json({ error: 'Rollout percentage must be 0-100' });
+                    return;
+                }
+
+                await this.configService.updateRollout(name, percentage, userId);
+                res.json({ 
+                    success: true, 
+                    message: `Rollout updated to ${percentage}%`,
+                    timestamp: new Date().toISOString()
+                });
+            } catch (error) {
+                console.error('[Brain] Error updating rollout:', error);
+                res.status(500).json({ error: 'Failed to update rollout' });
+            }
+        });
+
+        // Service management endpoints
+        app.get('/services', async (_req: express.Request, res: express.Response) => {
+            try {
+                const services = await this.configService.getServices();
+                res.json({ services, count: services.length });
+            } catch (error) {
+                console.error('[Brain] Error fetching services:', error);
+                res.status(500).json({ error: 'Failed to fetch services' });
+            }
+        });
+
+        app.get('/services/:provider', async (req: express.Request, res: express.Response) => {
+            try {
+                const provider = Array.isArray(req.params.provider) ? req.params.provider[0] : req.params.provider;
+                const services = await this.configService.getServicesByProvider(provider);
+                res.json({ services, count: services.length });
+            } catch (error) {
+                console.error('[Brain] Error fetching services by provider:', error);
+                res.status(500).json({ error: 'Failed to fetch services' });
+            }
+        });
+
+        // Interface management endpoints
+        app.get('/interfaces', async (_req: express.Request, res: express.Response) => {
+            try {
+                const interfaces = await this.configService.getInterfaces();
+                res.json({ interfaces, count: interfaces.length });
+            } catch (error) {
+                console.error('[Brain] Error fetching interfaces:', error);
+                res.status(500).json({ error: 'Failed to fetch interfaces' });
+            }
+        });
+
+        app.get('/interfaces/:serviceName', async (req: express.Request, res: express.Response) => {
+            try {
+                const serviceName = Array.isArray(req.params.serviceName) ? req.params.serviceName[0] : req.params.serviceName;
+                const interfaces = await this.configService.getInterfacesByService(serviceName);
+                res.json({ interfaces, count: interfaces.length });
+            } catch (error) {
+                console.error('[Brain] Error fetching interfaces by service:', error);
+                res.status(500).json({ error: 'Failed to fetch interfaces' });
+            }
+        });
+
+        app.get('/models/by-interface/:interfaceName', async (req: express.Request, res: express.Response) => {
+            try {
+                const interfaceName = Array.isArray(req.params.interfaceName) ? req.params.interfaceName[0] : req.params.interfaceName;
+                const models = await this.configService.getModelsByInterface(interfaceName);
+                res.json({ models, count: models.length });
+            } catch (error) {
+                console.error('[Brain] Error fetching models by interface:', error);
+                res.status(500).json({ error: 'Failed to fetch models' });
+            }
+        });
+
         app.get('/getLLMCalls', (_req: express.Request, res: express.Response) => {
             res.json({ llmCalls: this.llmCalls, activeLLMCalls: this.activeLLMCalls});
         });
@@ -158,8 +384,16 @@ export class Brain extends BaseEntity {
             }
         });
 
-        app.listen(Number(port), '0.0.0.0', () => {
+        app.listen(Number(port), '0.0.0.0', async () => {
             console.log(`Brain service listening at http://0.0.0.0:${port}`);
+            
+            // Initialize models and health checks
+            try {
+                await this.initializeModels();
+            } catch (error) {
+                console.error('[Brain] Failed to initialize models during startup:', error);
+                // Continue anyway; health checks will validate later
+            }
         });
 
         process.on('uncaughtException', (error) => {
@@ -173,9 +407,78 @@ export class Brain extends BaseEntity {
                 analyzeError(reason);
             }
         });
+
+        // Graceful shutdown
+        process.on('SIGTERM', () => {
+            console.log('[Brain] SIGTERM received, stopping health checks');
+            this.healthChecker.stopAllChecks();
+        });
     }
 
-    private modelTimeoutCounts: Record<string, number> = {};
+    /**
+     * Initialize models: hydrate if needed, load configs, validate credentials
+     */
+    private async initializeModels(): Promise<void> {
+        console.log('[Brain] Starting model initialization...');
+
+        try {
+            // Step 0: Bootstrap security token by making an authenticated call
+            // This ensures we have a valid JWT token before attempting hydration
+            console.log('[Brain] Bootstrapping security token...');
+            try {
+                await this.configService.getActiveModels();
+                console.log('[Brain] Security token bootstrapped successfully');
+            } catch (error) {
+                console.warn('[Brain] Token bootstrap attempt failed, proceeding anyway:', error);
+            }
+
+            // Step 1: Hydrate with seed models from JSON if database is empty
+            // This loads models, services, and interfaces from seedData.json
+            // Now safe because token has been obtained/cached
+            await this.configService.hydrate();
+
+            // Step 2: Load active models from config service
+            this.loadedModels = await this.configService.getActiveModels();
+            console.log(`[Brain] Loaded ${this.loadedModels.length} models from config service`);
+
+            if (this.loadedModels.length === 0) {
+                console.warn('[Brain] No models loaded after hydration!');
+                return;
+            }
+
+            // Step 2.5: Register models with ModelManager to create BaseModel instances
+            // This bridges the new config-based system with the legacy BaseModel system
+            const registeredCount = await this.modelManager.registerModelsFromConfig(this.loadedModels);
+            console.log(`[Brain] Registered ${registeredCount} models with ModelManager`);
+
+            // Step 3: Validate all model credentials and schedule health checks
+            await this.healthChecker.validateAllModels(this.loadedModels);
+
+            console.log('[Brain] Model initialization complete');
+
+            // Step 4: Register with Consul now that we're fully initialized
+            console.log('[Brain] Registering with Consul...');
+            try {
+                await this.registerWithConsul();
+                console.log('[Brain] Successfully registered with Consul');
+            } catch (error) {
+                console.error('[Brain] Failed to register with Consul:', error);
+                // Continue anyway - service is still functional
+            }
+        } catch (error) {
+            console.error('[Brain] Error during model initialization:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get models that are available (credentials valid, service responsive)
+     */
+    private getAvailableConfiguredModels(): ModelConfiguration[] {
+        return this.loadedModels.filter(model => 
+            this.healthChecker.isModelAvailable(model.name)
+        );
+    }
 
     async generate(req: express.Request, res: express.Response) {
         // No retry limit - keep trying until we find a working model
@@ -200,26 +503,64 @@ export class Brain extends BaseEntity {
             let trackingRequestId: string = '';
 
             try {
-                selectedModel = modelNameRequest && attempt === 1 ?
-                    this.modelManager.getModel(modelNameRequest) :
-                    this.modelManager.selectModel(optimization, conversationType, excludedModels);
-
-                // If selection failed, attempt a safer fallback: use any available, not-blacklisted model
-                // that hasn't been excluded yet. This prevents quitting prematurely when strict
-                // selection constraints filter out all models.
+                // Check configured models first (with health status)
+                const configuredAvailable = this.getAvailableConfiguredModels();
+                
+                if (configuredAvailable.length > 0) {
+                    // Use configured models with health checks
+                    if (modelNameRequest && attempt === 1) {
+                        const requested = configuredAvailable.find(m => m.name === modelNameRequest);
+                        if (requested) {
+                            selectedModel = this.modelManager.getModel(requested.name);
+                            console.log(`[Brain Generate] Using requested configured model: ${requested.name}`);
+                        }
+                    }
+                    
+                    if (!selectedModel) {
+                        // Select from available configured models
+                        selectedModel = this.modelManager.selectModel(
+                            optimization, 
+                            conversationType, 
+                            excludedModels
+                        );
+                        
+                        // Filter to only configured available models
+                        if (selectedModel && !configuredAvailable.find(m => m.name === selectedModel.name)) {
+                            console.log(`[Brain Generate] Selected model ${selectedModel.name} not in configured available list, skipping`);
+                            selectedModel = null;
+                        }
+                    }
+                }
+                
+                // Fallback to original logic for backward compatibility
                 if (!selectedModel) {
-                    const fallbackModels = this.modelManager.getAvailableAndNotBlacklistedModels(conversationType)
-                        .filter(m => !excludedModels.includes(m.name));
-                    if (fallbackModels.length > 0) {
-                        console.log(`[Brain Generate] selectModel returned null; falling back to first available model: ${fallbackModels[0].name}`);
-                        selectedModel = fallbackModels[0];
+                    selectedModel = this.modelManager.selectModel(optimization, conversationType, excludedModels);
+
+                    // If selection failed, attempt a safer fallback: use any available, not-blacklisted model
+                    if (!selectedModel) {
+                        const fallbackModels = this.modelManager.getAvailableAndNotBlacklistedModels(conversationType)
+                            .filter(m => !excludedModels.includes(m.name));
+                        if (fallbackModels.length > 0) {
+                            console.log(`[Brain Generate] selectModel returned null; falling back to first available model: ${fallbackModels[0].name}`);
+                            selectedModel = fallbackModels[0];
+                        }
                     }
                 }
 
                 if (!selectedModel || !selectedModel.isAvailable() || !selectedModel.service) {
                     if (attempt === 1) {
-                        console.log(`[Brain Generate] No suitable model found on attempt ${attempt}`);
-                        lastError = 'No suitable model found';
+                        // Check if we have any configured models available
+                        const availableConfigured = this.getAvailableConfiguredModels();
+                        if (availableConfigured.length === 0) {
+                            lastError = 'No configured models available. Check health status.';
+                            const allModels = this.loadedModels.map(m => ({
+                                name: m.name,
+                                status: this.healthChecker.getHealthStatus(m.name)?.status || 'unknown'
+                            }));
+                            console.error('[Brain Generate] Model availability:', allModels);
+                        } else {
+                            lastError = 'No suitable model found';
+                        }
                         continue;
                     } else {
                         break;
@@ -309,7 +650,7 @@ export class Brain extends BaseEntity {
                 const availableModels = this.modelManager.getAvailableAndNotBlacklistedModels(conversationType || LLMConversationType.TextToText);
                 if (availableModels.length === 0) {
                     console.error(`[Brain Generate] No available models left after ${attempt} attempts. Last error: ${lastError}`);
-                    res.status(500).json({ error: `No available models. Last error: ${lastError}` });
+                    res.status(503).json({ error: `No available models. Last error: ${lastError}` });
                     return;
                 }
 
@@ -411,6 +752,26 @@ export class Brain extends BaseEntity {
 
                 console.log(`[Brain Chat] Attempt ${attempt}: Using model ${selectedModel.modelName}`);
 
+                // --- NEW LOGIC HERE: Dynamically adjust max_length for TextToJSON based on model tokenLimit ---
+                let effectiveMaxTokensForInput = selectedModel.tokenLimit;
+                if (thread.conversationType === LLMConversationType.TextToJSON) {
+                    // For TextToJSON, we need to be more conservative with input to ensure room for JSON output.
+                    // Allocate 70% of the model's capacity for input, leaving 30% for output.
+                    // Ensure it's not smaller than a reasonable minimum (e.g., 1024 tokens)
+                    const conservativeInputLimit = Math.floor(selectedModel.tokenLimit * 0.7);
+                    effectiveMaxTokensForInput = Math.max(1024, conservativeInputLimit);
+                    console.log(`[Brain Chat] Adjusting effective max_tokens for TextToJSON: original model tokenLimit ${selectedModel.tokenLimit}, new input limit ${effectiveMaxTokensForInput}`);
+                }
+
+                // If thread.optionals.max_length is not explicitly set or is higher than our calculated limit,
+                // set it to our calculated effectiveMaxTokensForInput.
+                // This value will then be used by the interfaces (e.g., trimMessages).
+                if (!thread.optionals) thread.optionals = {};
+                if (thread.optionals.max_length === undefined || thread.optionals.max_length > effectiveMaxTokensForInput) {
+                    thread.optionals.max_length = effectiveMaxTokensForInput;
+                }
+                // --- END NEW LOGIC ---
+
                 const prompt = thread.exchanges.map((e: any) => e.content).join(' ');
                 trackingRequestId = this.modelManager.trackModelRequest(selectedModel.name, thread.conversationType || LLMConversationType.TextToText, prompt);
 
@@ -458,12 +819,18 @@ export class Brain extends BaseEntity {
                     const isTimeout = /timeout|system_error|connection error/i.test(errorMessage);
                     const isJsonError = /json|parse|invalid format/i.test(errorMessage);
                     const isRateLimit = /rate limit|429/i.test(errorMessage);
+                    const isExternalApiError = /free period has ended|no inference provider available|no endpoints found|request failed with status code 404|could not find a suitable model/i.test(errorMessage);
 
                     if (!this.modelFailureCounts[selectedModel.name]) {
                         this.modelFailureCounts[selectedModel.name] = { timeout: 0, json: 0, other: 0 };
                     }
 
-                    if (isRateLimit) {
+                    if (isExternalApiError) {
+                        const blacklistDuration = 24 * 60 * 60 * 1000; // Blacklist for 24 hours
+                        console.warn(`[Brain Chat] Blacklisting model ${selectedModel.name} for 24 hours due to persistent external API error: ${errorMessage}`);
+                        this.modelManager.blacklistModel(selectedModel.name, new Date(Date.now() + blacklistDuration), thread.conversationType || null);
+                        this.modelFailureCounts[selectedModel.name] = { timeout: 0, json: 0, other: 0 }; // Reset counts
+                    } else if (isRateLimit) {
                         // Handle rate limiting by notifying the service
                         console.warn(`[Brain Chat] Rate limit detected for model ${selectedModel.name}. Notifying service.`);
                         if (selectedModel.service && typeof selectedModel.service.handleRateLimitError === 'function') {
@@ -482,7 +849,8 @@ export class Brain extends BaseEntity {
                     const totalFailures = counts.timeout + counts.json + counts.other;
                     
                     // More aggressive blacklisting for specific, repeated failures
-                    if (counts.timeout >= 2 || counts.json >= 3 || totalFailures >= 5) {
+                    // (Only if not already blacklisted for an external API error)
+                    if (!isExternalApiError && (counts.timeout >= 2 || counts.json >= 3 || totalFailures >= 5)) {
                         console.warn(`[Brain Chat] Blacklisting model ${selectedModel.name} due to repeated failures:`, `Timeouts: ${counts.timeout}, JSON errors: ${counts.json}, Other: ${counts.other}`);
                         this.modelManager.blacklistModel(selectedModel.name, new Date(Date.now() + 15 * 60 * 1000), thread.conversationType || null); // Blacklist for 15 minutes
                         // Reset counts after blacklisting
@@ -494,7 +862,7 @@ export class Brain extends BaseEntity {
                 const availableModels = this.getAvailableModels();
                 if (availableModels.length === 0) {
                     console.error(`[Brain Chat] No available models left after ${attempt} attempts. Last error: ${lastError}`);
-                    res.status(500).json({ error: `No available models. Last error: ${lastError}` });
+                    res.status(503).json({ error: `No available models. Last error: ${lastError}` });
                     return;
                 }
 
@@ -888,7 +1256,6 @@ export class Brain extends BaseEntity {
             if (!thread.optionals) thread.optionals = {};
             thread.optionals.response_format = { "type": "json_object" };
             thread.optionals.temperature = 0.2;
-
             if (!thread.exchanges.some(ex => ex.role === 'system')) {
                 thread.exchanges.unshift({
                     role: 'system',

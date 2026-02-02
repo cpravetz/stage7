@@ -1,8 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Box, TextField, Button, Paper, IconButton, Typography } from '@mui/material';
-import SendIcon from '@mui/icons-material/Send';
-import MicIcon from '@mui/icons-material/Mic';
-import { useTheme } from '@mui/material/styles';
+import { Send as SendIcon, Mic as MicIcon } from '@mui/icons-material';
+import { useTheme } from '@mui/material';
 import { AnswerType } from '../shared-browser';
 
 export interface ActiveQuestion {

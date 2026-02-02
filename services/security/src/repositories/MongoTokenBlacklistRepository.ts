@@ -1,5 +1,5 @@
 import { MongoClient, Collection } from 'mongodb';
-import { analyzeError } from '@cktmcs/errorhandler';
+import { analyzeError } from '@cktmcs/shared';
 
 /**
  * Interface for blacklisted token entries

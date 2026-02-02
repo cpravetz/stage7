@@ -26,7 +26,7 @@ describe('StateManager', () => {
         dependencies: [],
         capabilitiesManagerUrl: '',
         brainUrl: '',
-        trafficManagerUrl: '',
+        missionControlUrl: '',
         librarianUrl: '',
         conversation: [],
         missionContext: '',
@@ -44,7 +44,7 @@ describe('StateManager', () => {
         dependencies: [],
         capabilitiesManagerUrl: '',
         brainUrl: '',
-        trafficManagerUrl: '',
+        missionControlUrl: '',
         librarianUrl: '',
         conversation: [],
         missionContext: '',
@@ -75,7 +75,7 @@ describe('StateManager', () => {
         dependencies: ['dep1'],
         capabilitiesManagerUrl: 'http://cap-man',
         brainUrl: 'http://brain',
-        trafficManagerUrl: 'http://traffic-man',
+        missionControlUrl: 'http://mission-control',
         librarianUrl: 'http://librarian',
         conversation: [{ role: 'user', content: 'hello' }],
         missionContext: 'loaded-context',
@@ -95,7 +95,7 @@ describe('StateManager', () => {
       expect(agent.dependencies).toEqual(loadedState.dependencies);
       expect(agent.capabilitiesManagerUrl).toBe(loadedState.capabilitiesManagerUrl);
       expect(agent.brainUrl).toBe(loadedState.brainUrl);
-      expect(agent.trafficManagerUrl).toBe(loadedState.trafficManagerUrl);
+      expect(agent.missionControlUrl).toBe(loadedState.missionControlUrl);
       expect(agent.librarianUrl).toBe(loadedState.librarianUrl);
       expect(agent.conversation).toEqual(loadedState.conversation);
       expect(agent.missionContext).toBe(loadedState.missionContext);

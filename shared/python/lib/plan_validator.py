@@ -196,42 +196,57 @@ class PlanValidator:
 
     def _discover_single_plugin(self, action_verb: str) -> Optional[Dict[str, Any]]:
         """
-        Dynamically discovers a single plugin definition from the Librarian DSL.
+        Dynamically discovers a single plugin definition from the Librarian using a hybrid approach.
+        1. Tries a direct, exact-match query for a known verb.
+        2. Falls back to a semantic search if the direct query fails.
         """
         if not self.librarian_info or not self.librarian_info.get('url') or not self.librarian_info.get('auth_token'):
             logger.warning(f"Librarian info is incomplete, cannot dynamically discover plugin for '{action_verb}'.")
             return None
-        
-        # Strip the PLUGIN- prefix if present
-        cleaned_action_verb = action_verb.replace('PLUGIN-', '')
-        logger.debug(f"Querying Librarian DSL for action verb: '{cleaned_action_verb}'")
-        
+
+        verb_upper = action_verb.upper()
         librarian_url = self.librarian_info['url']
         auth_token = self.librarian_info['auth_token']
+        headers = {'Authorization': f'Bearer {auth_token}', 'Content-Type': 'application/json'}
 
-        headers = {'Authorization': f'Bearer {auth_token}'}
+        # 1. Direct, exact-match query
         try:
-            # Query the Librarian for this specific action verb
-            payload = {'queryText': cleaned_action_verb, 'maxResults': 1}
-            response = requests.post(f"http://{librarian_url}/tools/search", headers=headers, json=payload, timeout=5)
+            logger.debug(f"Attempting direct discovery for verb: '{verb_upper}'")
+            direct_payload = {
+                'collection': 'tools',
+                'query': {'metadata.verb': verb_upper},
+                'limit': 1
+            }
+            response = requests.post(f"http://{librarian_url}/queryData", headers=headers, json=direct_payload, timeout=5)
             response.raise_for_status()
             response_data = response.json()
             
-            logger.debug(f"Librarian DSL response: {response_data}")
-            
-            # The response from /tools/search is a dictionary containing a 'data' key with a list
             if response_data and isinstance(response_data, dict) and 'data' in response_data and isinstance(response_data['data'], list) and response_data['data']:
-                # If search returns a result, we assume it's the best match.
-                best_match = response_data['data'][0]
-                verb_from_meta = best_match.get('metadata', {}).get('verb', '[not found]')
-                logger.info(f"Dynamically discovered plugin for '{action_verb}'. Found plugin with id '{best_match.get('id')}' and canonical verb '{verb_from_meta}'.")
-                return best_match
-
-            logger.debug(f"No plugin found for '{cleaned_action_verb}' in Librarian DSL response: {response_data}")
-            return None
+                exact_match = response_data['data'][0]
+                logger.info(f"Direct discovery successful for '{verb_upper}'.")
+                # The 'metadata' field from the document is the manifest.
+                return exact_match.get('metadata')
         except requests.exceptions.RequestException as e:
-            logger.warning(f"Failed to dynamically discover plugin '{cleaned_action_verb}' from Librarian: {e}")
-            return None
+            logger.warning(f"Direct discovery for '{verb_upper}' failed: {e}. Falling back to semantic search.")
+
+        # 2. Fallback to semantic search
+        try:
+            logger.debug(f"Falling back to semantic search for verb: '{action_verb}'")
+            semantic_payload = {'queryText': action_verb, 'maxResults': 1}
+            response = requests.post(f"http://{librarian_url}/tools/search", headers=headers, json=semantic_payload, timeout=5)
+            response.raise_for_status()
+            response_data = response.json()
+
+            if response_data and isinstance(response_data, dict) and 'data' in response_data and isinstance(response_data['data'], list) and response_data['data']:
+                semantic_match = response_data['data'][0]
+                logger.info(f"Semantic search successful for '{action_verb}'.")
+                # The 'metadata' field from the document is the manifest.
+                return semantic_match.get('metadata')
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Semantic search for '{action_verb}' also failed: {e}")
+
+        logger.warning(f"Failed to discover plugin for '{action_verb}' using all methods.")
+        return None
 
     def _sanitize_plan(self, plan: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
@@ -1574,6 +1589,19 @@ class PlanValidator:
         index = self._build_plan_index(plan)
         all_steps = index.steps
 
+        # Deserialize availablePlugins if it's a JSON string
+        deserialized_available_plugins = []
+        raw_available_plugins_input = inputs.get('availablePlugins')
+        if raw_available_plugins_input and isinstance(raw_available_plugins_input, dict) and 'value' in raw_available_plugins_input:
+            try:
+                # The value will be a JSON string from CapabilitiesManager.ts
+                deserialized_available_plugins = json.loads(raw_available_plugins_input['value'])
+                logger.debug(f"Deserialized {len(deserialized_available_plugins)} available plugins for LLM repair.")
+            except json.JSONDecodeError as e:
+                logger.warning(f"Failed to deserialize availablePlugins from input: {e}. Using empty list for repair instructions.")
+            except Exception as e:
+                logger.error(f"Unexpected error deserializing availablePlugins: {e}. Using empty list for repair instructions.")
+
         # Group errors by specific signature
         grouped_errors: Dict[str, List[str]] = {}
         for error in errors:
@@ -1595,7 +1623,7 @@ class PlanValidator:
         processed_signatures = set()
 
         # Function to get intelligent repair instructions for missing inputs
-        def get_missing_input_instructions(signature, available_plugins):
+        def get_missing_input_instructions(signature):
             """Generate repair instructions for missing required inputs based on the verb definition."""
             # Parse the signature: "MISSING_INPUT:VERB.inputName"
             if not signature.startswith("MISSING_INPUT:"):
@@ -1609,8 +1637,8 @@ class PlanValidator:
             
             # Try to find the verb definition in available plugins
             verb_def = None
-            if available_plugins and isinstance(available_plugins, list):
-                for plugin in available_plugins:
+            if deserialized_available_plugins:
+                for plugin in deserialized_available_plugins:
                     if isinstance(plugin, dict) and plugin.get('verb') == verb_name:
                         verb_def = plugin
                         break
@@ -1618,8 +1646,14 @@ class PlanValidator:
             # Build instructions based on verb definition
             if verb_def:
                 description = verb_def.get('description', '').strip()
-                required_inputs = verb_def.get('requiredInputs', [])
-                outputs = verb_def.get('outputs', [])
+                # Correctly extract required input names from inputDefinitions
+                required_inputs_from_manifest = [
+                    inp.get('name') for inp in verb_def.get('inputDefinitions', []) if inp.get('required')
+                ]
+                # Correctly extract output names from outputDefinitions
+                output_names_from_manifest = [
+                    out.get('name') for out in verb_def.get('outputDefinitions', [])
+                ]
                 
                 # Create context-aware instructions
                 instructions = f"The '{verb_name}' verb requires '{input_name}' as input."
@@ -1629,10 +1663,12 @@ class PlanValidator:
                 instructions += f"\n\nOptions for providing '{input_name}':"
                 instructions += "\n1. A static string value: \"" + input_name + "\": {\"value\": \"some text\", \"valueType\": \"string\"}"
                 instructions += "\n2. A reference to a previous step's output: \"" + input_name + "\": {\"sourceStep\": \"step_id\", \"outputName\": \"output_name\", \"valueType\": \"string\"}"
-                if outputs:
-                    instructions += f"\n3. Use output from previous steps like: {', '.join([o.get('name', '') for o in outputs if isinstance(o, dict) and o.get('name')])}"
+                if output_names_from_manifest:
+                    instructions += f"\n3. Use output from previous steps like: {', '.join(output_names_from_manifest)}"
                 
-                instructions += f"\n\nOther required inputs for this verb: {', '.join(required_inputs)}"
+                if required_inputs_from_manifest:
+                    instructions += f"\n\nOther required inputs for this verb: {', '.join(required_inputs_from_manifest)}"
+                
                 instructions += f"\n\n**Action:** For each {verb_name} step missing '{input_name}', add the input field with a valid value or step reference."
                 return instructions
             
@@ -1658,7 +1694,7 @@ The standard solution is to wrap the receiving step in a `FOREACH` loop.
                     specific_instructions = """The GENERATE verb requires a mandatory 'prompt' input that tells the LLM what to generate.
 
 **GENERATE Structure:**
-```
+```json
 {
   "id": "uuid",
   "actionVerb": "GENERATE",
@@ -1686,8 +1722,7 @@ The 'prompt' input can be:
 **Action:** For each GENERATE step missing a 'prompt', add the prompt input with meaningful content that describes what should be generated."""
                 elif signature.startswith("MISSING_INPUT:"):
                     # Use generic handler for all missing required inputs
-                    available_plugins = inputs.get('availablePlugins', []) if inputs else []
-                    specific_instructions = get_missing_input_instructions(signature, available_plugins)
+                    specific_instructions = get_missing_input_instructions(signature)
                 elif signature == "MISSING_FIELD":
                     specific_instructions = """This error indicates that input definitions are not in the expected format. The Brain often generates flattened input structures that need to be converted to the proper nested format.
 

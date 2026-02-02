@@ -1,9 +1,22 @@
 import express from 'express';
 import { PluginMarketplace } from '@cktmcs/marketplace';
-import { analyzeError } from '@cktmcs/errorhandler';
+import { analyzeError } from '@cktmcs/shared';
 import dotenv from 'dotenv';
 
 dotenv.config();
+
+/**
+ * Normalizes an ID to always be a string.
+ * @param Id The ID which could be a string or string array.
+ * @returns A normalized string ID.
+ */
+function normalizeId(Id: string | string[]): string {
+  if (Array.isArray(Id)) {
+    // If it's an array, use the first element or generate a fallback
+    return Id.length > 0 ? Id[0] : `id-${Date.now()}`;
+  }
+  return Id;
+}
 
 const router = express.Router();
 const pluginMarketplace = new PluginMarketplace();
@@ -107,7 +120,7 @@ router.get('/plugins/:id', async (req: express.Request, res: express.Response) =
         if (!repo) {
             res.status(404).json({ error: `${repoType} repository not configured` });
         } else {
-            const plugin = await repo.fetch(id);
+            const plugin = await repo.fetch(normalizeId(id));
             if (!plugin) {
                 res.status(404).json({ error: 'Plugin not found' });
             } else {
@@ -173,7 +186,7 @@ router.delete('/plugins/:id', async (req: express.Request, res: express.Response
         if (!repo) {
             res.status(404).json({ error: `${repoType} repository not configured` });
         } else {
-            await repo.delete(id);
+            await repo.delete(normalizeId(id));
             res.json({ success: true, message: 'Plugin deleted successfully' });
         }
     } catch (error) {

@@ -26,7 +26,6 @@ describe('serviceRegistry', () => {
         process.env.BRAIN_SECRET = 'brain-secret';
         process.env.LIBRARIAN_SECRET = 'librarian-secret';
         process.env.ENGINEER_SECRET = 'engineer-secret';
-        process.env.TRAFFICMANAGER_SECRET = 'trafficmanager-secret';
         process.env.CAPABILITIESMANAGER_SECRET = 'capabilitiesmanager-secret';
         process.env.AGENTSET_SECRET = 'agentset-secret';
         process.env.AGENT_SECRET = 'agent-secret';
@@ -109,9 +108,9 @@ describe('serviceRegistry', () => {
             const services = getAllServices();
             expect(services).toEqual(expect.arrayContaining([
                 'PostOffice', 'MissionControl', 'Brain', 'Librarian', 'Engineer',
-                'TrafficManager', 'CapabilitiesManager', 'AgentSet', 'Agent', 'ErrorHandler',
+                'CapabilitiesManager', 'AgentSet', 'Agent', 'ErrorHandler',
             ]));
-            expect(services.length).toBe(10);
+            expect(services.length).toBe(9);
         });
     });
 });

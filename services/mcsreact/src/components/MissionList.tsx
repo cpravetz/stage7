@@ -1,5 +1,5 @@
 import React from 'react';
-import { List, ListItem, ListItemText, Button, Paper, Typography } from '@mui/material';
+import { List, ListItem, ListItemText, Button, Paper, Typography } from '@mui/material/index.js';
 import { Mission } from '@cktmcs/shared';
 
 interface MissionListProps {

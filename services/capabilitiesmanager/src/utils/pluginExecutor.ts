@@ -285,7 +285,8 @@ export class PluginExecutor {
                                                 ...environment.env,
                                                 PYTHONPATH: `${pluginRootPath}:${path.join(__dirname, '..', '..', '..', '..', 'shared', 'python')}`,
                                                 PYTHONUNBUFFERED: '1',
-                                                PYTHONDONTWRITEBYTECODE: '1'
+                                                PYTHONDONTWRITEBYTECODE: '1',
+                                                S7_PLUGIN_CREDENTIALS: JSON.stringify(environment.credentials || [])
                                             },
                                             timeout: pluginDefinition.security?.sandboxOptions?.timeout || 60000
                                         });                let stdout = '';
@@ -399,7 +400,7 @@ export class PluginExecutor {
 
             await this.containerManager.buildPluginImage(containerManifest, pluginRootPath, trace_id);
 
-            const containerInstance = await this.containerManager.startPluginContainer(containerManifest, trace_id);
+            const containerInstance = await this.containerManager.startPluginContainer(containerManifest, executionContext.environment, trace_id);
 
             try {
                 const inputsObject: { [key: string]: any } = {};

@@ -30,7 +30,6 @@ jest.mock('@cktmcs/shared', () => ({
         getServiceUrls: jest.fn().mockResolvedValue({
             capabilitiesManagerUrl: 'capabilitiesmanager:5060',
             brainUrl: 'brain:5070',
-            trafficManagerUrl: 'trafficmanager:5080',
             librarianUrl: 'librarian:5040',
             missionControlUrl: 'missioncontrol:5030',
             engineerUrl: 'engineer:5050',
@@ -124,13 +123,14 @@ describe('MissionControl Service', () => {
             // Mock internal methods called by createMission
             jest.spyOn(missionControl as any, 'clearActionPlanCache').mockResolvedValue(undefined);
             jest.spyOn(missionControl as any, 'saveMissionState').mockResolvedValue(undefined);
+            jest.spyOn(missionControl as any, 'assignAgentToSet').mockResolvedValue('mock-agent-id'); // Mock the new internal method
 
             await (missionControl as any).handleMessage(mockReq, mockRes);
 
             expect(mockUuidv4).toHaveBeenCalledTimes(1);
             expect(missionControl.missions.get(mockMissionId)).toBeDefined();
             expect(missionControl.missions.get(mockMissionId)?.status).toBe(Status.RUNNING);
-            expect(mockAuthenticatedApiPost).toHaveBeenCalledWith(expect.stringContaining('/createAgent'), expect.any(Object));
+            expect(missionControl.assignAgentToSet).toHaveBeenCalledWith(expect.stringContaining('agent-'), 'ACCOMPLISH', expect.any(Map), mockMissionId, expect.any(String));
             expect(mockRes.status).toHaveBeenCalledWith(200);
             expect(mockRes.send).toHaveBeenCalledWith(expect.objectContaining({ missionId: mockMissionId, status: Status.RUNNING }));
             expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('Mission created successfully'));
@@ -309,7 +309,7 @@ describe('MissionControl Service', () => {
             expect(missionControl.missions.get(mockMissionId)).toBe(mission);
             expect(missionControl.clientMissions.get(mockClientId)?.has(mockMissionId)).toBe(true);
             expect(missionControl.clearActionPlanCache).toHaveBeenCalledTimes(1);
-            expect(mockAuthenticatedApiPost).toHaveBeenCalledWith(expect.stringContaining('/createAgent'), expect.any(Object));
+            expect(jest.spyOn(missionControl as any, 'assignAgentToSet')).toHaveBeenCalledWith(expect.stringContaining('agent-'), 'ACCOMPLISH', expect.any(Map), mission.id, expect.any(String));
             expect(missionControl.saveMissionState).toHaveBeenCalledWith(mission);
             expect(missionControl.sendStatusUpdate).toHaveBeenCalledWith(mission, 'Mission started');
         });
@@ -324,7 +324,7 @@ describe('MissionControl Service', () => {
         });
 
         it('should handle errors during mission creation', async () => {
-            mockAuthenticatedApiPost.mockRejectedValueOnce(new Error('TrafficManager error'));
+            jest.spyOn(missionControl as any, 'assignAgentToSet').mockRejectedValueOnce(new Error('AgentSet error'));
 
             await expect((missionControl as any).createMission(mockContent, mockClientId, mockUserId)).rejects.toThrow('TrafficManager error');
             expect(mockAnalyzeError).toHaveBeenCalledTimes(1);
@@ -347,9 +347,10 @@ describe('MissionControl Service', () => {
         });
 
         it('should pause a running mission', async () => {
+            jest.spyOn(missionControl as any, 'pauseAgents').mockResolvedValue(undefined); // Mock the internal method
             await (missionControl as any).pauseMission(mockMissionId);
             expect(missionControl.missions.get(mockMissionId)?.status).toBe(Status.PAUSED);
-            expect(mockAuthenticatedApiPost).toHaveBeenCalledWith(expect.stringContaining('/pauseAgents'), { missionId: mockMissionId });
+            expect(missionControl.pauseAgents).toHaveBeenCalledWith(mockMissionId);
             expect(missionControl.sendStatusUpdate).toHaveBeenCalledWith(mockMission, 'Mission paused');
         });
 
@@ -369,9 +370,10 @@ describe('MissionControl Service', () => {
         });
 
         it('should resume a paused mission', async () => {
+            jest.spyOn(missionControl as any, 'resumeAgents').mockResolvedValue(undefined); // Mock the internal method
             await (missionControl as any).resumeMission(mockMissionId);
             expect(missionControl.missions.get(mockMissionId)?.status).toBe(Status.RUNNING);
-            expect(mockAuthenticatedApiPost).toHaveBeenCalledWith(expect.stringContaining('/resumeAgents'), { missionId: mockMissionId });
+            expect(missionControl.resumeAgents).toHaveBeenCalledWith(mockMissionId);
             expect(missionControl.sendStatusUpdate).toHaveBeenCalledWith(mockMission, 'Mission resumed');
         });
 
@@ -393,10 +395,11 @@ describe('MissionControl Service', () => {
         });
 
         it('should abort a mission', async () => {
+            jest.spyOn(missionControl as any, 'abortAgents').mockResolvedValue(undefined); // Mock the internal method
             await (missionControl as any).abortMission(mockMissionId);
             expect(missionControl.missions.get(mockMissionId)).toBeUndefined();
             expect(missionControl.clientMissions.get('client1')?.has(mockMissionId)).toBe(false);
-            expect(mockAuthenticatedApiPost).toHaveBeenCalledWith(expect.stringContaining('/abortAgents'), { missionId: mockMissionId });
+            expect(missionControl.abortAgents).toHaveBeenCalledWith(mockMissionId);
             expect(missionControl.sendStatusUpdate).toHaveBeenCalledWith(mockMission, 'Mission aborted');
             expect(missionControl.removeClientMission).toHaveBeenCalledWith('client1', mockMissionId);
         });
@@ -420,13 +423,13 @@ describe('MissionControl Service', () => {
         });
 
         it('should load a mission successfully', async () => {
-            mockAuthenticatedApiPost.mockResolvedValueOnce({ data: { agents: [] } }); // loadAgents response
+            jest.spyOn(missionControl as any, 'loadAgents').mockResolvedValue(undefined); // Mock the internal method
 
             const mission = await (missionControl as any).loadMission(mockMissionId, mockClientId, mockUserId);
 
             expect(missionControl.loadMissionState).toHaveBeenCalledWith(mockMissionId);
             expect(missionControl.missions.get(mockMissionId)).toBe(mockLoadedMission);
-            expect(mockAuthenticatedApiPost).toHaveBeenCalledWith(expect.stringContaining('/loadAgents'), { missionId: mockMissionId });
+            expect(missionControl.loadAgents).toHaveBeenCalledWith(mockMissionId);
             expect(missionControl.addClientMission).toHaveBeenCalledWith(mockClientId, mockMissionId);
             expect(missionControl.sendStatusUpdate).toHaveBeenCalledWith(mockLoadedMission, expect.stringContaining('Mission loaded'));
             expect(mission).toBe(mockLoadedMission);
@@ -463,9 +466,10 @@ describe('MissionControl Service', () => {
         });
 
         it('should save mission state and agents', async () => {
+            jest.spyOn(missionControl as any, 'saveAgents').mockResolvedValue(undefined); // Mock the internal method
             await (missionControl as any).saveMission(mockMissionId);
             expect(missionControl.saveMissionState).toHaveBeenCalledWith(mockMission);
-            expect(mockAuthenticatedApiPost).toHaveBeenCalledWith(expect.stringContaining('/saveAgents'), { missionId: mockMissionId });
+            expect(missionControl.saveAgents).toHaveBeenCalledWith(mockMissionId);
             expect(missionControl.sendStatusUpdate).toHaveBeenCalledWith(mockMission, expect.stringContaining('Mission saved'));
         });
 
@@ -499,15 +503,19 @@ describe('MissionControl Service', () => {
             jest.spyOn(missionControl as any, 'sendStatusUpdate').mockResolvedValue(undefined);
         });
 
-        it('should send user message to TrafficManager', async () => {
+        it('should send user message to AgentSetManager', async () => {
+            jest.spyOn(missionControl as any, 'distributeUserMessage').mockResolvedValue(undefined); // Mock the internal method
+
             await (missionControl as any).handleUserMessage({ missionId: mockMissionId, message: mockMessageContent }, mockClientId, mockMissionId);
 
-            expect(mockAuthenticatedApiPost).toHaveBeenCalledWith(expect.stringContaining('/distributeUserMessage'), expect.objectContaining({
-                type: MessageType.USER_MESSAGE,
-                sender: 'user',
-                recipient: 'agents',
-                content: { missionId: mockMissionId, message: mockMessageContent },
-                clientId: mockClientId,
+            expect(missionControl.distributeUserMessage).toHaveBeenCalledWith(expect.objectContaining({
+                body: {
+                    type: MessageType.USER_MESSAGE,
+                    sender: 'user',
+                    recipient: 'agents',
+                    content: { missionId: mockMissionId, message: mockMessageContent },
+                    clientId: mockClientId,
+                }
             }));
             expect(missionControl.sendStatusUpdate).toHaveBeenCalledWith(mockMission, 'User message received and sent to agents');
         });
@@ -518,7 +526,7 @@ describe('MissionControl Service', () => {
         });
 
         it('should handle errors during message distribution', async () => {
-            mockAuthenticatedApiPost.mockRejectedValueOnce(new Error('TrafficManager error'));
+            jest.spyOn(missionControl as any, 'distributeUserMessage').mockRejectedValueOnce(new Error('Distribution error'));
             await (missionControl as any).handleUserMessage({ missionId: mockMissionId, message: mockMessageContent }, mockClientId, mockMissionId);
             expect(mockAnalyzeError).toHaveBeenCalledTimes(1);
             expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('Error handling user message'), expect.any(Error));
@@ -629,8 +637,7 @@ describe('MissionControl Service', () => {
 
             mockAuthenticatedApiGet.mockResolvedValueOnce({ data: { llmCalls: 10, activeLLMCalls: 2 } }); // Brain LLM calls
             mockAuthenticatedApiGet.mockResolvedValueOnce({ data: { newPlugins: ['plugin1'] } }); // Engineer stats
-            mockAuthenticatedApiGet.mockResolvedValueOnce({ data: { agentStatisticsByType: { agentCountByStatus: { RUNNING: 1 } }, agentStatisticsByStatus: new Map([['RUNNING', [{ id: 'agent1', steps: [] }]]]) } }); // TrafficManager stats
-        });
+            jest.spyOn(missionControl as any, 'getAgentStatistics').mockResolvedValue({ agentStatisticsByType: { agentCountByStatus: { RUNNING: 1 } }, agentsByStatus: new Map([['RUNNING', [{ id: 'agent1', steps: [] }]]]) }); // MissionControl stats
 
         it('should process agent statistics update and send to client', async () => {
             await (missionControl as any).handleAgentStatisticsUpdate(mockReq, mockRes);
@@ -638,8 +645,7 @@ describe('MissionControl Service', () => {
             expect(mockUuidValidate).toHaveBeenCalledWith(mockMissionId);
             expect(mockAuthenticatedApiGet).toHaveBeenCalledWith(expect.stringContaining('/getLLMCalls'));
             expect(mockAuthenticatedApiGet).toHaveBeenCalledWith(expect.stringContaining('/statistics'));
-            expect(mockAuthenticatedApiGet).toHaveBeenCalledWith(expect.stringContaining(`/getAgentStatistics/${mockMissionId}`));
-            expect(mockAuthenticatedApiPost).toHaveBeenCalledWith(expect.stringContaining('/message'), expect.objectContaining({
+            expect(missionControl.getAgentStatistics).toHaveBeenCalledWith(mockMissionId);
                 type: MessageType.STATISTICS,
                 clientId: 'client1',
                 content: expect.objectContaining({
@@ -674,7 +680,7 @@ describe('MissionControl Service', () => {
 
             mockAuthenticatedApiGet.mockResolvedValueOnce({ data: { llmCalls: 10 } }); // Brain LLM calls
             mockAuthenticatedApiGet.mockResolvedValueOnce({ data: { newPlugins: ['plugin1'] } }); // Engineer stats
-            mockAuthenticatedApiGet.mockResolvedValueOnce({ data: { agentStatisticsByType: { agentCountByStatus: { RUNNING: 0 } }, agentStatisticsByStatus: new Map() } }); // TrafficManager stats - no running agents
+            jest.spyOn(missionControl as any, 'getAgentStatistics').mockResolvedValue({ agentStatisticsByType: { agentCountByStatus: { RUNNING: 0 } }, agentsByStatus: new Map() }); // MissionControl stats - no running agents
 
             await (missionControl as any).handleAgentStatisticsUpdate(mockReq, mockRes);
 
@@ -691,7 +697,6 @@ describe('MissionControl Service', () => {
             jest.spyOn(missionControl as any, 'getServiceUrls').mockResolvedValue({
                 capabilitiesManagerUrl: 'cap:5060',
                 brainUrl: 'brain:5070',
-                trafficManagerUrl: 'traffic:5080',
                 librarianUrl: 'librarian:5040',
                 missionControlUrl: 'missioncontrol:5030',
                 engineerUrl: 'engineer:5050',
@@ -700,7 +705,7 @@ describe('MissionControl Service', () => {
         });
 
         it('should reflect on mission and process new plan', async () => {
-            mockAuthenticatedApiGet.mockResolvedValueOnce({ data: { agentStatisticsByStatus: new Map([['RUNNING', [{ id: 'agent1', steps: [{ id: 'step1', verb: 'STEP_VERB', status: 'completed', result: { data: 'step result' } }] }]]]) } }); // TrafficManager stats
+            jest.spyOn(missionControl as any, 'getAgentStatistics').mockResolvedValue({ agentsByStatus: new Map([['RUNNING', [{ id: 'agent1', steps: [{ id: 'step1', verb: 'STEP_VERB', status: 'completed', result: { data: 'step result' } }] }]]]) }); // MissionControl stats
             mockAuthenticatedApiPost.mockResolvedValueOnce({ data: { result: [{ name: 'plan', result: [{ stepNo: 1, actionVerb: 'NEW_STEP' }] }] } }); // REFLECT plugin response
 
             await (missionControl as any).reflectOnMission(mockMission);
@@ -715,7 +720,7 @@ describe('MissionControl Service', () => {
         });
 
         it('should reflect on mission and process answer', async () => {
-            mockAuthenticatedApiGet.mockResolvedValueOnce({ data: { agentStatisticsByStatus: new Map() } }); // TrafficManager stats
+            jest.spyOn(missionControl as any, 'getAgentStatistics').mockResolvedValue({ agentsByStatus: new Map() }); // MissionControl stats
             mockAuthenticatedApiPost.mockResolvedValueOnce({ data: { result: [{ name: 'answer', result: 'Mission accomplished!' }] } }); // REFLECT plugin response
 
             await (missionControl as any).reflectOnMission(mockMission);
@@ -725,7 +730,7 @@ describe('MissionControl Service', () => {
         });
 
         it('should handle errors during reflection', async () => {
-            mockAuthenticatedApiGet.mockRejectedValueOnce(new Error('TrafficManager error'));
+            jest.spyOn(missionControl as any, 'getAgentStatistics').mockRejectedValueOnce(new Error('MissionControl error'));
 
             await (missionControl as any).reflectOnMission(mockMission);
 
@@ -748,7 +753,7 @@ describe('MissionControl Service', () => {
 
             mockAuthenticatedApiGet.mockResolvedValueOnce({ data: { llmCalls: 5 } }); // Brain LLM calls
             mockAuthenticatedApiGet.mockResolvedValueOnce({ data: { newPlugins: [] } }); // Engineer stats
-            mockAuthenticatedApiGet.mockResolvedValueOnce({ data: { agentStatisticsByType: { agentCountByStatus: { RUNNING: 1 } }, agentStatisticsByStatus: new Map([['RUNNING', [{ id: 'agent1', steps: [] }]]]) } }); // TrafficManager stats
+            jest.spyOn(missionControl as any, 'getAgentStatistics').mockResolvedValue({ agentStatisticsByType: { agentCountByStatus: { RUNNING: 1 } }, agentsByStatus: new Map([['RUNNING', [{ id: 'agent1', steps: [] }]]]) }); // MissionControl stats
         });
 
         it('should fetch and push agent statistics periodically', async () => {
@@ -756,7 +761,7 @@ describe('MissionControl Service', () => {
 
             expect(mockAuthenticatedApiGet).toHaveBeenCalledWith(expect.stringContaining('/getLLMCalls'));
             expect(mockAuthenticatedApiGet).toHaveBeenCalledWith(expect.stringContaining('/statistics'));
-            expect(mockAuthenticatedApiGet).toHaveBeenCalledWith(expect.stringContaining(`/getAgentStatistics/${mockMissionId}`));
+            expect(missionControl.getAgentStatistics).toHaveBeenCalledWith(mockMissionId);
             expect(mockAuthenticatedApiPost).toHaveBeenCalledWith(expect.stringContaining('/message'), expect.objectContaining({
                 type: MessageType.STATISTICS,
                 clientId: mockClientId,
@@ -787,7 +792,7 @@ describe('MissionControl Service', () => {
             const malformedAgentStats = new Map([['RUNNING', [{ id: 'agent1', steps: { '0': { id: 's1' } } }]]]); // Steps as object
             mockAuthenticatedApiGet.mockResolvedValueOnce({ data: { llmCalls: 5 } });
             mockAuthenticatedApiGet.mockResolvedValueOnce({ data: { newPlugins: [] } });
-            mockAuthenticatedApiGet.mockResolvedValueOnce({ data: { agentStatisticsByType: { agentCountByStatus: { RUNNING: 1 } }, agentStatisticsByStatus: malformedAgentStats } });
+            jest.spyOn(missionControl as any, 'getAgentStatistics').mockResolvedValue({ agentStatisticsByType: { agentCountByStatus: { RUNNING: 1 } }, agentsByStatus: malformedAgentStats });
 
             await (missionControl as any).getAndPushAgentStatistics();
 
@@ -853,10 +858,12 @@ describe('MissionControl Service', () => {
         const mockAgentId = 'a1';
         const mockUserInput = { choice: 'option A' };
 
-        it('should send USER_INPUT_RESPONSE to TrafficManager', async () => {
+        it('should send USER_INPUT_RESPONSE to AgentSet', async () => {
+            jest.spyOn(missionControl as any, 'sendMessageToAgent').mockResolvedValue(undefined); // Mock the internal method
+
             await (missionControl as any).resumeStepWithUserInput(mockMissionId, mockStepId, mockAgentId, mockUserInput);
 
-            expect(mockAuthenticatedApiPost).toHaveBeenCalledWith(expect.stringContaining('/message'), expect.objectContaining({
+            expect(missionControl.sendMessageToAgent).toHaveBeenCalledWith(mockAgentId, expect.objectContaining({
                 type: MessageType.USER_INPUT_RESPONSE,
                 sender: missionControl.id,
                 recipient: mockAgentId,
@@ -867,11 +874,11 @@ describe('MissionControl Service', () => {
                     response: mockUserInput,
                 },
             }));
-            expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('Sent USER_INPUT_RESPONSE to TrafficManager'));
+            expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('Sent USER_INPUT_RESPONSE to AgentSet'));
         });
 
         it('should handle errors during sending message', async () => {
-            mockAuthenticatedApiPost.mockRejectedValueOnce(new Error('TrafficManager error'));
+            jest.spyOn(missionControl as any, 'sendMessageToAgent').mockRejectedValueOnce(new Error('AgentSet error'));
             await (missionControl as any).resumeStepWithUserInput(mockMissionId, mockStepId, mockAgentId, mockUserInput);
             expect(mockAnalyzeError).toHaveBeenCalledTimes(1);
             expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('Error resuming step'), expect.any(Error));

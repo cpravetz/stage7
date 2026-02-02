@@ -23,24 +23,17 @@ import {
   MenuItem,
   SelectChangeEvent,
   TextField,
-  IconButton
+  IconButton,
+  useTheme
 } from '@mui/material';
-import {
-  Refresh as RefreshIcon,
-  Delete as DeleteIcon,
-  GitHub as GitHubIcon,
-  Code as CodeIcon,
-  ArrowBack as ArrowBackIcon,
-  Add as AddIcon,
-  Check as CheckIcon,
-  Close as CloseIcon,
-} from '@mui/icons-material';
-import { Theme } from '@mui/material/styles';
+import { Close as CloseIcon, Check as CheckIcon, Add as AddIcon, ArrowBack as ArrowBackIcon, Code as CodeIcon, GitHub as GitHubIcon, Delete as DeleteIcon, Refresh as RefreshIcon } from '@mui/icons-material';
+
+import { Theme } from '@mui/material/styles/index.js';
 import { API_BASE_URL } from '../config';
 import { SecurityClient } from '../SecurityClient';
 import { useNavigate } from 'react-router-dom';
-import AppBar from '@mui/material/AppBar';
-import Toolbar from '@mui/material/Toolbar';
+import AppBar from '@mui/material/AppBar/index.js';
+import Toolbar from '@mui/material/Toolbar/index.js';
 import PluginDefinitionForm from './PluginDefinitionForm';
 import ToolSourceForm from './ToolSourceForm';
 import { PluginManifest, DefinitionManifest, DefinitionType } from '@cktmcs/shared';
@@ -87,6 +80,7 @@ const PluginManager: React.FC<PluginManagerProps> = ({ onPluginSelect }) => {
   const [selectedPendingTool, setSelectedPendingTool] = useState<PendingTool | null>(null);
   const [policyConfig, setPolicyConfig] = useState<any>({});
   const [githubConfig, setGithubConfig] = useState({ configured: false });
+  const theme = useTheme();
 
   const navigate = useNavigate();
 
@@ -394,7 +388,7 @@ const PluginManager: React.FC<PluginManagerProps> = ({ onPluginSelect }) => {
                 <Typography variant="h6" gutterBottom>Tool Sources</Typography>
                 <Grid container spacing={2}>
                     {toolSources.map((source) => (
-                        <Grid item xs={12} sm={6} md={4} key={source.id}>
+                        <Grid {...({ xs: 12, sm: 6, md: 4,  key: source.id, item: true } as any)}>
                             <Card>
                                 <CardContent>
                                     <Typography variant="h6">{source.id}</Typography>
@@ -413,7 +407,7 @@ const PluginManager: React.FC<PluginManagerProps> = ({ onPluginSelect }) => {
                 <Typography variant="h6" gutterBottom>Airlock - Pending Tools</Typography>
                 <Grid container spacing={2}>
                     {pendingTools.map((tool) => (
-                        <Grid item xs={12} sm={6} md={4} key={tool.id}>
+                        <Grid {...({ xs: 12, sm: 6, md: 4,  key: tool.id, item: true } as any)}>
                             <Card>
                                 <CardContent>
                                     <Typography variant="h6">{tool.id}</Typography>
@@ -436,7 +430,7 @@ const PluginManager: React.FC<PluginManagerProps> = ({ onPluginSelect }) => {
         ) : (
           <Grid container spacing={2}>
             {plugins.map((plugin) => (
-              <Grid item xs={12} sm={6} md={4} key={plugin.id}>
+              <Grid {...({ xs: 12, sm: 6, md: 4,  key: plugin.id, item: true } as any)}>
                 <Card>
                   <CardContent>
                     <Typography variant="h6" component="div">
@@ -535,7 +529,7 @@ const PluginManager: React.FC<PluginManagerProps> = ({ onPluginSelect }) => {
           </DialogTitle>
           <DialogContent dividers>
               <Typography variant="h6" gutterBottom>Manifest JSON</Typography>
-              <Paper variant="outlined" sx={{ p: 2, mb: 2, backgroundColor: '#f5f5f5' }}>
+              <Paper variant="outlined" sx={{ p: 2, mb: 2, backgroundColor: theme.palette.background.paper }}>
                   <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
                       {JSON.stringify(selectedPendingTool?.manifest_json, null, 2)}
                   </pre>

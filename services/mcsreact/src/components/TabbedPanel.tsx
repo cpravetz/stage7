@@ -1,9 +1,6 @@
 import React, { useState } from 'react';
-import { Box, Tabs, Tab, Typography, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Link, useTheme, Chip } from '@mui/material';
-import ChatIcon from '@mui/icons-material/Chat';
-import AssessmentIcon from '@mui/icons-material/Assessment';
-import AccountTreeIcon from '@mui/icons-material/AccountTree';
-import AttachFileIcon from '@mui/icons-material/AttachFile';
+import { Box, Tabs, Tab, Typography, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Link, useTheme, Chip } from '@mui/material/index.js';
+import { AttachFile as AttachFileIcon, AccountTree as AccountTreeIcon, Chat as ChatIcon, Assessment as AssessmentIcon } from '@mui/icons-material';
 import { ConversationHistory } from './ConversationHistory';
 import { AgentStatistics, ConversationMessage } from '../shared-browser';
 import { NetworkGraph } from './NetworkGraph';

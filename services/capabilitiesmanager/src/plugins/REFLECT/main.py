@@ -213,9 +213,12 @@ def call_brain(prompt: str, inputs: Dict[str, Any], response_type: str = "json")
         if response_type == 'json':
             conversation_type = "TextToJSON"
             system_message = (
-                "You are a planning assistant for a system of agents. Generate meaningful and actionable plans as JSON arrays. "
+                "You are a JSON-only reflection and planning assistant. Your primary task is to analyze the provided mission data and create a new plan if the mission has failed or is incomplete.\n\n"
+                "**CRITICAL INSTRUCTION FOR GENERATE VERB:**\n"
+                "When using the `GENERATE` actionVerb, you MUST always include a `prompt` input. The `prompt` should describe what needs to be generated.\n"
+                "Example: `{\"actionVerb\": \"GENERATE\", \"inputs\": {\"prompt\": {\"value\": \"Generate a summary of the document\", \"valueType\": \"string\"}}}`\n\n"
                 "Plans must accomplish the provided goal, not simulate it. "
-                "Each step must match the provided schema precisely.  You should attempt to use the available tools first to find solutions and complete tasks independently. Do not create steps to ask the user for information you can find elsewhere. "
+                "Each step must match the provided schema precisely. You should attempt to use the available tools first to find solutions and complete tasks independently. Do not create steps to ask the user for information you can find elsewhere. "
                 "Return ONLY valid JSON, no other text." 
             )
         else:
@@ -594,6 +597,10 @@ Your task is to analyze the mission's progress and determine the best course of 
 
 - **If the mission has failed or is incomplete, you MUST generate a new, concise plan to achieve the remaining objectives.**
 - **If and ONLY IF the mission is already successfully and fully completed, provide a direct answer.**
+
+**CRITICAL INSTRUCTION FOR GENERATE VERB IN PLANS:**
+When using the `GENERATE` actionVerb, you MUST always include a `prompt` input. The `prompt` should describe what needs to be generated.
+Example: `{"actionVerb": "GENERATE", "inputs": {"prompt": {"value": "Generate a summary of the document", "valueType": "string"}}}`
 
 **CRITICAL PLANNING PRINCIPLES (STRICTLY ENFORCED):**
 ---
