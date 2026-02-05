@@ -1,0 +1,131 @@
+{
+  "id": "plugin-KUBERNETES_MONITOR",
+  "verb": "KUBERNETES_MONITOR",
+  "description": "Kubernetes cluster monitoring and orchestration intelligence tool. Monitors pod health, container image vulnerabilities, resource utilization, and provides cluster diagnostics.",
+  "explanation": "Essential for CTOs managing containerized infrastructure. Provides real-time visibility into pod status, security risks in container images, resource constraints, and cluster health.",
+  "semanticDescription": "Monitor and analyze Kubernetes cluster health, container security vulnerabilities, and resource allocation across pods and nodes.",
+  "capabilityKeywords": [
+    "kubernetes",
+    "container",
+    "orchestration",
+    "pod-health",
+    "image-scanning",
+    "resource-monitoring",
+    "security",
+    "cluster-diagnostics"
+  ],
+  "usageExamples": [
+    "Get status of all pods in production namespace",
+    "Scan container images for vulnerabilities",
+    "Analyze resource utilization and identify constraint issues",
+    "Find pods at risk of termination due to resource limits"
+  ],
+  "category": "infrastructure",
+  "inputGuidance": "Inputs must include 'action'. Cluster access parameters are optional and use defaults.",
+  "inputDefinitions": [
+    {
+      "name": "action",
+      "type": "string",
+      "required": true,
+      "description": "The monitoring action to perform",
+      "enum": [
+        "get_pod_status",
+        "scan_image_vulnerabilities",
+        "get_resource_utilization",
+        "get_cluster_health",
+        "identify_at_risk_pods",
+        "get_namespace_summary"
+      ]
+    },
+    {
+      "name": "namespace",
+      "type": "string",
+      "required": false,
+      "description": "Kubernetes namespace to query. Defaults to 'default'.",
+      "aliases": [
+        "ns",
+        "k8s_namespace"
+      ]
+    },
+    {
+      "name": "pod_name",
+      "type": "string",
+      "required": false,
+      "description": "Specific pod name to query. Used with pod-specific actions."
+    },
+    {
+      "name": "image",
+      "type": "string",
+      "required": false,
+      "description": "Container image URI to scan for vulnerabilities. Format: registry/image:tag"
+    },
+    {
+      "name": "cluster_name",
+      "type": "string",
+      "required": false,
+      "description": "Name of the Kubernetes cluster. Defaults to 'default-cluster'."
+    },
+    {
+      "name": "kubeconfig_path",
+      "type": "string",
+      "required": false,
+      "description": "Path to kubeconfig file for cluster access. Defaults to ~/.kube/config"
+    },
+    {
+      "name": "severity_threshold",
+      "type": "string",
+      "required": false,
+      "description": "Minimum vulnerability severity to report: low, medium, high, critical. Defaults to 'high'.",
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ]
+    },
+    {
+      "name": "resource_threshold_percent",
+      "type": "number",
+      "required": false,
+      "description": "Percentage threshold for resource alerts (0-100). Defaults to 80."
+    }
+  ],
+  "outputDefinitions": [
+    {
+      "name": "pod_status_report",
+      "type": "object",
+      "description": "Detailed status of pods including phase, conditions, and resource usage"
+    },
+    {
+      "name": "vulnerability_report",
+      "type": "object",
+      "description": "Container image vulnerability scan results with severity levels and remediation guidance"
+    },
+    {
+      "name": "resource_utilization",
+      "type": "object",
+      "description": "Resource usage across cluster, namespace, or specific pod"
+    },
+    {
+      "name": "cluster_health",
+      "type": "object",
+      "description": "Overall cluster health metrics including node status, etcd health, and API server status"
+    },
+    {
+      "name": "at_risk_pods",
+      "type": "array",
+      "description": "List of pods at risk due to resource constraints or pending states"
+    },
+    {
+      "name": "namespace_summary",
+      "type": "object",
+      "description": "Aggregated metrics for a namespace including pod count, resource allocation, and health status"
+    }
+  ],
+  "repository": {
+    "type": "local",
+    "url": "",
+    "dependencies": {}
+  },
+  "version": "1.0.0"
+}

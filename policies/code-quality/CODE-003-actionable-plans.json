@@ -1,0 +1,46 @@
+{
+  "id": "CODE-003",
+  "category": "code",
+  "title": "Actionable Plans",
+  "description": "All plans must be actionable, schema-compliant, logical, sound, and manifest-compliant when created.",
+  "rules": [
+    "Plans must validate against the current schema",
+    "Plans must be logically consistent",
+    "Plans must reference valid, existing capabilities",
+    "Plans must include proper input/output specifications",
+    "Plans must be executable without manual intervention"
+  ],
+  "enforcementMechanisms": [
+    "Automated plan validation tools",
+    "Schema validation checks",
+    "Integration with existing validation logic"
+  ],
+  "complianceMetrics": [
+    "Plan validation success rate",
+    "Schema compliance percentage",
+    "Logical consistency score",
+    "Manifest compliance rate",
+    "Execution success rate",
+    "Plan optimization effectiveness"
+  ],
+  "severity": "high",
+  "documentation": "docs/ENGINEERING_POLICIES.md#policy-3-actionable-plans",
+  "examples": [
+    "Validating plans against JSON schema before execution",
+    "Checking for circular dependencies in plan steps",
+    "Verifying that all referenced verbs exist in the system",
+    "Ensuring proper input/output chaining between steps",
+    "Implementing fallback steps for critical operations"
+  ],
+  "exceptions": [
+    "Dynamically generated plans that require runtime validation",
+    "Experimental plan structures for testing new capabilities"
+  ],
+  "validationChecks": [
+    "validate-plan-schema",
+    "check-logical-consistency",
+    "verify-manifest-compliance",
+    "test-plan-execution",
+    "analyze-plan-optimization"
+  ]
+}

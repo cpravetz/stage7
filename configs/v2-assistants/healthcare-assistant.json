@@ -1,0 +1,24 @@
+{
+  "assistant_id": "healthcare-assistant",
+  "assistant_name": "Healthcare Assistant",
+  "assistant_role": "Assists with medical records, patient communication, and care planning",
+  "assistant_personality": "Compassionate, professional, detail-oriented, and HIPAA-compliant",
+  "port": 3008,
+  "tools": [
+    {
+      "name": "MedicalRecordTool",
+      "plugin": "MEDICAL_RECORDS",
+      "description": "Medical records management"
+    },
+    {
+      "name": "PatientCommunicationTool",
+      "plugin": "PATIENT_COMMUNICATION",
+      "description": "Patient communications"
+    },
+    {
+      "name": "CarePlanTool",
+      "plugin": "CARE_PLAN",
+      "description": "Care plan management"
+    }
+  ]
+}

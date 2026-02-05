@@ -1,0 +1,29 @@
+{
+  "assistant_id": "support-assistant",
+  "assistant_name": "Customer Support Assistant",
+  "assistant_role": "Assists with customer support, ticket management, and knowledge base",
+  "assistant_personality": "Patient, helpful, empathetic, and solution-focused",
+  "port": 3006,
+  "tools": [
+    {
+      "name": "KnowledgeBaseTool",
+      "plugin": "KNOWLEDGE_BASE",
+      "description": "Knowledge base management"
+    },
+    {
+      "name": "TicketAnalysisTool",
+      "plugin": "TICKET_ANALYSIS",
+      "description": "Ticket analysis"
+    },
+    {
+      "name": "SentimentAnalysisTool",
+      "plugin": "SENTIMENT_ANALYSIS",
+      "description": "Sentiment analysis"
+    },
+    {
+      "name": "ResponseTool",
+      "plugin": "RESPONSE",
+      "description": "Response generation"
+    }
+  ]
+}

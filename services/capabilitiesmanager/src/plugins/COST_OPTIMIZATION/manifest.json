@@ -1,0 +1,138 @@
+{
+  "id": "plugin-COST_OPTIMIZATION",
+  "verb": "COST_OPTIMIZATION",
+  "description": "Cloud cost optimization and forecasting tool. Provides cost anomaly detection, spending trends, reserved instance recommendations, and waste identification.",
+  "explanation": "Critical for CTOs managing cloud budgets. Identifies cost anomalies, forecasts spending, recommends reserved instance purchases, and detects unused resources.",
+  "semanticDescription": "Analyze cloud spending patterns, detect anomalies, forecast future costs, and recommend cost optimization strategies including reserved instances and resource cleanup.",
+  "capabilityKeywords": [
+    "cost-optimization",
+    "cloud-spending",
+    "forecasting",
+    "anomaly-detection",
+    "reserved-instances",
+    "waste-identification",
+    "budget-management"
+  ],
+  "usageExamples": [
+    "Analyze cloud spending for the last 30 days and identify trends",
+    "Detect cost anomalies and unusual spending patterns",
+    "Forecast next month's cloud spending based on historical data",
+    "Recommend reserved instance purchases to reduce costs",
+    "Identify unused resources and estimate savings from cleanup"
+  ],
+  "category": "financial",
+  "inputGuidance": "Inputs must include 'action'. Cloud provider parameters are optional and use defaults.",
+  "inputDefinitions": [
+    {
+      "name": "action",
+      "type": "string",
+      "required": true,
+      "description": "The cost analysis action to perform",
+      "enum": [
+        "analyze_spending",
+        "detect_anomalies",
+        "forecast_costs",
+        "recommend_reserved_instances",
+        "identify_waste",
+        "get_cost_by_service",
+        "get_cost_trends"
+      ]
+    },
+    {
+      "name": "days",
+      "type": "number",
+      "required": false,
+      "description": "Number of days to analyze. Defaults to 30."
+    },
+    {
+      "name": "forecast_days",
+      "type": "number",
+      "required": false,
+      "description": "Number of days to forecast. Defaults to 30."
+    },
+    {
+      "name": "cloud_provider",
+      "type": "string",
+      "required": false,
+      "description": "Cloud provider to analyze. Defaults to 'aws'.",
+      "enum": [
+        "aws",
+        "gcp",
+        "azure",
+        "multi"
+      ]
+    },
+    {
+      "name": "account_id",
+      "type": "string",
+      "required": false,
+      "description": "Cloud account ID or project to analyze"
+    },
+    {
+      "name": "anomaly_threshold",
+      "type": "number",
+      "required": false,
+      "description": "Percentage change threshold for anomaly detection (0-100). Defaults to 20."
+    },
+    {
+      "name": "confidence_level",
+      "type": "string",
+      "required": false,
+      "description": "Confidence level for recommendations: low, medium, high. Defaults to 'medium'.",
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ]
+    },
+    {
+      "name": "waste_threshold_percent",
+      "type": "number",
+      "required": false,
+      "description": "Minimum utilization percentage to flag as waste. Defaults to 10."
+    }
+  ],
+  "outputDefinitions": [
+    {
+      "name": "spending_analysis",
+      "type": "object",
+      "description": "Detailed breakdown of cloud spending by service, region, and cost center"
+    },
+    {
+      "name": "anomalies",
+      "type": "array",
+      "description": "Detected cost anomalies with severity and potential causes"
+    },
+    {
+      "name": "cost_forecast",
+      "type": "object",
+      "description": "Forecasted costs with confidence intervals and trend analysis"
+    },
+    {
+      "name": "ri_recommendations",
+      "type": "array",
+      "description": "Reserved instance recommendations with estimated savings"
+    },
+    {
+      "name": "waste_report",
+      "type": "array",
+      "description": "Identified waste and unused resources with cleanup recommendations"
+    },
+    {
+      "name": "cost_by_service",
+      "type": "array",
+      "description": "Cost breakdown by cloud service"
+    },
+    {
+      "name": "cost_trends",
+      "type": "object",
+      "description": "Historical cost trends and growth rate analysis"
+    }
+  ],
+  "repository": {
+    "type": "local",
+    "url": "",
+    "dependencies": {}
+  },
+  "version": "1.0.0"
+}

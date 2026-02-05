@@ -1,0 +1,86 @@
+{
+  "id": "plugin-TEAM_COLLABORATION",
+  "verb": "TEAM_COLLABORATION",
+  "description": "TEAM COLLABORATION plugin for comprehensive management and analytics",
+  "explanation": "Essential plugin for team collaboration operations with analytics and reporting",
+  "semanticDescription": "Manage, analyze, and track team collaboration data with advanced capabilities",
+  "capabilityKeywords": [
+    "team_collaboration",
+    "analytics",
+    "management",
+    "tracking",
+    "reporting"
+  ],
+  "usageExamples": [
+    "Use create_workspace to start operations",
+    "Use manage_members to analyze data",
+    "Use get_activity for comprehensive analytics"
+  ],
+  "category": "operational",
+  "actions": [
+    {
+      "name": "create_workspace",
+      "description": "Perform create workspace operation",
+      "inputParameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputType": "object"
+    },
+    {
+      "name": "manage_members",
+      "description": "Perform manage members operation",
+      "inputParameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputType": "object"
+    },
+    {
+      "name": "track_tasks",
+      "description": "Perform track tasks operation",
+      "inputParameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputType": "object"
+    },
+    {
+      "name": "post_updates",
+      "description": "Perform post updates operation",
+      "inputParameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputType": "object"
+    },
+    {
+      "name": "share_files",
+      "description": "Perform share files operation",
+      "inputParameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputType": "object"
+    },
+    {
+      "name": "get_activity",
+      "description": "Perform get activity operation",
+      "inputParameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputType": "object"
+    }
+  ],
+  "version": "1.0.0",
+  "status": "active",
+  "created_at": "2026-01-28T14:44:51.041598",
+  "features": {
+    "in_memory_storage": true,
+    "error_handling": true,
+    "logging": true,
+    "analytics": true,
+    "health_check": true
+  }
+}

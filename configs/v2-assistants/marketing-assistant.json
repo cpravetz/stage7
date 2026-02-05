@@ -1,0 +1,29 @@
+{
+  "assistant_id": "marketing-assistant",
+  "assistant_name": "Marketing Assistant",
+  "assistant_role": "Assists with marketing campaigns, content creation, and social media",
+  "assistant_personality": "Creative, data-driven, engaging, and strategic",
+  "port": 3003,
+  "tools": [
+    {
+      "name": "ContentGenerationTool",
+      "plugin": "CONTENT_GENERATION",
+      "description": "Generate marketing content"
+    },
+    {
+      "name": "SocialMediaTool",
+      "plugin": "SOCIAL_MEDIA",
+      "description": "Manage social media"
+    },
+    {
+      "name": "SEOTool",
+      "plugin": "SEO",
+      "description": "SEO optimization"
+    },
+    {
+      "name": "AnalyticsTool",
+      "plugin": "ANALYTICS",
+      "description": "Track marketing metrics"
+    }
+  ]
+}

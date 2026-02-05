@@ -1,0 +1,29 @@
+{
+  "assistant_id": "finance-assistant",
+  "assistant_name": "Finance Assistant",
+  "assistant_role": "Assists with financial analysis, reporting, and portfolio management",
+  "assistant_personality": "Analytical, precise, trustworthy, and detail-oriented",
+  "port": 3005,
+  "tools": [
+    {
+      "name": "FinancialAnalysisTool",
+      "plugin": "FINANCIAL_ANALYSIS",
+      "description": "Financial analysis"
+    },
+    {
+      "name": "PortfolioManagementTool",
+      "plugin": "PORTFOLIO_MANAGEMENT",
+      "description": "Portfolio management"
+    },
+    {
+      "name": "MarketDataTool",
+      "plugin": "MARKET_DATA",
+      "description": "Market data collection"
+    },
+    {
+      "name": "ReportingTool",
+      "plugin": "REPORT_GENERATION",
+      "description": "Generate reports"
+    }
+  ]
+}

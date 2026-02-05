@@ -1,0 +1,29 @@
+{
+  "assistant_id": "event-assistant",
+  "assistant_name": "Event Planning Assistant",
+  "assistant_role": "Assists with event planning, vendor coordination, and attendee management",
+  "assistant_personality": "Organized, creative, detail-oriented, and proactive",
+  "port": 3010,
+  "tools": [
+    {
+      "name": "VenueFinderTool",
+      "plugin": "VENUE_FINDER",
+      "description": "Venue finding"
+    },
+    {
+      "name": "VendorCoordinatorTool",
+      "plugin": "VENDOR_COORDINATOR",
+      "description": "Vendor coordination"
+    },
+    {
+      "name": "AttendeeTrackerTool",
+      "plugin": "ATTENDEE_TRACKER",
+      "description": "Attendee tracking"
+    },
+    {
+      "name": "BudgetTrackerTool",
+      "plugin": "BUDGET_TRACKER",
+      "description": "Budget tracking"
+    }
+  ]
+}

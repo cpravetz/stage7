@@ -1,0 +1,106 @@
+{
+  "id": "plugin-CONFLUENCE",
+  "verb": "CONFLUENCE",
+  "description": "Interact with Confluence to create, update, search, and manage pages and spaces. Supports creating pages, updating content, searching, getting page details, and managing attachments.",
+  "explanation": "This plugin provides comprehensive Confluence integration capabilities. It can create new pages, update existing ones, search for content, retrieve page details, manage attachments, and work with spaces. Authentication is handled via API tokens configured in the system.",
+  "inputDefinitions": [
+    {
+      "name": "action",
+      "required": true,
+      "type": "string",
+      "description": "The Confluence action to perform: createPage, updatePage, searchContent, getPageDetails, deletePage, getSpaces, addAttachment",
+      "aliases": ["operation", "command"]
+    },
+    {
+      "name": "payload",
+      "required": true,
+      "type": "object",
+      "description": "The action-specific payload containing parameters for the Confluence operation",
+      "aliases": ["data", "params", "parameters"]
+    },
+    {
+      "name": "conversationId",
+      "required": false,
+      "type": "string",
+      "description": "The conversation/mission ID for context",
+      "aliases": ["missionId", "contextId"]
+    }
+  ],
+  "inputGuidance": "Required inputs: 'action' (the operation to perform) and 'payload' (operation-specific parameters). For createPage, payload should include space, title, content. For updatePage, include pageId, title, content, version. For searchContent, include query. For getPageDetails, include pageId. For addAttachment, include pageId and file data.",
+  "outputDefinitions": [
+    {
+      "name": "result",
+      "required": true,
+      "type": "object",
+      "description": "The result of the Confluence operation, structure varies by action"
+    },
+    {
+      "name": "success",
+      "required": true,
+      "type": "boolean",
+      "description": "Whether the operation succeeded"
+    },
+    {
+      "name": "error",
+      "required": false,
+      "type": "string",
+      "description": "Error message if the operation failed"
+    }
+  ],
+  "language": "python",
+  "entryPoint": {
+    "main": "main.py",
+    "function": "execute_plugin"
+  },
+  "repository": {
+    "type": "local"
+  },
+  "security": {
+    "permissions": [
+      "net.fetch"
+    ],
+    "sandboxOptions": {
+      "timeout": 30000
+    }
+  },
+  "configuration": [
+    {
+      "key": "CONFLUENCE_URL",
+      "description": "Confluence instance URL (e.g., https://your-domain.atlassian.net/wiki)",
+      "required": true,
+      "type": "string",
+      "credentialSource": "ENV_CONFLUENCE_URL"
+    },
+    {
+      "key": "CONFLUENCE_EMAIL",
+      "description": "Confluence user email for authentication",
+      "required": true,
+      "type": "string",
+      "credentialSource": "ENV_CONFLUENCE_EMAIL"
+    },
+    {
+      "key": "CONFLUENCE_API_TOKEN",
+      "description": "Confluence API token for authentication",
+      "required": true,
+      "type": "string",
+      "credentialSource": "ENV_CONFLUENCE_API_TOKEN",
+      "sensitive": true
+    }
+  ],
+  "version": "1.0.0",
+  "metadata": {
+    "author": "Stage7 Development Team",
+    "tags": ["confluence", "documentation", "wiki", "knowledge-base", "atlassian"],
+    "category": "productivity",
+    "license": "MIT"
+  },
+  "semanticDescription": "Comprehensive Confluence integration for documentation, knowledge management, and collaboration",
+  "capabilityKeywords": ["confluence", "wiki", "documentation", "page", "space", "knowledge", "collaboration"],
+  "usageExamples": [
+    "Create a new page in the TEAM space",
+    "Search for pages about API documentation",
+    "Update the content of page 12345",
+    "Get details of page 67890"
+  ]
+}
+

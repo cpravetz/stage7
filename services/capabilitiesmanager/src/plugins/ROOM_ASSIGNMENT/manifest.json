@@ -1,0 +1,58 @@
+{
+  "id": "plugin-ROOM_ASSIGNMENT",
+  "verb": "ROOM_ASSIGNMENT",
+  "description": "Hotel room assignment and occupancy management",
+  "explanation": "Manage room allocation, occupancy tracking, and room status",
+  "inputDefinitions": [
+    {
+      "name": "action",
+      "required": true,
+      "type": "string",
+      "description": "The action to perform",
+      "aliases": [
+        "operation",
+        "command"
+      ]
+    },
+    {
+      "name": "payload",
+      "required": true,
+      "type": "object",
+      "description": "Action-specific parameters",
+      "aliases": [
+        "data",
+        "params",
+        "parameters"
+      ]
+    }
+  ],
+  "outputDefinitions": [
+    {
+      "name": "result",
+      "required": true,
+      "type": "object",
+      "description": "Operation result"
+    },
+    {
+      "name": "success",
+      "required": true,
+      "type": "boolean",
+      "description": "Success indicator"
+    }
+  ],
+  "language": "python",
+  "entryPoint": {
+    "main": "main.py",
+    "function": "execute_plugin"
+  },
+  "repository": {
+    "type": "local"
+  },
+  "tags": [
+    "hotel",
+    "operations",
+    "room-management",
+    "occupancy"
+  ],
+  "version": "1.0.0"
+}

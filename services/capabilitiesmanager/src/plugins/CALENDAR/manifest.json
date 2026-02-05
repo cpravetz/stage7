@@ -1,0 +1,49 @@
+{
+  "id": "plugin-CALENDAR",
+  "name": "CALENDAR",
+  "version": "1.0.0",
+  "description": "CALENDAR plugin for cktMCS backend services",
+  "author": "Backend Services",
+  "license": "MIT",
+  "type": "backend",
+  "category": "scheduling",
+  "actions": [
+    {
+      "id": "create_event",
+      "name": "Create Event",
+      "description": "Execute create event operation"
+    },
+    {
+      "id": "update_event",
+      "name": "Update Event",
+      "description": "Execute update event operation"
+    },
+    {
+      "id": "delete_event",
+      "name": "Delete Event",
+      "description": "Execute delete event operation"
+    },
+    {
+      "id": "get_events",
+      "name": "Get Events",
+      "description": "Execute get events operation"
+    },
+    {
+      "id": "check_availability",
+      "name": "Check Availability",
+      "description": "Execute check availability operation"
+    },
+    {
+      "id": "suggest_times",
+      "name": "Suggest Times",
+      "description": "Execute suggest times operation"
+    }
+  ],
+  "capabilities": {
+    "error_handling": true,
+    "logging": true,
+    "in_memory_storage": true,
+    "thread_safe": true
+  },
+  "verb": "CALENDAR"
+}

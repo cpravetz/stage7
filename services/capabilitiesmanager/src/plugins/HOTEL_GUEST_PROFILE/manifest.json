@@ -1,0 +1,58 @@
+{
+  "id": "plugin-HOTEL_GUEST_PROFILE",
+  "verb": "HOTEL_GUEST_PROFILE",
+  "description": "Guest profile and preference management",
+  "explanation": "Manage guest profiles, preferences, stay history, and VIP status",
+  "inputDefinitions": [
+    {
+      "name": "action",
+      "required": true,
+      "type": "string",
+      "description": "The action to perform",
+      "aliases": [
+        "operation",
+        "command"
+      ]
+    },
+    {
+      "name": "payload",
+      "required": true,
+      "type": "object",
+      "description": "Action-specific parameters",
+      "aliases": [
+        "data",
+        "params",
+        "parameters"
+      ]
+    }
+  ],
+  "outputDefinitions": [
+    {
+      "name": "result",
+      "required": true,
+      "type": "object",
+      "description": "Operation result"
+    },
+    {
+      "name": "success",
+      "required": true,
+      "type": "boolean",
+      "description": "Success indicator"
+    }
+  ],
+  "language": "python",
+  "entryPoint": {
+    "main": "main.py",
+    "function": "execute_plugin"
+  },
+  "repository": {
+    "type": "local"
+  },
+  "tags": [
+    "hotel",
+    "guest",
+    "profiles",
+    "preferences"
+  ],
+  "version": "1.0.0"
+}

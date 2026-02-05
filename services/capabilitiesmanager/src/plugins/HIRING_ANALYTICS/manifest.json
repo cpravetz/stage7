@@ -1,0 +1,86 @@
+{
+  "id": "plugin-HIRING_ANALYTICS",
+  "verb": "HIRING_ANALYTICS",
+  "description": "HIRING ANALYTICS plugin for comprehensive management and analytics",
+  "explanation": "Essential plugin for hiring analytics operations with analytics and reporting",
+  "semanticDescription": "Manage, analyze, and track hiring analytics data with advanced capabilities",
+  "capabilityKeywords": [
+    "hiring_analytics",
+    "analytics",
+    "management",
+    "tracking",
+    "reporting"
+  ],
+  "usageExamples": [
+    "Use track_candidates to start operations",
+    "Use analyze_hiring to analyze data",
+    "Use generate_report for comprehensive analytics"
+  ],
+  "category": "operational",
+  "actions": [
+    {
+      "name": "track_candidates",
+      "description": "Perform track candidates operation",
+      "inputParameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputType": "object"
+    },
+    {
+      "name": "analyze_hiring",
+      "description": "Perform analyze hiring operation",
+      "inputParameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputType": "object"
+    },
+    {
+      "name": "get_funnel",
+      "description": "Perform get funnel operation",
+      "inputParameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputType": "object"
+    },
+    {
+      "name": "predict_success",
+      "description": "Perform predict success operation",
+      "inputParameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputType": "object"
+    },
+    {
+      "name": "track_time_to_hire",
+      "description": "Perform track time to hire operation",
+      "inputParameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputType": "object"
+    },
+    {
+      "name": "generate_report",
+      "description": "Perform generate report operation",
+      "inputParameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputType": "object"
+    }
+  ],
+  "version": "1.0.0",
+  "status": "active",
+  "created_at": "2026-01-28T14:44:51.139325",
+  "features": {
+    "in_memory_storage": true,
+    "error_handling": true,
+    "logging": true,
+    "analytics": true,
+    "health_check": true
+  }
+}

@@ -1,0 +1,86 @@
+{
+  "id": "plugin-PROGRESS_TRACKING",
+  "verb": "PROGRESS_TRACKING",
+  "description": "PROGRESS TRACKING plugin for comprehensive management and analytics",
+  "explanation": "Essential plugin for progress tracking operations with analytics and reporting",
+  "semanticDescription": "Manage, analyze, and track progress tracking data with advanced capabilities",
+  "capabilityKeywords": [
+    "progress_tracking",
+    "analytics",
+    "management",
+    "tracking",
+    "reporting"
+  ],
+  "usageExamples": [
+    "Use create_project to start operations",
+    "Use track_progress to analyze data",
+    "Use suggest_improvements for comprehensive analytics"
+  ],
+  "category": "operational",
+  "actions": [
+    {
+      "name": "create_project",
+      "description": "Perform create project operation",
+      "inputParameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputType": "object"
+    },
+    {
+      "name": "track_progress",
+      "description": "Perform track progress operation",
+      "inputParameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputType": "object"
+    },
+    {
+      "name": "update_milestone",
+      "description": "Perform update milestone operation",
+      "inputParameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputType": "object"
+    },
+    {
+      "name": "get_status",
+      "description": "Perform get status operation",
+      "inputParameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputType": "object"
+    },
+    {
+      "name": "identify_risks",
+      "description": "Perform identify risks operation",
+      "inputParameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputType": "object"
+    },
+    {
+      "name": "suggest_improvements",
+      "description": "Perform suggest improvements operation",
+      "inputParameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputType": "object"
+    }
+  ],
+  "version": "1.0.0",
+  "status": "active",
+  "created_at": "2026-01-28T14:44:51.220310",
+  "features": {
+    "in_memory_storage": true,
+    "error_handling": true,
+    "logging": true,
+    "analytics": true,
+    "health_check": true
+  }
+}

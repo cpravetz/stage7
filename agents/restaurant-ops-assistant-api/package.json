@@ -1,0 +1,40 @@
+{
+  "name": "restaurant-ops-assistant-api",
+  "version": "1.0.0",
+  "description": "Restaurant Operations Assistant API for comprehensive restaurant management",
+  "main": "dist/index.js",
+  "scripts": {
+    "start": "ts-node src/index.ts",
+    "build": "tsc",
+    "dev": "nodemon src/index.ts",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "restaurant",
+    "operations",
+    "management",
+    "ai",
+    "assistant"
+  ],
+  "author": "CKT MCS Team",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "express": "^5.0.0",
+    "ws": "^8.14.2",
+    "axios": "^1.6.2",
+    "@cktmcs/sdk": "file:../../sdk",
+    "typescript": "^5.3.3",
+    "ts-node": "^10.9.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/ws": "^8.5.10",
+    "@types/node": "^20.10.5",
+    "nodemon": "^3.0.2"
+  },
+  "overrides": {
+    "glob": "^13.0.0",
+    "inflight": "^2.0.0"
+  }
+
+}

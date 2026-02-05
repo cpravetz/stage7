@@ -1,0 +1,90 @@
+{
+  "name": "DOC_GEN",
+  "version": "1.0.0",
+  "description": "Document generation plugin for creating formatted documents and reports",
+  "actions": [
+    {
+      "name": "generate_document",
+      "description": "Generate a formatted document from template and data",
+      "inputs": [
+        {
+          "name": "template",
+          "type": "string",
+          "description": "Document template name"
+        },
+        {
+          "name": "data",
+          "type": "object",
+          "description": "Data to populate template"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "document",
+          "type": "string",
+          "description": "Generated document content"
+        }
+      ]
+    },
+    {
+      "name": "create_template",
+      "description": "Create a new document template",
+      "inputs": [
+        {
+          "name": "name",
+          "type": "string",
+          "description": "Template name"
+        },
+        {
+          "name": "content",
+          "type": "string",
+          "description": "Template content"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "template_id",
+          "type": "string",
+          "description": "Created template ID"
+        }
+      ]
+    },
+    {
+      "name": "list_templates",
+      "description": "List all available document templates",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "templates",
+          "type": "array",
+          "description": "Available templates"
+        }
+      ]
+    },
+    {
+      "name": "export_document",
+      "description": "Export document to different format",
+      "inputs": [
+        {
+          "name": "document",
+          "type": "string",
+          "description": "Document content"
+        },
+        {
+          "name": "format",
+          "type": "string",
+          "description": "Export format (pdf, docx, md)"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "exported",
+          "type": "string",
+          "description": "Exported document"
+        }
+      ]
+    }
+  ],
+  "id": "plugin-DOC_GEN",
+  "verb": "DOC_GEN"
+}

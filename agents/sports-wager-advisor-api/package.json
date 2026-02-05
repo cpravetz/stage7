@@ -1,0 +1,29 @@
+{
+  "name": "sports-wager-advisor-api",
+  "version": "1.0.0",
+  "description": "L3 API Service for Sports Wager Advisor Assistant",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node-dev src/index.ts"
+  },
+  "dependencies": {
+    "express": "^5.0.0",
+    "ws": "^8.18.0",
+    "@cktmcs/sdk": "*",
+    "@cktmcs/shared": "file:../../../shared"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^20.x.x",
+    "@types/ws": "^8.5.10",
+    "typescript": "^5.6.3",
+    "ts-node-dev": "^2.0.0"
+  },
+  "overrides": {
+    "glob": "^13.0.0",
+    "inflight": "^2.0.0"
+  }
+
+}

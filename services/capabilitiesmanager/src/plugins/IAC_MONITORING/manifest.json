@@ -1,0 +1,82 @@
+{
+  "name": "IAC_MONITORING",
+  "version": "1.0.0",
+  "description": "Infrastructure as Code monitoring and compliance",
+  "actions": [
+    {
+      "name": "scan_drift",
+      "description": "Scan for IaC drift using Terraform or CloudFormation",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tool": {
+            "type": "string",
+            "enum": [
+              "terraform",
+              "cloudformation",
+              "both"
+            ],
+            "description": "IaC tool to scan"
+          },
+          "workspace": {
+            "type": "string",
+            "description": "Terraform workspace or CloudFormation stack name"
+          }
+        },
+        "required": [
+          "tool"
+        ]
+      }
+    },
+    {
+      "name": "get_compliance_status",
+      "description": "Check policy compliance of IaC",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "tool": {
+            "type": "string",
+            "enum": [
+              "terraform",
+              "cloudformation",
+              "both"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "identify_non_compliant_resources",
+      "description": "Identify resources that violate policies",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "severity_threshold": {
+            "type": "string",
+            "enum": [
+              "critical",
+              "high",
+              "medium",
+              "low"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "get_drift_history",
+      "description": "Get historical drift data",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "days": {
+            "type": "number",
+            "description": "Number of days to retrieve"
+          }
+        }
+      }
+    }
+  ],
+  "id": "plugin-IAC_MONITORING",
+  "verb": "IAC_MONITORING"
+}

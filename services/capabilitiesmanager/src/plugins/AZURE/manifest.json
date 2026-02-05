@@ -1,0 +1,52 @@
+{
+  "id": "plugin-AZURE",
+  "verb": "AZURE",
+  "description": "Microsoft Azure cloud integration",
+  "explanation": "Integration with Azure for resource management, VM monitoring, consumption analysis, and cost tracking",
+  "inputDefinitions": [
+    {
+      "name": "action",
+      "required": true,
+      "type": "string",
+      "description": "The action to perform (list_resources, check_vm_status, analyze_consumption, check_storage, analyze_costs, get_health_status)",
+      "aliases": [
+        "operation",
+        "command"
+      ]
+    },
+    {
+      "name": "payload",
+      "required": true,
+      "type": "object",
+      "description": "Action-specific parameters",
+      "aliases": [
+        "data",
+        "params",
+        "parameters"
+      ]
+    }
+  ],
+  "outputDefinitions": [
+    {
+      "name": "result",
+      "required": true,
+      "type": "object",
+      "description": "Operation result with Azure resource data"
+    },
+    {
+      "name": "success",
+      "required": true,
+      "type": "boolean",
+      "description": "Success indicator"
+    }
+  ],
+  "language": "python",
+  "entryPoint": {
+    "main": "main.py",
+    "function": "execute_plugin"
+  },
+  "repository": {
+    "type": "local"
+  },
+  "version": "1.0.0"
+}

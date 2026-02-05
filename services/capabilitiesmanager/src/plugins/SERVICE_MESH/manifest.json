@@ -1,0 +1,95 @@
+{
+  "name": "SERVICE_MESH",
+  "version": "1.0.0",
+  "description": "Service mesh and microservices monitoring",
+  "actions": [
+    {
+      "name": "get_mesh_status",
+      "description": "Get overall service mesh status",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mesh_name": {
+            "type": "string",
+            "enum": [
+              "istio",
+              "linkerd",
+              "consul"
+            ]
+          },
+          "namespace": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "mesh_name"
+        ]
+      }
+    },
+    {
+      "name": "get_service_dependencies",
+      "description": "Get service dependency map",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mesh_name": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "analyze_latency",
+      "description": "Analyze service latency metrics",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mesh_name": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "latency_threshold_ms": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    {
+      "name": "check_traffic_policies",
+      "description": "Check traffic management policies",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mesh_name": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "identify_bottlenecks",
+      "description": "Identify performance bottlenecks",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "mesh_name": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  ],
+  "id": "plugin-SERVICE_MESH",
+  "verb": "SERVICE_MESH"
+}

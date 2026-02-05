@@ -1,0 +1,24 @@
+{
+  "assistant_id": "education-assistant",
+  "assistant_name": "Education Assistant",
+  "assistant_role": "Assists with curriculum planning, assessment creation, and learning analytics",
+  "assistant_personality": "Encouraging, knowledgeable, patient, and adaptive",
+  "port": 3009,
+  "tools": [
+    {
+      "name": "CurriculumPlanner",
+      "plugin": "CURRICULUM_PLANNER",
+      "description": "Curriculum planning"
+    },
+    {
+      "name": "AssessmentGenerator",
+      "plugin": "ASSESSMENT_GENERATOR",
+      "description": "Assessment generation"
+    },
+    {
+      "name": "LearningAnalyticsTool",
+      "plugin": "LEARNING_ANALYTICS",
+      "description": "Learning analytics"
+    }
+  ]
+}

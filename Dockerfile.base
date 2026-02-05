@@ -1,0 +1,26 @@
+# Base image with all shared dependencies pre-built
+# Build with: docker build -f Dockerfile.base -t cktmcs:base .
+FROM node:20-alpine
+
+WORKDIR /usr/src/app
+
+# Copy root package files
+COPY package.json package-lock.json ./
+
+# Copy workspace package files
+COPY shared/package.json ./shared/
+COPY sdk/package.json ./sdk/
+COPY errorhandler/package.json ./errorhandler/
+
+# Install all dependencies with legacy peer deps to resolve MUI version conflicts
+RUN npm install --legacy-peer-deps
+
+# Copy source code for all shared workspaces
+COPY shared/ ./shared/
+COPY sdk/ ./sdk/
+COPY errorhandler/ ./errorhandler/
+
+# Build shared workspaces
+RUN npm run build --workspace=shared
+RUN npm run build --workspace=sdk
+RUN npm run build --workspace=errorhandler

@@ -1,0 +1,152 @@
+{
+  "id": "plugin-REPORT_GENERATION",
+  "verb": "REPORT_GENERATION",
+  "description": "Generate reports and documents",
+  "explanation": "Create formatted reports, export to various formats, and generate documentation",
+  "inputDefinitions": [
+    {
+      "name": "action",
+      "required": true,
+      "type": "string",
+      "description": "The action to perform",
+      "aliases": [
+        "operation",
+        "command"
+      ]
+    },
+    {
+      "name": "payload",
+      "required": true,
+      "type": "object",
+      "description": "Action-specific parameters",
+      "aliases": [
+        "data",
+        "params",
+        "parameters"
+      ]
+    }
+  ],
+  "outputDefinitions": [
+    {
+      "name": "result",
+      "required": true,
+      "type": "object",
+      "description": "Operation result"
+    },
+    {
+      "name": "success",
+      "required": true,
+      "type": "boolean",
+      "description": "Success indicator"
+    }
+  ],
+  "language": "python",
+  "entryPoint": {
+    "main": "main.py",
+    "function": "execute_plugin"
+  },
+  "repository": {
+    "type": "local"
+  },
+  "security": {
+    "permissions": [
+      "fs.write",
+      "fs.read"
+    ],
+    "sandboxOptions": {
+      "timeout": 60000
+    }
+  },
+  "actions": [
+    {
+      "name": "createReport",
+      "description": "Create a report from template and data",
+      "parameters": {
+        "title": {
+          "type": "string",
+          "required": true,
+          "description": "Report title"
+        },
+        "content": {
+          "type": "string",
+          "required": true,
+          "description": "Report content (markdown format)"
+        },
+        "data": {
+          "type": "object",
+          "required": false,
+          "description": "Additional data to include"
+        },
+        "template": {
+          "type": "string",
+          "required": false,
+          "description": "Template name (default: 'default')"
+        }
+      }
+    },
+    {
+      "name": "exportHTML",
+      "description": "Export report to HTML format",
+      "parameters": {
+        "content": {
+          "type": "string",
+          "required": true,
+          "description": "Report content (markdown format)"
+        },
+        "title": {
+          "type": "string",
+          "required": false,
+          "description": "Report title"
+        },
+        "css": {
+          "type": "string",
+          "required": false,
+          "description": "Custom CSS styles"
+        },
+        "output_path": {
+          "type": "string",
+          "required": false,
+          "description": "Output file path"
+        }
+      }
+    },
+    {
+      "name": "exportPDF",
+      "description": "Export report to PDF format",
+      "parameters": {
+        "title": {
+          "type": "string",
+          "required": true,
+          "description": "Report title"
+        },
+        "content": {
+          "type": "string",
+          "required": true,
+          "description": "Report content"
+        },
+        "data": {
+          "type": "array",
+          "required": false,
+          "description": "Table data to include"
+        },
+        "output_path": {
+          "type": "string",
+          "required": false,
+          "description": "Output file path (default: 'report.pdf')"
+        }
+      }
+    }
+  ],
+  "version": "1.0.0",
+  "metadata": {
+    "author": "Stage7 Development Team",
+    "tags": [
+      "reports",
+      "documents",
+      "export",
+      "pdf"
+    ],
+    "category": "productivity",
+    "license": "MIT"
+  }
+}

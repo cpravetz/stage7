@@ -3,5 +3,33 @@
         "shellArgs": ["-i"]
     },
     "terminal.integrated.copyOnSelection": true,
-    "terminal.integrated.defaultProfile.windows": "PowerShell"
+    "terminal.integrated.defaultProfile.windows": "PowerShell",
+    "chat.tools.terminal.autoApprove": {
+        "npm run typecheck": true,
+        "docker exec": true,
+        "ForEach-Object": true,
+        "Push-Location": true,
+        "Pop-Location": true,
+        "docker-compose": true,
+        "/^node test_message_flow\\.js 2>&1$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^sleep 3 ; node test_message_flow\\.js 2>&1$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "&": true,
+        "/^node test_message_flow\\.js 2>&1 ; sleep 2 ; docker logs cktmcs-postoffice-1 --since 2m 2>&1 \\| grep -i \"RABBITMQ_DEBUG\"$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "docker restart": true,
+        "Get-Item": true,
+        "docker build": true,
+        "New-Item": true,
+        "Out-Null": true,
+        "Copy-Item": true
+    },
+    "terminal.integrated.shellIntegration.environmentReporting": true
 }

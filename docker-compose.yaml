@@ -359,6 +359,582 @@ services:
       - ENV REACT_APP_API_BASE_URL=http://postoffice:5020
       - ENV REACT_APP_WS_URL=ws://localhost:5020
 
+  pm-assistant-api:
+    build:
+      context: .
+      dockerfile: agents/pm-assistant-api/Dockerfile
+    depends_on:
+      postoffice:
+        condition: service_healthy
+      securitymanager:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      POSTOFFICE_URL: *postofficeUrl
+      SECURITYMANAGER_URL: securitymanager:5010
+      PM_ASSISTANT_API_SECRET: stage7AuthSecret
+      CLIENT_SECRET: stage7AuthSecret
+      SERVICE_URL: pm-assistant-api:3000
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./shared/keys:/usr/src/app/shared/keys
+    healthcheck:
+      start_period: 300s
+
+  sales-assistant-api:
+    build:
+      context: .
+      dockerfile: agents/sales-assistant-api/Dockerfile
+    depends_on:
+      postoffice:
+        condition: service_healthy
+      securitymanager:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      PORT: 3002
+      POSTOFFICE_URL: *postofficeUrl
+      SECURITYMANAGER_URL: securitymanager:5010
+      SALES_ASSISTANT_API_SECRET: stage7AuthSecret
+      CLIENT_SECRET: stage7AuthSecret
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    ports:
+      - "3002:3002"
+    volumes:
+      - ./shared/keys:/usr/src/app/shared/keys
+    healthcheck:
+      test: ["CMD", "--spider", "-q", "http://localhost:3002/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 300s
+
+  marketing-assistant-api:
+    build:
+      context: .
+      dockerfile: agents/marketing-assistant-api/Dockerfile
+    depends_on:
+      postoffice:
+        condition: service_healthy
+      securitymanager:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      PORT: 3003
+      POSTOFFICE_URL: *postofficeUrl
+      SECURITYMANAGER_URL: securitymanager:5010
+      MARKETING_ASSISTANT_API_SECRET: stage7AuthSecret
+      CLIENT_SECRET: stage7AuthSecret
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    ports:
+      - "3003:3003"
+    volumes:
+      - ./shared/keys:/usr/src/app/shared/keys
+    healthcheck:
+      test: ["CMD", "--spider", "-q", "http://localhost:3003/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 300s
+
+  hr-assistant-api:
+    build:
+      context: .
+      dockerfile: agents/hr-assistant-api/Dockerfile
+    depends_on:
+      postoffice:
+        condition: service_healthy
+      securitymanager:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      PORT: 3004
+      POSTOFFICE_URL: *postofficeUrl
+      SECURITYMANAGER_URL: securitymanager:5010
+      HR_ASSISTANT_API_SECRET: stage7AuthSecret
+      CLIENT_SECRET: stage7AuthSecret
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    ports:
+      - "3004:3004"
+    volumes:
+      - ./shared/keys:/usr/src/app/shared/keys
+    healthcheck:
+      test: ["CMD", "--spider", "-q", "http://localhost:3004/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 300s
+
+  finance-assistant-api:
+    build:
+      context: .
+      dockerfile: agents/finance-assistant-api/Dockerfile
+    depends_on:
+      postoffice:
+        condition: service_healthy
+      securitymanager:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      PORT: 3005
+      POSTOFFICE_URL: *postofficeUrl
+      SECURITYMANAGER_URL: securitymanager:5010
+      FINANCE_ASSISTANT_API_SECRET: stage7AuthSecret
+      CLIENT_SECRET: stage7AuthSecret
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    ports:
+      - "3005:3005"
+    volumes:
+      - ./shared/keys:/usr/src/app/shared/keys
+    healthcheck:
+      test: ["CMD", "--spider", "-q", "http://localhost:3005/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 300s
+
+  support-assistant-api:
+    build:
+      context: .
+      dockerfile: agents/support-assistant-api/Dockerfile
+    depends_on:
+      postoffice:
+        condition: service_healthy
+      securitymanager:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      PORT: 3006
+      POSTOFFICE_URL: *postofficeUrl
+      SECURITYMANAGER_URL: securitymanager:5010
+      SUPPORT_ASSISTANT_API_SECRET: stage7AuthSecret
+      CLIENT_SECRET: stage7AuthSecret
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    ports:
+      - "3006:3006"
+    volumes:
+      - ./shared/keys:/usr/src/app/shared/keys
+    healthcheck:
+      test: ["CMD", "--spider", "-q", "http://localhost:3006/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 300s
+
+  legal-assistant-api:
+    build:
+      context: .
+      dockerfile: agents/legal-assistant-api/Dockerfile
+    depends_on:
+      postoffice:
+        condition: service_healthy
+      securitymanager:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      PORT: 3007
+      POSTOFFICE_URL: *postofficeUrl
+      SECURITYMANAGER_URL: securitymanager:5010
+      LEGAL_ASSISTANT_API_SECRET: stage7AuthSecret
+      CLIENT_SECRET: stage7AuthSecret
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    ports:
+      - "3007:3007"
+    volumes:
+      - ./shared/keys:/usr/src/app/shared/keys
+    healthcheck:
+      test: ["CMD", "--spider", "-q", "http://localhost:3007/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 300s
+
+  healthcare-assistant-api:
+    build:
+      context: .
+      dockerfile: agents/healthcare-assistant-api/Dockerfile
+    depends_on:
+      postoffice:
+        condition: service_healthy
+      securitymanager:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      PORT: 3008
+      POSTOFFICE_URL: *postofficeUrl
+      SECURITYMANAGER_URL: securitymanager:5010
+      HEALTHCARE_ASSISTANT_API_SECRET: stage7AuthSecret
+      CLIENT_SECRET: stage7AuthSecret
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    ports:
+      - "3008:3008"
+    volumes:
+      - ./shared/keys:/usr/src/app/shared/keys
+    healthcheck:
+      test: ["CMD", "--spider", "-q", "http://localhost:3008/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 300s
+
+  education-assistant-api:
+    build:
+      context: .
+      dockerfile: agents/education-assistant-api/Dockerfile
+    depends_on:
+      postoffice:
+        condition: service_healthy
+      securitymanager:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      PORT: 3009
+      POSTOFFICE_URL: *postofficeUrl
+      SECURITYMANAGER_URL: securitymanager:5010
+      EDUCATION_ASSISTANT_API_SECRET: stage7AuthSecret
+      CLIENT_SECRET: stage7AuthSecret
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    ports:
+      - "3009:3009"
+    volumes:
+      - ./shared/keys:/usr/src/app/shared/keys
+    healthcheck:
+      test: ["CMD", "--spider", "-q", "http://localhost:3009/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 300s
+
+  event-assistant-api:
+    build:
+      context: .
+      dockerfile: agents/event-assistant-api/Dockerfile
+    depends_on:
+      postoffice:
+        condition: service_healthy
+      securitymanager:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      PORT: 3010
+      POSTOFFICE_URL: *postofficeUrl
+      SECURITYMANAGER_URL: securitymanager:5010
+      EVENT_ASSISTANT_API_SECRET: stage7AuthSecret
+      CLIENT_SECRET: stage7AuthSecret
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    ports:
+      - "3010:3010"
+    volumes:
+      - ./shared/keys:/usr/src/app/shared/keys
+    healthcheck:
+      test: ["CMD", "--spider", "-q", "http://localhost:3010/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 300s
+
+  executive-assistant-api:
+    build:
+      context: .
+      dockerfile: agents/executive-assistant-api/Dockerfile
+    depends_on:
+      postoffice:
+        condition: service_healthy
+      securitymanager:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      PORT: 3011
+      POSTOFFICE_URL: *postofficeUrl
+      SECURITYMANAGER_URL: securitymanager:5010
+      EXECUTIVE_ASSISTANT_API_SECRET: stage7AuthSecret
+      CLIENT_SECRET: stage7AuthSecret
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    ports:
+      - "3011:3011"
+    volumes:
+      - ./shared/keys:/usr/src/app/shared/keys
+    healthcheck:
+      test: ["CMD", "--spider", "-q", "http://localhost:3011/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 300s
+
+  career-assistant-api:
+    build:
+      context: .
+      dockerfile: agents/career-assistant-api/Dockerfile
+    depends_on:
+      postoffice:
+        condition: service_healthy
+      securitymanager:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      PORT: 3012
+      POSTOFFICE_URL: *postofficeUrl
+      SECURITYMANAGER_URL: securitymanager:5010
+      CAREER_ASSISTANT_API_SECRET: stage7AuthSecret
+      CLIENT_SECRET: stage7AuthSecret
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    ports:
+      - "3012:3012"
+    volumes:
+      - ./shared/keys:/usr/src/app/shared/keys
+    healthcheck:
+      test: ["CMD", "--spider", "-q", "http://localhost:3012/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 300s
+
+  content-creator-assistant-api:
+    build:
+      context: .
+      dockerfile: agents/content-creator-assistant-api/Dockerfile
+    depends_on:
+      postoffice:
+        condition: service_healthy
+      securitymanager:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      PORT: 3013
+      POSTOFFICE_URL: *postofficeUrl
+      SECURITYMANAGER_URL: securitymanager:5010
+      CONTENT_CREATOR_ASSISTANT_API_SECRET: stage7AuthSecret
+      CLIENT_SECRET: stage7AuthSecret
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    ports:
+      - "3013:3013"
+    volumes:
+      - ./shared/keys:/usr/src/app/shared/keys
+    healthcheck:
+      test: ["CMD", "--spider", "-q", "http://localhost:3013/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 300s
+
+  songwriter-assistant-api:
+    build:
+      context: .
+      dockerfile: agents/songwriter-assistant-api/Dockerfile
+    depends_on:
+      postoffice:
+        condition: service_healthy
+      securitymanager:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      PORT: 3014
+      POSTOFFICE_URL: *postofficeUrl
+      SECURITYMANAGER_URL: securitymanager:5010
+      SONGWRITER_ASSISTANT_API_SECRET: stage7AuthSecret
+      CLIENT_SECRET: stage7AuthSecret
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    ports:
+      - "3014:3014"
+    volumes:
+      - ./shared/keys:/usr/src/app/shared/keys
+    healthcheck:
+      test: ["CMD", "--spider", "-q", "http://localhost:3014/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 300s
+
+  scriptwriter-assistant-api:
+    build:
+      context: .
+      dockerfile: agents/scriptwriter-assistant-api/Dockerfile
+    depends_on:
+      postoffice:
+        condition: service_healthy
+      securitymanager:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      PORT: 3015
+      POSTOFFICE_URL: *postofficeUrl
+      SECURITYMANAGER_URL: securitymanager:5010
+      SCRIPTWRITER_ASSISTANT_API_SECRET: stage7AuthSecret
+      CLIENT_SECRET: stage7AuthSecret
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    ports:
+      - "3015:3015"
+    volumes:
+      - ./shared/keys:/usr/src/app/shared/keys
+    healthcheck:
+      test: ["CMD", "--spider", "-q", "http://localhost:3015/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 300s
+
+  hotel-ops-assistant-api:
+    build:
+      context: .
+      dockerfile: agents/hotel-ops-assistant-api/Dockerfile
+    depends_on:
+      postoffice:
+        condition: service_healthy
+      securitymanager:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      PORT: 3017
+      POSTOFFICE_URL: *postofficeUrl
+      SECURITYMANAGER_URL: securitymanager:5010
+      HOTEL_OPS_ASSISTANT_API_SECRET: stage7AuthSecret
+      CLIENT_SECRET: stage7AuthSecret
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    ports:
+      - "3017:3017"
+    volumes:
+      - ./shared/keys:/usr/src/app/shared/keys
+    healthcheck:
+      test: ["CMD", "--spider", "-q", "http://localhost:3017/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 300s
+
+  restaurant-ops-assistant-api:
+    build:
+      context: .
+      dockerfile: agents/restaurant-ops-assistant-api/Dockerfile
+    depends_on:
+      postoffice:
+        condition: service_healthy
+      securitymanager:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      PORT: 3016
+      POSTOFFICE_URL: *postofficeUrl
+      SECURITYMANAGER_URL: securitymanager:5010
+      RESTAURANT_OPS_ASSISTANT_API_SECRET: stage7AuthSecret
+      CLIENT_SECRET: stage7AuthSecret
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    ports:
+      - "3016:3016"
+    volumes:
+      - ./shared/keys:/usr/src/app/shared/keys
+    healthcheck:
+      test: ["CMD", "--spider", "-q", "http://localhost:3016/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 300s
+
+
+  investment-advisor-api:
+    build:
+      context: .
+      dockerfile: agents/investment-advisor-api/Dockerfile
+    depends_on:
+      postoffice:
+        condition: service_healthy
+      securitymanager:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      PORT: 3025
+      POSTOFFICE_URL: *postofficeUrl
+      SECURITYMANAGER_URL: securitymanager:5010
+      INVESTMENT_ADVISOR_API_SECRET: stage7AuthSecret
+      CLIENT_SECRET: stage7AuthSecret
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    ports:
+      - "3025:3025"
+    volumes:
+      - ./shared/keys:/usr/src/app/shared/keys
+    healthcheck:
+      test: ["CMD", "--spider", "-q", "http://localhost:3025/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 300s  sports-wager-advisor-api:
+    build:
+      context: .
+      dockerfile: agents/sports-wager-advisor-api/Dockerfile
+    depends_on:
+      postoffice:
+        condition: service_healthy
+      securitymanager:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      PORT: 3018
+      POSTOFFICE_URL: *postofficeUrl
+      SECURITYMANAGER_URL: securitymanager:5010
+      SPORTS_WAGER_ADVISOR_API_SECRET: stage7AuthSecret
+      CLIENT_SECRET: stage7AuthSecret
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    ports:
+      - "3018:3018"
+    volumes:
+      - ./shared/keys:/usr/src/app/shared/keys
+    healthcheck:
+      test: ["CMD", "--spider", "-q", "http://localhost:3018/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 300s
+
+  cto-assistant-api:
+    build:
+      context: .
+      dockerfile: agents/cto-assistant-api/Dockerfile
+    depends_on:
+      postoffice:
+        condition: service_healthy
+      securitymanager:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      PORT: 3019
+      POSTOFFICE_URL: *postofficeUrl
+      SECURITYMANAGER_URL: securitymanager:5010
+      CTO_ASSISTANT_API_SECRET: stage7AuthSecret
+      CLIENT_SECRET: stage7AuthSecret
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    ports:
+      - "3019:3019"
+    volumes:
+      - ./shared/keys:/usr/src/app/shared/keys
+    healthcheck:
+      test: ["CMD", "--spider", "-q", "http://localhost:3019/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 300s
+
   mongo:
     image: mongo:latest
     ports:
@@ -451,3 +1027,4 @@ volumes:
 networks:
   default:
     name: mcs_network
+

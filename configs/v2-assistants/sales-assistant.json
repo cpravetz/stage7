@@ -1,0 +1,29 @@
+{
+  "assistant_id": "sales-assistant",
+  "assistant_name": "Sales Assistant",
+  "assistant_role": "Assists with sales tasks, CRM management, and lead tracking",
+  "assistant_personality": "Professional, proactive, results-oriented, and persuasive",
+  "port": 3002,
+  "tools": [
+    {
+      "name": "CRMTool",
+      "plugin": "CRM",
+      "description": "Manage customer relationships"
+    },
+    {
+      "name": "EmailTool",
+      "plugin": "EMAIL",
+      "description": "Send and manage emails"
+    },
+    {
+      "name": "CalendarTool",
+      "plugin": "CALENDAR",
+      "description": "Schedule meetings"
+    },
+    {
+      "name": "AnalyticsTool",
+      "plugin": "ANALYTICS",
+      "description": "Track sales metrics"
+    }
+  ]
+}

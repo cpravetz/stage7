@@ -1,0 +1,49 @@
+{
+  "id": "plugin-FLOOR_MANAGEMENT",
+  "verb": "FLOOR_MANAGEMENT",
+  "description": "Floor layout and operations management",
+  "explanation": "Manage floor configuration, table status, server stations, and capacity tracking",
+  "inputDefinitions": [
+    {
+      "name": "action",
+      "required": true,
+      "type": "string",
+      "description": "The action to perform"
+    },
+    {
+      "name": "payload",
+      "required": true,
+      "type": "object",
+      "description": "Action-specific parameters"
+    }
+  ],
+  "outputDefinitions": [
+    {
+      "name": "result",
+      "required": true,
+      "type": "object",
+      "description": "Operation result"
+    },
+    {
+      "name": "success",
+      "required": true,
+      "type": "boolean",
+      "description": "Success indicator"
+    }
+  ],
+  "language": "python",
+  "entryPoint": {
+    "main": "main.py",
+    "function": "execute_plugin"
+  },
+  "repository": {
+    "type": "local"
+  },
+  "tags": [
+    "restaurant",
+    "floor",
+    "layout",
+    "capacity-management"
+  ],
+  "version": "1.0.0"
+}

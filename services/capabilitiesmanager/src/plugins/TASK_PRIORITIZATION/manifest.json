@@ -1,0 +1,77 @@
+{
+  "id": "plugin-TASK_PRIORITIZATION",
+  "verb": "TASK_PRIORITIZATION",
+  "description": "TASK PRIORITIZATION plugin for comprehensive management and analytics",
+  "explanation": "Essential plugin for task prioritization operations with analytics and reporting",
+  "semanticDescription": "Manage, analyze, and track task prioritization data with advanced capabilities",
+  "capabilityKeywords": [
+    "task_prioritization",
+    "analytics",
+    "management",
+    "tracking",
+    "reporting"
+  ],
+  "usageExamples": [
+    "Use prioritize_tasks to start operations",
+    "Use create_task to analyze data",
+    "Use suggest_order for comprehensive analytics"
+  ],
+  "category": "operational",
+  "actions": [
+    {
+      "name": "prioritize_tasks",
+      "description": "Perform prioritize tasks operation",
+      "inputParameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputType": "object"
+    },
+    {
+      "name": "create_task",
+      "description": "Perform create task operation",
+      "inputParameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputType": "object"
+    },
+    {
+      "name": "update_task",
+      "description": "Perform update task operation",
+      "inputParameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputType": "object"
+    },
+    {
+      "name": "get_urgent",
+      "description": "Perform get urgent operation",
+      "inputParameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputType": "object"
+    },
+    {
+      "name": "suggest_order",
+      "description": "Perform suggest order operation",
+      "inputParameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputType": "object"
+    }
+  ],
+  "version": "1.0.0",
+  "status": "active",
+  "created_at": "2026-01-28T14:44:51.363750",
+  "features": {
+    "in_memory_storage": true,
+    "error_handling": true,
+    "logging": true,
+    "analytics": true,
+    "health_check": true
+  }
+}

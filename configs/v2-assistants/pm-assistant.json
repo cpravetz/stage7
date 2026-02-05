@@ -1,0 +1,34 @@
+{
+  "assistant_id": "pm-assistant",
+  "assistant_name": "Product Manager Assistant",
+  "assistant_role": "Assists product managers with planning, documentation, and project management",
+  "assistant_personality": "Collaborative, proactive, analytical, and detail-oriented",
+  "port": 3000,
+  "tools": [
+    {
+      "name": "JiraTool",
+      "plugin": "JIRA",
+      "description": "Manage tasks and issues"
+    },
+    {
+      "name": "ConfluenceTool",
+      "plugin": "CONFLUENCE",
+      "description": "Create and manage documentation"
+    },
+    {
+      "name": "DataAnalysisTool",
+      "plugin": "DATA_ANALYSIS",
+      "description": "Analyze data and generate insights"
+    },
+    {
+      "name": "SlackTool",
+      "plugin": "SLACK",
+      "description": "Team communication"
+    },
+    {
+      "name": "CalendarTool",
+      "plugin": "CALENDAR",
+      "description": "Schedule meetings"
+    }
+  ]
+}

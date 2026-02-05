@@ -1,0 +1,58 @@
+{
+  "id": "ARCH-004",
+  "category": "architecture",
+  "title": "Responsive User Interaction",
+  "description": "The system must be responsive to users and never bogged down with work that interferes with user interaction.",
+  "rules": [
+    "Implement proper prioritization of user-facing tasks over background processes",
+    "Use background processing for non-critical work",
+    "Ensure UI remains responsive during processing (maximum 200ms response time)",
+    "Implement proper resource allocation to prevent UI blocking",
+    "Use asynchronous patterns where appropriate to maintain responsiveness",
+    "Implement progress indicators for long-running operations",
+    "Use proper threading and concurrency models",
+    "Implement user interaction prioritization queues"
+  ],
+  "enforcementMechanisms": [
+    "Performance monitoring and response time tracking",
+    "User experience testing and validation",
+    "Resource utilization analysis and optimization",
+    "Concurrency pattern validation",
+    "UI responsiveness testing",
+    "Progress indicator effectiveness analysis",
+    "Threading model validation",
+    "Interaction prioritization testing"
+  ],
+  "complianceMetrics": [
+    "UI response time (target: <200ms)",
+    "Background processing effectiveness",
+    "Resource allocation efficiency",
+    "Concurrency pattern success rate",
+    "UI responsiveness score",
+    "Progress indicator accuracy",
+    "Threading model efficiency",
+    "Interaction prioritization effectiveness"
+  ],
+  "severity": "high",
+  "documentation": "docs/ENGINEERING_POLICIES.md#policy-7-responsive-user-interaction",
+  "examples": [
+    "Implementing background workers for data processing",
+    "Using web workers to prevent UI thread blocking",
+    "Implementing proper loading indicators for async operations",
+    "Using priority queues for user interaction handling",
+    "Implementing responsive design patterns for complex UIs"
+  ],
+  "exceptions": [
+    "Critical system operations that require immediate attention",
+    "Real-time processing requirements that override normal prioritization"
+  ],
+  "validationChecks": [
+    "test-ui-responsiveness",
+    "analyze-background-processing",
+    "validate-resource-allocation",
+    "check-concurrency-patterns",
+    "monitor-ui-performance",
+    "validate-progress-indicators",
+    "test-interaction-prioritization"
+  ]
+}

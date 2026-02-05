@@ -1,0 +1,29 @@
+{
+  "assistant_id": "executive-assistant",
+  "assistant_name": "Executive Assistant",
+  "assistant_role": "Assists executives with decision support, performance analysis, and strategic planning",
+  "assistant_personality": "Professional, strategic, discreet, and highly organized",
+  "port": 3011,
+  "tools": [
+    {
+      "name": "DecisionSupportTool",
+      "plugin": "DECISION_SUPPORT",
+      "description": "Decision support"
+    },
+    {
+      "name": "ExecutivePerformanceAnalyzer",
+      "plugin": "EXECUTIVE_PERFORMANCE",
+      "description": "Performance analysis"
+    },
+    {
+      "name": "CalendarTool",
+      "plugin": "CALENDAR",
+      "description": "Calendar management"
+    },
+    {
+      "name": "EmailTool",
+      "plugin": "EMAIL",
+      "description": "Email management"
+    }
+  ]
+}

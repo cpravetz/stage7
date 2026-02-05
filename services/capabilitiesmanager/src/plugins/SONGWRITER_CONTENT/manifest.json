@@ -1,0 +1,57 @@
+{
+  "id": "plugin-SONGWRITER_CONTENT",
+  "verb": "SONGWRITER_CONTENT",
+  "description": "Song composition assistance",
+  "explanation": "Generate and analyze songs and lyrics",
+  "inputDefinitions": [
+    {
+      "name": "action",
+      "required": true,
+      "type": "string",
+      "description": "The action to perform",
+      "aliases": ["operation", "command"]
+    },
+    {
+      "name": "payload",
+      "required": true,
+      "type": "object",
+      "description": "Action-specific parameters",
+      "aliases": ["data", "params", "parameters"]
+    }
+  ],
+  "outputDefinitions": [
+    {
+      "name": "result",
+      "required": true,
+      "type": "object",
+      "description": "Operation result"
+    },
+    {
+      "name": "success",
+      "required": true,
+      "type": "boolean",
+      "description": "Success indicator"
+    }
+  ],
+  "language": "python",
+  "entryPoint": {
+    "main": "main.py",
+    "function": "execute_plugin"
+  },
+  "repository": {
+    "type": "local"
+  },
+  "security": {
+    "permissions": [],
+    "sandboxOptions": {
+      "timeout": 30000
+    }
+  },
+  "version": "1.0.0",
+  "metadata": {
+    "author": "Stage7 Development Team",
+    "tags": ["songwriter", "lyrics", "melody"],
+    "category": "entertainment",
+    "license": "MIT"
+  }
+}

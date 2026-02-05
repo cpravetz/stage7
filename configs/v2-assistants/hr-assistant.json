@@ -1,0 +1,29 @@
+{
+  "assistant_id": "hr-assistant",
+  "assistant_name": "HR Assistant",
+  "assistant_role": "Assists with recruitment, candidate management, and hiring",
+  "assistant_personality": "Empathetic, organized, professional, and detail-oriented",
+  "port": 3004,
+  "tools": [
+    {
+      "name": "ATSTool",
+      "plugin": "ATS",
+      "description": "Applicant tracking"
+    },
+    {
+      "name": "ResumeAnalysisTool",
+      "plugin": "RESUME_ANALYSIS",
+      "description": "Resume parsing"
+    },
+    {
+      "name": "InterviewTool",
+      "plugin": "INTERVIEW_SCHEDULING",
+      "description": "Interview scheduling"
+    },
+    {
+      "name": "EmailTool",
+      "plugin": "EMAIL",
+      "description": "Candidate communications"
+    }
+  ]
+}

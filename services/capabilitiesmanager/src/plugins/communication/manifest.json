@@ -1,0 +1,86 @@
+{
+  "id": "plugin-COMMUNICATION",
+  "verb": "COMMUNICATION",
+  "description": "COMMUNICATION plugin for comprehensive management and analytics",
+  "explanation": "Essential plugin for communication operations with analytics and reporting",
+  "semanticDescription": "Manage, analyze, and track communication data with advanced capabilities",
+  "capabilityKeywords": [
+    "communication",
+    "analytics",
+    "management",
+    "tracking",
+    "reporting"
+  ],
+  "usageExamples": [
+    "Use send_message to start operations",
+    "Use create_channel to analyze data",
+    "Use search_messages for comprehensive analytics"
+  ],
+  "category": "operational",
+  "actions": [
+    {
+      "name": "send_message",
+      "description": "Perform send message operation",
+      "inputParameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputType": "object"
+    },
+    {
+      "name": "create_channel",
+      "description": "Perform create channel operation",
+      "inputParameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputType": "object"
+    },
+    {
+      "name": "manage_channel",
+      "description": "Perform manage channel operation",
+      "inputParameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputType": "object"
+    },
+    {
+      "name": "get_messages",
+      "description": "Perform get messages operation",
+      "inputParameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputType": "object"
+    },
+    {
+      "name": "pin_message",
+      "description": "Perform pin message operation",
+      "inputParameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputType": "object"
+    },
+    {
+      "name": "search_messages",
+      "description": "Perform search messages operation",
+      "inputParameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputType": "object"
+    }
+  ],
+  "version": "1.0.0",
+  "status": "active",
+  "created_at": "2026-01-28T14:44:51.419613",
+  "features": {
+    "in_memory_storage": true,
+    "error_handling": true,
+    "logging": true,
+    "analytics": true,
+    "health_check": true
+  }
+}
