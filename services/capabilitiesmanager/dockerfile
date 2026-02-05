@@ -19,7 +19,7 @@ COPY marketplace/package*.json ./marketplace/
 COPY services/capabilitiesmanager/package*.json ./services/capabilitiesmanager/
 
 # Install the application dependencies
-RUN npm install
+RUN npm install --legacy-peer-deps
 
 # Copy the application code to the working directory
 COPY shared ./shared

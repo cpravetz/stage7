@@ -752,7 +752,7 @@ export class AgentSet extends BaseEntity {
     }
 
     private async addAgent(req: express.Request, res: express.Response): Promise<void> {
-        let { agentId, actionVerb, inputs, missionId, missionContext, roleId, roleCustomizations } = req.body;
+        let { agentId, actionVerb, inputs, missionId, missionContext, roleId, roleCustomizations, userId, agentClass, instanceId } = req.body;
         
         // If agentId is not provided in the request body, generate one
         if (!agentId) {
@@ -792,6 +792,9 @@ export class AgentSet extends BaseEntity {
             inputValues: inputsMap,
             missionId,
             missionContext,
+            userId,
+            agentClass,
+            instanceId,
             id: agentId,
             postOfficeUrl: this.postOfficeUrl,
             agentSetUrl: this.url,
@@ -872,7 +875,7 @@ export class AgentSet extends BaseEntity {
     // Add a new agent with a configuration object
     private async addAgentWithConfig(config: any): Promise<string> { // Not a route handler, signature is fine
         try {
-            const { agentId, actionVerb, inputs, missionId, missionContext, roleId, roleCustomizations } = config;
+            const { agentId, actionVerb, inputs, missionId, missionContext, roleId, roleCustomizations, userId, agentClass, instanceId } = config;
 
             if (!agentId || !actionVerb) {
                 throw new Error('Missing required parameters');
@@ -918,6 +921,9 @@ export class AgentSet extends BaseEntity {
                 inputValues: inputsMap,
                 missionId,
                 missionContext,
+                userId,
+                agentClass,
+                instanceId,
                 id: agentId,
                 postOfficeUrl: this.postOfficeUrl,
                 agentSetUrl: this.url,

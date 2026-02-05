@@ -217,6 +217,7 @@ export class PostOffice extends BaseEntity {
 
             const targetServiceUrl = await this.serviceDiscoveryManager.discoverService(serviceName);
             if (!targetServiceUrl) {
+                console.error(`[PostOffice Proxy] Service ${serviceName} not available via service discovery`);
                 return res.status(503).send({ error: `Service ${serviceName} not available` });
             }
 
@@ -241,6 +242,10 @@ export class PostOffice extends BaseEntity {
                     }
                 };
 
+                // Log proxy request for debugging
+                console.log(`[PostOffice Proxy] Forwarding ${req.method} ${originalPath} to ${fullUrl}`);
+                console.log(`[PostOffice Proxy] Query params:`, req.query);
+
                 // Use the appropriate method based on the request method
                 switch (req.method.toLowerCase()) {
                     case 'get':
@@ -259,9 +264,14 @@ export class PostOffice extends BaseEntity {
                         // Handle unsupported methods
                         return res.status(405).send({ error: 'Method Not Allowed' });
                 }
+                console.log(`[PostOffice Proxy] Response status: ${response.status}`);
                 res.status(response.status).send(response.data);
             } catch (error: any) {
-                console.error(`Error proxying request to ${serviceName}:`, error.message);
+                console.error(`[PostOffice Proxy] Error proxying request to ${serviceName}:`, error.message);
+                if (error.response) {
+                    console.error(`[PostOffice Proxy] Error response status: ${error.response.status}`);
+                    console.error(`[PostOffice Proxy] Error response data:`, error.response.data);
+                }
                 res.status(error.response?.status || 500).send(error.response?.data || 'Proxy error');
             }
         });
@@ -469,7 +479,7 @@ export class PostOffice extends BaseEntity {
 
     private async createMission(req: express.Request, res: express.Response) {
         console.log('[PostOffice] Entering createMission method.'); // ADD THIS VERY EARLY LOG
-        const { goal, clientId, isAssistant } = req.body;
+        const { goal, clientId, isAssistant, userId, agentClass, instanceId, missionContext } = req.body;
         const token = req.headers.authorization;
 
         if (isAssistant) {
@@ -502,7 +512,7 @@ export class PostOffice extends BaseEntity {
 
             // Extract userId from token or use default
             // Since we've disabled token verification, we'll use a default userId
-            const userId = 'system';
+            const effectiveUserId = userId || 'system';
 
             const response = await this.authenticatedApi.post(`${missionControlUrl}/message`, {
                 type: MessageType.CREATE_MISSION,
@@ -510,9 +520,12 @@ export class PostOffice extends BaseEntity {
                 recipient: 'MissionControl',
                 clientId,
                 // Add userId to the message payload
-                userId: userId,
+                userId: effectiveUserId,
                 content: {
-                    goal
+                    goal,
+                    missionContext,
+                    agentClass,
+                    instanceId
                 },
                 timestamp: new Date().toISOString()
             }, { headers });

@@ -24,6 +24,8 @@ export interface Mission {
     status: Status;     // Current status of the mission
     name: string;
     missionContext: string;
+    agentClass?: string;
+    instanceId?: string;
     createdAt: Date;
     updatedAt: Date;
     attachedFiles?: DeliverableMissionFile[];  // Files attached to this mission

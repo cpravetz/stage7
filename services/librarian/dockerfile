@@ -15,10 +15,10 @@ COPY errorhandler/package*.json ./errorhandler/
 COPY shared/package*.json ./shared/
 
 # Install the application dependencies
-RUN npm install
-RUN cd shared && npm install
-RUN cd errorhandler && npm install
-RUN npm install --workspace=services/librarian
+RUN npm install --legacy-peer-deps
+RUN cd shared && npm install --legacy-peer-deps
+RUN cd errorhandler && npm install --legacy-peer-deps
+RUN npm install --legacy-peer-deps --workspace=services/librarian
 
 # Copy the shared module
 COPY shared/ ./shared/

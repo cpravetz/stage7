@@ -18,6 +18,9 @@ export interface AgentConfig {
     agentSetUrl: string;
     id: string;
     missionContext: string;
+    userId?: string;
+    agentClass?: string;
+    instanceId?: string;
     role?: string;
     roleCustomizations?: any;
 }

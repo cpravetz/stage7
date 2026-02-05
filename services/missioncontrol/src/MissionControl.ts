@@ -151,7 +151,17 @@ class MissionControl extends BaseEntity {
             inputs.set('payload', { inputName: 'payload', value: payload, valueType: PluginParameterType.OBJECT, args: {} });
 
             const missionIdStr = typeof missionId === 'string' ? missionId : missionId[0];
-            const agentIdResponse = await agentSetManager.assignAgentToSet(`agent-${uuidv4()}`, 'EXECUTE_TOOL', inputs, missionIdStr, '');
+            const mission = this.missions.get(missionIdStr);
+            const agentIdResponse = await agentSetManager.assignAgentToSet(
+                `agent-${uuidv4()}`,
+                'EXECUTE_TOOL',
+                inputs,
+                missionIdStr,
+                '',
+                mission?.userId,
+                mission?.agentClass,
+                mission?.instanceId
+            );
             const agentId = agentIdResponse as string;
             console.log(`MissionControl: Created temporary agent ${agentId} for tool execution.`);
 
@@ -507,6 +517,8 @@ class MissionControl extends BaseEntity {
                 name: content.name || `Mission ${new Date().toISOString().replace(/:/g, '-')}`,
                 goal: content.goal,
                 missionContext: content.missionContext || '',
+                agentClass: content.agentClass,
+                instanceId: content.instanceId,
                 status: Status.INITIALIZING,
                 createdAt: new Date(),
                 updatedAt: new Date()
@@ -547,7 +559,10 @@ class MissionControl extends BaseEntity {
                 'ACCOMPLISH',
                 inputs,
                 mission.id,
-                mission.missionContext
+                mission.missionContext,
+                userId,
+                content.agentClass,
+                content.instanceId
             );
 
             const agentId = agentIdResponse as string;

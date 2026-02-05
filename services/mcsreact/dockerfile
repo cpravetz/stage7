@@ -1,52 +1,29 @@
 # ---- Stage 1: Build ----
-# Use an official Node.js runtime as the base image for the build stage.
 FROM node:20-alpine AS builder
 
-# Set the working directory inside the container
-WORKDIR /app
+WORKDIR /usr/src/app
 
-# Copy package.json and package-lock.json
-COPY services/mcsreact/package*.json ./
+# Copy root package files for workspace context
+COPY package.json package-lock.json ./
 
-# Install dependencies
+# Copy ONLY frontend package files - this is what actually needs @mui
+COPY services/mcsreact/package*.json ./services/mcsreact/
+
+# Install dependencies (npm will hoist @mui and all other packages to root node_modules)
 RUN npm install --legacy-peer-deps
 
-# Copy the rest of the application source code
-COPY services/mcsreact/src ./src
-COPY services/mcsreact/public ./public
-COPY services/mcsreact/tsconfig.json ./
-COPY services/mcsreact/webpack.config.js ./
+# Copy frontend source code
+COPY services/mcsreact ./services/mcsreact
 
-# Copy shared files
-COPY shared/src/types/MCPTool.ts ./src/shared-browser
-COPY shared/src/types/DefinitionManifest.ts ./src/shared-browser
-COPY shared/src/types/OpenAPITool.ts ./src/shared-browser
-COPY shared/src/types/Plugin.ts ./src/shared-browser
-COPY shared/src/types/PluginManifest.ts ./src/shared-browser
-COPY shared/src/types/PluginRepository.ts ./src/shared-browser
-COPY shared/src/types/PluginStatus.ts ./src/shared-browser
-
-# Set environment variables
-ENV NODE_ENV=development
-ENV REACT_APP_API_BASE_URL=http://localhost:5020
-ENV REACT_APP_WS_URL=ws://localhost:5020
-ENV CI=false
-
-# Build the React application
-RUN npm run build
+# Build ONLY the frontend
+RUN npm run build --workspace=@cktmcs/cktmcs-frontend
 
 # ---- Stage 2: Serve ----
-# Use a lightweight Nginx image for the final stage
 FROM nginx:stable-alpine
 
-# Copy the built static files from the 'builder' stage to the Nginx html directory
-COPY --from=builder /app/build /usr/share/nginx/html
-
-# Copy a custom Nginx configuration file for SPA routing
+COPY --from=builder /usr/src/app/services/mcsreact/build /usr/share/nginx/html
 COPY services/mcsreact/nginx.conf /etc/nginx/conf.d/default.conf
 
-# Expose port 80 (the default HTTP port Nginx listens on)
 EXPOSE 80
 
-# Command to run Nginx in the foreground when the container starts
 CMD ["nginx", "-g", "daemon off;"]

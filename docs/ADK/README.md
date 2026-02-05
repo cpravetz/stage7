@@ -38,7 +38,7 @@ npm install
 npm start
 
 # 4. Open browser
-http://localhost:3000/assistants/pm-assistant
+http://localhost/assistants/pm-assistant
 ```
 
 ### Option B: Create Your Own Assistant
@@ -53,12 +53,6 @@ See [Creating Assistants](#creating-assistants) section below.
 
 All assistants in the ADK use the simplified `createQuickAssistant()` pattern that eliminates boilerplate:
 
-**Before (250+ lines of setup):**
-```typescript
-// Manual token manager, core engine client, express server, websocket setup...
-```
-
-**After (35 lines, clean and focused):**
 ```typescript
 import { createQuickAssistant } from '@cktmcs/sdk';
 

@@ -239,7 +239,16 @@ export class AgentSetManager {
         return Array.from(this.agentSets.values()).find(set => set.agentCount < this.maxAgentsPerSet);
     }
 
-    async assignAgentToSet(agentId: string, actionVerb: string, inputs: Map<string, InputValue>, missionId: string, missionContext: string): Promise<string> {
+    async assignAgentToSet(
+        agentId: string,
+        actionVerb: string,
+        inputs: Map<string, InputValue>,
+        missionId: string,
+        missionContext: string,
+        userId?: string,
+        agentClass?: string,
+        instanceId?: string
+    ): Promise<string> {
         await this.ensureAgentSets();
 
         let availableSet = await this.getAvailableAgentSet();
@@ -256,7 +265,10 @@ export class AgentSetManager {
                 actionVerb,
                 inputs: MapSerializer.transformForSerialization(inputs),
                 missionId,
-                missionContext
+                missionContext,
+                userId,
+                agentClass,
+                instanceId
             };
             const response = await this.apiCall('post', `${availableSet.url}/addAgent`, payload);
 

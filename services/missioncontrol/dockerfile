@@ -12,10 +12,10 @@ COPY errorhandler/package*.json ./errorhandler/
 COPY services/missioncontrol/package*.json ./services/missioncontrol/
 
 # Install the application dependencies
-RUN npm install
-RUN cd shared && npm install
-RUN cd errorhandler && npm install
-RUN cd services/missioncontrol && npm install
+RUN npm install --legacy-peer-deps
+RUN cd shared && npm install --legacy-peer-deps
+RUN cd errorhandler && npm install --legacy-peer-deps
+RUN cd services/missioncontrol && npm install --legacy-peer-deps
 
 # Copy the application code to the working directory
 COPY shared ./shared

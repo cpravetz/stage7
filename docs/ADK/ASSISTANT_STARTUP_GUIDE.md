@@ -5,8 +5,10 @@
 The v2 assistant architecture consists of:
 - **Frontend**: React app (port 5020 via PostOffice)
 - **PostOffice**: API Gateway and proxy (port 5020)
-- **Assistant APIs**: Individual backend services for each assistant (ports 3000-3015)
+- **Assistant APIs**: Individual backend services for each assistant (ports 3000-3020)
 - **Core Services**: MissionControl, Brain, Librarian, etc.
+
+> **Note**: The included assistant implementations are **example templates** designed as starting points for developers. They demonstrate the architecture, API patterns, and integration approach that developers should use when building their own custom assistant agents tailored to their specific use cases.
 
 ## Architecture
 
@@ -35,11 +37,13 @@ docker-compose up postoffice pm-assistant-api sales-assistant-api
 ```
 
 This starts:
-- All 14+ assistant APIs (ports 3000-3015)
+- All 20 example assistant APIs (ports 3000-3020)
 - PostOffice (port 5020)
 - All L1 services (MissionControl, Brain, Librarian, etc.)
 - Infrastructure (MongoDB, Redis, Consul)
 - React frontend
+
+> **Developer Note**: These 20 assistant implementations serve as reference templates. Developers should study these examples to understand the patterns, then create their own custom assistants tailored to their specific business needs.
 
 ### Option 2: Start Services Individually (Development)
 
@@ -82,7 +86,9 @@ cd services/mcsreact
 npm start
 ```
 
-## Assistant API Ports
+## Example Assistant API Ports
+
+These are **reference implementations** demonstrating various use cases. Use them as templates for building your own custom assistants.
 
 | Assistant | Port | Service Name |
 |-----------|------|--------------|
@@ -101,6 +107,11 @@ npm start
 | Songwriter Assistant | 3013 | songwriter-assistant |
 | Scriptwriter Assistant | 3014 | scriptwriter-assistant |
 | Content Creator Assistant | 3015 | content-creator-assistant |
+| CTO Assistant | 3016 | cto-assistant |
+| Hotel Ops Assistant | 3017 | hotel-ops-assistant |
+| Restaurant Ops Assistant | 3018 | restaurant-ops-assistant |
+| Sports Wager Advisor | 3019 | sports-wager-advisor |
+| Performance Analytics | 3020 | performance-analytics |
 
 ## How Routing Works
 
@@ -173,11 +184,33 @@ npm start
 3. ✅ Fixed action buttons to start conversation before triggering actions
 4. ✅ Removed `process.env` usage in browser code (not available in browser)
 
-## Next Steps
+## Building Your Own Assistants
 
-To get assistants fully working:
-1. Ensure all required backend services are running (PostOffice + Assistant APIs + Core services)
-2. Verify service discovery is working (check Consul or environment variables)
-3. Test conversation flow: Start conversation → Send message → Receive response
-4. Test action buttons: Click action → Conversation starts → Action triggers
+The provided assistants are **example implementations** to help you get started. To create your own custom assistant:
+
+1. **Study the Examples**: Review the existing assistant implementations to understand:
+   - API structure and endpoints (`/conversations`, `/actions`, etc.)
+   - WebSocket integration for real-time updates
+   - Integration with MissionControl and Brain
+   - Frontend component patterns
+
+2. **Copy a Template**: Choose an assistant similar to your use case and copy its structure
+
+3. **Customize**: Modify the assistant logic, actions, and UI to match your specific requirements
+
+4. **Register**: Add your new assistant to service discovery and routing configuration
+
+5. **Test**: Ensure all required backend services are running and verify:
+   - Service discovery is working (check Consul or environment variables)
+   - Conversation flow: Start conversation → Send message → Receive response
+   - Action buttons: Click action → Conversation starts → Action triggers
+
+## Quick Start Checklist
+
+To get the example assistants running:
+1. ✓ Start infrastructure services (MongoDB, Redis, Consul)
+2. ✓ Start core services (PostOffice, MissionControl, Brain, Librarian)
+3. ✓ Start one or more assistant APIs
+4. ✓ Start the frontend (mcsreact)
+5. ✓ Test a conversation in the browser
 

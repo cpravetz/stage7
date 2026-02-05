@@ -12,7 +12,7 @@ COPY errorhandler/package*.json ./errorhandler/
 COPY services/security/package*.json ./services/security/
 
 # Install the application dependencies
-RUN npm install
+RUN npm install --legacy-peer-deps
 
 # Copy the application code to the working directory
 COPY shared ./shared

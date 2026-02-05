@@ -94,6 +94,66 @@ export class CareerAssistantMessageBuilder {
 }
 
 /**
+ * Investment Advisor Assistant message builders
+ */
+export class InvestmentAdvisorMessageBuilder {
+  static analyzePortfolio(
+    missionId: string,
+    clientId: string,
+    conversationId: string,
+    options?: {
+      optimizationMethod?: 'meanVariance' | 'blackLitterman' | 'riskParity';
+      includeConstraintVisualization?: boolean;
+      generateAlternatives?: boolean;
+      riskAversion?: number;
+    }
+  ): PostOfficeMessage {
+    return buildToolMessage(missionId, clientId, conversationId, {
+      destinationApi: 'investment-advisor',
+      toolName: 'PortfolioManagementTool',
+      methodName: 'analyzePortfolio',
+      options,
+    });
+  }
+
+  static analyzeGoals(
+    missionId: string,
+    clientId: string,
+    conversationId: string,
+    options?: {
+      assumptions?: string[];
+      timeHorizon?: string;
+      investmentStyle?: 'aggressive' | 'moderate' | 'conservative';
+    }
+  ): PostOfficeMessage {
+    return buildToolMessage(missionId, clientId, conversationId, {
+      destinationApi: 'investment-advisor',
+      toolName: 'InvestmentStrategyTool',
+      methodName: 'analyzeGoals',
+      options,
+    });
+  }
+
+  static assessRisk(
+    missionId: string,
+    clientId: string,
+    conversationId: string,
+    options?: {
+      exposureMetrics?: ('delta' | 'beta' | 'volatility' | 'vAR' | 'cVAR')[];
+      benchmarkComparison?: boolean;
+      stressTestScenarios?: boolean;
+    }
+  ): PostOfficeMessage {
+    return buildToolMessage(missionId, clientId, conversationId, {
+      destinationApi: 'investment-advisor',
+      toolName: 'FinancialRiskAssessmentTool',
+      methodName: 'assessRisk',
+      options,
+    });
+  }
+}
+
+/**
  * Finance Assistant message builders
  */
 export class FinanceAssistantMessageBuilder {
@@ -1633,6 +1693,7 @@ export class SongwriterAssistantMessageBuilder {
 export const AssistantMessageBuilders = {
   Career: CareerAssistantMessageBuilder,
   Finance: FinanceAssistantMessageBuilder,
+  InvestmentAdvisor: InvestmentAdvisorMessageBuilder,
   Healthcare: HealthcareAssistantMessageBuilder,
   Sales: SalesAssistantMessageBuilder,
   Legal: LegalAssistantMessageBuilder,

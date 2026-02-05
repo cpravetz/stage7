@@ -18,6 +18,9 @@ export interface AgentState {
     librarianUrl: string;
     conversation: any[];
     missionContext: string;
+    userId?: string;
+    agentClass?: string;
+    instanceId?: string;
     role?: string;
     roleCustomizations?: any;
     lastFailedStep?: any;

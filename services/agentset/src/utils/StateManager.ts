@@ -29,6 +29,9 @@ export class StateManager {
                 librarianUrl: agent.librarianUrl,
                 conversation: agent.conversation,
                 missionContext: agent.missionContext,
+                userId: agent.userId,
+                agentClass: agent.agentClass,
+                instanceId: agent.instanceId,
                 lastFailedStep: agent.lastFailedStep
             });
         } catch (error) {
@@ -107,6 +110,9 @@ export class StateManager {
                 agent.librarianUrl = state.librarianUrl;
                 agent.conversation = state.conversation || [];
                 agent.missionContext = state.missionContext;
+                agent.userId = state.userId;
+                agent.agentClass = state.agentClass;
+                agent.instanceId = state.instanceId;
                 agent.role = state.role || 'executor';
                 agent.roleCustomizations = state.roleCustomizations;
                 agent.lastFailedStep = state.lastFailedStep;

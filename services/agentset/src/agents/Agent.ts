@@ -35,6 +35,9 @@ export class Agent extends BaseEntity {
     dependencies: string[];
     output: any;
     missionId: string;
+    userId?: string;
+    agentClass?: string;
+    instanceId?: string;
     capabilitiesManagerUrl: string = '';
     brainUrl: string = '';
     librarianUrl: string = '';
@@ -74,6 +77,9 @@ export class Agent extends BaseEntity {
         this.stateManager = new StateManager(config.id, this.agentPersistenceManager, this.crossAgentResolver);
         this.inputValues = config.inputValues instanceof Map ? config.inputValues : new Map(Object.entries(config.inputValues||{}));
         this.missionId = config.missionId;
+        this.userId = config.userId;
+        this.agentClass = config.agentClass;
+        this.instanceId = config.instanceId;
         this.agentSetUrl = config.agentSetUrl;
         this.status = AgentStatus.INITIALIZING;
         this.dependencies = config.dependencies || [];
@@ -928,6 +934,9 @@ Please consider this context when planning and executing the mission. Provide de
                 inputValues: MapSerializer.transformForSerialization(newInputs),
                 missionId: this.missionId,
                 dependencies: [this.id, ...(this.dependencies || [])],
+                userId: this.userId,
+                agentClass: this.agentClass,
+                instanceId: this.instanceId,
                 roleId: finalRoleId,
                 roleCustomizations: roleCustomizations
             };
@@ -1245,6 +1254,9 @@ Please consider this context when planning and executing the mission. Provide de
             status: this.status || AgentStatus.UNKNOWN,
             steps: Array.isArray(this.steps) ? this.steps.map(s => s.toJSON()) : [],
             missionId: this.missionId,
+            userId: this.userId,
+            agentClass: this.agentClass,
+            instanceId: this.instanceId,
             dependencies: Array.isArray(this.dependencies) ? this.dependencies : [],
             conversation: Array.isArray(this.conversation) ? this.conversation : [],
             role: this.role || 'executor',

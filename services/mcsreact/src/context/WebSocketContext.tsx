@@ -30,6 +30,8 @@ interface WebSocketContextType {
   clientId: string;
   conversationHistory: ConversationMessage[];
   setConversationHistory: React.Dispatch<React.SetStateAction<ConversationMessage[]>>;
+  assistantStateByConversation: Record<string, any>;
+  setAssistantStateByConversation: React.Dispatch<React.SetStateAction<Record<string, any>>>;
   currentQuestion: { guid: string, sender: string, content: string, choices?: string[], asker: string } | null;
   setCurrentQuestion: React.Dispatch<React.SetStateAction<{ guid: string, sender: string, content: string, choices?: string[], asker: string } | null>>;
   sendMessage: (message: string) => Promise<void>;
@@ -44,6 +46,8 @@ interface WebSocketContextType {
     choices?: string[];
   } | null;
   setPendingUserInput?: React.Dispatch<React.SetStateAction<any>>;
+  switchAssistant: (assistantId: string) => void;
+  saveAssistantConversation: (assistantId: string) => void;
 }
 
 interface MissionContextType {
@@ -75,6 +79,9 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   
   // Conversation state
   const [conversationHistory, setConversationHistory] = useState<ConversationMessage[]>([]);
+  const [conversationHistoryByAssistant, setConversationHistoryByAssistant] = useState<Record<string, ConversationMessage[]>>({});
+  const [currentAssistantId, setCurrentAssistantId] = useState<string | null>(null);
+  const [assistantStateByConversation, setAssistantStateByConversation] = useState<Record<string, any>>({});
   const [currentQuestion, setCurrentQuestion] = useState<{ guid: string, sender: string, content: string, choices?: string[], asker: string } | null>(null);
   
   // Mission state
@@ -135,6 +142,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       STATUS_UPDATE: "statusUpdate",
       AGENT_UPDATE: "agentUpdate",
       LIST_MISSIONS: "listMissions",
+      ASSISTANT_STATE: "assistant_state",
       // Frontend expects these types directly from PostOffice
       // Not userMessage/assistant as I previously thought
       MESSAGE: "message", // Generic message from PostOffice containing ConversationMessage
@@ -236,6 +244,41 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
           console.log(`[Frontend WS] Adding message to chat history: "${messageText?.substring(0, 50)}..." | persistent: ${receivedMessage.persistent}`);
           return [...prev, receivedMessage];
+        });
+        break;
+      }
+
+      case 'assistant_state': {
+        const delta = data.content?.delta || data.delta;
+        const conversationId = delta?.conversationId || data.content?.conversationId;
+        if (!delta || !conversationId) {
+          console.warn('[Frontend WS] assistant_state missing delta or conversationId');
+          return;
+        }
+        setAssistantStateByConversation((prev) => {
+          const prevConversation = prev[conversationId] || {};
+          const prevCollection = prevConversation[delta.collection] || {};
+          let nextCollection = prevCollection;
+
+          if (delta.operation === 'delete') {
+            const { [delta.entityId]: _, ...rest } = prevCollection;
+            nextCollection = rest;
+          } else {
+            const entityId = delta.entityId || delta.data?.id;
+            if (!entityId) return prev;
+            nextCollection = {
+              ...prevCollection,
+              [entityId]: delta.data
+            };
+          }
+
+          return {
+            ...prev,
+            [conversationId]: {
+              ...prevConversation,
+              [delta.collection]: nextCollection
+            }
+          };
         });
         break;
       }
@@ -418,6 +461,8 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     clientId,
     conversationHistory,
     setConversationHistory,
+    assistantStateByConversation,
+    setAssistantStateByConversation,
     currentQuestion,
     setCurrentQuestion,
     sendMessage: async (message: string) => {
@@ -620,6 +665,49 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         setConversationHistory((prev) => [...prev, { content: 'Failed to load mission. Please try again.', sender: 'system', persistent: false, timestamp: new Date().toISOString() }]);
       }
     },
+  // Helper functions for per-assistant conversation management
+  const switchAssistant = useCallback((assistantId: string) => {
+    console.log(`[WebSocketContext] Switching to assistant: ${assistantId}`);
+    
+    // Save current conversation if we have one
+    if (currentAssistantId) {
+      console.log(`[WebSocketContext] Saving conversation for ${currentAssistantId}, ${conversationHistory.length} messages`);
+      setConversationHistoryByAssistant(prev => ({
+        ...prev,
+        [currentAssistantId]: [...conversationHistory]
+      }));
+    }
+    
+    // Load conversation for new assistant or start fresh
+    const savedHistory = conversationHistoryByAssistant[assistantId] || [];
+    console.log(`[WebSocketContext] Loading conversation for ${assistantId}, ${savedHistory.length} messages`);
+    setConversationHistory(savedHistory);
+    setCurrentAssistantId(assistantId);
+    
+    // Clear pending input when switching
+    setPendingUserInput(null);
+  }, [currentAssistantId, conversationHistory, conversationHistoryByAssistant]);
+
+  const saveAssistantConversation = useCallback((assistantId: string) => {
+    console.log(`[WebSocketContext] Manually saving conversation for ${assistantId}, ${conversationHistory.length} messages`);
+    setConversationHistoryByAssistant(prev => ({
+      ...prev,
+      [assistantId]: [...conversationHistory]
+    }));
+  }, [conversationHistory]);
+
+  const webSocketContextValue = useMemo<WebSocketContextType>(() => ({
+    isConnected,
+    clientId,
+    conversationHistory,
+    setConversationHistory,
+    assistantStateByConversation,
+    setAssistantStateByConversation,
+    currentQuestion,
+    setCurrentQuestion,
+    sendMessage,
+    handleControlAction,
+    handleLoadMission,
     listMissions: async () => {
       if (!ws.current) {
         connectWebSocket();
@@ -645,8 +733,10 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       } else {
         setPendingUserInput(value);
       }
-    }
-  }), [isConnected, clientId, conversationHistory, currentQuestion, pendingUserInput, activeMission, activeMissionName, activeMissionId, missions]);
+    },
+    switchAssistant,
+    saveAssistantConversation
+  }), [isConnected, clientId, conversationHistory, assistantStateByConversation, currentQuestion, pendingUserInput, activeMission, activeMissionName, activeMissionId, missions, switchAssistant, saveAssistantConversation]);
 
   const missionContextValue = useMemo<MissionContextType>(() => ({
     activeMission,
