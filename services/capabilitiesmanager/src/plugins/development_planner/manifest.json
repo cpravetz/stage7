@@ -1,0 +1,82 @@
+{
+  "id": "plugin-DEVELOPMENT_PLANNER",
+  "name": "Development Planner",
+  "version": "1.0.0",
+  "description": "Career and skill development planning and tracking",
+  "category": "Development",
+  "enabled": true,
+  "actions": [
+    {
+      "id": "create_dev_plan",
+      "name": "Create Development Plan",
+      "description": "Create a comprehensive development plan for an employee",
+      "parameters": {
+        "employee_data": {
+          "type": "object",
+          "description": "Employee information and development goals"
+        }
+      }
+    },
+    {
+      "id": "set_goals",
+      "name": "Set Goals",
+      "description": "Set and define SMART goals for development plan",
+      "parameters": {
+        "plan_id": {
+          "type": "string",
+          "description": "The development plan ID"
+        },
+        "goals_data": {
+          "type": "object",
+          "description": "Goal definitions and metrics"
+        }
+      }
+    },
+    {
+      "id": "track_progress",
+      "name": "Track Progress",
+      "description": "Track progress on development plan and goals",
+      "parameters": {
+        "plan_id": {
+          "type": "string",
+          "description": "The development plan ID"
+        },
+        "progress_data": {
+          "type": "object",
+          "description": "Progress updates and metrics"
+        }
+      }
+    },
+    {
+      "id": "suggest_resources",
+      "name": "Suggest Resources",
+      "description": "Suggest learning and development resources",
+      "parameters": {
+        "plan_id": {
+          "type": "string",
+          "description": "The development plan ID"
+        },
+        "resource_request": {
+          "type": "object",
+          "description": "Resource requirements and preferences"
+        }
+      }
+    },
+    {
+      "id": "evaluate_skill_growth",
+      "name": "Evaluate Skill Growth",
+      "description": "Evaluate and measure skill growth and development",
+      "parameters": {
+        "plan_id": {
+          "type": "string",
+          "description": "The development plan ID"
+        },
+        "assessment_data": {
+          "type": "object",
+          "description": "Skill assessment results"
+        }
+      }
+    }
+  ],
+  "verb": "DEVELOPMENT_PLANNER"
+}

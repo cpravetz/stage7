@@ -1,0 +1,93 @@
+{
+  "id": "plugin-IMPROVEMENT_PLANNER",
+  "name": "Improvement Planner",
+  "version": "1.0.0",
+  "description": "Continuous improvement planning, tracking, and iteration",
+  "category": "Process Improvement",
+  "enabled": true,
+  "actions": [
+    {
+      "id": "identify_improvements",
+      "name": "Identify Improvements",
+      "description": "Identify improvement opportunities from assessment data",
+      "parameters": {
+        "assessment_data": {
+          "type": "object",
+          "description": "Data from process/performance assessment"
+        }
+      }
+    },
+    {
+      "id": "create_plan",
+      "name": "Create Plan",
+      "description": "Create a detailed improvement plan",
+      "parameters": {
+        "initiative_data": {
+          "type": "object",
+          "description": "Initiative details and objectives"
+        }
+      }
+    },
+    {
+      "id": "track_implementation",
+      "name": "Track Implementation",
+      "description": "Track implementation progress of improvement initiative",
+      "parameters": {
+        "initiative_id": {
+          "type": "string",
+          "description": "The initiative ID"
+        },
+        "progress_data": {
+          "type": "object",
+          "description": "Progress and status information"
+        }
+      }
+    },
+    {
+      "id": "measure_impact",
+      "name": "Measure Impact",
+      "description": "Measure and analyze the impact of improvement initiative",
+      "parameters": {
+        "initiative_id": {
+          "type": "string",
+          "description": "The initiative ID"
+        },
+        "measurement_data": {
+          "type": "object",
+          "description": "Measurement results and metrics"
+        }
+      }
+    },
+    {
+      "id": "iterate_plan",
+      "name": "Iterate Plan",
+      "description": "Iterate and refine improvement plan based on learnings",
+      "parameters": {
+        "initiative_id": {
+          "type": "string",
+          "description": "The initiative ID"
+        },
+        "iteration_data": {
+          "type": "object",
+          "description": "Learnings and refinements"
+        }
+      }
+    },
+    {
+      "id": "export_plan",
+      "name": "Export Plan",
+      "description": "Export improvement plan and results",
+      "parameters": {
+        "initiative_id": {
+          "type": "string",
+          "description": "The initiative ID to export"
+        },
+        "export_format": {
+          "type": "string",
+          "description": "Format for export (json, csv, pdf)"
+        }
+      }
+    }
+  ],
+  "verb": "IMPROVEMENT_PLANNER"
+}

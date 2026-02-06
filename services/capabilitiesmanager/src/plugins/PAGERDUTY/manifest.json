@@ -1,0 +1,52 @@
+{
+  "id": "plugin-PAGERDUTY",
+  "verb": "PAGERDUTY",
+  "description": "PagerDuty incident management and alerting",
+  "explanation": "Integration with PagerDuty for incident management, on-call tracking, escalation policies, and incident history",
+  "inputDefinitions": [
+    {
+      "name": "action",
+      "required": true,
+      "type": "string",
+      "description": "The action to perform (list_incidents, create_incident, acknowledge_incident, resolve_incident, list_oncall, get_escalation_policy)",
+      "aliases": [
+        "operation",
+        "command"
+      ]
+    },
+    {
+      "name": "payload",
+      "required": true,
+      "type": "object",
+      "description": "Action-specific parameters",
+      "aliases": [
+        "data",
+        "params",
+        "parameters"
+      ]
+    }
+  ],
+  "outputDefinitions": [
+    {
+      "name": "result",
+      "required": true,
+      "type": "object",
+      "description": "Operation result with incident and on-call data"
+    },
+    {
+      "name": "success",
+      "required": true,
+      "type": "boolean",
+      "description": "Success indicator"
+    }
+  ],
+  "language": "python",
+  "entryPoint": {
+    "main": "main.py",
+    "function": "execute_plugin"
+  },
+  "repository": {
+    "type": "local"
+  },
+  "version": "1.0.0"
+}

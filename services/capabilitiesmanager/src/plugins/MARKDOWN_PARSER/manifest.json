@@ -1,0 +1,41 @@
+{
+  "name": "MARKDOWN_PARSER",
+  "version": "1.0.0",
+  "description": "A plugin for parsing Markdown.",
+  "author": "Gemini",
+  "type": "python",
+  "operations": [
+    {
+      "name": "extract_section",
+      "description": "Extracts a section from a Markdown document.",
+      "inputs": [
+        {
+          "name": "markdown",
+          "type": "string",
+          "required": true,
+          "description": "The Markdown content to parse."
+        },
+        {
+          "name": "header",
+          "type": "string",
+          "required": true,
+          "description": "The header of the section to extract."
+        }
+      ]
+    },
+    {
+      "name": "to_json",
+      "description": "Converts a Markdown document to a JSON object.",
+      "inputs": [
+        {
+          "name": "markdown",
+          "type": "string",
+          "required": true,
+          "description": "The Markdown content to convert."
+        }
+      ]
+    }
+  ],
+  "id": "plugin-MARKDOWN_PARSER",
+  "verb": "MARKDOWN_PARSER"
+}

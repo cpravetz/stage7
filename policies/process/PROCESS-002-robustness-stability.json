@@ -1,0 +1,55 @@
+{
+  "id": "PROCESS-002",
+  "category": "process",
+  "title": "Robustness and Stability",
+  "description": "All changes must improve the robustness, functionality, efficiency, and stability of the project.",
+  "rules": [
+    "Changes must not introduce regressions",
+    "Changes must improve at least one quality attribute",
+    "Changes must maintain backward compatibility where possible",
+    "Changes must include proper testing",
+    "Changes must be reviewed for potential impacts on system stability"
+  ],
+  "enforcementMechanisms": [
+    "Comprehensive testing requirements",
+    "Impact assessment process",
+    "Performance benchmarking",
+    "Regression testing suite execution"
+  ],
+  "complianceMetrics": [
+    "Regression test pass rate",
+    "Quality attribute improvement score",
+    "Backward compatibility success rate",
+    "Test coverage percentage",
+    "Impact assessment completeness",
+    "Error handling effectiveness",
+    "Performance improvement percentage",
+    "Documentation quality score",
+    "Stability improvement rate"
+  ],
+  "severity": "critical",
+  "documentation": "docs/ENGINEERING_POLICIES.md#policy-9-robustness-and-stability",
+  "examples": [
+    "Implementing comprehensive regression test suites",
+    "Conducting impact assessments for stability risks",
+    "Performance benchmarking before and after changes",
+    "Implementing robust error handling and recovery",
+    "Ensuring backward compatibility with proper versioning",
+    "Measuring and documenting quality attribute improvements",
+    "Creating comprehensive maintenance guides and documentation"
+  ],
+  "exceptions": [
+    "Critical security patches that may require breaking changes",
+    "Major architectural changes with proper migration paths"
+  ],
+  "validationChecks": [
+    "execute-regression-tests",
+    "assess-impact-on-stability",
+    "benchmark-performance",
+    "validate-error-handling",
+    "test-backward-compatibility",
+    "measure-quality-improvements",
+    "validate-documentation-quality",
+    "analyze-stability-impact"
+  ]
+}

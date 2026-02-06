@@ -1,0 +1,152 @@
+{
+  "id": "plugin-INNQUEST_TOOL",
+  "verb": "INNQUEST_TOOL",
+  "description": "InnQuest Property Management System integration for hotel operations",
+  "explanation": "This plugin provides integration with InnQuest PMS to manage hotel operations. It allows you to check room availability, retrieve guest details, update housekeeping status, and manage reservations. The plugin communicates with the InnQuest API using stored credentials.",
+  "inputDefinitions": [
+    {
+      "name": "tool_name",
+      "required": true,
+      "type": "string",
+      "description": "The name of the InnQuest tool to execute (e.g., check_room_availability, get_guest_details, update_room_status, get_housekeeping_status, get_reservation_list)",
+      "aliases": [
+        "action",
+        "method",
+        "operation"
+      ]
+    },
+    {
+      "name": "room_type",
+      "required": false,
+      "type": "string",
+      "description": "The type of room (e.g., 'King Suite', 'Standard Double') - used with check_room_availability",
+      "aliases": [
+        "roomType",
+        "type"
+      ]
+    },
+    {
+      "name": "date",
+      "required": false,
+      "type": "string",
+      "description": "The date to check in YYYY-MM-DD format - used with check_room_availability",
+      "aliases": [
+        "checkDate"
+      ]
+    },
+    {
+      "name": "reservation_id",
+      "required": false,
+      "type": "string",
+      "description": "The unique ID for a reservation - used with get_guest_details",
+      "aliases": [
+        "reservationId",
+        "res_id"
+      ]
+    },
+    {
+      "name": "room_number",
+      "required": false,
+      "type": "string",
+      "description": "The room number - used with update_room_status",
+      "aliases": [
+        "roomNumber",
+        "room"
+      ]
+    },
+    {
+      "name": "status",
+      "required": false,
+      "type": "string",
+      "description": "The new room status (e.g., 'Clean', 'Dirty', 'Needs Inspection') - used with update_room_status",
+      "aliases": [
+        "roomStatus"
+      ]
+    },
+    {
+      "name": "check_in_date",
+      "required": false,
+      "type": "string",
+      "description": "Start date in YYYY-MM-DD format for reservation range queries",
+      "aliases": [
+        "checkInDate",
+        "fromDate",
+        "startDate"
+      ]
+    },
+    {
+      "name": "check_out_date",
+      "required": false,
+      "type": "string",
+      "description": "End date in YYYY-MM-DD format for reservation range queries",
+      "aliases": [
+        "checkOutDate",
+        "toDate",
+        "endDate"
+      ]
+    }
+  ],
+  "inputGuidance": "Specify the tool_name (or action) to indicate which operation to perform. Provide the relevant parameters based on the operation: use room_type and date for checking availability, reservation_id for guest details, room_number and status for updating room status, and check_in_date/check_out_date for listing reservations. The plugin will communicate with the InnQuest API using configured credentials.",
+  "outputDefinitions": [
+    {
+      "name": "success",
+      "required": true,
+      "type": "boolean",
+      "description": "Whether the operation was successful"
+    },
+    {
+      "name": "name",
+      "required": true,
+      "type": "string",
+      "description": "The name of the tool that was executed"
+    },
+    {
+      "name": "resultType",
+      "required": true,
+      "type": "string",
+      "description": "The type of result: 'success' or 'error'"
+    },
+    {
+      "name": "description",
+      "required": true,
+      "type": "string",
+      "description": "A description of the operation"
+    },
+    {
+      "name": "result",
+      "required": true,
+      "type": "object",
+      "description": "The actual result from the InnQuest API or error details"
+    }
+  ],
+  "language": "python",
+  "entryPoint": {
+    "main": "main.py",
+    "function": "execute_plugin"
+  },
+  "repository": {
+    "type": "local"
+  },
+  "security": {
+    "permissions": [
+      "net.fetch"
+    ],
+    "sandboxOptions": {
+      "timeout": 30000
+    }
+  },
+  "version": "1.0.0",
+  "metadata": {
+    "author": "Stage7 Development Team",
+    "tags": [
+      "hotel",
+      "pms",
+      "innquest",
+      "reservations",
+      "housekeeping",
+      "operations"
+    ],
+    "category": "hospitality",
+    "license": "MIT"
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "id": "CODE-001",
+  "category": "code",
+  "title": "Production-Ready Code",
+  "description": "All code must be production-ready before being merged.",
+  "rules": [
+    "Code must pass all existing tests",
+    "Code must include comprehensive test coverage for new functionality",
+    "Code must follow established coding standards and patterns",
+    "Code must be properly documented",
+    "Code must handle edge cases and error conditions gracefully"
+  ],
+  "enforcementMechanisms": [
+    "Automated CI/CD pipeline checks",
+    "Code review requirements",
+    "Test coverage thresholds"
+  ],
+  "complianceMetrics": [
+    "Test pass rate",
+    "Code review approval rate",
+    "Test coverage percentage",
+    "Static analysis violation count",
+    "Documentation completeness score",
+    "Breaking change detection accuracy"
+  ],
+  "severity": "critical",
+  "documentation": "docs/ENGINEERING_POLICIES.md#policy-1-production-ready-code",
+  "examples": [
+    "Adding comprehensive unit tests for new functionality",
+    "Writing clear JSDoc comments for all public methods",
+    "Implementing proper error handling with graceful degradation",
+    "Following established design patterns for consistency"
+  ],
+  "exceptions": [
+    "Hotfixes for critical production issues (with mandatory post-fix cleanup)",
+    "Experimental features clearly marked as such"
+  ],
+  "validationChecks": [
+    "npm test",
+    "npx tsc --noEmit",
+    "eslint .",
+    "check-docs-coverage",
+    "check-breaking-changes"
+  ]
+}

@@ -1,0 +1,60 @@
+{
+  "name": "DISASTER_RECOVERY",
+  "version": "1.0.0",
+  "description": "Disaster recovery monitoring and management",
+  "actions": [
+    {
+      "name": "get_rpo_status",
+      "description": "Get Recovery Point Objective (RPO) status",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "backup_type": {
+            "type": "string",
+            "enum": [
+              "full",
+              "incremental",
+              "differential",
+              "continuous"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "get_rto_status",
+      "description": "Get Recovery Time Objective (RTO) status",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "recovery_target": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "check_backup_compliance",
+      "description": "Check backup compliance",
+      "inputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "name": "verify_failover_readiness",
+      "description": "Verify failover readiness",
+      "inputSchema": {
+        "type": "object"
+      }
+    },
+    {
+      "name": "get_recovery_metrics",
+      "description": "Get comprehensive disaster recovery metrics",
+      "inputSchema": {
+        "type": "object"
+      }
+    }
+  ],
+  "id": "plugin-DISASTER_RECOVERY",
+  "verb": "DISASTER_RECOVERY"
+}

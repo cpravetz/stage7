@@ -1,0 +1,50 @@
+{
+  "id": "ARCH-002",
+  "category": "architecture",
+  "title": "Verb-Based Capability Expansion",
+  "description": "New verbs must be used for new concepts/actions, and the system must generate new capabilities with new plugins.",
+  "rules": [
+    "Each new capability requires a new verb definition",
+    "Verbs must follow naming conventions",
+    "Verbs must be properly documented",
+    "Verbs must integrate with the plugin ecosystem",
+    "Verbs must be discoverable and usable by the system"
+  ],
+  "enforcementMechanisms": [
+    "Verb registration and discovery mechanisms",
+    "Plugin validation and testing",
+    "Documentation requirements"
+  ],
+  "complianceMetrics": [
+    "Verb registration success rate",
+    "Plugin validation pass rate",
+    "Documentation completeness score",
+    "Naming convention compliance",
+    "Integration test success rate",
+    "Verb discoverability score",
+    "Input/output specification completeness",
+    "Versioning compliance rate"
+  ],
+  "severity": "high",
+  "documentation": "docs/ENGINEERING_POLICIES.md#policy-5-verb-based-capability-expansion",
+  "examples": [
+    "Creating a new verb for a novel capability",
+    "Documenting verb specifications and usage patterns",
+    "Integrating new verbs with existing plugin ecosystem",
+    "Implementing proper input/output validation for verbs",
+    "Versioning verbs appropriately for backward compatibility"
+  ],
+  "exceptions": [
+    "Experimental verbs for testing new concepts",
+    "Internal verbs not meant for general system use"
+  ],
+  "validationChecks": [
+    "validate-verb-registration",
+    "test-plugin-integration",
+    "check-verb-documentation",
+    "verify-naming-conventions",
+    "test-verb-discovery",
+    "validate-io-specifications",
+    "check-verb-versioning"
+  ]
+}

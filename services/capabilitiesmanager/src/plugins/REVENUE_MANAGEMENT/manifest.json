@@ -1,0 +1,58 @@
+{
+  "id": "plugin-REVENUE_MANAGEMENT",
+  "verb": "REVENUE_MANAGEMENT",
+  "description": "Hotel revenue analysis and optimization",
+  "explanation": "Analyze revenue trends, optimize pricing, and calculate key performance metrics",
+  "inputDefinitions": [
+    {
+      "name": "action",
+      "required": true,
+      "type": "string",
+      "description": "The action to perform",
+      "aliases": [
+        "operation",
+        "command"
+      ]
+    },
+    {
+      "name": "payload",
+      "required": true,
+      "type": "object",
+      "description": "Action-specific parameters",
+      "aliases": [
+        "data",
+        "params",
+        "parameters"
+      ]
+    }
+  ],
+  "outputDefinitions": [
+    {
+      "name": "result",
+      "required": true,
+      "type": "object",
+      "description": "Operation result"
+    },
+    {
+      "name": "success",
+      "required": true,
+      "type": "boolean",
+      "description": "Success indicator"
+    }
+  ],
+  "language": "python",
+  "entryPoint": {
+    "main": "main.py",
+    "function": "execute_plugin"
+  },
+  "repository": {
+    "type": "local"
+  },
+  "tags": [
+    "hotel",
+    "revenue",
+    "analytics",
+    "pricing"
+  ],
+  "version": "1.0.0"
+}

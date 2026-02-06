@@ -1,0 +1,86 @@
+{
+  "id": "plugin-RESOURCE_ALLOCATION",
+  "verb": "RESOURCE_ALLOCATION",
+  "description": "RESOURCE ALLOCATION plugin for comprehensive management and analytics",
+  "explanation": "Essential plugin for resource allocation operations with analytics and reporting",
+  "semanticDescription": "Manage, analyze, and track resource allocation data with advanced capabilities",
+  "capabilityKeywords": [
+    "resource_allocation",
+    "analytics",
+    "management",
+    "tracking",
+    "reporting"
+  ],
+  "usageExamples": [
+    "Use allocate_resources to start operations",
+    "Use optimize_allocation to analyze data",
+    "Use suggest_reallocation for comprehensive analytics"
+  ],
+  "category": "operational",
+  "actions": [
+    {
+      "name": "allocate_resources",
+      "description": "Perform allocate resources operation",
+      "inputParameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputType": "object"
+    },
+    {
+      "name": "optimize_allocation",
+      "description": "Perform optimize allocation operation",
+      "inputParameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputType": "object"
+    },
+    {
+      "name": "track_usage",
+      "description": "Perform track usage operation",
+      "inputParameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputType": "object"
+    },
+    {
+      "name": "forecast_needs",
+      "description": "Perform forecast needs operation",
+      "inputParameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputType": "object"
+    },
+    {
+      "name": "get_utilization",
+      "description": "Perform get utilization operation",
+      "inputParameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputType": "object"
+    },
+    {
+      "name": "suggest_reallocation",
+      "description": "Perform suggest reallocation operation",
+      "inputParameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputType": "object"
+    }
+  ],
+  "version": "1.0.0",
+  "status": "active",
+  "created_at": "2026-01-28T14:44:51.385492",
+  "features": {
+    "in_memory_storage": true,
+    "error_handling": true,
+    "logging": true,
+    "analytics": true,
+    "health_check": true
+  }
+}

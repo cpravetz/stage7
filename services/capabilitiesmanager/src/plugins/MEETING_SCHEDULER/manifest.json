@@ -1,0 +1,49 @@
+{
+  "id": "plugin-MEETING_SCHEDULER",
+  "name": "MEETING_SCHEDULER",
+  "version": "1.0.0",
+  "description": "MEETING_SCHEDULER plugin for cktMCS backend services",
+  "author": "Backend Services",
+  "license": "MIT",
+  "type": "backend",
+  "category": "scheduling",
+  "actions": [
+    {
+      "id": "schedule_meeting",
+      "name": "Schedule Meeting",
+      "description": "Execute schedule meeting operation"
+    },
+    {
+      "id": "find_available_times",
+      "name": "Find Available Times",
+      "description": "Execute find available times operation"
+    },
+    {
+      "id": "send_invites",
+      "name": "Send Invites",
+      "description": "Execute send invites operation"
+    },
+    {
+      "id": "manage_responses",
+      "name": "Manage Responses",
+      "description": "Execute manage responses operation"
+    },
+    {
+      "id": "update_meeting",
+      "name": "Update Meeting",
+      "description": "Execute update meeting operation"
+    },
+    {
+      "id": "cancel_meeting",
+      "name": "Cancel Meeting",
+      "description": "Execute cancel meeting operation"
+    }
+  ],
+  "capabilities": {
+    "error_handling": true,
+    "logging": true,
+    "in_memory_storage": true,
+    "thread_safe": true
+  },
+  "verb": "MEETING_SCHEDULER"
+}

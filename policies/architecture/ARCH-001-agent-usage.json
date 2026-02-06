@@ -1,0 +1,47 @@
+{
+  "id": "ARCH-001",
+  "category": "architecture",
+  "title": "Efficient Agent Usage",
+  "description": "Agents must be used efficiently, not created and destroyed excessively.",
+  "rules": [
+    "Implement agent pooling where appropriate",
+    "Reuse agents for similar tasks",
+    "Minimize agent creation/destruction overhead",
+    "Implement proper agent lifecycle management",
+    "Use agent specialization appropriately"
+  ],
+  "enforcementMechanisms": [
+    "Agent usage monitoring",
+    "Performance profiling",
+    "Resource utilization tracking"
+  ],
+  "complianceMetrics": [
+    "Agent reuse rate",
+    "Agent creation overhead",
+    "Resource utilization efficiency",
+    "Agent lifecycle management effectiveness",
+    "Agent pooling efficiency",
+    "Agent performance consistency",
+    "Agent resource cleanup completeness"
+  ],
+  "severity": "high",
+  "documentation": "docs/ENGINEERING_POLICIES.md#policy-4-efficient-agent-usage",
+  "examples": [
+    "Implementing an agent pool for frequently used agent types",
+    "Reusing specialized agents for similar task types",
+    "Monitoring agent memory usage and performance metrics",
+    "Implementing proper agent cleanup in error scenarios",
+    "Using agent health checks to maintain pool quality"
+  ],
+  "exceptions": [
+    "Specialized agents that require unique configurations",
+    "Short-lived agents for specific one-time tasks"
+  ],
+  "validationChecks": [
+    "analyze-agent-usage",
+    "monitor-agent-resources",
+    "validate-agent-lifecycle",
+    "test-agent-reuse",
+    "check-agent-performance"
+  ]
+}

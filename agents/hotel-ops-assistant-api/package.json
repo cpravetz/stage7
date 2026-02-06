@@ -1,0 +1,30 @@
+{
+  "name": "hotel-ops-assistant-api",
+  "version": "1.0.0",
+  "description": "Hotel Operations Assistant API",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "express": "^5.0.0",
+    "axios": "^1.6.2",
+    "ws": "^8.14.2",
+    "@cktmcs/sdk": "*",
+    "@cktmcs/shared": "file:../../../shared"
+},
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "ts-node": "^10.9.1"
+  },
+    "overrides": {
+    "glob": "^13.0.0",
+    "inflight": "^2.0.0"
+  },
+  "keywords": ["hotel", "operations", "assistant", "api"],
+  "author": "CKT Team",
+  "license": "MIT"
+}

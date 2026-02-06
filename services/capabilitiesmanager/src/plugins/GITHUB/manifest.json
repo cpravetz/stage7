@@ -1,0 +1,52 @@
+{
+  "id": "plugin-GITHUB",
+  "verb": "GITHUB",
+  "description": "GitHub repository and version control management",
+  "explanation": "Integration with GitHub for repository management, issue tracking, pull requests, build status, and code quality analysis",
+  "inputDefinitions": [
+    {
+      "name": "action",
+      "required": true,
+      "type": "string",
+      "description": "The action to perform (get_repos, create_issue, list_prs, check_build_status, get_commits, analyze_code_quality)",
+      "aliases": [
+        "operation",
+        "command"
+      ]
+    },
+    {
+      "name": "payload",
+      "required": true,
+      "type": "object",
+      "description": "Action-specific parameters",
+      "aliases": [
+        "data",
+        "params",
+        "parameters"
+      ]
+    }
+  ],
+  "outputDefinitions": [
+    {
+      "name": "result",
+      "required": true,
+      "type": "object",
+      "description": "Operation result with repository, issue, PR, or commit data"
+    },
+    {
+      "name": "success",
+      "required": true,
+      "type": "boolean",
+      "description": "Success indicator"
+    }
+  ],
+  "language": "python",
+  "entryPoint": {
+    "main": "main.py",
+    "function": "execute_plugin"
+  },
+  "repository": {
+    "type": "local"
+  },
+  "version": "1.0.0"
+}

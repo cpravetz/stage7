@@ -1,0 +1,57 @@
+{
+  "id": "plugin-LEARNING_PATH",
+  "verb": "LEARNING_PATH",
+  "description": "Personalized learning paths",
+  "explanation": "Create and manage personalized learning experiences",
+  "inputDefinitions": [
+    {
+      "name": "action",
+      "required": true,
+      "type": "string",
+      "description": "The action to perform",
+      "aliases": ["operation", "command"]
+    },
+    {
+      "name": "payload",
+      "required": true,
+      "type": "object",
+      "description": "Action-specific parameters",
+      "aliases": ["data", "params", "parameters"]
+    }
+  ],
+  "outputDefinitions": [
+    {
+      "name": "result",
+      "required": true,
+      "type": "object",
+      "description": "Operation result"
+    },
+    {
+      "name": "success",
+      "required": true,
+      "type": "boolean",
+      "description": "Success indicator"
+    }
+  ],
+  "language": "python",
+  "entryPoint": {
+    "main": "main.py",
+    "function": "execute_plugin"
+  },
+  "repository": {
+    "type": "local"
+  },
+  "security": {
+    "permissions": [],
+    "sandboxOptions": {
+      "timeout": 30000
+    }
+  },
+  "version": "1.0.0",
+  "metadata": {
+    "author": "Stage7 Development Team",
+    "tags": ["education", "learning", "personalized"],
+    "category": "education",
+    "license": "MIT"
+  }
+}

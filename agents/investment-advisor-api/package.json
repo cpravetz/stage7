@@ -1,0 +1,19 @@
+{
+  "name": "investment-advisor-api",
+  "version": "1.0.0",
+  "description": "Investment Advisor Assistant API - Portfolio management and market intelligence",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts"
+  },
+  "dependencies": {
+    "@cktmcs/sdk": "*",
+    "@cktmcs/shared": "file:../../../shared"
+  },
+  "devDependencies": {
+    "@types/node": "^20.x.x",
+    "typescript": "^5.6.3"
+  }
+}

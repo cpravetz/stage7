@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "es2019",
+    "module": "commonjs",
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "paths": {
+      "@cktmcs/sdk": ["../../../sdk/src"],
+      "@cktmcs/shared": ["../../../shared/src"],
+      "express": ["../../../node_modules/express"]
+    },
+    "typeRoots": ["../../../node_modules/@types"]
+  },
+  "include": [
+    "src/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ]
+}

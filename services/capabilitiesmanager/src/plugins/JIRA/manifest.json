@@ -1,0 +1,106 @@
+{
+  "id": "plugin-JIRA",
+  "verb": "JIRA",
+  "description": "Interact with Jira to create, update, search, and manage issues and projects. Supports creating issues, updating issue fields, searching with JQL, getting issue details, adding comments, and managing transitions.",
+  "explanation": "This plugin provides comprehensive Jira integration capabilities. It can create new issues, update existing ones, search using JQL queries, retrieve issue details, add comments, and transition issues through workflows. Authentication is handled via API tokens configured in the system.",
+  "inputDefinitions": [
+    {
+      "name": "action",
+      "required": true,
+      "type": "string",
+      "description": "The Jira action to perform: createIssue, updateIssue, searchIssues, getIssueDetails, addComment, transitionIssue, getProjects",
+      "aliases": ["operation", "command"]
+    },
+    {
+      "name": "payload",
+      "required": true,
+      "type": "object",
+      "description": "The action-specific payload containing parameters for the Jira operation",
+      "aliases": ["data", "params", "parameters"]
+    },
+    {
+      "name": "conversationId",
+      "required": false,
+      "type": "string",
+      "description": "The conversation/mission ID for context",
+      "aliases": ["missionId", "contextId"]
+    }
+  ],
+  "inputGuidance": "Required inputs: 'action' (the operation to perform) and 'payload' (operation-specific parameters). For createIssue, payload should include project, summary, description, issueType. For updateIssue, include issueKey and fields to update. For searchIssues, include jql query. For getIssueDetails, include issueKey. For addComment, include issueKey and comment. For transitionIssue, include issueKey and transitionId.",
+  "outputDefinitions": [
+    {
+      "name": "result",
+      "required": true,
+      "type": "object",
+      "description": "The result of the Jira operation, structure varies by action"
+    },
+    {
+      "name": "success",
+      "required": true,
+      "type": "boolean",
+      "description": "Whether the operation succeeded"
+    },
+    {
+      "name": "error",
+      "required": false,
+      "type": "string",
+      "description": "Error message if the operation failed"
+    }
+  ],
+  "language": "python",
+  "entryPoint": {
+    "main": "main.py",
+    "function": "execute_plugin"
+  },
+  "repository": {
+    "type": "local"
+  },
+  "security": {
+    "permissions": [
+      "net.fetch"
+    ],
+    "sandboxOptions": {
+      "timeout": 30000
+    }
+  },
+  "configuration": [
+    {
+      "key": "JIRA_URL",
+      "description": "Jira instance URL (e.g., https://your-domain.atlassian.net)",
+      "required": true,
+      "type": "string",
+      "credentialSource": "ENV_JIRA_URL"
+    },
+    {
+      "key": "JIRA_EMAIL",
+      "description": "Jira user email for authentication",
+      "required": true,
+      "type": "string",
+      "credentialSource": "ENV_JIRA_EMAIL"
+    },
+    {
+      "key": "JIRA_API_TOKEN",
+      "description": "Jira API token for authentication",
+      "required": true,
+      "type": "string",
+      "credentialSource": "ENV_JIRA_API_TOKEN",
+      "sensitive": true
+    }
+  ],
+  "version": "1.0.0",
+  "metadata": {
+    "author": "Stage7 Development Team",
+    "tags": ["jira", "project-management", "issue-tracking", "atlassian"],
+    "category": "productivity",
+    "license": "MIT"
+  },
+  "semanticDescription": "Comprehensive Jira integration for issue management, project tracking, and workflow automation",
+  "capabilityKeywords": ["jira", "issue", "ticket", "project", "sprint", "agile", "scrum", "kanban", "workflow"],
+  "usageExamples": [
+    "Create a new bug in project ABC",
+    "Search for all open issues assigned to me",
+    "Add a comment to PROJ-123",
+    "Transition issue PROJ-456 to In Progress"
+  ]
+}
+

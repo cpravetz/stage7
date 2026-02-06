@@ -1,0 +1,142 @@
+{
+  "id": "plugin-DATA_ANALYSIS",
+  "verb": "DATA_ANALYSIS",
+  "description": "Data analysis and visualization",
+  "explanation": "Analyze datasets, generate insights, create visualizations, and perform statistical analysis",
+  "inputDefinitions": [
+    {
+      "name": "action",
+      "required": true,
+      "type": "string",
+      "description": "The action to perform",
+      "aliases": [
+        "operation",
+        "command"
+      ]
+    },
+    {
+      "name": "payload",
+      "required": true,
+      "type": "object",
+      "description": "Action-specific parameters",
+      "aliases": [
+        "data",
+        "params",
+        "parameters"
+      ]
+    }
+  ],
+  "outputDefinitions": [
+    {
+      "name": "result",
+      "required": true,
+      "type": "object",
+      "description": "Operation result"
+    },
+    {
+      "name": "success",
+      "required": true,
+      "type": "boolean",
+      "description": "Success indicator"
+    }
+  ],
+  "language": "python",
+  "entryPoint": {
+    "main": "main.py",
+    "function": "execute_plugin"
+  },
+  "repository": {
+    "type": "local"
+  },
+  "security": {
+    "permissions": [
+      "net.fetch",
+      "fs.read"
+    ],
+    "sandboxOptions": {
+      "timeout": 60000
+    }
+  },
+  "actions": [
+    {
+      "name": "analyzeDataset",
+      "description": "Analyze a dataset and return statistical insights",
+      "parameters": {
+        "data": {
+          "type": "array",
+          "required": false,
+          "description": "Array of data objects"
+        },
+        "file_path": {
+          "type": "string",
+          "required": false,
+          "description": "Path to CSV or JSON file"
+        }
+      }
+    },
+    {
+      "name": "generateInsights",
+      "description": "Generate insights from a dataset",
+      "parameters": {
+        "data": {
+          "type": "array",
+          "required": false,
+          "description": "Array of data objects"
+        },
+        "file_path": {
+          "type": "string",
+          "required": false,
+          "description": "Path to CSV or JSON file"
+        }
+      }
+    },
+    {
+      "name": "createVisualization",
+      "description": "Create a visualization from data",
+      "parameters": {
+        "data": {
+          "type": "array",
+          "required": false,
+          "description": "Array of data objects"
+        },
+        "file_path": {
+          "type": "string",
+          "required": false,
+          "description": "Path to CSV or JSON file"
+        },
+        "chart_type": {
+          "type": "string",
+          "required": false,
+          "description": "Type of chart (bar, line, scatter, hist)"
+        },
+        "x_column": {
+          "type": "string",
+          "required": false,
+          "description": "Column for X axis"
+        },
+        "y_column": {
+          "type": "string",
+          "required": false,
+          "description": "Column for Y axis"
+        },
+        "title": {
+          "type": "string",
+          "required": false,
+          "description": "Chart title"
+        }
+      }
+    }
+  ],
+  "version": "1.0.0",
+  "metadata": {
+    "author": "Stage7 Development Team",
+    "tags": [
+      "data",
+      "analysis",
+      "statistics",
+      "visualization"
+    ],
+    "category": "analytics",
+    "license": "MIT"
+  }
+}

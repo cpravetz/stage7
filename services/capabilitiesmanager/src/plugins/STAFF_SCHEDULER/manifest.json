@@ -1,0 +1,49 @@
+{
+  "id": "plugin-STAFF_SCHEDULER",
+  "verb": "STAFF_SCHEDULER",
+  "description": "Staff scheduling and labor management",
+  "explanation": "Create schedules, assign shifts, track labor hours, and optimize coverage",
+  "inputDefinitions": [
+    {
+      "name": "action",
+      "required": true,
+      "type": "string",
+      "description": "The action to perform"
+    },
+    {
+      "name": "payload",
+      "required": true,
+      "type": "object",
+      "description": "Action-specific parameters"
+    }
+  ],
+  "outputDefinitions": [
+    {
+      "name": "result",
+      "required": true,
+      "type": "object",
+      "description": "Operation result"
+    },
+    {
+      "name": "success",
+      "required": true,
+      "type": "boolean",
+      "description": "Success indicator"
+    }
+  ],
+  "language": "python",
+  "entryPoint": {
+    "main": "main.py",
+    "function": "execute_plugin"
+  },
+  "repository": {
+    "type": "local"
+  },
+  "tags": [
+    "restaurant",
+    "scheduling",
+    "staff",
+    "labor-management"
+  ],
+  "version": "1.0.0"
+}

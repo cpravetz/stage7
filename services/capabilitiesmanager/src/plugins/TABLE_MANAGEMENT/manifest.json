@@ -1,0 +1,49 @@
+{
+  "id": "plugin-TABLE_MANAGEMENT",
+  "verb": "TABLE_MANAGEMENT",
+  "description": "Restaurant table management and seating operations",
+  "explanation": "Manage table assignments, track table status, monitor occupancy, and generate floor reports",
+  "inputDefinitions": [
+    {
+      "name": "action",
+      "required": true,
+      "type": "string",
+      "description": "The action to perform"
+    },
+    {
+      "name": "payload",
+      "required": true,
+      "type": "object",
+      "description": "Action-specific parameters"
+    }
+  ],
+  "outputDefinitions": [
+    {
+      "name": "result",
+      "required": true,
+      "type": "object",
+      "description": "Operation result"
+    },
+    {
+      "name": "success",
+      "required": true,
+      "type": "boolean",
+      "description": "Success indicator"
+    }
+  ],
+  "language": "python",
+  "entryPoint": {
+    "main": "main.py",
+    "function": "execute_plugin"
+  },
+  "repository": {
+    "type": "local"
+  },
+  "tags": [
+    "restaurant",
+    "tables",
+    "seating",
+    "floor-management"
+  ],
+  "version": "1.0.0"
+}

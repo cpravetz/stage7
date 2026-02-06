@@ -1,0 +1,38 @@
+{
+  "name": "@cktmcs/sdk",
+  "version": "0.1.0",
+  "description": "Assistant SDK for collaborative AI agents (Layer 2)",
+  "type": "commonjs",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "clean": "npx rimraf dist",
+    "build": "npm run clean && tsc --outDir ./dist && tsc --project tsconfig.json",
+    "test": "jest",
+    "lint": "eslint src/**/*.ts"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "sdk",
+    "collaborative",
+    "assistant"
+  ],
+  "author": "CKT MCS Team",
+    "license": "UNLICENSED",
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "@types/node": "^20.x.x",
+    "jest": "^29.x.x",
+    "@types/jest": "^29.x.x",
+    "ts-jest": "^29.x.x",
+    "eslint": "^9.10.0",
+    "@typescript-eslint/eslint-plugin": "^7.18.0",
+    "@typescript-eslint/parser": "^7.18.0"
+  },
+  "dependencies": {
+    "@cktmcs/shared": "file:../shared",
+    "axios": "^1.6.2",
+    "express": "^5.0.0"
+  }
+}

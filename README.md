@@ -74,6 +74,13 @@ The plugin ecosystem supports not only code-based plugins (Python, JavaScript, C
 
 ## 🚀 Key Features
 
+### Agent Development Kit (ADK)
+- **Rapid Assistant Creation**: Build domain-specific AI assistants in minutes using the Quick Assistant pattern
+- **20+ Production Assistants**: Pre-built assistants for Sales, PM, Marketing, HR, Finance, Healthcare, CTO, and more
+- **Multi-Layer Architecture**: Clean separation between UI, domain-specific assistants, SDK, and core engine
+- **Zero-Boilerplate Pattern**: Eliminate ~250 lines of infrastructure code with the Quick Assistant pattern
+- **Full Documentation**: Comprehensive guides for creating, deploying, and extending assistants (see [ADK docs](./docs/ADK/README.md))
+
 ### Enterprise-Ready Plugin Ecosystem
 - **Extensible Plugin Types**: Develop plugins in Python, JavaScript, any language via Docker containers, or as OpenAPI/MCP tool definitions
 - **Production-Ready Plugins**: 10+ ready-to-use plugins (ACCOMPLISH, ASK_USER_QUESTION, SCRAPE, WEATHER, TEXT_ANALYSIS, API_CLIENT, CODE_EXECUTOR, DATA_TOOLKIT, SEARCH_PYTHON, TASK_MANAGER, CHAT, GET_USER_INPUT, FILE_OPS_PYTHON, and more)
@@ -109,6 +116,94 @@ The plugin ecosystem supports not only code-based plugins (Python, JavaScript, C
 - **Plugin Sandboxing**: Secure execution environment for plugins
 - **Error Handling**: Comprehensive error analysis and recovery mechanisms
 - **Resource Management**: Container resource allocation and monitoring
+
+## 🚀 Agent Development Kit (ADK)
+
+The **Agent Development Kit (ADK)** is a comprehensive framework for rapidly building and deploying domain-specific AI assistants on top of stage7. It abstracts away infrastructure complexity and provides a clean, intuitive API for creating specialized agents.
+
+### What is ADK?
+
+ADK is a four-layer architecture that simplifies assistant development:
+
+- **L4: User Interface** - React frontend for user interactions
+- **L3: Domain-Specific Assistants** - 20+ production assistants (Sales, PM, Marketing, HR, Finance, Healthcare, CTO, etc.)
+- **L2: Agent SDK** - Reusable Assistant, Tool, and Conversation classes
+- **L1: Core Engine** - stage7 infrastructure (conversation management, multi-agent coordination, tool orchestration)
+
+### Quick Start with ADK
+
+Create a specialized assistant in minutes using the Quick Assistant pattern:
+
+```typescript
+import { createQuickAssistant } from '@cktmcs/sdk';
+
+createQuickAssistant({
+  id: 'my-assistant',
+  name: 'My Assistant',
+  role: 'Assists with domain-specific tasks',
+  personality: 'Helpful, professional, and domain-expert',
+  serviceId: 'my-assistant-api',
+  secretEnvVar: 'MY_ASSISTANT_API_SECRET',
+  tools: async (coreEngineClient) => [
+    // Add tools here
+  ],
+  port: 3000,
+  urlBase: 'my-assistant-api',
+}).catch((error: Error) => {
+  console.error('Failed to initialize:', error);
+  process.exit(1);
+});
+```
+
+### 20+ Production Assistants
+
+The system comes with 20+ production-ready assistants:
+
+- **Career Assistant** - Career planning and development
+- **Content Creator Assistant** - Content generation and strategy
+- **CTO Assistant** - Technology strategy and architecture
+- **Education Assistant** - Learning curriculum and tutoring
+- **Event Assistant** - Event planning and coordination
+- **Executive Assistant** - Strategic planning and decision support
+- **Finance Assistant** - Financial analysis and planning
+- **Healthcare Assistant** - Medical guidance and health management
+- **Hotel Operations Assistant** - Hospitality management
+- **HR Assistant** - Human resources and recruitment
+- **Investment Advisor** - Investment analysis and recommendations
+- **Legal Assistant** - Legal research and document review
+- **Marketing Assistant** - Marketing strategy and campaign management
+- **Performance Analytics Assistant** - Metrics analysis and reporting
+- **PM Assistant** - Product management and roadmapping
+- **Restaurant Operations Assistant** - Food service management
+- **Sales Assistant** - Sales pipeline and opportunity management
+- **Scriptwriter Assistant** - Script writing and content creation
+- **Songwriter Assistant** - Music composition and songwriting
+- **Sports Wager Advisor** - Sports analytics and predictions
+- **Support Assistant** - Customer support automation
+
+### Key ADK Features
+
+✨ **Quick Assistant Pattern** - Eliminate ~250 lines of boilerplate  
+🛠️ **20+ Production Assistants** - Ready-to-use domain specialists  
+🔐 **Enterprise Security** - JWT authentication, RBAC, encrypted communication  
+📈 **Scalable Architecture** - Horizontal & vertical scaling support  
+🧩 **Extensible Tools** - Easy to build and integrate custom tools  
+🤝 **Multi-Agent Collaboration** - Agents work together seamlessly  
+🎯 **LLM-Ready** - Built-in OpenAI/LLM integration  
+
+### ADK Documentation
+
+For comprehensive ADK documentation, including detailed guides on creating assistants, building custom tools, deployment strategies, and architecture deep-dives, see:
+
+👉 **[Agent Development Kit Documentation](./docs/ADK/README.md)**
+
+Key resources:
+- [Getting Started in 5 Minutes](./docs/ADK/README.md#getting-started-in-5-minutes)
+- [Creating Assistants](./docs/ADK/README.md#creating-assistants)
+- [Architecture Overview](./docs/ADK/README.md#architecture-overview)
+- [Tool Development Guide](./docs/ADK/TOOL-DEVELOPMENT.md)
+- [Deployment Guide](./docs/ADK/DEPLOYMENT.md)
+- [Complete Documentation Index](./docs/ADK/INDEX.md)
 
 ## Getting Started
 

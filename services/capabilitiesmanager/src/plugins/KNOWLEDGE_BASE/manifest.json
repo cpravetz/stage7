@@ -1,0 +1,49 @@
+{
+  "id": "plugin-KNOWLEDGE_BASE",
+  "name": "KNOWLEDGE_BASE",
+  "version": "1.0.0",
+  "description": "KNOWLEDGE_BASE plugin for cktMCS backend services",
+  "author": "Backend Services",
+  "license": "MIT",
+  "type": "backend",
+  "category": "knowledge",
+  "actions": [
+    {
+      "id": "create_kb",
+      "name": "Create Kb",
+      "description": "Execute create kb operation"
+    },
+    {
+      "id": "manage_access",
+      "name": "Manage Access",
+      "description": "Execute manage access operation"
+    },
+    {
+      "id": "export_kb",
+      "name": "Export Kb",
+      "description": "Execute export kb operation"
+    },
+    {
+      "id": "backup_kb",
+      "name": "Backup Kb",
+      "description": "Execute backup kb operation"
+    },
+    {
+      "id": "search_advanced",
+      "name": "Search Advanced",
+      "description": "Execute search advanced operation"
+    },
+    {
+      "id": "get_analytics",
+      "name": "Get Analytics",
+      "description": "Execute get analytics operation"
+    }
+  ],
+  "capabilities": {
+    "error_handling": true,
+    "logging": true,
+    "in_memory_storage": true,
+    "thread_safe": true
+  },
+  "verb": "KNOWLEDGE_BASE"
+}

@@ -1,0 +1,52 @@
+{
+  "id": "plugin-AWS",
+  "verb": "AWS",
+  "description": "Amazon Web Services cloud integration",
+  "explanation": "Integration with AWS for EC2 instance management, S3 storage analysis, Lambda monitoring, and cost analysis",
+  "inputDefinitions": [
+    {
+      "name": "action",
+      "required": true,
+      "type": "string",
+      "description": "The action to perform (list_instances, get_ec2_status, check_s3_usage, analyze_costs, get_lambda_stats, generate_report)",
+      "aliases": [
+        "operation",
+        "command"
+      ]
+    },
+    {
+      "name": "payload",
+      "required": true,
+      "type": "object",
+      "description": "Action-specific parameters",
+      "aliases": [
+        "data",
+        "params",
+        "parameters"
+      ]
+    }
+  ],
+  "outputDefinitions": [
+    {
+      "name": "result",
+      "required": true,
+      "type": "object",
+      "description": "Operation result with AWS resource data"
+    },
+    {
+      "name": "success",
+      "required": true,
+      "type": "boolean",
+      "description": "Success indicator"
+    }
+  ],
+  "language": "python",
+  "entryPoint": {
+    "main": "main.py",
+    "function": "execute_plugin"
+  },
+  "repository": {
+    "type": "local"
+  },
+  "version": "1.0.0"
+}

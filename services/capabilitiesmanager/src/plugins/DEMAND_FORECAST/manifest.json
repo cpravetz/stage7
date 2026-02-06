@@ -1,0 +1,49 @@
+{
+  "id": "plugin-DEMAND_FORECAST",
+  "verb": "DEMAND_FORECAST",
+  "description": "Restaurant demand forecasting and analysis",
+  "explanation": "Forecast demand, analyze trends, predict peak hours, and recommend staffing levels",
+  "inputDefinitions": [
+    {
+      "name": "action",
+      "required": true,
+      "type": "string",
+      "description": "The action to perform"
+    },
+    {
+      "name": "payload",
+      "required": true,
+      "type": "object",
+      "description": "Action-specific parameters"
+    }
+  ],
+  "outputDefinitions": [
+    {
+      "name": "result",
+      "required": true,
+      "type": "object",
+      "description": "Operation result"
+    },
+    {
+      "name": "success",
+      "required": true,
+      "type": "boolean",
+      "description": "Success indicator"
+    }
+  ],
+  "language": "python",
+  "entryPoint": {
+    "main": "main.py",
+    "function": "execute_plugin"
+  },
+  "repository": {
+    "type": "local"
+  },
+  "tags": [
+    "restaurant",
+    "forecasting",
+    "demand-analysis",
+    "staffing-optimization"
+  ],
+  "version": "1.0.0"
+}

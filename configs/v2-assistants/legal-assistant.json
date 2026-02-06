@@ -1,0 +1,29 @@
+{
+  "assistant_id": "legal-assistant",
+  "assistant_name": "Legal Assistant",
+  "assistant_role": "Assists with legal research, contract analysis, and compliance",
+  "assistant_personality": "Precise, thorough, professional, and detail-oriented",
+  "port": 3007,
+  "tools": [
+    {
+      "name": "LegalResearchTool",
+      "plugin": "LEGAL_RESEARCH",
+      "description": "Legal research"
+    },
+    {
+      "name": "ContractAnalysisTool",
+      "plugin": "CONTRACT_ANALYSIS",
+      "description": "Contract analysis"
+    },
+    {
+      "name": "ComplianceTool",
+      "plugin": "COMPLIANCE",
+      "description": "Compliance monitoring"
+    },
+    {
+      "name": "CaseManagementTool",
+      "plugin": "CASE_MANAGEMENT",
+      "description": "Case management"
+    }
+  ]
+}

@@ -1,0 +1,86 @@
+{
+  "id": "plugin-TICKET_ANALYSIS",
+  "verb": "TICKET_ANALYSIS",
+  "description": "TICKET ANALYSIS plugin for comprehensive management and analytics",
+  "explanation": "Essential plugin for ticket analysis operations with analytics and reporting",
+  "semanticDescription": "Manage, analyze, and track ticket analysis data with advanced capabilities",
+  "capabilityKeywords": [
+    "ticket_analysis",
+    "analytics",
+    "management",
+    "tracking",
+    "reporting"
+  ],
+  "usageExamples": [
+    "Use analyze_tickets to start operations",
+    "Use categorize to analyze data",
+    "Use get_trends for comprehensive analytics"
+  ],
+  "category": "operational",
+  "actions": [
+    {
+      "name": "analyze_tickets",
+      "description": "Perform analyze tickets operation",
+      "inputParameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputType": "object"
+    },
+    {
+      "name": "categorize",
+      "description": "Perform categorize operation",
+      "inputParameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputType": "object"
+    },
+    {
+      "name": "route_ticket",
+      "description": "Perform route ticket operation",
+      "inputParameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputType": "object"
+    },
+    {
+      "name": "predict_resolution_time",
+      "description": "Perform predict resolution time operation",
+      "inputParameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputType": "object"
+    },
+    {
+      "name": "suggest_priority",
+      "description": "Perform suggest priority operation",
+      "inputParameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputType": "object"
+    },
+    {
+      "name": "get_trends",
+      "description": "Perform get trends operation",
+      "inputParameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "outputType": "object"
+    }
+  ],
+  "version": "1.0.0",
+  "status": "active",
+  "created_at": "2026-01-28T14:44:51.304596",
+  "features": {
+    "in_memory_storage": true,
+    "error_handling": true,
+    "logging": true,
+    "analytics": true,
+    "health_check": true
+  }
+}

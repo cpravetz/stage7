@@ -1,0 +1,58 @@
+{
+  "id": "plugin-HOTEL_RESERVATION_SYSTEM",
+  "verb": "HOTEL_RESERVATION_SYSTEM",
+  "description": "Hotel reservation and booking management",
+  "explanation": "Manage reservations, availability checking, and booking confirmations",
+  "inputDefinitions": [
+    {
+      "name": "action",
+      "required": true,
+      "type": "string",
+      "description": "The action to perform",
+      "aliases": [
+        "operation",
+        "command"
+      ]
+    },
+    {
+      "name": "payload",
+      "required": true,
+      "type": "object",
+      "description": "Action-specific parameters",
+      "aliases": [
+        "data",
+        "params",
+        "parameters"
+      ]
+    }
+  ],
+  "outputDefinitions": [
+    {
+      "name": "result",
+      "required": true,
+      "type": "object",
+      "description": "Operation result"
+    },
+    {
+      "name": "success",
+      "required": true,
+      "type": "boolean",
+      "description": "Success indicator"
+    }
+  ],
+  "language": "python",
+  "entryPoint": {
+    "main": "main.py",
+    "function": "execute_plugin"
+  },
+  "repository": {
+    "type": "local"
+  },
+  "tags": [
+    "hotel",
+    "reservations",
+    "bookings",
+    "availability"
+  ],
+  "version": "1.0.0"
+}

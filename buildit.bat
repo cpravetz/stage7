@@ -1,38 +1,45 @@
-docker-compose down
-docker-compose build postoffice
-docker-compose build missioncontrol
-docker-compose build trafficmanager
-docker-compose build brain
-docker-compose build agentset
-docker-compose build engineer
-docker-compose build capabilitiesmanager
-docker-compose build librarian
-docker-compose build securitymanager
-docker-compose build frontend
-docker-compose build pm-assistant-api
-docker-compose build sales-assistant-api
-docker-compose build marketing-assistant-api
-docker-compose build hr-assistant-api
-docker-compose build finance-assistant-api
-docker-compose build support-assistant-api
-docker-compose build legal-assistant-api
-docker-compose build healthcare-assistant-api
-docker-compose build education-assistant-api
-docker-compose build event-assistant-api
-docker-compose build executive-assistant-api
-docker-compose build career-assistant-api
-docker-compose build content-creator-assistant-api
-docker-compose build songwriter-assistant-api
-docker-compose build scriptwriter-assistant-api
-docker-compose build hotel-ops-assistant-api
-docker-compose build restaurant-ops-assistant-api
-docker-compose build sports-wager-advisor-api
-docker-compose build cto-assistant-api
-docker-compose build mongo
-docker-compose build redis
-docker-compose build rabbitmq
-docker-compose build consul
-docker-compose build searxng
-docker-compose build chromadb
-docker-compose up -d
+docker-compose -f docker-compose.all.yaml build base
+
+docker-compose -f docker-compose.all.yaml build
+
+docker-compose -f docker-compose.all.yaml up -d
+
+
+# docker-compose down
+# docker-compose build postoffice
+# docker-compose build missioncontrol
+# docker-compose build trafficmanager
+# docker-compose build brain
+# docker-compose build agentset
+# docker-compose build engineer
+# docker-compose build capabilitiesmanager
+# docker-compose build librarian
+# docker-compose build securitymanager
+# docker-compose build frontend
+# docker-compose build pm-assistant-api
+# docker-compose build sales-assistant-api
+# docker-compose build marketing-assistant-api
+# docker-compose build hr-assistant-api
+# docker-compose build finance-assistant-api
+# docker-compose build support-assistant-api
+# docker-compose build legal-assistant-api
+# docker-compose build healthcare-assistant-api
+# docker-compose build education-assistant-api
+# docker-compose build event-assistant-api
+# docker-compose build executive-assistant-api
+# docker-compose build career-assistant-api
+# docker-compose build content-creator-assistant-api
+# docker-compose build songwriter-assistant-api
+# docker-compose build scriptwriter-assistant-api
+# docker-compose build hotel-ops-assistant-api
+# docker-compose build restaurant-ops-assistant-api
+# docker-compose build sports-wager-advisor-api
+# docker-compose build cto-assistant-api
+# docker-compose build mongo
+# docker-compose build redis
+# docker-compose build rabbitmq
+# docker-compose build consul
+# docker-compose build searxng
+# docker-compose build chromadb
+# docker-compose up -d
 

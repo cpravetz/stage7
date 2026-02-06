@@ -1,0 +1,149 @@
+{
+  "id": "plugin-SLACK",
+  "verb": "SLACK",
+  "description": "Slack integration for team communication and messaging",
+  "explanation": "Send messages, create channels, manage users, and interact with Slack workspaces",
+  "inputDefinitions": [
+    {
+      "name": "action",
+      "required": true,
+      "type": "string",
+      "description": "The action to perform",
+      "aliases": [
+        "operation",
+        "command"
+      ]
+    },
+    {
+      "name": "payload",
+      "required": true,
+      "type": "object",
+      "description": "Action-specific parameters",
+      "aliases": [
+        "data",
+        "params",
+        "parameters"
+      ]
+    }
+  ],
+  "outputDefinitions": [
+    {
+      "name": "result",
+      "required": true,
+      "type": "object",
+      "description": "Operation result"
+    },
+    {
+      "name": "success",
+      "required": true,
+      "type": "boolean",
+      "description": "Success indicator"
+    }
+  ],
+  "language": "python",
+  "entryPoint": {
+    "main": "main.py",
+    "function": "execute_plugin"
+  },
+  "repository": {
+    "type": "local"
+  },
+  "security": {
+    "permissions": [
+      "net.fetch"
+    ],
+    "sandboxOptions": {
+      "timeout": 30000
+    }
+  },
+  "configuration": {
+    "SLACK_BOT_TOKEN": {
+      "type": "string",
+      "required": true,
+      "description": "Slack Bot User OAuth Token (starts with xoxb-)"
+    }
+  },
+  "actions": [
+    {
+      "name": "sendMessage",
+      "description": "Send a message to a Slack channel",
+      "parameters": {
+        "channel": {
+          "type": "string",
+          "required": true,
+          "description": "Channel ID or name"
+        },
+        "text": {
+          "type": "string",
+          "required": true,
+          "description": "Message text"
+        },
+        "thread_ts": {
+          "type": "string",
+          "required": false,
+          "description": "Thread timestamp for replies"
+        }
+      }
+    },
+    {
+      "name": "listChannels",
+      "description": "List all channels in the workspace",
+      "parameters": {
+        "exclude_archived": {
+          "type": "boolean",
+          "required": false,
+          "description": "Exclude archived channels (default: true)"
+        },
+        "limit": {
+          "type": "number",
+          "required": false,
+          "description": "Maximum number of channels to return (default: 100)"
+        }
+      }
+    },
+    {
+      "name": "createChannel",
+      "description": "Create a new Slack channel",
+      "parameters": {
+        "name": {
+          "type": "string",
+          "required": true,
+          "description": "Channel name"
+        },
+        "is_private": {
+          "type": "boolean",
+          "required": false,
+          "description": "Create as private channel (default: false)"
+        }
+      }
+    },
+    {
+      "name": "getChannelHistory",
+      "description": "Get message history from a channel",
+      "parameters": {
+        "channel": {
+          "type": "string",
+          "required": true,
+          "description": "Channel ID"
+        },
+        "limit": {
+          "type": "number",
+          "required": false,
+          "description": "Maximum number of messages to return (default: 100)"
+        }
+      }
+    }
+  ],
+  "version": "1.0.0",
+  "metadata": {
+    "author": "Stage7 Development Team",
+    "tags": [
+      "slack",
+      "messaging",
+      "communication",
+      "team"
+    ],
+    "category": "communication",
+    "license": "MIT"
+  }
+}
