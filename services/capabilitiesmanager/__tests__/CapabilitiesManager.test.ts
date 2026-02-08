@@ -66,7 +66,26 @@ describe('CapabilitiesManager', () => {
     jest.clearAllMocks();
 
     // Create a mock instance of PluginExecutor before CapabilitiesManager
-    mockPluginExecutorInstance = new PluginExecutor();
+    const mockConfigManager = {};
+    const mockContainerManager = {};
+    const mockLibrarianUrl = 'http://localhost:5040';
+    const mockSecurityManagerUrl = 'http://localhost:5010';
+    const mockMissionControlUrl = 'http://localhost:5030';
+    const mockAuthenticatedApi = {
+      get: jest.fn(),
+      post: jest.fn(),
+      put: jest.fn(),
+      delete: jest.fn()
+    };
+
+    mockPluginExecutorInstance = new PluginExecutor(
+      mockConfigManager as any,
+      mockContainerManager as any,
+      mockLibrarianUrl,
+      mockSecurityManagerUrl,
+      mockMissionControlUrl,
+      mockAuthenticatedApi
+    );
     (PluginExecutor as jest.Mock).mockImplementationOnce(() => mockPluginExecutorInstance);
 
     capabilitiesManager = new CapabilitiesManager();

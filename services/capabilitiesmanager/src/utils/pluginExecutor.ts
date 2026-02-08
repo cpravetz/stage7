@@ -34,14 +34,61 @@ export class PluginExecutor {
     private librarianUrl: string;
     private securityManagerUrl: string;
     private missionControlUrl: string;  
+    private authenticatedApi?: any;
 
-    constructor(configManager: ConfigManager, containerManager: ContainerManager, librarianUrl: string, securityManagerUrl: string, missionControlUrl: string) {
+    constructor(configManager: ConfigManager, containerManager: ContainerManager, librarianUrl: string, securityManagerUrl: string, missionControlUrl: string, authenticatedApi?: any) {
         this.configManager = configManager;
         this.containerManager = containerManager;
         this.librarianUrl = librarianUrl;
         this.securityManagerUrl = securityManagerUrl;
         console.log(`[PluginExecutor] Initialized with securityManagerUrl: ${this.securityManagerUrl}`);
         this.missionControlUrl = missionControlUrl;
+        this.authenticatedApi = authenticatedApi;
+    }
+
+    /**
+     * Discovers MCP tool URL using service discovery
+     */
+    private async discoverMCPToolUrl(serviceName: string, trace_id: string): Promise<string | null> {
+        const source_component = "PluginExecutor.discoverMCPToolUrl";
+        try {
+            // First, try to get service URL from PostOffice using authenticated API
+            if (this.authenticatedApi) {
+                const response = await this.authenticatedApi.get(`http://${process.env.POSTOFFICE_URL || 'postoffice:5000'}/getServices`);
+                const services = response.data;
+                
+                // Convert service name to camelCase for property lookup
+                const serviceTypeLower = serviceName.charAt(0).toLowerCase() + serviceName.slice(1);
+                const urlPropertyName = `${serviceTypeLower}Url`;
+                
+                if (services && services[urlPropertyName]) {
+                    const normalizedUrl = this.normalizeUrl(services[urlPropertyName]);
+                    console.log(`[${trace_id}] ${source_component}: Service ${serviceName} found via PostOffice: ${normalizedUrl}`);
+                    return normalizedUrl;
+                }
+            }
+            
+            // If no authenticated API or service not found in PostOffice, fall back to default Docker service name and port
+            // For MCP services, we'll use default port 8080 unless specified otherwise
+            const defaultUrl = `${serviceName.toLowerCase()}:8080`;
+            console.log(`[${trace_id}] ${source_component}: Using default URL for service ${serviceName}: ${defaultUrl}`);
+            return this.normalizeUrl(defaultUrl);
+            
+        } catch (error) {
+            console.error(`[${trace_id}] ${source_component}: Error discovering MCP tool URL:`, error);
+            return null;
+        }
+    }
+
+    /**
+     * Normalizes URL by adding http:// if not present and ensuring no trailing slash
+     */
+    private normalizeUrl(url: string): string {
+        let normalized = url.trim();
+        if (!normalized.startsWith('http://') && !normalized.startsWith('https://')) {
+            normalized = `http://${normalized}`;
+        }
+        return normalized.endsWith('/') ? normalized.slice(0, -1) : normalized;
     }
 
     public async execute(pluginToExecute: PluginDefinition, inputsForPlugin: Map<string, InputValue>, actualPluginRootPath: string, trace_id: string): Promise<PluginOutput[]> {
@@ -686,10 +733,58 @@ export class PluginExecutor {
                     headers['Authorization'] = `Basic ${Buffer.from(credentials).toString('base64')}`;
                 }
                 break;
+            case 'oauth2':
+                if (auth.oauth2) {
+                    // Handle OAuth2 authentication
+                    let accessToken;
+                    if (auth.oauth2.credentialSource) {
+                        // Get token from credential source (e.g., environment variable)
+                        accessToken = await this.getCredential(auth.oauth2.credentialSource);
+                    } else if (auth.oauth2.clientId && auth.oauth2.clientSecret && auth.oauth2.tokenUrl) {
+                        // If we have client credentials, exchange them for an access token
+                        accessToken = await this.exchangeClientCredentialsForToken(auth.oauth2, trace_id);
+                    }
+                    
+                    if (accessToken) {
+                        headers['Authorization'] = `Bearer ${accessToken}`;
+                    }
+                }
+                break;
         }
     }
 
-    public async executeMCPTool(mcpTool: MCPTool, step: Step, trace_id: string): Promise<PluginOutput[]> {
+    /**
+     * Exchanges client credentials for an access token using OAuth2 client credentials flow
+     */
+    private async exchangeClientCredentialsForToken(oauth2Config: any, trace_id: string): Promise<string | null> {
+        const source_component = "PluginExecutor.exchangeClientCredentialsForToken";
+        try {
+            const response = await axios.post(oauth2Config.tokenUrl, new URLSearchParams({
+                grant_type: 'client_credentials',
+                client_id: oauth2Config.clientId,
+                client_secret: oauth2Config.clientSecret,
+                ...(oauth2Config.scopes ? { scope: oauth2Config.scopes.join(' ') } : {})
+            }), {
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'X-Trace-ID': trace_id
+                },
+                timeout: 10000
+            });
+
+            if (response.data && response.data.access_token) {
+                return response.data.access_token;
+            }
+
+            console.error(`[${trace_id}] ${source_component}: No access token in OAuth2 response`);
+            return null;
+        } catch (error: any) {
+            console.error(`[${trace_id}] ${source_component}: Error exchanging client credentials for access token:`, error.message);
+            return null;
+        }
+    }
+
+     public async executeMCPTool(mcpTool: MCPTool, step: Step, trace_id: string): Promise<PluginOutput[]> {
         const source_component = "PluginExecutor.executeMCPTool";
         console.log(`[${trace_id}] ${source_component}: Executing MCP Tool ${mcpTool.id} for actionVerb ${step.actionVerb}`);
 
@@ -711,14 +806,21 @@ export class PluginExecutor {
             let targetUrl = mcpTarget.serviceName;
 
             if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
-                const envUrl = process.env[`MCP_SERVICE_${targetUrl.toUpperCase().replace(/-/g, '_')}_URL`];
-                if (envUrl) {
-                    targetUrl = envUrl;
+                // First, try dynamic service discovery via PostOffice
+                let discoveredUrl = await this.discoverMCPToolUrl(mcpTarget.serviceName, trace_id);
+                
+                if (!discoveredUrl) {
+                    // Fallback to environment variable
+                    const envUrl = process.env[`MCP_SERVICE_${targetUrl.toUpperCase().replace(/-/g, '_')}_URL`];
+                    if (envUrl) {
+                        discoveredUrl = envUrl;
+                    } else {
+                        console.error(`[${trace_id}] ${source_component}: Cannot resolve MCP service name '${mcpTarget.serviceName}' to a URL.`);
+                        return [this.createErrorOutput(GlobalErrorCodes.CAPABILITIES_MANAGER_MCP_TOOL_EXECUTION_FAILED, `Cannot resolve MCP service name '${mcpTarget.serviceName}'.`, trace_id)];
+                    }
                 }
-                else {
-                    console.error(`[${trace_id}] ${source_component}: Cannot resolve MCP service name '${mcpTarget.serviceName}' to a URL.`);
-                    return [this.createErrorOutput(GlobalErrorCodes.CAPABILITIES_MANAGER_MCP_TOOL_EXECUTION_FAILED, `Cannot resolve MCP service name '${mcpTarget.serviceName}'.`, trace_id)];
-                }
+                
+                targetUrl = discoveredUrl;
             }
 
             if (mcpTarget.endpointOrCommand.startsWith('/')) {
@@ -728,6 +830,7 @@ export class PluginExecutor {
                 console.warn(`[${trace_id}] ${source_component}: MCP endpointOrCommand '${mcpTarget.endpointOrCommand}' is not a path, specific handling required.`);
             }
 
+            // Build request configuration
             const requestConfig: any = {
                 method: mcpTarget.method.toLowerCase() || 'post',
                 url: targetUrl,
@@ -735,12 +838,52 @@ export class PluginExecutor {
                     'Content-Type': 'application/json',
                     'X-Trace-ID': trace_id,
                 },
-                data: inputsObject
+                data: {} // Initialize empty body
             };
+
+            // Handle input mappings (path, query, header, body)
+            for (const input of actionMapping.inputs as any) { // Cast to any to allow 'in' property
+                const inputName = input.name;
+                const inputValue = inputsObject[inputName];
+                
+                if (inputValue !== undefined && inputValue !== null) {
+                    switch (input.in) {
+                        case 'path':
+                            // Replace path parameter in URL (e.g., {param} with value)
+                            requestConfig.url = requestConfig.url.replace(`{${inputName}}`, encodeURIComponent(String(inputValue)));
+                            break;
+                        case 'query':
+                            if (!requestConfig.params) {
+                                requestConfig.params = {};
+                            }
+                            requestConfig.params[inputName] = inputValue;
+                            break;
+                        case 'header':
+                            requestConfig.headers[inputName] = String(inputValue);
+                            break;
+                        case 'body':
+                        default:
+                            // Default to body
+                            requestConfig.data[inputName] = inputValue;
+                            break;
+                    }
+                }
+            }
+
+            // Only include body if we have data to send
+            if (Object.keys(requestConfig.data).length === 0) {
+                delete requestConfig.data;
+            }
 
             if (mcpTarget.additionalConfig) {
                 if (mcpTarget.additionalConfig.headers) {
                     requestConfig.headers = { ...requestConfig.headers, ...mcpTarget.additionalConfig.headers };
+                }
+                if (mcpTarget.additionalConfig.params) {
+                    if (!requestConfig.params) {
+                        requestConfig.params = {};
+                    }
+                    requestConfig.params = { ...requestConfig.params, ...mcpTarget.additionalConfig.params };
                 }
             }
 
@@ -750,7 +893,35 @@ export class PluginExecutor {
             }
 
             console.log(`[${trace_id}] ${source_component}: Calling MCP service. URL: ${requestConfig.url}, Method: ${requestConfig.method}`);
-            const mcpResponse = await axios(requestConfig);
+            
+            // Retry logic with exponential backoff
+            const maxRetries = 3;
+            const baseDelay = 1000; // 1 second
+            let mcpResponse: any;
+            
+            for (let attempt = 0; attempt <= maxRetries; attempt++) {
+                try {
+                    mcpResponse = await axios(requestConfig);
+                    break; // Success, exit retry loop
+                } catch (error: any) {
+                    console.error(`[${trace_id}] ${source_component}: MCP service call failed (attempt ${attempt + 1}/${maxRetries + 1}):`, error.message);
+                    
+                    if (attempt === maxRetries) {
+                        // Last attempt failed, rethrow the error
+                        return [this.createErrorOutput(GlobalErrorCodes.CAPABILITIES_MANAGER_MCP_TOOL_EXECUTION_FAILED, `MCP tool execution failed after ${maxRetries + 1} attempts: ${error.message}`, trace_id, { toolId: mcpTool.id, actionVerb: step.actionVerb, original_error: error.message })];
+                    }
+                    
+                    // Calculate delay with exponential backoff
+                    const delay = baseDelay * Math.pow(2, attempt);
+                    console.log(`[${trace_id}] ${source_component}: Retrying in ${delay}ms...`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
+            }
+            
+            // Ensure mcpResponse is defined before proceeding
+            if (!mcpResponse) {
+                return [this.createErrorOutput(GlobalErrorCodes.CAPABILITIES_MANAGER_MCP_TOOL_EXECUTION_FAILED, 'MCP service call failed: No response received', trace_id, { toolId: mcpTool.id, actionVerb: step.actionVerb })];
+            }
 
             const outputs: PluginOutput[] = [];
             if (mcpResponse.data && typeof mcpResponse.data === 'object') {

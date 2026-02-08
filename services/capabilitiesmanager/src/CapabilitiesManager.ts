@@ -163,7 +163,7 @@ export class CapabilitiesManager extends BaseEntity {
             }
 
             const missionControlUrl = await this.getServiceUrl('MissionControl') || process.env.MISSIONCONTROL_URL || 'missioncontrol:5030';
-            this.pluginExecutor = new PluginExecutor(this.configManager, this.containerManager, this.librarianUrl, this.securityManagerUrl, missionControlUrl);
+            this.pluginExecutor = new PluginExecutor(this.configManager, this.containerManager, this.librarianUrl, this.securityManagerUrl, missionControlUrl, this.authenticatedApi.api);
             console.log(`[${trace_id}] ${source_component}: PluginExecutor initialized.`);
 
             await this.start(trace_id);
