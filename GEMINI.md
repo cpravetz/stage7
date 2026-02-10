@@ -1,8 +1,9 @@
-- The `CONTENT_GENERATION` plugin now receives correct input definitions due to modifications in `services/librarian/src/Librarian.ts`, `services/capabilitiesmanager/src/CapabilitiesManager.ts`, and `services/capabilitiesmanager/src/plugins/ACCOMPLISH/main.py`. The `ACCOMPLISH` plugin's prompt to the Brain now includes detailed schema information for each verb, guiding the Brain to generate valid plan steps. Additionally, the `PlanValidator` now receives the full `availablePlugins` list (including `inputDefinitions`) from the `CapabilitiesManager` and uses this to generate more targeted repair instructions when the Brain fails to provide required inputs.
+- The project uses RabbitMQ for two key messaging patterns:
+    1.  **Agent Status Updates (Publish/Subscribe):** `MessageQueueManager` publishes agent status events to a `topic` exchange (`agent.events`), and `TaskDelegation` subscribes to `agent.status.update` events from this exchange. This provides an efficient, event-driven mechanism for coordinating task delegation based on agent lifecycle changes.
+    2.  **Plugin Type Information (RPC over AMQP):** `RuntimeForeachDetector` uses RabbitMQ for synchronous, reliable Remote Procedure Calls (RPC) to the `CapabilitiesManager` (`capabilitiesmanager.getPluginTypes` routing key). This is explicitly chosen over HTTP for "reliable, timeout-safe communication" crucial for dynamic FOREACH loop insertion.
 
-Please rebuild the project (`docker compose build --no-cache`) and relaunch the mission via the frontend to verify these fixes.
-- I have consolidated all Brain-related documentation files into a single `docs/BRAIN_SERVICE.md` file and removed the original redundant files.
-- I have consolidated all TrafficManager-related documentation files into a single `docs/TRAFFICMANAGER_SERVICE.md` file and removed the original redundant files.
-- I have consolidated all CTO Assistant-related documentation files into a single `docs/CTO_ASSISTANT_SERVICE.md` file and removed the original redundant files.
-- I have consolidated all Mission Failure Analysis documentation files into a single `docs/MISSION_FAILURE_ANALYSIS.md` file and removed the original redundant files.
-- I have consolidated all Agent Delegation documentation files into a single `docs/AGENT_DELEGATION.md` file and removed the original redundant files.
+- The `PostOffice` service currently functions primarily as an HTTP router for authenticated request-response messaging (`/message` endpoint) and a service discovery proxy (`getServiceUrl`). It does not inherently support publish/subscribe or RPC patterns.
+
+- **Evaluation:** RabbitMQ is not overkill for the project. Its usage addresses specific architectural requirements for event-driven communication and reliable RPC that are not easily (or efficiently) replicated by the existing HTTP-based `PostOffice` without significantly increasing `PostOffice`'s complexity. Migrating this functionality to `PostOffice` would require transforming it into a full-fledged message broker, which would be a substantial re-architecture.
+
+- **Recommendation:** Keep RabbitMQ. The existing implementation leverages RabbitMQ for its strengths in asynchronous eventing and reliable RPC, which are valuable in a distributed microservices environment.

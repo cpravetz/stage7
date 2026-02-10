@@ -1,97 +1,94 @@
-# Docker Build Instructions
+# Stage7 Docker Build & Deployment Guide
 
-## Quick Start
+This guide provides instructions for building and deploying the Stage7 system using Docker and Docker Compose. The primary method for setup and launch is now the interactive `setup.sh` script.
 
-Build the entire system with proper ordering:
+## 1. Quick Start with `setup.sh` (Recommended)
+
+The `setup.sh` script automates prerequisite checks, environment setup, Docker image builds, and service launches with profile selection.
+
+### Usage:
+```bash
+./setup.sh
+```
+This will guide you through:
+*   Checking for Docker and Docker Compose.
+*   Creating/updating your `.env` file and auto-generating secrets.
+*   Generating RSA keys for authentication.
+*   Building all necessary Docker images (`docker compose build --no-cache`).
+*   Prompting you to select a deployment profile (e.g., `core`, `assistants`, specific assistant, or all services).
+
+## 2. Manual Docker Build & Launch
+
+For advanced users or specific scenarios, you can manually build images and launch services.
+
+### 2.1. Building Docker Images
+
+All images are now defined in a single `docker-compose.yaml` file.
 
 ```bash
-# Step 1: Build the base image (shared dependencies)
-docker-compose -f docker-compose.all.yaml build base
-
-# Step 2: Build all agent and service images
-docker-compose -f docker-compose.all.yaml build
-
-# Step 3: Start all services
-docker-compose -f docker-compose.all.yaml up -d
+# Build all images (including the 'base' image first implicitly)
+# The '--no-cache' ensures a clean build, useful after code changes.
+docker compose build --no-cache
 ```
 
-## Why Two Builds?
+**Note on Base Image:** The `base` service (defined in `docker-compose.yaml` and built from `Dockerfile.base`) contains shared dependencies. Docker Compose intelligently reuses this image when building other services, significantly reducing overall build time. You no longer need to build the base image separately.
 
-The base image contains pre-compiled shared, sdk, and errorhandler packages. Building it once and having all 20 agents inherit from it significantly reduces total build time (parallel builds reuse the cached layers).
+### 2.2. Launching Services with Profiles
 
-## Individual Builds
+Stage7 now uses Docker Compose Profiles to manage different deployment scenarios from a single `docker-compose.yaml` file.
 
-To build specific agents:
+*   **Infrastructure Services:** (MongoDB, Redis, RabbitMQ, Consul, SearXNG, ChromaDB) do not have a profile and are always started by `docker compose up`.
+*   **Core System Services:** (PostOffice, MissionControl, Brain, AgentSet, Engineer, CapabilitiesManager, Librarian, SecurityManager, TrafficManager, Frontend) are part of the `core` profile.
+*   **Assistant Services:** All `*-assistant-api` services are part of the `assistants` profile, and each also has its own specific profile (e.g., `sales-assistant`).
 
-```bash
-# Build just one agent
-docker build -f agents/sales-assistant-api/Dockerfile -t cktmcs:sales .
+#### Common Launch Commands:
 
-# Build just the base
-docker build -f Dockerfile.base -t cktmcs:base .
-```
+*   **Launch all services (Infrastructure, Core System, all Assistants):**
+    ```bash
+    docker compose up -d
+    ```
+    *(This is equivalent to `./setup.sh` without any profile arguments)*
 
-## Port Assignments
+*   **Launch only Core System services (and infrastructure):**
+    ```bash
+    docker compose --profile core up -d
+    ```
+    *(This is useful for developing core platform features or if you want to selectively start assistants later)*
 
-All services and agents expose the following ports:
+*   **Launch all Assistant services (and infrastructure, assuming core is running or will start):**
+    ```bash
+    docker compose --profile assistants up -d
+    ```
+    *(Typically used in conjunction with `--profile core` or if core services are already active)*
 
-### Infrastructure Services
-- PostOffice: 5020
-- MissionControl: 5030
-- Brain: 5070
-- Engineer: 5050
-- Librarian: 5040
-- SecurityManager: 5010
-- AgentSet: 5060
+*   **Launch Core System + all Assistants (recommended for full local development):**
+    ```bash
+    docker compose --profile core --profile assistants up -d
+    ```
 
-### Agent APIs (20 total)
-```
-pm-assistant-api                 3000
-content-creator-assistant-api    3001
-sales-assistant-api              3002
-event-assistant-api              3003
-legal-assistant-api              3004
-sales-assistant-api              3005
-education-assistant-api          3006
-hr-assistant-api                 3007
-executive-assistant-api          3008
-marketing-assistant-api          3009
-support-assistant-api            3010
-performance-analytics-api        3011
-songwriter-assistant-api         3012
-scriptwriter-assistant-api       3013
-finance-assistant-api            3014
-healthcare-assistant-api         3015
-restaurant-ops-assistant-api     3016
-hotel-ops-assistant-api          3017
-sports-wager-advisor-api         3018
-cto-assistant-api                3020
-career-assistant-api             3021
-```
+*   **Launch Core System + a Specific Assistant (e.g., Sales Assistant):**
+    ```bash
+    docker compose --profile core --profile sales-assistant up -d
+    ```
+    *(Replace `sales-assistant` with the profile name of your desired assistant)*
 
-## Troubleshooting
+## 3. Troubleshooting
 
-### "cktmcs:base: failed to resolve source metadata"
+*   **Common Errors:** Refer to the "Troubleshooting" section in the main `README.md` for general issues and solutions.
+*   **Docker Desktop Memory:** Building and running many services can be memory-intensive. Ensure Docker Desktop's memory allocation is set to at least 4GB (recommended 8GB+) in Preferences → Resources.
+*   **Clean Rebuild:** To force a complete rebuild without using Docker's build cache:
+    ```bash
+    docker compose build --no-cache
+    ```
+    *(This replaces individual service `--no-cache` builds)*
 
-This error means the base image hasn't been built yet. Run:
-```bash
-docker-compose -f docker-compose.all.yaml build base
-```
+## 4. Port Assignments
 
-### Clean Rebuild
+Refer to the main `README.md` for a comprehensive list of exposed ports for all services and agents.
 
-To force a complete rebuild without cache:
-```bash
-docker-compose -f docker-compose.all.yaml build --no-cache base
-docker-compose -f docker-compose.all.yaml build --no-cache
-```
+## 5. Architecture
 
-### Docker Desktop Memory
-
-Building 20+ images may require increasing Docker Desktop memory allocation:
-- Set RAM to at least 4GB in Docker Desktop Preferences → Resources
-
-## Architecture
+The system's Docker architecture leverages a multi-stage build pattern and a shared `base` image for efficiency.
 
 ```
 Dockerfile.base (builds once)
@@ -99,8 +96,8 @@ Dockerfile.base (builds once)
 ├── sdk/
 └── errorhandler/
 
-All 20 agents build on cktmcs:base
+All agents and services (except infrastructure) build on cktmcs:base
+├── services/postoffice/Dockerfile
 ├── agents/pm-assistant-api/Dockerfile
-├── agents/sales-assistant-api/Dockerfile
-└── ... (18 more agents)
+└── ... (all other services and agents)
 ```

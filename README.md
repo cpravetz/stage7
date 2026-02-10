@@ -117,326 +117,74 @@ The plugin ecosystem supports not only code-based plugins (Python, JavaScript, C
 - **Error Handling**: Comprehensive error analysis and recovery mechanisms
 - **Resource Management**: Container resource allocation and monitoring
 
-## 🚀 Agent Development Kit (ADK)
-
-The **Agent Development Kit (ADK)** is a comprehensive framework for rapidly building and deploying domain-specific AI assistants on top of stage7. It abstracts away infrastructure complexity and provides a clean, intuitive API for creating specialized agents.
-
-### What is ADK?
-
-ADK is a four-layer architecture that simplifies assistant development:
-
-- **L4: User Interface** - React frontend for user interactions
-- **L3: Domain-Specific Assistants** - 20+ production assistants (Sales, PM, Marketing, HR, Finance, Healthcare, CTO, etc.)
-- **L2: Agent SDK** - Reusable Assistant, Tool, and Conversation classes
-- **L1: Core Engine** - stage7 infrastructure (conversation management, multi-agent coordination, tool orchestration)
-
-### Quick Start with ADK
-
-Create a specialized assistant in minutes using the Quick Assistant pattern:
-
-```typescript
-import { createQuickAssistant } from '@cktmcs/sdk';
-
-createQuickAssistant({
-  id: 'my-assistant',
-  name: 'My Assistant',
-  role: 'Assists with domain-specific tasks',
-  personality: 'Helpful, professional, and domain-expert',
-  serviceId: 'my-assistant-api',
-  secretEnvVar: 'MY_ASSISTANT_API_SECRET',
-  tools: async (coreEngineClient) => [
-    // Add tools here
-  ],
-  port: 3000,
-  urlBase: 'my-assistant-api',
-}).catch((error: Error) => {
-  console.error('Failed to initialize:', error);
-  process.exit(1);
-});
-```
-
-### 20+ Production Assistants
-
-The system comes with 20+ production-ready assistants:
-
-- **Career Assistant** - Career planning and development
-- **Content Creator Assistant** - Content generation and strategy
-- **CTO Assistant** - Technology strategy and architecture
-- **Education Assistant** - Learning curriculum and tutoring
-- **Event Assistant** - Event planning and coordination
-- **Executive Assistant** - Strategic planning and decision support
-- **Finance Assistant** - Financial analysis and planning
-- **Healthcare Assistant** - Medical guidance and health management
-- **Hotel Operations Assistant** - Hospitality management
-- **HR Assistant** - Human resources and recruitment
-- **Investment Advisor** - Investment analysis and recommendations
-- **Legal Assistant** - Legal research and document review
-- **Marketing Assistant** - Marketing strategy and campaign management
-- **Performance Analytics Assistant** - Metrics analysis and reporting
-- **PM Assistant** - Product management and roadmapping
-- **Restaurant Operations Assistant** - Food service management
-- **Sales Assistant** - Sales pipeline and opportunity management
-- **Scriptwriter Assistant** - Script writing and content creation
-- **Songwriter Assistant** - Music composition and songwriting
-- **Sports Wager Advisor** - Sports analytics and predictions
-- **Support Assistant** - Customer support automation
-
-### Key ADK Features
-
-✨ **Quick Assistant Pattern** - Eliminate ~250 lines of boilerplate  
-🛠️ **20+ Production Assistants** - Ready-to-use domain specialists  
-🔐 **Enterprise Security** - JWT authentication, RBAC, encrypted communication  
-📈 **Scalable Architecture** - Horizontal & vertical scaling support  
-🧩 **Extensible Tools** - Easy to build and integrate custom tools  
-🤝 **Multi-Agent Collaboration** - Agents work together seamlessly  
-🎯 **LLM-Ready** - Built-in OpenAI/LLM integration  
-
-### ADK Documentation
-
-For comprehensive ADK documentation, including detailed guides on creating assistants, building custom tools, deployment strategies, and architecture deep-dives, see:
-
-👉 **[Agent Development Kit Documentation](./docs/ADK/README.md)**
-
-Key resources:
-- [Getting Started in 5 Minutes](./docs/ADK/README.md#getting-started-in-5-minutes)
-- [Creating Assistants](./docs/ADK/README.md#creating-assistants)
-- [Architecture Overview](./docs/ADK/README.md#architecture-overview)
-- [Tool Development Guide](./docs/ADK/TOOL-DEVELOPMENT.md)
-- [Deployment Guide](./docs/ADK/DEPLOYMENT.md)
-- [Complete Documentation Index](./docs/ADK/INDEX.md)
-
 ## Getting Started
 
-### Prerequisites
+### Quick Start (Recommended)
 
-- Docker and Docker Compose
+The easiest way to set up and launch Stage7 is using the interactive `setup.sh` script. This script automates prerequisite checks, environment setup, Docker image builds, and service launches.
 
-### Environment Variables
+1.  **Clone the repository:**
+    ```bash
+    git clone https://github.com/cpravetz/stage7.git
+    cd stage7
+    ```
 
-Many environment variables are shared between containers.  The following variables are the ones you should
-define.  Any that start with an asterisk (*) are defined in another section of the docker-compose file and
-should not be changed.
+2.  **Run the setup script:**
+    ```bash
+    ./setup.sh
+    ```
+    The script will guide you through:
+    *   Verifying Docker and Docker Compose installation.
+    *   Creating/updating your `.env` file and securely auto-generating secrets.
+    *   Generating RSA keys required for service-to-service authentication.
+    *   Building all necessary Docker images.
+    *   Prompting you to select a deployment profile (e.g., `core` system, `all assistants`, `core + all assistants`, or a `specific assistant`).
 
-**SHORTCUT**: The system will run with just one LLM provider keys set in the Brain service and the JWT key in securitymanager.  The JWT keys should be random. You do not need to worry about the other variables now.  Most are already set for you. 
+### Manual Setup & Launch
 
-
-  postoffice:
-    environment:
-      NODE_ENV: production
-      PORT: &postofficePort 5020
-      POSTOFFICE_URL: &postofficeUrl postoffice:5020
-      SECURITYMANAGER_URL: &securitymanagerUrl securitymanager:5010
-      MISSIONCONTROL_URL: &missioncontrolUrl missioncontrol:5030
-      POSTOFFICE_SECRET: &postofficeSecret postOfficeAuthSecret
-
-  missioncontrol:
-    environment:
-      NODE_ENV: production
-      PORT: &missioncontrolPort 5030
-      TRAFFICMANAGER_URL: &trafficmanagerUrl trafficmanager:5080
-      LIBRARIAN_URL: &librarianUrl librarian:5040
-      BRAIN_URL: &brainUrl brain:5070
-      ENGINEER_URL: &engineerUrl engineer:5050
-      MISSIONCONTROL_SECRET: &missioncontrolSecret missionControlAuthSecret
-
-  trafficmanager:
-    environment:
-      NODE_ENV: production
-      PORT: &trafficmanagerPort 5080
-      TRAFFICMANAGER_SECRET: &trafficmanagerSecret trafficManagerAuthSecret
-
-  brain:
-    environment:
-      NODE_ENV: production
-      PORT: &brainPort 5070
-      BRAIN_SECRET: &brainSecret brainAuthSecret
-      # OpenAI API
-      OPENAI_API_KEY=
-
-      # Gemini API
-      GEMINI_API_KEY=
-      GEMINI_API_URL=
-
-      # Huggingface API
-      HUGGINGFACE_API_KEY=
-      HUGGINGFACE_API_URL=
-
-      # Anthropic API
-      ANTHROPIC_API_KEY=
-      ANTHROPIC_API_URL=
-
-      # OpenRouter API
-      OPENROUTER_API_KEY=
-
-  agentset:
-    environment:
-      NODE_ENV: production
-      TRAFFICMANAGER_URL: &trafficmanagerUrl
-      CAPABILITIESMANAGER_URL: &capabilitiesmanagerUrl capabilitiesmanager:5060
-      AGENTSET_SECRET: &agentsetSecret agentSetAuthSecret
-
-  engineer:
-    environment:
-      NODE_ENV: production
-      PORT: &engineerPort 5050
-      ENGINEER_SECRET: &engineerSecret engineerAuthSecret
-
-  capabilitiesmanager:
-    environment:
-      NODE_ENV: production
-      PORT: &capabilitiesmanagerPort 5060
-      ENGINEER_URL: &engineerUrl
-      CAPABILITIESMANAGER_SECRET: &capabilitiesmanagerSecret capabilitiesManagerAuthSecret
-
-  librarian:
-    environment:
-      NODE_ENV: production
-      PORT: &librarianPort 5040
-      LIBRARIAN_SECRET: &librarianSecret librarianAuthSecret
-      REDIS_HOST=redis
-      REDIS_PORT=6379
-      MONGO_URI=mongodb://mongo:27017
-      MONGO_DB=librarianDB
-
-  securitymanager:
-    environment:
-      NODE_ENV: production
-      PORT:  &securitymanagerPort 5010
-      JWT_SECRET: your-secret-key
-      ADMIN_SECRET: adminSecret
-      SECURITYMANAGER_SECRET: &securitymanagerSecret securityManagerAuthSecret
-
-  frontend:
-    environment:
-      - ENV REACT_APP_API_BASE_URL=http://localhost:5020
-      - ENV REACT_APP_WS_URL=ws://localhost:5020
-
-### Installation
-
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/cpravetz/stage7.git
-   cd stage7
-   ```
-
-2. Configure API keys for the LLMs you want to use by creating a `.env` file in the root directory with the following variables (you only need to provide keys for the LLMs you want to use):
-   ```
-   # OpenAI API
-   OPENAI_API_KEY=your_openai_api_key
-
-   # Gemini API
-   GEMINI_API_KEY=your_gemini_api_key
-
-   # Huggingface API
-   HUGGINGFACE_API_KEY=your_huggingface_api_key
-
-   # Anthropic API
-   ANTHROPIC_API_KEY=your_anthropic_api_key
-
-   # OpenRouter API
-   OPENROUTER_API_KEY=your_openrouter_api_key
-   ```
-
-3. (Optional) Configure self-hosted LLMs by adding the following to your `.env` file:
-   ```
-   # Self-hosted LLM configuration
-   OPENWEBUI_API_URL=http://your-openwebui-server:5000
-   OPENWEBUI_API_KEY=your_openwebui_api_key
-   ```
-
-4. Build the system containers:
-   ```bash
-   docker compose build
-   ```
-
-5. Start the containers:
-   ```bash
-   docker compose up -d
-   ```
-
-6. Generate RSA keys for authentication (first time only):
-   ```bash
-   docker compose exec securitymanager node src/scripts/generate-keys.js
-   ```
-
-   **IMPORTANT SECURITY NOTE**: Never commit private keys to the repository. The `.gitignore` file is configured to exclude private keys, but always verify that sensitive files are not being committed.
-
-7. On the host machine, the application will be available at [http://localhost:80](http://localhost:80).
-
-
-### Usage
-
-2. Create a new mission by providing a goal
-3. Monitor the mission progress and interact with the system through the user interface
+For advanced users, you can find detailed instructions for manual Docker builds, launching services with specific Docker Compose profiles, and configuring environment variables directly in the [Docker Build & Deployment Guide](./DOCKER_BUILD_GUIDE.md).
 
 ### First Steps After Installation
 
-1. Access the frontend at `http://localhost:80`
-2. Register a new account through the frontend interface
-3. Start with a simple mission like "Create a basic todo list" to test the system
-4. Monitor the agent creation and task execution through the UI
-5. Review the Files tab to see the deliverables and shared files
-
-### Example Missions
-
-Here are some example missions that highlight the system's advanced, long-term, and adaptive capabilities:
-
-1.  "Continuously monitor global climate data, identify emerging patterns, and generate weekly reports on potential environmental impacts and policy recommendations."
-2.  "Develop and maintain a personalized learning curriculum for AI ethics, adapting content based on my progress, current events, and new research in the field."
-3.  "Act as my strategic business advisor, analyzing market trends, competitor activities, and internal performance metrics to provide quarterly strategic recommendations for growth and innovation."
-4.  "Orchestrate the end-to-end development lifecycle of a new software feature, from requirements gathering and design to coding, testing, deployment, and post-launch monitoring, ensuring adherence to best practices and continuous improvement."
-5.  "Manage my digital presence across multiple platforms, curating content, engaging with my audience, and optimizing strategies based on performance analytics to foster community growth and brand recognition."
+1.  Access the frontend at `http://localhost:80` (or the port configured in your `.env` for `REACT_APP_API_BASE_URL`).
+2.  Register a new account through the frontend interface.
+3.  Start with a simple mission (e.g., "Create a basic todo list") to test the system.
+4.  Monitor agent creation and task execution through the UI.
+5.  Review the Files tab to see deliverables and shared files.
 
 ### Using Self-Hosted LLMs
 
-Stage7 supports integration with self-hosted LLM models through various interfaces. Here's a quick overview:
-
-1. **Supported Interfaces**:
-   - OpenWebUI Interface (compatible with OpenWebUI, LM Studio, Ollama, etc.)
-   - Direct Llama.cpp Interface
-   - Hugging Face Text Generation Interface
-
-2. **Basic Configuration**:
-   - Add the following to your `.env` file:
-     ```
-     # For OpenWebUI or compatible servers
-     OPENWEBUI_API_URL=http://your-openwebui-server:5000
-     OPENWEBUI_API_KEY=your_openwebui_api_key
-     ```
-
-3. **Supported Models**:
-   - Llama 3 (8B, 70B)
-   - Mistral (7B, 8x7B)
-   - Qwen (7B, 14B, 72B)
-   - Phi-3 (3.8B, 14B)
-   - Any other model compatible with the OpenAI API format
-
-4. **Detailed Guide**:
-   - For comprehensive instructions, see [SELF_HOSTED_LLM_GUIDE.md](SELF_HOSTED_LLM_GUIDE.md)
+Stage7 supports integration with self-hosted LLM models. For comprehensive instructions and configuration details, please refer to the [Self-Hosted LLM Guide](SELF_HOSTED_LLM_GUIDE.md).
 
 ### Troubleshooting
 
 Common issues and solutions:
 
-1. **Connection Errors**
-   - Verify all containers are running: `docker compose ps`
-   - Check container logs: `docker compose logs [service-name]`
-   - Ensure all required ports are available
-   - For authentication issues: `docker compose logs securitymanager`
+1.  **Connection Errors**
+    *   Verify all containers are running: `docker compose ps`
+    *   Check container logs: `docker compose logs [service-name]`
+    *   Ensure all required ports are available
+    *   For authentication issues: `docker compose logs securitymanager`
 
-2. **LLM Integration Issues**
-   - Verify API keys are correctly set in environment variables
-   - Check Brain service logs for API response errors: `docker compose logs brain`
-   - Ensure sufficient API credits/quota
-   - For self-hosted LLMs, check network connectivity between containers and the LLM server
-   - Verify the LLM server supports the OpenAI API format
+2.  **LLM Integration Issues**
+    *   Verify API keys are correctly set in environment variables (in your `.env` file).
+    *   Check Brain service logs for API response errors: `docker compose logs brain`
+    *   Ensure sufficient API credits/quota.
+    *   For self-hosted LLMs, check network connectivity between containers and the LLM server.
+    *   Verify the LLM server supports the OpenAI API format.
 
-3. **Performance Issues**
-   - Monitor container resource usage: `docker stats`
-   - Consider increasing container resource limits
-   - Check Redis and MongoDB performance
-   - For self-hosted LLMs, ensure the host has sufficient resources
+3.  **Performance Issues**
+    *   Monitor container resource usage: `docker stats`
+    *   Consider increasing container resource limits.
+    *   Check Redis and MongoDB performance.
+    *   For self-hosted LLMs, ensure the host has sufficient resources.
 
+4. **Debugging Logs**
+    *   Stage7 services now use structured logging (pino). To view human-readable logs for a specific service (e.g., postoffice):
+        ```bash
+        docker compose logs -f postoffice
+        ```
+    *   For advanced log analysis, consider setting up a centralized logging solution.
 
 ## Development
 
@@ -458,8 +206,8 @@ Common issues and solutions:
 
 ### Code Style Guidelines
 
-As stage7 was developed by LLMs, it has not always adhered to standards.  This is something that
-will be addressed as the system stabilizes and matures.  You can help us avoid additional tech debts to resolve
+As stage7 was developed by LLMs, it has not always adhered to standards. This is something that
+will be addressed as the system stabilizes and matures. You can help us avoid additional tech debts to resolve
 by trying to comply with the following:
 
 1. **TypeScript**
@@ -495,7 +243,6 @@ by trying to comply with the following:
    - Test coverage report
    - Updated documentation
    - Passing CI checks
-
 
 ## 🔌 Plugin Ecosystem
 

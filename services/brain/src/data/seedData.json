@@ -1925,44 +1925,6 @@
       }
     },
     {
-      "id": "deepseek-r1-or",
-      "name": "DeepSeek R1 (OpenRouter)",
-      "provider": "openrouter",
-      "providerModelId": "deepseek/deepseek-r1",
-      "interfaceName": "openrouter",
-      "serviceName": "ORService",
-      "tokenLimit": 1000000,
-      "costPer1kTokens": {
-        "input": 0.55,
-        "output": 1.1
-      },
-      "supportedConversationTypes": [
-        "TextToText",
-        "TextToCode"
-      ],
-      "status": "active",
-      "rolloutPercentage": 5,
-      "scoresByConversationType": {
-        "TextToText": {
-          "costScore": 30,
-          "accuracyScore": 98,
-          "creativityScore": 90,
-          "speedScore": 60
-        },
-        "TextToCode": {
-          "costScore": 30,
-          "accuracyScore": 95,
-          "creativityScore": 90,
-          "speedScore": 55
-        }
-      },
-      "metadata": {
-        "version": "1.0.0",
-        "releaseDate": "2024-01-01",
-        "knownLimitations": ""
-      }
-    },
-    {
       "id": "deva-stral-or",
       "name": "DeVa Stral (OpenRouter)",
       "provider": "openrouter",
