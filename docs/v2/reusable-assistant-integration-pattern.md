@@ -10,7 +10,6 @@ This document defines the standard pattern for integrating SDK assistants with L
 
 **Components**:
 - **MissionControl**: Orchestrates agent missions and tool execution
-- **TrafficManager**: Creates and manages agents
 - **CapabilitiesManager**: Executes plugins
 - **Plugins**: Individual capability implementations (JIRA, Slack, etc.)
 

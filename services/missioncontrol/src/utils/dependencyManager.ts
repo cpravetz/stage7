@@ -47,7 +47,6 @@ class DependencyManager {
 
     // Simulate checking if a dependent agent has completed its task
     isAgentCompleted(agentId: string): boolean {
-        // You could implement logic here to check the status of dependent agents from the TrafficManager
         // For now, let's assume agents are completed if they exist.
         return !!this.dependencies[agentId]; 
     }

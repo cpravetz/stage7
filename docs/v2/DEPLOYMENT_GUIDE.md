@@ -75,7 +75,6 @@ The system is composed of several services, each with a designated port.
 | **Engineer** | **5050** | Manages plugin development and lifecycle. |
 | **CapabilitiesManager**| **5060** | Executes plugins (tools). |
 | **Brain** | **5070** | Handles LLM-based planning and reasoning. |
-| **TrafficManager** | **5080** | Manages agent traffic and delegation. |
 | **AgentSet** | **5100** | Coordinates the pool of available agents. |
 
 ### 2.3. Foundation Infrastructure

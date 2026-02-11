@@ -139,19 +139,11 @@ fi
 echo "RSA key setup complete. ✅"
 press_any_key_to_continue
 
-# --- 4. Build Docker images ---
+# --- 4. Select Deployment Profile ---
 echo ""
-echo "Building Docker images (this may take a while)..."
-docker compose build --no-cache
-echo "Docker images built. ✅"
-press_any_key_to_continue
+echo "--- Select Deployment Profile ---"
 
-# --- 5. Start services ---
-echo ""
-echo "--- Starting Stage7 Services ---"
-
-COMPOSE_COMMAND="docker compose up -d"
-PROFILES_TO_RUN=""
+PROFILES_LIST=""
 USER_CHOICE=""
 
 while true; do
@@ -167,18 +159,18 @@ while true; do
 
   case $USER_CHOICE in
     1)
-      PROFILES_TO_RUN="--profile core"
+      PROFILES_LIST="core"
       echo "Selected: Core System"
       break
       ;;
     2)
-      PROFILES_TO_RUN="--profile assistants"
+      PROFILES_LIST="assistants"
       echo "Selected: All Assistants"
       echo "WARNING: This option assumes the 'core' services are already running or will be started separately."
       break
       ;;
     3)
-      PROFILES_TO_RUN="--profile core --profile assistants"
+      PROFILES_LIST="core,assistants"
       echo "Selected: Core System + All Assistants"
       break
       ;;
@@ -186,7 +178,7 @@ while true; do
       echo "Enter the name of the specific assistant (e.g., pm-assistant, sales-assistant): "
       read -r ASSISTANT_NAME
       if [ -n "$ASSISTANT_NAME" ]; then
-        PROFILES_TO_RUN="--profile core --profile $ASSISTANT_NAME"
+        PROFILES_LIST="core,$ASSISTANT_NAME"
         echo "Selected: Core System + Specific Assistant: $ASSISTANT_NAME"
         echo "Note: The 'core' profile is automatically included to ensure dependencies are met."
         break
@@ -195,7 +187,7 @@ while true; do
       fi
       ;;
     5)
-      PROFILES_TO_RUN="" # No profiles specified means all services without explicit profiles run
+      PROFILES_LIST="*"
       echo "Selected: Run All Services (Infrastructure, Core System, and All Assistants)"
       break
       ;;
@@ -205,9 +197,35 @@ while true; do
   esac
 done
 
+export COMPOSE_PROFILES="$PROFILES_LIST"
+
+# --- 5. Build Docker images ---
 echo ""
+echo "Building Docker images for selected profile(s)..."
+if ! docker compose build --no-cache; then
+    echo "Error: Docker compose build failed."
+    exit 1
+fi
+echo "Docker images built. ✅"
+press_any_key_to_continue
+
+# --- 6. Start services ---
+echo ""
+echo "--- Starting Stage7 Services ---"
 echo "Initiating Docker Compose with selected profile(s)..."
-$COMPOSE_COMMAND $PROFILES_TO_RUN
+
+# The --wait flag ensures Docker Compose waits for services to be healthy
+# The --timeout flag specifies how long to wait for containers to become healthy (300 seconds)
+COMPOSE_COMMAND="docker compose up -d --wait --timeout 300"
+
+$COMPOSE_COMMAND
+
+# Check if docker compose failed
+if [ $? -ne 0 ]; then
+  echo "Error: Docker compose up failed."
+  echo "Tip: Check container logs with 'docker compose logs <service-name>' for more details."
+  exit 1
+fi
 
 echo ""
 echo "Stage7 setup and launch complete! 🎉"

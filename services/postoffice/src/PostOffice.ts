@@ -56,6 +56,7 @@ export class PostOffice extends BaseEntity {
     private librarianUrl: string = '';
 
     constructor() {
+        super('PostOffice', 'PostOffice', 'postoffice', process.env.PORT || '5020');
         // Initialize logger first
         this.logger = pino({
             name: 'PostOffice',
@@ -70,13 +71,6 @@ export class PostOffice extends BaseEntity {
             }
         });
 
-        // Call the BaseEntity constructor with required parameters
-        const id = uuidv4();
-        const componentType = 'PostOffice';
-        const urlBase = process.env.POSTOFFICE_URL || 'postoffice';
-        const port = process.env.PORT || '5020';
-        // Skip PostOffice registration since this is the PostOffice itself
-        super(id, componentType, urlBase, port, true);
         this.app = express();
         // Very early logging middleware to catch all requests
         this.app.use((req: Request, res: Response, next: NextFunction) => {

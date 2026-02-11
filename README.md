@@ -69,8 +69,7 @@ The plugin ecosystem supports not only code-based plugins (Python, JavaScript, C
 5. **Engineer**: Responsible for creating and managing plugins.
 6. **Librarian**: Manages data storage using Redis and MongoDB servers.
 7. **CapabilitiesManager**: Handles ActionVerbs and Plugins.
-8. **TrafficManager**: Manages agents and agent sets.
-9. **SecurityManager**: Ensures system security.
+8. **SecurityManager**: Ensures system security.
 
 ## 🚀 Key Features
 

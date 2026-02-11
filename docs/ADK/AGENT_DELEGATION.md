@@ -55,7 +55,7 @@ The new architecture is built around the concept of transferring ownership of an
 
 ### Core Changes Required:
 
-1.  **Step Location Registry in AgentSet**: Each `AgentSet` will maintain an internal `stepLocationRegistry` map to track which agent currently owns each step. This registry will provide fast lookups, handle location updates during transfers, and integrate with the `TrafficManager` for cross-AgentSet tracking.
+1.  **Step Location Registry in AgentSet**: Each `AgentSet` will maintain an internal `stepLocationRegistry` map to track which agent currently owns each step. This registry will provide fast lookups, handle location updates during transfers, and integrate with the `AgentSet` for cross-AgentSet tracking.
 2.  **Enhanced Step Class (`Step.ts`)**:
     *   Add `currentOwnerAgentId` and `originalOwnerAgentId`.
     *   Include `delegationHistory` to track ownership changes.
@@ -397,7 +397,6 @@ export class AgentSet extends BaseEntity {
     const location: StepLocation = { stepId, currentOwnerAgentId: agentId, agentSetUrl, lastUpdated: new Date().toISOString(), delegationChain: [] };
     this.stepLocationRegistry.set(stepId, location);
     await this.persistenceManager.saveStepLocation(location);
-    await this.notifyTrafficManager('step_registered', location);
   }
 
   async updateStepLocation(stepId: string, newAgentId: string, newAgentSetUrl: string): Promise<void> {
@@ -406,7 +405,6 @@ export class AgentSet extends BaseEntity {
     const updatedLocation: StepLocation = { ...currentLocation, currentOwnerAgentId: newAgentId, agentSetUrl: newAgentSetUrl, lastUpdated: new Date().toISOString() };
     this.stepLocationRegistry.set(stepId, updatedLocation);
     await this.persistenceManager.saveStepLocation(updatedLocation);
-    await this.notifyTrafficManager('step_location_updated', updatedLocation);
   }
 }
 ```

@@ -262,29 +262,6 @@ services:
     env_file:
       - .env
 
-  trafficmanager:
-    profiles:
-      - core
-    build:
-      context: .
-      dockerfile: services/trafficmanager/dockerfile
-    depends_on:
-      postoffice:
-        condition: service_healthy
-      agentset:
-        condition: service_started
-      securitymanager:
-        condition: service_started
-    env_file:
-      - .env
-    environment:
-      PORT: 5080 # Explicitly set port
-      PRIMARY_AGENTSET_URL: http://agentset:5100 # Explicitly set
-    ports:
-      - "5080:5080"
-    volumes:
-      - ./shared/keys:/usr/src/app/shared/keys
-
   pm-assistant-api:
     profiles:
       - assistants
@@ -873,11 +850,11 @@ services:
     env_file:
       - .env
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 75s  # Increased to allow more time for RabbitMQ to fully initialize
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 15
+      start_period: 120s  # Increased to allow more time for RabbitMQ to fully initialize
     restart: unless-stopped
 
   consul:

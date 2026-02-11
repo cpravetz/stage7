@@ -53,18 +53,21 @@ WORKDIR /usr/src/app/services/capabilitiesmanager/dist/plugins
 # These names correspond to the directory names under dist/plugins
 ENV PYTHON_PLUGINS="ACCOMPLISH API_CLIENT CODE_EXECUTOR DATA_TOOLKIT FILE_OPS_PYTHON GET_USER_INPUT REFLECT SCRAPE SEARCH_PYTHON TEXT_ANALYSIS TRANSFORM SAVE_TO_KNOWLEDGE_BASE QUERY_KNOWLEDGE_BASE"
 
-RUN for plugin_name in $PYTHON_PLUGINS; do \
-    echo "Pre-building venv for $plugin_name..."; \
-    cd "$plugin_name" && \
-    python3 -m venv venv && \
-    . venv/bin/activate && \
+# Create a single shared virtual environment for all core plugins
+# This reduces image size and build time significantly compared to individual venvs
+RUN python3 -m venv /usr/src/app/shared_venv && \
+    . /usr/src/app/shared_venv/bin/activate && \
+    pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -e /usr/src/app/shared/python && \
+    for plugin_name in $PYTHON_PLUGINS; do \
+        echo "Installing dependencies for $plugin_name..."; \
+        cd "$plugin_name" && \
     if [ -f "requirements.txt" ]; then \
-        pip install --no-cache-dir -r requirements.txt; \
-    fi && \
-    deactivate && \
-    cd ..; \
-done
+            pip install --no-cache-dir -r requirements.txt; \
+        fi && \
+        ln -s /usr/src/app/shared_venv venv && \
+        cd ..; \
+    done
 
 # --- End Python Plugin Venv Pre-building ---
 

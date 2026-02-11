@@ -455,216 +455,312 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
   }, [API_BASE_URL]);
 
-  // Memoize context values to prevent unnecessary re-renders
-  const webSocketContextValue = useMemo<WebSocketContextType>(() => ({
-    isConnected,
-    clientId,
-    conversationHistory,
-    setConversationHistory,
-    assistantStateByConversation,
-    setAssistantStateByConversation,
-    currentQuestion,
-    setCurrentQuestion,
-    sendMessage: async (message: string) => {
-      if (!clientId) return;
-      if (!ws.current) {
-        connectWebSocket();
-      }
+  // Connection logic - defined early so it can be referenced by sendMessage
+  const connectWebSocket = useCallback(() => {
+    if (isConnecting) {
+      console.log('Already attempting to connect, ignoring duplicate request');
+      return;
+    }
 
-      // Determine if this is a plain text user message (should be added to chat)
-      // or a structured tool invocation (should NOT be added to chat)
-      const isPlainTextMessage = !message.startsWith('{') && !message.startsWith('[');
-      
-      // Add plain text user messages to chat history immediately on Send
-      if (isPlainTextMessage) {
-        if (pendingUserInput) {
-          setConversationHistory((prev) => [...prev, { content: `Question: ${pendingUserInput.question}`, sender: 'system', persistent: true, timestamp: new Date().toISOString() }, { content: `Answer: ${message}`, sender: 'user', persistent: true, timestamp: new Date().toISOString() }]);
-        } else if (currentQuestion) {
-          setConversationHistory((prev) => [...prev, { content: `Answer: ${message}`, sender: 'user', persistent: true, timestamp: new Date().toISOString() }]);
-        } else {
-          setConversationHistory((prev) => [...prev, { content: message, sender: 'user', persistent: true, timestamp: new Date().toISOString() }]);
-        }
-      }
+    if (ws.current && (ws.current.readyState === WebSocket.CONNECTING ||
+                       ws.current.readyState === WebSocket.OPEN)) {
+      console.log('WebSocket already connecting or connected');
+      return;
+    }
 
-      try {
-        const accessToken = securityClient.getAccessToken();
-        console.log(`Send message token: ${accessToken ? `${accessToken.substring(0, 10)}...` : 'No token available'}`);
+    setIsConnecting(true);
+    console.log('Connecting to WebSocket');
 
-        if (!accessToken) {
-          console.error('No authentication token available. Please log in again.');
-          setConversationHistory((prev) => [...prev, { content: 'Authentication failed. Please log in again.', sender: 'system', persistent: false, timestamp: new Date().toISOString() }]);
-          return;
-        }
+    const token = securityClient.getAccessToken();
+    console.log('Token for WebSocket connection:', token ? `${token.substring(0, 10)}...` : 'No token available');
 
-        const api = axios.create({
-          baseURL: API_BASE_URL,
-          headers: {
-            'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*',
-          },
-          withCredentials: true,
-        });
+    const wsUrl = token
+      ? `${WS_URL}?clientId=${clientId}&token=${token}`
+      : `${WS_URL}?clientId=${clientId}`;
+    console.log('WebSocket connection URL:', wsUrl.replace(token || '', token ? '(token)' : ''));
 
-        if (!activeMission) {
-          console.log(`[WebSocketContext] Creating new mission with token: ${accessToken.substring(0, 10)}...`);
-          await api.post('/createMission', {
-            goal: message,
-            clientId
-          }, {
-            headers: {
-              'Authorization': `Bearer ${accessToken}`
-            }
-          });
-          setActiveMission(true);
-          console.log('[WebSocketContext] New mission created successfully');
-        } else {
-          const headers = {
-            'Authorization': `Bearer ${accessToken}`
-          };
+    ws.current = new WebSocket(wsUrl);
 
-          if (pendingUserInput) {
-            console.log(`[WebSocketContext] Sending answer to pending user input from ${pendingUserInput.request_id}`);
-            await api.post('/sendMessage', {
-              type: "USER_INPUT_RESPONSE",
-              sender: 'user',
-              content: { missionId: activeMissionId, response: message, requestId: pendingUserInput.request_id },
-              recipient: 'agentset',
-              clientId
-            }, { headers });
-            if (setPendingUserInput) setPendingUserInput(null);
-          } else if (currentQuestion) {
-            console.log(`[WebSocketContext] Sending answer to question from ${currentQuestion.asker}`);
-            await api.post('/sendMessage', {
-              type: "answer",
-              sender: 'user',
-              content: { missionId: activeMissionId, answer: message, asker: currentQuestion.asker, questionGuid: currentQuestion.guid },
-              recipient: 'MissionControl',
-              clientId
-            }, { headers });
-            setCurrentQuestion(null);
-          } else {
-           console.log(`[WebSocketContext] Sending user message to active mission ${activeMissionId}`);
-           const messageId = `${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
-           await api.post('/sendMessage', {
-             type: "userMessage",
-             sender: 'user',
-             recipient: 'MissionControl',
-             content: { missionId: activeMissionId, message: message},
-             clientId,
-             id: messageId
-           }, { headers });
-           // User message already added to chat history above when Send was clicked
-         }
-        }
-      } catch (error) {
-        console.error('[WebSocketContext] Failed to send message:', error instanceof Error ? error.message : error);
-        setConversationHistory((prev) => [...prev, { content: 'Failed to send message. Please try again.', sender: 'system', persistent: false, timestamp: new Date().toISOString() }]);
-      }
-    },
-    handleControlAction: async (action: string) => {
-      if (!clientId) return;
+    ws.current.onopen = () => {
+      setIsConnecting(false);
+      console.log('WebSocket connection established with PostOffice');
+      reconnectAttempts.current = 0;
+      setIsConnected(true);
+      enqueueSnackbar('Connected to server', { variant: 'success' });
+      ws.current?.send(JSON.stringify({
+        type: 'CLIENT_CONNECT',
+        clientId: clientId
+      }));
 
-      let missionName = activeMissionName;
-      switch (action) {
-        case 'pause':
-          setIsPaused(true);
-          break;
-        case 'resume':
-          setIsPaused(false);
-          break;
-        case 'save':
-          if (!activeMissionName) {
-            missionName = prompt('Please enter a name for the mission:');
-            if (!missionName) return;
-            setActiveMissionName(missionName);
-          }
-          break;
-      }
-
-      try {
-        const accessToken = securityClient.getAccessToken();
-        console.log(`Control action token: ${accessToken ? `${accessToken.substring(0, 10)}...` : 'No token available'}`);
-
-        if (!accessToken) {
-          console.error('No authentication token available. Please log in again.');
-          setConversationHistory((prev) => [...prev, { content: 'Authentication failed. Please log in again.', sender: 'system', persistent: false }]);
-          return;
-        }
-
-        const api = axios.create({
-          baseURL: API_BASE_URL,
-          headers: {
-            'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*',
-          },
-          withCredentials: true,
-        });
-
-        console.log(`[WebSocketContext] Sending ${action} control action to MissionControl`);
-        await api.post('/sendMessage', {
-          clientId,
-          recipient: 'MissionControl',
+      const storedMissionId = localStorage.getItem('missionId');
+      if (storedMissionId) {
+        ws.current?.send(JSON.stringify({
+          type: 'RECONNECT_MISSION',
           content: {
-            type: action,
-            action: action,
-            missionId: activeMissionId,
-            missionName: missionName
-          },
-          timestamp: new Date().toISOString()
-        }, {
-          headers: {
-            'Authorization': `Bearer ${accessToken}`
+            missionId: storedMissionId
           }
-        });
+        }));
+      }
+    };
 
-        setConversationHistory((prev) => [...prev, { content: `Sent ${action} request to MissionControl.`, sender: 'system', persistent: false }]);
+    ws.current.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
 
-        if (action === 'abort') {
-          setActiveMission(false);
-          setActiveMissionName(null);
-          setActiveMissionId(null);
-          localStorage.removeItem('missionId');
+        if (data.type === 'CONNECTION_CONFIRMED') {
+          console.log('Connection confirmed by server');
+        } else {
+          handleWebSocketMessage(data);
         }
       } catch (error) {
-        console.error('[WebSocketContext] Failed to send control action:', error instanceof Error ? error.message : error);
-        setConversationHistory((prev) => [...prev, { content: `Failed to send ${action} request to MissionControl. Please try again.`, sender: 'system', persistent: false }]);
+        console.error('Error processing WebSocket message:', error);
+        console.log('Raw message data:', event.data);
       }
-    },
-    handleLoadMission: async (missionId: string) => {
-      try {
-        const accessToken = securityClient.getAccessToken();
-        console.log(`Load mission token: ${accessToken ? `${accessToken.substring(0, 10)}...` : 'No token available'}`);
+    };
 
-        if (!accessToken) {
-          console.error('No authentication token available. Please log in again.');
-          setConversationHistory((prev) => [...prev, { content: 'Authentication failed. Please log in again.', sender: 'system', persistent: false }]);
-          return;
-        }
+    ws.current.onerror = (error) => {
+      setIsConnecting(false);
+      console.error('WebSocket error:', error);
+      setIsConnected(false);
+      enqueueSnackbar('Connection error. Please try again.', { variant: 'error' });
+    };
 
-        const api = axios.create({
-          baseURL: API_BASE_URL,
-          headers: {
-            'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*',
-          },
-          withCredentials: true,
-        });
+    ws.current.onclose = (event) => {
+      setIsConnecting(false);
+      console.log('WebSocket connection closed with code:', event.code, 'reason:', event.reason);
+      setIsConnected(false);
 
-        console.log(`[WebSocketContext] Loading mission ${missionId}`);
-        await api.post('/loadMission', {
-          missionId,
+      if (event.code !== 1000 && event.code !== 1001) {
+        enqueueSnackbar('Disconnected from server. Attempting to reconnect...', { variant: 'warning' });
+        const reconnectDelay = Math.min(5000 * Math.pow(1.5, reconnectAttempts.current), 30000);
+        reconnectAttempts.current++;
+        console.log(`Scheduling reconnect in ${reconnectDelay}ms (attempt #${reconnectAttempts.current})`);
+        setTimeout(connectWebSocket, reconnectDelay);
+      } else {
+        console.log('Connection closed normally, not reconnecting');
+      }
+    };
+  }, [clientId, enqueueSnackbar, handleWebSocketMessage, isConnecting, securityClient]);
+
+  // Define sendMessage as useCallback
+  const sendMessage = useCallback(async (message: string) => {
+    if (!clientId) return;
+    if (!ws.current) {
+      connectWebSocket();
+    }
+
+    // Determine if this is a plain text user message (should be added to chat)
+    // or a structured tool invocation (should NOT be added to chat)
+    const isPlainTextMessage = !message.startsWith('{') && !message.startsWith('[');
+    
+    // Add plain text user messages to chat history immediately on Send
+    if (isPlainTextMessage) {
+      if (pendingUserInput) {
+        setConversationHistory((prev) => [...prev, { content: `Question: ${pendingUserInput.question}`, sender: 'system', persistent: true, timestamp: new Date().toISOString() }, { content: `Answer: ${message}`, sender: 'user', persistent: true, timestamp: new Date().toISOString() }]);
+      } else if (currentQuestion) {
+        setConversationHistory((prev) => [...prev, { content: `Answer: ${message}`, sender: 'user', persistent: true, timestamp: new Date().toISOString() }]);
+      } else {
+        setConversationHistory((prev) => [...prev, { content: message, sender: 'user', persistent: true, timestamp: new Date().toISOString() }]);
+      }
+    }
+
+    try {
+      const accessToken = securityClient.getAccessToken();
+      console.log(`Send message token: ${accessToken ? `${accessToken.substring(0, 10)}...` : 'No token available'}`);
+
+      if (!accessToken) {
+        console.error('No authentication token available. Please log in again.');
+        setConversationHistory((prev) => [...prev, { content: 'Authentication failed. Please log in again.', sender: 'system', persistent: false, timestamp: new Date().toISOString() }]);
+        return;
+      }
+
+      const api = axios.create({
+        baseURL: API_BASE_URL,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        },
+        withCredentials: true,
+      });
+
+      if (!activeMission) {
+        console.log(`[WebSocketContext] Creating new mission with token: ${accessToken.substring(0, 10)}...`);
+        await api.post('/createMission', {
+          goal: message,
           clientId
         }, {
           headers: {
             'Authorization': `Bearer ${accessToken}`
           }
         });
-        setConversationHistory((prev) => [...prev, { content: `Mission ${missionId} loaded.`, sender: 'system', persistent: false, timestamp: new Date().toISOString() }]);
-      } catch (error) {
-        console.error('[WebSocketContext] Failed to load mission:', error instanceof Error ? error.message : error);
-        setConversationHistory((prev) => [...prev, { content: 'Failed to load mission. Please try again.', sender: 'system', persistent: false, timestamp: new Date().toISOString() }]);
+        setActiveMission(true);
+        console.log('[WebSocketContext] New mission created successfully');
+      } else {
+        const headers = {
+          'Authorization': `Bearer ${accessToken}`
+        };
+
+        if (pendingUserInput) {
+          console.log(`[WebSocketContext] Sending answer to pending user input from ${pendingUserInput.request_id}`);
+          await api.post('/sendMessage', {
+            type: "USER_INPUT_RESPONSE",
+            sender: 'user',
+            content: { missionId: activeMissionId, response: message, requestId: pendingUserInput.request_id },
+            recipient: 'agentset',
+            clientId
+          }, { headers });
+          if (setPendingUserInput) setPendingUserInput(null);
+        } else if (currentQuestion) {
+          console.log(`[WebSocketContext] Sending answer to question from ${currentQuestion.asker}`);
+          await api.post('/sendMessage', {
+            type: "answer",
+            sender: 'user',
+            content: { missionId: activeMissionId, answer: message, asker: currentQuestion.asker, questionGuid: currentQuestion.guid },
+            recipient: 'MissionControl',
+            clientId
+          }, { headers });
+          setCurrentQuestion(null);
+        } else {
+         console.log(`[WebSocketContext] Sending user message to active mission ${activeMissionId}`);
+         const messageId = `${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
+         await api.post('/sendMessage', {
+           type: "userMessage",
+           sender: 'user',
+           recipient: 'MissionControl',
+           content: { missionId: activeMissionId, message: message},
+           clientId,
+           id: messageId
+         }, { headers });
+         // User message already added to chat history above when Send was clicked
+       }
       }
-    },
+    } catch (error) {
+      console.error('[WebSocketContext] Failed to send message:', error instanceof Error ? error.message : error);
+      setConversationHistory((prev) => [...prev, { content: 'Failed to send message. Please try again.', sender: 'system', persistent: false, timestamp: new Date().toISOString() }]);
+    }
+  }, [clientId, connectWebSocket, pendingUserInput, currentQuestion, activeMission, activeMissionId, securityClient]);
+
+  // Define handleControlAction as useCallback
+  const handleControlAction = useCallback(async (action: string) => {
+    if (!clientId) return;
+
+    let missionName = activeMissionName;
+    switch (action) {
+      case 'pause':
+        setIsPaused(true);
+        break;
+      case 'resume':
+        setIsPaused(false);
+        break;
+      case 'save':
+        if (!activeMissionName) {
+          missionName = prompt('Please enter a name for the mission:');
+          if (!missionName) return;
+          setActiveMissionName(missionName);
+        }
+        break;
+    }
+
+    try {
+      const accessToken = securityClient.getAccessToken();
+      console.log(`Control action token: ${accessToken ? `${accessToken.substring(0, 10)}...` : 'No token available'}`);
+
+      if (!accessToken) {
+        console.error('No authentication token available. Please log in again.');
+        setConversationHistory((prev) => [...prev, { content: 'Authentication failed. Please log in again.', sender: 'system', persistent: false }]);
+        return;
+      }
+
+      const api = axios.create({
+        baseURL: API_BASE_URL,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        },
+        withCredentials: true,
+      });
+
+      console.log(`[WebSocketContext] Sending ${action} control action to MissionControl`);
+      await api.post('/sendMessage', {
+        clientId,
+        recipient: 'MissionControl',
+        content: {
+          type: action,
+          action: action,
+          missionId: activeMissionId,
+          missionName: missionName
+        },
+        timestamp: new Date().toISOString()
+      }, {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`
+        }
+      });
+
+      setConversationHistory((prev) => [...prev, { content: `Sent ${action} request to MissionControl.`, sender: 'system', persistent: false }]);
+
+      if (action === 'abort') {
+        setActiveMission(false);
+        setActiveMissionName(null);
+        setActiveMissionId(null);
+        localStorage.removeItem('missionId');
+      }
+    } catch (error) {
+      console.error('[WebSocketContext] Failed to send control action:', error instanceof Error ? error.message : error);
+      setConversationHistory((prev) => [...prev, { content: `Failed to send ${action} request to MissionControl. Please try again.`, sender: 'system', persistent: false }]);
+    }
+  }, [clientId, activeMissionName, activeMissionId, securityClient]);
+
+  // Define handleLoadMission as useCallback
+  const handleLoadMission = useCallback(async (missionId: string) => {
+    try {
+      const accessToken = securityClient.getAccessToken();
+      console.log(`Load mission token: ${accessToken ? `${accessToken.substring(0, 10)}...` : 'No token available'}`);
+
+      if (!accessToken) {
+        console.error('No authentication token available. Please log in again.');
+        setConversationHistory((prev) => [...prev, { content: 'Authentication failed. Please log in again.', sender: 'system', persistent: false }]);
+        return;
+      }
+
+      const api = axios.create({
+        baseURL: API_BASE_URL,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+        },
+        withCredentials: true,
+      });
+
+      console.log(`[WebSocketContext] Loading mission ${missionId}`);
+      await api.post('/loadMission', {
+        missionId,
+        clientId
+      }, {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`
+        }
+      });
+      setConversationHistory((prev) => [...prev, { content: `Mission ${missionId} loaded.`, sender: 'system', persistent: false, timestamp: new Date().toISOString() }]);
+    } catch (error) {
+      console.error('[WebSocketContext] Failed to load mission:', error instanceof Error ? error.message : error);
+      setConversationHistory((prev) => [...prev, { content: 'Failed to load mission. Please try again.', sender: 'system', persistent: false, timestamp: new Date().toISOString() }]);
+    }
+  }, [clientId, securityClient]);
+
+  // Define listMissions as useCallback
+  const listMissions = useCallback(async () => {
+    if (!ws.current) {
+      connectWebSocket();
+    }
+    ws.current?.send(JSON.stringify({
+      type: 'LIST_MISSIONS',
+      sender: 'user',
+      recipient: 'MissionControl',
+      clientId
+    }));
+  }, [clientId, connectWebSocket]);
+
   // Helper functions for per-assistant conversation management
   const switchAssistant = useCallback((assistantId: string) => {
     console.log(`[WebSocketContext] Switching to assistant: ${assistantId}`);
@@ -753,93 +849,6 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     agentStatistics,
     agentDetails
   }), [workProducts, sharedFiles, statistics, agentStatistics, agentDetails]);
-
-  // Connection logic
-  const connectWebSocket = useCallback(() => {
-    if (isConnecting) {
-      console.log('Already attempting to connect, ignoring duplicate request');
-      return;
-    }
-
-    if (ws.current && (ws.current.readyState === WebSocket.CONNECTING ||
-                       ws.current.readyState === WebSocket.OPEN)) {
-      console.log('WebSocket already connecting or connected');
-      return;
-    }
-
-    setIsConnecting(true);
-    console.log('Connecting to WebSocket');
-
-    const token = securityClient.getAccessToken();
-    console.log('Token for WebSocket connection:', token ? `${token.substring(0, 10)}...` : 'No token available');
-
-    const wsUrl = token
-      ? `${WS_URL}?clientId=${clientId}&token=${token}`
-      : `${WS_URL}?clientId=${clientId}`;
-    console.log('WebSocket connection URL:', wsUrl.replace(token || '', token ? '(token)' : ''));
-
-    ws.current = new WebSocket(wsUrl);
-
-    ws.current.onopen = () => {
-      setIsConnecting(false);
-      console.log('WebSocket connection established with PostOffice');
-      reconnectAttempts.current = 0;
-      setIsConnected(true);
-      enqueueSnackbar('Connected to server', { variant: 'success' });
-      ws.current?.send(JSON.stringify({
-        type: 'CLIENT_CONNECT',
-        clientId: clientId
-      }));
-
-      const storedMissionId = localStorage.getItem('missionId');
-      if (storedMissionId) {
-        ws.current?.send(JSON.stringify({
-          type: 'RECONNECT_MISSION',
-          content: {
-            missionId: storedMissionId
-          }
-        }));
-      }
-    };
-
-    ws.current.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-
-        if (data.type === 'CONNECTION_CONFIRMED') {
-          console.log('Connection confirmed by server');
-        } else {
-          handleWebSocketMessage(data);
-        }
-      } catch (error) {
-        console.error('Error processing WebSocket message:', error);
-        console.log('Raw message data:', event.data);
-      }
-    };
-
-    ws.current.onerror = (error) => {
-      setIsConnecting(false);
-      console.error('WebSocket error:', error);
-      setIsConnected(false);
-      enqueueSnackbar('Connection error. Please try again.', { variant: 'error' });
-    };
-
-    ws.current.onclose = (event) => {
-      setIsConnecting(false);
-      console.log('WebSocket connection closed with code:', event.code, 'reason:', event.reason);
-      setIsConnected(false);
-
-      if (event.code !== 1000 && event.code !== 1001) {
-        enqueueSnackbar('Disconnected from server. Attempting to reconnect...', { variant: 'warning' });
-        const reconnectDelay = Math.min(5000 * Math.pow(1.5, reconnectAttempts.current), 30000);
-        reconnectAttempts.current++;
-        console.log(`Scheduling reconnect in ${reconnectDelay}ms (attempt #${reconnectAttempts.current})`);
-        setTimeout(connectWebSocket, reconnectDelay);
-      } else {
-        console.log('Connection closed normally, not reconnecting');
-      }
-    };
-  }, [clientId, enqueueSnackbar, handleWebSocketMessage]);
 
   useEffect(() => {
     connectWebSocket();

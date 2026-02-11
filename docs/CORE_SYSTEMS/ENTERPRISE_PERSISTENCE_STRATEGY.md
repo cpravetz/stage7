@@ -89,7 +89,7 @@ All SDK entry points that write or read state must include:
 - Support collection partitioning with indexed `userId`, `conversationId`, `agentClass`, `instanceId`.
 - Implement **query guardrails** to prevent cross-user state leakage.
 
-### MissionControl / TrafficManager
+### MissionControl
 - Route user messages by conversation + instance.
 - Provide clean lifecycle operations (pause/resume/abort) per instance.
 

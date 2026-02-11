@@ -38,7 +38,7 @@ docker compose build --no-cache
 Stage7 now uses Docker Compose Profiles to manage different deployment scenarios from a single `docker-compose.yaml` file.
 
 *   **Infrastructure Services:** (MongoDB, Redis, RabbitMQ, Consul, SearXNG, ChromaDB) do not have a profile and are always started by `docker compose up`.
-*   **Core System Services:** (PostOffice, MissionControl, Brain, AgentSet, Engineer, CapabilitiesManager, Librarian, SecurityManager, TrafficManager, Frontend) are part of the `core` profile.
+*   **Core System Services:** (PostOffice, MissionControl, Brain, AgentSet, Engineer, CapabilitiesManager, Librarian, SecurityManager, Frontend) are part of the `core` profile.
 *   **Assistant Services:** All `*-assistant-api` services are part of the `assistants` profile, and each also has its own specific profile (e.g., `sales-assistant`).
 
 #### Common Launch Commands:
