@@ -50,7 +50,6 @@ The `CollaborationManager` class, instantiated within the `AgentSet`, implements
 - Delegates message routing to the `postOffice` service, ensuring messages reach the correct agent or agent set.
 - Uses the `AgentSet` for agent lookup and management, rather than maintaining its own agent map.
 - Leverages the `librarian` service for shared memory and knowledge storage, instead of managing shared memory internally.
-- Delegates agent location and network routing to the `trafficManager` service.
 - Manages task delegation and conflict resolution by delegating to the respective systems.
 - Periodically checks for expired tasks and conflicts.
 
@@ -147,7 +146,7 @@ Handles conflicts that arise during collaboration.
 
 ### Security and Authentication
 
-Similar to `TaskDelegation`, the `ConflictResolution` system utilizes a `ServiceTokenManager` to make secure, authenticated requests when communicating with other services, such as the `Brain` for negotiation or the `TrafficManager` for escalations.
+Similar to `TaskDelegation`, the `ConflictResolution` system utilizes a `ServiceTokenManager` to make secure, authenticated requests when communicating with other services, such as the `Brain` for negotiation.
 
 ### Conflict Lifecycle
 

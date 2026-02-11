@@ -14,6 +14,7 @@ import { ServiceDiscoveryManager } from './serviceDiscoveryManager';
 import { WebSocketHandler } from './webSocketHandler';
 import { FileUploadManager } from './fileUploadManager';
 import { PluginManager } from './pluginManager';
+import pino from 'pino';
 
 /**
  * Normalizes an ID to always be a string.
@@ -29,6 +30,7 @@ function normalizeId(Id: string | string[]): string {
 }
 
 export class PostOffice extends BaseEntity {
+    private logger: pino.Logger;
     private app: express.Express;
     private server: http.Server;
     private components: Map<string, Component> = new Map();
@@ -54,17 +56,30 @@ export class PostOffice extends BaseEntity {
     private librarianUrl: string = '';
 
     constructor() {
-        // Call the BaseEntity constructor with required parameters
-        const id = uuidv4();
-        const componentType = 'PostOffice';
-        const urlBase = process.env.POSTOFFICE_URL || 'postoffice';
-        const port = process.env.PORT || '5020';
-        // Skip PostOffice registration since this is the PostOffice itself
-        super(id, componentType, urlBase, port, true);
+        super('PostOffice', 'PostOffice', 'postoffice', process.env.PORT || '5020');
+        // Initialize logger first
+        this.logger = pino({
+            name: 'PostOffice',
+            level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
+            transport: process.env.NODE_ENV === 'production' ? undefined : {
+                target: 'pino-pretty',
+                options: {
+                    colorize: true,
+                    translateTime: 'SYS:HH:MM:ss',
+                    ignore: 'pid,hostname',
+                }
+            }
+        });
+
         this.app = express();
         // Very early logging middleware to catch all requests
         this.app.use((req: Request, res: Response, next: NextFunction) => {
-            console.log(`[PostOffice - ALL] Incoming Request: ${req.method} ${req.originalUrl}`);
+            this.logger.info({
+                msg: `Incoming Request: ${req.method} ${req.originalUrl}`,
+                method: req.method,
+                url: req.originalUrl,
+                component: 'PostOffice'
+            });
             next();
         });
         this.server = http.createServer(this.app);
@@ -164,7 +179,7 @@ export class PostOffice extends BaseEntity {
         });
 
         this.app.post('/registerComponent', (req: Request, res: Response) => {
-            console.log('Received registration request:', req.body);
+            this.logger.info({ msg: 'Received registration request', body: req.body });
             this.registerComponent(req, res);
         });
 
@@ -284,7 +299,7 @@ export class PostOffice extends BaseEntity {
 
         const serverPort = parseInt(this.port, 10);
         this.server.listen(serverPort, '0.0.0.0', () => {
-            console.log(`PostOffice listening on all interfaces at port ${serverPort}`);
+            this.logger.info(`PostOffice listening on all interfaces at port ${serverPort}`);
         });
         // Initialize the MessageRouter with serviceDiscoveryManager and webSocketHandler
         this.messageRouter = new MessageRouter(
@@ -308,7 +323,7 @@ export class PostOffice extends BaseEntity {
 
         const librarianUrl = await this.serviceDiscoveryManager.discoverService('Librarian');
         if (!librarianUrl) {
-            // Throw an error or handle the case where the service is not found
+            this.logger.error('Librarian service not found.');
             throw new Error('Librarian service not found.');
         }
 
@@ -325,7 +340,7 @@ export class PostOffice extends BaseEntity {
         }
         catch (error) {
             analyzeError(error as Error);
-            console.error('Error retrieving work product:', error instanceof Error ? error.message : error, 'id:',req.params.id);
+            this.logger.error({ msg: 'Error retrieving work product', error: error instanceof Error ? error.message : error, id: req.params.id, stack: (error instanceof Error ? error.stack : 'N/A') });
             res.status(500).send({ error: `Failed to retrieve work product id:${req.params.id}`});
         }
     }
@@ -345,27 +360,27 @@ export class PostOffice extends BaseEntity {
                 clientId = clientId.substring(8);
             }
 
-            console.log(`WebSocket connection attempt - ClientID: ${clientId}, Token: ${token}`);
+            this.logger.info({ msg: `WebSocket connection attempt`, clientId, token: token ? '[REDACTED]' : 'N/A' });
 
             if (!clientId) {
-                console.log('Client ID missing');
+                this.logger.warn({ msg: 'Client ID missing from WebSocket connection attempt' });
                 ws.close(1008, 'Client ID missing');
                 return;
             }
 
             const isValid = true; //await this.validateClientConnection(clientId, token);
             if (!isValid) {
-                console.log(`Invalid token for client ${clientId}`);
+                this.logger.warn({ msg: `Invalid token for client`, clientId });
                 ws.close(1008, 'Invalid token');
                 return;
             }
             this.clients.set(clientId, ws);
-            console.log(`Client ${clientId} connected successfully`);
+            this.logger.info({ msg: `Client connected successfully`, clientId });
 
             // Check if this client has an associated mission
             const missionId = this.clientMissions.get(clientId);
             if (missionId) {
-                console.log(`Client ${clientId} is associated with mission ${missionId}`);
+                this.logger.info({ msg: `Client is associated with mission`, clientId, missionId });
 
                 // Make sure the mission is in the missionClients map
                 if (!this.missionClients.has(missionId)) {
@@ -374,29 +389,29 @@ export class PostOffice extends BaseEntity {
 
                 // Add the client to the mission's client set
                 this.missionClients.get(missionId)!.add(clientId);
-                console.log(`Added client ${clientId} to mission ${missionId} clients`);
+                this.logger.info({ msg: `Added client to mission clients`, clientId, missionId });
             } else {
-                console.log(`Client ${clientId} is not associated with any mission yet`);
+                this.logger.info({ msg: `Client is not associated with any mission yet`, clientId });
             }
 
             // Send any queued messages to the client
             if (this.clientMessageQueue.has(clientId)) {
                 const queuedMessages = this.clientMessageQueue.get(clientId)!;
-                console.log(`Sending ${queuedMessages.length} queued messages to client ${clientId}`);
+                this.logger.info({ msg: `Sending queued messages to client`, count: queuedMessages.length, clientId });
 
                 while (queuedMessages.length > 0) {
                     const message = queuedMessages.shift()!;
                     try {
                         ws.send(JSON.stringify(message));
-                        console.log(`Sent queued message of type ${message.type} to client ${clientId}`);
+                        this.logger.debug({ msg: `Sent queued message`, type: message.type, clientId });
                     } catch (error) {
-                        console.error(`Error sending queued message to client ${clientId}:`, error instanceof Error ? error.message : error);
+                        this.logger.error({ msg: `Error sending queued message to client`, clientId, error: error instanceof Error ? error.message : error, stack: (error instanceof Error ? error.stack : 'N/A') });
                         // Put the message back in the queue
                         this.clientMessageQueue.get(clientId)!.unshift(message);
                         break;
                     }
                 }
-                console.log(`All queued messages sent to client ${clientId}`);
+                this.logger.info({ msg: `All queued messages sent to client`, clientId });
             }
 
             ws.on('message', (message: string) => {
@@ -404,39 +419,56 @@ export class PostOffice extends BaseEntity {
                     const parsedMessage = JSON.parse(message.toString());
                     console.log(`Received WebSocket message from client ${clientId}:`, parsedMessage);
 
-                    if (parsedMessage.type === MessageType.CLIENT_CONNECT) {
-                        console.log(`Client ${parsedMessage.clientId} confirmed connection`);
+                                if (parsedMessage.type === MessageType.CLIENT_CONNECT) {
 
-                        // Associate this client with any missions it might have
-                        if (this.clientMissions.has(clientId)) {
-                            const missionId = this.clientMissions.get(clientId)!;
-                            console.log(`Associating client ${clientId} with mission ${missionId}`);
+                                    this.logger.info({ msg: `Client confirmed connection`, clientId: parsedMessage.clientId });
 
-                            // Make sure the mission is in the missionClients map
-                            if (!this.missionClients.has(missionId)) {
-                                this.missionClients.set(missionId, new Set());
-                            }
+                    
 
-                            // Add the client to the mission's client set
-                            this.missionClients.get(missionId)!.add(clientId);
-                        }
-                    } else {
+                                    // Associate this client with any missions it might have
+
+                                    if (this.clientMissions.has(clientId)) {
+
+                                        const missionId = this.clientMissions.get(clientId)!;
+
+                                        this.logger.info({ msg: `Associating client with mission`, clientId, missionId });
+
+                    
+
+                                        // Make sure the mission is in the missionClients map
+
+                                        if (!this.missionClients.has(missionId)) {
+
+                                            this.missionClients.set(missionId, new Set());
+
+                                        }
+
+                    
+
+                                        // Add the client to the mission's client set
+
+                                        this.missionClients.get(missionId)!.add(clientId);
+
+                                    }
+
+                                } else {
+
+                    
                         this.handleWebSocketMessage(parsedMessage, token || '');
                     }
                 } catch (error) {
-                    console.error('Error parsing WebSocket message:', error instanceof Error ? error.message : error);
-                    console.log('Raw message:', message);
+                    this.logger.error({ msg: 'Error parsing WebSocket message', error: error instanceof Error ? error.message : error, rawMessage: message });
                 }
             });
 
             ws.on('close', async () => {
-                console.log(`Client ${clientId} disconnected`);
+                this.logger.info({ msg: `Client disconnected`, clientId });
                 this.clients.delete(clientId);
 
                 // Check if this client had an active mission
                 const missionId = this.clientMissions.get(clientId);
                 if (missionId) {
-                    console.log(`Client ${clientId} disconnected with active mission ${missionId}. Pausing mission...`);
+                    this.logger.info({ msg: `Client disconnected with active mission. Pausing mission...`, clientId, missionId });
 
                     try {
                         // Send pause message to MissionControl
@@ -454,13 +486,13 @@ export class PostOffice extends BaseEntity {
                                 },
                                 timestamp: new Date().toISOString()
                             });
-                            console.log(`Successfully paused mission ${missionId} due to client ${clientId} disconnection`);
+                            this.logger.info({ msg: `Successfully paused mission due to client disconnection`, missionId, clientId });
                         } else {
-                            console.error(`Could not pause mission ${missionId}: MissionControl not found`);
+                            this.logger.error({ msg: `Could not pause mission: MissionControl not found`, missionId });
                         }
                     } catch (error) {
                         analyzeError(error as Error);
-                        console.error(`Failed to pause mission ${missionId}:`, error instanceof Error ? error.message : error);
+                        this.logger.error({ msg: `Failed to pause mission`, missionId, error: error instanceof Error ? error.message : error, stack: (error instanceof Error ? error.stack : 'N/A') });
                     }
                 }
             });
@@ -478,16 +510,16 @@ export class PostOffice extends BaseEntity {
     // These methods are now handled by the MessageRouter and WebSocketHandler
 
     private async createMission(req: express.Request, res: express.Response) {
-        console.log('[PostOffice] Entering createMission method.'); // ADD THIS VERY EARLY LOG
+        this.logger.info({ msg: 'Entering createMission method.', body: req.body });
         const { goal, clientId, isAssistant, userId, agentClass, instanceId, missionContext } = req.body;
         const token = req.headers.authorization;
 
         if (isAssistant) {
             this.assistantClients.add(clientId);
-            console.log(`[PostOffice] Client ${clientId} marked as an assistant client.`);
+            this.logger.info({ msg: `Client marked as an assistant client.`, clientId });
         }
 
-        console.log(`PostOffice has request to createMission for goal`, goal);
+        this.logger.info({ msg: `Request to createMission for goal`, goal });
 
         // Add a mock user object to the request
         (req as any).user = {
@@ -498,11 +530,12 @@ export class PostOffice extends BaseEntity {
         try {
             let missionControlUrl = this.getComponentUrl('MissionControl') || process.env.MISSIONCONTROL_URL;
             if (!missionControlUrl) {
+                this.logger.error({ msg: 'MissionControl URL not found. Failed to create mission.' });
                 res.status(404).send('Failed to create mission');
                 return;
             }
 
-            console.log(`Using MissionControl URL: ${missionControlUrl}`);
+            this.logger.info({ msg: `Using MissionControl URL`, missionControlUrl });
 
             // Pass the authorization header
             const headers = {
@@ -530,40 +563,40 @@ export class PostOffice extends BaseEntity {
                 timestamp: new Date().toISOString()
             }, { headers });
 
-            console.log('[PostOffice] Response from MissionControl:', JSON.stringify(response.data, null, 2)); // ADD THIS LOG
+            this.logger.info({ msg: 'Response from MissionControl', data: response.data });
 
             // Store the mission ID for this client
             if (response.data && response.data.result && response.data.result.missionId) {
                 const missionId = response.data.result.missionId;
                 this.clientMissions.set(clientId, missionId);
-                console.log(`Associated client ${clientId} with mission ${missionId}`);
+                this.logger.info({ msg: `Associated client with mission`, clientId, missionId });
 
                 // Also store the client ID for this mission
                 if (!this.missionClients.has(missionId)) {
                     this.missionClients.set(missionId, new Set());
                 }
                 this.missionClients.get(missionId)!.add(clientId);
-                console.log(`Added client ${clientId} to mission ${missionId} clients`);
+                this.logger.info({ msg: `Added client to mission clients`, clientId, missionId });
             }
 
             // Store the mission ID for this client if it's in the response
             if (response.data && response.data.missionId) {
                 const missionId = response.data.missionId;
                 this.clientMissions.set(clientId, missionId);
-                console.log(`Associated client ${clientId} with mission ${missionId}`);
+                this.logger.info({ msg: `Associated client with mission`, clientId, missionId });
 
                 // Also store the client ID for this mission
                 if (!this.missionClients.has(missionId)) {
                     this.missionClients.set(missionId, new Set());
                 }
                 this.missionClients.get(missionId)!.add(clientId);
-                console.log(`Added client ${clientId} to mission ${missionId} clients list`);
+                this.logger.info({ msg: `Added client to mission clients list`, clientId, missionId });
             }
 
             res.status(200).send(response.data);
         } catch (error) {
             analyzeError(error as Error);
-            console.error('Error creating mission:', error instanceof Error ? error.message : error);
+            this.logger.error({ msg: 'Error creating mission', error: error instanceof Error ? error.message : error, stack: (error instanceof Error ? error.stack : 'N/A') });
             res.status(504).json({ error: `Could not create mission, error: ${error instanceof Error ? error.message : 'Unknown' }`});
         }
     }
@@ -575,6 +608,7 @@ export class PostOffice extends BaseEntity {
         try {
             const missionControlUrl = this.getComponentUrl('MissionControl');
             if (!missionControlUrl) {
+                this.logger.error({ msg: 'MissionControl URL not found. Failed to load mission.' });
                 res.status(500).send({ error: 'Failed to load mission' });
                 return;
             }
@@ -591,18 +625,18 @@ export class PostOffice extends BaseEntity {
 
             // Store the mission ID for this client
             this.clientMissions.set(clientId, missionId);
-            console.log(`Associated client ${clientId} with loaded mission ${missionId}`);
+            this.logger.info({ msg: `Associated client with loaded mission`, clientId, missionId });
 
             // Also store the client ID for this mission
             if (!this.missionClients.has(missionId)) {
                 this.missionClients.set(missionId, new Set());
             }
             this.missionClients.get(missionId)!.add(clientId);
-            console.log(`Added client ${clientId} to mission ${missionId} clients list`);
+            this.logger.info({ msg: `Added client to mission clients list`, clientId, missionId });
 
             res.status(200).send(response.data);
         } catch (error) { analyzeError(error as Error);
-            console.error('Error loading mission:', error instanceof Error ? error.message : error);
+            this.logger.error({ msg: 'Error loading mission', error: error instanceof Error ? error.message : error, stack: (error instanceof Error ? error.stack : 'N/A') });
             res.status(500).send({ error: 'Failed to load mission' });
         }
     }
@@ -612,15 +646,17 @@ export class PostOffice extends BaseEntity {
             const { id, type, url } = req.body;
 
             if (!id || !type || !url) {
+                this.logger.error({ msg: 'Missing required fields for component registration', body: req.body });
                 res.status(400).send({ error: 'Missing required fields: id, type, url' });
                 return;
             }
 
             await this.serviceDiscoveryManager.registerComponent(id, type, url);
+            this.logger.info({ msg: 'Component registered successfully', id, type, url });
             res.status(200).send({ status: 'Component registered successfully' });
         } catch (error) {
             analyzeError(error as Error);
-            console.error('Error registering component:', error instanceof Error ? error.message : error);
+            this.logger.error({ msg: 'Error registering component', error: error instanceof Error ? error.message : error, stack: (error instanceof Error ? error.stack : 'N/A') });
             res.status(500).send({ error: 'Failed to register component' });
         }
     }
@@ -657,13 +693,15 @@ export class PostOffice extends BaseEntity {
         try {
             const recipientUrl = await this.discoverService(message.recipient || '');
             if (!recipientUrl) {
+                this.logger.error({ msg: 'Recipient not found for incoming message', recipient: message.recipient });
                 res.status(404).send({ error: `Recipient not found for ${JSON.stringify(message.recipient)}` });
                 return;
             }
             await this.sendToComponent(`${recipientUrl}/message`, message, token);
+            this.logger.info({ msg: 'Incoming message sent to component', recipient: message.recipient, type: message.type });
             res.status(200).send({ status: 'Message sent' });
         } catch (error) { analyzeError(error as Error);
-            console.error('Error sending message:', error instanceof Error ? error.message : error);
+            this.logger.error({ msg: 'Error sending incoming message', error: error instanceof Error ? error.message : error, stack: (error instanceof Error ? error.stack : 'N/A') });
             res.status(500).send({ error: 'Failed to send message' });
         }
     }
@@ -680,31 +718,30 @@ export class PostOffice extends BaseEntity {
                 parsedMessage = JSON.parse(message);
             }
 
-            console.log('WebSocket message received:', parsedMessage);
+            this.logger.debug({ msg: 'WebSocket message received', message: parsedMessage });
 
             if (parsedMessage.type === MessageType.LIST_MISSIONS) {
                 const missionControlUrl = await this.serviceDiscoveryManager.discoverService('MissionControl');
                 if (missionControlUrl) {
                     await this.sendToComponent(missionControlUrl, parsedMessage, token);
                 } else {
-                    console.error(`(ws)Recipient not found for ${JSON.stringify(parsedMessage)}`);
+                    this.logger.error({ msg: `Recipient not found for WebSocket message`, message: parsedMessage });
                 }
                 return;
             }
 
-                    console.log('Looking for client:', parsedMessage.recipient);
+                    this.logger.debug({ msg: 'Looking for client', recipient: parsedMessage.recipient });
                     if (!parsedMessage.recipient) {
-                        console.log('Message received without recipient, not routing.');
+                        this.logger.warn({ msg: 'Message received without recipient, not routing.', message: parsedMessage });
                         return;
                     }
                     const recipientUrl = await this.serviceDiscoveryManager.discoverService(parsedMessage.recipient || '');            if (!recipientUrl) {
-                console.error(`(ws)Recipient not found for ${JSON.stringify(parsedMessage)}`);
+                this.logger.error({ msg: `Recipient not found for WebSocket message`, message: parsedMessage });
                 return;
             }
             await this.sendToComponent(recipientUrl, parsedMessage, token);
         } catch (error) { analyzeError(error as Error);
-            console.error('Error handling WebSocket message:', error instanceof Error ? error.message : error);
-            console.error('Raw message:', message);
+            this.logger.error({ msg: 'Error handling WebSocket message', error: error instanceof Error ? error.message : error, rawMessage: message });
         }
     }
 
@@ -724,7 +761,7 @@ export class PostOffice extends BaseEntity {
             });
         } catch (error) {
             analyzeError(error as Error);
-            console.error(`Failed to send message to ${url}:`, error instanceof Error ? error.message : error);
+            this.logger.error({ msg: `Failed to send message to component`, url, error: error instanceof Error ? error.message : error, stack: (error instanceof Error ? error.stack : 'N/A') });
         }
     }
     private getServices(_req: express.Request, res: express.Response) {
@@ -804,7 +841,7 @@ export class PostOffice extends BaseEntity {
                     // Return the file ID as the response
                     finalResponse = uploadedFile.id;
                 } catch (uploadError) {
-                    console.error('Error uploading file for user input:', uploadError);
+                    this.logger.error({ msg: 'Error uploading file for user input', uploadError });
                     return res.status(500).send({ error: 'Failed to upload file' });
                 }
             }
@@ -823,7 +860,7 @@ export class PostOffice extends BaseEntity {
 
             res.status(200).send({ message: 'User input received' });
         } catch (error) {
-            console.error('Error in submitUserInput:', error);
+            this.logger.error({ msg: 'Error in submitUserInput', error: error instanceof Error ? error.message : error, stack: (error instanceof Error ? error.stack : 'N/A') });
             res.status(500).send({ error: 'Internal server error' });
         }
     }
@@ -838,11 +875,11 @@ export class PostOffice extends BaseEntity {
                     const decoded = jwt.verify(token, process.env.JWT_SECRET || '');
                     userId = (decoded as any).userId || 'system';
                 } catch (error) {
-                    console.error('Error verifying token:', error);
+                    this.logger.error({ msg: 'Error verifying token', error: error instanceof Error ? error.message : error, stack: (error instanceof Error ? error.stack : 'N/A') });
                 }
             }
 
-            console.log(`Using userId: ${userId} for getSavedMissions`);
+            this.logger.info({ msg: `Using userId for getSavedMissions`, userId });
 
             const librarianUrl = await this.getLibrarianUrl();
             const response = await this.authenticatedApi.get(`${librarianUrl}/getSavedMissions`, {
@@ -851,7 +888,7 @@ export class PostOffice extends BaseEntity {
             res.status(200).send(response.data);
         } catch (error) {
             analyzeError(error as Error);
-            console.error('Error getting saved missions:', error instanceof Error ? error.message : error);
+            this.logger.error({ msg: 'Error getting saved missions', error: error instanceof Error ? error.message : error, stack: (error instanceof Error ? error.stack : 'N/A') });
             res.status(500).send({ error: 'Failed to get saved missions' });
         }
     }
@@ -867,11 +904,11 @@ export class PostOffice extends BaseEntity {
                     query: { _id: 'model-performance-data' }
                 });
 
-                console.log('Full Librarian response:', JSON.stringify(response.data));
-                console.log('Raw Librarian response for performance:', JSON.stringify(response.data.data));
+                this.logger.debug({ msg: 'Full Librarian response', data: response.data });
+                this.logger.debug({ msg: 'Raw Librarian response for performance', data: response.data.data });
 
                 if (!response.data || !response.data.data || response.data.data.length === 0) {
-                    console.log('No model performance data found');
+                    this.logger.info('No model performance data found');
                     return res.status(200).json({
                         success: true,
                         performanceData: []
@@ -880,18 +917,18 @@ export class PostOffice extends BaseEntity {
 
                 // Extract the document from the response
                 const performanceDoc = response.data.data[0];
-                console.log('Performance document:', JSON.stringify(performanceDoc));
-                console.log('Performance data type:', typeof performanceDoc.performanceData);
-                console.log('Is performance data an array?', Array.isArray(performanceDoc.performanceData));
+                this.logger.debug({ msg: 'Performance document', performanceDoc });
+                this.logger.debug({ msg: 'Performance data type', type: typeof performanceDoc.performanceData });
+                this.logger.debug({ msg: 'Is performance data an array?', isArray: Array.isArray(performanceDoc.performanceData) });
 
                 if (performanceDoc.performanceData) {
-                    console.log('Performance data length:', performanceDoc.performanceData.length);
-                    console.log('First item in performance data:', JSON.stringify(performanceDoc.performanceData[0]));
+                    this.logger.debug({ msg: 'Performance data length', length: performanceDoc.performanceData.length });
+                    this.logger.debug({ msg: 'First item in performance data', item: performanceDoc.performanceData[0] });
                 }
 
                 // Check if performanceData exists and is an array
                 if (!performanceDoc.performanceData || !Array.isArray(performanceDoc.performanceData)) {
-                    console.log('Performance data is missing or not an array:', performanceDoc.performanceData);
+                    this.logger.warn({ msg: 'Performance data is missing or not an array', data: performanceDoc.performanceData });
                     // Return an empty array if performanceData is missing or not an array
                     return res.status(200).json({
                         success: true,
@@ -907,19 +944,19 @@ export class PostOffice extends BaseEntity {
                     performanceData: performanceDoc.performanceData
                 });
             } catch (error) {
-                console.error('Error querying model performance data:', error instanceof Error ? error.message : error);
+                this.logger.error({ msg: 'Error querying model performance data', error: error instanceof Error ? error.message : error, stack: (error instanceof Error ? error.stack : 'N/A') });
                 return res.status(500).json({ error: 'Failed to query model performance data' });
             }
         } catch (error) {
             analyzeError(error as Error);
-            console.error('Error getting model performance data:', error instanceof Error ? error.message : error);
+            this.logger.error({ msg: 'Error getting model performance data', error: error instanceof Error ? error.message : error, stack: (error instanceof Error ? error.stack : 'N/A') });
             return res.status(500).json({ error: 'Failed to get model performance data' });
         }
     }
 
     private async getModelRankings(req: express.Request, res: express.Response) {
         try {
-            console.log('Received request for model rankings');
+            this.logger.info({ msg: 'Received request for model rankings', query: req.query });
             // Get query parameters
             const conversationType = req.query.conversationType as LLMConversationType || LLMConversationType.TextToText;
             const metric = req.query.metric as string || 'overall';
@@ -933,7 +970,7 @@ export class PostOffice extends BaseEntity {
                 });
 
                 if (!response.data || !response.data.data || response.data.data.length === 0) {
-                    console.log('No model rankings data found, returning empty rankings');
+                    this.logger.info('No model rankings data found, returning empty rankings');
                     return res.status(200).json({
                         success: true,
                         rankings: []
@@ -954,7 +991,7 @@ export class PostOffice extends BaseEntity {
 
                 // Check if the requested conversation type and metric exist
                 if (!rankings[conversationType] || !rankings[conversationType][metric]) {
-                    console.log(`No rankings found for conversationType=${conversationType}, metric=${metric}`);
+                    this.logger.warn({ msg: `No rankings found for conversationType and metric`, conversationType, metric });
                     return res.status(200).json({
                         success: true,
                         rankings: []
@@ -964,14 +1001,14 @@ export class PostOffice extends BaseEntity {
                 // Check if the rankings array is valid
                 const rankingsArray = rankings[conversationType][metric];
                 if (!Array.isArray(rankingsArray)) {
-                    console.log(`Rankings for conversationType=${conversationType}, metric=${metric} is not an array:`, rankingsArray);
+                    this.logger.warn({ msg: `Rankings for conversationType and metric is not an array`, conversationType, metric, rankings: rankingsArray });
                     return res.status(200).json({
                         success: true,
                         rankings: []
                     });
                 }
 
-                console.log(`Retrieved ${rankingsArray.length} model rankings from Librarian`);
+                this.logger.info({ msg: `Retrieved model rankings from Librarian`, count: rankingsArray.length });
 
                 res.setHeader('Content-Type', 'application/json');
 
@@ -980,29 +1017,30 @@ export class PostOffice extends BaseEntity {
                     rankings: rankingsArray
                 });
             } catch (error) {
-                console.error('Error querying model rankings data:', error instanceof Error ? error.message : error);
+                this.logger.error({ msg: 'Error querying model rankings data', error: error instanceof Error ? error.message : error, stack: (error instanceof Error ? error.stack : 'N/A') });
                 return res.status(500).json({ error: 'Failed to query model rankings data' });
             }
         } catch (error) {
             analyzeError(error as Error);
-            console.error('Error getting model rankings:', error instanceof Error ? error.message : error);
+            this.logger.error({ msg: 'Error getting model rankings', error: error instanceof Error ? error.message : error, stack: (error instanceof Error ? error.stack : 'N/A') });
             return res.status(500).json({ error: 'Failed to get model rankings' });
         }
     }
 
     private async routeSecurityRequest(req: express.Request, res: express.Response, next: express.NextFunction) {
         if (!this.securityManagerUrl) {
+            this.logger.error({ msg: 'SecurityManager not registered yet', url: req.originalUrl });
             res.status(505).json({ error: 'SecurityManager not registered yet' });
             return next();
         }
 
-        console.log('Original URL:', req.originalUrl);
-        console.log('Request method:', req.method);
-        console.log('Request body:', req.body);
+        this.logger.debug({ msg: 'Original URL', url: req.originalUrl });
+        this.logger.debug({ msg: 'Request method', method: req.method });
+        this.logger.debug({ msg: 'Request body', body: req.body });
 
         const securityManagerPath = req.originalUrl.split('/securityManager')[1] || '/';
         const fullUrl = `${this.securityManagerUrl}${securityManagerPath}`;
-        console.log(`Forwarding request to SecurityManager: ${fullUrl}`);
+        this.logger.info({ msg: `Forwarding request to SecurityManager`, fullUrl });
 
         try {
             const securityManagerUrlObject = new URL(this.securityManagerUrl);
@@ -1021,14 +1059,14 @@ export class PostOffice extends BaseEntity {
                 }
             };
 
-            console.log('Request being sent to SecurityManager:', JSON.stringify(requestConfig, null, 2));
+            this.logger.debug({ msg: 'Request being sent to SecurityManager', requestConfig });
 
             const response = await axios(requestConfig);
 
-            console.log('Response from SecurityManager:', response.data);
+            this.logger.debug({ msg: 'Response from SecurityManager', data: response.data });
             res.status(response.status).json(response.data);
         } catch (error) {
-            console.error(`Error forwarding request to SecurityManager:`, error);
+            this.logger.error({ msg: `Error forwarding request to SecurityManager`, error: error instanceof Error ? error.message : error, stack: (error instanceof Error ? error.stack : 'N/A') });
             if (axios.isAxiosError(error) && error.response) {
                 res.status(error.response.status).json(error.response.data);
             } else {
@@ -1037,6 +1075,7 @@ export class PostOffice extends BaseEntity {
         }
     }
 
+
     // Note: Token validation is currently disabled, all connections are allowed
     // This is referenced in the setupWebSocket method with: const isValid = true;
 
@@ -1044,14 +1083,14 @@ export class PostOffice extends BaseEntity {
         try {
             let brainUrl = this.getComponentUrl('Brain');
             if (!brainUrl) {
-                console.error('Brain service not registered');
+                this.logger.error({ msg: 'Brain service not registered' });
                 return res.status(503).json({ error: 'Brain service not available' });
             }
-            console.log(`Fetching models from Brain at ${brainUrl}`);
+            this.logger.info({ msg: `Fetching models from Brain`, brainUrl });
             const response = await this.authenticatedApi.get(`${brainUrl}/models`);
             return res.status(200).json(response.data);
         } catch (error) {
-            console.error('Error fetching models from Brain:', error instanceof Error ? error.message : error);
+            this.logger.error({ msg: 'Error fetching models from Brain', error: error instanceof Error ? error.message : error, stack: (error instanceof Error ? error.stack : 'N/A') });
             return res.status(500).json({ error: 'Failed to fetch models from Brain' });
         }
     }
@@ -1060,14 +1099,15 @@ export class PostOffice extends BaseEntity {
         try {
             const brainUrl = this.getComponentUrl('Brain');
             if (!brainUrl) {
-                console.error('Brain service not registered');
+                this.logger.error({ msg: 'Brain service not registered' });
                 return res.status(503).json({ error: 'Brain service not available' });
             }
 
             const response = await this.authenticatedApi.get(`${brainUrl}/models/config`);
+            this.logger.info({ msg: `Fetched model configurations from Brain`, brainUrl });
             return res.status(200).json(response.data);
         } catch (error) {
-            console.error('Error fetching model configs from Brain:', error instanceof Error ? error.message : error);
+            this.logger.error({ msg: 'Error fetching model configs from Brain', error: error instanceof Error ? error.message : error, stack: (error instanceof Error ? error.stack : 'N/A') });
             return res.status(500).json({ error: 'Failed to fetch model configurations from Brain' });
         }
     }
@@ -1076,15 +1116,16 @@ export class PostOffice extends BaseEntity {
         try {
             const brainUrl = this.getComponentUrl('Brain');
             if (!brainUrl) {
-                console.error('Brain service not registered');
+                this.logger.error({ msg: 'Brain service not registered' });
                 return res.status(503).json({ error: 'Brain service not available' });
             }
 
             const { id } = req.params;
             const response = await this.authenticatedApi.get(`${brainUrl}/models/${id}`);
+            this.logger.info({ msg: `Fetched model configuration from Brain`, id, brainUrl });
             return res.status(200).json(response.data);
         } catch (error) {
-            console.error('Error fetching model config from Brain:', error instanceof Error ? error.message : error);
+            this.logger.error({ msg: 'Error fetching model config from Brain', error: error instanceof Error ? error.message : error, stack: (error instanceof Error ? error.stack : 'N/A') });
             return res.status(500).json({ error: 'Failed to fetch model configuration from Brain' });
         }
     }
@@ -1093,14 +1134,15 @@ export class PostOffice extends BaseEntity {
         try {
             const brainUrl = this.getComponentUrl('Brain');
             if (!brainUrl) {
-                console.error('Brain service not registered');
+                this.logger.error({ msg: 'Brain service not registered' });
                 return res.status(503).json({ error: 'Brain service not available' });
             }
 
             const response = await this.authenticatedApi.post(`${brainUrl}/models`, req.body);
+            this.logger.info({ msg: `Created model configuration in Brain`, brainUrl, body: req.body });
             return res.status(response.status).json(response.data);
         } catch (error) {
-            console.error('Error creating model config in Brain:', error instanceof Error ? error.message : error);
+            this.logger.error({ msg: 'Error creating model config in Brain', error: error instanceof Error ? error.message : error, stack: (error instanceof Error ? error.stack : 'N/A') });
             return res.status(500).json({ error: 'Failed to create model configuration in Brain' });
         }
     }
@@ -1109,15 +1151,16 @@ export class PostOffice extends BaseEntity {
         try {
             const brainUrl = this.getComponentUrl('Brain');
             if (!brainUrl) {
-                console.error('Brain service not registered');
+                this.logger.error({ msg: 'Brain service not registered' });
                 return res.status(503).json({ error: 'Brain service not available' });
             }
 
             const { id } = req.params;
             const response = await this.authenticatedApi.put(`${brainUrl}/models/${id}`, req.body);
+            this.logger.info({ msg: `Updated model configuration in Brain`, id, brainUrl, body: req.body });
             return res.status(response.status).json(response.data);
         } catch (error) {
-            console.error('Error updating model config in Brain:', error instanceof Error ? error.message : error);
+            this.logger.error({ msg: 'Error updating model config in Brain', error: error instanceof Error ? error.message : error, stack: (error instanceof Error ? error.stack : 'N/A') });
             return res.status(500).json({ error: 'Failed to update model configuration in Brain' });
         }
     }
@@ -1126,15 +1169,16 @@ export class PostOffice extends BaseEntity {
         try {
             const brainUrl = this.getComponentUrl('Brain');
             if (!brainUrl) {
-                console.error('Brain service not registered');
+                this.logger.error({ msg: 'Brain service not registered' });
                 return res.status(503).json({ error: 'Brain service not available' });
             }
 
             const { id } = req.params;
             const response = await this.authenticatedApi.delete(`${brainUrl}/models/${id}`);
+            this.logger.info({ msg: `Deleted model configuration in Brain`, id, brainUrl });
             return res.status(response.status).json(response.data);
         } catch (error) {
-            console.error('Error deleting model config in Brain:', error instanceof Error ? error.message : error);
+            this.logger.error({ msg: 'Error deleting model config in Brain', error: error instanceof Error ? error.message : error, stack: (error instanceof Error ? error.stack : 'N/A') });
             return res.status(500).json({ error: 'Failed to delete model configuration in Brain' });
         }
     }
@@ -1144,10 +1188,10 @@ export class PostOffice extends BaseEntity {
             const { modelName, conversationType, requestId, prompt, response, scores } = req.body;
             let brainUrl = this.getComponentUrl('Brain');
             if (!brainUrl) {
-                console.error('Brain service not registered');
+                this.logger.error({ msg: 'Brain service not registered' });
                 return res.status(404).json({ error: 'Brain service not available' });
             }
-            console.log(`Submitting model evaluation to Brain at ${brainUrl}`);
+            this.logger.info({ msg: `Submitting model evaluation to Brain`, brainUrl });
             await this.authenticatedApi.post(`${brainUrl}/evaluations`, {
                 modelName,
                 conversationType,
@@ -1159,7 +1203,7 @@ export class PostOffice extends BaseEntity {
 
             return res.status(200).json({ success: true });
         } catch (error) {
-            console.error('Error submitting model evaluation:', error instanceof Error ? error.message : error);
+            this.logger.error({ msg: 'Error submitting model evaluation', error: error instanceof Error ? error.message : error, stack: (error instanceof Error ? error.stack : 'N/A') });
             return res.status(500).json({ error: 'Failed to submit model evaluation' });
         }
     }
@@ -1181,7 +1225,7 @@ export class PostOffice extends BaseEntity {
             return res.status(200).json(response.data);
         } catch (error) {
             analyzeError(error as Error);
-            console.error('Error retrieving step details from AgentSet:', error instanceof Error ? error.message : error);
+            this.logger.error({ msg: 'Error retrieving step details from AgentSet', error: error instanceof Error ? error.message : error, stack: (error instanceof Error ? error.stack : 'N/A') });
             return res.status(500).json({ error: 'Failed to retrieve step details' });
         }
     }
@@ -1200,7 +1244,7 @@ export class PostOffice extends BaseEntity {
             res.status(response.status).send(response.data);
         } catch (error) {
             analyzeError(error as Error);
-            console.error('Error deleting mission file:', error instanceof Error ? error.message : error);
+            this.logger.error({ msg: 'Error deleting mission file', error: error instanceof Error ? error.message : error, stack: (error instanceof Error ? error.stack : 'N/A') });
             res.status(500).send({ error: 'Failed to delete mission file' });
         }
     }
@@ -1230,7 +1274,7 @@ export class PostOffice extends BaseEntity {
             } catch (error) {
                 // Log and ignore 404s from deliverables collection, continue search
                 if (axios.isAxiosError(error) && error.response?.status !== 404) {
-                    console.warn(`Error searching deliverables for file ${fileId}:`, error instanceof Error ? error.message : error);
+                    this.logger.warn({ msg: `Error searching deliverables for file`, fileId, error: error instanceof Error ? error.message : error });
                 }
             }
 
@@ -1273,7 +1317,7 @@ export class PostOffice extends BaseEntity {
 
         } catch (error) {
             analyzeError(error as Error);
-            console.error('Error downloading shared file:', error instanceof Error ? error.message : error);
+            this.logger.error({ msg: 'Error downloading shared file', error: error instanceof Error ? error.message : error, stack: (error instanceof Error ? error.stack : 'N/A') });
             if (axios.isAxiosError(error) && error.response?.status === 404) {
                 return res.status(404).send({ error: 'File not found in storage.' });
             }
@@ -1291,7 +1335,7 @@ export class PostOffice extends BaseEntity {
             res.status(200).send(response.data.data || []);
         } catch (error) {
             analyzeError(error as Error);
-            console.error('Error getting tool sources:', error instanceof Error ? error.message : error);
+            this.logger.error({ msg: 'Error getting tool sources', error: error instanceof Error ? error.message : error, stack: (error instanceof Error ? error.stack : 'N/A') });
             res.status(500).send({ error: 'Failed to get tool sources' });
         }
     }
@@ -1308,7 +1352,7 @@ export class PostOffice extends BaseEntity {
             res.status(201).send(newToolSource);
         } catch (error) {
             analyzeError(error as Error);
-            console.error('Error adding tool source:', error instanceof Error ? error.message : error);
+            this.logger.error({ msg: 'Error adding tool source', error: error instanceof Error ? error.message : error, stack: (error instanceof Error ? error.stack : 'N/A') });
             res.status(500).send({ error: 'Failed to add tool source' });
         }
     }
@@ -1323,7 +1367,7 @@ export class PostOffice extends BaseEntity {
             res.status(204).send();
         } catch (error) {
             analyzeError(error as Error);
-            console.error('Error deleting tool source:', error instanceof Error ? error.message : error);
+            this.logger.error({ msg: 'Error deleting tool source', error: error instanceof Error ? error.message : error, stack: (error instanceof Error ? error.stack : 'N/A') });
             res.status(500).send({ error: 'Failed to delete tool source' });
         }
     }
@@ -1338,7 +1382,7 @@ export class PostOffice extends BaseEntity {
             res.status(200).send(response.data.data || []);
         } catch (error) {
             analyzeError(error as Error);
-            console.error('Error getting pending tools:', error instanceof Error ? error.message : error);
+            this.logger.error({ msg: 'Error getting pending tools', error: error instanceof Error ? error.message : error, stack: (error instanceof Error ? error.stack : 'N/A') });
             res.status(500).send({ error: 'Failed to get pending tools' });
         }
     }
@@ -1377,7 +1421,7 @@ export class PostOffice extends BaseEntity {
             res.status(200).send({ message: 'Pending tool approved' });
         } catch (error) {
             analyzeError(error as Error);
-            console.error('Error approving pending tool:', error instanceof Error ? error.message : error);
+            this.logger.error({ msg: 'Error approving pending tool', error: error instanceof Error ? error.message : error, stack: (error instanceof Error ? error.stack : 'N/A') });
             res.status(500).send({ error: 'Failed to approve pending tool' });
         }
     }
@@ -1407,7 +1451,7 @@ export class PostOffice extends BaseEntity {
             res.status(200).send({ message: 'Pending tool rejected' });
         } catch (error) {
             analyzeError(error as Error);
-            console.error('Error rejecting pending tool:', error instanceof Error ? error.message : error);
+            this.logger.error({ msg: 'Error rejecting pending tool', error: error instanceof Error ? error.message : error, stack: (error instanceof Error ? error.stack : 'N/A') });
             res.status(500).send({ error: 'Failed to reject pending tool' });
         }
     }
@@ -1469,6 +1513,7 @@ export class PostOffice extends BaseEntity {
 
             res.status(200).json({ request_id });
         } catch (error) {
+            this.logger.error({ msg: 'Failed to send user input request', error: error instanceof Error ? error.message : error, stack: (error instanceof Error ? error.stack : 'N/A') });
             res.status(500).json({ error: 'Failed to send user input request' });
         }
     }
@@ -1496,6 +1541,7 @@ export class PostOffice extends BaseEntity {
 
             res.status(200).json(response);
         } catch (error) {
+            this.logger.error({ msg: 'Failed to get user input response', error: error instanceof Error ? error.message : error, stack: (error instanceof Error ? error.stack : 'N/A') });
             res.status(500).json({ error: 'Failed to get user input response' });
         }
     }
@@ -1523,14 +1569,14 @@ export class PostOffice extends BaseEntity {
                         };
 
                         await this.messageRouter.routeMessage(message);
-                        console.log(`Notified AgentSet ${agentSetId} of user response for request ${requestId}`);
+                        this.logger.info({ msg: `Notified AgentSet of user response`, agentSetId, requestId });
                     } catch (error) {
-                        console.error(`Failed to notify AgentSet ${agentSetId} of user response:`, error);
+                        this.logger.error({ msg: `Failed to notify AgentSet of user response`, agentSetId, requestId, error: error instanceof Error ? error.message : error, stack: (error instanceof Error ? error.stack : 'N/A') });
                     }
                 }
             }
         } catch (error) {
-            console.error(`Error notifying agents of user response for request ${requestId}:`, error);
+            this.logger.error({ msg: `Error notifying agents of user response`, requestId, error: error instanceof Error ? error.message : error, stack: (error instanceof Error ? error.stack : 'N/A') });
         }
     }
 
@@ -1541,13 +1587,13 @@ export class PostOffice extends BaseEntity {
     private async cleanupOldQueues(): Promise<void> {
         try {
             if (!this.mqClient || !this.mqClient.isConnected()) {
-                console.log('[QueueCleanup] RabbitMQ not connected, skipping cleanup');
+                this.logger.info('[QueueCleanup] RabbitMQ not connected, skipping cleanup');
                 return;
             }
 
             const channel = this.mqClient.getChannel();
             if (!channel) {
-                console.log('[QueueCleanup] No channel available, skipping cleanup');
+                this.logger.info('[QueueCleanup] No channel available, skipping cleanup');
                 return;
             }
 
@@ -1566,14 +1612,14 @@ export class PostOffice extends BaseEntity {
                         // For now, just log that cleanup would happen
                     }
                     
-                    console.log(`[QueueCleanup] Verified current queue is ${currentQueueName}`);
-                    console.log('[QueueCleanup] Old queues will be cleaned up by RabbitMQ\'s queue expiration policy');
+                    this.logger.info({ msg: `[QueueCleanup] Verified current queue is ${currentQueueName}`, currentQueueName });
+                    this.logger.info('[QueueCleanup] Old queues will be cleaned up by RabbitMQ\'s queue expiration policy');
                 } catch (error) {
-                    console.error('[QueueCleanup] Error during cleanup:', error instanceof Error ? error.message : 'Unknown error');
+                    this.logger.error({ msg: '[QueueCleanup] Error during cleanup', error: error instanceof Error ? error.message : 'Unknown error', stack: (error instanceof Error ? error.stack : 'N/A') });
                 }
             });
         } catch (error) {
-            console.error('[QueueCleanup] Failed to clean up old queues:', error instanceof Error ? error.message : 'Unknown error');
+            this.logger.error({ msg: '[QueueCleanup] Failed to clean up old queues', error: error instanceof Error ? error.message : 'Unknown error', stack: (error instanceof Error ? error.stack : 'N/A') });
         }
     }
 }

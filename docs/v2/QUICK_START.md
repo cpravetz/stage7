@@ -5,7 +5,7 @@
 ### Prerequisites
 - Node.js 18+ and npm
 - Python 3.9+
-- Running L1 Core Engine (MissionControl, TrafficManager, CapabilitiesManager)
+- Running L1 Core Engine (MissionControl, CapabilitiesManager)
 
 ## Option 1: Use an Existing Assistant (Fastest)
 
@@ -15,11 +15,7 @@
 cd services/missioncontrol
 npm run dev
 
-# Terminal 2: Start TrafficManager
-cd services/trafficmanager
-npm run dev
-
-# Terminal 3: Start CapabilitiesManager
+# Terminal 2: Start CapabilitiesManager
 cd services/capabilitiesmanager
 python src/main.py
 ```
@@ -201,7 +197,7 @@ Open browser and interact with the UI.
 ## Common Issues
 
 ### Issue: "Cannot connect to L1 Core Engine"
-**Solution**: Ensure MissionControl, TrafficManager, and CapabilitiesManager are running.
+**Solution**: Ensure MissionControl and CapabilitiesManager are running.
 
 ### Issue: "Plugin not found"
 **Solution**: Check that the plugin exists in `services/capabilitiesmanager/src/plugins/` and has a valid `manifest.json`.
@@ -229,7 +225,6 @@ project/
 │   ├── capabilitiesmanager/        # L1 CapabilitiesManager
 │   │   └── src/plugins/            # L1 plugins
 │   ├── missioncontrol/             # L1 MissionControl
-│   ├── trafficmanager/             # L1 TrafficManager
 │   ├── [assistant]-api/            # L3 assistant APIs
 │   └── mcsreact/                   # L4 React UI
 │       └── src/assistants/         # L4 assistant components

@@ -22,7 +22,6 @@ Complete guide for deploying the Agent Development Kit to production environment
 | Service | Purpose | Port | Status |
 |---------|---------|------|--------|
 | MissionControl (L1) | Conversation orchestration | 5010 | Core |
-| TrafficManager (L1) | Request routing | varies | Core |
 | CapabilitiesManager (L1) | Tool discovery | varies | Core |
 | Brain Service (L1) | LLM integration | varies | Core |
 | PostOffice (WebSocket) | Client communication | 5020 | Core |
@@ -108,18 +107,6 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-
-  trafficmanager:
-    build:
-      context: ./services/trafficmanager
-      dockerfile: Dockerfile.prod
-    environment:
-      NODE_ENV: production
-      RABBITMQ_URL: amqp://admin:${RABBITMQ_PASSWORD}@rabbitmq:5672
-    depends_on:
-      - missioncontrol
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
 
   brain:
     build:

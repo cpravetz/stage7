@@ -1,6 +1,6 @@
 # Documentation Index & Organization
 
-**Last Updated**: February 3, 2026
+**Last Updated**: February 10, 2026
 
 ## 📚 Documentation Organization
 
@@ -15,7 +15,7 @@ These documents are actively maintained and reference current system behavior:
 ### Core References
 - **[API.md](./API.md)** - PostOffice and system API specifications
 - **[authentication.md](./authentication.md)** - Authentication, JWT tokens, credentials
-- **[message-queue.md](./message-queue.md)** - RabbitMQ and message passing architecture
+- **[message-queue.md](./message-queue.md)** - RabbitMQ and message passing architecture. See also the [RabbitMQ Evaluation Summary](../GEMINI.md) for architectural decision details.
 
 ### Feature Documentation
 - **[file-upload-documentation.md](./file-upload-documentation.md)** - File upload system
@@ -27,6 +27,27 @@ These documents are actively maintained and reference current system behavior:
 - **[service-discovery-config.md](./service-discovery-config.md)** - Service discovery (Consul)
 - **[security_improvements.md](./security_improvements.md)** - Security hardening
 - **[plugin_config_and_secrets.md](./plugin_config_and_secrets.md)** - Plugin configuration
+
+---
+
+## ⚙️ Operational & Enterprise Readiness Guides (New)
+
+These documents provide guidance and roadmaps for critical operational aspects and enterprise readiness.
+
+- **[DEPLOYMENT_HA.md](./DEPLOYMENT_HA.md)** - High Availability deployment recommendations for Kubernetes/Helm.
+- **[MULTI_TENANCY_ROADMAP.md](./MULTI_TENANCY_ROADMAP.md)** - Roadmap for implementing multi-tenancy.
+- **[AUDIT_LOGGING_ROADMAP.md](./AUDIT_LOGGING_ROADMAP.md)** - Roadmap for implementing robust audit logging.
+- **[DISASTER_RECOVERY_PLAN.md](./DISASTER_RECOVERY_PLAN.md)** - Recommendations for a comprehensive disaster recovery plan.
+
+---
+
+## 📈 Strategic & Community Roadmaps (New)
+
+These documents outline strategies for market positioning, community growth, and enterprise certifications.
+
+- **[COMMUNITY_GROWTH_STRATEGY.md](./COMMUNITY_GROWTH_STRATEGY.md)** - Strategy for fostering community and ecosystem growth.
+- **[ENTERPRISE_CERTIFICATION_ROADMAP.md](./ENTERPRISE_CERTIFICATION_ROADMAP.md)** - Roadmap for pursuing enterprise security certifications (SOC 2, ISO 27001).
+- **[MARKET_POSITIONING_STRATEGY.md](./MARKET_POSITIONING_STRATEGY.md)** - Strategic recommendations for market positioning.
 
 ---
 

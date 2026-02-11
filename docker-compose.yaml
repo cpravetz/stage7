@@ -1,5 +1,19 @@
 services:
+  # Build base image with shared dependencies (shared, sdk, errorhandler)
+  # This is used by all agent services to reduce build time
+  # IMPORTANT: Build this first with: docker compose build base
+  base:
+    image: cktmcs:base
+    build:
+      context: .
+      dockerfile: Dockerfile.base
+    entrypoint: ["sh", "-c", "echo 'Base image built successfully' && exit 0"]
+    profiles:
+      - donotstart
+
   postoffice:
+    profiles:
+      - core
     build:
       context: .
       dockerfile: services/postoffice/dockerfile
@@ -15,24 +29,14 @@ services:
       mongo:
         condition: service_started
     environment:
-      NODE_ENV: production
-      PORT: &postofficePort 5020
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      SECURITYMANAGER_URL: &securitymanagerUrl securitymanager:5010
-      MISSIONCONTROL_URL: &missioncontrolUrl missioncontrol:5030
-      RABBITMQ_URL: &rabbitmqUrl amqp://stage7:stage7password@rabbitmq:5672
-      CONSUL_URL: &consulUrl consul:8500
-      POSTOFFICE_SECRET: &sharedSecret stage7AuthSecret
-      CLIENT_SECRET: *sharedSecret
-      # Temporarily allow bootstrapping without RabbitMQ to unblock other services
-      ALLOW_READY_WITHOUT_RABBITMQ: "true"
+      PORT: 5020 # Explicitly set port as it's not from .env
+    env_file:
+      - .env
     volumes:
       - ./shared/keys:/usr/src/app/shared/keys
     ports:
       - "5020:5020"
     healthcheck:
-      # Use /healthy endpoint which should always respond regardless of RabbitMQ status
       test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:5020/healthy"]
       interval: 30s
       timeout: 10s
@@ -41,6 +45,8 @@ services:
     restart: unless-stopped
 
   missioncontrol:
+    profiles:
+      - core
     build:
       context: .
       dockerfile: services/missioncontrol/dockerfile
@@ -58,26 +64,17 @@ services:
       engineer:
         condition: service_started
     environment:
-      NODE_ENV: production
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      PORT: &missioncontrolPort 5030
-      MISSIONCONTROL_URL: *missioncontrolUrl
-      SECURITYMANAGER_URL: *securitymanagerUrl
-      POSTOFFICE_URL: &postofficeUrl http://postoffice:5020
-      RABBITMQ_URL: *rabbitmqUrl
-      CONSUL_URL: *consulUrl
-      LIBRARIAN_URL: &librarianUrl librarian:5040
-      BRAIN_URL: &brainUrl brain:5070
-      ENGINEER_URL: &engineerUrl engineer:5050
-      MISSIONCONTROL_SECRET: *sharedSecret
-      CLIENT_SECRET: *sharedSecret
+      PORT: 5030 # Explicitly set port
+    env_file:
+      - .env
     ports:
       - "5030:5030"
     volumes:
       - ./shared/keys:/usr/src/app/shared/keys
 
   brain:
+    profiles:
+      - core
     build:
       context: .
       dockerfile: services/brain/dockerfile
@@ -90,23 +87,14 @@ services:
         condition: service_started
       redis:
         condition: service_started
-    env_file:
-      - services/brain/.env
     environment:
-      NODE_ENV: production
-      PORT: &brainPort 5070
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      BRAIN_URL: *brainUrl
-      SECURITYMANAGER_URL: *securitymanagerUrl
-      POSTOFFICE_URL: *postofficeUrl
-      RABBITMQ_URL: *rabbitmqUrl
-      CONSUL_URL: *consulUrl
-      BRAIN_SECRET: *sharedSecret
-      CLIENT_SECRET: *sharedSecret
+      PORT: 5070 # Explicitly set port
+    env_file:
+      - .env
     volumes:
       - ./shared/keys:/usr/src/app/shared/keys
-      - ./services/brain/.env:/usr/src/app/services/brain/.env
+      # The .env file mount for services/brain/.env is now redundant due to global .env
+      # - ./services/brain/.env:/usr/src/app/services/brain/.env
     ports:
       - "5070:5070"
     deploy:
@@ -115,6 +103,8 @@ services:
           memory: 2G
 
   agentset:
+    profiles:
+      - core
     build:
       context: .
       dockerfile: services/agentset/dockerfile
@@ -128,20 +118,10 @@ services:
       redis:
         condition: service_started
     environment:
-      NODE_ENV: production
-      PORT: 5100
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      NODE_OPTIONS: --max-old-space-size=4096
-      SECURITYMANAGER_URL: *securitymanagerUrl
-      POSTOFFICE_URL: *postofficeUrl
-      RABBITMQ_URL: *rabbitmqUrl
-      CAPABILITIESMANAGER_URL: &capabilitiesmanagerUrl capabilitiesmanager:5060
-      LIBRARIAN_URL: *librarianUrl
-      MISSIONCONTROL_URL: *missioncontrolUrl
-      BRAIN_URL: *brainUrl
-      AGENTSET_SECRET: *sharedSecret
-      CLIENT_SECRET: *sharedSecret
+      PORT: 5100 # Explicitly set port
+      NODE_OPTIONS: --max-old-space-size=4096 # Explicitly set
+    env_file:
+      - .env
     volumes:
       - ./shared/keys:/usr/src/app/shared/keys
     ports:
@@ -152,6 +132,8 @@ services:
           memory: 2G
 
   engineer:
+    profiles:
+      - core
     build:
       context: .
       dockerfile: services/engineer/dockerfile
@@ -166,37 +148,14 @@ services:
         condition: service_healthy
       securitymanager:
         condition: service_started
+    environment:
+      PORT: 5050 # Explicitly set port
     env_file:
       - .env
-    environment:
-      NODE_ENV: production
-      PORT: &engineerPort 5050
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      ENGINEER_URL: *engineerUrl
-      SECURITYMANAGER_URL: *securitymanagerUrl
-      POSTOFFICE_URL: *postofficeUrl
-      RABBITMQ_URL: *rabbitmqUrl
-      CONSUL_URL: *consulUrl
-      BRAIN_URL: *brainUrl
-      LIBRARIAN_URL: *librarianUrl
-      CAPABILITIESMANAGER_URL: *capabilitiesmanagerUrl
-      ENGINEER_SECRET: *sharedSecret
-      CLIENT_SECRET: *sharedSecret
-      GITHUB_USERNAME: &githubUsername 'cpravetz'
-      GIT_DEFAULT_BRANCH: &gitDefaultBranch main
-      GIT_REPOSITORY_URL: &gitRepositoryUrl 'https://github.com/cpravetz/s7plugins.git'
-      GITHUB_EMAIL: &githubEmail 'chris@pravetz.net'
-      DEFAULT_PLUGIN_REPOSITORY: &defaultPluginRepository github
-      DEFAULT_REPOSITORY_URL: &defaultRepositoryUrl
-      REPOSITORY_USERNAME: &repositoryUserName
-      REPOSITORY_TOKEN: &repositoryToken
-      REPOSITORY_EMAIL: &repositoryEmail
-      MONGO_COLLECTION: &mongoCollection plugins
     volumes:
       - ./shared/keys:/usr/src/app/shared/keys
     healthcheck:
-      test: ["CMD", "--spider", "-q", "http://127.0.0.1:5050/health"]
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:5050/health"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -204,6 +163,8 @@ services:
 
 
   capabilitiesmanager:
+    profiles:
+      - core
     build:
       context: .
       dockerfile: services/capabilitiesmanager/dockerfile
@@ -220,36 +181,11 @@ services:
         condition: service_healthy
       securitymanager:
         condition: service_started
+    environment:
+      PORT: 5060 # Explicitly set port
+      LOCAL_PLUGIN_PATH: /usr/src/app/services//capabilitiesmanager/src/plugins # Explicitly set
     env_file:
       - .env
-    environment:
-      NODE_ENV: production
-      PORT: &capabilitiesmanagerPort 5060
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      CAPABILITIESMANAGER_URL: *capabilitiesmanagerUrl
-      SECURITYMANAGER_URL: *securitymanagerUrl
-      POSTOFFICE_URL: *postofficeUrl
-      RABBITMQ_URL: *rabbitmqUrl
-      CONSUL_URL: *consulUrl
-      LIBRARIAN_URL: *librarianUrl
-      BRAIN_URL: *brainUrl
-      ENGINEER_URL: *engineerUrl
-      CAPABILITIESMANAGER_SECRET: *sharedSecret
-      CLIENT_SECRET: *sharedSecret
-      LOCAL_PLUGIN_PATH: /usr/src/app/services//capabilitiesmanager/src/plugins
-      GITHUB_TOKEN: ${GITHUB_TOKEN}
-      ENABLE_GITHUB: "true"
-      GITHUB_USERNAME: *githubUsername
-      GIT_DEFAULT_BRANCH: *gitDefaultBranch
-      GIT_REPOSITORY_URL: *gitRepositoryUrl
-      GITHUB_EMAIL: *githubEmail
-      DEFAULT_PLUGIN_REPOSITORY: "local"
-      DEFAULT_REPOSITORY_URL: *defaultRepositoryUrl
-      REPOSITORY_USERNAME: *repositoryUserName
-      REPOSITORY_TOKEN: *repositoryToken
-      REPOSITORY_EMAIL: *repositoryEmail
-      MONGO_COLLECTION: *mongoCollection
     volumes:
       - ./shared/keys:/usr/src/app/shared/keys
     ports:
@@ -260,6 +196,8 @@ services:
           memory: 2G
 
   librarian:
+    profiles:
+      - core
     build:
       context: .
       dockerfile: services/librarian/dockerfile
@@ -269,19 +207,9 @@ services:
       chromadb:
         condition: service_started
     environment:
-      MONGO_URI: mongodb://mongo:27017
-      MONGO_DB: librarianDB
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      NODE_ENV: production
-      PORT: &librarianPort 5040
-      LIBRARIAN_URL: *librarianUrl
-      SECURITYMANAGER_URL: *securitymanagerUrl
-      POSTOFFICE_URL: *postofficeUrl
-      RABBITMQ_URL: *rabbitmqUrl
-      CONSUL_URL: *consulUrl
-      LIBRARIAN_SECRET: *sharedSecret
-      CLIENT_SECRET: *sharedSecret
+      PORT: 5040 # Explicitly set port
+    env_file:
+      - .env
     volumes:
       - ./shared/keys:/usr/src/app/shared/keys
     ports:
@@ -291,7 +219,6 @@ services:
         limits:
           memory: 2G
     healthcheck:
-      # Use /ready endpoint for more comprehensive readiness check
       test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:5040/health"]
       interval: 30s
       timeout: 15s
@@ -301,6 +228,8 @@ services:
 
 
   securitymanager:
+    profiles:
+      - core
     build:
       context: .
       dockerfile: services/security/Dockerfile
@@ -309,44 +238,19 @@ services:
       - rabbitmq
       - consul
     environment:
-      NODE_ENV: production
-      PORT:  &securitymanagerPort 5010
-      SECURITYMANAGER_URL: *securitymanagerUrl
-      POSTOFFICE_URL: *postofficeUrl
-      RABBITMQ_URL: *rabbitmqUrl
-      CONSUL_URL: *consulUrl
-      # Using RS256 asymmetric keys for JWT signing and verification
-      KEYS_DIR: /usr/src/app/services/security/keys
-      ADMIN_SECRET: adminSecret
-      LIBRARIAN_URL: *librarianUrl
-      # Using a single shared client secret for all services
-      SECURITYMANAGER_SECRET: *sharedSecret
-      POSTOFFICE_SECRET: *sharedSecret
-      MISSIONCONTROL_SECRET: *sharedSecret
-      BRAIN_SECRET: *sharedSecret
-      AGENTSET_SECRET: *sharedSecret
-      ENGINEER_SECRET: *sharedSecret
-      CAPABILITIESMANAGER_SECRET: *sharedSecret
-      LIBRARIAN_SECRET: *sharedSecret
-      CLIENT_SECRET: *sharedSecret
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      # JWT configuration
-      JWT_ALGORITHM: RS256
-      JWT_EXPIRATION: 3600 # 1 hour in seconds
-      # Authentication configuration
-      AUTH_ENABLED: "true"
-      # For development only - set to false in production
-      ACCEPT_ANY_SERVICE: "false"
-      ACCEPT_ANY_SECRET: "false"
-      # Shared secret for all services
-      SHARED_SECRET: *sharedSecret
+      PORT: 5010 # Explicitly set port
+      KEYS_DIR: /usr/src/app/services/security/keys # Explicitly set
+    env_file:
+      - .env
     volumes:
       - ./services/security/keys:/usr/src/app/services/security/keys
       - ./shared/keys:/usr/src/app/shared/keys
     ports:
       - "5010:5010"
+
   frontend:
+    profiles:
+      - core
     build:
       context: .
       dockerfile: services/mcsreact/dockerfile
@@ -355,11 +259,13 @@ services:
     depends_on:
       postoffice:
         condition: service_healthy
-    environment:
-      - ENV REACT_APP_API_BASE_URL=http://postoffice:5020
-      - ENV REACT_APP_WS_URL=ws://localhost:5020
+    env_file:
+      - .env
 
   pm-assistant-api:
+    profiles:
+      - assistants
+      - pm-assistant
     build:
       context: .
       dockerfile: agents/pm-assistant-api/Dockerfile
@@ -369,15 +275,10 @@ services:
       securitymanager:
         condition: service_started
     environment:
-      NODE_ENV: production
-      PORT: 3000
-      POSTOFFICE_URL: *postofficeUrl
-      SECURITYMANAGER_URL: securitymanager:5010
-      PM_ASSISTANT_API_SECRET: stage7AuthSecret
-      CLIENT_SECRET: stage7AuthSecret
-      SERVICE_URL: pm-assistant-api:3000
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
+      PORT: 3000 # Explicitly set port
+      SERVICE_URL: pm-assistant-api:3000 # Explicitly set
+    env_file:
+      - .env
     ports:
       - "3000:3000"
     volumes:
@@ -386,6 +287,9 @@ services:
       start_period: 300s
 
   sales-assistant-api:
+    profiles:
+      - assistants
+      - sales-assistant
     build:
       context: .
       dockerfile: agents/sales-assistant-api/Dockerfile
@@ -395,26 +299,24 @@ services:
       securitymanager:
         condition: service_started
     environment:
-      NODE_ENV: production
-      PORT: 3002
-      POSTOFFICE_URL: *postofficeUrl
-      SECURITYMANAGER_URL: securitymanager:5010
-      SALES_ASSISTANT_API_SECRET: stage7AuthSecret
-      CLIENT_SECRET: stage7AuthSecret
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
+      PORT: 3002 # Explicitly set port
+    env_file:
+      - .env
     ports:
       - "3002:3002"
     volumes:
       - ./shared/keys:/usr/src/app/shared/keys
     healthcheck:
-      test: ["CMD", "--spider", "-q", "http://localhost:3002/health"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3002/health"]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 300s
 
   marketing-assistant-api:
+    profiles:
+      - assistants
+      - marketing-assistant
     build:
       context: .
       dockerfile: agents/marketing-assistant-api/Dockerfile
@@ -424,26 +326,24 @@ services:
       securitymanager:
         condition: service_started
     environment:
-      NODE_ENV: production
-      PORT: 3003
-      POSTOFFICE_URL: *postofficeUrl
-      SECURITYMANAGER_URL: securitymanager:5010
-      MARKETING_ASSISTANT_API_SECRET: stage7AuthSecret
-      CLIENT_SECRET: stage7AuthSecret
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
+      PORT: 3003 # Explicitly set port
+    env_file:
+      - .env
     ports:
       - "3003:3003"
     volumes:
       - ./shared/keys:/usr/src/app/shared/keys
     healthcheck:
-      test: ["CMD", "--spider", "-q", "http://localhost:3003/health"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3003/health"]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 300s
 
   hr-assistant-api:
+    profiles:
+      - assistants
+      - hr-assistant
     build:
       context: .
       dockerfile: agents/hr-assistant-api/Dockerfile
@@ -453,26 +353,24 @@ services:
       securitymanager:
         condition: service_started
     environment:
-      NODE_ENV: production
-      PORT: 3004
-      POSTOFFICE_URL: *postofficeUrl
-      SECURITYMANAGER_URL: securitymanager:5010
-      HR_ASSISTANT_API_SECRET: stage7AuthSecret
-      CLIENT_SECRET: stage7AuthSecret
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
+      PORT: 3004 # Explicitly set port
+    env_file:
+      - .env
     ports:
       - "3004:3004"
     volumes:
       - ./shared/keys:/usr/src/app/shared/keys
     healthcheck:
-      test: ["CMD", "--spider", "-q", "http://localhost:3004/health"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3004/health"]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 300s
 
   finance-assistant-api:
+    profiles:
+      - assistants
+      - finance-assistant
     build:
       context: .
       dockerfile: agents/finance-assistant-api/Dockerfile
@@ -482,26 +380,24 @@ services:
       securitymanager:
         condition: service_started
     environment:
-      NODE_ENV: production
-      PORT: 3005
-      POSTOFFICE_URL: *postofficeUrl
-      SECURITYMANAGER_URL: securitymanager:5010
-      FINANCE_ASSISTANT_API_SECRET: stage7AuthSecret
-      CLIENT_SECRET: stage7AuthSecret
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
+      PORT: 3005 # Explicitly set port
+    env_file:
+      - .env
     ports:
       - "3005:3005"
     volumes:
       - ./shared/keys:/usr/src/app/shared/keys
     healthcheck:
-      test: ["CMD", "--spider", "-q", "http://localhost:3005/health"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3005/health"]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 300s
 
   support-assistant-api:
+    profiles:
+      - assistants
+      - support-assistant
     build:
       context: .
       dockerfile: agents/support-assistant-api/Dockerfile
@@ -511,26 +407,24 @@ services:
       securitymanager:
         condition: service_started
     environment:
-      NODE_ENV: production
-      PORT: 3006
-      POSTOFFICE_URL: *postofficeUrl
-      SECURITYMANAGER_URL: securitymanager:5010
-      SUPPORT_ASSISTANT_API_SECRET: stage7AuthSecret
-      CLIENT_SECRET: stage7AuthSecret
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
+      PORT: 3006 # Explicitly set port
+    env_file:
+      - .env
     ports:
       - "3006:3006"
     volumes:
       - ./shared/keys:/usr/src/app/shared/keys
     healthcheck:
-      test: ["CMD", "--spider", "-q", "http://localhost:3006/health"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3006/health"]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 300s
 
   legal-assistant-api:
+    profiles:
+      - assistants
+      - legal-assistant
     build:
       context: .
       dockerfile: agents/legal-assistant-api/Dockerfile
@@ -540,26 +434,24 @@ services:
       securitymanager:
         condition: service_started
     environment:
-      NODE_ENV: production
-      PORT: 3007
-      POSTOFFICE_URL: *postofficeUrl
-      SECURITYMANAGER_URL: securitymanager:5010
-      LEGAL_ASSISTANT_API_SECRET: stage7AuthSecret
-      CLIENT_SECRET: stage7AuthSecret
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
+      PORT: 3007 # Explicitly set port
+    env_file:
+      - .env
     ports:
       - "3007:3007"
     volumes:
       - ./shared/keys:/usr/src/app/shared/keys
     healthcheck:
-      test: ["CMD", "--spider", "-q", "http://localhost:3007/health"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3007/health"]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 300s
 
   healthcare-assistant-api:
+    profiles:
+      - assistants
+      - healthcare-assistant
     build:
       context: .
       dockerfile: agents/healthcare-assistant-api/Dockerfile
@@ -569,26 +461,24 @@ services:
       securitymanager:
         condition: service_started
     environment:
-      NODE_ENV: production
-      PORT: 3008
-      POSTOFFICE_URL: *postofficeUrl
-      SECURITYMANAGER_URL: securitymanager:5010
-      HEALTHCARE_ASSISTANT_API_SECRET: stage7AuthSecret
-      CLIENT_SECRET: stage7AuthSecret
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
+      PORT: 3008 # Explicitly set port
+    env_file:
+      - .env
     ports:
       - "3008:3008"
     volumes:
       - ./shared/keys:/usr/src/app/shared/keys
     healthcheck:
-      test: ["CMD", "--spider", "-q", "http://localhost:3008/health"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3008/health"]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 300s
 
   education-assistant-api:
+    profiles:
+      - assistants
+      - education-assistant
     build:
       context: .
       dockerfile: agents/education-assistant-api/Dockerfile
@@ -598,26 +488,24 @@ services:
       securitymanager:
         condition: service_started
     environment:
-      NODE_ENV: production
-      PORT: 3009
-      POSTOFFICE_URL: *postofficeUrl
-      SECURITYMANAGER_URL: securitymanager:5010
-      EDUCATION_ASSISTANT_API_SECRET: stage7AuthSecret
-      CLIENT_SECRET: stage7AuthSecret
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
+      PORT: 3009 # Explicitly set port
+    env_file:
+      - .env
     ports:
       - "3009:3009"
     volumes:
       - ./shared/keys:/usr/src/app/shared/keys
     healthcheck:
-      test: ["CMD", "--spider", "-q", "http://localhost:3009/health"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3009/health"]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 300s
 
   event-assistant-api:
+    profiles:
+      - assistants
+      - event-assistant
     build:
       context: .
       dockerfile: agents/event-assistant-api/Dockerfile
@@ -627,26 +515,24 @@ services:
       securitymanager:
         condition: service_started
     environment:
-      NODE_ENV: production
-      PORT: 3010
-      POSTOFFICE_URL: *postofficeUrl
-      SECURITYMANAGER_URL: securitymanager:5010
-      EVENT_ASSISTANT_API_SECRET: stage7AuthSecret
-      CLIENT_SECRET: stage7AuthSecret
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
+      PORT: 3010 # Explicitly set port
+    env_file:
+      - .env
     ports:
       - "3010:3010"
     volumes:
       - ./shared/keys:/usr/src/app/shared/keys
     healthcheck:
-      test: ["CMD", "--spider", "-q", "http://localhost:3010/health"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3010/health"]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 300s
 
   executive-assistant-api:
+    profiles:
+      - assistants
+      - executive-assistant
     build:
       context: .
       dockerfile: agents/executive-assistant-api/Dockerfile
@@ -656,26 +542,24 @@ services:
       securitymanager:
         condition: service_started
     environment:
-      NODE_ENV: production
-      PORT: 3011
-      POSTOFFICE_URL: *postofficeUrl
-      SECURITYMANAGER_URL: securitymanager:5010
-      EXECUTIVE_ASSISTANT_API_SECRET: stage7AuthSecret
-      CLIENT_SECRET: stage7AuthSecret
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
+      PORT: 3011 # Explicitly set port
+    env_file:
+      - .env
     ports:
       - "3011:3011"
     volumes:
       - ./shared/keys:/usr/src/app/shared/keys
     healthcheck:
-      test: ["CMD", "--spider", "-q", "http://localhost:3011/health"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3011/health"]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 300s
 
   career-assistant-api:
+    profiles:
+      - assistants
+      - career-assistant
     build:
       context: .
       dockerfile: agents/career-assistant-api/Dockerfile
@@ -685,26 +569,24 @@ services:
       securitymanager:
         condition: service_started
     environment:
-      NODE_ENV: production
-      PORT: 3012
-      POSTOFFICE_URL: *postofficeUrl
-      SECURITYMANAGER_URL: securitymanager:5010
-      CAREER_ASSISTANT_API_SECRET: stage7AuthSecret
-      CLIENT_SECRET: stage7AuthSecret
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
+      PORT: 3012 # Explicitly set port
+    env_file:
+      - .env
     ports:
       - "3012:3012"
     volumes:
       - ./shared/keys:/usr/src/app/shared/keys
     healthcheck:
-      test: ["CMD", "--spider", "-q", "http://localhost:3012/health"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3012/health"]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 300s
 
   content-creator-assistant-api:
+    profiles:
+      - assistants
+      - content-creator-assistant
     build:
       context: .
       dockerfile: agents/content-creator-assistant-api/Dockerfile
@@ -714,26 +596,24 @@ services:
       securitymanager:
         condition: service_started
     environment:
-      NODE_ENV: production
-      PORT: 3013
-      POSTOFFICE_URL: *postofficeUrl
-      SECURITYMANAGER_URL: securitymanager:5010
-      CONTENT_CREATOR_ASSISTANT_API_SECRET: stage7AuthSecret
-      CLIENT_SECRET: stage7AuthSecret
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
+      PORT: 3013 # Explicitly set port
+    env_file:
+      - .env
     ports:
       - "3013:3013"
     volumes:
       - ./shared/keys:/usr/src/app/shared/keys
     healthcheck:
-      test: ["CMD", "--spider", "-q", "http://localhost:3013/health"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3013/health"]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 300s
 
   songwriter-assistant-api:
+    profiles:
+      - assistants
+      - songwriter-assistant
     build:
       context: .
       dockerfile: agents/songwriter-assistant-api/Dockerfile
@@ -743,26 +623,24 @@ services:
       securitymanager:
         condition: service_started
     environment:
-      NODE_ENV: production
-      PORT: 3014
-      POSTOFFICE_URL: *postofficeUrl
-      SECURITYMANAGER_URL: securitymanager:5010
-      SONGWRITER_ASSISTANT_API_SECRET: stage7AuthSecret
-      CLIENT_SECRET: stage7AuthSecret
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
+      PORT: 3014 # Explicitly set port
+    env_file:
+      - .env
     ports:
       - "3014:3014"
     volumes:
       - ./shared/keys:/usr/src/app/shared/keys
     healthcheck:
-      test: ["CMD", "--spider", "-q", "http://localhost:3014/health"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3014/health"]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 300s
 
   scriptwriter-assistant-api:
+    profiles:
+      - assistants
+      - scriptwriter-assistant
     build:
       context: .
       dockerfile: agents/scriptwriter-assistant-api/Dockerfile
@@ -772,26 +650,24 @@ services:
       securitymanager:
         condition: service_started
     environment:
-      NODE_ENV: production
-      PORT: 3015
-      POSTOFFICE_URL: *postofficeUrl
-      SECURITYMANAGER_URL: securitymanager:5010
-      SCRIPTWRITER_ASSISTANT_API_SECRET: stage7AuthSecret
-      CLIENT_SECRET: stage7AuthSecret
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
+      PORT: 3015 # Explicitly set port
+    env_file:
+      - .env
     ports:
       - "3015:3015"
     volumes:
       - ./shared/keys:/usr/src/app/shared/keys
     healthcheck:
-      test: ["CMD", "--spider", "-q", "http://localhost:3015/health"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3015/health"]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 300s
 
   hotel-ops-assistant-api:
+    profiles:
+      - assistants
+      - hotel-ops-assistant
     build:
       context: .
       dockerfile: agents/hotel-ops-assistant-api/Dockerfile
@@ -801,26 +677,24 @@ services:
       securitymanager:
         condition: service_started
     environment:
-      NODE_ENV: production
-      PORT: 3017
-      POSTOFFICE_URL: *postofficeUrl
-      SECURITYMANAGER_URL: securitymanager:5010
-      HOTEL_OPS_ASSISTANT_API_SECRET: stage7AuthSecret
-      CLIENT_SECRET: stage7AuthSecret
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
+      PORT: 3017 # Explicitly set port
+    env_file:
+      - .env
     ports:
       - "3017:3017"
     volumes:
       - ./shared/keys:/usr/src/app/shared/keys
     healthcheck:
-      test: ["CMD", "--spider", "-q", "http://localhost:3017/health"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3017/health"]
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 300s
 
   restaurant-ops-assistant-api:
+    profiles:
+      - assistants
+      - restaurant-ops-assistant
     build:
       context: .
       dockerfile: agents/restaurant-ops-assistant-api/Dockerfile
@@ -830,20 +704,15 @@ services:
       securitymanager:
         condition: service_started
     environment:
-      NODE_ENV: production
-      PORT: 3016
-      POSTOFFICE_URL: *postofficeUrl
-      SECURITYMANAGER_URL: securitymanager:5010
-      RESTAURANT_OPS_ASSISTANT_API_SECRET: stage7AuthSecret
-      CLIENT_SECRET: stage7AuthSecret
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
+      PORT: 3016 # Explicitly set port
+    env_file:
+      - .env
     ports:
       - "3016:3016"
     volumes:
       - ./shared/keys:/usr/src/app/shared/keys
     healthcheck:
-      test: ["CMD", "--spider", "-q", "http://localhost:3016/health"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3016/health"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -851,6 +720,9 @@ services:
 
 
   investment-advisor-api:
+    profiles:
+      - assistants
+      - investment-advisor
     build:
       context: .
       dockerfile: agents/investment-advisor-api/Dockerfile
@@ -860,14 +732,9 @@ services:
       securitymanager:
         condition: service_started
     environment:
-      NODE_ENV: production
-      PORT: 3025
-      POSTOFFICE_URL: *postofficeUrl
-      SECURITYMANAGER_URL: securitymanager:5010
-      INVESTMENT_ADVISOR_API_SECRET: stage7AuthSecret
-      CLIENT_SECRET: stage7AuthSecret
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
+      PORT: 3025 # Explicitly set port
+    env_file:
+      - .env
     ports:
       - "3025:3025"
     volumes:
@@ -877,7 +744,11 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
-      start_period: 300s  sports-wager-advisor-api:
+      start_period: 300s
+  sports-wager-advisor-api:
+    profiles:
+      - assistants
+      - sports-wager-advisor
     build:
       context: .
       dockerfile: agents/sports-wager-advisor-api/Dockerfile
@@ -887,14 +758,9 @@ services:
       securitymanager:
         condition: service_started
     environment:
-      NODE_ENV: production
-      PORT: 3018
-      POSTOFFICE_URL: *postofficeUrl
-      SECURITYMANAGER_URL: securitymanager:5010
-      SPORTS_WAGER_ADVISOR_API_SECRET: stage7AuthSecret
-      CLIENT_SECRET: stage7AuthSecret
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
+      PORT: 3018 # Explicitly set port
+    env_file:
+      - .env
     ports:
       - "3018:3018"
     volumes:
@@ -907,6 +773,9 @@ services:
       start_period: 300s
 
   cto-assistant-api:
+    profiles:
+      - assistants
+      - cto-assistant
     build:
       context: .
       dockerfile: agents/cto-assistant-api/Dockerfile
@@ -916,20 +785,42 @@ services:
       securitymanager:
         condition: service_started
     environment:
-      NODE_ENV: production
-      PORT: 3019
-      POSTOFFICE_URL: *postofficeUrl
-      SECURITYMANAGER_URL: securitymanager:5010
-      CTO_ASSISTANT_API_SECRET: stage7AuthSecret
-      CLIENT_SECRET: stage7AuthSecret
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
+      PORT: 3019 # Explicitly set port
+    env_file:
+      - .env
     ports:
       - "3019:3019"
     volumes:
       - ./shared/keys:/usr/src/app/shared/keys
     healthcheck:
       test: ["CMD", "--spider", "-q", "http://localhost:3019/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 300s
+
+  performance-analytics-api:
+    profiles:
+      - assistants
+      - performance-analytics
+    build:
+      context: .
+      dockerfile: agents/performance-analytics-api/Dockerfile
+    depends_on:
+      postoffice:
+        condition: service_healthy
+      securitymanager:
+        condition: service_started
+    environment:
+      PORT: 3020 # Explicitly set port
+    env_file:
+      - .env
+    ports:
+      - "3020:3020"
+    volumes:
+      - ./shared/keys:/usr/src/app/shared/keys
+    healthcheck:
+      test: ["CMD", "--spider", "-q", "http://localhost:3020/health"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -956,19 +847,14 @@ services:
       - "15672:15672" # Management UI
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
-    environment:
-      - RABBITMQ_DEFAULT_USER=stage7
-      - RABBITMQ_DEFAULT_PASS=stage7password
-      - RABBITMQ_DEFAULT_VHOST=/
-      # Increase memory available to RabbitMQ
-      - RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS=-rabbit vm_memory_high_watermark 0.7
+    env_file:
+      - .env
     healthcheck:
-      # Use a more reliable health check that ensures RabbitMQ is fully operational
-      test: ["CMD", "rabbitmq-diagnostics", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 75s  # Increased to allow more time for RabbitMQ to fully initialize
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 15
+      start_period: 120s  # Increased to allow more time for RabbitMQ to fully initialize
     restart: unless-stopped
 
   consul:
@@ -979,6 +865,8 @@ services:
     volumes:
       - consul_data:/consul/data
     command: agent -server -ui -bootstrap-expect=1 -client=0.0.0.0 -rejoin -node=consul-server-1
+    env_file:
+      - .env
     healthcheck:
       test: ["CMD", "consul", "members"]
       interval: 10s
@@ -1000,14 +888,12 @@ services:
     image: chromadb/chroma:latest
     volumes:
       - chromadb_data:/chroma/chroma
-    environment:
-      - IS_PERSISTENT=TRUE
-      - PERSIST_DIRECTORY=/chroma/chroma
-      - ANONYMIZED_TELEMETRY=FALSE
+    env_file:
+      - .env
     ports:
       - "8000:8000"
     healthcheck:
-      test: ["CMD", "--spider", "-q", "http://localhost:8000/api/v2/healthcheck"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8000/api/v2/healthcheck"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -1027,4 +913,3 @@ volumes:
 networks:
   default:
     name: mcs_network
-

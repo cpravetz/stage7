@@ -143,7 +143,7 @@ The ADK is organized in three layers:
                        │ Core Engine Client
 ┌──────────────────────┴──────────────────────────────────────┐
 │              L1: Core Engine Services                       │
-│  (MissionControl, TrafficManager, CapabilitiesManager)      │
+│  (MissionControl, CapabilitiesManager)                      │
 └─────────────────────────────────────────────────────────────┘
 ```
 

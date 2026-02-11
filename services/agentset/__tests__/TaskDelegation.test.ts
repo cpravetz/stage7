@@ -18,7 +18,7 @@ describe('TaskDelegation', () => {
 
   beforeEach(() => {
     mockAgents = new Map<string, Agent>();
-    taskDelegation = new TaskDelegation(mockAgents, 'trafficmanager:5080');
+    taskDelegation = new TaskDelegation(mockAgents);
 
     // Create a mock agent
     mockAgent = new Agent({

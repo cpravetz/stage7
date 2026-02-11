@@ -70,7 +70,9 @@ export interface MCPActionMapping {
     mcpServiceTarget: MCPServiceTarget;
 
     // Defines the inputs this actionVerb expects, using PluginParameter structure
-    inputs: PluginParameter[];
+    inputs: Array<PluginParameter & {
+        in?: 'path' | 'query' | 'header' | 'body'; // Where to place the input
+    }>;
 
     // Defines the outputs this actionVerb produces, using PluginParameter structure
     outputs: PluginParameter[];

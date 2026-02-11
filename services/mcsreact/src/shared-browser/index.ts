@@ -3,6 +3,7 @@ export interface ConversationMessage {
   content: string;
   persistent?: boolean;
   sender: 'user' | 'system' | 'agent';
+  timestamp?: string;
 }
 
 /**
