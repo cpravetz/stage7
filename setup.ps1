@@ -270,7 +270,6 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 Write-Host "Docker images built. ✅"
-Press-Any-Key-To-Continue
 
 # --- 6. Start services ---
 Write-Host ""

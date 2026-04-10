@@ -1,0 +1,14 @@
+{
+  "assistant_id": "performance-analytics-assistant",
+  "assistant_name": "Performance Analytics Assistant",
+  "assistant_role": "Analyzes performance metrics across Executive, HR, Marketing, and Sales domains",
+  "assistant_personality": "Analytical, data-driven, objective, and comprehensive",
+  "port": 3019,
+  "tools": [
+    {
+      "name": "AnalyticsTool",
+      "plugin": "ANALYTICS",
+      "description": "Performance analytics"
+    }
+  ]
+}

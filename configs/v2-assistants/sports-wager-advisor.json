@@ -1,0 +1,94 @@
+{
+  "assistant_id": "sports-wager-advisor",
+  "assistant_name": "Sports Wager Advisor",
+  "assistant_role": "Provides comprehensive sports betting analysis, odds evaluation, risk assessment, and strategic wagering recommendations",
+  "assistant_personality": "Analytical, data-driven, strategic, and responsible",
+  "port": 3020,
+  "tools": [
+    {
+      "name": "BettingRiskAssessmentTool",
+      "plugin": "SPORTS_BETTING",
+      "description": "Betting risk assessment"
+    },
+    {
+      "name": "SportsDataAnalyzer",
+      "plugin": "SPORTS_DATA_ANALYSIS",
+      "description": "Sports data analysis"
+    },
+    {
+      "name": "OddsDataCollector",
+      "plugin": "ODDS_DATA_COLLECTION",
+      "description": "Odds data collection"
+    },
+    {
+      "name": "ValueBettingAnalyzer",
+      "plugin": "VALUE_BETTING_ANALYSIS",
+      "description": "Value betting analysis"
+    },
+    {
+      "name": "OddsComparisonTool",
+      "plugin": "ODDS_COMPARISON",
+      "description": "Odds comparison"
+    },
+    {
+      "name": "BettingPerformanceAnalyzer",
+      "plugin": "BETTING_PERFORMANCE",
+      "description": "Betting performance analysis"
+    },
+    {
+      "name": "BankrollManager",
+      "plugin": "BANKROLL_MANAGEMENT",
+      "description": "Bankroll management"
+    },
+    {
+      "name": "PerformanceOptimizer",
+      "plugin": "PERFORMANCE_OPTIMIZER",
+      "description": "Performance optimization"
+    },
+    {
+      "name": "SportsStatsCollector",
+      "plugin": "SPORTS_STATS_COLLECTION",
+      "description": "Sports statistics collection"
+    },
+    {
+      "name": "PerformanceModelingTool",
+      "plugin": "PERFORMANCE_MODELING",
+      "description": "Performance modeling"
+    },
+    {
+      "name": "PredictionEngine",
+      "plugin": "PREDICTION_ENGINE",
+      "description": "Prediction engine"
+    },
+    {
+      "name": "ResponsibleGamblingTool",
+      "plugin": "RESPONSIBLE_GAMBLING",
+      "description": "Responsible gambling tools"
+    },
+    {
+      "name": "GamblingRiskAnalyzer",
+      "plugin": "GAMBLING_RISK_ANALYSIS",
+      "description": "Gambling risk analysis"
+    },
+    {
+      "name": "ResponsibleGamblingPlanner",
+      "plugin": "RESPONSIBLE_GAMBLING_PLANNER",
+      "description": "Responsible gambling planning"
+    },
+    {
+      "name": "LiveSportsDataCollector",
+      "plugin": "LIVE_SPORTS_DATA",
+      "description": "Live sports data collection"
+    },
+    {
+      "name": "InGameAnalyzer",
+      "plugin": "IN_GAME_ANALYSIS",
+      "description": "In-game analysis"
+    },
+    {
+      "name": "LiveBettingAdvisor",
+      "plugin": "LIVE_BETTING_ADVISOR",
+      "description": "Live betting advice"
+    }
+  ]
+}

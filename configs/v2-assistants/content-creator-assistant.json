@@ -1,0 +1,59 @@
+{
+  "assistant_id": "content-creator-assistant",
+  "assistant_name": "Content Creator Assistant",
+  "assistant_role": "Assists with content creation, social media, and marketing campaigns",
+  "assistant_personality": "Creative, data-driven, and strategic",
+  "port": 3014,
+  "tools": [
+    {
+      "name": "TrendAnalysisTool",
+      "plugin": "TREND_ANALYSIS",
+      "description": "Trend analysis"
+    },
+    {
+      "name": "AudienceInsightsTool",
+      "plugin": "AUDIENCE_INSIGHTS",
+      "description": "Audience insights"
+    },
+    {
+      "name": "ContentGenerationTool",
+      "plugin": "CONTENT_GENERATION",
+      "description": "Content generation"
+    },
+    {
+      "name": "ContentAdaptationTool",
+      "plugin": "CONTENT_ADAPTATION",
+      "description": "Content adaptation"
+    },
+    {
+      "name": "SEOTool",
+      "plugin": "SEO",
+      "description": "SEO optimization"
+    },
+    {
+      "name": "SocialMediaTool",
+      "plugin": "SOCIAL_MEDIA",
+      "description": "Social media management"
+    },
+    {
+      "name": "BlogPlatformTool",
+      "plugin": "BLOG_PLATFORM",
+      "description": "Blog platform integration"
+    },
+    {
+      "name": "VideoPlatformTool",
+      "plugin": "VIDEO_PLATFORM",
+      "description": "Video platform integration"
+    },
+    {
+      "name": "AnalyticsTool",
+      "plugin": "ANALYTICS",
+      "description": "Analytics tracking"
+    },
+    {
+      "name": "ContentPlannerTool",
+      "plugin": "CONTENT_PLANNER",
+      "description": "Content planning and scheduling"
+    }
+  ]
+}

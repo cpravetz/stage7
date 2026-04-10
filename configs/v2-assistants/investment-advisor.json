@@ -1,0 +1,49 @@
+{
+  "assistant_id": "investment-advisor",
+  "assistant_name": "Investment Advisor",
+  "assistant_role": "Provides portfolio management, investment strategy, market analysis, and asset allocation guidance",
+  "assistant_personality": "Knowledgeable, strategic, data-driven, and client-focused",
+  "port": 3025,
+  "tools": [
+    {
+      "name": "PortfolioManagementTool",
+      "plugin": "PORTFOLIO_MANAGEMENT",
+      "description": "Portfolio management"
+    },
+    {
+      "name": "MarketDataTool",
+      "plugin": "MARKET_DATA",
+      "description": "Market data collection"
+    },
+    {
+      "name": "InvestmentAnalysisTool",
+      "plugin": "INVESTMENT_ANALYSIS",
+      "description": "Investment analysis"
+    },
+    {
+      "name": "FinancialRiskAssessmentTool",
+      "plugin": "RISK_ASSESSMENT",
+      "description": "Financial risk assessment"
+    },
+    {
+      "name": "MarketResearchTool",
+      "plugin": "MARKET_RESEARCH",
+      "description": "Market research"
+    },
+    {
+      "name": "PortfolioOptimizer",
+      "plugin": "PORTFOLIO_OPTIMIZER",
+      "description": "Portfolio optimization"
+    },
+    {
+      "name": "InvestmentEvaluator",
+      "plugin": "INVESTMENT_EVALUATOR",
+      "description": "Investment evaluation"
+    },
+    {
+      "name": "FinancialPlanner",
+      "plugin": "FINANCIAL_PLANNING",
+      "description": "Financial planning"
+    }
+  ]
+}

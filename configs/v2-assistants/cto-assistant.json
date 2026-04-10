@@ -1,0 +1,79 @@
+{
+  "assistant_id": "cto-assistant",
+  "assistant_name": "CTO Assistant",
+  "assistant_role": "Provides a unified command center for a CTO to monitor, manage, and strategize across Software Engineering, Security & Compliance, and Cloud Operations",
+  "assistant_personality": "Data-driven, analytical, and proactive. Concise, precise, and capable of synthesizing complex technical and operational data into high-level, actionable insights",
+  "port": 3021,
+  "tools": [
+    {
+      "name": "JiraTool",
+      "plugin": "JIRA",
+      "description": "Issue and project tracking"
+    },
+    {
+      "name": "DatadogTool",
+      "plugin": "DATADOG",
+      "description": "Monitoring and observability"
+    },
+    {
+      "name": "GitHubTool",
+      "plugin": "GITHUB",
+      "description": "Source code management"
+    },
+    {
+      "name": "AWSTool",
+      "plugin": "AWS",
+      "description": "AWS cloud operations"
+    },
+    {
+      "name": "GCPTool",
+      "plugin": "GCP",
+      "description": "GCP cloud operations"
+    },
+    {
+      "name": "AzureTool",
+      "plugin": "AZURE",
+      "description": "Azure cloud operations"
+    },
+    {
+      "name": "PagerDutyTool",
+      "plugin": "PAGERDUTY",
+      "description": "Incident management"
+    },
+    {
+      "name": "KubernetesTool",
+      "plugin": "KUBERNETES_MONITOR",
+      "description": "Kubernetes cluster management"
+    },
+    {
+      "name": "CostOptimizationTool",
+      "plugin": "COST_OPTIMIZATION",
+      "description": "Cloud cost optimization"
+    },
+    {
+      "name": "TeamMetricsTool",
+      "plugin": "TEAM_METRICS",
+      "description": "Engineering team metrics"
+    },
+    {
+      "name": "IaCMonitoringTool",
+      "plugin": "IAC_MONITORING",
+      "description": "Infrastructure as code monitoring"
+    },
+    {
+      "name": "DatabaseOperationsTool",
+      "plugin": "DATABASE_OPERATIONS",
+      "description": "Database operations"
+    },
+    {
+      "name": "ServiceMeshTool",
+      "plugin": "SERVICE_MESH",
+      "description": "Service mesh management"
+    },
+    {
+      "name": "DisasterRecoveryTool",
+      "plugin": "DISASTER_RECOVERY",
+      "description": "Disaster recovery planning"
+    }
+  ]
+}
