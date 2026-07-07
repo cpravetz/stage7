@@ -20,8 +20,10 @@
     "@types/jest": "^30.0.0",
     "@types/jsonwebtoken": "^9.0.7",
     "@types/ws": "^8.18.1",
+    "jest": "^30.4.2",
     "markdownlint-cli": "^0.41.0",
     "rimraf": "^6.1.2",
+    "ts-jest": "^29.4.11",
     "webpack-cli": "^6.0.1"
   },
   "overrides": {

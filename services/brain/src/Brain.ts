@@ -14,6 +14,7 @@ import crypto from 'crypto';
 // Import new model management components
 import { serviceHealthChecker, ServiceHealthChecker } from './utils/ServiceHealthChecker';
 import { modelConfigService, ModelConfigService } from './services/ModelConfigService';
+import { modelDiscoveryService } from './services/ModelDiscoveryService';
 import { ModelConfiguration } from './types/ModelConfig';
 
 dotenv.config();
@@ -48,6 +49,8 @@ export class Brain extends BaseEntity {
     // New components for model management
     private healthChecker: ServiceHealthChecker;
     private configService: ModelConfigService;
+    private discoveryService = modelDiscoveryService;
+    private isDiscoveryRunning = false;
     private loadedModels: ModelConfiguration[] = [];
     private modelTimeoutCounts: Record<string, number> = {};
 
@@ -102,6 +105,7 @@ export class Brain extends BaseEntity {
 
         app.post('/chat', async (req: express.Request, res: express.Response, next: express.NextFunction) => {
             try {
+                this.checkAndTriggerDiscovery();
                 await this.chat(req, res);
             } catch (error) {
                 next(error);
@@ -110,6 +114,7 @@ export class Brain extends BaseEntity {
 
         app.post('/generate', async (req: express.Request, res: express.Response, next: express.NextFunction) => {
             try {
+                this.checkAndTriggerDiscovery();
                 await this.generate(req, res);
             } catch (error) {
                 next(error);
@@ -413,6 +418,37 @@ export class Brain extends BaseEntity {
             console.log('[Brain] SIGTERM received, stopping health checks');
             this.healthChecker.stopAllChecks();
         });
+    }
+
+    /**
+     * Initialize models: hydrate if needed, load configs, validate credentials
+     */
+    private async checkAndTriggerDiscovery(): Promise<void> {
+        if (this.isDiscoveryRunning) return;
+
+        try {
+            const lastDiscovery = await this.configService.getLastDiscoveryTimestamp();
+            const oneDayMs = 24 * 60 * 60 * 1000;
+
+            if (Date.now() - lastDiscovery > oneDayMs) {
+                this.isDiscoveryRunning = true;
+                console.log('[Brain] More than 24h since last model discovery. Triggering background update...');
+
+                // Run in background
+                this.discoveryService.discoverAllModels().then(async () => {
+                    await this.configService.updateLastDiscoveryTimestamp();
+                    // Refresh in-memory models after discovery
+                    this.loadedModels = await this.configService.getActiveModels();
+                    await this.modelManager.registerModelsFromConfig(this.loadedModels);
+                }).catch(err => {
+                    console.error('[Brain] Background model discovery failed:', err);
+                }).finally(() => {
+                    this.isDiscoveryRunning = false;
+                });
+            }
+        } catch (error) {
+            console.error('[Brain] Error checking for model discovery:', error);
+        }
     }
 
     /**
