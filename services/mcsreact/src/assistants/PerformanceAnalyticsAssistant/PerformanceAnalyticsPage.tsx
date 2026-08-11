@@ -143,7 +143,7 @@ const PerformanceAnalyticsPageView: React.FC<AssistantRenderProps> = ({
             <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>Top Items</Typography>
             <Grid container spacing={1}>
               {domainData.items.slice(0, 3).map((item: any) => (
-                <Grid item xs={12} key={item.id}>
+                <Grid size={{xs: 12}} key={item.id}>
                   <Paper sx={{ p: 1 }}>
                     <Typography variant="body2">{item.name}</Typography>
                   </Paper>
@@ -155,7 +155,7 @@ const PerformanceAnalyticsPageView: React.FC<AssistantRenderProps> = ({
             <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>Key Metrics</Typography>
             <Grid container spacing={1}>
               {domainData.metrics.slice(0, 3).map((metric: any) => (
-                <Grid item xs={12} key={metric.id}>
+                <Grid size={{xs: 12}} key={metric.id}>
                   <Paper sx={{ p: 1 }}>
                     <Typography variant="body2">{metric.name}</Typography>
                     <Typography variant="caption">{metric.currentValue}/{metric.targetValue}</Typography>
@@ -168,7 +168,7 @@ const PerformanceAnalyticsPageView: React.FC<AssistantRenderProps> = ({
             <Typography variant="subtitle2" sx={{ mt: 2, mb: 1 }}>Programs</Typography>
             <Grid container spacing={1}>
               {domainData.programs.slice(0, 3).map((program: any) => (
-                <Grid item xs={12} key={program.id}>
+                <Grid size={{xs: 12}} key={program.id}>
                   <Paper sx={{ p: 1 }}>
                     <Typography variant="body2">{program.name}</Typography>
                     <Typography variant="caption">{program.status}</Typography>

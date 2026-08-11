@@ -41,7 +41,7 @@ const BettingStrategyCenter: React.FC<BettingStrategyCenterProps> = ({
       </Typography>
       <Paper elevation={2} sx={{ p: 2 }}>
         <Grid container spacing={3}>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Create New Strategy
             </Typography>
@@ -70,7 +70,7 @@ const BettingStrategyCenter: React.FC<BettingStrategyCenterProps> = ({
               Create Strategy
             </Button>
           </Grid>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Available Strategies ({strategies.length})
             </Typography>
@@ -128,5 +128,3 @@ const BettingStrategyCenter: React.FC<BettingStrategyCenterProps> = ({
 };
 
 export default BettingStrategyCenter;
-
-

@@ -56,7 +56,7 @@ const AppointmentCoordinationHub: React.FC<AppointmentCoordinationHubProps> = ({
       </Typography>
       <Paper elevation={2} sx={{ p: 2 }}>
         <Grid container spacing={3}>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Schedule New Appointment
             </Typography>
@@ -107,7 +107,7 @@ const AppointmentCoordinationHub: React.FC<AppointmentCoordinationHubProps> = ({
               Schedule Appointment
             </Button>
           </Grid>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Upcoming Appointments
             </Typography>
@@ -143,5 +143,3 @@ const AppointmentCoordinationHub: React.FC<AppointmentCoordinationHubProps> = ({
 };
 
 export default AppointmentCoordinationHub;
-
-

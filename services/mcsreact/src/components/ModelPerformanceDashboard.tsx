@@ -775,7 +775,7 @@ const ModelPerformanceDashboard: React.FC = () => {
           <TabPanel value={tabValue} index={1}>
             <Box sx={{ mb: 3 }}>
               <Grid container spacing={2}>
-                <Grid {...({ xs: 12, sm: 6, item: true } as any)}>
+                <Grid size={{sm: 6}}>
                   <FormControl fullWidth>
                     <InputLabel id="conversation-type-label">Conversation Type</InputLabel>
                     <Select
@@ -795,7 +795,7 @@ const ModelPerformanceDashboard: React.FC = () => {
                     </Select>
                   </FormControl>
                 </Grid>
-                <Grid {...({ xs: 12, sm: 6, item: true } as any)}>
+                <Grid size={{sm: 6}}>
                   <FormControl fullWidth>
                     <InputLabel id="ranking-metric-label">Ranking Metric</InputLabel>
                     <Select
@@ -827,7 +827,7 @@ const ModelPerformanceDashboard: React.FC = () => {
                   {rankings && rankings.length > 0 ? (
                     rankings.map((ranking, index) => (
                       <TableRow
-                        key={ranking.modelName || `model-${index}`}
+                        key={ranking.modelName}`}
                         sx={{ '&:last-child td, &:last-child th': { border: 0 } }}
                       >
                         <TableCell component="th" scope="row">
@@ -849,7 +849,7 @@ const ModelPerformanceDashboard: React.FC = () => {
 
           <TabPanel value={tabValue} index={2}>
             <Grid container spacing={3}>
-              <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+              <Grid size={{md: 6}}>
                 <Card>
                   <CardHeader title="Total Usage by Model" />
                   <Divider />
@@ -881,7 +881,7 @@ const ModelPerformanceDashboard: React.FC = () => {
                   </CardContent>
                 </Card>
               </Grid>
-              <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+              <Grid size={{md: 6}}>
                 <Card>
                   <CardHeader title="Feedback Scores" />
                   <Divider />
@@ -915,7 +915,7 @@ const ModelPerformanceDashboard: React.FC = () => {
                   </CardContent>
                 </Card>
               </Grid>
-              <Grid {...({ xs: 12, item: true } as any)}>
+              <Grid>
                 <Card>
                   <CardHeader title="Performance Metrics" />
                   <Divider />
@@ -949,7 +949,7 @@ const ModelPerformanceDashboard: React.FC = () => {
                   </CardContent>
                 </Card>
               </Grid>
-              <Grid {...({ xs: 12, item: true } as any)}>
+              <Grid>
                 <Card>
                   <CardHeader title="Usage Summary" />
                   <Divider />
@@ -1098,7 +1098,5 @@ const ModelPerformanceDashboard: React.FC = () => {
 };
 
 export default ModelPerformanceDashboard;
-
-
 
 

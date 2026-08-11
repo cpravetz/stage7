@@ -42,7 +42,7 @@ const Candidate360View = () => {
       </Typography>
       <Paper elevation={2} sx={{ p: 2 }}>
         <Grid container spacing={3}>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Candidate Details
             </Typography>
@@ -61,7 +61,7 @@ const Candidate360View = () => {
               </ListItem>
             </List>
           </Grid>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Application History
             </Typography>
@@ -102,5 +102,3 @@ const Candidate360View = () => {
 };
 
 export default Candidate360View;
-
-

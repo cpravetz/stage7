@@ -64,7 +64,7 @@ const DialogueWritingWorkshop: React.FC<DialogueWritingWorkshopProps> = ({
       </Typography>
       <Paper elevation={2} sx={{ p: 2 }}>
         <Grid container spacing={3}>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               {editingId ? 'Edit Dialogue' : 'Add New Dialogue'}
             </Typography>
@@ -131,7 +131,7 @@ const DialogueWritingWorkshop: React.FC<DialogueWritingWorkshopProps> = ({
               </Button>
             )}
           </Grid>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Script Preview ({dialogues.length})
             </Typography>
@@ -175,5 +175,3 @@ const DialogueWritingWorkshop: React.FC<DialogueWritingWorkshopProps> = ({
 };
 
 export default DialogueWritingWorkshop;
-
-

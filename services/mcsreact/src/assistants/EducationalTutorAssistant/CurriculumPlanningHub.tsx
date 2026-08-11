@@ -104,7 +104,7 @@ const CurriculumPlanningHub: React.FC<CurriculumPlanningHubProps> = ({ conversat
       </Typography>
       <Paper elevation={2} sx={{ p: 2 }}>
         <Grid container spacing={3}>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Create New Module
             </Typography>
@@ -148,7 +148,7 @@ const CurriculumPlanningHub: React.FC<CurriculumPlanningHubProps> = ({ conversat
               Add Topic
             </Button>
           </Grid>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Current Curriculum
             </Typography>
@@ -188,5 +188,3 @@ const CurriculumPlanningHub: React.FC<CurriculumPlanningHubProps> = ({ conversat
 };
 
 export default CurriculumPlanningHub;
-
-

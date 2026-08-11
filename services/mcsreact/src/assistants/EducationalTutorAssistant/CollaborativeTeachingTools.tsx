@@ -138,7 +138,7 @@ const CollaborativeTeachingTools: React.FC<CollaborativeTeachingToolsProps> = ({
       </Typography>
       <Paper elevation={2} sx={{ p: 2 }}>
         <Grid container spacing={3}>
-          <Grid {...({ xs: 12, md: 4, item: true } as any)}>
+          <Grid size={{md: 4}}>
             <Button
               variant="contained"
               fullWidth
@@ -149,7 +149,7 @@ const CollaborativeTeachingTools: React.FC<CollaborativeTeachingToolsProps> = ({
               Launch Shared Whiteboard
             </Button>
           </Grid>
-          <Grid {...({ xs: 12, md: 4, item: true } as any)}>
+          <Grid size={{md: 4}}>
             <Button
               variant="contained"
               fullWidth
@@ -160,7 +160,7 @@ const CollaborativeTeachingTools: React.FC<CollaborativeTeachingToolsProps> = ({
               Open Discussion Forum
             </Button>
           </Grid>
-          <Grid {...({ xs: 12, md: 4, item: true } as any)}>
+          <Grid size={{md: 4}}>
             <Button
               variant="contained"
               fullWidth
@@ -196,5 +196,3 @@ const CollaborativeTeachingTools: React.FC<CollaborativeTeachingToolsProps> = ({
 };
 
 export default CollaborativeTeachingTools;
-
-

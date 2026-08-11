@@ -330,7 +330,7 @@ const PluginManager: React.FC<PluginManagerProps> = ({ onPluginSelect }) => {
               onChange={handleRepositoryChange}
             >
               {repoOptions.map(opt => (
-                <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
+                <MenuItem key={{opt.value} value={opt.value}}>{opt.label}</MenuItem>
               ))}
             </Select>
           </FormControl>
@@ -388,7 +388,7 @@ const PluginManager: React.FC<PluginManagerProps> = ({ onPluginSelect }) => {
                 <Typography variant="h6" gutterBottom>Tool Sources</Typography>
                 <Grid container spacing={2}>
                     {toolSources.map((source) => (
-                        <Grid {...({ xs: 12, sm: 6, md: 4,  key: source.id, item: true } as any)}>
+                        <Grid size={{sm: 6, md: 4}} key={}source.id>
                             <Card>
                                 <CardContent>
                                     <Typography variant="h6">{source.id}</Typography>
@@ -407,7 +407,7 @@ const PluginManager: React.FC<PluginManagerProps> = ({ onPluginSelect }) => {
                 <Typography variant="h6" gutterBottom>Airlock - Pending Tools</Typography>
                 <Grid container spacing={2}>
                     {pendingTools.map((tool) => (
-                        <Grid {...({ xs: 12, sm: 6, md: 4,  key: tool.id, item: true } as any)}>
+                        <Grid size={{sm: 6, md: 4}} key={tool.id}>
                             <Card>
                                 <CardContent>
                                     <Typography variant="h6">{tool.id}</Typography>
@@ -430,7 +430,7 @@ const PluginManager: React.FC<PluginManagerProps> = ({ onPluginSelect }) => {
         ) : (
           <Grid container spacing={2}>
             {plugins.map((plugin) => (
-              <Grid {...({ xs: 12, sm: 6, md: 4,  key: plugin.id, item: true } as any)}>
+              <Grid size={{sm: 6, md: 4}} key={plugin.id}>
                 <Card>
                   <CardContent>
                     <Typography variant="h6" component="div">

@@ -56,7 +56,7 @@ const ChordProgressionHub: React.FC<ChordProgressionHubProps> = ({
       </Typography>
       <Paper elevation={2} sx={{ p: 2 }}>
         <Grid container spacing={3}>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Create New Progression
             </Typography>
@@ -114,7 +114,7 @@ const ChordProgressionHub: React.FC<ChordProgressionHubProps> = ({
               Create Progression
             </Button>
           </Grid>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Chord Progressions ({progressions.length})
             </Typography>
@@ -163,5 +163,3 @@ const ChordProgressionHub: React.FC<ChordProgressionHubProps> = ({
 };
 
 export default ChordProgressionHub;
-
-

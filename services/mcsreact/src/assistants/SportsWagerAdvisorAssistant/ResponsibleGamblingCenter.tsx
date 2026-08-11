@@ -28,7 +28,7 @@ const ResponsibleGamblingCenter: React.FC<ResponsibleGamblingCenterProps> = ({
       </Typography>
       <Paper elevation={2} sx={{ p: 2 }}>
         <Grid container spacing={3}>
-          <Grid xs={12} item>
+          <Grid size={{xs: 12}} item>
             <Typography variant="h6" gutterBottom>
               Set Your Limits
             </Typography>
@@ -84,7 +84,7 @@ const ResponsibleGamblingCenter: React.FC<ResponsibleGamblingCenterProps> = ({
               Save Settings
             </Button>
           </Grid>
-          <Grid xs={12} item>
+          <Grid size={{xs: 12}} item>
             <Typography variant="h6" gutterBottom>
               Need Help?
             </Typography>

@@ -13,7 +13,7 @@ const MetricDisplay: React.FC<MetricDisplayProps> = ({ title, value, trend }) =>
   const trendColor = trend > 0 ? 'error.main' : trend < 0 ? 'success.main' : 'text.secondary';
 
   return (
-    <Grid item xs={6} sm={3}>
+    <Grid size={{xs: 6, sm: 3}} >
       <Tooltip title={`Trend: ${trend > 0 ? '+' : ''}${trend * 100}%`} arrow>
         <Box sx={{ textAlign: 'center' }}>
           <Typography variant="caption" color="text.secondary">{title}</Typography>

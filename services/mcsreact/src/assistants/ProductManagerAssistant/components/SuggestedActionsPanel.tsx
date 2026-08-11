@@ -44,7 +44,7 @@ const SuggestedActionsPanel: React.FC<SuggestedActionsPanelProps> = ({
         ) : (
           <List dense>
             {actions.map((action, index) => (
-              <React.Fragment key={action.id || index}>
+              <React.Fragment key={action.id}>
                 <ListItem 
                   secondaryAction={
                     <Button 

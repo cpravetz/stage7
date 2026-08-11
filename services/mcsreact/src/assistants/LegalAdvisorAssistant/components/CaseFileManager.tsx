@@ -35,7 +35,7 @@ const CaseFileManager: React.FC<CaseFileManagerProps> = ({
           </Button>
         </Box>
         <Grid container spacing={3}>
-          <Grid {...({ item: true, xs: 12 } as any)}>
+          <Grid>
             <Typography variant="h6" gutterBottom>
               My Case Files
             </Typography>
@@ -87,5 +87,4 @@ const CaseFileManager: React.FC<CaseFileManagerProps> = ({
 };
 
 export default CaseFileManager;
-
 

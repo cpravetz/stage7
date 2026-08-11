@@ -19,7 +19,7 @@ const InvestmentAnalysisDashboard = () => {
       </Typography>
       <Paper elevation={2} sx={{ p: 2 }}>
         <Grid container spacing={3}>
-          <Grid {...({ xs: 12, item: true } as any)}>
+          <Grid>
             <Typography variant="h6" gutterBottom>
               Portfolio Performance vs. Market Index
             </Typography>
@@ -42,5 +42,4 @@ const InvestmentAnalysisDashboard = () => {
 };
 
 export default InvestmentAnalysisDashboard;
-
 

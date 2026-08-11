@@ -2,6 +2,7 @@
 """
 Scenario Analyzer Plugin - Scenario modeling and simulation
 """
+import sys
 import json
 import logging
 from datetime import datetime
@@ -465,25 +466,34 @@ def execute_action(action: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         return {"error": f"Action '{action}' not found", "status": "failed"}
 
     return actions[action]()
-            "result": {{"message": "Plugin executed successfully"}},
-            "resultDescription": f"Result of {action} operation"
-        }}]
 
+def execute_plugin(inputs_dict: Dict[str, Any]) -> List[Dict[str, Any]]:
+    try:
+        action = inputs_dict.get("action", "")
+        parameters = inputs_dict.get("parameters", {})
+        result = execute_action(action, parameters)
+        return [{
+            "success": True,
+            "name": action,
+            "resultType": "result",
+            "result": result,
+            "resultDescription": f"Result of {action} operation"
+        }]
     except Exception as e:
         logger.error(f"Error in execute_plugin: {e}")
-        return [{{
+        return [{
             "success": False,
             "name": "error",
             "resultType": "error",
             "result": str(e),
             "error": str(e)
-        }}]
+        }]
 
 def parse_inputs(inputs_str):
     """Parse and normalize the plugin stdin JSON payload into a dict."""
     try:
         payload = json.loads(inputs_str)
-        inputs_dict = {{}}
+        inputs_dict = {}
 
         if isinstance(payload, dict):
             if payload.get('_type') == 'Map' and isinstance(payload.get('entries'), list):
@@ -505,7 +515,7 @@ def parse_inputs(inputs_str):
         return inputs_dict
 
     except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse input JSON: {{e}}")
+        logger.error(f"Failed to parse input JSON: {e}")
         raise
 
 def main():
@@ -513,13 +523,13 @@ def main():
     try:
         input_data = sys.stdin.read().strip()
         if not input_data:
-            result = [{{
+            result = [{
                 "success": False,
                 "name": "error",
                 "resultType": "error",
                 "result": "No input data received",
                 "error": "No input data received"
-            }}]
+            }]
         else:
             inputs_dict = parse_inputs(input_data)
             result = execute_plugin(inputs_dict)
@@ -528,13 +538,13 @@ def main():
 
     except Exception as e:
         logger.error(f"Plugin execution failed: {str(e)}")
-        result = [{{
+        result = [{
             "success": False,
             "name": "error",
             "resultType": "error",
             "result": str(e),
             "error": str(e)
-        }}]
+        }]
         print(json.dumps(result))
 
 if __name__ == "__main__":

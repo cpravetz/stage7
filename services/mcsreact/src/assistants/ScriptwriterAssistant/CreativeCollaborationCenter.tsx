@@ -60,7 +60,7 @@ const CreativeCollaborationCenter: React.FC<CreativeCollaborationCenterProps> = 
       </Alert>
 
       <Grid container spacing={3}>
-        <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+        <Grid size={{md: 6}}>
           <Paper elevation={2} sx={{ p: 2 }}>
             <Typography variant="h6" gutterBottom>
               Share Feedback
@@ -85,7 +85,7 @@ const CreativeCollaborationCenter: React.FC<CreativeCollaborationCenterProps> = 
           </Paper>
         </Grid>
 
-        <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+        <Grid size={{md: 6}}>
           <Paper elevation={2} sx={{ p: 2 }}>
             <Typography variant="h6" gutterBottom>
               Request Collaboration
@@ -110,7 +110,7 @@ const CreativeCollaborationCenter: React.FC<CreativeCollaborationCenterProps> = 
           </Paper>
         </Grid>
 
-        <Grid {...({ xs: 12, item: true } as any)}>
+        <Grid>
           <Paper elevation={2} sx={{ p: 2 }}>
             <Typography variant="h6" gutterBottom>
               Suggest Improvement
@@ -140,5 +140,3 @@ const CreativeCollaborationCenter: React.FC<CreativeCollaborationCenterProps> = 
 };
 
 export default CreativeCollaborationCenter;
-
-

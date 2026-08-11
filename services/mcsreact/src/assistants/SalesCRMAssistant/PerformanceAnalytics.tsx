@@ -34,7 +34,7 @@ const PerformanceAnalytics: React.FC<PerformanceAnalyticsProps> = ({
       ) : (
         <Paper elevation={2} sx={{ p: 2 }}>
           <Grid container spacing={3}>
-            <Grid item xs={12}>
+            <Grid size={{xs: 12}} >
               <Typography variant="h6" gutterBottom>
                 Salesperson Performance vs. Quota
               </Typography>
@@ -59,13 +59,13 @@ const PerformanceAnalytics: React.FC<PerformanceAnalyticsProps> = ({
               </ResponsiveContainer>
             </Grid>
             
-            <Grid item xs={12}>
+            <Grid size={{xs: 12}} >
               <Typography variant="h6" gutterBottom>
                 Performance Metrics
               </Typography>
               <Grid container spacing={2}>
                 {metrics.map((metric, index) => (
-                  <Grid item xs={12} sm={6} md={4} key={index}>
+                  <Grid size={{xs: 12, sm: 6, md: 4}} key={index}>
                     <Paper elevation={1} sx={{ p: 2 }}>
                       <Typography variant="subtitle1">Salesperson {metric.salespersonId}</Typography>
                       <Typography variant="body2" color="text.secondary">

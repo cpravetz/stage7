@@ -72,7 +72,7 @@ const RiskAssessmentTool: React.FC<RiskAssessmentToolProps> = ({ risks, sendMess
       {/* Filters and Search */}
       <Card elevation={3} sx={{ mb: 3, p: 2 }}>
         <Grid container spacing={2} alignItems="center">
-          <Grid item xs={12} sm={3}>
+          <Grid size={{xs: 12, sm: 3}} >
             <TextField
               fullWidth
               label="Search Risks"
@@ -84,7 +84,7 @@ const RiskAssessmentTool: React.FC<RiskAssessmentToolProps> = ({ risks, sendMess
             />
           </Grid>
 
-          <Grid item xs={12} sm={3}>
+          <Grid size={{xs: 12, sm: 3}} >
             <FormControl fullWidth size="small">
               <InputLabel>Status</InputLabel>
               <Select
@@ -101,7 +101,7 @@ const RiskAssessmentTool: React.FC<RiskAssessmentToolProps> = ({ risks, sendMess
             </FormControl>
           </Grid>
 
-          <Grid item xs={12} sm={2}>
+          <Grid size={{xs: 12, sm: 2}} >
             <FormControl fullWidth size="small">
               <InputLabel>Likelihood</InputLabel>
               <Select
@@ -117,7 +117,7 @@ const RiskAssessmentTool: React.FC<RiskAssessmentToolProps> = ({ risks, sendMess
             </FormControl>
           </Grid>
 
-          <Grid item xs={12} sm={2}>
+          <Grid size={{xs: 12, sm: 2}} >
             <FormControl fullWidth size="small">
               <InputLabel>Impact</InputLabel>
               <Select
@@ -133,7 +133,7 @@ const RiskAssessmentTool: React.FC<RiskAssessmentToolProps> = ({ risks, sendMess
             </FormControl>
           </Grid>
 
-          <Grid item xs={12} sm={2}>
+          <Grid size={{xs: 12, sm: 2}} >
             <Button 
               fullWidth
               variant="contained"
@@ -150,7 +150,7 @@ const RiskAssessmentTool: React.FC<RiskAssessmentToolProps> = ({ risks, sendMess
 
       {/* Summary Cards */}
       <Grid container spacing={2} sx={{ mb: 3 }}>
-        <Grid item xs={6} sm={3}>
+        <Grid size={{xs: 6, sm: 3}} >
           <Card elevation={3}>
             <CardContent>
               <Typography variant="subtitle2" color="textSecondary" gutterBottom>
@@ -163,7 +163,7 @@ const RiskAssessmentTool: React.FC<RiskAssessmentToolProps> = ({ risks, sendMess
           </Card>
         </Grid>
 
-        <Grid item xs={6} sm={3}>
+        <Grid size={{xs: 6, sm: 3}} >
           <Card elevation={3}>
             <CardContent>
               <Typography variant="subtitle2" color="textSecondary" gutterBottom>
@@ -176,7 +176,7 @@ const RiskAssessmentTool: React.FC<RiskAssessmentToolProps> = ({ risks, sendMess
           </Card>
         </Grid>
 
-        <Grid item xs={6} sm={3}>
+        <Grid size={{xs: 6, sm: 3}} >
           <Card elevation={3}>
             <CardContent>
               <Typography variant="subtitle2" color="textSecondary" gutterBottom>
@@ -189,7 +189,7 @@ const RiskAssessmentTool: React.FC<RiskAssessmentToolProps> = ({ risks, sendMess
           </Card>
         </Grid>
 
-        <Grid item xs={6} sm={3}>
+        <Grid size={{xs: 6, sm: 3}} >
           <Card elevation={3}>
             <CardContent>
               <Typography variant="subtitle2" color="textSecondary" gutterBottom>
@@ -347,30 +347,30 @@ const RiskAssessmentTool: React.FC<RiskAssessmentToolProps> = ({ risks, sendMess
                   </Typography>
                   <Paper elevation={1} sx={{ p: 2, mb: 2, textAlign: 'center' }}>
                     <Grid container spacing={1} justifyContent="center">
-                      <Grid item xs={4}>
+                      <Grid size={{xs: 4}} >
                         <Typography variant="caption" fontWeight="bold">Impact →</Typography>
                       </Grid>
-                      <Grid item xs={2}><Typography variant="caption">Low</Typography></Grid>
-                      <Grid item xs={2}><Typography variant="caption">Medium</Typography></Grid>
-                      <Grid item xs={2}><Typography variant="caption">High</Typography></Grid>
+                      <Grid size={{xs: 2}} ><Typography variant="caption">Low</Typography></Grid>
+                      <Grid size={{xs: 2}} ><Typography variant="caption">Medium</Typography></Grid>
+                      <Grid size={{xs: 2}} ><Typography variant="caption">High</Typography></Grid>
                     </Grid>
                     <Grid container spacing={1} justifyContent="center" sx={{ mt: 1 }}>
-                      <Grid item xs={4}><Typography variant="caption">High</Typography></Grid>
-                      <Grid item xs={2}><Paper sx={{ p: 1, bgcolor: 'warning.light' }}>6</Paper></Grid>
-                      <Grid item xs={2}><Paper sx={{ p: 1, bgcolor: 'error.light' }}>9</Paper></Grid>
-                      <Grid item xs={2}><Paper sx={{ p: 1, bgcolor: 'error.main', color: 'white' }}>9</Paper></Grid>
+                      <Grid size={{xs: 4}} ><Typography variant="caption">High</Typography></Grid>
+                      <Grid size={{xs: 2}} ><Paper sx={{ p: 1, bgcolor: 'warning.light' }}>6</Paper></Grid>
+                      <Grid size={{xs: 2}} ><Paper sx={{ p: 1, bgcolor: 'error.light' }}>9</Paper></Grid>
+                      <Grid size={{xs: 2}} ><Paper sx={{ p: 1, bgcolor: 'error.main', color: 'white' }}>9</Paper></Grid>
                     </Grid>
                     <Grid container spacing={1} justifyContent="center">
-                      <Grid item xs={4}><Typography variant="caption">Medium</Typography></Grid>
-                      <Grid item xs={2}><Paper sx={{ p: 1, bgcolor: 'success.light' }}>2</Paper></Grid>
-                      <Grid item xs={2}><Paper sx={{ p: 1, bgcolor: 'warning.light' }}>4</Paper></Grid>
-                      <Grid item xs={2}><Paper sx={{ p: 1, bgcolor: 'error.light' }}>6</Paper></Grid>
+                      <Grid size={{xs: 4}} ><Typography variant="caption">Medium</Typography></Grid>
+                      <Grid size={{xs: 2}} ><Paper sx={{ p: 1, bgcolor: 'success.light' }}>2</Paper></Grid>
+                      <Grid size={{xs: 2}} ><Paper sx={{ p: 1, bgcolor: 'warning.light' }}>4</Paper></Grid>
+                      <Grid size={{xs: 2}} ><Paper sx={{ p: 1, bgcolor: 'error.light' }}>6</Paper></Grid>
                     </Grid>
                     <Grid container spacing={1} justifyContent="center">
-                      <Grid item xs={4}><Typography variant="caption">Low</Typography></Grid>
-                      <Grid item xs={2}><Paper sx={{ p: 1, bgcolor: 'success.light' }}>1</Paper></Grid>
-                      <Grid item xs={2}><Paper sx={{ p: 1, bgcolor: 'success.light' }}>2</Paper></Grid>
-                      <Grid item xs={2}><Paper sx={{ p: 1, bgcolor: 'warning.light' }}>3</Paper></Grid>
+                      <Grid size={{xs: 4}} ><Typography variant="caption">Low</Typography></Grid>
+                      <Grid size={{xs: 2}} ><Paper sx={{ p: 1, bgcolor: 'success.light' }}>1</Paper></Grid>
+                      <Grid size={{xs: 2}} ><Paper sx={{ p: 1, bgcolor: 'success.light' }}>2</Paper></Grid>
+                      <Grid size={{xs: 2}} ><Paper sx={{ p: 1, bgcolor: 'warning.light' }}>3</Paper></Grid>
                     </Grid>
                     <Typography variant="caption" color="textSecondary" sx={{ mt: 1, display: 'block' }}>
                       ↑ Likelihood
@@ -451,7 +451,7 @@ const RiskAssessmentTool: React.FC<RiskAssessmentToolProps> = ({ risks, sendMess
           Quick Actions
         </Typography>
         <Grid container spacing={1}>
-          <Grid item>
+          <Grid>
             <Button 
               variant="contained"
               color="primary"
@@ -462,7 +462,7 @@ const RiskAssessmentTool: React.FC<RiskAssessmentToolProps> = ({ risks, sendMess
               Full Assessment
             </Button>
           </Grid>
-          <Grid item>
+          <Grid>
             <Button 
               variant="outlined"
               color="secondary"
@@ -473,7 +473,7 @@ const RiskAssessmentTool: React.FC<RiskAssessmentToolProps> = ({ risks, sendMess
               Prioritize Risks
             </Button>
           </Grid>
-          <Grid item>
+          <Grid>
             <Button 
               variant="outlined"
               color="success"

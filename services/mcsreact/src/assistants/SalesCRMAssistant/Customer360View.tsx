@@ -73,7 +73,7 @@ const Customer360View: React.FC<Customer360ViewProps> = ({
       
       <Paper elevation={2} sx={{ p: 2 }}>
         <Grid container spacing={3}>
-          <Grid item xs={12} md={6}>
+          <Grid size={{xs: 12, md: 6}} >
             <Typography variant="h6" gutterBottom>
               Customer Details
             </Typography>
@@ -98,7 +98,7 @@ const Customer360View: React.FC<Customer360ViewProps> = ({
               </ListItem>
             </List>
           </Grid>
-          <Grid item xs={12} md={6}>
+          <Grid size={{xs: 12, md: 6}} >
             <Typography variant="h6" gutterBottom>
               Recent Activity
             </Typography>

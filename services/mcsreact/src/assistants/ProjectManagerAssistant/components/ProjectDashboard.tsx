@@ -40,7 +40,7 @@ const ProjectDashboard: React.FC<ProjectDashboardProps> = ({ projects, sendMessa
 
       {/* Summary Cards */}
       <Grid container spacing={2} sx={{ mb: 3 }}>
-        <Grid item xs={12} sm={6}>
+        <Grid size={{xs: 12, sm: 6}} >
           <Card elevation={3}>
             <CardContent>
               <Typography variant="subtitle2" color="textSecondary" gutterBottom>
@@ -61,7 +61,7 @@ const ProjectDashboard: React.FC<ProjectDashboardProps> = ({ projects, sendMessa
           </Card>
         </Grid>
 
-        <Grid item xs={12} sm={6}>
+        <Grid size={{xs: 12, sm: 6}} >
           <Card elevation={3}>
             <CardContent>
               <Typography variant="subtitle2" color="textSecondary" gutterBottom>
@@ -168,7 +168,7 @@ const ProjectDashboard: React.FC<ProjectDashboardProps> = ({ projects, sendMessa
           Quick Actions
         </Typography>
         <Grid container spacing={1}>
-          <Grid item>
+          <Grid>
             <Button 
               variant="contained"
               color="primary"
@@ -178,7 +178,7 @@ const ProjectDashboard: React.FC<ProjectDashboardProps> = ({ projects, sendMessa
               Create Project
             </Button>
           </Grid>
-          <Grid item>
+          <Grid>
             <Button 
               variant="outlined"
               color="primary"
@@ -188,7 +188,7 @@ const ProjectDashboard: React.FC<ProjectDashboardProps> = ({ projects, sendMessa
               Generate Report
             </Button>
           </Grid>
-          <Grid item>
+          <Grid>
             <Button 
               variant="outlined"
               color="secondary"

@@ -65,7 +65,7 @@ const ROIAnalysisView: React.FC<ROIAnalysisViewProps> = ({
       </Box>
       <Paper elevation={2} sx={{ p: 2 }}>
         <Grid container spacing={3}>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Campaign ROI Overview
             </Typography>
@@ -90,7 +90,7 @@ const ROIAnalysisView: React.FC<ROIAnalysisViewProps> = ({
               </BarChart>
             </ResponsiveContainer>
           </Grid>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Key Metrics
             </Typography>
@@ -112,5 +112,3 @@ const ROIAnalysisView: React.FC<ROIAnalysisViewProps> = ({
 };
 
 export default ROIAnalysisView;
-
-

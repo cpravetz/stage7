@@ -44,7 +44,7 @@ const CareerPlanningStudio = () => {
       </Typography>
       <Paper elevation={2} sx={{ p: 2 }}>
         <Grid container spacing={3}>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Define New Career Goal
             </Typography>
@@ -95,7 +95,7 @@ const CareerPlanningStudio = () => {
               Add Step
             </Button>
           </Grid>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Your Career Goals
             </Typography>
@@ -136,5 +136,3 @@ const CareerPlanningStudio = () => {
 
 
 export default CareerPlanningStudio;
-
-

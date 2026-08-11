@@ -86,14 +86,14 @@ const PlotStructureHub: React.FC<PlotStructureHubProps> = ({
 
       <Grid container spacing={2}>
         {[1, 2, 3].map((actNumber) => (
-          <Grid {...({ xs: 12, md: 4, key: `act-${actNumber}`, item: true } as any)}>
+          <Grid size={{md: 4}} key={`act}`}>
             <Paper elevation={1} sx={{ p: 2 }}>
               <Typography variant="h6" gutterBottom>Act {actNumber}</Typography>
               <Divider sx={{ mb: 2 }} />
               <List sx={{ maxHeight: 400, overflowY: 'auto' }}>
                 {plotPointsByAct[actNumber]?.map((pp) => (
                   <ListItem
-                    key={pp.id}
+                    key={{pp.id}}
                     divider
                     secondaryAction={
                       <IconButton
@@ -121,5 +121,3 @@ const PlotStructureHub: React.FC<PlotStructureHubProps> = ({
 };
 
 export default PlotStructureHub;
-
-

@@ -39,7 +39,7 @@ const ComplianceChecking: React.FC<ComplianceCheckingProps> = ({
       </Typography>
       <Paper elevation={2} sx={{ p: 2 }}>
         <Grid container spacing={3}>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Document for Compliance
             </Typography>
@@ -55,7 +55,7 @@ const ComplianceChecking: React.FC<ComplianceCheckingProps> = ({
               Check Compliance
             </Button>
           </Grid>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Compliance Report
             </Typography>
@@ -87,5 +87,3 @@ const ComplianceChecking: React.FC<ComplianceCheckingProps> = ({
 };
 
 export default ComplianceChecking;
-
-

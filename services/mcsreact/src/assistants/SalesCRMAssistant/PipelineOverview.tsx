@@ -84,7 +84,7 @@ const PipelineOverview: React.FC<PipelineOverviewProps> = ({
       ) : (
         <Grid container spacing={3}>
           {Object.entries(dealsByStage).map(([stage, deals]) => (
-            <Grid item xs={12} sm={6} md={4} key={stage}>
+            <Grid size={{xs: 12, sm: 6, md: 4}} key={stage}>
               <Paper elevation={2} sx={{ p: 2, height: '100%' }}>
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                   <Typography variant="h6" gutterBottom>

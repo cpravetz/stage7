@@ -70,7 +70,7 @@ const ContentCalendar: React.FC<ContentCalendarProps> = ({
       </Box>
       <Paper elevation={2} sx={{ p: 2 }}>
         <Grid container spacing={3}>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <LocalizationProvider dateAdapter={AdapterDayjs}>
               <StaticDatePicker
                 displayStaticWrapperAs="desktop"
@@ -81,7 +81,7 @@ const ContentCalendar: React.FC<ContentCalendarProps> = ({
               />
             </LocalizationProvider>
           </Grid>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Events for {selectedDate ? selectedDate.format('MMMM D, YYYY') : 'Selected Date'}
             </Typography>
@@ -135,5 +135,3 @@ const ContentCalendar: React.FC<ContentCalendarProps> = ({
 };
 
 export default ContentCalendar;
-
-

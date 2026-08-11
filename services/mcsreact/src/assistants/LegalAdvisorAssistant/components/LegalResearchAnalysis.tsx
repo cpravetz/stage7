@@ -24,7 +24,7 @@ const LegalResearchAnalysis: React.FC<LegalResearchAnalysisProps> = ({
       </Typography>
       <Paper elevation={2} sx={{ p: 2 }}>
         <Grid container spacing={3}>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Conduct New Research
             </Typography>
@@ -42,7 +42,7 @@ value={researchQuery}
               Start Research
             </Button>
           </Grid>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Research Results
             </Typography>
@@ -81,5 +81,3 @@ value={researchQuery}
 };
 
 export default LegalResearchAnalysis;
-
-

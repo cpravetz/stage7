@@ -58,7 +58,7 @@ const FinancialAnalytics: React.FC<FinancialAnalyticsProps> = ({ financialData, 
       </Typography>
 
       <Grid container spacing={3} sx={{ mb: 3 }}>
-        <Grid {...({ xs: 12, md: 3, item: true } as any)}>
+        <Grid size={{md: 3}}>
           <Card>
             <CardContent>
               <Typography variant="subtitle2" color="text.secondary" gutterBottom>
@@ -70,7 +70,7 @@ const FinancialAnalytics: React.FC<FinancialAnalyticsProps> = ({ financialData, 
             </CardContent>
           </Card>
         </Grid>
-        <Grid {...({ xs: 12, md: 3, item: true } as any)}>
+        <Grid size={{md: 3}}>
           <Card>
             <CardContent>
               <Typography variant="subtitle2" color="text.secondary" gutterBottom>
@@ -82,7 +82,7 @@ const FinancialAnalytics: React.FC<FinancialAnalyticsProps> = ({ financialData, 
             </CardContent>
           </Card>
         </Grid>
-        <Grid {...({ xs: 12, md: 3, item: true } as any)}>
+        <Grid size={{md: 3}}>
           <Card>
             <CardContent>
               <Typography variant="subtitle2" color="text.secondary" gutterBottom>
@@ -94,7 +94,7 @@ const FinancialAnalytics: React.FC<FinancialAnalyticsProps> = ({ financialData, 
             </CardContent>
           </Card>
         </Grid>
-        <Grid {...({ xs: 12, md: 3, item: true } as any)}>
+        <Grid size={{md: 3}}>
           <Card>
             <CardContent>
               <Typography variant="subtitle2" color="text.secondary" gutterBottom>
@@ -109,7 +109,7 @@ const FinancialAnalytics: React.FC<FinancialAnalyticsProps> = ({ financialData, 
       </Grid>
 
       <Grid container spacing={3} sx={{ mb: 3 }}>
-        <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+        <Grid size={{md: 6}}>
           <Paper sx={{ p: 2 }}>
             <Typography variant="subtitle1" gutterBottom>
               Daily Revenue
@@ -127,7 +127,7 @@ const FinancialAnalytics: React.FC<FinancialAnalyticsProps> = ({ financialData, 
             )}
           </Paper>
         </Grid>
-        <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+        <Grid size={{md: 6}}>
           <Paper sx={{ p: 2 }}>
             <Typography variant="subtitle1" gutterBottom>
               Revenue by Category
@@ -159,7 +159,7 @@ const FinancialAnalytics: React.FC<FinancialAnalyticsProps> = ({ financialData, 
       </Grid>
 
       <Grid container spacing={3} sx={{ mb: 3 }}>
-        <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+        <Grid size={{md: 6}}>
           <Paper sx={{ p: 2 }}>
             <Typography variant="subtitle1" gutterBottom>
               Expense Breakdown
@@ -177,7 +177,7 @@ const FinancialAnalytics: React.FC<FinancialAnalyticsProps> = ({ financialData, 
             )}
           </Paper>
         </Grid>
-        <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+        <Grid size={{md: 6}}>
           <Paper sx={{ p: 2 }}>
             <Typography variant="subtitle1" gutterBottom>
               Key Metrics
@@ -252,4 +252,3 @@ const FinancialAnalytics: React.FC<FinancialAnalyticsProps> = ({ financialData, 
 };
 
 export default FinancialAnalytics;
-

@@ -91,7 +91,7 @@ const PerformanceDashboard: React.FC<PerformanceDashboardProps> = ({
         </Box>
       </Box>
       <Grid container spacing={3}>
-        <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+        <Grid size={{md: 6}}>
           <Paper elevation={2} sx={{ p: 2, height: 300 }}>
             <Typography variant="h6" gutterBottom>
               Engagement Metrics
@@ -110,7 +110,7 @@ const PerformanceDashboard: React.FC<PerformanceDashboardProps> = ({
             </ResponsiveContainer>
           </Paper>
         </Grid>
-        <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+        <Grid size={{md: 6}}>
           <Paper elevation={2} sx={{ p: 2, height: 300 }}>
             <Typography variant="h6" gutterBottom>
               Performance Metrics
@@ -134,5 +134,3 @@ const PerformanceDashboard: React.FC<PerformanceDashboardProps> = ({
 };
 
 export default PerformanceDashboard;
-
-

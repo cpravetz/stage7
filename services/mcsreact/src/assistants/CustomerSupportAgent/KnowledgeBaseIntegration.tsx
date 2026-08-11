@@ -108,4 +108,3 @@ const KnowledgeBaseIntegration: React.FC<KnowledgeBaseIntegrationProps> = ({ con
 
 export default KnowledgeBaseIntegration;
 
-

@@ -36,7 +36,7 @@ const CareerDevelopment: React.FC<CareerDevelopmentProps> = ({
           </Button>
         </Box>
         <Grid container spacing={3}>
-          <Grid {...({ xs: 12, item: true } as any)}>
+          <Grid>
             <Typography variant="h6" gutterBottom>
               My Development Plans
             </Typography>
@@ -85,7 +85,7 @@ const CareerDevelopment: React.FC<CareerDevelopmentProps> = ({
               </Typography>
             )}
           </Grid>
-          <Grid {...({ xs: 12, item: true } as any)}>
+          <Grid>
             <Typography variant="h6" gutterBottom sx={{ mt: 4 }}>
               Networking Resources
             </Typography>
@@ -105,5 +105,4 @@ const CareerDevelopment: React.FC<CareerDevelopmentProps> = ({
 };
 
 export default CareerDevelopment;
-
 

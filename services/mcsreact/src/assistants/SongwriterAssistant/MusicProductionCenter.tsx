@@ -53,7 +53,7 @@ const MusicProductionCenter: React.FC<MusicProductionCenterProps> = ({
       </Typography>
       <Paper elevation={2} sx={{ p: 2 }}>
         <Grid container spacing={3}>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Global Song Settings
             </Typography>
@@ -107,7 +107,7 @@ const MusicProductionCenter: React.FC<MusicProductionCenterProps> = ({
               </Select>
             </FormControl>
           </Grid>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Production Techniques
             </Typography>
@@ -134,7 +134,7 @@ const MusicProductionCenter: React.FC<MusicProductionCenterProps> = ({
               Explore {selectedCategory}
             </Button>
           </Grid>
-          <Grid xs={12} item>
+          <Grid size={{xs: 12}} item>
             <Typography variant="h6" gutterBottom>
               Applied Techniques
             </Typography>
@@ -172,5 +172,3 @@ const MusicProductionCenter: React.FC<MusicProductionCenterProps> = ({
 };
 
 export default MusicProductionCenter;
-
-

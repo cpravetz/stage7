@@ -29,7 +29,7 @@ const HealthcareAnalyticsDashboard: React.FC<HealthcareAnalyticsDashboardProps> 
       </Typography>
       <Paper elevation={2} sx={{ p: 2 }}>
         <Grid container spacing={3}>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Average Patient Wait Time (Minutes)
             </Typography>
@@ -44,7 +44,7 @@ const HealthcareAnalyticsDashboard: React.FC<HealthcareAnalyticsDashboardProps> 
               </LineChart>
             </ResponsiveContainer>
           </Grid>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Readmission Rate (%)
             </Typography>
@@ -59,7 +59,7 @@ const HealthcareAnalyticsDashboard: React.FC<HealthcareAnalyticsDashboardProps> 
               </BarChart>
             </ResponsiveContainer>
           </Grid>
-          <Grid {...({ xs: 12, item: true } as any)}>
+          <Grid>
             <Typography variant="h6" gutterBottom>
               Bed Occupancy Rate (%)
             </Typography>
@@ -81,5 +81,3 @@ const HealthcareAnalyticsDashboard: React.FC<HealthcareAnalyticsDashboardProps> 
 };
 
 export default HealthcareAnalyticsDashboard;
-
-

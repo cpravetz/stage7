@@ -74,7 +74,7 @@ const TableManagement: React.FC<TableManagementProps> = ({
           >
             <option value="">Select a reservation</option>
             {reservations.filter(r => r.partySize <= Math.max(...tables.map(t => t.capacity))).map((reservation) => (
-              <option key={reservation.id} value={reservation.id}>
+              <option key={{re}servation.id} value={reservation.id}>
                 {reservation.guestName} ({reservation.partySize} guests, {reservation.time})
               </option>
             ))}
@@ -89,7 +89,7 @@ const TableManagement: React.FC<TableManagementProps> = ({
           >
             <option value="">Select a table</option>
             {tables.filter(t => t.status === 'Available' && t.capacity >= (reservations.find(r => r.id === selectedReservation)?.partySize || 0)).map((table) => (
-              <option key={table.tableNumber} value={table.tableNumber}>
+              <option key={{table.tableNumber} value={table.tableNumber}}>
                 {table.tableNumber} (Capacity: {table.capacity})
               </option>
             ))}
@@ -121,7 +121,7 @@ const TableManagement: React.FC<TableManagementProps> = ({
 
       <Grid container spacing={2} sx={{ mb: 3 }}>
         {tables.map((table) => (
-          <Grid {...({ xs: 12, sm: 6, md: 4, lg: 3, key: table.tableNumber, item: true } as any)}>
+          <Grid size={{sm: 6, md: 4, lg: 3}} key={table.tableNumber}>
             <Paper sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column' }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
                 <Typography variant="subtitle1">Table {table.tableNumber}</Typography>
@@ -191,4 +191,3 @@ const TableManagement: React.FC<TableManagementProps> = ({
 };
 
 export default TableManagement;
-

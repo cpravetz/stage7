@@ -87,7 +87,7 @@ const ForecastingDashboard: React.FC = () => {
       </Typography>
 
       <Grid container spacing={2} sx={{ mb: 3 }}>
-        <Grid item xs={12} md={4}>
+        <Grid size={{xs: 12, md: 4}} >
           <Card>
             <CardContent>
               <Typography color="text.secondary" gutterBottom>
@@ -100,7 +100,7 @@ const ForecastingDashboard: React.FC = () => {
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} md={4}>
+        <Grid size={{xs: 12, md: 4}} >
           <Card>
             <CardContent>
               <Typography color="text.secondary" gutterBottom>
@@ -113,7 +113,7 @@ const ForecastingDashboard: React.FC = () => {
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} md={4}>
+        <Grid size={{xs: 12, md: 4}} >
           <Card>
             <CardContent>
               <Typography color="text.secondary" gutterBottom>

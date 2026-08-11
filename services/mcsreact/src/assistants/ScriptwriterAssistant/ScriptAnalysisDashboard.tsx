@@ -68,7 +68,7 @@ const ScriptAnalysisDashboard: React.FC<ScriptAnalysisDashboardProps> = ({
       </Alert>
 
       <Grid container spacing={3}>
-        <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+        <Grid size={{md: 6}}>
           <Paper elevation={2} sx={{ p: 2, minHeight: 350 }}>
             <Typography variant="h6" gutterBottom>
               Character Speaking Time
@@ -86,7 +86,7 @@ const ScriptAnalysisDashboard: React.FC<ScriptAnalysisDashboardProps> = ({
                     label
                   >
                     {characterSpeakingTime.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      <Cell key={`cell}`} fill={COLORS[index % COLORS.length]} />
                     ))}
                   </Pie>
                   <Tooltip formatter={(value: number) => `${value} words`} />
@@ -99,7 +99,7 @@ const ScriptAnalysisDashboard: React.FC<ScriptAnalysisDashboardProps> = ({
           </Paper>
         </Grid>
         
-        <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+        <Grid size={{md: 6}}>
           <Paper elevation={2} sx={{ p: 2, minHeight: 350 }}>
             <Typography variant="h6" gutterBottom>
               Scene Density by Act
@@ -126,7 +126,7 @@ const ScriptAnalysisDashboard: React.FC<ScriptAnalysisDashboardProps> = ({
           Script Analysis Tools
         </Typography>
         <Grid container spacing={2}>
-          <Grid {...({ xs: 12, sm: 6, md: 4, item: true } as any)}>
+          <Grid size={{sm: 6, md: 4}}>
             <Button
               variant="contained"
               fullWidth
@@ -135,7 +135,7 @@ const ScriptAnalysisDashboard: React.FC<ScriptAnalysisDashboardProps> = ({
               Analyze Script
             </Button>
           </Grid>
-          <Grid {...({ xs: 12, sm: 6, md: 4, item: true } as any)}>
+          <Grid size={{sm: 6, md: 4}}>
             <Button
               variant="contained"
               fullWidth
@@ -144,7 +144,7 @@ const ScriptAnalysisDashboard: React.FC<ScriptAnalysisDashboardProps> = ({
               Check Consistency
             </Button>
           </Grid>
-          <Grid {...({ xs: 12, sm: 6, md: 4, item: true } as any)}>
+          <Grid size={{sm: 6, md: 4}}>
             <Button
               variant="contained"
               fullWidth
@@ -160,5 +160,3 @@ const ScriptAnalysisDashboard: React.FC<ScriptAnalysisDashboardProps> = ({
 };
 
 export default ScriptAnalysisDashboard;
-
-

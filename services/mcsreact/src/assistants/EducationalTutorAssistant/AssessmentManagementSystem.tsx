@@ -23,7 +23,7 @@ const AssessmentManagementSystem: React.FC<AssessmentManagementSystemProps> = ({
       <Paper elevation={2} sx={{ p: 2 }}>
         <Grid container spacing={3}>
           {/* Add New Assessment Section (placeholder for future implementation) */}
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Add New Assessment (Future Feature)
             </Typography>
@@ -69,7 +69,7 @@ const AssessmentManagementSystem: React.FC<AssessmentManagementSystemProps> = ({
             </Button>
           </Grid>
           {/* Existing Assessments Section */}
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Existing Assessments
             </Typography>
@@ -97,5 +97,3 @@ const AssessmentManagementSystem: React.FC<AssessmentManagementSystemProps> = ({
 };
 
 export default AssessmentManagementSystem;
-
-
