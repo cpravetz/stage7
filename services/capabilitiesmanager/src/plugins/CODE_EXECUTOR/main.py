@@ -1,5 +1,3 @@
-
-
 import json
 import logging
 import os
@@ -19,48 +17,116 @@ logger = logging.getLogger(__name__)
 
 _seen_hashes = set()
 
-def robust_execute_plugin(script_parameters):
+def execute_plugin(inputs):
     temp_dir = None
     try:
-        # Deduplication: hash the script_parameters
-        hash_input = json.dumps(script_parameters, sort_keys=True)
+        # Deduplication: hash the inputs
+        hash_input = json.dumps(inputs, sort_keys=True)
         input_hash = hashlib.sha256(hash_input.encode()).hexdigest()
         if input_hash in _seen_hashes:
-            return [
-                {
-                    "success": False,
-                    "name": "error",
-                    "resultType": "error",
-                    "resultDescription": "Duplicate input detected. This input combination has already failed. Aborting to prevent infinite loop.",
-                    "error": "Duplicate input detected."
-                }
-            ]
+            return {
+                "stdout": "",
+                "stderr": "Duplicate input detected. This input combination has already failed. Aborting to prevent infinite loop.",
+                "exit_code": 1,
+                "success": False,
+                "name": "error",
+                "resultType": "error",
+                "resultDescription": "Duplicate input detected. This input combination has already failed. Aborting to prevent infinite loop.",
+                "error": "Duplicate input detected."
+            }
         _seen_hashes.add(input_hash)
 
         # Temp directory hygiene
         temp_dir = tempfile.mkdtemp(prefix="code_executor_")
         os.environ["CODE_EXECUTOR_TEMP_DIR"] = temp_dir
 
-        # Call the original plugin logic
-        result = execute_plugin(script_parameters)
+        # Extract and normalize inputs
+        language = inputs.get("language", inputs.get("lang", inputs.get("languageName", "")))
+        if isinstance(language, dict) and "value" in language:
+            language = language["value"]
+        language = str(language).lower() if language else ""
+
+        code = inputs.get("code", inputs.get("snippet", inputs.get("program", inputs.get("source", ""))))
+        if isinstance(code, dict) and "value" in code:
+            code = code["value"]
+        code = str(code) if code is not None else ""
+
+        if not code:
+            raise ValueError("Missing required parameter: code")
+        if not language:
+            raise ValueError("Missing required parameter: language")
+        if language not in ("python", "javascript"):
+            raise ValueError(f"Unsupported language: {language}")
+
+        if language == "python":
+            script_path = os.path.join(temp_dir, "script.py")
+            with open(script_path, "w") as f:
+                f.write(code)
+            proc = subprocess.run(
+                ["python3", script_path],
+                capture_output=True,
+                text=True,
+                timeout=60
+            )
+        elif language == "javascript":
+            script_path = os.path.join(temp_dir, "script.js")
+            with open(script_path, "w") as f:
+                f.write(code)
+            proc = subprocess.run(
+                ["node", script_path],
+                capture_output=True,
+                text=True,
+                timeout=60
+            )
+
+        result = {
+            "stdout": proc.stdout,
+            "stderr": proc.stderr,
+            "exit_code": proc.returncode
+        }
 
         # Strict output validation: must be a list or dict
         if not isinstance(result, (list, dict)):
             raise ValueError("Output schema validation failed: must be a list or dict.")
 
         return result
+    except subprocess.TimeoutExpired:
+        logger.error("Code execution timed out")
+        return {
+            "stdout": "",
+            "stderr": "Code execution timed out after 60 seconds",
+            "exit_code": -1,
+            "success": False,
+            "name": "error",
+            "resultType": "error",
+            "resultDescription": "Code execution timed out after 60 seconds",
+            "error": "TimeoutExpired"
+        }
+    except FileNotFoundError as e:
+        logger.error(f"Interpreter not found: {e}")
+        return {
+            "stdout": "",
+            "stderr": f"Interpreter not found: {e}",
+            "exit_code": 127,
+            "success": False,
+            "name": "error",
+            "resultType": "error",
+            "resultDescription": f"Interpreter not found: {e}",
+            "error": str(e)
+        }
     except Exception as e:
         # Log the error internally
-        print(f"CODE_EXECUTOR plugin encountered an error: {e}")
-        return [
-            {
-                "success": False,
-                "name": "error",
-                "resultType": "error",
-                "resultDescription": f"Error: {str(e)}",
-                "error": str(e)
-            }
-        ]
+        logger.error(f"CODE_EXECUTOR plugin encountered an error: {e}")
+        return {
+            "stdout": "",
+            "stderr": f"Error: {str(e)}",
+            "exit_code": -1,
+            "success": False,
+            "name": "error",
+            "resultType": "error",
+            "resultDescription": f"Error: {str(e)}",
+            "error": str(e)
+        }
     finally:
         if temp_dir and os.path.exists(temp_dir):
             try:
@@ -117,7 +183,7 @@ if __name__ == "__main__":
                         inputs_dict[primary_name] = inputs_dict.pop(alias)
                         break
 
-        print(execute_plugin(inputs_dict))
+        print(json.dumps(execute_plugin(inputs_dict)))
     except json.JSONDecodeError as e:
         # If JSON decoding still fails, log the error and return a structured error output
         error_message = f"JSONDecodeError: {e}. Raw input: {raw_input_str[:200]}..."

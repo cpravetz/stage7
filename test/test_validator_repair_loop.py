@@ -7,7 +7,7 @@ import sys
 
 # Add shared library path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../shared/python/lib')))
-from plan_validator import PlanValidator, AccomplishError
+from plan_validator import PlanValidator, AccomplishError  # type: ignore
 
 class TestPlanValidatorRepairLoop(unittest.TestCase):
 

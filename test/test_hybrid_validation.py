@@ -23,7 +23,7 @@ import plan_validator
 import hybrid_validation_service
 
 from plugin_type_service import PluginTypeService, create_plugin_type_service
-from plan_validator import PlanValidator
+from plan_validator import PlanValidator  # type: ignore
 from hybrid_validation_service import HybridValidationService, create_hybrid_validation_service
 
 # Configure logging

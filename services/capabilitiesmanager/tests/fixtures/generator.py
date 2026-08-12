@@ -4,6 +4,7 @@ Test fixtures and sample data for plugin testing
 """
 
 import json
+import random
 from pathlib import Path
 from datetime import datetime, timedelta
 

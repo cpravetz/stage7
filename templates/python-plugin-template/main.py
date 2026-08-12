@@ -23,7 +23,7 @@ from typing import Dict, List, Any, Optional
 
 # Import from the installed shared library package
 try:
-    from plan_validator import PlanValidator, AccomplishError, PLAN_STEP_SCHEMA, PLAN_ARRAY_SCHEMA
+    from plan_validator import PlanValidator, AccomplishError, PLAN_STEP_SCHEMA, PLAN_ARRAY_SCHEMA  # type: ignore
 except ImportError:
     # Fallback to direct import for development/testing
     plugin_dir = os.path.dirname(os.path.realpath(__file__))
@@ -31,7 +31,7 @@ except ImportError:
     if shared_lib_path not in sys.path:
         sys.path.insert(0, shared_lib_path)
     try:
-        from plan_validator import PlanValidator, AccomplishError, PLAN_STEP_SCHEMA, PLAN_ARRAY_SCHEMA
+        from plan_validator import PlanValidator, AccomplishError, PLAN_STEP_SCHEMA, PLAN_ARRAY_SCHEMA  # type: ignore
     except ImportError:
         # If shared library is not available, define dummy functions
         class PlanValidator:

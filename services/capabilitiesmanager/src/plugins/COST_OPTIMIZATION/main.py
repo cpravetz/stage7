@@ -14,6 +14,11 @@ import statistics
 import boto3
 from botocore.exceptions import ClientError
 
+# try:
+#    from azure.mgmt.costmanagement import CostManagementClient
+#except ImportError:
+CostManagementClient = None
+
 # Configure logging
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"), format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -62,11 +67,10 @@ class CostOptimizer:
             except ImportError:
                 logger.warning("Google Cloud client not installed. Install with: pip install google-cloud-bigquery")
         elif self.cloud_provider == "azure":
-            try:
-                from azure.mgmt.costmanagement import CostManagementClient
-                self.cost_mgmt_client = CostManagementClient()
-            except ImportError:
+            if CostManagementClient is None:
                 logger.warning("Azure client not installed. Install with: pip install azure-mgmt-costmanagement")
+            else:
+                self.cost_mgmt_client = CostManagementClient()
     
     def analyze_spending(self, inputs: Dict[str, Any]) -> List[Dict]:
         """Analyze cloud spending for a period using real Cost Explorer API."""

@@ -9,11 +9,11 @@ import json
 
 # Import from the installed shared library package
 try:
-    from plan_validator import PlanValidator
+    from plan_validator import PlanValidator  # type: ignore
 except ImportError:
     # Fallback to direct import for development/testing
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'shared', 'python', 'lib'))
-    from plan_validator import PlanValidator
+    from plan_validator import PlanValidator  # type: ignore
 
 def test_unique_step_numbers():
     """Test that duplicate step numbers are detected."""

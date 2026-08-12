@@ -156,6 +156,7 @@ class TeamMetricsPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"track_metrics_1769629673382"
+            action = "track metrics"
             
             # Validate input
             if not params:
@@ -218,6 +219,7 @@ class TeamMetricsPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"get_reports_1769629673383"
+            action = "get reports"
             
             # Validate input
             if not params:
@@ -280,6 +282,7 @@ class TeamMetricsPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"compare_teams_1769629673383"
+            action = "compare teams"
             
             # Validate input
             if not params:
@@ -342,6 +345,7 @@ class TeamMetricsPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"generate_summary_1769629673383"
+            action = "generate summary"
             
             # Validate input
             if not params:
@@ -404,6 +408,7 @@ class TeamMetricsPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"export_data_1769629673383"
+            action = "export data"
             
             # Validate input
             if not params:
@@ -466,6 +471,7 @@ class TeamMetricsPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"identify_trends_1769629673383"
+            action = "identify trends"
             
             # Validate input
             if not params:

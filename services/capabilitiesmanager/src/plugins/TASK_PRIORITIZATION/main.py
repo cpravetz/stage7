@@ -156,6 +156,7 @@ class TaskPrioritizationPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"prioritize_tasks_1769629673785"
+            action = "prioritize tasks"
             
             # Validate input
             if not params:
@@ -218,6 +219,7 @@ class TaskPrioritizationPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"create_task_1769629673785"
+            action = "create task"
             
             # Validate input
             if not params:
@@ -280,6 +282,7 @@ class TaskPrioritizationPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"update_task_1769629673785"
+            action = "update task"
             
             # Validate input
             if not params:
@@ -342,6 +345,7 @@ class TaskPrioritizationPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"get_urgent_1769629673785"
+            action = "get urgent"
             
             # Validate input
             if not params:
@@ -404,6 +408,7 @@ class TaskPrioritizationPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"suggest_order_1769629673785"
+            action = "suggest order"
             
             # Validate input
             if not params:

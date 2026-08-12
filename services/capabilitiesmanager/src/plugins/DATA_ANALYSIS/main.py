@@ -131,9 +131,12 @@ def generate_insights(payload: Dict[str, Any]) -> Dict[str, Any]:
 def create_visualization(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Create a visualization from data."""
     import pandas as pd
-    import matplotlib
-    matplotlib.use('Agg')  # Non-interactive backend
-    import matplotlib.pyplot as plt
+    try:
+        import matplotlib  # type: ignore
+        matplotlib.use('Agg')  # Non-interactive backend
+        import matplotlib.pyplot as plt  # type: ignore
+    except ImportError:
+        raise ImportError("matplotlib is required for createVisualization. Install it with: pip install matplotlib")
     import base64
     from io import BytesIO
 
@@ -258,7 +261,7 @@ def parse_inputs(inputs_str):
     """Parse and normalize the plugin stdin JSON payload into a dict."""
     try:
         payload = json.loads(inputs_str)
-        inputs_dict = {{}}
+        inputs_dict = {}
 
         if isinstance(payload, dict):
             if payload.get('_type') == 'Map' and isinstance(payload.get('entries'), list):
@@ -280,7 +283,7 @@ def parse_inputs(inputs_str):
         return inputs_dict
 
     except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse input JSON: {{e}}")
+        logger.error(f"Failed to parse input JSON: {e}")
         raise
 
 def main():
@@ -288,13 +291,13 @@ def main():
     try:
         input_data = sys.stdin.read().strip()
         if not input_data:
-            result = [{{
+            result = [{
                 "success": False,
                 "name": "error",
                 "resultType": "error",
                 "result": "No input data received",
                 "error": "No input data received"
-            }}]
+            }]
         else:
             inputs_dict = parse_inputs(input_data)
             result = execute_plugin(inputs_dict)
@@ -303,13 +306,13 @@ def main():
 
     except Exception as e:
         logger.error(f"Plugin execution failed: {str(e)}")
-        result = [{{
+        result = [{
             "success": False,
             "name": "error",
             "resultType": "error",
             "result": str(e),
             "error": str(e)
-        }}]
+        }]
         print(json.dumps(result))
 
 if __name__ == "__main__":
