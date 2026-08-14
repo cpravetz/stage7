@@ -456,6 +456,38 @@ export class ModelConfigService extends BaseEntity {
             return metadata?.interfaceName === interfaceName;
         });
     }
+
+    /**
+     * Get the last discovery timestamp
+     */
+    async getLastDiscoveryTimestamp(): Promise<number> {
+        try {
+            const response = await this.authenticatedApi.get(`http://librarian:5040/loadData/last-model-discovery`, {
+                params: { collection: 'system_metadata', storageType: 'mongo' }
+            });
+            return response.data?.data?.timestamp || 0;
+        } catch (error) {
+            console.error('[ModelConfigService] Error fetching last discovery timestamp:', error);
+            return 0;
+        }
+    }
+
+    /**
+     * Update the last discovery timestamp
+     */
+    async updateLastDiscoveryTimestamp(): Promise<void> {
+        try {
+            const timestamp = Date.now();
+            await this.authenticatedApi.post(`http://librarian:5040/storeData`, {
+                id: 'last-model-discovery',
+                data: { timestamp },
+                storageType: 'mongo',
+                collection: 'system_metadata'
+            });
+        } catch (error) {
+            console.error('[ModelConfigService] Error updating last discovery timestamp:', error);
+        }
+    }
 }
 
 // Export singleton instance
