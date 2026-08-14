@@ -49,7 +49,7 @@ const Analytics: React.FC<AnalyticsProps> = ({ analyticsData }) => {
       </Typography>
 
       <Grid container spacing={3} sx={{ mb: 3 }}>
-        <Grid {...({ xs: 12, md: 3, item: true } as any)}>
+        <Grid size={{md: 3}}>
           <Card>
             <CardContent>
               <Typography variant="subtitle2" color="text.secondary" gutterBottom>
@@ -61,7 +61,7 @@ const Analytics: React.FC<AnalyticsProps> = ({ analyticsData }) => {
             </CardContent>
           </Card>
         </Grid>
-        <Grid {...({ xs: 12, md: 3, item: true } as any)}>
+        <Grid size={{md: 3}}>
           <Card>
             <CardContent>
               <Typography variant="subtitle2" color="text.secondary" gutterBottom>
@@ -73,7 +73,7 @@ const Analytics: React.FC<AnalyticsProps> = ({ analyticsData }) => {
             </CardContent>
           </Card>
         </Grid>
-        <Grid {...({ xs: 12, md: 3, item: true } as any)}>
+        <Grid size={{md: 3}}>
           <Card>
             <CardContent>
               <Typography variant="subtitle2" color="text.secondary" gutterBottom>
@@ -85,7 +85,7 @@ const Analytics: React.FC<AnalyticsProps> = ({ analyticsData }) => {
             </CardContent>
           </Card>
         </Grid>
-        <Grid {...({ xs: 12, md: 3, item: true } as any)}>
+        <Grid size={{md: 3}}>
           <Card>
             <CardContent>
               <Typography variant="subtitle2" color="text.secondary" gutterBottom>
@@ -100,7 +100,7 @@ const Analytics: React.FC<AnalyticsProps> = ({ analyticsData }) => {
       </Grid>
 
       <Grid container spacing={3} sx={{ mb: 3 }}>
-        <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+        <Grid size={{md: 6}}>
           <Paper sx={{ p: 2 }}>
             <Typography variant="subtitle1" gutterBottom>
               Room Occupancy by Type
@@ -115,7 +115,7 @@ const Analytics: React.FC<AnalyticsProps> = ({ analyticsData }) => {
             />
           </Paper>
         </Grid>
-        <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+        <Grid size={{md: 6}}>
           <Paper sx={{ p: 2 }}>
             <Typography variant="subtitle1" gutterBottom>
               Revenue by Service
@@ -141,7 +141,7 @@ const Analytics: React.FC<AnalyticsProps> = ({ analyticsData }) => {
       </Grid>
 
       <Grid container spacing={3}>
-        <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+        <Grid size={{md: 6}}>
           <Paper sx={{ p: 2 }}>
             <Typography variant="subtitle1" gutterBottom>
               Daily Occupancy Trend
@@ -153,7 +153,7 @@ const Analytics: React.FC<AnalyticsProps> = ({ analyticsData }) => {
             />
           </Paper>
         </Grid>
-        <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+        <Grid size={{md: 6}}>
           <Paper sx={{ p: 2 }}>
             <Typography variant="subtitle1" gutterBottom>
               Room Occupancy Details
@@ -216,4 +216,3 @@ const Analytics: React.FC<AnalyticsProps> = ({ analyticsData }) => {
 };
 
 export default Analytics;
-

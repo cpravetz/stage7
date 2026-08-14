@@ -50,12 +50,12 @@ const BudgetAndFinancialTracking: React.FC<BudgetAndFinancialTrackingProps> = ({
       {/* Category Filter */}
       <Card elevation={3} sx={{ mb: 3, p: 2 }}>
         <Grid container spacing={2} alignItems="center">
-          <Grid item>
+          <Grid>
             <Typography variant="subtitle2" color="textSecondary">
               Category Filter:
             </Typography>
           </Grid>
-          <Grid item>
+          <Grid>
             <Button 
               variant={filterCategory === 'all' ? 'contained' : 'outlined'}
               color="primary"
@@ -66,7 +66,7 @@ const BudgetAndFinancialTracking: React.FC<BudgetAndFinancialTrackingProps> = ({
             </Button>
           </Grid>
           {uniqueCategories.map((category) => (
-            <Grid item key={category}>
+            <Grid key={category}>
               <Button 
                 variant={filterCategory === category.toLowerCase() ? 'contained' : 'outlined'}
                 color="primary"
@@ -77,8 +77,8 @@ const BudgetAndFinancialTracking: React.FC<BudgetAndFinancialTrackingProps> = ({
               </Button>
             </Grid>
           ))}
-          <Grid item xs />
-          <Grid item>
+          <Grid size={{xs: "grow"}} />
+          <Grid>
             <Button 
               variant="contained"
               color="primary"
@@ -94,7 +94,7 @@ const BudgetAndFinancialTracking: React.FC<BudgetAndFinancialTrackingProps> = ({
 
       {/* Summary Cards */}
       <Grid container spacing={2} sx={{ mb: 3 }}>
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid size={{xs: 12, sm: 6, md: 3}} >
           <Card elevation={3}>
             <CardContent>
               <Typography variant="subtitle2" color="textSecondary" gutterBottom>
@@ -113,7 +113,7 @@ const BudgetAndFinancialTracking: React.FC<BudgetAndFinancialTrackingProps> = ({
           </Card>
         </Grid>
 
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid size={{xs: 12, sm: 6, md: 3}} >
           <Card elevation={3}>
             <CardContent>
               <Typography variant="subtitle2" color="textSecondary" gutterBottom>
@@ -138,7 +138,7 @@ const BudgetAndFinancialTracking: React.FC<BudgetAndFinancialTrackingProps> = ({
           </Card>
         </Grid>
 
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid size={{xs: 12, sm: 6, md: 3}} >
           <Card elevation={3}>
             <CardContent>
               <Typography variant="subtitle2" color="textSecondary" gutterBottom>
@@ -163,7 +163,7 @@ const BudgetAndFinancialTracking: React.FC<BudgetAndFinancialTrackingProps> = ({
           </Card>
         </Grid>
 
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid size={{xs: 12, sm: 6, md: 3}} >
           <Card elevation={3}>
             <CardContent>
               <Typography variant="subtitle2" color="textSecondary" gutterBottom>
@@ -193,7 +193,7 @@ const BudgetAndFinancialTracking: React.FC<BudgetAndFinancialTrackingProps> = ({
         Budget Status Overview
       </Typography>
       <Grid container spacing={2} sx={{ mb: 3 }}>
-        <Grid item xs={12} sm={4}>
+        <Grid size={{xs: 12, sm: 4}} >
           <Card elevation={3} sx={{ bgcolor: overBudgetItems.length > 0 ? 'error.light' : 'background.paper' }}>
             <CardContent>
               <Box display="flex" alignItems="center" justifyContent="space-between">
@@ -214,7 +214,7 @@ const BudgetAndFinancialTracking: React.FC<BudgetAndFinancialTrackingProps> = ({
           </Card>
         </Grid>
 
-        <Grid item xs={12} sm={4}>
+        <Grid size={{xs: 12, sm: 4}} >
           <Card elevation={3} sx={{ bgcolor: onBudgetItems.length > 0 ? 'success.light' : 'background.paper' }}>
             <CardContent>
               <Box display="flex" alignItems="center" justifyContent="space-between">
@@ -235,7 +235,7 @@ const BudgetAndFinancialTracking: React.FC<BudgetAndFinancialTrackingProps> = ({
           </Card>
         </Grid>
 
-        <Grid item xs={12} sm={4}>
+        <Grid size={{xs: 12, sm: 4}} >
           <Card elevation={3} sx={{ bgcolor: underBudgetItems.length > 0 ? 'info.light' : 'background.paper' }}>
             <CardContent>
               <Box display="flex" alignItems="center" justifyContent="space-between">
@@ -511,7 +511,7 @@ const BudgetAndFinancialTracking: React.FC<BudgetAndFinancialTrackingProps> = ({
           Quick Actions
         </Typography>
         <Grid container spacing={1}>
-          <Grid item>
+          <Grid>
             <Button 
               variant="contained"
               color="primary"
@@ -522,7 +522,7 @@ const BudgetAndFinancialTracking: React.FC<BudgetAndFinancialTrackingProps> = ({
               Budget Report
             </Button>
           </Grid>
-          <Grid item>
+          <Grid>
             <Button 
               variant="outlined"
               color="secondary"
@@ -533,7 +533,7 @@ const BudgetAndFinancialTracking: React.FC<BudgetAndFinancialTrackingProps> = ({
               Variance Analysis
             </Button>
           </Grid>
-          <Grid item>
+          <Grid>
             <Button 
               variant="outlined"
               color="success"

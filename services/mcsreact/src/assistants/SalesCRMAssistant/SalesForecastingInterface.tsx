@@ -56,7 +56,7 @@ const SalesForecastingInterface: React.FC<SalesForecastingInterfaceProps> = ({
       ) : (
         <Paper elevation={2} sx={{ p: 2 }}>
           <Grid container spacing={3}>
-            <Grid item xs={12}>
+            <Grid size={{xs: 12}} >
               <Typography variant="h6" gutterBottom>
                 Sales Forecast vs. Pipeline
               </Typography>
@@ -73,13 +73,13 @@ const SalesForecastingInterface: React.FC<SalesForecastingInterfaceProps> = ({
               </ResponsiveContainer>
             </Grid>
             
-            <Grid item xs={12}>
+            <Grid size={{xs: 12}} >
               <Typography variant="h6" gutterBottom>
                 Forecast Details
               </Typography>
               <Grid container spacing={2}>
                 {forecasts.map((forecast, index) => (
-                  <Grid item xs={12} sm={6} md={4} key={index}>
+                  <Grid size={{xs: 12, sm: 6, md: 4}} key={index}>
                     <Paper elevation={1} sx={{ p: 2 }}>
                       <Typography variant="subtitle1">{forecast.period}</Typography>
                       <Typography variant="body2" color="text.secondary">

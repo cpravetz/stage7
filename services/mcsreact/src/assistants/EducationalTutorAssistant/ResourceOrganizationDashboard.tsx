@@ -104,7 +104,7 @@ const ResourceOrganizationDashboard: React.FC<ResourceOrganizationDashboardProps
       </Typography>
       <Paper elevation={2} sx={{ p: 2 }}>
         <Grid container spacing={3}>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Add New Resource
             </Typography>
@@ -160,7 +160,7 @@ const ResourceOrganizationDashboard: React.FC<ResourceOrganizationDashboardProps
               Add Resource
             </Button>
           </Grid>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Existing Resources
             </Typography>
@@ -196,5 +196,3 @@ const ResourceOrganizationDashboard: React.FC<ResourceOrganizationDashboardProps
 };
 
 export default ResourceOrganizationDashboard;
-
-

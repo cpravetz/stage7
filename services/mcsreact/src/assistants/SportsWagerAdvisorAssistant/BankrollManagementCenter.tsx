@@ -58,7 +58,7 @@ const BankrollManagementCenter: React.FC<BankrollManagementCenterProps> = ({
       </Typography>
       <Paper elevation={2} sx={{ p: 2 }}>
         <Grid container spacing={3}>
-          <Grid xs={12} item>
+          <Grid size={{xs: 12}} item>
             <Typography variant="h6" gutterBottom>
               Current Bankroll: <Typography component="span" variant="h6" color="primary">${currentBankroll.toFixed(2)}</Typography>
             </Typography>
@@ -68,7 +68,7 @@ const BankrollManagementCenter: React.FC<BankrollManagementCenterProps> = ({
               </Alert>
             )}
           </Grid>
-          <Grid {...({ xs: 12, md: 4, item: true } as any)}>
+          <Grid size={{md: 4}}>
             <TextField
               label="Deposit Amount"
               type="number"
@@ -81,7 +81,7 @@ const BankrollManagementCenter: React.FC<BankrollManagementCenterProps> = ({
               Deposit
             </Button>
           </Grid>
-          <Grid {...({ xs: 12, md: 4, item: true } as any)}>
+          <Grid size={{md: 4}}>
             <TextField
               label="Withdraw Amount"
               type="number"
@@ -94,7 +94,7 @@ const BankrollManagementCenter: React.FC<BankrollManagementCenterProps> = ({
               Withdraw
             </Button>
           </Grid>
-          <Grid {...({ xs: 12, md: 4, item: true } as any)}>
+          <Grid size={{md: 4}}>
             <TextField
               label="Unit Size ($)"
               type="number"
@@ -114,6 +114,4 @@ const BankrollManagementCenter: React.FC<BankrollManagementCenterProps> = ({
 };
 
 export default BankrollManagementCenter;
-
-
 

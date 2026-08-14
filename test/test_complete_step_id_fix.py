@@ -9,7 +9,7 @@ import sys
 import os
 sys.path.append(os.path.join(os.path.dirname(__file__), 'shared', 'python', 'lib'))
 
-from plan_validator import PlanValidator
+from plan_validator import PlanValidator  # type: ignore
 import json
 import uuid
 

@@ -27,7 +27,7 @@ const ProviderCollaborationTools: React.FC<ProviderCollaborationToolsProps> = ({
       </Typography>
       <Paper elevation={2} sx={{ p: 2 }}>
         <Grid container spacing={3}>
-          <Grid {...({ xs: 12, md: 4, item: true } as any)}>
+          <Grid size={{md: 4}}>
             <Button
               variant="contained"
               fullWidth
@@ -38,7 +38,7 @@ const ProviderCollaborationTools: React.FC<ProviderCollaborationToolsProps> = ({
               Launch Virtual Meeting
             </Button>
           </Grid>
-          <Grid {...({ xs: 12, md: 4, item: true } as any)}>
+          <Grid size={{md: 4}}>
             <Button
               variant="contained"
               fullWidth
@@ -49,7 +49,7 @@ const ProviderCollaborationTools: React.FC<ProviderCollaborationToolsProps> = ({
               Open Secure Chat
             </Button>
           </Grid>
-          <Grid {...({ xs: 12, md: 4, item: true } as any)}>
+          <Grid size={{md: 4}}>
             <Button
               variant="contained"
               fullWidth
@@ -81,5 +81,3 @@ const ProviderCollaborationTools: React.FC<ProviderCollaborationToolsProps> = ({
 };
 
 export default ProviderCollaborationTools;
-
-

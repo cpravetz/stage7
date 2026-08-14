@@ -156,6 +156,7 @@ class TicketAnalysisPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"analyze_tickets_1769629673689"
+            action = "analyze tickets"
             
             # Validate input
             if not params:
@@ -218,6 +219,7 @@ class TicketAnalysisPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"categorize_1769629673689"
+            action = "categorize"
             
             # Validate input
             if not params:
@@ -280,6 +282,7 @@ class TicketAnalysisPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"route_ticket_1769629673689"
+            action = "route ticket"
             
             # Validate input
             if not params:
@@ -342,6 +345,7 @@ class TicketAnalysisPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"predict_resolution_time_1769629673689"
+            action = "predict resolution time"
             
             # Validate input
             if not params:
@@ -404,6 +408,7 @@ class TicketAnalysisPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"suggest_priority_1769629673689"
+            action = "suggest priority"
             
             # Validate input
             if not params:
@@ -466,6 +471,7 @@ class TicketAnalysisPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"get_trends_1769629673689"
+            action = "get trends"
             
             # Validate input
             if not params:

@@ -8,12 +8,12 @@ import json
 import sys
 import os
 import requests
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup  # type: ignore
 from typing import Dict, List, Any, Optional, Union
 import logging
 import time
 import random
-from urllib.parse import urljoin, urlparse, urlparse
+from urllib.parse import urljoin, urlparse
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -424,7 +424,7 @@ class ScrapePlugin:
         except Exception as e:
             logger.error(f"SCRAPE plugin execution failed: {e}")
             try:
-                url_for_error = self._get_input_value(inputs_map, 'url', 'undefined URL')
+                url_for_error = self._get_input_value(inputs_map, 'url', default='undefined URL')
                 if isinstance(url_for_error, (dict, list)):
                     url_for_error = str(url_for_error)[:50] + "..." if len(str(url_for_error)) > 50 else str(url_for_error)
             except Exception:

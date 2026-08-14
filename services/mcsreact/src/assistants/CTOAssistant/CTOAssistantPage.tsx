@@ -170,7 +170,7 @@ const CTOAssistantPageView: React.FC<AssistantRenderProps> = ({ messages, sendMe
                   {/* Executive Summary Tab */}
                   <TabPanel value={tabValue} index={0}>
                     <Grid container spacing={3}>
-                      <Grid item xs={12}>
+                      <Grid size={{xs: 12}} >
                         <Box sx={{ backgroundColor: '#ffffff', p: 3, borderRadius: 2, boxShadow: 1 }}>
                           <ExecutiveSummaryWidget
                             activeIncidents={incidents.length}
@@ -184,13 +184,13 @@ const CTOAssistantPageView: React.FC<AssistantRenderProps> = ({ messages, sendMe
                   {/* Engineering Tab */}
                   <TabPanel value={tabValue} index={1}>
                     <Grid container spacing={3}>
-                      <Grid item xs={12}>
+                      <Grid size={{xs: 12}} >
                         <Box sx={{ backgroundColor: '#ffffff', p: 3, borderRadius: 2, boxShadow: 1 }}>
                           <DORAMetricsWidget metrics={doraMetrics} />
                         </Box>
                       </Grid>
                       {teamHealth && (
-                        <Grid item xs={12}>
+                        <Grid size={{xs: 12}} >
                           <Box sx={{ backgroundColor: '#ffffff', p: 3, borderRadius: 2, boxShadow: 1 }}>
                             <TeamHealthWidget data={teamHealth} />
                           </Box>
@@ -203,13 +203,13 @@ const CTOAssistantPageView: React.FC<AssistantRenderProps> = ({ messages, sendMe
                   <TabPanel value={tabValue} index={2}>
                     <Grid container spacing={3}>
                       {kubernetesHealth && (
-                        <Grid item xs={12}>
+                        <Grid size={{xs: 12}} >
                           <Box sx={{ backgroundColor: '#ffffff', p: 3, borderRadius: 2, boxShadow: 1 }}>
                             <KubernetesHealthWidget data={kubernetesHealth} />
                           </Box>
                         </Grid>
                       )}
-                      <Grid item xs={12}>
+                      <Grid size={{xs: 12}} >
                         <Box sx={{ backgroundColor: '#ffffff', p: 3, borderRadius: 2, boxShadow: 1 }}>
                           <ActiveIncidentsWidget incidents={incidents} />
                         </Box>
@@ -220,7 +220,7 @@ const CTOAssistantPageView: React.FC<AssistantRenderProps> = ({ messages, sendMe
                   {/* Security Tab */}
                   <TabPanel value={tabValue} index={3}>
                     <Grid container spacing={3}>
-                      <Grid item xs={12}>
+                      <Grid size={{xs: 12}} >
                         <Box sx={{ backgroundColor: '#ffffff', p: 3, borderRadius: 2, boxShadow: 1 }}>
                           <SecurityAlertsWidget alerts={securityAlerts} />
                         </Box>
@@ -231,13 +231,13 @@ const CTOAssistantPageView: React.FC<AssistantRenderProps> = ({ messages, sendMe
                   {/* Financial Tab */}
                   <TabPanel value={tabValue} index={4}>
                     <Grid container spacing={3}>
-                      <Grid item xs={12}>
+                      <Grid size={{xs: 12}} >
                         <Box sx={{ backgroundColor: '#ffffff', p: 3, borderRadius: 2, boxShadow: 1 }}>
                           <CloudSpendWidget data={cloudSpend} />
                         </Box>
                       </Grid>
                       {costTrends && (
-                        <Grid item xs={12}>
+                        <Grid size={{xs: 12}} >
                           <Box sx={{ backgroundColor: '#ffffff', p: 3, borderRadius: 2, boxShadow: 1 }}>
                             <CostTrendsWidget data={costTrends} />
                           </Box>
@@ -250,14 +250,14 @@ const CTOAssistantPageView: React.FC<AssistantRenderProps> = ({ messages, sendMe
                   <TabPanel value={tabValue} index={5}>
                     <Grid container spacing={3}>
                       {iacMonitoring && (
-                        <Grid item xs={12}>
+                        <Grid size={{xs: 12}} >
                           <Box sx={{ backgroundColor: '#ffffff', p: 3, borderRadius: 2, boxShadow: 1 }}>
                             <IaCMonitoringWidget data={iacMonitoring} />
                           </Box>
                         </Grid>
                       )}
                       {disasterRecovery && (
-                        <Grid item xs={12}>
+                        <Grid size={{xs: 12}} >
                           <Box sx={{ backgroundColor: '#ffffff', p: 3, borderRadius: 2, boxShadow: 1 }}>
                             <DisasterRecoveryWidget data={disasterRecovery} />
                           </Box>
@@ -270,14 +270,14 @@ const CTOAssistantPageView: React.FC<AssistantRenderProps> = ({ messages, sendMe
                   <TabPanel value={tabValue} index={6}>
                     <Grid container spacing={3}>
                       {databaseOps && (
-                        <Grid item xs={12}>
+                        <Grid size={{xs: 12}} >
                           <Box sx={{ backgroundColor: '#ffffff', p: 3, borderRadius: 2, boxShadow: 1 }}>
                             <DatabaseOperationsWidget data={databaseOps} />
                           </Box>
                         </Grid>
                       )}
                       {serviceMesh && (
-                        <Grid item xs={12}>
+                        <Grid size={{xs: 12}} >
                           <Box sx={{ backgroundColor: '#ffffff', p: 3, borderRadius: 2, boxShadow: 1 }}>
                             <ServiceMeshWidget data={serviceMesh} />
                           </Box>

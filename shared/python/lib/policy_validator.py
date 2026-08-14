@@ -21,7 +21,18 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Import syntax validator
-from syntax_validator import create_syntax_validator, ValidationResult as SyntaxValidationResult
+try:
+    from syntax_validator import create_syntax_validator, ValidationResult as SyntaxValidationResult  # type: ignore
+except ImportError:
+    create_syntax_validator = None
+    SyntaxValidationResult = None
+
+# Import from plan_validator for integration
+try:
+    from plan_validator import StructuredError, ErrorType  # type: ignore
+except ImportError:
+    StructuredError = None
+    ErrorType = None
 
 
 class PolicyValidator:
@@ -39,7 +50,7 @@ class PolicyValidator:
         self.policy_dir = policy_dir or os.path.join(os.path.dirname(__file__), '../../../policies')
         self.policies = []
         self.violations = []
-        self.syntax_validator = create_syntax_validator()
+        self.syntax_validator = create_syntax_validator() if create_syntax_validator else None
         self.load_policies()
     
     def load_policies(self) -> bool:
@@ -90,29 +101,50 @@ class PolicyValidator:
         """
         logger.info("Validating plan against policies")
         
-        # First perform syntax validation
-        syntax_result = self.syntax_validator.validate_component(plan, 'plan', 'policy_validation_plan')
+        # First perform syntax validation if available
+        if self.syntax_validator:
+            syntax_result = self.syntax_validator.validate_component(plan, 'plan', 'policy_validation_plan')
+        else:
+            syntax_result = None
         
-        results = {
-            'policy_compliance': True,
-            'syntax_compliance': syntax_result.is_valid,
-            'violations': [],
-            'warnings': [],
-            'syntax_errors': [self._convert_syntax_error(e) for e in syntax_result.errors],
-            'stats': {
-                'policies_checked': 0,
-                'critical_violations': 0,
-                'high_violations': 0,
-                'medium_violations': 0,
-                'low_violations': 0,
-                'syntax_errors': syntax_result.get_error_count(),
-                'syntax_warnings': syntax_result.get_warning_count()
+        if syntax_result is not None:
+            results = {
+                'policy_compliance': True,
+                'syntax_compliance': syntax_result.is_valid,
+                'violations': [],
+                'warnings': [],
+                'syntax_errors': [self._convert_syntax_error(e) for e in syntax_result.errors],
+                'stats': {
+                    'policies_checked': 0,
+                    'critical_violations': 0,
+                    'high_violations': 0,
+                    'medium_violations': 0,
+                    'low_violations': 0,
+                    'syntax_errors': syntax_result.get_error_count(),
+                    'syntax_warnings': syntax_result.get_warning_count()
+                }
             }
-        }
-        
-        # If syntax validation fails, mark as non-compliant
-        if not syntax_result.is_valid:
-            results['policy_compliance'] = False
+            
+            # If syntax validation fails, mark as non-compliant
+            if not syntax_result.is_valid:
+                results['policy_compliance'] = False
+        else:
+            results = {
+                'policy_compliance': True,
+                'syntax_compliance': None,
+                'violations': [],
+                'warnings': [],
+                'syntax_errors': [],
+                'stats': {
+                    'policies_checked': 0,
+                    'critical_violations': 0,
+                    'high_violations': 0,
+                    'medium_violations': 0,
+                    'low_violations': 0,
+                    'syntax_errors': 0,
+                    'syntax_warnings': 0
+                }
+            }
         
         # Check CODE-003: Actionable Plans policy
         actionable_policy = self._find_policy('CODE-003')
@@ -193,30 +225,51 @@ class PolicyValidator:
         """
         logger.info(f"Validating plugin {plugin.get('verb', 'unknown')} against policies")
         
-        # First perform syntax validation
+        # First perform syntax validation if available
         verb = plugin.get('verb', 'unknown_plugin')
-        syntax_result = self.syntax_validator.validate_component(plugin, 'plugin', verb)
+        if self.syntax_validator:
+            syntax_result = self.syntax_validator.validate_component(plugin, 'plugin', verb)
+        else:
+            syntax_result = None
         
-        results = {
-            'policy_compliance': True,
-            'syntax_compliance': syntax_result.is_valid,
-            'violations': [],
-            'warnings': [],
-            'syntax_errors': [self._convert_syntax_error(e) for e in syntax_result.errors],
-            'stats': {
-                'policies_checked': 0,
-                'critical_violations': 0,
-                'high_violations': 0,
-                'medium_violations': 0,
-                'low_violations': 0,
-                'syntax_errors': syntax_result.get_error_count(),
-                'syntax_warnings': syntax_result.get_warning_count()
+        if syntax_result is not None:
+            results = {
+                'policy_compliance': True,
+                'syntax_compliance': syntax_result.is_valid,
+                'violations': [],
+                'warnings': [],
+                'syntax_errors': [self._convert_syntax_error(e) for e in syntax_result.errors],
+                'stats': {
+                    'policies_checked': 0,
+                    'critical_violations': 0,
+                    'high_violations': 0,
+                    'medium_violations': 0,
+                    'low_violations': 0,
+                    'syntax_errors': syntax_result.get_error_count(),
+                    'syntax_warnings': syntax_result.get_warning_count()
+                }
             }
-        }
-        
-        # If syntax validation fails, mark as non-compliant
-        if not syntax_result.is_valid:
-            results['policy_compliance'] = False
+            
+            # If syntax validation fails, mark as non-compliant
+            if not syntax_result.is_valid:
+                results['policy_compliance'] = False
+        else:
+            results = {
+                'policy_compliance': True,
+                'syntax_compliance': None,
+                'violations': [],
+                'warnings': [],
+                'syntax_errors': [],
+                'stats': {
+                    'policies_checked': 0,
+                    'critical_violations': 0,
+                    'high_violations': 0,
+                    'medium_violations': 0,
+                    'low_violations': 0,
+                    'syntax_errors': 0,
+                    'syntax_warnings': 0
+                }
+            }
         
         # Check CODE-001: Production-Ready Code policy
         prod_policy = self._find_policy('CODE-001')

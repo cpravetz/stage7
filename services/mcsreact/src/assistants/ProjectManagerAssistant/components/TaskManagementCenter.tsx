@@ -56,7 +56,7 @@ const TaskManagementCenter: React.FC<TaskManagementCenterProps> = ({ tasks, send
       {/* Filters and Search */}
       <Card elevation={3} sx={{ mb: 3, p: 2 }}>
         <Grid container spacing={2} alignItems="center">
-          <Grid item xs={12} sm={4}>
+          <Grid size={{xs: 12, sm: 4}} >
             <TextField
               fullWidth
               label="Search Tasks"
@@ -68,7 +68,7 @@ const TaskManagementCenter: React.FC<TaskManagementCenterProps> = ({ tasks, send
             />
           </Grid>
 
-          <Grid item xs={12} sm={3}>
+          <Grid size={{xs: 12, sm: 3}} >
             <FormControl fullWidth size="small">
               <InputLabel>Status</InputLabel>
               <Select
@@ -86,7 +86,7 @@ const TaskManagementCenter: React.FC<TaskManagementCenterProps> = ({ tasks, send
             </FormControl>
           </Grid>
 
-          <Grid item xs={12} sm={3}>
+          <Grid size={{xs: 12, sm: 3}} >
             <FormControl fullWidth size="small">
               <InputLabel>Priority</InputLabel>
               <Select
@@ -102,7 +102,7 @@ const TaskManagementCenter: React.FC<TaskManagementCenterProps> = ({ tasks, send
             </FormControl>
           </Grid>
 
-          <Grid item xs={12} sm={2}>
+          <Grid size={{xs: 12, sm: 2}} >
             <Button 
               fullWidth
               variant="contained"
@@ -119,7 +119,7 @@ const TaskManagementCenter: React.FC<TaskManagementCenterProps> = ({ tasks, send
 
       {/* Summary Cards */}
       <Grid container spacing={2} sx={{ mb: 3 }}>
-        <Grid item xs={6} sm={3}>
+        <Grid size={{xs: 6, sm: 3}} >
           <Card elevation={3}>
             <CardContent>
               <Typography variant="subtitle2" color="textSecondary" gutterBottom>
@@ -132,7 +132,7 @@ const TaskManagementCenter: React.FC<TaskManagementCenterProps> = ({ tasks, send
           </Card>
         </Grid>
 
-        <Grid item xs={6} sm={3}>
+        <Grid size={{xs: 6, sm: 3}} >
           <Card elevation={3}>
             <CardContent>
               <Typography variant="subtitle2" color="textSecondary" gutterBottom>
@@ -145,7 +145,7 @@ const TaskManagementCenter: React.FC<TaskManagementCenterProps> = ({ tasks, send
           </Card>
         </Grid>
 
-        <Grid item xs={6} sm={3}>
+        <Grid size={{xs: 6, sm: 3}} >
           <Card elevation={3}>
             <CardContent>
               <Typography variant="subtitle2" color="textSecondary" gutterBottom>
@@ -158,7 +158,7 @@ const TaskManagementCenter: React.FC<TaskManagementCenterProps> = ({ tasks, send
           </Card>
         </Grid>
 
-        <Grid item xs={6} sm={3}>
+        <Grid size={{xs: 6, sm: 3}} >
           <Card elevation={3}>
             <CardContent>
               <Typography variant="subtitle2" color="textSecondary" gutterBottom>
@@ -273,7 +273,7 @@ const TaskManagementCenter: React.FC<TaskManagementCenterProps> = ({ tasks, send
           Quick Actions
         </Typography>
         <Grid container spacing={1}>
-          <Grid item>
+          <Grid>
             <Button 
               variant="contained"
               color="primary"
@@ -284,7 +284,7 @@ const TaskManagementCenter: React.FC<TaskManagementCenterProps> = ({ tasks, send
               Bulk Create
             </Button>
           </Grid>
-          <Grid item>
+          <Grid>
             <Button 
               variant="outlined"
               color="secondary"
@@ -295,7 +295,7 @@ const TaskManagementCenter: React.FC<TaskManagementCenterProps> = ({ tasks, send
               Mark Complete
             </Button>
           </Grid>
-          <Grid item>
+          <Grid>
             <Button 
               variant="outlined"
               color="error"

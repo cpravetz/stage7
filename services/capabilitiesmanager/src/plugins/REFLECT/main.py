@@ -16,12 +16,11 @@ from typing import Dict, Any, List, Optional, Set
 
 # Import from the installed shared library package
 try:
-    from plan_validator import PlanValidator, AccomplishError, PLAN_STEP_SCHEMA, PLAN_ARRAY_SCHEMA
+    from plan_validator import PlanValidator, AccomplishError, PLAN_STEP_SCHEMA, PLAN_ARRAY_SCHEMA  # type: ignore
     ReflectError = AccomplishError
 except ImportError:
-    # Fallback to direct import for development/testing
     sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', '..', 'shared', 'python', 'lib')))
-    from plan_validator import PlanValidator, AccomplishError as ReflectError, PLAN_STEP_SCHEMA, PLAN_ARRAY_SCHEMA
+    from plan_validator import PlanValidator, AccomplishError as ReflectError, PLAN_STEP_SCHEMA, PLAN_ARRAY_SCHEMA  # type: ignore
 
 # Configure logging
 logging.basicConfig(
@@ -339,7 +338,7 @@ def parse_inputs(inputs_str: str) -> Dict[str, Any]:
         return inputs
     except Exception as e:
         logger.error(f"Input parsing failed: {e}")
-        raise AccomplishError(f"Input validation failed: {e}", "input_error")
+        raise ReflectError(f"Input validation failed: {e}", "input_error")
 
 class ReflectHandler:
     """Handles reflection requests by generating schema-compliant plans"""
@@ -500,7 +499,6 @@ class ReflectHandler:
         Detect if mission has multiple phases and suggest next phase.
         Returns the next phase content if applicable.
         """
-        import re
         # Check if goal mentions phases
         phase_pattern = r'PHASE\s+(\d+)\s*[-:]?\s*([^\n]*)'
         matches = list(re.finditer(phase_pattern, mission_goal, re.IGNORECASE))

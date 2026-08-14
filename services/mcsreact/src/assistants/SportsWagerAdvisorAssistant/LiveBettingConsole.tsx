@@ -38,7 +38,7 @@ const LiveBettingConsole: React.FC<LiveBettingConsoleProps> = ({
             Recent Bets Placed: {confirmedBets.length}
           </Typography>
           {confirmedBets.map((bet, idx) => (
-            <Typography key={idx} variant="body2">
+            <Typography key={{idx} variant="body2"}>
               • {bet.selection} on Game {bet.gameId} for ${bet.amount.toFixed(2)}
             </Typography>
           ))}
@@ -47,13 +47,13 @@ const LiveBettingConsole: React.FC<LiveBettingConsoleProps> = ({
 
       <Grid container spacing={3}>
         {games.map((game) => (
-          <Grid {...({ xs: 12, md: 6, key: game.id, item: true } as any)}>
+          <Grid size={{md: 6}} key={game.id}>
             <Paper elevation={2} sx={{ p: 2 }}>
               <Typography variant="h6">{game.sport}: {game.teams.join(' vs ')}</Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>{game.date}</Typography>
               <Grid container spacing={1} sx={{ mb: 2 }}>
                 {Object.entries(game.odds).map(([outcome, odd]) => (
-                  <Grid {...({ xs: 6, key: outcome, item: true } as any)}>
+                  <Grid key={outcome}>
                     <Button
                       variant={selectedGameId === game.id && selectedOutcome === outcome ? 'contained' : 'outlined'}
                       fullWidth
@@ -103,6 +103,4 @@ const LiveBettingConsole: React.FC<LiveBettingConsoleProps> = ({
 };
 
 export default LiveBettingConsole;
-
-
 

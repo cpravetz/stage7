@@ -75,7 +75,7 @@ const PerformanceAnalyticsDashboard: React.FC<PerformanceAnalyticsDashboardProps
       </Typography>
       <Paper elevation={2} sx={{ p: 2 }}>
         <Grid container spacing={3}>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Average Assessment Scores
             </Typography>
@@ -90,7 +90,7 @@ const PerformanceAnalyticsDashboard: React.FC<PerformanceAnalyticsDashboardProps
               </BarChart>
             </ResponsiveContainer>
           </Grid>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Learning Plan Completion Rate
             </Typography>
@@ -105,7 +105,7 @@ const PerformanceAnalyticsDashboard: React.FC<PerformanceAnalyticsDashboardProps
               </BarChart>
             </ResponsiveContainer>
           </Grid>
-          <Grid {...({ xs: 12, item: true } as any)}>
+          <Grid>
             <Typography variant="h6" gutterBottom>
               Student Engagement Hours
             </Typography>
@@ -127,5 +127,3 @@ const PerformanceAnalyticsDashboard: React.FC<PerformanceAnalyticsDashboardProps
 };
 
 export default PerformanceAnalyticsDashboard;
-
-

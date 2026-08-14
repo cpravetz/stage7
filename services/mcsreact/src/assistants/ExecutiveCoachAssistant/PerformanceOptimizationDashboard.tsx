@@ -18,7 +18,7 @@ const PerformanceOptimizationDashboard = () => {
       </Typography>
       <Paper elevation={2} sx={{ p: 2 }}>
         <Grid container spacing={3}>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Revenue Growth (%)
             </Typography>
@@ -33,7 +33,7 @@ const PerformanceOptimizationDashboard = () => {
               </LineChart>
             </ResponsiveContainer>
           </Grid>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Employee Retention (%)
             </Typography>
@@ -48,7 +48,7 @@ const PerformanceOptimizationDashboard = () => {
               </BarChart>
             </ResponsiveContainer>
           </Grid>
-          <Grid {...({ xs: 12, item: true } as any)}>
+          <Grid>
             <Typography variant="h6" gutterBottom>
               Project Completion Rate (%)
             </Typography>
@@ -70,5 +70,3 @@ const PerformanceOptimizationDashboard = () => {
 };
 
 export default PerformanceOptimizationDashboard;
-
-

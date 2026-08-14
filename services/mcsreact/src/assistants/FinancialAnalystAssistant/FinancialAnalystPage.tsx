@@ -220,25 +220,25 @@ const FinancialAnalystPageView: React.FC<AssistantRenderProps> = ({
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
       <Grid container spacing={2} sx={{ flexGrow: 1, overflow: 'auto', p: 2 }}>
-        <Grid item xs={12} md={6} sx={{ height: '100%' }}>
+        <Grid size={{xs: 12, md: 6}} sx={{ height: '100%' }}>
           <Paper elevation={2} sx={{ p: 2, height: '100%', overflow: 'auto' }}>
             <BudgetingCenterWithContext />
           </Paper>
         </Grid>
         
-        <Grid item xs={12} md={6} sx={{ height: '100%' }}>
+        <Grid size={{xs: 12, md: 6}} sx={{ height: '100%' }}>
           <Paper elevation={2} sx={{ p: 2, height: '100%', overflow: 'auto' }}>
             <ForecastingDashboardWithContext />
           </Paper>
         </Grid>
         
-        <Grid item xs={12} md={6} sx={{ height: '100%' }}>
+        <Grid size={{xs: 12, md: 6}} sx={{ height: '100%' }}>
           <Paper elevation={2} sx={{ p: 2, height: '100%', overflow: 'auto' }}>
             <FinancialStatementsAnalyzerWithContext />
           </Paper>
         </Grid>
         
-        <Grid item xs={12} md={6} sx={{ height: '100%' }}>
+        <Grid size={{xs: 12, md: 6}} sx={{ height: '100%' }}>
           <Paper elevation={2} sx={{ p: 2, height: '100%', overflow: 'auto' }}>
             <CashFlowAnalyzerWithContext />
           </Paper>

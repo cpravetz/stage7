@@ -41,27 +41,27 @@ const PerformanceTrackingDashboard: React.FC<PerformanceTrackingDashboardProps> 
       </Typography>
       <Paper elevation={2} sx={{ p: 2 }}>
         <Grid container spacing={3}>
-          <Grid xs={12} item>
+          <Grid size={{xs: 12}} item>
             <Grid container spacing={2}>
-              <Grid xs={6} md={3} item>
+              <Grid size={{xs: 6, md: 3}} item>
                 <Paper sx={{ p: 2 }}>
                   <Typography variant="body2" color="textSecondary">Total Wagered</Typography>
                   <Typography variant="h6" color="primary">${totalWagered.toFixed(2)}</Typography>
                 </Paper>
               </Grid>
-              <Grid xs={6} md={3} item>
+              <Grid size={{xs: 6, md: 3}} item>
                 <Paper sx={{ p: 2 }}>
                   <Typography variant="body2" color="textSecondary">Total Won</Typography>
                   <Typography variant="h6" color="success.main">${totalWon.toFixed(2)}</Typography>
                 </Paper>
               </Grid>
-              <Grid xs={6} md={3} item>
+              <Grid size={{xs: 6, md: 3}} item>
                 <Paper sx={{ p: 2 }}>
                   <Typography variant="body2" color="textSecondary">Total Lost</Typography>
                   <Typography variant="h6" color="error.main">${totalLost.toFixed(2)}</Typography>
                 </Paper>
               </Grid>
-              <Grid xs={6} md={3} item>
+              <Grid size={{xs: 6, md: 3}} item>
                 <Paper sx={{ p: 2 }}>
                   <Typography variant="body2" color="textSecondary">Win Rate</Typography>
                   <Typography variant="h6" color="primary">{winRate}%</Typography>
@@ -69,7 +69,7 @@ const PerformanceTrackingDashboard: React.FC<PerformanceTrackingDashboardProps> 
               </Grid>
             </Grid>
           </Grid>
-          <Grid {...({ xs: 12, item: true } as any)}>
+          <Grid>
             <Typography variant="h6" gutterBottom>
               Profit/Loss Over Time
             </Typography>
@@ -88,7 +88,7 @@ const PerformanceTrackingDashboard: React.FC<PerformanceTrackingDashboardProps> 
               <Typography>No wagers recorded yet.</Typography>
             )}
           </Grid>
-          <Grid {...({ xs: 12, item: true } as any)}>
+          <Grid>
             <Button
               variant="contained"
               onClick={onAnalyzePerformance}
@@ -97,7 +97,7 @@ const PerformanceTrackingDashboard: React.FC<PerformanceTrackingDashboardProps> 
               Generate Detailed Analysis
             </Button>
           </Grid>
-          <Grid {...({ xs: 12, item: true } as any)}>
+          <Grid>
             <Typography variant="h6" gutterBottom>
               Wager History ({wagers.length})
             </Typography>
@@ -124,5 +124,4 @@ const PerformanceTrackingDashboard: React.FC<PerformanceTrackingDashboardProps> 
 };
 
 export default PerformanceTrackingDashboard;
-
 

@@ -156,6 +156,7 @@ class TeamCollaborationPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"create_workspace_1769629673442"
+            action = "create workspace"
             
             # Validate input
             if not params:
@@ -218,6 +219,7 @@ class TeamCollaborationPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"manage_members_1769629673442"
+            action = "manage members"
             
             # Validate input
             if not params:
@@ -280,6 +282,7 @@ class TeamCollaborationPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"track_tasks_1769629673442"
+            action = "track tasks"
             
             # Validate input
             if not params:
@@ -342,6 +345,7 @@ class TeamCollaborationPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"post_updates_1769629673443"
+            action = "post updates"
             
             # Validate input
             if not params:
@@ -404,6 +408,7 @@ class TeamCollaborationPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"share_files_1769629673443"
+            action = "share files"
             
             # Validate input
             if not params:
@@ -466,6 +471,7 @@ class TeamCollaborationPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"get_activity_1769629673443"
+            action = "get activity"
             
             # Validate input
             if not params:

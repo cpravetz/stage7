@@ -22,7 +22,7 @@ const PersonalizedJobMatching: React.FC<PersonalizedJobMatchingProps> = ({
       </Typography>
       <Paper elevation={2} sx={{ p: 2 }}>
         <Grid container spacing={3}>
-          <Grid {...({ xs: 12, md: 4, item: true } as any)}>
+          <Grid size={{md: 4}}>
             <Typography variant="h6" gutterBottom>
               Your Career Profile
             </Typography>
@@ -66,7 +66,7 @@ const PersonalizedJobMatching: React.FC<PersonalizedJobMatchingProps> = ({
               </Box>
             )}
           </Grid>
-          <Grid {...({ xs: 12, md: 8, item: true } as any)}>
+          <Grid size={{md: 8}}>
             <Typography variant="h6" gutterBottom>
               Recommended Job Listings
             </Typography>
@@ -107,5 +107,3 @@ const PersonalizedJobMatching: React.FC<PersonalizedJobMatchingProps> = ({
 };
 
 export default PersonalizedJobMatching;
-
-

@@ -30,7 +30,7 @@ const ContractReviewAnalysis: React.FC<ContractReviewAnalysisProps> = ({
       </Typography>
       <Paper elevation={2} sx={{ p: 2 }}>
         <Grid container spacing={3}>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Upload Contract for Analysis
             </Typography>
@@ -46,7 +46,7 @@ const ContractReviewAnalysis: React.FC<ContractReviewAnalysisProps> = ({
               Analyze Contract
             </Button>
           </Grid>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Analysis Results
             </Typography>
@@ -97,5 +97,3 @@ const ContractReviewAnalysis: React.FC<ContractReviewAnalysisProps> = ({
 };
 
 export default ContractReviewAnalysis;
-
-

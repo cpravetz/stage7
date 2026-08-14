@@ -60,7 +60,7 @@ const PerformanceAnalyticsHub: React.FC<PerformanceAnalyticsHubProps> = ({ conve
       </Typography>
       <Paper elevation={2} sx={{ p: 2 }}>
         <Grid container spacing={3}>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Agent Performance: Tickets Resolved
             </Typography>
@@ -75,7 +75,7 @@ const PerformanceAnalyticsHub: React.FC<PerformanceAnalyticsHubProps> = ({ conve
               </BarChart>
             </ResponsiveContainer>
           </Grid>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Agent Performance: Avg. Resolution Time (Hours)
             </Typography>
@@ -90,7 +90,7 @@ const PerformanceAnalyticsHub: React.FC<PerformanceAnalyticsHubProps> = ({ conve
               </BarChart>
             </ResponsiveContainer>
           </Grid>
-          <Grid {...({ xs: 12, item: true } as any)}>
+          <Grid>
             <Typography variant="h6" gutterBottom>
               Agent Performance: CSAT Score
             </Typography>
@@ -112,5 +112,3 @@ const PerformanceAnalyticsHub: React.FC<PerformanceAnalyticsHubProps> = ({ conve
 };
 
 export default PerformanceAnalyticsHub;
-
-

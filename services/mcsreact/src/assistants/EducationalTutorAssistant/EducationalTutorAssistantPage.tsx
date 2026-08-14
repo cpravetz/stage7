@@ -369,7 +369,7 @@ const EducationalTutorAssistantPage: React.FC<{ clientId: string }> = ({ clientI
               </Typography>
       
               <Grid container spacing={3}>
-                <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+                <Grid size={{md: 6}}>
                   <TextField
                     fullWidth
                     label="Topic"
@@ -384,7 +384,7 @@ const EducationalTutorAssistantPage: React.FC<{ clientId: string }> = ({ clientI
                   />
                 </Grid>
       
-                <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+                <Grid size={{md: 6}}>
                   <TextField
                     fullWidth
                     label="Level"
@@ -406,7 +406,7 @@ const EducationalTutorAssistantPage: React.FC<{ clientId: string }> = ({ clientI
                   </TextField>
                 </Grid>
       
-                <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+                <Grid size={{md: 6}}>
                   <TextField
                     fullWidth
                     label="Status"
@@ -428,7 +428,7 @@ const EducationalTutorAssistantPage: React.FC<{ clientId: string }> = ({ clientI
                   </TextField>
                 </Grid>
       
-                <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+                <Grid size={{md: 6}}>
                   <TextField
                     fullWidth
                     label="Due Date"
@@ -443,7 +443,7 @@ const EducationalTutorAssistantPage: React.FC<{ clientId: string }> = ({ clientI
                     InputLabelProps={{ shrink: true }}
                   />
                 </Grid>
-                <Grid {...({ xs: 12, item: true } as any)}>
+                <Grid>
                   <Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
                     {selectedLearningPlan ? (
                       <>
@@ -551,7 +551,7 @@ const EducationalTutorAssistantPage: React.FC<{ clientId: string }> = ({ clientI
             </Typography>
       
             <Grid container spacing={3}>
-              <Grid {...({ xs: 12, md: 4, item: true } as any)}>
+              <Grid size={{md: 4}}>
                 <Paper sx={{ p: 3, height: '100%' }}>
                   <Typography variant="h6" gutterBottom>
                     Student Selection
@@ -587,7 +587,7 @@ const EducationalTutorAssistantPage: React.FC<{ clientId: string }> = ({ clientI
                 </Paper>
               </Grid>
       
-              <Grid {...({ xs: 12, md: 8, item: true } as any)}>
+              <Grid size={{md: 8}}>
                 <Paper sx={{ p: 3, height: '100%' }}>
                   {selectedStudent ? (
                     <>
@@ -603,7 +603,7 @@ const EducationalTutorAssistantPage: React.FC<{ clientId: string }> = ({ clientI
                       </Box>
       
                       <Grid container spacing={3}>
-                        <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+                        <Grid size={{md: 6}}>
                           <Typography variant="subtitle1" gutterBottom>
                             Overall Progress
                           </Typography>
@@ -617,7 +617,7 @@ const EducationalTutorAssistantPage: React.FC<{ clientId: string }> = ({ clientI
                           </Typography>
                         </Grid>
       
-                        <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+                        <Grid size={{md: 6}}>
                           <Typography variant="subtitle1" gutterBottom>
                             Performance Score
                           </Typography>
@@ -632,7 +632,7 @@ const EducationalTutorAssistantPage: React.FC<{ clientId: string }> = ({ clientI
                           </Typography>
                         </Grid>
       
-                        <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+                        <Grid size={{md: 6}}>
                           <Typography variant="subtitle1" gutterBottom>
                             Engagement Level
                           </Typography>
@@ -647,7 +647,7 @@ const EducationalTutorAssistantPage: React.FC<{ clientId: string }> = ({ clientI
                           </Typography>
                         </Grid>
       
-                        <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+                        <Grid size={{md: 6}}>
                           <Typography variant="subtitle1" gutterBottom>
                             Time Spent Learning
                           </Typography>
@@ -709,7 +709,7 @@ const EducationalTutorAssistantPage: React.FC<{ clientId: string }> = ({ clientI
             </Typography>
       
             <Grid container spacing={3}>
-              <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+              <Grid size={{md: 6}}>
                 <Paper sx={{ p: 3, height: '100%' }}>
                   <Typography variant="h6" gutterBottom>
                     Upcoming Lessons
@@ -777,7 +777,7 @@ const EducationalTutorAssistantPage: React.FC<{ clientId: string }> = ({ clientI
                 </Paper>
               </Grid>
       
-              <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+              <Grid size={{md: 6}}>
                 <Paper sx={{ p: 3, height: '100%' }}>
                   <Typography variant="h6" gutterBottom>
                     Weekly Schedule
@@ -832,7 +832,7 @@ const EducationalTutorAssistantPage: React.FC<{ clientId: string }> = ({ clientI
                 </Typography>
       
                 <Grid container spacing={3}>
-                  <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+                  <Grid size={{md: 6}}>
                     <Card>
                       <CardContent>
                         <Typography variant="subtitle1" gutterBottom>
@@ -853,7 +853,7 @@ const EducationalTutorAssistantPage: React.FC<{ clientId: string }> = ({ clientI
                     </Card>
                   </Grid>
       
-                  <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+                  <Grid size={{md: 6}}>
                     <Card>
                       <CardContent>
                         <Typography variant="subtitle1" gutterBottom>
@@ -887,7 +887,7 @@ const EducationalTutorAssistantPage: React.FC<{ clientId: string }> = ({ clientI
             </Typography>
       
             <Grid container spacing={3}>
-              <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+              <Grid size={{md: 6}}>
                 <Paper sx={{ p: 3, height: '100%' }}>
                   <Typography variant="h6" gutterBottom>
                     AI Assistant Chat
@@ -971,7 +971,7 @@ const EducationalTutorAssistantPage: React.FC<{ clientId: string }> = ({ clientI
                 </Paper>
               </Grid>
       
-              <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+              <Grid size={{md: 6}}>
                 <Paper sx={{ p: 3, height: '100%' }}>
                   <Typography variant="h6" gutterBottom>
                     Support Resources
@@ -1105,20 +1105,12 @@ const EducationalTutorAssistantPage: React.FC<{ clientId: string }> = ({ clientI
       
             <Grid container sx={{ flex: 1, overflow: 'hidden' }}>
               {/* Left Panel - Chat */}
-              <Grid {...({ xs: 12, md: 6, component: "div", sx: {
-                  height: '100%',
-                  borderRight: '1px solid #e0e0e0',
-                  overflowY: 'auto'
-                }, item: true } as any)}>
+              <Grid  size={{md: 6}}>
                 <ChatPanel messages={messages} onSendMessage={sendMessage} isLoading={isLoading} error={error} assistantName="Educational Tutor" enableVoiceInput={true} />
               </Grid>
       
               {/* Right Panel - Active Tool Content */}
-              <Grid {...({ xs: 12, md: 6, component: "div", sx: {
-                  height: '100%',
-                  overflowY: 'auto',
-                  backgroundColor: theme.palette.background.default
-                }, item: true } as any)}>
+              <Grid  size={{md: 6}}>
                 <Box sx={{ p: 1, width: '100%', height: '100%' }}>
                   {activeTab === 0 && renderLearningPlanBuilder()}
                   {activeTab === 1 && renderStudentProgressTracker()}
@@ -1188,5 +1180,3 @@ const EducationalTutorAssistantPage: React.FC<{ clientId: string }> = ({ clientI
 };
 
 export default EducationalTutorAssistantPage;
-
-

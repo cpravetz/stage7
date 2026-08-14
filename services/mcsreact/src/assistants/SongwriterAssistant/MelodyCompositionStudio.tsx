@@ -58,7 +58,7 @@ const MelodyCompositionStudio: React.FC<MelodyCompositionStudioProps> = ({
       </Typography>
       <Paper elevation={2} sx={{ p: 2 }}>
         <Grid container spacing={3}>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Create New Melody
             </Typography>
@@ -94,7 +94,7 @@ const MelodyCompositionStudio: React.FC<MelodyCompositionStudioProps> = ({
               Create Melody
             </Button>
           </Grid>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Melody Ideas ({melodies.length})
             </Typography>
@@ -135,7 +135,7 @@ const MelodyCompositionStudio: React.FC<MelodyCompositionStudioProps> = ({
                 Add New Note
               </Typography>
               <Grid container spacing={2} alignItems="center">
-                <Grid item xs={5}>
+                <Grid size={{xs: 5}} >
                   <TextField
                     label="Note (e.g., C4, G#3)"
                     fullWidth
@@ -144,7 +144,7 @@ const MelodyCompositionStudio: React.FC<MelodyCompositionStudioProps> = ({
                     onChange={(e) => setNewNote({ ...newNote, note: e.target.value })}
                   />
                 </Grid>
-                <Grid item xs={5}>
+                <Grid size={{xs: 5}} >
                   <TextField
                     label="Duration (beats)"
                     fullWidth
@@ -154,7 +154,7 @@ const MelodyCompositionStudio: React.FC<MelodyCompositionStudioProps> = ({
                     onChange={(e) => setNewNote({ ...newNote, duration: e.target.value })}
                   />
                 </Grid>
-                <Grid item xs={2}>
+                <Grid size={{xs: 2}} >
                   <Button
                     variant="contained"
                     onClick={handleAddNote}
@@ -168,7 +168,7 @@ const MelodyCompositionStudio: React.FC<MelodyCompositionStudioProps> = ({
               </Grid>
             </Box>
           </Grid>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Current Melody Sketch
             </Typography>
@@ -195,5 +195,3 @@ const MelodyCompositionStudio: React.FC<MelodyCompositionStudioProps> = ({
 };
 
 export default MelodyCompositionStudio;
-
-

@@ -38,7 +38,7 @@ const PerformanceDashboard: React.FC<PerformanceDashboardProps> = ({ performance
         Performance Dashboard
       </Typography>
       <Grid container spacing={3}>
-        <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+        <Grid size={{md: 6}}>
           <Paper elevation={2} sx={{ p: 2, height: 300 }}>
             <Typography variant="h6" gutterBottom>
               Content Engagement Trends
@@ -56,7 +56,7 @@ const PerformanceDashboard: React.FC<PerformanceDashboardProps> = ({ performance
             </ResponsiveContainer>
           </Paper>
         </Grid>
-        <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+        <Grid size={{md: 6}}>
           <Paper elevation={2} sx={{ p: 2, height: 300 }}>
             <Typography variant="h6" gutterBottom>
               Video Performance
@@ -79,5 +79,3 @@ const PerformanceDashboard: React.FC<PerformanceDashboardProps> = ({ performance
 };
 
 export default PerformanceDashboard;
-
-

@@ -33,7 +33,7 @@ const AudienceInsightsView: React.FC<AudienceInsightsViewProps> = ({ audienceDem
         Audience Insights View
       </Typography>
       <Grid container spacing={3}>
-        <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+        <Grid size={{md: 6}}>
           <Paper elevation={2} sx={{ p: 2, height: 350 }}>
             <Typography variant="h6" gutterBottom>
               Audience Demographics (Age)
@@ -50,7 +50,7 @@ const AudienceInsightsView: React.FC<AudienceInsightsViewProps> = ({ audienceDem
                   label
                 >
                   {pieChartData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    <Cell key={`cell}`} fill={COLORS[index % COLORS.length]} />
                   ))}
                 </Pie>
                 <Tooltip />
@@ -59,7 +59,7 @@ const AudienceInsightsView: React.FC<AudienceInsightsViewProps> = ({ audienceDem
             </ResponsiveContainer>
           </Paper>
         </Grid>
-        <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+        <Grid size={{md: 6}}>
           <Paper elevation={2} sx={{ p: 2, height: 350 }}>
             <Typography variant="h6" gutterBottom>
               Audience Interests
@@ -82,5 +82,3 @@ const AudienceInsightsView: React.FC<AudienceInsightsViewProps> = ({ audienceDem
 };
 
 export default AudienceInsightsView;
-
-

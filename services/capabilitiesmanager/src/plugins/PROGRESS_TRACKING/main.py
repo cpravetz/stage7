@@ -156,6 +156,7 @@ class ProgressTrackingPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"create_project_1769629673580"
+            action = "create_project"
             
             # Validate input
             if not params:
@@ -197,7 +198,7 @@ class ProgressTrackingPlugin:
             return {
                 "status": "error",
                 "action": "create_project",
-                "message": f"Validation error: {{str(ve)}}",
+                "message": f"Validation error: {str(ve)}",
                 "error_type": "validation_error"
             }
         except Exception as e:
@@ -206,7 +207,7 @@ class ProgressTrackingPlugin:
             return {
                 "status": "error",
                 "action": "create_project",
-                "message": f"Error: {{str(e)}}",
+                "message": f"Error: {str(e)}",
                 "error_type": "execution_error"
             }
 
@@ -218,6 +219,7 @@ class ProgressTrackingPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"track_progress_1769629673580"
+            action = "track_progress"
             
             # Validate input
             if not params:
@@ -259,7 +261,7 @@ class ProgressTrackingPlugin:
             return {
                 "status": "error",
                 "action": "track_progress",
-                "message": f"Validation error: {{str(ve)}}",
+                "message": f"Validation error: {str(ve)}",
                 "error_type": "validation_error"
             }
         except Exception as e:
@@ -268,7 +270,7 @@ class ProgressTrackingPlugin:
             return {
                 "status": "error",
                 "action": "track_progress",
-                "message": f"Error: {{str(e)}}",
+                "message": f"Error: {str(e)}",
                 "error_type": "execution_error"
             }
 
@@ -280,6 +282,7 @@ class ProgressTrackingPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"update_milestone_1769629673580"
+            action = "update_milestone"
             
             # Validate input
             if not params:
@@ -321,7 +324,7 @@ class ProgressTrackingPlugin:
             return {
                 "status": "error",
                 "action": "update_milestone",
-                "message": f"Validation error: {{str(ve)}}",
+                "message": f"Validation error: {str(ve)}",
                 "error_type": "validation_error"
             }
         except Exception as e:
@@ -330,7 +333,7 @@ class ProgressTrackingPlugin:
             return {
                 "status": "error",
                 "action": "update_milestone",
-                "message": f"Error: {{str(e)}}",
+                "message": f"Error: {str(e)}",
                 "error_type": "execution_error"
             }
 
@@ -342,6 +345,7 @@ class ProgressTrackingPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"get_status_1769629673580"
+            action = "get_status"
             
             # Validate input
             if not params:
@@ -383,7 +387,7 @@ class ProgressTrackingPlugin:
             return {
                 "status": "error",
                 "action": "get_status",
-                "message": f"Validation error: {{str(ve)}}",
+                "message": f"Validation error: {str(ve)}",
                 "error_type": "validation_error"
             }
         except Exception as e:
@@ -392,7 +396,7 @@ class ProgressTrackingPlugin:
             return {
                 "status": "error",
                 "action": "get_status",
-                "message": f"Error: {{str(e)}}",
+                "message": f"Error: {str(e)}",
                 "error_type": "execution_error"
             }
 
@@ -404,6 +408,7 @@ class ProgressTrackingPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"identify_risks_1769629673580"
+            action = "identify_risks"
             
             # Validate input
             if not params:
@@ -445,7 +450,7 @@ class ProgressTrackingPlugin:
             return {
                 "status": "error",
                 "action": "identify_risks",
-                "message": f"Validation error: {{str(ve)}}",
+                "message": f"Validation error: {str(ve)}",
                 "error_type": "validation_error"
             }
         except Exception as e:
@@ -454,7 +459,7 @@ class ProgressTrackingPlugin:
             return {
                 "status": "error",
                 "action": "identify_risks",
-                "message": f"Error: {{str(e)}}",
+                "message": f"Error: {str(e)}",
                 "error_type": "execution_error"
             }
 
@@ -466,6 +471,7 @@ class ProgressTrackingPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"suggest_improvements_1769629673580"
+            action = "suggest_improvements"
             
             # Validate input
             if not params:
@@ -507,7 +513,7 @@ class ProgressTrackingPlugin:
             return {
                 "status": "error",
                 "action": "suggest_improvements",
-                "message": f"Validation error: {{str(ve)}}",
+                "message": f"Validation error: {str(ve)}",
                 "error_type": "validation_error"
             }
         except Exception as e:
@@ -516,7 +522,7 @@ class ProgressTrackingPlugin:
             return {
                 "status": "error",
                 "action": "suggest_improvements",
-                "message": f"Error: {{str(e)}}",
+                "message": f"Error: {str(e)}",
                 "error_type": "execution_error"
             }
 

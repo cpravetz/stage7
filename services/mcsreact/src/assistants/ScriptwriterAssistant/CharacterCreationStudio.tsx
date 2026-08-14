@@ -45,7 +45,7 @@ const CharacterCreationStudio: React.FC<CharacterCreationStudioProps> = ({
       </Typography>
       <Paper elevation={2} sx={{ p: 2 }}>
         <Grid container spacing={3}>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               {editingId ? 'Edit Character' : 'Create New Character'}
             </Typography>
@@ -99,7 +99,7 @@ const CharacterCreationStudio: React.FC<CharacterCreationStudioProps> = ({
               </Button>
             )}
           </Grid>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Characters ({characters.length})
             </Typography>
@@ -142,5 +142,3 @@ const CharacterCreationStudio: React.FC<CharacterCreationStudioProps> = ({
 };
 
 export default CharacterCreationStudio;
-
-

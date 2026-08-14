@@ -15,23 +15,23 @@ export const ExecutiveSummaryWidget: React.FC<ExecutiveSummaryWidgetProps> = ({ 
   return (
     <Paper elevation={3} sx={{ p: 2, backgroundColor: '#1a237e', color: 'white' }}>
       <Grid container alignItems="center" spacing={2}>
-        <Grid item>
+        <Grid>
           <Avatar sx={{ bgcolor: statusColor, width: 56, height: 56 }}>
             <StatusIcon sx={{ fontSize: 40 }}/>
           </Avatar>
         </Grid>
-        <Grid item xs>
+        <Grid size={{xs: "grow"}} >
           <Typography variant="h5">Executive Summary</Typography>
           <Typography variant="body1">System Status: {systemStatus}</Typography>
         </Grid>
-        <Grid item>
+        <Grid>
           <Paper sx={{ p: 1.5, textAlign: 'center', backgroundColor: 'rgba(255,255,255,0.1)', color: 'white' }}>
             <ErrorOutline />
             <Typography variant="h6">{activeIncidents}</Typography>
             <Typography variant="caption">Active Incidents</Typography>
           </Paper>
         </Grid>
-        <Grid item>
+        <Grid>
           <Paper sx={{ p: 1.5, textAlign: 'center', backgroundColor: 'rgba(255,255,255,0.1)', color: 'white' }}>
             <WarningAmber />
             <Typography variant="h6">{criticalVulnerabilities}</Typography>

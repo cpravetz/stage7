@@ -36,7 +36,7 @@ const MarketResearchDashboard: React.FC<MarketResearchDashboardProps> = ({ onAna
       </Typography>
       <Paper elevation={2} sx={{ p: 2 }}>
         <Grid container spacing={3}>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Market Index Trends
             </Typography>
@@ -52,7 +52,7 @@ const MarketResearchDashboard: React.FC<MarketResearchDashboardProps> = ({ onAna
               </LineChart>
             </ResponsiveContainer>
           </Grid>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Latest Market News
             </Typography>
@@ -71,5 +71,3 @@ const MarketResearchDashboard: React.FC<MarketResearchDashboardProps> = ({ onAna
 };
 
 export default MarketResearchDashboard;
-
-

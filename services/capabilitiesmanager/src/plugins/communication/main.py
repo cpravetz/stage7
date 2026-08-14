@@ -156,6 +156,7 @@ class CommunicationPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"send_message_1769629674143"
+            action = "send_message"
             
             # Validate input
             if not params:
@@ -197,7 +198,7 @@ class CommunicationPlugin:
             return {
                 "status": "error",
                 "action": "send_message",
-                "message": f"Validation error: {{str(ve)}}",
+                "message": f"Validation error: {str(ve)}",
                 "error_type": "validation_error"
             }
         except Exception as e:
@@ -206,7 +207,7 @@ class CommunicationPlugin:
             return {
                 "status": "error",
                 "action": "send_message",
-                "message": f"Error: {{str(e)}}",
+                "message": f"Error: {str(e)}",
                 "error_type": "execution_error"
             }
 
@@ -218,6 +219,7 @@ class CommunicationPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"create_channel_1769629674143"
+            action = "create_channel"
             
             # Validate input
             if not params:
@@ -259,7 +261,7 @@ class CommunicationPlugin:
             return {
                 "status": "error",
                 "action": "create_channel",
-                "message": f"Validation error: {{str(ve)}}",
+                "message": f"Validation error: {str(ve)}",
                 "error_type": "validation_error"
             }
         except Exception as e:
@@ -268,7 +270,7 @@ class CommunicationPlugin:
             return {
                 "status": "error",
                 "action": "create_channel",
-                "message": f"Error: {{str(e)}}",
+                "message": f"Error: {str(e)}",
                 "error_type": "execution_error"
             }
 
@@ -280,6 +282,7 @@ class CommunicationPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"manage_channel_1769629674143"
+            action = "manage_channel"
             
             # Validate input
             if not params:
@@ -321,7 +324,7 @@ class CommunicationPlugin:
             return {
                 "status": "error",
                 "action": "manage_channel",
-                "message": f"Validation error: {{str(ve)}}",
+                "message": f"Validation error: {str(ve)}",
                 "error_type": "validation_error"
             }
         except Exception as e:
@@ -330,7 +333,7 @@ class CommunicationPlugin:
             return {
                 "status": "error",
                 "action": "manage_channel",
-                "message": f"Error: {{str(e)}}",
+                "message": f"Error: {str(e)}",
                 "error_type": "execution_error"
             }
 
@@ -342,6 +345,7 @@ class CommunicationPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"get_messages_1769629674143"
+            action = "get_messages"
             
             # Validate input
             if not params:
@@ -383,7 +387,7 @@ class CommunicationPlugin:
             return {
                 "status": "error",
                 "action": "get_messages",
-                "message": f"Validation error: {{str(ve)}}",
+                "message": f"Validation error: {str(ve)}",
                 "error_type": "validation_error"
             }
         except Exception as e:
@@ -392,7 +396,7 @@ class CommunicationPlugin:
             return {
                 "status": "error",
                 "action": "get_messages",
-                "message": f"Error: {{str(e)}}",
+                "message": f"Error: {str(e)}",
                 "error_type": "execution_error"
             }
 
@@ -404,6 +408,7 @@ class CommunicationPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"pin_message_1769629674143"
+            action = "pin_message"
             
             # Validate input
             if not params:
@@ -445,7 +450,7 @@ class CommunicationPlugin:
             return {
                 "status": "error",
                 "action": "pin_message",
-                "message": f"Validation error: {{str(ve)}}",
+                "message": f"Validation error: {str(ve)}",
                 "error_type": "validation_error"
             }
         except Exception as e:
@@ -454,7 +459,7 @@ class CommunicationPlugin:
             return {
                 "status": "error",
                 "action": "pin_message",
-                "message": f"Error: {{str(e)}}",
+                "message": f"Error: {str(e)}",
                 "error_type": "execution_error"
             }
 
@@ -466,6 +471,7 @@ class CommunicationPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"search_messages_1769629674143"
+            action = "search_messages"
             
             # Validate input
             if not params:
@@ -507,7 +513,7 @@ class CommunicationPlugin:
             return {
                 "status": "error",
                 "action": "search_messages",
-                "message": f"Validation error: {{str(ve)}}",
+                "message": f"Validation error: {str(ve)}",
                 "error_type": "validation_error"
             }
         except Exception as e:
@@ -516,7 +522,7 @@ class CommunicationPlugin:
             return {
                 "status": "error",
                 "action": "search_messages",
-                "message": f"Error: {{str(e)}}",
+                "message": f"Error: {str(e)}",
                 "error_type": "execution_error"
             }
 

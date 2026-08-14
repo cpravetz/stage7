@@ -7,7 +7,7 @@ import sys
 import json
 sys.path.insert(0, 'shared/python/lib')
 
-from plan_validator import PlanValidator
+from plan_validator import PlanValidator  # type: ignore
 
 # Test plan with proper step dependencies (should trigger FOREACH)
 test_plan = [

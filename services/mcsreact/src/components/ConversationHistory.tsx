@@ -107,7 +107,7 @@ export const ConversationHistory: React.FC<Props> = React.memo(({ history }: Pro
         }}
       >
         {processedHistory.map((message: ConversationMessage, index: number) => (
-          <MessageItem key={`message-${index}-${message.content.substring(0, 50)}`} message={message} />
+          <MessageItem key={`message}-${message.content.substring(0, 50)}`} message={message} />
         ))}
       </Box>
     </Box>

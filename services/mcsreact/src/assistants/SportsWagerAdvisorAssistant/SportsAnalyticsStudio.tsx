@@ -35,7 +35,7 @@ const SportsAnalyticsStudio: React.FC<SportsAnalyticsStudioProps> = ({
       </Typography>
       <Paper elevation={2} sx={{ p: 2 }}>
         <Grid container spacing={3}>
-          <Grid {...({ xs: 12, item: true } as any)}>
+          <Grid>
             <Typography variant="h6" gutterBottom>
               Team Performance Overview
             </Typography>
@@ -60,13 +60,13 @@ const SportsAnalyticsStudio: React.FC<SportsAnalyticsStudioProps> = ({
               </BarChart>
             </ResponsiveContainer>
           </Grid>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Generate Insights
             </Typography>
             <Grid container spacing={1}>
               {sports.map((sport) => (
-                <Grid xs={6} item key={sport}>
+                <Grid size={{xs: 6}} item key={sport}>
                   <Button
                     variant="outlined"
                     fullWidth
@@ -78,7 +78,7 @@ const SportsAnalyticsStudio: React.FC<SportsAnalyticsStudioProps> = ({
               ))}
             </Grid>
           </Grid>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               AI Insights ({insights.length})
             </Typography>
@@ -105,5 +105,3 @@ const SportsAnalyticsStudio: React.FC<SportsAnalyticsStudioProps> = ({
 };
 
 export default SportsAnalyticsStudio;
-
-

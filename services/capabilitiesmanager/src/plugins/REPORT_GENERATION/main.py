@@ -13,7 +13,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 def _get_input(inputs: dict, key: str, aliases: list = [], default=None):
-    """Safely gets a value from inputs, checking aliases, and extracting from {{'value':...}} wrapper."""
+    """Safely gets a value from inputs, checking aliases, and extracting from {'value':...} wrapper."""
     raw_val = inputs.get(key)
     if raw_val is None:
         for alias in aliases:
@@ -50,7 +50,10 @@ def create_report(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 def export_html(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Export report to HTML format."""
-    import markdown
+    try:
+        import markdown  # type: ignore
+    except ImportError:
+        raise ImportError("markdown package is required for exportHTML. Install with: pip install markdown")
 
     content = payload.get('content', '')
     title = payload.get('title', 'Report')
@@ -116,11 +119,14 @@ def export_html(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 def export_pdf(payload: Dict[str, Any]) -> Dict[str, Any]:
     """Export report to PDF format."""
-    from reportlab.lib.pagesizes import letter
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.units import inch
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-    from reportlab.lib import colors
+    try:
+        from reportlab.lib.pagesizes import letter  # type: ignore
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle  # type: ignore
+        from reportlab.lib.units import inch  # type: ignore
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle  # type: ignore
+        from reportlab.lib import colors  # type: ignore
+    except ImportError:
+        raise ImportError("reportlab package is required for exportPDF. Install with: pip install reportlab")
 
     output_path = payload.get('output_path', 'report.pdf')
     title = payload.get('title', 'Report')
@@ -245,7 +251,7 @@ def parse_inputs(inputs_str):
     """Parse and normalize the plugin stdin JSON payload into a dict."""
     try:
         payload = json.loads(inputs_str)
-        inputs_dict = {{}}
+        inputs_dict = {}
 
         if isinstance(payload, dict):
             if payload.get('_type') == 'Map' and isinstance(payload.get('entries'), list):
@@ -267,7 +273,7 @@ def parse_inputs(inputs_str):
         return inputs_dict
 
     except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse input JSON: {{e}}")
+        logger.error(f"Failed to parse input JSON: {e}")
         raise
 
 def main():
@@ -275,13 +281,13 @@ def main():
     try:
         input_data = sys.stdin.read().strip()
         if not input_data:
-            result = [{{
+            result = [{
                 "success": False,
                 "name": "error",
                 "resultType": "error",
                 "result": "No input data received",
                 "error": "No input data received"
-            }}]
+            }]
         else:
             inputs_dict = parse_inputs(input_data)
             result = execute_plugin(inputs_dict)
@@ -290,13 +296,13 @@ def main():
 
     except Exception as e:
         logger.error(f"Plugin execution failed: {str(e)}")
-        result = [{{
+        result = [{
             "success": False,
             "name": "error",
             "resultType": "error",
             "result": str(e),
             "error": str(e)
-        }}]
+        }]
         print(json.dumps(result))
 
 if __name__ == "__main__":

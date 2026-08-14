@@ -99,7 +99,7 @@ const TimelineAndGanttChart: React.FC<TimelineAndGanttChartProps> = ({ timelineI
       {/* View Mode Toggle */}
       <Card elevation={3} sx={{ mb: 3, p: 2 }}>
         <Grid container spacing={2} alignItems="center">
-          <Grid item>
+          <Grid>
             <Button 
               variant={viewMode === 'timeline' ? 'contained' : 'outlined'}
               color="primary"
@@ -110,7 +110,7 @@ const TimelineAndGanttChart: React.FC<TimelineAndGanttChartProps> = ({ timelineI
               Timeline View
             </Button>
           </Grid>
-          <Grid item>
+          <Grid>
             <Button 
               variant={viewMode === 'gantt' ? 'contained' : 'outlined'}
               color="primary"
@@ -121,8 +121,8 @@ const TimelineAndGanttChart: React.FC<TimelineAndGanttChartProps> = ({ timelineI
               Gantt Chart
             </Button>
           </Grid>
-          <Grid item xs />
-          <Grid item>
+          <Grid size={{xs: "grow"}} />
+          <Grid>
             <Button 
               variant="outlined"
               color="primary"
@@ -138,7 +138,7 @@ const TimelineAndGanttChart: React.FC<TimelineAndGanttChartProps> = ({ timelineI
 
       {/* Summary Cards */}
       <Grid container spacing={2} sx={{ mb: 3 }}>
-        <Grid item xs={6} sm={3}>
+        <Grid size={{xs: 6, sm: 3}} >
           <Card elevation={3}>
             <CardContent>
               <Typography variant="subtitle2" color="textSecondary" gutterBottom>
@@ -151,7 +151,7 @@ const TimelineAndGanttChart: React.FC<TimelineAndGanttChartProps> = ({ timelineI
           </Card>
         </Grid>
 
-        <Grid item xs={6} sm={3}>
+        <Grid size={{xs: 6, sm: 3}} >
           <Card elevation={3}>
             <CardContent>
               <Typography variant="subtitle2" color="textSecondary" gutterBottom>
@@ -164,7 +164,7 @@ const TimelineAndGanttChart: React.FC<TimelineAndGanttChartProps> = ({ timelineI
           </Card>
         </Grid>
 
-        <Grid item xs={6} sm={3}>
+        <Grid size={{xs: 6, sm: 3}} >
           <Card elevation={3}>
             <CardContent>
               <Typography variant="subtitle2" color="textSecondary" gutterBottom>
@@ -177,7 +177,7 @@ const TimelineAndGanttChart: React.FC<TimelineAndGanttChartProps> = ({ timelineI
           </Card>
         </Grid>
 
-        <Grid item xs={6} sm={3}>
+        <Grid size={{xs: 6, sm: 3}} >
           <Card elevation={3}>
             <CardContent>
               <Typography variant="subtitle2" color="textSecondary" gutterBottom>
@@ -373,7 +373,7 @@ const TimelineAndGanttChart: React.FC<TimelineAndGanttChartProps> = ({ timelineI
           Quick Actions
         </Typography>
         <Grid container spacing={1}>
-          <Grid item>
+          <Grid>
             <Button 
               variant="contained"
               color="primary"
@@ -384,7 +384,7 @@ const TimelineAndGanttChart: React.FC<TimelineAndGanttChartProps> = ({ timelineI
               Create Timeline
             </Button>
           </Grid>
-          <Grid item>
+          <Grid>
             <Button 
               variant="outlined"
               color="secondary"
@@ -395,7 +395,7 @@ const TimelineAndGanttChart: React.FC<TimelineAndGanttChartProps> = ({ timelineI
               Optimize Timeline
             </Button>
           </Grid>
-          <Grid item>
+          <Grid>
             <Button 
               variant="outlined"
               color="secondary"

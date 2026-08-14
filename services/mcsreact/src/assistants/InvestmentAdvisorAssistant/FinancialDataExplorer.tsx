@@ -38,7 +38,7 @@ const FinancialDataExplorer = () => {
             </TableHead>
             <TableBody>
               {mockStockData.map((data) => (
-                <TableRow key={data.symbol + data.date}>
+                <TableRow key={data.symbol}>
                   <TableCell>{data.symbol}</TableCell>
                   <TableCell>{data.date}</TableCell>
                   <TableCell>${data.open.toFixed(2)}</TableCell>
@@ -68,7 +68,7 @@ const FinancialDataExplorer = () => {
             </TableHead>
             <TableBody>
               {mockCompanyFinancials.map((data) => (
-                <TableRow key={data.symbol + data.year}>
+                <TableRow key={data.symbol}>
                   <TableCell>{data.symbol}</TableCell>
                   <TableCell>{data.year}</TableCell>
                   <TableCell>${(data.revenue / 1000000000).toFixed(1)}B</TableCell>

@@ -38,7 +38,7 @@ const CrossPlatformPublishing: React.FC<CrossPlatformPublishingProps> = ({ publi
       </Typography>
       <Paper elevation={2} sx={{ p: 2 }}>
         <Grid container spacing={3}>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Select Platforms to Publish To
             </Typography>
@@ -58,7 +58,7 @@ const CrossPlatformPublishing: React.FC<CrossPlatformPublishingProps> = ({ publi
               ))}
             </FormGroup>
           </Grid>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Publish Action
             </Typography>
@@ -81,5 +81,3 @@ const CrossPlatformPublishing: React.FC<CrossPlatformPublishingProps> = ({ publi
 };
 
 export default CrossPlatformPublishing;
-
-

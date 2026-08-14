@@ -45,7 +45,7 @@ const PersonalizedTutoringCenter: React.FC<PersonalizedTutoringCenterProps> = ({
             learningPlans.map((plan) => (
               <ListItem key={plan.id} divider>
                 <Grid container alignItems="center">
-                  <Grid {...({ xs: 12, sm: 8, item: true } as any)}>
+                  <Grid size={{sm: 8}}>
                     <ListItemText
                       primary={plan.topic}
                       secondary={
@@ -59,7 +59,7 @@ const PersonalizedTutoringCenter: React.FC<PersonalizedTutoringCenterProps> = ({
                       }
                     />
                   </Grid>
-                  <Grid {...({ xs: 12, sm: 4, sx: { textAlign: { xs: 'left', sm: 'right' }}, item: true } as any)}>
+                  <Grid item sx={{ textAlign: 'right' }}>
                     <Chip label={plan.status} color={getStatusColor(plan.status)} />
                   </Grid>
                 </Grid>
@@ -77,5 +77,3 @@ const PersonalizedTutoringCenter: React.FC<PersonalizedTutoringCenterProps> = ({
 };
 
 export default PersonalizedTutoringCenter;
-
-

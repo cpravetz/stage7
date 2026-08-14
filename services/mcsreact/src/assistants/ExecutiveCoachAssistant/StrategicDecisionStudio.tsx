@@ -33,7 +33,7 @@ const StrategicDecisionStudio = () => {
       </Typography>
       <Paper elevation={2} sx={{ p: 2 }}>
         <Grid container spacing={3}>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Propose New Strategic Option
             </Typography>
@@ -78,7 +78,7 @@ const StrategicDecisionStudio = () => {
               Add Strategic Option
             </Button>
           </Grid>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Current Strategic Options
             </Typography>
@@ -111,5 +111,3 @@ const StrategicDecisionStudio = () => {
 };
 
 export default StrategicDecisionStudio;
-
-

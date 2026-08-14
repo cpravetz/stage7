@@ -44,7 +44,7 @@ const SalaryNegotiation: React.FC<SalaryNegotiationProps> = ({
       </Typography>
       <Paper elevation={2} sx={{ p: 2 }}>
         <Grid container spacing={3}>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Job Offer Details
             </Typography>
@@ -82,7 +82,7 @@ const SalaryNegotiation: React.FC<SalaryNegotiationProps> = ({
               </Box>
             )}
           </Grid>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Market Analysis & Strategy
             </Typography>
@@ -127,5 +127,3 @@ const SalaryNegotiation: React.FC<SalaryNegotiationProps> = ({
 };
 
 export default SalaryNegotiation;
-
-

@@ -18,7 +18,7 @@ const SentimentMonitoringDashboard = () => {
       </Typography>
       <Paper elevation={2} sx={{ p: 2, height: 350 }}>
         <Grid container spacing={3}>
-          <Grid {...({ xs: 12, item: true } as any)}>
+          <Grid>
             <Typography variant="h6" gutterBottom>
               Customer Sentiment Distribution
             </Typography>
@@ -34,7 +34,7 @@ const SentimentMonitoringDashboard = () => {
                   label
                 >
                   {sentimentData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    <Cell key={`cell}`} fill={COLORS[index % COLORS.length]} />
                   ))}
                 </Pie>
                 <Tooltip />
@@ -49,5 +49,4 @@ const SentimentMonitoringDashboard = () => {
 };
 
 export default SentimentMonitoringDashboard;
-
 

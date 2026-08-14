@@ -112,7 +112,7 @@ const CashFlowAnalyzer: React.FC = () => {
       </Typography>
 
       <Grid container spacing={2} sx={{ mb: 3 }}>
-        <Grid item xs={12} md={3}>
+        <Grid size={{xs: 12, md: 3}} >
           <Card>
             <CardContent>
               <Typography color="text.secondary" gutterBottom>
@@ -130,7 +130,7 @@ const CashFlowAnalyzer: React.FC = () => {
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} md={3}>
+        <Grid size={{xs: 12, md: 3}} >
           <Card>
             <CardContent>
               <Typography color="text.secondary" gutterBottom>
@@ -148,7 +148,7 @@ const CashFlowAnalyzer: React.FC = () => {
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} md={3}>
+        <Grid size={{xs: 12, md: 3}} >
           <Card>
             <CardContent>
               <Typography color="text.secondary" gutterBottom>
@@ -161,7 +161,7 @@ const CashFlowAnalyzer: React.FC = () => {
             </CardContent>
           </Card>
         </Grid>
-        <Grid item xs={12} md={3}>
+        <Grid size={{xs: 12, md: 3}} >
           <Card>
             <CardContent>
               <Typography color="text.secondary" gutterBottom>

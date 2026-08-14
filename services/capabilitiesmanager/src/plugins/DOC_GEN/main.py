@@ -44,7 +44,7 @@ def generate_document(inputs: Dict[str, Any]) -> List[Dict[str, Any]]:
             return str(data.get(key, match.group(0)))
 
         # Simple regex for {{variable}} style placeholders
-        generated_text = re.sub(r"\{\{([^}]+)\}"", replace_placeholder, template)
+        generated_text = re.sub(r"\{\{([^}]+)\}", replace_placeholder, template)
 
         return [PluginOutput(True, "generated_document", "string", generated_text, "Document generated successfully.").to_dict()]
 

@@ -26,7 +26,7 @@ const LegalDocumentDrafting: React.FC<LegalDocumentDraftingProps> = ({
       </Typography>
       <Paper elevation={2} sx={{ p: 2 }}>
         <Grid container spacing={3}>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Draft New Document
             </Typography>
@@ -59,7 +59,7 @@ const LegalDocumentDrafting: React.FC<LegalDocumentDraftingProps> = ({
               Draft Document
             </Button>
           </Grid>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Drafted Document Preview
             </Typography>
@@ -85,5 +85,3 @@ const LegalDocumentDrafting: React.FC<LegalDocumentDraftingProps> = ({
 };
 
 export default LegalDocumentDrafting;
-
-

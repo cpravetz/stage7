@@ -4,6 +4,8 @@ import os
 import requests
 from typing import Dict, Any, List, Optional
 
+from services.capabilitiesmanager.__tests__.test_accomplish_integration import AccomplishError
+
 logger = logging.getLogger(__name__)
 
 _seen_hashes = set()

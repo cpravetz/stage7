@@ -90,7 +90,7 @@ const StakeholderCommunicationHub: React.FC<StakeholderCommunicationHubProps> = 
       {/* Filters and Search */}
       <Card elevation={3} sx={{ mb: 3, p: 2 }}>
         <Grid container spacing={2} alignItems="center">
-          <Grid item xs={12} sm={4}>
+          <Grid size={{xs: 12, sm: 4}} >
             <TextField
               fullWidth
               label="Search Communications"
@@ -105,7 +105,7 @@ const StakeholderCommunicationHub: React.FC<StakeholderCommunicationHubProps> = 
             />
           </Grid>
 
-          <Grid item xs={12} sm={3}>
+          <Grid size={{xs: 12, sm: 3}} >
             <FormControl fullWidth size="small">
               <InputLabel>Type</InputLabel>
               <Select
@@ -121,7 +121,7 @@ const StakeholderCommunicationHub: React.FC<StakeholderCommunicationHubProps> = 
             </FormControl>
           </Grid>
 
-          <Grid item xs={12} sm={2}>
+          <Grid size={{xs: 12, sm: 2}} >
             <FormControl fullWidth size="small">
               <InputLabel>Status</InputLabel>
               <Select
@@ -138,7 +138,7 @@ const StakeholderCommunicationHub: React.FC<StakeholderCommunicationHubProps> = 
             </FormControl>
           </Grid>
 
-          <Grid item xs={12} sm={2}>
+          <Grid size={{xs: 12, sm: 2}} >
             <FormControl fullWidth size="small">
               <InputLabel>Priority</InputLabel>
               <Select
@@ -154,7 +154,7 @@ const StakeholderCommunicationHub: React.FC<StakeholderCommunicationHubProps> = 
             </FormControl>
           </Grid>
 
-          <Grid item xs={12} sm={1}>
+          <Grid size={{xs: 12, sm: 1}} >
             <Button 
               fullWidth
               variant="contained"
@@ -171,7 +171,7 @@ const StakeholderCommunicationHub: React.FC<StakeholderCommunicationHubProps> = 
 
       {/* Summary Cards */}
       <Grid container spacing={2} sx={{ mb: 3 }}>
-        <Grid item xs={6} sm={3}>
+        <Grid size={{xs: 6, sm: 3}} >
           <Card elevation={3}>
             <CardContent>
               <Typography variant="subtitle2" color="textSecondary" gutterBottom>
@@ -184,7 +184,7 @@ const StakeholderCommunicationHub: React.FC<StakeholderCommunicationHubProps> = 
           </Card>
         </Grid>
 
-        <Grid item xs={6} sm={3}>
+        <Grid size={{xs: 6, sm: 3}} >
           <Card elevation={3}>
             <CardContent>
               <Typography variant="subtitle2" color="textSecondary" gutterBottom>
@@ -197,7 +197,7 @@ const StakeholderCommunicationHub: React.FC<StakeholderCommunicationHubProps> = 
           </Card>
         </Grid>
 
-        <Grid item xs={6} sm={3}>
+        <Grid size={{xs: 6, sm: 3}} >
           <Card elevation={3}>
             <CardContent>
               <Typography variant="subtitle2" color="textSecondary" gutterBottom>
@@ -210,7 +210,7 @@ const StakeholderCommunicationHub: React.FC<StakeholderCommunicationHubProps> = 
           </Card>
         </Grid>
 
-        <Grid item xs={6} sm={3}>
+        <Grid size={{xs: 6, sm: 3}} >
           <Card elevation={3}>
             <CardContent>
               <Typography variant="subtitle2" color="textSecondary" gutterBottom>
@@ -232,7 +232,7 @@ const StakeholderCommunicationHub: React.FC<StakeholderCommunicationHubProps> = 
         Communication Type Distribution
       </Typography>
       <Grid container spacing={2} sx={{ mb: 3 }}>
-        <Grid item xs={12} sm={4}>
+        <Grid size={{xs: 12, sm: 4}} >
           <Card elevation={3} sx={{ bgcolor: 'primary.light' }}>
             <CardContent>
               <Box display="flex" alignItems="center" justifyContent="space-between">
@@ -250,7 +250,7 @@ const StakeholderCommunicationHub: React.FC<StakeholderCommunicationHubProps> = 
           </Card>
         </Grid>
 
-        <Grid item xs={12} sm={4}>
+        <Grid size={{xs: 12, sm: 4}} >
           <Card elevation={3} sx={{ bgcolor: 'secondary.light' }}>
             <CardContent>
               <Box display="flex" alignItems="center" justifyContent="space-between">
@@ -268,7 +268,7 @@ const StakeholderCommunicationHub: React.FC<StakeholderCommunicationHubProps> = 
           </Card>
         </Grid>
 
-        <Grid item xs={12} sm={4}>
+        <Grid size={{xs: 12, sm: 4}} >
           <Card elevation={3} sx={{ bgcolor: 'info.light' }}>
             <CardContent>
               <Box display="flex" alignItems="center" justifyContent="space-between">
@@ -557,7 +557,7 @@ const StakeholderCommunicationHub: React.FC<StakeholderCommunicationHubProps> = 
           Quick Actions
         </Typography>
         <Grid container spacing={1}>
-          <Grid item>
+          <Grid>
             <Button 
               variant="contained"
               color="primary"
@@ -568,7 +568,7 @@ const StakeholderCommunicationHub: React.FC<StakeholderCommunicationHubProps> = 
               Schedule Meeting
             </Button>
           </Grid>
-          <Grid item>
+          <Grid>
             <Button 
               variant="outlined"
               color="secondary"
@@ -579,7 +579,7 @@ const StakeholderCommunicationHub: React.FC<StakeholderCommunicationHubProps> = 
               Draft Email
             </Button>
           </Grid>
-          <Grid item>
+          <Grid>
             <Button 
               variant="outlined"
               color="secondary"

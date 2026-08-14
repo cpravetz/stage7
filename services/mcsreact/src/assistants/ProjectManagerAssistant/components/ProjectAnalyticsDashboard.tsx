@@ -40,12 +40,12 @@ const ProjectAnalyticsDashboard: React.FC<ProjectAnalyticsDashboardProps> = ({ p
       {/* Time Range Selector */}
       <Card elevation={3} sx={{ mb: 3, p: 2 }}>
         <Grid container spacing={2} alignItems="center">
-          <Grid item>
+          <Grid>
             <Typography variant="subtitle2" color="textSecondary">
               Time Range:
             </Typography>
           </Grid>
-          <Grid item>
+          <Grid>
             <Button 
               variant={timeRange === 'week' ? 'contained' : 'outlined'}
               color="primary"
@@ -55,7 +55,7 @@ const ProjectAnalyticsDashboard: React.FC<ProjectAnalyticsDashboardProps> = ({ p
               Week
             </Button>
           </Grid>
-          <Grid item>
+          <Grid>
             <Button 
               variant={timeRange === 'month' ? 'contained' : 'outlined'}
               color="primary"
@@ -65,7 +65,7 @@ const ProjectAnalyticsDashboard: React.FC<ProjectAnalyticsDashboardProps> = ({ p
               Month
             </Button>
           </Grid>
-          <Grid item>
+          <Grid>
             <Button 
               variant={timeRange === 'quarter' ? 'contained' : 'outlined'}
               color="primary"
@@ -75,7 +75,7 @@ const ProjectAnalyticsDashboard: React.FC<ProjectAnalyticsDashboardProps> = ({ p
               Quarter
             </Button>
           </Grid>
-          <Grid item>
+          <Grid>
             <Button 
               variant={timeRange === 'year' ? 'contained' : 'outlined'}
               color="primary"
@@ -85,8 +85,8 @@ const ProjectAnalyticsDashboard: React.FC<ProjectAnalyticsDashboardProps> = ({ p
               Year
             </Button>
           </Grid>
-          <Grid item xs />
-          <Grid item>
+          <Grid size={{xs: "grow"}} />
+          <Grid>
             <Button 
               variant="outlined"
               color="primary"
@@ -107,7 +107,7 @@ const ProjectAnalyticsDashboard: React.FC<ProjectAnalyticsDashboardProps> = ({ p
 
       <Grid container spacing={2} sx={{ mb: 3 }}>
         {/* Project Status */}
-        <Grid item xs={12} sm={4}>
+        <Grid size={{xs: 12, sm: 4}} >
           <Card elevation={3}>
             <CardContent>
               <Typography variant="subtitle2" color="textSecondary" gutterBottom>
@@ -151,7 +151,7 @@ const ProjectAnalyticsDashboard: React.FC<ProjectAnalyticsDashboardProps> = ({ p
         </Grid>
 
         {/* Delivery Performance */}
-        <Grid item xs={12} sm={4}>
+        <Grid size={{xs: 12, sm: 4}} >
           <Card elevation={3}>
             <CardContent>
               <Typography variant="subtitle2" color="textSecondary" gutterBottom>
@@ -182,7 +182,7 @@ const ProjectAnalyticsDashboard: React.FC<ProjectAnalyticsDashboardProps> = ({ p
         </Grid>
 
         {/* Budget Performance */}
-        <Grid item xs={12} sm={4}>
+        <Grid size={{xs: 12, sm: 4}} >
           <Card elevation={3}>
             <CardContent>
               <Typography variant="subtitle2" color="textSecondary" gutterBottom>
@@ -216,7 +216,7 @@ const ProjectAnalyticsDashboard: React.FC<ProjectAnalyticsDashboardProps> = ({ p
       {/* Resource and Productivity Metrics */}
       <Grid container spacing={2} sx={{ mb: 3 }}>
         {/* Resource Utilization */}
-        <Grid item xs={12} sm={6}>
+        <Grid size={{xs: 12, sm: 6}} >
           <Card elevation={3}>
             <CardContent>
               <Typography variant="subtitle2" color="textSecondary" gutterBottom>
@@ -247,14 +247,14 @@ const ProjectAnalyticsDashboard: React.FC<ProjectAnalyticsDashboardProps> = ({ p
         </Grid>
 
         {/* Productivity Metrics */}
-        <Grid item xs={12} sm={6}>
+        <Grid size={{xs: 12, sm: 6}} >
           <Card elevation={3}>
             <CardContent>
               <Typography variant="subtitle2" color="textSecondary" gutterBottom>
                 Productivity Metrics
               </Typography>
               <Grid container spacing={2} sx={{ mt: 1 }}>
-                <Grid item xs={6}>
+                <Grid size={{xs: 6}} >
                   <Typography variant="caption" color="textSecondary">
                     Tasks Completed
                   </Typography>
@@ -262,7 +262,7 @@ const ProjectAnalyticsDashboard: React.FC<ProjectAnalyticsDashboardProps> = ({ p
                     {projectAnalytics.productivityMetrics.tasksCompleted}
                   </Typography>
                 </Grid>
-                <Grid item xs={6}>
+                <Grid size={{xs: 6}} >
                   <Typography variant="caption" color="textSecondary">
                     Tasks Overdue
                   </Typography>
@@ -270,7 +270,7 @@ const ProjectAnalyticsDashboard: React.FC<ProjectAnalyticsDashboardProps> = ({ p
                     {projectAnalytics.productivityMetrics.tasksOverdue}
                   </Typography>
                 </Grid>
-                <Grid item xs={12}>
+                <Grid size={{xs: 12}} >
                   <Typography variant="caption" color="textSecondary">
                     Avg Completion Time (days)
                   </Typography>
@@ -344,7 +344,7 @@ const ProjectAnalyticsDashboard: React.FC<ProjectAnalyticsDashboardProps> = ({ p
           </Typography>
 
           <Grid container spacing={2} sx={{ mt: 2 }}>
-            <Grid item xs={6}>
+            <Grid size={{xs: 6}} >
               <Box display="flex" alignItems="center">
                 <CheckCircleIcon color="success" sx={{ mr: 1 }} />
                 <Typography variant="body2">
@@ -352,7 +352,7 @@ const ProjectAnalyticsDashboard: React.FC<ProjectAnalyticsDashboardProps> = ({ p
                 </Typography>
               </Box>
             </Grid>
-            <Grid item xs={6}>
+            <Grid size={{xs: 6}} >
               <Box display="flex" alignItems="center">
                 <CheckCircleIcon color="success" sx={{ mr: 1 }} />
                 <Typography variant="body2">
@@ -360,7 +360,7 @@ const ProjectAnalyticsDashboard: React.FC<ProjectAnalyticsDashboardProps> = ({ p
                 </Typography>
               </Box>
             </Grid>
-            <Grid item xs={6}>
+            <Grid size={{xs: 6}} >
               <Box display="flex" alignItems="center">
                 <WarningIcon color="warning" sx={{ mr: 1 }} />
                 <Typography variant="body2">
@@ -368,7 +368,7 @@ const ProjectAnalyticsDashboard: React.FC<ProjectAnalyticsDashboardProps> = ({ p
                 </Typography>
               </Box>
             </Grid>
-            <Grid item xs={6}>
+            <Grid size={{xs: 6}} >
               <Box display="flex" alignItems="center">
                 <ErrorIcon color="error" sx={{ mr: 1 }} />
                 <Typography variant="body2">
@@ -423,7 +423,7 @@ const ProjectAnalyticsDashboard: React.FC<ProjectAnalyticsDashboardProps> = ({ p
           Quick Actions
         </Typography>
         <Grid container spacing={1}>
-          <Grid item>
+          <Grid>
             <Button 
               variant="contained"
               color="primary"
@@ -434,7 +434,7 @@ const ProjectAnalyticsDashboard: React.FC<ProjectAnalyticsDashboardProps> = ({ p
               Full Analysis
             </Button>
           </Grid>
-          <Grid item>
+          <Grid>
             <Button 
               variant="outlined"
               color="secondary"
@@ -445,7 +445,7 @@ const ProjectAnalyticsDashboard: React.FC<ProjectAnalyticsDashboardProps> = ({ p
               Trend Analysis
             </Button>
           </Grid>
-          <Grid item>
+          <Grid>
             <Button 
               variant="outlined"
               color="secondary"

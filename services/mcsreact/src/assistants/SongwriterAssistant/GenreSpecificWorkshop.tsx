@@ -34,7 +34,7 @@ const GenreSpecificWorkshop: React.FC<GenreSpecificWorkshopProps> = ({
       </Typography>
       <Paper elevation={2} sx={{ p: 2 }}>
         <Grid container spacing={3}>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <FormControl fullWidth sx={{ mb: 2 }}>
               <InputLabel id="genre-select-label">Select Genre</InputLabel>
               <Select
@@ -66,7 +66,7 @@ const GenreSpecificWorkshop: React.FC<GenreSpecificWorkshopProps> = ({
               Analyze {selectedGenre}
             </Button>
           </Grid>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               {selectedGenre} Characteristics
             </Typography>
@@ -85,5 +85,3 @@ const GenreSpecificWorkshop: React.FC<GenreSpecificWorkshopProps> = ({
 };
 
 export default GenreSpecificWorkshop;
-
-

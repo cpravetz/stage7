@@ -107,7 +107,7 @@ const CurrentContextPanel: React.FC<CurrentContextPanelProps> = ({
                 </Typography>
                 <List dense>
                   {items.map((item, index) => (
-                    <React.Fragment key={item.id || index}>
+                    <React.Fragment key={item.id}>
                       <ListItem 
                         alignItems="flex-start"
                         sx={{ py: 1 }}

@@ -29,7 +29,7 @@ const ResumeOptimization: React.FC<ResumeOptimizationProps> = ({
       </Typography>
       <Paper elevation={2} sx={{ p: 2 }}>
         <Grid container spacing={3}>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Your Resume & Target Job
             </Typography>
@@ -63,7 +63,7 @@ const ResumeOptimization: React.FC<ResumeOptimizationProps> = ({
               Optimize My Application
             </Button>
           </Grid>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Optimization Results & Suggestions
             </Typography>
@@ -108,5 +108,3 @@ const ResumeOptimization: React.FC<ResumeOptimizationProps> = ({
 };
 
 export default ResumeOptimization;
-
-

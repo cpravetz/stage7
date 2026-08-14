@@ -61,7 +61,7 @@ const ProjectCalendarAndScheduling: React.FC<ProjectCalendarAndSchedulingProps> 
       {/* Filters and Search */}
       <Card elevation={3} sx={{ mb: 3, p: 2 }}>
         <Grid container spacing={2} alignItems="center">
-          <Grid item xs={12} sm={5}>
+          <Grid size={{xs: 12, sm: 5}} >
             <TextField
               fullWidth
               label="Search Events"
@@ -76,7 +76,7 @@ const ProjectCalendarAndScheduling: React.FC<ProjectCalendarAndSchedulingProps> 
             />
           </Grid>
 
-          <Grid item xs={12} sm={4}>
+          <Grid size={{xs: 12, sm: 4}} >
             <FormControl fullWidth size="small">
               <InputLabel>Event Type</InputLabel>
               <Select
@@ -92,7 +92,7 @@ const ProjectCalendarAndScheduling: React.FC<ProjectCalendarAndSchedulingProps> 
             </FormControl>
           </Grid>
 
-          <Grid item xs={12} sm={3}>
+          <Grid size={{xs: 12, sm: 3}} >
             <Button 
               fullWidth
               variant="contained"
@@ -109,7 +109,7 @@ const ProjectCalendarAndScheduling: React.FC<ProjectCalendarAndSchedulingProps> 
 
       {/* Summary Cards */}
       <Grid container spacing={2} sx={{ mb: 3 }}>
-        <Grid item xs={6} sm={3}>
+        <Grid size={{xs: 6, sm: 3}} >
           <Card elevation={3}>
             <CardContent>
               <Typography variant="subtitle2" color="textSecondary" gutterBottom>
@@ -122,7 +122,7 @@ const ProjectCalendarAndScheduling: React.FC<ProjectCalendarAndSchedulingProps> 
           </Card>
         </Grid>
 
-        <Grid item xs={6} sm={3}>
+        <Grid size={{xs: 6, sm: 3}} >
           <Card elevation={3}>
             <CardContent>
               <Typography variant="subtitle2" color="textSecondary" gutterBottom>
@@ -138,7 +138,7 @@ const ProjectCalendarAndScheduling: React.FC<ProjectCalendarAndSchedulingProps> 
           </Card>
         </Grid>
 
-        <Grid item xs={6} sm={3}>
+        <Grid size={{xs: 6, sm: 3}} >
           <Card elevation={3}>
             <CardContent>
               <Typography variant="subtitle2" color="textSecondary" gutterBottom>
@@ -151,7 +151,7 @@ const ProjectCalendarAndScheduling: React.FC<ProjectCalendarAndSchedulingProps> 
           </Card>
         </Grid>
 
-        <Grid item xs={6} sm={3}>
+        <Grid size={{xs: 6, sm: 3}} >
           <Card elevation={3}>
             <CardContent>
               <Typography variant="subtitle2" color="textSecondary" gutterBottom>
@@ -170,7 +170,7 @@ const ProjectCalendarAndScheduling: React.FC<ProjectCalendarAndSchedulingProps> 
         Event Type Distribution
       </Typography>
       <Grid container spacing={2} sx={{ mb: 3 }}>
-        <Grid item xs={12} sm={4}>
+        <Grid size={{xs: 12, sm: 4}} >
           <Card elevation={3} sx={{ bgcolor: 'secondary.light' }}>
             <CardContent>
               <Box display="flex" alignItems="center" justifyContent="space-between">
@@ -188,7 +188,7 @@ const ProjectCalendarAndScheduling: React.FC<ProjectCalendarAndSchedulingProps> 
           </Card>
         </Grid>
 
-        <Grid item xs={12} sm={4}>
+        <Grid size={{xs: 12, sm: 4}} >
           <Card elevation={3} sx={{ bgcolor: 'error.light' }}>
             <CardContent>
               <Box display="flex" alignItems="center" justifyContent="space-between">
@@ -206,7 +206,7 @@ const ProjectCalendarAndScheduling: React.FC<ProjectCalendarAndSchedulingProps> 
           </Card>
         </Grid>
 
-        <Grid item xs={12} sm={4}>
+        <Grid size={{xs: 12, sm: 4}} >
           <Card elevation={3} sx={{ bgcolor: 'success.light' }}>
             <CardContent>
               <Box display="flex" alignItems="center" justifyContent="space-between">
@@ -542,7 +542,7 @@ const ProjectCalendarAndScheduling: React.FC<ProjectCalendarAndSchedulingProps> 
           Quick Actions
         </Typography>
         <Grid container spacing={1}>
-          <Grid item>
+          <Grid>
             <Button 
               variant="contained"
               color="primary"
@@ -553,7 +553,7 @@ const ProjectCalendarAndScheduling: React.FC<ProjectCalendarAndSchedulingProps> 
               Schedule Meeting
             </Button>
           </Grid>
-          <Grid item>
+          <Grid>
             <Button 
               variant="outlined"
               color="secondary"
@@ -564,7 +564,7 @@ const ProjectCalendarAndScheduling: React.FC<ProjectCalendarAndSchedulingProps> 
               Today's Schedule
             </Button>
           </Grid>
-          <Grid item>
+          <Grid>
             <Button 
               variant="outlined"
               color="secondary"

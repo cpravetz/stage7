@@ -17,7 +17,7 @@ const LeadershipAssessmentCenter: React.FC<LeadershipAssessmentCenterProps> = ({
       <Paper elevation={2} sx={{ p: 2 }}>
         <Grid container spacing={3}>
           {assessments.map((result) => (
-            <Grid {...({ xs: 12, sm: 6, md: 4, key: result.id, item: true } as any)}>
+            <Grid size={{sm: 6, md: 4}} key={result.id}>
               <Paper elevation={1} sx={{ p: 2, height: '100%' }}>
                 <Typography variant="h6" gutterBottom>{result.name}</Typography>
                 <Typography variant="body2" color="text.secondary">{result.category}</Typography>
@@ -40,5 +40,3 @@ const LeadershipAssessmentCenter: React.FC<LeadershipAssessmentCenterProps> = ({
 };
 
 export default LeadershipAssessmentCenter;
-
-

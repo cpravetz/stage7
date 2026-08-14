@@ -12,12 +12,15 @@ import math
 from typing import Dict, Any, List, Tuple, Optional
 
 try:
-    import yfinance as yf
+    import yfinance as yf   # type: ignore
     import pandas as pd
     import numpy as np
     HAS_YFINANCE = True
 except ImportError:
     HAS_YFINANCE = False
+    yf = None
+    pd = None
+    np = None
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)

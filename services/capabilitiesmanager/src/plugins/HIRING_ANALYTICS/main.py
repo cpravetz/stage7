@@ -156,6 +156,7 @@ class HiringAnalyticsPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"track_candidates_1769629673468"
+            action = "track_candidates"
             
             # Validate input
             if not params:
@@ -197,7 +198,7 @@ class HiringAnalyticsPlugin:
             return {
                 "status": "error",
                 "action": "track_candidates",
-                "message": f"Validation error: {{str(ve)}}",
+                "message": f"Validation error: {str(ve)}",
                 "error_type": "validation_error"
             }
         except Exception as e:
@@ -206,7 +207,7 @@ class HiringAnalyticsPlugin:
             return {
                 "status": "error",
                 "action": "track_candidates",
-                "message": f"Error: {{str(e)}}",
+                "message": f"Error: {str(e)}",
                 "error_type": "execution_error"
             }
 
@@ -218,6 +219,7 @@ class HiringAnalyticsPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"analyze_hiring_1769629673468"
+            action = "analyze_hiring"
             
             # Validate input
             if not params:
@@ -259,7 +261,7 @@ class HiringAnalyticsPlugin:
             return {
                 "status": "error",
                 "action": "analyze_hiring",
-                "message": f"Validation error: {{str(ve)}}",
+                "message": f"Validation error: {str(ve)}",
                 "error_type": "validation_error"
             }
         except Exception as e:
@@ -268,7 +270,7 @@ class HiringAnalyticsPlugin:
             return {
                 "status": "error",
                 "action": "analyze_hiring",
-                "message": f"Error: {{str(e)}}",
+                "message": f"Error: {str(e)}",
                 "error_type": "execution_error"
             }
 
@@ -280,6 +282,7 @@ class HiringAnalyticsPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"get_funnel_1769629673468"
+            action = "get_funnel"
             
             # Validate input
             if not params:
@@ -321,7 +324,7 @@ class HiringAnalyticsPlugin:
             return {
                 "status": "error",
                 "action": "get_funnel",
-                "message": f"Validation error: {{str(ve)}}",
+                "message": f"Validation error: {str(ve)}",
                 "error_type": "validation_error"
             }
         except Exception as e:
@@ -330,7 +333,7 @@ class HiringAnalyticsPlugin:
             return {
                 "status": "error",
                 "action": "get_funnel",
-                "message": f"Error: {{str(e)}}",
+                "message": f"Error: {str(e)}",
                 "error_type": "execution_error"
             }
 
@@ -342,6 +345,7 @@ class HiringAnalyticsPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"predict_success_1769629673468"
+            action = "predict_success"
             
             # Validate input
             if not params:
@@ -383,7 +387,7 @@ class HiringAnalyticsPlugin:
             return {
                 "status": "error",
                 "action": "predict_success",
-                "message": f"Validation error: {{str(ve)}}",
+                "message": f"Validation error: {str(ve)}",
                 "error_type": "validation_error"
             }
         except Exception as e:
@@ -392,7 +396,7 @@ class HiringAnalyticsPlugin:
             return {
                 "status": "error",
                 "action": "predict_success",
-                "message": f"Error: {{str(e)}}",
+                "message": f"Error: {str(e)}",
                 "error_type": "execution_error"
             }
 
@@ -404,6 +408,7 @@ class HiringAnalyticsPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"track_time_to_hire_1769629673468"
+            action = "track_time_to_hire"
             
             # Validate input
             if not params:
@@ -445,7 +450,7 @@ class HiringAnalyticsPlugin:
             return {
                 "status": "error",
                 "action": "track_time_to_hire",
-                "message": f"Validation error: {{str(ve)}}",
+                "message": f"Validation error: {str(ve)}",
                 "error_type": "validation_error"
             }
         except Exception as e:
@@ -454,7 +459,7 @@ class HiringAnalyticsPlugin:
             return {
                 "status": "error",
                 "action": "track_time_to_hire",
-                "message": f"Error: {{str(e)}}",
+                "message": f"Error: {str(e)}",
                 "error_type": "execution_error"
             }
 
@@ -466,6 +471,7 @@ class HiringAnalyticsPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"generate_report_1769629673468"
+            action = "generate_report"
             
             # Validate input
             if not params:
@@ -507,7 +513,7 @@ class HiringAnalyticsPlugin:
             return {
                 "status": "error",
                 "action": "generate_report",
-                "message": f"Validation error: {{str(ve)}}",
+                "message": f"Validation error: {str(ve)}",
                 "error_type": "validation_error"
             }
         except Exception as e:
@@ -516,7 +522,7 @@ class HiringAnalyticsPlugin:
             return {
                 "status": "error",
                 "action": "generate_report",
-                "message": f"Error: {{str(e)}}",
+                "message": f"Error: {str(e)}",
                 "error_type": "execution_error"
             }
 

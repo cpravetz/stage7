@@ -13,18 +13,21 @@ from typing import Dict, Any, List, Tuple, Optional
 from datetime import datetime, timedelta
 
 try:
-    import yfinance as yf
-    import pandas as pd
-    import numpy as np
+    import yfinance as yf  # type: ignore
+    import pandas as pd  # type: ignore
+    import numpy as np  # type: ignore
     HAS_YFINANCE = True
 except ImportError:
     HAS_YFINANCE = False
+    yf = None
+    pd = None
+    np = None
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 def _get_input(inputs: dict, key: str, aliases: list = [], default=None):
-    """Safely gets a value from inputs, checking aliases, and extracting from {{'value':...}} wrapper."""
+    """Safely gets a value from inputs, checking aliases, and extracting from {'value':...} wrapper."""
     raw_val = inputs.get(key)
     if raw_val is None:
         for alias in aliases:
@@ -79,10 +82,7 @@ def analyze_portfolio(payload: Dict[str, Any]) -> Dict[str, Any]:
             raise ValueError(f"No data retrieved for tickers: {tickers}")
         
         # Ensure we have closing prices
-        if len(tickers) == 1:
-            close_prices = data['Close']
-        else:
-            close_prices = data['Close']
+        close_prices = data['Close']
         
         # Calculate returns
         returns = close_prices.pct_change().dropna()
@@ -180,10 +180,7 @@ def assess_risk(payload: Dict[str, Any]) -> Dict[str, Any]:
         if data.empty:
             raise ValueError(f"No data for tickers: {tickers}")
         
-        if len(tickers) == 1:
-            close_prices = data['Close']
-        else:
-            close_prices = data['Close']
+        close_prices = data['Close']
         
         returns = close_prices.pct_change().dropna()
         portfolio_returns = (returns * weights).sum(axis=1)
@@ -232,10 +229,7 @@ def analyze_returns(payload: Dict[str, Any]) -> Dict[str, Any]:
         if data.empty:
             raise ValueError(f"No data for tickers: {tickers}")
         
-        if len(tickers) == 1:
-            close_prices = data['Close']
-        else:
-            close_prices = data['Close']
+        close_prices = data['Close']
         
         returns = close_prices.pct_change().dropna()
         portfolio_returns = (returns * weights).sum(axis=1)
@@ -290,10 +284,7 @@ def analyze_allocation(payload: Dict[str, Any]) -> Dict[str, Any]:
         if data.empty:
             raise ValueError(f"No data for tickers: {tickers}")
         
-        if len(tickers) == 1:
-            close_prices = data['Close']
-        else:
-            close_prices = data['Close']
+        close_prices = data['Close']
         
         returns = close_prices.pct_change().dropna()
         

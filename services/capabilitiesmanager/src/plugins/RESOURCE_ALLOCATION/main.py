@@ -156,6 +156,7 @@ class ResourceAllocationPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"allocate_resources_1769629674023"
+            action = "allocate resources"
             
             # Validate input
             if not params:
@@ -218,6 +219,7 @@ class ResourceAllocationPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"optimize_allocation_1769629674023"
+            action = "optimize allocation"
             
             # Validate input
             if not params:
@@ -280,6 +282,7 @@ class ResourceAllocationPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"track_usage_1769629674023"
+            action = "track usage"
             
             # Validate input
             if not params:
@@ -342,6 +345,7 @@ class ResourceAllocationPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"forecast_needs_1769629674023"
+            action = "forecast needs"
             
             # Validate input
             if not params:
@@ -404,6 +408,7 @@ class ResourceAllocationPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"get_utilization_1769629674023"
+            action = "get utilization"
             
             # Validate input
             if not params:
@@ -466,6 +471,7 @@ class ResourceAllocationPlugin:
         try:
             params = kwargs.get("params", {})
             result_id = f"suggest_reallocation_1769629674023"
+            action = "suggest reallocation"
             
             # Validate input
             if not params:

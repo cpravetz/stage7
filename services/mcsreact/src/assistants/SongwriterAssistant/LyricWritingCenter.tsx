@@ -47,7 +47,7 @@ const LyricWritingCenter: React.FC<LyricWritingCenterProps> = ({
       </Typography>
       <Paper elevation={2} sx={{ p: 2 }}>
         <Grid container spacing={3}>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               {editingId ? 'Edit Lyric Section' : 'Add New Lyric Section'}
             </Typography>
@@ -107,7 +107,7 @@ const LyricWritingCenter: React.FC<LyricWritingCenterProps> = ({
               </Button>
             )}
           </Grid>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Lyric Sections ({lyrics.length})
             </Typography>
@@ -156,5 +156,3 @@ const LyricWritingCenter: React.FC<LyricWritingCenterProps> = ({
 };
 
 export default LyricWritingCenter;
-
-

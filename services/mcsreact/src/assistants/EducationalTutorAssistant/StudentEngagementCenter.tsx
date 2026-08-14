@@ -18,7 +18,7 @@ const StudentEngagementCenter = () => {
       </Typography>
       <Paper elevation={2} sx={{ p: 2 }}>
         <Grid container spacing={3}>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Active Students Over Time
             </Typography>
@@ -33,7 +33,7 @@ const StudentEngagementCenter = () => {
               </LineChart>
             </ResponsiveContainer>
           </Grid>
-          <Grid {...({ xs: 12, md: 6, item: true } as any)}>
+          <Grid size={{md: 6}}>
             <Typography variant="h6" gutterBottom>
               Average Session Time (Minutes)
             </Typography>
@@ -55,5 +55,3 @@ const StudentEngagementCenter = () => {
 };
 
 export default StudentEngagementCenter;
-
-
