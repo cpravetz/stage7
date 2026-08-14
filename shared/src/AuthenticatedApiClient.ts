@@ -13,6 +13,17 @@ import { createAuthenticatedAxios } from './http/createAuthenticatedAxios';
 function normalizeUrl(url: string): string {
   if (!url) return url;
 
+  // Prevent URL injection / SSRF by validating the protocol/host structure
+  try {
+    const parsed = new URL(url.startsWith('http://') || url.startsWith('https://') ? url : `http://${url}`);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error(`Unsupported protocol: ${parsed.protocol}`);
+    }
+    return parsed.toString();
+  } catch {
+    // If URL parsing fails, fall back to basic cleanup
+  }
+
   // Check if URL already has a valid protocol
   const protocolMatch = url.match(/^([a-z]+:)\/\//i);
 
