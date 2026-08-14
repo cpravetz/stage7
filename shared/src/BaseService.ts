@@ -44,21 +44,26 @@ export class BaseService implements IBaseEntity {
     this.postOfficeUrl = this.normalizeUrl(this.postOfficeUrl) || 'http://postoffice:5020';
     console.log(`[DIAGNOSTIC] ${this.componentType} constructor initialized with postOfficeUrl: ${this.postOfficeUrl}`);
 
-    // Initialize services
-    this.initializeMessageQueue();
-    
-    // Skip Consul registration if requested (some services defer this until fully initialized)
-    if (!skipServiceDiscovery) {
-      this.initializeServiceDiscovery();
-    } else {
-      console.log(`Skipping initial Consul registration for ${this.componentType} (will register manually)`);
-    }
+    // Skip network initialization if in test environment or explicitly skipped
+    if (process.env.NODE_ENV !== 'test') {
+      // Initialize services
+      this.initializeMessageQueue();
 
-    // Register with service registry and PostOffice (unless skipped)
-    if (!skipPostOfficeRegistration) {
-      this.registerWithPostOffice();
+      // Skip Consul registration if requested (some services defer this until fully initialized)
+      if (!skipServiceDiscovery) {
+        this.initializeServiceDiscovery();
+      } else {
+        console.log(`Skipping initial Consul registration for ${this.componentType} (will register manually)`);
+      }
+
+      // Register with service registry and PostOffice (unless skipped)
+      if (!skipPostOfficeRegistration) {
+        this.registerWithPostOffice();
+      } else {
+        console.log(`Skipping PostOffice registration for ${this.componentType} (self-registration)`);
+        this.registeredWithPostOffice = true;
+      }
     } else {
-      console.log(`Skipping PostOffice registration for ${this.componentType} (self-registration)`);
       this.registeredWithPostOffice = true;
     }
   }

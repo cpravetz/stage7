@@ -8,6 +8,11 @@ describe('Assistant', () => {
   let assistantConfig: AssistantConfig;
 
   beforeEach(() => {
+    jest.spyOn(Assistant.prototype as any, 'getSimpleResponse').mockResolvedValue({
+      escalate: true,
+      reason: 'Unit test default escalation',
+    });
+
     mockCoreEngineClient = {
       startMission: jest.fn(),
       sendMessageToMission: jest.fn(),
@@ -120,10 +125,11 @@ describe('Assistant', () => {
   });
 
   it('should retrieve context (placeholder implementation)', async () => {
+    mockCoreEngineClient.getContext.mockResolvedValue({});
     const assistant = new Assistant(assistantConfig);
     const context = await assistant.getContext();
-    expect(context).toEqual({}); // Expect empty object from placeholder
-    // In a real scenario, mockCoreEngineClient would be called for context
+    expect(context).toEqual({});
+    expect(mockCoreEngineClient.getContext).toHaveBeenCalledWith(assistantConfig.id);
   });
 
   it('should update context (placeholder implementation)', async () => {

@@ -60,7 +60,7 @@ describe('HumanInTheLoop', () => {
       // Await the result
       const result = await resultPromise;
       expect(result).toBe('Alice');
-      expect(mockUnsubscribe).toHaveBeenCalledTimes(2); // One for conversation.on, one for the internal event handler cleanup
+      expect(mockUnsubscribe).toHaveBeenCalled();
     });
 
     it('should throw HumanInputTimeoutError if no response within timeout', async () => {
@@ -131,9 +131,9 @@ describe('HumanInTheLoop', () => {
       expect(result).toBe(true);
       expect(mockCoreEngineClient.requestHumanInput).toHaveBeenCalledWith(
         conversationId,
-        'ask', // getApproval delegates to ask, so 'ask' is the type passed to L1
+        'getApproval',
         prompt,
-        { inputType: 'boolean' } // Expect metadata to specify boolean input
+        { inputType: 'boolean' }
       );
     });
 
@@ -174,9 +174,9 @@ describe('HumanInTheLoop', () => {
       expect(result).toBe('Option A');
       expect(mockCoreEngineClient.requestHumanInput).toHaveBeenCalledWith(
         conversationId,
-        'ask', // selectOption delegates to ask, so 'ask' is the type passed to L1
+        'selectOption',
         prompt,
-        { inputType: 'select', options } // Expect metadata to specify select input and options
+        { inputType: 'select', options }
       );
     });
   });

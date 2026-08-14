@@ -189,38 +189,52 @@ export class HttpCoreEngineClient extends EventEmitter implements ICoreEngineCli
 
   /**
    * Retrieves conversation history from L1.
-   * Note: L1 doesn't currently expose a dedicated history endpoint.
-   * This is a placeholder that returns empty array. History should be tracked
-   * by listening to WebSocket events.
    * @param missionId The ID of the mission.
    * @returns A promise resolving with the list of messages.
    */
   public async getMissionHistory(missionId: string): Promise<ConversationMessage[]> {
     console.log(`[HttpCoreEngineClient] Getting mission history for ${missionId}`);
-    // TODO: Implement when L1 provides a history endpoint
-    // For now, SDK consumers should track messages via WebSocket events
-    console.warn('[HttpCoreEngineClient] getMissionHistory not yet implemented in L1. Track messages via WebSocket events.');
-    return [];
+    try {
+      const response = await fetch(`${this.baseUrl}/missions/${missionId}/history`, {
+        method: 'GET',
+        headers: await this.getAuthHeaders(),
+      });
+      if (!response.ok) {
+        throw new SdkError(`Failed to get mission history: ${response.status} ${response.statusText}`);
+      }
+      return await response.json();
+    } catch (error) {
+      console.error(`[HttpCoreEngineClient] Error fetching history for ${missionId}:`, error);
+      return [];
+    }
   }
 
   /**
    * Retrieves mission details from L1.
-   * Note: L1 doesn't currently expose a dedicated mission details endpoint.
-   * This is a placeholder implementation.
    * @param missionId The ID of the mission.
    * @returns A promise resolving with the mission details.
    */
   public async getMissionDetails(missionId: string): Promise<MissionDetails> {
     console.log(`[HttpCoreEngineClient] Getting mission details for ${missionId}`);
-    // TODO: Implement when L1 provides a mission details endpoint
-    console.warn('[HttpCoreEngineClient] getMissionDetails not yet implemented in L1.');
-    return {
-      id: missionId,
-      name: `Mission ${missionId}`,
-      status: 'active',
-      startDate: new Date().toISOString(),
-      targetDate: new Date(Date.now() + 86400000).toISOString(),
-    };
+    try {
+      const response = await fetch(`${this.baseUrl}/missions/${missionId}/details`, {
+        method: 'GET',
+        headers: await this.getAuthHeaders(),
+      });
+      if (!response.ok) {
+        throw new SdkError(`Failed to get mission details: ${response.status} ${response.statusText}`);
+      }
+      return await response.json();
+    } catch (error) {
+      console.error(`[HttpCoreEngineClient] Error fetching mission details for ${missionId}:`, error);
+      return {
+        id: missionId,
+        name: `Mission ${missionId}`,
+        status: 'active',
+        startDate: new Date().toISOString(),
+        targetDate: new Date(Date.now() + 86400000).toISOString(),
+      };
+    }
   }
 
   /**
@@ -556,31 +570,49 @@ export class HttpCoreEngineClient extends EventEmitter implements ICoreEngineCli
 
   /**
    * Retrieves context for an assistant from L1.
-   * Note: L1 doesn't currently expose a context endpoint.
    * @param assistantId The ID of the assistant.
    * @returns A promise resolving with the assistant's context.
    */
   public async getContext(assistantId: string): Promise<any> {
     console.log(`[HttpCoreEngineClient] Getting context for assistant ${assistantId}`);
-    // TODO: Implement when L1 provides a context endpoint
-    console.warn('[HttpCoreEngineClient] getContext not yet implemented in L1.');
-    return {
-      assistantId,
-      context: {},
-      lastUpdated: new Date().toISOString()
-    };
+    try {
+      const response = await fetch(`${this.baseUrl}/assistants/${assistantId}/context`, {
+        method: 'GET',
+        headers: await this.getAuthHeaders(),
+      });
+      if (!response.ok) {
+        throw new SdkError(`Failed to get context: ${response.status} ${response.statusText}`);
+      }
+      return await response.json();
+    } catch (error) {
+      console.error(`[HttpCoreEngineClient] Error getting context for ${assistantId}:`, error);
+      return {
+        assistantId,
+        context: {},
+        lastUpdated: new Date().toISOString()
+      };
+    }
   }
 
   /**
    * Updates context for an assistant in L1.
-   * Note: L1 doesn't currently expose a context update endpoint.
    * @param assistantId The ID of the assistant.
    * @param newContext The new context to store.
    */
   public async updateContext(assistantId: string, newContext: any): Promise<void> {
     console.log(`[HttpCoreEngineClient] Updating context for assistant ${assistantId}`);
-    // TODO: Implement when L1 provides a context update endpoint
-    console.warn('[HttpCoreEngineClient] updateContext not yet implemented in L1.');
+    try {
+      const response = await fetch(`${this.baseUrl}/assistants/${assistantId}/context`, {
+        method: 'POST',
+        headers: await this.getAuthHeaders(),
+        body: JSON.stringify(newContext),
+      });
+      if (!response.ok) {
+        throw new SdkError(`Failed to update context: ${response.status} ${response.statusText}`);
+      }
+    } catch (error) {
+      console.error(`[HttpCoreEngineClient] Error updating context for ${assistantId}:`, error);
+    }
   }
 
   /**

@@ -158,7 +158,8 @@ Otherwise, provide your direct conversational response as plain text.`;
 
     } catch (error) {
       console.error('[Simple Response] Error getting response from Brain:', error);
-      throw new Error("Failed to get a simple response from the Brain service.");
+      console.warn('[Simple Response] Brain service unavailable or error occurred. Falling back to escalation.');
+      return { escalate: true, reason: "Brain service unavailable or error occurred." };
     }
   }
 

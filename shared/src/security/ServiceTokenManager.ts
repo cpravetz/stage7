@@ -36,13 +36,18 @@ export class ServiceTokenManager {
     this.serviceId = serviceId;
     this.serviceSecret = serviceSecret;
 
-    // Fetch the public key when the token manager is created
-    this.fetchPublicKey().catch(error => {
-      console.warn(`Failed to fetch public key for ${this.serviceId}: ${error.message}. Will retry later.`);
-    });
+    // Fetch the public key when the token manager is created (skip network retries in test env)
+    if (process.env.NODE_ENV !== 'test') {
+      this.fetchPublicKey().catch(error => {
+        console.warn(`Failed to fetch public key for ${this.serviceId}: ${error.message}. Will retry later.`);
+      });
 
-    // Proactively refresh the token every minute
-    setInterval(() => this.proactiveTokenRefresh(), 60 * 1000);
+      // Proactively refresh the token every minute
+      const timer = setInterval(() => this.proactiveTokenRefresh(), 60 * 1000);
+      if (timer.unref) {
+        timer.unref();
+      }
+    }
   }
 
   /**

@@ -121,6 +121,34 @@ class MissionControl extends BaseEntity {
             });
         });
 
+        app.get('/missions/:missionId/history', (req, res) => {
+            this.handleGetMissionHistory(req, res).catch((error: any) => {
+                console.error('Error in handleGetMissionHistory:', error);
+                res.status(500).send({ error: 'Internal server error' });
+            });
+        });
+
+        app.get('/missions/:missionId/details', (req, res) => {
+            this.handleGetMissionDetails(req, res).catch((error: any) => {
+                console.error('Error in handleGetMissionDetails:', error);
+                res.status(500).send({ error: 'Internal server error' });
+            });
+        });
+
+        app.get('/assistants/:assistantId/context', (req, res) => {
+            this.handleGetAssistantContext(req, res).catch((error: any) => {
+                console.error('Error in handleGetAssistantContext:', error);
+                res.status(500).send({ error: 'Internal server error' });
+            });
+        });
+
+        app.post('/assistants/:assistantId/context', (req, res) => {
+            this.handleUpdateAssistantContext(req, res).catch((error: any) => {
+                console.error('Error in handleUpdateAssistantContext:', error);
+                res.status(500).send({ error: 'Internal server error' });
+            });
+        });
+
         app.get('/dependentAgents/:agentId', (req, res) => {
             this.handleGetDependentAgents(req, res).catch((error: any) => {
                 console.error('Error in handleGetDependentAgents:', error);
@@ -1220,6 +1248,89 @@ class MissionControl extends BaseEntity {
         } catch (error) {
             analyzeError(error as Error);
             console.error(`MissionControl: Error resuming step ${stepId} with user input:`, error instanceof Error ? error.message : error);
+        }
+    }
+
+    private async handleGetMissionHistory(req: express.Request, res: express.Response) {
+        const { missionId } = req.params;
+        const normalizedMissionId = normalizeId(missionId);
+        try {
+            const workProducts = await this.getWorkProductsForMission(normalizedMissionId);
+            const messages = workProducts.map((wp: any) => ({
+                sender: wp.agentId || 'agent',
+                type: 'text',
+                content: wp.data?.[0]?.resultDescription || wp.name || 'Work product update',
+                timestamp: wp.createdAt || new Date(),
+                metadata: wp
+            }));
+            res.status(200).send(messages);
+        } catch (error) {
+            console.error(`MissionControl: Error getting history for mission ${normalizedMissionId}:`, error);
+            res.status(500).send({ error: 'Failed to retrieve mission history' });
+        }
+    }
+
+    private async handleGetMissionDetails(req: express.Request, res: express.Response) {
+        const { missionId } = req.params;
+        const normalizedMissionId = normalizeId(missionId);
+        try {
+            let mission = this.missions.get(normalizedMissionId);
+            if (!mission) {
+                mission = await this.loadMissionState(normalizedMissionId) || undefined;
+            }
+            if (!mission) {
+                return res.status(404).send({ error: `Mission ${normalizedMissionId} not found` });
+            }
+            res.status(200).send({
+                id: mission.id,
+                name: mission.name,
+                status: mission.status,
+                goal: mission.goal,
+                missionContext: mission.missionContext,
+                attachedFiles: mission.attachedFiles || [],
+                createdAt: mission.createdAt,
+                updatedAt: mission.updatedAt
+            });
+        } catch (error) {
+            console.error(`MissionControl: Error getting details for mission ${normalizedMissionId}:`, error);
+            res.status(500).send({ error: 'Failed to retrieve mission details' });
+        }
+    }
+
+    private async handleGetAssistantContext(req: express.Request, res: express.Response) {
+        const { assistantId } = req.params;
+        try {
+            const response = await this.authenticatedApi.get(`${this.librarianUrl}/loadData/${assistantId}`, {
+                params: {
+                    storageType: 'mongo',
+                    collection: 'assistantContexts'
+                }
+            });
+            const data = response.data?.data;
+            res.status(200).send(data || { assistantId, context: {}, lastUpdated: new Date().toISOString() });
+        } catch (error) {
+            res.status(200).send({ assistantId, context: {}, lastUpdated: new Date().toISOString() });
+        }
+    }
+
+    private async handleUpdateAssistantContext(req: express.Request, res: express.Response) {
+        const { assistantId } = req.params;
+        const newContext = req.body;
+        try {
+            await this.authenticatedApi.post(`${this.librarianUrl}/storeData`, {
+                id: assistantId,
+                data: {
+                    assistantId,
+                    context: newContext,
+                    lastUpdated: new Date().toISOString()
+                },
+                collection: 'assistantContexts',
+                storageType: 'mongo'
+            });
+            res.status(200).send({ status: 'success', assistantId });
+        } catch (error) {
+            console.error(`MissionControl: Error updating context for assistant ${assistantId}:`, error);
+            res.status(500).send({ error: 'Failed to update assistant context' });
         }
     }
 
