@@ -1254,6 +1254,7 @@ class MissionControl extends BaseEntity {
     private async handleGetMissionHistory(req: express.Request, res: express.Response) {
         const { missionId } = req.params;
         const normalizedMissionId = normalizeId(missionId);
+        const safeMissionId = String(normalizedMissionId).replace(/[\r\n]/g, '');
         try {
             const workProducts = await this.getWorkProductsForMission(normalizedMissionId);
             const messages = workProducts.map((wp: any) => ({
@@ -1265,7 +1266,7 @@ class MissionControl extends BaseEntity {
             }));
             res.status(200).send(messages);
         } catch (error) {
-            console.error(`MissionControl: Error getting history for mission ${normalizedMissionId}:`, error);
+            console.error('MissionControl: Error getting history for mission:', safeMissionId, error);
             res.status(500).send({ error: 'Failed to retrieve mission history' });
         }
     }
@@ -1273,13 +1274,14 @@ class MissionControl extends BaseEntity {
     private async handleGetMissionDetails(req: express.Request, res: express.Response) {
         const { missionId } = req.params;
         const normalizedMissionId = normalizeId(missionId);
+        const safeMissionId = String(normalizedMissionId).replace(/[\r\n]/g, '');
         try {
             let mission = this.missions.get(normalizedMissionId);
             if (!mission) {
                 mission = await this.loadMissionState(normalizedMissionId) || undefined;
             }
             if (!mission) {
-                return res.status(404).send({ error: `Mission ${normalizedMissionId} not found` });
+                return res.status(404).send({ error: `Mission ${safeMissionId} not found` });
             }
             res.status(200).send({
                 id: mission.id,
@@ -1292,15 +1294,16 @@ class MissionControl extends BaseEntity {
                 updatedAt: mission.updatedAt
             });
         } catch (error) {
-            console.error(`MissionControl: Error getting details for mission ${normalizedMissionId}:`, error);
+            console.error('MissionControl: Error getting details for mission:', safeMissionId, error);
             res.status(500).send({ error: 'Failed to retrieve mission details' });
         }
     }
 
     private async handleGetAssistantContext(req: express.Request, res: express.Response) {
         const { assistantId } = req.params;
+        const safeAssistantId = encodeURIComponent(String(assistantId).replace(/[\r\n]/g, ''));
         try {
-            const response = await this.authenticatedApi.get(`${this.librarianUrl}/loadData/${assistantId}`, {
+            const response = await this.authenticatedApi.get(`${this.librarianUrl}/loadData/${safeAssistantId}`, {
                 params: {
                     storageType: 'mongo',
                     collection: 'assistantContexts'
@@ -1315,6 +1318,7 @@ class MissionControl extends BaseEntity {
 
     private async handleUpdateAssistantContext(req: express.Request, res: express.Response) {
         const { assistantId } = req.params;
+        const safeAssistantId = String(assistantId).replace(/[\r\n]/g, '');
         const newContext = req.body;
         try {
             await this.authenticatedApi.post(`${this.librarianUrl}/storeData`, {
@@ -1329,7 +1333,7 @@ class MissionControl extends BaseEntity {
             });
             res.status(200).send({ status: 'success', assistantId });
         } catch (error) {
-            console.error(`MissionControl: Error updating context for assistant ${assistantId}:`, error);
+            console.error('MissionControl: Error updating context for assistant:', safeAssistantId, error);
             res.status(500).send({ error: 'Failed to update assistant context' });
         }
     }

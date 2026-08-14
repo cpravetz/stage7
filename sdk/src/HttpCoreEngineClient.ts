@@ -193,9 +193,12 @@ export class HttpCoreEngineClient extends EventEmitter implements ICoreEngineCli
    * @returns A promise resolving with the list of messages.
    */
   public async getMissionHistory(missionId: string): Promise<ConversationMessage[]> {
-    console.log(`[HttpCoreEngineClient] Getting mission history for ${missionId}`);
+    const safeMissionId = encodeURIComponent(String(missionId).replace(/[\r\n]/g, ''));
+    console.log('[HttpCoreEngineClient] Getting mission history for', safeMissionId);
     try {
-      const response = await fetch(`${this.baseUrl}/missions/${missionId}/history`, {
+      const base = new URL(this.baseUrl);
+      const url = new URL(`/missions/${safeMissionId}/history`, base).toString();
+      const response = await fetch(url, {
         method: 'GET',
         headers: await this.getAuthHeaders(),
       });
@@ -204,7 +207,7 @@ export class HttpCoreEngineClient extends EventEmitter implements ICoreEngineCli
       }
       return await response.json();
     } catch (error) {
-      console.error(`[HttpCoreEngineClient] Error fetching history for ${missionId}:`, error);
+      console.error('[HttpCoreEngineClient] Error fetching mission history:', error);
       return [];
     }
   }
@@ -215,9 +218,12 @@ export class HttpCoreEngineClient extends EventEmitter implements ICoreEngineCli
    * @returns A promise resolving with the mission details.
    */
   public async getMissionDetails(missionId: string): Promise<MissionDetails> {
-    console.log(`[HttpCoreEngineClient] Getting mission details for ${missionId}`);
+    const safeMissionId = encodeURIComponent(String(missionId).replace(/[\r\n]/g, ''));
+    console.log('[HttpCoreEngineClient] Getting mission details for', safeMissionId);
     try {
-      const response = await fetch(`${this.baseUrl}/missions/${missionId}/details`, {
+      const base = new URL(this.baseUrl);
+      const url = new URL(`/missions/${safeMissionId}/details`, base).toString();
+      const response = await fetch(url, {
         method: 'GET',
         headers: await this.getAuthHeaders(),
       });
@@ -226,7 +232,7 @@ export class HttpCoreEngineClient extends EventEmitter implements ICoreEngineCli
       }
       return await response.json();
     } catch (error) {
-      console.error(`[HttpCoreEngineClient] Error fetching mission details for ${missionId}:`, error);
+      console.error('[HttpCoreEngineClient] Error fetching mission details:', error);
       return {
         id: missionId,
         name: `Mission ${missionId}`,
@@ -574,9 +580,12 @@ export class HttpCoreEngineClient extends EventEmitter implements ICoreEngineCli
    * @returns A promise resolving with the assistant's context.
    */
   public async getContext(assistantId: string): Promise<any> {
-    console.log(`[HttpCoreEngineClient] Getting context for assistant ${assistantId}`);
+    const safeAssistantId = encodeURIComponent(String(assistantId).replace(/[\r\n]/g, ''));
+    console.log('[HttpCoreEngineClient] Getting context for assistant', safeAssistantId);
     try {
-      const response = await fetch(`${this.baseUrl}/assistants/${assistantId}/context`, {
+      const base = new URL(this.baseUrl);
+      const url = new URL(`/assistants/${safeAssistantId}/context`, base).toString();
+      const response = await fetch(url, {
         method: 'GET',
         headers: await this.getAuthHeaders(),
       });
@@ -585,7 +594,7 @@ export class HttpCoreEngineClient extends EventEmitter implements ICoreEngineCli
       }
       return await response.json();
     } catch (error) {
-      console.error(`[HttpCoreEngineClient] Error getting context for ${assistantId}:`, error);
+      console.error('[HttpCoreEngineClient] Error getting assistant context:', error);
       return {
         assistantId,
         context: {},
@@ -600,9 +609,12 @@ export class HttpCoreEngineClient extends EventEmitter implements ICoreEngineCli
    * @param newContext The new context to store.
    */
   public async updateContext(assistantId: string, newContext: any): Promise<void> {
-    console.log(`[HttpCoreEngineClient] Updating context for assistant ${assistantId}`);
+    const safeAssistantId = encodeURIComponent(String(assistantId).replace(/[\r\n]/g, ''));
+    console.log('[HttpCoreEngineClient] Updating context for assistant', safeAssistantId);
     try {
-      const response = await fetch(`${this.baseUrl}/assistants/${assistantId}/context`, {
+      const base = new URL(this.baseUrl);
+      const url = new URL(`/assistants/${safeAssistantId}/context`, base).toString();
+      const response = await fetch(url, {
         method: 'POST',
         headers: await this.getAuthHeaders(),
         body: JSON.stringify(newContext),
@@ -611,7 +623,7 @@ export class HttpCoreEngineClient extends EventEmitter implements ICoreEngineCli
         throw new SdkError(`Failed to update context: ${response.status} ${response.statusText}`);
       }
     } catch (error) {
-      console.error(`[HttpCoreEngineClient] Error updating context for ${assistantId}:`, error);
+      console.error('[HttpCoreEngineClient] Error updating assistant context:', error);
     }
   }
 
