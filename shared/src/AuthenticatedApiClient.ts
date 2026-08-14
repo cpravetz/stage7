@@ -13,42 +13,25 @@ import { createAuthenticatedAxios } from './http/createAuthenticatedAxios';
 function normalizeUrl(url: string): string {
   if (!url) return url;
 
-  // Prevent URL injection / SSRF by validating the protocol/host structure
+  // First handle duplicate protocol prefixes if present (e.g. "http://http://librarian:5040/path")
+  let cleanUrl = url;
+  const duplicateMatch = cleanUrl.match(/^(https?:\/\/)(https?:\/\/)(.*)$/i);
+  if (duplicateMatch) {
+    cleanUrl = duplicateMatch[1] + duplicateMatch[3];
+  } else if (!cleanUrl.match(/^([a-z]+:)\/\//i)) {
+    cleanUrl = 'http://' + cleanUrl;
+  }
+
   try {
-    const parsed = new URL(url.startsWith('http://') || url.startsWith('https://') ? url : `http://${url}`);
+    const parsed = new URL(cleanUrl);
+    // Sanitize host and path to prevent SSRF / URL manipulation
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-      throw new Error(`Unsupported protocol: ${parsed.protocol}`);
+      throw new Error(`Invalid protocol: ${parsed.protocol}`);
     }
-    return parsed.toString();
+    return parsed.href;
   } catch {
-    // If URL parsing fails, fall back to basic cleanup
+    return cleanUrl;
   }
-
-  // Check if URL already has a valid protocol
-  const protocolMatch = url.match(/^([a-z]+:)\/\//i);
-
-  if (protocolMatch) {
-    // URL has a protocol - check for duplicate http:// or https://
-    const protocol = protocolMatch[1].toLowerCase();
-    
-    if (protocol === 'http:' || protocol === 'https:') {
-      // For http:// or https://, check if there's a duplicate protocol after it
-      const afterProtocol = url.substring(protocol.length + 2); // +2 for //
-      const duplicateProtocolMatch = afterProtocol.match(/^([a-z]+:)\/\//i);
-      
-      if (duplicateProtocolMatch) {
-        // Remove the duplicate protocol
-        const duplicateProtocol = duplicateProtocolMatch[1].toLowerCase();
-        return protocol + '//' + afterProtocol.substring(duplicateProtocol.length + 2);
-      }
-    }
-    
-    // URL has a valid protocol (including non-http protocols like ws://, ftp://)
-    return url;
-  }
- 
-  // No protocol found - add http://
-  return 'http://' + url;
 }
 
 /**

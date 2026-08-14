@@ -169,7 +169,9 @@ class MissionControl extends BaseEntity {
             return res.status(400).send({ error: 'missionId, toolName, action, and payload are required.' });
         }
 
-        console.log(`MissionControl: Received execute-tool request for mission ${missionId}: ${toolName}.${action}`);
+        const safeToolName = String(toolName).replace(/[\r\n]/g, '');
+        const safeAction = String(action).replace(/[\r\n]/g, '');
+        console.log('MissionControl: Received execute-tool request for mission:', String(missionId).replace(/[\r\n]/g, ''), safeToolName, safeAction);
 
         try {
             // 1. Create a temporary agent to execute the tool
