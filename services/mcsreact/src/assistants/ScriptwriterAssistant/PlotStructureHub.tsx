@@ -93,7 +93,7 @@ const PlotStructureHub: React.FC<PlotStructureHubProps> = ({
               <List sx={{ maxHeight: 400, overflowY: 'auto' }}>
                 {plotPointsByAct[actNumber]?.map((pp) => (
                   <ListItem
-                    key={{pp.id}}
+                    key={pp.id}
                     divider
                     secondaryAction={
                       <IconButton
