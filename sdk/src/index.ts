@@ -4,6 +4,7 @@
 export * from './Assistant';
 export * from './Tool';
 export * from './Conversation';
+export * from './McpAdapter';
 export * from './HumanInTheLoop';
 export * from './types'; // For common interfaces like JsonSchema, ConversationEvent etc.
 export * from './HttpCoreEngineClient'; // Export the concrete client implementation
