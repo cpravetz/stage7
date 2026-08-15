@@ -1,5 +1,5 @@
 import { Conversation } from '../src/Conversation';
-import { ICoreEngineClient, ConversationError } from '../src/types';
+import { ICoreEngineClient, ConversationError, ConversationMessage } from '../src/types';
 
 describe('Conversation', () => {
   let mockCoreEngineClient: jest.Mocked<ICoreEngineClient>;
@@ -13,6 +13,11 @@ describe('Conversation', () => {
       sendMessageToMission: jest.fn(),
       submitHumanInputToMission: jest.fn(),
       getMissionHistory: jest.fn(),
+      getMissionDetails: jest.fn(),
+      executeTool: jest.fn(),
+      getContext: jest.fn(),
+      updateContext: jest.fn(),
+      endMission: jest.fn().mockResolvedValue(undefined),
       onMissionEvent: jest.fn().mockReturnValue(() => {}), // Mock unsubscribe function
       requestHumanInput: jest.fn(),
     };
@@ -38,7 +43,7 @@ describe('Conversation', () => {
     const testMessage = { sender: 'assistant', type: 'text', content: 'Hello', timestamp: new Date() };
     l1EventHandler('message', testMessage);
 
-    expect(handler).toHaveBeenCalledWith(testMessage);
+    expect(handler).toHaveBeenCalledWith('message', testMessage);
 
     unsubscribe();
     l1EventHandler('message', { ...testMessage, content: 'Another message' });
@@ -55,7 +60,7 @@ describe('Conversation', () => {
     await conversation.sendMessage(message);
 
     expect(mockCoreEngineClient.sendMessageToMission).toHaveBeenCalledWith(conversationId, message);
-    expect(handler).toHaveBeenCalledWith(expect.objectContaining({
+    expect(handler).toHaveBeenCalledWith('message', expect.objectContaining({
       sender: 'user',
       type: 'text',
       content: message,
@@ -87,7 +92,7 @@ describe('Conversation', () => {
       inputStepId,
       response
     );
-    expect(handler).toHaveBeenCalledWith(expect.objectContaining({
+    expect(handler).toHaveBeenCalledWith('message', expect.objectContaining({
       sender: 'user',
       type: 'text',
       content: `Human input provided for step ${inputStepId}: ${response}`,
@@ -127,6 +132,7 @@ describe('Conversation', () => {
   it('should end the conversation and unsubscribe from L1 events', async () => {
     const unsubscribeMock = jest.fn();
     mockCoreEngineClient.onMissionEvent.mockReturnValue(unsubscribeMock); // Make sure it returns a real mock
+    mockCoreEngineClient.endMission = jest.fn().mockResolvedValue(undefined);
     const conversationInstance = new Conversation(conversationId, assistantId, mockCoreEngineClient); // Re-instantiate to get the mock unsubscribe
     
     const handler = jest.fn();
@@ -135,22 +141,13 @@ describe('Conversation', () => {
     await conversationInstance.end();
 
     expect(unsubscribeMock).toHaveBeenCalledTimes(1);
-    expect(handler).toHaveBeenCalledWith({ conversationId });
-    // Expect L1 termination if applicable
+    expect(handler).toHaveBeenCalledWith('end', { conversationId });
   });
 
   it('should throw ConversationError if end fails', async () => {
-    mockCoreEngineClient.onMissionEvent.mockReturnValue(() => {}); // Prevent initial unsubscribe error
-    mockCoreEngineClient.startMission.mockResolvedValue('dummy-mission-id'); // To allow instantiation without error
-    const conv = await new Assistant({ ...assistantConfig, coreEngineClient: mockCoreEngineClient }).startConversation("test");
+    mockCoreEngineClient.endMission = jest.fn().mockRejectedValue(new Error('L1 termination failed'));
 
-    const errorMessage = 'L1 termination failed';
-    // Simulate error from the L1 termination logic if it were exposed via coreEngineClient
-    // For now, if the internal unsubscribe errors, it would be caught.
-    // The current `end` does not directly call a coreEngineClient method that would reject.
-    // This test will become more specific once L1 termination logic is integrated.
-    
-    // As per current implementation, it always resolves successfully unless unsubscribe itself throws
-    await expect(conv.end()).resolves.toBeUndefined();
+    const conv = new Conversation(conversationId, assistantId, mockCoreEngineClient);
+    await expect(conv.end()).rejects.toThrow(ConversationError);
   });
 });

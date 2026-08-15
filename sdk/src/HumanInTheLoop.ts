@@ -36,15 +36,17 @@ export class HumanInTheLoop {
         );
 
         responseListener = conversation.on('message', (event: ConversationEvent, data: ConversationMessage) => {
-          if (data.type === 'tool_output' && data.metadata?.inputStepId === inputStepId) {
+          const msg = (data && typeof data === 'object') ? data : (event as any);
+          if (msg && msg.type === 'tool_output' && msg.metadata?.inputStepId === inputStepId) {
             clearTimeout(timeout);
             if (responseListener) {
               responseListener(); // Unsubscribe
             }
             if (inputType === 'getApproval') {
-              resolve((String(data.content).toLowerCase() === 'true') as T);
+              const strVal = String(msg.content).toLowerCase();
+              resolve((strVal === 'true' || strVal === 'yes') as T);
             } else {
-              resolve(data.content as T);
+              resolve(msg.content as T);
             }
           }
         });

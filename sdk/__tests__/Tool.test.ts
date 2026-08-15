@@ -11,6 +11,14 @@ describe('Tool', () => {
       sendMessageToMission: jest.fn(),
       submitHumanInputToMission: jest.fn(),
       getMissionHistory: jest.fn(),
+      getMissionDetails: jest.fn(),
+      executeTool: jest.fn().mockResolvedValue({
+        status: 'success',
+        message: `Tool 'testTool' executed successfully with args: {"param1":"value","param2":123}`
+      }),
+      getContext: jest.fn(),
+      updateContext: jest.fn(),
+      endMission: jest.fn(),
       onMissionEvent: jest.fn(),
       requestHumanInput: jest.fn(),
     };
@@ -51,6 +59,7 @@ describe('Tool', () => {
       `Tool 'testTool' executing for conversation 'conv-123' with args:`,
       args
     );
+    expect(mockCoreEngineClient.executeTool).toHaveBeenCalledWith(conversationId, 'testTool', args);
     expect(result).toEqual({
       status: 'success',
       message: `Tool 'testTool' executed successfully with args: {"param1":"value","param2":123}`
@@ -58,30 +67,17 @@ describe('Tool', () => {
     consoleSpy.mockRestore();
   });
 
-  // This test will need to be updated when actual L1 integration for tool execution is implemented
   it('should throw ToolExecutionError on L1 failure (simulated)', async () => {
-    // To simulate L1 failure, we would typically mock a coreEngineClient method to throw.
-    // However, the current Tool.execute() body directly uses a try-catch on a simulated promise.
-    // For now, we cannot directly test L1 failure through coreEngineClient mock,
-    // but the error handling structure is in place.
+    mockCoreEngineClient.executeTool.mockRejectedValueOnce(new Error('L1 specific error'));
+
     const tool = new Tool({
       ...toolConfig,
-      coreEngineClient: { // A specific mock for this test
-        ...mockCoreEngineClient,
-        // Imagine a method `executeToolInL1` that would throw
-        // executeToolInL1: jest.fn().mockRejectedValue(new Error('L1 specific error')),
-      } as any, // Cast to any because we are partially mocking
+      coreEngineClient: mockCoreEngineClient,
     });
 
     const args = { param1: 'value' };
     const conversationId = 'conv-456';
 
-    // When the real L1 interaction is added, this test will become more meaningful.
-    // For now, we'll test the catch block by making the inner logic throw (if it could).
-    // The current implementation of execute() has a hardcoded success.
-    // A robust test here would involve injecting a mock that *makes* the placeholder throw.
-
-    // As per current implementation, it always resolves successfully.
-    await expect(tool.execute(args, conversationId)).resolves.toBeDefined();
+    await expect(tool.execute(args, conversationId)).rejects.toThrow(ToolExecutionError);
   });
 });

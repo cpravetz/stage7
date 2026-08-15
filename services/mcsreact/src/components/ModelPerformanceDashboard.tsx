@@ -827,7 +827,7 @@ const ModelPerformanceDashboard: React.FC = () => {
                   {rankings && rankings.length > 0 ? (
                     rankings.map((ranking, index) => (
                       <TableRow
-                        key={ranking.modelName}`}
+                        key={ranking.modelName}
                         sx={{ '&:last-child td, &:last-child th': { border: 0 } }}
                       >
                         <TableCell component="th" scope="row">

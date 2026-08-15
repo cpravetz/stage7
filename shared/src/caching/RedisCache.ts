@@ -65,8 +65,10 @@ class RedisCache {
                 console.log('[RedisCache] Redis client is ready.');
             });
 
-            // Auto-connect immediately in the background (non-blocking)
-            this.connectionPromise = this._autoConnect();
+            // Auto-connect immediately in the background (non-blocking) unless in test environment
+            if (process.env.NODE_ENV !== 'test') {
+                this.connectionPromise = this._autoConnect();
+            }
 
         } catch (error) {
             console.error('[RedisCache] Failed to create Redis client:', error);

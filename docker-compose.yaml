@@ -255,7 +255,7 @@ services:
       context: .
       dockerfile: services/mcsreact/dockerfile
     ports:
-      - "80:80"
+      - "8080:80"
     depends_on:
       postoffice:
         condition: service_healthy
@@ -891,9 +891,9 @@ services:
     env_file:
       - .env
     ports:
-      - "8000:8000"
+      - "8002:8000"
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8000/api/v2/healthcheck"]
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8002/api/v2/healthcheck"]
       interval: 10s
       timeout: 5s
       retries: 10
