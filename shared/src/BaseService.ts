@@ -48,7 +48,7 @@ export class BaseService implements IBaseEntity {
     if (process.env.NODE_ENV !== 'test') {
       // Initialize services
       this.initializeMessageQueue();
-
+      
       // Skip Consul registration if requested (some services defer this until fully initialized)
       if (!skipServiceDiscovery) {
         this.initializeServiceDiscovery();
