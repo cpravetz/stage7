@@ -37,14 +37,14 @@ const CandidatePipeline = () => {
       </Typography>
       <Grid container spacing={3}>
         {stages.map((stage) => (
-          <Grid size={{sm: 6, md: 3}} key={}stage>
+          <Grid size={{sm: 6, md: 3}} key={stage}>
             <Paper elevation={2} sx={{ p: 2, height: '100%' }}>
               <Typography variant="h6" gutterBottom>
                 {stage} ({candidatesByStage[stage]?.length || 0})
               </Typography>
               <List>
                 {candidatesByStage[stage]?.map((candidate) => (
-                  <ListItem key={{candidate.id} di}sablePadding>
+                  <ListItem key={candidate.id} disablePadding>
                     <ListItemText
                       primary={candidate.name}
                       secondary={`Score: ${candidate.score}`}

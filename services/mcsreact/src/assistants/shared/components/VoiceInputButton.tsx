@@ -80,7 +80,7 @@ const VoiceInputButton: React.FC<VoiceInputButtonProps> = ({
     return (
       <Tooltip title="Voice input not supported in this browser">
         <span>
-          <IconButton disabled size={{size}}>
+          <IconButton disabled size={size}>
             <MicOffIcon />
           </IconButton>
         </span>
@@ -94,7 +94,7 @@ const VoiceInputButton: React.FC<VoiceInputButtonProps> = ({
         onClick={handleToggle}
         disabled={disabled}
         color={isListening ? 'error' : 'default'}
-        size={{size}}
+        size={size}
       >
         {isListening ? <StopIcon /> : <MicIcon />}
       </IconButton>
