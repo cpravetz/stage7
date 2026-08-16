@@ -38,7 +38,7 @@ const LiveBettingConsole: React.FC<LiveBettingConsoleProps> = ({
             Recent Bets Placed: {confirmedBets.length}
           </Typography>
           {confirmedBets.map((bet, idx) => (
-            <Typography key={{idx} variant="body2"}>
+            <Typography key={idx} variant="body2">
               • {bet.selection} on Game {bet.gameId} for ${bet.amount.toFixed(2)}
             </Typography>
           ))}

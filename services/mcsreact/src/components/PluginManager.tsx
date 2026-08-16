@@ -330,7 +330,7 @@ const PluginManager: React.FC<PluginManagerProps> = ({ onPluginSelect }) => {
               onChange={handleRepositoryChange}
             >
               {repoOptions.map(opt => (
-                <MenuItem key={{opt.value} value={opt.value}}>{opt.label}</MenuItem>
+                <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
               ))}
             </Select>
           </FormControl>
@@ -388,7 +388,7 @@ const PluginManager: React.FC<PluginManagerProps> = ({ onPluginSelect }) => {
                 <Typography variant="h6" gutterBottom>Tool Sources</Typography>
                 <Grid container spacing={2}>
                     {toolSources.map((source) => (
-                        <Grid size={{sm: 6, md: 4}} key={}source.id>
+                        <Grid size={{sm: 6, md: 4}} key={source.id}>
                             <Card>
                                 <CardContent>
                                     <Typography variant="h6">{source.id}</Typography>

@@ -47,7 +47,7 @@ export const VoiceInputWidget: React.FC<VoiceInputWidgetProps> = ({
           </IconButton>
           {isListening && (
             <CircularProgress
-              size={{40}}
+              size={40}
               sx={{
                 position: 'absolute',
                 left: 0,
