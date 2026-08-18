@@ -5,7 +5,19 @@ import { educationAssistantClient } from '../shared/assistantClients';
 
 interface CollaborativeTeachingToolsProps {
   conversationId: string | null;
-  client: typeof educationAssistantClient;
+  client: {
+    getContext: (conversationId: string) => Promise<{
+      contextItems: Array<{
+        id: string;
+        type: string;
+        title: string;
+        preview: string;
+        link: string;
+        timestamp: string;
+      }>;
+    }>;
+    sendMessage: (conversationId: string, message: string) => Promise<void>;
+  };
   setError: (error: string | null) => void;
 }
 
@@ -37,22 +49,18 @@ const CollaborativeTeachingTools: React.FC<CollaborativeTeachingToolsProps> = ({
   useEffect(() => {
     const fetchCollaborations = async () => {
       if (!conversationId) return;
-
       setIsLoading(true);
       try {
         const contextData = await client.getContext(conversationId);
         const fetchedCollaborations = contextData.contextItems
           .filter(item => item.type === 'collaboration_log')
           .map(log => {
-            // Safely handle metadata and icon mapping with proper fallback
-            let iconElement = <DashboardIcon />; // Default icon
+            let iconElement = <DashboardIcon />;
             if (log.title.includes('Forum')) {
               iconElement = <ForumIcon />;
             } else if (log.title.includes('Dashboard')) {
               iconElement = <DashboardIcon />;
             }
-            // Additional icon mappings can be added here as needed
-
             return {
               id: log.id,
               activity: log.title,
@@ -70,7 +78,7 @@ const CollaborativeTeachingTools: React.FC<CollaborativeTeachingToolsProps> = ({
       }
     };
     fetchCollaborations();
-  }, [conversationId, client, setError]);
+  }, [conversationId, client]);
 
   const handleLaunchWhiteboard = async () => {
     if (!conversationId) {
@@ -78,11 +86,14 @@ const CollaborativeTeachingTools: React.FC<CollaborativeTeachingToolsProps> = ({
       return;
     }
     try {
-      // Inform the assistant about the action
       await client.sendMessage(conversationId, 'User requested to launch a shared whiteboard for collaboration.');
+      setCollaborations(prev => [...prev, {
+        id: `collab-${Date.now()}`,
+        activity: 'Launch Shared Whiteboard',
+        details: 'User requested to launch a shared whiteboard for collaboration.',
+        icon: <DashboardIcon />
+      }]);
       setError(null);
-      // In a real scenario, this would trigger an agent action to launch the whiteboard tool
-      alert('Assistant notified: Launching shared whiteboard functionality soon!');
     } catch (err) {
       console.error('Error launching whiteboard:', err);
       setError('Failed to request shared whiteboard launch from assistant.');
@@ -95,11 +106,14 @@ const CollaborativeTeachingTools: React.FC<CollaborativeTeachingToolsProps> = ({
       return;
     }
     try {
-      // Inform the assistant about the action
       await client.sendMessage(conversationId, 'User requested to open a discussion forum for collaboration.');
+      setCollaborations(prev => [...prev, {
+        id: `collab-${Date.now()}`,
+        activity: 'Open Discussion Forum',
+        details: 'User requested to open a discussion forum for collaboration.',
+        icon: <ForumIcon />
+      }]);
       setError(null);
-      // In a real scenario, this would trigger an agent action to open the forum tool
-      alert('Assistant notified: Opening discussion forum functionality soon!');
     } catch (err) {
       console.error('Error opening forum:', err);
       setError('Failed to request discussion forum from assistant.');
@@ -112,11 +126,14 @@ const CollaborativeTeachingTools: React.FC<CollaborativeTeachingToolsProps> = ({
       return;
     }
     try {
-      // Inform the assistant about the action
       await client.sendMessage(conversationId, 'User requested to share an educational resource with collaborators.');
+      setCollaborations(prev => [...prev, {
+        id: `collab-${Date.now()}`,
+        activity: 'Share Educational Resource',
+        details: 'User requested to share an educational resource with collaborators.',
+        icon: <ShareIcon />
+      }]);
       setError(null);
-      // In a real scenario, this would trigger an agent action to share the resource
-      alert('Assistant notified: Sharing educational resource functionality soon!');
     } catch (err) {
       console.error('Error sharing resource:', err);
       setError('Failed to request resource sharing from assistant.');

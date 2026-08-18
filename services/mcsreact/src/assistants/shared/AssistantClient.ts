@@ -265,6 +265,94 @@ export class AssistantClient {
     });
   }
 
+  public async getContext(conversationId: string): Promise<{
+    contextItems: Array<{
+      id: string;
+      type: string;
+      title: string;
+      preview: string;
+      link: string;
+      timestamp: string;
+    }>;
+    mission?: {
+      id: string;
+      name: string;
+      status: string;
+      startDate: string;
+      targetDate: string;
+    };
+  }> {
+    const tokens = this.getTokens();
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (tokens?.accessToken) {
+      headers['Authorization'] = `Bearer ${tokens.accessToken}`;
+    }
+
+    const response = await fetch(`${this.assistantApiBaseUrl}/conversations/${conversationId}/context`, {
+      method: 'GET',
+      headers,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to get context via AssistantAPI: ${response.status} ${errorText}`);
+    }
+
+    return response.json();
+  }
+
+  public async getSuggestedActions(conversationId: string): Promise<{
+    actions: Array<{
+      id: string;
+      title: string;
+      description: string;
+      type: string;
+    }>;
+  }> {
+    const tokens = this.getTokens();
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (tokens?.accessToken) {
+      headers['Authorization'] = `Bearer ${tokens.accessToken}`;
+    }
+
+    const response = await fetch(`${this.assistantApiBaseUrl}/conversations/${conversationId}/suggested-actions`, {
+      method: 'GET',
+      headers,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to get suggested actions via AssistantAPI: ${response.status} ${errorText}`);
+    }
+
+    return response.json();
+  }
+
+  public async triggerAction(conversationId: string, actionId: string, params?: any): Promise<void> {
+    const tokens = this.getTokens();
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (tokens?.accessToken) {
+      headers['Authorization'] = `Bearer ${tokens.accessToken}`;
+    }
+
+    const response = await fetch(`${this.assistantApiBaseUrl}/conversations/${conversationId}/actions`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ actionId, params }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to trigger action via AssistantAPI: ${response.status} ${errorText}`);
+    }
+  }
+
   // ... (getSuggestedActions, getContext, triggerAction methods remain the same, but their URLs might need review later) ...
 
   private connectWebSocket(conversationId: string, clientId: string) {
