@@ -47,7 +47,8 @@ export class CrossAgentDependencyResolver {
         }
         
         try {
-            const response = await this.authenticatedApi.get(`http://${location.agentSetUrl}/agent/step/${stepId}`);
+            const encodedStepId = encodeURIComponent(stepId);
+            const response = await this.authenticatedApi.get(`http://${location.agentSetUrl}/agent/step/${encodedStepId}`);
             if (response.data) {
                 // The data is a plain object, so we need to reconstruct a Step instance.
                 // This is a simplified reconstruction. A more robust implementation might be needed.

@@ -33,6 +33,14 @@ function normalizeId(Id: string | string[]): string {
   return Id;
 }
 
+function sanitizePathSegment(segment: string): string {
+  const normalized = normalizeId(segment);
+  if (!/^[a-zA-Z0-9._-]+$/.test(normalized)) {
+    throw new Error(`Invalid path segment: ${segment}`);
+  }
+  return normalized;
+}
+
 interface DataVersion {
     id: string;
     data: any;
@@ -296,11 +304,13 @@ export class Librarian extends BaseEntity {
 
     private async storeLargeAsset(req: express.Request, res: express.Response) {
         const { collection, id } = req.params;
-        const assetDir = path.join(LARGE_ASSET_PATH, normalizeId(collection));
+        const sanitizedCollection = sanitizePathSegment(collection);
+        const sanitizedId = sanitizePathSegment(id);
+        const assetDir = path.join(LARGE_ASSET_PATH, sanitizedCollection);
 
         try {
             await fs.promises.mkdir(assetDir, { recursive: true });
-            const filePath = path.join(assetDir, normalizeId(id));
+            const filePath = path.join(assetDir, sanitizedId);
 
             const writeStream = fs.createWriteStream(filePath);
             req.pipe(writeStream);
@@ -309,17 +319,17 @@ export class Librarian extends BaseEntity {
                 try {
                     const stats = await fs.promises.stat(filePath);
                     const metadata = {
-                        _id: id,
+                        _id: sanitizedId,
                         assetPath: filePath,
-                        collection: collection,
+                        collection: sanitizedCollection,
                         size: stats.size,
                         createdAt: new Date(),
                         mimeType: req.headers['content-type'] || 'application/octet-stream'
                     };
                     await storeInMongo('asset_metadata', metadata);
-                    res.status(201).send({ message: 'Asset stored successfully', id: id, size: stats.size });
+                    res.status(201).send({ message: 'Asset stored successfully', id: sanitizedId, size: stats.size });
                 } catch (dbError: any) {
-                    console.error(`Failed to store metadata for asset ${id}:`, dbError);
+                    console.error(`Failed to store metadata for asset ${sanitizedId}:`, dbError);
                     await fs.promises.unlink(filePath).catch(e => console.error(`Failed to cleanup asset file ${filePath} after metadata write failure:`, e));
                     res.status(500).send({ error: 'Failed to store asset metadata' });
                 }
@@ -338,28 +348,28 @@ export class Librarian extends BaseEntity {
 
     private async loadLargeAsset(req: express.Request, res: express.Response) {
         const { collection, id } = req.params;
-        const assetDir = path.join(LARGE_ASSET_PATH, normalizeId(collection));
-        const filePath = path.join(assetDir, normalizeId(id));
+        const sanitizedCollection = sanitizePathSegment(collection);
+        const sanitizedId = sanitizePathSegment(id);
+        const assetDir = path.join(LARGE_ASSET_PATH, sanitizedCollection);
+        const filePath = path.join(assetDir, sanitizedId);
 
         try {
-            // Check if the file exists
             await fs.promises.access(filePath, fs.constants.F_OK);
 
-            // Optional: Load metadata to set Content-Type header
             try {
-                const metadata = await loadFromMongo('asset_metadata', { _id: id });
+                const metadata = await loadFromMongo('asset_metadata', { _id: sanitizedId });
                 if (metadata && metadata.mimeType) {
                     res.setHeader('Content-Type', metadata.mimeType);
                 }
             } catch (metaError) {
-                console.warn(`Could not load metadata for asset ${id}, using default content-type. Error:`, metaError);
+                console.warn(`Could not load metadata for asset ${sanitizedId}, using default content-type. Error:`, metaError);
             }
 
             const readStream = fs.createReadStream(filePath);
             readStream.pipe(res);
 
             readStream.on('error', (err) => {
-                console.error(`Error streaming asset ${id} to response:`, err);
+                console.error(`Error streaming asset ${sanitizedId} to response:`, err);
                 res.end();
             });
 
@@ -367,7 +377,7 @@ export class Librarian extends BaseEntity {
             if (error.code === 'ENOENT') {
                 res.status(404).send({ error: 'Asset not found' });
             } else {
-                console.error(`Error preparing to load large asset ${id}:`, error);
+                console.error(`Error preparing to load large asset ${sanitizedId}:`, error);
                 res.status(500).send({ error: 'Failed to load asset' });
             }
         }

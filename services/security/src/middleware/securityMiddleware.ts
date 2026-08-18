@@ -109,12 +109,12 @@ export function securityHeaders() {
  */
 export function corsMiddleware(options: cors.CorsOptions = {}) {
     const defaultOptions: cors.CorsOptions = {
-        origin: process.env.CORS_ORIGIN || '*',
+        origin: process.env.CORS_ORIGIN && process.env.CORS_ORIGIN !== '*' ? process.env.CORS_ORIGIN : false,
         methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
         allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token'],
         exposedHeaders: ['Content-Length', 'X-Request-Id'],
-        credentials: true,
-        maxAge: 86400 // 24 hours
+        credentials: process.env.CORS_ORIGIN && process.env.CORS_ORIGIN !== '*' ? true : false,
+        maxAge: 86400
     };
 
     return cors({ ...defaultOptions, ...options });

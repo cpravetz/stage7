@@ -33,6 +33,7 @@ import { exec } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import os from 'os';
+import * as ts from 'typescript';
 
 // New utility imports
 import logger, { ScopedLogger } from './utils/Logger';
@@ -1263,24 +1264,35 @@ Context: ${contextString}`;
     }
 
     private validatePluginCodeString(code: string, language: string): boolean {
-        // Basic code validation - can be enhanced
         if (!code || code.trim().length === 0) return false;
 
         switch (language.toLowerCase()) {
             case 'python':
-                // Basic Python syntax check
-                return !code.includes('import os') || code.includes('# SAFE_OS_IMPORT');
-            case 'javascript':
-            case 'typescript': // Added typescript
-                // Basic JavaScript/TypeScript syntax check
                 try {
-                    new Function(code);
+                    const tempFile = path.join(os.tmpdir(), `syntax-check-${Date.now()}-${Math.random().toString(36).slice(2)}.py`);
+                    fs.writeFileSync(tempFile, code, 'utf-8');
+                    execSync('python3 -m py_compile ' + JSON.stringify(tempFile), { encoding: 'utf8' });
+                    fs.unlinkSync(tempFile);
+                    return true;
+                } catch {
+                    return false;
+                }
+            case 'javascript':
+            case 'typescript':
+                try {
+                    const sourceFile = ts.createSourceFile('temp.ts', code, ts.ScriptTarget.Latest, true);
+                    const diagnostics = ts.getPreEmitDiagnostics(sourceFile);
+                    const errors = diagnostics.filter(d => d.category === ts.DiagnosticCategory.Error);
+                    if (errors.length > 0) {
+                        console.warn('TypeScript syntax validation failed:', ts.flattenDiagnosticMessageText(errors[0].messageText, '\n'));
+                        return false;
+                    }
                     return true;
                 } catch {
                     return false;
                 }
             default:
-                return true; // Allow unknown languages for now
+                return true;
         }
     }
 

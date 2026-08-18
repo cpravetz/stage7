@@ -69,7 +69,13 @@ def execute():
         
         logger.info(f"Plugin execution completed successfully: {result.get('success', False)}")
         
-        return jsonify(result)
+        safe_result = {
+            'success': result.get('success'),
+            'name': result.get('name'),
+            'resultType': result.get('resultType'),
+            'result': result.get('result')
+        }
+        return jsonify(safe_result)
         
     except Exception as e:
         # Increment error counter
@@ -79,8 +85,7 @@ def execute():
         
         return jsonify({
             'success': False,
-            'error': str(e),
-            'type': type(e).__name__
+            'error': 'Plugin execution failed'
         }), 500
 
 @app.errorhandler(404)

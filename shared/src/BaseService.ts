@@ -657,7 +657,7 @@ export class BaseService implements IBaseEntity {
 
     if (content.includes('Result {') && content.includes('agentId')) {
       try {
-        const jsonMatch = content.match(/Result (\{.*\})/);
+        const jsonMatch = content.match(/Result (\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\})/);
         if (jsonMatch && jsonMatch[1]) {
           const resultData = JSON.parse(jsonMatch[1]);
           if (resultData.data && resultData.data.data && resultData.data.data.length > 0) {

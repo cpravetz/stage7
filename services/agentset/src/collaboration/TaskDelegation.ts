@@ -258,7 +258,8 @@ export class TaskDelegation {
    */
   private async findAgentLocation(agentId: string, missionId: string): Promise<string | undefined> {
     try {
-        const response = await this.authenticatedApi.get(`${this.missionControlUrl}/agentSetUrlForAgent/${agentId}`, {
+        const encodedAgentId = encodeURIComponent(agentId);
+        const response = await this.authenticatedApi.get(`${this.missionControlUrl}/agentSetUrlForAgent/${encodedAgentId}`, {
             params: {
                 missionId: missionId
             }
