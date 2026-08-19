@@ -684,8 +684,24 @@ describe('PostOffice Service', () => {
             expect(res.send).toHaveBeenCalledWith('Failed to create mission');
         });
 
-        it('should handle errors', async () => {
-            mockAuthenticatedApiPost.mockRejectedValueOnce(new Error('MissionControl error'));
+        it('should pass through upstream error status codes', async () => {
+            const upstreamError = new Error('Unauthorized') as any;
+            upstreamError.response = { status: 401, data: { message: 'Invalid token' } };
+            mockAuthenticatedApiPost.mockRejectedValueOnce(upstreamError);
+            const res = { status: jest.fn().mockReturnThis(), json: jest.fn() } as unknown as express.Response;
+            const req = { body: missionData, headers: {} } as express.Request;
+
+            await (postOffice as any).createMission(req, res);
+
+            expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('Error creating mission'), expect.any(Error));
+            expect(res.status).toHaveBeenCalledWith(401);
+            expect(res.json).toHaveBeenCalledWith({ message: 'Invalid token' });
+        });
+
+        it('should return 504 for network errors', async () => {
+            const networkError = new Error('connect ECONNREFUSED') as any;
+            networkError.code = 'ECONNREFUSED';
+            mockAuthenticatedApiPost.mockRejectedValueOnce(networkError);
             const res = { status: jest.fn().mockReturnThis(), json: jest.fn() } as unknown as express.Response;
             const req = { body: missionData, headers: {} } as express.Request;
 
@@ -693,6 +709,18 @@ describe('PostOffice Service', () => {
 
             expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('Error creating mission'), expect.any(Error));
             expect(res.status).toHaveBeenCalledWith(504);
+            expect(res.json).toHaveBeenCalledWith({ error: expect.stringContaining('upstream unavailable') });
+        });
+
+        it('should return 500 for generic errors', async () => {
+            mockAuthenticatedApiPost.mockRejectedValueOnce(new Error('MissionControl error'));
+            const res = { status: jest.fn().mockReturnThis(), json: jest.fn() } as unknown as express.Response;
+            const req = { body: missionData, headers: {} } as express.Request;
+
+            await (postOffice as any).createMission(req, res);
+
+            expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('Error creating mission'), expect.any(Error));
+            expect(res.status).toHaveBeenCalledWith(500);
             expect(res.json).toHaveBeenCalledWith({ error: expect.stringContaining('Could not create mission') });
         });
     });
@@ -718,16 +746,44 @@ describe('PostOffice Service', () => {
             expect((postOffice as any).missionClients.get('load-mission-id')?.has(loadData.clientId)).toBe(true);
         });
 
-        it('should handle errors', async () => {
+        it('should pass through upstream error status codes', async () => {
+            const upstreamError = new Error('Unauthorized') as any;
+            upstreamError.response = { status: 401, data: { message: 'Invalid token' } };
+            mockAuthenticatedApiPost.mockRejectedValueOnce(upstreamError);
+            const res = { status: jest.fn().mockReturnThis(), json: jest.fn() } as unknown as express.Response;
+            const req = { body: loadData } as express.Request;
+
+            await (postOffice as any).loadMission(req, res);
+
+            expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('Error loading mission'), expect.any(Error));
+            expect(res.status).toHaveBeenCalledWith(401);
+            expect(res.json).toHaveBeenCalledWith({ message: 'Invalid token' });
+        });
+
+        it('should return 504 for network errors', async () => {
+            const networkError = new Error('connect ECONNREFUSED') as any;
+            networkError.code = 'ECONNREFUSED';
+            mockAuthenticatedApiPost.mockRejectedValueOnce(networkError);
+            const res = { status: jest.fn().mockReturnThis(), json: jest.fn() } as unknown as express.Response;
+            const req = { body: loadData } as express.Request;
+
+            await (postOffice as any).loadMission(req, res);
+
+            expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('Error loading mission'), expect.any(Error));
+            expect(res.status).toHaveBeenCalledWith(504);
+            expect(res.json).toHaveBeenCalledWith({ error: expect.stringContaining('upstream unavailable') });
+        });
+
+        it('should return 500 for generic errors', async () => {
             mockAuthenticatedApiPost.mockRejectedValueOnce(new Error('MissionControl error'));
-            const res = { status: jest.fn().mockReturnThis(), send: jest.fn() } as unknown as express.Response;
+            const res = { status: jest.fn().mockReturnThis(), json: jest.fn() } as unknown as express.Response;
             const req = { body: loadData } as express.Request;
 
             await (postOffice as any).loadMission(req, res);
 
             expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('Error loading mission'), expect.any(Error));
             expect(res.status).toHaveBeenCalledWith(500);
-            expect(res.send).toHaveBeenCalledWith({ error: 'Failed to load mission' });
+            expect(res.json).toHaveBeenCalledWith({ error: 'Failed to load mission' });
         });
     });
 

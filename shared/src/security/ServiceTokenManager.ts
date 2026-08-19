@@ -212,27 +212,23 @@ export class ServiceTokenManager {
 
     // Prevent multiple simultaneous authentication attempts
     if (this.authInProgress) {
-      //console.log(`Authentication already in progress for ${this.serviceId}, waiting...`);
-      // Wait a bit and check if token is available
+      // Wait for the ongoing auth to complete
       await new Promise(resolve => setTimeout(resolve, 1000));
       if (this.token !== '' && this.tokenExpiry > now + 5000) {
         return this.token;
       }
-      // If still no token, wait longer
       await new Promise(resolve => setTimeout(resolve, 2000));
-      if (this.token !== '') {
+      if (this.token !== '' && this.tokenExpiry > now + 5000) {
         return this.token;
       }
+      // Auth is still in progress or token is still invalid, fall through to retry
     }
 
     // Prevent too frequent authentication attempts
     if (now - this.lastAuthAttempt < this.authRetryTimeout) {
-      //console.log(`Too many authentication attempts for ${this.serviceId}, using existing token or waiting`);
-      if (this.token !== '') {
-        // Use existing token even if it might be expired
+      if (this.token !== '' && this.tokenExpiry > now + 5000) {
         return this.token;
       }
-      // Wait until we can try again
       const waitTime = this.authRetryTimeout - (now - this.lastAuthAttempt);
       await new Promise(resolve => setTimeout(resolve, waitTime));
     }
@@ -274,27 +270,6 @@ export class ServiceTokenManager {
         throw new Error('Failed to authenticate service: Invalid response format');
       }
     } catch (error: any) {
-      // Provide more detailed error information
-      if (axios.isAxiosError(error)) {
-        if (error.response) {
-          console.error(`Authentication error (${error.response.status}): ${JSON.stringify(error.response.data)}`);
-          console.error(`Request URL: ${error.config?.url}`);
-        } else if (error.request) {
-          console.error(`No response from security manager: ${error.message}`);
-        } else {
-          console.error(`Error setting up authentication request: ${error.message}`);
-        }
-      } else {
-        console.error('Failed to get auth token:', error);
-      }
-
-      // If we have an existing token, use it even if expired
-      if (this.token !== '') {
-        console.warn(`Using existing token for ${this.serviceId} despite authentication failure`);
-        this.authInProgress = false;
-        return this.token;
-      }
-
       this.authInProgress = false;
       throw new Error(`Authentication service unavailable: ${error.message || 'Unknown error'}`);
     }

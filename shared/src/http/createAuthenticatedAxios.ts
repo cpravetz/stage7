@@ -231,49 +231,19 @@ export function createAuthenticatedAxios(
 
         if (!token) {
           log('error', `[AuthenticatedAxios] Request ${requestId}: Failed to get token for service ${serviceId}`, undefined, instanceLogLevel);
+          throw new Error(`Failed to acquire authentication token for ${serviceId}`);
         } else {
           // Always set the token - we don't have validation in ServiceTokenManager yet
           config.headers.set('Authorization', `Bearer ${token}`);
           log('debug', `[AuthenticatedAxios] Request ${requestId}: Added authentication token for ${serviceId}`, undefined, instanceLogLevel);
-
-          // Note: The code below is commented out because ServiceTokenManager doesn't have these methods yet
-          // When they are added, this code can be uncommented
-
-          /*
-          // Validate token before using it (if token validation is implemented in ServiceTokenManager)
-          let isValid = true;
-          if (typeof (tokenManager as any).validateToken === 'function') {
-            try {
-              isValid = await (tokenManager as any).validateToken(token);
-            } catch (validationError) {
-              log('error', `[AuthenticatedAxios] Request ${requestId}: Token validation error:`, validationError);
-              isValid = false;
-            }
-          }
-
-          if (isValid) {
-            config.headers.set('Authorization', `Bearer ${token}`);
-            log('debug', `[AuthenticatedAxios] Request ${requestId}: Added valid authentication token for ${serviceId}`);
-          } else if (enableTokenRefresh && typeof (tokenManager as any).refreshToken === 'function') {
-            log('warn', `[AuthenticatedAxios] Request ${requestId}: Token validation failed, attempting refresh`);
-            try {
-              await (tokenManager as any).refreshToken();
-              const newToken = await tokenManager.getToken();
-              if (newToken) {
-                config.headers.set('Authorization', `Bearer ${newToken}`);
-                log('debug', `[AuthenticatedAxios] Request ${requestId}: Added refreshed token for ${serviceId}`);
-              }
-            } catch (refreshError) {
-              log('error', `[AuthenticatedAxios] Request ${requestId}: Token refresh failed:`, refreshError);
-            }
-          }
-          */
         }
       } catch (tokenError) {
         log('error', `[AuthenticatedAxios] Request ${requestId}: Error getting token:`, tokenError, instanceLogLevel);
+        throw tokenError;
       }
     } catch (error) {
       log('error', `[AuthenticatedAxios] Request ${requestId}: Error in request interceptor for ${serviceId}:`, error, instanceLogLevel);
+      throw error;
     }
 
     return config;
@@ -328,15 +298,6 @@ export function createAuthenticatedAxios(
             try {
               log('debug', `[AuthenticatedAxios] Request ${requestId}: Getting new token before retry`, undefined, instanceLogLevel);
 
-              // Note: The code below is commented out because ServiceTokenManager doesn't have refreshToken method yet
-              // When it is added, this code can be uncommented
-              /*
-              // Try to refresh the token
-              if (typeof (tokenManager as any).refreshToken === 'function') {
-                await (tokenManager as any).refreshToken();
-              }
-              */
-
               // Get a new token (this will create a new one if needed)
               const newToken = await tokenManager.getToken();
 
@@ -346,6 +307,7 @@ export function createAuthenticatedAxios(
               log('debug', `[AuthenticatedAxios] Request ${requestId}: Got new token, retrying request`, undefined, instanceLogLevel);
             } catch (refreshError) {
               log('error', `[AuthenticatedAxios] Request ${requestId}: Getting new token failed during retry:`, refreshError, instanceLogLevel);
+              return Promise.reject(error);
             }
           }
 

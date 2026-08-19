@@ -180,14 +180,13 @@ describe('ServiceTokenManager', () => {
             expect(mockAxios.post).toHaveBeenCalledTimes(1); // Only one auth request
         });
 
-        it('should use existing token if auth fails but token is present', async () => {
+        it('should throw error if auth fails and existing token is expired', async () => {
             (manager as any).token = 'existing-but-expired-token';
             (manager as any).tokenExpiry = Date.now() - 1000; // Expired
             mockAxios.post.mockRejectedValueOnce(new Error('Auth failed'));
 
-            const token = await manager.getToken();
-            expect(token).toBe('existing-but-expired-token');
-            expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringContaining('Using existing token'));
+            await expect(manager.getToken()).rejects.toThrow('Authentication service unavailable: Auth failed');
+            expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('Failed to get auth token'));
         });
 
         it('should throw error if auth fails and no existing token', async () => {

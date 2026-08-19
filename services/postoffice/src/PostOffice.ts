@@ -594,10 +594,16 @@ export class PostOffice extends BaseEntity {
             }
 
             res.status(200).send(response.data);
-        } catch (error) {
+        } catch (error: any) {
             analyzeError(error as Error);
             this.logger.error({ msg: 'Error creating mission', error: error instanceof Error ? error.message : error, stack: (error instanceof Error ? error.stack : 'N/A') });
-            res.status(504).json({ error: `Could not create mission, error: ${error instanceof Error ? error.message : 'Unknown' }`});
+            if (error.response) {
+                res.status(error.response.status).json(error.response.data);
+            } else if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT' || error.code === 'ENOTFOUND' || error.code === 'EAI_AGAIN') {
+                res.status(504).json({ error: `Could not create mission, upstream unavailable: ${error instanceof Error ? error.message : 'Unknown' }`});
+            } else {
+                res.status(500).json({ error: `Could not create mission, error: ${error instanceof Error ? error.message : 'Unknown' }`});
+            }
         }
     }
 
@@ -635,9 +641,15 @@ export class PostOffice extends BaseEntity {
             this.logger.info({ msg: `Added client to mission clients list`, clientId, missionId });
 
             res.status(200).send(response.data);
-        } catch (error) { analyzeError(error as Error);
+        } catch (error: any) { analyzeError(error as Error);
             this.logger.error({ msg: 'Error loading mission', error: error instanceof Error ? error.message : error, stack: (error instanceof Error ? error.stack : 'N/A') });
-            res.status(500).send({ error: 'Failed to load mission' });
+            if (error.response) {
+                res.status(error.response.status).json(error.response.data);
+            } else if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT' || error.code === 'ENOTFOUND' || error.code === 'EAI_AGAIN') {
+                res.status(504).json({ error: `Failed to load mission, upstream unavailable: ${error instanceof Error ? error.message : 'Unknown' }`});
+            } else {
+                res.status(500).json({ error: 'Failed to load mission' });
+            }
         }
     }
 
