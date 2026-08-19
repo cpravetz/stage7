@@ -122,7 +122,7 @@ export class PostOffice extends BaseEntity {
         this.app.use(limiter);
 
         const corsOptions = {
-            origin: ['http://localhost', 'http://localhost:80', 'http://localhost:3000', 'http://frontend', 'http://frontend:80'],
+            origin: ['http://localhost', 'http://localhost:80', 'http://localhost:3000', 'http://localhost:8080', 'http://frontend', 'http://frontend:80'],
             methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
             allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin', 'Access-Control-Allow-Origin', 'Access-Control-Allow-Headers'],
             credentials: true,

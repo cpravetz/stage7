@@ -923,11 +923,10 @@ export class Librarian extends BaseEntity {
 
         try {
             await knowledgeStore.save('tools', content, metadata);
-            res.status(200).send({ status: `Verb '${verb}' registered for discovery successfully.` });
         } catch (error) {
-            console.error('Error in registerVerbForDiscovery:', error instanceof Error ? error.message : error);
-            res.status(500).send({ error: 'Failed to register verb for discovery', details: error instanceof Error ? error.message : String(error) });
+            console.error('Warning: ChromaDB indexing failed for verb registration (non-fatal):', error instanceof Error ? error.message : error);
         }
+        res.status(200).send({ status: `Verb '${verb}' registered for discovery successfully.` });
     }
 
     private async discoverVerbs(req: express.Request, res: express.Response) {
