@@ -328,6 +328,97 @@ export class SecurityManager extends BaseEntity {
         });
 
         // Framework integration endpoints
+        // Integrated Secrets & Configuration endpoints
+        app.post('/secrets/store', async (req: Request, res: Response) => {
+            try {
+                const { key, secretValue, category = 'default' } = req.body;
+                if (!key || secretValue === undefined) {
+                    res.status(400).json({ error: 'key and secretValue are required' });
+                    return;
+                }
+                const crypto = require('crypto');
+                const encryptionKey = process.env.CLIENT_SECRET;
+                if (!encryptionKey) {
+                    res.status(500).json({ error: 'CLIENT_SECRET environment variable is required for secret encryption' });
+                    return;
+                }
+                const keyHash = crypto.createHash('sha256').update(encryptionKey).digest();
+                const iv = crypto.randomBytes(16);
+                const cipher = crypto.createCipheriv('aes-256-gcm', keyHash, iv);
+                let encrypted = cipher.update(String(secretValue), 'utf8', 'hex');
+                encrypted += cipher.final('hex');
+                const authTag = cipher.getAuthTag().toString('hex');
+
+                const secretPayload = {
+                    key,
+                    category,
+                    iv: iv.toString('hex'),
+                    authTag,
+                    encrypted,
+                    updatedAt: new Date().toISOString()
+                };
+
+                const librarianUrl = process.env.LIBRARIAN_URL?.startsWith('http')
+                    ? process.env.LIBRARIAN_URL
+                    : `http://${process.env.LIBRARIAN_URL || 'librarian:5040'}`;
+
+                await this.authenticatedApi.post(`${librarianUrl}/storeData`, {
+                    id: `secret-${key}`,
+                    data: secretPayload,
+                    collection: 'system_secrets',
+                    storageType: 'mongo'
+                });
+
+                res.status(200).json({ success: true, key, category });
+            } catch (error) {
+                analyzeError(error as Error);
+                console.error('Error storing secret:', error);
+                res.status(500).json({ error: 'Failed to store secret' });
+            }
+        });
+
+        app.get('/secrets/get/:key', async (req: Request, res: Response) => {
+            try {
+                const { key } = req.params;
+                const librarianUrl = process.env.LIBRARIAN_URL?.startsWith('http')
+                    ? process.env.LIBRARIAN_URL
+                    : `http://${process.env.LIBRARIAN_URL || 'librarian:5040'}`;
+
+                const response = await this.authenticatedApi.get(`${librarianUrl}/loadData/secret-${key}`, {
+                    params: {
+                        storageType: 'mongo',
+                        collection: 'system_secrets'
+                    }
+                });
+
+                const payload = response.data?.data;
+                if (!payload || !payload.encrypted) {
+                    res.status(404).json({ error: 'Secret not found' });
+                    return;
+                }
+
+                const crypto = require('crypto');
+                const encryptionKey = process.env.CLIENT_SECRET;
+                if (!encryptionKey) {
+                    res.status(500).json({ error: 'CLIENT_SECRET environment variable is required for secret decryption' });
+                    return;
+                }
+                const keyHash = crypto.createHash('sha256').update(encryptionKey).digest();
+                const iv = Buffer.from(payload.iv, 'hex');
+                const authTag = Buffer.from(payload.authTag, 'hex');
+                const decipher = crypto.createDecipheriv('aes-256-gcm', keyHash, iv);
+                decipher.setAuthTag(authTag);
+                let decrypted = decipher.update(payload.encrypted, 'hex', 'utf8');
+                decrypted += decipher.final('utf8');
+
+                res.status(200).json({ key: payload.key, category: payload.category, secretValue: decrypted });
+            } catch (error) {
+                analyzeError(error as Error);
+                console.error('Error retrieving secret:', error);
+                res.status(500).json({ error: 'Failed to retrieve secret' });
+            }
+        });
+
         app.get('/integration/status', async (req: Request, res: Response) => {
             try {
                 const status = this.frameworkIntegrationService.getStatus();
