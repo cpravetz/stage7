@@ -7,10 +7,11 @@
     "skipLibCheck": true,                // Skips type checking of declaration files
     "forceConsistentCasingInFileNames": true,  // Ensure consistent file name casing
     "outDir": "./dist",                  // Output directory for compiled files
-    "rootDir": "./src",                      // Root directory of source files
     "baseUrl": ".",
     "paths": {
-      "@cktmcs/shared": ["../../shared"]
+      "@cktmcs/shared": ["../../shared"],
+      "@cktmcs/marketplace": ["../../marketplace"],
+      "@cktmcs/errorhandler": ["../../errorhandler"]
     },
 
     "resolveJsonModule": true,           // Allow importing JSON modules

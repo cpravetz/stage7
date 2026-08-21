@@ -1,6 +1,9 @@
 # ---- Stage 1: Build ----
 FROM node:20-alpine AS builder
 
+# Install build tools for native Node modules (e.g., isolated-vm)
+RUN apk add --no-cache python3 make g++
+
 WORKDIR /usr/src/app
 
 # Copy root package files for workspace context

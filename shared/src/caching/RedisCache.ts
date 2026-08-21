@@ -49,9 +49,16 @@ class RedisCache {
             });
 
             this.client.on('error', (err) => {
-                // Prevent error spam by only logging connection errors once
-                if (err.message.includes('ECONNREFUSED') || err.message.includes('ENOTFOUND')) {
-                    console.error(`[RedisCache] Connection error: ${err.message}. Caching will be disabled.`);
+                const error = err as any;
+                const isConnectionError = error.message?.includes('ECONNREFUSED') ||
+                                          error.message?.includes('ENOTFOUND') ||
+                                          error.code === 'ECONNREFUSED' ||
+                                          error.code === 'ENOTFOUND' ||
+                                          error.name === 'AggregateError' ||
+                                          (error.errors && Array.isArray(error.errors) && error.errors.some((e: any) => e.code === 'ECONNREFUSED' || e.message?.includes('ECONNREFUSED')));
+
+                if (isConnectionError) {
+                    console.error(`[RedisCache] Connection error: ${error.message || JSON.stringify(error.errors)}. Caching will be disabled.`);
                 } else {
                     reportError(err);
                 }

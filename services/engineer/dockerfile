@@ -1,6 +1,9 @@
 # Use an official Node.js runtime as the base image
 FROM node:20-alpine
 
+# Install build tools for native Node modules (e.g., isolated-vm)
+RUN apk add --no-cache python3 make g++
+
 # Set the working directory in the container
 WORKDIR /usr/src/app
 
@@ -25,7 +28,7 @@ COPY services/engineer ./services/engineer
 RUN cd shared && npm run build
 RUN cd errorhandler && npm run build
 RUN cd marketplace && npm run build
-RUN npm run build --workspace=services/engineer
+RUN cd services/engineer && npm run build
 
 # Set the working directory to the service
 WORKDIR /usr/src/app/services/engineer

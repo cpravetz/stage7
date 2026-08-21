@@ -19,6 +19,14 @@ export interface ModelConfiguration {
     retiredAt?: string;                  // ISO8601 DateTime
     rolloutPercentage: number;           // 0-100, for gradual deployment
 
+    capabilities?: string[];             // e.g. ["vision", "json_mode", "function_calling"]
+    scoresByConversationType?: Record<string, {
+        costScore: number;
+        accuracyScore: number;
+        creativityScore: number;
+        speedScore: number;
+    }>;
+
     // Provider credentials configuration
     providerCredentials: {
         keyVault: string;                // Reference to vault ("AWS_SECRETS_MANAGER", "VAULT", "ENV")

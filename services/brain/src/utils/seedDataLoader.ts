@@ -129,6 +129,7 @@ export class SeedDataLoader {
 
             const fileContent = fs.readFileSync(this.seedDataPath, 'utf-8');
             this.seedData = JSON.parse(fileContent);
+            this.seedData = this.substituteEnvVars(this.seedData);
 
             if (!this.seedData) {
                 throw new Error('Failed to parse seed data JSON');
@@ -221,6 +222,8 @@ export class SeedDataLoader {
             tokenLimit: raw.tokenLimit,
             costPer1kTokens: raw.costPer1kTokens,
             supportedConversationTypes: conversationTypes,
+            capabilities: (raw.metadata as any)?.capabilities || [],
+            scoresByConversationType: raw.scoresByConversationType,
             status: raw.status as 'active' | 'beta' | 'deprecated',
             deployedAt: now,
             rolloutPercentage: raw.rolloutPercentage,
@@ -251,7 +254,6 @@ export class SeedDataLoader {
                 version: raw.metadata.version || '1.0.0',
                 releaseDate: raw.metadata.releaseDate || now,
                 knownLimitations: raw.metadata.knownLimitations || 'None documented',
-                scores: raw.scoresByConversationType,
                 provider: raw.provider
             } as any,
             createdAt: now,
@@ -266,9 +268,12 @@ export class SeedDataLoader {
      * Uses environment variables where available for dynamic configuration
      */
     private getHealthCheckEndpoint(model: RawModelData): string {
-        // Get OpenWebUI URL from environment variable
-        const openWebUIUrl = process.env.OPENWEB_URL || 'http://localhost:8000';
-        
+        const openWebUIUrl = process.env.OPENWEB_URL;
+
+        if (!openWebUIUrl) {
+            console.warn('[SeedDataLoader] OPENWEB_URL is not set. Using fallback: http://localhost:3000');
+        }
+
         const endpointMap: Record<string, string> = {
             'openai': 'https://api.openai.com/v1/models',
             'anthropic': 'https://api.anthropic.com/v1/messages',
@@ -277,7 +282,7 @@ export class SeedDataLoader {
             'openrouter': 'https://openrouter.ai/api/v1/models',
             'huggingface': 'https://api-inference.huggingface.co/models/',
             'mistral': 'https://api.mistral.ai/v1/models',
-            'openwebui': `${openWebUIUrl}/api/v1/models`,
+            'openwebui': `${openWebUIUrl || 'http://localhost:3000'}/api/v1/models`,
             'cloudflare': 'https://api.cloudflare.com/client/v4/accounts/{accountId}/ai/models',
             'aiml': 'https://api.aiml.com/v1/models',
             'gg': 'https://api.gg.com/v1/models'
@@ -338,6 +343,26 @@ export class SeedDataLoader {
     async getVersion(): Promise<string> {
         const data = await this.loadSeedData();
         return data.version;
+    }
+
+    /**
+     * Substitute environment variables in strings (e.g. ${OPENWEB_URL})
+     */
+    private substituteEnvVars(obj: any): any {
+        if (typeof obj === 'string') {
+            return obj.replace(/\$\{(\w+)\}/g, (match, varName) => {
+                return process.env[varName] || match;
+            });
+        } else if (Array.isArray(obj)) {
+            return obj.map(item => this.substituteEnvVars(item));
+        } else if (obj && typeof obj === 'object') {
+            const result: any = {};
+            for (const key in obj) {
+                result[key] = this.substituteEnvVars(obj[key]);
+            }
+            return result;
+        }
+        return obj;
     }
 
     /**

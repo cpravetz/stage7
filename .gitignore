@@ -132,6 +132,9 @@ dist
 .todo.txt
 .qodo
 
+# Shared plugin volume mount (synced from capabilitiesmanager/src/plugins)
+plugins/
+
 # Private keys and sensitive files
 *.pem
 *.key

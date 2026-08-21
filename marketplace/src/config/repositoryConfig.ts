@@ -3,7 +3,7 @@ const repositories: any[] = [
     {
         type: 'local',
         options: {
-            localPath: process.env.LOCAL_PLUGIN_PATH || '/usr/src/app/services//capabilitiesmanager/src/plugins'
+            localPath: process.env.LOCAL_PLUGIN_PATH
         }
     },
     {

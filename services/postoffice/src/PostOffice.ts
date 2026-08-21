@@ -287,7 +287,7 @@ export class PostOffice extends BaseEntity {
                     console.error(`[PostOffice Proxy] Error response status: ${error.response.status}`);
                     console.error(`[PostOffice Proxy] Error response data:`, error.response.data);
                 }
-                res.status(error.response?.status || 500).send(error.response?.data || 'Proxy error');
+                res.status(error.response?.status || 500).json({ error: error.response?.data || 'Proxy error' });
             }
         });
 

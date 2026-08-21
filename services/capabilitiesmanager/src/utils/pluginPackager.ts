@@ -215,7 +215,7 @@ export class PluginPackager {
         
         return skipPatterns.some(pattern => {
             if (pattern.includes('*')) {
-                const regex = new RegExp(pattern.replace('*', '.*'));
+                const regex = new RegExp('^' + pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*') + '$');
                 return regex.test(filename);
             }
             return filename === pattern;

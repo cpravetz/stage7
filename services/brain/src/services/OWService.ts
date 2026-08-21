@@ -9,7 +9,7 @@ export class OWService extends BaseService {
         super(
             'OWService',
             process.env.OPENWEBUI_API_KEY || 'default-key',
-            process.env.OPENWEB_URL || 'http://localhost:11434/api/v1',
+            process.env.OPENWEB_URL || 'http://localhost:3000',
             ['openwebui']
         );
 

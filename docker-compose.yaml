@@ -12,8 +12,6 @@ services:
       - donotstart
 
   postoffice:
-    profiles:
-      - core
     build:
       context: .
       dockerfile: services/postoffice/dockerfile
@@ -45,8 +43,6 @@ services:
     restart: unless-stopped
 
   missioncontrol:
-    profiles:
-      - core
     build:
       context: .
       dockerfile: services/missioncontrol/dockerfile
@@ -73,8 +69,6 @@ services:
       - ./shared/keys:/usr/src/app/shared/keys
 
   brain:
-    profiles:
-      - core
     build:
       context: .
       dockerfile: services/brain/dockerfile
@@ -103,8 +97,6 @@ services:
           memory: 2G
 
   agentset:
-    profiles:
-      - core
     build:
       context: .
       dockerfile: services/agentset/dockerfile
@@ -130,10 +122,9 @@ services:
       resources:
         limits:
           memory: 2G
+    restart: unless-stopped
 
   engineer:
-    profiles:
-      - core
     build:
       context: .
       dockerfile: services/engineer/dockerfile
@@ -150,10 +141,12 @@ services:
         condition: service_started
     environment:
       PORT: 5050 # Explicitly set port
+      LOCAL_PLUGIN_PATH: /usr/src/app/services/engineer/src/plugins
     env_file:
       - .env
     volumes:
       - ./shared/keys:/usr/src/app/shared/keys
+      - ./plugins:/usr/src/app/services/engineer/src/plugins
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:5050/health"]
       interval: 30s
@@ -163,8 +156,6 @@ services:
 
 
   capabilitiesmanager:
-    profiles:
-      - core
     build:
       context: .
       dockerfile: services/capabilitiesmanager/dockerfile
@@ -176,28 +167,28 @@ services:
       engineer:
         condition: service_started
       librarian:
-        condition: service_started
+        condition: service_healthy
       rabbitmq:
         condition: service_healthy
       securitymanager:
         condition: service_started
     environment:
       PORT: 5060 # Explicitly set port
-      LOCAL_PLUGIN_PATH: /usr/src/app/services//capabilitiesmanager/src/plugins # Explicitly set
+      LOCAL_PLUGIN_PATH: /usr/src/app/services/capabilitiesmanager/src/plugins # Explicitly set
     env_file:
       - .env
     volumes:
       - ./shared/keys:/usr/src/app/shared/keys
+      - ./plugins:/usr/src/app/services/capabilitiesmanager/src/plugins
     ports:
       - "5060:5060"
     deploy:
       resources:
         limits:
           memory: 2G
+    restart: unless-stopped
 
   librarian:
-    profiles:
-      - core
     build:
       context: .
       dockerfile: services/librarian/dockerfile
@@ -206,6 +197,8 @@ services:
         condition: service_started
       chromadb:
         condition: service_started
+      mongo:
+        condition: service_healthy
     environment:
       PORT: 5040 # Explicitly set port
     env_file:
@@ -228,8 +221,6 @@ services:
 
 
   securitymanager:
-    profiles:
-      - core
     build:
       context: .
       dockerfile: services/security/Dockerfile
@@ -249,8 +240,6 @@ services:
       - "5010:5010"
 
   frontend:
-    profiles:
-      - core
     build:
       context: .
       dockerfile: services/mcsreact/dockerfile
@@ -832,6 +821,13 @@ services:
       - "27017:27017"
     volumes:
       - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
 
   redis:
     image: redis:latest
@@ -841,7 +837,7 @@ services:
       - redis_data:/data
 
   rabbitmq:
-    image: rabbitmq:3-management
+    image: rabbitmq:3.13-management
     ports:
       - "5672:5672"  # AMQP port
       - "15672:15672" # Management UI
@@ -892,8 +888,9 @@ services:
       - .env
     ports:
       - "8002:8000"
+    command: ["run", "--host", "0.0.0.0", "--port", "8000", "--path", "/chroma/chroma"]
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8002/api/v2/healthcheck"]
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/8000'"]
       interval: 10s
       timeout: 5s
       retries: 10

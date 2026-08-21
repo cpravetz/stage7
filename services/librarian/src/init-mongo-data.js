@@ -4,15 +4,35 @@
 // Connect to MongoDB
 const { MongoClient } = require('mongodb');
 
+async function connectWithRetry(uri, maxRetries = 10, initialDelayMs = 2000) {
+  let retryCount = 0;
+  let delay = initialDelayMs;
+  while (retryCount < maxRetries) {
+    try {
+      const client = new MongoClient(uri);
+      await client.connect();
+      console.log('Connected to MongoDB');
+      return client;
+    } catch (error) {
+      retryCount++;
+      if (retryCount >= maxRetries) {
+        console.error(`Failed to connect to MongoDB after ${maxRetries} attempts:`, error instanceof Error ? error.message : error);
+        throw error;
+      }
+      const jitter = Math.random() * 0.3 * delay;
+      const actualDelay = Math.floor(delay + jitter);
+      console.log(`MongoDB connection attempt ${retryCount}/${maxRetries} failed. Retrying in ${actualDelay}ms...`);
+      await new Promise(resolve => setTimeout(resolve, actualDelay));
+      delay = Math.min(delay * 1.5, 30000);
+    }
+  }
+}
+
 async function initializeMongoData() {
   const uri = 'mongodb://mongo:27017';
-  const client = new MongoClient(uri);
-
+  let client;
   try {
-    await client.connect();
-    console.log('Connected to MongoDB');
-
-    // Get database
+    client = await connectWithRetry(uri);
     const db = client.db('librarianDB');
 
     // Initialize agent_specializations collection

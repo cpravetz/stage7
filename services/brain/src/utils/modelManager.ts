@@ -713,6 +713,8 @@ export class ModelManager {
         providerModelId: string;
         supportedConversationTypes: LLMConversationType[];
         tokenLimit: number;
+        capabilities?: string[];
+        scoresByConversationType?: Record<string, { costScore: number; accuracyScore: number; creativityScore: number; speedScore: number }>;
         metadata?: any;
     }>): Promise<number> {
         await interfaceManager.ready();
@@ -721,15 +723,13 @@ export class ModelManager {
         
         for (const config of configs) {
             try {
-                // Find the interface by provider name
                 const interfaceInstance = interfaceManager.getInterface(config.provider);
                 
-                // Find the service - try different naming conventions
                 const serviceNames = [
-                    `${config.provider.charAt(0).toUpperCase()}${config.provider.slice(1)}Service`,  // e.g., GroqService
-                    `${config.provider.toUpperCase()}Service`,  // e.g., GROQService
-                    config.provider,  // e.g., groq
-                    `${config.provider.charAt(0).toUpperCase()}${config.provider.slice(1).toLowerCase()}Service`  // e.g., GroqService
+                    `${config.provider.charAt(0).toUpperCase()}${config.provider.slice(1)}Service`,
+                    `${config.provider.toUpperCase()}Service`,
+                    config.provider,
+                    `${config.provider.charAt(0).toUpperCase()}${config.provider.slice(1).toLowerCase()}Service`
                 ];
                 
                 let serviceInstance: BaseService | undefined;
@@ -738,7 +738,6 @@ export class ModelManager {
                     if (serviceInstance) break;
                 }
                 
-                // Also try common service name mappings
                 if (!serviceInstance) {
                     const serviceNameMap: Record<string, string> = {
                         'openai': 'OAService',
@@ -776,16 +775,15 @@ export class ModelManager {
                     continue;
                 }
 
-                // Build scores map from metadata
                 const scoresMap = new Map<LLMConversationType, { costScore: number; accuracyScore: number; creativityScore: number; speedScore: number }>();
-                if (config.metadata?.scores) {
-                    for (const [typeKey, score] of Object.entries(config.metadata.scores)) {
+                const rawScores = config.scoresByConversationType || config.metadata?.scores;
+                if (rawScores) {
+                    for (const [typeKey, score] of Object.entries(rawScores)) {
                         const convType = (LLMConversationType as Record<string, any>)[typeKey] || typeKey;
                         scoresMap.set(convType, score as { costScore: number; accuracyScore: number; creativityScore: number; speedScore: number });
                     }
                 }
 
-                // Create the BaseModel instance
                 const modelInstance = new BaseModel({
                     name: config.name,
                     modelName: config.providerModelId,
@@ -796,10 +794,8 @@ export class ModelManager {
                     contentConversation: config.supportedConversationTypes
                 });
 
-                // Set the providers
                 modelInstance.setProviders(interfaceInstance as BaseInterface, serviceInstance);
 
-                // Register the model
                 this.models.set(config.name.toLowerCase(), modelInstance);
                 registeredCount++;
                 console.log(`[ModelManager] Registered model from config: ${config.name}`);

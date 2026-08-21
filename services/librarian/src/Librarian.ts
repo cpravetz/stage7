@@ -33,7 +33,7 @@ function normalizeId(Id: string | string[]): string {
   return Id;
 }
 
-function sanitizePathSegment(segment: string): string {
+function sanitizePathSegment(segment: string | string[]): string {
   const normalized = normalizeId(segment);
   if (!/^[a-zA-Z0-9._-]+$/.test(normalized)) {
     throw new Error(`Invalid path segment: ${segment}`);

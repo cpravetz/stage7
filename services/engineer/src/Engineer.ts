@@ -28,8 +28,9 @@ import { analyzeError } from '@cktmcs/shared';
 import { PluginMarketplace } from '@cktmcs/marketplace';
 import { redisCache } from '@cktmcs/shared';
 import crypto from 'crypto';
-import { promises as fs } from 'fs';
-import { exec } from 'child_process';
+import * as fs from 'fs';
+import { promises as fsPromises } from 'fs';
+import { exec, execSync } from 'child_process';
 import { promisify } from 'util';
 import path from 'path';
 import os from 'os';
@@ -302,6 +303,8 @@ export class Engineer extends BaseEntity {
     private async setupServer() {
         const app = express();
         app.use(express.json());
+
+        this.setupHealthCheck(app);
 
         // Request logging middleware with correlation IDs
         app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -786,20 +789,20 @@ Context: ${contextString}`;
               if (language === 'javascript' && (filename.endsWith('.js') || filename.endsWith('.ts'))) {
                   new Function(content); 
                   console.log(`JavaScript file ${filename} passed basic syntax check.`);
-              } else if (language === 'python' && filename.endsWith('.py')) {
-                  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'validate-python-'));
-                  const tempPyFile = path.join(tempDir, filename);
-                  await fs.writeFile(tempPyFile, content);
-                  try {
-                      await execAsync(`python3 -m py_compile ${tempPyFile}`);
-                      console.log(`Python file ${filename} compiled successfully.`);
-                  } catch (compileError: any) {
-                      console.error(`Python compilation failed for ${filename}:`, compileError.stderr || compileError.message);
-                      throw new Error(`Python compilation failed for ${filename}: ${compileError.stderr || compileError.message}`);
-                  } finally {
-                      await fs.rm(tempDir, { recursive: true, force: true }).catch(e => console.error(`Error deleting temp dir ${tempDir}: ${e}`));
-                  }
-              }
+               } else if (language === 'python' && filename.endsWith('.py')) {
+                   const tempDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'validate-python-'));
+                   const tempPyFile = path.join(tempDir, filename);
+                   await fsPromises.writeFile(tempPyFile, content);
+                   try {
+                       await execAsync(`python3 -m py_compile ${tempPyFile}`);
+                       console.log(`Python file ${filename} compiled successfully.`);
+                   } catch (compileError: any) {
+                       console.error(`Python compilation failed for ${filename}:`, compileError.stderr || compileError.message);
+                       throw new Error(`Python compilation failed for ${filename}: ${compileError.stderr || compileError.message}`);
+                   } finally {
+                       await fsPromises.rm(tempDir, { recursive: true, force: true }).catch((e: any) => console.error(`Error deleting temp dir ${tempDir}: ${e}`));
+                   }
+               }
           }
           return true;
       } catch (error: any) {
@@ -1280,8 +1283,12 @@ Context: ${contextString}`;
             case 'javascript':
             case 'typescript':
                 try {
-                    const sourceFile = ts.createSourceFile('temp.ts', code, ts.ScriptTarget.Latest, true);
-                    const diagnostics = ts.getPreEmitDiagnostics(sourceFile);
+                    const program = ts.createProgram(['temp.ts'], { noEmit: true });
+                    const sourceFile = program.getSourceFile('temp.ts');
+                    if (!sourceFile) {
+                        return false;
+                    }
+                    const diagnostics = ts.getPreEmitDiagnostics(program);
                     const errors = diagnostics.filter(d => d.category === ts.DiagnosticCategory.Error);
                     if (errors.length > 0) {
                         console.warn('TypeScript syntax validation failed:', ts.flattenDiagnosticMessageText(errors[0].messageText, '\n'));
@@ -1421,14 +1428,14 @@ Context: ${contextString}`;
 
     private async executeTestRunner(generatedPlugin: any, scoped?: ScopedLogger): Promise<{ valid: boolean; issues: string[] }> {
         const issues: string[] = [];
-        const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), `plugin-test-${generatedPlugin.id}-`));
+        const tempDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), `plugin-test-${generatedPlugin.id}-`));
 
         try {
             // Write all plugin files to temporary directory
             for (const [filename, content] of Object.entries(generatedPlugin.entryPoint.files)) {
                 const filePath = path.join(tempDir, filename);
                 const contentStr = typeof content === 'string' ? content : String(content);
-                await fs.writeFile(filePath, contentStr);
+                await fsPromises.writeFile(filePath, contentStr);
             }
 
             // Determine test runner based on language
@@ -1495,7 +1502,7 @@ Context: ${contextString}`;
         } finally {
             // Clean up temporary directory
             try {
-                await fs.rm(tempDir, { recursive: true, force: true });
+                await fsPromises.rm(tempDir, { recursive: true, force: true });
             } catch (cleanupError) {
                 logger.warn(`Error cleaning up test directory ${tempDir}`, cleanupError as Error);
             }
