@@ -2,6 +2,11 @@
 # Build with: docker build -f Dockerfile.base -t cktmcs:base .
 FROM node:20-alpine
 
+# Install Python for capabilitiesmanager Python plugins (e.g., ACCOMPLISH)
+# Install gcompat for glibc compatibility (needed by onnxruntime-node in librarian)
+RUN apk add --no-cache python3 py3-pip make g++ gcompat && \
+    ln -sf /usr/bin/python3 /usr/bin/python
+
 WORKDIR /usr/src/app
 
 # Copy root package files
@@ -24,3 +29,9 @@ COPY errorhandler/ ./errorhandler/
 RUN npm run build --workspace=shared
 RUN npm run build --workspace=sdk
 RUN npm run build --workspace=errorhandler
+
+# Copy and build marketplace (needed by engineer service)
+COPY marketplace/package.json ./marketplace/
+RUN npm install --legacy-peer-deps --workspace=marketplace
+COPY marketplace/ ./marketplace/
+RUN npm run build --workspace=marketplace

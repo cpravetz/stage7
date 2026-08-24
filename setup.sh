@@ -199,17 +199,69 @@ done
 
 export COMPOSE_PROFILES="$PROFILES_LIST"
 
-# --- 5. Build Docker images ---
+# --- 5. Build base image ---
 echo ""
-echo "Building Docker images for selected profile(s)..."
-if ! docker compose build --no-cache; then
-    echo "Error: Docker compose build failed."
+echo "Building base image (cktmcs:base)..."
+if ! docker compose build base; then
+    echo "Error: Docker compose build base failed."
     exit 1
 fi
-echo "Docker images built. ✅"
+echo "Base image built. ✅"
 press_any_key_to_continue
 
-# --- 6. Start services ---
+# --- 6. Build Docker images ---
+echo ""
+echo "Building Docker images for selected profile(s)..."
+
+CORE_SERVICES="postoffice missioncontrol brain agentset engineer capabilitiesmanager librarian securitymanager frontend"
+ASSISTANT_SERVICES="pm-assistant-api sales-assistant-api marketing-assistant-api hr-assistant-api finance-assistant-api support-assistant-api legal-assistant-api healthcare-assistant-api education-assistant-api event-assistant-api executive-assistant-api career-assistant-api content-creator-assistant-api songwriter-assistant-api scriptwriter-assistant-api hotel-ops-assistant-api restaurant-ops-assistant-api investment-advisor-api sports-wager-advisor-api cto-assistant-api performance-analytics-api"
+
+BUILD_TARGETS=""
+
+if [[ "$PROFILES_LIST" == "*" ]]; then
+  BUILD_TARGETS="$CORE_SERVICES $ASSISTANT_SERVICES"
+else
+  if [[ "$PROFILES_LIST" == *"core"* ]]; then
+    BUILD_TARGETS="$CORE_SERVICES"
+  fi
+  if [[ "$PROFILES_LIST" == *"assistants"* ]]; then
+    BUILD_TARGETS="$BUILD_TARGETS $ASSISTANT_SERVICES"
+  fi
+  for assistant in pm-assistant sales-assistant marketing-assistant hr-assistant finance-assistant support-assistant legal-assistant healthcare-assistant education-assistant event-assistant executive-assistant career-assistant content-creator-assistant songwriter-assistant scriptwriter-assistant hotel-ops-assistant restaurant-ops-assistant investment-advisor sports-wager-advisor cto-assistant performance-analytics; do
+    if [[ "$PROFILES_LIST" == *"$assistant"* ]]; then
+      case $assistant in
+        investment-advisor) svc="investment-advisor-api" ;;
+        sports-wager-advisor) svc="sports-wager-advisor-api" ;;
+        cto-assistant) svc="cto-assistant-api" ;;
+        performance-analytics) svc="performance-analytics-api" ;;
+        *) svc="${assistant}-assistant-api" ;;
+      esac
+      BUILD_TARGETS="$BUILD_TARGETS $svc"
+    fi
+  done
+fi
+
+if [[ -z "$BUILD_TARGETS" ]]; then
+  echo "No services to build for selected profile(s). Skipping build step."
+else
+  echo "Building services sequentially to avoid Docker context timeouts..."
+  FAILED=false
+  for target in $BUILD_TARGETS; do
+    echo "  Building $target..."
+    if ! docker compose build "$target"; then
+        echo "Error: Docker compose build failed for $target."
+        FAILED=true
+        break
+    fi
+  done
+  if [ "$FAILED" = true ]; then
+    exit 1
+  fi
+  echo "Docker images built. ✅"
+fi
+press_any_key_to_continue
+
+# --- 7. Start services ---
 echo ""
 echo "--- Starting Stage7 Services ---"
 echo "Initiating Docker Compose with selected profile(s)..."

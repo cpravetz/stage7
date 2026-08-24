@@ -1,68 +1,56 @@
 import { ChromaClient, Collection, Metadata, EmbeddingFunction } from 'chromadb';
+import * as crypto from 'crypto';
 
-// Use dynamic import for @xenova/transformers
-let Transformers: any;
-let pipeline: any;
+// Simple hash-based embedding function that doesn't require ONNX Runtime
+// This provides basic semantic search capability using TF-IDF-like hashing
+class SimpleEmbeddingFunction implements EmbeddingFunction {
+    private dimension: number;
+
+    constructor(dimension: number = 384) {
+        this.dimension = dimension;
+    }
+
+    public async generate(texts: string[]): Promise<number[][]> {
+        return texts.map(text => this.embed(text));
+    }
+
+    private embed(text: string): number[] {
+        const embedding: number[] = new Array(this.dimension).fill(0);
+        const words = text.toLowerCase().split(/\W+/).filter(w => w.length > 0);
+
+        for (const word of words) {
+            const hash = crypto.createHash('md5').update(word).digest();
+            for (let i = 0; i < this.dimension; i++) {
+                // Use hash bytes to distribute word influence across dimensions
+                const hashByte = hash[i % hash.length];
+                // Center around 0 by subtracting 128
+                embedding[i] += (hashByte - 128) / 128;
+            }
+        }
+
+        // Normalize the embedding
+        const magnitude = Math.sqrt(embedding.reduce((sum, val) => sum + val * val, 0));
+        if (magnitude > 0) {
+            for (let i = 0; i < this.dimension; i++) {
+                embedding[i] /= magnitude;
+            }
+        }
+
+        return embedding;
+    }
+}
 
 // Global collection creation lock to prevent race conditions
 const collectionCreationLocks = new Map<string, Promise<Collection>>();
 
-class TransformerEmbeddingFunction implements EmbeddingFunction {
-    private pipe: any;
-
-    private constructor(pipe: any) {
-        this.pipe = pipe;
-    }
-
-    public static async create() {
-        if (!Transformers) {
-            Transformers = await import('@xenova/transformers');
-
-        }
-        // Use a pre-downloaded and locally available model
-        // This model should be part of the service's deployment package.
-        const pipe = await Transformers.pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
-        return new TransformerEmbeddingFunction(pipe);
-    }
-
-    public async generate(texts: string[]): Promise<number[][]> {
-        const output = await this.pipe(texts, { pooling: 'mean', normalize: true });
-        return output.tolist();
-    }
-}
-
 class KnowledgeStore {
     private client: ChromaClient;
-    private embeddingFunction: EmbeddingFunction | null = null;
-    private initializationPromise: Promise<void> | null = null;
+    private embeddingFunction: SimpleEmbeddingFunction;
 
     constructor() {
         this.client = new ChromaClient({ path: process.env.CHROMADB_PATH || 'http://chromadb:8000' });
+        this.embeddingFunction = new SimpleEmbeddingFunction();
         console.log(`KnowledgeStore initialized, connecting to ChromaDB at ${process.env.CHROMADB_PATH || 'http://chromadb:8000'}`);
-        this.initializationPromise = this.initializeEmbeddingFunction();
-    }
-
-    private async initializeEmbeddingFunction(): Promise<void> {
-        try {
-            this.embeddingFunction = await TransformerEmbeddingFunction.create();
-            console.log('Transformer embedding function initialized successfully.');
-        } catch (error) {
-            console.error('Failed to initialize transformer embedding function:', error);
-            // In a production environment, you might want to handle this more gracefully,
-            // perhaps by falling back to a simpler function or preventing the service from starting.
-            throw new Error('Could not initialize embedding function.');
-        }
-    }
-
-    private async getEmbeddingFunction(): Promise<EmbeddingFunction> {
-        if (!this.initializationPromise) {
-            throw new Error("KnowledgeStore embedding function not initialized.");
-        }
-        await this.initializationPromise;
-        if (!this.embeddingFunction) {
-            throw new Error("Embedding function is null after initialization.");
-        }
-        return this.embeddingFunction;
     }
 
     private async getOrCreateCollection(name: string): Promise<Collection> {
@@ -74,7 +62,7 @@ class KnowledgeStore {
 
         // Create a promise that will be resolved when this collection is created
         const creationPromise = this._createCollectionWithLock(name);
-        
+
         // Store the promise so other requests can wait for it
         collectionCreationLocks.set(name, creationPromise);
 
@@ -91,20 +79,30 @@ class KnowledgeStore {
     }
 
     private async _createCollectionWithLock(name: string): Promise<Collection> {
-        const embeddingFunction = await this.getEmbeddingFunction();
         try {
             const collection = await this.client.getCollection({
                 name,
-                embeddingFunction,
+                embeddingFunction: this.embeddingFunction,
             });
             console.log(`Found existing collection: ${name}`);
             return collection;
         } catch (error) {
-            console.log(`Collection ${name} not found, creating new one.`);
+            // Collection not found or has incompatible embedding function
+            const errorMsg = error instanceof Error ? error.message : '';
+            if (errorMsg.includes('No embedding function found') || errorMsg.includes('DefaultEmbeddingFunction')) {
+                console.log(`Collection ${name} has incompatible embedding function, deleting and recreating.`);
+                try {
+                    await this.client.deleteCollection({ name });
+                    console.log(`Deleted collection ${name}`);
+                } catch (deleteError) {
+                    console.warn(`Failed to delete collection ${name}:`, deleteError);
+                }
+            }
+            console.log(`Creating new collection: ${name}`);
             try {
                 const collection = await this.client.createCollection({
                     name,
-                    embeddingFunction,
+                    embeddingFunction: this.embeddingFunction,
                 });
                 console.log(`Successfully created collection: ${name}`);
                 return collection;
@@ -114,7 +112,7 @@ class KnowledgeStore {
                     try {
                         const collection = await this.client.getCollection({
                             name,
-                            embeddingFunction,
+                            embeddingFunction: this.embeddingFunction,
                         });
                         return collection;
                     } catch (getError) {
@@ -172,7 +170,7 @@ class KnowledgeStore {
             }
 
             console.log(`Queried collection ${collectionName} with "${queryText}", found ${results.ids[0].length} results.`);
-            
+
             const formattedResults = results.ids[0].map((id, index) => ({
                 id,
                 document: results.documents[0][index],

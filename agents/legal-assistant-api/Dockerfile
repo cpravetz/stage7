@@ -1,6 +1,9 @@
 # Build on top of pre-built base image
 FROM cktmcs:base
 
+# Copy root tsconfig for workspace extends
+COPY tsconfig.json ./
+
 # Copy agent package.json first
 COPY agents/legal-assistant-api/package.json ./agents/legal-assistant-api/
 

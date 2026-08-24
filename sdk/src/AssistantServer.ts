@@ -16,7 +16,7 @@ function normalizeClientId(clientId: string | string[]): string {
   return clientId;
 }
 
-export function createAssistantServer(assistant: Assistant) {
+export function createAssistantServer(assistant: Assistant): ReturnType<typeof express> {
   const app = express();
   app.use(express.json());
 

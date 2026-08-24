@@ -27,7 +27,7 @@ interface Thread {
     responseType?: string;
 }
 
-const app = express();
+const app: ReturnType<typeof express> = express();
 const port = process.env.PORT || 5070;
 
 export class Brain extends BaseEntity {

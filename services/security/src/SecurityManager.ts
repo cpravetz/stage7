@@ -18,7 +18,7 @@ import { FrameworkIntegrationService } from './services/FrameworkIntegrationServ
 type Request = express.Request;
 type Response = express.Response;
 
-const app = express();
+const app: ReturnType<typeof express> = express();
 export class SecurityManager extends BaseEntity {
     private securityAuditService: SecurityAuditService;
     private securityMonitoringService: SecurityMonitoringService;

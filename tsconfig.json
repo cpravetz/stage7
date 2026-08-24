@@ -18,12 +18,12 @@
     "emitDecoratorMetadata": true,   // If using decorators with metadata
     "baseUrl": ".", // Base directory for module resolution
     "paths": { // For module aliases
-      "@cktmcs/shared": ["shared/src"], 
-      "@cktmcs/shared/*": ["shared/src/*"],
-      "@cktmcs/sdk": ["sdk/src"], 
-      "@cktmcs/sdk/*": ["sdk/src/*"],
-      "@cktmcs/errorhandler": ["errorhandler/src"],
-      "@cktmcs/errorhandler/*": ["errorhandler/src/*"]
+      "@cktmcs/shared": ["shared/dist"], 
+      "@cktmcs/shared/*": ["shared/dist/*"],
+      "@cktmcs/sdk": ["sdk/dist"], 
+      "@cktmcs/sdk/*": ["sdk/dist/*"],
+      "@cktmcs/errorhandler": ["errorhandler/dist"],
+      "@cktmcs/errorhandler/*": ["errorhandler/dist/*"]
     },
     "typeRoots": ["./node_modules/@types", "./src/types"] // Include project-specific types if any
   },
