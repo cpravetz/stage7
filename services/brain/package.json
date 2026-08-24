@@ -5,7 +5,7 @@
     "main": "dist/Brain.js",
     "scripts": {
         "start": "ts-node src/Brain.ts",
-        "build": "tsc && mkdir -p dist/data && cp src/data/seedData.json dist/data/seedData.json",
+        "build": "tsc",
         "test": "jest"
     },
     "dependencies": {

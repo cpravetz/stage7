@@ -100,17 +100,8 @@ export class SeedDataLoader {
     private seedDataPath: string;
 
     private constructor() {
-        // Path to seedData.json. The file lives in the `data` directory next to
-        // `utils` (e.g. src/data/seedData.json or dist/data/seedData.json). Resolve
-        // it robustly across layouts instead of assuming a fixed relative path.
-        const candidates = [
-            path.join(__dirname, '..', 'data', 'seedData.json'),
-            path.join(__dirname, 'seedData.json'),
-            path.join(__dirname, '..', '..', 'data', 'seedData.json')
-        ];
-        this.seedDataPath = candidates.find(c => {
-            try { return fs.existsSync(c); } catch { return false; }
-        }) || candidates[0];
+        // Path to seedData.json relative to this file
+        this.seedDataPath = path.join(__dirname, 'seedData.json');
     }
 
     /**

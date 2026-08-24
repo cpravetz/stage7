@@ -1,9 +1,6 @@
 # Build on top of pre-built base image
 FROM cktmcs:base
 
-# Copy root tsconfig for workspace extends
-COPY tsconfig.json ./
-
 # Copy agent package.json first for workspace registration
 COPY agents/pm-assistant-api/package.json ./agents/pm-assistant-api/
 

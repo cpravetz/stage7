@@ -1,9 +1,6 @@
 # Build on top of pre-built base image
 FROM cktmcs:base
 
-# Copy root tsconfig for workspace extends
-COPY tsconfig.json ./
-
 # Copy root package files to ensure workspace setup
 COPY package.json package-lock.json ./
 

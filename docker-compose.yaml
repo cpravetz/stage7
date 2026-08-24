@@ -85,7 +85,6 @@ services:
       PORT: 5070 # Explicitly set port
     env_file:
       - .env
-      - services/brain/.env
     volumes:
       - ./shared/keys:/usr/src/app/shared/keys
       # The .env file mount for services/brain/.env is now redundant due to global .env

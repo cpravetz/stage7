@@ -1,21 +1,48 @@
-# Build on top of pre-built base image
-FROM cktmcs:base
+# Use an official Node.js runtime as the base image
+FROM node:20-alpine
 
-# Copy service package.json first for workspace registration
-COPY services/brain/package.json ./services/brain/
+# Install build tools for native Node modules (e.g., isolated-vm)
+RUN apk add --no-cache python3 make g++
 
-# Install service dependencies
-RUN npm install --legacy-peer-deps --workspace=services/brain
+# Set the working directory in the container
+WORKDIR /usr/src/app
 
-# Copy service source code
-COPY services/brain/ ./services/brain/
+# Copy package.json and package-lock.json to the working directory
+COPY package*.json ./
+COPY package-lock.json ./
+COPY shared/package*.json ./shared/
+COPY errorhandler/package*.json ./errorhandler/
+COPY services/brain/package*.json ./services/brain/
 
-# Build the service
+# Install the application dependencies
+RUN npm install --legacy-peer-deps
+RUN cd shared && npm install --legacy-peer-deps
+RUN cd errorhandler && npm install --legacy-peer-deps
+RUN cd services/brain && npm install --legacy-peer-deps
+
+# Copy the application code to the working directory
+COPY shared ./shared
+COPY errorhandler ./errorhandler
+COPY services/brain ./services/brain
+
+RUN mkdir -p ./services/brain/src/interfaces
+COPY services/brain/src/interfaces/*.?s ./services/brain/src/interfaces
+
+# Create data directory for model performance tracking
+RUN mkdir -p ./services/brain/data
+
+# Build the TypeScript code - ensure shared is built first
+RUN cd shared && npm run build
+RUN cd errorhandler && npm run build
 RUN npm run build --workspace=services/brain
 
-# Set working directory to the service's folder
+COPY services/brain/src/data/seedData.json ./services/brain/dist/utils/seedData.json
+
+# Set the working directory to the service
 WORKDIR /usr/src/app/services/brain
 
+# Expose the port the app runs on
 EXPOSE 5070
 
+# Define the command to run the application
 CMD ["node", "dist/Brain.js"]

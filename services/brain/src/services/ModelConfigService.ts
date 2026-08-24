@@ -31,13 +31,8 @@ export class ModelConfigService extends BaseEntity {
             }
 
             // Fallback to Librarian
-            // Query the collection for all active model configurations. Models are stored
-            // individually (ids like `model-config-<id>`), so we must query by status rather
-            // than loading a single document by the synthetic id `model-configs-active`.
-            const response = await this.authenticatedApi.post(`http://librarian:5040/queryData`, {
-                collection: this.CONFIG_COLLECTION,
-                query: { status: 'active' },
-                limit: 1000
+            const response = await this.authenticatedApi.get(`http://librarian:5040/loadData/model-configs-active`, {
+                params: { collection: this.CONFIG_COLLECTION, storageType: 'mongo' }
             });
 
             const models: ModelConfiguration[] = response.data?.data || [];
@@ -387,10 +382,11 @@ export class ModelConfigService extends BaseEntity {
                 return cached;
             }
 
-            const response = await this.authenticatedApi.post(`http://librarian:5040/queryData`, {
-                collection: 'service_configs',
-                query: {},
-                limit: 1000
+            const response = await this.authenticatedApi.get(`http://librarian:5040/query`, {
+                params: {
+                    collection: 'service_configs',
+                    storageType: 'mongo'
+                }
             });
 
             const services: ServiceConfig[] = response.data?.data || [];
@@ -415,10 +411,11 @@ export class ModelConfigService extends BaseEntity {
                 return cached;
             }
 
-            const response = await this.authenticatedApi.post(`http://librarian:5040/queryData`, {
-                collection: 'interface_configs',
-                query: {},
-                limit: 1000
+            const response = await this.authenticatedApi.get(`http://librarian:5040/query`, {
+                params: {
+                    collection: 'interface_configs',
+                    storageType: 'mongo'
+                }
             });
 
             const interfaces: InterfaceConfig[] = response.data?.data || [];
