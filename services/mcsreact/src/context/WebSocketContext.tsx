@@ -48,8 +48,6 @@ interface WebSocketContextType {
   setPendingUserInput?: React.Dispatch<React.SetStateAction<any>>;
   switchAssistant: (assistantId: string) => void;
   saveAssistantConversation: (assistantId: string) => void;
-  typingAgents: string[];
-  setTypingAgents: React.Dispatch<React.SetStateAction<string[]>>;
 }
 
 interface MissionContextType {
@@ -61,7 +59,7 @@ interface MissionContextType {
 }
 
 interface DataContextType {
-  workProducts: { type: 'Interim' | 'Final' | 'Plan', name: string, url?: string, workproduct: any, isDeliverable?: boolean }[];
+  workProducts: { type: 'Interim' | 'Final' | 'Plan', name: string, url: string, workproduct: any, isDeliverable?: boolean }[];
   sharedFiles: LocalMissionFile[];
   statistics: any;
   agentStatistics: Map<string, Array<any>>;
@@ -95,7 +93,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [missions, setMissions] = useState<Partial<SharedMission>[]>([]);
   
   // Data state
-  const [workProducts, setWorkProducts] = useState<{ type: 'Interim' | 'Final' | 'Plan', name: string, url?: string, workproduct: any, isDeliverable?: boolean }[]>([]);
+  const [workProducts, setWorkProducts] = useState<{ type: 'Interim' | 'Final' | 'Plan', name: string, url: string, workproduct: any, isDeliverable?: boolean }[]>([]);
   const [sharedFiles, setSharedFiles] = useState<LocalMissionFile[]>([]);
   const [agentDetails, setAgentDetails] = useState<any[]>([]);
   const [statistics, setStatistics] = useState<any>({
@@ -106,7 +104,6 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     engineerStatistics: { newPlugins: [] }
   });
   const [agentStatistics, setAgentStatistics] = useState<Map<string, Array<any>>>(new Map());
-  const [typingAgents, setTypingAgents] = useState<string[]>([]);
 
   // User input state
   const [pendingUserInputQueue, setPendingUserInputQueue] = useState<Array<{
@@ -312,7 +309,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           const newProduct = {
             type: data.content.type,
             name: data.content.name,
-            url: data.content.id ? `${API_BASE_URL}/librarian/retrieve/${data.content.id}` : undefined,
+            url: `${API_BASE_URL}/librarian/retrieve/${data.content.id}`,
             workproduct: data.content.workproduct,
             isDeliverable: data.content.isDeliverable || false
           };
@@ -385,16 +382,6 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       case MessageType.STATUS_UPDATE:
         const statusContent = data.data ? data.data.content : data.content;
         if (statusContent) {
-          // Add status update to conversation history so user can see progress and errors
-          const statusMessage = statusContent.message || `Mission status: ${statusContent.status}`;
-          const isError = statusContent.status === 'error' || statusContent.status === 'failed';
-          setConversationHistory((prev) => [...prev, {
-            content: statusMessage,
-            sender: isError ? 'system' : 'assistant',
-            persistent: true,
-            timestamp: new Date().toISOString()
-          }]);
-
           // Batch mission status updates
           setActiveMission((prev: boolean) => statusContent.active !== prev ? statusContent.active : prev);
           setActiveMissionName((prev: string | null) => statusContent.name !== prev ? statusContent.name : prev);
@@ -457,28 +444,6 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             choices: data.choices
           }
         ]);
-        break;
-
-      case MessageType.TYPING:
-        if (data.content && data.content.isTyping) {
-          setTypingAgents((prev: string[]) => {
-            if (prev.includes(data.content.agentId)) return prev;
-            return [...prev, data.content.agentId];
-          });
-        } else if (data.content && data.content.agentId) {
-          setTypingAgents((prev: string[]) => prev.filter(id => id !== data.content.agentId));
-        }
-        break;
-
-      case MessageType.PLUGIN_PROGRESS:
-        if (data.content) {
-          setConversationHistory((prev) => [...prev, {
-            content: data.content.message || 'Processing...',
-            sender: 'system',
-            persistent: false,
-            timestamp: new Date().toISOString()
-          }]);
-        }
         break;
 
       case MessageType.LIST_MISSIONS:
@@ -866,10 +831,8 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
     },
     switchAssistant,
-    saveAssistantConversation,
-    typingAgents,
-    setTypingAgents
-  }), [isConnected, clientId, conversationHistory, assistantStateByConversation, currentQuestion, pendingUserInput, activeMission, activeMissionName, activeMissionId, missions, switchAssistant, saveAssistantConversation, typingAgents]);
+    saveAssistantConversation
+  }), [isConnected, clientId, conversationHistory, assistantStateByConversation, currentQuestion, pendingUserInput, activeMission, activeMissionName, activeMissionId, missions, switchAssistant, saveAssistantConversation]);
 
   const missionContextValue = useMemo<MissionContextType>(() => ({
     activeMission,

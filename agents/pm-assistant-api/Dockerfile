@@ -16,6 +16,6 @@ RUN npm run build --workspace=pm-assistant-api
 # Set working directory to the agent's folder
 WORKDIR /usr/src/app/agents/pm-assistant-api
 
-EXPOSE 3060
+EXPOSE 3000
 
 CMD ["node", "dist/index.js"]

@@ -16,12 +16,10 @@ interface Props {
   activeQuestion: ActiveQuestion | null;
   onAnswer: (requestId: string, answer: string) => void;
   onCancelQuestion: () => void;
-  isProcessing?: boolean;
 }
 
-const TextInput: React.FC<Props> = ({ onSend, activeQuestion, onAnswer, onCancelQuestion, isProcessing = false }) => {
+const TextInput: React.FC<Props> = ({ onSend, activeQuestion, onAnswer, onCancelQuestion }) => {
   const [message, setMessage] = useState('');
-  const [isFocused, setIsFocused] = useState(false);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -38,6 +36,7 @@ const TextInput: React.FC<Props> = ({ onSend, activeQuestion, onAnswer, onCancel
   const textFieldRef = useRef<HTMLDivElement>(null);
   const theme = useTheme();
 
+  // Auto-focus the text field when the component mounts or activeQuestion changes
   useEffect(() => {
     if (textFieldRef.current) {
       const input = textFieldRef.current.querySelector('textarea');
@@ -45,8 +44,9 @@ const TextInput: React.FC<Props> = ({ onSend, activeQuestion, onAnswer, onCancel
         input.focus();
       }
     }
-  }, [activeQuestion]);
+  }, [activeQuestion]); // Re-focus when activeQuestion changes
 
+  // Handle Ctrl+Enter to submit
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
@@ -55,7 +55,6 @@ const TextInput: React.FC<Props> = ({ onSend, activeQuestion, onAnswer, onCancel
   };
 
   const isInputDisabled = activeQuestion !== null && activeQuestion.answerType !== 'text';
-  const isSendDisabled = !message.trim() || isInputDisabled || isProcessing;
 
   return (
     <Paper
@@ -80,17 +79,14 @@ const TextInput: React.FC<Props> = ({ onSend, activeQuestion, onAnswer, onCancel
         <TextField
           fullWidth
           multiline
-          minRows={isFocused ? 2 : 1}
-          maxRows={isFocused ? 6 : 2}
+          maxRows={4}
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           onKeyDown={handleKeyDown}
-          onFocus={() => setIsFocused(true)}
-          onBlur={() => setIsFocused(false)}
           placeholder={activeQuestion ? "Enter your answer..." : "Enter message..."}
           variant="outlined"
           ref={textFieldRef}
-          disabled={isInputDisabled || isProcessing}
+          disabled={isInputDisabled}
           sx={{
             mr: 1,
             '& .MuiOutlinedInput-root': {
@@ -104,7 +100,7 @@ const TextInput: React.FC<Props> = ({ onSend, activeQuestion, onAnswer, onCancel
             type="submit"
             variant="contained"
             color="primary"
-            disabled={isSendDisabled}
+            disabled={!message.trim() || isInputDisabled}
             endIcon={<SendIcon />}
             sx={{
               height: '40px',

@@ -160,24 +160,6 @@ const StatisticsWindow: React.FC<Props> = ({ statistics, activeMissionName, acti
             sx={{ fontWeight: 'bold' }}
           />
         </Box>
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 0.5 }}>
-          <Typography variant="body2" color="text.secondary">New:</Typography>
-          <Chip
-            label={statistics.newLlmCalls ?? 0}
-            color="success"
-            size="small"
-            sx={{ fontWeight: 'bold' }}
-          />
-        </Box>
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mt: 0.5 }}>
-          <Typography variant="body2" color="text.secondary">Retried:</Typography>
-          <Chip
-            label={statistics.retriedLlmCalls ?? 0}
-            color="warning"
-            size="small"
-            sx={{ fontWeight: 'bold' }}
-          />
-        </Box>
       </Paper>
 
       <Paper elevation={1} sx={{ p: 2, mb: 3, lborderRadius: 2 }}>

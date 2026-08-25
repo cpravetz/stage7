@@ -634,7 +634,7 @@ describe('MissionControl Service', () => {
             missionControl.missions.set(mockMissionId, mockMission);
             missionControl.addClientMission('client1', mockMissionId);
 
-            mockAuthenticatedApiGet.mockResolvedValueOnce({ data: { llmCalls: 10, activeLLMCalls: 2, newLlmCalls: 8, retriedLlmCalls: 2 } }); // Brain LLM calls
+            mockAuthenticatedApiGet.mockResolvedValueOnce({ data: { llmCalls: 10, activeLLMCalls: 2 } }); // Brain LLM calls
             mockAuthenticatedApiGet.mockResolvedValueOnce({ data: { newPlugins: ['plugin1'] } }); // Engineer stats
             jest.spyOn(missionControl as any, 'getAgentStatistics').mockResolvedValue({ agentStatisticsByType: { agentCountByStatus: { RUNNING: 1 } }, agentsByStatus: new Map([['RUNNING', [{ id: 'agent1', steps: [] }]]]) }); // MissionControl stats
 
@@ -677,7 +677,7 @@ describe('MissionControl Service', () => {
             missionControl.missions.set(mockMissionId, completedMission);
             jest.spyOn(missionControl as any, 'reflectOnMission').mockResolvedValue(undefined);
 
-            mockAuthenticatedApiGet.mockResolvedValueOnce({ data: { llmCalls: 10, newLlmCalls: 10, retriedLlmCalls: 0 } }); // Brain LLM calls
+            mockAuthenticatedApiGet.mockResolvedValueOnce({ data: { llmCalls: 10 } }); // Brain LLM calls
             mockAuthenticatedApiGet.mockResolvedValueOnce({ data: { newPlugins: ['plugin1'] } }); // Engineer stats
             jest.spyOn(missionControl as any, 'getAgentStatistics').mockResolvedValue({ agentStatisticsByType: { agentCountByStatus: { RUNNING: 0 } }, agentsByStatus: new Map() }); // MissionControl stats - no running agents
 
@@ -750,7 +750,7 @@ describe('MissionControl Service', () => {
             jest.spyOn(missionControl as any, 'sendStatusUpdate').mockResolvedValue(undefined);
             jest.spyOn(missionControl as any, 'reflectOnMission').mockResolvedValue(undefined);
 
-            mockAuthenticatedApiGet.mockResolvedValueOnce({ data: { llmCalls: 5, newLlmCalls: 5, retriedLlmCalls: 0 } }); // Brain LLM calls
+            mockAuthenticatedApiGet.mockResolvedValueOnce({ data: { llmCalls: 5 } }); // Brain LLM calls
             mockAuthenticatedApiGet.mockResolvedValueOnce({ data: { newPlugins: [] } }); // Engineer stats
             jest.spyOn(missionControl as any, 'getAgentStatistics').mockResolvedValue({ agentStatisticsByType: { agentCountByStatus: { RUNNING: 1 } }, agentsByStatus: new Map([['RUNNING', [{ id: 'agent1', steps: [] }]]]) }); // MissionControl stats
         });
@@ -789,7 +789,7 @@ describe('MissionControl Service', () => {
 
         it('should reconstruct malformed agent steps', async () => {
             const malformedAgentStats = new Map([['RUNNING', [{ id: 'agent1', steps: { '0': { id: 's1' } } }]]]); // Steps as object
-            mockAuthenticatedApiGet.mockResolvedValueOnce({ data: { llmCalls: 5, newLlmCalls: 5, retriedLlmCalls: 0 } });
+            mockAuthenticatedApiGet.mockResolvedValueOnce({ data: { llmCalls: 5 } });
             mockAuthenticatedApiGet.mockResolvedValueOnce({ data: { newPlugins: [] } });
             jest.spyOn(missionControl as any, 'getAgentStatistics').mockResolvedValue({ agentStatisticsByType: { agentCountByStatus: { RUNNING: 1 } }, agentsByStatus: malformedAgentStats });
 

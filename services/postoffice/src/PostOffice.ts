@@ -335,7 +335,7 @@ export class PostOffice extends BaseEntity {
     private async retrieveWorkProduct(req: express.Request, res: express.Response) {
         try {
             const librarianUrl = await this.getLibrarianUrl();
-            const response = await this.authenticatedApi.get(`${librarianUrl}/loadStepOutput/${req.params.id}`);
+            const response = await this.authenticatedApi.get(`${librarianUrl}/loadWorkProduct/${req.params.id}`);
             res.status(200).send(response.data);
         }
         catch (error) {

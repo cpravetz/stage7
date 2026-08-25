@@ -131,7 +131,7 @@ describe('Brain', () => {
       await brain.generate(mockReq, mockRes);
 
       expect(mockSelectedModel.llminterface.convert).toHaveBeenCalledTimes(3);
-      expect(ModelManager.prototype.blacklistModel).toHaveBeenCalledWith('TestModel', expect.any(Date), null);
+      expect(ModelManager.prototype.blacklistModel).toHaveBeenCalledWith('TestModel', expect.any(Date));
       expect(mockRes.json).toHaveBeenCalledWith({ result: 'Final response', mimeType: 'text/plain' });
     });
 

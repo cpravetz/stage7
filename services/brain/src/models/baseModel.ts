@@ -1,7 +1,6 @@
 import { BaseService, ExchangeType } from '../services/baseService';
 import { BaseInterface, ConvertParamsType } from '../interfaces/baseInterface';
 import { LLMConversationType } from '@cktmcs/shared';
-import { serviceHealthChecker } from '../utils/ServiceHealthChecker';
 
 export interface ModelScore {
     costScore: number;
@@ -100,10 +99,12 @@ export class BaseModel {
     }
 
     isAvailable(): boolean {
+        // First check if the service is available and the model name is valid
         if (!this.service?.isAvailable() || this.modelName === '') {
             return false;
         }
 
+        // Check if this is a Huggingface model and if there's a global blacklist
         if (this.name.toLowerCase().includes('hf/') || this.name.toLowerCase().includes('huggingface')) {
             const globalBlacklistUntil = (global as any).huggingfaceBlacklistedUntil;
             if (globalBlacklistUntil) {
@@ -114,10 +115,6 @@ export class BaseModel {
                     return false;
                 }
             }
-        }
-
-        if (!serviceHealthChecker.isModelAvailable(this.name)) {
-            return false;
         }
 
         return true;

@@ -264,12 +264,12 @@ services:
       securitymanager:
         condition: service_started
     environment:
-      PORT: 3060 # Explicitly set port
-      SERVICE_URL: pm-assistant-api:3060 # Explicitly set
+      PORT: 3000 # Explicitly set port
+      SERVICE_URL: pm-assistant-api:3000 # Explicitly set
     env_file:
       - .env
     ports:
-      - "3060:3060"
+      - "3000:3000"
     volumes:
       - ./shared/keys:/usr/src/app/shared/keys
     healthcheck:

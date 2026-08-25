@@ -106,12 +106,10 @@ Do NOT provide any conversational response if you need to escalate. ONLY return 
 Otherwise, provide your direct conversational response as plain text.`;
     try {
       const authenticatedAxios = this.getAuthenticatedAxios();
-      await this.sendTypingIndicator(frontendClientId, true);
       const response = await authenticatedAxios.post(`${this.brainUrl}/generate`, {
         prompt: conversationalPrompt,
         raw: true, // Request raw response to parse it ourselves
       });
-      await this.sendTypingIndicator(frontendClientId, false);
       // --- NEW DIAGNOSTIC LOGGING ---
       console.log('[Assistant::getSimpleResponse] Raw Axios Response Status:', response.status);
       console.log('[Assistant::getSimpleResponse] Raw Axios Response Data:', JSON.stringify(response.data, null, 2));
@@ -289,12 +287,6 @@ Otherwise, provide your direct conversational response as plain text.`;
           content: data,
           timestamp: new Date()
         });
-        void this.sendMessageToClient(conversationId, {
-          sender: 'assistant',
-          type: 'text',
-          content: `🔧 Using tool: ${data.name || 'unknown'}`,
-          timestamp: new Date()
-        });
       }
     });
     
@@ -304,13 +296,6 @@ Otherwise, provide your direct conversational response as plain text.`;
           sender: 'tool',
           type: 'tool_output',
           content: data,
-          timestamp: new Date()
-        });
-        const outputText = typeof data === 'string' ? data : (data.result || data.output || JSON.stringify(data));
-        void this.sendMessageToClient(conversationId, {
-          sender: 'assistant',
-          type: 'text',
-          content: `📋 Result: ${outputText}`,
           timestamp: new Date()
         });
       }
@@ -871,24 +856,6 @@ Otherwise, provide your direct conversational response as plain text.`;
 
     const conversation = new Conversation(missionId, this.id, this.coreEngineClient);
     return conversation;
-  }
-
-  private async sendTypingIndicator(frontendClientId: string, isTyping: boolean): Promise<void> {
-    try {
-      await this.sendMessage(
-        'typing',
-        'PostOffice',
-        {
-          agentId: this.id,
-          isTyping,
-          clientId: frontendClientId
-        },
-        false,
-        'user'
-      );
-    } catch (error) {
-      console.error(`[Assistant] Failed to send typing indicator:`, error);
-    }
   }
 
   private async sendMessageToClient(conversationId: string, message: ConversationMessage): Promise<void> {
