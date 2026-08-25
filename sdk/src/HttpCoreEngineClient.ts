@@ -515,11 +515,34 @@ export class HttpCoreEngineClient extends EventEmitter implements ICoreEngineCli
       `[HttpCoreEngineClient] Requesting human input for ${missionId}. Type: ${inputType}, Prompt: "${prompt}"`
     );
 
-    // TODO: Implement actual L1 API call when endpoint is available
-    // For now, this is a placeholder that generates a request ID
-    const requestId = `human-input-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+    const requestId = `human-input-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
 
-    console.warn('[HttpCoreEngineClient] requestHumanInput not yet fully implemented in L1.');
+    try {
+      const response = await fetch(`${this.baseUrl}/message`, {
+        method: 'POST',
+        headers: await this.getAuthHeaders(),
+        body: JSON.stringify({
+          type: 'USER_INPUT_REQUEST',
+          sender: 'SDK',
+          recipient: 'MissionControl',
+          content: {
+            missionId,
+            requestId,
+            inputType,
+            prompt,
+            metadata
+          },
+          timestamp: new Date().toISOString()
+        })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.warn(`[HttpCoreEngineClient] Request human input HTTP warning: ${response.status} ${errorText}`);
+      }
+    } catch (error) {
+      console.error('[HttpCoreEngineClient] Error requesting human input from L1:', error);
+    }
 
     return requestId;
   }

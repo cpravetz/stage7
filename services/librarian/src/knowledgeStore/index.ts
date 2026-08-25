@@ -66,15 +66,16 @@ class KnowledgeStore {
     }
 
     private async getOrCreateCollection(name: string): Promise<Collection> {
+        const safeName = encodeURIComponent(String(name).replace(/[\r\n]/g, ''));
         // Check if another process is already creating this collection
         if (collectionCreationLocks.has(name)) {
-            console.log(`Collection ${name} is being created by another process, waiting for completion...`);
+            console.log('Collection %s is being created by another process, waiting for completion...', safeName);
             return collectionCreationLocks.get(name)!;
         }
 
         // Create a promise that will be resolved when this collection is created
         const creationPromise = this._createCollectionWithLock(name);
-        
+
         // Store the promise so other requests can wait for it
         collectionCreationLocks.set(name, creationPromise);
 
@@ -91,26 +92,27 @@ class KnowledgeStore {
     }
 
     private async _createCollectionWithLock(name: string): Promise<Collection> {
+        const safeName = encodeURIComponent(String(name).replace(/[\r\n]/g, ''));
         const embeddingFunction = await this.getEmbeddingFunction();
         try {
             const collection = await this.client.getCollection({
                 name,
                 embeddingFunction,
             });
-            console.log(`Found existing collection: ${name}`);
+            console.log('Found existing collection: %s', safeName);
             return collection;
         } catch (error) {
-            console.log(`Collection ${name} not found, creating new one.`);
+            console.log('Collection %s not found, creating new one.', safeName);
             try {
                 const collection = await this.client.createCollection({
                     name,
                     embeddingFunction,
                 });
-                console.log(`Successfully created collection: ${name}`);
+                console.log('Successfully created collection: %s', safeName);
                 return collection;
             } catch (createError) {
                 if (createError instanceof Error && createError.message.includes('already exists')) {
-                    console.log(`Collection ${name} was created by another process, getting it now.`);
+                    console.log('Collection %s was created by another process, getting it now.', safeName);
                     try {
                         const collection = await this.client.getCollection({
                             name,
@@ -118,11 +120,11 @@ class KnowledgeStore {
                         });
                         return collection;
                     } catch (getError) {
-                        console.error(`Failed to get collection ${name} after creation race condition:`, getError);
+                        console.error('Failed to get collection %s after creation race condition:', safeName, getError);
                         throw new Error(`ChromaDB connection failed after race condition: ${getError instanceof Error ? getError.message : 'Unknown error'}`);
                     }
                 }
-                console.error(`Failed to create collection ${name}:`, createError);
+                console.error('Failed to create collection %s:', safeName, createError);
                 throw new Error(`ChromaDB connection failed: ${createError instanceof Error ? createError.message : 'Unknown error'}`);
             }
         }
@@ -172,7 +174,7 @@ class KnowledgeStore {
             }
 
             console.log(`Queried collection ${collectionName} with "${queryText}", found ${results.ids[0].length} results.`);
-            
+
             const formattedResults = results.ids[0].map((id, index) => ({
                 id,
                 document: results.documents[0][index],

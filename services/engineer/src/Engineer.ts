@@ -1,5 +1,6 @@
 import axios from 'axios';
 import express from 'express';
+import { rateLimit } from 'express-rate-limit';
 import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
 import {
@@ -302,6 +303,10 @@ export class Engineer extends BaseEntity {
 
     private async setupServer() {
         const app = express();
+        app.use(rateLimit({
+            windowMs: 15 * 60 * 1000,
+            max: 5000,
+        }));
         app.use(express.json());
 
         this.setupHealthCheck(app);

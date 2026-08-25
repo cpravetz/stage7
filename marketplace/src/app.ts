@@ -1,7 +1,7 @@
-import express from 'express';
+import express, { Application } from 'express';
 import { PluginMarketplace } from './PluginMarketplace';
 
-const app = express();
+const app: Application = express();
 app.use(express.json());
 
 const marketplace = new PluginMarketplace();

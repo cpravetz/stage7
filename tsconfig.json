@@ -18,9 +18,9 @@
     "emitDecoratorMetadata": true,   // If using decorators with metadata
     "baseUrl": ".", // Base directory for module resolution
     "paths": { // For module aliases
-      "@cktmcs/shared": ["shared/src"], 
+      "@cktmcs/shared": ["shared/src"],
       "@cktmcs/shared/*": ["shared/src/*"],
-      "@cktmcs/sdk": ["sdk/src"], 
+      "@cktmcs/sdk": ["sdk/src"],
       "@cktmcs/sdk/*": ["sdk/src/*"],
       "@cktmcs/errorhandler": ["errorhandler/src"],
       "@cktmcs/errorhandler/*": ["errorhandler/src/*"]
