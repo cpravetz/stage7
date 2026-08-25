@@ -1,17 +1,18 @@
 import React, { useState } from 'react';
 import { Box, Tabs, Tab, Typography, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Link, useTheme, Chip } from '@mui/material/index.js';
-import { AttachFile as AttachFileIcon, AccountTree as AccountTreeIcon, Chat as ChatIcon, Assessment as AssessmentIcon } from '@mui/icons-material';
+
 import { ConversationHistory } from './ConversationHistory';
 import { AgentStatistics, ConversationMessage } from '../shared-browser';
 import { NetworkGraph } from './NetworkGraph';
 import { MissionFile } from '../context/WebSocketContext';
 import { SecurityClient } from '../SecurityClient';
 import FileUpload from './FileUpload';
+import { AgentPanel } from './AgentPanel';
 
 interface WorkProduct {
   type: 'Interim' | 'Final' | 'Plan';
   name: string;
-  url: string;
+  url?: string;
   workproduct: any;
   isDeliverable?: boolean;
 }
@@ -102,11 +103,13 @@ export const TabbedPanel: React.FC<TabbedPanelProps> = ({
           variant="fullWidth"
           textColor="primary"
           indicatorColor="primary"
+          sx={{ minHeight: 36, '& .MuiTab-root': { minHeight: 36, py: 0.5 } }}
         >
-          <Tab icon={<ChatIcon />} iconPosition="start" label="Conversation" value="conversation" />
-          <Tab icon={<AssessmentIcon />} iconPosition="start" label="Results" value="results" />
-          <Tab icon={<AccountTreeIcon />} iconPosition="start" label="Agent Network" value="network" />
-          <Tab icon={<AttachFileIcon />} iconPosition="start" label="Files" value="files" />
+          <Tab label="Conv" value="conversation" />
+          <Tab label="Results" value="results" />
+          <Tab label="Agents" value="agents" />
+          <Tab label="Network" value="network" />
+          <Tab label="Files" value="files" />
         </Tabs>
       </Box>
 
@@ -150,9 +153,15 @@ export const TabbedPanel: React.FC<TabbedPanelProps> = ({
                         </Box>
                       </TableCell>
                       <TableCell>
-                        <Link component="button" variant="body2" onClick={(e) => handleWorkProductClick(e, product.url)}>
-                          {product.name}
-                        </Link>
+                        {product.url ? (
+                          <Link component="button" variant="body2" onClick={(e) => handleWorkProductClick(e, product.url!)}>
+                            {product.name}
+                          </Link>
+                        ) : (
+                          <Typography variant="body2" color="text.secondary">
+                            {product.name}
+                          </Typography>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))
@@ -160,6 +169,10 @@ export const TabbedPanel: React.FC<TabbedPanelProps> = ({
               </TableBody>
             </Table>
           </TableContainer>, [workProducts, handleWorkProductClick])}
+        </TabPanel>
+
+        <TabPanel value={activeTab} index="agents">
+          {React.useMemo(() => <AgentPanel agentStatistics={agentStatistics} />, [agentStatistics])}
         </TabPanel>
 
         <TabPanel value={activeTab} index="network">

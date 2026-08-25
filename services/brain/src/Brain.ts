@@ -34,6 +34,8 @@ export class Brain extends BaseEntity {
     private modelManager: ModelManager;
     private llmCalls: number = 0;
     private activeLLMCalls: number = 0;
+    private newLlmCalls: number = 0;
+    private retriedLlmCalls: number = 0;
     private modelFailureCounts: { 
         [key: string]: { 
             timeout: number;
@@ -41,6 +43,7 @@ export class Brain extends BaseEntity {
             other: number;
         } 
     } = {};
+    private _preselectedModel: any = null;
 
     private librarianUrl: string | null = null;
     private performanceDataSyncInterval: NodeJS.Timeout | null = null;
@@ -362,7 +365,7 @@ export class Brain extends BaseEntity {
         });
 
         app.get('/getLLMCalls', (_req: express.Request, res: express.Response) => {
-            res.json({ llmCalls: this.llmCalls, activeLLMCalls: this.activeLLMCalls});
+            res.json({ llmCalls: this.llmCalls, activeLLMCalls: this.activeLLMCalls, newLlmCalls: this.newLlmCalls, retriedLlmCalls: this.retriedLlmCalls });
         });
 
         app.get('/models', (_req: express.Request, res: express.Response) => {
@@ -547,8 +550,15 @@ export class Brain extends BaseEntity {
                     if (modelNameRequest && attempt === 1) {
                         const requested = configuredAvailable.find(m => m.name === modelNameRequest);
                         if (requested) {
-                            selectedModel = this.modelManager.getModel(requested.name);
-                            console.log(`[Brain Generate] Using requested configured model: ${requested.name}`);
+                            const requestedModel = this.modelManager.getModel(requested.name);
+                            const providerCircuitBroken = requestedModel && this.modelManager.performanceTracker.isProviderCircuitBroken(requestedModel.serviceName);
+                            if (!this.modelManager.isModelBlacklisted(requested.name, conversationType) && !providerCircuitBroken) {
+                                selectedModel = requestedModel;
+                                console.log(`[Brain Generate] Using requested configured model: ${requested.name}`);
+                            } else {
+                                const reason = this.modelManager.isModelBlacklisted(requested.name, conversationType) ? 'blacklisted' : 'provider circuit broken';
+                                console.log(`[Brain Generate] Requested model ${requested.name} is ${reason}, falling back to selection`);
+                            }
                         }
                     }
                     
@@ -626,6 +636,11 @@ export class Brain extends BaseEntity {
                 const requestTrackingPrompt = modelConvertParams.prompt || ''; // Use the actual prompt for tracking
                 trackingRequestId = this.modelManager.trackModelRequest(selectedModel.name, conversationType, requestTrackingPrompt);
 
+                if (attempt === 1) {
+                    this.newLlmCalls++;
+                } else {
+                    this.retriedLlmCalls++;
+                }
                 this.llmCalls++;
                 this.activeLLMCalls++;
                 console.log(`[Brain Generate] Attempt ${attempt}: Using model ${selectedModel.modelName} for conversation type ${conversationType} with content type ${contentType}`);
@@ -659,7 +674,7 @@ export class Brain extends BaseEntity {
                         this.modelTimeoutCounts[selectedModel.name] = (this.modelTimeoutCounts[selectedModel.name] || 0) + 1;
                         if (this.modelTimeoutCounts[selectedModel.name] >= 3) {
                             console.warn(`[Brain Generate] Blacklisting model ${selectedModel.name} after 3 consecutive timeouts/system errors.`);
-                            this.modelManager.blacklistModel(selectedModel.name, new Date(Date.now() + 3600 * 1000), conversationType);
+                            this.modelManager.blacklistModel(selectedModel.name, new Date(Date.now() + 3600 * 1000), null);
                             this.modelTimeoutCounts[selectedModel.name] = 0;
                         }
                     } else if (isRateLimit) {
@@ -754,20 +769,34 @@ export class Brain extends BaseEntity {
             let trackingRequestId: string = '';
 
             try {
-                selectedModel = this.modelManager.selectModel(
-                    thread.optimization || 'accuracy',
-                    thread.conversationType || LLMConversationType.TextToText,
-                    excludedModels,
-                    estimatedTokens
-                );
+                if (attempt > 1 && this._preselectedModel) {
+                    if (this.modelManager.isModelBlacklisted(this._preselectedModel.name, thread.conversationType || LLMConversationType.TextToText)) {
+                        console.log(`[Brain Chat] Preselected model ${this._preselectedModel.name} is blacklisted, ignoring preselection`);
+                        this._preselectedModel = null;
+                    } else if (this.modelManager.performanceTracker.isProviderCircuitBroken(this._preselectedModel.serviceName)) {
+                        console.log(`[Brain Chat] Preselected model ${this._preselectedModel.name} provider ${this._preselectedModel.serviceName} is circuit-broken, ignoring preselection`);
+                        this._preselectedModel = null;
+                    } else {
+                        selectedModel = this._preselectedModel;
+                        this._preselectedModel = null;
+                        console.log(`[Brain Chat] Using preselected model ${selectedModel.name} for retry attempt ${attempt}`);
+                    }
+                } else {
+                    selectedModel = this.modelManager.selectModel(
+                        thread.optimization || 'accuracy',
+                        thread.conversationType || LLMConversationType.TextToText,
+                        excludedModels,
+                        estimatedTokens
+                    );
 
-                // If no model was returned by selectModel, try a relaxed fallback selection
-                if (!selectedModel) {
-                    const fallbackModels = this.modelManager.getAvailableAndNotBlacklistedModels(thread.conversationType || LLMConversationType.TextToText)
-                        .filter(m => !excludedModels.includes(m.name));
-                    if (fallbackModels.length > 0) {
-                        console.log(`[Brain Chat] selectModel returned null; falling back to first available model: ${fallbackModels[0].name}`);
-                        selectedModel = fallbackModels[0];
+                    // If no model was returned by selectModel, try a relaxed fallback selection
+                    if (!selectedModel) {
+                        const fallbackModels = this.modelManager.getAvailableAndNotBlacklistedModels(thread.conversationType || LLMConversationType.TextToText)
+                            .filter(m => !excludedModels.includes(m.name));
+                        if (fallbackModels.length > 0) {
+                            console.log(`[Brain Chat] selectModel returned null; falling back to first available model: ${fallbackModels[0].name}`);
+                            selectedModel = fallbackModels[0];
+                        }
                     }
                 }
 
@@ -811,7 +840,7 @@ export class Brain extends BaseEntity {
                 const prompt = thread.exchanges.map((e: any) => e.content).join(' ');
                 trackingRequestId = this.modelManager.trackModelRequest(selectedModel.name, thread.conversationType || LLMConversationType.TextToText, prompt);
 
-                const response = await this._chatWithModel(selectedModel, thread, trackingRequestId);
+                const response = await this._chatWithModel(selectedModel, thread, trackingRequestId, attempt);
 
                 if (selectedModel.name in this.modelTimeoutCounts) {
                     this.modelTimeoutCounts[selectedModel.name] = 0;
@@ -864,7 +893,7 @@ export class Brain extends BaseEntity {
                     if (isExternalApiError) {
                         const blacklistDuration = 24 * 60 * 60 * 1000; // Blacklist for 24 hours
                         console.warn(`[Brain Chat] Blacklisting model ${selectedModel.name} for 24 hours due to persistent external API error: ${errorMessage}`);
-                        this.modelManager.blacklistModel(selectedModel.name, new Date(Date.now() + blacklistDuration), thread.conversationType || null);
+                        this.modelManager.blacklistModel(selectedModel.name, new Date(Date.now() + blacklistDuration), null);
                         this.modelFailureCounts[selectedModel.name] = { timeout: 0, json: 0, other: 0 }; // Reset counts
                     } else if (isRateLimit) {
                         // Handle rate limiting by notifying the service
@@ -888,7 +917,7 @@ export class Brain extends BaseEntity {
                     // (Only if not already blacklisted for an external API error)
                     if (!isExternalApiError && (counts.timeout >= 2 || counts.json >= 3 || totalFailures >= 5)) {
                         console.warn(`[Brain Chat] Blacklisting model ${selectedModel.name} due to repeated failures:`, `Timeouts: ${counts.timeout}, JSON errors: ${counts.json}, Other: ${counts.other}`);
-                        this.modelManager.blacklistModel(selectedModel.name, new Date(Date.now() + 15 * 60 * 1000), thread.conversationType || null); // Blacklist for 15 minutes
+                        this.modelManager.blacklistModel(selectedModel.name, new Date(Date.now() + 15 * 60 * 1000), null); // Blacklist for 15 minutes
                         // Reset counts after blacklisting
                         this.modelFailureCounts[selectedModel.name] = { timeout: 0, json: 0, other: 0 };
                     }
@@ -903,7 +932,23 @@ export class Brain extends BaseEntity {
                 }
 
                 const retryDelay = Math.min(Math.pow(2, Math.min(attempt, 10)) * 1000, 30000); // Cap at 30s
-                console.log(`[Brain Chat] Clearing model selection cache and retrying in ${retryDelay / 1000}s... (${availableModels.length} models available)`);
+                
+                // Smart model selection for next attempt based on error type
+                this._preselectedModel = await this.selectNextModelSmartly(
+                    thread.optimization || 'accuracy',
+                    thread.conversationType || LLMConversationType.TextToText,
+                    excludedModels,
+                    estimatedTokens,
+                    errorMessage
+                );
+                
+                if (!this._preselectedModel) {
+                    console.error(`[Brain Chat] Smart model selection found no suitable next model after ${attempt} attempts. Last error: ${lastError}`);
+                    res.status(503).json({ error: `No suitable model found. Last error: ${lastError}` });
+                    return;
+                }
+                
+                console.log(`[Brain Chat] Preselected ${this._preselectedModel.name} for next attempt. Retrying in ${retryDelay / 1000}s... (${availableModels.length} models available)`);
                 this.modelManager.clearModelSelectionCache();
                 await new Promise(resolve => setTimeout(resolve, retryDelay));
             }
@@ -920,7 +965,12 @@ export class Brain extends BaseEntity {
         }
     }
 
-    private async _chatWithModel(selectedModel: any, thread: any, requestId: string): Promise<any> {
+    private async _chatWithModel(selectedModel: any, thread: any, requestId: string, attempt: number = 1): Promise<any> {
+        if (attempt === 1) {
+            this.newLlmCalls++;
+        } else {
+            this.retriedLlmCalls++;
+        }
         this.llmCalls++;
         this.activeLLMCalls++;
         console.log(`[Brain Chat] Using model ${selectedModel.modelName} for request ${requestId}`);
@@ -1006,7 +1056,7 @@ export class Brain extends BaseEntity {
                     // If modelResponse was replaced by a successful regenJson above, do not blacklist
                     if (!modelResponse || (typeof modelResponse === 'string' && modelResponse.trim().length === 0)) {
                         console.error(`[Brain Chat] Unrecoverable JSON from model ${selectedModel.name}, blacklisting.`);
-                        this.modelManager.blacklistModel(selectedModel.name, new Date(), thread.conversationType);
+                        this.modelManager.blacklistModel(selectedModel.name, new Date(), null);
                         throw new Error('Unrecoverable JSON from model: ' + selectedModel.name);
                     }
                 } catch (finalErr) {
@@ -1037,6 +1087,85 @@ export class Brain extends BaseEntity {
             this.activeLLMCalls = Math.max(0, this.activeLLMCalls - 1);
             throw err;
         }
+    }
+
+    private async selectNextModelSmartly(
+        optimization: OptimizationType,
+        conversationType: LLMConversationType,
+        excludedModels: string[],
+        estimatedTokens: number,
+        errorMessage: string
+    ): Promise<any> {
+        const availableModels = this.modelManager.getAvailableAndNotBlacklistedModels(conversationType)
+            .filter(m => !excludedModels.includes(m.name));
+
+        if (availableModels.length === 0) {
+            return null;
+        }
+
+        const isTokenLimit = /max_tokens|context_window|token limit|too many tokens/i.test(errorMessage);
+        const isTimeout = /timeout|system_error|connection error|ECONNREFUSED|ETIMEDOUT|network/i.test(errorMessage);
+        const isRateLimit = /rate limit|429|too many requests/i.test(errorMessage);
+        const isJsonError = /json|parse|invalid format|expected.*json|no content in/i.test(errorMessage);
+        const isProviderError = /provider|endpoint|404|no inference|free period has ended|request failed with status code|could not find a suitable model/i.test(errorMessage);
+
+        let candidates = availableModels;
+
+        if (isTokenLimit) {
+            const withCapacity = availableModels.filter(m => m.tokenLimit >= estimatedTokens);
+            if (withCapacity.length > 0) {
+                candidates = withCapacity;
+            } else {
+                candidates = [...availableModels].sort((a, b) => b.tokenLimit - a.tokenLimit);
+            }
+            console.log(`[Brain Chat] Token limit error. Switching to models with larger context: ${candidates.slice(0, 3).map(m => `${m.name}(${m.tokenLimit})`).join(', ')}`);
+        } else if (isTimeout || isProviderError) {
+            const failedModelName = excludedModels[excludedModels.length - 1];
+            const failedModel = this.modelManager.getModel(failedModelName);
+            const failedService = failedModel?.serviceName;
+            if (failedService) {
+                const otherProviders = availableModels.filter(m => m.serviceName !== failedService);
+                if (otherProviders.length > 0) {
+                    candidates = otherProviders;
+                }
+            }
+            console.log(`[Brain Chat] Provider/timeout error. Switching away from ${failedService || 'unknown'}. Candidates: ${candidates.slice(0, 3).map(m => m.name).join(', ')}`);
+        } else if (isRateLimit) {
+            const failedModelName = excludedModels[excludedModels.length - 1];
+            const failedModel = this.modelManager.getModel(failedModelName);
+            const failedService = failedModel?.serviceName;
+            if (failedService) {
+                const otherProviders = availableModels.filter(m => m.serviceName !== failedService);
+                if (otherProviders.length > 0) {
+                    candidates = otherProviders;
+                }
+            }
+            console.log(`[Brain Chat] Rate limit error. Switching away from ${failedService || 'unknown'}. Candidates: ${candidates.slice(0, 3).map(m => m.name).join(', ')}`);
+        } else if (isJsonError) {
+            candidates = [...availableModels].sort((a, b) => {
+                const scoreA = a.getAccuracyScore(conversationType);
+                const scoreB = b.getAccuracyScore(conversationType);
+                return scoreB - scoreA;
+            });
+            console.log(`[Brain Chat] JSON error. Preferring high-accuracy models: ${candidates.slice(0, 3).map(m => `${m.name}(acc=${m.getAccuracyScore(conversationType)})`).join(', ')}`);
+        }
+
+        if (candidates.length === 0) {
+            candidates = availableModels;
+        }
+
+        const scored = candidates.map(m => ({
+            model: m,
+            score: this.modelManager.calculateScore(m, optimization, conversationType)
+        }));
+        scored.sort((a, b) => b.score - a.score);
+
+        const selected = scored[0]?.model || null;
+        if (selected) {
+            console.log(`[Brain Chat] Smart selection chose ${selected.name} (service=${selected.serviceName}, tokens=${selected.tokenLimit}) for error: ${errorMessage.substring(0, 80)}`);
+        }
+
+        return selected;
     }
 
     getAvailableModels(): string[] {

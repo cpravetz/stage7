@@ -18,7 +18,7 @@ The V2 architecture is composed of four primary layers, all running on a common 
                               │
 ┌─────────────────────────────────────────────────────────────┐
 │                  L3: Assistant APIs (12+)                   │
-│  pm(3000) sales(3002) marketing(3003) ... etc ...           │
+│  pm(3060) sales(3002) marketing(3003) ... etc ...           │
 └─────────────────────────────────────────────────────────────┘
                               │
 ┌─────────────────────────────────────────────────────────────┐
@@ -52,7 +52,7 @@ The system is composed of several services, each with a designated port.
 | Service | Port | Description |
 | :--- | :--- | :--- |
 | **Frontend (mcsreact)** | **80** | The main web interface. |
-| pm-assistant-api | 3000 | Product Manager Assistant |
+| pm-assistant-api | 3060 | Product Manager Assistant |
 | sales-assistant-api | 3002 | Sales Assistant |
 | marketing-assistant-api| 3003 | Marketing Assistant |
 | hr-assistant-api | 3004 | HR Assistant |

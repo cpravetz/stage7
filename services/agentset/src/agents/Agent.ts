@@ -113,8 +113,6 @@ export class Agent extends BaseEntity {
             this.steps.push(initialStep);
         }
         
-        this.setAgentStatus(this.status,{eventType: 'agent_created', inputValues: MapSerializer.transformForSerialization(this.inputValues)});
-
         this.updateStatus = this.updateStatus.bind(this);
         
         // Initialize managers
@@ -126,18 +124,20 @@ export class Agent extends BaseEntity {
         this.lifecycleManager = new LifecycleManager(this.createLifecycleContext());
         this.lifecycleManager.setResolveQuestionCallback(() => this.userInteractionManager.resolveWithEmpty());
 
+        this.setAgentStatus(this.status,{eventType: 'agent_created', inputValues: MapSerializer.transformForSerialization(this.inputValues)});
+
         // Await RabbitMQ initialization before proceeding
         this._initializationPromise = this.messageQueueManager.initialize()
             .then(() => this.initializeAgent())
             .then(() => {
-                this.say(`Agent ${this.id} initialized and commencing operations.`);
+                this.say(`Agent ${this.id} initialized and commencing operations.`, true);
                 this.runUntilDone();
                 return true;
             }).catch((error) => {
                 this.setAgentStatus(AgentStatus.ERROR, {eventType: 'agent_initialization_failed', error: error instanceof Error ? error.message : String(error)});
                 const errorMessage = error instanceof Error ? error.message : String(error);
                 console.error(`Agent ${this.id} failed during initialization or before starting execution loop. Error: ${errorMessage}`);
-                this.say(`Agent ${this.id} failed to initialize or start. Error: ${errorMessage}`);
+                this.say(`Agent ${this.id} failed to initialize or start. Error: ${errorMessage}`, true);
                 return false;
             });
     }
@@ -437,7 +437,7 @@ Please consider this context when planning and executing the mission. Provide de
             if (this.status !== AgentStatus.RUNNING) return;
 
             step.inputValues = await step.dereferenceInputsForExecution(this.steps, this.missionId);
-            this.say(`Executing step: ${step.actionVerb} - ${step.description || 'No description'}`);
+            this.say(`Executing step: ${step.actionVerb} - ${step.description || 'No description'}`, true);
 
             const result = await step.execute(
                 this.executeActionWithCapabilitiesManager.bind(this),
@@ -476,7 +476,7 @@ Please consider this context when planning and executing the mission. Provide de
                 return;
             }
 
-            this.say(`Completed step: ${step.actionVerb}`);
+            this.say(`Completed step: ${step.actionVerb}`, true);
 
             if (step.actionVerb === 'REFLECT') {
                 await this.reflectionManager.handleReflectionResult(result, step);
@@ -489,7 +489,7 @@ Please consider this context when planning and executing the mission. Provide de
                 if (!planOutput) {
                     const errorMessage = `Error: A result of type 'plan' was expected but not found in the output.`;
                     console.error(`[Agent.ts] runAgent (${this.id}): ${errorMessage}`);
-                    this.say(`Failed to process a generated plan.`);
+                    this.say(`Failed to process a generated plan.`, true);
                     await this.handleStepFailure(step, new Error(errorMessage));
                     return;
                 }
@@ -510,7 +510,7 @@ Please consider this context when planning and executing the mission. Provide de
                 }
 
                 if (actualPlanArray && Array.isArray(actualPlanArray)) {
-                    this.say(`Generated a plan with ${actualPlanArray.length} steps`);
+                    this.say(`Generated a plan with ${actualPlanArray.length} steps`, true);
                     console.log(`[Agent ${this.id}] runAgent: Planning step ${step.id} generated plan:`, JSON.stringify(actualPlanArray));
                     await this.saveWorkProductWithClassification(step, mappedResult);
                     const workstreamStartIndex = this.steps.length;
@@ -524,7 +524,7 @@ Please consider this context when planning and executing the mission. Provide de
                 } else {
                     const errorMessage = `Error: Expected a plan, but received: ${JSON.stringify(planningStepResult)}`;
                     console.error(`[Agent.ts] runAgent (${this.id}): ${errorMessage}`);
-                    this.say(`Failed to generate a valid plan.`);
+                    this.say(`Failed to generate a valid plan.`, true);
                     this.setAgentStatus(AgentStatus.ERROR, { eventType: 'agent_error', error: errorMessage });
                 }
             }
@@ -614,7 +614,7 @@ Please consider this context when planning and executing the mission. Provide de
         } catch (error) {
             console.error('Error in agent main loop:', error instanceof Error ? error.message : error);
             this.setAgentStatus(AgentStatus.ERROR, {eventType: 'agent_error', error: error instanceof Error ? error.message : String(error)});
-            this.say(`Error in agent execution: ${error instanceof Error ? error.message : String(error)}`);
+            this.say(`Error in agent execution: ${error instanceof Error ? error.message : String(error)}`, true);
         }
     }
 
@@ -1098,13 +1098,6 @@ Please consider this context when planning and executing the mission. Provide de
                     }
 
                     const stepError = error instanceof Error ? error : new Error(`Unknown error occurred ${error}`);
-                    try {
-                        await this.handleStepFailure(step, stepError);
-                    } catch (replanError) {
-                        console.error(`[Agent ${this.id}] CRITICAL: Failed to handle step failure and replan. Mission may be stalled. Error:`, replanError);
-                        this.setAgentStatus(AgentStatus.ERROR, {eventType: 'agent_error', details: 'Failed to handle step failure and replan'});
-                    }
-
                     return [{
                         success: false,
                         name: 'error',
@@ -1167,6 +1160,7 @@ Please consider this context when planning and executing the mission. Provide de
         });
 
         await this.notifyStepCompletion(step);
+        await this.notifyDependents(step.id, StepStatus.ERROR);
         await this.updateStatus();
     }
 

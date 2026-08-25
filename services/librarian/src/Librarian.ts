@@ -1166,7 +1166,7 @@ export class Librarian extends BaseEntity {
 
             // Trigger Engineer onboarding process
             try {
-                await axios.post(`${ENGINEER_SERVICE_URL}/tools/onboard`, {
+                await this.authenticatedApi.post(`${ENGINEER_SERVICE_URL}/tools/onboard`, {
                     toolManifest: updatedTool.manifest_json,
                     policyConfig: updatedTool.policy_config,
                 });

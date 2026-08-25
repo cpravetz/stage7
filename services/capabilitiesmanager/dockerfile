@@ -7,8 +7,14 @@ RUN apk add --no-cache python3 py3-pip python3-dev build-base git
 # Create symbolic link for python command
 RUN ln -sf python3 /usr/bin/python
 
+# Install Python dependencies for plugins
+RUN pip install --break-system-packages requests
+
 # Set the working directory in the container
 WORKDIR /usr/src/app
+
+# Copy service source code
+COPY services/capabilitiesmanager/ ./services/capabilitiesmanager/
 
 # Copy package.json and package-lock.json to the working directory
 COPY package*.json ./

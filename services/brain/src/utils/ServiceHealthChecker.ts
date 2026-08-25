@@ -10,16 +10,18 @@ export class ServiceHealthChecker {
     private healthCheckInterval: Map<string, NodeJS.Timer> = new Map();
     private healthStatus: Map<string, ServiceHealthStatus> = new Map();
     private readonly HEALTH_STATUS_TTL = 600; // 10 minutes in Redis
+    private lastLoggedCredentialErrors: Map<string, number> = new Map();
+    private readonly CREDENTIAL_ERROR_LOG_INTERVAL = 600000; // 10 minutes in ms
 
     /**
      * Load credentials from vault based on configuration
      */
-    async loadCredential(keyVault: string, credentialName: string): Promise<string | null> {
+    async loadCredential(keyVault: string, credentialName: string, provider?: string): Promise<string | null> {
         try {
             // Support multiple vault types
             switch (keyVault.toUpperCase()) {
                 case 'AWS_SECRETS_MANAGER':
-                    return await this.loadFromAwsSecretsManager(credentialName);
+                    return await this.loadFromAwsSecretsManager(credentialName, provider);
                 case 'VAULT':
                     return await this.loadFromHashiCorpVault(credentialName);
                 case 'ENV':
@@ -35,12 +37,15 @@ export class ServiceHealthChecker {
     /**
      * Load credential from AWS Secrets Manager
      */
-    private async loadFromAwsSecretsManager(credentialName: string): Promise<string | null> {
+    private async loadFromAwsSecretsManager(credentialName: string, provider?: string): Promise<string | null> {
         try {
             // In production, use AWS SDK: import { SecretsManagerClient, GetSecretValueCommand } from "@aws-sdk/client-secrets-manager";
             // For now, use environment variable as fallback
             const value = process.env[credentialName];
             if (!value) {
+                if (provider && !this.shouldLogCredentialError(provider)) {
+                    return null;
+                }
                 console.warn(`[Health Check] Credential ${credentialName} not found in environment (AWS Secrets Manager fallback)`);
                 return null;
             }
@@ -86,6 +91,16 @@ export class ServiceHealthChecker {
         return process.env[credentialName] || null;
     }
 
+    private shouldLogCredentialError(provider: string): boolean {
+        const now = Date.now();
+        const lastLog = this.lastLoggedCredentialErrors.get(provider);
+        if (!lastLog || (now - lastLog) > this.CREDENTIAL_ERROR_LOG_INTERVAL) {
+            this.lastLoggedCredentialErrors.set(provider, now);
+            return true;
+        }
+        return false;
+    }
+
     /**
      * Validate model credentials are available and working
      */
@@ -93,11 +108,14 @@ export class ServiceHealthChecker {
         try {
             const credential = await this.loadCredential(
                 model.providerCredentials.keyVault,
-                model.providerCredentials.credentialName
+                model.providerCredentials.credentialName,
+                model.provider
             );
 
             if (!credential || credential.length === 0) {
-                console.error(`[Health Check] No credential found for ${model.name}`);
+                if (this.shouldLogCredentialError(model.provider)) {
+                    console.error(`[Health Check] No credential found for ${model.name}`);
+                }
                 this.recordHealthStatus(model.name, 'unavailable', 'Credential not found', 'auth_failed');
                 return false;
             }
@@ -138,7 +156,8 @@ export class ServiceHealthChecker {
             try {
                 const credential = await this.loadCredential(
                     model.providerCredentials.keyVault,
-                    model.providerCredentials.credentialName
+                    model.providerCredentials.credentialName,
+                    model.provider
                 );
 
                 if (!credential) {

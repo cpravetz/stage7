@@ -16,7 +16,7 @@ const MissionControls: React.FC<Props> = ({ onControl, activeMission, missionNam
 
   return (
     <Box sx={{
-      p: 2,
+      p: 1,
       borderRadius: 2,
       bgcolor: 'background.paper',
       boxShadow: 1,
@@ -24,10 +24,10 @@ const MissionControls: React.FC<Props> = ({ onControl, activeMission, missionNam
       flexDirection: { xs: 'column', sm: 'row' },
       alignItems: { xs: 'stretch', sm: 'center' },
       justifyContent: 'space-between',
-      gap: 2
+      gap: 1
     }}>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-        <Typography variant="subtitle1" sx={{ fontWeight: 'medium' }}>
+        <Typography variant="subtitle2" sx={{ fontWeight: 'medium' }}>
           Mission:
         </Typography>
         {activeMission ? (
@@ -54,51 +54,41 @@ const MissionControls: React.FC<Props> = ({ onControl, activeMission, missionNam
         )}
       </Box>
 
-      <ButtonGroup variant="contained" aria-label="mission control buttons">
+      <ButtonGroup variant="contained" size="small" aria-label="mission control buttons">
         <Button
           onClick={() => onControl('resume')}
           disabled={!activeMission || !isPaused}
-          startIcon={<PlayArrowIcon />}
-          color="success"
-          sx={{ minWidth: '100px' }}
+          title="Play"
         >
-          Play
+          <PlayArrowIcon />
         </Button>
         <Button
           onClick={() => onControl('pause')}
           disabled={!activeMission || isPaused}
-          startIcon={<PauseIcon />}
-          color="warning"
-          sx={{ minWidth: '100px' }}
+          title="Pause"
         >
-          Pause
+          <PauseIcon />
         </Button>
         <Button
           onClick={() => onControl('abort')}
           disabled={!activeMission}
-          startIcon={<StopIcon />}
-          color="error"
-          sx={{ minWidth: '100px' }}
+          title="Abort"
         >
-          Abort
+          <StopIcon />
         </Button>
         <Button
           onClick={() => onControl('save')}
           disabled={!activeMission}
-          startIcon={<SaveIcon />}
-          color="info"
-          sx={{ minWidth: '100px' }}
+          title="Save"
         >
-          Save
+          <SaveIcon />
         </Button>
         <Button
           onClick={() => onControl('load')}
           disabled={activeMission}
-          startIcon={<FolderOpenIcon />}
-          color="secondary"
-          sx={{ minWidth: '100px' }}
+          title="Load"
         >
-          Load
+          <FolderOpenIcon />
         </Button>
       </ButtonGroup>
     </Box>

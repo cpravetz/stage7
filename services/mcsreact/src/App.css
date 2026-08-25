@@ -44,7 +44,12 @@ body {
     padding: 10px;
   }
 
-  .app-name {
-    color: violet;
-  }
+.app-name {
+  color: violet;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
   

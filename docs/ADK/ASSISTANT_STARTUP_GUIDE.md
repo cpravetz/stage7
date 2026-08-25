@@ -5,7 +5,7 @@
 The v2 assistant architecture consists of:
 - **Frontend**: React app (port 5020 via PostOffice)
 - **PostOffice**: API Gateway and proxy (port 5020)
-- **Assistant APIs**: Individual backend services for each assistant (ports 3000-3020)
+- **Assistant APIs**: Individual backend services for each assistant (ports 3000-3020, 3060)
 - **Core Services**: MissionControl, Brain, Librarian, etc.
 
 > **Note**: The included assistant implementations are **example templates** designed as starting points for developers. They demonstrate the architecture, API patterns, and integration approach that developers should use when building their own custom assistant agents tailored to their specific use cases.
@@ -64,7 +64,7 @@ npm start
 #### 2. Start Assistant APIs
 
 ```bash
-# PM Assistant (port 3000)
+# PM Assistant (port 3060)
 cd agents/pm-assistant-api
 npm start
 
@@ -92,7 +92,7 @@ These are **reference implementations** demonstrating various use cases. Use the
 
 | Assistant | Port | Service Name |
 |-----------|------|--------------|
-| PM Assistant | 3000 | pm-assistant |
+| PM Assistant | 3060 | pm-assistant |
 | Sales Assistant | 3002 | sales-assistant |
 | Marketing Assistant | 3003 | marketing-assistant |
 | HR Assistant | 3004 | hr-assistant |
@@ -121,7 +121,7 @@ These are **reference implementations** demonstrating various use cases. Use the
    - Consul service discovery (primary)
    - Environment variables (fallback)
    - Local registry (last resort)
-4. **Proxy request**: PostOffice forwards to `http://pm-assistant-api:3000/conversations`
+4. **Proxy request**: PostOffice forwards to `http://pm-assistant-api:3060/conversations`
 5. **Response**: Assistant API responds, PostOffice returns to frontend
 
 ## Troubleshooting

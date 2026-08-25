@@ -44,6 +44,7 @@ export interface ModelPerformanceData {
  */
 export interface RequestData {
   modelName: string;
+  provider: string;
   conversationType: LLMConversationType;
   prompt: string;
   response: string;
@@ -82,6 +83,11 @@ export class ModelPerformanceTracker {
   private requestHistory: Map<string, RequestData> = new Map();
   private saveInterval: NodeJS.Timeout | null = null;
   private static PERSIST_PATH = path.resolve(process.cwd(), 'performance-metrics.json');
+
+  private providerCircuitBreakers: Map<string, { failures: number; lastFailure: number; until: number }> = new Map();
+  private readonly PROVIDER_CIRCUIT_THRESHOLD = 5;
+  private readonly PROVIDER_CIRCUIT_BASE_DURATION = 5 * 60 * 1000;
+  private readonly MAX_PROVIDER_CIRCUIT_DURATION = 60 * 60 * 1000;
 
   constructor() {
     this.loadPerformanceData();
@@ -176,13 +182,23 @@ export class ModelPerformanceTracker {
     modelName: string,
     conversationType: LLMConversationType
   ): ModelPerformanceMetrics {
-    const modelData = this.performanceData.get(modelName);
-
-    if (!modelData || !modelData.metrics[conversationType]) {
-      return this.newPerformanceMetrics();
+    let modelData = this.performanceData.get(modelName);
+    if (!modelData) {
+      modelData = {
+        modelName,
+        metrics: {} as Record<LLMConversationType, ModelPerformanceMetrics>,
+        lastUpdated: new Date().toISOString()
+      };
+      this.performanceData.set(modelName, modelData);
     }
 
-    return modelData.metrics[conversationType];
+    let metrics = modelData.metrics[conversationType];
+    if (!metrics) {
+      metrics = this.newPerformanceMetrics();
+      modelData.metrics[conversationType] = metrics;
+    }
+
+    return metrics;
   }
 
   /**
@@ -197,12 +213,14 @@ export class ModelPerformanceTracker {
     requestId: string,
     modelName: string,
     conversationType: LLMConversationType,
-    prompt: string
+    prompt: string,
+    provider: string = ''
   ): string {
 
     // Store request data
     this.requestHistory.set(requestId, {
       modelName,
+      provider,
       conversationType,
       prompt,
       response: '',
@@ -276,28 +294,34 @@ export class ModelPerformanceTracker {
    * @param error The error message string.
    * @returns The type of error.
    */
-  private classifyError(error?: string): 'FATAL' | 'RETRYABLE' | 'UNKNOWN' {
+  private classifyError(error?: string): 'AUTH' | 'FATAL' | 'RETRYABLE' | 'UNKNOWN' {
     if (!error) return 'UNKNOWN';
     const lowerError = error.toLowerCase();
 
-    // Fatal errors that suggest the model/service is down, misconfigured, or unresponsive
-    const fatalPatterns = [
-      'timeout', 'timed out', 'econnreset', 'econnrefused', 'enotfound',
-      'network error', '500', '502', '503', '504', '401', '403'
-    ];
-    if (fatalPatterns.some(p => lowerError.includes(p))) {
+    if (lowerError.includes('401') || lowerError.includes('403') || lowerError.includes('unauthorized') || lowerError.includes('authentication')) {
+      return 'AUTH';
+    }
+
+    if (lowerError.includes('timeout') || lowerError.includes('timed out') || lowerError.includes('econnreset') ||
+        lowerError.includes('econnrefused') || lowerError.includes('enotfound') || lowerError.includes('network error') ||
+        lowerError.includes('provider') || lowerError.includes('endpoint') || lowerError.includes('no inference') ||
+        lowerError.includes('free period has ended') || lowerError.includes('could not find a suitable model')) {
       return 'FATAL';
     }
 
-    // Errors that might be fixed by retrying or changing the prompt (e.g., a flawed response)
-    const retryablePatterns = [
-      'invalid json', 'malformed json', 'json parse error', 'syntax error', '400', '429'
-    ];
-    if (retryablePatterns.some(p => lowerError.includes(p))) {
+    if (lowerError.includes('invalid json') || lowerError.includes('malformed json') || lowerError.includes('json parse error') ||
+        lowerError.includes('syntax error') || lowerError.includes('no content in') || lowerError.includes('expected.*json')) {
       return 'RETRYABLE';
     }
 
-    // Default to unknown for errors that don't fit the other categories
+    if (lowerError.includes('500') || lowerError.includes('502') || lowerError.includes('503') || lowerError.includes('504')) {
+      return 'FATAL';
+    }
+
+    if (lowerError.includes('429') || lowerError.includes('rate limit') || lowerError.includes('too many requests')) {
+      return 'RETRYABLE';
+    }
+
     return 'UNKNOWN';
   }
 
@@ -307,7 +331,7 @@ export class ModelPerformanceTracker {
    * @param requestData Request data
    */
   private updateMetrics(requestData: RequestData, isRetry: boolean = false): void {
-    const { modelName, conversationType, startTime, endTime, tokenCount, success, error } = requestData;
+    const { modelName, provider, conversationType, startTime, endTime, tokenCount, success, error } = requestData;
 
     // Get or create model data
     let modelData = this.performanceData.get(modelName);
@@ -341,6 +365,11 @@ export class ModelPerformanceTracker {
       if (metrics.consecutiveFailures > 0) {
         metrics.consecutiveFailures = 0;
       }
+
+      // Reset provider circuit breaker on success
+      if (provider) {
+        this.resetProviderCircuit(provider);
+      }
     } else {
       const oldFailureCount = metrics.failureCount;
       metrics.failureCount++;
@@ -354,55 +383,52 @@ export class ModelPerformanceTracker {
       }
 
       const errorType = this.classifyError(error);
+
+      // Record provider failure for circuit breaking
+      if (provider && (errorType === 'AUTH' || errorType === 'FATAL')) {
+        this.recordProviderFailure(provider, error);
+      }
+
       let blacklistThreshold: number;
+      let blacklistHours: number;
 
       switch (errorType) {
+        case 'AUTH':
+          blacklistThreshold = 1;
+          blacklistHours = 24;
+          console.log(`[PerformanceTracker] Auth error detected for ${modelName} (${error}), blacklisting for 24h.`);
+          break;
         case 'FATAL':
-          blacklistThreshold = 1; // Immediate blacklisting for fatal/unresponsive errors
-          console.log(`[PerformanceTracker] Fatal error detected for ${modelName} (${error}), using immediate blacklisting.`);
+          blacklistThreshold = 2;
+          blacklistHours = 4;
+          console.log(`[PerformanceTracker] Fatal error detected for ${modelName} (${error}), using threshold ${blacklistThreshold}, base blacklist ${blacklistHours}h.`);
           break;
         case 'RETRYABLE':
-          blacklistThreshold = 3; // Higher threshold for fixable/flawed response errors
-          console.log(`[PerformanceTracker] Retryable error detected for ${modelName}, using threshold ${blacklistThreshold}.`);
+          blacklistThreshold = 5;
+          blacklistHours = 1;
+          console.log(`[PerformanceTracker] Retryable error detected for ${modelName}, using threshold ${blacklistThreshold}, base blacklist ${blacklistHours}h.`);
           break;
-        default: // UNKNOWN
-          blacklistThreshold = 2; // Middle-ground for unknown errors
-          console.log(`[PerformanceTracker] Unknown error type for ${modelName}, using threshold ${blacklistThreshold}.`);
+        default:
+          blacklistThreshold = 3;
+          blacklistHours = 2;
+          console.log(`[PerformanceTracker] Unknown error type for ${modelName}, using threshold ${blacklistThreshold}, base blacklist ${blacklistHours}h.`);
           break;
       }
 
       // Special handling for less reliable models like Huggingface
       const isHuggingfaceModel = modelName.toLowerCase().includes('huggingface') || modelName.toLowerCase().includes('hf/');
-      if (isHuggingfaceModel && errorType !== 'FATAL') {
-        blacklistThreshold = 2; // More aggressive for Huggingface on non-fatal errors
+      if (isHuggingfaceModel && errorType !== 'AUTH') {
+        blacklistThreshold = Math.max(2, blacklistThreshold - 1);
         console.log(`[PerformanceTracker] Adjusting threshold for Huggingface model to ${blacklistThreshold}.`);
       }
 
       if (metrics.consecutiveFailures >= blacklistThreshold) {
-        // Calculate blacklist duration: 1 hour * 2^(consecutiveFailures-threshold)
-        // For regular models: 3 failures: 1 hour, 4 failures: 2 hours, 5 failures: 4 hours, etc.
-        // For Huggingface: 2 failures: 1 hour, 3 failures: 2 hours, 4 failures: 4 hours, etc.
-        let blacklistHours = Math.pow(2, metrics.consecutiveFailures - blacklistThreshold);
-
-        // Set a reasonable maximum blacklist duration
-        const MAX_BLACKLIST_HOURS = 24; // Maximum 24 hours for regular models
-        const MAX_HUGGINGFACE_BLACKLIST_HOURS = 168; // Maximum 7 days (168 hours) for Huggingface models
-
-        // Cap the blacklist hours to the maximum
-        if (isHuggingfaceModel) {
-          blacklistHours = Math.min(blacklistHours, MAX_HUGGINGFACE_BLACKLIST_HOURS);
-        } else {
-          blacklistHours = Math.min(blacklistHours, MAX_BLACKLIST_HOURS);
-        }
-
-        // Huggingface models get longer blacklist periods
-        const multiplier = isHuggingfaceModel ? 4 : 1; // 4x longer blacklist for Huggingface models
-        const actualBlacklistHours = blacklistHours * multiplier;
-        const blacklistDuration = actualBlacklistHours * 60 * 60 * 1000; // Convert to milliseconds
+        const additionalHours = Math.pow(2, metrics.consecutiveFailures - blacklistThreshold);
+        const totalBlacklistHours = Math.min(blacklistHours + additionalHours, errorType === 'AUTH' ? 168 : 24);
+        const blacklistDuration = totalBlacklistHours * 60 * 60 * 1000;
 
         const blacklistedUntil = new Date(Date.now() + blacklistDuration);
         metrics.blacklistedUntil = blacklistedUntil.toISOString();
-
 
         if (isHuggingfaceModel) {
           console.log(`[PerformanceTracker] Huggingface model ${modelName} blacklisted more aggressively due to frequent failures`);
@@ -686,42 +712,93 @@ export class ModelPerformanceTracker {
    * @returns True if the model is blacklisted, false otherwise
    */
   isModelBlacklisted(modelName: string, conversationType: LLMConversationType): boolean {
-
-    const metrics = this.getPerformanceMetrics(modelName, conversationType);
-
-    // Check if temporarily blacklisted due to critical failures
-    if (metrics.isTemporarilyBlacklisted && metrics.blacklistUntil) {
-      const blacklistedUntil = new Date(metrics.blacklistUntil);
-      const now = new Date();
-
-      if (now < blacklistedUntil) {
-        return true;
-      } else {
-        // Blacklist period has expired, clear the temporary blacklist
-        metrics.isTemporarilyBlacklisted = false;
-        metrics.blacklistUntil = undefined;
-      }
-    }
-
-    // If the model has no blacklistedUntil date, it's not blacklisted
-    if (!metrics.blacklistedUntil) {
-        return false;
-    }
-
-    // Check if the blacklist period has expired
-    const blacklistedUntil = new Date(metrics.blacklistedUntil);
-    const now = new Date();
-
-    if (now > blacklistedUntil) {
-      // Blacklist period has expired, clear the blacklist
-      const modelData = this.performanceData.get(modelName);
-      if (modelData && modelData.metrics[conversationType]) {
-        modelData.metrics[conversationType].blacklistedUntil = null;
-      }
+    const modelData = this.performanceData.get(modelName);
+    if (!modelData || !modelData.metrics) {
       return false;
     }
-    // Model is still blacklisted
-    return true;
+
+    for (const [type, metrics] of Object.entries(modelData.metrics)) {
+      if (metrics && metrics.blacklistedUntil) {
+        const blacklistedUntil = new Date(metrics.blacklistedUntil);
+        const now = new Date();
+
+        if (now < blacklistedUntil) {
+          return true;
+        } else {
+          metrics.blacklistedUntil = null;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Check if a provider is circuit-broken due to repeated failures
+   */
+  isProviderCircuitBroken(provider: string): boolean {
+    const circuit = this.providerCircuitBreakers.get(provider);
+    if (!circuit) {
+      return false;
+    }
+
+    const now = Date.now();
+    if (now < circuit.until) {
+      return true;
+    }
+
+    this.providerCircuitBreakers.delete(provider);
+    return false;
+  }
+
+  /**
+   * Record a provider failure and trip circuit breaker if threshold is reached
+   */
+  recordProviderFailure(provider: string, error: string | undefined): void {
+    if (!provider) {
+      return;
+    }
+
+    const circuit = this.providerCircuitBreakers.get(provider) || {
+      failures: 0,
+      lastFailure: 0,
+      until: 0
+    };
+
+    circuit.failures++;
+    circuit.lastFailure = Date.now();
+
+    if (circuit.failures >= this.PROVIDER_CIRCUIT_THRESHOLD) {
+      const duration = Math.min(
+        this.PROVIDER_CIRCUIT_BASE_DURATION * Math.pow(2, circuit.failures - this.PROVIDER_CIRCUIT_THRESHOLD),
+        this.MAX_PROVIDER_CIRCUIT_DURATION
+      );
+      circuit.until = Date.now() + duration;
+      console.warn(`[PerformanceTracker] Provider circuit breaker tripped for ${provider}: ${circuit.failures} failures. Cooling down for ${duration / 1000}s. Error: ${error}`);
+    }
+
+    this.providerCircuitBreakers.set(provider, circuit);
+  }
+
+  /**
+   * Reset provider circuit breaker (e.g., after a successful health check)
+   */
+  resetProviderCircuit(provider: string): void {
+    this.providerCircuitBreakers.delete(provider);
+  }
+
+  /**
+   * Get all provider circuit breaker states
+   */
+  getProviderCircuitStates(): Record<string, { failures: number; until: number }> {
+    const now = Date.now();
+    const states: Record<string, { failures: number; until: number }> = {};
+    for (const [provider, circuit] of this.providerCircuitBreakers.entries()) {
+      if (now < circuit.until) {
+        states[provider] = { failures: circuit.failures, until: circuit.until };
+      }
+    }
+    return states;
   }
 
   /**

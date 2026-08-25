@@ -137,12 +137,11 @@ export class HealthCheckManager {
 
     // Redirect /health to /ready?detail=full for backward compatibility
     this.app.get('/health', (req, res) => {
-      // Add detail=full query parameter and redirect to /ready
-      const url = new URL(`http://${req.headers.host}/ready`);
-      url.searchParams.append('detail', 'full');
-
-      // Use a 307 Temporary Redirect to preserve the HTTP method
-      res.redirect(307, url.pathname + url.search);
+      res.status(200).json({
+        status: 'ok',
+        timestamp: new Date().toISOString(),
+        message: 'PostOffice service is running'
+      });
     });
   }
 }

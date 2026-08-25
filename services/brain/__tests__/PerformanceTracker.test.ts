@@ -19,7 +19,7 @@ describe('ModelPerformanceTracker', () => {
     it('should track a request and response, and update metrics', () => {
       const requestId = 'test-request';
       const modelName = 'test-model';
-      const conversationType = LLMConversationType.TEXT_TO_TEXT;
+      const conversationType = LLMConversationType.TextToText;
 
       performanceTracker.trackRequest(requestId, modelName, conversationType, 'test-prompt');
       performanceTracker.trackResponse(requestId, 'test-response', 100, true);
@@ -34,7 +34,7 @@ describe('ModelPerformanceTracker', () => {
   describe('recordFeedback', () => {
     it('should record feedback for a model', () => {
       const modelName = 'test-model';
-      const conversationType = LLMConversationType.TEXT_TO_TEXT;
+      const conversationType = LLMConversationType.TextToText;
       const feedback: FeedbackData = {
         modelName,
         conversationType,
@@ -58,7 +58,7 @@ describe('ModelPerformanceTracker', () => {
   describe('isModelBlacklisted', () => {
     it('should blacklist a model after consecutive failures', () => {
       const modelName = 'test-model';
-      const conversationType = LLMConversationType.TEXT_TO_TEXT;
+      const conversationType = LLMConversationType.TextToText;
 
       for (let i = 0; i < 5; i++) {
         const requestId = `test-request-${i}`;

@@ -69,10 +69,12 @@ export interface AgentStatistics {
 
 export interface MissionStatistics {
   missionId?: string;
-  startTime?: number;
-  endTime?: number;
+  startTime?: string;
+  endTime?: string;
   llmCalls: number;
   activeLLMCalls: number;
+  newLlmCalls: number;
+  retriedLlmCalls: number;
   agentCount?: number;
   activeAgents?: number;
   completedAgents?: number;

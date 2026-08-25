@@ -1,7 +1,8 @@
 import React, { useEffect, useLayoutEffect, useRef, useMemo } from 'react';
-import { Box, Typography, useTheme } from '@mui/material/index.js';
+import { Box, Typography, useTheme, CircularProgress, Chip } from '@mui/material/index.js';
 import MessageItem from './MessageItem';
 import { ConversationMessage } from '../shared-browser';
+import { useWebSocket } from '../context/WebSocketContext';
 
 interface Props {
   history: ConversationMessage[];
@@ -10,6 +11,7 @@ interface Props {
 export const ConversationHistory: React.FC<Props> = React.memo(({ history }: Props) => {
   const historyContainerRef = useRef<HTMLDivElement>(null);
   const shouldScrollToBottomRef = useRef(true);
+  const { typingAgents } = useWebSocket();
 
   const processedHistory = useMemo(() => {
     // This reducer processes the history to show all persistent messages
@@ -106,6 +108,14 @@ export const ConversationHistory: React.FC<Props> = React.memo(({ history }: Pro
           },
         }}
       >
+        {typingAgents.length > 0 && (
+          <Box sx={{ px: 2, pb: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
+            <CircularProgress size={16} />
+            <Typography variant="body2" color="text.secondary">
+              {typingAgents.length === 1 ? `${typingAgents[0]} is typing...` : `${typingAgents.join(', ')} are typing...`}
+            </Typography>
+          </Box>
+        )}
         {processedHistory.map((message: ConversationMessage, index: number) => (
           <MessageItem key={`message}-${message.content.substring(0, 50)}`} message={message} />
         ))}

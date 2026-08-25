@@ -25,7 +25,7 @@ ports["event-assistant-api"]=3003
 ports["pm-assistant-api"]=3000
 
 for agent_dir in *-api; do
-  port=${ports[$agent_dir]:-3000}
+  port=${ports[$agent_dir]:-3060}
   cat > "$agent_dir/Dockerfile" << EOF
 # Build on top of pre-built base image
 FROM cktmcs:base

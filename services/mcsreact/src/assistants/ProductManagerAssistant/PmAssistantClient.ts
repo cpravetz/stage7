@@ -206,6 +206,6 @@ export interface WebSocketEvents {
 }
 
 // Example usage:
-// const client = new PmAssistantClient('http://localhost:3000/api/pm-assistant', 'ws://localhost:3000/ws/pm-assistant/conversations');
+// const client = new PmAssistantClient('http://localhost:3060/api/pm-assistant', 'ws://localhost:3060/ws/pm-assistant/conversations');
 // client.on('message', (msg) => console.log('New message:', msg));
 // client.on('human_input_required', (prompt) => console.log('Human input needed:', prompt));

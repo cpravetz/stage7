@@ -400,8 +400,8 @@ export class ModelDiscoveryService {
             deployedAt: now,
             rolloutPercentage: 100,
             providerCredentials: {
-                keyVault: service.keyVault,
-                credentialName: service.credentialName,
+                keyVault: 'ENV',
+                credentialName: this.getCredentialEnvVar(service.provider),
                 validated: true,
                 validatedAt: now
             },
