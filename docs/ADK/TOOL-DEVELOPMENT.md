@@ -114,7 +114,7 @@ createQuickAssistant({
       // ... other tools
     ];
   },
-  port: 3009,
+  port: 3000,
 }).catch(error => process.exit(1));
 ```
 

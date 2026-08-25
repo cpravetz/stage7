@@ -23,8 +23,6 @@ export interface AgentStatistics {
 export interface MissionStatistics {
     llmCalls: number;
     activeLLMCalls: number;
-    newLlmCalls: number;
-    retriedLlmCalls: number;
     agentCountByStatus: Record<string, number>; // Changed from Object
     agentStatistics: Map<string, Array<AgentStatistics>>; // Implicitly uses new AgentStatistics
     engineerStatistics: EngineerStatistics;

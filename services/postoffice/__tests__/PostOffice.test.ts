@@ -368,7 +368,7 @@ describe('PostOffice Service', () => {
 
             const res = await agent.get(`/librarian/retrieve/${workProductId}`);
 
-            expect(mockAuthenticatedApiGet).toHaveBeenCalledWith(expect.stringContaining(`/loadStepOutput/${workProductId}`), expect.any(Object));
+            expect(mockAuthenticatedApiGet).toHaveBeenCalledWith(expect.stringContaining(`/loadWorkProduct/${workProductId}`), expect.any(Object));
             expect(res.statusCode).toBe(200);
             expect(res.body).toEqual({ data: { id: workProductId, content: 'work product data' } });
         });
@@ -797,7 +797,7 @@ describe('PostOffice Service', () => {
 
             await (postOffice as any).retrieveWorkProduct(req, res);
 
-            expect(mockAuthenticatedApiGet).toHaveBeenCalledWith(expect.stringContaining(`/loadStepOutput/${workProductId}`), expect.any(Object));
+            expect(mockAuthenticatedApiGet).toHaveBeenCalledWith(expect.stringContaining(`/loadWorkProduct/${workProductId}`), expect.any(Object));
             expect(res.statusCode).toBe(200);
             expect(res.send).toHaveBeenCalledWith({ data: { id: workProductId, content: 'work product data' } });
         });

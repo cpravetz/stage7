@@ -11,7 +11,6 @@ jest.mock('fs', () => ({
 
 jest.mock('path', () => ({
   join: jest.fn().mockReturnValue('/mocked/path'),
-  resolve: jest.fn().mockReturnValue('/mocked/path'),
 }));
 
 // Mock the dynamic imports
@@ -51,23 +50,23 @@ describe('ModelManager', () => {
 
   describe('selectModel', () => {
     it('should select the model with the highest cost score when optimizing for cost', () => {
-      const result = modelManager.selectModel('cost', LLMConversationType.TextToText);
-      expect(result?.name).toBe('Model1');
+      const result = modelManager.selectModel('cost');
+      expect(result?.model.name).toBe('Model1');
     });
 
     it('should select the model with the highest accuracy score when optimizing for accuracy', () => {
-      const result = modelManager.selectModel('accuracy', LLMConversationType.TextToText);
-      expect(result?.name).toBe('Model2');
+      const result = modelManager.selectModel('accuracy');
+      expect(result?.model.name).toBe('Model2');
     });
 
     it('should select the model with the highest creativity score when optimizing for creativity', () => {
-      const result = modelManager.selectModel('creativity', LLMConversationType.TextToText);
-      expect(result?.name).toBe('Model2');
+      const result = modelManager.selectModel('creativity');
+      expect(result?.model.name).toBe('Model2');
     });
 
     it('should select the model with the highest speed score when optimizing for speed', () => {
-      const result = modelManager.selectModel('speed', LLMConversationType.TextToText);
-      expect(result?.name).toBe('Model1');
+      const result = modelManager.selectModel('speed');
+      expect(result?.model.name).toBe('Model1');
     });
 
     it('should return undefined when no compatible models are found', () => {
@@ -76,14 +75,14 @@ describe('ModelManager', () => {
         ['model1', { contentConversation: [LLMConversationType.TextToImage] }],
         ['model2', { contentConversation: [LLMConversationType.TextToImage] }],
       ]);
-      const result = modelManager.selectModel('cost', LLMConversationType.TextToText);
+      const result = modelManager.selectModel('cost');
       expect(result).toBeUndefined();
     });
 
     it('should return undefined when no interface is found for the selected model', () => {
       // Remove the interfaces
       (modelManager as any).interfaces.clear();
-      const result = modelManager.selectModel('cost', LLMConversationType.TextToText);
+      const result = modelManager.selectModel('cost');
       expect(result).toBeUndefined();
     });
   });

@@ -3,7 +3,7 @@
   "assistant_name": "Product Manager Assistant",
   "assistant_role": "Assists product managers with planning, documentation, and project management",
   "assistant_personality": "Collaborative, proactive, analytical, and detail-oriented",
-  "port": 3060,
+  "port": 3000,
   "tools": [
     {
       "name": "JiraTool",

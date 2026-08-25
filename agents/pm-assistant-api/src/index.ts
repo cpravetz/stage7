@@ -29,7 +29,7 @@ createQuickAssistant({
       new MarkdownParsingTool(coreEngineClient),
     ];
   },
-  port: parseInt(process.env.PORT || '3060'),
+  port: parseInt(process.env.PORT || '3000'),
   urlBase: 'pm-assistant-api',
 }).catch((error: Error) => {
   console.error('Failed to initialize PM Assistant:', error);

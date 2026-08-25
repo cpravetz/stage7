@@ -8,7 +8,6 @@ import { LLMConversationType } from '@cktmcs/shared';
 import { BaseService } from '../services/baseService';
 import { analyzeError } from '@cktmcs/shared';
 import { ModelPerformanceTracker } from './performanceTracker';
-import { serviceHealthChecker } from './ServiceHealthChecker';
 import { v4 as uuidv4 } from 'uuid';
 
 
@@ -34,18 +33,27 @@ export class ModelManager {
      * @param until Date until which the model is blacklisted
      */
     blacklistModel(modelName: string, until: Date, conversationType: LLMConversationType | null = null): void {
-        const metrics = this.performanceTracker.getPerformanceMetrics(modelName, LLMConversationType.TextToText);
+        const metrics = this.performanceTracker.getPerformanceMetrics(modelName, LLMConversationType.TextToText); // Use a default conversation type for fetching failure count
         const consecutiveFailures = metrics ? metrics.consecutiveFailures : 0;
-        const backoffTime = Math.pow(2, consecutiveFailures) * 60 * 1000;
+        const backoffTime = Math.pow(2, consecutiveFailures) * 60 * 1000; // Exponential backoff in minutes
         const blacklistUntil = new Date(Date.now() + backoffTime);
 
         console.log(`Blacklisting model ${modelName} until ${blacklistUntil.toISOString()} due to ${consecutiveFailures} consecutive failures.`);
 
-        const typesToBlacklist = conversationType ? [conversationType] : Object.values(LLMConversationType);
-        for (const type of typesToBlacklist) {
-            const specificMetrics = this.performanceTracker.getPerformanceMetrics(modelName, type);
-            specificMetrics.blacklistedUntil = blacklistUntil.toISOString();
-            specificMetrics.consecutiveFailures = Math.max(specificMetrics.consecutiveFailures, 1);
+        if (conversationType) {
+            const specificMetrics = this.performanceTracker.getPerformanceMetrics(modelName, conversationType);
+            if (specificMetrics) {
+                specificMetrics.blacklistedUntil = blacklistUntil.toISOString();
+                specificMetrics.consecutiveFailures = Math.max(specificMetrics.consecutiveFailures, 1);
+            }
+        } else {
+            for (const modelConversationType of Object.values(LLMConversationType)) {
+                const specificMetrics = this.performanceTracker.getPerformanceMetrics(modelName, modelConversationType);
+                if (specificMetrics) {
+                    specificMetrics.blacklistedUntil = blacklistUntil.toISOString();
+                    specificMetrics.consecutiveFailures = Math.max(specificMetrics.consecutiveFailures, 1);
+                }
+            }
         }
         this.clearModelSelectionCache();
 
@@ -111,10 +119,6 @@ export class ModelManager {
         return this.models.get(name.toLowerCase());
     }
 
-    isModelBlacklisted(modelName: string, conversationType: LLMConversationType): boolean {
-        return this.performanceTracker.isModelBlacklisted(modelName, conversationType);
-    }
-
     selectModel(optimization: OptimizationType, conversationType: LLMConversationType, excludedModels: string[] = [], estimatedTokens: number = 0): BaseModel | null {
         console.log(`Selecting model for optimization: ${optimization}, conversationType: ${conversationType}`);
 
@@ -130,13 +134,13 @@ export class ModelManager {
             });
 
             const nonBlacklistedModels = availableTextToJsonModels.filter(model =>
-                !this.performanceTracker.isModelBlacklisted(model.name, conversationType) &&
-                serviceHealthChecker.isModelAvailable(model.name) &&
-                !this.performanceTracker.isProviderCircuitBroken(model.serviceName)
+                !this.performanceTracker.isModelBlacklisted(model.name, conversationType)
             );
 
             if (availableTextToJsonModels.length > 0 && nonBlacklistedModels.length === 0) {
-                console.log(`All TextToJSON models are blacklisted or unhealthy. Not resetting blacklists to avoid affecting other conversation types.`);
+                console.log(`All TextToJSON models are blacklisted. Resetting all blacklists...`);
+                this.performanceTracker.resetAllBlacklists();
+                this.clearModelSelectionCache(); // Clear cache to force re-selection
             }
         }
 
@@ -147,14 +151,13 @@ export class ModelManager {
         if (cachedResult && (Date.now() - cachedResult.timestamp) < this.CACHE_TTL) {
             // Verify cached model is still available and not blacklisted
             if (cachedResult.model.isAvailable() &&
-                !this.performanceTracker.isModelBlacklisted(cachedResult.model.name, conversationType) &&
-                !this.performanceTracker.isProviderCircuitBroken(cachedResult.model.serviceName)) {
+                !this.performanceTracker.isModelBlacklisted(cachedResult.model.name, conversationType)) {
                 console.log(`**** CACHE HIT **** Using cached model selection result: ${cachedResult.model.name}`);
                 console.log(`Cache age: ${Math.floor((Date.now() - cachedResult.timestamp) / 1000)} seconds`);
 
                 return cachedResult.model;
             } else {
-                console.log(`**** CACHE INVALIDATED **** Cached model ${cachedResult.model.name} is no longer available, blacklisted, or provider circuit broken`);
+                console.log(`**** CACHE INVALIDATED **** Cached model ${cachedResult.model.name} is no longer available or blacklisted`);
                 this.modelSelectionCache.delete(cacheKey);
             }
         }
@@ -212,20 +215,6 @@ export class ModelManager {
                     return false;
                 }
 
-                // Check if model is healthy according to service health checker
-                if (!serviceHealthChecker.isModelAvailable(model.name)) {
-                    reasons.push('unhealthy (service health checker)');
-                    filterReasons.set(model.name, reasons);
-                    return false;
-                }
-
-                // Check if model's provider is circuit-broken
-                if (this.performanceTracker.isProviderCircuitBroken(model.serviceName)) {
-                    reasons.push('provider circuit broken');
-                    filterReasons.set(model.name, reasons);
-                    return false;
-                }
-
                 // Check if model is blacklisted
                 const isBlacklisted = this.performanceTracker.isModelBlacklisted(model.name, conversationType);
                 if (isBlacklisted) {
@@ -252,17 +241,6 @@ export class ModelManager {
             return null;
         }
 
-        // Log filter reasons for all models to aid debugging
-        console.log(`[ModelSelection Debug] Available models for ${conversationType}: ${availableModels.map(m => m.name).join(', ')}`);
-        for (const model of Array.from(this.models.values())) {
-            const reasons = filterReasons.get(model.name) || ['passed'];
-            if (reasons.includes('passed')) {
-                console.log(`[ModelSelection Debug] Model ${model.name}: PASSED`);
-            } else {
-                console.log(`[ModelSelection Debug] Model ${model.name}: ${reasons.join('; ')}`);
-            }
-        }
-
         // Sort models by their score for the given optimization
         const scoredModels = availableModels.map(model => {
             const score = this.calculateScore(model, optimization, conversationType);
@@ -275,29 +253,25 @@ export class ModelManager {
         // No longer prioritizing specific models - using pure score-based selection
         console.log(`Using score-based model selection. Top model: ${scoredModels.length > 0 ? scoredModels[0].model.name : 'none'}`);
 
-        // Reject models with very negative scores to prevent selecting broken/unreliable models
-        const MIN_ACCEPTABLE_SCORE = -50;
-        const viableModels = scoredModels.filter(sm => sm.score >= MIN_ACCEPTABLE_SCORE);
+        // Return the highest-scoring model
+        if (scoredModels.length > 0) {
+            const selectedModel = scoredModels[0].model;
+            console.log(`Selected model ${selectedModel.name} for ${optimization} optimization and conversation type ${conversationType}`);
 
-        if (viableModels.length === 0) {
-            console.warn(`[ModelSelection] All models have scores below ${MIN_ACCEPTABLE_SCORE}. Best score: ${scoredModels[0]?.score ?? 'none'} for ${scoredModels[0]?.model.name ?? 'none'}. Falling back to lowest-penalty model.`);
-            viableModels.push(scoredModels[0]);
+            // Store in cache
+            this.modelSelectionCache.set(cacheKey, {
+                model: selectedModel,
+                timestamp: Date.now()
+            });
+
+            return selectedModel;
         }
 
-        // Return the highest-scoring model
-        const selectedModel = viableModels[0].model;
-        console.log(`Selected model ${selectedModel.name} for ${optimization} optimization and conversation type ${conversationType} (score: ${viableModels[0].score})`);
-
-        // Store in cache
-        this.modelSelectionCache.set(cacheKey, {
-            model: selectedModel,
-            timestamp: Date.now()
-        });
-
-        return selectedModel;
+        console.log('No suitable models found after scoring');
+        return null;
     }
 
-    public calculateScore(model: BaseModel, optimization: OptimizationType, conversationType: LLMConversationType): number {
+    private calculateScore(model: BaseModel, optimization: OptimizationType, conversationType: LLMConversationType): number {
         const scores = model.getScoresForConversationType(conversationType);
         if (!scores) return -Infinity;
 
@@ -376,13 +350,6 @@ export class ModelManager {
         return Array.from(this.models.keys());
     }
 
-    isProviderAvailable(provider: string): boolean {
-        if (!provider) {
-            return true;
-        }
-        return !this.performanceTracker.isProviderCircuitBroken(provider);
-    }
-
 
 
     getAvailableAndNotBlacklistedModels(conversationType: LLMConversationType): BaseModel[] {
@@ -399,14 +366,6 @@ export class ModelManager {
 
                 const service = serviceManager.getService(model.serviceName);
                 if (!service || !service.isAvailable()) {
-                    return false;
-                }
-
-                if (!serviceHealthChecker.isModelAvailable(model.name)) {
-                    return false;
-                }
-
-                if (this.performanceTracker.isProviderCircuitBroken(model.serviceName)) {
                     return false;
                 }
 
@@ -443,18 +402,13 @@ export class ModelManager {
      * @param prompt Prompt
      * @returns Request ID
      */
-    trackModelRequest(modelName: string, conversationType: LLMConversationType, prompt: string, provider?: string): string {
+    trackModelRequest(modelName: string, conversationType: LLMConversationType, prompt: string): string {
         const requestId = uuidv4();
 
         console.log(`[ModelManager] Tracking model request: ${requestId} for model ${modelName}, conversation type ${conversationType}`);
 
-        if (!provider) {
-            const model = this.models.get(modelName.toLowerCase());
-            provider = model?.serviceName || '';
-        }
-
         // Track request in performance tracker
-        this.performanceTracker.trackRequest(requestId, modelName, conversationType, prompt, provider);
+        this.performanceTracker.trackRequest(requestId, modelName, conversationType, prompt);
 
         // Store active request
         this.activeRequests.set(requestId, {

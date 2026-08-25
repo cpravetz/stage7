@@ -139,14 +139,10 @@ export class ServiceDiscoveryManager {
    * @param id Component ID
    * @returns Component URL or undefined if not found
    */
-  getComponentUrl(type: string): string | undefined {
-    const componentIds = this.componentsByType.get(type);
-    if (componentIds && componentIds.size > 0) {
-      const firstId = Array.from(componentIds)[0];
-      const component = this.components.get(firstId);
-      if (component) {
-        return this.normalizeUrl(component.url);
-      }
+  getComponentUrl(id: string): string | undefined {
+    const component = this.components.get(id);
+    if (component) {
+      return this.normalizeUrl(component.url);
     }
     return undefined;
   }

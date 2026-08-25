@@ -1,5 +1,6 @@
 import axios from 'axios';
 import express from 'express';
+import { rateLimit } from 'express-rate-limit';
 import Ajv from 'ajv';
 import addFormats from 'ajv-formats';
 import {
@@ -22,8 +23,7 @@ import {
     OpenAPIParameterMapping,
     OpenAPIResponseMapping,
     MCPTool,
-    MCPToolRegistrationRequest,
-    MessageType
+    MCPToolRegistrationRequest
 } from '@cktmcs/shared';
 import { analyzeError } from '@cktmcs/shared';
 import { PluginMarketplace } from '@cktmcs/marketplace';
@@ -87,11 +87,9 @@ export class Engineer extends BaseEntity {
         generationTime: number;
         testExecutionTime: number;
     };
-    private allowDirectModify: boolean;
 
     constructor() {
         super('Engineer', 'Engineer', `engineer`, process.env.PORT || '5050');
-        this.allowDirectModify = process.env.ENGINEER_ALLOW_DIRECT_MODIFY === 'true';
         this.pluginMarketplace = new PluginMarketplace();
         this.ajv = new Ajv({ allErrors: true, strict: false });
         this.pluginSchema = {};
@@ -297,8 +295,7 @@ export class Engineer extends BaseEntity {
         logger.info('Engineer service initializing', { 
             port: this.port,
             brainUrl: this.brainUrl,
-            librarianUrl: this.librarianUrl,
-            allowDirectModify: this.allowDirectModify
+            librarianUrl: this.librarianUrl
         });
         
         await this.setupServer();
@@ -306,6 +303,10 @@ export class Engineer extends BaseEntity {
 
     private async setupServer() {
         const app = express();
+        app.use(rateLimit({
+            windowMs: 15 * 60 * 1000,
+            max: 5000,
+        }));
         app.use(express.json());
 
         this.setupHealthCheck(app);
@@ -327,20 +328,11 @@ export class Engineer extends BaseEntity {
         });
 
         app.post('/createPlugin', async (req, res) => {
-            const callerCheck = this.verifyCallerIdentity(req);
-            if (!callerCheck.authorized) {
-                return res.status(403).json({
-                    error: callerCheck.error || 'Unauthorized caller',
-                    code: 'UNAUTHORIZED_CALLER',
-                    severity: 'HIGH'
-                });
-            }
-
             const scoped = logger.createScoped('POST /createPlugin');
             
             try {
                 const { verb, context, guidance, language } = req.body;
-                scoped.debug('Creating plugin', { verb, language, caller: callerCheck.caller });
+                scoped.debug('Creating plugin', { verb, language });
 
                 const deserializedContext = context instanceof Map ? context : MapSerializer.transformFromSerialization(context || {});
                 const plugin = await this.createPlugin(verb, deserializedContext, guidance, language, scoped);
@@ -354,19 +346,10 @@ export class Engineer extends BaseEntity {
 
         // OpenAPI tool registration endpoints
         app.post('/tools/openapi', async (req, res) => {
-            const callerCheck = this.verifyCallerIdentity(req);
-            if (!callerCheck.authorized) {
-                return res.status(403).json({
-                    error: callerCheck.error || 'Unauthorized caller',
-                    code: 'UNAUTHORIZED_CALLER',
-                    severity: 'HIGH'
-                });
-            }
-
             const scoped = logger.createScoped('POST /tools/openapi');
             try {
                 const registrationRequest: OpenAPIToolRegistrationRequest = req.body;
-                scoped.debug('Registering OpenAPI tool', { toolName: registrationRequest.name, caller: callerCheck.caller });
+                scoped.debug('Registering OpenAPI tool', { toolName: registrationRequest.name });
                 
                 const result = await this.registerOpenAPITool(registrationRequest, scoped);
                 scoped.complete('OpenAPI tool registered');
@@ -377,19 +360,10 @@ export class Engineer extends BaseEntity {
         });
 
         app.post('/validate', async (req, res) => {
-            const callerCheck = this.verifyCallerIdentity(req);
-            if (!callerCheck.authorized) {
-                return res.status(403).json({
-                    error: callerCheck.error || 'Unauthorized caller',
-                    code: 'UNAUTHORIZED_CALLER',
-                    severity: 'HIGH'
-                });
-            }
-
             const scoped = logger.createScoped('POST /validate');
             try {
                 const { manifest, code } = req.body;
-                scoped.debug('Validating tool', { toolId: manifest.id, caller: callerCheck.caller });
+                scoped.debug('Validating tool', { toolId: manifest.id });
                 
                 const result = await this.validateTool(manifest, code, scoped);
                 scoped.complete('Tool validation complete');
@@ -400,19 +374,10 @@ export class Engineer extends BaseEntity {
         });
 
         app.get('/tools/openapi/:id', async (req, res) => {
-            const callerCheck = this.verifyCallerIdentity(req);
-            if (!callerCheck.authorized) {
-                return res.status(403).json({
-                    error: callerCheck.error || 'Unauthorized caller',
-                    code: 'UNAUTHORIZED_CALLER',
-                    severity: 'HIGH'
-                });
-            }
-
             const scoped = logger.createScoped('GET /tools/openapi/:id');
             try {
                 const { id } = req.params;
-                scoped.debug('Retrieving OpenAPI tool', { id, caller: callerCheck.caller });
+                scoped.debug('Retrieving OpenAPI tool', { id });
                 
                 const tool = await this.getOpenAPITool(id, scoped);
                 if (!tool) {
@@ -433,29 +398,12 @@ export class Engineer extends BaseEntity {
 
         app.post('/message', (req, res) => this.handleMessage(req, res));
         app.get('/statistics', (req, res) => { this.getStatistics(req, res) });
-        app.get('/config', (req, res) => {
-            res.json({
-                allowDirectModify: this.allowDirectModify,
-                port: this.port,
-                brainUrl: this.brainUrl,
-                librarianUrl: this.librarianUrl
-            });
-        });
 
         app.post('/tools/onboard', async (req, res) => {
-            const callerCheck = this.verifyCallerIdentity(req);
-            if (!callerCheck.authorized) {
-                return res.status(403).json({
-                    error: callerCheck.error || 'Unauthorized caller',
-                    code: 'UNAUTHORIZED_CALLER',
-                    severity: 'HIGH'
-                });
-            }
-
             const scoped = logger.createScoped('POST /tools/onboard');
             try {
                 const { toolManifest, policyConfig } = req.body;
-                scoped.debug('Onboarding tool', { toolId: toolManifest.id, caller: callerCheck.caller });
+                scoped.debug('Onboarding tool', { toolId: toolManifest.id });
                 
                 const result = await this.onboardTool(toolManifest, policyConfig, scoped);
                 scoped.complete('Tool onboarded successfully');
@@ -466,15 +414,6 @@ export class Engineer extends BaseEntity {
         });
 
         app.post('/createPluginFromOpenAPI', async (req, res) => {
-            const callerCheck = this.verifyCallerIdentity(req);
-            if (!callerCheck.authorized) {
-                return res.status(403).json({
-                    error: callerCheck.error || 'Unauthorized caller',
-                    code: 'UNAUTHORIZED_CALLER',
-                    severity: 'HIGH'
-                });
-            }
-
             const scoped = logger.createScoped('POST /createPluginFromOpenAPI');
             const { specUrl, name, description, authentication, baseUrl } = req.body;
 
@@ -483,7 +422,7 @@ export class Engineer extends BaseEntity {
             }
 
             try {
-                scoped.debug('Creating plugin from OpenAPI', { name, specUrl, caller: callerCheck.caller });
+                scoped.debug('Creating plugin from OpenAPI', { name, specUrl });
                 const result = await this.createPluginFromOpenAPI(specUrl, name, description, authentication, baseUrl, scoped);
                 scoped.complete('Plugin created from OpenAPI');
                 res.json(result);
@@ -493,19 +432,10 @@ export class Engineer extends BaseEntity {
         });
 
         app.post('/repair', async (req, res) => {
-            const callerCheck = this.verifyCallerIdentity(req);
-            if (!callerCheck.authorized) {
-                return res.status(403).json({
-                    error: callerCheck.error || 'Unauthorized caller',
-                    code: 'UNAUTHORIZED_CALLER',
-                    severity: 'HIGH'
-                });
-            }
-
             const scoped = logger.createScoped('POST /repair');
             try {
                 const { errorMessage, code } = req.body;
-                scoped.debug('Repairing code', { errorLength: String(code).length, caller: callerCheck.caller });
+                scoped.debug('Repairing code', { errorLength: String(code).length });
                 
                 const result = await this.repairCode(errorMessage, code, scoped);
                 scoped.complete('Code repaired successfully');
@@ -518,30 +448,6 @@ export class Engineer extends BaseEntity {
         app.listen(this.port, () => {
             logger.info(`Engineer listening at ${this.url}`);
         });
-    }
-
-    private async sendProgress(message: string, verb: string, progress: number, scoped?: ScopedLogger): Promise<void> {
-        try {
-            await this.sendMessage(
-                MessageType.PLUGIN_PROGRESS,
-                'user',
-                {
-                    message,
-                    verb,
-                    progress,
-                    timestamp: new Date().toISOString()
-                },
-                false,
-                'user'
-            );
-            if (scoped) {
-                scoped.debug('Progress message sent', { verb, progress });
-            }
-        } catch (error) {
-            if (scoped) {
-                scoped.warn('Failed to send progress message', error as Error);
-            }
-        }
     }
 
     private getStatistics(req: express.Request, res: express.Response) {
@@ -618,56 +524,6 @@ export class Engineer extends BaseEntity {
             // Add more permission checks as needed
         }
         return [...new Set(permissions)]; // Remove duplicates
-    }
-
-    isDirectModifyAllowed(): boolean {
-        return this.allowDirectModify;
-    }
-
-    private verifyCallerIdentity(req: express.Request): { authorized: boolean; caller?: string; error?: string } {
-        const user = (req as any).user;
-        if (!user) {
-            return { authorized: false, error: 'No authenticated caller identity' };
-        }
-
-        const callerService = user.sub || user.componentType || user.clientId;
-        if (!callerService) {
-            return { authorized: false, error: 'Caller identity missing service identifier' };
-        }
-
-        const allowedCallers = [
-            'Engineer',
-            'MissionControl',
-            'CapabilitiesManager',
-            'Librarian',
-            'Brain',
-            'PostOffice',
-            'SecurityManager'
-        ];
-
-        const normalizedCaller = String(callerService).toLowerCase();
-        const isAllowed = allowedCallers.some(
-            allowed => String(allowed).toLowerCase() === normalizedCaller
-        );
-
-        if (!isAllowed) {
-            return { authorized: false, error: `Caller ${callerService} is not authorized to access Engineer endpoints` };
-        }
-
-        return { authorized: true, caller: String(callerService) };
-    }
-
-    private requireAuthorizedCaller(req: express.Request, res: express.Response, next: express.NextFunction): void {
-        const verification = this.verifyCallerIdentity(req);
-        if (!verification.authorized) {
-            res.status(403).json({
-                error: verification.error || 'Unauthorized caller',
-                code: 'UNAUTHORIZED_CALLER',
-                severity: 'HIGH'
-            });
-            return;
-        }
-        next();
     }
 
     /**

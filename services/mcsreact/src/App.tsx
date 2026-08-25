@@ -378,7 +378,6 @@ const MainApp: React.FC<{ clientId: string }> = ({ clientId }) => {
               activeQuestion={activeQuestion}
               onAnswer={handleAnswer}
               onCancelQuestion={handleCancelQuestion}
-              isProcessing={activeMission && !isPaused}
             />
             <Box sx={{ mt: 2 }}>
               <MissionControls

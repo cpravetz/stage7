@@ -141,10 +141,10 @@ services:
       context: ./agents/pm-assistant-api
       dockerfile: Dockerfile.prod
     ports:
-      - "3060:3060"
+      - "3000:3000"
     environment:
       NODE_ENV: production
-      PORT: 3060
+      PORT: 3000
       POSTOFFICE_URL: http://postoffice:5020
       SECURITYMANAGER_URL: http://missioncontrol:5010
       PM_ASSISTANT_API_SECRET: ${PM_ASSISTANT_API_SECRET}
@@ -347,9 +347,9 @@ docker-compose -f docker-compose.prod.yaml up -d --scale pm-assistant=3
 
 # Or using load balancer (nginx/HAProxy):
 upstream pm_assistant {
-  server pm-assistant-1:3060;
-  server pm-assistant-2:3060;
-  server pm-assistant-3:3060;
+  server pm-assistant-1:3000;
+  server pm-assistant-2:3000;
+  server pm-assistant-3:3000;
 }
 ```
 
