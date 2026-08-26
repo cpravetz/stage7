@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Box,
@@ -192,6 +192,8 @@ const ModelPerformanceDashboard: React.FC = () => {
   const [configActionLoading, setConfigActionLoading] = useState(false);
   const [configActionError, setConfigActionError] = useState<string | null>(null);
   const [selectedConfig, setSelectedConfig] = useState<ModelConfiguration | null>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const scrollPositionRef = useRef<number>(0);
 
   // Log connection status and mission info for debugging
   useEffect(() => {
@@ -223,6 +225,10 @@ const ModelPerformanceDashboard: React.FC = () => {
     const securityClient = SecurityClient.getInstance(API_BASE_URL);
 
     const fetchData = async () => {
+      if (scrollContainerRef.current) {
+        scrollPositionRef.current = scrollContainerRef.current.scrollTop;
+      }
+
       try {
         setLoading(true);
         setError(null);
@@ -443,6 +449,12 @@ const ModelPerformanceDashboard: React.FC = () => {
     // Clean up the interval when the component unmounts
     return () => clearInterval(refreshInterval);
   }, [conversationType, rankingMetric]);
+
+  useLayoutEffect(() => {
+    if (scrollContainerRef.current && scrollPositionRef.current > 0) {
+      scrollContainerRef.current.scrollTop = scrollPositionRef.current;
+    }
+  }, [performanceData, rankings, loading]);
 
   const getConfigTemplate = (): ModelConfiguration => {
     const now = new Date().toISOString();
@@ -710,7 +722,7 @@ const ModelPerformanceDashboard: React.FC = () => {
         </Toolbar>
       </AppBar>
 
-      <Box sx={{ px: 3, flexGrow: 1, overflow: 'auto' }}>
+      <Box ref={scrollContainerRef} sx={{ px: 3, flexGrow: 1, overflow: 'auto' }}>
         <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
           <Tabs value={tabValue} onChange={handleTabChange} aria-label="model performance tabs">
             <Tab label="Performance Metrics" {...a11yProps(0)} />

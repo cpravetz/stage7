@@ -74,16 +74,28 @@ const DataContext = createContext<DataContextType | undefined>(undefined);
 // Create a combined provider that manages all state but provides separate contexts
 export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [isConnected, setIsConnected] = useState(false);
+  const [clientId, setClientId] = useState<string>(() => {
+    const stored = localStorage.getItem('clientId');
+    return stored || uuidv4();
+  });
   const [isConnecting, setIsConnecting] = useState<boolean>(false);
-  const [clientId] = useState<string>(() => uuidv4());
-  
-  // Conversation state
-  const [conversationHistory, setConversationHistory] = useState<ConversationMessage[]>([]);
-  const [conversationHistoryByAssistant, setConversationHistoryByAssistant] = useState<Record<string, ConversationMessage[]>>({});
-  const [currentAssistantId, setCurrentAssistantId] = useState<string | null>(null);
-  const [assistantStateByConversation, setAssistantStateByConversation] = useState<Record<string, any>>({});
-  const [currentQuestion, setCurrentQuestion] = useState<{ guid: string, sender: string, content: string, choices?: string[], asker: string } | null>(null);
-  
+
+  useEffect(() => {
+    localStorage.setItem('clientId', clientId);
+  }, [clientId]);
+
+  useEffect(() => {
+    const storedMissionId = localStorage.getItem('missionId');
+    if (storedMissionId) {
+      setActiveMissionId(storedMissionId);
+      setActiveMission(true);
+    }
+    const storedMissionName = localStorage.getItem('missionName');
+    if (storedMissionName) {
+      setActiveMissionName(storedMissionName);
+    }
+  }, []);
+
   // Mission state
   const [activeMission, setActiveMission] = useState<boolean>(false);
   const [activeMissionName, setActiveMissionName] = useState<string | null>(null);
@@ -91,7 +103,20 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [isPaused, setIsPaused] = useState<boolean>(false);
   const [missionStatus, setMissionStatus] = useState<any>(null);
   const [missions, setMissions] = useState<Partial<SharedMission>[]>([]);
+
+  useEffect(() => {
+    if (activeMissionName) {
+      localStorage.setItem('missionName', activeMissionName);
+    }
+  }, [activeMissionName]);
   
+  // Conversation state
+  const [conversationHistory, setConversationHistory] = useState<ConversationMessage[]>([]);
+  const [conversationHistoryByAssistant, setConversationHistoryByAssistant] = useState<Record<string, ConversationMessage[]>>({});
+  const [currentAssistantId, setCurrentAssistantId] = useState<string | null>(null);
+  const [assistantStateByConversation, setAssistantStateByConversation] = useState<Record<string, any>>({});
+  const [currentQuestion, setCurrentQuestion] = useState<{ guid: string, sender: string, content: string, choices?: string[], asker: string } | null>(null);
+
   // Data state
   const [workProducts, setWorkProducts] = useState<{ type: 'Interim' | 'Final' | 'Plan', name: string, url: string, workproduct: any, isDeliverable?: boolean }[]>([]);
   const [sharedFiles, setSharedFiles] = useState<LocalMissionFile[]>([]);
@@ -704,6 +729,7 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         setActiveMissionName(null);
         setActiveMissionId(null);
         localStorage.removeItem('missionId');
+        localStorage.removeItem('missionName');
       }
     } catch (error) {
       console.error('[WebSocketContext] Failed to send control action:', error instanceof Error ? error.message : error);

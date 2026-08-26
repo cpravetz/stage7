@@ -347,7 +347,7 @@ export class ModelManager {
     }
 
     getAvailableModels(): string[] {
-        return Array.from(this.models.keys());
+        return Array.from(this.models.values()).map(m => m.name);
     }
 
 

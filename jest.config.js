@@ -5,6 +5,8 @@ module.exports = {
   moduleDirectories: ['node_modules', 'src'],
   testMatch: [
     '<rootDir>/services/engineer/__tests__/**/*.test.ts',
+    '<rootDir>/services/brain/__tests__/**/*.test.ts',
+    '<rootDir>/services/missioncontrol/__tests__/**/*.test.ts',
     '<rootDir>/marketplace/__tests__/**/*.test.ts'
   ],
   modulePaths: [

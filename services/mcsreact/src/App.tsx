@@ -161,6 +161,9 @@ const MainApp: React.FC<{ clientId: string }> = ({ clientId }) => {
         ws.current.close();
         ws.current = null;
       }
+      localStorage.removeItem('clientId');
+      localStorage.removeItem('missionId');
+      localStorage.removeItem('missionName');
       enqueueSnackbar('Logged out successfully', { variant: 'success' });
       window.location.href = '/';
     } catch (error) {

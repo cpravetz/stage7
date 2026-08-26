@@ -31,7 +31,7 @@ function normalizeId(Id: string | string[]): string {
   return Id;
 }
 
-class MissionControl extends BaseEntity {
+export class MissionControl extends BaseEntity {
     private missions: Map<string, Mission> = new Map();
     private clientMissions: Map<string, Set<string>> = new Map();
     private librarianUrl: string = process.env.LIBRARIAN_URL?.startsWith('http') ? process.env.LIBRARIAN_URL : `http://${process.env.LIBRARIAN_URL || 'librarian:5040'}`;
@@ -941,6 +941,13 @@ class MissionControl extends BaseEntity {
             inputValues.set('question', { inputName: 'question', value: 'Given the original mission goal and the work completed, is the mission fully accomplished? If not, what is the next logical step?', valueType: PluginParameterType.STRING, args: {} });
 
             const serializedInputs = MapSerializer.transformForSerialization(inputValues);
+
+            // Skip reflection if mission errored before any plan was generated
+            if (mission.status === Status.ERROR && planHistory.length === 0) {
+                console.log(`Mission ${mission.id} has no plan history and is in error status. Skipping unnecessary reflection.`);
+                this.sendStatusUpdate(mission, 'Mission failed before plan generation. No reflection needed.');
+                return;
+            }
 
             // 2. Call the REFLECT plugin - get capabilities manager URL dynamically
             const serviceUrls = await this.getServiceUrls();

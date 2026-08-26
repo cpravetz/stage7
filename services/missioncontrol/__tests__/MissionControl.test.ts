@@ -1,3 +1,4 @@
+import { jest, describe, it, expect, beforeAll, beforeEach, afterEach } from '@jest/globals';
 import request from 'supertest';
 import express from 'express';
 import { MissionControl } from '../src/MissionControl';
@@ -11,23 +12,23 @@ import { rateLimit } from 'express-rate-limit';
 jest.mock('express');
 jest.mock('uuid');
 jest.mock('@cktmcs/shared', () => ({
-    ...jest.requireActual('@cktmcs/shared'),
-    BaseEntity: jest.fn().mockImplementation(() => ({
+    ...(jest.requireActual('@cktmcs/shared') as any),
+    BaseEntity: (jest.fn() as any).mockImplementation(() => ({
         id: 'mock-missioncontrol-id',
         componentType: 'MissionControl',
         url: 'http://mock-missioncontrol:5030',
         port: '5030',
         postOfficeUrl: 'http://mock-postoffice:5020',
         authenticatedApi: {
-            post: jest.fn().mockResolvedValue({ status: 200, data: {} }),
-            get: jest.fn().mockResolvedValue({ status: 200, data: {} }),
+            post: (jest.fn() as any).mockResolvedValue({ status: 200, data: {} }),
+            get: (jest.fn() as any).mockResolvedValue({ status: 200, data: {} }),
         },
-        verifyToken: jest.fn((req, res, next) => next()), // Mock verifyToken to just call next
-        initializeMessageQueue: jest.fn().mockResolvedValue(undefined),
-        initializeServiceDiscovery: jest.fn().mockResolvedValue(undefined),
-        registerWithPostOffice: jest.fn().mockResolvedValue(undefined),
-        logAndSay: jest.fn().mockResolvedValue(undefined),
-        getServiceUrls: jest.fn().mockResolvedValue({
+        verifyToken: jest.fn((_req: any, _res: any, next: any) => next()),
+        initializeMessageQueue: (jest.fn() as any).mockResolvedValue(undefined),
+        initializeServiceDiscovery: (jest.fn() as any).mockResolvedValue(undefined),
+        registerWithPostOffice: (jest.fn() as any).mockResolvedValue(undefined),
+        logAndSay: (jest.fn() as any).mockResolvedValue(undefined),
+        getServiceUrls: (jest.fn() as any).mockResolvedValue({
             capabilitiesManagerUrl: 'capabilitiesmanager:5060',
             brainUrl: 'brain:5070',
             librarianUrl: 'librarian:5040',
@@ -35,7 +36,7 @@ jest.mock('@cktmcs/shared', () => ({
             engineerUrl: 'engineer:5050',
         }),
     })),
-}));
+} as any));
 jest.mock('@cktmcs/errorhandler');
 jest.mock('express-rate-limit');
 
@@ -49,17 +50,15 @@ const mockRateLimit = rateLimit as jest.MockedFunction<typeof rateLimit>;
 describe('MissionControl Service', () => {
     let missionControl: MissionControl;
     let mockApp: jest.Mocked<express.Application>;
-    let mockAuthenticatedApiPost: jest.Mock;
-    let mockAuthenticatedApiGet: jest.Mock;
-    let consoleLogSpy: jest.SpyInstance;
-    let consoleErrorSpy: jest.SpyInstance;
-
-    // Mock the actual express app instance that MissionControl will use
-    const realExpress = jest.requireActual('express');
+    let mockAuthenticatedApiPost: any;
+    let mockAuthenticatedApiGet: any;
+    let consoleLogSpy: any;
+    let consoleErrorSpy: any;
+    let consoleWarnSpy: any;
 
     beforeAll(() => {
         // Mock rateLimit to return a simple middleware
-        mockRateLimit.mockImplementation(() => (req, res, next) => next());
+        mockRateLimit.mockImplementation(() => ((_req: any, _res: any, next: any) => next()) as any);
     });
 
     beforeEach(() => {
@@ -71,20 +70,21 @@ describe('MissionControl Service', () => {
             use: jest.fn(),
             post: jest.fn(),
             get: jest.fn(),
-            listen: jest.fn((port, callback) => callback()),
+            listen: jest.fn((port: any, callback: any) => callback()),
         } as unknown as jest.Mocked<express.Application>;
 
         // Ensure express() returns our mockApp
-        mockExpress.mockReturnValue(mockApp);
+        mockExpress.mockReturnValue(mockApp as any);
 
         // Get the mocked authenticatedApi from the BaseEntity mock
-        const BaseEntityMockInstance = new (BaseEntity as jest.Mock)();
+        const BaseEntityMockInstance = new (BaseEntity as unknown as jest.Mock)() as any;
         mockAuthenticatedApiPost = BaseEntityMockInstance.authenticatedApi.post;
         mockAuthenticatedApiGet = BaseEntityMockInstance.authenticatedApi.get;
 
         // Suppress console logs
         consoleLogSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
         consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+        consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
 
         // Instantiate MissionControl (this will call its constructor and initialize server)
         missionControl = new MissionControl();
@@ -128,9 +128,9 @@ describe('MissionControl Service', () => {
             await (missionControl as any).handleMessage(mockReq, mockRes);
 
             expect(mockUuidv4).toHaveBeenCalledTimes(1);
-            expect(missionControl.missions.get(mockMissionId)).toBeDefined();
-            expect(missionControl.missions.get(mockMissionId)?.status).toBe(Status.RUNNING);
-            expect(missionControl.assignAgentToSet).toHaveBeenCalledWith(expect.stringContaining('agent-'), 'ACCOMPLISH', expect.any(Map), mockMissionId, expect.any(String));
+            expect((missionControl as any).missions.get(mockMissionId)).toBeDefined();
+            expect((missionControl as any).missions.get(mockMissionId)?.status).toBe(Status.RUNNING);
+            expect((missionControl as any).assignAgentToSet).toHaveBeenCalledWith(expect.stringContaining('agent-'), 'ACCOMPLISH', expect.any(Map), mockMissionId, expect.any(String));
             expect(mockRes.status).toHaveBeenCalledWith(200);
             expect(mockRes.send).toHaveBeenCalledWith(expect.objectContaining({ missionId: mockMissionId, status: Status.RUNNING }));
             expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('Mission created successfully'));
@@ -144,7 +144,7 @@ describe('MissionControl Service', () => {
 
             await (missionControl as any).handleMessage(mockReq, mockRes);
 
-            expect(missionControl.processMessage).toHaveBeenCalledWith(mockReq.body, undefined); // req.user is undefined in this mock
+            expect((missionControl as any).processMessage).toHaveBeenCalledWith(mockReq.body, undefined); // req.user is undefined in this mock
             expect(mockRes.status).toHaveBeenCalledWith(200);
             expect(mockRes.send).toHaveBeenCalledWith({ message: 'Message processed successfully', result: { status: 'processed' } });
         });
@@ -170,7 +170,7 @@ describe('MissionControl Service', () => {
             // Mock mqClient.publishMessage
             (missionControl as any).mqClient = {
                 isConnected: jest.fn().mockReturnValue(true),
-                publishMessage: jest.fn().mockResolvedValue(true),
+                publishMessage: (jest.fn() as any).mockResolvedValue(true),
             };
             mockMqClientPublish = (missionControl as any).mqClient.publishMessage;
         });
@@ -182,7 +182,7 @@ describe('MissionControl Service', () => {
 
             await (missionControl as any).handleQueueMessage(mockMessage);
 
-            expect(missionControl.processMessage).toHaveBeenCalledWith(mockMessage, { id: 'system' });
+            expect((missionControl as any).processMessage).toHaveBeenCalledWith(mockMessage, { id: 'system' });
             expect(mockMqClientPublish).toHaveBeenCalledWith(
                 'stage7', 'reply-q', expect.objectContaining({ type: 'RESPONSE', correlationId: 'corr-id', content: { status: 'processed' } }), expect.any(Object)
             );
@@ -204,13 +204,13 @@ describe('MissionControl Service', () => {
     });
 
     describe('processMessage', () => {
-        let mockCreateMission: jest.SpyInstance;
-        let mockPauseMission: jest.SpyInstance;
-        let mockResumeMission: jest.SpyInstance;
-        let mockAbortMission: jest.SpyInstance;
-        let mockSaveMission: jest.SpyInstance;
-        let mockLoadMission: jest.SpyInstance;
-        let mockHandleUserMessage: jest.SpyInstance;
+        let mockCreateMission: any;
+        let mockPauseMission: any;
+        let mockResumeMission: any;
+        let mockAbortMission: any;
+        let mockSaveMission: any;
+        let mockLoadMission: any;
+        let mockHandleUserMessage: any;
 
         beforeEach(() => {
             mockCreateMission = jest.spyOn(missionControl as any, 'createMission').mockResolvedValue({});
@@ -253,8 +253,8 @@ describe('MissionControl Service', () => {
         it('should process SAVE message', async () => {
             const missionId = 'mission1';
             const missionName = 'My Mission';
-            const mission: Mission = { id: missionId, name: missionName, userId: 'user1', goal: 'test', status: Status.RUNNING, createdAt: new Date(), updatedAt: new Date() };
-            missionControl.missions.set(missionId, mission);
+            const mission: Mission = { id: missionId, name: missionName, userId: 'user1', goal: 'test', status: Status.RUNNING, missionContext: 'test', createdAt: new Date(), updatedAt: new Date() };
+            (missionControl as any).missions.set(missionId, mission);
 
             const message = { type: MessageType.SAVE, missionId, missionName };
             const result = await (missionControl as any).processMessage(message, {});
@@ -306,12 +306,12 @@ describe('MissionControl Service', () => {
             expect(mission.goal).toBe(mockContent.goal);
             expect(mission.userId).toBe(mockUserId);
             expect(mission.status).toBe(Status.RUNNING);
-            expect(missionControl.missions.get(mockMissionId)).toBe(mission);
-            expect(missionControl.clientMissions.get(mockClientId)?.has(mockMissionId)).toBe(true);
-            expect(missionControl.clearActionPlanCache).toHaveBeenCalledTimes(1);
+            expect((missionControl as any).missions.get(mockMissionId)).toBe(mission);
+            expect((missionControl as any).clientMissions.get(mockClientId)?.has(mockMissionId)).toBe(true);
+            expect((missionControl as any).clearActionPlanCache).toHaveBeenCalledTimes(1);
             expect(jest.spyOn(missionControl as any, 'assignAgentToSet')).toHaveBeenCalledWith(expect.stringContaining('agent-'), 'ACCOMPLISH', expect.any(Map), mission.id, expect.any(String));
-            expect(missionControl.saveMissionState).toHaveBeenCalledWith(mission);
-            expect(missionControl.sendStatusUpdate).toHaveBeenCalledWith(mission, 'Mission started');
+            expect((missionControl as any).saveMissionState).toHaveBeenCalledWith(mission);
+            expect((missionControl as any).sendStatusUpdate).toHaveBeenCalledWith(mission, 'Mission started');
         });
 
         it('should generate default name if not provided', async () => {
@@ -330,27 +330,27 @@ describe('MissionControl Service', () => {
             expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('Error creating/starting mission'), expect.any(Error));
 
             // Verify mission status is updated to ERROR if it was in INITIALIZING
-            const failedMission = missionControl.missions.get(mockMissionId);
+            const failedMission = (missionControl as any).missions.get(mockMissionId);
             expect(failedMission?.status).toBe(Status.ERROR);
-            expect(missionControl.sendStatusUpdate).toHaveBeenCalledWith(failedMission, expect.stringContaining('Error starting mission'));
+            expect((missionControl as any).sendStatusUpdate).toHaveBeenCalledWith(failedMission, expect.stringContaining('Error starting mission'));
         });
     });
 
     describe('pauseMission', () => {
         const mockMissionId = 'mission-pause';
-        const mockMission: Mission = { id: mockMissionId, userId: 'user1', name: 'Test', goal: 'test', status: Status.RUNNING, createdAt: new Date(), updatedAt: new Date() };
+        const mockMission: Mission = { id: mockMissionId, userId: 'user1', name: 'Test', goal: 'test', status: Status.RUNNING, missionContext: 'test', createdAt: new Date(), updatedAt: new Date() };
 
         beforeEach(() => {
-            missionControl.missions.set(mockMissionId, mockMission);
+            (missionControl as any).missions.set(mockMissionId, mockMission);
             jest.spyOn(missionControl as any, 'sendStatusUpdate').mockResolvedValue(undefined);
         });
 
         it('should pause a running mission', async () => {
             jest.spyOn(missionControl as any, 'pauseAgents').mockResolvedValue(undefined); // Mock the internal method
             await (missionControl as any).pauseMission(mockMissionId);
-            expect(missionControl.missions.get(mockMissionId)?.status).toBe(Status.PAUSED);
-            expect(missionControl.pauseAgents).toHaveBeenCalledWith(mockMissionId);
-            expect(missionControl.sendStatusUpdate).toHaveBeenCalledWith(mockMission, 'Mission paused');
+            expect((missionControl as any).missions.get(mockMissionId)?.status).toBe(Status.PAUSED);
+            expect((missionControl as any).pauseAgents).toHaveBeenCalledWith(mockMissionId);
+            expect((missionControl as any).sendStatusUpdate).toHaveBeenCalledWith(mockMission, 'Mission paused');
         });
 
         it('should log error if mission not found', async () => {
@@ -361,19 +361,19 @@ describe('MissionControl Service', () => {
 
     describe('resumeMission', () => {
         const mockMissionId = 'mission-resume';
-        const mockMission: Mission = { id: mockMissionId, userId: 'user1', name: 'Test', goal: 'test', status: Status.PAUSED, createdAt: new Date(), updatedAt: new Date() };
+        const mockMission: Mission = { id: mockMissionId, userId: 'user1', name: 'Test', goal: 'test', status: Status.PAUSED, missionContext: 'test', createdAt: new Date(), updatedAt: new Date() };
 
         beforeEach(() => {
-            missionControl.missions.set(mockMissionId, mockMission);
+            (missionControl as any).missions.set(mockMissionId, mockMission);
             jest.spyOn(missionControl as any, 'sendStatusUpdate').mockResolvedValue(undefined);
         });
 
         it('should resume a paused mission', async () => {
             jest.spyOn(missionControl as any, 'resumeAgents').mockResolvedValue(undefined); // Mock the internal method
             await (missionControl as any).resumeMission(mockMissionId);
-            expect(missionControl.missions.get(mockMissionId)?.status).toBe(Status.RUNNING);
-            expect(missionControl.resumeAgents).toHaveBeenCalledWith(mockMissionId);
-            expect(missionControl.sendStatusUpdate).toHaveBeenCalledWith(mockMission, 'Mission resumed');
+            expect((missionControl as any).missions.get(mockMissionId)?.status).toBe(Status.RUNNING);
+            expect((missionControl as any).resumeAgents).toHaveBeenCalledWith(mockMissionId);
+            expect((missionControl as any).sendStatusUpdate).toHaveBeenCalledWith(mockMission, 'Mission resumed');
         });
 
         it('should log error if mission not found', async () => {
@@ -384,11 +384,11 @@ describe('MissionControl Service', () => {
 
     describe('abortMission', () => {
         const mockMissionId = 'mission-abort';
-        const mockMission: Mission = { id: mockMissionId, userId: 'user1', name: 'Test', goal: 'test', status: Status.RUNNING, createdAt: new Date(), updatedAt: new Date() };
+        const mockMission: Mission = { id: mockMissionId, userId: 'user1', name: 'Test', goal: 'test', status: Status.RUNNING, missionContext: 'test', createdAt: new Date(), updatedAt: new Date() };
 
         beforeEach(() => {
-            missionControl.missions.set(mockMissionId, mockMission);
-            missionControl.addClientMission('client1', mockMissionId);
+            (missionControl as any).missions.set(mockMissionId, mockMission);
+            (missionControl as any).addClientMission('client1', mockMissionId);
             jest.spyOn(missionControl as any, 'sendStatusUpdate').mockResolvedValue(undefined);
             jest.spyOn(missionControl as any, 'removeClientMission').mockResolvedValue(undefined);
         });
@@ -396,11 +396,11 @@ describe('MissionControl Service', () => {
         it('should abort a mission', async () => {
             jest.spyOn(missionControl as any, 'abortAgents').mockResolvedValue(undefined); // Mock the internal method
             await (missionControl as any).abortMission(mockMissionId);
-            expect(missionControl.missions.get(mockMissionId)).toBeUndefined();
-            expect(missionControl.clientMissions.get('client1')?.has(mockMissionId)).toBe(false);
-            expect(missionControl.abortAgents).toHaveBeenCalledWith(mockMissionId);
-            expect(missionControl.sendStatusUpdate).toHaveBeenCalledWith(mockMission, 'Mission aborted');
-            expect(missionControl.removeClientMission).toHaveBeenCalledWith('client1', mockMissionId);
+            expect((missionControl as any).missions.get(mockMissionId)).toBeUndefined();
+            expect((missionControl as any).clientMissions.get('client1')?.has(mockMissionId)).toBe(false);
+            expect((missionControl as any).abortAgents).toHaveBeenCalledWith(mockMissionId);
+            expect((missionControl as any).sendStatusUpdate).toHaveBeenCalledWith(mockMission, 'Mission aborted');
+            expect((missionControl as any).removeClientMission).toHaveBeenCalledWith('client1', mockMissionId);
         });
 
         it('should log error if mission not found', async () => {
@@ -413,7 +413,7 @@ describe('MissionControl Service', () => {
         const mockMissionId = 'mission-load';
         const mockClientId = 'client-load';
         const mockUserId = 'user-load';
-        const mockLoadedMission: Mission = { id: mockMissionId, userId: mockUserId, name: 'Loaded', goal: 'load', status: Status.RUNNING, createdAt: new Date(), updatedAt: new Date() };
+        const mockLoadedMission: Mission = { id: mockMissionId, userId: mockUserId, name: 'Loaded', goal: 'load', status: Status.RUNNING, missionContext: 'test', createdAt: new Date(), updatedAt: new Date() };
 
         beforeEach(() => {
             jest.spyOn(missionControl as any, 'loadMissionState').mockResolvedValue(mockLoadedMission);
@@ -426,11 +426,11 @@ describe('MissionControl Service', () => {
 
             const mission = await (missionControl as any).loadMission(mockMissionId, mockClientId, mockUserId);
 
-            expect(missionControl.loadMissionState).toHaveBeenCalledWith(mockMissionId);
-            expect(missionControl.missions.get(mockMissionId)).toBe(mockLoadedMission);
-            expect(missionControl.loadAgents).toHaveBeenCalledWith(mockMissionId);
-            expect(missionControl.addClientMission).toHaveBeenCalledWith(mockClientId, mockMissionId);
-            expect(missionControl.sendStatusUpdate).toHaveBeenCalledWith(mockLoadedMission, expect.stringContaining('Mission loaded'));
+            expect((missionControl as any).loadMissionState).toHaveBeenCalledWith(mockMissionId);
+            expect((missionControl as any).missions.get(mockMissionId)).toBe(mockLoadedMission);
+            expect((missionControl as any).loadAgents).toHaveBeenCalledWith(mockMissionId);
+            expect((missionControl as any).addClientMission).toHaveBeenCalledWith(mockClientId, mockMissionId);
+            expect((missionControl as any).sendStatusUpdate).toHaveBeenCalledWith(mockLoadedMission, expect.stringContaining('Mission loaded'));
             expect(mission).toBe(mockLoadedMission);
         });
 
@@ -456,10 +456,10 @@ describe('MissionControl Service', () => {
 
     describe('saveMission', () => {
         const mockMissionId = 'mission-save';
-        const mockMission: Mission = { id: mockMissionId, userId: 'user1', name: 'Original', goal: 'test', status: Status.RUNNING, createdAt: new Date(), updatedAt: new Date() };
+        const mockMission: Mission = { id: mockMissionId, userId: 'user1', name: 'Original', goal: 'test', status: Status.RUNNING, missionContext: 'test', createdAt: new Date(), updatedAt: new Date() };
 
         beforeEach(() => {
-            missionControl.missions.set(mockMissionId, mockMission);
+            (missionControl as any).missions.set(mockMissionId, mockMission);
             jest.spyOn(missionControl as any, 'saveMissionState').mockResolvedValue(undefined);
             jest.spyOn(missionControl as any, 'sendStatusUpdate').mockResolvedValue(undefined);
         });
@@ -467,15 +467,15 @@ describe('MissionControl Service', () => {
         it('should save mission state and agents', async () => {
             jest.spyOn(missionControl as any, 'saveAgents').mockResolvedValue(undefined); // Mock the internal method
             await (missionControl as any).saveMission(mockMissionId);
-            expect(missionControl.saveMissionState).toHaveBeenCalledWith(mockMission);
-            expect(missionControl.saveAgents).toHaveBeenCalledWith(mockMissionId);
-            expect(missionControl.sendStatusUpdate).toHaveBeenCalledWith(mockMission, expect.stringContaining('Mission saved'));
+            expect((missionControl as any).saveMissionState).toHaveBeenCalledWith(mockMission);
+            expect((missionControl as any).saveAgents).toHaveBeenCalledWith(mockMissionId);
+            expect((missionControl as any).sendStatusUpdate).toHaveBeenCalledWith(mockMission, expect.stringContaining('Mission saved'));
         });
 
         it('should update mission name if provided', async () => {
             await (missionControl as any).saveMission(mockMissionId, 'Updated Name');
             expect(mockMission.name).toBe('Updated Name');
-            expect(missionControl.saveMissionState).toHaveBeenCalledWith(mockMission);
+            expect((missionControl as any).saveMissionState).toHaveBeenCalledWith(mockMission);
         });
 
         it('should log error if mission not found', async () => {
@@ -495,10 +495,10 @@ describe('MissionControl Service', () => {
         const mockMissionId = 'mission-user-message';
         const mockClientId = 'client-user-message';
         const mockMessageContent = 'Hello agent';
-        const mockMission: Mission = { id: mockMissionId, userId: 'user1', name: 'Test', goal: 'test', status: Status.RUNNING, createdAt: new Date(), updatedAt: new Date() };
+        const mockMission: Mission = { id: mockMissionId, userId: 'user1', name: 'Test', goal: 'test', status: Status.RUNNING, missionContext: 'test', createdAt: new Date(), updatedAt: new Date() };
 
         beforeEach(() => {
-            missionControl.missions.set(mockMissionId, mockMission);
+            (missionControl as any).missions.set(mockMissionId, mockMission);
             jest.spyOn(missionControl as any, 'sendStatusUpdate').mockResolvedValue(undefined);
         });
 
@@ -507,7 +507,7 @@ describe('MissionControl Service', () => {
 
             await (missionControl as any).handleUserMessage({ missionId: mockMissionId, message: mockMessageContent }, mockClientId, mockMissionId);
 
-            expect(missionControl.distributeUserMessage).toHaveBeenCalledWith(expect.objectContaining({
+            expect((missionControl as any).distributeUserMessage).toHaveBeenCalledWith(expect.objectContaining({
                 body: {
                     type: MessageType.USER_MESSAGE,
                     sender: 'user',
@@ -516,7 +516,7 @@ describe('MissionControl Service', () => {
                     clientId: mockClientId,
                 }
             }));
-            expect(missionControl.sendStatusUpdate).toHaveBeenCalledWith(mockMission, 'User message received and sent to agents');
+            expect((missionControl as any).sendStatusUpdate).toHaveBeenCalledWith(mockMission, 'User message received and sent to agents');
         });
 
         it('should log error if mission not found', async () => {
@@ -547,7 +547,7 @@ describe('MissionControl Service', () => {
     });
 
     describe('saveMissionState', () => {
-        const mockMission: Mission = { id: 'mission-save-state', userId: 'user1', name: 'Test', goal: 'test', status: Status.RUNNING, createdAt: new Date(), updatedAt: new Date() };
+        const mockMission: Mission = { id: 'mission-save-state', userId: 'user1', name: 'Test', goal: 'test', status: Status.RUNNING, missionContext: 'test', createdAt: new Date(), updatedAt: new Date() };
 
         it('should save mission state to Librarian', async () => {
             await (missionControl as any).saveMissionState(mockMission);
@@ -570,7 +570,7 @@ describe('MissionControl Service', () => {
 
     describe('loadMissionState', () => {
         const mockMissionId = 'mission-load-state';
-        const mockLoadedMission: Mission = { id: mockMissionId, userId: 'user1', name: 'Loaded', goal: 'load', status: Status.RUNNING, createdAt: new Date(), updatedAt: new Date() };
+        const mockLoadedMission: Mission = { id: mockMissionId, userId: 'user1', name: 'Loaded', goal: 'load', status: Status.RUNNING, missionContext: 'test', createdAt: new Date(), updatedAt: new Date() };
 
         it('should load mission state from Librarian', async () => {
             mockAuthenticatedApiGet.mockResolvedValueOnce({ data: { data: mockLoadedMission } });
@@ -595,11 +595,11 @@ describe('MissionControl Service', () => {
     });
 
     describe('sendStatusUpdate', () => {
-        const mockMission: Mission = { id: 'mission-status', userId: 'user1', name: 'Test', goal: 'test', status: Status.RUNNING, createdAt: new Date(), updatedAt: new Date() };
+        const mockMission: Mission = { id: 'mission-status', userId: 'user1', name: 'Test', goal: 'test', status: Status.RUNNING, missionContext: 'test', createdAt: new Date(), updatedAt: new Date() };
         const mockClientId = 'client-status';
 
         beforeEach(() => {
-            missionControl.addClientMission(mockClientId, mockMission.id);
+            (missionControl as any).addClientMission(mockClientId, mockMission.id);
         });
 
         it('should send status update to client via PostOffice', async () => {
@@ -627,16 +627,17 @@ describe('MissionControl Service', () => {
         const mockReq = { body: { agentId: mockAgentId, missionId: mockMissionId, statistics: mockStatistics, timestamp: new Date().toISOString() } } as express.Request;
         const mockRes = { status: jest.fn().mockReturnThis(), send: jest.fn() } as unknown as express.Response;
 
-        const mockMission: Mission = { id: mockMissionId, userId: 'user1', name: 'Test', goal: 'test', status: Status.RUNNING, createdAt: new Date(), updatedAt: new Date() };
+        const mockMission: Mission = { id: mockMissionId, userId: 'user1', name: 'Test', goal: 'test', status: Status.RUNNING, missionContext: 'test', createdAt: new Date(), updatedAt: new Date() };
 
         beforeEach(() => {
             mockUuidValidate.mockReturnValue(true);
-            missionControl.missions.set(mockMissionId, mockMission);
-            missionControl.addClientMission('client1', mockMissionId);
+            (missionControl as any).missions.set(mockMissionId, mockMission);
+            (missionControl as any).addClientMission('client1', mockMissionId);
 
             mockAuthenticatedApiGet.mockResolvedValueOnce({ data: { llmCalls: 10, activeLLMCalls: 2 } }); // Brain LLM calls
             mockAuthenticatedApiGet.mockResolvedValueOnce({ data: { newPlugins: ['plugin1'] } }); // Engineer stats
             jest.spyOn(missionControl as any, 'getAgentStatistics').mockResolvedValue({ agentStatisticsByType: { agentCountByStatus: { RUNNING: 1 } }, agentsByStatus: new Map([['RUNNING', [{ id: 'agent1', steps: [] }]]]) }); // MissionControl stats
+        });
 
         it('should process agent statistics update and send to client', async () => {
             await (missionControl as any).handleAgentStatisticsUpdate(mockReq, mockRes);
@@ -644,7 +645,8 @@ describe('MissionControl Service', () => {
             expect(mockUuidValidate).toHaveBeenCalledWith(mockMissionId);
             expect(mockAuthenticatedApiGet).toHaveBeenCalledWith(expect.stringContaining('/getLLMCalls'));
             expect(mockAuthenticatedApiGet).toHaveBeenCalledWith(expect.stringContaining('/statistics'));
-            expect(missionControl.getAgentStatistics).toHaveBeenCalledWith(mockMissionId);
+            expect((missionControl as any).getAgentStatistics).toHaveBeenCalledWith(mockMissionId);
+            expect(mockAuthenticatedApiPost).toHaveBeenCalledWith(expect.stringContaining('/message'), expect.objectContaining({
                 type: MessageType.STATISTICS,
                 clientId: 'client1',
                 content: expect.objectContaining({
@@ -674,7 +676,7 @@ describe('MissionControl Service', () => {
 
         it('should initiate reflection if mission is completed/errored and no running agents', async () => {
             const completedMission: Mission = { ...mockMission, status: Status.COMPLETED };
-            missionControl.missions.set(mockMissionId, completedMission);
+            (missionControl as any).missions.set(mockMissionId, completedMission);
             jest.spyOn(missionControl as any, 'reflectOnMission').mockResolvedValue(undefined);
 
             mockAuthenticatedApiGet.mockResolvedValueOnce({ data: { llmCalls: 10 } }); // Brain LLM calls
@@ -683,14 +685,14 @@ describe('MissionControl Service', () => {
 
             await (missionControl as any).handleAgentStatisticsUpdate(mockReq, mockRes);
 
-            expect(missionControl.reflectOnMission).toHaveBeenCalledWith(completedMission);
+            expect((missionControl as any).reflectOnMission).toHaveBeenCalledWith(completedMission);
             expect(completedMission.status).toBe(Status.REFLECTING);
         });
     });
 
     describe('reflectOnMission', () => {
         const mockMissionId = 'mission-reflect';
-        const mockMission: Mission = { id: mockMissionId, userId: 'user1', name: 'Test', goal: 'test', status: Status.COMPLETED, createdAt: new Date(), updatedAt: new Date() };
+        const mockMission: Mission = { id: mockMissionId, userId: 'user1', name: 'Test', goal: 'test', status: Status.COMPLETED, missionContext: 'test', createdAt: new Date(), updatedAt: new Date() };
 
         beforeEach(() => {
             jest.spyOn(missionControl as any, 'getServiceUrls').mockResolvedValue({
@@ -714,7 +716,7 @@ describe('MissionControl Service', () => {
                 actionVerb: 'REFLECT',
                 inputValues: expect.any(String), // Serialized Map
             }));
-            expect(missionControl.sendStatusUpdate).toHaveBeenCalledWith(mockMission, expect.stringContaining('Reflection complete. New plan generated.'));
+            expect((missionControl as any).sendStatusUpdate).toHaveBeenCalledWith(mockMission, expect.stringContaining('Reflection complete. New plan generated.'));
             expect(mockMission.status).toBe(Status.RUNNING); // Status updated to RUNNING
         });
 
@@ -724,7 +726,7 @@ describe('MissionControl Service', () => {
 
             await (missionControl as any).reflectOnMission(mockMission);
 
-            expect(missionControl.sendStatusUpdate).toHaveBeenCalledWith(mockMission, expect.stringContaining('Reflection complete: Mission accomplished!'));
+            expect((missionControl as any).sendStatusUpdate).toHaveBeenCalledWith(mockMission, expect.stringContaining('Reflection complete: Mission accomplished!'));
             expect(mockMission.status).toBe(Status.COMPLETED);
         });
 
@@ -735,18 +737,18 @@ describe('MissionControl Service', () => {
 
             expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining('Error during reflection'), expect.any(Error));
             expect(mockMission.status).toBe(Status.ERROR);
-            expect(missionControl.sendStatusUpdate).toHaveBeenCalledWith(mockMission, 'Reflection process failed.');
+            expect((missionControl as any).sendStatusUpdate).toHaveBeenCalledWith(mockMission, 'Reflection process failed.');
         });
     });
 
     describe('getAndPushAgentStatistics', () => {
         const mockMissionId = 'mission-periodic-stats';
         const mockClientId = 'client-periodic-stats';
-        const mockMission: Mission = { id: mockMissionId, userId: 'user1', name: 'Test', goal: 'test', status: Status.RUNNING, createdAt: new Date(), updatedAt: new Date() };
+        const mockMission: Mission = { id: mockMissionId, userId: 'user1', name: 'Test', goal: 'test', status: Status.RUNNING, missionContext: 'test', createdAt: new Date(), updatedAt: new Date() };
 
         beforeEach(() => {
-            missionControl.missions.set(mockMissionId, mockMission);
-            missionControl.addClientMission(mockClientId, mockMissionId);
+            (missionControl as any).missions.set(mockMissionId, mockMission);
+            (missionControl as any).addClientMission(mockClientId, mockMissionId);
             jest.spyOn(missionControl as any, 'sendStatusUpdate').mockResolvedValue(undefined);
             jest.spyOn(missionControl as any, 'reflectOnMission').mockResolvedValue(undefined);
 
@@ -760,7 +762,7 @@ describe('MissionControl Service', () => {
 
             expect(mockAuthenticatedApiGet).toHaveBeenCalledWith(expect.stringContaining('/getLLMCalls'));
             expect(mockAuthenticatedApiGet).toHaveBeenCalledWith(expect.stringContaining('/statistics'));
-            expect(missionControl.getAgentStatistics).toHaveBeenCalledWith(mockMissionId);
+            expect((missionControl as any).getAgentStatistics).toHaveBeenCalledWith(mockMissionId);
             expect(mockAuthenticatedApiPost).toHaveBeenCalledWith(expect.stringContaining('/message'), expect.objectContaining({
                 type: MessageType.STATISTICS,
                 clientId: mockClientId,
@@ -821,7 +823,7 @@ describe('MissionControl Service', () => {
 
             await (missionControl as any).handleUserInputResponse(mockReq, mockRes);
 
-            expect(missionControl.resumeStepWithUserInput).toHaveBeenCalledWith(mockMissionId, mockStepId, mockAgentId, mockResponse);
+            expect((missionControl as any).resumeStepWithUserInput).toHaveBeenCalledWith(mockMissionId, mockStepId, mockAgentId, mockResponse);
             expect((missionControl as any).pendingUserInputs.has(mockRequestId)).toBe(false);
             expect(mockRes.status).toHaveBeenCalledWith(200);
             expect(mockRes.send).toHaveBeenCalledWith({ message: 'User input processed' });
@@ -862,7 +864,7 @@ describe('MissionControl Service', () => {
 
             await (missionControl as any).resumeStepWithUserInput(mockMissionId, mockStepId, mockAgentId, mockUserInput);
 
-            expect(missionControl.sendMessageToAgent).toHaveBeenCalledWith(mockAgentId, expect.objectContaining({
+            expect((missionControl as any).sendMessageToAgent).toHaveBeenCalledWith(mockAgentId, expect.objectContaining({
                 type: MessageType.USER_INPUT_RESPONSE,
                 sender: missionControl.id,
                 recipient: mockAgentId,
