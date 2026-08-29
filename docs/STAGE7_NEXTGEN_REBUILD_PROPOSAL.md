@@ -140,17 +140,42 @@ A critical evaluation of previous refactoring attempts (e.g., `modernization_pro
 2. **Mock-Heavy Abstraction Leaks**: SDK enhancements (such as `HttpCoreEngineClient`) added unimplemented placeholder methods (`// TODO: Implement when L1 provides...`) and silent fallback mocks rather than true integration tests.
 3. **Layer Coupling Violations**: Higher-level SDK abstractions became tightly bound to lower-level infrastructure setups (such as hardcoded per-assistant port numbers), causing local dev setup failures and workspace test brittleness.
 
-### 6.2 Architectural Risk Mitigation Framework
+### 6.2 Architectural Risk Mitigation Framework (Greenfield Clean Slate)
 
-To guarantee that Stage7 NextGen avoids repeating these failure modes, the rebuild enforces five strict architectural safeguards:
+Since there are no active production instances of Stage7, the rebuild adopts a **Greenfield Clean-Slate Strategy**. We are not constrained by backward compatibility or legacy migrations and can replace outdated message-passing architectures whole cloth.
 
-| Risk Factor | Past Refactoring Failure Mode | NextGen Safeguard & Mitigation Strategy |
+The rebuild enforces five strict architectural safeguards to avoid past refactoring failure modes:
+
+| Risk Factor | Past Refactoring Failure Mode | NextGen Clean-Slate Mitigation Strategy |
 |---|---|---|
-| **Service Contracts** | Silent failures via unimplemented mock fallbacks | **Contract-Driven API Schemas**: Strict OpenAPI / gRPC contract generation between L1, L2, L3, and L4. Mocks are forbidden in production builds. |
-| **Migration Path** | Big-bang replacement of PostOffice / RabbitMQ | **Dual-Read / Adapter Pattern**: Dual-adapter bridge where legacy plugins & `QuickAssistant` instances execute side-by-side with new MCP worker instances during migration. |
-| **Testing Durability** | Broken local Jest setups and untested async paths | **Mandatory E2E Integration Gates**: Integration test suite verifying multi-service state transitions prior to merging any core engine refactor. |
+| **Service Contracts** | Silent failures via unimplemented mock fallbacks | **Contract-Driven API Schemas**: Strict OpenAPI / gRPC contract generation between L1, L2, L3, and L4. Mocks are completely eliminated. |
+| **Clean Architecture** | Maintaining dual-read legacy bridges | **Zero-Legacy Clean Break**: Complete replacement of PostOffice/RabbitMQ with a unified event broker and Temporal workflow engine. |
+| **Testing Durability** | Broken local Jest setups and untested async paths | **Mandatory E2E Integration Gates**: Automated integration test suite verifying multi-service state transitions before deployment. |
 | **State Consistency** | Ephemeral MongoDB/Redis state drops | **Transactional Saga Rollbacks**: Temporal workflow activities execute atomic state updates with explicit compensation steps for failed tool calls. |
-| **SDK Stability** | Breaking changes to `QuickAssistant` interfaces | **Zero-Downtime ADK Compatibility Layer**: The L2 ADK `createQuickAssistant` interface remains 100% backward compatible; internal transport details are hidden behind standard adapters. |
+| **Developer DX** | Fragmented SDK patterns & port clutter | **Single Unified SDK**: Streamlined ADK client interfacing directly with the Unified Control Plane API gateway. |
+
+---
+
+## 7. Why Stage7 NextGen? Strategic Differentiators vs. Existing Frameworks
+
+With numerous agent frameworks on the market (e.g., LangGraph, CrewAI, AutoGen, LlamaIndex Workflows), Stage7 NextGen distinguishes itself by serving a unique market positioning: **A Self-Evolving, Entity-Centric Agent OS for Personal Autonomy and Scalable Control**.
+
+### 7.1 Key Differentiators
+
+1. **Self-Evolving & Self-Healing Runtime Engine**:
+   - Unlike static agent frameworks where tool integration requires manual coding, Stage7 NextGen retains its core genetic advantage: **Active AI Code Generation & Dynamic Self-Healing**.
+   - When an agent encounters missing capabilities or runtime errors, the built-in Engineer/ErrorHandler module generates, tests, and deploys new MCP tools dynamically at runtime without restarting system containers.
+
+2. **Single-User Autonomy to Enterprise Control Continuum**:
+   - Existing frameworks force a trade-off: lightweight single-user script libraries (LangGraph/CrewAI) vs. heavy enterprise SaaS platforms.
+   - Stage7 NextGen runs effortlessly as a **lightweight, self-hosted personal AI assistant OS** on a single laptop/server, while possessing the architecture to instantly scale to multi-tenant deployment without rewriting agent logic.
+
+3. **Entity-Centric Co-Creation Canvas**:
+   - Most frameworks treat UX as a secondary chat box or raw execution log viewer.
+   - Stage7 NextGen introduces a **Live Entity Desk & Co-Creation Canvas**: persistent, stateful digital colleagues that collaborate side-by-side with human users on live interactive artifacts (code, documentation, media, architecture diagrams) with real-time inner-monologue streaming.
+
+4. **Native Tool Standard (MCP-First Engine)**:
+   - Rather than inventing another proprietary tool schema, Stage7 NextGen builds natively on Anthropic's Model Context Protocol (MCP) as its core tool primitive. Any tool written for Stage7 is instantly usable across the global MCP ecosystem, and vice versa.
 
 ---
 
