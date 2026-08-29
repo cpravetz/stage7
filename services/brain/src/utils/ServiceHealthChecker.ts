@@ -33,23 +33,16 @@ export class ServiceHealthChecker {
     }
 
     /**
-     * Load credential from AWS Secrets Manager
-     */
-    private async loadFromAwsSecretsManager(credentialName: string): Promise<string | null> {
-        try {
-            // In production, use AWS SDK: import { SecretsManagerClient, GetSecretValueCommand } from "@aws-sdk/client-secrets-manager";
-            // For now, use environment variable as fallback
-            const value = process.env[credentialName];
-            if (!value) {
-                console.warn(`[Health Check] Credential ${credentialName} not found in environment (AWS Secrets Manager fallback)`);
-                return null;
-            }
-            return value;
-        } catch (error) {
-            console.error(`[Health Check] Failed to load from AWS Secrets Manager:`, error);
-            return null;
-        }
-    }
+      * Load credential from AWS Secrets Manager
+      */
+     private async loadFromAwsSecretsManager(credentialName: string): Promise<string | null> {
+         try {
+             return this.loadFromEnvironment(credentialName);
+         } catch (error) {
+             console.error(`[Health Check] Failed to load from AWS Secrets Manager:`, error);
+             return null;
+         }
+     }
 
     /**
      * Load credential from HashiCorp Vault
@@ -80,11 +73,39 @@ export class ServiceHealthChecker {
     }
 
     /**
-     * Load credential from environment variable
-     */
-    private loadFromEnvironment(credentialName: string): string | null {
-        return process.env[credentialName] || null;
-    }
+      * Load credential from environment variable
+      */
+     private loadFromEnvironment(credentialName: string): string | null {
+         const providerEnvMap: Record<string, string> = {
+             'groq': 'GROQ_API_KEY',
+             'anthropic': 'ANTHROPIC_API_KEY',
+             'openai': 'OPENAI_API_KEY',
+             'google': 'GEMINI_API_KEY',
+             'gemini': 'GEMINI_API_KEY',
+             'mistral': 'MISTRAL_API_KEY',
+             'huggingface': 'HUGGINGFACE_API_KEY',
+             'openrouter': 'OPENROUTER_API_KEY',
+             'openwebui': 'OPENWEBUI_API_KEY',
+             'openweb': 'OPENWEBUI_API_KEY',
+             'cloudflare': 'CLOUDFLARE_WORKERS_AI_API_TOKEN',
+             'aiml': 'AIML_API_KEY',
+             'gg': 'GEMINI_API_KEY',
+         };
+
+         const normalizedKey = credentialName.toLowerCase().replace(/-/g, '');
+         const mappedEnvVar = Object.entries(providerEnvMap).find(([key]) => normalizedKey.includes(key))?.[1];
+         
+         if (mappedEnvVar && process.env[mappedEnvVar]) {
+             return process.env[mappedEnvVar];
+         }
+
+         const upperName = credentialName.toUpperCase();
+         if (process.env[upperName]) {
+             return process.env[upperName];
+         }
+
+         return process.env[credentialName] || null;
+     }
 
     /**
      * Validate model credentials are available and working
@@ -240,16 +261,22 @@ export class ServiceHealthChecker {
             let errorType = 'other';
             if (errorMessage.includes('timeout')) {
                 errorType = 'timeout';
+            } else if (errorMessage.includes('ENOTFOUND') || errorMessage.includes('ECONNREFUSED') || errorMessage.includes('ECONNRESET') || errorMessage.includes('EAI_AGAIN')) {
+                errorType = 'network';
             } else if (errorMessage.includes('Unauthorized') || errorMessage.includes('401')) {
                 errorType = 'auth_failed';
             } else if (errorMessage.includes('429') || errorMessage.includes('rate')) {
                 errorType = 'rate_limited';
             }
 
+            // Transient network errors should be degraded, not unavailable
+            const status = (errorType === 'network' || errorType === 'timeout') ? 'degraded' : 'unavailable';
+
             return {
                 success: false,
                 error: errorMessage,
-                errorType
+                errorType,
+                status
             };
         }
     }
@@ -265,13 +292,15 @@ export class ServiceHealthChecker {
         errorCount: number = 0,
         duration: number = 0
     ) {
+        const credentialValid = status !== 'unavailable' && errorType !== 'auth_failed';
+
         const healthStatus: ServiceHealthStatus = {
             modelName,
             status,
             lastChecked: new Date().toISOString(),
             checksDuration: duration,
             errorCount,
-            credentialValid: status !== 'unavailable',
+            credentialValid,
             credentialValidatedAt: new Date().toISOString(),
             errorType: errorType as any,
             errorMessage: reason

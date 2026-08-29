@@ -156,6 +156,14 @@ export class MissionControl extends BaseEntity {
             });
         });
 
+        app.get('/health', (req, res) => {
+            res.status(200).send('OK');
+        });
+
+        app.get('/ready', (req, res) => {
+            res.status(200).send('OK');
+        });
+
         app.listen(this.port, () => {
             console.log(`MissionControl is running on port ${this.port}`);
         });
@@ -377,7 +385,7 @@ export class MissionControl extends BaseEntity {
                 break;
             case MessageType.RESUME:
                 if (missionId) {
-                    await this.resumeMission(missionId);
+                    await this.resumeMission(missionId, clientId);
                     return { missionId, status: 'resumed' };
                 }
                 break;
@@ -402,7 +410,17 @@ export class MissionControl extends BaseEntity {
                 const missions = await this.listMissions(effectiveUserId);
                 return { status: 'listed', missions: missions };
             case MessageType.USER_MESSAGE:
-                const missionForMessage = missionId ? this.missions.get(missionId) : null;
+                let missionForMessage = missionId ? this.missions.get(missionId) : null;
+                if (!missionForMessage) {
+                    console.log(`Mission ${missionId} not in memory, attempting to load from persistence...`);
+                    missionForMessage = await this.loadMissionState(missionId);
+                    if (missionForMessage) {
+                        this.missions.set(missionId, missionForMessage);
+                        console.log(`Mission ${missionId} loaded from persistence`);
+                        await agentSetManager.loadAgents(missionId);
+                        console.log(`Agents loaded for mission ${missionId}`);
+                    }
+                }
                 if (missionForMessage) {
                     try {
                         // Distribute the user message directly via AgentSetManager
@@ -651,10 +669,21 @@ export class MissionControl extends BaseEntity {
         }
     }
 
-    private async resumeMission(missionId: string) {
-        const mission = this.missions.get(missionId);
+    private async resumeMission(missionId: string, clientId?: string) {
+        let mission = this.missions.get(missionId);
+        if (!mission) {
+            const loadedMission = await this.loadMissionState(missionId);
+            if (loadedMission) {
+                this.missions.set(missionId, loadedMission);
+                mission = loadedMission;
+                await agentSetManager.loadAgents(missionId);
+            }
+        }
         if (mission) {
             mission.status = Status.RUNNING;
+            if (clientId) {
+                this.addClientMission(clientId, missionId);
+            }
             await agentSetManager.resumeAgents(missionId);
             this.sendStatusUpdate(mission, 'Mission resumed');
         } else {

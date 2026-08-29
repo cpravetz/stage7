@@ -148,6 +148,7 @@ export class WebSocketHandler {
                       type: MessageType.RESUME,
                       sender: 'PostOffice',
                       recipient: 'MissionControl',
+                      clientId: clientId,
                       content: {
                         type: 'resume',
                         action: 'resume',

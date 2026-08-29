@@ -32,7 +32,6 @@ const port = process.env.PORT || 5070;
 
 export class Brain extends BaseEntity {
     private modelManager: ModelManager;
-    private llmCalls: number = 0;
     private activeLLMCalls: number = 0;
     private modelFailureCounts: { 
         [key: string]: { 
@@ -86,8 +85,8 @@ export class Brain extends BaseEntity {
 
         // Use BaseEntity's verifyToken method which already handles health check bypassing
         app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
-            // Allow admin endpoints, chat, feedback, and reportLogicFailure without authentication
-            if (req.path === '/chat' || req.path === '/feedback' || req.path === '/reportLogicFailure' || req.path.startsWith('/admin/')) {
+            // Allow admin endpoints, chat, feedback, reportLogicFailure, getLLMCalls, and models without authentication
+            if (req.path === '/chat' || req.path === '/feedback' || req.path === '/reportLogicFailure' || req.path === '/getLLMCalls' || req.path === '/models' || req.path.startsWith('/admin/')) {
                 return next();
             }
             // BaseEntity.verifyToken already handles health check endpoints
@@ -362,7 +361,28 @@ export class Brain extends BaseEntity {
         });
 
         app.get('/getLLMCalls', (_req: express.Request, res: express.Response) => {
-            res.json({ llmCalls: this.llmCalls, activeLLMCalls: this.activeLLMCalls});
+            // Derive the count from the performance tracker so it always matches
+            // the totals summed on the performance dashboard.
+            res.json({
+                llmCalls: this.modelManager.performanceTracker.getTotalUsageCount(),
+                activeLLMCalls: this.activeLLMCalls
+            });
+        });
+
+        app.get('/performance', (_req: express.Request, res: express.Response) => {
+            try {
+                // Return the LIVE performance data so the dashboard totals always
+                // agree with the llmCalls counter (which reads the same tracker).
+                const allModels = this.loadedModels.map(m => ({
+                    name: m.name,
+                    contentConversation: m.supportedConversationTypes
+                }));
+                const performanceData = this.modelManager.performanceTracker.getAllPerformanceData(allModels as any);
+                res.json({ success: true, performanceData });
+            } catch (error) {
+                console.error('[Brain] Error returning performance data:', error instanceof Error ? error.message : String(error));
+                res.status(500).json({ error: 'Failed to return performance data' });
+            }
         });
 
         app.get('/models', (_req: express.Request, res: express.Response) => {
@@ -424,15 +444,21 @@ export class Brain extends BaseEntity {
      * Initialize models: hydrate if needed, load configs, validate credentials
      */
     private async checkAndTriggerDiscovery(): Promise<void> {
-        if (this.isDiscoveryRunning) return;
+        if (this.isDiscoveryRunning) {
+            console.log('[Brain] Discovery already running, skipping');
+            return;
+        }
 
         try {
             const lastDiscovery = await this.configService.getLastDiscoveryTimestamp();
-            const oneDayMs = 24 * 60 * 60 * 1000;
+            const oneHourMs = 1 * 60 * 60 * 1000;
+            const needsDiscovery = Date.now() - lastDiscovery > oneHourMs || lastDiscovery === 0;
 
-            if (Date.now() - lastDiscovery > oneDayMs) {
+            console.log(`[Brain] Discovery check: lastDiscovery=${lastDiscovery}, now=${Date.now()}, needsDiscovery=${needsDiscovery}`);
+
+            if (needsDiscovery) {
                 this.isDiscoveryRunning = true;
-                console.log('[Brain] More than 24h since last model discovery. Triggering background update...');
+                console.log(`[Brain] Triggering model discovery (lastDiscovery=${lastDiscovery === 0 ? 'never' : '>1h ago'})...`);
 
                 // Run in background
                 this.discoveryService.discoverAllModels().then(async () => {
@@ -440,6 +466,7 @@ export class Brain extends BaseEntity {
                     // Refresh in-memory models after discovery
                     this.loadedModels = await this.configService.getActiveModels();
                     await this.modelManager.registerModelsFromConfig(this.loadedModels);
+                    console.log(`[Brain] Model discovery complete, ${this.loadedModels.length} active models loaded`);
                 }).catch(err => {
                     console.error('[Brain] Background model discovery failed:', err);
                 }).finally(() => {
@@ -492,6 +519,9 @@ export class Brain extends BaseEntity {
 
             console.log('[Brain] Model initialization complete');
 
+            // Step 3.5: Trigger initial model discovery in background to refresh from live providers
+            this.checkAndTriggerDiscovery();
+
             // Step 4: Register with Consul now that we're fully initialized
             console.log('[Brain] Registering with Consul...');
             try {
@@ -523,6 +553,12 @@ export class Brain extends BaseEntity {
         const conversationType = req.body.type || req.body.conversationType || LLMConversationType.TextToText; // Use 'type' from agent request if present
         const promptFromAgent = req.body.prompt;
         const contentType = req.body.contentType || this.determineMimeType(promptFromAgent); // Ensure contentType is present
+
+        // Estimate token count (heuristic: 1 token ~= 4 characters) so model
+        // selection can avoid models whose context window is too small for the prompt.
+        const estimatedTokens = typeof promptFromAgent === 'string'
+            ? promptFromAgent.length / 4
+            : (promptFromAgent ? JSON.stringify(promptFromAgent).length / 4 : 0);
 
         console.log(`[Brain Generate] Request params - modelName: ${modelNameRequest || 'none'}, optimization: ${optimization}, conversationType: ${conversationType}, contentType: ${contentType}`);
 
@@ -557,7 +593,8 @@ export class Brain extends BaseEntity {
                         selectedModel = this.modelManager.selectModel(
                             optimization, 
                             conversationType, 
-                            excludedModels
+                            excludedModels,
+                            estimatedTokens
                         );
                         
                         // Filter to only configured available models
@@ -570,7 +607,7 @@ export class Brain extends BaseEntity {
                 
                 // Fallback to original logic for backward compatibility
                 if (!selectedModel) {
-                    selectedModel = this.modelManager.selectModel(optimization, conversationType, excludedModels);
+                    selectedModel = this.modelManager.selectModel(optimization, conversationType, excludedModels, estimatedTokens);
 
                     // If selection failed, attempt a safer fallback: use any available, not-blacklisted model
                     if (!selectedModel) {
@@ -620,13 +657,17 @@ export class Brain extends BaseEntity {
                 };
 
                 // Apply max_length after other parameters for correct min calculation
-                modelConvertParams.max_length = selectedModel.tokenLimit || modelConvertParams.max_length ?
-                    Math.min(modelConvertParams.max_length || selectedModel.tokenLimit, 8192) : 8192;
+                const safeMaxLength = selectedModel.tokenLimit
+                    ? Math.max(256, Math.min(selectedModel.tokenLimit, 8192))
+                    : 2048;
+
+                modelConvertParams.max_length = modelConvertParams.max_length
+                    ? Math.min(modelConvertParams.max_length, safeMaxLength)
+                    : safeMaxLength;
 
                 const requestTrackingPrompt = modelConvertParams.prompt || ''; // Use the actual prompt for tracking
                 trackingRequestId = this.modelManager.trackModelRequest(selectedModel.name, conversationType, requestTrackingPrompt);
 
-                this.llmCalls++;
                 this.activeLLMCalls++;
                 console.log(`[Brain Generate] Attempt ${attempt}: Using model ${selectedModel.modelName} for conversation type ${conversationType} with content type ${contentType}`);
 
@@ -646,16 +687,25 @@ export class Brain extends BaseEntity {
                 lastError = errorMessage;
                 console.error(`[Brain Generate] Attempt ${attempt} failed with model ${selectedModel?.modelName || 'unknown'}: ${errorMessage}`);
 
+                const isContextError = /max_tokens|maximum context length|context length|token limit|too many tokens|exceeds.*context|prompt is too long|input.*too long|input length|request too large/i.test(errorMessage);
+
                 if (selectedModel && trackingRequestId) {
-                    console.log(`[Brain Generate] Tracking failure for model ${selectedModel.name}`);
-                    this.modelManager.trackModelResponse(trackingRequestId, '', 0, false, errorMessage);
+                    if (isContextError) {
+                        console.log(`[Brain Generate] Context-length mismatch for model ${selectedModel.name}; recording as a model switch, not a failure.`);
+                        this.modelManager.trackModelResponse(trackingRequestId, '', 0, false, errorMessage, false, false, true);
+                    } else {
+                        console.log(`[Brain Generate] Tracking failure for model ${selectedModel.name}`);
+                        this.modelManager.trackModelResponse(trackingRequestId, '', 0, false, errorMessage);
+                    }
                 }
 
                 if (selectedModel && selectedModel.name) {
                     const isTimeout = /timeout|system_error/i.test(errorMessage);
                     const isRateLimit = /rate limit|429/i.test(errorMessage);
 
-                    if (isTimeout) {
+                    if (isContextError) {
+                        console.warn(`[Brain Generate] Model ${selectedModel.name} cannot fit the prompt (context length). Switching to a different model; not counted as a failure.`);
+                    } else if (isTimeout) {
                         this.modelTimeoutCounts[selectedModel.name] = (this.modelTimeoutCounts[selectedModel.name] || 0) + 1;
                         if (this.modelTimeoutCounts[selectedModel.name] >= 3) {
                             console.warn(`[Brain Generate] Blacklisting model ${selectedModel.name} after 3 consecutive timeouts/system errors.`);
@@ -831,31 +881,53 @@ export class Brain extends BaseEntity {
                 lastError = errorMessage;
                 console.error(`[Brain Chat] Attempt ${attempt} failed with model ${selectedModel?.modelName || 'unknown'}: ${errorMessage}`);
 
+                // Context-length errors are model-capability mismatches, not model
+                // failures. We still count the usage but must not escalate blacklists or
+                // failure counts. There are two distinct cases:
+                //  - The INPUT itself exceeds the model's window: reducing the output
+                //    budget cannot help, so switch to a different (larger) model.
+                //  - Only the OUTPUT budget was too large (the input fits): reduce the
+                //    output max_length and retry the SAME model, which is what worked
+                //    previously and avoids needless model switching.
+                const isInputTooLong = /input too long|input length|request too large|prompt is too long|input.*too long/i.test(errorMessage);
+                const isContextError = isInputTooLong || /max_tokens|maximum context length|context length|token limit|too many tokens|exceeds.*context/i.test(errorMessage);
+
                 if (selectedModel && trackingRequestId) {
-                    console.log(`[Brain Chat] Tracking failure for model ${selectedModel.name}`);
-                    this.modelManager.trackModelResponse(trackingRequestId, '', 0, false, errorMessage);
+                    if (isContextError) {
+                        console.log(`[Brain Chat] Context-length mismatch for model ${selectedModel.name}; recording as a model switch, not a failure.`);
+                        this.modelManager.trackModelResponse(trackingRequestId, '', 0, false, errorMessage, false, false, true);
+                    } else {
+                        console.log(`[Brain Chat] Tracking failure for model ${selectedModel.name}`);
+                        this.modelManager.trackModelResponse(trackingRequestId, '', 0, false, errorMessage);
+                    }
                 }
 
-                if (selectedModel && selectedModel.name && errorMessage.includes('max_tokens') && errorMessage.includes('context_window')) {
-                    const currentMaxTokens = thread.optionals?.max_length || selectedModel.tokenLimit;
-                    const newMaxTokens = Math.max(512, Math.floor(currentMaxTokens * 0.75)); // Reduce by 25%, minimum 512
-
-                    if (newMaxTokens < currentMaxTokens) {
-                        console.warn(`[Brain Chat] Model ${selectedModel.name} failed due to max_tokens. Retrying with reduced max_tokens from ${currentMaxTokens} to ${newMaxTokens}.`);
-                        if (!thread.optionals) {
-                            thread.optionals = {};
+                if (isContextError) {
+                    if (isInputTooLong) {
+                        console.warn(`[Brain Chat] Model ${selectedModel?.name} input exceeds its context window. Switching models; not counted as a failure.`);
+                        if (selectedModel && selectedModel.name) {
+                            excludedModels.push(selectedModel.name);
                         }
-                        thread.optionals.max_length = newMaxTokens;
-                        // Do NOT add to excludedModels, allow retry with smaller tokens
                     } else {
-                        console.error(`[Brain Chat] Model ${selectedModel.name} failed due to max_tokens, but could not reduce further or already at minimum. Excluding it from retries.`);
-                        excludedModels.push(selectedModel.name);
+                        // Output budget too large but input fits: shrink output and retry same model.
+                        const currentMaxTokens = thread.optionals?.max_length || selectedModel?.tokenLimit || 2048;
+                        const newMaxTokens = Math.max(512, Math.min(Math.floor(currentMaxTokens * 0.75), 8192));
+                        if (newMaxTokens < currentMaxTokens) {
+                            console.warn(`[Brain Chat] Model ${selectedModel?.name} hit context limit; reducing output max_length ${currentMaxTokens} -> ${newMaxTokens} and retrying same model.`);
+                            if (!thread.optionals) thread.optionals = {};
+                            thread.optionals.max_length = newMaxTokens;
+                        } else {
+                            console.error(`[Brain Chat] Model ${selectedModel?.name} context limit, cannot reduce output further. Switching models; not counted as a failure.`);
+                            if (selectedModel && selectedModel.name) {
+                                excludedModels.push(selectedModel.name);
+                            }
+                        }
                     }
                 } else if (selectedModel && selectedModel.name) {
                     const isTimeout = /timeout|system_error|connection error/i.test(errorMessage);
                     const isJsonError = /json|parse|invalid format/i.test(errorMessage);
                     const isRateLimit = /rate limit|429/i.test(errorMessage);
-                    const isExternalApiError = /free period has ended|no inference provider available|no endpoints found|request failed with status code 404|could not find a suitable model/i.test(errorMessage);
+                    const isExternalApiError = /free period has ended|no inference provider available|no endpoints found|request failed with status code 404|404|model not found|No such model|does not exist|could not find a suitable model/i.test(errorMessage);
 
                     if (!this.modelFailureCounts[selectedModel.name]) {
                         this.modelFailureCounts[selectedModel.name] = { timeout: 0, json: 0, other: 0 };
@@ -873,10 +945,13 @@ export class Brain extends BaseEntity {
                             selectedModel.service.handleRateLimitError(error);
                         }
                         // Don't count rate limits as failures, let the service handle availability
+                    } else if (isJsonError) {
+                        // JSON errors are model-specific; try another model instead of blacklisting
+                        console.warn(`[Brain Chat] Model ${selectedModel.name} returned invalid JSON. Excluding from current request and trying another model.`);
+                        excludedModels.push(selectedModel.name);
+                        continue;
                     } else if (isTimeout) {
                         this.modelFailureCounts[selectedModel.name].timeout++;
-                    } else if (isJsonError) {
-                        this.modelFailureCounts[selectedModel.name].json++;
                     } else {
                         this.modelFailureCounts[selectedModel.name].other++;
                     }
@@ -884,18 +959,19 @@ export class Brain extends BaseEntity {
                     const counts = this.modelFailureCounts[selectedModel.name];
                     const totalFailures = counts.timeout + counts.json + counts.other;
                     
-                    // More aggressive blacklisting for specific, repeated failures
-                    // (Only if not already blacklisted for an external API error)
-                    if (!isExternalApiError && (counts.timeout >= 2 || counts.json >= 3 || totalFailures >= 5)) {
-                        console.warn(`[Brain Chat] Blacklisting model ${selectedModel.name} due to repeated failures:`, `Timeouts: ${counts.timeout}, JSON errors: ${counts.json}, Other: ${counts.other}`);
-                        this.modelManager.blacklistModel(selectedModel.name, new Date(Date.now() + 15 * 60 * 1000), thread.conversationType || null); // Blacklist for 15 minutes
+                    // Escalating blacklist durations for repeated failures
+                    if (!isExternalApiError && !isJsonError && (counts.timeout >= 2 || totalFailures >= 5)) {
+                        const previousBlacklists = counts.timeout >= 2 ? Math.floor(counts.timeout / 2) : Math.floor(totalFailures / 5);
+                        const blacklistDuration = Math.min(15 * 60 * 1000 * Math.pow(2, previousBlacklists), 24 * 60 * 60 * 1000);
+                        console.warn(`[Brain Chat] Blacklisting model ${selectedModel.name} due to repeated failures (timeouts: ${counts.timeout}, other: ${counts.other}). Blacklisting for ${Math.round(blacklistDuration / 60000)} minutes.`);
+                        this.modelManager.blacklistModel(selectedModel.name, new Date(Date.now() + blacklistDuration), thread.conversationType || null);
                         // Reset counts after blacklisting
                         this.modelFailureCounts[selectedModel.name] = { timeout: 0, json: 0, other: 0 };
                     }
                 }
 
                 // Check if we have any available models left
-                const availableModels = this.getAvailableModels();
+                const availableModels = this.modelManager.getAvailableAndNotBlacklistedModels(thread.conversationType || LLMConversationType.TextToText);
                 if (availableModels.length === 0) {
                     console.error(`[Brain Chat] No available models left after ${attempt} attempts. Last error: ${lastError}`);
                     res.status(503).json({ error: `No available models. Last error: ${lastError}` });
@@ -921,7 +997,6 @@ export class Brain extends BaseEntity {
     }
 
     private async _chatWithModel(selectedModel: any, thread: any, requestId: string): Promise<any> {
-        this.llmCalls++;
         this.activeLLMCalls++;
         console.log(`[Brain Chat] Using model ${selectedModel.modelName} for request ${requestId}`);
 
@@ -934,6 +1009,7 @@ export class Brain extends BaseEntity {
                 thread.exchanges,
                 {
                     max_length: thread.max_length || selectedModel.tokenLimit,
+                    tokenLimit: selectedModel.tokenLimit,
                     temperature: thread.temperature || 0.7,
                     modelName: selectedModel.modelName,
                     responseType: thread.responseType || 'text',

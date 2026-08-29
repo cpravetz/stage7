@@ -23,21 +23,19 @@ export class ModelConfigService extends BaseEntity {
      */
     async getActiveModels(): Promise<ModelConfiguration[]> {
         try {
-            // Try Redis cache first
             const cached = await redisCache.get<ModelConfiguration[]>('models:active');
             if (cached && cached.length > 0) {
                 console.log(`[ModelConfigService] Retrieved ${cached.length} models from cache`);
                 return cached;
             }
 
-            // Fallback to Librarian
-            const response = await this.authenticatedApi.get(`http://librarian:5040/loadData/model-configs-active`, {
-                params: { collection: this.CONFIG_COLLECTION, storageType: 'mongo' }
+            const response = await this.authenticatedApi.post(`http://librarian:5040/queryData`, {
+                collection: 'model_configs',
+                query: { status: 'active' }
             });
 
             const models: ModelConfiguration[] = response.data?.data || [];
 
-            // Cache the results
             if (models.length > 0) {
                 await redisCache.set('models:active', models, this.CACHE_TTL);
                 console.log(`[ModelConfigService] Cached ${models.length} models`);
@@ -382,11 +380,9 @@ export class ModelConfigService extends BaseEntity {
                 return cached;
             }
 
-            const response = await this.authenticatedApi.get(`http://librarian:5040/query`, {
-                params: {
-                    collection: 'service_configs',
-                    storageType: 'mongo'
-                }
+            const response = await this.authenticatedApi.post(`http://librarian:5040/queryData`, {
+                collection: 'service_configs',
+                query: {}
             });
 
             const services: ServiceConfig[] = response.data?.data || [];
@@ -411,11 +407,9 @@ export class ModelConfigService extends BaseEntity {
                 return cached;
             }
 
-            const response = await this.authenticatedApi.get(`http://librarian:5040/query`, {
-                params: {
-                    collection: 'interface_configs',
-                    storageType: 'mongo'
-                }
+            const response = await this.authenticatedApi.post(`http://librarian:5040/queryData`, {
+                collection: 'interface_configs',
+                query: {}
             });
 
             const interfaces: InterfaceConfig[] = response.data?.data || [];

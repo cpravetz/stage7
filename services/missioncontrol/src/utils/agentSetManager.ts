@@ -584,8 +584,9 @@ export class AgentSetManager {
 
     private async getAgentIdsByMission(missionId: string): Promise<string[]> {
         try {
-            const response = await this.apiCall('get', `${this.postOfficeUrl}/getAgentIdsByMission/${missionId}`);
-            return response.data;
+            await this.ensureAgentSets();
+            const agents = await this.getAgentsByMission(missionId);
+            return agents.map(agent => agent.id);
         } catch (error) {
             analyzeError(error as Error);
             console.error('Error getting agent IDs by mission:', error instanceof Error ? error.message : error);

@@ -280,7 +280,7 @@ export class SeedDataLoader {
             'google': 'https://generativelanguage.googleapis.com/v1/models?key={apiKey}',
             'groq': 'https://api.groq.com/v1/models',
             'openrouter': 'https://openrouter.ai/api/v1/models',
-            'huggingface': 'https://api-inference.huggingface.co/models/',
+            'huggingface': 'https://router.huggingface.co/hf-inference/models',
             'mistral': 'https://api.mistral.ai/v1/models',
             'openwebui': `${openWebUIUrl || 'http://localhost:3000'}/api/v1/models`,
             'cloudflare': 'https://api.cloudflare.com/client/v4/accounts/{accountId}/ai/models',

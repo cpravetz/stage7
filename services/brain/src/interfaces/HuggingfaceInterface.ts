@@ -59,6 +59,14 @@ export class HuggingfaceInterface extends BaseInterface {
         });
     }
 
+    private createInferenceClient(service: BaseService): InferenceClient {
+        const options: any = { accessToken: service.apiKey };
+        if (service.apiUrl) {
+            options.baseUrl = service.apiUrl.replace(/\/$/, '');
+        }
+        return new InferenceClient(options);
+    }
+
     /**
      * Check if an error message indicates that we've exceeded our monthly credits
      * @param errorMessage The error message to check
@@ -165,9 +173,15 @@ export class HuggingfaceInterface extends BaseInterface {
 
     // Removed unused isResponseComplete method
 
-    async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string, timeout?: number, responseType?: string }): Promise<string> {
+    async chat(service: BaseService, messages: ExchangeType, options: { max_length?: number, temperature?: number, modelName?: string, timeout?: number, responseType?: string, tokenLimit?: number }): Promise<string> {
         try {
-            const MODEL_MAX_TOKENS = 4096;
+            // Use the model's declared context window, but clamp to a conservative
+            // hard cap. HuggingFace free inference endpoints commonly reject inputs
+            // well above their true limit, so we never send more than 4096 tokens
+            // (or the model's smaller declared limit). Trusting an inflated seed
+            // tokenLimit (e.g. 128000) literally caused mass context-length
+            // failures and mission exhaustion.
+            const MODEL_MAX_TOKENS = Math.min(options.tokenLimit && options.tokenLimit > 0 ? options.tokenLimit : 4096, 4096);
             const SAFETY_MARGIN = 200;
 
             // Validate service and API key
@@ -207,8 +221,12 @@ export class HuggingfaceInterface extends BaseInterface {
 
             console.log(`Token allocation: input=${inputTokens}, max_new=${max_new_tokens}, total=${inputTokens + max_new_tokens}`);
 
-            // Create inference instance with API key
-            const inference = new InferenceClient(service.apiKey);
+            // Create inference instance with API key and service URL
+            const inferenceOptions: any = { accessToken: service.apiKey };
+            if (service.apiUrl) {
+                inferenceOptions.baseUrl = service.apiUrl.replace(/\/$/, '');
+            }
+            const inference = new InferenceClient(inferenceOptions);
             let out = "";
 
             try {
@@ -302,7 +320,7 @@ export class HuggingfaceInterface extends BaseInterface {
                 throw new Error('HuggingfaceInterface: No service provided for text-to-text conversion');
             }
 
-            const inference = new InferenceClient(service.apiKey);
+            const inference = this.createInferenceClient(service);
 
             // Estimate the number of tokens in the input prompt
             // A rough estimate is 1 token per 4 characters
@@ -365,7 +383,7 @@ export class HuggingfaceInterface extends BaseInterface {
                 console.log('HuggingfaceInterface: No service provided for text-to-image conversion');
                 return Promise.resolve(undefined);
             }   
-            const inference = new InferenceClient(service.apiKey);
+            const inference = this.createInferenceClient(service);
             // NOTE: `@huggingface/inference` has overloads for textToImage.
             // If we omit `outputType`, TypeScript may resolve the first overload
             // (which can return a URL string). We explicitly request a Blob.
@@ -395,7 +413,7 @@ export class HuggingfaceInterface extends BaseInterface {
                 console.log('HuggingfaceInterface: No service provided for text-to-audio conversion');
                 return Promise.resolve(undefined);
             }   
-            const inference = new InferenceClient(service.apiKey);
+            const inference = this.createInferenceClient(service);
             const response = await inference.textToSpeech({
                 model: modelName || 'facebook/fastspeech2-en-ljspeech',
                 inputs: text||'',
@@ -421,7 +439,7 @@ export class HuggingfaceInterface extends BaseInterface {
                 console.log('HuggingfaceInterface: No service provided for text-to-text conversion');
                 return Promise.resolve('');
             }   
-            const inference = new InferenceClient(service.apiKey);
+            const inference = this.createInferenceClient(service);
             if (!inference || !audio) {
                 console.error('No audio file provided');
                 return '';
@@ -459,7 +477,7 @@ export class HuggingfaceInterface extends BaseInterface {
                 console.log('HuggingfaceInterface: No service provided for text-to-text conversion');
                 return Promise.resolve('');
             }   
-            const inference = new InferenceClient(service.apiKey);
+            const inference = this.createInferenceClient(service);
             if (!inference || !image) {
                 console.error('No image file provided');
                 return '';

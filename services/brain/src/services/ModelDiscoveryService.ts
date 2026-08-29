@@ -148,6 +148,9 @@ export class ModelDiscoveryService {
             case 'huggingface':
                 discoveredModels = await this.discoverHuggingfaceModels(apiKey);
                 break;
+            case 'openwebui':
+                discoveredModels = await this.discoverOpenWebUIModels(service);
+                break;
             default:
                 console.log(`[ModelDiscoveryService] Discovery not implemented for provider: ${provider}`);
                 return;
@@ -310,6 +313,70 @@ export class ModelDiscoveryService {
             console.error('[ModelDiscoveryService] Error fetching HuggingFace models:', error);
             return [];
         }
+    }
+
+    async discoverOpenWebUIModels(service: any): Promise<Partial<ModelConfiguration>[]> {
+        const apiKey = process.env.OPENWEBUI_API_KEY;
+        const baseUrl = process.env.OPENWEB_URL || service.apiUrlBase?.replace(/\/api\/v1\/$/, '') || 'http://localhost:3000';
+
+        if (!apiKey) {
+            console.warn('[ModelDiscoveryService] No OPENWEBUI_API_KEY found, skipping OpenWebUI discovery');
+            return [];
+        }
+
+        try {
+            const response = await axios.get(`${baseUrl}/api/v1/models`, {
+                headers: { 'Authorization': `Bearer ${apiKey}` },
+                timeout: 30000
+            });
+
+            if (!response.data?.data || !Array.isArray(response.data.data)) {
+                console.warn('[ModelDiscoveryService] Unexpected OpenWebUI response format');
+                return [];
+            }
+
+            return response.data.data.map((m: any) => {
+                const modelId = m.id;
+                const contextLength = m.details?.context_length || m.context_length || this.inferTokenLimit(modelId);
+                const pricing = { input: 0, output: 0 };
+
+                return {
+                    providerModelId: modelId,
+                    name: modelId,
+                    tokenLimit: contextLength,
+                    costPer1kTokens: pricing,
+                    capabilities: this.inferOpenWebUICapabilities(modelId, m),
+                    scoresByConversationType: computeInitialScores(modelId, pricing),
+                    status: 'active' as const,
+                };
+            });
+        } catch (error) {
+            console.error('[ModelDiscoveryService] Error fetching OpenWebUI models:', error);
+            return [];
+        }
+    }
+
+    private inferOpenWebUICapabilities(modelId: string, modelDetails: any): string[] {
+        const name = modelId.toLowerCase();
+        const capabilities: string[] = ['text_generation'];
+
+        const details = modelDetails.details || {};
+        const families = details.families || [];
+
+        if (name.includes('vision') || name.includes('llava') || name.includes('gemini') || name.includes('gpt-4o') || families.includes('clip')) {
+            capabilities.push('vision');
+        }
+        if (name.includes('json') || name.includes('instruct') || name.includes('turbo') || name.includes('gpt') || name.includes('claude') || name.includes('gemini') || name.includes('qwen')) {
+            capabilities.push('json_mode');
+        }
+        if (name.includes('tool') || name.includes('function') || name.includes('claude') || name.includes('gpt') || name.includes('gemini') || name.includes('qwen') || (details.capabilities && details.capabilities.includes('tools'))) {
+            capabilities.push('function_calling');
+        }
+        if (name.includes('embed')) {
+            capabilities.push('embeddings');
+        }
+
+        return capabilities;
     }
 
     private inferTokenLimit(modelId: string): number {

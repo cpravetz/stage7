@@ -105,7 +105,15 @@ export class PostOffice extends BaseEntity {
             this.missionClients,
             this.assistantClients,
             this.authenticatedApi,
-            (type) => this.serviceDiscoveryManager.getComponentUrl(type),
+            (type) => {
+                const url = this.serviceDiscoveryManager.getComponentUrl(type);
+                if (url) return url;
+                const envUrl = process.env[`${type.toUpperCase()}_URL`];
+                if (envUrl) {
+                    return envUrl.startsWith('http://') || envUrl.startsWith('https://') ? envUrl : `http://${envUrl}`;
+                }
+                return undefined;
+            },
             this.handleWebSocketMessage.bind(this)
         );
 
@@ -907,6 +915,23 @@ export class PostOffice extends BaseEntity {
 
     private async getModelPerformance(_req: express.Request, res: express.Response) {
         try {
+            // Prefer the LIVE Brain performance data so the dashboard totals always
+            // agree with the llmCalls counter. Fall back to Librarian if Brain is unavailable.
+            try {
+                const brainUrl = this.getComponentUrl('Brain');
+                if (brainUrl) {
+                    const brainResponse = await this.authenticatedApi.get(`${brainUrl}/performance`);
+                    if (brainResponse.data && brainResponse.data.success && Array.isArray(brainResponse.data.performanceData)) {
+                        this.logger.debug({ msg: 'Returning live Brain performance data', count: brainResponse.data.performanceData.length });
+                        return res.status(200).json({
+                            success: true,
+                            performanceData: brainResponse.data.performanceData
+                        });
+                    }
+                }
+            } catch (brainError) {
+                this.logger.warn({ msg: 'Live Brain performance fetch failed, falling back to Librarian', error: brainError instanceof Error ? brainError.message : String(brainError) });
+            }
 
             try {
                 const librarianUrl = await this.getLibrarianUrl();
@@ -1227,8 +1252,8 @@ export class PostOffice extends BaseEntity {
             return res.status(400).json({ error: 'stepId is required' });
         }
         try {
-            // Discover AgentSet service URL
-            let agentSetUrl = this.getComponentUrl('AgentSet') || process.env.AGENTSET_URL;
+            // Discover AgentSet service URL by type
+            let agentSetUrl = await this.discoverService('AgentSet') || process.env.AGENTSET_URL;
             if (!agentSetUrl) {
                 return res.status(503).json({ error: 'AgentSet service not available' });
             }

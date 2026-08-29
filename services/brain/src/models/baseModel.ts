@@ -19,6 +19,7 @@ export class BaseModel {
     tokenLimit: number;
     scoresByConversationType: Map<LLMConversationType, ModelScore>;
     public contentConversation: LLMConversationType[];
+    public isFree: boolean;
 
     constructor(options: {
             name: string,
@@ -27,7 +28,8 @@ export class BaseModel {
             serviceName: string,
             tokenLimit: number,
             scoresByConversationType: Map<LLMConversationType, ModelScore>,
-            contentConversation: LLMConversationType[] })
+            contentConversation: LLMConversationType[],
+            isFree?: boolean })
     {
         this.name = options.name;
         this.modelName = options.modelName;
@@ -36,6 +38,7 @@ export class BaseModel {
         this.tokenLimit = options.tokenLimit;
         this.scoresByConversationType = options.scoresByConversationType;
         this.contentConversation = options.contentConversation;
+        this.isFree = options.isFree ?? true;
     }
 
     getScoreForConversationType(conversationType: LLMConversationType): number {

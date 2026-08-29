@@ -1,5 +1,5 @@
 import { BrowserRouter as Router, Routes, Route, Navigate, Link } from 'react-router-dom';
-import { Box, Button, Container, Paper, Typography, Drawer, AppBar, Toolbar, IconButton, Select, MenuItem, FormControl, InputLabel, SelectChangeEvent } from '@mui/material/index.js';
+import { Box, Button, Container, Paper, Typography, Drawer, AppBar, Toolbar, IconButton, Select, MenuItem, FormControl, InputLabel, SelectChangeEvent, Dialog, DialogTitle, DialogContent, DialogActions } from '@mui/material/index.js';
 import React, { useState, useEffect, useRef } from 'react';
 import { Menu as MenuIcon, Close as CloseIcon } from '@mui/icons-material';
 import TabbedPanel from './components/TabbedPanel';
@@ -90,7 +90,9 @@ const MainApp: React.FC<{ clientId: string }> = ({ clientId }) => {
     listMissions,
     missions,
     pendingUserInput,
-    setPendingUserInput
+    setPendingUserInput,
+    reconnectDecision,
+    confirmReconnect
   } = useWebSocket();
 
   const {
@@ -225,6 +227,27 @@ const MainApp: React.FC<{ clientId: string }> = ({ clientId }) => {
 
   if (!isAuthenticated) {
     return <LoginComponent onLogin={handleLogin} onRegister={handleRegister} />;
+  }
+
+  if (reconnectDecision === 'pending') {
+    return (
+      <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', bgcolor: 'background.default' }}>
+        <Paper sx={{ p: 4, maxWidth: 400, textAlign: 'center' }}>
+          <Typography variant="h5" gutterBottom>Resume Mission?</Typography>
+          <Typography variant="body1" gutterBottom>
+            You have an existing mission. Would you like to resume it or start a new one?
+          </Typography>
+          <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center', mt: 2 }}>
+            <Button variant="contained" color="primary" onClick={() => confirmReconnect('resume')}>
+              Resume
+            </Button>
+            <Button variant="outlined" color="secondary" onClick={() => confirmReconnect('new')}>
+              New Mission
+            </Button>
+          </Box>
+        </Paper>
+      </Box>
+    );
   }
 
   return (

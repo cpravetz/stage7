@@ -65,8 +65,8 @@ describe('ModelManager', () => {
   describe('selectModel', () => {
     it('should select the model with the highest cost score when optimizing for cost', () => {
       (modelManager as any).models = new Map([
-        ['model1', { name: 'Model1', interfaceName: 'interface1', serviceName: 'Service1', tokenLimit: 4096, contentConversation: [LLMConversationType.TextToText], getScoresForConversationType: () => ({ costScore: 0.8, accuracyScore: 0.7, creativityScore: 0.6, speedScore: 0.9 }) }],
-        ['model2', { name: 'Model2', interfaceName: 'interface2', serviceName: 'Service2', tokenLimit: 4096, contentConversation: [LLMConversationType.TextToText], getScoresForConversationType: () => ({ costScore: 0.7, accuracyScore: 0.8, creativityScore: 0.9, speedScore: 0.6 }) }],
+        ['model1', { name: 'Model1', interfaceName: 'interface1', serviceName: 'Service1', tokenLimit: 4096, contentConversation: [LLMConversationType.TextToText], isFree: true, getScoresForConversationType: () => ({ costScore: 0.8, accuracyScore: 0.7, creativityScore: 0.6, speedScore: 0.9 }) }],
+        ['model2', { name: 'Model2', interfaceName: 'interface2', serviceName: 'Service2', tokenLimit: 4096, contentConversation: [LLMConversationType.TextToText], isFree: true, getScoresForConversationType: () => ({ costScore: 0.7, accuracyScore: 0.8, creativityScore: 0.9, speedScore: 0.6 }) }],
       ]);
       const result = modelManager.selectModel('cost', LLMConversationType.TextToText);
       expect(result?.name).toBe('Model2');
@@ -74,8 +74,8 @@ describe('ModelManager', () => {
 
     it('should select the model with the highest accuracy score when optimizing for accuracy', () => {
       (modelManager as any).models = new Map([
-        ['model1', { name: 'Model1', interfaceName: 'interface1', serviceName: 'Service1', tokenLimit: 4096, contentConversation: [LLMConversationType.TextToText], getScoresForConversationType: () => ({ costScore: 0.8, accuracyScore: 0.7, creativityScore: 0.6, speedScore: 0.9 }) }],
-        ['model2', { name: 'Model2', interfaceName: 'interface2', serviceName: 'Service2', tokenLimit: 4096, contentConversation: [LLMConversationType.TextToText], getScoresForConversationType: () => ({ costScore: 0.7, accuracyScore: 0.8, creativityScore: 0.9, speedScore: 0.6 }) }],
+        ['model1', { name: 'Model1', interfaceName: 'interface1', serviceName: 'Service1', tokenLimit: 4096, contentConversation: [LLMConversationType.TextToText], isFree: true, getScoresForConversationType: () => ({ costScore: 0.8, accuracyScore: 0.7, creativityScore: 0.6, speedScore: 0.9 }) }],
+        ['model2', { name: 'Model2', interfaceName: 'interface2', serviceName: 'Service2', tokenLimit: 4096, contentConversation: [LLMConversationType.TextToText], isFree: true, getScoresForConversationType: () => ({ costScore: 0.7, accuracyScore: 0.8, creativityScore: 0.9, speedScore: 0.6 }) }],
       ]);
       const result = modelManager.selectModel('accuracy', LLMConversationType.TextToText);
       expect(result?.name).toBe('Model2');
@@ -83,8 +83,8 @@ describe('ModelManager', () => {
 
     it('should select the model with the highest creativity score when optimizing for creativity', () => {
       (modelManager as any).models = new Map([
-        ['model1', { name: 'Model1', interfaceName: 'interface1', serviceName: 'Service1', tokenLimit: 4096, contentConversation: [LLMConversationType.TextToText], getScoresForConversationType: () => ({ costScore: 0.8, accuracyScore: 0.7, creativityScore: 0.6, speedScore: 0.9 }) }],
-        ['model2', { name: 'Model2', interfaceName: 'interface2', serviceName: 'Service2', tokenLimit: 4096, contentConversation: [LLMConversationType.TextToText], getScoresForConversationType: () => ({ costScore: 0.7, accuracyScore: 0.8, creativityScore: 0.9, speedScore: 0.6 }) }],
+        ['model1', { name: 'Model1', interfaceName: 'interface1', serviceName: 'Service1', tokenLimit: 4096, contentConversation: [LLMConversationType.TextToText], isFree: true, getScoresForConversationType: () => ({ costScore: 0.8, accuracyScore: 0.7, creativityScore: 0.6, speedScore: 0.9 }) }],
+        ['model2', { name: 'Model2', interfaceName: 'interface2', serviceName: 'Service2', tokenLimit: 4096, contentConversation: [LLMConversationType.TextToText], isFree: true, getScoresForConversationType: () => ({ costScore: 0.7, accuracyScore: 0.8, creativityScore: 0.9, speedScore: 0.6 }) }],
       ]);
       const result = modelManager.selectModel('creativity', LLMConversationType.TextToText);
       expect(result?.name).toBe('Model2');
@@ -92,8 +92,8 @@ describe('ModelManager', () => {
 
     it('should select the model with the highest speed score when optimizing for speed', () => {
       (modelManager as any).models = new Map([
-        ['model1', { name: 'Model1', interfaceName: 'interface1', serviceName: 'Service1', tokenLimit: 4096, contentConversation: [LLMConversationType.TextToText], getScoresForConversationType: () => ({ costScore: 0.8, accuracyScore: 0.7, creativityScore: 0.6, speedScore: 0.9 }) }],
-        ['model2', { name: 'Model2', interfaceName: 'interface2', serviceName: 'Service2', tokenLimit: 4096, contentConversation: [LLMConversationType.TextToText], getScoresForConversationType: () => ({ costScore: 0.7, accuracyScore: 0.8, creativityScore: 0.9, speedScore: 0.6 }) }],
+        ['model1', { name: 'Model1', interfaceName: 'interface1', serviceName: 'Service1', tokenLimit: 4096, contentConversation: [LLMConversationType.TextToText], isFree: true, getScoresForConversationType: () => ({ costScore: 0.8, accuracyScore: 0.7, creativityScore: 0.6, speedScore: 0.9 }) }],
+        ['model2', { name: 'Model2', interfaceName: 'interface2', serviceName: 'Service2', tokenLimit: 4096, contentConversation: [LLMConversationType.TextToText], isFree: true, getScoresForConversationType: () => ({ costScore: 0.7, accuracyScore: 0.8, creativityScore: 0.9, speedScore: 0.6 }) }],
       ]);
       const result = modelManager.selectModel('speed', LLMConversationType.TextToText);
       expect(result?.name).toBe('Model1');
@@ -101,8 +101,8 @@ describe('ModelManager', () => {
 
     it('should return null when no compatible models are found', () => {
       (modelManager as any).models = new Map([
-        ['model1', { name: 'Model1', interfaceName: 'interface1', serviceName: 'Service1', tokenLimit: 4096, contentConversation: [LLMConversationType.TextToImage] }],
-        ['model2', { name: 'Model2', interfaceName: 'interface2', serviceName: 'Service2', tokenLimit: 4096, contentConversation: [LLMConversationType.TextToImage] }],
+        ['model1', { name: 'Model1', interfaceName: 'interface1', serviceName: 'Service1', tokenLimit: 4096, contentConversation: [LLMConversationType.TextToImage], isFree: true }],
+        ['model2', { name: 'Model2', interfaceName: 'interface2', serviceName: 'Service2', tokenLimit: 4096, contentConversation: [LLMConversationType.TextToImage], isFree: true }],
       ]);
       const result = modelManager.selectModel('cost', LLMConversationType.TextToText);
       expect(result).toBeNull();
@@ -110,8 +110,8 @@ describe('ModelManager', () => {
 
     it('should return null when no interface is found for the selected model', () => {
       (modelManager as any).models = new Map([
-        ['model1', { name: 'Model1', interfaceName: 'interface1', serviceName: 'Service1', tokenLimit: 4096, contentConversation: [LLMConversationType.TextToText] }],
-        ['model2', { name: 'Model2', interfaceName: 'interface2', serviceName: 'Service2', tokenLimit: 4096, contentConversation: [LLMConversationType.TextToText] }],
+        ['model1', { name: 'Model1', interfaceName: 'interface1', serviceName: 'Service1', tokenLimit: 4096, contentConversation: [LLMConversationType.TextToText], isFree: true }],
+        ['model2', { name: 'Model2', interfaceName: 'interface2', serviceName: 'Service2', tokenLimit: 4096, contentConversation: [LLMConversationType.TextToText], isFree: true }],
       ]);
       (interfaceManager as any).interfaces.clear();
       (interfaceManager as any).getInterface.mockImplementation(() => undefined);

@@ -130,7 +130,7 @@ export class ModelManager {
             const availableTextToJsonModels = allTextToJsonModels.filter(model => {
                 const interfaceInstance = interfaceManager.getInterface(model.interfaceName);
                 const service = serviceManager.getService(model.serviceName);
-                return interfaceInstance && service && service.isAvailable();
+                return interfaceInstance && service && service.isAvailable() && model.isFree;
             });
 
             const nonBlacklistedModels = availableTextToJsonModels.filter(model =>
@@ -219,6 +219,13 @@ export class ModelManager {
                 const isBlacklisted = this.performanceTracker.isModelBlacklisted(model.name, conversationType);
                 if (isBlacklisted) {
                     reasons.push('blacklisted');
+                    filterReasons.set(model.name, reasons);
+                    return false;
+                }
+
+                // Exclude paid models - only use free models
+                if (!model.isFree) {
+                    reasons.push('paid model excluded');
                     filterReasons.set(model.name, reasons);
                     return false;
                 }
@@ -373,6 +380,10 @@ export class ModelManager {
                     return false;
                 }
 
+                if (!model.isFree) {
+                    return false;
+                }
+
                 return true;
             });
     }
@@ -432,8 +443,8 @@ export class ModelManager {
      * @param success Success flag
      * @param error Error message
      */
-    trackModelResponse(requestId: string, response: string, tokenCount: number, success: boolean, error?: string, isRetry?: boolean, logicFailure: boolean = false): void {
-        console.log(`[ModelManager] Tracking model response for request ${requestId}, success: ${success}, token count: ${tokenCount}, isRetry: ${isRetry}, logicFailure: ${logicFailure}`);
+    trackModelResponse(requestId: string, response: string, tokenCount: number, success: boolean, error?: string, isRetry?: boolean, logicFailure: boolean = false, isContextSwitch: boolean = false): void {
+        console.log(`[ModelManager] Tracking model response for request ${requestId}, success: ${success}, token count: ${tokenCount}, isRetry: ${isRetry}, logicFailure: ${logicFailure}, isContextSwitch: ${isContextSwitch}`);
 
         // Get active request
         const request = this.activeRequests.get(requestId);
@@ -445,7 +456,7 @@ export class ModelManager {
         console.log(`[ModelManager] Found active request for model ${request.modelName}, conversation type ${request.conversationType}`);
 
         // Track response in performance tracker
-        this.performanceTracker.trackResponse(requestId, response, tokenCount, success, error, isRetry);
+        this.performanceTracker.trackResponse(requestId, response, tokenCount, success, error, isRetry, isContextSwitch);
 
         if (logicFailure) {
             this.performanceTracker.trackLogicFailure(request.modelName, request.conversationType);
@@ -715,6 +726,7 @@ export class ModelManager {
         tokenLimit: number;
         capabilities?: string[];
         scoresByConversationType?: Record<string, { costScore: number; accuracyScore: number; creativityScore: number; speedScore: number }>;
+        costPer1kTokens?: { input: number; output: number };
         metadata?: any;
     }>): Promise<number> {
         await interfaceManager.ready();
@@ -784,6 +796,7 @@ export class ModelManager {
                     }
                 }
 
+                const isFree = (config.costPer1kTokens?.input === 0 && config.costPer1kTokens?.output === 0);
                 const modelInstance = new BaseModel({
                     name: config.name,
                     modelName: config.providerModelId,
@@ -791,7 +804,8 @@ export class ModelManager {
                     serviceName: serviceInstance.serviceName,
                     tokenLimit: config.tokenLimit,
                     scoresByConversationType: scoresMap,
-                    contentConversation: config.supportedConversationTypes
+                    contentConversation: config.supportedConversationTypes,
+                    isFree
                 });
 
                 modelInstance.setProviders(interfaceInstance as BaseInterface, serviceInstance);

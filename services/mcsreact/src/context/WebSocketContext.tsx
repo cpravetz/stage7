@@ -48,6 +48,9 @@ interface WebSocketContextType {
   setPendingUserInput?: React.Dispatch<React.SetStateAction<any>>;
   switchAssistant: (assistantId: string) => void;
   saveAssistantConversation: (assistantId: string) => void;
+  reconnectDecision: 'pending' | 'resume' | 'new' | null;
+  setReconnectDecision: React.Dispatch<React.SetStateAction<'pending' | 'resume' | 'new' | null>>;
+  confirmReconnect: (decision: 'resume' | 'new') => void;
 }
 
 interface MissionContextType {
@@ -78,31 +81,41 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const stored = localStorage.getItem('clientId');
     return stored || uuidv4();
   });
-  const [isConnecting, setIsConnecting] = useState<boolean>(false);
+   const [isConnecting, setIsConnecting] = useState<boolean>(false);
 
-  useEffect(() => {
-    localStorage.setItem('clientId', clientId);
-  }, [clientId]);
+    const reconnectDecisionRef = useRef<'pending' | 'resume' | 'new' | null>(null);
+    const [reconnectDecision, setReconnectDecision] = useState<'pending' | 'resume' | 'new' | null>(null);
 
-  useEffect(() => {
-    const storedMissionId = localStorage.getItem('missionId');
-    if (storedMissionId) {
-      setActiveMissionId(storedMissionId);
-      setActiveMission(true);
-    }
-    const storedMissionName = localStorage.getItem('missionName');
-    if (storedMissionName) {
-      setActiveMissionName(storedMissionName);
-    }
-  }, []);
+    // A missionId read from localStorage that still needs server-side validation
+    // before we can confidently offer to resume it.
+    const storedMissionCandidateRef = useRef<string | null>(null);
+    const reconnectValidationPendingRef = useRef<boolean>(false);
 
-  // Mission state
-  const [activeMission, setActiveMission] = useState<boolean>(false);
-  const [activeMissionName, setActiveMissionName] = useState<string | null>(null);
-  const [activeMissionId, setActiveMissionId] = useState<string | null>(null);
-  const [isPaused, setIsPaused] = useState<boolean>(false);
-  const [missionStatus, setMissionStatus] = useState<any>(null);
-  const [missions, setMissions] = useState<Partial<SharedMission>[]>([]);
+    useEffect(() => {
+      localStorage.setItem('clientId', clientId);
+    }, [clientId]);
+
+    useEffect(() => {
+      const storedMissionId = localStorage.getItem('missionId');
+      if (storedMissionId) {
+        // Do NOT assume this mission still exists or belongs to this user.
+        // It is only a candidate until validated against the server.
+        storedMissionCandidateRef.current = storedMissionId;
+        setActiveMissionId(storedMissionId);
+      }
+      const storedMissionName = localStorage.getItem('missionName');
+      if (storedMissionName) {
+        setActiveMissionName(storedMissionName);
+      }
+    }, []);
+
+   // Mission state
+   const [activeMission, setActiveMission] = useState<boolean>(false);
+   const [activeMissionName, setActiveMissionName] = useState<string | null>(null);
+   const [activeMissionId, setActiveMissionId] = useState<string | null>(null);
+   const [isPaused, setIsPaused] = useState<boolean>(false);
+   const [missionStatus, setMissionStatus] = useState<any>(null);
+   const [missions, setMissions] = useState<Partial<SharedMission>[]>([]);
 
   useEffect(() => {
     if (activeMissionName) {
@@ -473,6 +486,29 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
       case MessageType.LIST_MISSIONS:
         setMissions(data.content.missions);
+
+        // If this list response was requested to validate a candidate mission
+        // restored from localStorage, decide whether to offer a resume.
+        if (reconnectValidationPendingRef.current && storedMissionCandidateRef.current) {
+          reconnectValidationPendingRef.current = false;
+          const candidate = storedMissionCandidateRef.current;
+          const missions = data.content.missions || [];
+          const exists = missions.some(
+            (m: any) => m.id === candidate || (m as any).missionId === candidate
+          );
+          if (exists) {
+            setActiveMission(true);
+            setReconnectDecision('pending');
+          } else {
+            // Stale/invalid: the mission no longer exists or isn't this user's.
+            storedMissionCandidateRef.current = null;
+            setActiveMissionId(null);
+            setActiveMissionName(null);
+            setActiveMission(false);
+            localStorage.removeItem('missionId');
+            localStorage.removeItem('missionName');
+          }
+        }
         break;
         
       default:
@@ -513,17 +549,30 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       setIsConnected(true);
       enqueueSnackbar('Connected to server', { variant: 'success' });
       ws.current?.send(JSON.stringify({
-        type: 'CLIENT_CONNECT',
+        type: 'connect',
         clientId: clientId
       }));
 
       const storedMissionId = localStorage.getItem('missionId');
-      if (storedMissionId) {
+      if (storedMissionId && reconnectDecisionRef.current === 'resume') {
         ws.current?.send(JSON.stringify({
-          type: 'RECONNECT_MISSION',
+          type: 'reconnectMission',
           content: {
             missionId: storedMissionId
           }
+        }));
+      }
+
+      // Validate any candidate mission from localStorage against the server
+      // before offering to resume it. Only do this if the user has not
+      // already made a reconnect decision.
+      if (storedMissionCandidateRef.current && reconnectDecisionRef.current === null) {
+        reconnectValidationPendingRef.current = true;
+        ws.current?.send(JSON.stringify({
+          type: 'listMissions',
+          sender: 'user',
+          recipient: 'MissionControl',
+          clientId
         }));
       }
     };
@@ -610,7 +659,20 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
       if (!activeMission) {
         console.log(`[WebSocketContext] Creating new mission with token: ${accessToken.substring(0, 10)}...`);
-        await api.post('/createMission', {
+        setActiveMission(true);
+        setConversationHistory([]);
+        setWorkProducts([]);
+        setSharedFiles([]);
+        setStatistics({
+          llmCalls: 0,
+          activeLLMCalls: 0,
+          agentCountByStatus: {},
+          agentStatistics: new Map(),
+          engineerStatistics: { newPlugins: [] }
+        });
+        setAgentStatistics(new Map());
+        setAgentDetails([]);
+        const response = await api.post('/createMission', {
           goal: message,
           clientId
         }, {
@@ -618,7 +680,11 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             'Authorization': `Bearer ${accessToken}`
           }
         });
-        setActiveMission(true);
+        const newMissionId = response.data?.missionId;
+        if (newMissionId) {
+          setActiveMissionId(newMissionId);
+          localStorage.setItem('missionId', newMissionId);
+        }
         console.log('[WebSocketContext] New mission created successfully');
       } else {
         const headers = {
@@ -780,12 +846,59 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       connectWebSocket();
     }
     ws.current?.send(JSON.stringify({
-      type: 'LIST_MISSIONS',
+      type: 'listMissions',
       sender: 'user',
       recipient: 'MissionControl',
       clientId
     }));
   }, [clientId, connectWebSocket]);
+
+  const confirmReconnect = useCallback((decision: 'resume' | 'new') => {
+    reconnectDecisionRef.current = decision;
+    setReconnectDecision(decision);
+    // A decision has been made; stop treating the stored id as a candidate
+    // so future reconnects don't re-trigger validation.
+    storedMissionCandidateRef.current = null;
+    reconnectValidationPendingRef.current = false;
+    if (decision === 'resume') {
+      const storedMissionId = localStorage.getItem('missionId');
+      if (storedMissionId) {
+        const sendReconnect = () => {
+          if (ws.current?.readyState === WebSocket.OPEN) {
+            ws.current.send(JSON.stringify({
+              type: 'reconnectMission',
+              content: { missionId: storedMissionId }
+            }));
+            return true;
+          }
+          return false;
+        };
+
+        if (!sendReconnect()) {
+          if (ws.current) {
+            try { ws.current.close(); } catch (e) { /* ignore */ }
+            ws.current = null as any;
+          }
+          connectWebSocket();
+          const maxAttempts = 50;
+          let attempts = 0;
+          const interval = setInterval(() => {
+            attempts++;
+            if (sendReconnect() || attempts >= maxAttempts) {
+              clearInterval(interval);
+            }
+          }, 100);
+        }
+      }
+    } else {
+      setActiveMission(false);
+      setActiveMissionName(null);
+      setActiveMissionId(null);
+      setIsPaused(false);
+      localStorage.removeItem('missionId');
+      localStorage.removeItem('missionName');
+    }
+  }, [setReconnectDecision, connectWebSocket]);
 
   // Helper functions for per-assistant conversation management
   const switchAssistant = useCallback((assistantId: string) => {
@@ -857,8 +970,11 @@ export const WebSocketProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
     },
     switchAssistant,
-    saveAssistantConversation
-  }), [isConnected, clientId, conversationHistory, assistantStateByConversation, currentQuestion, pendingUserInput, activeMission, activeMissionName, activeMissionId, missions, switchAssistant, saveAssistantConversation]);
+    saveAssistantConversation,
+    reconnectDecision,
+    setReconnectDecision,
+    confirmReconnect
+  }), [isConnected, clientId, conversationHistory, assistantStateByConversation, currentQuestion, pendingUserInput, activeMission, activeMissionName, activeMissionId, missions, switchAssistant, saveAssistantConversation, reconnectDecision, setReconnectDecision, confirmReconnect]);
 
   const missionContextValue = useMemo<MissionContextType>(() => ({
     activeMission,

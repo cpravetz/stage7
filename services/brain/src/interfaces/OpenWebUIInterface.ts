@@ -57,14 +57,25 @@ export class OpenWebUIInterface extends BaseInterface {
 
             console.log('Formatted messages for OpenWebUI:', JSON.stringify(formattedMessages));
 
+            const rawModelName = options.modelName || '';
+            const modelName = rawModelName.replace(/^openweb\//, '');
+
+            console.log(`[OpenWebUI] Resolved model name: ${modelName} (raw: ${rawModelName})`);
+
             // Prepare request body
-            const body = JSON.stringify({
-                model: options.modelName,
+            const requestBody: any = {
+                model: modelName,
                 messages: formattedMessages,
                 temperature: options.temperature || 0.3,
                 max_tokens: options.max_length || 4096,
                 stream: !!options.streamCallback
-            });
+            };
+
+            if (options.responseType === 'json') {
+                requestBody.response_format = { type: 'json_object' };
+            }
+
+            const body = JSON.stringify(requestBody);
 
             console.log(`Sending request to OpenWebUI at ${baseUrl}/api/chat/completions`);
 

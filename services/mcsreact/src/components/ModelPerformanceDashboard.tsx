@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Box,
@@ -179,7 +179,7 @@ const ModelPerformanceDashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [performanceData, setPerformanceData] = useState<Record<string, ModelPerformanceMetrics>>({});
-  const [rankings, setRankings] = useState<ModelRanking[]>([]);  // Initialize with empty array
+  const [rankings, setRankings] = useState<ModelRanking[]>([]);
   const [conversationType, setConversationType] = useState<LLMConversationType>(LLMConversationType.TextToText);
   const [rankingMetric, setRankingMetric] = useState<'successRate' | 'averageLatency' | 'overall'>('overall');
   const [modelConfigs, setModelConfigs] = useState<ModelConfiguration[]>([]);
@@ -192,8 +192,8 @@ const ModelPerformanceDashboard: React.FC = () => {
   const [configActionLoading, setConfigActionLoading] = useState(false);
   const [configActionError, setConfigActionError] = useState<string | null>(null);
   const [selectedConfig, setSelectedConfig] = useState<ModelConfiguration | null>(null);
+  const [sortConfig, setSortConfig] = useState<{ key: string; direction: 'asc' | 'desc' } | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const scrollPositionRef = useRef<number>(0);
 
   // Log connection status and mission info for debugging
   useEffect(() => {
@@ -225,10 +225,6 @@ const ModelPerformanceDashboard: React.FC = () => {
     const securityClient = SecurityClient.getInstance(API_BASE_URL);
 
     const fetchData = async () => {
-      if (scrollContainerRef.current) {
-        scrollPositionRef.current = scrollContainerRef.current.scrollTop;
-      }
-
       try {
         setLoading(true);
         setError(null);
@@ -450,11 +446,28 @@ const ModelPerformanceDashboard: React.FC = () => {
     return () => clearInterval(refreshInterval);
   }, [conversationType, rankingMetric]);
 
-  useLayoutEffect(() => {
-    if (scrollContainerRef.current && scrollPositionRef.current > 0) {
-      scrollContainerRef.current.scrollTop = scrollPositionRef.current;
-    }
-  }, [performanceData, rankings, loading]);
+  const handleSort = (key: string) => {
+    setSortConfig(prev => {
+      if (prev?.key === key) {
+        return { key, direction: prev.direction === 'asc' ? 'desc' : 'asc' };
+      }
+      return { key, direction: 'asc' };
+    });
+  };
+
+  const sortedPerformanceData = useMemo<[string, ModelPerformanceMetrics][]>(() => {
+    if (!sortConfig) return Object.entries(performanceData);
+    return Object.entries(performanceData).sort((a, b) => {
+      const aVal = a[1]?.[sortConfig.key as keyof ModelPerformanceMetrics];
+      const bVal = b[1]?.[sortConfig.key as keyof ModelPerformanceMetrics];
+      if (aVal == null && bVal == null) return 0;
+      if (aVal == null) return sortConfig.direction === 'asc' ? -1 : 1;
+      if (bVal == null) return sortConfig.direction === 'asc' ? 1 : -1;
+      if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
+      if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }, [performanceData, sortConfig]);
 
   const getConfigTemplate = (): ModelConfiguration => {
     const now = new Date().toISOString();
@@ -744,20 +757,34 @@ const ModelPerformanceDashboard: React.FC = () => {
         <>
           <TabPanel value={tabValue} index={0}>
             <TableContainer component={Paper}>
-              <Table sx={{ minWidth: 650 }} aria-label="model performance table">
+                <Table sx={{ minWidth: 650 }} aria-label="model performance table">
                 <TableHead>
                   <TableRow>
-                    <TableCell>Model</TableCell>
-                    <TableCell align="right">Status</TableCell>
-                    <TableCell align="right">Success Rate</TableCell>
-                    <TableCell align="right">Avg. Latency</TableCell>
-                    <TableCell align="right">Avg. Tokens</TableCell>
-                    <TableCell align="right">Usage Count</TableCell>
-                    <TableCell align="right">Last Used</TableCell>
+                    <TableCell onClick={() => handleSort('modelName')} style={{ cursor: 'pointer' }}>
+                      Model {sortConfig?.key === 'modelName' ? (sortConfig.direction === 'asc' ? '▲' : '▼') : ''}
+                    </TableCell>
+                    <TableCell align="right" onClick={() => handleSort('blacklistedUntil')} style={{ cursor: 'pointer' }}>
+                      Status {sortConfig?.key === 'blacklistedUntil' ? (sortConfig.direction === 'asc' ? '▲' : '▼') : ''}
+                    </TableCell>
+                    <TableCell align="right" onClick={() => handleSort('successRate')} style={{ cursor: 'pointer' }}>
+                      Success Rate {sortConfig?.key === 'successRate' ? (sortConfig.direction === 'asc' ? '▲' : '▼') : ''}
+                    </TableCell>
+                    <TableCell align="right" onClick={() => handleSort('averageLatency')} style={{ cursor: 'pointer' }}>
+                      Avg. Latency {sortConfig?.key === 'averageLatency' ? (sortConfig.direction === 'asc' ? '▲' : '▼') : ''}
+                    </TableCell>
+                    <TableCell align="right" onClick={() => handleSort('averageTokenCount')} style={{ cursor: 'pointer' }}>
+                      Avg. Tokens {sortConfig?.key === 'averageTokenCount' ? (sortConfig.direction === 'asc' ? '▲' : '▼') : ''}
+                    </TableCell>
+                    <TableCell align="right" onClick={() => handleSort('usageCount')} style={{ cursor: 'pointer' }}>
+                      Usage Count {sortConfig?.key === 'usageCount' ? (sortConfig.direction === 'asc' ? '▲' : '▼') : ''}
+                    </TableCell>
+                    <TableCell align="right" onClick={() => handleSort('lastUsed')} style={{ cursor: 'pointer' }}>
+                      Last Used {sortConfig?.key === 'lastUsed' ? (sortConfig.direction === 'asc' ? '▲' : '▼') : ''}
+                    </TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {Object.entries(performanceData).map(([modelName, data]) => (
+                  {sortedPerformanceData.map(([modelName, data]) => (
                     <TableRow
                       key={modelName}
                       sx={{ '&:last-child td, &:last-child th': { border: 0 } }}

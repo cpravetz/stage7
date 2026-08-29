@@ -91,6 +91,9 @@ export class ModelPerformanceTracker {
       // Reset excessive blacklists during periodic check
       this.resetExcessiveBlacklists();
     }, 2 * 60 * 1000); // Check every 2 minutes
+    if (this.saveInterval) {
+      this.saveInterval.unref();
+    }
 
     // Handle process exit to save data
     process.on('SIGINT', this.handleExit.bind(this));
@@ -176,10 +179,19 @@ export class ModelPerformanceTracker {
     modelName: string,
     conversationType: LLMConversationType
   ): ModelPerformanceMetrics {
-    const modelData = this.performanceData.get(modelName);
+    let modelData = this.performanceData.get(modelName);
 
-    if (!modelData || !modelData.metrics[conversationType]) {
-      return this.newPerformanceMetrics();
+    if (!modelData) {
+      modelData = {
+        modelName,
+        metrics: {} as Record<LLMConversationType, ModelPerformanceMetrics>,
+        lastUpdated: new Date().toISOString()
+      };
+      this.performanceData.set(modelName, modelData);
+    }
+
+    if (!modelData.metrics[conversationType]) {
+      modelData.metrics[conversationType] = this.newPerformanceMetrics();
     }
 
     return modelData.metrics[conversationType];
@@ -229,11 +241,51 @@ export class ModelPerformanceTracker {
     tokenCount: number,
     success: boolean,
     error?: string,
-    isRetry?: boolean
+    isRetry?: boolean,
+    isContextSwitch?: boolean
   ): void {
     if (error) {
       console.log(`[PerformanceTracker] Error details: ${error}`);
     }
+
+    // A context-length / context-window problem is a model-capability mismatch,
+    // not a model failure. We still record the usage so call counts stay accurate,
+    // but we must not escalate blacklists or increment failure counts for it.
+    if (isContextSwitch) {
+      const requestData = this.requestHistory.get(requestId);
+      if (requestData) {
+        requestData.response = response;
+        requestData.endTime = Date.now();
+        requestData.tokenCount = tokenCount;
+        requestData.success = success;
+        requestData.error = error;
+        if (!isRetry) {
+          const modelData = this.performanceData.get(requestData.modelName);
+          let metrics = modelData?.metrics[requestData.conversationType];
+          if (!metrics) {
+            metrics = this.newPerformanceMetrics();
+            if (!modelData) {
+              this.performanceData.set(requestData.modelName, {
+                modelName: requestData.modelName,
+                metrics: { [requestData.conversationType]: metrics } as Record<LLMConversationType, ModelPerformanceMetrics>,
+                lastUpdated: new Date().toISOString()
+              });
+            } else {
+              modelData.metrics[requestData.conversationType] = metrics;
+            }
+          }
+          metrics.usageCount++;
+          metrics.lastUsed = new Date().toISOString();
+        }
+      }
+      if (this.requestHistory.size > 1000) {
+        const oldestKey = Array.from(this.requestHistory.keys())[0];
+        this.requestHistory.delete(oldestKey);
+      }
+      this.savePerformanceData().catch(e => console.error('[PerformanceTracker] Error saving after response:', e));
+      return;
+    }
+
 
     // Get request data
     const requestData = this.requestHistory.get(requestId);
@@ -666,6 +718,23 @@ export class ModelPerformanceTracker {
   }
 
 
+
+  /**
+   * Get the total number of tracked model usages across all models and
+   * conversation types. This is the authoritative "llmCalls" count and is what
+   * the Brain reports via /getLLMCalls, so it always matches the values summed
+   * on the performance dashboard.
+   * @returns Total usage count
+   */
+  getTotalUsageCount(): number {
+    let total = 0;
+    for (const modelData of this.performanceData.values()) {
+      for (const metrics of Object.values(modelData.metrics)) {
+        total += (metrics.usageCount || 0);
+      }
+    }
+    return total;
+  }
 
   /**
    * Get request history
