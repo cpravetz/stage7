@@ -131,7 +131,30 @@ The rebuilt system (**Stage7 NextGen**) transitions Stage7 from a plan-centric, 
 
 ---
 
-## 6. Implementation Roadmap
+## 6. Retrospective on Past Modernization Pitfalls & Risk Mitigation
+
+A critical evaluation of previous refactoring attempts (e.g., `modernization_proposal.md`) highlights why previous modernization efforts inadvertently caused system instability, fragile runtime behaviors, and mock-heavy technical debt:
+
+### 6.1 Root Causes of Past Instability
+1. **Big-Bang Architecture Swaps**: Previous proposals attempted to replace core message-passing protocols wholesale without maintaining backward-compatible adapters, leading to broken service-to-service contracts.
+2. **Mock-Heavy Abstraction Leaks**: SDK enhancements (such as `HttpCoreEngineClient`) added unimplemented placeholder methods (`// TODO: Implement when L1 provides...`) and silent fallback mocks rather than true integration tests.
+3. **Layer Coupling Violations**: Higher-level SDK abstractions became tightly bound to lower-level infrastructure setups (such as hardcoded per-assistant port numbers), causing local dev setup failures and workspace test brittleness.
+
+### 6.2 Architectural Risk Mitigation Framework
+
+To guarantee that Stage7 NextGen avoids repeating these failure modes, the rebuild enforces five strict architectural safeguards:
+
+| Risk Factor | Past Refactoring Failure Mode | NextGen Safeguard & Mitigation Strategy |
+|---|---|---|
+| **Service Contracts** | Silent failures via unimplemented mock fallbacks | **Contract-Driven API Schemas**: Strict OpenAPI / gRPC contract generation between L1, L2, L3, and L4. Mocks are forbidden in production builds. |
+| **Migration Path** | Big-bang replacement of PostOffice / RabbitMQ | **Dual-Read / Adapter Pattern**: Dual-adapter bridge where legacy plugins & `QuickAssistant` instances execute side-by-side with new MCP worker instances during migration. |
+| **Testing Durability** | Broken local Jest setups and untested async paths | **Mandatory E2E Integration Gates**: Integration test suite verifying multi-service state transitions prior to merging any core engine refactor. |
+| **State Consistency** | Ephemeral MongoDB/Redis state drops | **Transactional Saga Rollbacks**: Temporal workflow activities execute atomic state updates with explicit compensation steps for failed tool calls. |
+| **SDK Stability** | Breaking changes to `QuickAssistant` interfaces | **Zero-Downtime ADK Compatibility Layer**: The L2 ADK `createQuickAssistant` interface remains 100% backward compatible; internal transport details are hidden behind standard adapters. |
+
+---
+
+## 7. Implementation Roadmap
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -158,6 +181,6 @@ The rebuilt system (**Stage7 NextGen**) transitions Stage7 from a plan-centric, 
 
 ---
 
-## 7. Conclusion
+## 8. Conclusion
 
 By implementing the NextGen Rebuild Proposal, Stage7 eliminates legacy architectural bottlenecks, resolves port scaling limits, standardizes tool ecosystem integration via MCP, and elevates user experience from rigid plan tracking to dynamic, entity-centric agent collaboration. This positions Stage7 as a state-of-the-art, enterprise-grade agent platform ready for commercial multi-tenant deployment.
