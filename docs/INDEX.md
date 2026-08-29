@@ -16,6 +16,7 @@
 ### For Architects
 - Start: [CORE_SYSTEMS/README.md](./CORE_SYSTEMS/README.md)
 - Then: [ADK/SDK-ARCHITECTURE.md](./ADK/SDK-ARCHITECTURE.md)
+- Proposal: [STAGE7_NEXTGEN_REBUILD_PROPOSAL.md](./STAGE7_NEXTGEN_REBUILD_PROPOSAL.md) ⭐ Architectural Overhaul Blueprint
 
 ### For Historians
 - **Archive** → [archive/](./archive/) - Historical analysis, deprecated proposals, completed migrations

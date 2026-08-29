@@ -34,6 +34,7 @@ These documents are actively maintained and reference current system behavior:
 
 These documents provide guidance and roadmaps for critical operational aspects and enterprise readiness.
 
+- **[STAGE7_NEXTGEN_REBUILD_PROPOSAL.md](./STAGE7_NEXTGEN_REBUILD_PROPOSAL.md)** - NextGen architectural rebuild proposal for enterprise scaling, state durability, entity-centric UX, and MCP integration.
 - **[DEPLOYMENT_HA.md](./DEPLOYMENT_HA.md)** - High Availability deployment recommendations for Kubernetes/Helm.
 - **[MULTI_TENANCY_ROADMAP.md](./MULTI_TENANCY_ROADMAP.md)** - Roadmap for implementing multi-tenancy.
 - **[AUDIT_LOGGING_ROADMAP.md](./AUDIT_LOGGING_ROADMAP.md)** - Roadmap for implementing robust audit logging.
