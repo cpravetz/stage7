@@ -196,7 +196,7 @@ Common issues and solutions:
 
 ### Project Structure
 
-- `services/`: NextGen service components (gateway, mcp-runtime, worker-pool, brain, temporal, vault, artifacts, auth, agent-runtime, tool-executor)
+ - `services/`: NextGen service components (gateway, mcp-runtime, worker-pool, brain, temporal, vault, artifacts, auth, agent-runtime, tool-executor)
 - `shared-nextgen/`: NextGen shared utilities and types
 - `frontend-nextgen/`: React + Vite frontend application
 - `docs/`: Documentation including the NextGen rebuild proposal
