@@ -1,5 +1,7 @@
 # Agent Development Kit (ADK) Overview
 
+**Status**: ⚠️ HISTORICAL - This document describes the superseded V2 architecture. For current NextGen architecture, see [../STAGE7_NEXTGEN_REBUILD_PROPOSAL.md](../STAGE7_NEXTGEN_REBUILD_PROPOSAL.md) and [./README.md](./README.md).
+
 **Last Updated**: January 22, 2026
 
 ## Introduction
@@ -128,7 +130,9 @@ Users interact with agents through a rich, intuitive interface that supports:
 
 ## Getting Started
 
-For detailed deployment and usage instructions, refer to the [Stage7 V2 Deployment Guide](docs/v2/DEPLOYMENT_GUIDE.md) and the [Assistant SDK API Design](docs/v2/l2-sdk-api-design.md).
+For detailed deployment and usage instructions, refer to the [NextGen Deployment Guide](./DEPLOYMENT.md) and the [SDK Architecture](./SDK-ARCHITECTURE.md).
+
+> **Note**: The V2 architecture described in this document has been superseded by NextGen. See [../STAGE7_NEXTGEN_REBUILD_PROPOSAL.md](../STAGE7_NEXTGEN_REBUILD_PROPOSAL.md) for the current target architecture.
 
 ## Conclusion
 

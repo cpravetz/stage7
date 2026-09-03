@@ -9,6 +9,11 @@ press_any_key_to_continue() {
 }
 
 echo "🚀 Stage7 Setup and Launch Script 🚀"
+echo ""
+echo "Profile Structure:"
+echo "  - NextGen services are the default and always run"
+echo "  - All services are managed via Docker Compose"
+echo ""
 
 # --- 1. Check for Docker and Docker Compose prerequisites ---
 echo "Checking prerequisites: Docker and Docker Compose..."
@@ -81,127 +86,17 @@ else
   echo "ADMIN_SECRET already set or has a value in .env. Skipping generation."
 fi
 
-# Update assistant-specific secrets to use the SHARED_SECRET if they are empty
-echo "Updating assistant-specific secrets in .env if empty..."
-ASSISTANT_SECRETS=(
-  "PM_ASSISTANT_API_SECRET" "SALES_ASSISTANT_API_SECRET" "MARKETING_ASSISTANT_API_SECRET" "HR_ASSISTANT_API_SECRET"
-  "FINANCE_ASSISTANT_API_SECRET" "SUPPORT_ASSISTANT_API_SECRET" "LEGAL_ASSISTANT_API_SECRET" "HEALTHCARE_ASSISTANT_API_SECRET"
-  "EDUCATION_ASSISTANT_API_SECRET" "EVENT_ASSISTANT_API_SECRET" "EXECUTIVE_ASSISTANT_API_SECRET" "CAREER_ASSISTANT_API_SECRET"
-  "CONTENT_CREATOR_ASSISTANT_API_SECRET" "SONGWRITER_ASSISTANT_API_SECRET" "SCRIPTWRITER_ASSISTANT_API_SECRET"
-  "HOTEL_OPS_ASSISTANT_API_SECRET" "RESTAURANT_OPS_ASSISTANT_API_SECRET" "INVESTMENT_ADVISOR_API_SECRET"
-  "SPORTS_WAGER_ADVISOR_API_SECRET" "CTO_ASSISTANT_API_SECRET" "PERFORMANCE_ANALYTICS_API_SECRET"
-)
-
-for SECRET_VAR in "${ASSISTANT_SECRETS[@]}"; do
-  if grep -q "^${SECRET_VAR}=" "$ENV_FILE" && [ -z "$(grep "^${SECRET_VAR}=" "$ENV_FILE" | cut -d '=' -f2-)" ]; then
-    sed -i '' -e "s/^${SECRET_VAR}=.*/${SECRET_VAR}=${GENERATED_SHARED_SECRET}/" "$ENV_FILE" 2>/dev/null || \
-    sed -i "s/^${SECRET_VAR}=.*/${SECRET_VAR}=${GENERATED_SHARED_SECRET}/" "$ENV_FILE"
-    echo "  - ${SECRET_VAR} set to SHARED_SECRET."
-  fi
-done
 echo ".env file setup complete. ✅"
 press_any_key_to_continue
 
-# --- 3. Generate RSA keys ---
+# --- 3. Tear down any old / orphan containers before rebuilding ---
 echo ""
-echo "Checking for RSA keys..."
-KEYS_DIR="./shared/keys"
-PRIVATE_KEY_PATH="${KEYS_DIR}/private.key"
-PUBLIC_KEY_PATH="${KEYS_DIR}/public.key"
-PUBLIC_PEM_PATH="${KEYS_DIR}/public.pem"
+echo "Tearing down previous deployment (if any) to free ports and remove orphans..."
+docker compose down --remove-orphans --timeout 30 || echo "Warning: docker compose down returned a non-zero exit code. Continuing."
 
-mkdir -p "${KEYS_DIR}"
-
-if [ ! -f "${PRIVATE_KEY_PATH}" ]; then
-  echo "Generating RSA private key at ${PRIVATE_KEY_PATH}..."
-  openssl genrsa -out "${PRIVATE_KEY_PATH}" 2048
-  chmod 600 "${PRIVATE_KEY_PATH}"
-  echo "RSA private key generated."
-else
-  echo "RSA private key already exists. Skipping generation."
-fi
-
-if [ ! -f "${PUBLIC_KEY_PATH}" ]; then
-  echo "Generating RSA public key at ${PUBLIC_KEY_PATH} from private key..."
-  openssl rsa -in "${PRIVATE_KEY_PATH}" -pubout -out "${PUBLIC_KEY_PATH}"
-  echo "RSA public key generated."
-else
-  echo "RSA public key already exists. Skipping generation."
-fi
-
-if [ ! -f "${PUBLIC_PEM_PATH}" ]; then
-  echo "Generating RSA public PEM key at ${PUBLIC_PEM_PATH} from private key..."
-  openssl rsa -in "${PRIVATE_KEY_PATH}" -pubout -outform PEM -out "${PUBLIC_PEM_PATH}"
-  echo "RSA public PEM key generated."
-else
-  echo "RSA public PEM key already exists. Skipping generation."
-fi
-echo "RSA key setup complete. ✅"
-press_any_key_to_continue
-
-# --- 4. Select Deployment Profile ---
+# --- 4. Build Docker images ---
 echo ""
-echo "--- Select Deployment Profile ---"
-
-PROFILES_LIST=""
-USER_CHOICE=""
-
-while true; do
-  echo ""
-  echo "Please select a deployment profile:"
-  echo "1) Core System (Essential services like PostOffice, MissionControl, Brain, Frontend)"
-  echo "2) All Assistants (Requires Core System to be running. Use with option 1 or 3)"
-  echo "3) Core System + All Assistants (Recommended for full local development)"
-  echo "4) Specific Assistant (You will be prompted to enter the assistant's name)"
-  echo "5) Run All Services (Includes infrastructure, core system, and all assistants)"
-  echo "Enter your choice (1-5): "
-  read -r USER_CHOICE
-
-  case $USER_CHOICE in
-    1)
-      PROFILES_LIST="core"
-      echo "Selected: Core System"
-      break
-      ;;
-    2)
-      PROFILES_LIST="assistants"
-      echo "Selected: All Assistants"
-      echo "WARNING: This option assumes the 'core' services are already running or will be started separately."
-      break
-      ;;
-    3)
-      PROFILES_LIST="core,assistants"
-      echo "Selected: Core System + All Assistants"
-      break
-      ;;
-    4)
-      echo "Enter the name of the specific assistant (e.g., pm-assistant, sales-assistant): "
-      read -r ASSISTANT_NAME
-      if [ -n "$ASSISTANT_NAME" ]; then
-        PROFILES_LIST="core,$ASSISTANT_NAME"
-        echo "Selected: Core System + Specific Assistant: $ASSISTANT_NAME"
-        echo "Note: The 'core' profile is automatically included to ensure dependencies are met."
-        break
-      else
-        echo "Assistant name cannot be empty. Please try again."
-      fi
-      ;;
-    5)
-      PROFILES_LIST="*"
-      echo "Selected: Run All Services (Infrastructure, Core System, and All Assistants)"
-      break
-      ;;
-    *)
-      echo "Invalid choice. Please enter a number between 1 and 5."
-      ;;
-  esac
-done
-
-export COMPOSE_PROFILES="$PROFILES_LIST"
-
-# --- 5. Build Docker images ---
-echo ""
-echo "Building Docker images for selected profile(s)..."
+echo "Building Docker images..."
 if ! docker compose build --no-cache; then
     echo "Error: Docker compose build failed."
     exit 1
@@ -209,10 +104,10 @@ fi
 echo "Docker images built. ✅"
 press_any_key_to_continue
 
-# --- 6. Start services ---
+# --- 5. Start services ---
 echo ""
 echo "--- Starting Stage7 Services ---"
-echo "Initiating Docker Compose with selected profile(s)..."
+echo "Initiating Docker Compose..."
 
 # The --wait flag ensures Docker Compose waits for services to be healthy
 # The --timeout flag specifies how long to wait for containers to become healthy (300 seconds)
@@ -232,13 +127,9 @@ echo "Stage7 setup and launch complete! 🎉"
 echo "Access the frontend at http://localhost"
 echo ""
 echo "--- Debugging Information ---"
-echo "You can access the RabbitMQ Management UI at http://localhost:15672"
-echo "  - Username: stage7"
-echo "  - Password: stage7password"
-echo ""
 echo "To check the status of core services:"
 echo "  docker compose ps"
 echo ""
-echo "To view logs for a specific service (e.g., postoffice):"
-echo "  docker compose logs -f postoffice"
+echo "To view logs for a specific service (e.g., gateway):"
+echo "  docker compose logs -f gateway"
 echo "To stop services: docker compose down"

@@ -1,6 +1,6 @@
 # Archive: Historical Documentation
 
-**Last Updated**: February 3, 2026
+**Last Updated**: September 3, 2026
 
 This directory contains historical documentation, deprecated proposals, and reference materials preserved for context.
 
@@ -55,6 +55,14 @@ Historical analysis and reference materials:
 
 - **implementation-prompts.md** - Implementation prompts and notes
   - Development notes and prompts
+  - Kept for: Development context
+
+- **email_verification_implementation.md** - Email verification implementation
+  - Email verification flow and integration details
+  - Kept for: Development context
+
+- **github_integration_implementation.md** - GitHub integration implementation
+  - GitHub OAuth and API integration patterns
   - Kept for: Development context
 
 ---

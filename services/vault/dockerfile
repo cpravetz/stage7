@@ -1,0 +1,23 @@
+FROM node:22-alpine
+
+RUN apk add --no-cache python3 make g++ vips-dev
+
+WORKDIR /usr/src/app
+
+COPY package*.json ./
+COPY shared-nextgen/package*.json ./shared-nextgen/
+COPY services ./services
+
+RUN npm install --legacy-peer-deps
+
+COPY shared-nextgen ./shared-nextgen
+COPY services/vault ./services/vault
+
+RUN cd shared-nextgen && npm run build
+RUN cd services/vault && rm -rf dist && npm run build
+
+WORKDIR /usr/src/app/services/vault
+
+EXPOSE 4000
+
+CMD ["node", "dist/index.js"]

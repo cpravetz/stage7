@@ -1,820 +1,4 @@
 services:
-  # Build base image with shared dependencies (shared, sdk, errorhandler)
-  # This is used by all agent services to reduce build time
-  # IMPORTANT: Build this first with: docker compose build base
-  base:
-    image: cktmcs:base
-    build:
-      context: .
-      dockerfile: Dockerfile.base
-    entrypoint: ["sh", "-c", "echo 'Base image built successfully' && exit 0"]
-    profiles:
-      - donotstart
-
-  postoffice:
-    build:
-      context: .
-      dockerfile: services/postoffice/dockerfile
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-      securitymanager:
-        condition: service_started
-      consul:
-        condition: service_started
-      redis:
-        condition: service_started
-      mongo:
-        condition: service_started
-    environment:
-      PORT: 5020 # Explicitly set port as it's not from .env
-    env_file:
-      - .env
-    volumes:
-      - ./shared/keys:/usr/src/app/shared/keys
-    ports:
-      - "5020:5020"
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:5020/healthy"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 60s
-    restart: unless-stopped
-
-  missioncontrol:
-    build:
-      context: .
-      dockerfile: services/missioncontrol/dockerfile
-    depends_on:
-      rabbitmq:
-        condition: service_healthy
-      postoffice:
-        condition: service_healthy
-      librarian:
-        condition: service_started
-      securitymanager:
-        condition: service_started
-      brain:
-        condition: service_started
-      engineer:
-        condition: service_started
-    environment:
-      PORT: 5030 # Explicitly set port
-    env_file:
-      - .env
-    ports:
-      - "5030:5030"
-    volumes:
-      - ./shared/keys:/usr/src/app/shared/keys
-
-  brain:
-    build:
-      context: .
-      dockerfile: services/brain/dockerfile
-    depends_on:
-      postoffice:
-        condition: service_healthy
-      librarian:
-        condition: service_healthy
-      securitymanager:
-        condition: service_started
-      redis:
-        condition: service_started
-    environment:
-      PORT: 5070 # Explicitly set port
-    env_file:
-      - .env
-    volumes:
-      - ./shared/keys:/usr/src/app/shared/keys
-      # The .env file mount for services/brain/.env is now redundant due to global .env
-      # - ./services/brain/.env:/usr/src/app/services/brain/.env
-    ports:
-      - "5070:5070"
-    deploy:
-      resources:
-        limits:
-          memory: 2G
-
-  agentset:
-    build:
-      context: .
-      dockerfile: services/agentset/dockerfile
-    depends_on:
-      postoffice:
-        condition: service_healthy
-      librarian:
-        condition: service_healthy
-      securitymanager:
-        condition: service_started
-      redis:
-        condition: service_started
-    environment:
-      PORT: 5100 # Explicitly set port
-      NODE_OPTIONS: --max-old-space-size=4096 # Explicitly set
-    env_file:
-      - .env
-    volumes:
-      - ./shared/keys:/usr/src/app/shared/keys
-    ports:
-      - "5100:5100"
-    deploy:
-      resources:
-        limits:
-          memory: 2G
-    restart: unless-stopped
-
-  engineer:
-    build:
-      context: .
-      dockerfile: services/engineer/dockerfile
-    depends_on:
-      postoffice:
-        condition: service_healthy
-      brain:
-        condition: service_started
-      librarian:
-        condition: service_started
-      rabbitmq:
-        condition: service_healthy
-      securitymanager:
-        condition: service_started
-    environment:
-      PORT: 5050 # Explicitly set port
-      LOCAL_PLUGIN_PATH: /usr/src/app/services/engineer/src/plugins
-    env_file:
-      - .env
-    volumes:
-      - ./shared/keys:/usr/src/app/shared/keys
-      - ./plugins:/usr/src/app/services/engineer/src/plugins
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:5050/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 60s
-
-
-  capabilitiesmanager:
-    build:
-      context: .
-      dockerfile: services/capabilitiesmanager/dockerfile
-    depends_on:
-      postoffice:
-        condition: service_healthy
-      missioncontrol:
-        condition: service_started
-      engineer:
-        condition: service_started
-      librarian:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
-      securitymanager:
-        condition: service_started
-    environment:
-      PORT: 5060 # Explicitly set port
-      LOCAL_PLUGIN_PATH: /usr/src/app/services/capabilitiesmanager/src/plugins # Explicitly set
-    env_file:
-      - .env
-    volumes:
-      - ./shared/keys:/usr/src/app/shared/keys
-      - ./plugins:/usr/src/app/services/capabilitiesmanager/src/plugins
-    ports:
-      - "5060:5060"
-    deploy:
-      resources:
-        limits:
-          memory: 2G
-    restart: unless-stopped
-
-  librarian:
-    build:
-      context: .
-      dockerfile: services/librarian/dockerfile
-    depends_on:
-      securitymanager:
-        condition: service_started
-      chromadb:
-        condition: service_started
-      mongo:
-        condition: service_healthy
-    environment:
-      PORT: 5040 # Explicitly set port
-    env_file:
-      - .env
-    volumes:
-      - ./shared/keys:/usr/src/app/shared/keys
-    ports:
-      - "5040:5040"
-    deploy:
-      resources:
-        limits:
-          memory: 2G
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:5040/health"]
-      interval: 30s
-      timeout: 15s
-      retries: 15
-      start_period: 120s
-    restart: unless-stopped
-
-
-  securitymanager:
-    build:
-      context: .
-      dockerfile: services/security/Dockerfile
-    depends_on:
-      - mongo
-      - rabbitmq
-      - consul
-    environment:
-      PORT: 5010 # Explicitly set port
-      KEYS_DIR: /usr/src/app/services/security/keys # Explicitly set
-    env_file:
-      - .env
-    volumes:
-      - ./services/security/keys:/usr/src/app/services/security/keys
-      - ./shared/keys:/usr/src/app/shared/keys
-    ports:
-      - "5010:5010"
-
-  frontend:
-    build:
-      context: .
-      dockerfile: services/mcsreact/dockerfile
-    ports:
-      - "8080:80"
-    depends_on:
-      postoffice:
-        condition: service_healthy
-    env_file:
-      - .env
-
-  pm-assistant-api:
-    profiles:
-      - assistants
-      - pm-assistant
-    build:
-      context: .
-      dockerfile: agents/pm-assistant-api/Dockerfile
-    depends_on:
-      postoffice:
-        condition: service_healthy
-      securitymanager:
-        condition: service_started
-    environment:
-      PORT: 3000 # Explicitly set port
-      SERVICE_URL: pm-assistant-api:3000 # Explicitly set
-    env_file:
-      - .env
-    ports:
-      - "3000:3000"
-    volumes:
-      - ./shared/keys:/usr/src/app/shared/keys
-    healthcheck:
-      start_period: 300s
-
-  sales-assistant-api:
-    profiles:
-      - assistants
-      - sales-assistant
-    build:
-      context: .
-      dockerfile: agents/sales-assistant-api/Dockerfile
-    depends_on:
-      postoffice:
-        condition: service_healthy
-      securitymanager:
-        condition: service_started
-    environment:
-      PORT: 3002 # Explicitly set port
-    env_file:
-      - .env
-    ports:
-      - "3002:3002"
-    volumes:
-      - ./shared/keys:/usr/src/app/shared/keys
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3002/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 300s
-
-  marketing-assistant-api:
-    profiles:
-      - assistants
-      - marketing-assistant
-    build:
-      context: .
-      dockerfile: agents/marketing-assistant-api/Dockerfile
-    depends_on:
-      postoffice:
-        condition: service_healthy
-      securitymanager:
-        condition: service_started
-    environment:
-      PORT: 3003 # Explicitly set port
-    env_file:
-      - .env
-    ports:
-      - "3003:3003"
-    volumes:
-      - ./shared/keys:/usr/src/app/shared/keys
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3003/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 300s
-
-  hr-assistant-api:
-    profiles:
-      - assistants
-      - hr-assistant
-    build:
-      context: .
-      dockerfile: agents/hr-assistant-api/Dockerfile
-    depends_on:
-      postoffice:
-        condition: service_healthy
-      securitymanager:
-        condition: service_started
-    environment:
-      PORT: 3004 # Explicitly set port
-    env_file:
-      - .env
-    ports:
-      - "3004:3004"
-    volumes:
-      - ./shared/keys:/usr/src/app/shared/keys
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3004/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 300s
-
-  finance-assistant-api:
-    profiles:
-      - assistants
-      - finance-assistant
-    build:
-      context: .
-      dockerfile: agents/finance-assistant-api/Dockerfile
-    depends_on:
-      postoffice:
-        condition: service_healthy
-      securitymanager:
-        condition: service_started
-    environment:
-      PORT: 3005 # Explicitly set port
-    env_file:
-      - .env
-    ports:
-      - "3005:3005"
-    volumes:
-      - ./shared/keys:/usr/src/app/shared/keys
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3005/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 300s
-
-  support-assistant-api:
-    profiles:
-      - assistants
-      - support-assistant
-    build:
-      context: .
-      dockerfile: agents/support-assistant-api/Dockerfile
-    depends_on:
-      postoffice:
-        condition: service_healthy
-      securitymanager:
-        condition: service_started
-    environment:
-      PORT: 3006 # Explicitly set port
-    env_file:
-      - .env
-    ports:
-      - "3006:3006"
-    volumes:
-      - ./shared/keys:/usr/src/app/shared/keys
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3006/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 300s
-
-  legal-assistant-api:
-    profiles:
-      - assistants
-      - legal-assistant
-    build:
-      context: .
-      dockerfile: agents/legal-assistant-api/Dockerfile
-    depends_on:
-      postoffice:
-        condition: service_healthy
-      securitymanager:
-        condition: service_started
-    environment:
-      PORT: 3007 # Explicitly set port
-    env_file:
-      - .env
-    ports:
-      - "3007:3007"
-    volumes:
-      - ./shared/keys:/usr/src/app/shared/keys
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3007/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 300s
-
-  healthcare-assistant-api:
-    profiles:
-      - assistants
-      - healthcare-assistant
-    build:
-      context: .
-      dockerfile: agents/healthcare-assistant-api/Dockerfile
-    depends_on:
-      postoffice:
-        condition: service_healthy
-      securitymanager:
-        condition: service_started
-    environment:
-      PORT: 3008 # Explicitly set port
-    env_file:
-      - .env
-    ports:
-      - "3008:3008"
-    volumes:
-      - ./shared/keys:/usr/src/app/shared/keys
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3008/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 300s
-
-  education-assistant-api:
-    profiles:
-      - assistants
-      - education-assistant
-    build:
-      context: .
-      dockerfile: agents/education-assistant-api/Dockerfile
-    depends_on:
-      postoffice:
-        condition: service_healthy
-      securitymanager:
-        condition: service_started
-    environment:
-      PORT: 3009 # Explicitly set port
-    env_file:
-      - .env
-    ports:
-      - "3009:3009"
-    volumes:
-      - ./shared/keys:/usr/src/app/shared/keys
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3009/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 300s
-
-  event-assistant-api:
-    profiles:
-      - assistants
-      - event-assistant
-    build:
-      context: .
-      dockerfile: agents/event-assistant-api/Dockerfile
-    depends_on:
-      postoffice:
-        condition: service_healthy
-      securitymanager:
-        condition: service_started
-    environment:
-      PORT: 3010 # Explicitly set port
-    env_file:
-      - .env
-    ports:
-      - "3010:3010"
-    volumes:
-      - ./shared/keys:/usr/src/app/shared/keys
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3010/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 300s
-
-  executive-assistant-api:
-    profiles:
-      - assistants
-      - executive-assistant
-    build:
-      context: .
-      dockerfile: agents/executive-assistant-api/Dockerfile
-    depends_on:
-      postoffice:
-        condition: service_healthy
-      securitymanager:
-        condition: service_started
-    environment:
-      PORT: 3011 # Explicitly set port
-    env_file:
-      - .env
-    ports:
-      - "3011:3011"
-    volumes:
-      - ./shared/keys:/usr/src/app/shared/keys
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3011/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 300s
-
-  career-assistant-api:
-    profiles:
-      - assistants
-      - career-assistant
-    build:
-      context: .
-      dockerfile: agents/career-assistant-api/Dockerfile
-    depends_on:
-      postoffice:
-        condition: service_healthy
-      securitymanager:
-        condition: service_started
-    environment:
-      PORT: 3012 # Explicitly set port
-    env_file:
-      - .env
-    ports:
-      - "3012:3012"
-    volumes:
-      - ./shared/keys:/usr/src/app/shared/keys
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3012/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 300s
-
-  content-creator-assistant-api:
-    profiles:
-      - assistants
-      - content-creator-assistant
-    build:
-      context: .
-      dockerfile: agents/content-creator-assistant-api/Dockerfile
-    depends_on:
-      postoffice:
-        condition: service_healthy
-      securitymanager:
-        condition: service_started
-    environment:
-      PORT: 3013 # Explicitly set port
-    env_file:
-      - .env
-    ports:
-      - "3013:3013"
-    volumes:
-      - ./shared/keys:/usr/src/app/shared/keys
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3013/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 300s
-
-  songwriter-assistant-api:
-    profiles:
-      - assistants
-      - songwriter-assistant
-    build:
-      context: .
-      dockerfile: agents/songwriter-assistant-api/Dockerfile
-    depends_on:
-      postoffice:
-        condition: service_healthy
-      securitymanager:
-        condition: service_started
-    environment:
-      PORT: 3014 # Explicitly set port
-    env_file:
-      - .env
-    ports:
-      - "3014:3014"
-    volumes:
-      - ./shared/keys:/usr/src/app/shared/keys
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3014/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 300s
-
-  scriptwriter-assistant-api:
-    profiles:
-      - assistants
-      - scriptwriter-assistant
-    build:
-      context: .
-      dockerfile: agents/scriptwriter-assistant-api/Dockerfile
-    depends_on:
-      postoffice:
-        condition: service_healthy
-      securitymanager:
-        condition: service_started
-    environment:
-      PORT: 3015 # Explicitly set port
-    env_file:
-      - .env
-    ports:
-      - "3015:3015"
-    volumes:
-      - ./shared/keys:/usr/src/app/shared/keys
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3015/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 300s
-
-  hotel-ops-assistant-api:
-    profiles:
-      - assistants
-      - hotel-ops-assistant
-    build:
-      context: .
-      dockerfile: agents/hotel-ops-assistant-api/Dockerfile
-    depends_on:
-      postoffice:
-        condition: service_healthy
-      securitymanager:
-        condition: service_started
-    environment:
-      PORT: 3017 # Explicitly set port
-    env_file:
-      - .env
-    ports:
-      - "3017:3017"
-    volumes:
-      - ./shared/keys:/usr/src/app/shared/keys
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3017/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 300s
-
-  restaurant-ops-assistant-api:
-    profiles:
-      - assistants
-      - restaurant-ops-assistant
-    build:
-      context: .
-      dockerfile: agents/restaurant-ops-assistant-api/Dockerfile
-    depends_on:
-      postoffice:
-        condition: service_healthy
-      securitymanager:
-        condition: service_started
-    environment:
-      PORT: 3016 # Explicitly set port
-    env_file:
-      - .env
-    ports:
-      - "3016:3016"
-    volumes:
-      - ./shared/keys:/usr/src/app/shared/keys
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3016/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 300s
-
-
-  investment-advisor-api:
-    profiles:
-      - assistants
-      - investment-advisor
-    build:
-      context: .
-      dockerfile: agents/investment-advisor-api/Dockerfile
-    depends_on:
-      postoffice:
-        condition: service_healthy
-      securitymanager:
-        condition: service_started
-    environment:
-      PORT: 3025 # Explicitly set port
-    env_file:
-      - .env
-    ports:
-      - "3025:3025"
-    volumes:
-      - ./shared/keys:/usr/src/app/shared/keys
-    healthcheck:
-      test: ["CMD", "--spider", "-q", "http://localhost:3025/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 300s
-  sports-wager-advisor-api:
-    profiles:
-      - assistants
-      - sports-wager-advisor
-    build:
-      context: .
-      dockerfile: agents/sports-wager-advisor-api/Dockerfile
-    depends_on:
-      postoffice:
-        condition: service_healthy
-      securitymanager:
-        condition: service_started
-    environment:
-      PORT: 3018 # Explicitly set port
-    env_file:
-      - .env
-    ports:
-      - "3018:3018"
-    volumes:
-      - ./shared/keys:/usr/src/app/shared/keys
-    healthcheck:
-      test: ["CMD", "--spider", "-q", "http://localhost:3018/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 300s
-
-  cto-assistant-api:
-    profiles:
-      - assistants
-      - cto-assistant
-    build:
-      context: .
-      dockerfile: agents/cto-assistant-api/Dockerfile
-    depends_on:
-      postoffice:
-        condition: service_healthy
-      securitymanager:
-        condition: service_started
-    environment:
-      PORT: 3019 # Explicitly set port
-    env_file:
-      - .env
-    ports:
-      - "3019:3019"
-    volumes:
-      - ./shared/keys:/usr/src/app/shared/keys
-    healthcheck:
-      test: ["CMD", "--spider", "-q", "http://localhost:3019/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 300s
-
-  performance-analytics-api:
-    profiles:
-      - assistants
-      - performance-analytics
-    build:
-      context: .
-      dockerfile: agents/performance-analytics-api/Dockerfile
-    depends_on:
-      postoffice:
-        condition: service_healthy
-      securitymanager:
-        condition: service_started
-    environment:
-      PORT: 3020 # Explicitly set port
-    env_file:
-      - .env
-    ports:
-      - "3020:3020"
-    volumes:
-      - ./shared/keys:/usr/src/app/shared/keys
-    healthcheck:
-      test: ["CMD", "--spider", "-q", "http://localhost:3020/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 300s
-
   mongo:
     image: mongo:latest
     ports:
@@ -836,76 +20,149 @@ services:
     volumes:
       - redis_data:/data
 
-  rabbitmq:
-    image: rabbitmq:3.13-management
+  gateway:
+    image: stage7-gateway
+    build:
+      context: .
+      dockerfile: services/gateway/dockerfile
     ports:
-      - "5672:5672"  # AMQP port
-      - "15672:15672" # Management UI
-    volumes:
-      - rabbitmq_data:/var/lib/rabbitmq
+      - "3900:3000"
     env_file:
       - .env
-    healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
-      interval: 15s
-      timeout: 10s
-      retries: 15
-      start_period: 120s  # Increased to allow more time for RabbitMQ to fully initialize
     restart: unless-stopped
 
-  consul:
-    image: consul:1.15
+  brain:
+    image: stage7-brain
+    build:
+      context: .
+      dockerfile: services/brain/dockerfile
     ports:
-      - "8500:8500"  # HTTP API and UI
-      - "8600:8600/udp"  # DNS interface
-    volumes:
-      - consul_data:/consul/data
-    command: agent -server -ui -bootstrap-expect=1 -client=0.0.0.0 -rejoin -node=consul-server-1
+      - "3100:3100"
     env_file:
       - .env
-    healthcheck:
-      test: ["CMD", "consul", "members"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 60s
     restart: unless-stopped
 
-  searxng:
-    image: searxng/searxng:latest
+  mcp-runtime:
+    image: stage7-mcp-runtime
+    build:
+      context: .
+      dockerfile: services/mcp-runtime/dockerfile
     ports:
-      - "8888:8080"
-    volumes:
-      - "./searxng/config:/etc/searxng/"
-      - "./searxng/data/:/var/cache/searxng/"
-    restart: unless-stopped
-
-  chromadb:
-    image: chromadb/chroma:latest
-    volumes:
-      - chromadb_data:/chroma/chroma
+      - "3300:3300"
     env_file:
       - .env
+    restart: unless-stopped
+
+  worker-pool:
+    image: stage7-worker-pool
+    build:
+      context: .
+      dockerfile: services/worker-pool/dockerfile
     ports:
-      - "8002:8000"
-    command: ["run", "--host", "0.0.0.0", "--port", "8000", "--path", "/chroma/chroma"]
-    healthcheck:
-      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/8000'"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
+      - "3200:3200"
+    env_file:
+      - .env
+    restart: unless-stopped
+
+  temporal:
+    image: stage7-temporal
+    build:
+      context: .
+      dockerfile: services/temporal/dockerfile
+    ports:
+      - "4100:4100"
+    env_file:
+      - .env
+    depends_on:
+      - artifacts
+      - gateway
+    restart: unless-stopped
+
+  vault:
+    image: stage7-vault
+    build:
+      context: .
+      dockerfile: services/vault/dockerfile
+    ports:
+      - "4000:4000"
+    env_file:
+      - .env
+    restart: unless-stopped
+
+  artifacts:
+    image: stage7-artifacts
+    build:
+      context: .
+      dockerfile: services/artifacts/dockerfile
+    ports:
+      - "4200:4200"
+    env_file:
+      - .env
+    depends_on:
+      - redis
+      - mongo
+    restart: unless-stopped
+
+  auth:
+    image: stage7-auth
+    build:
+      context: .
+      dockerfile: services/auth/dockerfile
+    ports:
+      - "4300:4300"
+    env_file:
+      - .env
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  agent-runtime:
+    image: stage7-agent-runtime
+    build:
+      context: .
+      dockerfile: services/agent-runtime/dockerfile
+    ports:
+      - "3400:3400"
+    env_file:
+      - .env
+    depends_on:
+      - redis
+      - artifacts
+    restart: unless-stopped
+
+  tool-executor:
+    image: stage7-tool-executor
+    build:
+      context: .
+      dockerfile: services/tool-executor/dockerfile
+    ports:
+      - "3500:3500"
+    env_file:
+      - .env
+    depends_on:
+      - redis
+      - artifacts
+    restart: unless-stopped
+
+  frontend:
+    image: stage7-frontend
+    build:
+      context: .
+      dockerfile: frontend-nextgen/dockerfile
+    ports:
+      - "8080:8080"
+    depends_on:
+      - gateway
+    restart: unless-stopped
 
   # OpenWebUI is using an external server, not a local container
+
 
 volumes:
   mongo_data:
   redis_data:
-  rabbitmq_data:
-  consul_data:
   config_data:
   security_keys:
-  chromadb_data:
 
 networks:
   default:

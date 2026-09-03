@@ -198,7 +198,7 @@ Improve **Solution 1** with helpers:
 Apply same pattern to:
 
 - [ ] Content Creator Assistant
-- [ ] PM Assistant  
+- [ ] Product Mgt Assistant  
 - [ ] Event Assistant
 - [ ] HR Assistant
 - [ ] Finance Assistant

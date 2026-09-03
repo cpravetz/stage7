@@ -1,43 +1,38 @@
 {
   "compilerOptions": {
-    "target": "es2019", // Or a newer version like ES2020, ES2021
+    "target": "es2019",
     "module": "commonjs",
-    "lib": ["es2019", "dom"], // "dom" might be needed if any browser-like globals are used, otherwise remove
+    "lib": ["es2019", "dom"],
     "declaration": true,
-    "outDir": "./dist", // Or your preferred output directory
-    "rootDir": "./",    // Assuming source files are in root or subdirectories like 'src'
+    "outDir": "./dist",
+    "rootDir": "./",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "moduleResolution": "node",
     "resolveJsonModule": true,
-    "isolatedModules": true, // Good for Babel compatibility if used
-    "jsx": "react-jsx", // Add this line to enable JSX parsing
-    "experimentalDecorators": true, // If using decorators
-    "emitDecoratorMetadata": true,   // If using decorators with metadata
-    "baseUrl": ".", // Base directory for module resolution
-    "paths": { // For module aliases
-      "@cktmcs/shared": ["shared/src"],
-      "@cktmcs/shared/*": ["shared/src/*"],
-      "@cktmcs/sdk": ["sdk/src"],
-      "@cktmcs/sdk/*": ["sdk/src/*"],
-      "@cktmcs/errorhandler": ["errorhandler/src"],
-      "@cktmcs/errorhandler/*": ["errorhandler/src/*"]
+    "isolatedModules": true,
+    "jsx": "react-jsx",
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "baseUrl": ".",
+    "paths": {
+      "@stage7-nextgen/shared": ["shared-nextgen/src"],
+      "@stage7-nextgen/shared/*": ["shared-nextgen/src/*"]
     },
-    "typeRoots": ["./node_modules/@types", "./src/types"] // Include project-specific types if any
+    "typeRoots": ["./node_modules/@types", "./src/types"]
   },
   "include": [
-    "services/**/*", // Include all ts files in services
-    "agents/**/*", // Include all ts files in agents
-    "shared/src/**/*",    // Include all ts files in shared/src
-    "errorhandler/src/**/*" // Include errorhandler source
-    // Add other paths like "src/**/*" if your project structure is different
+    "services/**/*",
+    "shared/src/**/*",
+    "errorhandler/src/**/*"
   ],
   "exclude": [
     "node_modules",
-    "dist", // Exclude output directory
-    "**/*.test.ts", // Usually test files are not part of the main compilation output
-    "**/*.spec.ts"  // Or if you use .spec.ts
+    "dist",
+    "**/*.test.ts",
+    "**/*.spec.ts",
+    "services/gateway/**/*"
   ]
 }

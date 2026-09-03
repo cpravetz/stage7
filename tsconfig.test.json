@@ -1,10 +1,6 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "paths": {
-      "@cktmcs/marketplace": ["marketplace/src"],
-      "@cktmcs/marketplace/*": ["marketplace/src/*"]
-    },
     "types": ["node", "jest"]
   },
   "include": [

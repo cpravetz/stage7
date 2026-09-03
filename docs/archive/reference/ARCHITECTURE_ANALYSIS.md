@@ -435,7 +435,7 @@ This issue affects **all assistants** that have UI-editable data:
 
 - ✗ Scriptwriter Assistant (characters, plots, dialogues)
 - ✗ Content Creator Assistant (topics, articles, schedules)
-- ✗ PM Assistant (tasks, dependencies, milestones)
+- ✗ Product Mgt Assistant (tasks, dependencies, milestones)
 - ✗ Event Assistant (venues, vendors, timeline)
 - ✗ HR Assistant (job postings, candidates)
 - ✗ Finance Assistant (transactions, budgets)
