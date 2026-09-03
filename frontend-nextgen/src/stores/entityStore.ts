@@ -8,7 +8,6 @@ export interface Entity {
   type: 'assistant' | 'agent';
   status: string;
   model: string;
-  capabilities: string[];
   systemPrompt: string;
   tools: Array<{ name: string; description: string; inputSchema: Record<string, unknown> } | string>;
   metadata: Record<string, unknown>;
@@ -28,7 +27,6 @@ const normalizeEntity = (raw: Record<string, unknown>, type: 'assistant' | 'agen
   type,
   status: (raw.status as string) || 'active',
   model: (raw.model as string) || '',
-  capabilities: Array.isArray(raw.capabilities) ? raw.capabilities as string[] : [],
   systemPrompt: (raw.systemPrompt as string) || '',
   tools: Array.isArray(raw.tools) ? raw.tools as Entity['tools'] : [],
   metadata: (raw.metadata as Record<string, unknown>) || {},

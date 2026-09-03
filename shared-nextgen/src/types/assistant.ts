@@ -6,7 +6,6 @@ export interface AssistantDefinition {
   name: string;
   description: string;
   model: string;
-  capabilities: string[];
   systemPrompt: string;
   tools: MCPTool[];
   metadata: Record<string, unknown>;
@@ -20,7 +19,6 @@ export interface AssistantTemplate {
   description: string;
   category: string;
   model: string;
-  capabilities: string[];
   systemPrompt: string;
   tools: MCPTool[];
   metadata: Record<string, unknown>;
@@ -35,7 +33,6 @@ export interface AssistantInstance {
   name: string;
   description: string;
   model: string;
-  capabilities: string[];
   systemPrompt: string;
   tools: MCPTool[];
   metadata: Record<string, unknown>;

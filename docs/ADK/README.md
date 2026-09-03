@@ -1,6 +1,6 @@
 # Agent Development Kit (ADK) - NextGen
 
-**Last Updated**: August 30, 2026
+**Last Updated**: September 3, 2026
 
 ## Getting Started
 
@@ -452,7 +452,7 @@ The Auth service includes RBAC:
 
 - [INDEX.md](./INDEX.md) - Complete documentation navigation
 - [ADK_OVERVIEW.md](./ADK_OVERVIEW.md) - ADK system overview
-- [SDK-ARCHITECTURE.md](./ADK/SDK-ARCHITECTURE.md) - Technical API reference
+- [SDK-ARCHITECTURE.md](./SDK-ARCHITECTURE.md) - Technical API reference
 - [TOOL-DEVELOPMENT.md](./ADK/TOOL-DEVELOPMENT.md) - Build custom tools
 - [DEPLOYMENT.md](./ADK/DEPLOYMENT.md) - Production deployment
 - [ASSISTANT_STARTUP_GUIDE.md](./ADK/ASSISTANT_STARTUP_GUIDE.md) - Service reference
@@ -469,8 +469,8 @@ The Auth service includes RBAC:
 
 ### Architecture & Reference
 
-- [../v2/v2-architecture-overview.md](../v2/v2-architecture-overview.md) - NextGen architecture details
-- [../STAGE7_NEXTGEN_REBUILD_PROPOSAL.md](../STAGE7_NEXTGEN_REBUILD_PROPOSAL.md) - Architectural overhaul blueprint
+- [../v2/v2-architecture-overview.md](../v2/v2-architecture-overview.md) - ⚠️ Superseded V2 architecture (replaced by NextGen)
+- [../STAGE7_NEXTGEN_REBUILD_PROPOSAL.md](../STAGE7_NEXTGEN_REBUILD_PROPOSAL.md) - Current NextGen architectural blueprint
 - [../ACTIVE_REFERENCE/Step Architecture.md](../ACTIVE_REFERENCE/Step%20Architecture.md) - Step lifecycle
 - [../ACTIVE_REFERENCE/TASK_MANAGER_PLUGIN_DESIGN.md](../ACTIVE_REFERENCE/TASK_MANAGER_PLUGIN_DESIGN.md) - Task plugin spec
 

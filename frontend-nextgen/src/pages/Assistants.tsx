@@ -14,7 +14,6 @@ interface Assistant {
   name: string;
   description: string;
   model?: string;
-  capabilities: string[];
   systemPrompt: string;
   tools: AssistantTool[];
   metadata: Record<string, unknown>;
@@ -40,7 +39,6 @@ const Assistants = () => {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [systemPrompt, setSystemPrompt] = useState('');
-  const [capabilities, setCapabilities] = useState('chat');
   const [tools, setTools] = useState<AssistantTool[]>([]);
   const [toolName, setToolName] = useState('');
   const [toolDescription, setToolDescription] = useState('');
@@ -55,7 +53,6 @@ const Assistants = () => {
   const [editForm, setEditForm] = useState<{
     name?: string;
     description?: string;
-    capabilities?: string;
     systemPrompt?: string;
     tools?: AssistantTool[];
   }>({});
@@ -100,7 +97,6 @@ const Assistants = () => {
         tenantId: 'tenant-1',
         name,
         description,
-        capabilities: capabilities.split(',').map((c) => c.trim()).filter(Boolean),
         systemPrompt: systemPrompt || 'You are a helpful assistant.',
         tools,
         metadata: {},
@@ -110,7 +106,6 @@ const Assistants = () => {
       setName('');
       setDescription('');
       setSystemPrompt('');
-      setCapabilities('chat');
       setTools([]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to register assistant');
@@ -135,7 +130,6 @@ const Assistants = () => {
     setEditForm({
       name: assistant.name,
       description: assistant.description,
-      capabilities: assistant.capabilities.join(', '),
       systemPrompt: assistant.systemPrompt,
       tools: assistant.tools,
     });
@@ -146,12 +140,7 @@ const Assistants = () => {
     if (!editingId) return;
     setError(null);
     try {
-      const data = await putJSON<Assistant>(`/api/workers/assistants/${editingId}`, {
-        ...editForm,
-        capabilities: typeof editForm.capabilities === 'string'
-          ? (editForm.capabilities as string).split(',').map((c) => c.trim()).filter(Boolean)
-          : editForm.capabilities,
-      });
+      const data = await putJSON<Assistant>(`/api/workers/assistants/${editingId}`, editForm);
       setAssistants(assistants.map((a) => (a.id === editingId ? data : a)));
       setEditingId(null);
       setEditForm({});
@@ -219,7 +208,6 @@ const Assistants = () => {
             <textarea placeholder="Description" value={description} onChange={(e) => setDescription(e.target.value)} required rows={2} />
             <p className="hint">Model is optimized at chat time via the Brain router; no model assignment needed at registration.</p>
             <textarea placeholder="System Prompt" value={systemPrompt} onChange={(e) => setSystemPrompt(e.target.value)} rows={3} />
-            <input type="text" placeholder="Capabilities (comma-separated)" value={capabilities} onChange={(e) => setCapabilities(e.target.value)} />
 
             <div className="tool-binding-section">
               <h4>Tool Bindings</h4>
@@ -267,7 +255,6 @@ const Assistants = () => {
             <input type="text" placeholder="Name" value={editForm.name || ''} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} />
             <textarea placeholder="Description" value={editForm.description || ''} onChange={(e) => setEditForm({ ...editForm, description: e.target.value })} rows={2} />
             <textarea placeholder="System Prompt" value={editForm.systemPrompt || ''} onChange={(e) => setEditForm({ ...editForm, systemPrompt: e.target.value })} rows={3} />
-            <input type="text" placeholder="Capabilities (comma-separated)" value={editForm.capabilities || ''} onChange={(e) => setEditForm({ ...editForm, capabilities: e.target.value })} />
             <div className="button-row">
               <button type="submit">Save Changes</button>
               <button type="button" className="secondary" onClick={() => { setEditingId(null); setEditForm({}); }}>Cancel</button>
@@ -292,7 +279,6 @@ const Assistants = () => {
               <tr>
                 <th>Name</th>
                 <th>Description</th>
-                <th>Capabilities</th>
                 <th>Tools</th>
                 <th>Status</th>
                 <th>Actions</th>
@@ -303,7 +289,6 @@ const Assistants = () => {
                 <tr key={a.id}>
                   <td><Link to={`/entity/${a.id}`}>{a.name}</Link></td>
                   <td className="truncate">{a.description}</td>
-                  <td>{(a.capabilities || []).join(', ') || 'None'}</td>
                   <td>{a.tools?.length || 0}</td>
                   <td><span className="badge active">persisted</span></td>
                   <td className="actions-cell">

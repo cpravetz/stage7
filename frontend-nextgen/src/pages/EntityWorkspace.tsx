@@ -157,7 +157,6 @@ const EntityWorkspace = () => {
               <p>{entity.description}</p>
               <div className="meta-grid">
                 <div><strong>Model:</strong> {entity.model}</div>
-                <div><strong>Capabilities:</strong> {(entity.capabilities || []).join(', ') || 'None'}</div>
                 <div><strong>Tools Bound:</strong> {toolBindings.filter((t) => t.enabled).length}</div>
                 <div><strong>Memory Keys:</strong> {Object.keys(memoryContext).length}</div>
               </div>

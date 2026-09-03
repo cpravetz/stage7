@@ -153,7 +153,7 @@ For advanced users, you can find detailed instructions for manual Docker builds,
 
 ### First Steps After Installation
 
-1.  Access the frontend at `http://localhost:80` (or the port configured in your `.env` for `REACT_APP_API_BASE_URL`).
+1.  Access the frontend at `http://localhost:8080` (or the port configured in your `.env` for `REACT_APP_API_BASE_URL`).
 2.  Register a new account through the frontend interface.
 3.  Start with a simple mission (e.g., "Create a basic todo list") to test the system.
 4.  Monitor agent creation and task execution through the UI.
@@ -196,7 +196,7 @@ Common issues and solutions:
 
 ### Project Structure
 
-- `services/`: NextGen service components (gateway, mcp-runtime, worker-pool, brain, temporal, vault, persistence, auth, agent-runtime, tool-executor)
+- `services/`: NextGen service components (gateway, mcp-runtime, worker-pool, brain, temporal, vault, artifacts, auth, agent-runtime, tool-executor)
 - `shared-nextgen/`: NextGen shared utilities and types
 - `frontend-nextgen/`: React + Vite frontend application
 - `docs/`: Documentation including the NextGen rebuild proposal

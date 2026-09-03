@@ -123,7 +123,6 @@ describe('Integration: End-to-End Mission Flow', () => {
         id: 'e2e-assistant',
         name: 'E2E Assistant',
         model: 'gpt-4',
-        capabilities: ['chat', 'code'],
         systemPrompt: 'You are an end-to-end test assistant.',
         tools: [],
         metadata: {},

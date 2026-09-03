@@ -122,7 +122,6 @@ const Canvas = () => {
               <div className="meta-grid">
                 <div><strong>Type:</strong> {selectedEntity.type}</div>
                 <div><strong>Model:</strong> {selectedEntity.model}</div>
-                <div><strong>Capabilities:</strong> {selectedEntity.capabilities.join(', ')}</div>
               </div>
             </div>
           ) : (
