@@ -4,25 +4,26 @@ module.exports = {
   rootDir: '.',
   moduleDirectories: ['node_modules', 'src'],
   testMatch: [
-    '<rootDir>/services/engineer/__tests__/**/*.test.ts',
-    '<rootDir>/services/brain/__tests__/**/*.test.ts',
-    '<rootDir>/services/missioncontrol/__tests__/**/*.test.ts',
-    '<rootDir>/marketplace/__tests__/**/*.test.ts'
+    '<rootDir>/services/brain/src/__tests__/**/*.test.ts',
+    '<rootDir>/services/mcp-runtime/src/__tests__/**/*.test.ts',
+    '<rootDir>/services/worker-pool/src/__tests__/**/*.test.ts',
+    '<rootDir>/services/gateway/src/__tests__/**/*.test.ts',
+    '<rootDir>/services/temporal/src/__tests__/**/*.test.ts',
+    '<rootDir>/services/vault/src/__tests__/**/*.test.ts',
+    '<rootDir>/services/artifacts/src/__tests__/**/*.test.ts',
+    '<rootDir>/services/auth/src/__tests__/**/*.test.ts',
+    '<rootDir>/services/agent-runtime/src/__tests__/**/*.test.ts',
+    '<rootDir>/services/tool-executor/src/__tests__/**/*.test.ts',
+    '<rootDir>/tests/integration/**/*.test.ts'
   ],
-  modulePaths: [
-    '<rootDir>',
-    '<rootDir>/marketplace/src'
-  ],
+  transform: {
+    '^.+\\.ts$': 'ts-jest',
+  },
   moduleNameMapper: {
-    '^@cktmcs/shared$': '<rootDir>/shared/src',
-    '^@cktmcs/sdk$': '<rootDir>/sdk/src',
-    '^@cktmcs/errorhandler$': '<rootDir>/errorhandler/src',
-    '^@cktmcs/marketplace/(.*)$': '<rootDir>/marketplace/src/$1',
-    '^../src/(.*)$': '<rootDir>/marketplace/src/$1',
+    '^@stage7-nextgen/shared$': '<rootDir>/shared-nextgen/src',
+    '^@stage7-nextgen/artifacts$': '<rootDir>/services/artifacts/src',
+    '^@stage7-nextgen/persistence$': '<rootDir>/services/artifacts/src',
+    '^@stage7-nextgen/mcp-runtime$': '<rootDir>/services/mcp-runtime/src',
   },
-  globals: {
-    'ts-jest': {
-      tsconfig: 'tsconfig.test.json',
-    },
-  },
+  forceExit: true,
 };

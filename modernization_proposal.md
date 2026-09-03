@@ -65,7 +65,7 @@ To turn Stage7 into a commercially successful SaaS product or an enterprise-grad
 *   **Current State**: The 20+ assistants (Sales, HR, CTO, PM, etc.) each run as independent, long-running Node.js processes bound to their own dedicated HTTP/WebSocket ports (e.g., 3001, 3002). This does not scale. If 1,000 users register custom assistants, the server will quickly exhaust available ports and memory.
 *   **Commercialization**: Implement a **Serverless/Shared Worker Pattern** and a **Control Plane**:
     -   Run a single, highly optimized **Assistant Execution Pool** (worker pool).
-    -   When a user initiates a conversation with a PM Assistant, a worker dynamically fetches the PM assistant's configuration from the database and executes its logic in an isolated sandbox.
+    -   When a user initiates a conversation with a Product Mgt Assistant, a worker dynamically fetches the Product Mgt Assistant's configuration from the database and executes its logic in an isolated sandbox.
     -   Implement a **Unified API Gateway** (e.g., Kong, Traefik, or an Express-based Router) that exposes a single entrypoint (e.g., `api.stage7.ai/v1/assistants/:id`) and dynamically routes traffic internally.
 
 ### 3.2 Enterprise Multi-Tenancy & Data Isolation

@@ -201,10 +201,228 @@ With numerous agent frameworks on the market (e.g., LangGraph, CrewAI, AutoGen, 
 │   • Redesign React UI into Entity-Centric Agent Canvas & Workspace          │
 │   • Implement Row-Level Multi-Tenancy (RLS) & OpenTelemetry tracing         │
 │   • Deploy cost attribution dashboards and automated spending limits        │
+│   🔄 In Progress: Core replacement underway                                    │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
+## 7.1 Progress Tracker
+
+| Phase | Component | Status | Notes |
+|---|---|---|---|
+| Phase 1 | MCP Server Runtime | ✅ Complete | Core server, tool registry, stdio/HTTP transport, 8 tests passing |
+| Phase 1 | Unified API Gateway | ✅ Complete | Service registry, health routes, 2 tests passing |
+| Phase 1 | Shared Worker Pool | ✅ Complete | Task queue, worker pool, REST routes, 12 tests passing |
+| Phase 1 | Brain/LLM Layer - Utilities | ✅ Complete | Logger, errors, asyncHandler |
+| Phase 1 | Brain/LLM Layer - Structured Output | ✅ Complete | StructuredOutputSampler with Zod |
+| Phase 1 | Brain/LLM Layer - Semantic Cache | ✅ Complete | SemanticCache with ioredis |
+| Phase 1 | Brain/LLM Layer - Context Manager | ✅ Complete | ContextManager with token-aware windows |
+| Phase 1 | Brain/LLM Layer - Model Router | ✅ Complete | ModelRouter with cost-based routing |
+| Phase 1 | Brain/LLM Layer - Service | ✅ Complete | BrainService orchestration |
+| Phase 1 | Brain/LLM Layer - Routes | ✅ Complete | REST endpoints |
+| Phase 1 | Brain/LLM Layer - Tests | ✅ Complete | 16 unit tests passing |
+| Phase 2 | Temporal.io | ✅ Complete | Workflow types, MissionWorkflow, activities, 4 tests passing |
+| Phase 2 | Vault Integration | ✅ Complete | Envelope encryption, encrypt/decrypt routes, 4 tests passing |
+| Phase 2 | NextGen Persistence Service | ✅ Complete | Document storage, mission state, agent state, vector search, 9 tests passing |
+| Phase 2 | NextGen Auth Service | ✅ Complete | JWT tokens, API keys, RBAC, 15 tests passing |
+| Phase 2 | NextGen Agent Runtime | ✅ Complete | Agent lifecycle, task execution, collaboration, specialization, 10 tests passing |
+| Phase 2 | NextGen Tool Executor | ✅ Complete | Tool registry, execution, plugin generation, 11 tests passing |
+| Phase 3 | NextGen Frontend | ✅ Complete | React + Vite SPA with entity workspace, multi-agent canvas, live feeds, login, and full service coverage |
+| Legacy Cleanup | Legacy Cleanup | ✅ Complete | All legacy services removed from codebase; 'legacy' docker-compose profile cleared; zero legacy imports across NextGen services |
+| Legacy Service Replacement | Legacy Service Replacement | ✅ Complete | All 21 legacy assistants removed; Worker-pool replaces dynamic assistant execution; NextGen services are default in docker-compose |
+| Dependency Isolation | Dependency Isolation | ✅ Complete | All NextGen services depend only on @stage7-nextgen/shared; zero legacy imports |
+| Docker Profile Restructure | Docker Profile Restructure | ✅ Complete | NextGen is default/always-on; legacy services removed from docker-compose |
+| Integration Tests | Integration Tests | ✅ Complete | 7 integration suites, 22 tests passing; covers gateway→workers, auth flows, agent runtime collaboration, multi-tenancy, vault→tool executor, and end-to-end mission flows |
+
+
+## 7.2 True Replacement Strategy
+
+The rebuild has moved from additive parallel services to active replacement of legacy components. The guiding principle: **new services must cut legacy dependencies and supplant old components, not merely coexist with them**.
+
+### Replacement Order
+
+| Priority | Legacy Component | Replacement | Status |
+|---|---|---|
+| 1 | 21 Assistant Services (port-per-assistant) | Worker-Pool dynamic assistant execution | ✅ Complete |
+| 2 | Legacy Brain HTTP API | NextGen Brain direct service calls | ✅ Complete |
+| 3 | PostOffice / RabbitMQ | Gateway + MCP Runtime | ✅ Complete |
+| 4 | MissionControl | Temporal.io workflows | ✅ Complete |
+| 5 | AgentSet | NextGen Agent Runtime | ✅ Complete |
+| 6 | Engineer / CapabilitiesManager | Tool Executor | ✅ Complete |
+| 7 | Librarian | NextGen Persistence | ✅ Complete |
+| 8 | SecurityManager | NextGen Auth | ✅ Complete |
+
+### Replacement Rules
+
+1. **No legacy imports**: NextGen services must not import from `@cktmcs/shared`, `@cktmcs/sdk`, `@cktmcs/errorhandler`, or `@cktmcs/marketplace`
+2. **No legacy infrastructure**: New services must not depend on RabbitMQ, Consul, or legacy service discovery
+3. **Contract boundaries**: Legacy services that remain must call NextGen services via HTTP APIs, not shared libraries
+4. **Deprecation profile**: Legacy services move to `legacy` docker-compose profile; NextGen services move to `default` (always-on)
+
 ---
+
+## 7.3 What Has Been Replaced
+
+| Legacy Component | Replacement | Status |
+|---|---|---|
+| PostOffice | Gateway | ✅ Complete and removed |
+| MissionControl | Temporal | ✅ Complete and removed |
+| 21 Assistant Services (port-per-assistant) | Worker-Pool | ✅ Complete and removed |
+| Brain (legacy) | NextGen Brain (services/brain) | ✅ Complete and removed |
+| AgentSet | Agent Runtime | ✅ Complete and removed |
+| Engineer / CapabilitiesManager | Tool Executor | ✅ Complete and removed |
+| Librarian | Persistence | ✅ Complete and removed |
+| SecurityManager | Auth | ✅ Complete and removed |
+| Legacy mcsreact frontend | NextGen React frontend (frontend-nextgen) | ✅ Complete and removed |
+| Legacy shared/sdk/errorhandler/marketplace packages | shared-nextgen | ✅ Complete and removed |
+
+> **Note:** All legacy components listed above have been completely removed from the codebase. The NextGen replacements are now the sole implementations.
+
+## 7.4 What Remains Legacy
+
+| Legacy Component | Replacement | Details |
+|---|---|---|
+| mongo | Infrastructure | Used by NextGen Persistence Service (MongoDB) |
+| redis | Infrastructure | Used by NextGen Auth Service, Agent Runtime, and Worker Pool (Redis) |
+
+All legacy services have been completely removed from the codebase. Only **mongo** and **redis** infrastructure components remain — these are shared by NextGen services and are not legacy application code.
+
+
+
+## 7.5 Final Architecture
+
+> **All legacy code has been removed.** The entire system now runs exclusively on NextGen services. No legacy service processes, packages, or shared libraries remain in the codebase. Only MongoDB and Redis infrastructure persist — both consumed directly by NextGen services.
+
+### NextGen Services
+
+| Service | Port | Directory | Description |
+|---|---|---|---|
+| Gateway | 3000 | services/gateway | Unified API Gateway (HTTP/WebSocket routing, service registry) |
+| Brain | 3100 | services/brain | LLM orchestration, structured output, semantic cache, model routing |
+| Worker-Pool | 3200 | services/worker-pool | Dynamic assistant execution (replaces 21 port-per-assistant services) |
+| MCP Runtime | 3300 | services/mcp-runtime | Model Context Protocol server runtime and tool registry |
+| Agent Runtime | 3400 | services/agent-runtime | Agent lifecycle, task execution, collaboration, specialization |
+| Tool Executor | 3500 | services/tool-executor | Tool registry, execution, MCP plugin generation |
+| Vault | 4000 | services/vault | Envelope encryption for secrets management |
+| Temporal | 4100 | services/temporal | Durable workflow orchestration (replaces MissionControl) |
+| Artifacts | 4200 | services/artifacts | Document storage, mission/agent state, vector search, mission event log |
+| Auth | 4300 | services/auth | JWT tokens, API keys, RBAC |
+| Frontend | 8080 | frontend-nextgen | NextGen React frontend (Entity Workspace, Multi-Agent Canvas) |
+
+### Infrastructure
+
+| Component | Port | Purpose |
+|---|---|---|
+| MongoDB | 27017 | Persistence backing store (used by NextGen Persistence Service) |
+| Redis | 6379 | Caching and queuing (used by Auth, Agent Runtime, Worker-Pool, Persistence) |
+
+### Clean Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                 NextGen Frontend  (port 8080)                       │
+│   Entity Workspace  •  Multi-Agent Canvas  •  Live Feeds           │
+│                    (frontend-nextgen/)                              │
+└──────────────────────────────┬─────────────────────────────────────┘
+                               │ HTTP / WebSocket
+┌──────────────────────────────▼─────────────────────────────────────┐
+│                      Gateway  (port 3000)                          │
+│           Unified API Gateway & Service Registry                   │
+│                    (services/gateway/)                             │
+├──────────┬──────────┬──────────┬──────────┬──────────┬────────────┤
+│          │          │          │          │          │
+│          ▼          ▼          ▼          ▼          ▼
+│ ┌─────────────┐ ┌─────────┐ ┌───────────┐ ┌─────────┐ ┌──────────┐
+│ │   Brain     │ │Worker   │ │  MCP      │ │ Agent   │ │  Tool    │
+│ │(port 3100)  │ │  Pool   │ │  Runtime  │ │ Runtime │ │Executor  │
+│ │             │ │(3200)   │ │  (3300)   │ │ (3400)  │ │(3500)   │
+│ └─────────────┘ └────┬────┘ └─────┬─────┘ └─────────┘ └──────────┘
+│          │           │           │
+│          │           ▼           │
+│          │     ┌──────────────────────────────────────┐ │
+│          │     │    Temporal  (port 4100)              │ │
+│          │     │  Durable Workflow Orchestration       │ │
+│          │     │  (replaces MissionControl)           │ │
+│          │     └──────────────────┬───────────────────┘ │
+│          │                      │                       │
+│          │           ┌─────────┴──────────┐            │
+│          ▼           ▼                     ▼            ▼
+│ ┌─────────────┐ ┌─────────────┐   ┌─────────────┐ ┌─────────────┐
+│ │   Vault     │ │ Persistence │   │    Auth     │ │             │
+│ │ (port 4000) │ │ (port 4200) │   │ (port 4300) │ │             │
+│ │ Envelope    │ │ Document    │   │ JWT, API    │ │             │
+│ │ Encryption  │ │ Store,      │   │ Keys, RBAC  │ │             │
+│ │             │ │ Vector      │   │             │ │             │
+│ └─────────────┘ └─────────────┘   └─────────────┘ └─────────────┘
+│          │           │                   │
+│          │           │                   │
+└──────────┼───────────┼───────────────────┼─────────────────────────┘
+           │           │                   │
+┌──────────▼───────────▼───────────────────▼────────────────────────┐
+│                          Infrastructure                           │
+│  ┌─────────────┐           ┌──────────────────┐                   │
+│  │  MongoDB    │           │      Redis       │                   │
+│  │ (27017)     │           │     (6379)       │                   │
+│  │ Persistence │           │  Cache & Queue   │                   │
+│  └─────────────┘           └──────────────────┘                   │
+│  Used by all NextGen services for durable state                    │
+└─────────────────────────────────────────────────────────────────────┘
+
+```
+
+---
+
+
+## 7.6 Multi-Provider Brain (Implemented)
+
+The Brain service is the LLM orchestrator. It always selects the most appropriate model from the available providers based on the optimization criteria of the prompt, the capabilities required, the token budget, and which providers have valid API keys in the environment.
+
+### Supported Providers
+
+| Provider | Env Variable | API Base | Auth |
+|---|---|---|---|
+| **OpenAI** | `OPENAI_API_KEY` | `OPENAI_API_BASE` (default `https://api.openai.com/v1`) | Bearer token |
+| **OpenRouter** | `OPENROUTER_API_KEY` | `OPENROUTER_URL` (default `https://openrouter.ai/api/v1`) | Bearer token |
+| **Anthropic** | `ANTHROPIC_API_KEY` | `https://api.anthropic.com` | `x-api-key` header |
+| **Google Gemini** | `GEMINI_API_KEY` or `GOOGLE_API_KEY` | `https://generativelanguage.googleapis.com` | `?key=` query param |
+| **Mistral** | `MISTRAL_API_KEY` | `MISTRAL_API_BASE` (default `https://api.mistral.ai/v1`) | Bearer token |
+| **Grok (xAI)** | `GROK_API_KEY` or `XAI_API_KEY` | `GROK_API_BASE` (default `https://api.x.ai/v1`) | Bearer token |
+| **Hugging Face** | `HUGGINGFACE_API_KEY` or `HF_TOKEN` | `HUGGINGFACE_API_BASE` (default `https://router.huggingface.co/v1`) | Bearer token |
+| **OpenWebUI / Ollama** | `OPENWEB_URL` (and optionally `OPENWEBUI_API_KEY`) | `${OPENWEB_URL}/api/v1` | Bearer token (optional for local) |
+
+### Architecture
+
+- **Provider abstraction** (`services/brain/src/providers/`): each provider implements the `LLMProvider` interface (`isAvailable()`, `listModels()`, `complete()`). Most providers extend `OpenAICompatibleProvider` (OpenAI, OpenRouter, Mistral, Grok, HuggingFace, OpenWebUI). Anthropic and Gemini have their own native adapters because they use different request/response formats.
+- **Provider registry** (`registry.ts`): auto-detects which providers are available from environment variables. Only providers with valid credentials are registered.
+- **Model registry**: each provider exposes its available models (queried via the provider's `/models` endpoint where available, or fall back to a curated default list). Each model is tagged with `capabilities: ['chat', 'code', 'reasoning', 'vision', 'creative', 'search']`, `maxTokens`, and `costPer1kTokens`.
+- **ModelRouter** (`ModelRouter.ts`): selects the optimal model by:
+  1. Inferring required capabilities from the prompt via keyword analysis.
+  2. Filtering candidates by capabilities, `maxTokens`, `budget`, and (if specified) `provider`.
+  3. Sorting by cost ascending; picking the cheapest that meets all criteria.
+  4. Relaxing capability filter if no strict match; throwing if no model is available at all.
+- **BrainService**: orchestrates the call. It checks the semantic cache first (key = SHA-256 of prompt + systemPrompt + model + provider), then routes, then dispatches to the matching provider. Caches the result on success.
+- **SemanticCache** (`SemanticCache.ts`): Redis-backed with a 1-second connection timeout and automatic in-memory fallback when Redis is unreachable, so tests and local development don't hang.
+
+### API
+
+The Brain exposes:
+- `GET /api/brain/health` — service health with provider list and model count
+- `GET /api/brain/providers` — list of configured providers
+- `GET /api/brain/models` — all available models across providers
+- `POST /api/brain/complete` — unified completion endpoint accepting `{ prompt, systemPrompt?, model?, provider?, maxTokens?, budget?, temperature? }`
+- `POST /api/brain/validate` — structured output validation against a Zod schema
+- `POST /api/brain/route` — model routing preview (lists candidates)
+- `GET /api/brain/cache/stats` — cache hit/miss/mode stats
+
+### Model Selection Examples
+
+- `POST /api/brain/complete` with `{ prompt: "Help me write a Python function" }` → routes to the cheapest model with `code` capability
+- `POST /api/brain/complete` with `{ prompt: "...", model: "openai/gpt-4o-mini", provider: "openrouter" }` → uses that exact model on that provider
+- `POST /api/brain/complete` with `{ prompt: "...", provider: "openai" }` → picks the cheapest model on OpenAI
+- Reasoning models (e.g. Gemini with `max_tokens` < 64) automatically fall back to their `reasoning` field when `content` is empty, so the caller always gets a useful answer.
+
+### Mission Integration
+
+A mission flows through the Brain via the worker-pool's `AssistantExecutor.execute()`, which forwards the mission prompt and (optionally) the assistant's persona system prompt to the Brain. The Brain picks the model, the provider handles the API call, and the real LLM response is persisted as the mission output.
 
 ## 8. Conclusion
 

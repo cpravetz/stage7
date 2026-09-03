@@ -1,0 +1,124 @@
+export interface Tool {
+  id: string;
+  name: string;
+  description: string;
+  type: 'mcp' | 'openapi' | 'code';
+  manifest: Record<string, unknown>;
+  inputSchema?: Record<string, unknown>;
+  outputSchema?: Record<string, unknown>;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export const legacyGeneralTools: Tool[] = [
+  {
+    id: 'jira_issue_tracker',
+    name: 'Jira Issue Tracker',
+    description: 'Create, update, and query Jira issues. Supports project filtering, status transitions, and sprint management.',
+    type: 'mcp',
+    manifest: { server: 'jira-mcp', capabilities: ['issue.create', 'issue.update', 'issue.query', 'sprint.manage'] },
+    inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['create', 'update', 'query', 'transition'] }, project: { type: 'string' }, issueKey: { type: 'string' }, fields: { type: 'object' } } },
+    outputSchema: { type: 'object', properties: { issue: { type: 'object' }, issues: { type: 'array' } } },
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  },
+  {
+    id: 'confluence_docs',
+    name: 'Confluence Documentation',
+    description: 'Read, write, and manage Confluence pages and spaces. Supports content search and page hierarchy.',
+    type: 'mcp',
+    manifest: { server: 'confluence-mcp', capabilities: ['page.read', 'page.write', 'page.search', 'space.list'] },
+    inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['read', 'write', 'search', 'list'] }, spaceKey: { type: 'string' }, pageId: { type: 'string' }, content: { type: 'string' } } },
+    outputSchema: { type: 'object', properties: { page: { type: 'object' }, pages: { type: 'array' } } },
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  },
+  {
+    id: 'data_analysis',
+    name: 'Data Analysis',
+    description: 'Analyze datasets with statistical summaries, trend detection, and visualization recommendations.',
+    type: 'mcp',
+    manifest: { server: 'data-analysis-mcp', capabilities: ['analyze', 'summarize', 'trends', 'correlations'] },
+    inputSchema: { type: 'object', properties: { dataset: { type: 'string' }, analysisType: { type: 'string', enum: ['summary', 'trend', 'correlation', 'distribution'] } } },
+    outputSchema: { type: 'object', properties: { summary: { type: 'object' }, insights: { type: 'array' } } },
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  },
+  {
+    id: 'email_sender',
+    name: 'Email Sender',
+    description: 'Send and manage emails with templates, attachments, and scheduling.',
+    type: 'mcp',
+    manifest: { server: 'email-mcp', capabilities: ['send', 'draft', 'schedule', 'template'] },
+    inputSchema: { type: 'object', properties: { to: { type: 'array', items: { type: 'string' } }, subject: { type: 'string' }, body: { type: 'string' }, attachments: { type: 'array' } } },
+    outputSchema: { type: 'object', properties: { messageId: { type: 'string' }, status: { type: 'string' } } },
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  },
+  {
+    id: 'calendar_manager',
+    name: 'Calendar Manager',
+    description: 'Manage calendar events, scheduling, and availability across providers.',
+    type: 'mcp',
+    manifest: { server: 'calendar-mcp', capabilities: ['event.create', 'event.update', 'event.list', 'availability.check'] },
+    inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['create', 'update', 'list', 'check_availability'] }, startTime: { type: 'string' }, endTime: { type: 'string' }, attendees: { type: 'array' } } },
+    outputSchema: { type: 'object', properties: { event: { type: 'object' }, events: { type: 'array' }, slots: { type: 'array' } } },
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  },
+  {
+    id: 'slack_messaging',
+    name: 'Slack Messaging',
+    description: 'Send messages, manage channels, and query Slack workspace.',
+    type: 'mcp',
+    manifest: { server: 'slack-mcp', capabilities: ['message.send', 'channel.list', 'user.query', 'reaction.add'] },
+    inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['send', 'list_channels', 'query_user', 'add_reaction'] }, channel: { type: 'string' }, message: { type: 'string' } } },
+    outputSchema: { type: 'object', properties: { ts: { type: 'string' }, channel: { type: 'string' } } },
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  },
+  {
+    id: 'github_integration',
+    name: 'GitHub Integration',
+    description: 'Manage repositories, issues, PRs, and code review on GitHub.',
+    type: 'mcp',
+    manifest: { server: 'github-mcp', capabilities: ['repo.list', 'issue.create', 'pr.create', 'pr.review'] },
+    inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['list_repos', 'create_issue', 'create_pr', 'review_pr'] }, repo: { type: 'string' }, title: { type: 'string' }, body: { type: 'string' } } },
+    outputSchema: { type: 'object', properties: { result: { type: 'object' } } },
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  },
+  {
+    id: 'database_query',
+    name: 'Database Query',
+    description: 'Execute read-only SQL queries against connected databases with schema introspection.',
+    type: 'mcp',
+    manifest: { server: 'database-mcp', capabilities: ['query.execute', 'schema.introspect', 'table.list'] },
+    inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['query', 'introspect', 'list_tables'] }, database: { type: 'string' }, sql: { type: 'string' } } },
+    outputSchema: { type: 'object', properties: { rows: { type: 'array' }, schema: { type: 'object' } } },
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  },
+  {
+    id: 'file_storage',
+    name: 'File Storage',
+    description: 'Upload, download, and manage files in cloud storage (S3, GCS).',
+    type: 'mcp',
+    manifest: { server: 'storage-mcp', capabilities: ['file.upload', 'file.download', 'file.list', 'file.delete'] },
+    inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['upload', 'download', 'list', 'delete'] }, bucket: { type: 'string' }, key: { type: 'string' } } },
+    outputSchema: { type: 'object', properties: { url: { type: 'string' }, files: { type: 'array' } } },
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  },
+  {
+    id: 'webhook_dispatcher',
+    name: 'Webhook Dispatcher',
+    description: 'Send HTTP webhooks with retry, signing, and event tracking.',
+    type: 'mcp',
+    manifest: { server: 'webhook-mcp', capabilities: ['webhook.send', 'webhook.register', 'webhook.list'] },
+    inputSchema: { type: 'object', properties: { url: { type: 'string' }, event: { type: 'string' }, payload: { type: 'object' }, secret: { type: 'string' } } },
+    outputSchema: { type: 'object', properties: { delivered: { type: 'boolean' }, statusCode: { type: 'number' } } },
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  },
+];

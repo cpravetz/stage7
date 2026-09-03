@@ -1,0 +1,23 @@
+FROM node:22-alpine
+
+RUN apk add --no-cache python3 make g++ vips-dev
+
+WORKDIR /usr/src/app
+
+COPY package*.json ./
+COPY shared-nextgen/package*.json ./shared-nextgen/
+COPY services ./services
+
+RUN npm install --legacy-peer-deps
+
+COPY shared-nextgen ./shared-nextgen
+COPY services/tool-executor ./services/tool-executor
+
+RUN cd shared-nextgen && npm run build
+RUN cd services/tool-executor && rm -rf dist && npm run build
+
+WORKDIR /usr/src/app/services/tool-executor
+
+EXPOSE 3500
+
+CMD ["node", "dist/index.js"]

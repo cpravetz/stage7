@@ -1,238 +1,332 @@
-# Agent Development Kit (ADK) - Get Started
+# Agent Development Kit (ADK) - NextGen
 
-**Last Updated**: February 2, 2026
+**Last Updated**: August 30, 2026
 
-## 🎯 Quick Navigation
-
-- **New to ADK?** Start with [Getting Started in 5 Minutes](#getting-started-in-5-minutes)
-- **Want to create an assistant?** See [Creating Assistants](#creating-assistants)
-- **Need to understand the architecture?** See [Architecture Overview](#architecture-overview)
-- **Building custom tools?** See [TOOL-DEVELOPMENT.md](./TOOL-DEVELOPMENT.md)
-- **Deploying to production?** See [DEPLOYMENT.md](./DEPLOYMENT.md)
-- **Browse all docs?** See [INDEX.md](./INDEX.md)
-
----
-
-## Getting Started in 5 Minutes
-
-The fastest way to run an assistant:
+## Getting Started
 
 ### Prerequisites
-- Node.js 18+ and npm
-- Running L1 Core Engine services (or use docker-compose)
+
+- Node.js 22+
+- Docker & Docker Compose (v2)
 
 ### Option A: Run an Existing Assistant
 
 ```bash
-# 1. Start the Core Engine (in terminal 1)
-docker-compose up -d
+# 1. Start NextGen services
+./setup.sh
 
-# 2. Start an assistant (in terminal 2)
-cd agents/pm-assistant-api
+# 2. Start the frontend (in a new terminal)
+cd frontend-nextgen
 npm install
 npm run dev
 
-# 3. Start the React UI (in terminal 3)
-cd services/mcsreact
-npm install
-npm start
-
-# 4. Open browser
-http://localhost/assistants/pm-assistant
+# 3. Open browser
+http://localhost:8080
 ```
 
-### Option B: Create Your Own Assistant
+### Option B: Create a Custom Assistant
 
-See [Creating Assistants](#creating-assistants) section below.
+```bash
+# 1. Start NextGen services
+./setup.sh
+
+# 2. Register your assistant via the Worker Pool API
+curl -X POST http://localhost:3200/api/workers/assistants \
+  -H "Content-Type: application/json" \
+  -d '{"id":"my-assistant","tenantId":"tenant-1","name":"My Assistant","description":"Custom assistant","model":"llama3","capabilities":["chat"],"systemPrompt":"You are helpful.","tools":[],"metadata":{}}'
+
+# 3. Execute the assistant
+curl -X POST http://localhost:3200/api/workers/assistants/my-assistant/execute \
+  -H "Content-Type: application/json" \
+  -d '{"prompt":"Hello!"}'
+```
+
+### Setup Script
+
+`./setup.sh` performs the following:
+- Validates Docker and Docker Compose are installed
+- Creates `.env` from `.env.example` and generates `SHARED_SECRET` and `ADMIN_SECRET` if blank
+- Generates RSA key pairs under `shared/keys/`
+- Builds Docker images
+- Starts services with `docker compose up -d --wait --timeout 300`
+
+To stop services: `docker compose down`
 
 ---
 
 ## Creating Assistants
 
-### Quick Assistant Pattern (Recommended)
+### Assistant Registration Pattern
 
-All assistants in the ADK use the simplified `createQuickAssistant()` pattern that eliminates boilerplate:
+Assistants are registered dynamically via the Worker Pool API. There is no separate process or SDK bootstrap required.
 
-```typescript
-import { createQuickAssistant } from '@cktmcs/sdk';
-
-createQuickAssistant({
-  id: 'my-assistant',
-  name: 'My Assistant',
-  role: 'Assists with domain-specific tasks',
-  personality: 'Helpful, professional, and domain-expert',
-  serviceId: 'my-assistant-api',
-  secretEnvVar: 'MY_ASSISTANT_API_SECRET',
-  tools: async (coreEngineClient) => {
-    const { MyTool, OtherTool } = await import('@cktmcs/sdk');
-    return [
-      new MyTool(coreEngineClient),
-      new OtherTool(coreEngineClient),
-    ];
-  },
-  port: parseInt(process.env.PORT || '3000'),
-  urlBase: 'my-assistant-api',
-}).catch((error: Error) => {
-  console.error('Failed to initialize:', error);
-  process.exit(1);
-});
+```bash
+POST /api/workers/assistants
 ```
 
-### Step-by-Step: Create a New Assistant
+**Request Body:**
 
-1. **Create directory structure:**
-   ```bash
-   mkdir agents/my-assistant-api
-   cd agents/my-assistant-api
-   npm init -y
-   ```
+```json
+{
+  "id": "my-assistant",
+  "tenantId": "tenant-1",
+  "name": "My Assistant",
+  "description": "Handles domain-specific tasks",
+  "model": "llama3",
+  "capabilities": ["chat", "tools"],
+  "systemPrompt": "You are a helpful domain expert.",
+  "tools": [],
+  "metadata": {}
+}
+```
 
-2. **Add package.json dependencies:**
-   ```json
-   {
-     "name": "my-assistant-api",
-     "version": "1.0.0",
-     "scripts": {
-       "build": "tsc",
-       "dev": "ts-node src/index.ts",
-       "start": "node dist/index.js"
-     },
-     "dependencies": {
-       "@cktmcs/sdk": "workspace:*",
-       "@cktmcs/shared": "workspace:*"
-     },
-     "devDependencies": {
-       "typescript": "^5.0.0",
-       "ts-node": "^10.0.0"
-     }
-   }
-   ```
+**Response:** `201 Created` with the registered `AssistantDefinition`.
 
-3. **Create `src/index.ts`** using the Quick Assistant pattern above
+### Executing an Assistant
 
-4. **Build and run:**
-   ```bash
-   npm install
-   npm run build
-   npm start
-   ```
+```bash
+POST /api/workers/assistants/:id/execute
+```
+
+**Request Body:**
+
+```json
+{
+  "prompt": "What is the weather today?",
+  "context": {
+    "userId": "user-123",
+    "sessionId": "session-456"
+  }
+}
+```
+
+**Response:**
+
+```json
+{
+  "assistantId": "my-assistant",
+  "success": true,
+  "output": "I cannot check real-time weather...",
+  "tokensUsed": 42,
+  "durationMs": 1200
+}
+```
+
+### Registering MCP Tools
+
+Tools are registered with the MCP Runtime service and referenced in the assistant definition.
+
+```bash
+# Register an MCP tool
+POST http://localhost:3300/tools
+Content-Type: application/json
+
+{
+  "name": "get-weather",
+  "description": "Get current weather for a location",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "location": { "type": "string" }
+    },
+    "required": ["location"]
+  }
+}
+```
+
+Then include the tool in the assistant definition:
+
+```json
+{
+  "tools": [
+    {
+      "name": "get-weather",
+      "description": "Get current weather for a location",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "location": { "type": "string" }
+        },
+        "required": ["location"]
+      }
+    }
+  ]
+}
+```
 
 ---
 
 ## Architecture Overview
 
-### Three-Layer Architecture
-
-The ADK is organized in three layers:
+### NextGen Service Topology
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                   L4: User Interface                        │
-│              (React Frontend - mcsreact)                    │
-└──────────────────────┬──────────────────────────────────────┘
-                       │ WebSocket + HTTP
-┌──────────────────────┴──────────────────────────────────────┐
-│              L3: Domain-Specific Assistants                 │
-│    (20+ production assistants using QuickAssistant pattern) │
-└──────────────────────┬──────────────────────────────────────┘
-                       │ SDK API
-┌──────────────────────┴──────────────────────────────────────┐
-│                   L2: Agent SDK                             │
-│  (Assistant, Tool, Conversation, Brain integration)         │
-└──────────────────────┬──────────────────────────────────────┘
-                       │ Core Engine Client
-┌──────────────────────┴──────────────────────────────────────┐
-│              L1: Core Engine Services                       │
-│  (MissionControl, CapabilitiesManager)                      │
+│                    Frontend (React/Vite)                     │
+│                        Port 8080                             │
+└────────────────────────────┬────────────────────────────────┘
+                             │ HTTP + WebSocket
+┌────────────────────────────┴────────────────────────────────┐
+│                         Gateway                              │
+│                     Port 3000                                │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
+│  │   Proxy     │  │   WebSocket │  │   Message Router    │  │
+│  │  Routes     │  │   Gateway   │  │   (internal)        │  │
+│  └─────────────┘  └─────────────┘  └─────────────────────┘  │
+└────────────────────────────┬────────────────────────────────┘
+                             │
+          ┌──────────────────┼──────────────────┐
+          ▼                  ▼                  ▼
+┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
+│  Worker Pool    │ │  Agent Runtime  │ │  Tool Executor  │
+│    Port 3200    │ │    Port 3400    │ │    Port 3500    │
+│                 │ │                 │ │                 │
+│  • Assistant    │ │  • Agent state  │ │  • Sandboxed    │
+│    registry     │ │    machine      │ │    execution    │
+│  • Task queue   │ │  • Mission mgr  │ │  • API clients  │
+│  • Executor     │ │  • Collaboration│ │  • Code runner  │
+└────────┬────────┘ └────────┬────────┘ └────────┬────────┘
+         │                   │                   │
+         ▼                   ▼                   ▼
+┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
+│     Brain       │ │   Temporal      │ │   MCP Runtime   │
+│   (LLM/Orch)    │ │   Port 4100     │ │    Port 3300    │
+│                 │ │                 │ │                 │
+│  • Model select │ │  • Workflows    │ │  • Tool registry│
+│  • Prompt mgr   │ │  • Retries      │ │  • Stdio/HTTP   │
+│  • Token track  │ │  • Scheduling   │ │    transports   │
+└────────┬────────┘ └────────┬────────┘ └────────┬────────┘
+         │                   │                   │
+         ▼                   ▼                   ▼
+┌─────────────────────────────────────────────────────────────┐
+│                     Shared Infrastructure                   │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐  │
+│  │   Auth   │ │  Vault   │ │ Persist  │ │    Redis     │  │
+│  │ :4300    │ │  :4000   │ │  :4200   │ │    :6379     │  │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────────┘  │
+│  ┌──────────┐                                             │
+│  │  Mongo   │                                             │
+│  │ :27017   │                                             │
+│  └──────────┘                                             │
 └─────────────────────────────────────────────────────────────┘
 ```
-
-### What Each Layer Does
-
-| Layer | Purpose | Examples |
-|-------|---------|----------|
-| **L1: Core Engine** | Foundational AI/planning infrastructure | Conversation management, multi-agent coordination, tool invocation planning |
-| **L2: SDK** | Reusable assistant foundation | `Assistant`, `Tool`, `Conversation`, `MessageParser` classes |
-| **L3: Assistants** | Domain-specific implementations | Sales, PM, Marketing, HR, Finance, Healthcare, CTO, etc. |
-| **L4: UI** | User interaction | React web app, WebSocket client, chat interface |
 
 ### Message Flow
 
 ```
-User Input (L4)
+User Input
     ↓
-React Component
+Frontend (React)
     ↓
-WebSocket → L3 Assistant API
+HTTP POST /api/workers/assistants/:id/execute
     ↓
-SDK Assistant.sendMessage()
+Gateway (port 3000)
     ↓
-Core Engine Client (L2)
+Worker Pool (port 3200)
     ↓
-RabbitMQ Message Queue
+AssistantExecutor
     ↓
-Brain Service (MissionControl)
+Brain (LLM orchestration + tool selection)
     ↓
-LLM Integration + Tool Orchestration
+MCP Runtime (port 3300) / Tool Executor (port 3500)
     ↓
-Response back through RabbitMQ
+Agent Runtime (port 3400) for stateful workflows
     ↓
-WebSocket → Browser
+Temporal (port 4100) for durable workflows
     ↓
-Chat Display (L4)
+Response returned through Worker Pool → Gateway → Frontend
 ```
 
-See [ADK_OVERVIEW.md](./ADK_OVERVIEW.md) for complete architecture details.
+### Service Responsibilities
+
+| Service | Port | Responsibility |
+|---------|------|----------------|
+| **Frontend** | 8080 | React UI, chat interface |
+| **Gateway** | 3000 | Unified entry point, proxy routing, WebSocket |
+| **Worker Pool** | 3200 | Assistant registry, task queue, execution |
+| **Brain** | internal | LLM selection, prompt management, token tracking |
+| **MCP Runtime** | 3300 | MCP tool registry, stdio/HTTP transports |
+| **Agent Runtime** | 3400 | Agent state machines, missions, collaboration |
+| **Tool Executor** | 3500 | Sandboxed code execution, API clients |
+| **Temporal** | 4100 | Durable workflow orchestration |
+| **Auth** | 4300 | JWT, RBAC, service tokens |
+| **Vault** | 4000 | Envelope encryption, secrets management |
+| **Persistence** | 4200 | Session storage, tenant isolation |
+| **Redis** | 6379 | Cache, pub/sub, queues |
+| **Mongo** | 27017 | Document persistence |
 
 ---
 
-## SDK API Reference
+## API Reference
 
-### Assistant Class
+### Worker Pool API
 
-Main interface for building assistants:
+Base URL: `http://localhost:3200/api/workers`
 
-```typescript
-interface AssistantConfig {
-  id: string;              // Unique identifier
-  name: string;            // Display name
-  role: string;            // Purpose description
-  personality: string;     // LLM personality prompt
-  tools: Tool[];           // Available tools
-  coreEngineClient: HttpCoreEngineClient;
-  port?: number;
-}
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/health` | Service health check |
+| `POST` | `/assistants` | Register assistant definition |
+| `GET` | `/assistants` | List all assistants |
+| `GET` | `/assistants/:id` | Get assistant by ID |
+| `DELETE` | `/assistants/:id` | Unregister assistant |
+| `POST` | `/assistants/:id/runtime` | Configure runtime (worker, queue, timeout) |
+| `POST` | `/assistants/:id/execute` | Execute assistant with prompt |
+| `POST` | `/assistants/:id/tools/execute` | Execute tool by name |
+| `POST` | `/workers` | Register worker |
+| `GET` | `/workers` | List workers |
+| `POST` | `/tasks` | Submit task to queue |
+| `GET` | `/tasks/:taskId` | Get task status |
+| `POST` | `/workers/:workerId/process` | Process next task |
+| `POST` | `/workers/:workerId/complete` | Mark task complete |
+| `POST` | `/workers/:workerId/fail` | Mark task failed |
+| `GET` | `/queue/size` | Get queue depth |
+| `GET` | `/config` | Get pool configuration |
 
-class Assistant {
-  // Start conversation with user input
-  async startConversation(initialPrompt: string): Promise<void>;
-  
-  // Send message to user via WebSocket
-  async sendMessageToClient(content: string, clientId: string): Promise<void>;
-  
-  // Get active conversation
-  getConversation(conversationId: string): Conversation | undefined;
-  
-  // Register additional tools at runtime
-  registerTool(tool: Tool): void;
-}
-```
+### Gateway API
 
-### Tool Class
+Base URL: `http://localhost:3000`
 
-Base class for all tools:
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/health` | Gateway health |
+| `GET` | `/services` | List registered services |
+| `GET` | `/services/:id/health` | Service health check |
+| `*` | `/:service/*` | Proxy to backend service |
+| `WS` | `/ws` | WebSocket gateway |
 
-```typescript
-abstract class Tool {
-  name: string;           // Unique tool identifier
-  description: string;    // What this tool does
-  
-  // Override this to implement tool logic
-  abstract execute(args: Record<string, any>): Promise<any>;
-}
-```
+### MCP Runtime API
 
-See [SDK-ARCHITECTURE.md](./SDK-ARCHITECTURE.md) for complete API reference.
+Base URL: `http://localhost:3300`
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/tools` | Register MCP tool |
+| `DELETE` | `/tools/:name` | Unregister tool |
+| `GET` | `/tools` | List tools |
+| `POST` | `/rpc` | JSON-RPC endpoint (`tools/list`, `tools/call`) |
+
+### Auth API
+
+Base URL: `http://localhost:4300/api/auth`
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/health` | Auth service health |
+| `POST` | `/login` | User login (email + password) |
+| `POST` | `/service/auth` | Service authentication (serviceId + apiKey) |
+| `POST` | `/refresh` | Refresh JWT token |
+| `GET` | `/verify` | Verify current token |
+| `POST` | `/users/:id/roles` | Assign role to user |
+
+### Persistence API
+
+Base URL: `http://localhost:4200`
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/health` | Persistence health |
+| *(see docs/CORE_SYSTEMS/ENTERPRISE_PERSISTENCE_STRATEGY.md)* | | Session & tenant data |
 
 ---
 
@@ -240,31 +334,51 @@ See [SDK-ARCHITECTURE.md](./SDK-ARCHITECTURE.md) for complete API reference.
 
 ### Common Issues
 
-**Issue: Assistant won't start**
-```
-Error: Cannot find module '@cktmcs/sdk'
-```
-Solution: Run `npm install` in both SDK and assistant directories
+**Issue: Services fail to start**
+```bash
+# Check container status
+docker compose ps
 
-**Issue: WebSocket connection refused**
+# View logs for a specific service
+docker compose logs -f worker-pool
+docker compose logs -f gateway
+docker compose logs -f mcp-runtime
 ```
-WebSocket is closed with code 1006 (abnormal closure)
-```
-Solution: Verify PostOffice service is running (`http://localhost:5020/health`)
 
-**Issue: Tool invocation fails**
+**Issue: Worker Pool health check failing**
 ```
-Tool execution timeout after 30s
+curl http://localhost:3200/api/workers/health
 ```
-Solution: Check external service connectivity; increase timeout if legitimate
+Expected: `{"status":"ok","service":"worker-pool",...}`
 
-**Issue: Messages not displaying in UI**
+**Issue: Assistant not found during execution**
 ```
-ChatPanel shows count: 0
+{"error":"Assistant not found"}
 ```
-Solution: Verify WebSocket connection; check browser console for errors
+Solution: Verify the assistant was registered with `GET /api/workers/assistants`.
 
-See [DEPLOYMENT.md](./DEPLOYMENT.md) for complete troubleshooting guide.
+**Issue: Frontend cannot reach Gateway**
+```
+Proxy error, ECONNREFUSED
+```
+Solution: Ensure Gateway is running on port 3000 and frontend is on 8080. Check `docker compose ps`.
+
+**Issue: WebSocket connection fails**
+Solution: Verify Gateway WebSocket is active at `ws://localhost:3000/ws`. Check browser console and Gateway logs.
+
+### Health Check Endpoints
+
+| Service | Endpoint |
+|---------|----------|
+| Gateway | `http://localhost:3000/health` |
+| Worker Pool | `http://localhost:3200/api/workers/health` |
+| MCP Runtime | `http://localhost:3300/health` |
+| Auth | `http://localhost:4300/api/auth/health` |
+| Vault | `http://localhost:4000/health` |
+| Persistence | `http://localhost:4200/health` |
+| Temporal | `http://localhost:4100/health` |
+| Agent Runtime | `http://localhost:3400/health` |
+| Tool Executor | `http://localhost:3500/health` |
 
 ---
 
@@ -272,85 +386,108 @@ See [DEPLOYMENT.md](./DEPLOYMENT.md) for complete troubleshooting guide.
 
 ### Authentication
 
-The ADK uses JWT tokens issued by the Security Manager service:
+The NextGen Auth service (port 4300) handles all authentication:
 
-- Each assistant service has a unique credential pair (service ID + secret)
-- Secrets should be stored in environment variables, never committed to git
-- Tokens are automatically refreshed by the SDK
+- **User Auth**: JWT tokens via `POST /api/auth/login`
+- **Service Auth**: API key + serviceId via `POST /api/auth/service/auth`
+- **Token Refresh**: `POST /api/auth/refresh`
+- **Verification**: `GET /api/auth/verify`
 
-**Best Practice:**
-```bash
-# Never do this:
-export MY_ASSISTANT_API_SECRET=mySecretKey
+### Secrets Management
 
-# Instead, use secrets management:
-# - Docker secrets for container deployments
-# - HashiCorp Vault for distributed systems
-# - AWS Secrets Manager / Azure Key Vault for cloud
-```
+Use Vault (port 4000) for secrets encryption and storage:
 
-See [authentication.md](./authentication.md) and [security_improvements.md](./security_improvements.md) for details.
+- Envelope encryption for sensitive data
+- Secrets are never stored in plain text in configuration files
+- `.env` should only contain non-sensitive configuration
+
+**Best Practices:**
+- Never commit secrets to version control
+- Use `SHARED_SECRET` and `ADMIN_SECRET` generated by `setup.sh`
+- Store API keys in Vault or environment variables
+- Use Docker secrets for container deployments
+
+### RBAC
+
+The Auth service includes RBAC:
+
+- Role assignment via `POST /api/auth/users/:id/roles`
+- Permissions checked at Gateway and service levels
+- Tenant isolation enforced at the data layer
 
 ---
 
 ## Performance
 
-### Key Performance Metrics
+### Key Metrics
 
-| Metric | Target | Status |
-|--------|--------|--------|
-| Assistant Startup | < 5s | ✅ Achieved |
-| Message Round-trip | < 2s | ✅ Achieved |
-| Concurrent Users | 100+ | ✅ Supported |
-| Tool Invocation | < 10s avg | ⚠️ Depends on tool |
+| Metric | Target | Notes |
+|--------|--------|-------|
+| Gateway Latency | < 50ms | Proxy overhead only |
+| Worker Pool Task Submit | < 10ms | Redis-backed queue |
+| Assistant Execution | < 5s | Depends on LLM latency |
+| MCP Tool Call | < 2s | Local tool execution |
+| Frontend Load | < 2s | Vite HMR in dev |
+
+### Scaling
+
+- **Worker Pool**: Horizontal scaling via multiple instances (minWorkers: 2, maxWorkers: 50)
+- **Gateway**: Stateless proxy; scale behind load balancer
+- **MCP Runtime**: Tool registry is in-memory; share via Redis pub/sub for multi-instance
+- **Temporal**: Durable workflow engine; scales workers independently
+- **Redis**: Shared queue backing; ensure persistence mode for reliability
 
 ### Optimization Tips
 
-1. **Lazy Load Tools**: Only import tools that will be used
-2. **Cache Tool Responses**: Implement caching for expensive operations
-3. **Batch Operations**: Group multiple tool calls when possible
-4. **Monitor Memory**: Watch for memory leaks in long-running assistants
-5. **Connection Pooling**: Reuse database/API connections
+1. **Pool Config**: Tune `minWorkers`, `maxWorkers`, and `queueSize` in Worker Pool config
+2. **Cache**: Use Redis for repeated model responses and tool results
+3. **Batch**: Submit related tasks with the same `type` for sequential processing
+4. **Monitor**: Track queue depth via `GET /api/workers/queue/size`
 
 ---
 
 ## Documentation Index
 
 ### Essential Guides
+
 - [INDEX.md](./INDEX.md) - Complete documentation navigation
-- [ADK_OVERVIEW.md](./ADK_OVERVIEW.md) - System overview
-- [SDK-ARCHITECTURE.md](./SDK-ARCHITECTURE.md) - Technical API reference
-- [TOOL-DEVELOPMENT.md](./TOOL-DEVELOPMENT.md) - Build custom tools
-- [DEPLOYMENT.md](./DEPLOYMENT.md) - Production deployment
-- [ASSISTANT_STARTUP_GUIDE.md](./ASSISTANT_STARTUP_GUIDE.md) - Service reference
+- [ADK_OVERVIEW.md](./ADK_OVERVIEW.md) - ADK system overview
+- [SDK-ARCHITECTURE.md](./ADK/SDK-ARCHITECTURE.md) - Technical API reference
+- [TOOL-DEVELOPMENT.md](./ADK/TOOL-DEVELOPMENT.md) - Build custom tools
+- [DEPLOYMENT.md](./ADK/DEPLOYMENT.md) - Production deployment
+- [ASSISTANT_STARTUP_GUIDE.md](./ADK/ASSISTANT_STARTUP_GUIDE.md) - Service reference
 
-### Integration & Security
-- [authentication.md](./authentication.md) - Auth system
-- [security_improvements.md](./security_improvements.md) - Security practices
-- [message-queue.md](./message-queue.md) - RabbitMQ config
-- [plugin_config_and_secrets.md](./plugin_config_and_secrets.md) - Configuration
-- [file-upload-documentation.md](./file-upload-documentation.md) - File handling
+### Core Systems
 
-### Architecture
-- [AGENT_DELEGATION.md](./AGENT_DELEGATION.md) - Multi-agent collaboration
-- [technical_implementation_details.md](./technical_implementation_details.md) - Deep dives
-- [service-discovery-config.md](./service-discovery-config.md) - Service discovery
+- [../CORE_SYSTEMS/BRAIN_SERVICE.md](../CORE_SYSTEMS/BRAIN_SERVICE.md) - LLM model selection and health
+- [../CORE_SYSTEMS/authentication.md](../CORE_SYSTEMS/authentication.md) - JWT, RBAC, credentials
+- [../CORE_SYSTEMS/ENTERPRISE_PERSISTENCE_STRATEGY.md](../CORE_SYSTEMS/ENTERPRISE_PERSISTENCE_STRATEGY.md) - Session & persistence
+- [../CORE_SYSTEMS/collaboration-services.md](../CORE_SYSTEMS/collaboration-services.md) - Multi-agent coordination
+- [../CORE_SYSTEMS/plugin_config_and_secrets.md](../CORE_SYSTEMS/plugin_config_and_secrets.md) - Plugin configuration
+- [../CORE_SYSTEMS/security_improvements.md](../CORE_SYSTEMS/security_improvements.md) - Security architecture
+- [../CORE_SYSTEMS/message-queue.md](../CORE_SYSTEMS/message-queue.md) - Async messaging
+
+### Architecture & Reference
+
+- [../v2/v2-architecture-overview.md](../v2/v2-architecture-overview.md) - NextGen architecture details
+- [../STAGE7_NEXTGEN_REBUILD_PROPOSAL.md](../STAGE7_NEXTGEN_REBUILD_PROPOSAL.md) - Architectural overhaul blueprint
+- [../ACTIVE_REFERENCE/Step Architecture.md](../ACTIVE_REFERENCE/Step%20Architecture.md) - Step lifecycle
+- [../ACTIVE_REFERENCE/TASK_MANAGER_PLUGIN_DESIGN.md](../ACTIVE_REFERENCE/TASK_MANAGER_PLUGIN_DESIGN.md) - Task plugin spec
 
 ---
 
 ## ADK Features
 
-✨ **Quick Assistant Pattern**: Eliminate ~250 lines of boilerplate  
-🛠️ **20+ Production Assistants**: Sales, PM, Marketing, HR, Finance, Healthcare, CTO, etc.  
-🔐 **Enterprise Security**: JWT authentication, RBAC, encrypted communication  
-📈 **Scalable Architecture**: Horizontal & vertical scaling support  
-🧩 **Extensible Tools**: Easy to build and integrate custom tools  
-🤝 **Multi-Agent Collaboration**: Agents work together seamlessly  
-🎯 **LLM-Ready**: Built-in OpenAI/LLM integration  
+- **Dynamic Registration**: Assistants registered at runtime via API
+- **Worker Pool Execution**: Scalable task queue with retry and concurrency control
+- **MCP Tool Integration**: Standard Model Context Protocol tool registry
+- **Temporal Workflows**: Durable, long-running agent orchestration
+- **Vault Secrets**: Centralized secrets and envelope encryption
+- **NextGen Auth**: JWT + RBAC with service account support
+- **Multi-Tenant**: Tenant isolation at data and service layers
+- **Observable**: Structured logging with Pino, health checks on all services
 
 ---
 
-**Version**: 2.0 (Production-Ready)  
-**Status**: ✅ Complete and Maintained
-
-👉 **Next**: [Browse all documentation (INDEX.md)](./INDEX.md)
+**Version**: NextGen (2026-08-30)
+**Status**: Active Development

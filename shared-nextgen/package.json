@@ -1,0 +1,25 @@
+{
+  "name": "@stage7-nextgen/shared",
+  "version": "1.0.0",
+  "description": "Stage7 NextGen shared utilities - zero legacy dependencies",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "jest",
+    "lint": "echo 'lint not configured'"
+  },
+  "dependencies": {
+    "zod": "^3.22.4",
+    "pino": "^8.16.2",
+    "express": "^4.18.2"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.25",
+    "@types/jest": "^29.5.0",
+    "@types/node": "^20.0.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.0",
+    "typescript": "^5.3.0"
+  }
+}

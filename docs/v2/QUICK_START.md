@@ -24,7 +24,7 @@ python src/main.py
 To choose an assistant, navigate to the `agents/` directory and select one, for example, `pm-assistant-api`.
 
 ```bash
-# Terminal 4: Start [assistant]-api, e.g., PM Assistant API
+# Terminal 4: Start [assistant]-api, e.g., Product Mgt Assistant API
 cd agents/[assistant]-api # e.g., cd agents/pm-assistant-api
 npm install
 npm run dev
@@ -254,7 +254,7 @@ project/
 
 For questions or issues:
 1. Check the documentation in `docs/`
-2. Review the PM Assistant reference implementation
+2. Review the Product Mgt Assistant reference implementation
 3. Run the test scripts to verify your setup
 4. Check the console logs for error messages
 

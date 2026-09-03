@@ -1,17 +1,23 @@
-# stage7 - A self-aware, self-optimizing, scalable, and flexible system for managing and executing complex missions using Large Language Models (LLMs) and custom plugins.
+# stage7 - NextGen Enterprise Agent Platform
 
 ## Overview
 
-stage7 is an advanced, self-modifying system designed to manage and execute complex missions using Large Language Models (LLMs) and custom plugins. The system is composed of several independent Node.js instances that interact with each other to collectively manage agents, process LLM conversations, and complete given missions.
+stage7 is a modern, self-hosted agent platform built on a clean microservices architecture. It provides durable workflow execution, dynamic assistant loading, MCP-native tool integration, and an entity-centric user interface.
 
-The plugin ecosystem supports not only code-based plugins (Python, JavaScript, Container) but also definition-based plugins for OpenAPI and MCP tools. All plugin types are managed, discovered, and executed through a unified Plugin Marketplace and CapabilitiesManager, enabling seamless integration of external APIs and internal services as first-class plugins.
+The system is composed of independent Node.js services that communicate via REST and WebSocket, with Temporal.io providing durable mission execution and Redis providing caching and task queuing.
 
 ## Key Components
 
-1. **MissionControl**: Manages the overall operation of the system, initializing and controlling missions.
-2. **PostOffice**: Central message routing component that maintains a registry of available components and routes messages between entities.
-3. **Brain**: Handles chat conversations, LLM content conversions, and selects the best LLM for processing based on the context.
-4. **Frontend**: A React application that provides a user interface for interacting with the system.
+### NextGen Services (Primary)
+- **Unified API Gateway**: Single entry point for routing requests to backend services with service registry and health checks.
+- **MCP Server Runtime**: Native Model Context Protocol (MCP) server implementation with tool registry, stdio/HTTP transport.
+- **Shared Worker Pool**: Dynamic worker pool for executing assistant tasks with Redis-backed task queue and retry logic.
+- **Brain/LLM Layer**: Modern LLM orchestration with structured output sampling (Zod), semantic Redis caching, token-aware context windows, and cost-based model routing.
+- **Temporal.io Workflow Engine**: Durable workflow execution for missions with state persistence, saga patterns, and crash fault-tolerance.
+- **Vault Integration**: AES-256-GCM envelope encryption for secrets management with key rotation support.
+
+### Frontend
+A React application that provides a user interface for interacting with the system.
    - **Plugins and Tools Panel**: This integrated section in the UI, accessible via the 'Tools' menu in the sidebar, serves as the central hub for managing all types of plugins and external tools. It allows users to discover, configure, and interact with code-based plugins, OpenAPI tools, and MCP tools.
 
      - **Accessing the Panel**: Click on the 'Tools' option in the main navigation sidebar of the frontend.
@@ -66,16 +72,18 @@ The plugin ecosystem supports not only code-based plugins (Python, JavaScript, C
        - **Identify Bottlenecks**: Pinpoint agents that are overloaded or causing delays in the mission execution.
        - **Understand Mission Flow**: Gain a holistic view of how a complex mission is being executed by the distributed agent system.
        - **Inspect Agent State**: Click on individual agents to view their current status, assigned role, and recent activities.
-5. **Engineer**: Responsible for creating and managing plugins.
-6. **Librarian**: Manages data storage using Redis and MongoDB servers.
-7. **CapabilitiesManager**: Handles ActionVerbs and Plugins.
-8. **SecurityManager**: Ensures system security.
+
+### Infrastructure
+
+The platform requires the following infrastructure services:
+- **MongoDB**: Document persistence for mission and agent state
+- **Redis**: Caching, task queuing, and session storage
 
 ## 🚀 Key Features
 
 ### Agent Development Kit (ADK)
 - **Rapid Assistant Creation**: Build domain-specific AI assistants in minutes using the Quick Assistant pattern
-- **20+ Production Assistants**: Pre-built assistants for Sales, PM, Marketing, HR, Finance, Healthcare, CTO, and more
+- **Dynamic Assistant Loading**: Assistants are loaded dynamically by the Worker Pool, eliminating port-per-assistant limitations
 - **Multi-Layer Architecture**: Clean separation between UI, domain-specific assistants, SDK, and core engine
 - **Zero-Boilerplate Pattern**: Eliminate ~250 lines of infrastructure code with the Quick Assistant pattern
 - **Full Documentation**: Comprehensive guides for creating, deploying, and extending assistants (see [ADK docs](./docs/ADK/README.md))
@@ -163,11 +171,10 @@ Common issues and solutions:
     *   Verify all containers are running: `docker compose ps`
     *   Check container logs: `docker compose logs [service-name]`
     *   Ensure all required ports are available
-    *   For authentication issues: `docker compose logs securitymanager`
 
 2.  **LLM Integration Issues**
     *   Verify API keys are correctly set in environment variables (in your `.env` file).
-    *   Check Brain service logs for API response errors: `docker compose logs brain`
+    *   Check service logs for API response errors: `docker compose logs [service-name]`
     *   Ensure sufficient API credits/quota.
     *   For self-hosted LLMs, check network connectivity between containers and the LLM server.
     *   Verify the LLM server supports the OpenAI API format.
@@ -179,9 +186,9 @@ Common issues and solutions:
     *   For self-hosted LLMs, ensure the host has sufficient resources.
 
 4. **Debugging Logs**
-    *   Stage7 services now use structured logging (pino). To view human-readable logs for a specific service (e.g., postoffice):
+    *   Stage7 services now use structured logging (pino). To view human-readable logs for a specific service (e.g., gateway):
         ```bash
-        docker compose logs -f postoffice
+        docker compose logs -f gateway
         ```
     *   For advanced log analysis, consider setting up a centralized logging solution.
 
@@ -189,17 +196,20 @@ Common issues and solutions:
 
 ### Project Structure
 
-- `services/`: Contains individual service components
-- `shared/`: Shared utilities and types used across services
-- `services/mcsreact/`: React frontend application
-- `errorhandler/`: Error handling utility - analyzes runtime errors and develops code improvements to address
+- `services/`: NextGen service components (gateway, mcp-runtime, worker-pool, brain, temporal, vault, persistence, auth, agent-runtime, tool-executor)
+- `shared-nextgen/`: NextGen shared utilities and types
+- `frontend-nextgen/`: React + Vite frontend application
+- `docs/`: Documentation including the NextGen rebuild proposal
 - `docker-compose.yaml`: Docker Compose file for running the system
 
 ### Adding a New Service
 
 1. Create a new directory under `services/`
-2. Implement the service using the BaseEntity class from the shared library
-3. Add the service to the Docker Compose file
+2. Implement the service with `src/`, `__tests__/`, `package.json`, `tsconfig.json`, and `dockerfile`
+3. Use `@stage7-nextgen/shared` for shared utilities (not legacy shared packages)
+4. Add the service to the Docker Compose file
+5. Register the service with the Unified API Gateway for service discovery
+6. Update `.env.example` with any new environment variables
 
 ## Contributing
 

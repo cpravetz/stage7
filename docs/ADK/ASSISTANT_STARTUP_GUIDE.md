@@ -64,7 +64,7 @@ npm start
 #### 2. Start Assistant APIs
 
 ```bash
-# PM Assistant (port 3000)
+# Product Mgt Assistant (port 3000)
 cd agents/pm-assistant-api
 npm start
 
@@ -92,7 +92,7 @@ These are **reference implementations** demonstrating various use cases. Use the
 
 | Assistant | Port | Service Name |
 |-----------|------|--------------|
-| PM Assistant | 3000 | pm-assistant |
+| Product Mgt Assistant | 3000 | pm-assistant |
 | Sales Assistant | 3002 | sales-assistant |
 | Marketing Assistant | 3003 | marketing-assistant |
 | HR Assistant | 3004 | hr-assistant |
@@ -180,7 +180,7 @@ These are **reference implementations** demonstrating various use cases. Use the
 ## Recent Fixes Applied
 
 1. ✅ Fixed `assistantClients.ts` to route through PostOffice instead of direct ports
-2. ✅ Fixed PM Assistant page to use shared client instead of hardcoded localhost:3000
+2. ✅ Fixed Product Mgt Assistant page to use shared client instead of hardcoded localhost:3000
 3. ✅ Fixed action buttons to start conversation before triggering actions
 4. ✅ Removed `process.env` usage in browser code (not available in browser)
 

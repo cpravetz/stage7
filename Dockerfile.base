@@ -13,6 +13,16 @@ COPY package.json package-lock.json ./
 COPY shared/package.json ./shared/
 COPY sdk/package.json ./sdk/
 COPY errorhandler/package.json ./errorhandler/
+COPY services/brain/package.json ./services/brain/
+COPY services/mcp-runtime/package.json ./services/mcp-runtime/
+COPY services/worker-pool/package.json ./services/worker-pool/
+COPY services/gateway/package.json ./services/gateway/
+COPY services/temporal/package.json ./services/temporal/
+COPY services/vault/package.json ./services/vault/
+COPY services/artifacts/package.json ./services/artifacts/
+COPY services/agent-runtime/package.json ./services/agent-runtime/
+COPY services/tool-executor/package.json ./services/tool-executor/
+COPY frontend-nextgen/package.json ./frontend-nextgen/
 
 # Install all dependencies with legacy peer deps to resolve MUI version conflicts
 RUN npm install --legacy-peer-deps
@@ -21,8 +31,28 @@ RUN npm install --legacy-peer-deps
 COPY shared/ ./shared/
 COPY sdk/ ./sdk/
 COPY errorhandler/ ./errorhandler/
+COPY services/brain/ ./services/brain/
+COPY services/mcp-runtime/ ./services/mcp-runtime/
+COPY services/worker-pool/ ./services/worker-pool/
+COPY services/gateway/ ./services/gateway/
+COPY services/temporal/ ./services/temporal/
+COPY services/vault/ ./services/vault/
+COPY services/artifacts/ ./services/artifacts/
+COPY services/agent-runtime/ ./services/agent-runtime/
+COPY services/tool-executor/ ./services/tool-executor/
+COPY frontend-nextgen/ ./frontend-nextgen/
 
 # Build shared workspaces
 RUN npm run build --workspace=shared
 RUN npm run build --workspace=sdk
 RUN npm run build --workspace=errorhandler
+RUN npm run build --workspace=services/brain
+RUN npm run build --workspace=services/mcp-runtime
+RUN npm run build --workspace=services/worker-pool
+RUN npm run build --workspace=services/gateway
+RUN npm run build --workspace=services/temporal
+RUN npm run build --workspace=services/vault
+RUN npm run build --workspace=services/artifacts
+RUN npm run build --workspace=services/agent-runtime
+RUN npm run build --workspace=services/tool-executor
+RUN npm run build --workspace=frontend-nextgen

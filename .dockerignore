@@ -1,8 +1,8 @@
 **/node_modules
 **/.git
 **/.vscode
-**/dist
-**/build
+# **/dist
+# **/build
 **/.DS_Store
 **/.env
 **/.env.local
@@ -18,3 +18,5 @@
 **/.cache
 **/tmp
 **/temp
+
+**/tsconfig.tsbuildinfo

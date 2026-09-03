@@ -194,7 +194,7 @@ curl http://localhost:5070/health
 
 ### 5.3. Access an Assistant API
 ```bash
-# Access the PM Assistant's health endpoint
+# Access the Product Mgt Assistant's health endpoint
 curl http://localhost:3000/health
 ```
 

@@ -1,7 +1,7 @@
-# PM Assistant Tool-to-Plugin Mapping
+# Product Mgt Assistant Tool-to-Plugin Mapping
 
 ## Overview
-This document maps PM Assistant SDK tools (L2) to their corresponding L1 plugins in the CapabilitiesManager.
+This document maps Product Mgt Assistant SDK tools (L2) to their corresponding L1 plugins in the CapabilitiesManager.
 
 ## Architecture Flow
 ```
@@ -14,9 +14,9 @@ L1 Core Engine (MissionControl)
 L1 Plugins (JIRA, CONFLUENCE, etc.)
 ```
 
-## PM Assistant Tools
+## Product Mgt Assistant Tools
 
-### Current PM Assistant Configuration
+### Current Product Mgt Assistant Configuration
 From `agents/pm-assistant-api/src/index.ts`:
 - **JiraTool** - Jira integration
 - **ConfluenceTool** - Confluence documentation
@@ -104,7 +104,7 @@ From `agents/pm-assistant-api/src/index.ts`:
 | listFiles | list_files | ✅ Implemented |
 | deleteFile | delete_file | ✅ Implemented |
 
-## Additional PM Assistant Tools (Recommended)
+## Additional Product Mgt Assistant Tools (Recommended)
 
 ### 6. SlackTool → SLACK Plugin
 
@@ -124,7 +124,7 @@ From `agents/pm-assistant-api/src/index.ts`:
 **L1 Plugin**: `services/capabilitiesmanager/src/plugins/CALENDAR/`
 - Actions: `create_event`, `get_events`, `update_event`, `delete_event`, `find_available_slots`
 
-**Status**: ✅ Plugin implemented, SDK tool needs to be added to PM Assistant
+**Status**: ✅ Plugin implemented, SDK tool needs to be added to Product Mgt Assistant
 
 ### 8. ReportingTool → REPORT_GENERATION Plugin
 
@@ -134,7 +134,7 @@ From `agents/pm-assistant-api/src/index.ts`:
 **L1 Plugin**: `services/capabilitiesmanager/src/plugins/REPORT_GENERATION/`
 - Actions: `create_report`, `export_pdf`, `export_html`, `export_markdown`, `schedule_report`
 
-**Status**: ✅ Plugin implemented, SDK tool needs to be added to PM Assistant
+**Status**: ✅ Plugin implemented, SDK tool needs to be added to Product Mgt Assistant
 
 ## Integration Pattern
 
@@ -178,9 +178,9 @@ From `agents/pm-assistant-api/src/index.ts`:
 
 ## Next Steps
 
-1. ✅ Verify all PM Assistant tools are registered
+1. ✅ Verify all Product Mgt Assistant tools are registered
 2. ⚠️ Implement missing DOC_PARSER actions
-3. 📋 Add CalendarTool and ReportingTool to PM Assistant configuration
+3. 📋 Add CalendarTool and ReportingTool to Product Mgt Assistant configuration
 4. 🧪 Test each tool-to-plugin mapping end-to-end
 5. 📝 Document any discrepancies or missing functionality
 
