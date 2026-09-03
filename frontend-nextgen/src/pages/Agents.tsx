@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { fetchJSON, postJSON, deleteResource } from '../utils/api';
 
 const Agents = () => {
-  const [agents, setAgents] = useState<Array<{ id: string; name: string; description: string; type: string; status: string; capabilities: string[] }>>([]);
+  const [agents, setAgents] = useState<Array<{ id: string; name: string; description: string; type: string; status: string }>>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -11,13 +11,12 @@ const Agents = () => {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [type, setType] = useState('worker');
-  const [capabilities, setCapabilities] = useState('chat');
   const [registering, setRegistering] = useState(false);
 
   useEffect(() => {
     const loadAgents = async () => {
       try {
-        const agentsData = await fetchJSON<{ agents: Array<{ id: string; name: string; description: string; type: string; status: string; capabilities: string[] }> }>('/api/agent-runtime/agents');
+        const agentsData = await fetchJSON<{ agents: Array<{ id: string; name: string; description: string; type: string; status: string }> }>('/api/agent-runtime/agents');
          setAgents(agentsData.agents || []);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load agents');
@@ -33,13 +32,12 @@ const Agents = () => {
     setRegistering(true);
     setError(null);
     try {
-      const data = await postJSON<{ agent: { id: string; name: string; description: string; type: string; status: string; capabilities: string[] } }>('/api/agent-runtime/agents', {
+      const data = await postJSON<{ agent: { id: string; name: string; description: string; type: string; status: string } }>('/api/agent-runtime/agents', {
         id: id || `agent-${Date.now()}`,
         tenantId: 'tenant-1',
         name,
         description,
         type,
-        capabilities: capabilities.split(',').map((c) => c.trim()).filter(Boolean),
         systemPrompt: 'You are a helpful agent.',
         tools: [],
         metadata: {},
@@ -49,7 +47,6 @@ const Agents = () => {
       setName('');
       setDescription('');
       setType('worker');
-      setCapabilities('chat');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to register agent');
     } finally {
@@ -83,7 +80,6 @@ const Agents = () => {
               <option value="supervisor">supervisor</option>
               <option value="coordinator">coordinator</option>
             </select>
-            <input type="text" placeholder="Capabilities (comma-separated)" value={capabilities} onChange={(e) => setCapabilities(e.target.value)} required />
             <button type="submit" disabled={registering}>{registering ? 'Registering...' : 'Register'}</button>
           </form>
         </div>

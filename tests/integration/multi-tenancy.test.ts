@@ -37,7 +37,6 @@ describe('Integration: Multi-Tenancy Isolation', () => {
         name: 'Tenant A Agent',
         description: 'A agent',
         type: 'worker',
-        capabilities: ['chat'],
         systemPrompt: 'You are A.',
         model: 'gpt-4',
         tools: [],

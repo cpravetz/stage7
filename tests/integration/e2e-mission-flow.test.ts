@@ -140,7 +140,6 @@ describe('Integration: End-to-End Mission Flow', () => {
         name: 'E2E Agent',
         description: 'End-to-end agent',
         type: 'worker',
-        capabilities: ['chat'],
         systemPrompt: 'You execute missions.',
         model: 'gpt-4',
         tools: [],

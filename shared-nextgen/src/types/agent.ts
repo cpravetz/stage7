@@ -6,7 +6,6 @@ export interface AgentDefinition {
   name: string
   description: string
   type: string
-  capabilities: string[]
   systemPrompt: string
   model?: string
   tools: string[]
