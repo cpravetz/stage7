@@ -8,6 +8,8 @@ export const legacyAssistantCatalog: AssistantDefinition[] = [
     description: 'Product management assistant for roadmaps, PRDs, sprint planning, and stakeholder communication.',
     model: 'openai/gpt-4o',
     systemPrompt: 'You are a senior product manager. Help with roadmaps, PRDs, user stories, sprint planning, and stakeholder updates. Be concise and data-driven.',
+    knowledge: [],
+    transactionGuidance: [],
     tools: [
       { name: 'create-roadmap', description: 'Generate a product roadmap', inputSchema: { type: 'object', properties: { quarter: { type: 'string' }, goals: { type: 'array', items: { type: 'string' } } } } },
       { name: 'write-prd', description: 'Draft a product requirements document', inputSchema: { type: 'object', properties: { title: { type: 'string' }, scope: { type: 'string' } } } },
@@ -23,6 +25,8 @@ export const legacyAssistantCatalog: AssistantDefinition[] = [
     description: 'Creates engaging content for blogs, social media, newsletters, and marketing campaigns.',
     model: 'anthropic/claude-3.5-sonnet',
     systemPrompt: 'You are a creative content specialist. Write engaging, on-brand content for blogs, social media, newsletters, and campaigns. Adapt tone to audience.',
+    knowledge: [],
+    transactionGuidance: [],
     tools: [
       { name: 'draft-blog-post', description: 'Draft a blog post on a topic', inputSchema: { type: 'object', properties: { topic: { type: 'string' }, wordCount: { type: 'number' } } } },
       { name: 'social-media-post', description: 'Generate social media copy', inputSchema: { type: 'object', properties: { platform: { type: 'string' }, message: { type: 'string' } } } },
@@ -38,6 +42,8 @@ export const legacyAssistantCatalog: AssistantDefinition[] = [
     description: 'Plans and coordinates events, conferences, and meetings with logistics management.',
     model: 'openai/gpt-4o-mini',
     systemPrompt: 'You are an expert event planner. Help organize events, conferences, and meetings. Handle logistics, vendor coordination, scheduling, and attendee management.',
+    knowledge: [],
+    transactionGuidance: [],
     tools: [
       { name: 'plan-event', description: 'Create an event plan', inputSchema: { type: 'object', properties: { eventType: { type: 'string' }, attendees: { type: 'number' }, date: { type: 'string' } } } },
     ],
@@ -52,6 +58,8 @@ export const legacyAssistantCatalog: AssistantDefinition[] = [
     description: 'Provides legal document review, contract analysis, and compliance guidance.',
     model: 'anthropic/claude-3.5-sonnet',
     systemPrompt: 'You are a legal advisor AI. Help review contracts, identify legal risks, draft clauses, and provide compliance guidance. Always include disclaimers that this is not legal advice.',
+    knowledge: [],
+    transactionGuidance: [],
     tools: [
       { name: 'review-contract', description: 'Review a contract for risks', inputSchema: { type: 'object', properties: { contractText: { type: 'string' } } } },
       { name: 'draft-clause', description: 'Draft a contract clause', inputSchema: { type: 'object', properties: { clauseType: { type: 'string' }, terms: { type: 'string' } } } },
@@ -67,6 +75,8 @@ export const legacyAssistantCatalog: AssistantDefinition[] = [
     description: 'Manages sales pipeline, lead scoring, CRM data, and outreach sequences.',
     model: 'openai/gpt-4o',
     systemPrompt: 'You are a sales assistant. Help manage pipeline, score leads, draft outreach emails, and track deals. Focus on conversion and relationship building.',
+    knowledge: [],
+    transactionGuidance: [],
     tools: [
       { name: 'score-lead', description: 'Score a sales lead', inputSchema: { type: 'object', properties: { company: { type: 'string' }, budget: { type: 'number' }, timeline: { type: 'string' } } } },
       { name: 'draft-outreach', description: 'Draft a sales outreach email', inputSchema: { type: 'object', properties: { prospectName: { type: 'string' }, company: { type: 'string' } } } },
@@ -82,6 +92,8 @@ export const legacyAssistantCatalog: AssistantDefinition[] = [
     description: 'Personalized tutoring across subjects with adaptive learning and progress tracking.',
     model: 'anthropic/claude-3.5-sonnet',
     systemPrompt: 'You are an expert tutor. Adapt to the student\'s level, explain concepts clearly, provide examples, and track progress. Be patient and encouraging.',
+    knowledge: [],
+    transactionGuidance: [],
     tools: [
       { name: 'create-lesson-plan', description: 'Create a lesson plan', inputSchema: { type: 'object', properties: { subject: { type: 'string' }, level: { type: 'string' }, duration: { type: 'number' } } } },
       { name: 'generate-quiz', description: 'Generate a quiz', inputSchema: { type: 'object', properties: { topic: { type: 'string' }, questions: { type: 'number' } } } },
@@ -97,6 +109,8 @@ export const legacyAssistantCatalog: AssistantDefinition[] = [
     description: 'Handles recruitment workflows, candidate screening, interview scheduling, and onboarding.',
     model: 'openai/gpt-4o-mini',
     systemPrompt: 'You are an HR recruitment assistant. Help with job postings, candidate screening, interview scheduling, and onboarding workflows.',
+    knowledge: [],
+    transactionGuidance: [],
     tools: [
       { name: 'screen-resume', description: 'Screen a resume against job requirements', inputSchema: { type: 'object', properties: { resumeText: { type: 'string' }, jobRequirements: { type: 'string' } } } },
       { name: 'schedule-interview', description: 'Schedule an interview', inputSchema: { type: 'object', properties: { candidateName: { type: 'string' }, panel: { type: 'array', items: { type: 'string' } } } } },
@@ -112,6 +126,8 @@ export const legacyAssistantCatalog: AssistantDefinition[] = [
     description: 'Executive coaching for leadership development, decision-making, and strategic thinking.',
     model: 'anthropic/claude-3.5-sonnet',
     systemPrompt: 'You are an executive coach. Help leaders develop their skills, make strategic decisions, manage teams, and navigate organizational challenges.',
+    knowledge: [],
+    transactionGuidance: [],
     tools: [
       { name: 'decision-framework', description: 'Apply a decision-making framework', inputSchema: { type: 'object', properties: { decision: { type: 'string' }, options: { type: 'array', items: { type: 'string' } } } } },
     ],
@@ -126,6 +142,8 @@ export const legacyAssistantCatalog: AssistantDefinition[] = [
     description: 'Plans and executes marketing campaigns across channels with performance tracking.',
     model: 'openai/gpt-4o',
     systemPrompt: 'You are a marketing campaign specialist. Plan multi-channel campaigns, create copy, set budgets, and track KPIs.',
+    knowledge: [],
+    transactionGuidance: [],
     tools: [
       { name: 'plan-campaign', description: 'Plan a marketing campaign', inputSchema: { type: 'object', properties: { product: { type: 'string' }, budget: { type: 'number' }, channels: { type: 'array', items: { type: 'string' } } } } },
       { name: 'analyze-performance', description: 'Analyze campaign performance', inputSchema: { type: 'object', properties: { campaignId: { type: 'string' }, metrics: { type: 'array', items: { type: 'string' } } } } },
@@ -141,6 +159,8 @@ export const legacyAssistantCatalog: AssistantDefinition[] = [
     description: 'Handles customer inquiries, ticket resolution, and support knowledge base management.',
     model: 'openai/gpt-4o-mini',
     systemPrompt: 'You are a customer support specialist. Resolve tickets, answer product questions, and maintain a helpful knowledge base. Be empathetic and solution-oriented.',
+    knowledge: [],
+    transactionGuidance: [],
     tools: [
       { name: 'resolve-ticket', description: 'Resolve a support ticket', inputSchema: { type: 'object', properties: { ticketId: { type: 'string' }, issue: { type: 'string' } } } },
       { name: 'search-kb', description: 'Search knowledge base', inputSchema: { type: 'object', properties: { query: { type: 'string' } } } },
@@ -156,6 +176,8 @@ export const legacyAssistantCatalog: AssistantDefinition[] = [
     description: 'Analyzes business metrics, generates reports, and provides data-driven insights.',
     model: 'anthropic/claude-3.5-sonnet',
     systemPrompt: 'You are a performance analytics expert. Analyze metrics, generate reports, identify trends, and provide actionable business insights.',
+    knowledge: [],
+    transactionGuidance: [],
     tools: [
       { name: 'generate-report', description: 'Generate an analytics report', inputSchema: { type: 'object', properties: { metric: { type: 'string' }, period: { type: 'string' } } } },
       { name: 'identify-trends', description: 'Identify trends in data', inputSchema: { type: 'object', properties: { dataset: { type: 'string' }, timeframe: { type: 'string' } } } },
@@ -171,6 +193,8 @@ export const legacyAssistantCatalog: AssistantDefinition[] = [
     description: 'Composes lyrics, melodies, and song structures for various genres.',
     model: 'anthropic/claude-3.5-sonnet',
     systemPrompt: 'You are a songwriter. Help compose lyrics, suggest chord progressions, develop song structures, and refine musical ideas across genres.',
+    knowledge: [],
+    transactionGuidance: [],
     tools: [
       { name: 'write-lyrics', description: 'Write song lyrics', inputSchema: { type: 'object', properties: { theme: { type: 'string' }, genre: { type: 'string' }, mood: { type: 'string' } } } },
     ],
@@ -185,6 +209,8 @@ export const legacyAssistantCatalog: AssistantDefinition[] = [
     description: 'Writes scripts for video, film, podcasts, and presentations.',
     model: 'anthropic/claude-3.5-sonnet',
     systemPrompt: 'You are a scriptwriter. Write engaging scripts for video, film, podcasts, and presentations. Focus on narrative, pacing, and audience engagement.',
+    knowledge: [],
+    transactionGuidance: [],
     tools: [
       { name: 'write-script', description: 'Write a script', inputSchema: { type: 'object', properties: { format: { type: 'string' }, topic: { type: 'string' }, duration: { type: 'number' } } } },
     ],
@@ -199,6 +225,8 @@ export const legacyAssistantCatalog: AssistantDefinition[] = [
     description: 'Financial analysis, forecasting, budgeting, and investment research.',
     model: 'openai/gpt-4o',
     systemPrompt: 'You are a financial analyst. Help with financial modeling, forecasting, budgeting, investment analysis, and reporting. Be precise with numbers.',
+    knowledge: [],
+    transactionGuidance: [],
     tools: [
       { name: 'financial-model', description: 'Build a financial model', inputSchema: { type: 'object', properties: { revenue: { type: 'number' }, costs: { type: 'number' }, periods: { type: 'number' } } } },
       { name: 'analyze-investment', description: 'Analyze an investment opportunity', inputSchema: { type: 'object', properties: { asset: { type: 'string' }, amount: { type: 'number' }, horizon: { type: 'string' } } } },
@@ -214,6 +242,8 @@ export const legacyAssistantCatalog: AssistantDefinition[] = [
     description: 'Provides health information, symptom checking, and wellness guidance.',
     model: 'anthropic/claude-3.5-sonnet',
     systemPrompt: 'You are a healthcare advisor. Provide evidence-based health information, symptom awareness, and wellness guidance. Always recommend consulting a medical professional.',
+    knowledge: [],
+    transactionGuidance: [],
     tools: [
       { name: 'symptom-checker', description: 'Check symptoms and provide guidance', inputSchema: { type: 'object', properties: { symptoms: { type: 'array', items: { type: 'string' } }, duration: { type: 'string' } } } },
     ],
@@ -228,6 +258,8 @@ export const legacyAssistantCatalog: AssistantDefinition[] = [
     description: 'Manages restaurant operations including inventory, staffing, menus, and compliance.',
     model: 'openai/gpt-4o-mini',
     systemPrompt: 'You are a restaurant operations specialist. Help with inventory management, staff scheduling, menu planning, vendor relations, and health compliance.',
+    knowledge: [],
+    transactionGuidance: [],
     tools: [
       { name: 'manage-inventory', description: 'Manage restaurant inventory', inputSchema: { type: 'object', properties: { item: { type: 'string' }, quantity: { type: 'number' }, unit: { type: 'string' } } } },
     ],
@@ -242,6 +274,8 @@ export const legacyAssistantCatalog: AssistantDefinition[] = [
     description: 'Manages hotel operations including reservations, housekeeping, and guest services.',
     model: 'openai/gpt-4o-mini',
     systemPrompt: 'You are a hotel operations specialist. Help manage reservations, housekeeping schedules, guest services, and revenue optimization.',
+    knowledge: [],
+    transactionGuidance: [],
     tools: [
       { name: 'manage-reservation', description: 'Manage a hotel reservation', inputSchema: { type: 'object', properties: { guestName: { type: 'string' }, checkIn: { type: 'string' }, checkOut: { type: 'string' } } } },
     ],
@@ -256,6 +290,8 @@ export const legacyAssistantCatalog: AssistantDefinition[] = [
     description: 'Analyzes sports statistics and provides wagering insights and bankroll management.',
     model: 'openai/gpt-4o',
     systemPrompt: 'You are a sports wagering analyst. Analyze statistics, odds, and trends to provide wagering insights. Always emphasize responsible gambling and bankroll management.',
+    knowledge: [],
+    transactionGuidance: [],
     tools: [
       { name: 'analyze-matchup', description: 'Analyze a sports matchup', inputSchema: { type: 'object', properties: { sport: { type: 'string' }, teams: { type: 'array', items: { type: 'string' } } } } },
     ],
@@ -270,6 +306,8 @@ export const legacyAssistantCatalog: AssistantDefinition[] = [
     description: 'Technical leadership guidance for architecture, engineering strategy, and team scaling.',
     model: 'anthropic/claude-3.5-sonnet',
     systemPrompt: 'You are a CTO advisor. Help with technical architecture decisions, engineering strategy, team scaling, technology selection, and technical debt management.',
+    knowledge: [],
+    transactionGuidance: [],
     tools: [
       { name: 'architecture-review', description: 'Review a system architecture', inputSchema: { type: 'object', properties: { system: { type: 'string' }, requirements: { type: 'string' } } } },
       { name: 'tech-stack-recommendation', description: 'Recommend a tech stack', inputSchema: { type: 'object', properties: { project: { type: 'string' }, scale: { type: 'string' } } } },
@@ -285,6 +323,8 @@ export const legacyAssistantCatalog: AssistantDefinition[] = [
     description: 'Career development guidance including resume review, interview prep, and skill planning.',
     model: 'openai/gpt-4o',
     systemPrompt: 'You are a career coach. Help with resume optimization, interview preparation, skill development planning, and career transition strategies.',
+    knowledge: [],
+    transactionGuidance: [],
     tools: [
       { name: 'review-resume', description: 'Review and improve a resume', inputSchema: { type: 'object', properties: { resumeText: { type: 'string' }, targetRole: { type: 'string' } } } },
       { name: 'mock-interview', description: 'Conduct a mock interview', inputSchema: { type: 'object', properties: { role: { type: 'string' }, level: { type: 'string' } } } },
@@ -300,6 +340,8 @@ export const legacyAssistantCatalog: AssistantDefinition[] = [
     description: 'Portfolio analysis, investment strategies, and market research.',
     model: 'openai/gpt-4o',
     systemPrompt: 'You are an investment advisor. Help with portfolio analysis, asset allocation, risk assessment, and market research. Always include risk disclaimers.',
+    knowledge: [],
+    transactionGuidance: [],
     tools: [
       { name: 'portfolio-analysis', description: 'Analyze an investment portfolio', inputSchema: { type: 'object', properties: { holdings: { type: 'array', items: { type: 'object' } }, riskTolerance: { type: 'string' } } } },
     ],

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { useFeedStore, FeedEvent } from '../stores/feedStore';
+import { useFeedStore, FeedEvent, normalize } from '../stores/feedStore';
 import { fetchJSON, postJSON } from '../utils/api';
 
 interface MissionDetail {
@@ -62,6 +62,8 @@ const STATUS_BADGE: Record<string, string> = {
   canceled: 'canceled',
   pending: 'pending',
   started: 'running',
+  awaiting_review: 'review',
+  incomplete: 'incomplete',
 };
 
 function iconForType(type: string): string {
@@ -92,6 +94,10 @@ const MissionRoom = () => {
   const [sendError, setSendError] = useState<string | null>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
 
+  const [persistedEvents, setPersistedEvents] = useState<FeedEvent[]>([]);
+  const [persistedPlan, setPersistedPlan] = useState<Plan | null>(null);
+  const [now, setNow] = useState(Date.now());
+
   useEffect(() => {
     let cancelled = false;
     setDetail(null);
@@ -113,6 +119,44 @@ const MissionRoom = () => {
     };
   }, [workflowId]);
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const planData = await fetchJSON<Plan>(
+          `/api/artifacts/missions/${encodeURIComponent(missionId)}/plan`,
+        );
+        if (!cancelled) setPersistedPlan(planData || null);
+      } catch {
+        if (!cancelled) setPersistedPlan(null);
+      }
+      try {
+        const evtRes = await fetchJSON<{ events: unknown[] }>(
+          `/api/artifacts/missions/${encodeURIComponent(missionId)}/events`,
+        );
+        const raw = evtRes?.events || [];
+        if (!cancelled) {
+          setPersistedEvents(
+            raw
+              .map((e) => normalize(e))
+              .filter((e): e is FeedEvent => e !== null),
+          );
+        }
+      } catch {
+        if (!cancelled) setPersistedEvents([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [missionId]);
+
+  useEffect(() => {
+    if (detail?.status !== 'running') return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [detail?.status]);
+
   const missionEvents = useMemo<FeedEvent[]>(() => {
     const fromOutput: FeedEvent[] = [];
     const startedAt = detail?.startedAt
@@ -126,7 +170,7 @@ const MissionRoom = () => {
       timestamp: startedAt,
       missionId,
     });
-    const plan = detail?.output?.plan;
+    const plan = detail?.output?.plan ?? persistedPlan ?? null;
     if (plan) {
       fromOutput.push({
         id: `derived-planner-started-${startedAt + 1}`,
@@ -213,12 +257,12 @@ const MissionRoom = () => {
     const live = events.filter((e) => e.missionId === missionId);
     const map = new Map<string, FeedEvent>();
     for (const e of fromOutput) map.set(e.id, e);
-    for (const e of live) {
-      const key = `${e.type}-${e.timestamp}-${e.id}`;
+    for (const e of [...persistedEvents, ...live]) {
+      const key = e.id || `${e.type}-${e.timestamp}-${e.source || ''}`;
       if (!map.has(key)) map.set(key, e);
     }
     return Array.from(map.values()).sort((a, b) => a.timestamp - b.timestamp);
-  }, [events, detail, missionId]);
+  }, [events, persistedEvents, detail, missionId]);
 
   const transcript = useMemo(() => buildTranscript(missionEvents), [missionEvents]);
 
@@ -246,7 +290,7 @@ const MissionRoom = () => {
 
   const status = detail?.status || 'unknown';
   const badge = STATUS_BADGE[status] || status;
-  const plan = detail?.output?.plan;
+  const plan = detail?.output?.plan ?? persistedPlan ?? null;
   const phaseOutputs = detail?.output?.outputs?.phases || [];
   const taskArtifactCount = phaseOutputs.reduce(
     (sum, p) => sum + (p.tasks || []).reduce((s, t) => s + (t.artifacts?.length || 0), 0),
@@ -256,10 +300,14 @@ const MissionRoom = () => {
     (sum, ph) => sum + ph.tasks.reduce((s, t) => s + (t.expectedArtifacts?.length || 0) + (t.artifacts?.length || 0), 0),
     0,
   ) || 0;
+  const startedAtMs = detail?.startedAt ? new Date(detail.startedAt).getTime() : undefined;
+  const completedAtMs = detail?.completedAt ? new Date(detail.completedAt).getTime() : undefined;
   const wallClockMs =
-    detail?.startedAt && detail?.completedAt
-      ? new Date(detail.completedAt).getTime() - new Date(detail.startedAt).getTime()
-      : null;
+    startedAtMs && completedAtMs
+      ? completedAtMs - startedAtMs
+      : startedAtMs && (detail?.status === 'running' || !completedAtMs)
+        ? now - startedAtMs
+        : null;
   const wallClockLabel = wallClockMs != null ? formatDuration(wallClockMs) : null;
 
   return (

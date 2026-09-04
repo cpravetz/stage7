@@ -30,6 +30,12 @@ router.post('/assistants', asyncHandler(async (req, res) => {
   if (!definition.metadata) {
     definition.metadata = {};
   }
+  if (!definition.knowledge) {
+    definition.knowledge = [];
+  }
+  if (!definition.transactionGuidance) {
+    definition.transactionGuidance = [];
+  }
   const saved = await loader.register(definition);
   if (saved.tools && saved.tools.length > 0) {
     registerAssistantTools(saved.tools);

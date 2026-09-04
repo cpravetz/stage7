@@ -20,6 +20,9 @@ const AgentStateSchema = z.object({
 
 router.post('/', asyncHandler(async (req, res) => {
   const parsed = AgentStateSchema.parse(req.body);
+  if (!parsed.tenantId) {
+    throw NextGenError.badRequest('tenantId is required');
+  }
   await service.saveAgentState(parsed);
   res.status(201).json(parsed);
 }));

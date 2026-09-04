@@ -132,8 +132,10 @@ export class InMemoryStore {
     return Promise.resolve(this.missions.get(missionId));
   }
 
-  listMissionStates(): Promise<MissionState[]> {
-    return Promise.resolve(Array.from(this.missions.values()));
+  listMissionStates(tenantId?: string): Promise<MissionState[]> {
+    const all = Array.from(this.missions.values());
+    if (!tenantId) return Promise.resolve(all);
+    return Promise.resolve(all.filter((m) => m.tenantId === tenantId));
   }
 
   async deleteMissionState(missionId: string): Promise<void> {
@@ -151,8 +153,10 @@ export class InMemoryStore {
     return Promise.resolve(this.agents.get(agentId));
   }
 
-  listAgentStates(): Promise<AgentState[]> {
-    return Promise.resolve(Array.from(this.agents.values()));
+  listAgentStates(tenantId?: string): Promise<AgentState[]> {
+    const all = Array.from(this.agents.values());
+    if (!tenantId) return Promise.resolve(all);
+    return Promise.resolve(all.filter((a) => a.tenantId === tenantId));
   }
 
   saveAssistant(definition: AssistantDefinition): Promise<AssistantDefinition> {

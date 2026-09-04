@@ -7,7 +7,6 @@ interface MissionRow {
   status: string;
   missionId: string;
   prompt?: string;
-  assistantId?: string;
   startedAt?: string;
   completedAt?: string;
   timestamp?: number;
@@ -19,6 +18,8 @@ const STATUS_FILTERS: Array<{ value: 'all' | MissionRow['status']; label: string
   { value: 'completed', label: 'Completed' },
   { value: 'failed', label: 'Failed' },
   { value: 'canceled', label: 'Canceled' },
+  { value: 'awaiting_review', label: 'Needs Review' },
+  { value: 'incomplete', label: 'Incomplete' },
 ];
 
 const Missions = () => {
@@ -50,6 +51,14 @@ const Missions = () => {
     loadMissions();
   }, []);
 
+  const [now, setNow] = useState(Date.now());
+  const hasRunning = missions.some((m) => m.status === 'running');
+  useEffect(() => {
+    if (!hasRunning) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [hasRunning]);
+
   const handleStart = async (e: React.FormEvent) => {
     e.preventDefault();
     setStarting(true);
@@ -59,7 +68,6 @@ const Missions = () => {
         missionId: missionId || `mission-${Date.now()}`,
         prompt,
         tenantId: 'tenant-1',
-        assistantId: 'default',
         contextChunks: [],
         metadata: {},
       });
@@ -97,24 +105,23 @@ const Missions = () => {
       return (
         m.missionId.toLowerCase().includes(q) ||
         m.workflowId.toLowerCase().includes(q) ||
-        (m.prompt || '').toLowerCase().includes(q) ||
-        (m.assistantId || '').toLowerCase().includes(q)
+        (m.prompt || '').toLowerCase().includes(q)
       );
     });
   }, [missions, filter, search]);
 
   const counts = useMemo(() => {
-    const c: Record<'all' | 'running' | 'completed' | 'failed' | 'canceled', number> = {
+    const c: Record<string, number> = {
       all: missions.length,
       running: 0,
       completed: 0,
       failed: 0,
       canceled: 0,
+      awaiting_review: 0,
+      incomplete: 0,
     };
     for (const m of missions) {
-      if (m.status === 'running' || m.status === 'completed' || m.status === 'failed' || m.status === 'canceled') {
-        c[m.status]++;
-      }
+      c[m.status] = (c[m.status] || 0) + 1;
     }
     return c;
   }, [missions]);
@@ -127,8 +134,11 @@ const Missions = () => {
   };
 
   const formatDuration = (m: MissionRow) => {
-    if (!m.startedAt || !m.completedAt) return '—';
-    const ms = new Date(m.completedAt).getTime() - new Date(m.startedAt).getTime();
+    if (!m.startedAt) return '—';
+    const started = new Date(m.startedAt).getTime();
+    if (Number.isNaN(started)) return '—';
+    const end = m.completedAt ? new Date(m.completedAt).getTime() : now;
+    const ms = end - started;
     if (ms < 1000) return `${ms}ms`;
     const s = Math.floor(ms / 1000);
     if (s < 60) return `${s}s`;
@@ -181,8 +191,10 @@ const Missions = () => {
             <span><strong>{counts.all}</strong> total</span>
             <span style={{ color: '#22c55e' }}><strong>{counts.running}</strong> running</span>
             <span style={{ color: '#38bdf8' }}><strong>{counts.completed}</strong> completed</span>
-            <span style={{ color: '#ef4444' }}><strong>{counts.failed}</strong> failed</span>
-            <span style={{ color: '#f59e0b' }}><strong>{counts.canceled}</strong> canceled</span>
+          <span style={{ color: '#ef4444' }}><strong>{counts.failed}</strong> failed</span>
+          <span style={{ color: '#f59e0b' }}><strong>{counts.canceled}</strong> canceled</span>
+          <span style={{ color: '#eab308' }}><strong>{counts.awaiting_review || 0}</strong> needs review</span>
+          <span style={{ color: '#a78bfa' }}><strong>{counts.incomplete || 0}</strong> incomplete</span>
           </div>
           <button onClick={() => setShowCreate(true)}>+ Create Mission</button>
         </div>
@@ -224,7 +236,6 @@ const Missions = () => {
                   <th>Status</th>
                   <th>Started</th>
                   <th>Duration</th>
-                  <th>Assistant</th>
                   <th></th>
                 </tr>
               </thead>
@@ -237,7 +248,6 @@ const Missions = () => {
                     <td><span className={`badge ${m.status}`}>{m.status}</span></td>
                     <td>{formatTime(m.startedAt || m.timestamp)}</td>
                     <td>{formatDuration(m)}</td>
-                    <td className="truncate">{m.assistantId || '—'}</td>
                     <td>
                       <button className="danger small" onClick={() => handleDelete(m.workflowId)}>
                         Delete
@@ -247,7 +257,7 @@ const Missions = () => {
                 ))}
                 {filtered.length === 0 && (
                   <tr>
-                    <td colSpan={6}>
+                    <td colSpan={5}>
                       <div className="empty-state">No missions match the current filter.</div>
                     </td>
                   </tr>

@@ -1,8 +1,9 @@
 import { Router, Request, Response, NextFunction } from 'express'
 import { z } from 'zod'
-import { Tool, PluginGenerationRequest, PluginGenerationResult } from '../types'
+import { Tool, PluginGenerationRequest, PluginGenerationResult, CredentialRequiredError } from '../types'
 import { ToolNotFoundError, ValidationError } from '../utils/errors'
 import asyncHandler from '../utils/asyncHandler'
+import logger from '../utils/logger'
 import { toolRegistry as registry, toolExecutor as executor, pluginGenerator as generator } from '../utils/sharedInstance'
 
 const router: Router = Router()
@@ -75,7 +76,45 @@ router.post(
       throw new ToolNotFoundError(req.params.id)
     }
 
-    const execution = await executor.execute(tool, req.body.input || {})
+    const execution = await executor.executeOrRequestCredentials(tool, req.body.input || {}, req.body.credentials)
+
+    if (execution instanceof CredentialRequiredError) {
+      res.status(428).json({ error: execution.message, request: execution.request })
+      return;
+    }
+
+    const statusCode = execution.status === 'failed' ? 500 : 200
+    res.status(statusCode).json(execution)
+  })
+)
+
+router.post(
+  '/tools/execute',
+  asyncHandler(async (req: Request, res: Response) => {
+    const { tool, input, credentials } = req.body as { tool?: Partial<Tool>; input?: Record<string, unknown>; credentials?: Record<string, string> }
+    if (!tool?.name || !tool?.type) {
+      throw new ValidationError('tool.name and tool.type are required')
+    }
+
+    const fullTool: Tool = {
+      id: tool.id || `tool-${Date.now()}`,
+      name: tool.name,
+      description: tool.description || '',
+      type: tool.type as Tool['type'],
+      manifest: tool.manifest || {},
+      inputSchema: tool.inputSchema,
+      outputSchema: tool.outputSchema,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }
+
+    const execution = await executor.executeOrRequestCredentials(fullTool, input || {}, credentials)
+
+    if (execution instanceof CredentialRequiredError) {
+      res.status(428).json({ error: execution.message, request: execution.request })
+      return;
+    }
+
     const statusCode = execution.status === 'failed' ? 500 : 200
     res.status(statusCode).json(execution)
   })
@@ -91,7 +130,52 @@ router.post(
       context: data.context,
     }
     const result: PluginGenerationResult = await generator.generate(request)
+    if (result.success && result.tool) {
+      try {
+        const deployed = await generator.deploy(result.tool)
+        if (deployed.success) {
+          logger.info({ toolId: result.tool.id, deployPath: deployed.deployPath }, 'Generated plugin deployed and registered')
+        } else {
+          logger.warn({ toolId: result.tool.id, error: deployed.error }, 'Generated plugin deployment failed')
+        }
+      } catch (deployErr) {
+        logger.warn({ toolId: result.tool.id, err: deployErr instanceof Error ? deployErr.message : String(deployErr) }, 'Generated plugin deployment threw')
+      }
+    }
     const statusCode = result.success ? 201 : 400
+    res.status(statusCode).json(result)
+  })
+)
+
+const credentialSubmissionSchema = z.object({
+  credentials: z.record(z.string()),
+  storeInVault: z.boolean().optional(),
+  vaultSecretId: z.string().optional(),
+})
+
+router.get(
+  '/executions/:executionId/credential-request',
+  asyncHandler(async (req: Request, res: Response) => {
+    const request = executor.getCredentialRequest(req.params.executionId)
+    if (!request) {
+      throw new ToolNotFoundError('credential request')
+    }
+    res.json(request)
+  })
+)
+
+router.post(
+  '/executions/:executionId/credentials',
+  asyncHandler(async (req: Request, res: Response) => {
+    const submission = credentialSubmissionSchema.parse(req.body)
+    const result = await executor.submitCredentials(req.params.executionId, submission)
+
+    if (result instanceof CredentialRequiredError) {
+      res.status(428).json({ error: result.message, request: result.request })
+      return;
+    }
+
+    const statusCode = result.status === 'completed' ? 200 : 500
     res.status(statusCode).json(result)
   })
 )

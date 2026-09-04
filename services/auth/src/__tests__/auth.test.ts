@@ -6,6 +6,7 @@ import { RBACService } from '../services/RBACService';
 
 describe('Auth', () => {
   let app: express.Application;
+  const tokenService = new TokenService('test-secret');
 
   beforeEach(() => {
     app = express();
@@ -15,7 +16,6 @@ describe('Auth', () => {
 
   describe('TokenService', () => {
     it('should generate and verify user token', () => {
-      const tokenService = new TokenService('test-secret');
       const token = tokenService.generateUserToken({
         id: 'user-1',
         tenantId: 'tenant-1',
@@ -40,7 +40,6 @@ describe('Auth', () => {
     });
 
     it('should generate and verify service token', () => {
-      const tokenService = new TokenService('test-secret');
       const token = tokenService.generateServiceToken({
         id: 'service-1',
         tenantId: 'tenant-1',
@@ -61,7 +60,6 @@ describe('Auth', () => {
     });
 
     it('should return null for invalid token', () => {
-      const tokenService = new TokenService('test-secret');
       const payload = tokenService.verifyToken('invalid-token');
       expect(payload).toBeNull();
     });
@@ -96,7 +94,7 @@ describe('Auth', () => {
     it('should login with valid credentials', async () => {
       const response = await request(app)
         .post('/api/auth/login')
-        .send({ email: 'admin@example.com', password: 'password' });
+        .send({ email: 'admin@example.com', password: 'change-me-in-production' });
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
@@ -114,9 +112,7 @@ describe('Auth', () => {
     });
 
     it('should reject missing fields', async () => {
-      const response = await request(app)
-        .post('/api/auth/login')
-        .send({});
+      const response = await request(app).post('/api/auth/login').send({});
 
       expect(response.status).toBe(400);
     });
@@ -124,9 +120,17 @@ describe('Auth', () => {
 
   describe('POST /api/auth/service/auth', () => {
     it('should authenticate service with valid API key', async () => {
+      const serviceId = `svc-${Date.now()}`;
+      const apiKey = `sk-${Date.now()}`;
+      const apiKeyHash = tokenService.hashApiKey(apiKey);
+
+      await request(app)
+        .post('/api/auth/services')
+        .send({ name: 'Test Service', serviceId, apiKey, scopes: ['read', 'write'] });
+
       const response = await request(app)
         .post('/api/auth/service/auth')
-        .send({ serviceId: 'svc-1', apiKey: 'secret-api-key' });
+        .send({ serviceId, apiKey });
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
@@ -146,7 +150,7 @@ describe('Auth', () => {
     it('should verify valid token', async () => {
       const loginResponse = await request(app)
         .post('/api/auth/login')
-        .send({ email: 'admin@example.com', password: 'password' });
+        .send({ email: 'admin@example.com', password: 'change-me-in-production' });
 
       const token = loginResponse.body.token;
       const response = await request(app)
@@ -155,7 +159,7 @@ describe('Auth', () => {
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
-      expect(response.body.payload.sub).toBe('user-1');
+      expect(response.body.payload.sub).toBe('user-admin');
     });
 
     it('should reject missing token', async () => {
@@ -168,7 +172,7 @@ describe('Auth', () => {
     it('should refresh valid token', async () => {
       const loginResponse = await request(app)
         .post('/api/auth/login')
-        .send({ email: 'admin@example.com', password: 'password' });
+        .send({ email: 'admin@example.com', password: 'change-me-in-production' });
 
       const token = loginResponse.body.token;
       const response = await request(app)
@@ -183,8 +187,13 @@ describe('Auth', () => {
 
   describe('POST /api/auth/users/:id/roles', () => {
     it('should assign role to user', async () => {
+      const loginResponse = await request(app)
+        .post('/api/auth/login')
+        .send({ email: 'admin@example.com', password: 'change-me-in-production' });
+
+      const userId = loginResponse.body.user.id;
       const response = await request(app)
-        .post('/api/auth/users/user-1/roles')
+        .post(`/api/auth/users/${userId}/roles`)
         .send({ role: 'editor' });
 
       expect(response.status).toBe(200);

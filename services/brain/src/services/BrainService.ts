@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { logger } from '../utils/logger';
 import { buildProviderRegistry } from '../providers/registry';
 import { LLMProvider, CompletionRequest, CompletionResponse } from '../providers/Provider';
+import { CircuitBreaker } from '../utils/circuitBreaker';
 import * as crypto from 'crypto';
 
 export interface CompletionOptions {
@@ -32,11 +33,13 @@ export class BrainService {
   private cache = SemanticCache.getInstance();
   private context = new ContextManager();
   private providers: LLMProvider[] = [];
+  private circuitBreakers: Map<string, CircuitBreaker> = new Map();
 
   constructor() {
     this.providers = buildProviderRegistry();
     for (const p of this.providers) {
       this.registerProviderModels(p);
+      this.circuitBreakers.set(p.id, new CircuitBreaker(5, 30000));
     }
     logger.info({ providers: this.providers.map((p) => p.id) }, 'Brain initialized with providers');
   }
@@ -119,7 +122,8 @@ export class BrainService {
     };
 
     logger.info({ provider: provider.id, model: model.id }, 'Dispatching completion');
-    const response: CompletionResponse = await provider.complete(req);
+    const breaker = this.circuitBreakers.get(provider.id);
+    const response: CompletionResponse = await (breaker || new CircuitBreaker()).execute(async () => provider.complete(req));
 
     const result: CompletionResult = {
       content: response.content,
@@ -140,5 +144,16 @@ export class BrainService {
 
   getCacheStats() {
     return this.cache.stats();
+  }
+
+  getCircuitBreakerStats(): Array<{ provider: string; state: string; failures: number }> {
+    return this.providers.map((p) => {
+      const breaker = this.circuitBreakers.get(p.id);
+      return {
+        provider: p.id,
+        state: breaker ? breaker.getState() : 'closed',
+        failures: breaker ? breaker.getFailureCount() : 0,
+      };
+    });
   }
 }

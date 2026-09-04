@@ -11,7 +11,7 @@ const MissionStateSchema = z.object({
   missionId: z.string(),
   tenantId: z.string(),
   assistantId: z.string(),
-  status: z.enum(['pending', 'running', 'completed', 'failed', 'canceled']),
+  status: z.enum(['pending', 'running', 'completed', 'failed', 'canceled', 'awaiting_review', 'incomplete']),
   currentStep: z.number(),
   totalSteps: z.number(),
   history: z.array(z.any()),
@@ -26,12 +26,16 @@ const MissionStateSchema = z.object({
 
 router.post('/', asyncHandler(async (req, res) => {
   const parsed = MissionStateSchema.parse(req.body);
+  if (!parsed.tenantId) {
+    throw NextGenError.badRequest('tenantId is required');
+  }
   await service.saveMissionState(parsed as MissionState);
   res.status(201).json(parsed);
 }));
 
-router.get('/', asyncHandler(async (_req, res) => {
-  const states = await service.listMissionStates();
+router.get('/', asyncHandler(async (req, res) => {
+  const tenantId = (req.query.tenantId as string) || undefined;
+  const states = await service.listMissionStates(tenantId);
   res.json({ missions: states });
 }));
 
@@ -215,6 +219,12 @@ function deriveEventsFromMissionState(state: any): Array<{ type: string; timesta
   } else if (state.status === 'canceled') {
     cursor += 1000;
     events.push({ type: 'mission_failed', timestamp: cursor, data: { error: 'Mission canceled' } });
+  } else if (state.status === 'incomplete') {
+    cursor += 1000;
+    events.push({ type: 'mission_incomplete', timestamp: cursor, data: { error: state.error, reason: state.output?.outputs?.status || 'Outputs did not satisfy the mission goal' } });
+  } else if (state.status === 'awaiting_review') {
+    cursor += 1000;
+    events.push({ type: 'mission_needs_review', timestamp: cursor, data: { reason: state.output?.outputs?.reason || 'Awaiting user review' } });
   }
   return events;
 }

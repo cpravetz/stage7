@@ -51,7 +51,7 @@ function shortId(): string {
   return Math.random().toString(36).slice(2, 10);
 }
 
-function normalize(raw: unknown): FeedEvent | null {
+export function normalize(raw: unknown): FeedEvent | null {
   if (!raw || typeof raw !== 'object') return null;
   const r = raw as Record<string, unknown>;
 

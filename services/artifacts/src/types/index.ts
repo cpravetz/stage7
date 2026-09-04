@@ -52,7 +52,7 @@ export interface MissionState {
   missionId: string;
   tenantId: string;
   assistantId: string;
-  status: 'pending' | 'running' | 'completed' | 'failed' | 'canceled';
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'canceled' | 'awaiting_review' | 'incomplete';
   currentStep: number;
   totalSteps: number;
   history: unknown[];

@@ -18,12 +18,14 @@ describe('Integration: End-to-End Mission Flow', () => {
   let agentRuntimeServer: http.Server;
   let workerPoolServer: http.Server;
   let gatewayServer: http.Server;
+  let brainServer: http.Server;
   let wsGateway: WebSocketGateway;
 
   let artifactsUrl: string;
   let agentRuntimeUrl: string;
   let workerPoolUrl: string;
   let gatewayUrl: string;
+  let brainUrl: string;
 
   let app: express.Application;
 
@@ -50,33 +52,132 @@ describe('Integration: End-to-End Mission Flow', () => {
     gatewayApp.use('/api/gateway', gatewayRoutes);
     gatewayApp.use('/api/gateway', messagingRoutes);
 
+    const brainApp = express();
+    brainApp.use(express.json());
+    brainApp.post('/api/brain/complete', (req, res) => {
+      const { prompt, systemPrompt } = req.body || {};
+      const isPlanner = systemPrompt?.includes('mission planner');
+      const isWorker = systemPrompt?.includes('executing task');
+
+      if (isPlanner) {
+        const goal = (prompt || '').slice(0, 100);
+        res.json({
+          content: JSON.stringify({
+            summary: `Plan for: ${goal}`,
+            estimatedDuration: '1-2 days',
+            estimatedCost: 'TBD',
+            requiresClarification: false,
+            clarificationQuestions: [],
+            phases: [
+              {
+                id: 'phase-1',
+                name: 'Planning',
+                goal: `Break down and plan the execution of: ${goal}`,
+                tasks: [
+                  {
+                    id: 'task-1-1',
+                    title: 'Analyze goal and create execution plan',
+                    description: `Analyze the goal and create a concrete, step-by-step execution plan for: ${prompt}`,
+                    agentRole: 'general-purpose',
+                    systemPrompt: 'You are a planning agent. Analyze the goal and create a concrete, step-by-step execution plan. Be thorough and consider edge cases.',
+                    expectedArtifacts: ['plan.md'],
+                    status: 'pending',
+                    artifacts: [],
+                  },
+                ],
+                requiresApproval: true,
+                status: 'pending',
+              },
+              {
+                id: 'phase-2',
+                name: 'Execution',
+                goal: `Execute the plan to accomplish: ${goal}`,
+                tasks: [
+                  {
+                    id: 'task-2-1',
+                    title: 'Execute the plan',
+                    description: `Execute the previously created plan to accomplish: ${prompt}`,
+                    agentRole: 'general-purpose',
+                    systemPrompt: 'You are an execution agent. Execute the plan thoroughly and produce the required artifacts. If you need tools, use the available tool execution interface.',
+                    expectedArtifacts: ['output.md'],
+                    status: 'pending',
+                    artifacts: [],
+                  },
+                ],
+                requiresApproval: false,
+                status: 'pending',
+              },
+              {
+                id: 'phase-3',
+                name: 'Review',
+                goal: 'Review output quality and completeness',
+                tasks: [
+                  {
+                    id: 'task-3-1',
+                    title: 'Review and refine output',
+                    description: 'Review the execution output for completeness, accuracy, and quality. Refine or request follow-up tasks if needed.',
+                    agentRole: 'reviewer',
+                    systemPrompt: 'You are a reviewer agent. Evaluate outputs for completeness, accuracy, and quality. Identify gaps and suggest improvements.',
+                    expectedArtifacts: ['review.md'],
+                    status: 'pending',
+                    artifacts: [],
+                  },
+                ],
+                requiresApproval: true,
+                status: 'pending',
+              },
+            ],
+          }),
+        });
+      } else if (isWorker) {
+        res.json({
+          content: 'Mock worker output for: ' + (prompt || '').slice(0, 100),
+          tokensUsed: 100,
+        });
+      } else {
+        res.json({
+          content: 'Mock response for: ' + (prompt || '').slice(0, 100),
+          tokensUsed: 50,
+        });
+      }
+    });
+
     persistenceServer = http.createServer(artifactsApp);
     agentRuntimeServer = http.createServer(agentRuntimeApp);
     workerPoolServer = http.createServer(workerPoolApp);
     gatewayServer = http.createServer(gatewayApp);
+    brainServer = http.createServer(brainApp);
 
     await Promise.all([
       new Promise<void>((resolve) => persistenceServer.listen(0, '127.0.0.1', resolve)),
       new Promise<void>((resolve) => agentRuntimeServer.listen(0, '127.0.0.1', resolve)),
       new Promise<void>((resolve) => workerPoolServer.listen(0, '127.0.0.1', resolve)),
       new Promise<void>((resolve) => gatewayServer.listen(0, '127.0.0.1', resolve)),
+      new Promise<void>((resolve) => brainServer.listen(0, '127.0.0.1', resolve)),
     ]);
 
     const persistenceAddr = persistenceServer.address() as { address: string; port: number };
     const agentRuntimeAddr = agentRuntimeServer.address() as { address: string; port: number };
     const workerPoolAddr = workerPoolServer.address() as { address: string; port: number };
     const gatewayAddr = gatewayServer.address() as { address: string; port: number };
+    const brainAddr = brainServer.address() as { address: string; port: number };
 
     artifactsUrl = `http://${persistenceAddr.address}:${persistenceAddr.port}`;
     agentRuntimeUrl = `http://${agentRuntimeAddr.address}:${agentRuntimeAddr.port}`;
     workerPoolUrl = `http://${workerPoolAddr.address}:${workerPoolAddr.port}`;
     gatewayUrl = `http://${gatewayAddr.address}:${gatewayAddr.port}`;
+    brainUrl = `http://${brainAddr.address}:${brainAddr.port}`;
 
     process.env.ARTIFACTS_URL = artifactsUrl;
     process.env.AGENT_RUNTIME_URL = agentRuntimeUrl;
     process.env.WORKER_POOL_URL = workerPoolUrl;
     process.env.GATEWAY_URL = gatewayUrl;
+    process.env.BRAIN_URL = brainUrl;
+    process.env.APPROVAL_POLL_INTERVAL_MS = '500';
     delete process.env.TEMPORAL_ADDRESS;
+
+    const healthCheck = await fetch(`${artifactsUrl}/api/artifacts/health`);
+    expect(healthCheck.ok).toBe(true);
 
     wsGateway = new WebSocketGateway(gatewayServer, '/ws');
     wsGateway.start();
@@ -107,12 +208,15 @@ describe('Integration: End-to-End Mission Flow', () => {
     delete process.env.AGENT_RUNTIME_URL;
     delete process.env.WORKER_POOL_URL;
     delete process.env.GATEWAY_URL;
+    delete process.env.BRAIN_URL;
+    delete process.env.APPROVAL_POLL_INTERVAL_MS;
 
     await Promise.all([
       new Promise<void>((resolve) => persistenceServer.close(() => resolve())),
       new Promise<void>((resolve) => agentRuntimeServer.close(() => resolve())),
       new Promise<void>((resolve) => workerPoolServer.close(() => resolve())),
       new Promise<void>((resolve) => gatewayServer.close(() => resolve())),
+      new Promise<void>((resolve) => brainServer.close(() => resolve())),
     ]);
   });
 
@@ -163,6 +267,40 @@ describe('Integration: End-to-End Mission Flow', () => {
 
     expect(missionRes.status).toBe(202);
     expect(missionRes.body.workflowId).toBe('mission-e2e-mission');
+
+    for (let i = 0; i < 20; i++) {
+      await new Promise((r) => setTimeout(r, 500));
+      const planRes = await fetch(`${artifactsUrl}/api/artifacts/missions/e2e-mission/plan`);
+      if (planRes.ok) break;
+    }
+
+    const planRes = await fetch(`${artifactsUrl}/api/artifacts/missions/e2e-mission/plan`);
+    expect(planRes.ok).toBe(true);
+    const plan = await planRes.json();
+    expect(plan.phases.length).toBeGreaterThanOrEqual(1);
+
+    await fetch(`${artifactsUrl}/api/artifacts/missions/e2e-mission/phases/phase-1/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approvedBy: 'test' }),
+    });
+
+    for (let i = 0; i < 40; i++) {
+      await new Promise((r) => setTimeout(r, 500));
+      const phase3Res = await fetch(`${artifactsUrl}/api/artifacts/missions/e2e-mission/phases/phase-3`);
+      if (phase3Res.ok) {
+        const phase3 = await phase3Res.json();
+        if (phase3.status === 'awaiting_approval') {
+          await fetch(`${artifactsUrl}/api/artifacts/missions/e2e-mission/phases/phase-3/approve`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ approvedBy: 'test' }),
+          });
+        }
+      }
+      const resultRes = await request(app).get('/api/temporal/missions/mission-e2e-mission');
+      if (resultRes.body.status === 'completed' || resultRes.body.status === 'failed') break;
+    }
 
     const resultRes = await request(app).get('/api/temporal/missions/mission-e2e-mission');
     expect(resultRes.status).toBe(200);

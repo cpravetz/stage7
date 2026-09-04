@@ -3,7 +3,7 @@ import { missionWorkflow } from '../workflows/missionWorkflow';
 import { WorkflowInput, WorkflowResult } from '../types/workflow';
 import { logger } from '@stage7-nextgen/shared';
 
-const TEMPORAL_TIMEOUT_MS = 3000;
+const TEMPORAL_TIMEOUT_MS = parseInt(process.env.TEMPORAL_OP_TIMEOUT_MS || '5000', 10);
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return Promise.race([
@@ -68,21 +68,32 @@ export class TemporalClient {
     result: WorkflowResult,
     startTime: number,
   ): Promise<void> {
-    const history = result.status === 'completed'
-      ? [{
-          step: 0,
-          status: 'completed' as const,
-          startedAt: result.startedAt,
-          completedAt: result.completedAt,
-          result: result.output,
-        }]
-      : [{
-          step: 0,
-          status: 'failed' as const,
-          startedAt: result.startedAt,
-          completedAt: result.completedAt,
-          error: result.error,
-        }];
+    const historyStatus: 'pending' | 'running' | 'completed' | 'failed' | 'awaiting_review' | 'incomplete' =
+      result.status === 'completed'
+        ? 'completed'
+        : result.status === 'failed'
+          ? 'failed'
+          : result.status === 'awaiting_review'
+            ? 'awaiting_review'
+            : 'incomplete';
+
+    const history: Array<{
+      step: number;
+      status: 'pending' | 'running' | 'completed' | 'failed' | 'awaiting_review' | 'incomplete';
+      startedAt?: number;
+      completedAt?: number;
+      result?: unknown;
+      error?: string;
+    }> = [
+      {
+        step: 0,
+        status: historyStatus,
+        startedAt: result.startedAt,
+        completedAt: result.completedAt,
+        ...(result.status === 'completed' ? { result: result.output } : {}),
+        ...(result.status === 'failed' ? { error: result.error } : {}),
+      },
+    ];
 
     await this.persistMissionState({
       missionId: input.missionId,
@@ -137,65 +148,65 @@ export class TemporalClient {
       }
     }
 
-    // Fallback: direct execution without a Temporal server.
+    // Fallback: execute workflow asynchronously without Temporal.
     const startTime = Date.now();
-    try {
-      const result = await missionWorkflow(input);
-      await this.persistFinalState(input, result, startTime);
-      await this.broadcastMissionUpdate({
-        type: 'mission_completed',
-        missionId: input.missionId,
-        workflowId,
-        status: result.status,
-        output: result.output,
-        timestamp: result.completedAt || Date.now(),
+    missionWorkflow(input)
+      .then(async (result) => {
+        await this.persistFinalState(input, result, startTime);
+        await this.broadcastMissionUpdate({
+          type: 'mission_completed',
+          missionId: input.missionId,
+          workflowId,
+          status: result.status,
+          output: result.output,
+          timestamp: result.completedAt || Date.now(),
+        });
+      })
+      .catch(async (err: any) => {
+        logger.error({ err: err.message }, 'Mission workflow failed');
+        await this.persistMissionState({
+          missionId: input.missionId,
+          tenantId: input.tenantId || '',
+          assistantId: input.assistantId || '',
+          status: 'failed',
+          currentStep: 0,
+          totalSteps: 1,
+          history: [{ step: 0, status: 'failed' as const, startedAt: startTime, completedAt: Date.now(), error: err.message }],
+          input,
+          error: err.message,
+          startedAt: startTime,
+          completedAt: Date.now(),
+          createdAt: startTime,
+          updatedAt: Date.now(),
+        });
+        await this.broadcastMissionUpdate({
+          type: 'mission_failed',
+          missionId: input.missionId,
+          workflowId,
+          status: 'failed',
+          error: err.message,
+          timestamp: Date.now(),
+        });
       });
-    } catch (err: any) {
-      logger.error({ err: err.message }, 'Mission workflow failed');
-      await this.persistMissionState({
-        missionId: input.missionId,
-        tenantId: input.tenantId || '',
-        assistantId: input.assistantId || '',
-        status: 'failed',
-        currentStep: 0,
-        totalSteps: 1,
-        history: [{ step: 0, status: 'failed' as const, startedAt: startTime, completedAt: Date.now(), error: err.message }],
-        input,
-        error: err.message,
-        startedAt: startTime,
-        completedAt: Date.now(),
-        createdAt: startTime,
-        updatedAt: Date.now(),
-      });
-      await this.broadcastMissionUpdate({
-        type: 'mission_failed',
-        missionId: input.missionId,
-        workflowId,
-        status: 'failed',
-        error: err.message,
-        timestamp: Date.now(),
-      });
-    }
 
     return workflowId;
   }
 
   async getMissionResult(workflowId: string): Promise<WorkflowResult | null> {
-    // Try Temporal first if connected
+    const getResultTimeout = parseInt(process.env.TEMPORAL_GET_RESULT_TIMEOUT_MS || '1000', 10);
+
     if (this.client) {
       try {
         const handle = this.client.workflow.getHandle<typeof missionWorkflow>(workflowId);
-        const result = await withTimeout(handle.result(), TEMPORAL_TIMEOUT_MS);
+        const result = await withTimeout(handle.result(), getResultTimeout);
         return result as WorkflowResult;
       } catch (error: any) {
         if (!error.message?.includes('workflow not found') && !error.message?.includes('timed out')) {
           logger.warn({ err: error.message }, 'Temporal getMissionResult error');
         }
-        // Fall through to persistence
       }
     }
 
-    // Fetch from persistence service — strip 'mission-' prefix
     const missionKey = workflowId.startsWith('mission-') ? workflowId.slice(8) : workflowId;
     try {
       const persistenceUrl = process.env.ARTIFACTS_URL;
@@ -223,7 +234,6 @@ export class TemporalClient {
   async listMissions(): Promise<Array<{ workflowId: string; status: string; missionId: string; prompt?: string; assistantId?: string; startedAt?: string; completedAt?: string }>> {
     const results: Array<{ workflowId: string; status: string; missionId: string; prompt?: string; assistantId?: string; startedAt?: string; completedAt?: string }> = [];
 
-    // Try Temporal first if connected
     if (this.client) {
       try {
         const listPromise = (async () => {
@@ -240,12 +250,12 @@ export class TemporalClient {
           }
         })();
         await withTimeout(listPromise, TEMPORAL_TIMEOUT_MS);
+        return results;
       } catch (error: any) {
         logger.warn({ err: error.message }, 'Failed to list missions from Temporal');
       }
     }
 
-    // Also query persistence service as fallback/merge
     try {
       const persistenceUrl = process.env.ARTIFACTS_URL;
       if (persistenceUrl) {
@@ -257,17 +267,15 @@ export class TemporalClient {
             const missionId = doc.missionId || doc.id || '';
             const workflowId = `mission-${missionId}`;
             const status = doc.status || 'unknown';
-            if (!results.find((r) => r.workflowId === workflowId)) {
-              results.push({
-                workflowId,
-                status,
-                missionId,
-                prompt: doc.input?.prompt,
-                assistantId: doc.assistantId,
-                startedAt: doc.startedAt,
-                completedAt: doc.completedAt,
-              });
-            }
+            results.push({
+              workflowId,
+              status,
+              missionId,
+              prompt: doc.input?.prompt,
+              assistantId: doc.assistantId,
+              startedAt: doc.startedAt,
+              completedAt: doc.completedAt,
+            });
           }
         }
       }
@@ -382,7 +390,7 @@ export class TemporalClient {
     totalSteps: number;
     history: Array<{
       step: number;
-      status: 'pending' | 'running' | 'completed' | 'failed';
+       status: 'pending' | 'running' | 'completed' | 'failed' | 'awaiting_review' | 'incomplete';
       startedAt?: number;
       completedAt?: number;
       result?: unknown;

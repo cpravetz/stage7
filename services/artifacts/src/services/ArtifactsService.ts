@@ -19,10 +19,9 @@ export class ArtifactsService {
   private mongoStore: MongoStore | null = null;
 
   constructor() {
-    const mongoUri = process.env.MONGO_URI;
     this.store = new InMemoryStore();
 
-    if (mongoUri) {
+    if (process.env.MONGO_URI) {
       this.mongoStore = new MongoStore();
       this.connectMongo();
     }
@@ -71,8 +70,8 @@ export class ArtifactsService {
     return this.store.getMissionState(missionId);
   }
 
-  async listMissionStates(): Promise<MissionState[]> {
-    return this.store.listMissionStates();
+  async listMissionStates(tenantId?: string): Promise<MissionState[]> {
+    return this.store.listMissionStates(tenantId);
   }
 
   async deleteMissionState(missionId: string): Promise<void> {
@@ -87,8 +86,8 @@ export class ArtifactsService {
     return this.store.getAgentState(agentId);
   }
 
-  async listAgentStates(): Promise<AgentState[]> {
-    return this.store.listAgentStates();
+  async listAgentStates(tenantId?: string): Promise<AgentState[]> {
+    return this.store.listAgentStates(tenantId);
   }
 
   async saveAssistant(definition: AssistantDefinition): Promise<AssistantDefinition> {

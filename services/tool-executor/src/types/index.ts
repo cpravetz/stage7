@@ -36,3 +36,33 @@ export interface PluginGenerationResult {
   tool?: Tool
   error?: string
 }
+
+export interface CredentialRequest {
+  executionId: string
+  toolId: string
+  toolName: string
+  missingCredentials: Array<{
+    key: string
+    source: { vaultSecretId?: string; envVar?: string; configKey?: string }
+    label?: string
+  }>
+  message: string
+}
+
+export interface CredentialSubmission {
+  executionId: string
+  toolId: string
+  credentials: Record<string, string>
+  storeInVault?: boolean
+  vaultSecretId?: string
+}
+
+export class CredentialRequiredError extends Error {
+  readonly request: CredentialRequest;
+
+  constructor(request: CredentialRequest) {
+    super(request.message);
+    this.name = 'CredentialRequiredError';
+    this.request = request;
+  }
+}

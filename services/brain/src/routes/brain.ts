@@ -82,4 +82,8 @@ router.get('/cache/stats', asyncHandler(async (_req: any, res: any) => {
   res.json(brain.getCacheStats());
 }));
 
+router.get('/circuit-breakers', asyncHandler(async (_req: any, res: any) => {
+  res.json(brain.getCircuitBreakerStats());
+}));
+
 export default router;

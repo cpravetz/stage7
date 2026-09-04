@@ -10,6 +10,8 @@ export interface Entity {
   model: string;
   systemPrompt: string;
   tools: Array<{ name: string; description: string; inputSchema: Record<string, unknown> } | string>;
+  knowledge?: Array<{ id: string; title: string; content: string; source?: string }>;
+  transactionGuidance?: string[];
   metadata: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
@@ -29,6 +31,8 @@ const normalizeEntity = (raw: Record<string, unknown>, type: 'assistant' | 'agen
   model: (raw.model as string) || '',
   systemPrompt: (raw.systemPrompt as string) || '',
   tools: Array.isArray(raw.tools) ? raw.tools as Entity['tools'] : [],
+  knowledge: Array.isArray(raw.knowledge) ? raw.knowledge as Entity['knowledge'] : [],
+  transactionGuidance: Array.isArray(raw.transactionGuidance) ? raw.transactionGuidance as Entity['transactionGuidance'] : [],
   metadata: (raw.metadata as Record<string, unknown>) || {},
   createdAt: (raw.createdAt as string) || new Date().toISOString(),
   updatedAt: (raw.updatedAt as string) || new Date().toISOString(),

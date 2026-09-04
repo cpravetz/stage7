@@ -17,12 +17,6 @@ const MONGO_DB = process.env.MONGO_DB || 'stage7';
 type VectorDoc = { _id: string; vector: number[] };
 
 export class MongoStore {
-  private missionPlans: Map<string, any> = new Map();
-  private missionPhases: Map<string, Map<string, any>> = new Map();
-  private missionTasks: Map<string, Map<string, any>> = new Map();
-  private missionEvents: Map<string, any[]> = new Map();
-
-
   private client: MongoClient | null = null;
   private db: Db | null = null;
   private connected = false;
@@ -34,6 +28,10 @@ export class MongoStore {
   private assistants!: Collection<AssistantDefinition & { _id?: string }>;
   private assistantRuntimes!: Collection<AssistantRuntimeConfig & { _id?: string }>;
   private assistantTemplates!: Collection<AssistantTemplate & { _id?: string }>;
+  private missionPlans!: Collection<{ missionId: string; plan: any }>;
+  private missionPhases!: Collection<any>;
+  private missionTasks!: Collection<any>;
+  private missionEvents!: Collection<any>;
 
   async connect(): Promise<void> {
     if (this.connected) return;
@@ -50,12 +48,20 @@ export class MongoStore {
       this.assistants = this.db.collection<AssistantDefinition & { _id?: string }>('assistants');
       this.assistantRuntimes = this.db.collection<AssistantRuntimeConfig & { _id?: string }>('assistantRuntimes');
       this.assistantTemplates = this.db.collection<AssistantTemplate & { _id?: string }>('assistantTemplates');
+      this.missionPlans = this.db.collection<{ missionId: string; plan: any }>('missionPlans');
+      this.missionPhases = this.db.collection<any>('missionPhases');
+      this.missionTasks = this.db.collection<any>('missionTasks');
+      this.missionEvents = this.db.collection<any>('missionEvents');
 
       await this.documents.createIndex({ id: 1 }, { unique: true });
       await this.missions.createIndex({ missionId: 1 }, { unique: true });
       await this.agents.createIndex({ agentId: 1 }, { unique: true });
       await this.assistants.createIndex({ id: 1 }, { unique: true });
       await this.assistantTemplates.createIndex({ id: 1 }, { unique: true });
+      await this.missionPlans.createIndex({ missionId: 1 }, { unique: true });
+      await this.missionPhases.createIndex({ missionId: 1, phaseId: 1 }, { unique: true });
+      await this.missionTasks.createIndex({ missionId: 1, taskId: 1 }, { unique: true });
+      await this.missionEvents.createIndex({ missionId: 1, timestamp: 1 });
 
       this.connected = true;
       logger.info({ uri: MONGO_URI, db: MONGO_DB }, 'MongoStore connected');
@@ -186,8 +192,9 @@ export class MongoStore {
     return rest;
   }
 
-  async listMissionStates(): Promise<MissionState[]> {
-    const results = await this.missions.find({}).toArray();
+  async listMissionStates(tenantId?: string): Promise<MissionState[]> {
+    const query: Record<string, string> = tenantId ? { tenantId } : {};
+    const results = await this.missions.find(query).toArray();
     return results.map((r: any) => {
       const { _id, ...rest } = r;
       return rest;
@@ -211,8 +218,9 @@ export class MongoStore {
     return rest;
   }
 
-  async listAgentStates(): Promise<AgentState[]> {
-    const results = await this.agents.find({}).toArray();
+  async listAgentStates(tenantId?: string): Promise<AgentState[]> {
+    const query: Record<string, string> = tenantId ? { tenantId } : {};
+    const results = await this.agents.find(query).toArray();
     return results.map((r: any) => {
       const { _id, ...rest } = r;
       return rest;
@@ -301,43 +309,52 @@ export class MongoStore {
     });
   }
 
+  async deleteTemplate(id: string): Promise<boolean> {
+    const result = await this.assistantTemplates.deleteOne({ id } as any);
+    const existed = result.deletedCount > 0;
+    if (existed) logger.debug({ templateId: id }, 'Assistant template deleted');
+    return existed;
+  }
+
   async saveMissionPlan(missionId: string, plan: any): Promise<any> {
-    this.missionPlans.set(missionId, plan);
+    await this.missionPlans.replaceOne({ missionId }, { missionId, plan }, { upsert: true });
     return plan;
   }
-  async getMissionPlan(missionId: string): Promise<any | undefined> {
-    return this.missionPlans.get(missionId);
-  }
-  async updateMissionPhase(missionId: string, phaseId: string, update: any): Promise<any> {
-    let phases = this.missionPhases.get(missionId);
-    if (!phases) { phases = new Map(); this.missionPhases.set(missionId, phases); }
-    const existing = phases.get(phaseId) || { id: phaseId, missionId };
-    const merged = { ...existing, ...update, id: phaseId, missionId, updatedAt: Date.now() };
-    phases.set(phaseId, merged);
 
-    const plan = this.missionPlans.get(missionId);
-    if (plan && Array.isArray(plan.phases)) {
-      const newPhases = plan.phases.map((p: any) =>
+  async getMissionPlan(missionId: string): Promise<any | undefined> {
+    const result = await this.missionPlans.findOne({ missionId });
+    return result?.plan;
+  }
+
+  async updateMissionPhase(missionId: string, phaseId: string, update: any): Promise<any> {
+    const existing = await this.missionPhases.findOne({ missionId, phaseId });
+    const merged = { ...(existing || { id: phaseId, missionId }), ...update, id: phaseId, missionId, updatedAt: Date.now() };
+    await this.missionPhases.replaceOne({ missionId, phaseId }, merged, { upsert: true });
+
+    const planResult = await this.missionPlans.findOne({ missionId });
+    if (planResult?.plan && Array.isArray(planResult.plan.phases)) {
+      const newPhases = planResult.plan.phases.map((p: any) =>
         p.id === phaseId ? { ...p, ...update } : p
       );
-      this.missionPlans.set(missionId, { ...plan, phases: newPhases });
+      await this.missionPlans.replaceOne({ missionId }, { missionId, plan: { ...planResult.plan, phases: newPhases } }, { upsert: true });
     }
 
     return merged;
   }
-  async getMissionPhase(missionId: string, phaseId: string): Promise<any | undefined> {
-    return this.missionPhases.get(missionId)?.get(phaseId);
-  }
-  async updateMissionTask(missionId: string, taskId: string, update: any): Promise<any> {
-    let tasks = this.missionTasks.get(missionId);
-    if (!tasks) { tasks = new Map(); this.missionTasks.set(missionId, tasks); }
-    const existing = tasks.get(taskId) || { id: taskId, missionId };
-    const merged = { ...existing, ...update, id: taskId, missionId, updatedAt: Date.now() };
-    tasks.set(taskId, merged);
 
-    const plan = this.missionPlans.get(missionId);
-    if (plan && Array.isArray(plan.phases)) {
-      const newPhases = plan.phases.map((phase: any) => {
+  async getMissionPhase(missionId: string, phaseId: string): Promise<any | undefined> {
+    const result = await this.missionPhases.findOne({ missionId, phaseId });
+    return result;
+  }
+
+  async updateMissionTask(missionId: string, taskId: string, update: any): Promise<any> {
+    const existing = await this.missionTasks.findOne({ missionId, taskId });
+    const merged = { ...(existing || { id: taskId, missionId }), ...update, id: taskId, missionId, updatedAt: Date.now() };
+    await this.missionTasks.replaceOne({ missionId, taskId }, merged, { upsert: true });
+
+    const planResult = await this.missionPlans.findOne({ missionId });
+    if (planResult?.plan && Array.isArray(planResult.plan.phases)) {
+      const newPhases = planResult.plan.phases.map((phase: any) => {
         if (Array.isArray(phase.tasks)) {
           const newTasks = phase.tasks.map((t: any) =>
             t.id === taskId ? { ...t, ...update } : t
@@ -346,29 +363,26 @@ export class MongoStore {
         }
         return phase;
       });
-      this.missionPlans.set(missionId, { ...plan, phases: newPhases });
+      await this.missionPlans.replaceOne({ missionId }, { missionId, plan: { ...planResult.plan, phases: newPhases } }, { upsert: true });
     }
 
     return merged;
   }
+
   async getMissionTask(missionId: string, taskId: string): Promise<any | undefined> {
-    return this.missionTasks.get(missionId)?.get(taskId);
+    const result = await this.missionTasks.findOne({ missionId, taskId });
+    return result;
   }
+
   async appendMissionEvent(missionId: string, event: any): Promise<any> {
-    const existing = this.missionEvents.get(missionId) || [];
-    const e = { ...event, timestamp: event.timestamp || Date.now() };
-    existing.push(e);
-    this.missionEvents.set(missionId, existing);
+    const e = { ...event, timestamp: event.timestamp || Date.now(), missionId };
+    await this.missionEvents.insertOne(e);
     return e;
   }
+
   async listMissionEvents(missionId: string): Promise<any[]> {
-    return this.missionEvents.get(missionId) || [];
-  }
-  async deleteTemplate(id: string): Promise<boolean> {
-    const result = await this.assistantTemplates.deleteOne({ id } as any);
-    const existed = result.deletedCount > 0;
-    if (existed) logger.debug({ templateId: id }, 'Assistant template deleted');
-    return existed;
+    const results = await this.missionEvents.find({ missionId }).sort({ timestamp: 1 }).toArray();
+    return results;
   }
 
   async upsertVector(id: string, vector: number[]): Promise<void> {

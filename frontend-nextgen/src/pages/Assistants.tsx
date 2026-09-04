@@ -15,6 +15,8 @@ interface Assistant {
   description: string;
   model?: string;
   systemPrompt: string;
+  knowledge?: Array<{ id: string; title: string; content: string; source?: string }>;
+  transactionGuidance?: string[];
   tools: AssistantTool[];
   metadata: Record<string, unknown>;
   createdAt: string;
@@ -39,6 +41,12 @@ const Assistants = () => {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [systemPrompt, setSystemPrompt] = useState('');
+  const [knowledge, setKnowledge] = useState<Array<{ id: string; title: string; content: string; source?: string }>>([]);
+  const [knowledgeTitle, setKnowledgeTitle] = useState('');
+  const [knowledgeContent, setKnowledgeContent] = useState('');
+  const [knowledgeSource, setKnowledgeSource] = useState('');
+  const [transactionGuidance, setTransactionGuidance] = useState<string[]>([]);
+  const [transactionInput, setTransactionInput] = useState('');
   const [tools, setTools] = useState<AssistantTool[]>([]);
   const [toolName, setToolName] = useState('');
   const [toolDescription, setToolDescription] = useState('');
@@ -55,6 +63,8 @@ const Assistants = () => {
     description?: string;
     systemPrompt?: string;
     tools?: AssistantTool[];
+    knowledge?: Array<{ id: string; title: string; content: string; source?: string }>;
+    transactionGuidance?: string[];
   }>({});
   const [showRuntime, setShowRuntime] = useState<string | null>(null);
   const [runtimeConfig, setRuntimeConfig] = useState<AssistantRuntime | null>(null);
@@ -87,6 +97,28 @@ const Assistants = () => {
     setTools(tools.filter((_, i) => i !== idx));
   };
 
+  const addKnowledge = () => {
+    if (!knowledgeTitle.trim() || !knowledgeContent.trim()) return;
+    setKnowledge([...knowledge, { id: `knowledge-${Date.now()}`, title: knowledgeTitle.trim(), content: knowledgeContent.trim(), source: knowledgeSource.trim() || undefined }]);
+    setKnowledgeTitle('');
+    setKnowledgeContent('');
+    setKnowledgeSource('');
+  };
+
+  const removeKnowledge = (idx: number) => {
+    setKnowledge(knowledge.filter((_, i) => i !== idx));
+  };
+
+  const addTransactionGuidance = () => {
+    if (!transactionInput.trim()) return;
+    setTransactionGuidance([...transactionGuidance, transactionInput.trim()]);
+    setTransactionInput('');
+  };
+
+  const removeTransactionGuidance = (idx: number) => {
+    setTransactionGuidance(transactionGuidance.filter((_, i) => i !== idx));
+  };
+
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setRegistering(true);
@@ -98,6 +130,8 @@ const Assistants = () => {
         name,
         description,
         systemPrompt: systemPrompt || 'You are a helpful assistant.',
+        knowledge,
+        transactionGuidance,
         tools,
         metadata: {},
       });
@@ -106,6 +140,8 @@ const Assistants = () => {
       setName('');
       setDescription('');
       setSystemPrompt('');
+      setKnowledge([]);
+      setTransactionGuidance([]);
       setTools([]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to register assistant');
@@ -132,6 +168,8 @@ const Assistants = () => {
       description: assistant.description,
       systemPrompt: assistant.systemPrompt,
       tools: assistant.tools,
+      knowledge: assistant.knowledge,
+      transactionGuidance: assistant.transactionGuidance,
     });
   };
 
@@ -228,6 +266,44 @@ const Assistants = () => {
               )}
             </div>
 
+            <div className="tool-binding-section">
+              <h4>Knowledge Base</h4>
+              <div className="input-row">
+                <input type="text" placeholder="Title" value={knowledgeTitle} onChange={(e) => setKnowledgeTitle(e.target.value)} className="flex-grow" />
+                <input type="text" placeholder="Source (optional)" value={knowledgeSource} onChange={(e) => setKnowledgeSource(e.target.value)} className="flex-grow" />
+              </div>
+              <textarea placeholder="Knowledge content" value={knowledgeContent} onChange={(e) => setKnowledgeContent(e.target.value)} rows={2} />
+              <button type="button" onClick={addKnowledge} className="secondary">Add Knowledge</button>
+              {knowledge.length > 0 && (
+                <ul className="tool-list">
+                  {knowledge.map((k, idx) => (
+                    <li key={k.id || idx}>
+                      <strong>{k.title}</strong>: {k.content.slice(0, 100)}{k.content.length > 100 ? '...' : ''}
+                      <button type="button" onClick={() => removeKnowledge(idx)} className="remove-btn">&times;</button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            <div className="tool-binding-section">
+              <h4>Transaction Guidance</h4>
+              <div className="input-row">
+                <input type="text" placeholder="Guidance rule (e.g. Always confirm before booking)" value={transactionInput} onChange={(e) => setTransactionInput(e.target.value)} className="flex-grow" />
+                <button type="button" onClick={addTransactionGuidance}>Add</button>
+              </div>
+              {transactionGuidance.length > 0 && (
+                <ul className="tool-list">
+                  {transactionGuidance.map((g, idx) => (
+                    <li key={idx}>
+                      {g}
+                      <button type="button" onClick={() => removeTransactionGuidance(idx)} className="remove-btn">&times;</button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
             <button type="submit" disabled={registering}>{registering ? 'Registering...' : 'Register'}</button>
           </form>
         </div>
@@ -255,6 +331,7 @@ const Assistants = () => {
             <input type="text" placeholder="Name" value={editForm.name || ''} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} />
             <textarea placeholder="Description" value={editForm.description || ''} onChange={(e) => setEditForm({ ...editForm, description: e.target.value })} rows={2} />
             <textarea placeholder="System Prompt" value={editForm.systemPrompt || ''} onChange={(e) => setEditForm({ ...editForm, systemPrompt: e.target.value })} rows={3} />
+            <p className="hint">Knowledge and transaction guidance are saved with the assistant definition and injected into the system prompt at execution time.</p>
             <div className="button-row">
               <button type="submit">Save Changes</button>
               <button type="button" className="secondary" onClick={() => { setEditingId(null); setEditForm({}); }}>Cancel</button>
