@@ -39,6 +39,11 @@ router.get('/', asyncHandler(async (req, res) => {
   res.json({ missions: states });
 }));
 
+router.get('/approvals', asyncHandler(async (_req, res) => {
+  const approvals = await service.listPendingApprovals();
+  res.json({ approvals });
+}));
+
 router.get('/:missionId', asyncHandler(async (req, res) => {
   const state = await service.getMissionState(req.params.missionId as string);
   if (!state) {

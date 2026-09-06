@@ -58,7 +58,12 @@ describe('Integration: End-to-End Mission Flow', () => {
       const { prompt, systemPrompt } = req.body || {};
       const isPlanner = systemPrompt?.includes('mission planner');
       const isWorker = systemPrompt?.includes('executing task');
+      const isEvaluator = systemPrompt?.includes('objective mission evaluator');
 
+      if (isEvaluator) {
+        res.json({ content: 'yes' });
+        return;
+      }
       if (isPlanner) {
         const goal = (prompt || '').slice(0, 100);
         res.json({
@@ -129,15 +134,28 @@ describe('Integration: End-to-End Mission Flow', () => {
             ],
           }),
         });
-      } else if (isWorker) {
-        res.json({
-          content: 'Mock worker output for: ' + (prompt || '').slice(0, 100),
-          tokensUsed: 100,
-        });
       } else {
+        // Task-execution brain call (assistant path or brain-direct worker path).
+        // Emit structured markdown with a ## section per expected artifact so the
+        // real extractArtifacts path produces meaningful artifacts instead of a
+        // one-line stub.
+        const isTaskPrompt = /Expected artifacts:/i.test(prompt || '');
+        const artifactMatch = (prompt || '').match(/Expected artifacts:\s*(.*)/i);
+        const artifactList = artifactMatch
+          ? artifactMatch[1].split(/[\s,]+/).filter(Boolean).map((a) => a.replace(/[.,]$/, ''))
+          : [];
+        const base = isWorker ? 'Mock worker output' : 'Mock assistant output';
+        let content: string;
+        if (isTaskPrompt && artifactList.length > 0) {
+          content =
+            `${base} for: ${(prompt || '').slice(0, 80)}\n\n` +
+            artifactList.map((a) => `## ${a}\nConcrete content for ${a} produced by the mock brain.`).join('\n\n');
+        } else {
+          content = `${base} for: ${(prompt || '').slice(0, 100)}`;
+        }
         res.json({
-          content: 'Mock response for: ' + (prompt || '').slice(0, 100),
-          tokensUsed: 50,
+          content,
+          tokensUsed: isWorker ? 100 : 50,
         });
       }
     });

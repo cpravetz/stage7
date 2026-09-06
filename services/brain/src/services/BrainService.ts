@@ -28,12 +28,27 @@ export interface CompletionResult {
   tokensUsed?: number;
 }
 
+export interface BrainLogEntry {
+  timestamp: string;
+  type: 'completion' | 'cache_hit' | 'error';
+  model?: string;
+  provider?: string;
+  promptPreview?: string;
+  success: boolean;
+  durationMs?: number;
+  error?: string;
+  tokensUsed?: number;
+}
+
+const MAX_LOG_ENTRIES = 200;
+
 export class BrainService {
   private router = new ModelRouter();
   private cache = SemanticCache.getInstance();
   private context = new ContextManager();
   private providers: LLMProvider[] = [];
   private circuitBreakers: Map<string, CircuitBreaker> = new Map();
+  private brainLog: BrainLogEntry[] = [];
 
   constructor() {
     this.providers = buildProviderRegistry();
@@ -80,19 +95,33 @@ export class BrainService {
   }
 
   async complete(prompt: string, options: CompletionOptions = {}): Promise<CompletionResult> {
+    const startTime = Date.now();
+    const modelIdOpt = options.model || 'auto';
+    const providerOpt = options.provider || 'any';
+    const promptPreview = prompt.slice(0, 120);
+
     const promptHash = crypto.createHash('sha256').update(prompt).digest('hex').slice(0, 16);
     const systemHash = options.systemPrompt
       ? crypto.createHash('sha256').update(options.systemPrompt).digest('hex').slice(0, 8)
       : 'none';
-    const cacheKey = `brain:complete:${options.model || 'auto'}:${options.provider || 'any'}:${promptHash}:${systemHash}`;
+    const cacheKey = `brain:complete:${modelIdOpt}:${providerOpt}:${promptHash}:${systemHash}`;
 
     const cached = await this.cache.get(cacheKey);
     if (cached) {
       logger.info({ cacheKey }, 'Cache hit');
+      this.addLog({
+        type: 'cache_hit',
+        model: modelIdOpt,
+        provider: providerOpt,
+        promptPreview,
+        success: true,
+        durationMs: Date.now() - startTime,
+      });
       return { ...(cached as CompletionResult), cached: true };
     }
 
-    const model = this.router.route({
+    // Build ordered candidate list and try providers/models until one succeeds.
+    const candidates = this.router.getCandidates({
       task: prompt,
       modelId: options.model,
       provider: options.provider,
@@ -100,41 +129,140 @@ export class BrainService {
       budget: options.budget,
     });
 
-    const provider = this.providers.find((p) => p.id === model.provider);
-    if (!provider) {
-      throw new Error(`Provider ${model.provider} not found for model ${model.id}`);
+    if (!candidates || candidates.length === 0) {
+      const errMsg = 'No model available for the requested task. Ensure at least one LLM provider is configured with a valid API key.';
+      this.addLog({
+        type: 'error',
+        model: options.model || 'auto',
+        provider: options.provider || 'any',
+        promptPreview,
+        success: false,
+        durationMs: Date.now() - startTime,
+        error: errMsg,
+      });
+      throw new Error(errMsg);
     }
-    if (!provider.isAvailable()) {
-      throw new Error(`Provider ${provider.id} is not available (missing API key or endpoint)`);
+
+    let lastErr: unknown = null;
+    const maxRetriesPerProvider = 2;
+
+    const messagesBase: CompletionRequest['messages'] = [];
+    if (options.systemPrompt) messagesBase.push({ role: 'system', content: options.systemPrompt });
+    messagesBase.push({ role: 'user', content: prompt });
+
+    for (const candidate of candidates) {
+      const provider = this.providers.find((p) => p.id === candidate.provider);
+      if (!provider) {
+        logger.warn({ candidate }, 'Skipping candidate: provider not registered');
+        continue;
+      }
+      if (!provider.isAvailable()) {
+        logger.warn({ provider: provider.id }, 'Skipping candidate: provider not available');
+        continue;
+      }
+
+      const req: CompletionRequest = {
+        model: candidate.id,
+        messages: messagesBase,
+        maxTokens: options.maxTokens ?? 1024,
+        temperature: options.temperature,
+      };
+
+      logger.info({ provider: provider.id, model: candidate.id }, 'Dispatching completion (candidate)');
+      const breaker = this.circuitBreakers.get(provider.id) || new CircuitBreaker();
+
+      for (let attempt = 0; attempt < maxRetriesPerProvider; attempt++) {
+        try {
+          const response: CompletionResponse = await breaker.execute(async () => provider.complete(req));
+
+          const result: CompletionResult = {
+            content: response.content,
+            model: response.model || candidate.id,
+            provider: response.provider || provider.id,
+            cached: false,
+            tokensUsed: response.tokensUsed,
+          };
+
+          this.addLog({
+            type: 'completion',
+            model: result.model,
+            provider: result.provider,
+            promptPreview,
+            success: true,
+            durationMs: Date.now() - startTime,
+            tokensUsed: response.tokensUsed,
+          });
+
+          await this.cache.set(cacheKey, result);
+          return result;
+        } catch (err) {
+          lastErr = err;
+          const errMsg = err instanceof Error ? err.message : String(err);
+          logger.warn({ provider: provider.id, model: candidate.id, attempt, err: errMsg }, 'Candidate attempt failed');
+
+          // classify error: provider-key / quota issues vs transient
+          const isKeyLimit = /key limit exceeded|limit exceeded|quota exceeded/i.test(errMsg) || /\b403\b/.test(errMsg);
+          if (isKeyLimit) {
+            // provider-level fatal: remove provider models from router and stop trying this provider
+            logger.error({ provider: provider.id, err: errMsg }, 'Provider key/quota error - removing provider models from router');
+            try {
+              this.router.removeProviderModels(provider.id);
+            } catch (e) {
+              logger.warn({ e }, 'Failed to remove provider models');
+            }
+            this.addLog({
+              type: 'error',
+              model: candidate.id,
+              provider: provider.id,
+              promptPreview,
+              success: false,
+              durationMs: Date.now() - startTime,
+              error: errMsg,
+            });
+            // break out to next candidate
+            break;
+          }
+
+          // transient: backoff a little then retry this provider (if attempts remain)
+          if (attempt < maxRetriesPerProvider - 1) {
+            const backoffMs = 250 * (attempt + 1);
+            await new Promise((res) => setTimeout(res, backoffMs));
+            continue;
+          }
+
+          // exhausted attempts for this candidate; log and try next candidate
+          this.addLog({
+            type: 'error',
+            model: candidate.id,
+            provider: provider.id,
+            promptPreview,
+            success: false,
+            durationMs: Date.now() - startTime,
+            error: errMsg,
+          });
+          break;
+        }
+      }
     }
 
-    const messages: CompletionRequest['messages'] = [];
-    if (options.systemPrompt) {
-      messages.push({ role: 'system', content: options.systemPrompt });
+    const finalErrMsg = lastErr instanceof Error ? lastErr.message : String(lastErr || 'All providers failed');
+    this.addLog({
+      type: 'error',
+      model: options.model || 'auto',
+      provider: options.provider || 'any',
+      promptPreview,
+      success: false,
+      durationMs: Date.now() - startTime,
+      error: finalErrMsg,
+    });
+    throw new Error(finalErrMsg);
+  }
+
+  private addLog(entry: Omit<BrainLogEntry, 'timestamp'>) {
+    this.brainLog.unshift({ timestamp: new Date().toISOString(), ...entry });
+    if (this.brainLog.length > MAX_LOG_ENTRIES) {
+      this.brainLog = this.brainLog.slice(0, MAX_LOG_ENTRIES);
     }
-    messages.push({ role: 'user', content: prompt });
-
-    const req: CompletionRequest = {
-      model: model.id,
-      messages,
-      maxTokens: options.maxTokens ?? 1024,
-      temperature: options.temperature,
-    };
-
-    logger.info({ provider: provider.id, model: model.id }, 'Dispatching completion');
-    const breaker = this.circuitBreakers.get(provider.id);
-    const response: CompletionResponse = await (breaker || new CircuitBreaker()).execute(async () => provider.complete(req));
-
-    const result: CompletionResult = {
-      content: response.content,
-      model: response.model || model.id,
-      provider: response.provider || provider.id,
-      cached: false,
-      tokensUsed: response.tokensUsed,
-    };
-
-    await this.cache.set(cacheKey, result);
-    return result;
   }
 
   validateStructuredOutput<T>(schema: z.ZodSchema, data: unknown): T {
@@ -155,5 +283,9 @@ export class BrainService {
         failures: breaker ? breaker.getFailureCount() : 0,
       };
     });
+  }
+
+  getLogs(): BrainLogEntry[] {
+    return this.brainLog;
   }
 }

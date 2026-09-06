@@ -7,6 +7,10 @@ function artifactNameMatches(name: string, expected: string): boolean {
   return norm(name).includes(norm(base)) || norm(base).includes(norm(name));
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export interface WorkerResult {
   output: string;
   artifacts: Array<{ name: string; type: string; content: string }>;
@@ -24,6 +28,11 @@ export interface WorkerAgentOptions {
     systemPrompt: string;
     tools: string[];
   };
+  broadcastBrainError?: (event: {
+    type: string;
+    timestamp: number;
+    data: { model?: string; provider?: string; missionId?: string; error: string };
+  }) => Promise<void>;
 }
 
 export class WorkerAgent {
@@ -32,6 +41,7 @@ export class WorkerAgent {
   private workerPoolUrl: string | undefined;
   private assistantId: string | undefined;
   private agentDefinition: WorkerAgentOptions['agentDefinition'];
+  private broadcastBrainError: WorkerAgentOptions['broadcastBrainError'];
 
   constructor(options: WorkerAgentOptions) {
     this.brainUrl = options.brainUrl;
@@ -39,6 +49,7 @@ export class WorkerAgent {
     this.workerPoolUrl = options.workerPoolUrl;
     this.assistantId = options.assistantId;
     this.agentDefinition = options.agentDefinition;
+    this.broadcastBrainError = options.broadcastBrainError;
   }
 
   async executeTask(task: Task, phase: Phase, plan: Plan, missionId: string): Promise<WorkerResult> {
@@ -100,51 +111,97 @@ export class WorkerAgent {
       { label: 'openwebui', body: { prompt: userPrompt, systemPrompt, maxTokens: 4096, temperature: 0.4, provider: 'openwebui' } },
     ];
 
+    const MAX_RETRIES_PER_ATTEMPT = 3;
+    const BACKOFF_BASE_MS = 1000;
+
     let lastContent = '';
     const errors: string[] = [];
     for (const attempt of attempts) {
-      try {
-        const res = await fetch(`${this.brainUrl}/api/brain/complete`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(attempt.body),
-        });
-        if (!res.ok) {
-          const text = await res.text();
-          errors.push(`[${attempt.label}] ${res.status}: ${text.slice(0, 200)}`);
-          continue;
+      for (let retry = 0; retry < MAX_RETRIES_PER_ATTEMPT; retry++) {
+        if (retry > 0) {
+          const delay = BACKOFF_BASE_MS * Math.pow(2, retry - 1);
+          await sleep(delay);
+          logger.warn(
+            { task: task.title, phase: phase.name, attempt: attempt.label, retry, delay },
+            'Retrying brain call after backoff',
+          );
         }
-        const data = await res.json() as { content: string; tokensUsed?: number };
-        lastContent = data.content;
+        try {
+          const res = await fetch(`${this.brainUrl}/api/brain/complete`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(attempt.body),
+          });
+          if (!res.ok) {
+            const text = await res.text();
+            const errMsg = `[${attempt.label}] ${res.status}: ${text.slice(0, 200)}`;
+            errors.push(errMsg);
+            await this.broadcastBrainError?.({
+              type: 'brain_error',
+              timestamp: Date.now(),
+              data: {
+                missionId,
+                provider: (attempt.body as Record<string, unknown>).provider as string || attempt.label,
+                error: `${res.status}: ${text.slice(0, 200)}`,
+              },
+            });
+            if (retry === MAX_RETRIES_PER_ATTEMPT - 1) {
+              logger.warn(
+                { task: task.title, phase: phase.name, attempt: attempt.label, status: res.status },
+                'Brain call failed after retries, trying next provider',
+              );
+            }
+            continue;
+          }
+          const data = await res.json() as { content: string; tokensUsed?: number };
+            lastContent = data.content;
 
-        // Self-correction: if the output produced none of the expected artifacts,
-        // reflect on the gaps and refine once before returning.
-        const artifacts = this.extractArtifacts(data.content, task.expectedArtifacts);
-        const missing = (task.expectedArtifacts || []).filter(
-          (e) => !artifacts.some((a) => artifactNameMatches(a.name, e)),
-        );
-        if (missing.length > 0) {
-          const refined = await this.refine(task, phase, plan, systemPrompt, data.content, missing);
-          if (refined) {
+            // Self-correction: if the output produced none of the expected artifacts,
+            // reflect on the gaps and refine once before returning.
+            const artifacts = this.extractArtifacts(data.content, task.expectedArtifacts);
+            const missing = (task.expectedArtifacts || []).filter(
+              (e) => !artifacts.some((a) => artifactNameMatches(a.name, e)),
+            );
+            if (missing.length > 0) {
+              const refined = await this.refine(task, phase, plan, systemPrompt, data.content, missing);
+              if (refined) {
+                return {
+                  output: refined,
+                  artifacts: this.extractArtifacts(refined, task.expectedArtifacts || []),
+                  tokensUsed: data.tokensUsed || 0,
+                };
+              }
+            }
+
+            logger.info(
+              { task: task.title, phase: phase.name, provider: attempt.label, tokensUsed: data.tokensUsed || 0 },
+              'Worker task completed',
+            );
             return {
-              output: refined,
-              artifacts: this.extractArtifacts(refined, task.expectedArtifacts || []),
+              output: data.content,
+              artifacts,
               tokensUsed: data.tokensUsed || 0,
             };
+        } catch (err: any) {
+          const errMsg = `[${attempt.label}] ${err.message}`;
+          errors.push(errMsg);
+          await this.broadcastBrainError?.({
+            type: 'brain_error',
+            timestamp: Date.now(),
+            data: {
+              missionId,
+              provider: (attempt.body as Record<string, unknown>).provider as string || attempt.label,
+              error: err.message,
+            },
+          });
+          logger.warn(
+            { task: task.title, phase: phase.name, attempt: attempt.label, retry, err: err.message },
+            'Brain call error, will retry',
+          );
+          if (retry < MAX_RETRIES_PER_ATTEMPT - 1) {
+            continue;
           }
         }
-
-        logger.info(
-          { task: task.title, phase: phase.name, provider: attempt.label, tokensUsed: data.tokensUsed || 0 },
-          'Worker task completed',
-        );
-        return {
-          output: data.content,
-          artifacts,
-          tokensUsed: data.tokensUsed || 0,
-        };
-      } catch (err: any) {
-        errors.push(`[${attempt.label}] ${err.message}`);
       }
     }
     throw new Error(`Worker failed after all attempts: ${errors.join('; ')}. Last content: ${lastContent.slice(0, 200)}`);

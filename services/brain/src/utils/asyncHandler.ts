@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { BrainError } from './errors';
+import { logger } from './logger';
 
 export const asyncHandler = (
   fn: (req: Request, res: Response, next: NextFunction) => Promise<void>
@@ -9,9 +10,11 @@ export const asyncHandler = (
       if (err instanceof BrainError) {
         return res.status(err.statusCode).json(err.toJson());
       }
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error({ err: message, path: req.path }, 'Brain service error');
       return res.status(500).json({
         success: false,
-        error: 'Internal server error',
+        error: message,
         statusCode: 500,
       });
     });

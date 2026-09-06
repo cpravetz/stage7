@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { postJSON, fetchJSON, deleteResource } from '../utils/api';
+import { postJSON } from '../utils/api';
+import { useMissionsStore } from '../stores/missionsStore';
 
 interface MissionRow {
   workflowId: string;
@@ -23,33 +24,35 @@ const STATUS_FILTERS: Array<{ value: 'all' | MissionRow['status']; label: string
 ];
 
 const Missions = () => {
-  const [missions, setMissions] = useState<MissionRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const missions = useMissionsStore((s) => s.missions);
+  const missionsLoading = useMissionsStore((s) => s.missionsLoading);
+  const missionsError = useMissionsStore((s) => s.missionsError);
+  const missionsLoaded = useMissionsStore((s) => s.missionsLoaded);
+  const pendingApprovals = useMissionsStore((s) => s.pendingApprovals);
+  const pendingApprovalsLoading = useMissionsStore((s) => s.pendingApprovalsLoading);
+  const fetchMissions = useMissionsStore((s) => s.fetchMissions);
+  const fetchPendingApprovals = useMissionsStore((s) => s.fetchPendingApprovals);
+  const addMission = useMissionsStore((s) => s.addMission);
+  const deleteMission = useMissionsStore((s) => s.deleteMission);
 
   const [showCreate, setShowCreate] = useState(false);
   const [missionId, setMissionId] = useState('');
   const [prompt, setPrompt] = useState('');
   const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
 
   const [filter, setFilter] = useState<'all' | MissionRow['status']>('all');
   const [search, setSearch] = useState('');
 
-  const loadMissions = async () => {
-    setLoading(true);
-    try {
-      const data = await fetchJSON<{ missions: MissionRow[] }>('/api/temporal/missions');
-      setMissions(data.missions || []);
-    } catch {
-      // keep existing state
-    } finally {
-      setLoading(false);
-    }
-  };
+  useEffect(() => {
+    fetchMissions();
+  }, [fetchMissions]);
 
   useEffect(() => {
-    loadMissions();
-  }, []);
+    if (pendingApprovals.length === 0) {
+      fetchPendingApprovals();
+    }
+  }, [pendingApprovals.length, fetchPendingApprovals]);
 
   const [now, setNow] = useState(Date.now());
   const hasRunning = missions.some((m) => m.status === 'running');
@@ -62,26 +65,29 @@ const Missions = () => {
   const handleStart = async (e: React.FormEvent) => {
     e.preventDefault();
     setStarting(true);
-    setError(null);
+    setStartError(null);
     try {
-      const data = await postJSON<{ workflowId: string; status: string }>('/api/temporal/missions', {
-        missionId: missionId || `mission-${Date.now()}`,
-        prompt,
-        tenantId: 'tenant-1',
-        contextChunks: [],
-        metadata: {},
-      });
+      const data = await postJSON<{ workflowId: string; status: string }>(
+        '/api/temporal/missions',
+        {
+          missionId: missionId || `mission-${Date.now()}`,
+          prompt,
+          tenantId: 'tenant-1',
+          contextChunks: [],
+          metadata: {},
+        }
+      );
       const newMission: MissionRow = {
         workflowId: data.workflowId,
         status: data.status,
         missionId: missionId || `mission-${Date.now()}`,
       };
-      setMissions([newMission, ...missions]);
+      addMission(newMission);
       setMissionId('');
       setPrompt('');
       setShowCreate(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to start mission');
+      setStartError(err instanceof Error ? err.message : 'Failed to start mission');
     } finally {
       setStarting(false);
     }
@@ -89,12 +95,7 @@ const Missions = () => {
 
   const handleDelete = async (workflowId: string) => {
     if (!window.confirm(`Delete mission ${workflowId}?`)) return;
-    try {
-      await deleteResource(`/api/temporal/missions/${encodeURIComponent(workflowId)}`);
-      setMissions((prev) => prev.filter((m) => m.workflowId !== workflowId));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete mission');
-    }
+    await deleteMission(workflowId);
   };
 
   const filtered = useMemo(() => {
@@ -150,10 +151,13 @@ const Missions = () => {
     return rm ? `${h}h ${rm}m` : `${h}h`;
   };
 
+  const showLoading = !missionsLoaded && missionsLoading;
+
   return (
     <div className="page">
       <h1>Missions</h1>
-      {error && <div className="error-banner">{error}</div>}
+      {startError && <div className="error-banner">{startError}</div>}
+      {missionsError && <div className="error-banner">{missionsError}</div>}
 
       {showCreate ? (
         <div className="card mission-start-expanded">
@@ -191,10 +195,13 @@ const Missions = () => {
             <span><strong>{counts.all}</strong> total</span>
             <span style={{ color: '#22c55e' }}><strong>{counts.running}</strong> running</span>
             <span style={{ color: '#38bdf8' }}><strong>{counts.completed}</strong> completed</span>
-          <span style={{ color: '#ef4444' }}><strong>{counts.failed}</strong> failed</span>
-          <span style={{ color: '#f59e0b' }}><strong>{counts.canceled}</strong> canceled</span>
-          <span style={{ color: '#eab308' }}><strong>{counts.awaiting_review || 0}</strong> needs review</span>
-          <span style={{ color: '#a78bfa' }}><strong>{counts.incomplete || 0}</strong> incomplete</span>
+            <span style={{ color: '#ef4444' }}><strong>{counts.failed}</strong> failed</span>
+            <span style={{ color: '#f59e0b' }}><strong>{counts.canceled}</strong> canceled</span>
+            <span style={{ color: '#eab308' }}><strong>{counts.awaiting_review || 0}</strong> needs review</span>
+            <span style={{ color: '#a78bfa' }}><strong>{counts.incomplete || 0}</strong> incomplete</span>
+            {!pendingApprovalsLoading && pendingApprovals.length > 0 && (
+              <span style={{ color: '#ef4444' }}><strong>{pendingApprovals.length}</strong> ⏳ awaiting your approval</span>
+            )}
           </div>
           <button onClick={() => setShowCreate(true)}>+ Create Mission</button>
         </div>
@@ -202,17 +209,6 @@ const Missions = () => {
 
       <div className="card" style={{ marginTop: 0 }}>
         <div className="mission-start-collapsed">
-          <div className="entity-tabs">
-            {STATUS_FILTERS.map((f) => (
-              <button
-                key={f.value}
-                className={filter === f.value ? 'tab active' : 'tab'}
-                onClick={() => setFilter(f.value)}
-              >
-                {f.label} ({counts[f.value as keyof typeof counts] ?? 0})
-              </button>
-            ))}
-          </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <input
               type="search"
@@ -221,8 +217,20 @@ const Missions = () => {
               onChange={(e) => setSearch(e.target.value)}
               style={{ minWidth: 220 }}
             />
-            <button className="secondary" onClick={loadMissions} disabled={loading}>
-              {loading ? '...' : 'Refresh'}
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {STATUS_FILTERS.map((sf) => (
+                <button
+                  key={sf.value}
+                  className={filter === sf.value ? '' : 'secondary'}
+                  style={{ fontSize: '12px', padding: '4px 8px' }}
+                  onClick={() => setFilter(sf.value)}
+                >
+                  {sf.label}
+                </button>
+              ))}
+            </div>
+            <button className="secondary" onClick={fetchMissions} disabled={missionsLoading}>
+              {missionsLoading ? '🔄' : 'Refresh'}
             </button>
           </div>
         </div>
@@ -240,27 +248,41 @@ const Missions = () => {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((m) => (
-                  <tr key={m.workflowId}>
-                    <td className="truncate">
-                      <Link to={`/missions/${encodeURIComponent(m.workflowId)}`}>{m.missionId}</Link>
-                    </td>
-                    <td><span className={`badge ${m.status}`}>{m.status}</span></td>
-                    <td>{formatTime(m.startedAt || m.timestamp)}</td>
-                    <td>{formatDuration(m)}</td>
-                    <td>
-                      <button className="danger small" onClick={() => handleDelete(m.workflowId)}>
-                        Delete
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-                {filtered.length === 0 && (
+                {showLoading ? (
                   <tr>
                     <td colSpan={5}>
-                      <div className="empty-state">No missions match the current filter.</div>
+                      <div className="loading">Loading missions...</div>
                     </td>
                   </tr>
+                ) : (
+                  <>
+                    {filtered.map((m) => (
+                      <tr key={m.workflowId}>
+                        <td className="truncate">
+                          <Link to={`/missions/${encodeURIComponent(m.workflowId)}`}>{m.missionId}</Link>
+                        </td>
+                        <td><span className={`badge ${m.status}`}>{m.status}</span></td>
+                        <td>{formatTime(m.startedAt || m.timestamp)}</td>
+                        <td>{formatDuration(m)}</td>
+                        <td>
+                          <button className="danger small" onClick={() => handleDelete(m.workflowId)}>
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {filtered.length === 0 && (
+                      <tr>
+                        <td colSpan={5}>
+                          <div className="empty-state">
+                            {search.trim() || filter !== 'all'
+                              ? 'No missions match the current filter.'
+                              : 'No missions yet. Click "+ Create Mission" to get started.'}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </>
                 )}
               </tbody>
             </table>

@@ -267,6 +267,23 @@ export class InMemoryStore {
   getMissionPhase(missionId: string, phaseId: string): Promise<any | undefined> {
     return Promise.resolve(this.missionPhases.get(missionId)?.get(phaseId));
   }
+
+  async listPendingApprovals(): Promise<Array<{ missionId: string; phaseId: string; phaseName: string; question: string }>> {
+    const result: Array<{ missionId: string; phaseId: string; phaseName: string; question: string }> = [];
+    for (const [missionId, phases] of this.missionPhases) {
+      for (const [phaseId, phase] of phases) {
+        if (phase?.status === 'awaiting_approval') {
+          result.push({
+            missionId,
+            phaseId,
+            phaseName: (phase.name as string) || phaseId,
+            question: (phase.approvalQuestion as string) || '',
+          });
+        }
+      }
+    }
+    return result;
+  }
   updateMissionTask(missionId: string, taskId: string, update: any): Promise<any> {
     let tasks = this.missionTasks.get(missionId);
     if (!tasks) { tasks = new Map(); this.missionTasks.set(missionId, tasks); }

@@ -14,6 +14,7 @@ interface ToolBinding {
 interface HITLApproval {
   id: string;
   missionId: string;
+  phaseId: string;
   action: string;
   status: 'pending' | 'approved' | 'rejected';
   requestedAt: string;
@@ -32,6 +33,7 @@ const EntityWorkspace = () => {
   const [toolBindings, setToolBindings] = useState<ToolBinding[]>([]);
   const [availableTools, setAvailableTools] = useState<Array<{ id: string; name: string; description: string }>>([]);
   const [hitlApprovals, setHitlApprovals] = useState<HITLApproval[]>([]);
+  const [loadingApprovals, setLoadingApprovals] = useState(false);
   const [memoryContext, setMemoryContext] = useState<Record<string, unknown>>({});
   const [error, setError] = useState<string | null>(null);
 
@@ -101,13 +103,52 @@ const EntityWorkspace = () => {
     );
   };
 
-  const handleHITLAction = (approvalId: string, action: 'approved' | 'rejected') => {
-    setHitlApprovals((prev) =>
-      prev.map((a) => (a.id === approvalId ? { ...a, status: action } : a))
-    );
+  const handleHITLAction = async (approvalId: string, action: 'approved' | 'rejected') => {
+    const approval = hitlApprovals.find((a) => a.id === approvalId);
+    if (!approval) return;
+    try {
+      if (action === 'approved') {
+        await postJSON(`/api/artifacts/missions/${encodeURIComponent(approval.missionId)}/phases/${encodeURIComponent(approval.phaseId)}/approve`, {
+          approvedBy: entity?.id || 'user',
+        });
+      } else {
+        await postJSON(`/api/artifacts/missions/${encodeURIComponent(approval.missionId)}/phases/${encodeURIComponent(approval.phaseId)}/reject`, {
+          reason: 'Rejected from assistant workspace',
+          rejectedBy: entity?.id || 'user',
+        });
+      }
+      setHitlApprovals((prev) => prev.filter((a) => a.id !== approvalId));
+    } catch (err) {
+      console.error('Approval action failed', err);
+    }
   };
 
-  const filteredEvents = events.filter((e) => e.source === entity?.id || e.source === 'system');
+  const loadApprovals = async () => {
+    setLoadingApprovals(true);
+    try {
+      const data = await fetchJSON<{ approvals: Array<{ missionId: string; phaseId: string; question: string }> }>('/api/artifacts/missions/approvals');
+      setHitlApprovals(
+        (data.approvals || []).map((a) => ({
+          id: `${a.missionId}:${a.phaseId}`,
+          missionId: a.missionId,
+          phaseId: a.phaseId,
+          action: a.question,
+          status: 'pending' as const,
+          requestedAt: new Date().toISOString(),
+        })),
+      );
+   } catch {
+     setHitlApprovals([]);
+   } finally {
+     setLoadingApprovals(false);
+   }
+ };
+
+ useEffect(() => {
+   if (activeTab === 'hitl') loadApprovals();
+ }, [activeTab]);
+
+ const filteredEvents = events.filter((e) => e.source === entity?.id || e.source === 'system');
 
   if (!entity) {
     return (
@@ -281,37 +322,21 @@ const EntityWorkspace = () => {
           </div>
         )}
 
-        {activeTab === 'hitl' && (
+         {activeTab === 'hitl' && (
           <div className="card">
             <h3>Human-in-the-Loop Controls</h3>
             <p className="hint">Review and approve assistant actions that require human oversight.</p>
-            {hitlApprovals.length === 0 ? (
-              <div className="empty-state">
-                <p>No pending approvals. HITL gates will appear here when the assistant requests human review.</p>
-                <button
-                  className="secondary"
-                  onClick={() =>
-                    setHitlApprovals([
-                      {
-                        id: 'sample-1',
-                        missionId: 'mission-sample',
-                        action: 'Execute data modification',
-                        status: 'pending',
-                        requestedAt: new Date().toISOString(),
-                      },
-                    ])
-                  }
-                >
-                  Simulate Approval Request
-                </button>
-              </div>
+            {loadingApprovals ? (
+              <p>Loading approvals…</p>
+            ) : hitlApprovals.length === 0 ? (
+              <p>No pending approvals. HITL gates will appear here when the assistant requests human review.</p>
             ) : (
               <ul className="hitl-list">
                 {hitlApprovals.map((approval) => (
                   <li key={approval.id} className={`hitl-item ${approval.status}`}>
                     <div className="hitl-info">
                       <strong>{approval.action}</strong>
-                      <p>Mission: {approval.missionId}</p>
+                      <p>Mission: {approval.missionId} · Phase: {approval.phaseId}</p>
                       <p className="timestamp">Requested: {new Date(approval.requestedAt).toLocaleString()}</p>
                     </div>
                     {approval.status === 'pending' ? (

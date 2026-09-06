@@ -3,6 +3,9 @@ import { logger } from '@stage7-nextgen/shared';
 import { MissionPlanner } from './MissionPlanner';
 import { WorkerAgent } from './WorkerAgent';
 
+const TASK_MAX_RETRIES = 3;
+const TASK_RETRY_BACKOFF_BASE_MS = 2000;
+
 export interface MissionContext {
   missionId: string;
   prompt: string;
@@ -15,6 +18,7 @@ export interface MissionContext {
   persistenceUrl: string;
   gatewayUrl: string;
   broadcast: (event: { type: string; missionId: string; timestamp: number; data?: any }) => Promise<void>;
+  broadcastAll: (event: { type: string; timestamp: number; data?: any }) => Promise<void>;
   waitForApproval: (phaseId: string, question: string) => Promise<{ approved: boolean; reason?: string }>;
 }
 
@@ -63,40 +67,84 @@ export class MissionOrchestrator {
         await ctx.broadcast({ type: 'task_started', missionId: ctx.missionId, timestamp: Date.now(), data: { phaseId: phase.id, taskId: task.id, taskTitle: task.title, agentRole: task.agentRole } });
         await this.updateTask(ctx, phase.id, task.id, { status: 'in_progress', startedAt: Date.now() });
 
-        try {
-          const useSystemAssistant = !ctx.assistantId && !!ctx.workerPoolUrl;
-          const agentDef = await this.ensureAgentForRole(
-            ctx.missionId,
-            task.agentRole,
-            task.systemPrompt,
-            useSystemAssistant ? ctx.workerPoolUrl : undefined,
-          );
-          const worker = new WorkerAgent({
-            brainUrl: process.env.BRAIN_URL || 'http://brain:3100',
-            agentRuntimeUrl: this.agentRuntimeUrl,
-            workerPoolUrl: ctx.workerPoolUrl,
-            assistantId: ctx.assistantId || agentDef?.assistantId,
-            agentDefinition: agentDef,
-          });
-          const result = await worker.executeTask(task, phase, plan, ctx.missionId);
+        let taskSucceeded = false;
+        const taskErrors: string[] = [];
+        for (let attempt = 1; attempt <= TASK_MAX_RETRIES; attempt++) {
+          if (attempt > 1) {
+            const delay = TASK_RETRY_BACKOFF_BASE_MS * Math.pow(2, attempt - 2);
+            logger.warn(
+              { task: task.title, phase: phase.name, attempt, delay },
+              'Retrying failed task after backoff',
+            );
+            await new Promise((resolve) => setTimeout(resolve, delay));
+          }
+
+          try {
+            const useSystemAssistant = !ctx.assistantId && !!ctx.workerPoolUrl;
+            const agentDef = await this.ensureAgentForRole(
+              ctx.missionId,
+              task.agentRole,
+              task.systemPrompt,
+              useSystemAssistant ? ctx.workerPoolUrl : undefined,
+            );
+            const worker = new WorkerAgent({
+              brainUrl: process.env.BRAIN_URL || 'http://brain:3100',
+              agentRuntimeUrl: this.agentRuntimeUrl,
+              workerPoolUrl: ctx.workerPoolUrl,
+              assistantId: ctx.assistantId || agentDef?.assistantId,
+              agentDefinition: agentDef,
+              broadcastBrainError: ctx.broadcastAll
+                ? async (event) => ctx.broadcastAll(event)
+                : undefined,
+            });
+            const result = await worker.executeTask(task, phase, plan, ctx.missionId);
+            await this.updateTask(ctx, phase.id, task.id, {
+              status: 'completed',
+              completedAt: Date.now(),
+              output: result.output,
+              artifacts: result.artifacts,
+            });
+            await ctx.broadcast({
+              type: 'task_completed',
+              missionId: ctx.missionId,
+              timestamp: Date.now(),
+              data: { phaseId: phase.id, taskId: task.id, artifacts: result.artifacts, tokensUsed: result.tokensUsed },
+            });
+            phaseOutput.tasks.push({ taskId: task.id, status: 'completed', artifacts: result.artifacts });
+            compensations.push({ phaseId: phase.id, action: `revert-phase-${phase.id}` });
+            taskSucceeded = true;
+            break;
+          } catch (err: any) {
+            taskErrors.push(`Attempt ${attempt}: ${err.message}`);
+            logger.warn(
+              { task: task.title, phase: phase.name, attempt, error: err.message },
+              'Task attempt failed',
+            );
+            if (attempt < TASK_MAX_RETRIES) {
+              await ctx.broadcast({
+                type: 'log',
+                missionId: ctx.missionId,
+                timestamp: Date.now(),
+                data: { phaseId: phase.id, taskId: task.id, message: `Task retrying... (attempt ${attempt} failed)` },
+              });
+            }
+          }
+        }
+
+        if (!taskSucceeded) {
+          const combinedError = taskErrors.join('; ');
           await this.updateTask(ctx, phase.id, task.id, {
-            status: 'completed',
+            status: 'failed',
             completedAt: Date.now(),
-            output: result.output,
-            artifacts: result.artifacts,
+            output: `Error: ${combinedError}`,
           });
           await ctx.broadcast({
-            type: 'task_completed',
+            type: 'task_failed',
             missionId: ctx.missionId,
             timestamp: Date.now(),
-            data: { phaseId: phase.id, taskId: task.id, artifacts: result.artifacts, tokensUsed: result.tokensUsed },
+            data: { phaseId: phase.id, taskId: task.id, error: combinedError },
           });
-          phaseOutput.tasks.push({ taskId: task.id, status: 'completed', artifacts: result.artifacts });
-          compensations.push({ phaseId: phase.id, action: `revert-phase-${phase.id}` });
-        } catch (err: any) {
-          await this.updateTask(ctx, phase.id, task.id, { status: 'failed', completedAt: Date.now(), output: `Error: ${err.message}` });
-          await ctx.broadcast({ type: 'task_failed', missionId: ctx.missionId, timestamp: Date.now(), data: { phaseId: phase.id, taskId: task.id, error: err.message } });
-          throw err;
+          throw new Error(`Task "${task.title}" failed after ${TASK_MAX_RETRIES} attempts: ${combinedError}`);
         }
       }
 
@@ -105,13 +153,22 @@ export class MissionOrchestrator {
 
       if (phase.requiresApproval) {
         const question = phase.approvalQuestion || `Phase "${phase.name}" complete. Approve to continue?`;
+        const approvalId = `approval-${ctx.missionId}-${phase.id}-${Date.now()}`;
+        await this.updatePhase(ctx, phase.id, { approvalQuestion: question });
+        await ctx.broadcast({
+          type: 'approval_requested',
+          missionId: ctx.missionId,
+          timestamp: Date.now(),
+          data: { approvalId, phaseId: phase.id, phaseName: phase.name, question },
+        });
         const decision = await ctx.waitForApproval(phase.id, question);
         if (!decision.approved) {
           await this.updatePhase(ctx, phase.id, { status: 'rejected', rejectionReason: decision.reason });
-          await ctx.broadcast({ type: 'phase_rejected', missionId: ctx.missionId, timestamp: Date.now(), data: { phaseId: phase.id, reason: decision.reason } });
+          await ctx.broadcast({ type: 'approval_rejected', missionId: ctx.missionId, timestamp: Date.now(), data: { phaseId: phase.id, reason: decision.reason } });
           return { plan, outputs: { ...outputs, status: 'rejected_at_phase', phaseId: phase.id, reason: decision.reason }, compensations };
         }
-        await this.updatePhase(ctx, phase.id, { status: 'approved', approvedAt: Date.now() });
+        await this.updatePhase(ctx, phase.id, { status: 'approved', approvedAt: Date.now(), approvedBy: 'user' });
+        await ctx.broadcast({ type: 'approval_approved', missionId: ctx.missionId, timestamp: Date.now(), data: { phaseId: phase.id } });
         await ctx.broadcast({ type: 'phase_approved', missionId: ctx.missionId, timestamp: Date.now(), data: { phaseId: phase.id } });
       } else {
         await this.updatePhase(ctx, phase.id, { status: 'completed' });

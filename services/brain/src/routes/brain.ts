@@ -86,4 +86,8 @@ router.get('/circuit-breakers', asyncHandler(async (_req: any, res: any) => {
   res.json(brain.getCircuitBreakerStats());
 }));
 
+router.get('/logs', asyncHandler(async (_req: any, res: any) => {
+  res.json(brain.getLogs());
+}));
+
 export default router;

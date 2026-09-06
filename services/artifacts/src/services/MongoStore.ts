@@ -205,6 +205,25 @@ export class MongoStore {
     await this.missions.deleteOne({ missionId } as any);
   }
 
+  async listPendingApprovals(): Promise<Array<{ missionId: string; phaseId: string; phaseName: string; question: string }>> {
+    const docs = await this.missionPlans.find({}).toArray();
+    const result: Array<{ missionId: string; phaseId: string; phaseName: string; question: string }> = [];
+    for (const doc of docs) {
+      const phases = (doc.plan && Array.isArray(doc.plan.phases)) ? doc.plan.phases : [];
+      for (const phase of phases) {
+        if (phase?.status === 'awaiting_approval') {
+          result.push({
+            missionId: doc.missionId,
+            phaseId: phase.id,
+            phaseName: phase.name || phase.id,
+            question: phase.approvalQuestion || '',
+          });
+        }
+      }
+    }
+    return result;
+  }
+
   async saveAgentState(state: AgentState): Promise<void> {
     const doc = { ...state, _id: state.agentId } as any;
     await this.agents.replaceOne({ agentId: state.agentId } as any, doc, { upsert: true });

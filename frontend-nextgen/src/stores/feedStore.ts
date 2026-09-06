@@ -8,15 +8,20 @@ export type FeedEventType =
   | 'mission_started'
   | 'mission_completed'
   | 'mission_failed'
+  | 'mission_incomplete'
+  | 'mission_needs_review'
+  | 'plan_generated'
+  | 'planner_started'
   | 'phase_started'
   | 'phase_completed'
-  | 'phase_rejected'
   | 'phase_approved'
+  | 'phase_rejected'
+  | 'approval_requested'
+  | 'approval_approved'
+  | 'approval_rejected'
   | 'task_started'
   | 'task_completed'
   | 'task_failed'
-  | 'planner_started'
-  | 'plan_generated'
   | 'assistant'
   | 'user';
 
@@ -37,6 +42,7 @@ interface FeedState {
   ensureConnected: () => void;
   disconnect: () => void;
   addEvent: (event: FeedEvent) => void;
+  addEvents: (events: FeedEvent[]) => void;
   clear: () => void;
 }
 
@@ -47,8 +53,18 @@ let started = false;
 const MAX_RECONNECT_ATTEMPTS = 20;
 const RECONNECT_BASE_DELAY = 1000;
 
-function shortId(): string {
-  return Math.random().toString(36).slice(2, 10);
+function stableId(type: string, timestamp: number, data: Record<string, unknown>): string {
+  let str = `${type}|${timestamp}|`;
+  const keys = Object.keys(data).sort();
+  for (const k of keys) {
+    str += `${k}=${JSON.stringify(data[k])}|`;
+  }
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash) + str.charCodeAt(i);
+    hash |= 0;
+  }
+  return `${timestamp}-${Math.abs(hash).toString(36)}`;
 }
 
 export function normalize(raw: unknown): FeedEvent | null {
@@ -66,9 +82,9 @@ export function normalize(raw: unknown): FeedEvent | null {
     if (missionId) source = `mission:${missionId}`;
     else if ((data.agentRole as string) || (data.assistantId as string)) {
       source = (data.agentRole as string) || (data.assistantId as string);
-    } else if (type.startsWith('mission_') || type.startsWith('phase_') || type.startsWith('task_') || type.startsWith('planner_') || type.startsWith('plan_')) {
-      source = 'orchestrator';
-    }
+      } else if (type.startsWith('mission_') || type.startsWith('phase_') || type.startsWith('task_') || type.startsWith('planner_') || type.startsWith('plan_') || type === 'brain_error') {
+        source = 'orchestrator';
+      }
   }
 
   let message = (r.message as string) || '';
@@ -92,6 +108,16 @@ export function normalize(raw: unknown): FeedEvent | null {
       case 'phase_rejected':
         message = `Phase rejected: ${(data.phaseId as string) || ''} — ${(data.reason as string) || ''}`.trim();
         break;
+      case 'approval_requested':
+        message = `Approval requested: ${(data.phaseName as string) || (data.phaseId as string) || ''}`;
+        if (data.question) message += ` — ${(data.question as string)}`;
+        break;
+      case 'approval_approved':
+        message = `Phase approved: ${(data.phaseId as string) || ''}`;
+        break;
+      case 'approval_rejected':
+        message = `Phase rejected: ${(data.phaseId as string) || ''} — ${(data.reason as string) || ''}`.trim();
+        break;
       case 'task_started':
         message = `Task: ${(data.taskTitle as string) || (data.taskId as string) || ''}${data.agentRole ? ` (${data.agentRole})` : ''}`.trim();
         break;
@@ -100,6 +126,9 @@ export function normalize(raw: unknown): FeedEvent | null {
         break;
       case 'task_failed':
         message = `Task failed: ${(data.taskTitle as string) || (data.taskId as string) || ''} — ${(data.error as string) || ''}`.trim();
+        break;
+      case 'brain_error':
+        message = `Brain error${(data.provider as string) ? ` (${data.provider})` : ''}: ${(data.error as string) || ''}`.trim();
         break;
       case 'mission_started':
         message = 'Mission started';
@@ -127,7 +156,7 @@ export function normalize(raw: unknown): FeedEvent | null {
   }
 
   return {
-    id: (r.id as string) || `${timestamp}-${shortId()}`,
+    id: (r.id as string) || stableId(type, timestamp, data),
     type,
     source,
     message,
@@ -153,6 +182,7 @@ export const useFeedStore = create<FeedState>((set, get) => ({
       ws.onopen = () => {
         set({ connected: true, ws });
         reconnectAttempts = 0;
+        ws.send(JSON.stringify({ type: 'subscribe-all' }));
       };
       ws.onmessage = (msg) => {
         let payload: unknown;
@@ -201,7 +231,7 @@ export const useFeedStore = create<FeedState>((set, get) => ({
 
     connectWs();
   },
-  disconnect: () => {
+       disconnect: () => {
     if (reconnectTimeout) {
       clearTimeout(reconnectTimeout);
       reconnectTimeout = null;
@@ -213,5 +243,16 @@ export const useFeedStore = create<FeedState>((set, get) => ({
   },
   addEvent: (event: FeedEvent) =>
     set((state) => ({ events: [event, ...state.events].slice(0, 500) })),
+  addEvents: (newEvents: FeedEvent[]) => {
+    if (newEvents.length === 0) return;
+    set((state) => {
+      const existing = new Set(state.events.map((e) => e.id));
+      const filtered = newEvents.filter((e) => !existing.has(e.id));
+      if (filtered.length === 0) return state;
+      return {
+        events: [...filtered, ...state.events].slice(0, 500),
+      };
+    });
+  },
   clear: () => set({ events: [] }),
 }));
