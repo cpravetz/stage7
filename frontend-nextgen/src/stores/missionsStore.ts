@@ -40,6 +40,8 @@ export interface PendingApproval {
   missionId: string;
   phaseId: string;
   question: string;
+  phaseName?: string;
+  assistantId?: string;
 }
 
 interface MissionsState {

@@ -40,6 +40,13 @@ export class CircuitBreaker {
     return this.failureCount;
   }
 
+  // Force the circuit into open state for the cooldown period.
+  trip(): void {
+    this.failureCount = this.threshold;
+    this.state = 'open';
+    this.nextAttempt = Date.now() + this.cooldownMs;
+  }
+
   private onSuccess(): void {
     this.failureCount = 0;
     this.state = 'closed';

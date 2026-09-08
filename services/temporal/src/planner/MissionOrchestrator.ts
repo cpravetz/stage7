@@ -294,27 +294,60 @@ export class MissionOrchestrator {
   }
 
   private async persistPlan(ctx: MissionContext, plan: Plan): Promise<void> {
-    await fetch(`${ctx.persistenceUrl}/api/artifacts/missions/${ctx.missionId}/plan`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(plan),
-    });
+    const url = `${ctx.persistenceUrl}/api/artifacts/missions/${ctx.missionId}/plan`;
+    const body = JSON.stringify(plan);
+    try {
+      logger.info({ missionId: ctx.missionId, url, bodyLength: body.length }, 'Persisting plan to artifacts service');
+      const res = await fetch(url, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      });
+      const text = await res.text();
+      logger.info({ missionId: ctx.missionId, status: res.status, responsePreview: text && text.length > 2000 ? text.slice(0, 2000) : text }, 'Persist plan response');
+      if (!res.ok) throw new Error(`Persist plan failed: ${res.status} ${res.statusText} - ${text}`);
+    } catch (err) {
+      logger.error({ missionId: ctx.missionId, err: err instanceof Error ? err.message : String(err) }, 'Error persisting plan to artifacts');
+      throw err;
+    }
   }
 
   private async updatePhase(ctx: MissionContext, phaseId: string, update: Partial<Phase>): Promise<void> {
-    await fetch(`${ctx.persistenceUrl}/api/artifacts/missions/${ctx.missionId}/phases/${phaseId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(update),
-    });
+    const url = `${ctx.persistenceUrl}/api/artifacts/missions/${ctx.missionId}/phases/${phaseId}`;
+    const body = JSON.stringify(update);
+    try {
+      logger.debug({ missionId: ctx.missionId, phaseId, url, bodyLength: body.length }, 'Updating phase in artifacts service');
+      const res = await fetch(url, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      });
+      const text = await res.text();
+      if (!res.ok) {
+        logger.warn({ missionId: ctx.missionId, phaseId, status: res.status, responseText: text }, 'Failed updating phase');
+      }
+    } catch (err) {
+      logger.warn({ missionId: ctx.missionId, phaseId, err: err instanceof Error ? err.message : String(err) }, 'Error updating phase');
+    }
   }
 
   private async updateTask(ctx: MissionContext, phaseId: string, taskId: string, update: Partial<Task>): Promise<void> {
-    await fetch(`${ctx.persistenceUrl}/api/artifacts/missions/${ctx.missionId}/tasks/${taskId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...update, phaseId }),
-    });
+    const url = `${ctx.persistenceUrl}/api/artifacts/missions/${ctx.missionId}/tasks/${taskId}`;
+    const body = JSON.stringify({ ...update, phaseId });
+    try {
+      logger.debug({ missionId: ctx.missionId, phaseId, taskId, url, bodyLength: body.length }, 'Updating task in artifacts service');
+      const res = await fetch(url, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      });
+      const text = await res.text();
+      if (!res.ok) {
+        logger.warn({ missionId: ctx.missionId, phaseId, taskId, status: res.status, responseText: text }, 'Failed updating task');
+      }
+    } catch (err) {
+      logger.warn({ missionId: ctx.missionId, phaseId, taskId, err: err instanceof Error ? err.message : String(err) }, 'Error updating task');
+    }
   }
 
   private async evaluateMissionCompletion(

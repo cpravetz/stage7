@@ -1,6 +1,6 @@
 # Agent Development Kit (ADK) - NextGen
 
-**Last Updated**: September 3, 2026
+
 
 ## Getting Started
 

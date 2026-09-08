@@ -54,7 +54,7 @@ export class ModelRouter {
     return this.models.get(id);
   }
 
-  route(options: { task: string; modelId?: string; maxTokens?: number; budget?: number; provider?: string }): ModelDefinition {
+  route(options: { task: string; modelId?: string; maxTokens?: number; budget?: number; provider?: string; freeOnly?: boolean }): ModelDefinition {
     if (options.modelId) {
       const m = this.models.get(options.modelId);
       if (m) return m;
@@ -75,6 +75,9 @@ export class ModelRouter {
       if (providers && !providers.has(m.provider)) return false;
       if (options.maxTokens && m.maxTokens < options.maxTokens) return false;
       if (options.budget !== undefined && m.costPer1kTokens > options.budget) return false;
+      if (options.freeOnly) {
+        if (!(m.costPer1kTokens === 0 || ['openwebui', 'local', 'huggingface'].includes(m.provider))) return false;
+      }
       return requiredCaps.every((cap) => m.capabilities.includes(cap));
     });
 
@@ -83,6 +86,9 @@ export class ModelRouter {
         if (providers && !providers.has(m.provider)) return false;
         if (options.maxTokens && m.maxTokens < options.maxTokens) return false;
         if (options.budget !== undefined && m.costPer1kTokens > options.budget) return false;
+        if (options.freeOnly) {
+          if (!(m.costPer1kTokens === 0 || ['openwebui', 'local', 'huggingface'].includes(m.provider))) return false;
+        }
         return requiredCaps.length === 0 || requiredCaps.some((cap) => m.capabilities.includes(cap));
       });
     }
@@ -103,7 +109,7 @@ export class ModelRouter {
   }
 
   // Return an ordered list of candidate models for the given routing options.
-  getCandidates(options: { task: string; modelId?: string; maxTokens?: number; budget?: number; provider?: string }): ModelDefinition[] {
+  getCandidates(options: { task: string; modelId?: string; maxTokens?: number; budget?: number; provider?: string; freeOnly?: boolean }): ModelDefinition[] {
     if (options.modelId) {
       const m = this.models.get(options.modelId);
       return m ? [m] : [];
@@ -116,6 +122,9 @@ export class ModelRouter {
       if (providers && !providers.has(m.provider)) return false;
       if (options.maxTokens && m.maxTokens < options.maxTokens) return false;
       if (options.budget !== undefined && m.costPer1kTokens > options.budget) return false;
+      if (options.freeOnly) {
+        if (!(m.costPer1kTokens === 0 || ['openwebui', 'local', 'huggingface'].includes(m.provider))) return false;
+      }
       return requiredCaps.every((cap) => m.capabilities.includes(cap));
     });
 
@@ -124,6 +133,9 @@ export class ModelRouter {
         if (providers && !providers.has(m.provider)) return false;
         if (options.maxTokens && m.maxTokens < options.maxTokens) return false;
         if (options.budget !== undefined && m.costPer1kTokens > options.budget) return false;
+        if (options.freeOnly) {
+          if (!(m.costPer1kTokens === 0 || ['openwebui', 'local', 'huggingface'].includes(m.provider))) return false;
+        }
         return requiredCaps.length === 0 || requiredCaps.some((cap) => m.capabilities.includes(cap));
       });
     }

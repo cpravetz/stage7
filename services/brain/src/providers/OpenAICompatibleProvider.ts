@@ -8,6 +8,8 @@ export interface OpenAICompatibleConfig {
   defaultModels: Array<{ id: string; capabilities: string[]; maxTokens: number; costPer1kTokens: number }>;
   extraHeaders?: Record<string, string>;
   listModelsPath?: string;
+  chatCompletionsPath?: string;
+  completionsPath?: string;
 }
 
 export class OpenAICompatibleProvider implements LLMProvider {
@@ -19,6 +21,8 @@ export class OpenAICompatibleProvider implements LLMProvider {
   private extraHeaders: Record<string, string>;
   private defaultModels: OpenAICompatibleConfig['defaultModels'];
   private listModelsPath?: string;
+  private chatCompletionsPath: string;
+  private completionsPath: string;
   private modelCache: Array<{ id: string; capabilities: string[]; maxTokens: number; costPer1kTokens: number }> | null = null;
 
   constructor(config: OpenAICompatibleConfig) {
@@ -29,6 +33,8 @@ export class OpenAICompatibleProvider implements LLMProvider {
     this.extraHeaders = config.extraHeaders || {};
     this.defaultModels = config.defaultModels;
     this.listModelsPath = config.listModelsPath;
+    this.chatCompletionsPath = config.chatCompletionsPath || '/chat/completions';
+    this.completionsPath = config.completionsPath || '/completions';
     this.info = {
       id: config.id,
       name: config.name,
@@ -36,6 +42,17 @@ export class OpenAICompatibleProvider implements LLMProvider {
       hasApiKey: !!config.apiKey,
       openAICompatible: true,
     };
+  }
+
+  // Allow updating API path overrides at runtime (e.g., from persisted settings)
+  updatePathOverrides(overrides: { apiBase?: string; listModelsPath?: string; chatCompletionsPath?: string; completionsPath?: string }) {
+    if (overrides.apiBase) this.apiBase = overrides.apiBase.replace(/\/+$/, '');
+    if (overrides.listModelsPath) this.listModelsPath = overrides.listModelsPath;
+    if (overrides.chatCompletionsPath) this.chatCompletionsPath = overrides.chatCompletionsPath;
+    if (overrides.completionsPath) this.completionsPath = overrides.completionsPath;
+    // Invalidate model cache when api base or list path changes
+    if (overrides.apiBase || overrides.listModelsPath) this.modelCache = null;
+    this.info.apiBase = this.apiBase;
   }
 
   isAvailable(): boolean {
@@ -93,7 +110,8 @@ export class OpenAICompatibleProvider implements LLMProvider {
     if (this.apiKey) {
       headers['Authorization'] = `Bearer ${this.apiKey}`;
     }
-    const res = await fetch(`${this.apiBase}/chat/completions`, {
+    // Try chat/completions first, fall back to /completions if the server doesn't support chat endpoint.
+    let res = await fetch(`${this.apiBase}${this.chatCompletionsPath}`, {
       method: 'POST',
       headers,
       body: JSON.stringify({
@@ -102,20 +120,88 @@ export class OpenAICompatibleProvider implements LLMProvider {
         max_tokens: req.maxTokens,
         temperature: req.temperature,
       }),
-    });
+    }).catch((e) => ({ ok: false, status: 0, text: async () => String(e) } as any));
+
+    let data: any;
     if (!res.ok) {
-      const errText = await res.text();
-      throw new Error(`[${this.id}] completion failed: ${res.status} ${errText}`);
+      const errText = await (res.text ? res.text() : Promise.resolve(String(res)));
+      // If the server returns 400 with a "Model not found" message, try to
+      // discover available models and retry with a known model once.
+      if (res.status === 400 && /Model not found/i.test(errText)) {
+        try {
+          const available = await this.listModels();
+          if (available && available.length > 0) {
+            const fallbackModel = available[0].id;
+            const prompt = req.messages.map((m: CompletionMessage) => `${m.role}: ${m.content}`).join('\n');
+            res = await fetch(`${this.apiBase}${this.chatCompletionsPath}`, {
+              method: 'POST',
+              headers: headers,
+              body: JSON.stringify({
+                model: fallbackModel,
+                messages: req.messages,
+                max_tokens: req.maxTokens,
+                temperature: req.temperature,
+              }),
+            }).catch((e) => ({ ok: false, status: 0, text: async () => String(e) } as any));
+            if (res.ok) {
+              // proceed to parse below
+              data = await res.json();
+            } else {
+              const errText2 = await (res.text ? res.text() : Promise.resolve(String(res)));
+              throw new Error(`[${this.id}] completion failed after fallback model attempt: ${res.status} ${errText2}`);
+            }
+          }
+        } catch (e) {
+          // fall through to other fallback logic
+        }
+      }
+      // If method not allowed or not found, try the older /completions endpoint.
+      if (res.status === 405 || res.status === 404 || /Method Not Allowed/i.test(errText) || /Not Found/i.test(errText)) {
+        const prompt = req.messages.map((m: CompletionMessage) => `${m.role}: ${m.content}`).join('\n');
+        res = await fetch(`${this.apiBase}${this.completionsPath}`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            model: req.model,
+            prompt,
+            max_tokens: req.maxTokens,
+            temperature: req.temperature,
+          }),
+        }).catch((e) => ({ ok: false, status: 0, text: async () => String(e) } as any));
+        if (!res.ok) {
+          const errText2 = await (res.text ? res.text() : Promise.resolve(String(res)));
+          const upperId = this.id.toUpperCase().replace(/[^A-Z0-9]/g, '_');
+          const alt = upperId.replace(/UI$/, '');
+          const suggestion = `Set ${upperId}_CHAT_PATH or ${upperId}_COMPLETIONS_PATH (or ${alt}_CHAT_PATH / ${alt}_COMPLETIONS_PATH) env var to the provider's supported completion endpoint (e.g. /api/chat/completions, /completions).`;
+          throw new Error(`[${this.id}] completion failed (chat then completions): ${res.status} ${errText2}. ${suggestion}`);
+        }
+        data = await res.json();
+      } else {
+        const upperId = this.id.toUpperCase().replace(/[^A-Z0-9]/g, '_');
+        const alt = upperId.replace(/UI$/, '');
+        const suggestion = `Set ${upperId}_CHAT_PATH or ${upperId}_COMPLETIONS_PATH (or ${alt}_CHAT_PATH / ${alt}_COMPLETIONS_PATH) env var to the provider's supported completion endpoint (e.g. /api/chat/completions, /completions).`;
+        throw new Error(`[${this.id}] completion failed: ${res.status} ${errText}. ${suggestion}`);
+      }
+    } else {
+      data = await res.json();
     }
-    const data = await res.json() as { choices?: Array<{ message?: { content?: string | null; reasoning?: string; refusal?: string | null } }>; usage?: { total_tokens?: number; prompt_tokens?: number; completion_tokens?: number; reasoning_tokens?: number }; model?: string };
-    let content = data.choices?.[0]?.message?.content ?? '';
-    if ((!content || content.trim() === '') && data.choices?.[0]?.message?.reasoning) {
-      content = data.choices[0].message.reasoning;
+    // Normalize response for both /chat/completions and /completions
+    let content = '';
+    if (data.choices && data.choices[0] && data.choices[0].message) {
+      content = data.choices[0].message.content ?? '';
+      if ((!content || content.trim() === '') && data.choices[0].message.reasoning) {
+        content = data.choices[0].message.reasoning;
+      }
+      if (!content && data.choices[0].message.refusal) {
+        throw new Error(`[${this.id}] model refused: ${data.choices[0].message.refusal}`);
+      }
+    } else if (data.choices && data.choices[0] && data.choices[0].text) {
+      content = data.choices[0].text;
+    } else if (data.output && Array.isArray(data.output) && data.output[0] && data.output[0].content) {
+      content = data.output[0].content[0].text || '';
     }
-    if (!content && data.choices?.[0]?.message?.refusal) {
-      throw new Error(`[${this.id}] model refused: ${data.choices[0].message.refusal}`);
-    }
-    const tokensUsed = (data.usage?.completion_tokens && data.usage?.prompt_tokens)
+
+    const tokensUsed = (data.usage && (data.usage.completion_tokens && data.usage.prompt_tokens))
       ? (data.usage.completion_tokens + data.usage.prompt_tokens)
       : data.usage?.total_tokens;
     return {

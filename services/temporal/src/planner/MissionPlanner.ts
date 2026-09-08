@@ -96,19 +96,39 @@ export class MissionPlanner {
       { label: 'openrouter-fresh', body: { prompt: `GOAL: ${prompt}\n\nCONTEXT: ${JSON.stringify(context || {})}`, systemPrompt: PLANNER_SYSTEM_PROMPT, maxTokens: 4096, temperature: 0.3, provider: 'openrouter' } },
     ];
     let lastError: Error | null = null;
+    const ATTEMPT_TIMEOUT_MS = 10000;
     for (const attempt of attempts) {
       try {
-        const res = await fetch(`${this.brainUrl}/api/brain/complete`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(attempt.body),
-        });
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), ATTEMPT_TIMEOUT_MS);
+        let res;
+        try {
+          res = await fetch(`${this.brainUrl}/api/brain/complete`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(attempt.body),
+            signal: controller.signal,
+          });
+        } finally {
+          clearTimeout(timeout);
+        }
+        const raw = await res.text();
+        // Record raw response body for debugging if running inside Temporal
+        try {
+          logger.info({ provider: attempt.label, raw: raw.slice(0, 2000) }, 'Planner raw brain response');
+        } catch (e) {
+          // ignore logging errors
+        }
         if (!res.ok) {
-          const text = await res.text();
-          errors.push(`[${attempt.label}] ${res.status}: ${text.slice(0, 200)}`);
+          errors.push(`[${attempt.label}] ${res.status}: ${raw.slice(0, 200)}`);
           continue;
         }
-        const data = await res.json() as { content: string };
+        let data: { content: string };
+        try {
+          data = JSON.parse(raw) as { content: string };
+        } catch {
+          data = { content: raw };
+        }
         const jsonMatch = data.content.match(/\{[\s\S]*\}/);
         if (!jsonMatch) {
           logger.warn({ provider: attempt.label, content: data.content.slice(0, 200) }, 'Planner response had no JSON, using fallback plan');
@@ -121,7 +141,8 @@ export class MissionPlanner {
         logger.info({ missionGoal: prompt.slice(0, 50), phases: validated.phases.length, provider: attempt.label }, 'Plan generated');
         return validated;
       } catch (err: any) {
-        errors.push(`[${attempt.label}] ${err.message}`);
+        const msg = err?.name === 'AbortError' ? 'timeout' : (err.message || String(err));
+        errors.push(`[${attempt.label}] ${msg}`);
         lastError = err;
       }
     }

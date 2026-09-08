@@ -59,7 +59,7 @@ export class MongoStore {
       await this.assistants.createIndex({ id: 1 }, { unique: true });
       await this.assistantTemplates.createIndex({ id: 1 }, { unique: true });
       await this.missionPlans.createIndex({ missionId: 1 }, { unique: true });
-      await this.missionPhases.createIndex({ missionId: 1, phaseId: 1 }, { unique: true });
+      await this.missionPhases.createIndex({ missionId: 1, id: 1 }, { unique: true });
       await this.missionTasks.createIndex({ missionId: 1, taskId: 1 }, { unique: true });
       await this.missionEvents.createIndex({ missionId: 1, timestamp: 1 });
 
@@ -203,13 +203,19 @@ export class MongoStore {
 
   async deleteMissionState(missionId: string): Promise<void> {
     await this.missions.deleteOne({ missionId } as any);
+    await this.missionPlans.deleteMany({ missionId } as any);
+    await this.missionPhases.deleteMany({ missionId } as any);
+    await this.missionTasks.deleteMany({ missionId } as any);
+    await this.missionEvents.deleteMany({ missionId } as any);
   }
 
-  async listPendingApprovals(): Promise<Array<{ missionId: string; phaseId: string; phaseName: string; question: string }>> {
+  async listPendingApprovals(): Promise<Array<{ missionId: string; phaseId: string; phaseName: string; question: string; assistantId?: string }>> {
     const docs = await this.missionPlans.find({}).toArray();
-    const result: Array<{ missionId: string; phaseId: string; phaseName: string; question: string }> = [];
+    const result: Array<{ missionId: string; phaseId: string; phaseName: string; question: string; assistantId?: string }> = [];
     for (const doc of docs) {
       const phases = (doc.plan && Array.isArray(doc.plan.phases)) ? doc.plan.phases : [];
+      const mission = await this.missions.findOne({ missionId: doc.missionId });
+      const assistantId = mission?.assistantId;
       for (const phase of phases) {
         if (phase?.status === 'awaiting_approval') {
           result.push({
@@ -217,6 +223,7 @@ export class MongoStore {
             phaseId: phase.id,
             phaseName: phase.name || phase.id,
             question: phase.approvalQuestion || '',
+            assistantId,
           });
         }
       }
@@ -346,9 +353,9 @@ export class MongoStore {
   }
 
   async updateMissionPhase(missionId: string, phaseId: string, update: any): Promise<any> {
-    const existing = await this.missionPhases.findOne({ missionId, phaseId });
-    const merged = { ...(existing || { id: phaseId, missionId }), ...update, id: phaseId, missionId, updatedAt: Date.now() };
-    await this.missionPhases.replaceOne({ missionId, phaseId }, merged, { upsert: true });
+    const existing = await this.missionPhases.findOne({ missionId, id: phaseId });
+    const merged = { ...(existing || { id: phaseId, missionId, phaseId }), ...update, id: phaseId, missionId, updatedAt: Date.now(), phaseId };
+    await this.missionPhases.replaceOne({ missionId, id: phaseId }, merged, { upsert: true });
 
     const planResult = await this.missionPlans.findOne({ missionId });
     if (planResult?.plan && Array.isArray(planResult.plan.phases)) {
@@ -362,7 +369,7 @@ export class MongoStore {
   }
 
   async getMissionPhase(missionId: string, phaseId: string): Promise<any | undefined> {
-    const result = await this.missionPhases.findOne({ missionId, phaseId });
+    const result = await this.missionPhases.findOne({ missionId, id: phaseId });
     return result;
   }
 

@@ -1,4 +1,5 @@
 import { NavLink } from 'react-router-dom';
+import stage7Logo from '../assets/stage7_logo.svg';
 
 const Sidebar = () => {
   const navItems = [
@@ -18,8 +19,7 @@ const Sidebar = () => {
   return (
     <aside className="sidebar">
       <div className="sidebar-header">
-        <h1>Stage7</h1>
-        <p>NextGen</p>
+        <img src={stage7Logo} alt="Stage7" className="sidebar-logo" />
       </div>
       <nav className="sidebar-nav">
         {navItems.map((item) => (

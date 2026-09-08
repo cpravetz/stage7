@@ -13,7 +13,9 @@ export function buildProviderRegistry(): LLMProvider[] {
       name: 'OpenAI',
       apiBase: process.env.OPENAI_API_BASE || 'https://api.openai.com/v1',
       apiKey: openaiKey,
-      listModelsPath: '/models',
+      listModelsPath: process.env.OPENAI_LIST_MODELS_PATH || '/models',
+      chatCompletionsPath: process.env.OPENAI_CHAT_PATH || '/chat/completions',
+      completionsPath: process.env.OPENAI_COMPLETIONS_PATH || '/completions',
       defaultModels: [
         { id: 'gpt-4o', capabilities: ['chat', 'vision', 'code', 'reasoning'], maxTokens: 128000, costPer1kTokens: 2.5 },
         { id: 'gpt-4o-mini', capabilities: ['chat', 'vision', 'code', 'reasoning'], maxTokens: 128000, costPer1kTokens: 0.15 },
@@ -33,7 +35,9 @@ export function buildProviderRegistry(): LLMProvider[] {
       name: 'OpenRouter',
       apiBase: process.env.OPENROUTER_URL || 'https://openrouter.ai/api/v1',
       apiKey: openrouterKey,
-      listModelsPath: '/models',
+      listModelsPath: process.env.OPENROUTER_LIST_MODELS_PATH || '/models',
+      chatCompletionsPath: process.env.OPENROUTER_CHAT_PATH || '/chat/completions',
+      completionsPath: process.env.OPENROUTER_COMPLETIONS_PATH || '/completions',
       defaultModels: [
         { id: 'openai/gpt-4o', capabilities: ['chat', 'vision', 'code', 'reasoning'], maxTokens: 128000, costPer1kTokens: 2.5 },
         { id: 'openai/gpt-4o-mini', capabilities: ['chat', 'vision', 'code', 'reasoning'], maxTokens: 128000, costPer1kTokens: 0.15 },
@@ -52,7 +56,9 @@ export function buildProviderRegistry(): LLMProvider[] {
       name: 'Mistral',
       apiBase: process.env.MISTRAL_API_BASE || 'https://api.mistral.ai/v1',
       apiKey: mistralKey,
-      listModelsPath: '/models',
+      listModelsPath: process.env.MISTRAL_LIST_MODELS_PATH || '/models',
+      chatCompletionsPath: process.env.MISTRAL_CHAT_PATH || '/chat/completions',
+      completionsPath: process.env.MISTRAL_COMPLETIONS_PATH || '/completions',
       defaultModels: [
         { id: 'mistral-large-latest', capabilities: ['chat', 'code', 'reasoning'], maxTokens: 128000, costPer1kTokens: 2 },
         { id: 'mistral-small-latest', capabilities: ['chat', 'code'], maxTokens: 32000, costPer1kTokens: 0.2 },
@@ -69,7 +75,9 @@ export function buildProviderRegistry(): LLMProvider[] {
       name: 'Grok (xAI)',
       apiBase: process.env.GROK_API_BASE || 'https://api.x.ai/v1',
       apiKey: grokKey,
-      listModelsPath: '/models',
+      listModelsPath: process.env.GROK_LIST_MODELS_PATH || '/models',
+      chatCompletionsPath: process.env.GROK_CHAT_PATH || '/chat/completions',
+      completionsPath: process.env.GROK_COMPLETIONS_PATH || '/completions',
       defaultModels: [
         { id: 'grok-2-latest', capabilities: ['chat', 'code', 'reasoning', 'search'], maxTokens: 131072, costPer1kTokens: 2 },
         { id: 'grok-2-mini', capabilities: ['chat', 'code'], maxTokens: 131072, costPer1kTokens: 0.2 },
@@ -85,7 +93,9 @@ export function buildProviderRegistry(): LLMProvider[] {
       name: 'Hugging Face',
       apiBase: process.env.HUGGINGFACE_API_BASE || 'https://router.huggingface.co/v1',
       apiKey: hfKey,
-      listModelsPath: '/models',
+      listModelsPath: process.env.HUGGINGFACE_LIST_MODELS_PATH || '/models',
+      chatCompletionsPath: process.env.HUGGINGFACE_CHAT_PATH || '/chat/completions',
+      completionsPath: process.env.HUGGINGFACE_COMPLETIONS_PATH || '/completions',
       defaultModels: [
         { id: 'meta-llama/Llama-3.1-8B-Instruct', capabilities: ['chat', 'code'], maxTokens: 128000, costPer1kTokens: 0.06 },
         { id: 'meta-llama/Llama-3.1-70B-Instruct', capabilities: ['chat', 'code', 'reasoning'], maxTokens: 128000, costPer1kTokens: 0.59 },
@@ -95,14 +105,20 @@ export function buildProviderRegistry(): LLMProvider[] {
     }));
   }
 
-  const openwebUrl = process.env.OPENWEB_URL;
+  const openwebUrl = process.env.OPENWEB_URL || process.env.OPENWEBUI_URL;
   if (openwebUrl) {
+    // Normalize OpenWebUI URL: strip trailing /v1 if present and prefer /api base so
+    // that endpoints like /api/models and /api/chat/completions are reachable.
+    let openwebBase = openwebUrl.replace(/\/+$/, '');
+    if (openwebBase.endsWith('/v1')) openwebBase = openwebBase.slice(0, -3);
     providers.push(new OpenAICompatibleProvider({
       id: 'openwebui',
       name: 'OpenWebUI / Ollama',
-      apiBase: openwebUrl.replace(/\/+$/, '') + (openwebUrl.includes('/v1') ? '' : '/api/v1'),
+      apiBase: openwebBase,
       apiKey: process.env.OPENWEBUI_API_KEY,
-      listModelsPath: '/models',
+      listModelsPath: process.env.OPENWEB_LIST_MODELS_PATH || process.env.OPENWEBUI_LIST_MODELS_PATH || '/models',
+      chatCompletionsPath: process.env.OPENWEB_CHAT_PATH || process.env.OPENWEBUI_CHAT_PATH || '/chat/completions',
+      completionsPath: process.env.OPENWEB_COMPLETIONS_PATH || process.env.OPENWEBUI_COMPLETIONS_PATH || '/completions',
       defaultModels: [
         { id: 'llama3.2', capabilities: ['chat'], maxTokens: 8192, costPer1kTokens: 0 },
         { id: 'mistral', capabilities: ['chat'], maxTokens: 8192, costPer1kTokens: 0 },

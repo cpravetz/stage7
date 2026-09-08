@@ -100,8 +100,68 @@ describe('ArtifactsService', () => {
         startedAt: new Date(),
       });
 
+      await service.saveMissionPlan('mission-del', { phases: [] });
+      await service.updateMissionPhase('mission-del', 'phase-1', { name: 'Phase 1' });
+      await service.updateMissionTask('mission-del', 'task-1', { name: 'Task 1' });
+      await service.appendMissionEvent('mission-del', { type: 'test' });
+
       await service.deleteMissionState('mission-del');
-      expect(await service.getMissionState('mission-del')).toBeUndefined();
+       expect(await service.getMissionState('mission-del')).toBeUndefined();
+       expect(await service.getMissionPlan('mission-del')).toBeUndefined();
+       expect(await service.getMissionPhase('mission-del', 'phase-1')).toBeUndefined();
+       expect(await service.getMissionTask('mission-del', 'task-1')).toBeUndefined();
+       expect(await service.listMissionEvents('mission-del')).toEqual([]);
+     });
+
+    it('should list pending approvals with assistantId', async () => {
+      await service.saveMissionState({
+        missionId: 'mission-appr-1',
+        tenantId: 'tenant-1',
+        assistantId: 'asst-pm',
+        status: 'running' as const,
+        currentStep: 0,
+        totalSteps: 3,
+        history: [],
+        input: { prompt: 'test' },
+        startedAt: new Date(),
+      });
+
+      await service.updateMissionPhase('mission-appr-1', 'phase-1', {
+        name: 'Planning',
+        status: 'awaiting_approval',
+        approvalQuestion: 'Approve planning phase?',
+      });
+
+      const approvals = await (service as any).store.listPendingApprovals();
+      expect(approvals).toHaveLength(1);
+      expect(approvals[0].missionId).toBe('mission-appr-1');
+      expect(approvals[0].phaseId).toBe('phase-1');
+      expect(approvals[0].assistantId).toBe('asst-pm');
+      expect(approvals[0].question).toBe('Approve planning phase?');
+    });
+
+    it('should list pending approvals with undefined assistantId when mission has no assistantId', async () => {
+      await service.saveMissionState({
+        missionId: 'mission-appr-2',
+        tenantId: 'tenant-1',
+        assistantId: '',
+        status: 'running' as const,
+        currentStep: 0,
+        totalSteps: 3,
+        history: [],
+        input: { prompt: 'test' },
+        startedAt: new Date(),
+      });
+
+      await service.updateMissionPhase('mission-appr-2', 'phase-1', {
+        name: 'Planning',
+        status: 'awaiting_approval',
+        approvalQuestion: 'Approve?',
+      });
+
+      const approvals = await (service as any).store.listPendingApprovals();
+      expect(approvals).toHaveLength(1);
+      expect(approvals[0].assistantId).toBe('');
     });
   });
 

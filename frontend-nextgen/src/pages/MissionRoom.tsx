@@ -257,6 +257,17 @@ const MissionRoom = () => {
     return Array.from(map.values()).sort((a, b) => a.timestamp - b.timestamp);
   }, [events, detail, plan, missionId]);
 
+  const totalEstimatedCost = useMemo(() => {
+    const costEvents = missionEvents.filter((e) => e.type === 'cost_estimate');
+    let sum = 0;
+    for (const e of costEvents) {
+      const c = e.metadata?.data?.estimatedCost ?? e.metadata?.estimatedCost ?? e.data?.estimatedCost ?? e.data?.cost ?? (e as any).data?.estimatedCost;
+      const num = typeof c === 'number' ? c : Number(c || 0);
+      if (!isNaN(num)) sum += num;
+    }
+    return sum;
+  }, [missionEvents]);
+
   const conversationEvents = useMemo(
     () => missionEvents.filter((e) => CONVERSATION_EVENT_TYPES.has(e.type as string)),
     [missionEvents]
@@ -408,6 +419,11 @@ const MissionRoom = () => {
           </span>
         )}
         {plan && <span><strong>Phases:</strong> {plan.phases.length}</span>}
+        {totalEstimatedCost > 0 && (
+          <span>
+            <strong>Estimated Cost:</strong> ${totalEstimatedCost.toFixed(4)}
+          </span>
+        )}
         {(taskArtifactCount + expectedArtifactCount) > 0 && (
           <span>
             <strong>Artifacts:</strong> {taskArtifactCount + expectedArtifactCount}

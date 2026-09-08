@@ -140,6 +140,10 @@ export class InMemoryStore {
 
   async deleteMissionState(missionId: string): Promise<void> {
     this.missions.delete(missionId);
+    this.missionPlans.delete(missionId);
+    this.missionPhases.delete(missionId);
+    this.missionTasks.delete(missionId);
+    this.missionEvents.delete(missionId);
     return Promise.resolve();
   }
 
@@ -268,9 +272,11 @@ export class InMemoryStore {
     return Promise.resolve(this.missionPhases.get(missionId)?.get(phaseId));
   }
 
-  async listPendingApprovals(): Promise<Array<{ missionId: string; phaseId: string; phaseName: string; question: string }>> {
-    const result: Array<{ missionId: string; phaseId: string; phaseName: string; question: string }> = [];
+  async listPendingApprovals(): Promise<Array<{ missionId: string; phaseId: string; phaseName: string; question: string; assistantId?: string }>> {
+    const result: Array<{ missionId: string; phaseId: string; phaseName: string; question: string; assistantId?: string }> = [];
     for (const [missionId, phases] of this.missionPhases) {
+      const missionState = this.missions.get(missionId);
+      const assistantId = missionState?.assistantId;
       for (const [phaseId, phase] of phases) {
         if (phase?.status === 'awaiting_approval') {
           result.push({
@@ -278,6 +284,7 @@ export class InMemoryStore {
             phaseId,
             phaseName: (phase.name as string) || phaseId,
             question: (phase.approvalQuestion as string) || '',
+            assistantId,
           });
         }
       }

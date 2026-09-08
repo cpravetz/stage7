@@ -66,6 +66,12 @@ const Assistants = () => {
     knowledge?: Array<{ id: string; title: string; content: string; source?: string }>;
     transactionGuidance?: string[];
   }>({});
+  const [editToolName, setEditToolName] = useState('');
+  const [editToolDescription, setEditToolDescription] = useState('');
+  const [editKnowledgeTitle, setEditKnowledgeTitle] = useState('');
+  const [editKnowledgeContent, setEditKnowledgeContent] = useState('');
+  const [editKnowledgeSource, setEditKnowledgeSource] = useState('');
+  const [editTransactionInput, setEditTransactionInput] = useState('');
   const [showRuntime, setShowRuntime] = useState<string | null>(null);
   const [runtimeConfig, setRuntimeConfig] = useState<AssistantRuntime | null>(null);
 
@@ -115,8 +121,56 @@ const Assistants = () => {
     setTransactionInput('');
   };
 
-  const removeTransactionGuidance = (idx: number) => {
+   const removeTransactionGuidance = (idx: number) => {
     setTransactionGuidance(transactionGuidance.filter((_, i) => i !== idx));
+  };
+
+  const addEditTool = () => {
+    if (!editToolName.trim()) return;
+    setEditForm({
+      ...editForm,
+      tools: [...(editForm.tools || []), { name: editToolName.trim(), description: editToolDescription.trim(), inputSchema: { type: 'object', properties: {} } }],
+    });
+    setEditToolName('');
+    setEditToolDescription('');
+  };
+
+  const removeEditTool = (idx: number) => {
+    setEditForm({ ...editForm, tools: (editForm.tools || []).filter((_, i) => i !== idx) });
+  };
+
+  const addEditKnowledge = () => {
+    if (!editKnowledgeTitle.trim() || !editKnowledgeContent.trim()) return;
+    setEditForm({
+      ...editForm,
+      knowledge: [
+        ...(editForm.knowledge || []),
+        { id: `knowledge-${Date.now()}`, title: editKnowledgeTitle.trim(), content: editKnowledgeContent.trim(), source: editKnowledgeSource.trim() || undefined },
+      ],
+    });
+    setEditKnowledgeTitle('');
+    setEditKnowledgeContent('');
+    setEditKnowledgeSource('');
+  };
+
+  const removeEditKnowledge = (idx: number) => {
+    setEditForm({ ...editForm, knowledge: (editForm.knowledge || []).filter((_, i) => i !== idx) });
+  };
+
+  const addEditTransactionGuidance = () => {
+    if (!editTransactionInput.trim()) return;
+    setEditForm({
+      ...editForm,
+      transactionGuidance: [...(editForm.transactionGuidance || []), editTransactionInput.trim()],
+    });
+    setEditTransactionInput('');
+  };
+
+  const removeEditTransactionGuidance = (idx: number) => {
+    setEditForm({
+      ...editForm,
+      transactionGuidance: (editForm.transactionGuidance || []).filter((_, i) => i !== idx),
+    });
   };
 
   const handleRegister = async (e: React.FormEvent) => {
@@ -331,7 +385,64 @@ const Assistants = () => {
             <input type="text" placeholder="Name" value={editForm.name || ''} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} />
             <textarea placeholder="Description" value={editForm.description || ''} onChange={(e) => setEditForm({ ...editForm, description: e.target.value })} rows={2} />
             <textarea placeholder="System Prompt" value={editForm.systemPrompt || ''} onChange={(e) => setEditForm({ ...editForm, systemPrompt: e.target.value })} rows={3} />
-            <p className="hint">Knowledge and transaction guidance are saved with the assistant definition and injected into the system prompt at execution time.</p>
+
+            <div className="tool-binding-section">
+              <h4>Tool Bindings</h4>
+              <div className="input-row">
+                <input type="text" placeholder="Tool name" value={editToolName} onChange={(e) => setEditToolName(e.target.value)} className="flex-grow" />
+                <input type="text" placeholder="Description" value={editToolDescription} onChange={(e) => setEditToolDescription(e.target.value)} className="flex-grow" />
+                <button type="button" onClick={addEditTool}>Add</button>
+              </div>
+              {(editForm.tools || []).length > 0 && (
+                <ul className="tool-list">
+                  {(editForm.tools || []).map((t, idx) => (
+                    <li key={idx}>
+                      <strong>{t.name}</strong>: {t.description}
+                      <button type="button" onClick={() => removeEditTool(idx)} className="remove-btn">&times;</button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            <div className="tool-binding-section">
+              <h4>Knowledge Base</h4>
+              <div className="input-row">
+                <input type="text" placeholder="Title" value={editKnowledgeTitle} onChange={(e) => setEditKnowledgeTitle(e.target.value)} className="flex-grow" />
+                <input type="text" placeholder="Source (optional)" value={editKnowledgeSource} onChange={(e) => setEditKnowledgeSource(e.target.value)} className="flex-grow" />
+              </div>
+              <textarea placeholder="Knowledge content" value={editKnowledgeContent} onChange={(e) => setEditKnowledgeContent(e.target.value)} rows={2} />
+              <button type="button" onClick={addEditKnowledge} className="secondary">Add Knowledge</button>
+              {(editForm.knowledge || []).length > 0 && (
+                <ul className="tool-list">
+                  {(editForm.knowledge || []).map((k, idx) => (
+                    <li key={k.id || idx}>
+                      <strong>{k.title}</strong>: {k.content.slice(0, 100)}{k.content.length > 100 ? '...' : ''}
+                      <button type="button" onClick={() => removeEditKnowledge(idx)} className="remove-btn">&times;</button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            <div className="tool-binding-section">
+              <h4>Transaction Guidance</h4>
+              <div className="input-row">
+                <input type="text" placeholder="Guidance rule (e.g. Always confirm before booking)" value={editTransactionInput} onChange={(e) => setEditTransactionInput(e.target.value)} className="flex-grow" />
+                <button type="button" onClick={addEditTransactionGuidance}>Add</button>
+              </div>
+              {(editForm.transactionGuidance || []).length > 0 && (
+                <ul className="tool-list">
+                  {(editForm.transactionGuidance || []).map((g, idx) => (
+                    <li key={idx}>
+                      {g}
+                      <button type="button" onClick={() => removeEditTransactionGuidance(idx)} className="remove-btn">&times;</button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
             <div className="button-row">
               <button type="submit">Save Changes</button>
               <button type="button" className="secondary" onClick={() => { setEditingId(null); setEditForm({}); }}>Cancel</button>

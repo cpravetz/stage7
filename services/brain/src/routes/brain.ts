@@ -27,6 +27,7 @@ router.post('/complete', asyncHandler(async (req: any, res: any) => {
     maxTokens?: number;
     budget?: number;
     temperature?: number;
+    missionId?: string;
   };
   if (!prompt) {
     throw BrainError.badRequest('Missing prompt');
@@ -39,6 +40,7 @@ router.post('/complete', asyncHandler(async (req: any, res: any) => {
     maxTokens: maxTokens ?? options?.maxTokens ?? 1024,
     budget: budget ?? options?.budget,
     temperature: temperature ?? options?.temperature,
+    missionId: (req.body as any).missionId,
   };
   const result = await brain.complete(prompt, mergedOptions);
   res.json(result);

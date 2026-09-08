@@ -159,7 +159,7 @@ export class ArtifactsService {
     return this.store.listMissionEvents(missionId);
   }
 
-  async listPendingApprovals(): Promise<Array<{ missionId: string; phaseId: string; phaseName: string; question: string }>> {
+  async listPendingApprovals(): Promise<Array<{ missionId: string; phaseId: string; phaseName: string; question: string; assistantId?: string }>> {
     return this.store.listPendingApprovals();
   }
 

@@ -18,6 +18,7 @@ export interface CompletionOptions {
   budget?: number;
   systemPrompt?: string;
   temperature?: number;
+  missionId?: string;
 }
 
 export interface CompletionResult {
@@ -38,6 +39,7 @@ export interface BrainLogEntry {
   durationMs?: number;
   error?: string;
   tokensUsed?: number;
+  estimatedCost?: number;
 }
 
 const MAX_LOG_ENTRIES = 200;
@@ -49,6 +51,8 @@ export class BrainService {
   private providers: LLMProvider[] = [];
   private circuitBreakers: Map<string, CircuitBreaker> = new Map();
   private brainLog: BrainLogEntry[] = [];
+  private llmSettingsCache: { freeModelsOnly: boolean; fetchedAt: number } | null = null;
+  private LLMS_SETTINGS_TTL_MS = 30000; // 30 seconds
 
   constructor() {
     this.providers = buildProviderRegistry();
@@ -58,6 +62,8 @@ export class BrainService {
     }
     logger.info({ providers: this.providers.map((p) => p.id) }, 'Brain initialized with providers');
   }
+
+  
 
   private registerProviderModels(provider: LLMProvider) {
     provider.listModels()
@@ -120,6 +126,9 @@ export class BrainService {
       return { ...(cached as CompletionResult), cached: true };
     }
 
+    // Optionally consult llm-config for runtime preference to prefer free models
+    const settings = await this.loadLlmSettings();
+
     // Build ordered candidate list and try providers/models until one succeeds.
     const candidates = this.router.getCandidates({
       task: prompt,
@@ -127,6 +136,7 @@ export class BrainService {
       provider: options.provider,
       maxTokens: options.maxTokens ?? 1024,
       budget: options.budget,
+      freeOnly: settings?.freeModelsOnly,
     });
 
     if (!candidates || candidates.length === 0) {
@@ -183,6 +193,11 @@ export class BrainService {
             tokensUsed: response.tokensUsed,
           };
 
+          // estimate cost based on model's costPer1kTokens
+          const estimatedCost = typeof response.tokensUsed === 'number' && typeof candidate.costPer1kTokens === 'number'
+            ? (response.tokensUsed / 1000) * candidate.costPer1kTokens
+            : undefined;
+
           this.addLog({
             type: 'completion',
             model: result.model,
@@ -191,9 +206,35 @@ export class BrainService {
             success: true,
             durationMs: Date.now() - startTime,
             tokensUsed: response.tokensUsed,
+            estimatedCost,
           });
 
           await this.cache.set(cacheKey, result);
+
+          // if missionId provided, append a cost_estimate event to artifacts persistence
+          try {
+            const missionId = (options as any).missionId as string | undefined;
+            if (missionId) {
+              const persistenceUrl = process.env.ARTIFACTS_URL || process.env.PERSISTENCE_URL || 'http://artifacts:4200';
+              const event = {
+                type: 'cost_estimate',
+                timestamp: Date.now(),
+                data: {
+                  model: result.model,
+                  provider: result.provider,
+                  tokensUsed: response.tokensUsed,
+                  estimatedCost,
+                },
+              };
+              fetch(`${persistenceUrl}/api/artifacts/missions/${encodeURIComponent(missionId)}/events`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(event),
+              }).catch((e) => logger.warn({ err: e instanceof Error ? e.message : String(e), missionId }, 'Failed to post cost event to artifacts'));
+            }
+          } catch (e) {
+            logger.warn({ err: e instanceof Error ? e.message : String(e) }, 'Error while attempting to publish cost event');
+          }
           return result;
         } catch (err) {
           lastErr = err;
@@ -203,12 +244,19 @@ export class BrainService {
           // classify error: provider-key / quota issues vs transient
           const isKeyLimit = /key limit exceeded|limit exceeded|quota exceeded/i.test(errMsg) || /\b403\b/.test(errMsg);
           if (isKeyLimit) {
-            // provider-level fatal: remove provider models from router and stop trying this provider
-            logger.error({ provider: provider.id, err: errMsg }, 'Provider key/quota error - removing provider models from router');
+            // provider-level fatal: mark provider unavailable by tripping its circuit-breaker
+            logger.error({ provider: provider.id, err: errMsg }, 'Provider key/quota error - tripping provider circuit-breaker (models retained)');
             try {
-              this.router.removeProviderModels(provider.id);
+              const cb = this.circuitBreakers.get(provider.id);
+              if (cb && typeof (cb as any).trip === 'function') {
+                (cb as any).trip();
+              } else if (cb) {
+                // best-effort fallback: set open state via any
+                (cb as any).state = 'open';
+                (cb as any).nextAttempt = Date.now() + 30000;
+              }
             } catch (e) {
-              logger.warn({ e }, 'Failed to remove provider models');
+              logger.warn({ e }, 'Failed to trip circuit-breaker for provider');
             }
             this.addLog({
               type: 'error',
@@ -256,6 +304,27 @@ export class BrainService {
       error: finalErrMsg,
     });
     throw new Error(finalErrMsg);
+  }
+
+  private async loadLlmSettings(): Promise<{ freeModelsOnly: boolean } | null> {
+    try {
+      const now = Date.now();
+      if (this.llmSettingsCache && now - this.llmSettingsCache.fetchedAt < this.LLMS_SETTINGS_TTL_MS) {
+        return { freeModelsOnly: this.llmSettingsCache.freeModelsOnly };
+      }
+      const persistenceUrl = process.env.ARTIFACTS_URL || process.env.PERSISTENCE_URL || 'http://artifacts:4200';
+      const res = await fetch(`${persistenceUrl}/api/artifacts/documents/llm-config`, { method: 'GET' });
+      if (!res.ok) {
+        return null;
+      }
+      const doc = await res.json() as { id?: string; tenantId?: string; collection?: string; data?: Record<string, unknown> };
+      const free = !!(doc.data && typeof doc.data.freeModelsOnly === 'boolean' ? doc.data.freeModelsOnly : false);
+      this.llmSettingsCache = { freeModelsOnly: free, fetchedAt: now };
+      return { freeModelsOnly: free };
+    } catch (err) {
+      logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Failed to load llm-config from artifacts');
+      return null;
+    }
   }
 
   private addLog(entry: Omit<BrainLogEntry, 'timestamp'>) {
