@@ -1,9 +1,11 @@
 import request from 'supertest';
 import express from 'express';
 import authRoutes from '../../services/auth/src/routes/auth';
+import { TokenService } from '../../services/auth/src/services/TokenService';
 
 describe('Integration: Auth Service', () => {
   let app: express.Application;
+  const tokenService = new TokenService();
 
   beforeEach(() => {
     app = express();
@@ -15,7 +17,7 @@ describe('Integration: Auth Service', () => {
     it('should login with valid credentials', async () => {
       const response = await request(app)
         .post('/api/auth/login')
-        .send({ email: 'admin@example.com', password: 'password' });
+        .send({ email: 'admin@example.com', password: 'change-me-in-production' });
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
@@ -40,9 +42,17 @@ describe('Integration: Auth Service', () => {
 
   describe('POST /api/auth/service/auth', () => {
     it('should authenticate service with valid API key', async () => {
+      const serviceId = `svc-${Date.now()}`;
+      const apiKey = `sk-${Date.now()}`;
+      const apiKeyHash = tokenService.hashApiKey(apiKey);
+
+      await request(app)
+        .post('/api/auth/services')
+        .send({ name: 'Test Service', serviceId, apiKey, scopes: ['read', 'write'] });
+
       const response = await request(app)
         .post('/api/auth/service/auth')
-        .send({ serviceId: 'svc-1', apiKey: 'secret-api-key' });
+        .send({ serviceId, apiKey });
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
@@ -63,7 +73,7 @@ describe('Integration: Auth Service', () => {
     it('should verify valid token', async () => {
       const loginResponse = await request(app)
         .post('/api/auth/login')
-        .send({ email: 'admin@example.com', password: 'password' });
+        .send({ email: 'admin@example.com', password: 'change-me-in-production' });
 
       const token = loginResponse.body.token;
       const response = await request(app)
@@ -72,7 +82,7 @@ describe('Integration: Auth Service', () => {
 
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
-      expect(response.body.payload.sub).toBe('user-1');
+      expect(response.body.payload.sub).toBe('user-admin');
     });
 
     it('should reject missing token', async () => {
@@ -85,7 +95,7 @@ describe('Integration: Auth Service', () => {
     it('should refresh valid token', async () => {
       const loginResponse = await request(app)
         .post('/api/auth/login')
-        .send({ email: 'admin@example.com', password: 'password' });
+        .send({ email: 'admin@example.com', password: 'change-me-in-production' });
 
       const token = loginResponse.body.token;
       const response = await request(app)
@@ -100,8 +110,13 @@ describe('Integration: Auth Service', () => {
 
   describe('POST /api/auth/users/:id/roles', () => {
     it('should assign role to user', async () => {
+      const loginResponse = await request(app)
+        .post('/api/auth/login')
+        .send({ email: 'admin@example.com', password: 'change-me-in-production' });
+
+      const userId = loginResponse.body.user.id;
       const response = await request(app)
-        .post('/api/auth/users/user-1/roles')
+        .post(`/api/auth/users/${userId}/roles`)
         .send({ role: 'editor' });
 
       expect(response.status).toBe(200);

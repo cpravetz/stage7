@@ -1,6 +1,6 @@
 # Agent Development Kit (ADK) Documentation Index
 
-**Last Updated**: February 2, 2026  
+
 **Status**: Complete, Production-Ready
 
 ## 📚 Documentation Structure

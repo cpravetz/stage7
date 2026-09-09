@@ -3,5 +3,7 @@ import { ToolExecutor } from '../services/ToolExecutor';
 import { PluginGenerator } from '../services/PluginGenerator';
 
 export const toolRegistry = new ToolRegistry();
-export const toolExecutor = new ToolExecutor();
+export const toolExecutor = new ToolExecutor(toolRegistry.getMap());
 export const pluginGenerator = new PluginGenerator();
+
+pluginGenerator.setRegistry(toolRegistry);

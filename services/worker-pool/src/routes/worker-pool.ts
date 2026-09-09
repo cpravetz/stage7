@@ -1,10 +1,11 @@
 import { Router } from 'express';
-import { WorkerPool } from '../pool/WorkerPool';
+import { PersistentWorkerPool } from '../pool/PersistentWorkerPool';
 import { asyncHandler } from '../utils/asyncHandler';
 import { WorkerPoolError } from '../utils/errors';
+import { persistence } from '../utils/sharedInstance';
 
 const router: Router = Router();
-const pool = new WorkerPool();
+const pool = new PersistentWorkerPool(persistence);
 
 router.get('/health', (req, res) => {
   res.json({ status: 'ok', service: 'worker-pool', running: pool.isRunning() });
@@ -30,7 +31,7 @@ router.post('/workers', asyncHandler(async (req, res) => {
   if (!id || !type) {
     throw WorkerPoolError.badRequest('Missing id or type');
   }
-  const worker = pool.registerWorker(id, type);
+  const worker = await pool.registerWorker(id, type);
   res.status(201).json(worker);
 }));
 

@@ -9,7 +9,7 @@ export interface WorkflowInput {
 
 export interface WorkflowResult {
   missionId: string;
-  status: 'completed' | 'failed' | 'canceled' | 'continued-as-new';
+  status: 'completed' | 'failed' | 'canceled' | 'continued-as-new' | 'awaiting_review' | 'incomplete';
   output?: unknown;
   error?: string;
   startedAt: number;

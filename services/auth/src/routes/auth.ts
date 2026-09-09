@@ -4,38 +4,37 @@ import { AuthError } from '../utils/errors';
 import { TokenService } from '../services/TokenService';
 import { RBACService } from '../services/RBACService';
 import { LoginRequest, ServiceAuthRequest, AuthResult, User, ServiceAccount } from '../types';
+import { PersistentUserStore, PersistentServiceAccountStore } from '../data/stores';
 
 const router: Router = Router();
 const tokenService = new TokenService();
 const rbacService = new RBACService();
 
-const mockUsers: User[] = [
-  {
-    id: 'user-1',
-    tenantId: 'tenant-1',
+const userStore = new PersistentUserStore();
+const serviceStore = new PersistentServiceAccountStore();
+
+const DEFAULT_ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@example.com';
+const DEFAULT_ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'change-me-in-production';
+const DEFAULT_ADMIN_TENANT = process.env.ADMIN_TENANT || 'tenant-1';
+
+async function ensureDefaultAdmin(): Promise<User> {
+  const existing = await userStore.findByEmail(DEFAULT_ADMIN_EMAIL);
+  if (existing) return existing;
+  return userStore.create({
+    id: 'user-admin',
+    tenantId: DEFAULT_ADMIN_TENANT,
     orgId: 'org-1',
-    email: 'admin@example.com',
+    email: DEFAULT_ADMIN_EMAIL,
     name: 'Admin User',
     roles: ['admin'],
     permissions: ['read', 'write', 'delete'],
     metadata: {},
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  },
-];
+  });
+}
 
-const mockServices: ServiceAccount[] = [
-  {
-    id: 'service-1',
-    tenantId: 'tenant-1',
-    name: 'Test Service',
-    serviceId: 'svc-1',
-    scopes: ['read', 'write'],
-    apiKeyHash: tokenService.hashApiKey('secret-api-key'),
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  },
-];
+ensureDefaultAdmin().catch((err) => {
+  console.error('Failed to seed default admin:', err);
+});
 
 router.get('/health', (req, res) => {
   res.json({ status: 'ok', service: 'auth' });
@@ -48,7 +47,7 @@ router.post('/login', asyncHandler(async (req: Request, res: Response) => {
     throw AuthError.badRequest('Email and password are required');
   }
 
-  const user = mockUsers.find((u) => u.email === email);
+  const user = await userStore.findByEmail(email);
   if (!user) {
     throw AuthError.unauthorized('Invalid credentials');
   }
@@ -74,7 +73,7 @@ router.post('/service/auth', asyncHandler(async (req: Request, res: Response) =>
     throw AuthError.badRequest('serviceId and apiKey are required');
   }
 
-  const service = mockServices.find((s) => s.serviceId === serviceId);
+  const service = await serviceStore.findByServiceId(serviceId);
   if (!service || !tokenService.compareApiKey(apiKey, service.apiKeyHash)) {
     throw AuthError.unauthorized('Invalid service credentials');
   }
@@ -101,19 +100,12 @@ router.post('/refresh', asyncHandler(async (req: Request, res: Response) => {
     throw AuthError.unauthorized('Invalid or expired token');
   }
 
-  const newToken = tokenService.generateUserToken({
-    id: payload.sub,
-    tenantId: payload.tenantId,
-    orgId: payload.orgId,
-    email: '',
-    name: '',
-    roles: payload.roles || [],
-    permissions: payload.permissions || [],
-    metadata: {},
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  });
+  const user = await userStore.findById(payload.sub);
+  if (!user) {
+    throw AuthError.unauthorized('User not found');
+  }
 
+  const newToken = tokenService.generateUserToken(user);
   res.status(200).json({ success: true, token: newToken });
 }));
 
@@ -142,6 +134,71 @@ router.post('/users/:id/roles', asyncHandler(async (req: Request, res: Response)
 
   rbacService.assignRole(userId, role);
   res.status(200).json({ success: true, userId, roles: rbacService.getRoles(userId) });
+}));
+
+router.post('/users', asyncHandler(async (req: Request, res: Response) => {
+  const { email, password, name, tenantId, roles, permissions } = req.body;
+
+  if (!email || !password) {
+    throw AuthError.badRequest('Email and password are required');
+  }
+
+  const existing = await userStore.findByEmail(email);
+  if (existing) {
+    throw AuthError.badRequest('User already exists');
+  }
+
+  const user = await userStore.create({
+    id: `user-${Date.now()}`,
+    tenantId: tenantId || 'tenant-1',
+    orgId: 'org-1',
+    email,
+    name: name || email,
+    roles: roles || ['user'],
+    permissions: permissions || ['read'],
+    metadata: {},
+  });
+
+  res.status(201).json({ success: true, user });
+}));
+
+router.get('/users', asyncHandler(async (_req: Request, res: Response) => {
+  const users = await userStore.list();
+  res.json({ users });
+}));
+
+router.post('/services', asyncHandler(async (req: Request, res: Response) => {
+  const { name, serviceId, scopes, apiKey } = req.body;
+
+  if (!name || !serviceId) {
+    throw AuthError.badRequest('name and serviceId are required');
+  }
+
+  const existing = await serviceStore.findByServiceId(serviceId);
+  if (existing) {
+    throw AuthError.badRequest('Service already exists');
+  }
+
+  const keyHash = tokenService.hashApiKey(apiKey || `sk-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`);
+
+  const service: ServiceAccount = {
+    id: `service-${Date.now()}`,
+    tenantId: 'tenant-1',
+    name,
+    serviceId,
+    scopes: scopes || ['read'],
+    apiKeyHash: keyHash,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+
+  await serviceStore.create(service);
+  res.status(201).json({ success: true, service: { id: service.id, name: service.name, serviceId: service.serviceId, scopes: service.scopes } });
+}));
+
+router.get('/services', asyncHandler(async (_req: Request, res: Response) => {
+  const services = await serviceStore.list();
+  res.json({ services });
 }));
 
 export default router;

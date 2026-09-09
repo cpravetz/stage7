@@ -5,8 +5,9 @@ export interface AssistantDefinition {
   tenantId: string;
   name: string;
   description: string;
-  model: string;
   systemPrompt: string;
+  knowledge?: Array<{ id: string; title: string; content: string; source?: string }>;
+  transactionGuidance?: string[];
   tools: MCPTool[];
   metadata: Record<string, unknown>;
   createdAt: Date;
@@ -18,8 +19,9 @@ export interface AssistantTemplate {
   name: string;
   description: string;
   category: string;
-  model: string;
   systemPrompt: string;
+  knowledge?: Array<{ id: string; title: string; content: string; source?: string }>;
+  transactionGuidance?: string[];
   tools: MCPTool[];
   metadata: Record<string, unknown>;
   createdAt: Date;
@@ -32,8 +34,9 @@ export interface AssistantInstance {
   templateId?: string;
   name: string;
   description: string;
-  model: string;
   systemPrompt: string;
+  knowledge?: Array<{ id: string; title: string; content: string; source?: string }>;
+  transactionGuidance?: string[];
   tools: MCPTool[];
   metadata: Record<string, unknown>;
   status: 'active' | 'inactive' | 'error';

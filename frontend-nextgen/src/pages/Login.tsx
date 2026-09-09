@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../stores/authStore';
+import stage7Logo from '../assets/stage7_logo.svg';
 
 const Login = () => {
   const [email, setEmail] = useState('admin@example.com');
@@ -27,6 +28,7 @@ const Login = () => {
   return (
     <div className="page login-page">
       <div className="login-card">
+        <img src={stage7Logo} alt="Stage7" className="login-logo" />
         <h1>Stage7 NextGen</h1>
         <p className="login-subtitle">Entity-Centric Agent Platform</p>
         {error && <div className="error-banner">{error}</div>}

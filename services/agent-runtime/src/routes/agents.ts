@@ -6,9 +6,9 @@ import { AgentDefinition, AgentTask, AgentCollaboration, AgentSpecialization } f
 
 const router: Router = Router()
 
-router.post('/agents', asyncHandler((req: Request, res: Response) => {
+router.post('/agents', asyncHandler(async (req: Request, res: Response) => {
   const agent = req.body as AgentDefinition
-  runtime.registerAgent(agent)
+  await runtime.registerAgent(agent)
   res.status(201).json(agent)
 }))
 
@@ -30,10 +30,10 @@ router.delete('/agents/:id', asyncHandler((req: Request, res: Response) => {
   res.status(204).send()
 }))
 
-router.post('/agents/:id/start', asyncHandler((req: Request, res: Response) => {
+router.post('/agents/:id/start', asyncHandler(async (req: Request, res: Response) => {
   const { missionId } = req.body as { missionId: string }
   if (!missionId) throw new BadRequestError('missionId is required')
-  const state = runtime.startAgent(req.params.id as string, missionId)
+  const state = await runtime.startAgent(req.params.id as string, missionId)
   res.status(201).json(state)
 }))
 
@@ -48,25 +48,22 @@ router.get('/agents/:id/state', asyncHandler((req: Request, res: Response) => {
   res.json(state)
 }))
 
-router.post('/agents/:id/tasks', asyncHandler((req: Request, res: Response) => {
+router.post('/agents/:id/tasks', asyncHandler(async (req: Request, res: Response) => {
   const taskData = req.body as Omit<AgentTask, 'taskId' | 'createdAt'>
-  const task = runtime.submitTask(req.params.id as string, taskData)
+  const task = await runtime.submitTask(req.params.id as string, taskData)
   res.status(201).json(task)
 }))
 
-router.post('/agents/:id/tasks/:taskId/complete', asyncHandler((req: Request, res: Response) => {
+router.post('/agents/:id/tasks/:taskId/complete', asyncHandler(async (req: Request, res: Response) => {
   const { result } = req.body as { result?: any }
-  const task = runtime.completeTask(req.params.taskId as string, result)
+  const task = await runtime.completeTask(req.params.taskId as string, result)
   if (!task) throw new NotFoundError('Task')
   res.json(task)
 }))
 
 router.post('/collaborations', asyncHandler((req: Request, res: Response) => {
-  const { participants } = req.body as { participants: string[] }
-  if (!Array.isArray(participants) || participants.length === 0) {
-    throw new BadRequestError('participants array is required')
-  }
-  const collaboration = runtime.createCollaboration(participants)
+  const participants = req.body as { participants: string[] }
+  const collaboration = runtime.createCollaboration(participants.participants)
   res.status(201).json(collaboration)
 }))
 

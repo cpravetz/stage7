@@ -1,19 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useFeedStore, FeedEvent } from '../stores/feedStore';
-import { fetchJSON, postJSON } from '../utils/api';
-
-interface MissionDetail {
-  missionId: string;
-  status: string;
-  output?: {
-    plan?: Plan;
-    outputs?: { phases?: PhaseOutput[]; status?: string; phaseId?: string; reason?: string };
-  };
-  error?: string;
-  startedAt?: number | string;
-  completedAt?: number | string;
-}
+import { useMissionsStore } from '../stores/missionsStore';
+import { postJSON } from '../utils/api';
 
 interface Plan {
   summary?: string;
@@ -62,20 +51,54 @@ const STATUS_BADGE: Record<string, string> = {
   canceled: 'canceled',
   pending: 'pending',
   started: 'running',
+  awaiting_review: 'review',
+  incomplete: 'incomplete',
 };
 
 function iconForType(type: string): string {
   if (type.startsWith('task_')) return type === 'task_failed' ? '❌' : '✅';
   if (type.startsWith('phase_')) return '📦';
+  if (type.startsWith('approval_')) return type === 'approval_approved' ? '✅' : type === 'approval_rejected' ? '❌' : '⏸️';
   if (type.startsWith('plan_') || type.startsWith('planner_')) return '🧭';
   if (type === 'tool') return '🔧';
   if (type === 'monologue') return '💭';
   if (type === 'user' || type === 'user_message') return '🧑';
   if (type === 'mission_completed') return '🏁';
   if (type === 'mission_failed') return '💥';
+  if (type === 'mission_incomplete') return '⚠️';
+  if (type === 'mission_needs_review') return '⏳';
   if (type === 'mission_started') return '🚀';
   return '📋';
 }
+
+const CONVERSATION_EVENT_TYPES = new Set([
+  'user',
+  'user_message',
+  'monologue',
+  'tool',
+  'assistant',
+  'planner_started',
+  'plan_generated',
+  'phase_started',
+  'phase_completed',
+  'task_started',
+  'task_completed',
+  'task_failed',
+]);
+
+const TIMELINE_EVENT_TYPES = new Set([
+  'mission_started',
+  'mission_completed',
+  'mission_failed',
+  'mission_canceled',
+  'mission_incomplete',
+  'mission_needs_review',
+  'phase_approved',
+  'phase_rejected',
+  'approval_requested',
+  'approval_approved',
+  'approval_rejected',
+]);
 
 const MissionRoom = () => {
   const { workflowId = '' } = useParams<{ workflowId: string }>();
@@ -83,35 +106,45 @@ const MissionRoom = () => {
 
   const events = useFeedStore((s) => s.events);
   const connected = useFeedStore((s) => s.connected);
+  const ensureConnected = useFeedStore((s) => s.ensureConnected);
 
-  const [detail, setDetail] = useState<MissionDetail | null>(null);
-  const [detailError, setDetailError] = useState<string | null>(null);
+  const detail = useMissionsStore((s) => s.details[workflowId]);
+  const detailLoading = useMissionsStore((s) => s.detailLoading[workflowId]);
+  const detailError = useMissionsStore((s) => s.detailError[workflowId]);
+  const fetchMissionDetail = useMissionsStore((s) => s.fetchMissionDetail);
+  const refreshDetail = useMissionsStore((s) => s.refreshDetail);
+
   const [tab, setTab] = useState<Tab>('conversation');
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [now, setNow] = useState(Date.now());
   const transcriptRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    let cancelled = false;
-    setDetail(null);
-    setDetailError(null);
-    (async () => {
-      try {
-        const data = await fetchJSON<MissionDetail>(
-          `/api/temporal/missions/${encodeURIComponent(workflowId)}`,
-        );
-        if (!cancelled) setDetail(data);
-      } catch (err) {
-        if (!cancelled) {
-          setDetailError(err instanceof Error ? err.message : 'Mission not found');
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [workflowId]);
+    ensureConnected();
+  }, [ensureConnected]);
+
+  useEffect(() => {
+    if (workflowId) {
+      fetchMissionDetail(workflowId);
+    }
+  }, [workflowId, fetchMissionDetail]);
+
+  useEffect(() => {
+    if (detail?.status !== 'running') return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [detail?.status]);
+
+  const plan = useMemo(() => {
+    const p = (detail?.output?.plan as Plan | undefined) ?? null;
+    return p;
+  }, [detail?.output?.plan]);
+
+  const phaseOutputs: PhaseOutput[] = useMemo(() => {
+    return detail?.output?.outputs?.phases || [];
+  }, [detail?.output?.outputs?.phases]);
 
   const missionEvents = useMemo<FeedEvent[]>(() => {
     const fromOutput: FeedEvent[] = [];
@@ -126,7 +159,6 @@ const MissionRoom = () => {
       timestamp: startedAt,
       missionId,
     });
-    const plan = detail?.output?.plan;
     if (plan) {
       fromOutput.push({
         id: `derived-planner-started-${startedAt + 1}`,
@@ -152,7 +184,12 @@ const MissionRoom = () => {
       phases = plan.phases.map((p) => ({
         phaseId: p.id,
         name: p.name,
-        status: detail?.status === 'completed' ? 'completed' : detail?.status === 'failed' ? 'failed' : 'planned',
+        status:
+          detail?.status === 'completed'
+            ? 'completed'
+            : detail?.status === 'failed'
+              ? 'failed'
+              : 'planned',
         tasks: p.tasks.map((t) => ({ taskId: t.id, status: 'planned' })),
       }));
     }
@@ -214,13 +251,85 @@ const MissionRoom = () => {
     const map = new Map<string, FeedEvent>();
     for (const e of fromOutput) map.set(e.id, e);
     for (const e of live) {
-      const key = `${e.type}-${e.timestamp}-${e.id}`;
+      const key = e.id || `${e.type}-${e.timestamp}-${e.source || ''}`;
       if (!map.has(key)) map.set(key, e);
     }
     return Array.from(map.values()).sort((a, b) => a.timestamp - b.timestamp);
-  }, [events, detail, missionId]);
+  }, [events, detail, plan, missionId]);
 
-  const transcript = useMemo(() => buildTranscript(missionEvents), [missionEvents]);
+  const totalEstimatedCost = useMemo(() => {
+    const costEvents = missionEvents.filter((e) => e.type === 'cost_estimate');
+    let sum = 0;
+    for (const e of costEvents) {
+      const c = e.metadata?.data?.estimatedCost ?? e.metadata?.estimatedCost ?? e.data?.estimatedCost ?? e.data?.cost ?? (e as any).data?.estimatedCost;
+      const num = typeof c === 'number' ? c : Number(c || 0);
+      if (!isNaN(num)) sum += num;
+    }
+    return sum;
+  }, [missionEvents]);
+
+  const conversationEvents = useMemo(
+    () => missionEvents.filter((e) => CONVERSATION_EVENT_TYPES.has(e.type as string)),
+    [missionEvents]
+  );
+
+  const timelineEvents = useMemo(
+    () => missionEvents.filter((e) => TIMELINE_EVENT_TYPES.has(e.type as string)),
+    [missionEvents]
+  );
+
+  const transcript = useMemo(
+    () => buildTranscript(conversationEvents),
+    [conversationEvents]
+  );
+
+  const pendingApproval = useMemo(() => {
+    const resolved = new Set<string>();
+    for (const e of missionEvents) {
+      if (e.type === 'approval_approved' || e.type === 'approval_rejected') {
+        const md = e.metadata || {};
+        if (md.phaseId) resolved.add(String(md.phaseId));
+      }
+    }
+    for (const e of missionEvents) {
+      if (e.type === 'approval_requested') {
+        const md = e.metadata || {};
+        const phaseId = String(md.phaseId || '');
+        if (!resolved.has(phaseId)) {
+          return { phaseId, question: String(md.question || e.message), eventId: e.id };
+        }
+      }
+    }
+    return null;
+  }, [missionEvents]);
+
+  const [approvalActionError, setApprovalActionError] = useState<string | null>(null);
+  const handleApprove = async () => {
+    if (!pendingApproval) return;
+    setApprovalActionError(null);
+    try {
+      await postJSON(
+        `/api/artifacts/missions/${encodeURIComponent(missionId)}/phases/${encodeURIComponent(pendingApproval.phaseId)}/approve`,
+        { approvedBy: 'user' },
+      );
+      refreshDetail(workflowId);
+    } catch (err) {
+      setApprovalActionError(err instanceof Error ? err.message : 'Approve failed');
+    }
+  };
+  const handleReject = async () => {
+    if (!pendingApproval) return;
+    setApprovalActionError(null);
+    try {
+      await postJSON(
+        `/api/artifacts/missions/${encodeURIComponent(missionId)}/phases/${encodeURIComponent(pendingApproval.phaseId)}/reject`,
+        { reason: 'Rejected by user from Mission Room' },
+      );
+      refreshDetail(workflowId);
+    } catch (err) {
+      setApprovalActionError(err instanceof Error ? err.message : 'Reject failed');
+    }
+  };
 
   useEffect(() => {
     transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight });
@@ -246,8 +355,6 @@ const MissionRoom = () => {
 
   const status = detail?.status || 'unknown';
   const badge = STATUS_BADGE[status] || status;
-  const plan = detail?.output?.plan;
-  const phaseOutputs = detail?.output?.outputs?.phases || [];
   const taskArtifactCount = phaseOutputs.reduce(
     (sum, p) => sum + (p.tasks || []).reduce((s, t) => s + (t.artifacts?.length || 0), 0),
     0,
@@ -256,17 +363,23 @@ const MissionRoom = () => {
     (sum, ph) => sum + ph.tasks.reduce((s, t) => s + (t.expectedArtifacts?.length || 0) + (t.artifacts?.length || 0), 0),
     0,
   ) || 0;
+  const startedAtMs = detail?.startedAt ? new Date(detail.startedAt).getTime() : undefined;
+  const completedAtMs = detail?.completedAt ? new Date(detail.completedAt).getTime() : undefined;
   const wallClockMs =
-    detail?.startedAt && detail?.completedAt
-      ? new Date(detail.completedAt).getTime() - new Date(detail.startedAt).getTime()
-      : null;
+    startedAtMs && completedAtMs
+      ? completedAtMs - startedAtMs
+      : startedAtMs && (detail?.status === 'running' || !completedAtMs)
+        ? now - startedAtMs
+        : null;
   const wallClockLabel = wallClockMs != null ? formatDuration(wallClockMs) : null;
 
   return (
     <div className="page mission-room">
       <div className="mission-room-header">
         <div>
-          <Link to="/missions" className="link-button" style={{ marginBottom: 4 }}>← All Missions</Link>
+          <Link to="/missions" className="link-button" style={{ marginBottom: 4 }}>
+            ← All Missions
+          </Link>
           <h1 style={{ margin: 0 }}>Mission Room</h1>
           <p className="muted" style={{ margin: '4px 0 0' }}>
             <code>{workflowId}</code>
@@ -282,13 +395,39 @@ const MissionRoom = () => {
 
       {detailError && <div className="error-banner">{detailError}</div>}
 
+      {pendingApproval && (
+        <div
+          className="error-banner"
+          style={{ background: 'rgba(245,158,11,0.15)' }}
+        >
+          <div>
+            <strong style={{ color: '#ea5809' }}>Action required:</strong>{' '}
+            {pendingApproval.question}
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+            <button onClick={handleApprove}>Approve phase</button>
+            <button className="danger" onClick={handleReject}>Reject phase</button>
+          </div>
+          {approvalActionError && <span className="muted">{approvalActionError}</span>}
+        </div>
+      )}
+
       <div className="mission-summary">
         {wallClockLabel && (
-          <span><strong>Duration:</strong> {wallClockLabel}</span>
+          <span>
+            <strong>Duration:</strong> {wallClockLabel}
+          </span>
         )}
         {plan && <span><strong>Phases:</strong> {plan.phases.length}</span>}
+        {totalEstimatedCost > 0 && (
+          <span>
+            <strong>Estimated Cost:</strong> ${totalEstimatedCost.toFixed(4)}
+          </span>
+        )}
         {(taskArtifactCount + expectedArtifactCount) > 0 && (
-          <span><strong>Artifacts:</strong> {taskArtifactCount + expectedArtifactCount}</span>
+          <span>
+            <strong>Artifacts:</strong> {taskArtifactCount + expectedArtifactCount}
+          </span>
         )}
         <span><strong>Events:</strong> {missionEvents.length}</span>
       </div>
@@ -301,9 +440,18 @@ const MissionRoom = () => {
             onClick={() => setTab(t)}
           >
             {t.charAt(0).toUpperCase() + t.slice(1)}
-            {t === 'artifacts' && (taskArtifactCount + expectedArtifactCount) > 0 ? ` (${taskArtifactCount + expectedArtifactCount})` : ''}
-            {t === 'plan' && plan?.phases.length ? ` (${plan.phases.length})` : ''}
-            {t === 'timeline' && missionEvents.length ? ` (${missionEvents.length})` : ''}
+            {t === 'artifacts' && (taskArtifactCount + expectedArtifactCount) > 0
+              ? ` (${taskArtifactCount + expectedArtifactCount})`
+              : ''}
+            {t === 'plan' && plan?.phases.length
+              ? ` (${plan.phases.length})`
+              : ''}
+            {t === 'conversation' && conversationEvents.length
+              ? ` (${conversationEvents.length})`
+              : ''}
+            {t === 'timeline' && timelineEvents.length
+              ? ` (${timelineEvents.length})`
+              : ''}
           </button>
         ))}
       </div>
@@ -311,7 +459,9 @@ const MissionRoom = () => {
       {tab === 'conversation' && (
         <div className="card mission-conversation">
           <div className="transcript" ref={transcriptRef}>
-            {transcript.length === 0 ? (
+            {detailLoading && !detail ? (
+              <div className="loading">Loading mission...</div>
+            ) : transcript.length === 0 ? (
               <div className="empty-state">
                 <p>No conversation yet.</p>
                 <p className="muted">Mission events and your messages will appear here.</p>
@@ -321,13 +471,21 @@ const MissionRoom = () => {
                 <div key={turn.id} className={`turn turn-${turn.role}`}>
                   <div className="turn-meta">
                     <strong>{turn.label}</strong>
-                    <span className="muted">{new Date(turn.timestamp).toLocaleTimeString()}</span>
+                    <span className="muted">
+                      {new Date(turn.timestamp).toLocaleTimeString()}
+                    </span>
                   </div>
                   <div className="turn-body">
                     {turn.lines.map((line, idx) => (
                       <div key={idx} className={`turn-line ${line.kind}`}>
                         <span className="turn-icon">{iconForType(line.type)}</span>
                         <span>{line.text}</span>
+                        {line.approval && (
+                          <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+                            <button onClick={handleApprove}>Approve</button>
+                            <button className="danger" onClick={handleReject}>Reject</button>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -361,22 +519,32 @@ const MissionRoom = () => {
 
       {tab === 'timeline' && (
         <div className="card">
-          <h3>Live Event Timeline</h3>
-          {missionEvents.length === 0 ? (
-            <div className="empty-state">No events for this mission yet.</div>
+          <h3>Mission Timeline</h3>
+          <p className="muted" style={{ fontSize: '12px', marginBottom: '12px' }}>
+            Lifecycle milestones: mission start/complete, phase approvals, and task outcomes.
+          </p>
+          {timelineEvents.length === 0 ? (
+            <div className="empty-state">No lifecycle events recorded yet.</div>
           ) : (
             <ul className="timeline">
-              {missionEvents.map((evt) => (
+              {timelineEvents.map((evt) => (
                 <li key={evt.id} className={`timeline-item ${evt.type}`}>
                   <span className="timeline-icon">{iconForType(String(evt.type))}</span>
                   <div className="timeline-body">
                     <div className="timeline-meta">
                       <strong>{String(evt.type)}</strong>
                       <span className="muted">
-                        {evt.timestamp ? new Date(evt.timestamp).toLocaleString() : ''}
+                        {evt.timestamp
+                          ? new Date(evt.timestamp).toLocaleString()
+                          : ''}
                       </span>
                     </div>
                     <div>{evt.message}</div>
+                    {evt.metadata && (
+                      <div className="muted" style={{ fontSize: '11px', marginTop: '4px' }}>
+                        {JSON.stringify(evt.metadata)}
+                      </div>
+                    )}
                   </div>
                 </li>
               ))}
@@ -396,36 +564,71 @@ const MissionRoom = () => {
                 <p className="plan-summary">{plan.summary}</p>
               )}
               <div className="plan-meta">
-                {plan.estimatedDuration && <span><strong>Duration:</strong> {plan.estimatedDuration}</span>}
-                {plan.estimatedCost && <span><strong>Cost:</strong> {plan.estimatedCost}</span>}
-                <span><strong>Phases:</strong> {plan.phases.length}</span>
+                {plan.estimatedDuration && (
+                  <span>
+                    <strong>Duration:</strong> {plan.estimatedDuration}
+                  </span>
+                )}
+                {plan.estimatedCost && (
+                  <span>
+                    <strong>Cost:</strong> {plan.estimatedCost}
+                  </span>
+                )}
+                <span>
+                  <strong>Phases:</strong> {plan.phases.length}
+                </span>
               </div>
               <ol className="plan-phases">
                 {plan.phases.map((phase) => {
                   const output = phaseOutputs.find((p) => p.phaseId === phase.id);
                   return (
-                    <li key={phase.id} className={`plan-phase ${output?.status || ''}`}>
+                    <li
+                      key={phase.id}
+                      className={`plan-phase ${output?.status || ''}`}
+                    >
                       <div className="plan-phase-header">
                         <strong>{phase.name}</strong>
-                        {phase.requiresApproval && <span className="badge">requires approval</span>}
-                        {output?.status && <span className={`badge ${output.status}`}>{output.status}</span>}
+                        {phase.requiresApproval && (
+                          <span className="badge">requires approval</span>
+                        )}
+                        {output?.status && (
+                          <span className={`badge ${output.status}`}>
+                            {output.status}
+                          </span>
+                        )}
                       </div>
                       {phase.goal && <p className="muted">{phase.goal}</p>}
                       <ul className="plan-tasks">
                         {phase.tasks.map((task) => {
-                          const taskOutput = output?.tasks?.find((t) => t.taskId === task.id);
+                          const taskOutput = output?.tasks?.find(
+                            (t) => t.taskId === task.id
+                          );
                           return (
-                            <li key={task.id} className={`plan-task ${taskOutput?.status || ''}`}>
+                            <li
+                              key={task.id}
+                              className={`plan-task ${taskOutput?.status || ''}`}
+                            >
                               <div>
                                 <strong>{task.title}</strong>
-                                {task.description && <p className="muted">{task.description}</p>}
+                                {task.description && (
+                                  <p className="muted">{task.description}</p>
+                                )}
                               </div>
                               <div className="plan-task-meta">
-                                {task.agentRole && <span className="badge">🤖 {task.agentRole}</span>}
-                                {taskOutput?.status && <span className={`badge ${taskOutput.status}`}>{taskOutput.status}</span>}
-                                {taskOutput?.artifacts && taskOutput.artifacts.length > 0 && (
-                                  <span className="badge">📎 {taskOutput.artifacts.length}</span>
+                                {task.agentRole && (
+                                  <span className="badge">🤖 {task.agentRole}</span>
                                 )}
+                                {taskOutput?.status && (
+                                  <span className={`badge ${taskOutput.status}`}>
+                                    {taskOutput.status}
+                                  </span>
+                                )}
+                                {taskOutput?.artifacts &&
+                                  taskOutput.artifacts.length > 0 && (
+                                    <span className="badge">
+                                      📎 {taskOutput.artifacts.length}
+                                    </span>
+                                  )}
                               </div>
                             </li>
                           );
@@ -457,6 +660,7 @@ interface TranscriptLine {
   kind: 'text' | 'tool' | 'plan' | 'task';
   type: string;
   text: string;
+  approval?: { phaseId: string; question: string };
 }
 
 interface TranscriptTurn {
@@ -471,7 +675,12 @@ function buildTranscript(events: FeedEvent[]): TranscriptTurn[] {
   const turns: TranscriptTurn[] = [];
   let current: TranscriptTurn | null = null;
 
-  const startTurn = (role: TranscriptTurn['role'], label: string, ts: number, idHint: string): TranscriptTurn => {
+  const startTurn = (
+    role: TranscriptTurn['role'],
+    label: string,
+    ts: number,
+    idHint: string
+  ): TranscriptTurn => {
     const t: TranscriptTurn = {
       id: `${idHint}-${ts}`,
       role,
@@ -486,14 +695,33 @@ function buildTranscript(events: FeedEvent[]): TranscriptTurn[] {
   for (const evt of events) {
     const type = String(evt.type);
     const ts = evt.timestamp || Date.now();
+    const data = evt.metadata || {};
     if (type === 'user' || type === 'user_message') {
       current = startTurn('user', 'You', ts, evt.id);
       current.lines.push({ kind: 'text', type, text: evt.message });
       continue;
     }
-    if (type === 'planner_started' || type === 'plan_generated' || type === 'phase_started' || type === 'phase_completed' || type === 'phase_approved' || type === 'phase_rejected') {
-      if (!current || current.role !== 'assistant' || (current.label !== 'Planner' && current.label !== 'Orchestrator')) {
-        current = startTurn('assistant', type === 'planner_started' || type === 'plan_generated' ? 'Planner' : 'Orchestrator', ts, evt.id);
+    if (
+      type === 'planner_started' ||
+      type === 'plan_generated' ||
+      type === 'phase_started' ||
+      type === 'phase_completed' ||
+      type === 'phase_approved' ||
+      type === 'phase_rejected'
+    ) {
+      if (
+        !current ||
+        current.role !== 'assistant' ||
+        (current.label !== 'Planner' && current.label !== 'Orchestrator')
+      ) {
+        current = startTurn(
+          'assistant',
+          type === 'planner_started' || type === 'plan_generated'
+            ? 'Planner'
+            : 'Orchestrator',
+          ts,
+          evt.id
+        );
       }
       current.lines.push({ kind: 'plan', type, text: evt.message });
       continue;
@@ -509,12 +737,33 @@ function buildTranscript(events: FeedEvent[]): TranscriptTurn[] {
       if (!current || current.role !== 'assistant') {
         current = startTurn('assistant', 'Agent', ts, evt.id);
       }
-      current.lines.push({ kind: type === 'tool' ? 'tool' : 'text', type, text: evt.message });
+      current.lines.push({
+        kind: type === 'tool' ? 'tool' : 'text',
+        type,
+        text: evt.message,
+      });
       continue;
     }
-    if (type === 'mission_started' || type === 'mission_completed' || type === 'mission_failed') {
+    if (
+      type === 'mission_started' ||
+      type === 'mission_completed' ||
+      type === 'mission_failed' ||
+      type === 'mission_incomplete' ||
+      type === 'mission_needs_review' ||
+      type === 'mission_canceled' ||
+      type === 'approval_requested' ||
+      type === 'approval_approved' ||
+      type === 'approval_rejected'
+    ) {
       current = startTurn('system', 'Mission', ts, evt.id);
-      current.lines.push({ kind: 'text', type, text: evt.message });
+      const line: TranscriptLine = { kind: 'text', type, text: evt.message };
+      if (type === 'approval_requested') {
+        line.approval = {
+          phaseId: (data.phaseId as string) || '',
+          question: (data.question as string) || evt.message,
+        };
+      }
+      current.lines.push(line);
       continue;
     }
     if (!current) current = startTurn('system', 'Mission', ts, evt.id);
@@ -530,7 +779,14 @@ interface ArtifactsViewProps {
 }
 
 const ArtifactsView = ({ plan, phaseOutputs }: ArtifactsViewProps) => {
-  const items: Array<{ id: string; name: string; phaseId?: string; taskId?: string; kind: 'expected' | 'produced'; text?: string }> = [];
+  const items: Array<{
+    id: string;
+    name: string;
+    phaseId?: string;
+    taskId?: string;
+    kind: 'expected' | 'produced';
+    text?: string;
+  }> = [];
 
   if (plan) {
     for (const phase of plan.phases) {
@@ -546,11 +802,19 @@ const ArtifactsView = ({ plan, phaseOutputs }: ArtifactsViewProps) => {
         }
         for (const a of task.artifacts || []) {
           if (typeof a === 'string') {
-            items.push({ id: `plan-artifact-${phase.id}-${task.id}-${a}`, name: a, phaseId: phase.id, taskId: task.id, kind: 'produced' });
+            items.push({
+              id: `plan-artifact-${phase.id}-${task.id}-${a}`,
+              name: a,
+              phaseId: phase.id,
+              taskId: task.id,
+              kind: 'produced',
+            });
           } else if (a && typeof a === 'object') {
             const obj = a as Record<string, unknown>;
             items.push({
-              id: `plan-artifact-${phase.id}-${task.id}-${String(obj.id || obj.name || JSON.stringify(a))}`,
+              id: `plan-artifact-${phase.id}-${task.id}-${String(
+                obj.id || obj.name || JSON.stringify(a)
+              )}`,
               name: String(obj.name || obj.id || 'artifact'),
               phaseId: phase.id,
               taskId: task.id,
@@ -567,11 +831,19 @@ const ArtifactsView = ({ plan, phaseOutputs }: ArtifactsViewProps) => {
     for (const task of phase.tasks || []) {
       for (const a of task.artifacts || []) {
         if (typeof a === 'string') {
-          items.push({ id: `produced-${phase.phaseId}-${task.taskId}-${a}`, name: a, phaseId: phase.phaseId, taskId: task.taskId, kind: 'produced' });
+          items.push({
+            id: `produced-${phase.phaseId}-${task.taskId}-${a}`,
+            name: a,
+            phaseId: phase.phaseId,
+            taskId: task.taskId,
+            kind: 'produced',
+          });
         } else if (a && typeof a === 'object') {
           const obj = a as Record<string, unknown>;
           items.push({
-            id: `produced-${phase.phaseId}-${task.taskId}-${String(obj.id || obj.name || JSON.stringify(a))}`,
+            id: `produced-${phase.phaseId}-${task.taskId}-${String(
+              obj.id || obj.name || JSON.stringify(a)
+            )}`,
             name: String(obj.name || obj.id || 'artifact'),
             phaseId: phase.phaseId,
             taskId: task.taskId,
@@ -593,7 +865,9 @@ const ArtifactsView = ({ plan, phaseOutputs }: ArtifactsViewProps) => {
         <li key={a.id} className={`artifact-item ${a.kind}`}>
           <div className="artifact-header">
             <strong>{a.name}</strong>
-            <span className={`badge ${a.kind}`}>{a.kind === 'expected' ? 'Expected' : 'Produced'}</span>
+            <span className={`badge ${a.kind}`}>
+              {a.kind === 'expected' ? 'Expected' : 'Produced'}
+            </span>
             {a.phaseId && <span className="muted">phase: {a.phaseId}</span>}
             {a.taskId && <span className="muted">task: {a.taskId}</span>}
           </div>
@@ -603,8 +877,6 @@ const ArtifactsView = ({ plan, phaseOutputs }: ArtifactsViewProps) => {
     </ul>
   );
 };
-
-export default MissionRoom;
 
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
@@ -617,3 +889,5 @@ function formatDuration(ms: number): string {
   const rm = m % 60;
   return rm ? `${h}h ${rm}m` : `${h}h`;
 }
+
+export default MissionRoom;

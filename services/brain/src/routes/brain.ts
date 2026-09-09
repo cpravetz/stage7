@@ -27,6 +27,7 @@ router.post('/complete', asyncHandler(async (req: any, res: any) => {
     maxTokens?: number;
     budget?: number;
     temperature?: number;
+    missionId?: string;
   };
   if (!prompt) {
     throw BrainError.badRequest('Missing prompt');
@@ -39,6 +40,7 @@ router.post('/complete', asyncHandler(async (req: any, res: any) => {
     maxTokens: maxTokens ?? options?.maxTokens ?? 1024,
     budget: budget ?? options?.budget,
     temperature: temperature ?? options?.temperature,
+    missionId: (req.body as any).missionId,
   };
   const result = await brain.complete(prompt, mergedOptions);
   res.json(result);
@@ -80,6 +82,14 @@ router.post('/route', asyncHandler(async (req: any, res: any) => {
 
 router.get('/cache/stats', asyncHandler(async (_req: any, res: any) => {
   res.json(brain.getCacheStats());
+}));
+
+router.get('/circuit-breakers', asyncHandler(async (_req: any, res: any) => {
+  res.json(brain.getCircuitBreakerStats());
+}));
+
+router.get('/logs', asyncHandler(async (_req: any, res: any) => {
+  res.json(brain.getLogs());
 }));
 
 export default router;

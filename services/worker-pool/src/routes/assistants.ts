@@ -30,6 +30,14 @@ router.post('/assistants', asyncHandler(async (req, res) => {
   if (!definition.metadata) {
     definition.metadata = {};
   }
+  if (!definition.knowledge) {
+    definition.knowledge = [];
+  }
+  if (!definition.transactionGuidance) {
+    definition.transactionGuidance = [];
+  }
+  // Ensure assistants never carry a persisted `model` property
+  if ((definition as any).model) delete (definition as any).model;
   const saved = await loader.register(definition);
   if (saved.tools && saved.tools.length > 0) {
     registerAssistantTools(saved.tools);
@@ -52,6 +60,8 @@ router.get('/assistants/:id', asyncHandler(async (req, res) => {
 
 router.put('/assistants/:id', asyncHandler(async (req, res) => {
   const updates = req.body as Partial<AssistantDefinition>;
+  // Strip any user-supplied model override — assistants must not carry `model`
+  if ((updates as any).model) delete (updates as any).model;
   const updated = await loader.update(req.params.id as string, updates);
   if (!updated) {
     throw NextGenError.notFound('Assistant not found');

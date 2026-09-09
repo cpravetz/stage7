@@ -2,7 +2,7 @@
 
 **Status**: ⚠️ HISTORICAL - This document describes the superseded V2 architecture. For current NextGen architecture, see [../STAGE7_NEXTGEN_REBUILD_PROPOSAL.md](../STAGE7_NEXTGEN_REBUILD_PROPOSAL.md) and [./README.md](./README.md).
 
-**Last Updated**: January 22, 2026
+
 
 ## Introduction
 

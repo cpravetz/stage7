@@ -1,6 +1,8 @@
 import { randomUUID } from 'crypto';
 import { EncryptedSecret } from '../types/vault';
 import { EnvelopeEncryption } from '../encryption/envelopeEncryption';
+import { MongoSecretStore } from '../data/mongoStore';
+import { logger } from '@stage7-nextgen/shared';
 
 export interface StoredSecret {
   id: string;
@@ -22,9 +24,30 @@ export interface SecretMetadata {
 export class SecretStore {
   private secrets: Map<string, StoredSecret> = new Map();
   private encryption: EnvelopeEncryption;
+  private mongoStore: MongoSecretStore | null = null;
+  private connectPromise: Promise<void> | null = null;
 
   constructor(encryption: EnvelopeEncryption) {
     this.encryption = encryption;
+    if (process.env.MONGO_URI) {
+      this.mongoStore = new MongoSecretStore();
+    }
+  }
+
+  private async ensureMongo(): Promise<void> {
+    if (this.mongoStore?.isConnected()) return;
+    if (this.connectPromise) return this.connectPromise;
+    if (!this.mongoStore) return;
+
+    this.connectPromise = (async () => {
+      try {
+        await this.mongoStore!.connect();
+      } catch {
+        this.mongoStore = null;
+      }
+    })();
+
+    return this.connectPromise;
   }
 
   createSecret(name: string, plaintext: string, tenantId: string): SecretMetadata {
@@ -38,24 +61,76 @@ export class SecretStore {
       createdAt: now,
       updatedAt: now,
     };
-    this.secrets.set(secret.id, secret);
+
+    if (this.mongoStore) {
+      this.createSecretInMongo(secret).catch(() => {
+        this.secrets.set(secret.id, secret);
+      });
+    } else {
+      this.secrets.set(secret.id, secret);
+    }
+
     return this.toMetadata(secret);
   }
 
-  getSecret(id: string): StoredSecret | undefined {
+  private async createSecretInMongo(secret: StoredSecret): Promise<void> {
+    await this.ensureMongo();
+    if (this.mongoStore) {
+      try {
+        await this.mongoStore.createSecret(secret);
+      } catch {
+        this.secrets.set(secret.id, secret);
+      }
+    } else {
+      this.secrets.set(secret.id, secret);
+    }
+  }
+
+  async getSecret(id: string): Promise<StoredSecret | undefined> {
+    await this.ensureMongo();
+    if (this.mongoStore) {
+      try {
+        const result = await this.mongoStore.getSecret(id);
+        if (result) return result;
+      } catch {
+        // fallback
+      }
+    }
     return this.secrets.get(id);
   }
 
-  listSecrets(): SecretMetadata[] {
+  async listSecrets(): Promise<SecretMetadata[]> {
+    await this.ensureMongo();
+    if (this.mongoStore) {
+      try {
+        const tenantId = this.getTenantIdFromContext();
+        return await this.mongoStore.listSecrets(tenantId);
+      } catch {
+        // fallback
+      }
+    }
     return Array.from(this.secrets.values()).map((s) => this.toMetadata(s));
   }
 
-  deleteSecret(id: string): boolean {
-    return this.secrets.delete(id);
+  async deleteSecret(id: string): Promise<boolean> {
+    await this.ensureMongo();
+    if (this.mongoStore) {
+      try {
+        const deleted = await this.mongoStore.deleteSecret(id);
+        if (deleted) {
+          this.secrets.delete(id);
+          return true;
+        }
+      } catch {
+        // fallback
+      }
+    }
+    const existed = this.secrets.delete(id);
+    return existed;
   }
 
-  decryptSecret(id: string): string | undefined {
-    const secret = this.secrets.get(id);
+  async decryptSecret(id: string): Promise<string | undefined> {
+    const secret = await this.getSecret(id);
     if (!secret) return undefined;
     return this.encryption.decrypt(secret.encrypted);
   }
@@ -68,5 +143,9 @@ export class SecretStore {
       createdAt: secret.createdAt,
       updatedAt: secret.updatedAt,
     };
+  }
+
+  private getTenantIdFromContext(): string | undefined {
+    return undefined;
   }
 }

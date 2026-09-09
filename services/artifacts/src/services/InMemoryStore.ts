@@ -132,12 +132,18 @@ export class InMemoryStore {
     return Promise.resolve(this.missions.get(missionId));
   }
 
-  listMissionStates(): Promise<MissionState[]> {
-    return Promise.resolve(Array.from(this.missions.values()));
+  listMissionStates(tenantId?: string): Promise<MissionState[]> {
+    const all = Array.from(this.missions.values());
+    if (!tenantId) return Promise.resolve(all);
+    return Promise.resolve(all.filter((m) => m.tenantId === tenantId));
   }
 
   async deleteMissionState(missionId: string): Promise<void> {
     this.missions.delete(missionId);
+    this.missionPlans.delete(missionId);
+    this.missionPhases.delete(missionId);
+    this.missionTasks.delete(missionId);
+    this.missionEvents.delete(missionId);
     return Promise.resolve();
   }
 
@@ -151,18 +157,22 @@ export class InMemoryStore {
     return Promise.resolve(this.agents.get(agentId));
   }
 
-  listAgentStates(): Promise<AgentState[]> {
-    return Promise.resolve(Array.from(this.agents.values()));
+  listAgentStates(tenantId?: string): Promise<AgentState[]> {
+    const all = Array.from(this.agents.values());
+    if (!tenantId) return Promise.resolve(all);
+    return Promise.resolve(all.filter((a) => a.tenantId === tenantId));
   }
 
   saveAssistant(definition: AssistantDefinition): Promise<AssistantDefinition> {
     const now = new Date();
     const existing = this.assistants.get(definition.id);
+    // Persist assistant without any `model` property
+    const { model, ...rest } = definition as any;
     const assistant: AssistantDefinition = {
-      ...definition,
+      ...(rest as any),
       createdAt: existing?.createdAt || definition.createdAt || now,
       updatedAt: now,
-    };
+    } as any;
     this.assistants.set(definition.id, assistant);
     logger.debug({ assistantId: definition.id }, 'Assistant saved');
     return Promise.resolve(assistant);
@@ -262,6 +272,26 @@ export class InMemoryStore {
   }
   getMissionPhase(missionId: string, phaseId: string): Promise<any | undefined> {
     return Promise.resolve(this.missionPhases.get(missionId)?.get(phaseId));
+  }
+
+  async listPendingApprovals(): Promise<Array<{ missionId: string; phaseId: string; phaseName: string; question: string; assistantId?: string }>> {
+    const result: Array<{ missionId: string; phaseId: string; phaseName: string; question: string; assistantId?: string }> = [];
+    for (const [missionId, phases] of this.missionPhases) {
+      const missionState = this.missions.get(missionId);
+      const assistantId = missionState?.assistantId;
+      for (const [phaseId, phase] of phases) {
+        if (phase?.status === 'awaiting_approval') {
+          result.push({
+            missionId,
+            phaseId,
+            phaseName: (phase.name as string) || phaseId,
+            question: (phase.approvalQuestion as string) || '',
+            assistantId,
+          });
+        }
+      }
+    }
+    return result;
   }
   updateMissionTask(missionId: string, taskId: string, update: any): Promise<any> {
     let tasks = this.missionTasks.get(missionId);

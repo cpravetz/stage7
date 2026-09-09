@@ -10,7 +10,7 @@
     "start": "npm run start --workspaces",
     "lint:md": "markdownlint --config .markdownlint.json \"**/*.md\"",
     "test": "jest",
-    "test:integration": "jest --testPathPattern=tests/integration"
+    "test:integration": "jest --testPathPatterns=tests/integration"
   },
   "devDependencies": {
     "@types/body-parser": "^1.19.5",

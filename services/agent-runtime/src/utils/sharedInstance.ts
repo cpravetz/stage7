@@ -1,7 +1,11 @@
 import { AgentRuntime } from '../services/AgentRuntime';
+import { PersistentAgentRuntime } from '../services/PersistentAgentRuntime';
+import { ArtifactsService } from '@stage7-nextgen/artifacts';
 import { AgentDefinition } from '../types';
+import { logger } from '@stage7-nextgen/shared';
 
-export const runtime = new AgentRuntime();
+const artifactsService = new ArtifactsService();
+export const runtime = new PersistentAgentRuntime(artifactsService);
 
 const defaultAgents: AgentDefinition[] = [
   {
@@ -45,4 +49,8 @@ const defaultAgents: AgentDefinition[] = [
   },
 ]
 
-defaultAgents.forEach((a) => runtime.registerAgent(a))
+defaultAgents.forEach((a) => {
+  runtime.registerAgent(a).catch((err) => {
+    logger.warn({ agentId: a.id, err: err instanceof Error ? err.message : String(err) }, 'Failed to register default agent');
+  });
+});

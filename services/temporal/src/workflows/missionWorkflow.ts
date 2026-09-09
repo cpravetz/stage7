@@ -23,15 +23,28 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
 
     const result = await runMissionActivity(input);
 
-    state.history[0].status = 'completed';
+    const outputs =
+      result && typeof result === 'object'
+        ? (result as { outputs?: { status?: string } }).outputs
+        : undefined;
+    let status: WorkflowResult['status'];
+    if (outputs?.status === 'awaiting_clarification' || outputs?.status === 'rejected_at_phase') {
+      status = 'awaiting_review';
+    } else if (outputs?.status === 'incomplete') {
+      status = 'incomplete';
+    } else {
+      status = 'completed';
+    }
+
+    state.history[0].status = status as any;
     state.history[0].completedAt = Date.now();
     state.history[0].result = result;
 
-    logger.info('Mission workflow completed', { missionId: input.missionId });
+    logger.info('Mission workflow completed', { missionId: input.missionId, status });
 
     return {
       missionId: input.missionId,
-      status: 'completed',
+      status,
       output: result,
       startedAt,
       completedAt: Date.now(),

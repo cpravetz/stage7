@@ -22,4 +22,8 @@ export class ToolRegistry {
   findByType(type: string): Tool[] {
     return this.list().filter((tool) => tool.type === type)
   }
+
+  getMap(): Map<string, Tool> {
+    return this.tools
+  }
 }

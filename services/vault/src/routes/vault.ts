@@ -41,7 +41,7 @@ router.post('/decrypt', asyncHandler(async (req, res) => {
 }));
 
 router.get('/secrets', asyncHandler(async (req, res) => {
-  const secrets = secretStore.listSecrets();
+  const secrets = await secretStore.listSecrets();
   res.json({ secrets });
 }));
 
@@ -66,7 +66,7 @@ router.post('/secrets', asyncHandler(async (req, res) => {
 
 router.get('/secrets/:id', asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const secret = secretStore.getSecret(id);
+  const secret = await secretStore.getSecret(id);
 
   if (!secret) {
     throw VaultError.notFound('Secret not found');
@@ -83,7 +83,7 @@ router.get('/secrets/:id', asyncHandler(async (req, res) => {
 
 router.get('/secrets/:id/decrypt', asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const plaintext = secretStore.decryptSecret(id);
+  const plaintext = await secretStore.decryptSecret(id);
 
   if (plaintext === undefined) {
     throw VaultError.notFound('Secret not found');
@@ -94,7 +94,7 @@ router.get('/secrets/:id/decrypt', asyncHandler(async (req, res) => {
 
 router.delete('/secrets/:id', asyncHandler(async (req, res) => {
   const {id} = req.params;
-  const deleted = secretStore.deleteSecret(id);
+  const deleted = await secretStore.deleteSecret(id);
 
   if (!deleted) {
     throw VaultError.notFound('Secret not found');

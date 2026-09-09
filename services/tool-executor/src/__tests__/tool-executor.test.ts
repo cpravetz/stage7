@@ -14,6 +14,43 @@ const registry = new ToolRegistry()
 const executor = new ToolExecutor()
 const generator = new PluginGenerator()
 
+const originalFetch = global.fetch;
+beforeAll(() => {
+  global.fetch = jest.fn(async (url: any, init: any) => {
+    const urlStr = String(url);
+    if (urlStr.includes('/api/brain/complete')) {
+      const body = JSON.parse(init.body);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          content: JSON.stringify({
+            id: `plugin_${Date.now()}`,
+            name: 'calculator',
+            description: body.prompt,
+            type: 'code',
+            language: 'javascript',
+            entrypoint: 'index.js',
+            sourceCode: 'module.exports = { add: (a, b) => a + b };',
+            requirements: [],
+            configSchema: {},
+            inputs: {},
+            outputs: {},
+          }),
+          model: body.options?.model || 'gpt-4o-mini',
+          provider: 'openrouter',
+          tokensUsed: 100,
+        }),
+        text: async () => '',
+      } as any;
+    }
+    return originalFetch(url, init);
+  });
+});
+afterAll(() => {
+  global.fetch = originalFetch;
+});
+
 describe('ToolRegistry', () => {
   const mockTool: Tool = {
     id: 'tool-1',
@@ -57,21 +94,41 @@ describe('ToolRegistry', () => {
 })
 
 describe('ToolExecutor', () => {
-  const mockTool: Tool = {
-    id: 'tool-exec-1',
-    name: 'Query Tool',
-    description: 'Query data',
-    type: 'mcp',
-    manifest: {},
+  const codeTool: Tool = {
+    id: 'tool-code-1',
+    name: 'Code Runner',
+    description: 'Run code',
+    type: 'code',
+    manifest: {
+      language: 'javascript',
+      entrypoint: 'index.js',
+      sourceCode: 'console.log("hello");',
+    },
     createdAt: new Date(),
     updatedAt: new Date(),
   }
 
-  it('should execute a tool successfully', async () => {
-    const execution = await executor.execute(mockTool, { query: 'test' })
+  it('should execute a code tool successfully', async () => {
+    const execution = await executor.execute(codeTool, {})
     expect(execution.status).toBe('completed')
     expect(execution.output).toBeDefined()
-    expect(execution.toolId).toBe(mockTool.id)
+    expect(execution.toolId).toBe(codeTool.id)
+  })
+
+  it('should attempt discovery and generation for unsupported tool type', async () => {
+    const unsupportedTool: Tool = {
+      id: 'tool-unknown',
+      name: 'Unknown Tool',
+      description: 'Unknown',
+      type: 'mcp',
+      manifest: {},
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    const execution = await executor.execute(unsupportedTool, {})
+    expect(execution.status).toBe('completed')
+    expect(execution.output).toBeDefined()
+    expect(execution.toolId).toBe('tool-unknown')
   })
 })
 
@@ -86,8 +143,8 @@ describe('PluginGenerator', () => {
     const result = await generator.generate(request)
     expect(result.success).toBe(true)
     expect(result.tool).toBeDefined()
-    expect(result.tool?.type).toBe('mcp')
-    expect(result.tool?.description).toBe(request.description)
+    expect(result.tool?.type).toBe('code')
+    expect(result.tool?.description).toContain('Generate a calculator plugin')
   })
 })
 
@@ -137,5 +194,67 @@ describe('REST endpoints', () => {
       .send({ description: 'New plugin' })
     expect(res.status).toBe(201)
     expect(res.body.success).toBe(true)
+  })
+
+  it('should return 428 when tool requires missing credentials', async () => {
+    const credentialTool = {
+      id: 'cred-tool-1',
+      name: 'Jira Tool',
+      description: 'Jira integration',
+      type: 'mcp',
+      manifest: {
+        credentialSource: {
+          jiraToken: { vaultSecretId: 'jira-token', envVar: 'JIRA_TOKEN' },
+        },
+      },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }
+
+    await request(app).post('/api/tools').send(credentialTool)
+    const res = await request(app)
+      .post('/api/tools/cred-tool-1/execute')
+      .send({ input: { projectKey: 'TEST' } })
+
+    expect(res.status).toBe(428)
+    expect(res.body.error).toContain('requires credentials')
+    expect(res.body.request.missingCredentials).toBeDefined()
+    expect(res.body.request.missingCredentials.length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('should execute tool successfully after providing credentials', async () => {
+    const credentialTool = {
+      id: 'cred-tool-2',
+      name: 'Slack Tool',
+      description: 'Slack integration',
+      type: 'mcp',
+      manifest: {
+        credentialSource: {
+          slackToken: { vaultSecretId: 'slack-token', envVar: 'SLACK_TOKEN' },
+        },
+      },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }
+
+    await request(app).post('/api/tools').send(credentialTool)
+
+    const execRes = await request(app)
+      .post('/api/tools/cred-tool-2/execute')
+      .send({ input: { channel: '#general', text: 'hello' } })
+
+    expect(execRes.status).toBe(428)
+    const executionId = execRes.body.request.executionId
+    expect(executionId).toBeDefined()
+
+    const credRes = await request(app)
+      .post(`/api/executions/${executionId}/credentials`)
+      .send({
+        credentials: { slackToken: 'xoxb-test' },
+        storeInVault: false,
+      })
+
+    expect(credRes.status).toBe(200)
+    expect(credRes.body.status).toBe('completed')
   })
 })

@@ -23,6 +23,8 @@ function inferCapabilities(task: string): string[] {
   for (const [cap, keywords] of Object.entries(CAPABILITY_KEYWORDS)) {
     if (keywords.some((kw) => lower.includes(kw))) {
       matched.add(cap);
+        // treat creative tasks as chat-capable as well (broad fallback)
+        if (cap === 'creative') matched.add('chat');
     }
   }
   if (matched.size === 0) matched.add('chat');
@@ -54,7 +56,7 @@ export class ModelRouter {
     return this.models.get(id);
   }
 
-  route(options: { task: string; modelId?: string; maxTokens?: number; budget?: number; provider?: string }): ModelDefinition {
+  route(options: { task: string; modelId?: string; maxTokens?: number; budget?: number; provider?: string; freeOnly?: boolean }): ModelDefinition {
     if (options.modelId) {
       const m = this.models.get(options.modelId);
       if (m) return m;
@@ -75,6 +77,9 @@ export class ModelRouter {
       if (providers && !providers.has(m.provider)) return false;
       if (options.maxTokens && m.maxTokens < options.maxTokens) return false;
       if (options.budget !== undefined && m.costPer1kTokens > options.budget) return false;
+      if (options.freeOnly) {
+        if (!(m.costPer1kTokens === 0 || ['openwebui', 'local', 'huggingface'].includes(m.provider))) return false;
+      }
       return requiredCaps.every((cap) => m.capabilities.includes(cap));
     });
 
@@ -83,6 +88,9 @@ export class ModelRouter {
         if (providers && !providers.has(m.provider)) return false;
         if (options.maxTokens && m.maxTokens < options.maxTokens) return false;
         if (options.budget !== undefined && m.costPer1kTokens > options.budget) return false;
+        if (options.freeOnly) {
+          if (!(m.costPer1kTokens === 0 || ['openwebui', 'local', 'huggingface'].includes(m.provider))) return false;
+        }
         return requiredCaps.length === 0 || requiredCaps.some((cap) => m.capabilities.includes(cap));
       });
     }
@@ -100,5 +108,49 @@ export class ModelRouter {
       return a.id.localeCompare(b.id);
     });
     return candidates[0];
+  }
+
+  // Return an ordered list of candidate models for the given routing options.
+  getCandidates(options: { task: string; modelId?: string; maxTokens?: number; budget?: number; provider?: string; freeOnly?: boolean }): ModelDefinition[] {
+    if (options.modelId) {
+      const m = this.models.get(options.modelId);
+      return m ? [m] : [];
+    }
+    const requiredCaps = inferCapabilities(options.task);
+
+    const providers = options.provider ? new Set([options.provider]) : null;
+
+    let candidates = Array.from(this.models.values()).filter((m) => {
+      if (providers && !providers.has(m.provider)) return false;
+      if (options.maxTokens && m.maxTokens < options.maxTokens) return false;
+      if (options.budget !== undefined && m.costPer1kTokens > options.budget) return false;
+      if (options.freeOnly) {
+        if (!(m.costPer1kTokens === 0 || ['openwebui', 'local', 'huggingface'].includes(m.provider))) return false;
+      }
+      return requiredCaps.every((cap) => m.capabilities.includes(cap));
+    });
+
+    if (candidates.length === 0) {
+      candidates = Array.from(this.models.values()).filter((m) => {
+        if (providers && !providers.has(m.provider)) return false;
+        if (options.maxTokens && m.maxTokens < options.maxTokens) return false;
+        if (options.budget !== undefined && m.costPer1kTokens > options.budget) return false;
+        if (options.freeOnly) {
+          if (!(m.costPer1kTokens === 0 || ['openwebui', 'local', 'huggingface'].includes(m.provider))) return false;
+        }
+        return requiredCaps.length === 0 || requiredCaps.some((cap) => m.capabilities.includes(cap));
+      });
+    }
+
+    candidates.sort((a, b) => {
+      const costDiff = a.costPer1kTokens - b.costPer1kTokens;
+      if (costDiff !== 0) return costDiff;
+      const aMatch = requiredCaps.filter((cap) => a.capabilities.includes(cap)).length;
+      const bMatch = requiredCaps.filter((cap) => b.capabilities.includes(cap)).length;
+      if (bMatch !== aMatch) return bMatch - aMatch;
+      return a.id.localeCompare(b.id);
+    });
+
+    return candidates;
   }
 }

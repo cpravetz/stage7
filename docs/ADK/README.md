@@ -1,6 +1,6 @@
 # Agent Development Kit (ADK) - NextGen
 
-**Last Updated**: September 3, 2026
+
 
 ## Getting Started
 
@@ -34,6 +34,7 @@ http://localhost:8080
 curl -X POST http://localhost:3200/api/workers/assistants \
   -H "Content-Type: application/json" \
   -d '{"id":"my-assistant","tenantId":"tenant-1","name":"My Assistant","description":"Custom assistant","model":"llama3","capabilities":["chat"],"systemPrompt":"You are helpful.","tools":[],"metadata":{}}'
+   -d '{"id":"my-assistant","tenantId":"tenant-1","name":"My Assistant","description":"Custom assistant","capabilities":["chat"],"systemPrompt":"You are helpful.","tools":[],"metadata":{}}'
 
 # 3. Execute the assistant
 curl -X POST http://localhost:3200/api/workers/assistants/my-assistant/execute \
@@ -72,7 +73,6 @@ POST /api/workers/assistants
   "tenantId": "tenant-1",
   "name": "My Assistant",
   "description": "Handles domain-specific tasks",
-  "model": "llama3",
   "capabilities": ["chat", "tools"],
   "systemPrompt": "You are a helpful domain expert.",
   "tools": [],
