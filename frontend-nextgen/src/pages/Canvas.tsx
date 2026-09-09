@@ -121,7 +121,6 @@ const Canvas = () => {
               <p>{selectedEntity.description}</p>
               <div className="meta-grid">
                 <div><strong>Type:</strong> {selectedEntity.type}</div>
-                <div><strong>Model:</strong> {selectedEntity.model}</div>
               </div>
             </div>
           ) : (

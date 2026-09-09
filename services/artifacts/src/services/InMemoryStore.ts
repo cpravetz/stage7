@@ -166,11 +166,13 @@ export class InMemoryStore {
   saveAssistant(definition: AssistantDefinition): Promise<AssistantDefinition> {
     const now = new Date();
     const existing = this.assistants.get(definition.id);
+    // Persist assistant without any `model` property
+    const { model, ...rest } = definition as any;
     const assistant: AssistantDefinition = {
-      ...definition,
+      ...(rest as any),
       createdAt: existing?.createdAt || definition.createdAt || now,
       updatedAt: now,
-    };
+    } as any;
     this.assistants.set(definition.id, assistant);
     logger.debug({ assistantId: definition.id }, 'Assistant saved');
     return Promise.resolve(assistant);

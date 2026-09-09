@@ -155,8 +155,12 @@ export class OpenAICompatibleProvider implements LLMProvider {
           // fall through to other fallback logic
         }
       }
-      // If method not allowed or not found, try the older /completions endpoint.
-      if (res.status === 405 || res.status === 404 || /Method Not Allowed/i.test(errText) || /Not Found/i.test(errText)) {
+      // If the server indicates the model or endpoint does not support chat (400),
+      // or method not allowed / not found, try the older /completions endpoint.
+      if (res.status === 400 && /does not support chat|does not support/i.test(errText)) {
+        // fall through to completions path below
+      }
+      if (res.status === 405 || res.status === 404 || /Method Not Allowed/i.test(errText) || /Not Found/i.test(errText) || (res.status === 400 && /does not support chat|does not support/i.test(errText))) {
         const prompt = req.messages.map((m: CompletionMessage) => `${m.role}: ${m.content}`).join('\n');
         res = await fetch(`${this.apiBase}${this.completionsPath}`, {
           method: 'POST',

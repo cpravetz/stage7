@@ -2,6 +2,7 @@ import { LLMProvider } from './Provider';
 import { OpenAICompatibleProvider } from './OpenAICompatibleProvider';
 import { AnthropicProvider } from './AnthropicProvider';
 import { GeminiProvider } from './GeminiProvider';
+import { CloudflareProvider } from './CloudflareProvider';
 
 export function buildProviderRegistry(): LLMProvider[] {
   const providers: LLMProvider[] = [];
@@ -26,6 +27,12 @@ export function buildProviderRegistry(): LLMProvider[] {
         { id: 'o3-mini', capabilities: ['chat', 'code', 'reasoning'], maxTokens: 200000, costPer1kTokens: 1.1 },
       ],
     }));
+  }
+
+  const cloudflareKey = process.env.CLOUDFLARE_WORKERS_AI_API_TOKEN;
+  const cloudflareAccountId = process.env.CLOUDFLARE_WORKERS_AI_ACCOUNT_ID;
+  if (cloudflareKey && cloudflareAccountId) {
+    providers.push(new CloudflareProvider());
   }
 
   const openrouterKey = process.env.OPENROUTER_API_KEY;
@@ -107,18 +114,37 @@ export function buildProviderRegistry(): LLMProvider[] {
 
   const openwebUrl = process.env.OPENWEB_URL || process.env.OPENWEBUI_URL;
   if (openwebUrl) {
-    // Normalize OpenWebUI URL: strip trailing /v1 if present and prefer /api base so
-    // that endpoints like /api/models and /api/chat/completions are reachable.
     let openwebBase = openwebUrl.replace(/\/+$/, '');
     if (openwebBase.endsWith('/v1')) openwebBase = openwebBase.slice(0, -3);
     providers.push(new OpenAICompatibleProvider({
       id: 'openwebui',
-      name: 'OpenWebUI / Ollama',
+      name: 'OpenWebUI',
       apiBase: openwebBase,
       apiKey: process.env.OPENWEBUI_API_KEY,
       listModelsPath: process.env.OPENWEB_LIST_MODELS_PATH || process.env.OPENWEBUI_LIST_MODELS_PATH || '/models',
       chatCompletionsPath: process.env.OPENWEB_CHAT_PATH || process.env.OPENWEBUI_CHAT_PATH || '/chat/completions',
       completionsPath: process.env.OPENWEB_COMPLETIONS_PATH || process.env.OPENWEBUI_COMPLETIONS_PATH || '/completions',
+      defaultModels: [
+        { id: 'llama3.2', capabilities: ['chat'], maxTokens: 8192, costPer1kTokens: 0 },
+        { id: 'mistral', capabilities: ['chat'], maxTokens: 8192, costPer1kTokens: 0 },
+        { id: 'codellama', capabilities: ['chat', 'code'], maxTokens: 16384, costPer1kTokens: 0 },
+        { id: 'gemma2', capabilities: ['chat', 'reasoning'], maxTokens: 8192, costPer1kTokens: 0 },
+      ],
+    }));
+  }
+
+  const ollamaUrl = process.env.OLLAMA_API_BASE || process.env.OLLAMA_URL;
+  if (ollamaUrl) {
+    let ollamaBase = ollamaUrl.replace(/\/+$/, '');
+    if (!ollamaBase.endsWith('/v1')) ollamaBase = `${ollamaBase}/v1`;
+    providers.push(new OpenAICompatibleProvider({
+      id: 'ollama',
+      name: 'Ollama',
+      apiBase: ollamaBase,
+      apiKey: process.env.OLLAMA_API_KEY,
+      listModelsPath: process.env.OLLAMA_LIST_MODELS_PATH || '/models',
+      chatCompletionsPath: process.env.OLLAMA_CHAT_PATH || '/chat/completions',
+      completionsPath: process.env.OLLAMA_COMPLETIONS_PATH || '/completions',
       defaultModels: [
         { id: 'llama3.2', capabilities: ['chat'], maxTokens: 8192, costPer1kTokens: 0 },
         { id: 'mistral', capabilities: ['chat'], maxTokens: 8192, costPer1kTokens: 0 },

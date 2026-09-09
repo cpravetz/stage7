@@ -27,7 +27,10 @@ export class AssistantLoader {
   }
 
   async register(definition: AssistantDefinition): Promise<AssistantDefinition> {
-    const saved = await this.persistence.saveAssistant(definition);
+    // Ensure no `model` is persisted with assistant definitions
+    const defToSave = { ...(definition as any) } as any;
+    if (defToSave.model) delete defToSave.model;
+    const saved = await this.persistence.saveAssistant(defToSave as AssistantDefinition);
     this.assistants.set(saved.id, saved);
     logger.info({ assistantId: saved.id }, 'Assistant registered and persisted');
     return saved;
@@ -45,9 +48,12 @@ export class AssistantLoader {
   async update(assistantId: string, updates: Partial<AssistantDefinition>): Promise<AssistantDefinition | undefined> {
     const existing = this.assistants.get(assistantId);
     if (!existing) return undefined;
+    // Prevent persisting any `model` value on assistants
+    const sanitizedUpdates = { ...(updates as any) } as any;
+    if (sanitizedUpdates.model) delete sanitizedUpdates.model;
     const updated: AssistantDefinition = {
       ...existing,
-      ...updates,
+      ...sanitizedUpdates,
       id: existing.id,
       tenantId: existing.tenantId,
       updatedAt: new Date(),

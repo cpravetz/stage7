@@ -5,7 +5,6 @@ export interface AssistantDefinition {
   tenantId: string;
   name: string;
   description: string;
-  model: string;
   systemPrompt: string;
   knowledge?: Array<{ id: string; title: string; content: string; source?: string }>;
   transactionGuidance?: string[];
@@ -20,7 +19,6 @@ export interface AssistantTemplate {
   name: string;
   description: string;
   category: string;
-  model: string;
   systemPrompt: string;
   knowledge?: Array<{ id: string; title: string; content: string; source?: string }>;
   transactionGuidance?: string[];
@@ -36,7 +34,6 @@ export interface AssistantInstance {
   templateId?: string;
   name: string;
   description: string;
-  model: string;
   systemPrompt: string;
   knowledge?: Array<{ id: string; title: string; content: string; source?: string }>;
   transactionGuidance?: string[];

@@ -199,9 +199,12 @@ const Missions = () => {
             <span style={{ color: '#f59e0b' }}><strong>{counts.canceled}</strong> canceled</span>
             <span style={{ color: '#eab308' }}><strong>{counts.awaiting_review || 0}</strong> needs review</span>
             <span style={{ color: '#a78bfa' }}><strong>{counts.incomplete || 0}</strong> incomplete</span>
-            {!pendingApprovalsLoading && pendingApprovals.length > 0 && (
-              <span style={{ color: '#ef4444' }}><strong>{pendingApprovals.length}</strong> ⏳ awaiting your approval</span>
-            )}
+            {!pendingApprovalsLoading && pendingApprovals.length > 0 && (() => {
+              const missionIds = new Set(pendingApprovals.map((p) => p.missionId));
+              return (
+                <span style={{ color: '#ef4444' }}><strong>{missionIds.size}</strong> missions with ⏳ pending approval</span>
+              );
+            })()}
           </div>
           <button onClick={() => setShowCreate(true)}>+ Create Mission</button>
         </div>
@@ -256,11 +259,16 @@ const Missions = () => {
                   </tr>
                 ) : (
                   <>
-                    {filtered.map((m) => (
-                      <tr key={m.workflowId}>
-                        <td className="truncate">
-                          <Link to={`/missions/${encodeURIComponent(m.workflowId)}`}>{m.missionId}</Link>
-                        </td>
+                     {filtered.map((m) => (
+                       <tr key={m.workflowId} style={(m.status === 'awaiting_review' || pendingApprovals.some((p) => p.missionId === m.missionId)) ? { backgroundColor: '#fefce8', borderLeft: '3px solid #f59e0b' } : undefined}>
+                         <td className="truncate">
+                           <Link to={`/missions/${encodeURIComponent(m.workflowId)}`}>
+                             {(m.status === 'awaiting_review' || pendingApprovals.some((p) => p.missionId === m.missionId)) && (
+                               <span style={{ marginRight: '6px' }} title="Needs attention">🔔</span>
+                             )}
+                             {m.missionId}
+                           </Link>
+                         </td>
                         <td><span className={`badge ${m.status}`}>{m.status}</span></td>
                         <td>{formatTime(m.startedAt || m.timestamp)}</td>
                         <td>{formatDuration(m)}</td>

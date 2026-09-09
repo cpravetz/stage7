@@ -130,7 +130,7 @@ export class BrainService {
     const settings = await this.loadLlmSettings();
 
     // Build ordered candidate list and try providers/models until one succeeds.
-    const candidates = this.router.getCandidates({
+    let candidates = this.router.getCandidates({
       task: prompt,
       modelId: options.model,
       provider: options.provider,
@@ -138,6 +138,28 @@ export class BrainService {
       budget: options.budget,
       freeOnly: settings?.freeModelsOnly,
     });
+
+    // If no candidates found and we were preferring free models, retry without that constraint.
+    if ((!candidates || candidates.length === 0) && settings?.freeModelsOnly) {
+      logger.warn({ task: prompt.slice(0, 80) }, 'No free-model candidates found; retrying with paid models allowed');
+      candidates = this.router.getCandidates({
+        task: prompt,
+        modelId: options.model,
+        provider: options.provider,
+        maxTokens: options.maxTokens ?? 1024,
+        budget: options.budget,
+        freeOnly: false,
+      });
+    }
+
+    if (!candidates || candidates.length === 0) {
+      // As a last-resort fallback, allow any free chat-capable model from the registry.
+      const fallback = this.router.listModels().filter((m) => (m.costPer1kTokens === 0) && (m.capabilities.includes('chat') || m.capabilities.includes('creative')));
+      if (fallback.length > 0) {
+        logger.warn({ task: prompt.slice(0, 80), fallbackCount: fallback.length }, 'Using fallback free chat-capable models');
+        candidates = fallback;
+      }
+    }
 
     if (!candidates || candidates.length === 0) {
       const errMsg = 'No model available for the requested task. Ensure at least one LLM provider is configured with a valid API key.';
@@ -294,6 +316,38 @@ export class BrainService {
     }
 
     const finalErrMsg = lastErr instanceof Error ? lastErr.message : String(lastErr || 'All providers failed');
+
+    // As a last-resort, attempt one direct call to any free chat-capable model
+    try {
+      const fallbackModels = this.router.listModels().filter((m) => (m.costPer1kTokens === 0) && (m.capabilities.includes('chat') || m.capabilities.includes('creative')));
+      if (fallbackModels.length > 0) {
+        const candidate = fallbackModels[0];
+        const provider = this.providers.find((p) => p.id === candidate.provider);
+        if (provider && provider.isAvailable()) {
+          logger.info({ model: candidate.id, provider: provider.id }, 'Attempting last-resort direct completion with fallback model');
+          const req = {
+            model: candidate.id,
+            messages: messagesBase,
+            maxTokens: options.maxTokens ?? 1024,
+            temperature: options.temperature,
+          } as any;
+          const resp = await provider.complete(req as any);
+          const result: CompletionResult = {
+            content: resp.content,
+            model: resp.model || candidate.id,
+            provider: resp.provider || provider.id,
+            cached: false,
+            tokensUsed: resp.tokensUsed,
+          };
+          this.addLog({ type: 'completion', model: result.model, provider: result.provider, promptPreview, success: true, durationMs: Date.now() - startTime, tokensUsed: resp.tokensUsed });
+          await this.cache.set(cacheKey, result);
+          return result;
+        }
+      }
+    } catch (e) {
+      logger.warn({ err: e instanceof Error ? e.message : String(e) }, 'Fallback direct model attempt failed');
+    }
+
     this.addLog({
       type: 'error',
       model: options.model || 'auto',

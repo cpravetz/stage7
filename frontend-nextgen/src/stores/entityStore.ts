@@ -7,7 +7,6 @@ export interface Entity {
   description: string;
   type: 'assistant' | 'agent';
   status: string;
-  model: string;
   systemPrompt: string;
   tools: Array<{ name: string; description: string; inputSchema: Record<string, unknown> } | string>;
   knowledge?: Array<{ id: string; title: string; content: string; source?: string }>;
@@ -28,7 +27,6 @@ const normalizeEntity = (raw: Record<string, unknown>, type: 'assistant' | 'agen
   description: (raw.description as string) || '',
   type,
   status: (raw.status as string) || 'active',
-  model: (raw.model as string) || '',
   systemPrompt: (raw.systemPrompt as string) || '',
   tools: Array.isArray(raw.tools) ? raw.tools as Entity['tools'] : [],
   knowledge: Array.isArray(raw.knowledge) ? raw.knowledge as Entity['knowledge'] : [],

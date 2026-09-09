@@ -411,14 +411,133 @@ export class ToolExecutor {
         fetchOptions.body = JSON.stringify(input.body);
       }
 
-      const response = await fetch(url, fetchOptions);
+      let response: Response | null = null;
       let data: any;
       try {
-        data = await response.json();
-      } catch {
-        data = { text: await response.text() };
+        response = await fetch(url, fetchOptions);
+      } catch (err) {
+        // try localhost/127.0.0.1 fallback when direct fetch fails for local services
+        const errMsg = err instanceof Error ? err.message : String(err);
+        logger.warn({ url, err: errMsg }, 'Initial fetch failed for openapi tool; attempting localhost/127.0.0.1 fallback');
+        // first quick fallback: localhost -> 127.0.0.1
+        let tried = false;
+        if (url.includes('localhost')) {
+          const alt = url.replace('localhost', '127.0.0.1');
+          tried = true;
+          try {
+            response = await fetch(alt, fetchOptions);
+            logger.info({ url, alt }, 'Fetch succeeded with 127.0.0.1 fallback');
+          } catch (err2) {
+            const err2Msg = err2 instanceof Error ? err2.message : String(err2);
+            logger.warn({ url: alt, err: err2Msg }, '127.0.0.1 fallback failed, will try service env overrides');
+          }
+        }
+
+        // Next: try known service env overrides when running in compose/container networks
+        const svcEnvCandidates = [process.env.ARTIFACTS_URL, process.env.PERSISTENCE_URL, process.env.BRAIN_URL, process.env.WORKER_POOL_URL, process.env.AGENT_RUNTIME_URL];
+        const triedAlts: string[] = [];
+        if (!response) {
+          for (const base of svcEnvCandidates) {
+            if (!base) continue;
+            try {
+              // construct alt by replacing origin of original url with this base (keeping path)
+              const original = new URL(url);
+              const baseUrl = new URL(base);
+              const alt = `${baseUrl.origin}${original.pathname}${original.search}`;
+              triedAlts.push(alt);
+              try {
+                response = await fetch(alt, fetchOptions);
+                if (response && response.ok) {
+                  logger.info({ url, alt }, 'Fetch succeeded with service env override fallback');
+                  break;
+                }
+              } catch (err3) {
+                logger.warn({ alt, err: err3 instanceof Error ? err3.message : String(err3) }, 'Service env override fetch failed');
+              }
+            } catch (e) {
+              // ignore invalid URL constructions
+            }
+          }
+        }
+
+        if (!response) {
+          // As a last-resort, try running a small Python fetch via the CodeExecutor sandbox
+          try {
+            const pyHeaders = JSON.stringify(fetchOptions.headers || {});
+            const pyBody = fetchOptions.body ? JSON.stringify(JSON.parse(fetchOptions.body as string)) : null;
+            const pyCode = `import sys, json, urllib.request\n\nurl = ${JSON.stringify(url)}\nheaders = json.loads('''${pyHeaders}''')\nmethod = ${JSON.stringify(method)}\nbody = ${JSON.stringify(pyBody)}\n\nif body is not None and isinstance(body, str):\n    data = body.encode('utf-8')\nelse:\n    data = None\nreq = urllib.request.Request(url, data=data, headers=headers, method=method)\ntry:\n    with urllib.request.urlopen(req, timeout=10) as resp:\n        status = resp.getcode()\n        data = resp.read().decode('utf-8')\n    print(json.dumps({'status': status, 'data': data}))\nexcept Exception as e:\n    print(json.dumps({'error': str(e)}))\n    sys.exit(1)\n`;
+            const execResult = await this.codeExecutor.execute({ language: 'python', code: pyCode }, {} as any);
+            if (execResult.success && execResult.output) {
+              try {
+                const parsed = JSON.parse(execResult.output);
+                if (parsed && parsed.status) {
+                  return { status: parsed.status, data: parsed.data } as any;
+                }
+              } catch {
+                // fall through to throwing
+              }
+            }
+          } catch (pyErr) {
+            // ignore python fallback errors and throw the original fetch error below
+            logger.warn({ err: pyErr instanceof Error ? pyErr.message : String(pyErr) }, 'Python code-wrapper fallback failed');
+          }
+
+          const triedMsg = triedAlts.length > 0 ? `; tried overrides: ${triedAlts.join(',')}` : '';
+          throw new Error(`Fetch to ${url} failed: ${errMsg}${triedMsg}`);
+        }
       }
-      return { status: response.status, data };
+
+      if (response && !response.ok && url.includes('localhost')) {
+        // try swapping to 127.0.0.1 for some environments where localhost resolves differently
+        try {
+          const alt = url.includes('localhost') ? url.replace('localhost', '127.0.0.1') : url;
+          logger.info({ url, alt, status: response.status }, 'Non-OK response; retrying with alternate localhost host');
+          const retryRes = await fetch(alt, fetchOptions);
+          if (retryRes.ok) {
+            response = retryRes;
+          } else {
+            // keep original response
+          }
+        } catch (err) {
+          // ignore retry error and proceed to parse original response
+        }
+      }
+
+      try {
+        if (!response) {
+          data = { text: '' };
+        } else if ((response as any).bodyUsed) {
+          // body already consumed by another fetch attempt or handler; try to read as text safely
+          try {
+            const txt = await (response as any).text();
+            try {
+              data = JSON.parse(txt);
+            } catch {
+              data = { text: txt };
+            }
+          } catch {
+            data = { text: '' };
+          }
+        } else {
+          try {
+            data = await response.json();
+          } catch (jsonErr) {
+            try {
+              const txt = await response.text();
+              try {
+                data = JSON.parse(txt);
+              } catch {
+                data = { text: txt };
+              }
+            } catch {
+              data = { text: '' };
+            }
+          }
+        }
+      } catch {
+        data = { text: await (response ? response.text() : Promise.resolve('')) };
+      }
+      return { status: response ? response.status : 0, data };
     }
 
     if (tool.type === 'mcp' && manifest?.server) {

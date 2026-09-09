@@ -36,6 +36,15 @@ const Dashboard = () => {
   const missionsLoaded = useMissionsStore((s) => s.missionsLoaded);
   const deleteMission = useMissionsStore((s) => s.deleteMission);
   const fetchMissions = useMissionsStore((s) => s.fetchMissions);
+  const pendingApprovals = useMissionsStore((s) => s.pendingApprovals);
+
+  const [now, setNow] = useState(Date.now());
+  const hasRunning = missions.some((m) => m.status === 'running');
+  useEffect(() => {
+    if (!hasRunning) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [hasRunning]);
 
   const loadServices = useCallback(async () => {
     try {
@@ -142,9 +151,11 @@ const Dashboard = () => {
     status?: string;
     timestamp?: number;
   }) => {
-    if (!m.startedAt || !m.completedAt) return '—';
-    const ms =
-      new Date(m.completedAt).getTime() - new Date(m.startedAt).getTime();
+    if (!m.startedAt) return '—';
+    const started = new Date(m.startedAt).getTime();
+    if (Number.isNaN(started)) return '—';
+    const end = m.completedAt ? new Date(m.completedAt).getTime() : now;
+    const ms = end - started;
     if (ms < 1000) return `${ms}ms`;
     const s = Math.floor(ms / 1000);
     if (s < 60) return `${s}s`;
@@ -258,9 +269,12 @@ const Dashboard = () => {
                 </thead>
                 <tbody>
                   {missions.slice(0, 8).map((m) => (
-                    <tr key={m.workflowId}>
+                    <tr key={m.workflowId} style={(m.status === 'awaiting_review' || pendingApprovals.some((p) => p.missionId === m.missionId)) ? { backgroundColor: '#fefce8', borderLeft: '3px solid #f59e0b' } : undefined}>
                       <td className="truncate">
                         <Link to={`/missions/${encodeURIComponent(m.workflowId)}`}>
+                          {(m.status === 'awaiting_review' || pendingApprovals.some((p) => p.missionId === m.missionId)) && (
+                            <span style={{ marginRight: '6px' }} title="Needs attention">🔔</span>
+                          )}
                           {m.missionId}
                         </Link>
                       </td>

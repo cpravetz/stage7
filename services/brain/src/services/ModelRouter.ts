@@ -23,6 +23,8 @@ function inferCapabilities(task: string): string[] {
   for (const [cap, keywords] of Object.entries(CAPABILITY_KEYWORDS)) {
     if (keywords.some((kw) => lower.includes(kw))) {
       matched.add(cap);
+        // treat creative tasks as chat-capable as well (broad fallback)
+        if (cap === 'creative') matched.add('chat');
     }
   }
   if (matched.size === 0) matched.add('chat');

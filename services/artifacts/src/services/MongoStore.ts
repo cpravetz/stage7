@@ -256,11 +256,13 @@ export class MongoStore {
   async saveAssistant(definition: AssistantDefinition): Promise<AssistantDefinition> {
     const now = new Date();
     const existing = await this.assistants.findOne({ id: definition.id } as any);
+    // Persist assistant without any `model` property
+    const { model, ...rest } = definition as any;
     const assistant: AssistantDefinition = {
-      ...definition,
+      ...(rest as any),
       createdAt: (existing as any)?.createdAt || definition.createdAt || now,
       updatedAt: now,
-    };
+    } as any;
     await this.assistants.replaceOne({ id: assistant.id } as any, assistant as any, { upsert: true });
     logger.debug({ assistantId: definition.id }, 'Assistant saved');
     return assistant;

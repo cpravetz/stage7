@@ -302,9 +302,6 @@ const EntityWorkspace = () => {
           <h1>{entity.name}</h1>
           <span className={`badge ${entity.status}`}>{entity.status}</span>
           <span className="badge">{entity.type}</span>
-          {entity.metadata && typeof (entity.metadata as Record<string, unknown>).legacyPort !== 'undefined' && (
-            <span className="badge info">legacy port {String((entity.metadata as Record<string, unknown>).legacyPort)}</span>
-          )}
           {entity.metadata && typeof (entity.metadata as Record<string, unknown>).category !== 'undefined' && (
             <span className="badge info">{String((entity.metadata as Record<string, unknown>).category)}</span>
           )}
@@ -337,8 +334,7 @@ const EntityWorkspace = () => {
               <h3>Persona</h3>
               <p>{entity.description}</p>
              <div className="meta-grid">
-                 <div><strong>Model:</strong> {entity.model || '—'}</div>
-                 <div><strong>Tools Bound:</strong> {toolBindings.filter((t) => t.enabled).length}</div>
+               <div><strong>Tools Bound:</strong> {toolBindings.filter((t) => t.enabled).length}</div>
                  <div><strong>Knowledge Entries:</strong> {knowledgeEntries.length}</div>
                  <div><strong>Guidance Rules:</strong> {transactionGuidanceEntries.length}</div>
                  <div><strong>Memory Keys:</strong> {Object.keys(memoryContext).length}</div>
