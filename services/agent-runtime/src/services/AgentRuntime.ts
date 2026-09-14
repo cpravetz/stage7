@@ -10,6 +10,8 @@ import {
 
 export class AgentRuntime {
   private agents: Map<string, AgentDefinition> = new Map()
+  // missionId -> (agentId -> AgentDefinition)
+  private missionAgents: Map<string, Map<string, AgentDefinition>> = new Map()
   private states: Map<string, AgentState> = new Map()
   private tasks: Map<string, AgentTask> = new Map()
   private collaborations: Map<string, AgentCollaboration> = new Map()
@@ -20,10 +22,28 @@ export class AgentRuntime {
     logger.info({ agentId: definition.id }, 'Agent registered')
   }
 
+  registerAgentForMission(missionId: string, definition: AgentDefinition): AgentDefinition {
+    const map = this.missionAgents.get(missionId) || new Map<string, AgentDefinition>()
+    const id = definition.id || `${missionId}:agent-${uuidv4()}`
+    const defWithId = { ...definition, id }
+    map.set(id, defWithId)
+    this.missionAgents.set(missionId, map)
+    this.agents.set(id, defWithId)
+    logger.info({ agentId: id, missionId }, 'Agent registered for mission')
+    return defWithId
+  }
+
   unregisterAgent(agentId: string): boolean {
     const existed = this.agents.delete(agentId)
     this.states.delete(agentId)
     this.specializations.delete(agentId)
+    // remove from any mission mapping
+    for (const [missionId, map] of this.missionAgents.entries()) {
+      if (map.delete(agentId)) {
+        if (map.size === 0) this.missionAgents.delete(missionId)
+        break
+      }
+    }
     if (existed) {
       logger.info({ agentId }, 'Agent unregistered')
     }
@@ -38,6 +58,12 @@ export class AgentRuntime {
     const all = Array.from(this.agents.values())
     if (!tenantId) return all
     return all.filter((a) => a.tenantId === tenantId)
+  }
+
+  listAgentsForMission(missionId: string): AgentDefinition[] {
+    const map = this.missionAgents.get(missionId)
+    if (!map) return []
+    return Array.from(map.values())
   }
 
   startAgent(agentId: string, missionId: string): AgentState {

@@ -18,6 +18,14 @@ export class PersistentAgentRuntime {
     this.persistence = persistence;
   }
 
+  registerAgentForMission(missionId: string, definition: AgentDefinition): AgentDefinition {
+    return this.runtime.registerAgentForMission(missionId, definition)
+  }
+
+  listAgentsForMission(missionId: string): AgentDefinition[] {
+    return this.runtime.listAgentsForMission(missionId)
+  }
+
   async registerAgent(definition: AgentDefinition): Promise<AgentDefinition> {
     this.runtime.registerAgent(definition);
     logger.info({ agentId: definition.id, type: definition.type }, 'Agent registered (runtime-managed)');

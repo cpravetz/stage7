@@ -22,10 +22,9 @@ const REFRESH_INTERVAL = 20000;
 
 const Dashboard = () => {
   const [services, setServices] = useState<ServiceInfo[]>([]);
-  const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [agentsLoading, setAgentsLoading] = useState(true);
+  const [agentsLoading, setAgentsLoading] = useState(false);
 
   const feedEvents = useFeedStore((state) => state.events);
   const feedConnected = useFeedStore((state) => state.connected);
@@ -83,26 +82,17 @@ const Dashboard = () => {
   }, []);
 
   const loadAgents = useCallback(async () => {
-    setAgentsLoading(true);
-    try {
-      const data = await fetch(`/api/agent-runtime/agents`).then((r) => r.json());
-      setAgents(data.agents || []);
-    } catch {
-      setAgents([]);
-    } finally {
-      setAgentsLoading(false);
-    }
+    // Agents are mission-scoped and managed by Stage7; the dashboard shows agent counts derived from missions.
+    setAgentsLoading(false);
   }, []);
 
   useEffect(() => {
     ensureConnected();
     loadServices();
     fetchMissions();
-    loadAgents();
     const interval = setInterval(() => {
       loadServices();
       fetchMissions();
-      loadAgents();
     }, REFRESH_INTERVAL);
     return () => clearInterval(interval);
   }, [loadServices, fetchMissions, loadAgents, ensureConnected]);
@@ -117,9 +107,8 @@ const Dashboard = () => {
   const completedMissions = missions.filter((m) => m.status === 'completed').length;
   const failedMissions = missions.filter((m) => m.status === 'failed').length;
 
-  const activeAgents = agents.filter(
-    (a) => a.status === 'active' || a.status === 'running' || a.status === 'idle'
-  ).length;
+  // derive active agent count from running missions (agents are ephemeral per mission)
+  const activeAgents = runningMissions;
 
   const getStatusLabel = (status: string) => {
     switch (status) {

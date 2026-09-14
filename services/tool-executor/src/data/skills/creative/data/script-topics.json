@@ -1,0 +1,161 @@
+{
+  "_description": "Topic-specific scene templates with conflict and resolution patterns for script generation.",
+  "topics": {
+    "romance": {
+      "conflict": [
+        "misunderstanding",
+        "distance",
+        "rival",
+        "pride",
+        "timing",
+        "family"
+      ],
+      "resolution": [
+        "confession",
+        "reunion",
+        "sacrifice",
+        "understanding",
+        "patience",
+        "growth"
+      ],
+      "beats": [
+        "meet-cute",
+        "attraction",
+        "obstacle",
+        "crisis",
+        "climax",
+        "resolution"
+      ]
+    },
+    "thriller": {
+      "conflict": [
+        "chase",
+        "betrayal",
+        "secret",
+        "threat",
+        "trap",
+        "moral dilemma"
+      ],
+      "resolution": [
+        "escape",
+        "exposure",
+        "sacrifice",
+        "revenge",
+        "justice",
+        "twist"
+      ],
+      "beats": [
+        "setup",
+        "discovery",
+        "escalation",
+        "confrontation",
+        "climax",
+        "aftermath"
+      ]
+    },
+    "comedy": {
+      "conflict": [
+        "miscommunication",
+        "mistake",
+        "scheme",
+        "embarrassment",
+        "prank",
+        "quirk"
+      ],
+      "resolution": [
+        "realization",
+        "apology",
+        "laugh",
+        "lesson",
+        "growth",
+        "bond"
+      ],
+      "beats": [
+        "setup",
+        "confusion",
+        "escalation",
+        "climax",
+        "resolution",
+        "punchline"
+      ]
+    },
+    "drama": {
+      "conflict": [
+        "moral choice",
+        "family secret",
+        "loss",
+        "addiction",
+        "betrayal",
+        "expectation"
+      ],
+      "resolution": [
+        "acceptance",
+        "forgiveness",
+        "transformation",
+        "truth",
+        "reconciliation",
+        "moving on"
+      ],
+      "beats": [
+        "setup",
+        "tension",
+        "peak",
+        "crisis",
+        "climax",
+        "resolution"
+      ]
+    },
+    "action": {
+      "conflict": [
+        "battle",
+        "chase",
+        "race",
+        "confrontation",
+        "trap",
+        "rescue"
+      ],
+      "resolution": [
+        "victory",
+        "sacrifice",
+        "escape",
+        "triumph",
+        "defeat",
+        "new beginning"
+      ],
+      "beats": [
+        "setup",
+        "preparation",
+        "action",
+        "setback",
+        "climax",
+        "resolution"
+      ]
+    },
+    "horror": {
+      "conflict": [
+        "curse",
+        "possession",
+        "isolation",
+        "secret",
+        "threat",
+        "fear"
+      ],
+      "resolution": [
+        "defeat",
+        "escape",
+        "acceptance",
+        "trapped",
+        "cycle continues",
+        "revelation"
+      ],
+      "beats": [
+        "setup",
+        "discovery",
+        "escalation",
+        "confrontation",
+        "climax",
+        "aftermath"
+      ]
+    }
+  }
+}

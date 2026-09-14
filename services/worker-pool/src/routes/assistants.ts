@@ -4,11 +4,35 @@ import { AssistantDefinition, asyncHandler, NextGenError } from '@stage7-nextgen
 import { assistantLoader as loader, assistantExecutor as executor } from '../utils/sharedInstance';
 import { registerAssistantTools } from '../shared/mcp';
 
-const router: Router = Router();
+const toolExecutorUrl = process.env.TOOL_EXECUTOR_URL || 'http://tool-executor:3500';
 
-router.get('/health', (req, res) => {
-  res.json({ status: 'ok', service: 'worker-pool', assistants: loader.list().length });
-});
+async function validateAssistantTools(tools: any[] | undefined) {
+  if (!tools || !Array.isArray(tools)) return;
+  for (const t of tools) {
+    const name = typeof t === 'string' ? t : t.name;
+    if (!name) continue;
+    try {
+      const res = await fetch(`${toolExecutorUrl}/api/tool-executor/tools/${encodeURIComponent(name)}`);
+      if (res.status === 404) {
+        // not a registered global tool/skill — assume inline/custom tool, allow
+        continue;
+      }
+      if (!res.ok) {
+        throw new Error(`Tool registry returned ${res.status}`);
+      }
+      const tool = await res.json();
+      // If tool is registered but not a skill, disallow binding it as a skill/assistant-bound item
+      if (!(tool as any).isSkill) {
+        throw NextGenError.badRequest(`Cannot bind general tool '${name}' as a skill to an assistant`);
+      }
+    } catch (err) {
+      if (err instanceof NextGenError) throw err;
+      throw NextGenError.badRequest(`Tool validation failed for '${name}': ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+}
+
+const router: Router = Router();
 
 router.post('/assistants', asyncHandler(async (req, res) => {
   const definition = req.body as AssistantDefinition;
@@ -38,6 +62,9 @@ router.post('/assistants', asyncHandler(async (req, res) => {
   }
   // Ensure assistants never carry a persisted `model` property
   if ((definition as any).model) delete (definition as any).model;
+  // Validate provided tools/skills before saving
+  await validateAssistantTools(definition.tools);
+
   const saved = await loader.register(definition);
   if (saved.tools && saved.tools.length > 0) {
     registerAssistantTools(saved.tools);
@@ -62,6 +89,9 @@ router.put('/assistants/:id', asyncHandler(async (req, res) => {
   const updates = req.body as Partial<AssistantDefinition>;
   // Strip any user-supplied model override — assistants must not carry `model`
   if ((updates as any).model) delete (updates as any).model;
+  // validate any updated tools
+  await validateAssistantTools(updates.tools);
+
   const updated = await loader.update(req.params.id as string, updates);
   if (!updated) {
     throw NextGenError.notFound('Assistant not found');
@@ -109,7 +139,7 @@ router.post('/assistants/:id/tools/execute', asyncHandler(async (req, res) => {
   if (!name) {
     throw NextGenError.badRequest('Missing tool name');
   }
-  const result = await executor.executeToolCall({ name, arguments: args });
+  const result = await executor.executeToolCall({ name, arguments: args }, req.params.id as string);
   res.json(result);
 }));
 

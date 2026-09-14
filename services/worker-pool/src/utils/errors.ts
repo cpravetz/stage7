@@ -1,11 +1,21 @@
-export class WorkerPoolError extends Error {
+import { NextGenError } from '@stage7-nextgen/shared';
+
+export class WorkerPoolError extends NextGenError {
   constructor(
-    public statusCode: number,
+    statusCode: number,
     message: string,
-    public details?: any
+    details?: any,
   ) {
-    super(message);
+    super(message, statusCode, details);
     this.name = 'WorkerPoolError';
+  }
+
+  toJson(): any {
+    return {
+      statusCode: this.statusCode,
+      message: this.message,
+      details: this.details,
+    };
   }
 
   static badRequest(message = 'Bad Request', details?: any): WorkerPoolError {
@@ -22,13 +32,5 @@ export class WorkerPoolError extends Error {
 
   static poolFull(message = 'Worker pool is full'): WorkerPoolError {
     return new WorkerPoolError(429, message);
-  }
-
-  toJson() {
-    return {
-      statusCode: this.statusCode,
-      message: this.message,
-      details: this.details,
-    };
   }
 }

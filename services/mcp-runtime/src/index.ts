@@ -10,12 +10,15 @@ app.use(express.json());
 const TOOL_EXECUTOR_URL = process.env.TOOL_EXECUTOR_URL || 'http://tool-executor:3500';
 
 const executor: ToolExecutor = {
-  execute: async (name: string, args: Record<string, unknown>): Promise<MCPToolCallResponse> => {
+  execute: async (name: string, args: Record<string, unknown>, headers?: Record<string, string>): Promise<MCPToolCallResponse> => {
     logger.info({ toolName: name, args }, 'MCP tool execution requested');
     try {
-      const response = await fetch(`${TOOL_EXECUTOR_URL}/api/tools/execute`, {
+      const response = await fetch(`${TOOL_EXECUTOR_URL}/api/tool-executor/tools/execute`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(headers?.['x-assistant-id'] ? { 'X-Assistant-Id': headers['x-assistant-id'] } : {}),
+        },
         body: JSON.stringify({
           id: `tool-${Date.now()}`,
           name,
@@ -129,7 +132,11 @@ app.post('/api/mcp-runtime/mcp', async (req, res) => {
       res.status(404).json({ content: [{ type: 'error', error: `Tool not found: ${callReq.params.name}` }], isError: true });
       return;
     }
-    const result = await executor.execute(callReq.params.name, callReq.params.arguments || {});
+    const headers: Record<string, string> = {};
+    if (req.headers['x-assistant-id']) {
+      headers['x-assistant-id'] = req.headers['x-assistant-id'] as string;
+    }
+    const result = await executor.execute(callReq.params.name, callReq.params.arguments || {}, headers);
     res.json(result);
   } else {
     res.status(400).json({ content: [{ type: 'error', error: `Unknown method: ${(req.body as { method?: string }).method}` }], isError: true });

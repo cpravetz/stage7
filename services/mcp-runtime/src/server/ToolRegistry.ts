@@ -2,7 +2,7 @@ import { MCPTool, MCPToolCallRequest, MCPToolCallResponse, MCPListToolsRequest, 
 import { logger } from '../utils/logger';
 
 export interface ToolExecutor {
-  execute(name: string, args: Record<string, unknown>): Promise<MCPToolCallResponse>;
+  execute(name: string, args: Record<string, unknown>, headers?: Record<string, string>): Promise<MCPToolCallResponse>;
 }
 
 export class MCPToolRegistry {
@@ -34,7 +34,7 @@ export class MCPToolRegistry {
     return this.tools.get(name);
   }
 
-  async call(request: MCPToolCallRequest): Promise<MCPToolCallResponse> {
+  async call(request: MCPToolCallRequest, headers?: Record<string, string>): Promise<MCPToolCallResponse> {
     const tool = this.tools.get(request.params.name);
     if (!tool) {
       return {
@@ -42,7 +42,7 @@ export class MCPToolRegistry {
         isError: true,
       };
     }
-    return this.executor.execute(request.params.name, request.params.arguments || {});
+    return this.executor.execute(request.params.name, request.params.arguments || {}, headers);
   }
 
   has(name: string): boolean {

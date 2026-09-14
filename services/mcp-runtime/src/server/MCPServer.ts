@@ -12,7 +12,7 @@ export class MCPServer {
   private name: string;
   private version: string;
 
-  constructor(options: MCPServerOptions, executor: { execute: (name: string, args: Record<string, unknown>) => Promise<MCPToolCallResponse> }) {
+  constructor(options: MCPServerOptions, executor: { execute: (name: string, args: Record<string, unknown>, headers?: Record<string, string>) => Promise<MCPToolCallResponse> }) {
     this.name = options.name;
     this.version = options.version;
     this.registry = new MCPToolRegistry(executor);

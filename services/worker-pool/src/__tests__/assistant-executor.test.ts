@@ -19,7 +19,7 @@ beforeAll(() => {
         text: async () => '',
       } as any;
     }
-    if (urlStr.includes('/api/tools/execute')) {
+    if (urlStr.includes('/api/tool-executor/tools/execute')) {
       const body = JSON.parse(init.body);
       const toolName = body.name || 'tool';
       if (toolName === 'unknown_tool') {
@@ -129,7 +129,7 @@ describe('AssistantExecutor', () => {
             text: async () => '',
           } as any;
         }
-        if (urlStr.includes('/api/tools/execute')) {
+        if (urlStr.includes('/api/tool-executor/tools/execute')) {
           const body = JSON.parse(init.body);
           const toolName = body.name || 'tool';
           if (toolName === 'unknown_tool') {

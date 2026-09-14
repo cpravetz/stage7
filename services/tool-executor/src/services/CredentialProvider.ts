@@ -10,6 +10,10 @@ export interface CredentialSource {
   configKey?: string;
 }
 
+export interface NamedCredentialSource extends CredentialSource {
+  logicalKey: string;
+}
+
 export class CredentialProvider {
   private cache: Map<string, { value: string; expiresAt: number }> = new Map();
   private readonly TTL_MS = 5 * 60 * 1000;
@@ -38,11 +42,11 @@ export class CredentialProvider {
     return value;
   }
 
-  async resolveAll(sources: CredentialSource[]): Promise<ToolCredentials> {
+  async resolveAll(sources: NamedCredentialSource[]): Promise<ToolCredentials> {
     const creds: ToolCredentials = {};
     for (const source of sources) {
-      const key = source.vaultSecretId || source.envVar || source.configKey || '';
-      creds[key] = await this.resolve(source);
+      const value = await this.resolve(source);
+      creds[source.logicalKey] = value;
     }
     return creds;
   }

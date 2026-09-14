@@ -220,17 +220,76 @@ const Persistence = () => {
                               {a.phaseId && <span className="muted">phase: {a.phaseId}</span>}
                               {a.taskId && <span className="muted">task: {a.taskId}</span>}
                             </div>
-                            {a.content && (
-                              <pre className="code-block">
-                                {a.content.length > 600
-                                  ? a.content.slice(0, 600) + '…'
-                                  : a.content}
-                              </pre>
-                            )}
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                      {a.content && (
+                                        <pre className="code-block">
+                                          {a.content.length > 600
+                                            ? a.content.slice(0, 600) + '…'
+                                            : a.content}
+                                        </pre>
+                                      )}
+                                      <div style={{ display: 'flex', gap: 8 }}>
+                                        {(a.content || (a as any).url) && (
+                                          <>
+                                            <button
+                                              onClick={() => {
+                                                if ((a as any).url) {
+                                                  window.open((a as any).url, '_blank');
+                                                } else {
+                                                  const blob = new Blob([a.content || ''], { type: 'text/plain' });
+                                                  const url = URL.createObjectURL(blob);
+                                                  window.open(url, '_blank');
+                                                }
+                                              }}
+                                            >Open</button>
+                                            <button
+                                              onClick={() => {
+                                                if ((a as any).url) {
+                                                  const aEl = document.createElement('a');
+                                                  aEl.href = (a as any).url;
+                                                  aEl.target = '_blank';
+                                                  document.body.appendChild(aEl);
+                                                  aEl.click();
+                                                  aEl.remove();
+                                                } else {
+                                                  const blob = new Blob([a.content || ''], { type: 'text/plain' });
+                                                  const url = URL.createObjectURL(blob);
+                                                  const aEl = document.createElement('a');
+                                                  aEl.href = url;
+                                                  aEl.download = (a.name || 'artifact') + '.txt';
+                                                  document.body.appendChild(aEl);
+                                                  aEl.click();
+                                                  aEl.remove();
+                                                  URL.revokeObjectURL(url);
+                                                }
+                                              }}
+                                            >Download</button>
+                                          </>
+                                        )}
+                                      </div>
+                                    </div>
                           </li>
                         ))}
                       </ul>
                     )}
+                            <div style={{ marginTop: 8 }}>
+                              <label style={{ fontSize: 13 }}>
+                                Upload artifact: <input type="file" onChange={async (e) => {
+                                  const file = e.target.files?.[0];
+                                  if (!file) return;
+                                  const text = await file.text();
+                                  try {
+                                    await postJSON(`/api/artifacts/missions/${encodeURIComponent(m.missionId)}/artifacts`, {
+                                      name: file.name,
+                                      content: text,
+                                      type: file.type || 'text/plain',
+                                    });
+                                    await loadMissionsWithArtifacts();
+                                  } catch (err) {
+                                    window.alert(err instanceof Error ? err.message : 'Upload failed');
+                                  }
+                                }} /></label>
+                            </div>
                   </div>
                 );
               })}

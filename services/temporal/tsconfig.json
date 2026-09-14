@@ -15,6 +15,7 @@
     "sourceMap": true,
     "incremental": true,
     "baseUrl": ".",
+    "rootDir": "./src",
     "types": ["node", "jest"]
   },
   "include": [

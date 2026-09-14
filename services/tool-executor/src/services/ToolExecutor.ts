@@ -2,13 +2,13 @@ import { Tool, ToolExecution, CredentialRequest, CredentialRequiredError } from 
 import logger from '../utils/logger';
 import { EmailExecutor } from '../executors/EmailExecutor';
 import { SearchExecutor } from '../executors/SearchExecutor';
-import { CodeExecutor } from '../executors/CodeExecutor';
+import { CodeExecutor, CodeExecutorCredentials } from '../executors/CodeExecutor';
 import { FtpExecutor, FtpExecutionOptions } from '../executors/FtpExecutor';
 import { WebhookExecutor, WebhookDispatchOptions } from '../executors/WebhookExecutor';
 import { DatabaseExecutor, DatabaseQueryOptions } from '../executors/DatabaseExecutor';
 import { FileStorageExecutor, FileStorageOptions } from '../executors/FileStorageExecutor';
 import { VendorApiExecutor } from '../executors/VendorApiExecutor';
-import { credentialProvider } from '../services/CredentialProvider';
+import { credentialProvider, NamedCredentialSource } from '../services/CredentialProvider';
 import { PluginGenerator } from '../services/PluginGenerator';
 import { ToolDiscovery } from '../services/ToolDiscovery';
 import { MCPClient, MCPHTTPClient, MCPServerConfig } from '../services/MCPClient';
@@ -60,8 +60,9 @@ export class ToolExecutor {
     logger.info({ executionId, toolId: tool.id, toolName: tool.name, toolType: tool.type }, 'Tool execution started');
 
     try {
-      const credentials = await this.resolveCredentials(tool, input);
-      const output = await this.dispatch(tool, input, credentials);
+      const { resolved, sources } = await this.resolveCredentials(tool, input);
+      const output = await this.dispatch(tool, input, { resolved, sources });
+      this.pendingCredentialOverrides.delete(tool.id);
       const completedAt = new Date();
 
       logger.info({ executionId, toolId: tool.id, status: 'completed' }, 'Tool execution completed');
@@ -104,8 +105,9 @@ export class ToolExecutor {
     }
 
     try {
-      const credentials = await this.resolveCredentials(tool, input);
-      const output = await this.dispatch(tool, input, credentials);
+      const { resolved, sources } = await this.resolveCredentials(tool, input);
+      const output = await this.dispatch(tool, input, { resolved, sources });
+      this.pendingCredentialOverrides.delete(tool.id);
       const completedAt = new Date();
 
       logger.info({ executionId, toolId: tool.id, status: 'completed' }, 'Tool execution completed');
@@ -297,31 +299,36 @@ export class ToolExecutor {
     return discovered;
   }
 
-  private async resolveCredentials(tool: Tool, _input: Record<string, unknown>): Promise<Record<string, string | undefined>> {
+  private async resolveCredentials(tool: Tool, _input: Record<string, unknown>): Promise<{ resolved: Record<string, string | undefined>; sources: NamedCredentialSource[] }> {
     const manifest = tool.manifest as Record<string, unknown> | undefined;
-    const credentialSources: Array<{ key: string; label?: string; source: { vaultSecretId?: string; envVar?: string; configKey?: string } }> = [];
+    const credentialSources: Array<{ logicalKey: string; label?: string; source: { vaultSecretId?: string; envVar?: string; configKey?: string } }> = [];
 
     if (manifest?.credentialSource && typeof manifest.credentialSource === 'object') {
       const cs = manifest.credentialSource as Record<string, { vaultSecretId?: string; envVar?: string; configKey?: string }>;
-      for (const [key, source] of Object.entries(cs)) {
+      for (const [logicalKey, source] of Object.entries(cs)) {
         if (source && typeof source === 'object') {
           const s = source as { vaultSecretId?: string; envVar?: string; configKey?: string };
-          credentialSources.push({ key, label: key, source: s });
+          credentialSources.push({ logicalKey, label: logicalKey, source: s });
         }
       }
     }
 
-    const sources = credentialSources.map((c) => c.source);
-    const resolved = await credentialProvider.resolveAll(sources);
+    const namedSources: NamedCredentialSource[] = credentialSources.map(c => ({
+      logicalKey: c.logicalKey,
+      vaultSecretId: c.source.vaultSecretId,
+      envVar: c.source.envVar,
+      configKey: c.source.configKey,
+    }));
+    const resolved = await credentialProvider.resolveAll(namedSources);
 
     const overrides = this.pendingCredentialOverrides.get(tool.id) || {};
     const merged = { ...resolved, ...overrides };
 
     const missing = credentialSources
-      .filter((c) => !merged[c.key])
+      .filter((c) => !merged[c.logicalKey])
       .map((c) => ({
-        key: c.key,
-        label: c.label || c.key,
+        key: c.logicalKey,
+        label: c.label || c.logicalKey,
         source: c.source,
       }));
 
@@ -336,10 +343,11 @@ export class ToolExecutor {
       throw new CredentialRequiredError(request);
     }
 
-    return merged;
+    return { resolved: merged, sources: namedSources };
   }
 
-  private async dispatch(tool: Tool, input: Record<string, unknown>, credentials: Record<string, string | undefined>): Promise<Record<string, unknown>> {
+  private async dispatch(tool: Tool, input: Record<string, unknown>, credentials: { resolved: Record<string, string | undefined>; sources: NamedCredentialSource[] }): Promise<Record<string, unknown>> {
+    const { resolved, sources } = credentials;
     const name = tool.name.toLowerCase();
     const manifest = tool.manifest as Record<string, unknown> | undefined;
     const capabilities = Array.isArray(manifest?.capabilities) ? manifest.capabilities as string[] : [];
@@ -359,8 +367,8 @@ export class ToolExecutor {
 
       while (healingAttempts <= MAX_HEALING_ATTEMPTS) {
         const result = await this.codeExecutor.execute(
-          { language: language as 'javascript' | 'typescript' | 'python', code: codeToRun },
-          credentials,
+          { language: language as 'javascript' | 'typescript' | 'python', code: codeToRun, input },
+          { resolved, sources } as CodeExecutorCredentials,
         );
 
         if (result.success) {
@@ -401,8 +409,8 @@ export class ToolExecutor {
         method,
         headers: {
           'Content-Type': 'application/json',
-          ...(credentials.Authorization ? { Authorization: credentials.Authorization } : {}),
-          ...(credentials['api-key'] ? { 'api-key': credentials['api-key'] } : {}),
+          ...(resolved.Authorization ? { Authorization: resolved.Authorization } : {}),
+          ...(resolved['api-key'] ? { 'api-key': resolved['api-key'] } : {}),
           ...(manifest.headers as Record<string, string> || {}),
         },
       };
@@ -416,10 +424,8 @@ export class ToolExecutor {
       try {
         response = await fetch(url, fetchOptions);
       } catch (err) {
-        // try localhost/127.0.0.1 fallback when direct fetch fails for local services
         const errMsg = err instanceof Error ? err.message : String(err);
         logger.warn({ url, err: errMsg }, 'Initial fetch failed for openapi tool; attempting localhost/127.0.0.1 fallback');
-        // first quick fallback: localhost -> 127.0.0.1
         let tried = false;
         if (url.includes('localhost')) {
           const alt = url.replace('localhost', '127.0.0.1');
@@ -433,14 +439,12 @@ export class ToolExecutor {
           }
         }
 
-        // Next: try known service env overrides when running in compose/container networks
         const svcEnvCandidates = [process.env.ARTIFACTS_URL, process.env.PERSISTENCE_URL, process.env.BRAIN_URL, process.env.WORKER_POOL_URL, process.env.AGENT_RUNTIME_URL];
         const triedAlts: string[] = [];
         if (!response) {
           for (const base of svcEnvCandidates) {
             if (!base) continue;
             try {
-              // construct alt by replacing origin of original url with this base (keeping path)
               const original = new URL(url);
               const baseUrl = new URL(base);
               const alt = `${baseUrl.origin}${original.pathname}${original.search}`;
@@ -461,7 +465,6 @@ export class ToolExecutor {
         }
 
         if (!response) {
-          // As a last-resort, try running a small Python fetch via the CodeExecutor sandbox
           try {
             const pyHeaders = JSON.stringify(fetchOptions.headers || {});
             const pyBody = fetchOptions.body ? JSON.stringify(JSON.parse(fetchOptions.body as string)) : null;
@@ -478,7 +481,6 @@ export class ToolExecutor {
               }
             }
           } catch (pyErr) {
-            // ignore python fallback errors and throw the original fetch error below
             logger.warn({ err: pyErr instanceof Error ? pyErr.message : String(pyErr) }, 'Python code-wrapper fallback failed');
           }
 
@@ -488,7 +490,6 @@ export class ToolExecutor {
       }
 
       if (response && !response.ok && url.includes('localhost')) {
-        // try swapping to 127.0.0.1 for some environments where localhost resolves differently
         try {
           const alt = url.includes('localhost') ? url.replace('localhost', '127.0.0.1') : url;
           logger.info({ url, alt, status: response.status }, 'Non-OK response; retrying with alternate localhost host');
@@ -507,7 +508,6 @@ export class ToolExecutor {
         if (!response) {
           data = { text: '' };
         } else if ((response as any).bodyUsed) {
-          // body already consumed by another fetch attempt or handler; try to read as text safely
           try {
             const txt = await (response as any).text();
             try {
@@ -570,7 +570,7 @@ export class ToolExecutor {
           localPath: input.localPath as string,
           content: input.content as string,
         },
-        credentials,
+        resolved,
       );
 
       if (!result.success) {
@@ -592,7 +592,7 @@ export class ToolExecutor {
           retries: (input.retries as number) || 3,
           timeoutMs: (input.timeoutMs as number) || 10000,
         },
-        credentials,
+        resolved,
       );
 
       if (!result.success) {
@@ -616,7 +616,7 @@ export class ToolExecutor {
           params: input.params as unknown[],
           timeoutMs: (input.timeoutMs as number) || 30000,
         },
-        credentials,
+        resolved,
       );
 
       if (!result.success) {
@@ -634,7 +634,7 @@ export class ToolExecutor {
           content: input.content as string,
           bucket: input.bucket as string,
         },
-        credentials,
+        resolved,
       );
 
       if (!result.success) {
@@ -655,7 +655,7 @@ export class ToolExecutor {
           operation: (input.operation as string) || 'query',
           input,
         },
-        credentials,
+        resolved,
       );
 
       if (!result.success) {
@@ -675,7 +675,7 @@ export class ToolExecutor {
           from: (input.from as string),
           attachments: (input.attachments as Array<{ filename?: string; content?: string | Buffer; path?: string }>) || [],
         },
-        credentials,
+        resolved,
       );
 
       if (!result.success) {
@@ -692,7 +692,7 @@ export class ToolExecutor {
           maxResults: (input.maxResults as number) || (input.max_results as number) || 10,
           searchType: (input.searchType as 'web' | 'images' | 'news') || 'web',
         },
-        credentials,
+        resolved,
       );
 
       if (!result.success) {
@@ -736,7 +736,7 @@ export class ToolExecutor {
           logger.info({ toolId: generated.tool.id, deployPath: deployed.deployPath }, 'Auto-generated plugin deployed');
           const retryResult = await this.codeExecutor.execute(
             { language: 'javascript', code: (generated.tool.manifest as Record<string, unknown>)?.sourceCode as string || '' },
-            credentials,
+            { resolved, sources } as CodeExecutorCredentials,
           );
           if (retryResult.success) {
             return {

@@ -16,13 +16,17 @@ export class AssistantExecutor {
   async execute(
     definition: AssistantDefinition,
     prompt: string,
-    _context?: Record<string, unknown>,
+    context?: Record<string, unknown>,
   ): Promise<AssistantExecutionResult> {
     const start = Date.now();
     logger.info(
       { assistantId: definition.id, promptLength: prompt.length },
       'Assistant execution started',
     );
+
+    const contextBlock = context && Object.keys(context).length > 0
+      ? `\n\nRuntime Context:\n${JSON.stringify(context, null, 2)}`
+      : '';
 
     const knowledgeBlock = definition.knowledge && definition.knowledge.length > 0
       ? `\n\nKnowledge Base:\n${definition.knowledge.map((k) => `- ${k.title}: ${k.content}`).join('\n')}`
@@ -36,7 +40,7 @@ export class AssistantExecutor {
       ? `\n\nAvailable tools:\n${definition.tools.map((t) => `- ${t.name}: ${t.description}`).join('\n')}\n\nTo use a tool, respond with ONLY a JSON object in this exact format:\n{"tool":"tool-name","args":{...}}`
       : '\n\nNo tools are available. Answer directly.';
 
-    const systemPrompt = `${definition.systemPrompt}${knowledgeBlock}${transactionBlock}${toolsContext}`;
+    const systemPrompt = `${definition.systemPrompt}${contextBlock}${knowledgeBlock}${transactionBlock}${toolsContext}`;
 
     const maxIterations = Math.max(1, Number(definition.metadata?.maxIterations) || 8);
     const conversation: Array<{ role: string; content: string }> = [{ role: 'user', content: prompt }];
@@ -86,7 +90,7 @@ export class AssistantExecutor {
           { assistantId: definition.id, toolName: toolCall.name, args: toolCall.arguments },
           'Assistant requested tool execution',
         );
-        const toolResult = await this.executeToolCall(toolCall);
+        const toolResult = await this.executeToolCall(toolCall, definition.id);
         lastToolResultText = toolResult.content.map((c) => c.text || c.error || '').join('\n');
         const feedback = toolResult.isError
           ? `The tool "${toolCall.name}" returned an error:\n${lastToolResultText}\nCorrect your approach, retry with fixed arguments, or produce a final answer.`
@@ -157,13 +161,15 @@ export class AssistantExecutor {
   }
 
 
-  async executeToolCall(tool: MCPToolCall): Promise<MCPToolResult> {
+  async executeToolCall(tool: MCPToolCall, assistantId?: string): Promise<MCPToolResult> {
     logger.info({ toolName: tool.name, arguments: tool.arguments }, 'Tool execution requested');
 
     try {
-      const response = await fetch(`${this.toolExecutorUrl}/api/tools/execute`, {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (assistantId) headers['X-Assistant-Id'] = assistantId;
+      const response = await fetch(`${this.toolExecutorUrl}/api/tool-executor/tools/execute`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           id: `tool-${Date.now()}`,
           name: tool.name,
@@ -244,7 +250,7 @@ export class AssistantExecutor {
     logger.info({ toolName, arguments: arguments_, credentialsProvided: Object.keys(credentials).length }, 'Providing credentials for tool');
 
     try {
-      const response = await fetch(`${this.toolExecutorUrl}/api/tools/execute`, {
+      const response = await fetch(`${this.toolExecutorUrl}/api/tool-executor/tools/execute`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

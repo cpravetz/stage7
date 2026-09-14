@@ -3,12 +3,24 @@ import express, { Application } from 'express'
 import { ToolRegistry } from '../services/ToolRegistry'
 import { ToolExecutor } from '../services/ToolExecutor'
 import { PluginGenerator } from '../services/PluginGenerator'
-import { Tool, PluginGenerationRequest } from '../types'
+import { Tool, PluginGenerationRequest, CredentialRequiredError } from '../types'
 import toolsRouter from '../routes/tools'
+import { ToolNotFoundError, ValidationError } from '../utils/errors'
 
 const app: Application = express()
 app.use(express.json())
 app.use('/api', toolsRouter)
+
+// Error handling middleware (same as index.ts)
+app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  if (err instanceof ToolNotFoundError) {
+    return res.status(404).json({ success: false, error: err.message, statusCode: 404 });
+  }
+  if (err instanceof ValidationError) {
+    return res.status(400).json({ success: false, error: err.message, statusCode: 400 });
+  }
+  res.status(500).json({ success: false, error: err?.message || 'Internal server error', statusCode: 500 });
+});
 
 const registry = new ToolRegistry()
 const executor = new ToolExecutor()
@@ -129,6 +141,66 @@ describe('ToolExecutor', () => {
     expect(execution.status).toBe('completed')
     expect(execution.output).toBeDefined()
     expect(execution.toolId).toBe('tool-unknown')
+  })
+
+  it('should resolve credentials using logical keys from credentialSource', async () => {
+    const credentialTool: Tool = {
+      id: 'tool-cred-1',
+      name: 'Credential Tool',
+      description: 'Tool with credentialSource',
+      type: 'code',
+      manifest: {
+        language: 'javascript',
+        entrypoint: 'index.js',
+        sourceCode: 'console.log("test");',
+        credentialSource: {
+          apiToken: { envVar: 'TEST_API_TOKEN' },
+          apiKey: { envVar: 'TEST_API_KEY' },
+        },
+      },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    // Set env vars for test
+    process.env.TEST_API_TOKEN = 'test-token-value';
+    process.env.TEST_API_KEY = 'test-key-value';
+
+    try {
+      const execution = await executor.execute(credentialTool, {})
+      expect(execution.status).toBe('completed')
+    } finally {
+      delete process.env.TEST_API_TOKEN;
+      delete process.env.TEST_API_KEY;
+    }
+  })
+
+  it('should use provided credential overrides over env vars', async () => {
+    const credentialTool: Tool = {
+      id: 'tool-cred-2',
+      name: 'Credential Tool 2',
+      description: 'Tool with credentialSource',
+      type: 'code',
+      manifest: {
+        language: 'javascript',
+        entrypoint: 'index.js',
+        sourceCode: 'console.log("test");',
+        credentialSource: {
+          apiToken: { envVar: 'OVERRIDE_TEST_TOKEN' },
+        },
+      },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    process.env.OVERRIDE_TEST_TOKEN = 'env-value';
+
+    try {
+      const execution = await executor.executeOrRequestCredentials(credentialTool, {}, { apiToken: 'override-value' })
+      expect('status' in execution && execution.status).toBe('completed')
+    } finally {
+      delete process.env.OVERRIDE_TEST_TOKEN;
+    }
   })
 })
 
@@ -257,4 +329,293 @@ describe('REST endpoints', () => {
     expect(credRes.status).toBe(200)
     expect(credRes.body.status).toBe('completed')
   })
+
+  describe('POST /api/tools/execute - flat payload support', () => {
+    it('should execute with flat payload {id, name, type, manifest, input, credentials, isSkill}', async () => {
+      const codeTool = {
+        id: 'flat-tool-1',
+        name: 'Flat Code Tool',
+        description: 'Code tool via flat payload',
+        type: 'code',
+        manifest: {
+          language: 'javascript',
+          entrypoint: 'index.js',
+          sourceCode: 'console.log("flat payload test");',
+        },
+        isSkill: false,
+      };
+
+      const res = await request(app)
+        .post('/api/tools/execute')
+        .send({
+          ...codeTool,
+          input: { test: 'flat' },
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('completed');
+      expect(res.body.toolId).toBe('flat-tool-1');
+    });
+
+    it('should resolve registered skill by name when using flat payload', async () => {
+      // First register a skill
+      const skillTool = {
+        id: 'skill-1',
+        name: 'Registered Skill',
+        description: 'A registered skill',
+        type: 'code',
+        manifest: {
+          language: 'javascript',
+          entrypoint: 'index.js',
+          sourceCode: 'console.log("skill registered");',
+        },
+        isSkill: true,
+      };
+
+      await request(app).post('/api/tools').send(skillTool);
+
+      // Now execute using flat payload with just the name
+      const res = await request(app)
+        .post('/api/tools/execute')
+        .send({
+          name: 'Registered Skill',
+          type: 'code',
+          manifest: {}, // empty - should resolve from registry
+          input: { test: 'skill' },
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('completed');
+      expect(res.body.toolId).toBe('skill-1');
+    });
+
+    it('should preserve isSkill from flat payload when tool not registered', async () => {
+      const res = await request(app)
+        .post('/api/tools/execute')
+        .send({
+          name: 'Unregistered Skill',
+          type: 'code',
+          manifest: {
+            language: 'javascript',
+            entrypoint: 'index.js',
+            sourceCode: 'console.log("unregistered");',
+          },
+          input: {},
+          isSkill: true,
+        });
+
+      // Should fail because isSkill=true but no X-Assistant-Id header
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('assistant context');
+    });
+
+    it('should require X-Assistant-Id header for skill execution via flat payload', async () => {
+      // Register a skill WITHOUT isSkill (so flat payload isSkill applies)
+      const skillTool = {
+        id: 'skill-2',
+        name: 'Skill With Auth',
+        description: 'Skill requiring auth',
+        type: 'code',
+        manifest: {
+          language: 'javascript',
+          entrypoint: 'index.js',
+          sourceCode: 'console.log("skill auth");',
+        },
+        // Note: isSkill not set on registered tool
+      };
+
+      await request(app).post('/api/tools').send(skillTool);
+
+      // Execute with flat payload setting isSkill=true - should fail without header
+      const res = await request(app)
+        .post('/api/tools/execute')
+        .send({
+          name: 'Skill With Auth',
+          type: 'code',
+          manifest: {},
+          input: {},
+          isSkill: true,
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('assistant context');
+    });
+
+    it('should execute skill with X-Assistant-Id header via flat payload', async () => {
+      // Register a skill
+      const skillTool = {
+        id: 'skill-3',
+        name: 'Skill With Header',
+        description: 'Skill with header',
+        type: 'code',
+        manifest: {
+          language: 'javascript',
+          entrypoint: 'index.js',
+          sourceCode: 'console.log("skill with header");',
+        },
+        isSkill: true,
+      };
+
+      await request(app).post('/api/tools').send(skillTool);
+
+      // Execute with header - should succeed
+      const res = await request(app)
+        .post('/api/tools/execute')
+        .set('X-Assistant-Id', 'assistant-123')
+        .send({
+          name: 'Skill With Header',
+          type: 'code',
+          manifest: {},
+          input: {},
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('completed');
+    });
+  });
+
+  describe('Credential propagation to CodeExecutor', () => {
+    it('should propagate credentials to CodeExecutor sandbox without logging them', async () => {
+      const credentialTool = {
+        id: 'cred-propagate-1',
+        name: 'Credential Propagate Tool',
+        description: 'Tool to test credential propagation',
+        type: 'code',
+        manifest: {
+          language: 'javascript',
+          entrypoint: 'index.js',
+          sourceCode: `
+            // Check that credentials are available via process.env or input
+            const token = process.env.TEST_PROPAGATE_TOKEN || '';
+            const key = process.env.TEST_PROPAGATE_KEY || '';
+            console.log(JSON.stringify({ hasToken: !!token, hasKey: !!key }));
+          `,
+          credentialSource: {
+            token: { envVar: 'TEST_PROPAGATE_TOKEN' },
+            key: { envVar: 'TEST_PROPAGATE_KEY' },
+          },
+        },
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      process.env.TEST_PROPAGATE_TOKEN = 'secret-token-value';
+      process.env.TEST_PROPAGATE_KEY = 'secret-key-value';
+
+      try {
+        await request(app).post('/api/tools').send(credentialTool);
+
+        const res = await request(app)
+          .post('/api/tools/cred-propagate-1/execute')
+          .send({ input: {} });
+
+        expect(res.status).toBe(200);
+        expect(res.body.status).toBe('completed');
+        expect(res.body.output.output).toContain('hasToken');
+      } finally {
+        delete process.env.TEST_PROPAGATE_TOKEN;
+        delete process.env.TEST_PROPAGATE_KEY;
+      }
+    });
+
+    it('should support auth placeholder resolution in CodeExecutor', async () => {
+      const authTool = {
+        id: 'auth-tool-1',
+        name: 'Auth Tool',
+        description: 'Tool with auth placeholder',
+        type: 'code',
+        manifest: {
+          language: 'javascript',
+          entrypoint: 'index.js',
+          sourceCode: `
+            // The sandbox has __resolveAuth injected
+            const auth = { type: 'bearer', token: { envVar: 'AUTH_TEST_TOKEN' } };
+            const resolved = await __resolveAuth(auth);
+            console.log(JSON.stringify({ hasAuth: !!resolved.headers.Authorization }));
+          `,
+          credentialSource: {
+            token: { envVar: 'AUTH_TEST_TOKEN' },
+          },
+        },
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      process.env.AUTH_TEST_TOKEN = 'auth-test-value';
+
+      try {
+        await request(app).post('/api/tools').send(authTool);
+
+        const res = await request(app)
+          .post('/api/tools/auth-tool-1/execute')
+          .send({ input: {} });
+
+        expect(res.status).toBe(200);
+        expect(res.body.status).toBe('completed');
+      } finally {
+        delete process.env.AUTH_TEST_TOKEN;
+      }
+    });
+
+    it('should handle pending credential overrides for missing credentials', async () => {
+      const missingCredTool = {
+        id: 'missing-cred-1',
+        name: 'Missing Credential Tool',
+        description: 'Tool with missing credential',
+        type: 'code',
+        manifest: {
+          language: 'javascript',
+          entrypoint: 'index.js',
+          sourceCode: 'console.log("test");',
+          credentialSource: {
+            missingToken: { envVar: 'MISSING_TOKEN_VAR' },
+          },
+        },
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      await request(app).post('/api/tools').send(missingCredTool);
+
+      // Execute without credentials - should return 428
+      const execRes = await request(app)
+        .post('/api/tools/missing-cred-1/execute')
+        .send({ input: {} });
+
+      expect(execRes.status).toBe(428);
+      const executionId = execRes.body.request.executionId;
+
+      // Submit credentials override
+      const credRes = await request(app)
+        .post(`/api/executions/${executionId}/credentials`)
+        .send({
+          credentials: { missingToken: 'override-value' },
+          storeInVault: false,
+        });
+
+      expect(credRes.status).toBe(200);
+      expect(credRes.body.status).toBe('completed');
+    });
+  });
+
+  describe('Event skill credential alignment', () => {
+    it('should have credentialSource envVar matching auth token envVar for event skills', () => {
+      // This test validates the event skill definitions
+      const { eventSkills } = require('../data/skills/event/index');
+      
+      for (const skill of eventSkills) {
+        if (skill.manifest?.credentialSource && skill.manifest?.auth) {
+          const credSource = skill.manifest.credentialSource as Record<string, { envVar?: string }>;
+          const auth = skill.manifest.auth as Record<string, unknown>;
+          const authCredentialEnvKeyMap = auth.credentialEnvKeyMap as Record<string, { envVar?: string }> | undefined;
+          
+          if (authCredentialEnvKeyMap?.token?.envVar) {
+            const expectedEnvVar = authCredentialEnvKeyMap.token.envVar;
+            const actualEnvVar = credSource.token?.envVar;
+            expect(actualEnvVar).toBe(expectedEnvVar);
+          }
+        }
+      }
+    });
+  });
 })

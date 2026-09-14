@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { fetchJSON, postJSON, deleteResource } from '../utils/api';
+import { fetchJSON, postJSON, putJSON, deleteResource } from '../utils/api';
 
 type JsonSchema = {
   type?: string;
@@ -50,6 +50,8 @@ const safeParseJson = (text: string): { ok: true; value: JsonSchema } | { ok: fa
 
 const Tools = () => {
   const [tools, setTools] = useState<Tool[]>([]);
+  const [assistants, setAssistants] = useState<Array<{ id: string; name: string; tools?: any[] }>>([]);
+  const [assignSelection, setAssignSelection] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -75,7 +77,9 @@ const Tools = () => {
     setError(null);
     try {
       const data = await fetchJSON<{ tools: Tool[] }>('/api/tool-executor/tools');
-      setTools(data.tools || []);
+      // Filter out skill definitions — the tool-executor registers both general tools and skill definitions.
+      const general = (data.tools || []).filter((t: any) => !t.isSkill);
+      setTools(general);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load tools');
       setTools([]);
@@ -86,6 +90,15 @@ const Tools = () => {
 
   useEffect(() => {
     loadTools();
+    const loadAssistants = async () => {
+      try {
+        const data = await fetchJSON<{ assistants: Array<{ id: string; name: string; tools?: any[] }> }>('/api/workers/assistants');
+        setAssistants(data.assistants || []);
+      } catch {
+        setAssistants([]);
+      }
+    };
+    loadAssistants();
   }, []);
 
   const inputSchemaParse = useMemo(() => safeParseJson(inputSchemaText), [inputSchemaText]);
@@ -303,9 +316,54 @@ const Tools = () => {
                       <td className="mono truncate" title={JSON.stringify(t.outputSchema ?? {})}>
                         {truncate(t.outputSchema ?? {})}
                       </td>
-                      <td className="actions">
-                        <button onClick={() => openExecute(t)}>Execute</button>
-                        <button onClick={() => handleDelete(t.id)}>Delete</button>
+                      <td>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                          <select
+                            value={assignSelection[t.id] || ''}
+                            onChange={(e) => setAssignSelection({ ...assignSelection, [t.id]: e.target.value })}
+                          >
+                            <option value="">Select assistant</option>
+                            {assistants.map((a) => (
+                              <option key={a.id} value={a.id}>{a.name}</option>
+                            ))}
+                          </select>
+                          <button
+                            onClick={async () => {
+                              const assistantId = assignSelection[t.id];
+                              if (!assistantId) return alert('Select an assistant to bind to');
+                              try {
+                                const full = await fetchJSON<any>(`/api/workers/assistants/${encodeURIComponent(assistantId)}`);
+                                full.tools = full.tools || [];
+                                const exists = full.tools.find((et: any) => et.name === t.id || et.name === t.name);
+                                if (exists) return alert('Assistant already has this tool bound');
+                                full.tools.push({ name: t.id, description: t.description, inputSchema: t.inputSchema || { type: 'object', properties: {} } });
+                                await putJSON(`/api/workers/assistants/${encodeURIComponent(assistantId)}`, full);
+                                alert('Tool bound to assistant');
+                                // refresh assistants list
+                                const data = await fetchJSON<{ assistants: Array<{ id: string; name: string; tools?: any[] }> }>('/api/workers/assistants');
+                                setAssistants(data.assistants || []);
+                              } catch (err) {
+                                alert(err instanceof Error ? err.message : 'Bind failed');
+                              }
+                            }}
+                          >Bind</button>
+                          <button
+                            onClick={async () => {
+                              const assistantId = assignSelection[t.id];
+                              if (!assistantId) return alert('Select an assistant to unbind from');
+                              try {
+                                const full = await fetchJSON<any>(`/api/workers/assistants/${encodeURIComponent(assistantId)}`);
+                                full.tools = (full.tools || []).filter((et: any) => et.name !== t.id && et.name !== t.name);
+                                await putJSON(`/api/workers/assistants/${encodeURIComponent(assistantId)}`, full);
+                                alert('Tool unbound from assistant');
+                                const data = await fetchJSON<{ assistants: Array<{ id: string; name: string; tools?: any[] }> }>('/api/workers/assistants');
+                                setAssistants(data.assistants || []);
+                              } catch (err) {
+                                alert(err instanceof Error ? err.message : 'Unbind failed');
+                              }
+                            }}
+                          >Unbind</button>
+                        </div>
                       </td>
                     </tr>
                   ))}

@@ -4,6 +4,7 @@ import { fetchJSON, postJSON, putJSON, deleteResource } from '../utils/api';
 
 interface AssistantTool {
   name: string;
+  displayName?: string;
   description: string;
   inputSchema: Record<string, unknown>;
 }
@@ -22,19 +23,12 @@ interface Assistant {
   updatedAt: string;
 }
 
-interface AssistantRuntime {
-  assistantId: string;
-  workerId: string;
-  taskQueue: string;
-  maxConcurrency: number;
-  timeoutMs: number;
-}
-
 const Assistants = () => {
   const [assistants, setAssistants] = useState<Assistant[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
+  const [showRegisterForm, setShowRegisterForm] = useState(false);
 
   const [id, setId] = useState('');
   const [name, setName] = useState('');
@@ -47,9 +41,11 @@ const Assistants = () => {
   const [transactionGuidance, setTransactionGuidance] = useState<string[]>([]);
   const [transactionInput, setTransactionInput] = useState('');
   const [tools, setTools] = useState<AssistantTool[]>([]);
-  const [toolName, setToolName] = useState('');
-  const [toolDescription, setToolDescription] = useState('');
   const [registering, setRegistering] = useState(false);
+  const [availableSkills, setAvailableSkills] = useState<Array<{ id: string; name: string; description: string; inputSchema?: Record<string, unknown> }>>([]);
+  
+  const [bindModalOpen, setBindModalOpen] = useState(false);
+  const [bindTarget, setBindTarget] = useState<'create' | 'edit'>('create');
 
   const [execId, setExecId] = useState('');
   const [execPrompt, setExecPrompt] = useState('');
@@ -65,15 +61,11 @@ const Assistants = () => {
     knowledge?: Array<{ id: string; title: string; content: string; source?: string }>;
     transactionGuidance?: string[];
   }>({});
-  const [editToolName, setEditToolName] = useState('');
-  const [editToolDescription, setEditToolDescription] = useState('');
+  const [editSelectedSkillId, setEditSelectedSkillId] = useState('');
   const [editKnowledgeTitle, setEditKnowledgeTitle] = useState('');
   const [editKnowledgeContent, setEditKnowledgeContent] = useState('');
   const [editKnowledgeSource, setEditKnowledgeSource] = useState('');
   const [editTransactionInput, setEditTransactionInput] = useState('');
-  const [showRuntime, setShowRuntime] = useState<string | null>(null);
-  const [runtimeConfig, setRuntimeConfig] = useState<AssistantRuntime | null>(null);
-
   const loadAssistants = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -91,12 +83,16 @@ const Assistants = () => {
     loadAssistants();
   }, [loadAssistants, retryCount]);
 
-  const addTool = () => {
-    if (!toolName.trim()) return;
-    setTools([...tools, { name: toolName.trim(), description: toolDescription.trim(), inputSchema: { type: 'object', properties: {} } }]);
-    setToolName('');
-    setToolDescription('');
-  };
+  useEffect(() => {
+    fetchJSON<{ tools: Array<{ id: string; name: string; description: string; isSkill?: boolean; inputSchema?: Record<string, unknown> }> }>('/api/tool-executor/tools')
+      .then((data) => {
+        const tools = data.tools || [];
+        setAvailableSkills(tools.filter((t: any) => t.isSkill).map((t: any) => ({ id: t.id, name: t.name, description: t.description, inputSchema: t.inputSchema })));
+      })
+      .catch(() => setAvailableSkills([]));
+  }, []);
+
+  // Tools must be skills bound from the skill catalog; freeform tools are not allowed.
 
   const removeTool = (idx: number) => {
     setTools(tools.filter((_, i) => i !== idx));
@@ -125,13 +121,14 @@ const Assistants = () => {
   };
 
   const addEditTool = () => {
-    if (!editToolName.trim()) return;
+    if (!editSelectedSkillId) return;
+    const skill = availableSkills.find((s) => s.id === editSelectedSkillId);
+    if (!skill) return;
     setEditForm({
       ...editForm,
-      tools: [...(editForm.tools || []), { name: editToolName.trim(), description: editToolDescription.trim(), inputSchema: { type: 'object', properties: {} } }],
+      tools: [...(editForm.tools || []), { name: skill.id, displayName: skill.name, description: skill.description, inputSchema: skill.inputSchema || { type: 'object', properties: {} } }],
     });
-    setEditToolName('');
-    setEditToolDescription('');
+    setEditSelectedSkillId('');
   };
 
   const removeEditTool = (idx: number) => {
@@ -240,22 +237,6 @@ const Assistants = () => {
     }
   };
 
-  const handleConfigureRuntime = async (assistantId: string) => {
-    setError(null);
-    try {
-      const runtime = await postJSON<AssistantRuntime>(`/api/workers/assistants/${assistantId}/runtime`, {
-        workerId: `worker-${assistantId}`,
-        taskQueue: `queue-${assistantId}`,
-        maxConcurrency: 2,
-        timeoutMs: 60000,
-      });
-      setRuntimeConfig(runtime);
-      setShowRuntime(assistantId);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to configure runtime');
-    }
-  };
-
   const handleExecute = async (e: React.FormEvent) => {
     e.preventDefault();
     setExecuting(true);
@@ -277,6 +258,7 @@ const Assistants = () => {
         <h1>Assistants</h1>
         <div className="header-actions">
           <span className="badge-count">{assistants.length} assistants</span>
+          <button onClick={() => setShowRegisterForm(true)} className="secondary">Register a new assistant</button>
           <button onClick={() => setRetryCount((c) => c + 1)} className="secondary" disabled={loading}>
             {loading ? 'Refreshing...' : 'Refresh'}
           </button>
@@ -291,90 +273,79 @@ const Assistants = () => {
       )}
 
       <div className="grid two-col">
-        <div className="card">
-          <h3>Register Assistant</h3>
-          <form onSubmit={handleRegister} className="form">
-            <input type="text" placeholder="ID (optional — auto-generated)" value={id} onChange={(e) => setId(e.target.value)} />
-            <input type="text" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} required />
-            <textarea placeholder="Description" value={description} onChange={(e) => setDescription(e.target.value)} required rows={2} />
-            <p className="hint">Model is optimized at chat time via the Brain router; no model assignment needed at registration.</p>
-            <textarea placeholder="System Prompt" value={systemPrompt} onChange={(e) => setSystemPrompt(e.target.value)} rows={3} />
-
-            <div className="tool-binding-section">
-              <h4>Tool Bindings</h4>
-              <div className="input-row">
-                <input type="text" placeholder="Tool name" value={toolName} onChange={(e) => setToolName(e.target.value)} className="flex-grow" />
-                <input type="text" placeholder="Description" value={toolDescription} onChange={(e) => setToolDescription(e.target.value)} className="flex-grow" />
-                <button type="button" onClick={addTool}>Add</button>
-              </div>
-              {tools.length > 0 && (
-                <ul className="tool-list">
-                  {tools.map((t, idx) => (
-                    <li key={idx}>
-                      <strong>{t.name}</strong>: {t.description}
-                      <button type="button" onClick={() => removeTool(idx)} className="remove-btn">&times;</button>
-                    </li>
-                  ))}
-                </ul>
-              )}
+        {showRegisterForm && (
+          <div className="card">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3>Register Assistant</h3>
+              <button type="button" className="close-btn" onClick={() => setShowRegisterForm(false)} aria-label="Close registration panel">&times;</button>
             </div>
+            <form onSubmit={handleRegister} className="form">
+              <input type="text" placeholder="ID (optional — auto-generated)" value={id} onChange={(e) => setId(e.target.value)} />
+              <input type="text" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} required />
+              <textarea placeholder="Description" value={description} onChange={(e) => setDescription(e.target.value)} required rows={2} />
+              <p className="hint">Model is optimized at chat time via the Brain router; no model assignment needed at registration.</p>
+              <textarea placeholder="System Prompt" value={systemPrompt} onChange={(e) => setSystemPrompt(e.target.value)} rows={3} />
 
-            <div className="tool-binding-section">
-              <h4>Knowledge Base</h4>
-              <div className="input-row">
-                <input type="text" placeholder="Title" value={knowledgeTitle} onChange={(e) => setKnowledgeTitle(e.target.value)} className="flex-grow" />
-                <input type="text" placeholder="Source (optional)" value={knowledgeSource} onChange={(e) => setKnowledgeSource(e.target.value)} className="flex-grow" />
+              <div className="tool-binding-section">
+                <h4>Skill Bindings</h4>
+                <div className="input-row">
+                  <button type="button" onClick={() => { setBindTarget('create'); setBindModalOpen(true); }} className="secondary">Bind Skill</button>
+                </div>
+                {tools.length > 0 && (
+                  <ul className="tool-list">
+                    {tools.map((t, idx) => (
+                      <li key={idx}>
+                         <strong>{t.displayName || availableSkills.find((s) => s.id === t.name)?.name || t.name}</strong>: {t.description}
+                         <button type="button" onClick={() => removeTool(idx)} className="remove-btn">&times;</button>
+                       </li>
+                     ))}
+                   </ul>
+                 )}
+               </div>
+
+               <div className="tool-binding-section">
+                 <h4>Knowledge Base</h4>
+                <div className="input-row">
+                  <input type="text" placeholder="Title" value={knowledgeTitle} onChange={(e) => setKnowledgeTitle(e.target.value)} className="flex-grow" />
+                  <input type="text" placeholder="Source (optional)" value={knowledgeSource} onChange={(e) => setKnowledgeSource(e.target.value)} className="flex-grow" />
+                </div>
+                <textarea placeholder="Knowledge content" value={knowledgeContent} onChange={(e) => setKnowledgeContent(e.target.value)} rows={2} />
+                <button type="button" onClick={addKnowledge} className="secondary">Add Knowledge</button>
+                {knowledge.length > 0 && (
+                  <ul className="tool-list">
+                    {knowledge.map((k, idx) => (
+                      <li key={k.id || idx}>
+                        <strong>{k.title}</strong>: {k.content.slice(0, 100)}{k.content.length > 100 ? '...' : ''}
+                        <button type="button" onClick={() => removeKnowledge(idx)} className="remove-btn">&times;</button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
-              <textarea placeholder="Knowledge content" value={knowledgeContent} onChange={(e) => setKnowledgeContent(e.target.value)} rows={2} />
-              <button type="button" onClick={addKnowledge} className="secondary">Add Knowledge</button>
-              {knowledge.length > 0 && (
-                <ul className="tool-list">
-                  {knowledge.map((k, idx) => (
-                    <li key={k.id || idx}>
-                      <strong>{k.title}</strong>: {k.content.slice(0, 100)}{k.content.length > 100 ? '...' : ''}
-                      <button type="button" onClick={() => removeKnowledge(idx)} className="remove-btn">&times;</button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
 
-            <div className="tool-binding-section">
-              <h4>Transaction Guidance</h4>
-              <div className="input-row">
-                <input type="text" placeholder="Guidance rule (e.g. Always confirm before booking)" value={transactionInput} onChange={(e) => setTransactionInput(e.target.value)} className="flex-grow" />
-                <button type="button" onClick={addTransactionGuidance}>Add</button>
+              <div className="tool-binding-section">
+                <h4>Transaction Guidance</h4>
+                <div className="input-row">
+                  <input type="text" placeholder="Guidance rule (e.g. Always confirm before booking)" value={transactionInput} onChange={(e) => setTransactionInput(e.target.value)} className="flex-grow" />
+                  <button type="button" onClick={addTransactionGuidance}>Add</button>
+                </div>
+                {transactionGuidance.length > 0 && (
+                  <ul className="tool-list">
+                    {transactionGuidance.map((g, idx) => (
+                      <li key={idx}>
+                        {g}
+                        <button type="button" onClick={() => removeTransactionGuidance(idx)} className="remove-btn">&times;</button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
-              {transactionGuidance.length > 0 && (
-                <ul className="tool-list">
-                  {transactionGuidance.map((g, idx) => (
-                    <li key={idx}>
-                      {g}
-                      <button type="button" onClick={() => removeTransactionGuidance(idx)} className="remove-btn">&times;</button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
 
-            <button type="submit" disabled={registering}>{registering ? 'Registering...' : 'Register'}</button>
-          </form>
-        </div>
+              <button type="submit" disabled={registering}>{registering ? 'Registering...' : 'Register'}</button>
+            </form>
+          </div>
+        )}
 
-        <div className="card">
-          <h3>Execute Assistant</h3>
-          <form onSubmit={handleExecute} className="form">
-            <select value={execId} onChange={(e) => setExecId(e.target.value)} required>
-              <option value="">Select assistant</option>
-              {assistants.map((a) => (
-                <option key={a.id} value={a.id}>{a.name}</option>
-              ))}
-            </select>
-            <textarea placeholder="Prompt" value={execPrompt} onChange={(e) => setExecPrompt(e.target.value)} required rows={3} />
-            <button type="submit" disabled={executing}>{executing ? 'Running...' : 'Execute'}</button>
-          </form>
-          {execResult && <pre className="result">{execResult}</pre>}
-        </div>
       </div>
 
       {editingId && (
@@ -388,16 +359,14 @@ const Assistants = () => {
             <div className="tool-binding-section">
               <h4>Tool Bindings</h4>
               <div className="input-row">
-                <input type="text" placeholder="Tool name" value={editToolName} onChange={(e) => setEditToolName(e.target.value)} className="flex-grow" />
-                <input type="text" placeholder="Description" value={editToolDescription} onChange={(e) => setEditToolDescription(e.target.value)} className="flex-grow" />
-                <button type="button" onClick={addEditTool}>Add</button>
+                <button type="button" onClick={() => { setBindTarget('edit'); setBindModalOpen(true); }} className="secondary">Bind Skill</button>
               </div>
               {(editForm.tools || []).length > 0 && (
                 <ul className="tool-list">
                   {(editForm.tools || []).map((t, idx) => (
                     <li key={idx}>
-                      <strong>{t.name}</strong>: {t.description}
-                      <button type="button" onClick={() => removeEditTool(idx)} className="remove-btn">&times;</button>
+                       <strong>{t.displayName || availableSkills.find((s) => s.id === t.name)?.name || t.name}</strong>: {t.description}
+                       <button type="button" onClick={() => removeEditTool(idx)} className="remove-btn">&times;</button>
                     </li>
                   ))}
                 </ul>
@@ -466,7 +435,7 @@ const Assistants = () => {
               <tr>
                 <th>Name</th>
                 <th>Description</th>
-                <th>Tools</th>
+                <th>Skills</th>
                 <th>Status</th>
                 <th>Actions</th>
               </tr>
@@ -481,7 +450,6 @@ const Assistants = () => {
                   <td className="actions-cell">
                     <Link to={`/entity/${a.id}`} className="link-button">Workspace</Link>
                     <button onClick={() => handleEdit(a)} className="link-button">Edit</button>
-                    <button onClick={() => handleConfigureRuntime(a.id)} className="link-button">Runtime</button>
                     <button onClick={() => handleDelete(a.id)} className="link-button danger">Delete</button>
                   </td>
                 </tr>
@@ -491,11 +459,50 @@ const Assistants = () => {
         )}
       </div>
 
-      {showRuntime && runtimeConfig && (
-        <div className="card runtime-card">
-          <h3>Runtime Configuration</h3>
-          <button className="close-btn" onClick={() => setShowRuntime(null)}>&times;</button>
-          <pre className="code-block">{JSON.stringify(runtimeConfig, null, 2)}</pre>
+      {bindModalOpen && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <div className="modal-header">
+              <h3>Bind a Skill</h3>
+              <button className="close" onClick={() => setBindModalOpen(false)}>×</button>
+            </div>
+            <div className="modal-body">
+              {availableSkills.length === 0 ? (
+                <p>No skills available.</p>
+              ) : (
+                <div className="skill-list">
+                  {availableSkills.map((s) => {
+                    const alreadyCreate = tools.some((t) => t.name === s.id);
+                    const alreadyEdit = (editForm.tools || []).some((t) => t.name === s.id);
+                    const already = bindTarget === 'create' ? alreadyCreate : alreadyEdit;
+                    return (
+                      <div key={s.id} className="skill-list-item">
+                        <div style={{ flex: 1 }}>
+                          <strong>{s.name}</strong>
+                          <div className="muted">{s.description}</div>
+                        </div>
+                        <div>
+                          <button disabled={already} onClick={() => {
+                            if (already) return;
+                            const newBinding = { name: s.id, description: s.description || s.name, enabled: true, config: {}, inputSchema: s.inputSchema } as any;
+                            if (bindTarget === 'create') {
+                              setTools((prev) => [...prev, { name: s.id, displayName: s.name, description: s.description, inputSchema: s.inputSchema || { type: 'object', properties: {} } }]);
+                            } else {
+                              setEditForm((prev) => ({ ...prev, tools: [...(prev.tools || []), { name: s.id, displayName: s.name, description: s.description, inputSchema: s.inputSchema || { type: 'object', properties: {} } }] }));
+                            }
+                            setBindModalOpen(false);
+                          }}>{already ? 'Bound' : 'Bind'}</button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button onClick={() => setBindModalOpen(false)} className="secondary">Close</button>
+            </div>
+          </div>
         </div>
       )}
     </div>

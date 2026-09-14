@@ -3,7 +3,6 @@ import express, { NextFunction, Request, Response } from 'express';
 import request from 'supertest';
 
 import artifactsMissionRoutes from '../../services/artifacts/src/routes/missions';
-import artifactsAgentRoutes from '../../services/artifacts/src/routes/agents';
 import artifactsDocumentRoutes from '../../services/artifacts/src/routes/documents';
 import agentRoutes from '../../services/agent-runtime/src/routes/agents';
 import workerPoolAssistantRoutes from '../../services/worker-pool/src/routes/assistants';
@@ -36,7 +35,6 @@ describe('Integration: End-to-End Mission Flow', () => {
       res.json({ status: 'ok', service: 'artifacts' });
     });
     artifactsApp.use('/api/artifacts/missions', artifactsMissionRoutes);
-    artifactsApp.use('/api/artifacts/agents', artifactsAgentRoutes);
     artifactsApp.use('/api/artifacts/documents', artifactsDocumentRoutes);
 
     const agentRuntimeApp = express();
@@ -255,7 +253,7 @@ describe('Integration: End-to-End Mission Flow', () => {
     expect(assistantReg.body.id).toBe('e2e-assistant');
 
     const agentReg = await request(app)
-      .post('/api/agent-runtime/agents')
+      .post('/api/agent-runtime/missions/e2e-mission/agents')
       .send({
         id: 'e2e-agent',
         tenantId: 'tenant-1',
@@ -325,8 +323,8 @@ describe('Integration: End-to-End Mission Flow', () => {
     expect(resultRes.body.status).toBe('completed');
 
     const agentStateRes = await request(app)
-      .post('/api/agent-runtime/agents/e2e-agent/start')
-      .send({ missionId: 'e2e-mission' });
+      .post('/api/agent-runtime/missions/e2e-mission/agents/e2e-agent/start')
+      .send({});
 
     expect(agentStateRes.status).toBe(201);
     expect(agentStateRes.body.status).toBe('running');

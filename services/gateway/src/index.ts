@@ -31,6 +31,7 @@ NEXTGEN_SERVICES.forEach((svc) => {
 
 app.use('/api/gateway', express.json(), gatewayRoutes);
 app.use('/api/gateway', express.json(), messagingRoutes);
+app.use('/api/workers', express.json(), workersRoutes);
 app.use('/api', proxyRoutes);
 
 const PORT = process.env.PORT || 3000;

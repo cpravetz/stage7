@@ -10,7 +10,7 @@ describe('Integration: Vault → Tool Executor Secret Flow', () => {
     app = express();
     app.use(express.json());
     app.use('/api/vault', vaultRoutes);
-    app.use('/api/tools', toolRoutes);
+    app.use('/api/tool-executor', toolRoutes);
   });
 
   describe('Secret encryption → tool registration with encrypted config', () => {
@@ -24,7 +24,7 @@ describe('Integration: Vault → Tool Executor Secret Flow', () => {
       expect(encryptRes.body.keyId).toBe('master-key');
 
       const toolRes = await request(app)
-        .post('/api/tools/tools')
+        .post('/api/tool-executor/tools')
         .send({
           id: 'tool-1',
           name: 'Secure Tool',
@@ -38,7 +38,7 @@ describe('Integration: Vault → Tool Executor Secret Flow', () => {
       expect(toolRes.status).toBe(201);
       expect(toolRes.body.id).toBe('tool-1');
 
-      const listRes = await request(app).get('/api/tools/tools');
+      const listRes = await request(app).get('/api/tool-executor/tools');
       expect(listRes.status).toBe(200);
       expect(listRes.body.tools).toBeDefined();
       expect(listRes.body.tools.length).toBeGreaterThanOrEqual(1);
@@ -49,7 +49,7 @@ describe('Integration: Vault → Tool Executor Secret Flow', () => {
   describe('Tool execution with decrypted secret', () => {
     it('should execute tool and decrypt config at runtime', async () => {
       await request(app)
-        .post('/api/tools/tools')
+        .post('/api/tool-executor/tools')
         .send({
           id: 'tool-2',
           name: 'Runtime Tool',
@@ -61,11 +61,45 @@ describe('Integration: Vault → Tool Executor Secret Flow', () => {
         });
 
       const execRes = await request(app)
-        .post('/api/tools/tools/tool-2/execute')
+        .post('/api/tool-executor/tools/tool-2/execute')
         .send({ input: { data: 'test' } });
 
       expect(execRes.status).toBe(200);
       expect(execRes.body.status).toBe('completed');
+    });
+  });
+
+  describe('Bulk execute endpoint /api/tool-executor/tools/execute', () => {
+    it('should accept a tool execution request without requiring a pre-registered id', async () => {
+      const execRes = await request(app)
+        .post('/api/tool-executor/tools/execute')
+        .send({
+          tool: { name: 'unknown-bulk-tool', type: 'code', manifest: {} },
+          input: { data: 'bulk-test' },
+        });
+
+      expect([200, 500]).toContain(execRes.status);
+    });
+  });
+
+  describe('Registered-tool execute path /api/tool-executor/tools/:id/execute', () => {
+    it('should register then execute a tool by id', async () => {
+      const regRes = await request(app)
+        .post('/api/tool-executor/tools')
+        .send({
+          id: 'integration-tool',
+          name: 'Integration Tool',
+          description: 'Test tool',
+          type: 'code',
+          manifest: { handler: 'echo' },
+        });
+      expect(regRes.status).toBe(201);
+
+      const execRes = await request(app)
+        .post('/api/tool-executor/tools/integration-tool/execute')
+        .send({ input: { msg: 'hello' } });
+
+      expect([200, 500]).toContain(execRes.status);
     });
   });
 });

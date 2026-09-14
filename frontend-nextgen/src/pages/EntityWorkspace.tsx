@@ -1,14 +1,17 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, type ReactNode } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { useEntityStore, Entity } from '../stores/entityStore';
+import { useEntityStore, Entity, type EntityTool } from '../stores/entityStore';
 import { useFeedStore } from '../stores/feedStore';
 import { fetchJSON, postJSON, putJSON } from '../utils/api';
 
 interface ToolBinding {
   name: string;
+  displayName?: string;
   description: string;
   inputSchema: Record<string, unknown>;
   enabled: boolean;
+  config?: Record<string, unknown>;
+  configSchema?: Record<string, unknown>;
 }
 
 interface HITLApproval {
@@ -22,6 +25,199 @@ interface HITLApproval {
   workflowId?: string;
 }
 
+type SchemaRecord = Record<string, unknown>;
+
+const formatTextValue = (value: unknown): string => {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value);
+  try {
+    return JSON.stringify(value) ?? String(value);
+  } catch {
+    return String(value);
+  }
+};
+
+const formatNumberValue = (value: unknown): number | '' => (
+  typeof value === 'number' ? value : ''
+);
+
+const humanizeKey = (key: string): string => {
+  const words = key
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+  const acronyms = new Set(['API', 'URL', 'ID', 'JSON', 'HTML', 'SEO', 'CRM', 'HTTP', 'UUID', 'CSV', 'PDF', 'XML', 'RSS', 'SSL', 'TLS']);
+  return words.map((word) => {
+    const upper = word.toUpperCase();
+    return acronyms.has(upper) ? upper : word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+  }).join(' ');
+};
+
+const getSchemaProperties = (schema?: SchemaRecord): Record<string, SchemaRecord> => {
+  const properties = schema?.properties;
+  return properties && typeof properties === 'object' && !Array.isArray(properties)
+    ? properties as Record<string, SchemaRecord>
+    : {};
+};
+
+const getSchemaTitle = (key: string, schema?: SchemaRecord): string => (
+  String(schema?.title || schema?.label || schema?.['x-label'] || humanizeKey(key))
+);
+
+const getSchemaDescription = (schema?: SchemaRecord): string => (
+  String(schema?.description || schema?.hint || '')
+);
+
+const isLongTextSchema = (key: string, schema?: SchemaRecord): boolean => (
+  schema?.multiline === true ||
+  schema?.format === 'long-text' ||
+  schema?.format === 'textarea' ||
+  /message|prompt|content|description|instructions|text|body|query|keywords|topic|resume|job/i.test(key) ||
+  /prompt|message|content|instructions/i.test(getSchemaDescription(schema))
+);
+
+const getInitialInputValues = (schema?: SchemaRecord): Record<string, unknown> => {
+  const values: Record<string, unknown> = {};
+  for (const [key, raw] of Object.entries(getSchemaProperties(schema))) {
+    const field = raw || {};
+    if (field.default !== undefined) {
+      values[key] = field.default;
+    } else if (field.type === 'boolean') {
+      values[key] = false;
+    } else if (field.type === 'number' || field.type === 'integer') {
+      values[key] = '';
+    } else if (field.type === 'array') {
+      values[key] = [];
+    } else if (field.type === 'object' && getSchemaProperties(field as SchemaRecord)) {
+      values[key] = getInitialInputValues(field as SchemaRecord);
+    } else {
+      values[key] = '';
+    }
+  }
+  return values;
+};
+
+interface SchemaFieldsProps {
+  schema: SchemaRecord;
+  values: Record<string, unknown>;
+  onChange: (key: string, value: unknown) => void;
+  namePrefix?: string;
+}
+
+const SchemaFields = ({ schema, values, onChange, namePrefix = 'skill-field' }: SchemaFieldsProps) => {
+  const properties = getSchemaProperties(schema);
+  if (Object.keys(properties).length === 0) return null;
+
+  return (
+    <div className="skill-fields">
+      {Object.entries(properties).map(([key, rawSchema]) => {
+        const fieldSchema = (rawSchema || {}) as SchemaRecord;
+        const value = values[key];
+        const label = getSchemaTitle(key, fieldSchema);
+        const description = getSchemaDescription(fieldSchema);
+        const fieldId = `${namePrefix}-${key.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+        const required = Array.isArray(schema.required) && (schema.required as unknown[]).includes(key);
+        const controlClass = `skill-control${isLongTextSchema(key, fieldSchema) ? ' skill-control-long' : ''}`;
+
+        let control: ReactNode;
+        if (fieldSchema.type === 'boolean') {
+          control = (
+            <input
+              id={fieldId}
+              className="skill-checkbox"
+              type="checkbox"
+              checked={Boolean(value)}
+              onChange={(e) => onChange(key, e.target.checked)}
+            />
+          );
+        } else if (fieldSchema.type === 'number' || fieldSchema.type === 'integer') {
+          control = (
+            <input
+              id={fieldId}
+              className={controlClass}
+              type="number"
+              value={formatNumberValue(value)}
+              onChange={(e) => onChange(key, e.target.value === '' ? '' : Number(e.target.value))}
+            />
+          );
+        } else if (Array.isArray(fieldSchema.enum)) {
+          control = (
+            <select
+              id={fieldId}
+              className={controlClass}
+              value={typeof value === 'string' ? value : ''}
+              onChange={(e) => onChange(key, e.target.value)}
+            >
+              <option value="">Select an option</option>
+              {(fieldSchema.enum as unknown[]).map((option) => {
+                const optionValue = typeof option === 'object' && option !== null ? (option as any).value : option;
+                const optionLabel = typeof option === 'object' && option !== null ? (option as any).label : option;
+                return <option key={String(optionValue)} value={String(optionValue)}>{String(optionLabel)}</option>;
+              })}
+            </select>
+          );
+        } else if (fieldSchema.type === 'array') {
+          const arrayValue = Array.isArray(value) ? value : [];
+          control = (
+            <input
+              id={fieldId}
+              className={controlClass}
+              type="text"
+              value={arrayValue.map((item) => formatTextValue(item)).join(', ')}
+              onChange={(e) => onChange(key, e.target.value.split(',').map((item) => item.trim()).filter(Boolean))}
+            />
+          );
+        } else if (fieldSchema.type === 'object' && getSchemaProperties(fieldSchema)) {
+          const nestedValues = value && typeof value === 'object' && !Array.isArray(value)
+            ? value as Record<string, unknown>
+            : {};
+          control = (
+            <div className="skill-nested-fields">
+              <SchemaFields
+                schema={fieldSchema}
+                values={nestedValues}
+                onChange={(nestedKey, nestedValue) => onChange(key, { ...nestedValues, [nestedKey]: nestedValue })}
+                namePrefix={`${namePrefix}-${key}`}
+              />
+            </div>
+          );
+        } else if (fieldSchema.type === 'string' && isLongTextSchema(key, fieldSchema)) {
+          control = (
+            <textarea
+              id={fieldId}
+              className={controlClass}
+              rows={3}
+              value={formatTextValue(value)}
+              onChange={(e) => onChange(key, e.target.value)}
+            />
+          );
+        } else {
+          control = (
+            <input
+              id={fieldId}
+              className={controlClass}
+              type="text"
+              value={formatTextValue(value)}
+              onChange={(e) => onChange(key, e.target.value)}
+            />
+          );
+        }
+
+        return (
+          <div key={key} className="skill-field">
+            <div className="skill-field-heading">
+              <label htmlFor={fieldId}>{label}{required ? ' *' : ''}</label>
+              {description && <span className="skill-field-description">{description}</span>}
+            </div>
+            {control}
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
 const EntityWorkspace = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -33,6 +229,7 @@ const EntityWorkspace = () => {
   const [running, setRunning] = useState(false);
   const [missionHistory, setMissionHistory] = useState<Array<{ missionId: string; status: string; timestamp: string; output?: string }>>([]);
   const [toolBindings, setToolBindings] = useState<ToolBinding[]>([]);
+  const [availableSkills, setAvailableSkills] = useState<Array<{ id: string; name: string; description: string; inputSchema?: Record<string, unknown>; configSchema?: Record<string, unknown> }>>([]);
   const [availableTools, setAvailableTools] = useState<Array<{ id: string; name: string; description: string }>>([]);
   const [hitlApprovals, setHitlApprovals] = useState<HITLApproval[]>([]);
   const [loadingApprovals, setLoadingApprovals] = useState(false);
@@ -40,6 +237,8 @@ const EntityWorkspace = () => {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [agentArtifacts, setAgentArtifacts] = useState<Array<any>>([]);
+
 
   const [editingSystemPrompt, setEditingSystemPrompt] = useState('');
   const [knowledgeEntries, setKnowledgeEntries] = useState<Array<{ id: string; title: string; content: string; source?: string }>>([]);
@@ -49,9 +248,12 @@ const EntityWorkspace = () => {
   const [transactionGuidanceEntries, setTransactionGuidanceEntries] = useState<string[]>([]);
   const [transactionInput, setTransactionInput] = useState('');
   const [metadataConfig, setMetadataConfig] = useState<Record<string, unknown>>({});
-  const [customToolName, setCustomToolName] = useState('');
-  const [customToolDescription, setCustomToolDescription] = useState('');
-  const [customToolSchema, setCustomToolSchema] = useState('');
+  const [runTool, setRunTool] = useState<ToolBinding | null>(null);
+
+  const [runResult, setRunResult] = useState<string | null>(null);
+  const [runningTool, setRunningTool] = useState(false);
+
+  const entity: Entity | null = selectedEntity || entities.find((e) => e.id === id) || null;
 
   useEffect(() => {
     if (id) {
@@ -67,12 +269,22 @@ const EntityWorkspace = () => {
   useEffect(() => {
     if (selectedEntity) {
       setToolBindings(
-        (selectedEntity.tools || []).map((t) => ({
-          name: typeof t === 'string' ? t : t.name,
-          description: typeof t === 'string' ? '' : t.description || '',
-          inputSchema: typeof t === 'string' ? {} : t.inputSchema || {},
-          enabled: true,
-        }))
+        (selectedEntity.tools || []).map((t) => {
+          const tool = typeof t === 'string'
+            ? null
+            : (t as EntityTool & { displayName?: string; configSchema?: SchemaRecord });
+          return {
+            name: typeof t === 'string' ? t : t.name,
+            displayName: tool?.displayName,
+            description: typeof t === 'string' ? '' : t.description || '',
+            inputSchema: typeof t === 'string' ? {} : t.inputSchema || {},
+            configSchema: typeof t === 'string'
+              ? undefined
+              : (tool?.configSchema || (t as any).manifest?.configSchema),
+            enabled: true,
+            config: typeof t === 'string' ? {} : (t.config || {}),
+          };
+        })
       );
       setMemoryContext(selectedEntity.memory || { context: {}, notes: 'No memory persisted yet.' });
       setMissionHistory(selectedEntity.missionHistory || []);
@@ -84,12 +296,92 @@ const EntityWorkspace = () => {
   }, [selectedEntity]);
 
   useEffect(() => {
-    fetchJSON<{ tools: Array<{ id: string; name: string; description: string }> }>('/api/tool-executor/tools')
-      .then((data) => setAvailableTools(data.tools || []))
-      .catch(() => setAvailableTools([]));
+    fetchJSON<{ tools: Array<{ id: string; name: string; description: string; isSkill?: boolean; inputSchema?: Record<string, unknown>; configSchema?: Record<string, unknown>; manifest?: Record<string, unknown> }> }>('/api/tool-executor/tools')
+      .then((data) => {
+        const tools = data.tools || [];
+        setAvailableSkills(tools.filter((t: any) => t.isSkill).map((t: any) => ({
+          id: t.id,
+          name: t.name,
+          description: t.description,
+          inputSchema: t.inputSchema,
+          configSchema: t.manifest?.configSchema || t.configSchema,
+        })));
+        setAvailableTools(tools.filter((t: any) => !t.isSkill).map((t: any) => ({ id: t.id, name: t.name, description: t.description })));
+      })
+      .catch(() => {
+        setAvailableSkills([]);
+        setAvailableTools([]);
+      });
   }, []);
 
-  const entity: Entity | null = selectedEntity || entities.find((e) => e.id === id) || null;
+  const getSkillByBindingName = (name: string) => availableSkills.find((skill) => skill.id === name || skill.name === name);
+
+  const getToolDisplayName = (tool: ToolBinding): string => (
+    tool.displayName || getSkillByBindingName(tool.name)?.name || humanizeKey(tool.name)
+  );
+
+  const getToolDescription = (tool: ToolBinding): string => (
+    tool.description || getSkillByBindingName(tool.name)?.description || ''
+  );
+
+  const getToolConfigSchema = (tool: ToolBinding): SchemaRecord | undefined => (
+    tool.configSchema || getSkillByBindingName(tool.name)?.configSchema
+  );
+
+  const getToolInputSchema = (tool: ToolBinding): SchemaRecord => {
+    const schema = tool.inputSchema || getSkillByBindingName(tool.name)?.inputSchema || { type: 'object', properties: {} };
+    return Object.keys(getSchemaProperties(schema)).length > 0 ? schema : { type: 'object', properties: {} };
+  };
+
+  useEffect(() => {
+    if (availableSkills.length === 0) return;
+    setToolBindings((previous) => {
+      const normalized: ToolBinding[] = [];
+      let changed = false;
+      for (const tool of previous) {
+        const skill = availableSkills.find((candidate) => candidate.id === tool.name || candidate.name === tool.name);
+        const name = skill?.id || tool.name;
+        const displayName = skill?.name || tool.displayName || '';
+        const description = tool.description || skill?.description || '';
+        const inputSchema = tool.inputSchema && Object.keys(getSchemaProperties(tool.inputSchema)).length > 0
+          ? tool.inputSchema
+          : skill?.inputSchema || tool.inputSchema || { type: 'object', properties: {} };
+        const configSchema = tool.configSchema || skill?.configSchema;
+        if (name !== tool.name || displayName !== tool.displayName || description !== tool.description || inputSchema !== tool.inputSchema || configSchema !== tool.configSchema) {
+          changed = true;
+        }
+        if (!normalized.some((existing) => existing.name === name)) {
+          normalized.push({ ...tool, name, displayName, description, inputSchema, configSchema });
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? normalized : previous;
+    });
+  }, [availableSkills, toolBindings]);
+  const [runInputs, setRunInputs] = useState<Record<string, Record<string, unknown>>>({});
+  const [runResults, setRunResults] = useState<Record<string, string>>({});
+  const [runningMap, setRunningMap] = useState<Record<string, boolean>>({});
+  const [bindModalOpen, setBindModalOpen] = useState(false);
+
+  useEffect(() => {
+    setRunInputs((prev) => {
+      const next = { ...prev };
+      toolBindings.forEach((tb) => {
+        if (!next[tb.name]) {
+          next[tb.name] = getInitialInputValues(getToolInputSchema(tb));
+        }
+      });
+      return next;
+    });
+  }, [toolBindings]);
+
+  // Agents are ephemeral and mission-scoped; redirect to Missions if an agent entity is requested.
+  useEffect(() => {
+    if (entity && entity.type === 'agent') {
+      navigate('/missions');
+    }
+  }, [entity, navigate]);
 
   const runMission = async () => {
     if (!entity || !missionInput.trim()) return;
@@ -122,43 +414,21 @@ const EntityWorkspace = () => {
   };
 
   const toggleToolBinding = (toolName: string) => {
-    setToolBindings((prev) =>
-      prev.map((t) => (t.name === toolName ? { ...t, enabled: !t.enabled } : t))
-    );
-  };
-
-  const addCustomTool = () => {
-    if (!customToolName.trim()) return;
-    let parsedSchema: Record<string, unknown> = {};
-    if (customToolSchema.trim()) {
-      try {
-        parsedSchema = JSON.parse(customToolSchema);
-      } catch {
-        setSaveError('Invalid JSON for tool input schema');
-        return;
-      }
-    }
-    if (toolBindings.find((t) => t.name === customToolName.trim())) {
-      setSaveError(`Tool "${customToolName.trim()}" is already bound`);
-      return;
-    }
-    setToolBindings((prev) => [
-      ...prev,
-      {
-        name: customToolName.trim(),
-        description: customToolDescription.trim(),
-        inputSchema: parsedSchema,
-        enabled: true,
-      },
-    ]);
-    setCustomToolName('');
-    setCustomToolDescription('');
-    setCustomToolSchema('');
+    setToolBindings((prev) => {
+      const nb = prev.map((t) => (t.name === toolName ? { ...t, enabled: !t.enabled } : t));
+      scheduleSave(nb);
+      return nb;
+    });
   };
 
   const removeCustomTool = (toolName: string) => {
-    setToolBindings((prev) => prev.filter((t) => t.name !== toolName));
+    setToolBindings((prev) => {
+      const nb = prev.filter((t) => t.name !== toolName);
+      scheduleSave(nb);
+      return nb;
+    });
   };
+
 
   const addKnowledgeEntry = () => {
     if (!knowledgeTitle.trim() || !knowledgeContent.trim()) return;
@@ -191,7 +461,13 @@ const EntityWorkspace = () => {
   };
 
   const saveConfiguration = async () => {
+    // DEPRECATED: replaced by saveConfigurationWithBindings(bindings)
+    return saveConfigurationWithBindings();
+  };
+
+  const saveConfigurationWithBindings = async (bindings?: ToolBinding[]) => {
     if (!entity) return;
+    const tbs = bindings || toolBindings;
     setSaving(true);
     setSaveError(null);
     try {
@@ -199,10 +475,13 @@ const EntityWorkspace = () => {
         systemPrompt: editingSystemPrompt,
         knowledge: knowledgeEntries,
         transactionGuidance: transactionGuidanceEntries,
-        tools: toolBindings.filter((t) => t.enabled).map((t) => ({
+        tools: tbs.filter((t) => t.enabled).map((t) => ({
           name: t.name,
+          displayName: t.displayName,
           description: t.description,
           inputSchema: t.inputSchema || { type: 'object', properties: {} },
+          config: t.config || {},
+          configSchema: t.configSchema,
         })),
         metadata: metadataConfig,
       };
@@ -214,6 +493,18 @@ const EntityWorkspace = () => {
     } finally {
       setSaving(false);
     }
+  };
+
+  // Debounced save helper: schedule save for updated bindings
+  const saveTimerRef = useRef<number | null>(null);
+  const scheduleSave = (bindings?: ToolBinding[]) => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+    }
+    saveTimerRef.current = window.setTimeout(() => {
+      saveConfigurationWithBindings(bindings).catch(() => {});
+      saveTimerRef.current = null;
+    }, 700) as unknown as number;
   };
 
   const handleHITLAction = async (approvalId: string, action: 'approved' | 'rejected') => {
@@ -288,6 +579,11 @@ const EntityWorkspace = () => {
     );
   }
 
+  const entityTabs =
+    entity.type === 'assistant'
+      ? (['overview', 'tools', 'configuration', 'memory', 'missions', 'hitl', 'artifacts'] as const)
+      : (['overview', 'tools', 'memory', 'missions', 'hitl', 'artifacts'] as const);
+
   return (
     <div className="page entity-workspace">
       {error && (
@@ -313,16 +609,13 @@ const EntityWorkspace = () => {
       </div>
 
       <div className="entity-tabs">
-        {(entity.type === 'assistant'
-          ? (['overview', 'tools', 'configuration', 'memory', 'missions', 'hitl', 'artifacts'] as const)
-          : (['overview', 'tools', 'memory', 'missions', 'hitl', 'artifacts'] as const)
-        ).map((tab) => (
+        {entityTabs.map((tab) => (
           <button
             key={tab}
             className={activeTab === tab ? 'tab active' : 'tab'}
             onClick={() => setActiveTab(tab)}
           >
-            {tab === 'hitl' ? 'Human-in-Loop' : tab.charAt(0).toUpperCase() + tab.slice(1)}
+            {tab === 'hitl' ? 'Human-in-Loop' : tab === 'tools' ? 'Skills' : tab.charAt(0).toUpperCase() + tab.slice(1)}
           </button>
         ))}
       </div>
@@ -334,7 +627,7 @@ const EntityWorkspace = () => {
               <h3>Persona</h3>
               <p>{entity.description}</p>
              <div className="meta-grid">
-               <div><strong>Tools Bound:</strong> {toolBindings.filter((t) => t.enabled).length}</div>
+               <div><strong>Skills Bound:</strong> {toolBindings.filter((t) => t.enabled).length}</div>
                  <div><strong>Knowledge Entries:</strong> {knowledgeEntries.length}</div>
                  <div><strong>Guidance Rules:</strong> {transactionGuidanceEntries.length}</div>
                  <div><strong>Memory Keys:</strong> {Object.keys(memoryContext).length}</div>
@@ -368,50 +661,287 @@ const EntityWorkspace = () => {
                  {saveError && <div className="error-banner">{saveError}</div>}
                </div>
             </div>
+            {/* Bound Skills Panels (persistent settings + runtime inputs/results) */}
+            <div className="card">
+              <h3>Skills</h3>
+              {toolBindings.filter((t) => t.enabled).length === 0 ? (
+                <p>No skills bound to this assistant.</p>
+              ) : (
+                toolBindings.filter((t) => t.enabled).map((tool) => {
+                  const inputSchema = getToolInputSchema(tool);
+                  const configSchema = getToolConfigSchema(tool);
+                  const hasSettings = Object.keys(getSchemaProperties(configSchema)).length > 0;
+                  const hasInputs = Object.keys(getSchemaProperties(inputSchema)).length > 0;
+                  return (
+                    <div key={tool.name} className="card skill-panel">
+                      <h4>{getToolDisplayName(tool)}</h4>
+                      {getToolDescription(tool) && <p className="muted">{getToolDescription(tool)}</p>}
+                      <div className="skill-body">
+                        {hasSettings && (
+                          <div className="skill-settings-summary">
+                            <button className="secondary" onClick={() => setActiveTab('tools')}>⚙️</button>
+                          </div>
+                        )}
+                        <div className="skill-runtime">
+                          {hasInputs ? (
+                            <div>
+                              <SchemaFields
+                                schema={inputSchema}
+                                values={runInputs[tool.name] || {}}
+                                onChange={(key, value) => setRunInputs((prev) => ({
+                                  ...prev,
+                                  [tool.name]: { ...(prev[tool.name] || {}), [key]: value },
+                                }))}
+                                namePrefix={`overview-${tool.name}`}
+                              />
+                              <div className="skill-run-actions">
+                                <button onClick={async () => {
+                                  setRunningMap((m) => ({ ...m, [tool.name]: true }));
+                                  try {
+                                    const args = runInputs[tool.name] || {};
+                                    const res = await fetch(`/api/workers/assistants/${encodeURIComponent(entity!.id)}/tools/execute`, {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ name: tool.name, arguments: args }),
+                                    });
+                                    const data = await res.json();
+                                    setRunResults((r) => ({ ...r, [tool.name]: JSON.stringify(data, null, 2) }));
+                                  } catch (err) {
+                                    setRunResults((r) => ({ ...r, [tool.name]: String(err instanceof Error ? err.message : err) }));
+                                  } finally {
+                                    setRunningMap((m) => ({ ...m, [tool.name]: false }));
+                                  }
+                                }} disabled={Boolean(runningMap[tool.name])}>{runningMap[tool.name] ? 'Running…' : ''}</button>
+                              </div>
+                              {runResults[tool.name] && (
+                                <div className="skill-result">
+                                  <h6>Last result</h6>
+                                  <pre className="code-block">{runResults[tool.name]}</pre>
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <div>
+                              <p className="muted">No inputs are defined for this skill.</p>
+                              <div className="skill-run-actions">
+                                <button onClick={async () => {
+                                  setRunningMap((m) => ({ ...m, [tool.name]: true }));
+                                  try {
+                                    const res = await fetch(`/api/workers/assistants/${encodeURIComponent(entity!.id)}/tools/execute`, {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ name: tool.name, arguments: {} }),
+                                    });
+                                    const data = await res.json();
+                                    setRunResults((r) => ({ ...r, [tool.name]: JSON.stringify(data, null, 2) }));
+                                  } catch (err) {
+                                    setRunResults((r) => ({ ...r, [tool.name]: String(err instanceof Error ? err.message : err) }));
+                                  } finally {
+                                    setRunningMap((m) => ({ ...m, [tool.name]: false }));
+                                  }
+                                }} disabled={Boolean(runningMap[tool.name])}>{runningMap[tool.name] ? 'Running…' : 'Run'}</button>
+                              </div>
+                              {runResults[tool.name] && <pre className="code-block">{runResults[tool.name]}</pre>}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+              <div style={{ marginTop: 8 }}>
+                <button onClick={() => setBindModalOpen(true)} className="secondary">Bind Skill</button>
+              </div>
+            </div>
+            {bindModalOpen && (
+              <div className="modal-overlay">
+                <div className="modal">
+                  <div className="modal-header">
+                    <h3>Bind a Skill</h3>
+                    <button className="close" onClick={() => setBindModalOpen(false)}>×</button>
+                  </div>
+                  <div className="modal-body">
+                    {availableSkills.length === 0 ? (
+                      <p>No skills available.</p>
+                    ) : (
+                      <div className="skill-list">
+                        {availableSkills.map((s) => {
+                          const already = toolBindings.some((tb) => tb.name === s.id || tb.name === s.name);
+                          return (
+                            <div key={s.id} className="skill-list-item">
+                              <div style={{ flex: 1 }}>
+                                <strong>{s.name}</strong>
+                                <div className="muted">{s.description}</div>
+                              </div>
+                              <div>
+                                <button disabled={already} onClick={() => {
+                                  if (already) return;
+                                  const newBinding: ToolBinding = {
+                                    name: s.id,
+                                    displayName: s.name,
+                                    description: s.description || s.name,
+                                    enabled: true,
+                                    config: {},
+                                    inputSchema: s.inputSchema || { type: 'object', properties: {} },
+                                    configSchema: s.configSchema,
+                                  };
+                                  setToolBindings((prev) => {
+                                    const nb = [...prev, newBinding];
+                                    scheduleSave(nb);
+                                    return nb;
+                                  });
+                                  setBindModalOpen(false);
+                                }}>{already ? 'Bound' : 'Bind'}</button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                  <div className="modal-footer">
+                    <button onClick={() => setBindModalOpen(false)} className="secondary">Close</button>
+                  </div>
+                </div>
+              </div>
+            )}
+
           </div>
         )}
 
-         {activeTab === 'tools' && (
+        {activeTab === 'tools' && (
            <div className="grid two-col">
              <div className="card">
-               <h3>Bound Tools</h3>
+               <h3>Bound Skills</h3>
                {toolBindings.length === 0 ? (
-                 <p>No tools bound to this assistant.</p>
+                 <p>No skills bound to this assistant.</p>
                ) : (
-                 <ul className="tool-binding-list">
-                   {toolBindings.map((tool) => (
-                      <li key={tool.name} className={tool.enabled ? 'enabled' : 'disabled'}>
-                        <div className="tool-info">
-                          <strong>{tool.name}</strong>
-                          <p>{tool.description}</p>
-                          {tool.inputSchema && Object.keys(tool.inputSchema).length > 0 && (
-                            <p className="muted" style={{ fontSize: '11px' }}>
-                              Schema: {JSON.stringify(tool.inputSchema).slice(0, 120)}
-                              {JSON.stringify(tool.inputSchema).length > 120 ? '…' : ''}
-                            </p>
-                          )}
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <label className="toggle">
-                            <input
-                              type="checkbox"
-                              checked={tool.enabled}
-                              onChange={() => toggleToolBinding(tool.name)}
-                            />
-                            <span className="toggle-slider"></span>
-                          </label>
-                          <button
-                            className="remove-btn"
-                            onClick={() => removeCustomTool(tool.name)}
-                            title={`Remove ${tool.name}`}
-                          >
-                            &times;
-                          </button>
-                        </div>
-                      </li>
-                   ))}
-                 </ul>
+                  <ul className="tool-binding-list">
+                    {toolBindings.map((tool) => {
+                      const configSchema = getToolConfigSchema(tool);
+                      const hasSettings = Object.keys(getSchemaProperties(configSchema)).length > 0;
+                      return (
+                        <li key={tool.name} className={tool.enabled ? 'enabled' : 'disabled'}>
+                          <div className="tool-info">
+                            <strong>{getToolDisplayName(tool)}</strong>
+                            <p>{getToolDescription(tool)}</p>
+                            <div className="skill-settings">
+                              {hasSettings ? (
+                                <SchemaFields
+                                  schema={configSchema as SchemaRecord}
+                                  values={tool.config || {}}
+                                  onChange={(key, value) => setToolBindings((prev) => {
+                                    const nb = prev.map((tb) => tb.name === tool.name
+                                      ? { ...tb, config: { ...(tb.config || {}), [key]: value } }
+                                      : tb);
+                                    scheduleSave(nb);
+                                    return nb;
+                                  })}
+                                  namePrefix={`settings-${tool.name}`}
+                                />
+                              ) : (
+                                <p className="muted">This Skill has no settings.</p>
+                              )}
+                            </div>
+                            <div className="skill-run-actions">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const inputSchema = getToolInputSchema(tool);
+                                  setRunInputs((prev) => ({
+                                    ...prev,
+                                    [tool.name]: prev[tool.name] || getInitialInputValues(inputSchema),
+                                  }));
+                                  setRunResult(null);
+                                  setRunTool(tool);
+                                }}
+                              >Run Skill</button>
+                            </div>
+                          </div>
+                          <div className="tool-actions">
+                            <label className="toggle">
+                              <input
+                                type="checkbox"
+                                checked={tool.enabled}
+                                onChange={() => toggleToolBinding(tool.name)}
+                              />
+                              <span className="toggle-slider"></span>
+                            </label>
+                            <button
+                              className="remove-btn"
+                              onClick={() => removeCustomTool(tool.name)}
+                              title={`Remove ${getToolDisplayName(tool)}`}
+                            >
+                              &times;
+                            </button>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
                )}
+
+              {runTool && (
+                <div className="modal-backdrop" onClick={() => { if (!runningTool) setRunTool(null); }}>
+                  <div className="modal" onClick={(e) => e.stopPropagation()}>
+                    <div className="panel-header">
+                      <h3>Run: {getToolDisplayName(runTool)}</h3>
+                      <button onClick={() => { if (!runningTool) setRunTool(null); }}>Close</button>
+                    </div>
+                    <p className="muted">{getToolDescription(runTool)}</p>
+
+                    <div className="skill-modal-fields">
+                      {Object.keys(getSchemaProperties(getToolInputSchema(runTool))).length > 0 ? (
+                        <SchemaFields
+                          schema={getToolInputSchema(runTool)}
+                          values={runInputs[runTool.name] || {}}
+                          onChange={(key, value) => setRunInputs((prev) => ({
+                            ...prev,
+                            [runTool.name]: { ...(prev[runTool.name] || {}), [key]: value },
+                          }))}
+                          namePrefix={`run-${runTool.name}`}
+                        />
+                      ) : (
+                        <p className="muted">No inputs are defined for this skill.</p>
+                      )}
+                    </div>
+
+                    <div className="actions">
+                      <button
+                        onClick={async () => {
+                          if (!entity || !runTool) return;
+                          const parsed = runInputs[runTool.name] || {};
+                          setRunningTool(true);
+                          setRunResult(null);
+                          try {
+                            const res = await fetch(`/api/workers/assistants/${encodeURIComponent(entity.id)}/tools/execute`, {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ name: runTool.name, arguments: parsed }),
+                            });
+                            const data = await res.json();
+                            setRunResult(JSON.stringify(data, null, 2));
+                          } catch (err) {
+                            setRunResult(err instanceof Error ? err.message : String(err));
+                          } finally {
+                            setRunningTool(false);
+                          }
+                        }}
+                        disabled={runningTool}
+                      >{runningTool ? 'Running…' : 'Run'}</button>
+                      <button onClick={() => { if (!runningTool) setRunTool(null); }} disabled={runningTool}>Cancel</button>
+                    </div>
+
+                    {runResult && (
+                      <div className="card-inner" style={{ marginTop: 12 }}>
+                        <h4>Result</h4>
+                        <pre className="code-block">{runResult}</pre>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
                <div className="button-row" style={{ marginTop: 12 }}>
                  <button onClick={saveConfiguration} disabled={saving}>
                    {saving ? 'Saving…' : 'Save Tool Bindings'}
@@ -419,63 +949,59 @@ const EntityWorkspace = () => {
                </div>
                {saveError && <div className="error-banner">{saveError}</div>}
              </div>
-             <div className="card">
-               <h3>Add Custom Tool</h3>
-               <p className="hint">
-                 Define a domain-specific tool for this assistant. The tool will be bound and
-                 made available during mission execution.
-               </p>
-               <div className="form">
-                 <input
-                   type="text"
-                   placeholder="Tool name"
-                   value={customToolName}
-                   onChange={(e) => setCustomToolName(e.target.value)}
-                 />
-                 <input
-                   type="text"
-                   placeholder="Description"
-                   value={customToolDescription}
-                   onChange={(e) => setCustomToolDescription(e.target.value)}
-                 />
-                 <textarea
-                   placeholder='Input schema (JSON, e.g. {"type":"object","properties":{}})'
-                   value={customToolSchema}
-                   onChange={(e) => setCustomToolSchema(e.target.value)}
-                   rows={3}
-                 />
-                 <div className="button-row">
-                   <button type="button" onClick={addCustomTool} className="secondary">
-                     Add Custom Tool
-                   </button>
-                 </div>
-               </div>
-             </div>
-             <div className="card">
-               <h3>Available General Tools</h3>
-               <p className="hint">Legacy Stage7 tools registered in the platform</p>
-               <ul className="available-tools-list">
-                 {availableTools.map((tool) => (
-                   <li key={tool.id}>
-                     <strong>{tool.name}</strong>
-                     <p>{tool.description}</p>
-                     <button
-                       className="link-button"
-                       onClick={() => {
-                         if (!toolBindings.find((t) => t.name === tool.id)) {
-                           setToolBindings((prev) => [
-                             ...prev,
-                             { name: tool.id, description: tool.description, inputSchema: {}, enabled: true },
-                           ]);
-                         }
-                       }}
-                     >
-                       Bind
-                     </button>
-                   </li>
-                 ))}
-               </ul>
-             </div>
+              <div className="card">
+                <h3>Available Skills</h3>
+                <p className="hint">Choose a skill to add it to this assistant.</p>
+                {availableSkills.length === 0 ? (
+                  <p>No skills available.</p>
+                ) : (
+                  <ul className="available-tools-list">
+                    {availableSkills.map((s) => (
+                      <li key={s.id}>
+                        <strong>{s.name}</strong>
+                        <p>{s.description}</p>
+                        <button
+                          className="link-button"
+                            onClick={() => {
+                            if (!toolBindings.find((t) => t.name === s.id || t.name === s.name)) {
+                              setToolBindings((prev) => {
+                                const nb = [
+                                  ...prev,
+                                  {
+                                    name: s.id,
+                                    displayName: s.name,
+                                    description: s.description,
+                                    inputSchema: s.inputSchema || { type: 'object', properties: {} },
+                                    configSchema: s.configSchema,
+                                    enabled: true,
+                                    config: {},
+                                  },
+                                ];
+                                scheduleSave(nb);
+                                return nb;
+                              });
+                            }
+                          }}
+                        >
+                          Bind another Skill
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <div className="card">
+                <h3>Available General Tools</h3>
+                <p className="hint">Legacy Stage7 tools registered in the platform (not bindable to assistants).</p>
+                <ul className="available-tools-list">
+                  {availableTools.map((tool) => (
+                    <li key={tool.id}>
+                      <strong>{tool.name}</strong>
+                      <p>{tool.description}</p>
+                    </li>
+                  ))}
+                </ul>
+              </div>
            </div>
          )}
 
@@ -589,9 +1115,21 @@ const EntityWorkspace = () => {
                    Configure execution parameters and metadata for this assistant.
                    These are stored in the assistant definition's metadata.
                  </p>
-                 <pre className="code-block" style={{ maxHeight: '200px', overflow: 'auto' }}>
-                   {JSON.stringify(metadataConfig, null, 2)}
-                 </pre>
+                 <div style={{ maxHeight: '200px', overflow: 'auto' }}>
+                   {Object.entries(metadataConfig).length === 0 ? (
+                     <p className="muted">No metadata configured.</p>
+                   ) : (
+                     <div style={{ display: 'grid', gap: 8 }}>
+                       {Object.entries(metadataConfig).map(([k, v]) => (
+                         <div key={k} className="input-row">
+                           <label style={{ width: 160 }}>{k}</label>
+                           <input type="text" value={String(v ?? '')} onChange={(e) => setMetadataConfig((prev) => ({ ...prev, [k]: e.target.value }))} />
+                           <button className="remove-btn" onClick={() => { const n = { ...metadataConfig }; delete n[k]; setMetadataConfig(n); }}>&times;</button>
+                         </div>
+                       ))}
+                     </div>
+                   )}
+                 </div>
                  <div className="input-row">
                    <input
                      type="text"
@@ -627,20 +1165,29 @@ const EntityWorkspace = () => {
          )}
 
          {activeTab === 'memory' && (
-           <div className="card">
-             <h3>Memory Context</h3>
-             <pre className="code-block">
-               {JSON.stringify(memoryContext, null, 2)}
-             </pre>
-             <div className="button-row">
-               <button onClick={() => setMemoryContext({ ...memoryContext, lastInteraction: new Date().toISOString() })}>
-                 Update Timestamp
-               </button>
-               <button className="secondary" onClick={() => setMemoryContext({})}>
-                 Clear Memory
-               </button>
-             </div>
-           </div>
+          <div className="card">
+            <h3>Memory Context</h3>
+            {Object.keys(memoryContext).length === 0 ? (
+              <p className="muted">No memory persisted.</p>
+            ) : (
+              <div style={{ display: 'grid', gap: 8 }}>
+                {Object.entries(memoryContext).map(([k, v]) => (
+                  <div key={k} className="input-row">
+                    <label style={{ width: 160 }}>{k}</label>
+                    <div style={{ flex: 1 }}>{String(typeof v === 'object' ? JSON.stringify(v) : v)}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="button-row">
+              <button onClick={() => setMemoryContext({ ...memoryContext, lastInteraction: new Date().toISOString() })}>
+                Update Timestamp
+              </button>
+              <button className="secondary" onClick={() => setMemoryContext({})}>
+                Clear Memory
+              </button>
+            </div>
+          </div>
          )}
 
          {activeTab === 'missions' && (
@@ -723,18 +1270,62 @@ const EntityWorkspace = () => {
         {activeTab === 'artifacts' && (
           <div className="card">
             <h3>Artifacts</h3>
-            {(entity.artifacts || []).length === 0 ? (
-              <p>No artifacts generated yet.</p>
+            {agentArtifacts.length === 0 ? (
+              <div>
+                <p>No artifacts generated yet.</p>
+              </div>
             ) : (
-              <ul>
-                {entity.artifacts!.map((a) => (
-                  <li key={a}>{a}</li>
+              <ul className="artifact-list">
+                {agentArtifacts.map((a) => (
+                  <li key={a.id || a.name} className="artifact-item produced">
+                    <div className="artifact-header">
+                      <strong>{a.name || a.id}</strong>
+                      {a.type && <span className="badge">{a.type}</span>}
+                    </div>
+                    {(a.content || (a as any).url) && (
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                        <button onClick={() => {
+                          if ((a as any).url) {
+                            window.open((a as any).url, '_blank');
+                          } else {
+                            const blob = new Blob([a.content || ''], { type: 'text/plain' });
+                            const url = URL.createObjectURL(blob);
+                            window.open(url, '_blank');
+                          }
+                        }}>Open</button>
+                        <button onClick={() => {
+                          if ((a as any).url) {
+                            const aEl = document.createElement('a');
+                            aEl.href = (a as any).url;
+                            aEl.target = '_blank';
+                            document.body.appendChild(aEl);
+                            aEl.click();
+                            aEl.remove();
+                          } else {
+                            const blob = new Blob([a.content || ''], { type: 'text/plain' });
+                            const url = URL.createObjectURL(blob);
+                            const aEl = document.createElement('a');
+                            aEl.href = url;
+                            aEl.download = (a.name || a.id || 'artifact') + '.txt';
+                            document.body.appendChild(aEl);
+                            aEl.click();
+                            aEl.remove();
+                            URL.revokeObjectURL(url);
+                          }
+                        }}>Download</button>
+                      </div>
+                    )}
+                  </li>
                 ))}
               </ul>
             )}
+            <div style={{ marginTop: 8 }}>
+              <p className="muted">Artifact upload for entities is handled via Mission UI and the Artifacts page.</p>
+            </div>
           </div>
         )}
       </div>
+
 
       <div className="live-feed-panel">
         <div className="feed-header">

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useFeedStore, FeedEvent } from '../stores/feedStore';
+import AgentOutputsPanel from '../components/AgentOutputsPanel';
 import { useMissionsStore } from '../stores/missionsStore';
 import { postJSON } from '../utils/api';
 
@@ -42,7 +43,7 @@ interface PhaseOutput {
   }>;
 }
 
-type Tab = 'conversation' | 'timeline' | 'plan' | 'artifacts';
+type Tab = 'conversation' | 'timeline' | 'plan' | 'artifacts' | 'agents';
 
 const STATUS_BADGE: Record<string, string> = {
   running: 'running',
@@ -261,9 +262,25 @@ const MissionRoom = () => {
     const costEvents = missionEvents.filter((e) => e.type === 'cost_estimate');
     let sum = 0;
     for (const e of costEvents) {
-      const c = e.metadata?.data?.estimatedCost ?? e.metadata?.estimatedCost ?? e.data?.estimatedCost ?? e.data?.cost ?? (e as any).data?.estimatedCost;
-      const num = typeof c === 'number' ? c : Number(c || 0);
-      if (!isNaN(num)) sum += num;
+      const nestedData =
+        e.metadata?.data !== undefined &&
+        e.metadata.data !== null &&
+        typeof e.metadata.data === 'object' &&
+        !Array.isArray(e.metadata.data)
+          ? (e.metadata.data as Record<string, unknown>)
+          : undefined;
+      const c =
+        e.metadata?.estimatedCost ??
+        e.metadata?.cost ??
+        nestedData?.estimatedCost ??
+        nestedData?.cost;
+      const num =
+        typeof c === 'number'
+          ? c
+          : typeof c === 'string'
+            ? Number(c.trim())
+            : Number.NaN;
+      if (Number.isFinite(num)) sum += num;
     }
     return sum;
   }, [missionEvents]);
@@ -286,7 +303,13 @@ const MissionRoom = () => {
   const pendingApproval = useMemo(() => {
     const resolved = new Set<string>();
     for (const e of missionEvents) {
-      if (e.type === 'approval_approved' || e.type === 'approval_rejected') {
+      // consider both approval_* and phase_* resolution events as resolving a pending approval
+      if (
+        e.type === 'approval_approved' ||
+        e.type === 'approval_rejected' ||
+        e.type === 'phase_approved' ||
+        e.type === 'phase_rejected'
+      ) {
         const md = e.metadata || {};
         if (md.phaseId) resolved.add(String(md.phaseId));
       }
@@ -386,6 +409,29 @@ const MissionRoom = () => {
           </p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={async () => {
+              try {
+                await postJSON(`/api/temporal/missions/${encodeURIComponent(workflowId)}/start`, {});
+                refreshDetail(workflowId);
+              } catch (e) {
+                // ignore — refresh will show errors
+              }
+            }}>Start</button>
+            <button onClick={async () => {
+              try {
+                await postJSON(`/api/temporal/missions/${encodeURIComponent(workflowId)}/pause`, {});
+                refreshDetail(workflowId);
+              } catch (e) {}
+            }}>Pause</button>
+            <button className="danger" onClick={async () => {
+              if (!confirm('Stop mission? This will terminate running branches.')) return;
+              try {
+                await postJSON(`/api/temporal/missions/${encodeURIComponent(workflowId)}/stop`, {});
+                refreshDetail(workflowId);
+              } catch (e) {}
+            }}>Stop</button>
+          </div>
           <span className={`badge ${badge}`}>{status}</span>
           <span className={`connection-status ${connected ? 'online' : 'offline'}`}>
             {connected ? 'Live' : 'Disconnected'}
@@ -433,7 +479,7 @@ const MissionRoom = () => {
       </div>
 
       <div className="entity-tabs">
-        {(['conversation', 'timeline', 'plan', 'artifacts'] as Tab[]).map((t) => (
+        {(['conversation', 'timeline', 'plan', 'artifacts', 'agents'] as Tab[]).map((t) => (
           <button
             key={t}
             className={tab === t ? 'tab active' : 'tab'}
@@ -458,7 +504,9 @@ const MissionRoom = () => {
 
       {tab === 'conversation' && (
         <div className="card mission-conversation">
-          <div className="transcript" ref={transcriptRef}>
+          <div style={{ display: 'flex', gap: 12 }}>
+            <div style={{ flex: 1 }}>
+              <div className="transcript" ref={transcriptRef}>
             {detailLoading && !detail ? (
               <div className="loading">Loading mission...</div>
             ) : transcript.length === 0 ? (
@@ -492,11 +540,16 @@ const MissionRoom = () => {
                 </div>
               ))
             )}
+              </div>
+            </div>
+            <div style={{ width: 300 }}>
+              <AgentOutputsPanel missionId={missionId} />
+            </div>
           </div>
           <div className="composer">
             {sendError && <div className="error-banner">{sendError}</div>}
             <textarea
-              placeholder="Talk to your agents..."
+              placeholder="Send messages to the mission (agent outputs stream here)..."
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
@@ -518,38 +571,43 @@ const MissionRoom = () => {
       )}
 
       {tab === 'timeline' && (
-        <div className="card">
-          <h3>Mission Timeline</h3>
-          <p className="muted" style={{ fontSize: '12px', marginBottom: '12px' }}>
-            Lifecycle milestones: mission start/complete, phase approvals, and task outcomes.
-          </p>
-          {timelineEvents.length === 0 ? (
-            <div className="empty-state">No lifecycle events recorded yet.</div>
-          ) : (
-            <ul className="timeline">
-              {timelineEvents.map((evt) => (
-                <li key={evt.id} className={`timeline-item ${evt.type}`}>
-                  <span className="timeline-icon">{iconForType(String(evt.type))}</span>
-                  <div className="timeline-body">
-                    <div className="timeline-meta">
-                      <strong>{String(evt.type)}</strong>
-                      <span className="muted">
-                        {evt.timestamp
-                          ? new Date(evt.timestamp).toLocaleString()
-                          : ''}
-                      </span>
-                    </div>
-                    <div>{evt.message}</div>
-                    {evt.metadata && (
-                      <div className="muted" style={{ fontSize: '11px', marginTop: '4px' }}>
-                        {JSON.stringify(evt.metadata)}
+        <div className="card" style={{ display: 'flex', gap: 12 }}>
+          <div style={{ flex: 1 }}>
+            <h3>Mission Timeline</h3>
+            <p className="muted" style={{ fontSize: '12px', marginBottom: '12px' }}>
+              Lifecycle milestones: mission start/complete, phase approvals, and task outcomes.
+            </p>
+            {timelineEvents.length === 0 ? (
+              <div className="empty-state">No lifecycle events recorded yet.</div>
+            ) : (
+              <ul className="timeline">
+                {timelineEvents.map((evt) => (
+                  <li key={evt.id} className={`timeline-item ${evt.type}`}>
+                    <span className="timeline-icon">{iconForType(String(evt.type))}</span>
+                    <div className="timeline-body">
+                      <div className="timeline-meta">
+                        <strong>{String(evt.type)}</strong>
+                        <span className="muted">
+                          {evt.timestamp
+                            ? new Date(evt.timestamp).toLocaleString()
+                            : ''}
+                        </span>
                       </div>
-                    )}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
+                      <div>{evt.message}</div>
+                      {evt.metadata && (
+                        <div className="muted" style={{ fontSize: '11px', marginTop: '4px' }}>
+                          {JSON.stringify(evt.metadata)}
+                        </div>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <div style={{ width: 300 }}>
+            <AgentOutputsPanel missionId={missionId} />
+          </div>
         </div>
       )}
 
@@ -646,10 +704,41 @@ const MissionRoom = () => {
       {tab === 'artifacts' && (
         <div className="card">
           <h3>Artifacts</h3>
+          <div style={{ marginBottom: 8 }}>
+            <label style={{ fontSize: 13 }}>
+              Upload artifact for mission: <input type="file" onChange={async (e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                try {
+                  const text = await file.text();
+                  await postJSON(`/api/artifacts/missions/${encodeURIComponent(missionId)}/artifacts`, {
+                    name: file.name,
+                    content: text,
+                    type: file.type || 'text/plain',
+                  });
+                  // refresh mission detail to show new artifact
+                  await refreshDetail(workflowId);
+                } catch (err) {
+                  window.alert(err instanceof Error ? err.message : 'Upload failed');
+                }
+              }} />
+            </label>
+          </div>
           <ArtifactsView
+            missionId={missionId}
             plan={plan ?? null}
             phaseOutputs={phaseOutputs}
           />
+        </div>
+      )}
+
+      {tab === 'agents' && (
+        <div className="card">
+          <h3>Agents</h3>
+          <p className="muted" style={{ fontSize: '12px', marginBottom: '12px' }}>
+            Ephemeral mission agents and their recent outputs.
+          </p>
+          <AgentOutputsPanel missionId={missionId} />
         </div>
       )}
     </div>
@@ -774,11 +863,12 @@ function buildTranscript(events: FeedEvent[]): TranscriptTurn[] {
 }
 
 interface ArtifactsViewProps {
+  missionId: string;
   plan: Plan | null;
   phaseOutputs: PhaseOutput[];
 }
 
-const ArtifactsView = ({ plan, phaseOutputs }: ArtifactsViewProps) => {
+const ArtifactsView = ({ missionId, plan, phaseOutputs }: ArtifactsViewProps) => {
   const items: Array<{
     id: string;
     name: string;
@@ -871,7 +961,61 @@ const ArtifactsView = ({ plan, phaseOutputs }: ArtifactsViewProps) => {
             {a.phaseId && <span className="muted">phase: {a.phaseId}</span>}
             {a.taskId && <span className="muted">task: {a.taskId}</span>}
           </div>
-          {a.text && <pre className="code-block">{a.text}</pre>}
+          {a.text && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <pre className="code-block">{a.text}</pre>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => {
+                  if ((a as any).url) {
+                    window.open((a as any).url, '_blank');
+                  } else {
+                    const blob = new Blob([a.text || ''], { type: 'text/plain' });
+                    const url = URL.createObjectURL(blob);
+                    window.open(url, '_blank');
+                  }
+                }}>Open</button>
+                <button onClick={() => {
+                  if ((a as any).url) {
+                    const aEl = document.createElement('a');
+                    aEl.href = (a as any).url;
+                    aEl.target = '_blank';
+                    document.body.appendChild(aEl);
+                    aEl.click();
+                    aEl.remove();
+                  } else {
+                    const blob = new Blob([a.text || ''], { type: 'text/plain' });
+                    const url = URL.createObjectURL(blob);
+                    const aEl = document.createElement('a');
+                    aEl.href = url;
+                    aEl.download = (a.name || 'artifact') + '.txt';
+                    document.body.appendChild(aEl);
+                    aEl.click();
+                    aEl.remove();
+                    URL.revokeObjectURL(url);
+                  }
+                }}>Download</button>
+                <label style={{ fontSize: 13 }}>
+                  Upload replacement: <input type="file" onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    const text = await file.text();
+                    try {
+                      await postJSON(`/api/artifacts/missions/${encodeURIComponent(missionId)}/artifacts`, {
+                        name: file.name,
+                        content: text,
+                        type: file.type || 'text/plain',
+                        phaseId: a.phaseId,
+                        taskId: a.taskId,
+                      });
+                      // simple reload of page data by reloading mission detail
+                      window.location.reload();
+                    } catch (err) {
+                      window.alert(err instanceof Error ? err.message : 'Upload failed');
+                    }
+                  }} /></label>
+              </div>
+            </div>
+          )}
         </li>
       ))}
     </ul>

@@ -15,6 +15,7 @@ router.use((req: Request, res: Response, next: Function) => {
     next();
     return;
   }
+  req.url = '/api/workers' + req.url;
   proxy.web(req, res, undefined, (err: any) => {
     logger.error({ err: err.message, url: req.url }, 'Worker pool proxy failed');
     if (!res.headersSent) {
@@ -24,7 +25,7 @@ router.use((req: Request, res: Response, next: Function) => {
 });
 
 router.post('/assistants', asyncHandler(async (req: Request, res: Response) => {
-  const response = await fetch(`${WORKER_POOL_URL}/assistants`, {
+  const response = await fetch(`${WORKER_POOL_URL}/api/workers/assistants`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(req.body),

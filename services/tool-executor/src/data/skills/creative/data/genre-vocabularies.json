@@ -1,0 +1,296 @@
+{
+  "_description": "Genre-specific vocabulary and patterns for lyric generation.",
+  "genres": {
+    "pop": {
+      "vocabulary": [
+        "love",
+        "heart",
+        "fire",
+        "dance",
+        "night",
+        "shine",
+        "together",
+        "dream",
+        "high",
+        "feeling",
+        "beat",
+        "soul",
+        "magic",
+        "bright",
+        "wonder"
+      ],
+      "themes": [
+        "love",
+        "heartbreak",
+        "empowerment",
+        "summer",
+        "dance",
+        "friendship"
+      ],
+      "structure": [
+        "verse",
+        "chorus",
+        "verse",
+        "chorus",
+        "bridge",
+        "chorus"
+      ],
+      "syllableTarget": [
+        8,
+        10,
+        12
+      ],
+      "commonPhrases": [
+        "in the",
+        "of the",
+        "with your",
+        "every",
+        "I can",
+        "we are"
+      ]
+    },
+    "rock": {
+      "vocabulary": [
+        "fire",
+        "thunder",
+        "rebel",
+        "fight",
+        "run",
+        "road",
+        "engine",
+        "wild",
+        "storm",
+        "burn",
+        "steel",
+        "rise",
+        "edge",
+        "loud",
+        "forever"
+      ],
+      "themes": [
+        "rebellion",
+        "freedom",
+        "loss",
+        "power",
+        "journey",
+        "survival"
+      ],
+      "structure": [
+        "verse",
+        "chorus",
+        "verse",
+        "chorus",
+        "bridge",
+        "chorus",
+        "guitar solo"
+      ],
+      "syllableTarget": [
+        10,
+        12,
+        14
+      ],
+      "commonPhrases": [
+        "on the",
+        "in the",
+        "with my",
+        "never",
+        "I will",
+        "we can"
+      ]
+    },
+    "hip-hop": {
+      "vocabulary": [
+        "flow",
+        "beat",
+        "street",
+        "dream",
+        "hustle",
+        "real",
+        "truth",
+        "power",
+        "rise",
+        "grind",
+        "night",
+        "light",
+        "sky",
+        "fly",
+        "higher"
+      ],
+      "themes": [
+        "struggle",
+        "success",
+        "authenticity",
+        "street life",
+        "overcoming"
+      ],
+      "structure": [
+        "intro",
+        "verse",
+        "hook",
+        "verse",
+        "hook",
+        "verse",
+        "hook",
+        "outro"
+      ],
+      "syllableTarget": [
+        12,
+        16,
+        20
+      ],
+      "commonPhrases": [
+        "yeah",
+        "yo",
+        "check",
+        "I said",
+        "you know",
+        "listen"
+      ]
+    },
+    "country": {
+      "vocabulary": [
+        "road",
+        "truck",
+        "beer",
+        "heart",
+        "farm",
+        "sky",
+        "home",
+        "love",
+        "train",
+        "river",
+        "dust",
+        "wild",
+        "true",
+        "song",
+        "dance"
+      ],
+      "themes": [
+        "heartbreak",
+        "home",
+        "farm",
+        "truck",
+        "love",
+        "loss"
+      ],
+      "structure": [
+        "verse",
+        "chorus",
+        "verse",
+        "chorus",
+        "bridge",
+        "chorus"
+      ],
+      "syllableTarget": [
+        8,
+        10,
+        12
+      ],
+      "commonPhrases": [
+        "in the",
+        "on the",
+        "with my",
+        "under the",
+        "by the"
+      ]
+    },
+    "r-and-b": {
+      "vocabulary": [
+        "love",
+        "heart",
+        "body",
+        "soul",
+        "touch",
+        "fire",
+        "night",
+        "feeling",
+        "desire",
+        "slow",
+        "deep",
+        "true",
+        "need",
+        "want",
+        "close"
+      ],
+      "themes": [
+        "love",
+        "desire",
+        "heartbreak",
+        "intimacy",
+        "sensuality"
+      ],
+      "structure": [
+        "intro",
+        "verse",
+        "chorus",
+        "verse",
+        "chorus",
+        "bridge",
+        "chorus",
+        "outro"
+      ],
+      "syllableTarget": [
+        8,
+        10,
+        12
+      ],
+      "commonPhrases": [
+        "in the",
+        "of the",
+        "with you",
+        "every",
+        "I want",
+        "you know"
+      ]
+    },
+    "electronic": {
+      "vocabulary": [
+        "beat",
+        "light",
+        "night",
+        "high",
+        "sound",
+        "wave",
+        "pulse",
+        "dream",
+        "sky",
+        "fire",
+        "run",
+        "dance",
+        "glow",
+        "vibe",
+        "flow"
+      ],
+      "themes": [
+        "energy",
+        "escape",
+        "dance",
+        "nightlife",
+        "euphoria"
+      ],
+      "structure": [
+        "intro",
+        "buildup",
+        "drop",
+        "verse",
+        "drop",
+        "bridge",
+        "drop",
+        "outro"
+      ],
+      "syllableTarget": [
+        6,
+        8,
+        10
+      ],
+      "commonPhrases": [
+        "in the",
+        "of the",
+        "with the",
+        "every",
+        "I feel",
+        "we are"
+      ]
+    }
+  }
+}

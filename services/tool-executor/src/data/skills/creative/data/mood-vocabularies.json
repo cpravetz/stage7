@@ -1,0 +1,171 @@
+{
+  "_description": "Mood-specific emotional language for lyric generation.",
+  "moods": {
+    "happy": {
+      "words": [
+        "sunshine",
+        "smile",
+        "dance",
+        "laugh",
+        "bright",
+        "joy",
+        "free",
+        "sky",
+        "shine",
+        "together",
+        "magic",
+        "wonder",
+        "glow",
+        "high",
+        "love"
+      ],
+      "phrases": [
+        "feel so good",
+        "under the sun",
+        "dancing away",
+        "smiling bright",
+        "hearts alight",
+        "so alive"
+      ],
+      "tone": "upbeat, bright, uplifting, major key"
+    },
+    "sad": {
+      "words": [
+        "rain",
+        "tears",
+        "shadow",
+        "cold",
+        "gone",
+        "lost",
+        "ache",
+        "cry",
+        "gray",
+        "hurt",
+        "scar",
+        "goodbye",
+        "alone",
+        "silent",
+        "fading"
+      ],
+      "phrases": [
+        "hurts so deep",
+        "gone without a trace",
+        "alone in the dark",
+        "tears falling down",
+        "lost without you"
+      ],
+      "tone": "melancholic, slow, minor key, introspective"
+    },
+    "energetic": {
+      "words": [
+        "fire",
+        "thunder",
+        "run",
+        "fast",
+        "power",
+        "rise",
+        "beat",
+        "loud",
+        "wild",
+        "storm",
+        "burn",
+        "engine",
+        "fight",
+        "rush",
+        "high"
+      ],
+      "phrases": [
+        "never stop",
+        "running fast",
+        "burning up",
+        "rising high",
+        "full throttle",
+        "on the edge"
+      ],
+      "tone": "fast tempo, driving rhythm, aggressive, intense"
+    },
+    "melancholic": {
+      "words": [
+        "fading",
+        "ghost",
+        "memory",
+        "dust",
+        "silent",
+        "hollow",
+        "drifting",
+        "ash",
+        "echo",
+        "distant",
+        "wither",
+        "gray",
+        "still",
+        "cold",
+        "gone"
+      ],
+      "phrases": [
+        "fading away",
+        "ghost of you",
+        "silent and still",
+        "drifting apart",
+        "ashes to dust"
+      ],
+      "tone": "slow, atmospheric, reflective, bittersweet"
+    },
+    "romantic": {
+      "words": [
+        "love",
+        "heart",
+        "body",
+        "soul",
+        "touch",
+        "kiss",
+        "desire",
+        "close",
+        "soft",
+        "warm",
+        "true",
+        "need",
+        "want",
+        "shine",
+        "glow"
+      ],
+      "phrases": [
+        "hold you close",
+        "heart to heart",
+        "under the stars",
+        "love so deep",
+        "you and me",
+        "forever yours"
+      ],
+      "tone": "intimate, warm, gentle, sensual"
+    },
+    "angry": {
+      "words": [
+        "fire",
+        "rage",
+        "fight",
+        "break",
+        "shatter",
+        "burn",
+        "hate",
+        "war",
+        "storm",
+        "thunder",
+        "scream",
+        "noise",
+        "edge",
+        "sharp",
+        "cold"
+      ],
+      "phrases": [
+        "never again",
+        "breaking through",
+        "burn it down",
+        "shatter the wall",
+        "rage inside",
+        "enough is enough"
+      ],
+      "tone": "aggressive, distorted, loud, confrontational"
+    }
+  }
+}

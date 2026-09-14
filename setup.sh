@@ -30,7 +30,7 @@ then
     exit 1
 fi
 echo "Docker and Docker Compose are installed. ✅"
-press_any_key_to_continue
+#press_any_key_to_continue
 
 # --- 2. Setup .env file ---
 echo ""
@@ -55,7 +55,7 @@ echo "  - Fill in your API keys (e.g., GROQ_API_KEY) and any other custom settin
 echo "  - Ensure 'SHARED_SECRET' and 'ADMIN_SECRET' are left blank for auto-generation,"
 echo "    unless you want to set them manually."
 echo "============================================================================"
-press_any_key_to_continue
+#press_any_key_to_continue
 
 # Function to generate a random secret string
 generate_secret() {
@@ -87,7 +87,7 @@ else
 fi
 
 echo ".env file setup complete. ✅"
-press_any_key_to_continue
+#press_any_key_to_continue
 
 # --- 3. Tear down any old / orphan containers before rebuilding ---
 echo ""
@@ -102,7 +102,7 @@ if ! docker compose build --no-cache; then
     exit 1
 fi
 echo "Docker images built. ✅"
-press_any_key_to_continue
+#press_any_key_to_continue
 
 # --- 5. Start services ---
 echo ""

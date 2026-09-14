@@ -4,7 +4,6 @@ import Dashboard from './pages/Dashboard';
 import Assistants from './pages/Assistants';
 import Missions from './pages/Missions';
 import MissionRoom from './pages/MissionRoom';
-import Agents from './pages/Agents';
 import Settings from './pages/Settings';
 import Login from './pages/Login';
 import EntityWorkspace from './pages/EntityWorkspace';
@@ -24,7 +23,6 @@ function App() {
         <Route path="assistants" element={<Assistants />} />
         <Route path="missions" element={<Missions />} />
         <Route path="missions/:workflowId" element={<MissionRoom />} />
-        <Route path="agents" element={<Agents />} />
         <Route path="entity/:id" element={<EntityWorkspace />} />
         <Route path="canvas" element={<Canvas />} />
         <Route path="feeds" element={<LiveFeeds />} />

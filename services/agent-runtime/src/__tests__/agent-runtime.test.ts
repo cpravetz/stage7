@@ -98,7 +98,7 @@ describe('AgentRuntime', () => {
 describe('REST endpoints', () => {
   it('should register an agent via POST /api/agent-runtime/agents', async () => {
     const res = await request(app)
-      .post('/api/agent-runtime/agents')
+      .post('/api/agent-runtime/missions/test-mission/agents')
       .send({
         id: 'agent-rest-1',
         tenantId: 'tenant-1',
@@ -116,7 +116,7 @@ describe('REST endpoints', () => {
   })
 
   it('should list agents via GET /api/agent-runtime/agents', async () => {
-    const res = await request(app).get('/api/agent-runtime/agents')
+    const res = await request(app).get('/api/agent-runtime/missions/test-mission/agents')
     expect(res.status).toBe(200)
     expect(res.body.agents).toBeDefined()
     expect(Array.isArray(res.body.agents)).toBe(true)
@@ -124,7 +124,7 @@ describe('REST endpoints', () => {
 
   it('should start agent via POST /api/agent-runtime/agents/:id/start', async () => {
     await request(app)
-      .post('/api/agent-runtime/agents')
+      .post('/api/agent-runtime/missions/test-mission/agents')
       .send({
         id: 'agent-rest-2',
         tenantId: 'tenant-1',
@@ -139,8 +139,7 @@ describe('REST endpoints', () => {
         updatedAt: new Date().toISOString(),
       })
     const res = await request(app)
-      .post('/api/agent-runtime/agents/agent-rest-2/start')
-      .send({ missionId: 'mission-1' })
+      .post('/api/agent-runtime/missions/test-mission/agents/agent-rest-2/start')
     expect(res.status).toBe(201)
     expect(res.body.status).toBe('running')
   })

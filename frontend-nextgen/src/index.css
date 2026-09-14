@@ -654,6 +654,13 @@ button:disabled {
   word-break: break-word;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .secondary {
   background: #334155;
   color: #e2e8f0;
@@ -1209,6 +1216,99 @@ a:hover {
   margin: 4px 0 0;
   font-size: 12px;
   color: #94a3b8;
+}
+
+.tool-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.skill-settings {
+  margin-top: 10px;
+}
+
+.skill-fields {
+  display: grid;
+  gap: 10px;
+  width: 100%;
+}
+
+.skill-field {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.skill-field-heading {
+  display: grid;
+  gap: 2px;
+}
+
+.skill-field-heading label {
+  color: #e2e8f0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.skill-field-description {
+  color: #94a3b8;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.skill-control {
+  width: 100%;
+  min-width: 0;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  color: #e2e8f0;
+  font: inherit;
+  font-size: 14px;
+  padding: 8px 10px;
+}
+
+.skill-control-long {
+  min-height: 72px;
+  resize: vertical;
+}
+
+.skill-checkbox {
+  accent-color: #0ea5e9;
+  width: 16px;
+  height: 16px;
+}
+
+.skill-nested-fields {
+  display: grid;
+  gap: 8px;
+  padding-left: 12px;
+  border-left: 1px solid #334155;
+}
+
+.skill-settings-summary,
+.skill-run-actions,
+.skill-result {
+  margin-top: 10px;
+}
+
+.skill-modal-fields {
+  margin-top: 12px;
+}
+
+.skill-panel {
+  margin-top: 10px;
+}
+
+.skill-panel h4 {
+  color: #f1f5f9;
+  font-size: 15px;
+}
+
+.skill-panel .muted {
+  margin-bottom: 8px;
 }
 
 .available-tools-list li {

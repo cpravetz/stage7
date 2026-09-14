@@ -1,5 +1,6 @@
 export interface MCPTool {
   name: string;
+  displayName?: string;
   description: string;
   inputSchema: Record<string, unknown>;
   outputSchema?: Record<string, unknown>;

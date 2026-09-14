@@ -46,7 +46,7 @@ router.get(
   })
 )
 
-  router.get(
+router.get(
   '/tools/:id',
   asyncHandler(async (req: Request, res: Response) => {
     const tool = registry.get(req.params.id)
@@ -76,6 +76,11 @@ router.post(
       throw new ToolNotFoundError(req.params.id)
     }
 
+    // Skills require an assistant context — reject direct execution without assistant id
+    if (tool.isSkill && !req.header('x-assistant-id')) {
+      throw new ValidationError('Skill execution requires assistant context (X-Assistant-Id header)');
+    }
+
     const execution = await executor.executeOrRequestCredentials(tool, req.body.input || {}, req.body.credentials)
 
     if (execution instanceof CredentialRequiredError) {
@@ -91,32 +96,70 @@ router.post(
 router.post(
   '/tools/execute',
   asyncHandler(async (req: Request, res: Response) => {
-    const { tool, input, credentials } = req.body as { tool?: Partial<Tool>; input?: Record<string, unknown>; credentials?: Record<string, string> }
-    if (!tool?.name || !tool?.type) {
-      throw new ValidationError('tool.name and tool.type are required')
+    // Support both nested {tool, input, credentials} and flat {id, name, type, manifest, input, credentials, isSkill}
+    const body = req.body as Record<string, unknown>;
+    let tool: Partial<Tool>;
+    let input: Record<string, unknown>;
+    let credentials: Record<string, string> | undefined;
+
+    if (body.tool && typeof body.tool === 'object') {
+      // Nested payload: {tool, input, credentials}
+      tool = body.tool as Partial<Tool>;
+      input = (body.input as Record<string, unknown>) || {};
+      credentials = body.credentials as Record<string, string> | undefined;
+    } else {
+      // Flat payload: {id, name, type, manifest, input, credentials, isSkill}
+      const { tool: _tool, input: _input, credentials: _creds, ...toolFields } = body;
+      tool = toolFields as Partial<Tool>;
+      input = (body.input as Record<string, unknown>) || {};
+      credentials = body.credentials as Record<string, string> | undefined;
     }
 
-    const fullTool: Tool = {
-      id: tool.id || `tool-${Date.now()}`,
-      name: tool.name,
-      description: tool.description || '',
-      type: tool.type as Tool['type'],
-      manifest: tool.manifest || {},
-      inputSchema: tool.inputSchema,
-      outputSchema: tool.outputSchema,
-      createdAt: new Date(),
-      updatedAt: new Date(),
+    if (!tool.name || !tool.type) {
+      throw new ValidationError('tool.name and tool.type are required');
     }
 
-    const execution = await executor.executeOrRequestCredentials(fullTool, input || {}, credentials)
+    // Look up the registered tool/skill by name/id first so the assistant's
+    // declared skill name resolves to the real implementation (code, manifest,
+    // inputSchema) instead of an empty stub.
+    const registered = tool.name ? registry.list().find((t) => t.name === tool.name || t.id === tool.name) : undefined;
+    
+    let fullTool: Tool;
+    if (registered) {
+      fullTool = registered;
+      // Preserve isSkill from incoming payload if provided
+      if (tool.isSkill !== undefined) {
+        fullTool = { ...fullTool, isSkill: tool.isSkill };
+      }
+    } else {
+      fullTool = {
+        id: (tool.id as string) || `tool-${Date.now()}`,
+        name: tool.name as string,
+        description: (tool.description as string) || '',
+        type: tool.type as Tool['type'],
+        manifest: (tool.manifest as Record<string, unknown>) || {},
+        inputSchema: tool.inputSchema as Record<string, unknown> | undefined,
+        outputSchema: tool.outputSchema as Record<string, unknown> | undefined,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        isSkill: tool.isSkill,
+      };
+    }
+
+    // If the resolved tool is a skill, require assistant context header
+    if (fullTool.isSkill && !req.header('x-assistant-id')) {
+      throw new ValidationError('Skill execution requires assistant context (X-Assistant-Id header)');
+    }
+
+    const execution = await executor.executeOrRequestCredentials(fullTool, input, credentials);
 
     if (execution instanceof CredentialRequiredError) {
-      res.status(428).json({ error: execution.message, request: execution.request })
+      res.status(428).json({ error: execution.message, request: execution.request });
       return;
     }
 
-    const statusCode = execution.status === 'failed' ? 500 : 200
-    res.status(statusCode).json(execution)
+    const statusCode = execution.status === 'failed' ? 500 : 200;
+    res.status(statusCode).json(execution);
   })
 )
 

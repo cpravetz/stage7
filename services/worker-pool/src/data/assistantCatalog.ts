@@ -1,5 +1,8 @@
 import { AssistantDefinition } from '@stage7-nextgen/shared';
 
+const bindSkill = (name: string, description = `Run ${name}`, inputSchema: Record<string, unknown> = { type: 'object', properties: {} }) => ({ name, description, inputSchema });
+const bindSkills = (...names: string[]) => names.map((name) => bindSkill(name));
+
 export const legacyAssistantCatalog: AssistantDefinition[] = [
   {
     id: 'pm-assistant',
@@ -12,6 +15,7 @@ export const legacyAssistantCatalog: AssistantDefinition[] = [
     tools: [
       { name: 'create-roadmap', description: 'Generate a product roadmap', inputSchema: { type: 'object', properties: { quarter: { type: 'string' }, goals: { type: 'array', items: { type: 'string' } } } } },
       { name: 'write-prd', description: 'Draft a product requirements document', inputSchema: { type: 'object', properties: { title: { type: 'string' }, scope: { type: 'string' } } } },
+      ...bindSkills('product-jira', 'product-confluence', 'product-data-analysis', 'product-slack', 'product-calendar', 'product-markdown-parsing'),
     ],
     metadata: { category: 'product', legacyPort: 3000, service: 'pm-assistant-api' },
     createdAt: new Date(),
@@ -28,6 +32,7 @@ export const legacyAssistantCatalog: AssistantDefinition[] = [
     tools: [
       { name: 'draft-blog-post', description: 'Draft a blog post on a topic', inputSchema: { type: 'object', properties: { topic: { type: 'string' }, wordCount: { type: 'number' } } } },
       { name: 'social-media-post', description: 'Generate social media copy', inputSchema: { type: 'object', properties: { platform: { type: 'string' }, message: { type: 'string' } } } },
+      ...bindSkills('content-trend-analysis', 'content-audience-insights', 'content-adaptation', 'content-seo', 'content-blog-platform', 'content-video-platform', 'content-analytics', 'content-planner'),
     ],
     metadata: { category: 'marketing', legacyPort: 3001, service: 'content-creator-assistant-api' },
     createdAt: new Date(),
@@ -43,6 +48,7 @@ export const legacyAssistantCatalog: AssistantDefinition[] = [
     transactionGuidance: [],
     tools: [
       { name: 'plan-event', description: 'Create an event plan', inputSchema: { type: 'object', properties: { eventType: { type: 'string' }, attendees: { type: 'number' }, date: { type: 'string' } } } },
+      ...bindSkills('event-budget-tracker', 'event-vendor-database', 'event-seating', 'event-monitor', 'event-check-in', 'event-contract', 'event-payment'),
     ],
     metadata: { category: 'operations', legacyPort: 3003, service: 'event-assistant-api' },
     createdAt: new Date(),
@@ -59,6 +65,7 @@ export const legacyAssistantCatalog: AssistantDefinition[] = [
     tools: [
       { name: 'review-contract', description: 'Review a contract for risks', inputSchema: { type: 'object', properties: { contractText: { type: 'string' } } } },
       { name: 'draft-clause', description: 'Draft a contract clause', inputSchema: { type: 'object', properties: { clauseType: { type: 'string' }, terms: { type: 'string' } } } },
+      ...bindSkills('legal-research', 'legal-compliance', 'legal-case-management', 'legal-statute-database', 'legal-document-tagging', 'legal-case-search', 'legal-risk-assessment', 'legal-ediscovery'),
     ],
     metadata: { category: 'legal', legacyPort: 3004, service: 'legal-assistant-api' },
     createdAt: new Date(),
@@ -75,6 +82,7 @@ export const legacyAssistantCatalog: AssistantDefinition[] = [
     tools: [
       { name: 'score-lead', description: 'Score a sales lead', inputSchema: { type: 'object', properties: { company: { type: 'string' }, budget: { type: 'number' }, timeline: { type: 'string' } } } },
       { name: 'draft-outreach', description: 'Draft a sales outreach email', inputSchema: { type: 'object', properties: { prospectName: { type: 'string' }, company: { type: 'string' } } } },
+      ...bindSkills('sales-crm', 'sales-calendar', 'sales-analytics', 'sales-document-management'),
     ],
     metadata: { category: 'sales', legacyPort: 3005, service: 'sales-assistant-api' },
     createdAt: new Date(),
@@ -91,6 +99,7 @@ export const legacyAssistantCatalog: AssistantDefinition[] = [
     tools: [
       { name: 'create-lesson-plan', description: 'Create a lesson plan', inputSchema: { type: 'object', properties: { subject: { type: 'string' }, level: { type: 'string' }, duration: { type: 'number' } } } },
       { name: 'generate-quiz', description: 'Generate a quiz', inputSchema: { type: 'object', properties: { topic: { type: 'string' }, questions: { type: 'number' } } } },
+      ...bindSkills('education-learning-analytics', 'education-learning-style-analyzer', 'education-adaptation-engine', 'education-performance-analyzer', 'education-progress-tracker', 'education-resource-organizer', 'education-resource-tagger', 'education-resource-analyzer', 'education-content-creator', 'education-multimedia-integrator', 'education-accessibility-checker', 'education-motivation-analyzer', 'education-engagement-planner', 'education-activity-designer'),
     ],
     metadata: { category: 'education', legacyPort: 3006, service: 'education-assistant-api' },
     createdAt: new Date(),
@@ -107,6 +116,7 @@ export const legacyAssistantCatalog: AssistantDefinition[] = [
     tools: [
       { name: 'screen-resume', description: 'Screen a resume against job requirements', inputSchema: { type: 'object', properties: { resumeText: { type: 'string' }, jobRequirements: { type: 'string' } } } },
       { name: 'schedule-interview', description: 'Schedule an interview', inputSchema: { type: 'object', properties: { candidateName: { type: 'string' }, panel: { type: 'array', items: { type: 'string' } } } } },
+      ...bindSkills('hr-ats', 'hr-email', 'hr-job-board', 'hr-linkedin', 'hr-hiring-analytics', 'hr-assessment', 'hr-compliance', 'hr-calendar'),
     ],
     metadata: { category: 'hr', legacyPort: 3007, service: 'hr-assistant-api' },
     createdAt: new Date(),
@@ -122,6 +132,7 @@ export const legacyAssistantCatalog: AssistantDefinition[] = [
     transactionGuidance: [],
     tools: [
       { name: 'decision-framework', description: 'Apply a decision-making framework', inputSchema: { type: 'object', properties: { decision: { type: 'string' }, options: { type: 'array', items: { type: 'string' } } } } },
+      ...bindSkills('leadership-coaching', 'executive-performance-analyzer', 'executive-calendar', 'executive-email', 'executive-leadership-assessment', 'executive-feedback-analysis', 'executive-skill-gap', 'executive-development-plan', 'executive-resource-recommender', 'executive-risk-assessment', 'executive-scenario-modeler', 'executive-feedback-collector', 'executive-improvement-plan', 'executive-communication-analyzer', 'executive-eq-assessment', 'executive-communication-coach', 'executive-career-planner', 'executive-presence-analyzer', 'executive-career-roadmap'),
     ],
     metadata: { category: 'leadership', legacyPort: 3008, service: 'executive-assistant-api' },
     createdAt: new Date(),
@@ -138,6 +149,7 @@ export const legacyAssistantCatalog: AssistantDefinition[] = [
     tools: [
       { name: 'plan-campaign', description: 'Plan a marketing campaign', inputSchema: { type: 'object', properties: { product: { type: 'string' }, budget: { type: 'number' }, channels: { type: 'array', items: { type: 'string' } } } } },
       { name: 'analyze-performance', description: 'Analyze campaign performance', inputSchema: { type: 'object', properties: { campaignId: { type: 'string' }, metrics: { type: 'array', items: { type: 'string' } } } } },
+      ...bindSkills('marketing-content-generation', 'marketing-social-media', 'marketing-seo', 'marketing-market-research', 'marketing-audience-insights', 'marketing-email', 'marketing-document-management'),
     ],
     metadata: { category: 'marketing', legacyPort: 3009, service: 'marketing-assistant-api' },
     createdAt: new Date(),
@@ -154,6 +166,7 @@ export const legacyAssistantCatalog: AssistantDefinition[] = [
     tools: [
       { name: 'resolve-ticket', description: 'Resolve a support ticket', inputSchema: { type: 'object', properties: { ticketId: { type: 'string' }, issue: { type: 'string' } } } },
       { name: 'search-kb', description: 'Search knowledge base', inputSchema: { type: 'object', properties: { query: { type: 'string' } } } },
+      ...bindSkills('support-sentiment-analysis', 'support-response', 'support-crm', 'support-escalation', 'support-analytics', 'support-issue-analysis', 'support-follow-up', 'support-planning'),
     ],
     metadata: { category: 'support', legacyPort: 3010, service: 'support-assistant-api' },
     createdAt: new Date(),
@@ -185,6 +198,7 @@ export const legacyAssistantCatalog: AssistantDefinition[] = [
     transactionGuidance: [],
     tools: [
       { name: 'write-lyrics', description: 'Write song lyrics', inputSchema: { type: 'object', properties: { theme: { type: 'string' }, genre: { type: 'string' }, mood: { type: 'string' } } } },
+      ...bindSkills('songwriter-trend-analysis'),
     ],
     metadata: { category: 'creative', legacyPort: 3012, service: 'songwriter-assistant-api' },
     createdAt: new Date(),
@@ -200,6 +214,7 @@ export const legacyAssistantCatalog: AssistantDefinition[] = [
     transactionGuidance: [],
     tools: [
       { name: 'write-script', description: 'Write a script', inputSchema: { type: 'object', properties: { format: { type: 'string' }, topic: { type: 'string' }, duration: { type: 'number' } } } },
+      ...bindSkills('scriptwriter-content-planner'),
     ],
     metadata: { category: 'creative', legacyPort: 3013, service: 'scriptwriter-assistant-api' },
     createdAt: new Date(),
@@ -216,6 +231,7 @@ export const legacyAssistantCatalog: AssistantDefinition[] = [
     tools: [
       { name: 'financial-model', description: 'Build a financial model', inputSchema: { type: 'object', properties: { revenue: { type: 'number' }, costs: { type: 'number' }, periods: { type: 'number' } } } },
       { name: 'analyze-investment', description: 'Analyze an investment opportunity', inputSchema: { type: 'object', properties: { asset: { type: 'string' }, amount: { type: 'number' }, horizon: { type: 'string' } } } },
+      ...bindSkills('finance-financial-analysis', 'finance-reporting', 'finance-financial-data', 'finance-financial-risk-assessment', 'finance-budget-tracker', 'finance-data-cleaning', 'finance-regulatory', 'finance-document-management'),
     ],
     metadata: { category: 'finance', legacyPort: 3014, service: 'finance-assistant-api' },
     createdAt: new Date(),
@@ -231,6 +247,7 @@ export const legacyAssistantCatalog: AssistantDefinition[] = [
     transactionGuidance: [],
     tools: [
       { name: 'symptom-checker', description: 'Check symptoms and provide guidance', inputSchema: { type: 'object', properties: { symptoms: { type: 'array', items: { type: 'string' } }, duration: { type: 'string' } } } },
+      ...bindSkills('healthcare-medical-record', 'healthcare-patient-communication', 'healthcare-care-plan', 'healthcare-appointment-scheduler', 'healthcare-schedule-optimizer', 'healthcare-record-tagging', 'healthcare-record-search', 'healthcare-resource-coordinator', 'healthcare-resource-matcher', 'healthcare-communication-scheduler', 'healthcare-medical-risk-assessment', 'healthcare-analytics'),
     ],
     metadata: { category: 'healthcare', legacyPort: 3015, service: 'healthcare-assistant-api' },
     createdAt: new Date(),
@@ -246,6 +263,7 @@ export const legacyAssistantCatalog: AssistantDefinition[] = [
     transactionGuidance: [],
     tools: [
       { name: 'manage-inventory', description: 'Manage restaurant inventory', inputSchema: { type: 'object', properties: { item: { type: 'string' }, quantity: { type: 'number' }, unit: { type: 'string' } } } },
+      ...bindSkills('restaurant-reservation-system', 'restaurant-table-management', 'restaurant-guest-profile', 'restaurant-service-flow', 'restaurant-floor-management', 'restaurant-staff-scheduler', 'restaurant-demand-forecast', 'restaurant-labor-analytics', 'restaurant-server-communication', 'restaurant-prep-scheduler', 'restaurant-kitchen-display', 'restaurant-station-coordinator', 'restaurant-recipe-management', 'restaurant-recipe-costing', 'restaurant-menu-engineering', 'restaurant-menu-optimizer', 'restaurant-pricing-strategy', 'restaurant-purchase-order', 'restaurant-supplier-management', 'restaurant-order-optimizer', 'restaurant-waste-management', 'restaurant-price-tracking', 'restaurant-financial-analytics', 'restaurant-variance-analysis', 'restaurant-trend-analysis', 'restaurant-sales-analytics', 'restaurant-reservation-analytics', 'restaurant-table-turnover', 'restaurant-quality-control', 'restaurant-guest-feedback'),
     ],
     metadata: { category: 'operations', legacyPort: 3016, service: 'restaurant-ops-assistant-api' },
     createdAt: new Date(),
@@ -261,6 +279,7 @@ export const legacyAssistantCatalog: AssistantDefinition[] = [
     transactionGuidance: [],
     tools: [
       { name: 'manage-reservation', description: 'Manage a hotel reservation', inputSchema: { type: 'object', properties: { guestName: { type: 'string' }, checkIn: { type: 'string' }, checkOut: { type: 'string' } } } },
+      ...bindSkills('hotel-room-assignment', 'hotel-guest-profile', 'hotel-billing', 'hotel-revenue', 'hotel-housekeeping-scheduler', 'hotel-maintenance', 'hotel-room-status', 'hotel-concierge-knowledge', 'hotel-external-booking', 'hotel-local-information', 'hotel-guest-service', 'hotel-task-dispatch', 'hotel-issue-tracker', 'hotel-guest-communication', 'hotel-operational-analytics', 'hotel-staff-performance', 'hotel-inventory-management'),
     ],
     metadata: { category: 'operations', legacyPort: 3017, service: 'hotel-ops-assistant-api' },
     createdAt: new Date(),
@@ -276,6 +295,7 @@ export const legacyAssistantCatalog: AssistantDefinition[] = [
     transactionGuidance: [],
     tools: [
       { name: 'analyze-matchup', description: 'Analyze a sports matchup', inputSchema: { type: 'object', properties: { sport: { type: 'string' }, teams: { type: 'array', items: { type: 'string' } } } } },
+      ...bindSkills('sports-betting-risk-assessment', 'sports-odds-data-collector', 'sports-value-betting-analyzer', 'sports-odds-comparison', 'sports-betting-performance-analyzer', 'sports-bankroll-manager', 'sports-performance-optimizer', 'sports-stats-collector', 'sports-performance-modeling', 'sports-prediction-engine', 'sports-responsible-gambling', 'sports-gambling-risk-analyzer', 'sports-responsible-gambling-planner', 'sports-live-data-collector', 'sports-in-game-analyzer', 'sports-live-betting-advisor'),
     ],
     metadata: { category: 'sports', legacyPort: 3018, service: 'sports-wager-advisor-api' },
     createdAt: new Date(),
@@ -292,6 +312,7 @@ export const legacyAssistantCatalog: AssistantDefinition[] = [
     tools: [
       { name: 'architecture-review', description: 'Review a system architecture', inputSchema: { type: 'object', properties: { system: { type: 'string' }, requirements: { type: 'string' } } } },
       { name: 'tech-stack-recommendation', description: 'Recommend a tech stack', inputSchema: { type: 'object', properties: { project: { type: 'string' }, scale: { type: 'string' } } } },
+      ...bindSkills('cto-jira', 'cto-datadog', 'cto-github', 'cto-aws', 'cto-gcp', 'cto-azure', 'cto-pagerduty', 'cto-kubernetes', 'cto-cost-optimization', 'cto-team-metrics', 'cto-iac-monitoring', 'cto-database-operations', 'cto-service-mesh', 'cto-disaster-recovery'),
     ],
     metadata: { category: 'technology', legacyPort: 3020, service: 'cto-assistant-api' },
     createdAt: new Date(),
@@ -301,13 +322,26 @@ export const legacyAssistantCatalog: AssistantDefinition[] = [
     id: 'career-assistant',
     tenantId: 'system',
     name: 'Career Coach',
-    description: 'Career development guidance including resume review, interview prep, and skill planning.',
-    systemPrompt: 'You are a career coach. Help with resume optimization, interview preparation, skill development planning, and career transition strategies.',
+    description: 'AI Job Search Career Coach: setup, scrape, apply, rank, interview prep, outcome tracking, search expansion, upskilling, HTML reporting, Notion/Gmail sync, template and portal management, and workspace reset.',
+    systemPrompt: 'You are the Stage7 Career Coach, an expert AI job search assistant. You guide users through the full job search lifecycle: setting up a profile, finding and scraping opportunities from multiple portals, ranking matches, applying with tailored resumes and cover letters, preparing for interviews, tracking outcomes, expanding the search, building upskilling plans, generating HTML reports, syncing with Notion and Gmail, managing templates and portals, and resetting the workspace. Always be encouraging, data-driven, and concise. When recommending actions, explain the "why" and the expected outcome. Never share or log credentials; direct users to the credential vault for sensitive inputs.',
     knowledge: [],
     transactionGuidance: [],
     tools: [
-      { name: 'review-resume', description: 'Review and improve a resume', inputSchema: { type: 'object', properties: { resumeText: { type: 'string' }, targetRole: { type: 'string' } } } },
-      { name: 'mock-interview', description: 'Conduct a mock interview', inputSchema: { type: 'object', properties: { role: { type: 'string' }, level: { type: 'string' } } } },
+      { name: 'career_setup', description: 'Initialize the career coach workspace: profile, preferences, target roles, and storage layout.', inputSchema: { type: 'object', properties: { profileId: { type: 'string' }, name: { type: 'string' }, email: { type: 'string' }, phone: { type: 'string' }, location: { type: 'string' }, linkedinUrl: { type: 'string' }, githubUrl: { type: 'string' }, portfolioUrl: { type: 'string' }, targetRoles: { type: 'array', items: { type: 'string' } }, targetCompanies: { type: 'array', items: { type: 'string' } }, industries: { type: 'array', items: { type: 'string' } }, workArrangement: { type: 'array', items: { type: 'string' } }, minSalary: { type: 'number' }, maxSalary: { type: 'number' }, locations: { type: 'array', items: { type: 'string' } }, excludeCompanies: { type: 'array', items: { type: 'string' } }, keywords: { type: 'array', items: { type: 'string' } } } } },
+      { name: 'career_scrape', description: 'Scrape job listings from configured job portals and normalize them for ranking and application.', inputSchema: { type: 'object', properties: { query: { type: 'string' }, queries: { type: 'array', items: { type: 'string' } }, sources: { type: 'array', items: { type: 'string' } }, location: { type: 'string' }, remoteOnly: { type: 'boolean' }, maxResults: { type: 'number' }, targetCompanies: { type: 'array', items: { type: 'string' } }, minSalary: { type: 'number' }, maxSalary: { type: 'number' } } } },
+      { name: 'career_apply', description: 'Submit applications to one or more jobs using a stored resume and cover letter. When a portal submit config is registered via career_add_portal, submits to the real endpoint; otherwise simulates. Supports bulk and dry-run.', inputSchema: { type: 'object', properties: { jobId: { type: 'string' }, jobIds: { type: 'array', items: { type: 'string' } }, resumeId: { type: 'string' }, coverLetterId: { type: 'string' }, bulk: { type: 'boolean' }, dryRun: { type: 'boolean' } } } },
+      { name: 'career_rank', description: 'Score and rank job listings against the user profile using weighted criteria and rationale.', inputSchema: { type: 'object', properties: { profileId: { type: 'string' }, jobIds: { type: 'array', items: { type: 'string' } }, weights: { type: 'object' } } } },
+      { name: 'career_interview', description: 'Generate interview prep materials, schedule interviews, and record outcomes.', inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['prepare', 'schedule', 'complete'] }, jobId: { type: 'string' }, company: { type: 'string' }, role: { type: 'string' }, interviewType: { type: 'string' }, scheduledAt: { type: 'string' }, notes: { type: 'string' }, outcome: { type: 'string' }, feedback: { type: 'string' } } } },
+      { name: 'career_outcome', description: 'Record application outcomes and update career search statistics.', inputSchema: { type: 'object', properties: { profileId: { type: 'string' }, jobId: { type: 'string' }, status: { type: 'string', enum: ['offer', 'rejection', 'interview', 'screening', 'no_response', 'withdrawn'] }, company: { type: 'string' }, role: { type: 'string' }, salaryOffered: { type: 'number' }, notes: { type: 'string' }, date: { type: 'string' } } } },
+      { name: 'career_expand', description: 'Broaden the job search with similar titles, adjacent companies, and keyword expansion.', inputSchema: { type: 'object', properties: { profileId: { type: 'string' }, currentRoles: { type: 'array', items: { type: 'string' } }, currentCompanies: { type: 'array', items: { type: 'string' } }, currentKeywords: { type: 'array', items: { type: 'string' } }, industries: { type: 'array', items: { type: 'string' } }, competitors: { type: 'object' }, adjacentCompanies: { type: 'array', items: { type: 'string' } } } } },
+      { name: 'career_upskill', description: 'Generate a personalized upskilling plan with courses, certifications, and project milestones.', inputSchema: { type: 'object', properties: { profileId: { type: 'string' }, targetRole: { type: 'string' }, currentSkills: { type: 'array', items: { type: 'string' } }, desiredSkills: { type: 'array', items: { type: 'string' } }, weeks: { type: 'number' } } } },
+      { name: 'career_html_report', description: 'Generate a standalone HTML career search report with inline preview.', inputSchema: { type: 'object', properties: { profileId: { type: 'string' }, reportType: { type: 'string', enum: ['summary', 'weekly', 'monthly', 'full'] } } } },
+      { name: 'career_notion_sync', description: 'Push career data to a Notion database or pull existing schema.', inputSchema: { type: 'object', properties: { token: { type: 'string' }, databaseId: { type: 'string' }, profileId: { type: 'string' }, entityTypes: { type: 'array', items: { type: 'string' } }, direction: { type: 'string', enum: ['push', 'pull', 'both'] }, dryRun: { type: 'boolean' } } } },
+      { name: 'career_gmail_sync', description: 'Search Gmail for job-related emails and log them into the outcomes tracker.', inputSchema: { type: 'object', properties: { accessToken: { type: 'string' }, refreshToken: { type: 'string' }, clientId: { type: 'string' }, clientSecret: { type: 'string' }, query: { type: 'string' }, maxResults: { type: 'number' }, markRead: { type: 'boolean' }, dryRun: { type: 'boolean' } } } },
+      { name: 'career_add_template', description: 'Register a new resume or cover letter template in the career workspace.', inputSchema: { type: 'object', properties: { kind: { type: 'string', enum: ['resume', 'cover_letter'] }, name: { type: 'string' }, content: { type: 'string' }, variables: { type: 'array', items: { type: 'string' } }, description: { type: 'string' }, profileId: { type: 'string' } } } },
+      { name: 'career_add_portal', description: 'Register a job portal configuration so the scrape tool can target it.', inputSchema: { type: 'object', properties: { id: { type: 'string' }, name: { type: 'string' }, baseUrl: { type: 'string' }, searchUrlTemplate: { type: 'string' }, selectors: { type: 'object' }, auth: { type: 'object' }, enabled: { type: 'boolean' } } } },
+      { name: 'career_reset', description: 'Reset the career coach workspace, archiving previous state before destructive resets.', inputSchema: { type: 'object', properties: { scope: { type: 'string', enum: ['full', 'profile', 'applications', 'interviews', 'outcomes', 'all_data'] }, confirm: { type: 'boolean' }, archive: { type: 'boolean' }, profileId: { type: 'string' } } } },
+      ...bindSkills('career-resume-optimizer', 'career-resume-analyzer', 'career-resume-formatter', 'career-application-monitor', 'career-followup-advisor', 'career-salary-analyzer', 'career-negotiation-advisor', 'career-offer-evaluator', 'career-networking-advisor'),
     ],
     metadata: { category: 'career', legacyPort: 3021, service: 'career-assistant-api' },
     createdAt: new Date(),
@@ -323,6 +357,7 @@ export const legacyAssistantCatalog: AssistantDefinition[] = [
     transactionGuidance: [],
     tools: [
       { name: 'portfolio-analysis', description: 'Analyze an investment portfolio', inputSchema: { type: 'object', properties: { holdings: { type: 'array', items: { type: 'object' } }, riskTolerance: { type: 'string' } } } },
+      ...bindSkills('investment-market-data', 'investment-analysis', 'investment-financial-risk-assessment', 'investment-market-research', 'investment-portfolio-optimizer', 'investment-evaluator', 'investment-financial-planner'),
     ],
     metadata: { category: 'finance', legacyPort: 3022, service: 'investment-advisor-assistant-api' },
     createdAt: new Date(),

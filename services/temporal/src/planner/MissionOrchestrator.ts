@@ -216,7 +216,7 @@ export class MissionOrchestrator {
     if (this.agentRuntimeUrl) {
       const agentId = `agent-${missionId}-${agentRole}`;
       try {
-        const res = await fetch(`${this.agentRuntimeUrl}/api/agent-runtime/agents/${encodeURIComponent(agentId)}`);
+        const res = await fetch(`${this.agentRuntimeUrl}/api/agent-runtime/missions/${encodeURIComponent(missionId)}/agents/${encodeURIComponent(agentId)}`);
         if (res.ok) {
           const data = await res.json() as { agent: { id: string; name: string; systemPrompt: string; tools: string[] } };
           definition = {
@@ -226,7 +226,7 @@ export class MissionOrchestrator {
             tools: data.agent.tools || [],
           };
         } else {
-          const res2 = await fetch(`${this.agentRuntimeUrl}/api/agent-runtime/agents`, {
+          const res2 = await fetch(`${this.agentRuntimeUrl}/api/agent-runtime/missions/${encodeURIComponent(missionId)}/agents`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({

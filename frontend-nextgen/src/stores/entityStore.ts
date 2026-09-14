@@ -1,5 +1,14 @@
 import { create } from 'zustand';
 
+export interface EntityTool {
+  name: string;
+  displayName?: string;
+  description: string;
+  inputSchema?: Record<string, unknown>;
+  config?: Record<string, unknown>;
+  configSchema?: Record<string, unknown>;
+}
+
 export interface Entity {
   id: string;
   tenantId: string;
@@ -8,7 +17,7 @@ export interface Entity {
   type: 'assistant' | 'agent';
   status: string;
   systemPrompt: string;
-  tools: Array<{ name: string; description: string; inputSchema: Record<string, unknown> } | string>;
+  tools: Array<EntityTool | string>;
   knowledge?: Array<{ id: string; title: string; content: string; source?: string }>;
   transactionGuidance?: string[];
   metadata: Record<string, unknown>;
@@ -58,19 +67,13 @@ export const useEntityStore = create<EntityState>((set) => ({
   fetchEntities: async () => {
     set({ loading: true, error: null });
     try {
-      const [assistantsRes, agentsRes] = await Promise.all([
-        fetch('/api/workers/assistants').then((r) => r.json()),
-        fetch('/api/agent-runtime/agents').then((r) => r.json()),
-      ]);
+      const assistantsRes = await fetch('/api/workers/assistants').then((r) => r.json());
       const assistants = (assistantsRes.assistants || []).map((a: Record<string, unknown>) => ({
         ...a,
         type: 'assistant' as const,
       }));
-      const agents = (agentsRes.agents || []).map((a: Record<string, unknown>) => ({
-        ...a,
-        type: 'agent' as const,
-      }));
-      set({ entities: [...assistants, ...agents] });
+      // Do not fetch or expose system-wide agents. Missions create ephemeral agents at runtime.
+      set({ entities: [...assistants] });
     } catch (err) {
       set({ error: err instanceof Error ? err.message : 'Failed to load entities' });
     } finally {
@@ -80,30 +83,15 @@ export const useEntityStore = create<EntityState>((set) => ({
   fetchEntity: async (id: string) => {
     set({ loading: true, error: null });
     try {
-      const [res1, res2] = await Promise.allSettled([
-        fetch(`/api/workers/assistants/${id}`),
-        fetch(`/api/agent-runtime/agents/${id}`),
-      ]);
-
-      const assistantRes = res1.status === 'fulfilled' && res1.value.ok ? res1.value : null;
-      const agentRes = res2.status === 'fulfilled' && res2.value.ok ? res2.value : null;
-
-      if (assistantRes) {
-        const data = await assistantRes.json();
+      const res = await fetch(`/api/workers/assistants/${id}`);
+      if (res.ok) {
+        const data = await res.json();
         const assistant = data.assistant || data;
         const normalized = normalizeEntity(assistant, 'assistant');
         set({ selectedEntity: normalized });
         return;
       }
-
-      if (agentRes) {
-        const data = await agentRes.json();
-        const agent = data.agent || data;
-        const normalized = normalizeEntity(agent, 'agent');
-        set({ selectedEntity: normalized });
-        return;
-      }
-
+      // Do not look up agents by global ID — agents are mission-scoped and ephemeral.
       set({ error: `Entity not found: ${id}` });
     } catch (err) {
       set({ error: err instanceof Error ? err.message : 'Failed to fetch entity' });

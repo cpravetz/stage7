@@ -3,6 +3,28 @@ import toolRoutes from './routes/tools';
 import { Tool } from './types';
 import { toolRegistry } from './utils/sharedInstance';
 import { legacyGeneralTools } from './data/generalTools';
+import {
+  careerSkills,
+  productSkills,
+  contentSkills,
+  legalSkills,
+  salesSkills,
+  educationSkills,
+  hrSkills,
+  executiveSkills,
+  ctoSkills,
+  hotelSkills,
+  sportsSkills,
+  eventSkills,
+  marketingSkills,
+  supportSkills,
+  analyticsSkills,
+  creativeSkills,
+  financeSkills,
+  healthcareSkills,
+  restaurantSkills,
+  investmentSkills,
+} from './data/skills';
 import logger from './utils/logger';
 import { ToolNotFoundError, ValidationError } from './utils/errors';
 
@@ -67,9 +89,42 @@ const defaultTools: Tool[] = [
   },
 ];
 
-const allDefaults = [...defaultTools, ...legacyGeneralTools];
+const skillTools = [
+  ...careerSkills,
+  ...productSkills,
+  ...contentSkills,
+  ...legalSkills,
+  ...salesSkills,
+  ...educationSkills,
+  ...hrSkills,
+  ...executiveSkills,
+  ...ctoSkills,
+  ...hotelSkills,
+  ...sportsSkills,
+  ...eventSkills,
+  ...marketingSkills,
+  ...supportSkills,
+  ...analyticsSkills,
+  ...creativeSkills,
+  ...financeSkills,
+  ...healthcareSkills,
+  ...restaurantSkills,
+  ...investmentSkills,
+];
+
+const allDefaults = [
+  ...defaultTools,
+  ...legacyGeneralTools,
+  ...skillTools,
+];
+
+const skillIds = new Set(skillTools.map((t) => t.id));
 
 for (const tool of allDefaults) {
+  // Mark known skill definitions so UIs can separate "skills" from general tools
+  if (skillIds.has(tool.id)) {
+    (tool as any).isSkill = true;
+  }
   if (!toolRegistry.get(tool.id)) {
     toolRegistry.register(tool);
   }
@@ -104,4 +159,26 @@ app.listen(PORT, () => {
 });
 
 export { legacyGeneralTools } from './data/generalTools';
+export {
+  careerSkills,
+  productSkills,
+  contentSkills,
+  legalSkills,
+  salesSkills,
+  educationSkills,
+  hrSkills,
+  executiveSkills,
+  ctoSkills,
+  hotelSkills,
+  sportsSkills,
+  eventSkills,
+  marketingSkills,
+  supportSkills,
+  analyticsSkills,
+  creativeSkills,
+  financeSkills,
+  healthcareSkills,
+  restaurantSkills,
+  investmentSkills,
+} from './data/skills';
 export default app;

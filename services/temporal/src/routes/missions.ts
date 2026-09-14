@@ -65,6 +65,54 @@ router.post(
   }),
 );
 
+router.post(
+  '/missions/:workflowId/start',
+  asyncHandler(async (req: Request, res: Response) => {
+    const workflowId = req.params.workflowId as string;
+    const missionId = workflowId.startsWith('mission-') ? workflowId.slice(8) : workflowId;
+    // Mark mission as running in persistence so UI reflects state.
+    try {
+      if (process.env.ARTIFACTS_URL) {
+        await fetch(`${process.env.ARTIFACTS_URL}/api/artifacts/missions/${missionId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'running', updatedAt: Date.now() }),
+        });
+      }
+    } catch (err) {
+      // best-effort; continue
+    }
+    res.status(202).json({ status: 'started' });
+  }),
+);
+
+router.post(
+  '/missions/:workflowId/pause',
+  asyncHandler(async (req: Request, res: Response) => {
+    const workflowId = req.params.workflowId as string;
+    const missionId = workflowId.startsWith('mission-') ? workflowId.slice(8) : workflowId;
+    try {
+      await fetch(`${process.env.ARTIFACTS_URL}/api/artifacts/missions/${missionId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'paused', updatedAt: Date.now() }),
+      });
+    } catch (err) {
+      // ignore
+    }
+    res.status(200).json({ status: 'paused' });
+  }),
+);
+
+router.post(
+  '/missions/:workflowId/stop',
+  asyncHandler(async (req: Request, res: Response) => {
+    const workflowId = req.params.workflowId as string;
+    await client.terminateMission(workflowId);
+    res.status(200).json({ status: 'stopped' });
+  }),
+);
+
 router.delete(
   '/missions/:workflowId',
   asyncHandler(async (req: Request, res: Response) => {

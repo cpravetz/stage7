@@ -1,0 +1,329 @@
+{
+  "_description": "Script templates for different formats. Each format defines structural conventions, scene pacing, and dialogue patterns.",
+  "formats": {
+    "screenplay": {
+      "sceneTypes": [
+        "INT",
+        "EXT"
+      ],
+      "elements": [
+        "slugline",
+        "action",
+        "character",
+        "dialogue",
+        "parenthetical",
+        "transition"
+      ],
+      "pacing": {
+        "short": 40,
+        "medium": 60,
+        "feature": 90
+      },
+      "threeAct": {
+        "act1": {
+          "percentage": 25,
+          "beats": [
+            "setup",
+            "inciting incident",
+            "thesis statement"
+          ]
+        },
+        "act2": {
+          "percentage": 50,
+          "beats": [
+            "rising action",
+            "midpoint",
+            "all is lost"
+          ]
+        },
+        "act3": {
+          "percentage": 25,
+          "beats": [
+            "climax",
+            "resolution"
+          ]
+        }
+      },
+      "archetypes": {
+        "hero": [
+          "brave",
+          "determined",
+          "flawed",
+          "reluctant"
+        ],
+        "mentor": [
+          "wise",
+          "experienced",
+          "mysterious"
+        ],
+        "villain": [
+          "ruthless",
+          "charismatic",
+          "twisted"
+        ],
+        "ally": [
+          "loyal",
+          "quirky",
+          "supportive"
+        ]
+      }
+    },
+    "tv": {
+      "sceneTypes": [
+        "INT",
+        "EXT"
+      ],
+      "elements": [
+        "cold open",
+        "act break",
+        "tag",
+        "teaser"
+      ],
+      "pacing": {
+        "episode": 22,
+        "seasonArc": 12
+      },
+      "threeAct": {
+        "act1": {
+          "percentage": 20,
+          "beats": [
+            "setup",
+            "inciting incident"
+          ]
+        },
+        "act2": {
+          "percentage": 60,
+          "beats": [
+            "rising action",
+            "midpoint",
+            "dark moment"
+          ]
+        },
+        "act3": {
+          "percentage": 20,
+          "beats": [
+            "climax",
+            "resolution"
+          ]
+        }
+      },
+      "archetypes": {
+        "lead": [
+          "complex",
+          "flawed",
+          "evolving"
+        ],
+        "supporting": [
+          "quirky",
+          "conflict-driven",
+          "comic relief"
+        ],
+        "antagonist": [
+          "personal",
+          "escalating",
+          "motivated"
+        ]
+      }
+    },
+    "podcast": {
+      "sceneTypes": [
+        "studio",
+        "remote",
+        "field"
+      ],
+      "elements": [
+        "intro",
+        "segment",
+        "interview",
+        "ads",
+        "outro"
+      ],
+      "pacing": {
+        "short": 15,
+        "medium": 30,
+        "long": 60
+      },
+      "threeAct": {
+        "act1": {
+          "percentage": 15,
+          "beats": [
+            "hook",
+            "topic intro"
+          ]
+        },
+        "act2": {
+          "percentage": 70,
+          "beats": [
+            "main segment",
+            "interview",
+            "discussion"
+          ]
+        },
+        "act3": {
+          "percentage": 15,
+          "beats": [
+            "wrap up",
+            "teaser",
+            "outro"
+          ]
+        }
+      },
+      "archetypes": {
+        "host": [
+          "engaging",
+          "curious",
+          "warm"
+        ],
+        "guest": [
+          "expert",
+          "storyteller",
+          "controversial"
+        ],
+        "co-host": [
+          "supportive",
+          "banter",
+          "counterpoint"
+        ]
+      }
+    },
+    "presentation": {
+      "sceneTypes": [
+        "stage",
+        "virtual",
+        "meeting"
+      ],
+      "elements": [
+        "title slide",
+        "agenda",
+        "content",
+        "qa",
+        "closing"
+      ],
+      "pacing": {
+        "short": 10,
+        "medium": 20,
+        "long": 45
+      },
+      "threeAct": {
+        "act1": {
+          "percentage": 15,
+          "beats": [
+            "hook",
+            "agenda",
+            "problem"
+          ]
+        },
+        "act2": {
+          "percentage": 60,
+          "beats": [
+            "evidence",
+            "analysis",
+            "solution"
+          ]
+        },
+        "act3": {
+          "percentage": 25,
+          "beats": [
+            "call to action",
+            "summary",
+            "thank you"
+          ]
+        }
+      },
+      "archetypes": {
+        "presenter": [
+          "confident",
+          "clear",
+          "persuasive"
+        ],
+        "audience": [
+          "curious",
+          "skeptical",
+          "engaged"
+        ],
+        "opponent": [
+          "challenging",
+          "questioning",
+          "constructive"
+        ]
+      }
+    },
+    "stage-play": {
+      "sceneTypes": [
+        "INT",
+        "EXT"
+      ],
+      "elements": [
+        "scene heading",
+        "set description",
+        "character entry",
+        "dialogue",
+        "stage direction",
+        "blackout"
+      ],
+      "pacing": {
+        "one-act": 30,
+        "full": 120
+      },
+      "threeAct": {
+        "act1": {
+          "percentage": 25,
+          "beats": [
+            "exposition",
+            "inciting incident"
+          ]
+        },
+        "act2": {
+          "percentage": 50,
+          "beats": [
+            "rising action",
+            "crisis",
+            "climax"
+          ]
+        },
+        "act3": {
+          "percentage": 25,
+          "beats": [
+            "falling action",
+            "resolution"
+          ]
+        }
+      },
+      "archetypes": {
+        "protagonist": [
+          "driven",
+          "flawed",
+          "transforming"
+        ],
+        "conflict": [
+          "internal",
+          "external",
+          "societal"
+        ],
+        "chorus": [
+          "narrator",
+          "commentator",
+          "ensemble"
+        ]
+      }
+    }
+  },
+  "transitions": [
+    "CUT TO:",
+    "FADE IN:",
+    "FADE OUT:",
+    "DISSOLVE TO:",
+    "SMASH TO:",
+    "MATCH CUT TO:"
+  ],
+  "parentheticals": [
+    "(beat)",
+    "(pause)",
+    "(softly)",
+    "(angrily)",
+    "(quickly)",
+    "(thoughtful)",
+    "(hesitant)",
+    "(determined)"
+  ]
+}
