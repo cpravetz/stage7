@@ -14,39 +14,54 @@ Key Concepts
 - Mission: A stateful workflow run by one or more agents. Missions are durable and resumable (Temporal-powered).
 - Tools / MCP: Integrations and automations are exposed as MCP-compatible tools. Agents call tools to perform side-effecting operations.
 
-Quickstart (Local Development)
------------------------------
+Quickstart (Docker)
+-------------------
 
-1. Clone the repository and run the setup script (recommended):
+Stage7 runs the frontend and backend services as one Docker Compose environment. Do not start the frontend separately with `npm install` or `npm run dev`; the setup script builds and starts the complete stack in a shared Docker network.
+
+1. Install Docker Engine or Docker Desktop and Docker Compose v2.
+
+2. Clone the repository:
 
 ```bash
 git clone https://github.com/cpravetz/stage7.git
 cd stage7
+```
+
+3. Run the setup script for your operating system from the repository root:
+
+```bash
+# Linux or macOS
+chmod +x setup.sh
 ./setup.sh
 ```
 
-2. Start the frontend (in a separate terminal):
-
-```bash
-cd frontend-nextgen
-npm install
-npm run dev
-# open http://localhost:8080
+```powershell
+# Windows
+.\setup.bat
 ```
 
-3. Open the Unified Frontend, sign in, then create or open an Entity Workspace and add an Agent.
+The setup script creates or updates `.env`, generates missing secrets, builds the Docker images, and starts all Stage7 containers, including the frontend. Wait for the script to report that setup is complete.
 
-4. Start a Mission by chatting with the Agent or selecting a mission template from the workspace.
+4. Verify that all containers are running in the shared Docker environment:
+
+```bash
+docker compose ps
+```
+
+5. Open the Unified Frontend at `http://localhost:8080`, sign in, then create or open an Entity Workspace and add an Agent.
+
+6. Start a Mission by chatting with the Agent or selecting a mission template from the workspace.
 
 Health Checks & Endpoints
 -------------------------
 
-Useful service health endpoints (dev defaults):
+Useful service health endpoints exposed by the local Docker Compose environment:
 
-- Gateway: `http://localhost:3000/health`
+- Gateway: `http://localhost:3900/health`
 - Worker Pool: `http://localhost:3200/api/workers/health`
-- MCP Runtime: `http://localhost:3300/health`
-- Temporal: `http://localhost:4100/health`
+- MCP Runtime: `http://localhost:3300/api/mcp-runtime/health`
+- Temporal: `http://localhost:4100/api/temporal/health`
 - Auth: `http://localhost:4300/api/auth/health`
 
 Tools Panel & Plugin Marketplace

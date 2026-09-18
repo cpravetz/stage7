@@ -11,20 +11,19 @@ skills that are slightly better than raw functions."
 ## The method
 
 1. **Domain** — what problem space does this assistant own end-to-end?
-2. **Advise** — where must the assistant give the user reasoned options, not act, because the
+5. **Higher-order skills** — group into the set of *features* a user would expect this Assistant to be capable of performing. A Skill is not a step or discrete function, as the current tools define, but an integrated process that gets to a natural outcome. This is the point where atomic CRUD functions get folded into workflows.  Skills fall into one of three categories.
+   5.1 **Advise** — where must the assistant give the user reasoned options, not act, because the
    decision is personal, values-based, or irreversible?
-3. **Proxy** — where can the assistant act *as* the user, directly, because the action is
+   5.2 **Proxy** — where can the assistant act *as* the user, directly, because the action is
    mechanical, low-risk, or reversible with review?
-4. **Aid** — where does the user have to act personally (a call, an interview, a decision
+   5.3 **Aid** — where does the user have to act personally (a call, an interview, a decision
    conversation), but the assistant can prepare the material that makes that moment easier?
-5. **Higher-order skills** — group into the set of *features* a user would expect this Assistant to be capable of performing. A Skill is not a step or discrete function, as the current tools define, but an integrated process that gets to a natural outcome. This is the point where atomic CRUD functions get folded into workflows.
+
 6. **Outputs** — for each higher-order skill, what does the user actually receive?
 7. **Config & inputs** — what does the skill need to produce that output, and — critically —
    what should it *derive itself* from stored context vs. require from the user?
 8. **Triggers** — user-initiated, scheduled (date/time), event-driven (new data arrived), or
-   data-driven (a threshold/condition was met). Most of the original 25 tools only had one
-   trigger type available: a human pressing a button. That's the tell that they were built as
-   functions, not skills.
+   data-driven (a threshold/condition was met). Triggers may be improperly implemented.
 
 ### The cross-cutting classification (applies at step 6–7)
 
@@ -36,12 +35,6 @@ Every skill also needs to be tagged by **what it actually depends on**:
 | **Real external integration** | A live system of record (a job board's actual API, Gmail, Notion, an ATS) | Modeled identically to reasoning-only skills — same stub shape, same fake "provider" config — so it was indistinguishable from something that couldn't possibly work |
 | **Internal code** | Real data fetch, then execution on top of it with code defined for the task (lower-order tools or general tools)| Split across two disconnected tools with no shared state |
 | **Hybrid** | Real data fetch, then reasoning on top of it | Split across two disconnected tools with no shared state |
-
-Collapsing all four into one `createExternalActionSkill` factory is exactly the
-over-simplification you flagged: it made "needs a stub" and "needs a real MCP/API
-connection" look like the same design decision. They aren't. A skill's classification
-here determines whether step 7's config schema should contain an MCP server reference,
-a real credential, or nothing external at all.
 
 ---
 
@@ -73,7 +66,7 @@ These are high-volume, mechanical, and reversible-with-review — the textbook c
 letting the assistant just do it, with a dry-run/review gate rather than a
 manually-operated button per step.
 
-### 4. Aide (assistant prepares, user performs)
+### 4. Aid (assistant prepares, user performs)
 - Interview prep: likely questions, model answers grounded in the user's actual
   experience, mock Q&A
 - Drafting (not sending) a specific networking message for the user to personalize and send
@@ -89,7 +82,7 @@ manually-operated button per step.
 | C | **Application Execution** | `career_apply`, `career_add_portal`, `career_add_template` | hybrid (real portal submission where connected) |
 | D | **Interview Preparation** | `career_interview` | reasoning-only |
 | E | **Career Advisory** | `career-resume-optimizer`, `career-resume-analyzer`, `career-resume-formatter`, `career-salary-analyzer`, `career-negotiation-advisor`, `career-offer-evaluator` | reasoning-only — collapses 6 stub tools into 1 real one |
-| F | **Networking & Outreach** | `career-networking-advisor`, `career-followup-advisor` | aide by default; proxy only if an outreach channel (email/LinkedIn MCP) is connected |
+| F | **Networking & Outreach** | `career-networking-advisor`, `career-followup-advisor` | aid by default; proxy only if an outreach channel (email/LinkedIn MCP) is connected |
 | G | **Pipeline Reporting & Sync** | `career_outcome`, `career_html_report`, `career_notion_sync`, `career_gmail_sync`, `career_expand`, `career_upskill` | hybrid — real sync needs real MCP connectors; reporting is reasoning-only |
 
 `career_reset` becomes a utility action inside Profile & Resume Intake, not a standalone skill.
@@ -159,7 +152,7 @@ just scheduled, and proactively surface that — not wait to be operated.
 
 ## Applying this to the other 20 assistants
 
-The repeatable part is steps 1–5: domain → advise/proxy/aide → collapse into
+The repeatable part is steps 1–5: domain → advise/proxy/aid → collapse into
 outcome-shaped skills. The repeatable failure to check for is the same one found
 here — atomic CRUD exposed as user-facing "skills," advisory reasoning wrongly
 modeled as external stub calls, and no trigger besides manual invocation. Grading
@@ -171,7 +164,7 @@ compiles.
 
 ## Applied: The Other 20 Assistants
 
-Detailed 8-step assessments for every assistant below live in `docs/assistant-skill-assessments/`. Each follows the same method in this document: domain → advise/proxy/aide → outcome-shaped skills → outputs, config & inputs → triggers, with the reasoning-only / real-external / hybrid classification applied honestly.
+Detailed 8-step assessments for every assistant below live in `docs/assistant-skill-assessments/`. Each follows the same method in this document: domain → advise/proxy/aid → outcome-shaped skills → outputs, config & inputs → triggers, with the reasoning-only / real-external / hybrid classification applied honestly.
 
 ### Business
 
@@ -217,7 +210,7 @@ Detailed 8-step assessments for every assistant below live in `docs/assistant-sk
 
 **Outcome-shaped skills.** Every assessment collapses many atomic tools into higher-order skills named after user outcomes ("draft a lesson plan," "book a room," "analyze this matchup") rather than system actions. Skill counts range from 4 to 9 depending on domain complexity (Finance uses 8 rows, Healthcare uses 9); the count is small enough to navigate and large enough to own an end-to-end domain.
 
-**Advise / Proxy / Aide boundaries.** In every case, Advise stays strictly advisory—values-based, irreversible decisions are never executed. Proxy handles high-volume mechanical work behind confirm-before-live gates. Aide prepares material for a human moment the user must personally perform. No assessment lets the assistant sign contracts, place bets, submit legal filings, or fire staff. These boundaries describe intended design; in the current source, not every assistant has implemented all three modes for every skill.
+**Advise / Proxy / Aid boundaries.** In every case, Advise stays strictly advisory—values-based, irreversible decisions are never executed. Proxy handles high-volume mechanical work behind confirm-before-live gates. Aid prepares material for a human moment the user must personally perform. No assessment lets the assistant sign contracts, place bets, submit legal filings, or fire staff. These boundaries describe intended design; in the current source, not every assistant has implemented all three modes for every skill.
 
 **Shared state.** Where implemented, a small set of shared state keys (e.g., `sales.opportunities[]`, `event.plan`, `product.context`) flows between skills, so one skill's output becomes the next skill's input. Most assistants do not have functioning shared state today: Finance and Healthcare external skills share no state; Songwriter and Scriptwriter share only a local drafts store (`CREATIVE_HOME/drafts.json`); Analytics has only a local metrics store. Proposed shared-state contracts exist in several assessments but are not yet wired into the source.
 
@@ -251,7 +244,7 @@ Assistant presents options, assumptions, evidence, consequences; never makes sco
 - Maintain local product, delivery, approval records; produce recurring summaries
 Live external writes gated; reads, calculations, drafts, dry runs are proxy work.
 
-### Aide
+### Aid
 - Prepare PRD review pack, roadmap review, release-readiness brief, decision memo
 - Draft stakeholder updates, release notes, meeting agendas, talking points for user to personalize
 - Prepare customer-discovery questions, experiment readouts, escalation options
@@ -311,7 +304,7 @@ The assistant presents options, assumptions, trade-offs, and confidence; the use
 - Prepare and validate publish, schedule, update, delete, and retrieval payloads as dry runs
 - Maintain local content, campaign, calendar, research, and approval records
 
-### Aide
+### Aid
 - Prepare content briefs, editorial calendars, campaign plans, and review packets
 - Draft headlines, hooks, outlines, blog copy, social variants, video scripts, newsletters, and localization options
 - Prepare SEO checklists, keyword maps, performance narratives, audience summaries, and optimization recommendations
@@ -373,7 +366,7 @@ The assistant explains trade-offs and recommendations; the user or authorized op
 - Schedule payment reminders, contract-renewal nudges, and approved staff-alert drafts
 - Maintain plan, vendor, contract, payment, seating, check-in, monitoring, and issue records
 
-### Aide
+### Aid
 - Prepare the run-of-show, BEO, seating chart, and table plan for sign-off
 - Draft contract terms, payment schedules, and vendor communications for legal/finance review
 - Prepare issue-response playbooks, escalation paths, and day-of staff briefings
@@ -431,7 +424,7 @@ The assistant provides options, evidence, assumptions, and consequences; the use
 - Calculate deadlines, risk scores, issue lists, review priorities, and matter timelines
 - Prepare reversible discovery searches/exports and external payloads as dry runs
 
-### Aide
+### Aid
 - Prepare redline summaries, clause alternatives, negotiation positions, and signing checklists
 - Draft research briefs with citations, dates, jurisdiction, and negative-treatment warnings
 - Prepare compliance matrices, remediation plans, risk memos, escalation packets, and case timelines
@@ -492,7 +485,7 @@ These are strategic decisions with organizational and financial stakes. The assi
 
 These are high-volume, mechanical, and reversible-with-review — the textbook case for proxy action with dry-run/review gates.
 
-### Aide
+### Aid
 - Drafting an architecture decision record (ADR) with trade-offs and risk assessment (user reviews/approves)
 - Preparing a cloud cost optimization report with recommendations (user decides which to fund)
 - Creating a talent gap analysis and hiring plan (user approves budget/roles)
@@ -551,7 +544,7 @@ These are financial decision-making calls with real money at stake. The assistan
 - Scoring and ranking investment opportunities using multi-criteria models
 - Running Monte Carlo projections for retirement/goal timelines
 
-### Aide
+### Aid
 - Drafting a rebalancing plan with specific trades, tax implications, and rationale (user reviews/executes)
 - Preparing an investment opportunity memo with scoring, peer comparison, and valuation analysis (user decides)
 - Creating a financial plan draft with retirement projections, tax strategies, and goal tracking (user finalizes)
@@ -609,7 +602,7 @@ End-to-end sales pipeline management: lead capture → scoring/qualification →
 - Analytics queries: pipeline velocity, win-rate, quota-attainment, cohort reports.
 - Lead scoring execution and forecast computation from opportunity data.
 
-### Aide
+### Aid
 - Discovery call prep: agenda, likely questions, competitor battlecards, tailored value props.
 - Demo script & run-through: flow, data stories, objection responses personalized to prospect.
 - Proposal/quote review package: formatted doc, pricing rationale, discount justification, approval checklist.
@@ -668,7 +661,7 @@ End-to-end instructional support: curriculum planning (lesson plans, quizzes, ac
 - Store generated drafts in local `EDUCATION_HOME`.
 - Organize and tag resources in connected repository (when connector configured).
 
-### Aide
+### Aid
 - Generate lesson plan draft for teacher review/customization.
 - Produce quiz with answer key for teacher sign-off.
 - Draft activity structures teacher can adapt.
@@ -720,7 +713,7 @@ End-to-end recruitment lifecycle: candidate sourcing and screening, interview sc
 - Search candidates via LinkedIn Recruiter; sync to ATS.
 - Sync interview events to external calendar.
 
-### Aide
+### Aid
 - Screening scores and gap analysis for HR review.
 - Candidate communication templates for approval.
 - Compliance report for HR sign-off before posting.
@@ -776,7 +769,7 @@ Recommendations remain advisory; the executive approves decisions, commitments, 
 - Prepare development, improvement, coaching, resource, and career-plan records.
 - Prepare calendar/email payloads and draft, schedule, or sync only after the applicable gate.
 
-### Aide
+### Aid
 - Draft decision briefs, risk registers, 360 questions, feedback summaries, talking points, coaching agendas, and roadmap options for sign-off.
 - Prepare review packets and missing-input lists; the executive conducts consequential conversations and approves final actions.
 
@@ -836,7 +829,7 @@ End-to-end campaign lifecycle management: audience intelligence and market resea
 - Manage document assets; audit SEO on live URLs
 - All external writes gated behind dry-run + confirmation; reads, calculations, drafts are proxy work
 
-### Aide
+### Aid
 - Draft campaign plan, content copy, SEO audit report, and audience segment analysis for user review
 - Prepare performance analysis drafts for stakeholder sign-off
 
@@ -884,7 +877,7 @@ End-to-end customer support lifecycle: ticket resolution and knowledge managemen
 ### Proxy
 - Resolve/close tickets (local); generate/send response drafts (email/social when connected); schedule follow-ups (CRM/scheduling when connected); sync ticket/customer data to CRM.
 
-### Aide
+### Aid
 - Generate response drafts for agent review; prepare root-cause analysis for lead; draft staffing forecast; draft escalation notes for human review.
 
 ### Higher-Order Skills
@@ -926,7 +919,7 @@ End-to-end customer support lifecycle: ticket resolution and knowledge managemen
 
 **Proxy.** Pulling the latest metric slice from the local metrics store; computing stats, regression, moving averages, and z-score anomaly detection; returning the insight/trend JSON artifact to the caller; preparing a warehouse query for user approval before execution (only when the external connector is configured).
 
-**Aide.** Drafting the warehouse query for user approval before execution; preparing the narrative an analyst would present to stakeholders; suggesting which metric definitions need owner sign-off.
+**Aid.** Drafting the warehouse query for user approval before execution; preparing the narrative an analyst would present to stakeholders; suggesting which metric definitions need owner sign-off.
 
 **Higher-order skills.**
 
@@ -966,7 +959,7 @@ End-to-end customer support lifecycle: ticket resolution and knowledge managemen
 
 **Proxy.** Generating and persisting full lyrics (verses, chorus, bridge, outro) from a brief; applying a rhyme scheme and structure selection per genre; revising a stored draft when an implementation consumes `existingContent` — the current source accepts that field but does not produce a revision diff; preparing trend or release-planning requests as dry runs when no connector is configured.
 
-**Aide.** Drafting chord-progression and melody suggestions for the user to arrange with their producer; preparing a pitch/coverage memo for the label or playlist team; building a release checklist the artist signs off on.
+**Aid.** Drafting chord-progression and melody suggestions for the user to arrange with their producer; preparing a pitch/coverage memo for the label or playlist team; building a release checklist the artist signs off on.
 
 **Higher-order skills.**
 
@@ -1004,7 +997,7 @@ End-to-end customer support lifecycle: ticket resolution and knowledge managemen
 
 **Proxy.** Generate and persist an original script draft from a brief; derive scene count, act structure, beats, dialogue placeholders, and visual notes; revise a stored draft only when the revision path is implemented — the current source accepts `existingContent` but does not generate a revision diff; prepare trend/planning requests and production-handoff artifacts as dry runs.
 
-**Aide.** Prepare a pitch-deck outline, shooting/production schedule, casting breakdown, and review packet for the user to finalize; draft talking points and approval notes for director/producer review.
+**Aid.** Prepare a pitch-deck outline, shooting/production schedule, casting breakdown, and review packet for the user to finalize; draft talking points and approval notes for director/producer review.
 
 **Higher-order skills.**
 
@@ -1048,7 +1041,7 @@ The current creative source defines `creative_drafting` and `creative_trend_plan
 
 **Proxy.** Building the full financial model: period projections, FCFF, NPV, IRR, ROIC, and base/bull/bear sensitivity. Running investment analysis: CAPM, VaR, Sharpe/Sortino, Monte Carlo percentiles, scenarios, and risk classification. Returning model and analysis JSON to the caller; the current code does not write artifacts to disk. Preparing reporting, budget, cleaning, and regulatory outputs as dry runs until their catalog-only implementations exist.
 
-**Aide.** Drafting the assumption memo the CFO signs off on. Preparing board slides from model output. Building a budget-tracking template the finance team owns.
+**Aid.** Drafting the assumption memo the CFO signs off on. Preparing board slides from model output. Building a budget-tracking template the finance team owns.
 
 **Higher-order skills.**
 
@@ -1113,7 +1106,7 @@ End-to-end restaurant operations: inventory, procurement, reservations, guest ex
 - Generating staff shift schedules within labor-rule constraints (once approved pattern)
 - Logging and categorizing guest feedback for trend analysis
 
-### Aide
+### Aid
 - Drafting vendor negotiation talking points (user conducts the call)
 - Preparing a health inspection self-assessment checklist (user reviews/signs)
 - Creating a menu revision proposal with cost-margin analysis (user approves changes)
@@ -1168,7 +1161,7 @@ The assistant presents evidence, assumptions, and trade-offs; the user approves 
 - Calculate billing, revenue KPIs, forecasts, staff metrics, and reorder priorities.
 - Prepare guest messages and external PMS, payment, or channel-manager payloads as dry runs.
 
-### Aide
+### Aid
 - Draft personalized complaint responses, escalation memos, and guest communications.
 - Prepare rate-adjustment, vendor-evaluation, incident, and revenue-meeting packs.
 - Prepare check-in, turnover, maintenance, and inventory exception briefs for operator review.
@@ -1213,7 +1206,7 @@ The assistant presents evidence, assumptions, and trade-offs; the user approves 
 
 **Proxy.** Logging a symptom check with an empty guidance field and a professional disclaimer to the local store; preparing structured communication drafts for user review/send; preparing care-plan, scheduling, resource, tagging/search, risk, and analytics requests as dry runs until connectors exist; computing risk-stratification inputs only when a real risk connector is available — the current source does not calculate risk scores.
 
-**Aide.** Preparing the intake form and triage questions for the user's next call with a provider; drafting the appointment request the user must send to the clinic; preparing a handoff summary for the care team to review.
+**Aid.** Preparing the intake form and triage questions for the user's next call with a provider; drafting the appointment request the user must send to the clinic; preparing a handoff summary for the care team to review.
 
 **Higher-order skills.**
 
@@ -1283,7 +1276,7 @@ These are financial and behavioral judgment calls. The assistant never places be
 
 These are computational, deterministic, and reversible — the textbook case for proxy action.
 
-### Aide
+### Aid
 - Preparing a betting strategy document with rationale, edge analysis, and stake sizing for user review
 - Drafting a bankroll management plan with limits, stop-loss, and take-profit rules (user sets final values)
 - Creating a self-assessment for betting behavior patterns (user interprets and acts)
