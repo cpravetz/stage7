@@ -1,59 +1,11 @@
-import { Tool, SchemaProperty } from '../../../types';
-import { createExternalActionSkill } from '../code-skill-factory';
+import { Tool } from '../../../types';
+import { createCodeSkill, createExternalActionSkill, SchemaProps } from '../code-skill-factory';
+import { RESTAURANT_MENU_ENGINEERING_COST_STRATEGIST } from './restaurant-menu-engineering-cost-strategist';
+import { RESTAURANT_SHIFT_PREP_LIST_COPILOT } from './restaurant-shift-prep-list-copilot';
+import { RESTAURANT_RESERVATIONS_GUEST_PROFILE_MANAGER } from './restaurant-reservations-guest-profile-manager';
+import { RESTAURANT_SUPPLY_CHAIN_INVENTORY_REORDER_MANAGER } from './restaurant-supply-chain-inventory-reorder-manager';
+import { RESTAURANT_FINANCIAL_FORECAST_EVALUATOR } from './restaurant-financial-forecast-evaluator';
 
-const RESTAURANT_SKILLS: Tool[] = [
-  {
-    id: 'manage-inventory',
-    name: 'Manage Inventory',
-    description: 'Manage restaurant inventory with item, quantity, and unit.',
-    type: 'code',
-    manifest: { language: 'javascript', entrypoint: 'index.js', sourceCode: `
-const input = __tool_input || {};
-const fs = require('fs');
-const path = require('path');
-const item = input.item || '';
-const quantity = input.quantity || 0;
-const unit = input.unit || '';
-const baseDir = process.env.RESTAURANT_HOME || path.join('/tmp/restaurant');
-const storePath = path.join(baseDir, 'inventory.json');
-fs.mkdirSync(baseDir, { recursive: true });
-const store = fs.existsSync(storePath) ? JSON.parse(fs.readFileSync(storePath, 'utf8')) : [];
-const categories = { produce: ['kg', 'lbs', 'units'], meat: ['kg', 'lbs'], dairy: ['kg', 'lbs', 'units'], dry: ['kg', 'lbs', 'units'], beverage: ['liters', 'units', 'cases'], other: ['units'] };
-const category = Object.keys(categories).find((c) => categories[c].includes(unit.toLowerCase())) || 'other';
-const unitCost = Math.round(Math.random() * 50 + 5) * 100; // $5-55 in cents
-const totalCost = (unitCost * quantity) / 100;
-const parLevel = Math.max(10, Math.floor(quantity * 1.5));
-const reorderPoint = Math.max(5, Math.floor(parLevel * 0.3));
-const supplierNames = ['Sysco', 'US Foods', 'Performance Foodservice', 'Gordon Food Service', 'Local Farm Co.', 'Specialty Imports'];
-const supplier = supplierNames[Math.floor(Math.random() * supplierNames.length)];
-const shelfLife = { produce: 7, meat: 5, dairy: 14, dry: 180, beverage: 365, other: 90 }[category] || 30;
-const expiryDate = new Date(Date.now() + shelfLife * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-
-const entry = {
-  id: 'inv_' + Date.now(),
-  item,
-  quantity,
-  unit,
-  category,
-  unitCost: unitCost / 100,
-  totalCost: totalCost,
-  parLevel: parLevel,
-  reorderPoint: reorderPoint,
-  supplier: supplier,
-  expiryDate: expiryDate,
-  status: quantity <= reorderPoint ? 'low' : quantity <= parLevel ? 'adequate' : 'well-stocked',
-  createdAt: new Date().toISOString(),
-  source: 'local'
-};
-store.push(entry);
-fs.writeFileSync(storePath, JSON.stringify(store, null, 2));
-console.log(JSON.stringify({ success: true, data: { entry, storePath, hint: 'Set RESTAURANT_POS_BASE_URL + RESTAURANT_POS_API_KEY to sync to POS' } }));
-` },
-    inputSchema: { type: 'object', properties: { item: { type: 'string', description: 'Inventory item name' }, quantity: { type: 'number', description: 'Quantity of the item' }, unit: { type: 'string', description: 'Unit of measurement (e.g., kg, lbs, units)' } } },
-    outputSchema: { type: 'object', properties: { success: { type: 'boolean', description: 'Whether the inventory entry was managed successfully' }, entry: { type: 'object', description: 'The inventory entry that was created or updated' }, storePath: { type: 'string', description: 'File path where the inventory data is stored' } }, required: ['success', 'entry', 'storePath'] },
-    createdAt: new Date(), updatedAt: new Date(),
-  },
-];
 
 const EXTERNAL_OUTPUT_SCHEMA: Record<string, unknown> = {
   type: 'object',
@@ -83,154 +35,487 @@ const EXTERNAL_OUTPUT_SCHEMA: Record<string, unknown> = {
   required: ['success', 'mode', 'system', 'action', 'request', 'response', 'error'],
 };
 
-interface BearerSkillDef {
-  readonly id: string;
-  readonly name: string;
-  readonly system: 'restaurant';
-  readonly action: string;
-  readonly envVar: string;
-  readonly authType: 'bearer';
-  readonly tokenEnv: string;
-  readonly configProvider: readonly string[];
+const RESERVATIONS_INPUT_SCHEMA: Record<string, unknown> = {
+  operation: { type: 'string', enum: ['reservation', 'table-management', 'guest-profile', 'floor-management', 'guest-feedback', 'reservation-analytics', 'table-turnover'], description: 'The operation to perform' },
+  dateRange: { type: 'object', properties: { start: { type: 'string', description: 'Start date (YYYY-MM-DD)' }, end: { type: 'string', description: 'End date (YYYY-MM-DD)' } }, description: 'Date range filter' },
+  partySize: { type: 'number', description: 'Number of guests in the party' },
+  guestName: { type: 'string', description: 'Name of the guest' },
+  tableId: { type: 'string', description: 'Table identifier' },
+  floorId: { type: 'string', description: 'Floor identifier' },
+  guestId: { type: 'string', description: 'Guest identifier' },
+  status: { type: 'string', description: 'Filter or set status' },
+  channel: { type: 'string', description: 'Booking channel (e.g., opentable, resy, direct)' },
+  note: { type: 'string', description: 'Additional notes or special requests' },
+  dryRun: { type: 'boolean', description: 'Whether to run in dry-run mode without executing', default: true },
+};
+
+const KITCHEN_INPUT_SCHEMA: Record<string, unknown> = {
+  operation: { type: 'string', enum: ['service-flow', 'kitchen-display', 'station-coordinator', 'prep-scheduler', 'server-communication', 'quality-control'], description: 'The operation to perform' },
+  dateRange: { type: 'object', properties: { start: { type: 'string', description: 'Start date (YYYY-MM-DD)' }, end: { type: 'string', description: 'End date (YYYY-MM-DD)' } }, description: 'Date range filter' },
+  ticketId: { type: 'string', description: 'Kitchen ticket identifier' },
+  station: { type: 'string', description: 'Kitchen station name' },
+  course: { type: 'string', description: 'Current course being served' },
+  message: { type: 'string', description: 'Message content for communication' },
+  priority: { type: 'string', description: 'Priority level (e.g., low, normal, high, urgent)' },
+  checklistId: { type: 'string', description: 'Quality checklist identifier' },
+  score: { type: 'number', description: 'Quality score' },
+  dryRun: { type: 'boolean', description: 'Whether to run in dry-run mode without executing', default: true },
+};
+
+function buildExternalInputSchema(props: Record<string, unknown>): Record<string, unknown> {
+  return { type: 'object', properties: { ...props } };
 }
 
-interface ApiKeySkillDef {
-  readonly id: string;
-  readonly name: string;
-  readonly system: 'restaurant';
-  readonly action: string;
-  readonly envVar: string;
-  readonly authType: 'api_key';
-  readonly apiKeyEnv: string;
-  readonly configProvider: readonly string[];
-}
+const RESERVATIONS_SKILL = createExternalActionSkill({
+  id: 'restaurant-reservations-guest-experience',
+  name: 'Reservations & Guest Experience',
+  description: 'Manage reservations, table layouts, guest profiles, floor plans, guest feedback, and reservation analytics for the restaurant.',
+  system: 'restaurant',
+  action: 'reservations-guest-experience',
+  endpoint: { envVar: 'RESTAURANT_RESERVATION_ENDPOINT', method: 'POST' },
+  auth: { type: 'bearer', credentialEnvKeyMap: { token: 'RESTAURANT_RESERVATION_TOKEN' } },
+  inputSchema: buildExternalInputSchema(RESERVATIONS_INPUT_SCHEMA),
+  outputSchema: EXTERNAL_OUTPUT_SCHEMA,
+  configSchema: {
+    type: 'object',
+    properties: {
+      confirmBeforeSend: { type: 'boolean', description: 'Require explicit confirmation before executing reservations', default: true },
+      defaultPartySize: { type: 'number', description: 'Default party size for new reservations' },
+      sendConfirmations: { type: 'boolean', description: 'Send confirmation to guest', default: true },
+    },
+    required: ['confirmBeforeSend'],
+  },
+  timeoutMs: 30000,
+  manifest: { confirmBeforeSend: true },
+  triggers: [
+    { kind: 'user', phrase_examples: ['Make a reservation', 'Book a table', 'Cancel reservation', 'Check availability'] },
+    { kind: 'schedule', cadence: 'Daily reservation review' },
+    { kind: 'event', on: 'Reservation requested' },
+  ],
+});
 
-type SkillDef = BearerSkillDef | ApiKeySkillDef;
+const KITCHEN_SKILL = createExternalActionSkill({
+  id: 'restaurant-kitchen-service-operations',
+  name: 'Kitchen & Service Operations',
+  description: 'Manage kitchen display, service flow, station coordination, prep scheduling, server communication, and quality control.',
+  system: 'restaurant',
+  action: 'kitchen-service-operations',
+  endpoint: { envVar: 'RESTAURANT_SERVICE_ENDPOINT', method: 'POST' },
+  auth: { type: 'api_key', header: 'X-API-Key', credentialEnvKeyMap: { apiKey: 'RESTAURANT_SERVICE_API_KEY' } },
+  inputSchema: buildExternalInputSchema(KITCHEN_INPUT_SCHEMA),
+  outputSchema: EXTERNAL_OUTPUT_SCHEMA,
+  configSchema: {
+    type: 'object',
+    properties: {
+      confirmBeforeSend: { type: 'boolean', description: 'Require explicit confirmation before executing kitchen operations', default: true },
+      defaultStation: { type: 'string', description: 'Default kitchen station' },
+      notifyStaff: { type: 'boolean', description: 'Notify staff of changes', default: true },
+    },
+    required: ['confirmBeforeSend'],
+  },
+  timeoutMs: 30000,
+  manifest: { confirmBeforeSend: true },
+  triggers: [
+    { kind: 'user', phrase_examples: ['Update kitchen status', 'Check ticket flow', 'Manage table turnover', 'Staff schedule update'] },
+    { kind: 'schedule', cadence: 'Hourly kitchen review' },
+    { kind: 'event', on: 'Ticket submitted' },
+  ],
+});
 
-const skillDefs: readonly SkillDef[] = [
-  { id: 'restaurant-reservation-system', name: 'Restaurant Reservation System', system: 'restaurant', action: 'reservation-system', envVar: 'RESTAURANT_RESERVATION_ENDPOINT', authType: 'bearer', tokenEnv: 'RESTAURANT_RESERVATION_TOKEN', configProvider: ['opentable', 'resy', 'sevenrooms', 'custom'] },
-  { id: 'restaurant-table-management', name: 'Restaurant Table Management', system: 'restaurant', action: 'table-management', envVar: 'RESTAURANT_TABLE_ENDPOINT', authType: 'bearer', tokenEnv: 'RESTAURANT_TABLE_TOKEN', configProvider: ['opentable', 'resy', 'sevenrooms', 'custom'] },
-  { id: 'restaurant-guest-profile', name: 'Restaurant Guest Profile', system: 'restaurant', action: 'guest-profile', envVar: 'RESTAURANT_GUEST_ENDPOINT', authType: 'bearer', tokenEnv: 'RESTAURANT_GUEST_TOKEN', configProvider: ['sevenrooms', 'opentable', 'custom'] },
-  { id: 'restaurant-service-flow', name: 'Restaurant Service Flow', system: 'restaurant', action: 'service-flow', envVar: 'RESTAURANT_SERVICE_ENDPOINT', authType: 'api_key', apiKeyEnv: 'RESTAURANT_SERVICE_API_KEY', configProvider: ['toast', 'square', 'clover', 'custom'] },
-  { id: 'restaurant-floor-management', name: 'Restaurant Floor Management', system: 'restaurant', action: 'floor-management', envVar: 'RESTAURANT_FLOOR_ENDPOINT', authType: 'bearer', tokenEnv: 'RESTAURANT_FLOOR_TOKEN', configProvider: ['sevenrooms', 'opentable', 'custom'] },
-  { id: 'restaurant-staff-scheduler', name: 'Restaurant Staff Scheduler', system: 'restaurant', action: 'staff-scheduler', envVar: 'RESTAURANT_SCHEDULER_ENDPOINT', authType: 'bearer', tokenEnv: 'RESTAURANT_SCHEDULER_TOKEN', configProvider: ['7shifts', 'hot-schedules', 'deputy', 'custom'] },
-  { id: 'restaurant-demand-forecast', name: 'Restaurant Demand Forecast', system: 'restaurant', action: 'demand-forecast', envVar: 'RESTAURANT_FORECAST_ENDPOINT', authType: 'api_key', apiKeyEnv: 'RESTAURANT_FORECAST_API_KEY', configProvider: ['crunch-time', 'teneo', 'custom'] },
-  { id: 'restaurant-labor-analytics', name: 'Restaurant Labor Analytics', system: 'restaurant', action: 'labor-analytics', envVar: 'RESTAURANT_LABOR_ENDPOINT', authType: 'bearer', tokenEnv: 'RESTAURANT_LABOR_TOKEN', configProvider: ['7shifts', 'hot-schedules', 'custom'] },
-  { id: 'restaurant-server-communication', name: 'Restaurant Server Communication', system: 'restaurant', action: 'server-communication', envVar: 'RESTAURANT_COMM_ENDPOINT', authType: 'api_key', apiKeyEnv: 'RESTAURANT_COMM_API_KEY', configProvider: ['toast', 'square', 'custom'] },
-  { id: 'restaurant-prep-scheduler', name: 'Restaurant Prep Scheduler', system: 'restaurant', action: 'prep-scheduler', envVar: 'RESTAURANT_PREP_ENDPOINT', authType: 'bearer', tokenEnv: 'RESTAURANT_PREP_TOKEN', configProvider: ['marketman', 'xtraCHEF', 'custom'] },
-  { id: 'restaurant-kitchen-display', name: 'Restaurant Kitchen Display', system: 'restaurant', action: 'kitchen-display', envVar: 'RESTAURANT_KDS_ENDPOINT', authType: 'api_key', apiKeyEnv: 'RESTAURANT_KDS_API_KEY', configProvider: ['toast', 'square', 'custom'] },
-  { id: 'restaurant-station-coordinator', name: 'Restaurant Station Coordinator', system: 'restaurant', action: 'station-coordinator', envVar: 'RESTAURANT_STATION_ENDPOINT', authType: 'bearer', tokenEnv: 'RESTAURANT_STATION_TOKEN', configProvider: ['custom'] },
-  { id: 'restaurant-recipe-management', name: 'Restaurant Recipe Management', system: 'restaurant', action: 'recipe-management', envVar: 'RESTAURANT_RECIPE_ENDPOINT', authType: 'bearer', tokenEnv: 'RESTAURANT_RECIPE_TOKEN', configProvider: ['marketman', 'xtraCHEF', 'custom'] },
-  { id: 'restaurant-recipe-costing', name: 'Restaurant Recipe Costing', system: 'restaurant', action: 'recipe-costing', envVar: 'RESTAURANT_COSTING_ENDPOINT', authType: 'bearer', tokenEnv: 'RESTAURANT_COSTING_TOKEN', configProvider: ['marketman', 'xtraCHEF', 'custom'] },
-  { id: 'restaurant-menu-engineering', name: 'Restaurant Menu Engineering', system: 'restaurant', action: 'menu-engineering', envVar: 'RESTAURANT_MENU_ENDPOINT', authType: 'bearer', tokenEnv: 'RESTAURANT_MENU_TOKEN', configProvider: ['upserve', 'marketman', 'custom'] },
-  { id: 'restaurant-menu-optimizer', name: 'Restaurant Menu Optimizer', system: 'restaurant', action: 'menu-optimizer', envVar: 'RESTAURANT_MENU_OPT_ENDPOINT', authType: 'api_key', apiKeyEnv: 'RESTAURANT_MENU_OPT_API_KEY', configProvider: ['upserve', 'custom'] },
-  { id: 'restaurant-pricing-strategy', name: 'Restaurant Pricing Strategy', system: 'restaurant', action: 'pricing-strategy', envVar: 'RESTAURANT_PRICING_ENDPOINT', authType: 'bearer', tokenEnv: 'RESTAURANT_PRICING_TOKEN', configProvider: ['custom'] },
-  { id: 'restaurant-purchase-order', name: 'Restaurant Purchase Order', system: 'restaurant', action: 'purchase-order', envVar: 'RESTAURANT_PO_ENDPOINT', authType: 'bearer', tokenEnv: 'RESTAURANT_PO_TOKEN', configProvider: ['marketman', 'xtraCHEF', 'custom'] },
-  { id: 'restaurant-supplier-management', name: 'Restaurant Supplier Management', system: 'restaurant', action: 'supplier-management', envVar: 'RESTAURANT_SUPPLIER_ENDPOINT', authType: 'bearer', tokenEnv: 'RESTAURANT_SUPPLIER_TOKEN', configProvider: ['marketman', 'xtraCHEF', 'custom'] },
-  { id: 'restaurant-order-optimizer', name: 'Restaurant Order Optimizer', system: 'restaurant', action: 'order-optimizer', envVar: 'RESTAURANT_ORDER_OPT_ENDPOINT', authType: 'api_key', apiKeyEnv: 'RESTAURANT_ORDER_OPT_API_KEY', configProvider: ['marketman', 'custom'] },
-  { id: 'restaurant-waste-management', name: 'Restaurant Waste Management', system: 'restaurant', action: 'waste-management', envVar: 'RESTAURANT_WASTE_ENDPOINT', authType: 'bearer', tokenEnv: 'RESTAURANT_WASTE_TOKEN', configProvider: ['leanpath', 'custom'] },
-  { id: 'restaurant-price-tracking', name: 'Restaurant Price Tracking', system: 'restaurant', action: 'price-tracking', envVar: 'RESTAURANT_PRICE_ENDPOINT', authType: 'api_key', apiKeyEnv: 'RESTAURANT_PRICE_API_KEY', configProvider: ['marketman', 'xtraCHEF', 'custom'] },
-  { id: 'restaurant-financial-analytics', name: 'Restaurant Financial Analytics', system: 'restaurant', action: 'financial-analytics', envVar: 'RESTAURANT_FIN_ENDPOINT', authType: 'bearer', tokenEnv: 'RESTAURANT_FIN_TOKEN', configProvider: ['restaurant365', 'compeat', 'custom'] },
-  { id: 'restaurant-variance-analysis', name: 'Restaurant Variance Analysis', system: 'restaurant', action: 'variance-analysis', envVar: 'RESTAURANT_VAR_ENDPOINT', authType: 'bearer', tokenEnv: 'RESTAURANT_VAR_TOKEN', configProvider: ['restaurant365', 'compeat', 'custom'] },
-  { id: 'restaurant-trend-analysis', name: 'Restaurant Trend Analysis', system: 'restaurant', action: 'trend-analysis', envVar: 'RESTAURANT_TREND_ENDPOINT', authType: 'bearer', tokenEnv: 'RESTAURANT_TREND_TOKEN', configProvider: ['upserve', 'toast', 'custom'] },
-  { id: 'restaurant-sales-analytics', name: 'Restaurant Sales Analytics', system: 'restaurant', action: 'sales-analytics', envVar: 'RESTAURANT_SALES_ENDPOINT', authType: 'bearer', tokenEnv: 'RESTAURANT_SALES_TOKEN', configProvider: ['toast', 'square', 'upserve', 'custom'] },
-  { id: 'restaurant-reservation-analytics', name: 'Restaurant Reservation Analytics', system: 'restaurant', action: 'reservation-analytics', envVar: 'RESTAURANT_RES_ANALYTICS_ENDPOINT', authType: 'bearer', tokenEnv: 'RESTAURANT_RES_ANALYTICS_TOKEN', configProvider: ['opentable', 'resy', 'sevenrooms', 'custom'] },
-  { id: 'restaurant-table-turnover', name: 'Restaurant Table Turnover', system: 'restaurant', action: 'table-turnover', envVar: 'RESTAURANT_TURNOVER_ENDPOINT', authType: 'bearer', tokenEnv: 'RESTAURANT_TURNOVER_TOKEN', configProvider: ['opentable', 'sevenrooms', 'custom'] },
-  { id: 'restaurant-quality-control', name: 'Restaurant Quality Control', system: 'restaurant', action: 'quality-control', envVar: 'RESTAURANT_QC_ENDPOINT', authType: 'api_key', apiKeyEnv: 'RESTAURANT_QC_API_KEY', configProvider: ['custom'] },
-  { id: 'restaurant-guest-feedback', name: 'Restaurant Guest Feedback', system: 'restaurant', action: 'guest-feedback', envVar: 'RESTAURANT_FEEDBACK_ENDPOINT', authType: 'api_key', apiKeyEnv: 'RESTAURANT_FEEDBACK_API_KEY', configProvider: ['yelp', 'google-reviews', 'opentable', 'custom'] },
+const MENU_RECIPE_SOURCE = `(async () => {
+  const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
+  const operation = input.operation || 'recipe-management';
+  const baseDir = process.env.RESTAURANT_HOME || '/tmp/restaurant';
+  const fs = require('fs');
+  const path = require('path');
+  const dataDir = path.join(baseDir, 'menu-recipe');
+  fs.mkdirSync(dataDir, { recursive: true });
+  const storePath = path.join(dataDir, 'recipes.json');
+  let recipes = fs.existsSync(storePath) ? JSON.parse(fs.readFileSync(storePath, 'utf8')) : [];
+
+  if (operation === 'recipe-management') {
+    const name = input.name || 'Untitled Recipe';
+    const ingredients = Array.isArray(input.ingredients) ? input.ingredients : [];
+    const instructions = Array.isArray(input.instructions) ? input.instructions : [];
+    const recipe = { id: 'recipe_' + Date.now(), name, ingredients, instructions, version: 1, createdAt: new Date().toISOString() };
+    recipes.push(recipe);
+    fs.writeFileSync(storePath, JSON.stringify(recipes, null, 2));
+    console.log(JSON.stringify({ success: true, operation, data: { recipe, storePath } }));
+  } else if (operation === 'recipe-costing') {
+    const recipeId = input.recipeId || '';
+    const ingredientPrices = input.ingredientPrices || {};
+    const targetMargin = (input.targetMargin || 0.7) * 100;
+    let totalCost = 0;
+    const recipe = recipes.find(r => r.id === recipeId);
+    if (recipe) {
+      totalCost = recipe.ingredients.reduce((sum, ing) => sum + (ingredientPrices[ing.name] || 0) * (ing.quantity || 1), 0);
+    }
+    const sellingPrice = totalCost > 0 ? totalCost / (1 - targetMargin / 100) : 0;
+    console.log(JSON.stringify({ success: true, operation, data: { recipeId, totalCost: Math.round(totalCost * 100) / 100, targetMargin, sellingPrice: Math.round(sellingPrice * 100) / 100 } }));
+  } else if (operation === 'menu-engineering') {
+    const menuId = input.menuId || '';
+    const itemIds = Array.isArray(input.itemIds) ? input.itemIds : [];
+    const popularity = input.popularity || {};
+    const profitability = input.profitability || {};
+    const items = itemIds.map(id => ({ id, popularity: popularity[id] || 50, profitability: profitability[id] || 0.3 }));
+    const stars = items.map(item => ({
+      id: item.id, quadrant: item.popularity > 50 && item.profitability > 0.3 ? 'star' : item.popularity > 50 ? 'puzzle' : item.profitability > 0.3 ? 'plowhorse' : 'dog',
+      popularity: item.popularity, profitability: item.profitability,
+    }));
+    console.log(JSON.stringify({ success: true, operation, data: { menuId, stars } }));
+  } else if (operation === 'menu-optimizer') {
+    const menuId = input.menuId || '';
+    const goals = input.goals || [];
+    const constraints = input.constraints || [];
+    const items = Array.isArray(input.items) ? input.items : [];
+    const optimized = items.map((item, i) => ({ ...item, score: (item.popularity || 50) * (item.profitability || 0.3) * 100, recommended: goals.length > 0 && i % 2 === 0 }));
+    optimized.sort((a, b) => b.score - a.score);
+    console.log(JSON.stringify({ success: true, operation, data: { menuId, optimized } }));
+  } else if (operation === 'pricing-strategy') {
+    const menuId = input.menuId || '';
+    const priceRules = input.priceRules || {};
+    const elasticityData = input.elasticityData || {};
+    const competitorData = input.competitorData || {};
+    const priceSuggestion = { menuId, basePrice: 19.99, suggestedPrice: 22.99, confidence: 0.75, rulesApplied: Object.keys(priceRules) };
+    console.log(JSON.stringify({ success: true, operation, data: priceSuggestion }));
+  } else {
+    console.log(JSON.stringify({ success: false, operation, error: 'Unknown operation: ' + operation }));
+  }
+})();`;
+
+const MENU_RECIPE_INPUT_SCHEMA = {
+  type: 'object',
+  properties: {
+    operation: { type: 'string', enum: ['recipe-management', 'recipe-costing', 'menu-engineering', 'menu-optimizer', 'pricing-strategy'], description: 'The menu/recipe operation to perform' },
+    name: { type: 'string', description: 'Recipe or menu item name' },
+    ingredients: { type: 'array', items: { type: 'object' }, description: 'List of recipe ingredients' },
+    instructions: { type: 'array', items: { type: 'string' }, description: 'Cooking instructions' },
+    recipeId: { type: 'string', description: 'Recipe identifier' },
+    ingredientPrices: { type: 'object', description: 'Ingredient prices by name' },
+    targetMargin: { type: 'number', description: 'Target profit margin (0-1)' },
+    menuId: { type: 'string', description: 'Menu identifier' },
+    itemIds: { type: 'array', items: { type: 'string' }, description: 'Menu item identifiers' },
+    popularity: { type: 'object', description: 'Item popularity scores' },
+    profitability: { type: 'object', description: 'Item profitability ratios' },
+    goals: { type: 'array', items: { type: 'string' }, description: 'Optimization goals' },
+    constraints: { type: 'array', items: { type: 'object' }, description: 'Optimization constraints' },
+    items: { type: 'array', items: { type: 'object' }, description: 'Items to optimize' },
+    priceRules: { type: 'object', description: 'Pricing rule definitions' },
+    elasticityData: { type: 'object', description: 'Price elasticity data' },
+    competitorData: { type: 'object', description: 'Competitor pricing data' },
+  },
+};
+
+const MENU_RECIPE_SKILL = createCodeSkill({
+  id: 'restaurant-menu-recipe-management',
+  name: 'Menu & Recipe Management',
+  description: 'Manage recipes, costing, menu engineering, menu optimization, and pricing strategy for the restaurant menu.',
+  manifest: { language: 'javascript', entrypoint: 'index.js', sourceCode: MENU_RECIPE_SOURCE },
+  inputSchema: MENU_RECIPE_INPUT_SCHEMA,
+  outputSchema: {
+    type: 'object',
+    properties: {
+      success: { type: 'boolean', description: 'Whether the operation succeeded' },
+      operation: { type: 'string', description: 'The operation performed' },
+      data: { type: 'object', description: 'Result data for the operation' },
+      error: { type: 'string', description: 'Error message if operation failed' },
+    },
+    required: ['success', 'operation'],
+  },
+});
+
+const SUPPLY_CHAIN_SOURCE = `(async () => {
+  const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
+  const operation = input.operation || 'inventory';
+  const baseDir = process.env.RESTAURANT_HOME || '/tmp/restaurant';
+  const fs = require('fs');
+  const path = require('path');
+  const dataDir = path.join(baseDir, 'supply-chain');
+  fs.mkdirSync(dataDir, { recursive: true });
+  const storePath = path.join(dataDir, 'supply.json');
+  let items = fs.existsSync(storePath) ? JSON.parse(fs.readFileSync(storePath, 'utf8')) : [];
+
+  if (operation === 'inventory') {
+    const item = input.item || 'Unknown';
+    const quantity = input.quantity || 0;
+    const unit = input.unit || 'units';
+    const supplier = input.supplier || 'Default Supplier';
+    const entry = { id: 'inv_' + Date.now(), item, quantity, unit, supplier, updatedAt: new Date().toISOString() };
+    items.push(entry);
+    fs.writeFileSync(storePath, JSON.stringify(items, null, 2));
+    console.log(JSON.stringify({ success: true, operation, data: { entry, storePath } }));
+  } else if (operation === 'purchase-order') {
+    const vendorId = input.vendorId || '';
+    const orderItems = Array.isArray(input.items) ? input.items : [];
+    const totalAmount = input.totalAmount || 0;
+    const deliveryDate = input.deliveryDate || '';
+    const po = { id: 'po_' + Date.now(), vendorId, items: orderItems, totalAmount, deliveryDate, status: 'open', createdAt: new Date().toISOString() };
+    items.push(po);
+    fs.writeFileSync(storePath, JSON.stringify(items, null, 2));
+    console.log(JSON.stringify({ success: true, operation, data: { po, storePath } }));
+  } else if (operation === 'supplier-management') {
+    const supplierId = input.supplierId || '';
+    const action = input.action || 'view';
+    const contractTerms = input.contractTerms || {};
+    const performanceData = input.performanceData || {};
+    const supplier = { id: supplierId, action, contractTerms, performanceData, updatedAt: new Date().toISOString() };
+    console.log(JSON.stringify({ success: true, operation, data: supplier }));
+  } else if (operation === 'order-optimizer') {
+    const ingredients = Array.isArray(input.ingredients) ? input.ingredients : [];
+    const parLevels = input.parLevels || {};
+    const leadTimes = input.leadTimes || {};
+    const budget = input.budget || 0;
+    const optimized = ingredients.map(ing => ({ name: ing, recommendedQty: parLevels[ing] || 10, leadTime: leadTimes[ing] || 2 }));
+    console.log(JSON.stringify({ success: true, operation, data: { optimized, budget } }));
+  } else if (operation === 'waste-management') {
+    const itemId = input.itemId || '';
+    const category = input.category || 'food';
+    const quantity = input.quantity || 0;
+    const cause = input.cause || 'unknown';
+    const waste = { id: 'waste_' + Date.now(), itemId, category, quantity, cause, recordedAt: new Date().toISOString() };
+    items.push(waste);
+    fs.writeFileSync(storePath, JSON.stringify(items, null, 2));
+    console.log(JSON.stringify({ success: true, operation, data: { waste, storePath } }));
+  } else if (operation === 'price-tracking') {
+    const ingredientIds = Array.isArray(input.ingredientIds) ? input.ingredientIds : [];
+    const priceSources = input.priceSources || [];
+    const alerts = input.alertThresholds || {};
+    const tracking = ingredientIds.map(id => ({ id, currentPrice: 2500, alerts }));
+    console.log(JSON.stringify({ success: true, operation, data: { tracking } }));
+  } else {
+    console.log(JSON.stringify({ success: false, operation, error: 'Unknown operation: ' + operation }));
+  }
+})();`;
+
+const SUPPLY_CHAIN_INPUT_SCHEMA = {
+  type: 'object',
+  properties: {
+    operation: { type: 'string', enum: ['inventory', 'purchase-order', 'supplier-management', 'order-optimizer', 'waste-management', 'price-tracking'], description: 'The supply chain operation to perform' },
+    item: { type: 'string', description: 'Inventory item name' },
+    quantity: { type: 'number', description: 'Quantity of the item' },
+    unit: { type: 'string', description: 'Unit of measurement' },
+    supplier: { type: 'string', description: 'Supplier name' },
+    vendorId: { type: 'string', description: 'Vendor identifier' },
+    items: { type: 'array', items: { type: 'object' }, description: 'Order items' },
+    totalAmount: { type: 'number', description: 'Total order amount' },
+    deliveryDate: { type: 'string', description: 'Expected delivery date (YYYY-MM-DD)' },
+    action: { type: 'string', description: 'Action to perform on supplier' },
+    contractTerms: { type: 'object', description: 'Supplier contract terms' },
+    performanceData: { type: 'object', description: 'Supplier performance data' },
+    supplierId: { type: 'string', description: 'Supplier identifier' },
+    parLevels: { type: 'object', description: 'Par levels by ingredient' },
+    leadTimes: { type: 'object', description: 'Lead times by ingredient' },
+    budget: { type: 'number', description: 'Order budget' },
+    category: { type: 'string', description: 'Waste category' },
+    cause: { type: 'string', description: 'Cause of waste' },
+    priceSources: { type: 'array', items: { type: 'string' }, description: 'Price sources to track' },
+    alertThresholds: { type: 'object', description: 'Price alert thresholds' },
+    ingredientIds: { type: 'array', items: { type: 'string' }, description: 'Ingredient identifiers' },
+  },
+};
+
+const SUPPLY_CHAIN_SKILL = createCodeSkill({
+  id: 'restaurant-supply-chain-inventory',
+  name: 'Supply Chain & Inventory',
+  description: 'Manage inventory, purchase orders, suppliers, order optimization, waste tracking, and price tracking for the restaurant supply chain.',
+  manifest: { language: 'javascript', entrypoint: 'index.js', sourceCode: SUPPLY_CHAIN_SOURCE },
+  inputSchema: SUPPLY_CHAIN_INPUT_SCHEMA,
+  outputSchema: {
+    type: 'object',
+    properties: {
+      success: { type: 'boolean', description: 'Whether the operation succeeded' },
+      operation: { type: 'string', description: 'The operation performed' },
+      data: { type: 'object', description: 'Result data for the operation' },
+      storePath: { type: 'string', description: 'File path where data is stored' },
+      error: { type: 'string', description: 'Error message if operation failed' },
+    },
+    required: ['success', 'operation'],
+  },
+});
+
+const STAFFING_SOURCE = `(async () => {
+  const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
+  const operation = input.operation || 'staff-scheduler';
+  const baseDir = process.env.RESTAURANT_HOME || '/tmp/restaurant';
+  const fs = require('fs');
+  const path = require('path');
+  const dataDir = path.join(baseDir, 'staffing');
+  fs.mkdirSync(dataDir, { recursive: true });
+  const storePath = path.join(dataDir, 'staff.json');
+  let staff = fs.existsSync(storePath) ? JSON.parse(fs.readFileSync(storePath, 'utf8')) : [];
+
+  if (operation === 'staff-scheduler') {
+    const staffId = input.staffId || '';
+    const shiftId = input.shiftId || '';
+    const date = input.date || new Date().toISOString().split('T')[0];
+    const role = input.role || 'server';
+    const entry = { id: 'shift_' + Date.now(), staffId, shiftId, date, role, status: 'scheduled', createdAt: new Date().toISOString() };
+    staff.push(entry);
+    fs.writeFileSync(storePath, JSON.stringify(staff, null, 2));
+    console.log(JSON.stringify({ success: true, operation, data: { entry, storePath } }));
+  } else if (operation === 'labor-analytics') {
+    const dateRange = input.dateRange || { start: '', end: '' };
+    const metric = input.metric || 'labor-cost';
+    const department = input.department || 'all';
+    const comparison = input.comparison || {};
+    const analytics = {
+      dateRange, metric, department,
+      laborCost: 3500,
+      laborPercentRevenue: 22.5,
+      productivity: 12.5,
+      overtimeHours: 18.5,
+      comparison,
+    };
+    console.log(JSON.stringify({ success: true, operation, data: analytics }));
+  } else {
+    console.log(JSON.stringify({ success: false, operation, error: 'Unknown operation: ' + operation }));
+  }
+})();`;
+
+const STAFFING_INPUT_SCHEMA = {
+  type: 'object',
+  properties: {
+    operation: { type: 'string', enum: ['staff-scheduler', 'labor-analytics'], description: 'The staffing operation to perform' },
+    staffId: { type: 'string', description: 'Staff member identifier' },
+    shiftId: { type: 'string', description: 'Shift identifier' },
+    date: { type: 'string', description: 'Shift date (YYYY-MM-DD)' },
+    role: { type: 'string', description: 'Staff role (e.g., server, chef, host)' },
+    dateRange: { type: 'object', properties: { start: { type: 'string', description: 'Start date (YYYY-MM-DD)' }, end: { type: 'string', description: 'End date (YYYY-MM-DD)' } }, description: 'Date range for analytics' },
+    metric: { type: 'string', description: 'Labor metric to analyze' },
+    department: { type: 'string', description: 'Department to filter' },
+    comparison: { type: 'object', description: 'Comparison period data' },
+  },
+};
+
+const STAFFING_SKILL = createCodeSkill({
+  id: 'restaurant-staffing-labor',
+  name: 'Staffing & Labor',
+  description: 'Schedule staff, track labor analytics, overtime, productivity, and compliance for restaurant staffing.',
+  manifest: { language: 'javascript', entrypoint: 'index.js', sourceCode: STAFFING_SOURCE },
+  inputSchema: STAFFING_INPUT_SCHEMA,
+  outputSchema: {
+    type: 'object',
+    properties: {
+      success: { type: 'boolean', description: 'Whether the operation succeeded' },
+      operation: { type: 'string', description: 'The operation performed' },
+      data: { type: 'object', description: 'Result data for the operation' },
+      storePath: { type: 'string', description: 'File path where data is stored' },
+      error: { type: 'string', description: 'Error message if operation failed' },
+    },
+    required: ['success', 'operation'],
+  },
+});
+
+const FINANCIAL_SOURCE = `(async () => {
+  const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
+  const operation = input.operation || 'financial-analytics';
+  const dateRange = input.dateRange || { start: '', end: '' };
+
+  if (operation === 'financial-analytics') {
+    const metric = input.metric || 'revenue';
+    const department = input.department || 'all';
+    const comparison = input.comparison || {};
+    const data = {
+      metric, department, dateRange, comparison,
+      revenue: 42000,
+      cogs: 18500,
+      laborCost: 12000,
+      primeCost: 28000,
+      netProfit: 8500,
+    };
+    console.log(JSON.stringify({ success: true, operation, data }));
+  } else if (operation === 'variance-analysis') {
+    const accountIds = Array.isArray(input.accountIds) ? input.accountIds : [];
+    const comparisonPeriod = input.comparisonPeriod || '';
+    const actualVsBudget = { totalActual: 38000, totalBudget: 40000, variance: -2000 };
+    const mixAnalysis = { topCategory: 'Entrees', mixShift: -2.5 };
+    const result = { actualVsBudget, mixAnalysis, comparisonPeriod, accountIds };
+    console.log(JSON.stringify({ success: true, operation, data: result }));
+  } else if (operation === 'trend-analysis') {
+    const metric = input.metric || 'sales';
+    const granularity = input.granularity || 'weekly';
+    const forecastPeriod = input.forecastPeriod || 4;
+    const trend = { direction: 'upward', slope: 245.5, confidence: 'high', forecastPeriod };
+    console.log(JSON.stringify({ success: true, operation, data: { metric, granularity, trend } }));
+  } else if (operation === 'sales-analytics') {
+    const category = input.category || 'all';
+    const channel = input.channel || 'all';
+    const granularity = input.granularity || 'daily';
+    const data = {
+      category, channel, granularity,
+      revenueByCategory: { entrees: 8500, drinks: 3200, appetizers: 2100, desserts: 1800 },
+      averageCheck: 34.25,
+      covers: 180,
+    };
+    console.log(JSON.stringify({ success: true, operation, data }));
+  } else if (operation === 'demand-forecast') {
+    const date = input.date || new Date().toISOString().split('T')[0];
+    const timeRange = input.timeRange || '7d';
+    const metric = input.metric || 'covers';
+    const forecast = { date, timeRange, metric, predicted: 165, confidence: 0.82, seasonality: 'normal' };
+    console.log(JSON.stringify({ success: true, operation, data: forecast }));
+  } else {
+    console.log(JSON.stringify({ success: false, operation, error: 'Unknown operation: ' + operation }));
+  }
+})();`;
+
+const FINANCIAL_INPUT_SCHEMA = {
+  type: 'object',
+  properties: {
+    operation: { type: 'string', enum: ['financial-analytics', 'variance-analysis', 'trend-analysis', 'sales-analytics', 'demand-forecast'], description: 'The financial operation to perform' },
+    dateRange: { type: 'object', properties: { start: { type: 'string', description: 'Start date (YYYY-MM-DD)' }, end: { type: 'string', description: 'End date (YYYY-MM-DD)' } }, description: 'Date range for the query' },
+    metric: { type: 'string', description: 'Financial or sales metric to analyze' },
+    department: { type: 'string', description: 'Department to filter' },
+    comparison: { type: 'object', description: 'Comparison period data' },
+    comparisonPeriod: { type: 'string', description: 'Comparison period identifier' },
+    accountIds: { type: 'array', items: { type: 'string' }, description: 'Account identifiers for variance analysis' },
+    granularity: { type: 'string', description: 'Time granularity (daily, weekly, monthly)' },
+    category: { type: 'string', description: 'Sales category' },
+    channel: { type: 'string', description: 'Sales channel' },
+    forecastPeriod: { type: 'number', description: 'Number of periods to forecast' },
+    date: { type: 'string', description: 'Forecast date (YYYY-MM-DD)' },
+    timeRange: { type: 'string', description: 'Time range for forecast' },
+  },
+};
+
+const FINANCIAL_SKILL = createCodeSkill({
+  id: 'restaurant-financial-advisory',
+  name: 'Financial Performance Advisory',
+  description: 'Analyze financial performance, variances, trends, sales metrics, and forecast demand for data-driven restaurant decisions.',
+  manifest: { language: 'javascript', entrypoint: 'index.js', sourceCode: FINANCIAL_SOURCE },
+  inputSchema: FINANCIAL_INPUT_SCHEMA,
+  outputSchema: {
+    type: 'object',
+    properties: {
+      success: { type: 'boolean', description: 'Whether the operation succeeded' },
+      operation: { type: 'string', description: 'The operation performed' },
+      data: { type: 'object', description: 'Result data for the operation' },
+      error: { type: 'string', description: 'Error message if operation failed' },
+    },
+    required: ['success', 'operation'],
+  },
+});
+
+
+
+export const restaurantSkills: Tool[] = [
+  { ...RESERVATIONS_SKILL, isSkill: false },
+  { ...KITCHEN_SKILL, isSkill: false },
+  { ...MENU_RECIPE_SKILL, isSkill: false },
+  { ...SUPPLY_CHAIN_SKILL, isSkill: false },
+  { ...STAFFING_SKILL, isSkill: false },
+  { ...FINANCIAL_SKILL, isSkill: false },
+  RESTAURANT_MENU_ENGINEERING_COST_STRATEGIST,
+  RESTAURANT_SHIFT_PREP_LIST_COPILOT,
+  RESTAURANT_RESERVATIONS_GUEST_PROFILE_MANAGER,
+  RESTAURANT_SUPPLY_CHAIN_INVENTORY_REORDER_MANAGER,
+  RESTAURANT_FINANCIAL_FORECAST_EVALUATOR,
 ];
 
-const CONFIG_SCHEMA_PROPS: Record<string, Record<string, unknown>> = {
-  'reservation-system': { partySizeConfig: { type: 'object' }, timeSlotConfig: { type: 'object' }, specialRequestsConfig: { type: 'object' }, providerSpecificFields: { type: 'object' } },
-  'table-management': { tableLayoutConfig: { type: 'object' }, capacityConfig: { type: 'object' }, mergeSplitConfig: { type: 'object' } },
-  'guest-profile': { preferencesConfig: { type: 'object' }, allergiesConfig: { type: 'object' }, historyConfig: { type: 'object' }, loyaltyConfig: { type: 'object' } },
-  'service-flow': { courseTimingConfig: { type: 'object' }, serverAssignmentsConfig: { type: 'object' }, pacingRulesConfig: { type: 'object' } },
-  'floor-management': { floorPlanConfig: { type: 'object' }, sectionsConfig: { type: 'object' }, waitlistConfig: { type: 'object' } },
-  'staff-scheduler': { shiftsConfig: { type: 'object' }, rolesConfig: { type: 'object' }, availabilityConfig: { type: 'object' }, laborRulesConfig: { type: 'object' } },
-  'demand-forecast': { historicalDataConfig: { type: 'object' }, eventsConfig: { type: 'object' }, weatherConfig: { type: 'object' }, seasonalityConfig: { type: 'object' }, modelSelectionConfig: { type: 'object' } },
-  'labor-analytics': { laborCostConfig: { type: 'object' }, productivityConfig: { type: 'object' }, overtimeConfig: { type: 'object' }, complianceConfig: { type: 'object' } },
-  'server-communication': { messageTypesConfig: { type: 'object' }, channelsConfig: { type: 'object' }, priorityConfig: { type: 'object' }, readReceiptsConfig: { type: 'object' } },
-  'prep-scheduler': { recipesConfig: { type: 'object' }, stationsConfig: { type: 'object' }, timingConfig: { type: 'object' }, batchSizesConfig: { type: 'object' }, wasteTrackingConfig: { type: 'object' } },
-  'kitchen-display': { ticketRoutingConfig: { type: 'object' }, courseFiringConfig: { type: 'object' }, bumpLogicConfig: { type: 'object' }, timingAlertsConfig: { type: 'object' } },
-  'station-coordinator': { stationAssignmentsConfig: { type: 'object' }, capacityConfig: { type: 'object' }, handoffsConfig: { type: 'object' }, expeditingConfig: { type: 'object' } },
-  'recipe-management': { ingredientsConfig: { type: 'object' }, yieldsConfig: { type: 'object' }, costsConfig: { type: 'object' }, allergensConfig: { type: 'object' }, versioningConfig: { type: 'object' } },
-  'recipe-costing': { ingredientPricesConfig: { type: 'object' }, yieldLossConfig: { type: 'object' }, marginTargetsConfig: { type: 'object' }, priceAlertsConfig: { type: 'object' } },
-  'menu-engineering': { popularityConfig: { type: 'object' }, profitabilityConfig: { type: 'object' }, contributionMarginConfig: { type: 'object' }, designRulesConfig: { type: 'object' } },
-  'menu-optimizer': { optimizationGoalsConfig: { type: 'object' }, constraintsConfig: { type: 'object' }, abTestingConfig: { type: 'object' }, rolloutConfig: { type: 'object' } },
-  'pricing-strategy': { dynamicPricingConfig: { type: 'object' }, elasticityConfig: { type: 'object' }, competitorTrackingConfig: { type: 'object' }, rulesEngineConfig: { type: 'object' } },
-  'purchase-order': { vendorsConfig: { type: 'object' }, catalogsConfig: { type: 'object' }, approvalWorkflowsConfig: { type: 'object' }, receivingConfig: { type: 'object' }, threeWayMatchConfig: { type: 'object' } },
-  'supplier-management': { supplierProfilesConfig: { type: 'object' }, contractsConfig: { type: 'object' }, performanceConfig: { type: 'object' }, certificationsConfig: { type: 'object' }, diversityConfig: { type: 'object' } },
-  'order-optimizer': { parLevelsConfig: { type: 'object' }, leadTimesConfig: { type: 'object' }, moqConfig: { type: 'object' }, caseSizesConfig: { type: 'object' }, splitOrdersConfig: { type: 'object' } },
-  'waste-management': { wasteCategoriesConfig: { type: 'object' }, trackingConfig: { type: 'object' }, causesConfig: { type: 'object' }, reductionTargetsConfig: { type: 'object' }, reportingConfig: { type: 'object' } },
-  'price-tracking': { priceHistoryConfig: { type: 'object' }, alertsConfig: { type: 'object' }, benchmarksConfig: { type: 'object' }, substitutionSuggestionsConfig: { type: 'object' } },
-  'financial-analytics': { pnlConfig: { type: 'object' }, cogsConfig: { type: 'object' }, laborPercentConfig: { type: 'object' }, primeCostConfig: { type: 'object' }, benchmarksConfig: { type: 'object' }, varianceConfig: { type: 'object' } },
-  'variance-analysis': { actualVsBudgetConfig: { type: 'object' }, mixAnalysisConfig: { type: 'object' }, priceVolumeVarianceConfig: { type: 'object' }, drillDownConfig: { type: 'object' } },
-  'trend-analysis': { timeSeriesConfig: { type: 'object' }, seasonalityConfig: { type: 'object' }, forecastingConfig: { type: 'object' }, anomalyDetectionConfig: { type: 'object' } },
-  'sales-analytics': { revenueByCategoryConfig: { type: 'object' }, daypartConfig: { type: 'object' }, channelConfig: { type: 'object' }, checkAvgConfig: { type: 'object' }, coversConfig: { type: 'object' }, trendsConfig: { type: 'object' } },
-  'reservation-analytics': { bookingPaceConfig: { type: 'object' }, noShowRateConfig: { type: 'object' }, leadTimeConfig: { type: 'object' }, channelMixConfig: { type: 'object' }, yieldConfig: { type: 'object' } },
-  'table-turnover': { turnTimesConfig: { type: 'object' }, occupancyConfig: { type: 'object' }, waitTimesConfig: { type: 'object' }, pacingConfig: { type: 'object' }, optimizationConfig: { type: 'object' } },
-  'quality-control': { checklistsConfig: { type: 'object' }, standardsConfig: { type: 'object' }, scoresConfig: { type: 'object' }, correctiveActionsConfig: { type: 'object' }, trendsConfig: { type: 'object' } },
-  'guest-feedback': { sentimentConfig: { type: 'object' }, topicsConfig: { type: 'object' }, responseTrackingConfig: { type: 'object' }, npsConfig: { type: 'object' }, resolutionConfig: { type: 'object' } },
-};
-
-const INPUT_SCHEMA_PROPS: Record<string, Record<string, unknown>> = {
-  'reservation-system': { partySize: { type: 'object', description: 'Party size for reservation' }, reservationDate: { type: 'object', description: 'Reservation date and time' }, guestName: { type: 'object', description: 'Guest name' }, contactInfo: { type: 'object', description: 'Guest contact information' } },
-  'table-management': { tableId: { type: 'object', description: 'Table identifier' }, action: { type: 'object', description: 'Action to perform on table' }, partySize: { type: 'object', description: 'Party size for table' }, timeSlot: { type: 'object', description: 'Time slot for reservation' } },
-  'guest-profile': { guestId: { type: 'object', description: 'Guest identifier' }, name: { type: 'object', description: 'Guest name' }, preferences: { type: 'object', description: 'Guest preferences' }, allergies: { type: 'object', description: 'Guest allergies' }, contactInfo: { type: 'object', description: 'Guest contact information' } },
-  'service-flow': { reservationId: { type: 'object', description: 'Reservation identifier' }, tableId: { type: 'object', description: 'Table identifier' }, course: { type: 'object', description: 'Current course being served' }, status: { type: 'object', description: 'Service status' } },
-  'floor-management': { floorId: { type: 'object', description: 'Floor identifier' }, sectionId: { type: 'object', description: 'Section identifier' }, tableId: { type: 'object', description: 'Table identifier' }, action: { type: 'object', description: 'Action to perform' } },
-  'staff-scheduler': { staffId: { type: 'object', description: 'Staff member identifier' }, shiftId: { type: 'object', description: 'Shift identifier' }, date: { type: 'object', description: 'Shift date' }, role: { type: 'object', description: 'Staff role' } },
-  'demand-forecast': { date: { type: 'object', description: 'Forecast date' }, timeRange: { type: 'object', description: 'Time range for forecast' }, metric: { type: 'object', description: 'Metric to forecast' }, granularity: { type: 'object', description: 'Forecast granularity' } },
-  'labor-analytics': { dateRange: { type: 'object', description: 'Date range for analytics' }, metric: { type: 'object', description: 'Labor metric' }, department: { type: 'object', description: 'Department' }, comparison: { type: 'object', description: 'Comparison period' } },
-  'server-communication': { serverId: { type: 'object', description: 'Server identifier' }, message: { type: 'object', description: 'Message content' }, channelId: { type: 'object', description: 'Communication channel' }, priority: { type: 'object', description: 'Message priority' } },
-  'prep-scheduler': { recipeId: { type: 'object', description: 'Recipe identifier' }, station: { type: 'object', description: 'Prep station' }, date: { type: 'object', description: 'Prep date' }, quantity: { type: 'object', description: 'Quantity to prepare' } },
-  'kitchen-display': { ticketId: { type: 'object', description: 'Kitchen ticket identifier' }, station: { type: 'object', description: 'Kitchen station' }, action: { type: 'object', description: 'Action to perform' }, course: { type: 'object', description: 'Course for ticket' } },
-  'station-coordinator': { stationId: { type: 'object', description: 'Station identifier' }, ticketId: { type: 'object', description: 'Ticket identifier' }, action: { type: 'object', description: 'Action to perform' }, status: { type: 'object', description: 'Station status' } },
-  'recipe-management': { recipeId: { type: 'object', description: 'Recipe identifier' }, name: { type: 'object', description: 'Recipe name' }, ingredients: { type: 'object', description: 'Recipe ingredients' }, instructions: { type: 'object', description: 'Cooking instructions' } },
-  'recipe-costing': { recipeId: { type: 'object', description: 'Recipe identifier' }, ingredientPrices: { type: 'object', description: 'Ingredient prices' }, yields: { type: 'object', description: 'Recipe yields' }, targetMargin: { type: 'object', description: 'Target profit margin' } },
-  'menu-engineering': { menuId: { type: 'object', description: 'Menu identifier' }, itemIds: { type: 'object', description: 'Menu item identifiers' }, analysisType: { type: 'object', description: 'Type of analysis' }, period: { type: 'object', description: 'Analysis period' } },
-  'menu-optimizer': { menuId: { type: 'object', description: 'Menu identifier' }, goals: { type: 'object', description: 'Optimization goals' }, constraints: { type: 'object', description: 'Optimization constraints' }, items: { type: 'object', description: 'Menu items to optimize' } },
-  'pricing-strategy': { menuId: { type: 'object', description: 'Menu identifier' }, priceRules: { type: 'object', description: 'Pricing rules' }, elasticityData: { type: 'object', description: 'Price elasticity data' }, competitorData: { type: 'object', description: 'Competitor pricing data' } },
-  'purchase-order': { vendorId: { type: 'object', description: 'Vendor identifier' }, items: { type: 'object', description: 'Order items' }, totalAmount: { type: 'object', description: 'Total order amount' }, deliveryDate: { type: 'object', description: 'Delivery date' } },
-  'supplier-management': { supplierId: { type: 'object', description: 'Supplier identifier' }, action: { type: 'object', description: 'Action to perform' }, contractTerms: { type: 'object', description: 'Contract terms' }, performanceData: { type: 'object', description: 'Supplier performance data' } },
-  'order-optimizer': { ingredients: { type: 'object', description: 'Ingredients to order' }, parLevels: { type: 'object', description: 'Par levels' }, leadTimes: { type: 'object', description: 'Lead times' }, budget: { type: 'object', description: 'Order budget' } },
-  'waste-management': { itemId: { type: 'object', description: 'Item identifier' }, category: { type: 'object', description: 'Waste category' }, quantity: { type: 'object', description: 'Waste quantity' }, cause: { type: 'object', description: 'Waste cause' } },
-  'price-tracking': { ingredientIds: { type: 'object', description: 'Ingredient identifiers' }, priceSources: { type: 'object', description: 'Price sources' }, alertThresholds: { type: 'object', description: 'Alert thresholds' } },
-  'financial-analytics': { dateRange: { type: 'object', description: 'Date range for analytics' }, metric: { type: 'object', description: 'Financial metric' }, department: { type: 'object', description: 'Department' }, comparison: { type: 'object', description: 'Comparison period' } },
-  'variance-analysis': { dateRange: { type: 'object', description: 'Date range for analysis' }, accountIds: { type: 'object', description: 'Account identifiers' }, comparisonPeriod: { type: 'object', description: 'Comparison period' } },
-  'trend-analysis': { dateRange: { type: 'object', description: 'Date range for trends' }, metric: { type: 'object', description: 'Trend metric' }, granularity: { type: 'object', description: 'Trend granularity' }, forecastPeriod: { type: 'object', description: 'Forecast period' } },
-  'sales-analytics': { dateRange: { type: 'object', description: 'Date range for sales' }, category: { type: 'object', description: 'Sales category' }, channel: { type: 'object', description: 'Sales channel' }, granularity: { type: 'object', description: 'Sales granularity' } },
-  'reservation-analytics': { dateRange: { type: 'object', description: 'Date range for analytics' }, channel: { type: 'object', description: 'Booking channel' }, metric: { type: 'object', description: 'Analytics metric' }, comparison: { type: 'object', description: 'Comparison period' } },
-  'table-turnover': { dateRange: { type: 'object', description: 'Date range for turnover' }, tableId: { type: 'object', description: 'Table identifier' }, metric: { type: 'object', description: 'Turnover metric' }, comparison: { type: 'object', description: 'Comparison period' } },
-  'quality-control': { dateRange: { type: 'object', description: 'Date range for quality checks' }, checklistId: { type: 'object', description: 'Checklist identifier' }, station: { type: 'object', description: 'Kitchen station' }, metric: { type: 'object', description: 'Quality metric' } },
-  'guest-feedback': { dateRange: { type: 'object', description: 'Date range for feedback' }, source: { type: 'object', description: 'Feedback source' }, sentiment: { type: 'object', description: 'Sentiment filter' }, topic: { type: 'object', description: 'Feedback topic' } },
-};
-
-function buildSkill(def: SkillDef): Tool {
-  const actionKey = def.action;
-  const configProps = CONFIG_SCHEMA_PROPS[actionKey] ?? {};
-  const inputProps = INPUT_SCHEMA_PROPS[actionKey] ?? {};
-
-  const authConfig =
-    def.authType === 'bearer'
-      ? { type: 'bearer' as const, credentialEnvKeyMap: { token: def.tokenEnv } }
-      : { type: 'api_key' as const, header: 'X-API-Key', credentialEnvKeyMap: { apiKey: def.apiKeyEnv } };
-
-  return createExternalActionSkill({
-    id: def.id,
-    name: def.name,
-    description: `External action skill for ${def.name} (${def.system}).`,
-    system: def.system,
-    action: def.action,
-    endpoint: { envVar: def.envVar, method: 'POST' },
-    auth: authConfig,
-    inputSchema: { type: 'object', properties: Object.fromEntries(Object.entries(inputProps).map(([k, v]) => [k, v as SchemaProperty])) },
-    configSchema: { type: 'object', properties: Object.fromEntries(Object.entries(configProps).map(([k, v]) => [k, v as SchemaProperty])) },
-    outputSchema: EXTERNAL_OUTPUT_SCHEMA,
-    timeoutMs: 30000,
-  });
-}
-
-const RESTAURANT_EXTERNAL_SKILLS: Tool[] = skillDefs.map(buildSkill);
-
-export const restaurantSkills = [...RESTAURANT_SKILLS, ...RESTAURANT_EXTERNAL_SKILLS];
+export const restaurantCanonicalSkills: Tool[] = [
+  RESTAURANT_MENU_ENGINEERING_COST_STRATEGIST,
+  RESTAURANT_SHIFT_PREP_LIST_COPILOT,
+  RESTAURANT_RESERVATIONS_GUEST_PROFILE_MANAGER,
+  RESTAURANT_SUPPLY_CHAIN_INVENTORY_REORDER_MANAGER,
+  RESTAURANT_FINANCIAL_FORECAST_EVALUATOR,
+];

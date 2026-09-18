@@ -2,7 +2,7 @@ import express from 'express';
 import workerPoolRoutes from './routes/worker-pool';
 import assistantRoutes from './routes/assistants';
 import { assistantLoader } from './utils/sharedInstance';
-import { legacyAssistantCatalog } from './data/assistantCatalog';
+import { canonicalAssistantCatalog } from './data/canonicalAssistantCatalog';
 import { logger } from './utils/logger';
 import { registerAssistantTools } from './shared/mcp';
 
@@ -13,13 +13,21 @@ async function initializeAssistants(): Promise<void> {
   const existing = assistantLoader.list();
 
   if (existing.length === 0) {
-    logger.info({ count: legacyAssistantCatalog.length }, 'Seeding assistant catalog from legacy definitions');
-    for (const assistant of legacyAssistantCatalog) {
-      const saved = await assistantLoader.register(assistant);
-      if (saved.tools && saved.tools.length > 0) {
-        registerAssistantTools(saved.tools);
+    // Default: seed only the canonical, currently implemented assistants.
+    if (canonicalAssistantCatalog.length > 0) {
+      logger.info({ count: canonicalAssistantCatalog.length }, 'Seeding assistant catalog from canonical definitions');
+      for (const assistant of canonicalAssistantCatalog) {
+        const saved = await assistantLoader.register(assistant);
+        if (saved.tools && saved.tools.length > 0) {
+          registerAssistantTools(saved.tools);
+        }
       }
     }
+
+    if (canonicalAssistantCatalog.length === 0) {
+      logger.warn('No assistant catalogs available to seed; initialization is robust to empty catalogs');
+    }
+
     logger.info({ count: assistantLoader.list().length }, 'Assistant catalog seeded');
   } else {
     logger.info({ count: existing.length }, 'Assistants already persisted, registering tools');

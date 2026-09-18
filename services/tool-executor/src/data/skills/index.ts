@@ -1,9 +1,11 @@
+export { emailIntegrationSkill } from './shared/email';
 export { careerSkills } from './career';
 export { productSkills } from './product';
 export { contentSkills } from './content';
 export { legalSkills } from './legal';
 export { salesSkills } from './sales';
 export { educationSkills } from './education';
+export { educationCanonicalSkills } from './education';
 export { hrSkills } from './hr';
 export { executiveSkills } from './executive';
 export { ctoSkills } from './cto';
@@ -18,3 +20,13 @@ export { financeSkills } from './finance';
 export { healthcareSkills } from './healthcare';
 export { restaurantSkills } from './restaurant';
 export { investmentSkills } from './investment';
+export { scriptwritingCanonicalSkills } from './scriptwriting';
+export { songwritingCanonicalSkills } from './songwriting';
+export { songwritingSkills } from './songwriting';
+export { scriptwritingSkills } from './scriptwriting';
+
+export { ctoCanonicalSkills } from './cto';
+export { healthcareCanonicalSkills } from './healthcare';
+export { restaurantCanonicalSkills } from './restaurant';
+export { careerCanonicalSkills } from './career';
+export { hrCanonicalSkills } from './hr';

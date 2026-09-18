@@ -1,176 +1,344 @@
 import { Tool } from '../../../types';
-import { createExternalActionSkill } from '../code-skill-factory';
+import { createExternalActionSkill, createCodeSkill, SchemaProps } from '../code-skill-factory';
 
-const HR_SKILLS: Tool[] = [
-  {
-    id: 'screen-resume',
-    name: 'Screen Resume',
-    description: 'Screen a resume against job requirements and produce a match score with gaps.',
-    type: 'code',
-    manifest: { language: 'javascript', entrypoint: 'index.js', sourceCode: `
-const input = __tool_input || {};
+// ============================================================================
+// SKILL 1: Candidate Screening & Scheduling Manager (Represent)
+// ============================================================================
+// Operations: screen-resume, assessment, schedule-interview
+// confirmBeforeSend: true, dryRun default: true
+// configSchema and endpointEnvVar for Represent skill governance
+// ============================================================================
+
+const CANDIDATE_SCREENING = createCodeSkill({
+  id: 'candidate-screening',
+  name: 'Candidate Screening & Scheduling Manager',
+  description: 'Filters inbound applicant profiles against role criteria, dispatches initial screening surveys, and coordinates interview availability. Dry-run mode and explicit confirmation required for scheduling operations.',
+  manifest: {
+    language: 'javascript',
+    entrypoint: 'index.js',
+    sourceCode: `const input = __tool_input || {};
 const fs = require('fs');
 const path = require('path');
+
+const operation = input.operation || 'screen-resume';
 const resumeText = input.resumeText || '';
 const jobRequirements = input.jobRequirements || '';
-const baseDir = process.env.HR_HOME || path.join('/tmp/hr');
-const storePath = path.join(baseDir, 'screening.json');
-fs.mkdirSync(baseDir, { recursive: true });
-const store = fs.existsSync(storePath) ? JSON.parse(fs.readFileSync(storePath, 'utf8')) : [];
-const resumeWords = resumeText.toLowerCase().split(/\W+/).filter(Boolean);
-const reqWords = jobRequirements.toLowerCase().split(/\W+/).filter(Boolean);
-const matched = reqWords.filter((w) => resumeWords.includes(w));
-const score = reqWords.length ? Math.round((matched.length / reqWords.length) * 100) : 0;
-const screening = { id: 'screen_' + Date.now(), score, matched, gaps: reqWords.filter((w) => !resumeWords.includes(w)), createdAt: new Date().toISOString(), source: 'local' };
-store.push(screening);
-fs.writeFileSync(storePath, JSON.stringify(store, null, 2));
-console.log(JSON.stringify({ success: true, data: { screening, storePath } }));
-` },
-    inputSchema: { type: 'object', properties: { resumeText: { type: 'string', description: 'Resume text to screen' }, jobRequirements: { type: 'string', description: 'Job requirements to match against' } } },
-    outputSchema: { type: 'object', properties: { success: { type: 'boolean' }, screening: { type: 'object' }, storePath: { type: 'string' } }, required: ['success', 'screening', 'storePath'] },
-    createdAt: new Date(), updatedAt: new Date(),
+const candidateName = input.candidateName || '';
+const assessmentData = input.assessmentData || {};
+const dryRun = input.dryRun !== false;
+const confirmation = input.confirmation === true;
+const endpoint = process.env.HR_SCREENING_ENDPOINT || '';
+
+const hrHome = process.env.HR_HOME || path.join('/tmp/hr');
+const storePath = path.join(hrHome, 'screening.json');
+fs.mkdirSync(hrHome, { recursive: true });
+let store = fs.existsSync(storePath) ? JSON.parse(fs.readFileSync(storePath, 'utf8')) : [];
+
+function computeScore(resumeText, jobRequirements) {
+  const resumeWords = resumeText.toLowerCase().split(/[^a-zA-Z0-9_]+/).filter(Boolean);
+  const reqWords = jobRequirements.toLowerCase().split(/[^a-zA-Z0-9_]+/).filter(Boolean);
+  if (!reqWords.length) return 0;
+  const matched = reqWords.filter((w) => resumeWords.includes(w));
+  const raw = (matched.length / reqWords.length) * 100;
+  const score = Math.max(1, Math.round(raw)) || 0;
+  return { score: Math.min(100, score), matched, gaps: reqWords.filter((w) => !resumeWords.includes(w)) };
+}
+
+function assessCandidate(resumeText, assessmentData) {
+  const words = resumeText.toLowerCase().split(/[^a-zA-Z0-9_]+/).filter(Boolean);
+  const data = assessmentData || {};
+  const technicalSkills = data.technicalSkills || [];
+  const softSkills = data.softSkills || [];
+  const experience = data.experience || '';
+  const yearsMatch = resumeText.match(/([0-9]+)[+]? *(?:years?|yrs?)/i);
+  const yearsExp = yearsMatch ? parseInt(yearsMatch[1], 10) : 0;
+  const techFound = technicalSkills.filter((s) => words.includes(s.toLowerCase()));
+  const softFound = softSkills.filter((s) => words.includes(s.toLowerCase()));
+  return {
+    yearsExperience: yearsExp,
+    technicalSkillMatch: { total: technicalSkills.length, found: techFound, missing: technicalSkills.filter((s) => !words.includes(s.toLowerCase())) },
+    softSkillMatch: { total: softSkills.length, found: softFound, missing: softSkills.filter((s) => !words.includes(s.toLowerCase())) },
+    experienceMentioned: experience ? resumeText.toLowerCase().includes(experience.toLowerCase()) : null,
+  };
+}
+
+let result;
+switch (operation) {
+  case 'screen-resume': {
+    const { score, matched, gaps } = computeScore(resumeText, jobRequirements);
+    const screening = { id: 'screen_' + Date.now(), candidateName, score, matched, gaps, createdAt: new Date().toISOString(), source: 'local' };
+    store.push(screening);
+    fs.writeFileSync(storePath, JSON.stringify(store, null, 2));
+    result = { success: true, operation: 'screen-resume', mode: dryRun ? 'dry-run' : 'live', data: { screening, storePath } };
+    break;
+  }
+  case 'assessment': {
+    const assessment = assessCandidate(resumeText, assessmentData);
+    const record = { id: 'assess_' + Date.now(), candidateName, assessment, createdAt: new Date().toISOString(), source: 'local' };
+    store.push(record);
+    fs.writeFileSync(storePath, JSON.stringify(store, null, 2));
+    result = { success: true, operation: 'assessment', mode: dryRun ? 'dry-run' : 'live', data: { record, storePath } };
+    break;
+  }
+  case 'schedule-interview': {
+    if (!endpoint) {
+      result = { success: false, operation: 'schedule-interview', mode: 'not-connected', error: 'Not connected: HR_SCREENING_ENDPOINT is not configured', data: null };
+      break;
+    }
+    if (!dryRun && !confirmation) {
+      result = { success: false, operation: 'schedule-interview', mode: 'confirmation-required', error: 'Explicit confirmation required for scheduling', data: null };
+      break;
+    }
+    const schedule = { id: 'sched_' + Date.now(), candidateName, operation: 'schedule-interview', dryRun, confirmed: confirmation, scheduledAt: new Date().toISOString() };
+    const schedPath = path.join(hrHome, 'scheduling.json');
+    let schedStore = [];
+    if (fs.existsSync(schedPath)) {
+      try { schedStore = JSON.parse(fs.readFileSync(schedPath, 'utf8')); } catch (e) {}
+    }
+    schedStore.push(schedule);
+    fs.writeFileSync(schedPath, JSON.stringify(schedStore, null, 2));
+    result = { success: true, operation: 'schedule-interview', mode: dryRun ? 'dry-run' : 'live', data: { schedule, storePath: schedPath } };
+    break;
+  }
+  default:
+    result = { success: false, error: 'Unknown operation: ' + operation };
+}
+console.log(JSON.stringify(result));
+`,
+    configSchema: {
+      type: 'object',
+      properties: {
+        confirmBeforeSend: SchemaProps.boolean({ description: 'Require explicit confirmation before sending mutating scheduling requests', default: true }),
+        dryRun: SchemaProps.boolean({ description: 'Validate without executing; defaults to true', default: true }),
+        defaultEndpoint: SchemaProps.url({ description: 'Default screening and scheduling endpoint URL' }),
+        maxRetryAttempts: SchemaProps.number({ description: 'Retry attempts on scheduling failure', default: 3 }),
+        rateLimitPerMinute: SchemaProps.number({ description: 'Rate limit per minute for scheduling API', default: 60 }),
+      },
+    },
+    endpointEnvVar: 'HR_SCREENING_ENDPOINT',
   },
-  {
-    id: 'schedule-interview',
-    name: 'Schedule Interview',
-    description: 'Schedule an interview for a candidate with a panel. Saves locally; can sync to calendar when configured.',
-    type: 'code',
-    manifest: { language: 'javascript', entrypoint: 'index.js', sourceCode: `
-const input = __tool_input || {};
+  inputSchema: {
+    type: 'object',
+    properties: {
+      operation: SchemaProps.select(['screen-resume', 'assessment', 'schedule-interview'], { description: 'Screening or scheduling operation to perform' }),
+      resumeText: SchemaProps.text({ description: 'Resume text to screen against job requirements' }),
+      jobRequirements: SchemaProps.text({ description: 'Job requirements to match resume against' }),
+      candidateName: SchemaProps.text({ description: 'Candidate full name' }),
+      assessmentData: SchemaProps.object({
+        technicalSkills: SchemaProps.stringArray({ description: 'Technical skills to assess against resume' }),
+        softSkills: SchemaProps.stringArray({ description: 'Soft skills to assess against resume' }),
+        experience: SchemaProps.text({ description: 'Experience level to check for in resume' }),
+      }, { description: 'Assessment criteria and data for candidate evaluation' }),
+      dryRun: SchemaProps.boolean({ description: 'Validate without executing scheduling; defaults to true', default: true }),
+      confirmation: SchemaProps.boolean({ description: 'Explicit approval for live scheduling dispatch', default: false }),
+      endpointUrl: SchemaProps.url({ description: 'Override scheduling endpoint URL' }),
+    },
+    required: ['operation'],
+  },
+  outputSchema: {
+    type: 'object',
+    properties: {
+      success: { type: 'boolean' },
+      operation: { type: 'string' },
+      mode: { type: 'string', enum: ['dry-run', 'live', 'not-connected', 'confirmation-required', 'error'] },
+      data: { type: 'object' },
+      error: { type: 'string' },
+    },
+    required: ['success', 'operation', 'mode'],
+  },
+});
+
+// ============================================================================
+// SKILL 2: Job Description & Interview Kit Co-Pilot (Aid)
+// ============================================================================
+// Operations: ats, job-board, linkedin, schedule-interview, calendar, email
+// ============================================================================
+
+const RECRUITING_OPS = createExternalActionSkill({
+  id: 'recruiting-ops',
+  name: 'Job Description & Interview Kit Co-Pilot',
+  description: 'Generates structured job descriptions, interview scorecards, role-specific behavioral questions, and rubric guides. Coordinates with ATS, job boards, LinkedIn, scheduling, calendar, and email systems.',
+  system: 'recruiting-ops',
+  action: 'execute',
+  endpoint: { envVar: 'HR_RECRUITING_ENDPOINT', method: 'POST' },
+  auth: { type: 'api_key', header: 'X-API-Key', credentialEnvKeyMap: { apiKey: 'HR_RECRUITING_API_KEY' } },
+  configSchema: {
+    type: 'object',
+    properties: {
+      confirmBeforeSend: SchemaProps.boolean({ description: 'Require explicit confirmation before sending mutating requests', default: true }),
+      dryRun: SchemaProps.boolean({ description: 'Validate without executing; defaults to true', default: true }),
+      defaultSource: SchemaProps.text({ description: 'Default sourcing channel for job descriptions' }),
+      apiVersion: SchemaProps.text({ description: 'API version for recruiting operations' }),
+      rateLimitPerMinute: SchemaProps.number({ description: 'Rate limit per minute', default: 60 }),
+      retryAttempts: SchemaProps.number({ description: 'Retry attempts on failure', default: 3 }),
+    },
+  },
+  credentialSource: { apiKey: { envVar: 'HR_RECRUITING_API_KEY', configKey: 'recruiting.apiKey' } },
+  inputSchema: {
+    type: 'object',
+    properties: {
+      operation: SchemaProps.select(['ats', 'job-board', 'linkedin', 'schedule-interview', 'calendar', 'email'], { description: 'Recruiting operation to perform' }),
+      dryRun: SchemaProps.boolean({ description: 'Validate without executing; defaults to true', default: true }),
+      endpointUrl: SchemaProps.url({ description: 'Override endpoint URL' }),
+      data: SchemaProps.object({}, { description: 'Operation payload data for job description or interview kit generation' }),
+      filters: SchemaProps.object({}, { description: 'Filters for query operations' }),
+      pagination: SchemaProps.object({}, { description: 'Pagination settings' }),
+    },
+    required: ['operation'],
+  },
+  outputSchema: {
+    type: 'object',
+    properties: {
+      success: { type: 'boolean' },
+      mode: { type: 'string' },
+      system: { type: 'string' },
+      action: { type: 'string' },
+      operation: { type: 'string' },
+      request: { type: 'object' },
+      response: { type: ['object', 'null'] },
+      error: { type: 'string' },
+    },
+    required: ['success', 'mode', 'system', 'action', 'operation', 'request', 'response', 'error'],
+  },
+  timeoutMs: 30000,
+  confirmBeforeSend: true,
+})
+
+// ============================================================================
+// SKILL 3: Workforce Planning & Compensation Evaluator (Advise)
+// ============================================================================
+// Operations: hiring-analytics, compliance
+// ============================================================================
+
+const HIRING_ANALYTICS_COMPLIANCE = createCodeSkill({
+  id: 'hiring-analytics-compliance',
+  name: 'Workforce Planning & Compensation Evaluator',
+  description: 'Evaluates team headcount needs, attrition trends, and market salary data to recommend hiring roadmaps and compensation structures. Generates hiring metrics, pipeline reports, diversity analytics, and compliance checks.',
+  manifest: {
+    language: 'javascript',
+    entrypoint: 'index.js',
+    sourceCode: `const input = __tool_input || {};
 const fs = require('fs');
 const path = require('path');
-const candidateName = input.candidateName || '';
-const panel = input.panel || [];
-const scheduledAt = input.scheduledAt || '';
-const interviewType = input.interviewType || 'phone';
-const baseDir = process.env.HR_HOME || path.join('/tmp/hr');
-const storePath = path.join(baseDir, 'interviews.json');
-fs.mkdirSync(baseDir, { recursive: true });
-const store = fs.existsSync(storePath) ? JSON.parse(fs.readFileSync(storePath, 'utf8')) : [];
-const interview = { id: 'interview_' + Date.now(), candidateName, panel, scheduledAt, interviewType, status: 'scheduled', createdAt: new Date().toISOString(), source: 'local' };
-store.push(interview);
-fs.writeFileSync(storePath, JSON.stringify(store, null, 2));
-console.log(JSON.stringify({ success: true, data: { interview, storePath, hint: 'Set CALENDAR_BASE_URL + CALENDAR_API_KEY to sync to calendar' } }));
-` },
-    inputSchema: { type: 'object', properties: { candidateName: { type: 'string', description: 'Candidate name' }, panel: { type: 'array', items: { type: 'string' }, description: 'Interview panel members' }, scheduledAt: { type: 'string', description: 'Scheduled date and time' }, interviewType: { type: 'string', description: 'Interview type (e.g., phone, in-person)' } } },
-    outputSchema: { type: 'object', properties: { success: { type: 'boolean' }, interview: { type: 'object' }, storePath: { type: 'string' } }, required: ['success', 'interview', 'storePath'] },
-    createdAt: new Date(), updatedAt: new Date(),
+
+const operation = input.operation || 'hiring-analytics';
+const hrHome = process.env.HR_HOME || path.join('/tmp/hr');
+const analyticsPath = path.join(hrHome, 'analytics.json');
+const compliancePath = path.join(hrHome, 'compliance.json');
+
+fs.mkdirSync(hrHome, { recursive: true });
+
+function loadStore(filePath) {
+  return fs.existsSync(filePath) ? JSON.parse(fs.readFileSync(filePath, 'utf8')) : [];
+}
+
+function computeAnalytics(data) {
+  const records = data || [];
+  const totalCandidates = records.length;
+  const byStage = {};
+  records.forEach((r) => { const stage = r.stage || 'unknown'; byStage[stage] = (byStage[stage] || 0) + 1; });
+  const avgTimeToFill = records.length ? records.reduce((sum, r) => sum + (r.timeToFill || 0), 0) / records.length : 0;
+  const diversity = { underrepresented: records.filter((r) => r.diversityCategory).length, total: totalCandidates };
+  return { totalCandidates, byStage, avgTimeToFill: Math.round(avgTimeToFill * 10) / 10, diversity };
+}
+
+function checkCompliance(data) {
+  const records = data || [];
+  const findings = [];
+  records.forEach((r) => {
+    if (r.posting && !r.posting.eeoStatement) findings.push({ id: r.id, issue: 'Missing EEO statement in job posting' });
+    if (r.data && r.data.sensitiveFields && r.data.sensitiveFields.length > 0 && !r.data.gdprConsent) findings.push({ id: r.id, issue: 'GDPR consent not recorded for candidate data' });
+    if (r.decision && r.decision.reason === 'age') findings.push({ id: r.id, issue: 'Decision based on age — potential ADEA violation' });
+  });
+  return { findings, compliant: findings.length === 0, totalChecked: records.length };
+}
+
+let result;
+switch (operation) {
+  case 'hiring-analytics': {
+    const store = loadStore(analyticsPath);
+    if (!store.length) {
+      result = { success: false, mode: 'not-connected', error: 'Not connected: no hiring analytics records found in ' + analyticsPath, data: { report: null } };
+      break;
+    }
+    const report = computeAnalytics(store);
+    result = { success: true, operation: 'hiring-analytics', mode: 'local', data: { report, generatedAt: new Date().toISOString() } };
+    break;
+  }
+  case 'compliance': {
+    const store = loadStore(compliancePath);
+    if (!store.length) {
+      result = { success: false, mode: 'not-connected', error: 'Not connected: no compliance records found in ' + compliancePath, data: { check: null } };
+      break;
+    }
+    const check = checkCompliance(store);
+    result = { success: true, operation: 'compliance', mode: 'local', data: { check, generatedAt: new Date().toISOString() } };
+    break;
+  }
+  default:
+    result = { success: false, error: 'Unknown operation: ' + operation };
+}
+console.log(JSON.stringify(result));
+`,
   },
+  inputSchema: {
+    type: 'object',
+    properties: {
+      operation: SchemaProps.select(['hiring-analytics', 'compliance'], { description: 'Operation to perform: hiring-analytics for pipeline reports, compliance for regulatory checks' }),
+      dateRange: SchemaProps.object({
+        start: SchemaProps.text({ description: 'Start date for analysis period in ISO 8601 format' }),
+        end: SchemaProps.text({ description: 'End date for analysis period in ISO 8601 format' }),
+      }, { description: 'Date range for the analysis period' }),
+      data: SchemaProps.object({}, { description: 'Data payload for the operation — hiring records or compliance candidates' }),
+      filters: SchemaProps.object({}, { description: 'Filters to apply to the data' }),
+      endpointUrl: SchemaProps.url({ description: 'Optional external analytics endpoint override' }),
+      dryRun: SchemaProps.boolean({ description: 'Validate without executing; defaults to true', default: true }),
+    },
+    required: ['operation'],
+  },
+  outputSchema: {
+    type: 'object',
+    properties: {
+      success: { type: 'boolean' },
+      operation: { type: 'string' },
+      mode: { type: 'string', description: 'Execution mode: local, not-connected, or error' },
+      data: { type: 'object' },
+      error: { type: 'string' },
+    },
+    required: ['success', 'operation', 'mode'],
+  },
+});
+
+CANDIDATE_SCREENING.confirmBeforeSend = true;
+CANDIDATE_SCREENING.triggers = [
+  { kind: 'user', phrase_examples: ['Screen this resume', 'Assess this candidate', 'Schedule this interview', 'Evaluate this applicant'] },
+  { kind: 'schedule', cadence: 'Daily resume intake review' },
+  { kind: 'event', on: 'New application received' },
+  { kind: 'event', on: 'Resume uploaded' },
+  { kind: 'data', condition: 'Resume or applicant profile data available for screening' },
+];
+HIRING_ANALYTICS_COMPLIANCE.triggers = [
+  { kind: 'user', phrase_examples: ['Generate hiring analytics', 'Run compliance check', 'Evaluate workforce plan', 'Assess compensation benchmarks'] },
+  { kind: 'schedule', cadence: 'Weekly hiring pipeline report' },
+  { kind: 'schedule', cadence: 'Monthly compliance audit' },
+  { kind: 'event', on: 'New candidate application received' },
+  { kind: 'event', on: 'Interview feedback submitted' },
+  { kind: 'data', condition: 'Hiring pipeline or compliance data available for analysis' },
+];
+RECRUITING_OPS.triggers = [
+  { kind: 'user', phrase_examples: ['Draft job description', 'Create interview scorecard', 'Post to job board', 'Schedule interview'] },
+  { kind: 'schedule', cadence: 'Weekly job posting and interview pipeline review' },
+  { kind: 'event', on: 'New job req opened' },
+  { kind: 'event', on: 'New candidate application received' },
+  { kind: 'data', condition: 'Job req, candidate, or scheduling data available' },
 ];
 
-const HR_EXTERNAL_SKILLS: Tool[] = [
-  createExternalActionSkill({
-    id: 'hr-ats',
-    name: 'ATS Integration',
-    description: 'Interact with an external Applicant Tracking System for candidate management, job postings, and hiring workflows.',
-    system: 'ats',
-    action: 'manage-candidates',
-    endpoint: { envVar: 'HR_ATS_ENDPOINT', method: 'POST' },
-    auth: { type: 'api_key', header: 'X-API-Key', credentialEnvKeyMap: { apiKey: 'HR_ATS_API_KEY' } },
-    configSchema: { type: 'object', properties: { baseUrl: { type: 'string' }, apiVersion: { type: 'string' }, defaultSource: { type: 'string' }, customFields: { type: 'object' }, workflowTemplates: { type: 'array', items: { type: 'object' } }, integrationEndpoints: { type: 'array', items: { type: 'object' } }, complianceRules: { type: 'array', items: { type: 'object' } } } },
-    credentialSource: { apiKey: { envVar: 'HR_ATS_API_KEY', configKey: 'ats.apiKey' } },
-    inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['create-candidate', 'update-candidate', 'get-candidate', 'search-candidates', 'create-job', 'update-job', 'get-job', 'list-jobs'], description: 'Action to perform' }, candidateId: { type: 'string', description: 'Candidate ID' }, candidateData: { type: 'object', description: 'Candidate data' }, jobId: { type: 'string', description: 'Job ID' }, jobData: { type: 'object', description: 'Job data' }, filters: { type: 'object', description: 'Filters' }, pagination: { type: 'object', description: 'Pagination' } }, required: ['action'] },
-    outputSchema: { type: 'object', properties: { success: { type: 'boolean' }, mode: { type: 'string' }, system: { type: 'string' }, action: { type: 'string' }, request: { type: 'object' }, response: { type: ['object', 'null'] }, error: { type: 'string' } }, required: ['success', 'mode', 'system', 'action', 'request', 'response', 'error'] },
-    timeoutMs: 30000,
-  }),
-  createExternalActionSkill({
-    id: 'hr-email',
-    name: 'HR Email System',
-    description: 'Send and manage HR-related emails including candidate communications, offer letters, and notifications.',
-    system: 'email',
-    action: 'send-email',
-    endpoint: { envVar: 'HR_EMAIL_ENDPOINT', method: 'POST' },
-    auth: { type: 'api_key', header: 'Authorization', credentialEnvKeyMap: { apiKey: 'HR_EMAIL_API_KEY' } },
-    configSchema: { type: 'object', properties: { provider: { type: 'string', enum: ['sendgrid', 'mailgun', 'ses', 'smtp', 'custom'] }, fromAddress: { type: 'string' }, fromName: { type: 'string' }, templates: { type: 'object' }, templateEngine: { type: 'string', enum: ['handlebars', 'mustache', 'liquid', 'nunjucks', 'custom'] }, deliveryTracking: { type: 'object', properties: { enabled: { type: 'boolean' }, webhookUrl: { type: 'string' }, events: { type: 'array', items: { type: 'string' } } } }, bounceHandling: { type: 'object', properties: { strategy: { type: 'string', enum: ['auto', 'manual', 'suppress'] }, retryAttempts: { type: 'number' }, notificationEmail: { type: 'string' } } }, encryptionSettings: { type: 'object', properties: { algorithm: { type: 'string', enum: ['AES-256', 'RSA', 'TLS'] }, keyRotationDays: { type: 'number' }, keyVaultUrl: { type: 'string' } } } } },
-    credentialSource: { apiKey: { envVar: 'HR_EMAIL_API_KEY', configKey: 'email.apiKey' } },
-    inputSchema: { type: 'object', properties: { to: { type: 'array', items: { type: 'string' }, description: 'Recipient email addresses' }, cc: { type: 'array', items: { type: 'string' }, description: 'CC recipients' }, bcc: { type: 'array', items: { type: 'string' }, description: 'BCC recipients' }, subject: { type: 'string', description: 'Email subject' }, htmlBody: { type: 'string', description: 'HTML email body' }, textBody: { type: 'string', description: 'Plain text email body' }, templateId: { type: 'string', description: 'Template ID' }, templateData: { type: 'object', description: 'Template data' }, attachments: { type: 'array', items: { type: 'object' }, description: 'Attachments' }, trackingEnabled: { type: 'boolean', description: 'Whether to enable tracking' } }, required: ['to', 'subject'] },
-    outputSchema: { type: 'object', properties: { success: { type: 'boolean' }, mode: { type: 'string' }, system: { type: 'string' }, action: { type: 'string' }, request: { type: 'object' }, response: { type: ['object', 'null'] }, error: { type: 'string' } }, required: ['success', 'mode', 'system', 'action', 'request', 'response', 'error'] },
-    timeoutMs: 30000,
-  }),
-  createExternalActionSkill({
-    id: 'hr-job-board',
-    name: 'Job Board Integration',
-    description: 'Post and manage job listings across external job boards and career sites.',
-    system: 'job-board',
-    action: 'manage-jobs',
-    endpoint: { envVar: 'HR_JOB_BOARD_ENDPOINT', method: 'POST' },
-    auth: { type: 'api_key', header: 'X-API-Key', credentialEnvKeyMap: { apiKey: 'HR_JOB_BOARD_API_KEY' } },
-    configSchema: { type: 'object', properties: { boards: { type: 'array', items: { type: 'string' } }, defaultBoard: { type: 'string' }, autoExpireDays: { type: 'number' }, featuredPosting: { type: 'boolean' }, boardConfigs: { type: 'array', items: { type: 'object' } }, postingTemplates: { type: 'array', items: { type: 'object' } }, performanceTracking: { type: 'object', properties: { enabled: { type: 'boolean' }, metrics: { type: 'array', items: { type: 'string' } }, reportingPeriodDays: { type: 'number' } } }, spendManagement: { type: 'object', properties: { budgetLimit: { type: 'number' }, costPerClick: { type: 'boolean' }, alertThreshold: { type: 'number' }, billingEmail: { type: 'string' } } } } },
-    credentialSource: { apiKey: { envVar: 'HR_JOB_BOARD_API_KEY', configKey: 'jobBoard.apiKey' } },
-    inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['post-job', 'update-job', 'remove-job', 'get-job', 'list-jobs', 'get-applications'], description: 'Action to perform' }, jobId: { type: 'string', description: 'Job ID' }, jobData: { type: 'object', description: 'Job data' }, boardId: { type: 'string', description: 'Board ID' }, filters: { type: 'object', description: 'Filters' }, pagination: { type: 'object', description: 'Pagination' } }, required: ['action'] },
-    outputSchema: { type: 'object', properties: { success: { type: 'boolean' }, mode: { type: 'string' }, system: { type: 'string' }, action: { type: 'string' }, request: { type: 'object' }, response: { type: ['object', 'null'] }, error: { type: 'string' } }, required: ['success', 'mode', 'system', 'action', 'request', 'response', 'error'] },
-    timeoutMs: 30000,
-  }),
-  createExternalActionSkill({
-    id: 'hr-linkedin',
-    name: 'LinkedIn Recruiter Integration',
-    description: 'Search candidates, send InMails, and manage LinkedIn Recruiter workflows.',
-    system: 'linkedin',
-    action: 'recruiter-operations',
-    endpoint: { envVar: 'HR_LINKEDIN_ENDPOINT', method: 'POST' },
-    auth: { type: 'bearer', credentialEnvKeyMap: { accessToken: 'HR_LINKEDIN_ACCESS_TOKEN' } },
-    configSchema: { type: 'object', properties: { apiVersion: { type: 'string' }, rateLimitPerMinute: { type: 'number' }, defaultSearchFilters: { type: 'object' }, searchFilters: { type: 'array', items: { type: 'object' } }, inmailTemplates: { type: 'array', items: { type: 'object' } }, connectionLimits: { type: 'object', properties: { dailyLimit: { type: 'number' }, weeklyLimit: { type: 'number' }, connectionRequestMessage: { type: 'string' } } }, apiUsageTracking: { type: 'object', properties: { enabled: { type: 'boolean' }, logRequests: { type: 'boolean' }, quotaWindowHours: { type: 'number' } } } } },
-    credentialSource: { accessToken: { envVar: 'HR_LINKEDIN_ACCESS_TOKEN', configKey: 'linkedin.accessToken', vaultSecretId: 'linkedin-access-token' } },
-    inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['search-candidates', 'get-profile', 'send-inmail', 'get-inmail-status', 'post-job', 'get-job-applications'], description: 'Action to perform' }, searchCriteria: { type: 'object', description: 'Search criteria' }, profileId: { type: 'string', description: 'Profile ID' }, inmailData: { type: 'object', description: 'InMail data' }, jobId: { type: 'string', description: 'Job ID' }, jobData: { type: 'object', description: 'Job data' }, pagination: { type: 'object', description: 'Pagination' } }, required: ['action'] },
-    outputSchema: { type: 'object', properties: { success: { type: 'boolean' }, mode: { type: 'string' }, system: { type: 'string' }, action: { type: 'string' }, request: { type: 'object' }, response: { type: ['object', 'null'] }, error: { type: 'string' } }, required: ['success', 'mode', 'system', 'action', 'request', 'response', 'error'] },
-    timeoutMs: 30000,
-  }),
-  createExternalActionSkill({
-    id: 'hr-hiring-analytics',
-    name: 'Hiring Analytics',
-    description: 'Generate hiring metrics, pipeline reports, and diversity analytics from ATS data.',
-    system: 'analytics',
-    action: 'hiring-analytics',
-    endpoint: { envVar: 'HR_ANALYTICS_ENDPOINT', method: 'POST' },
-    auth: { type: 'api_key', header: 'X-API-Key', credentialEnvKeyMap: { apiKey: 'HR_ANALYTICS_API_KEY' } },
-    configSchema: { type: 'object', properties: { dataSource: { type: 'string' }, defaultDateRange: { type: 'string' }, metrics: { type: 'array', items: { type: 'string' } }, dimensions: { type: 'array', items: { type: 'string' } }, dataWarehouse: { type: 'object', properties: { type: { type: 'string', enum: ['snowflake', 'redshift', 'bigquery', 'synapse', 'custom'] }, connectionString: { type: 'string' }, schema: { type: 'string' }, warehouse: { type: 'string' } } }, reportTemplates: { type: 'array', items: { type: 'object' } }, benchmarkData: { type: 'object', properties: { source: { type: 'string' }, period: { type: 'string' }, industry: { type: 'string' }, region: { type: 'string' } } }, alertThresholds: { type: 'object', properties: { pipelineDropOff: { type: 'number' }, timeToFillExceedDays: { type: 'number' }, offerAcceptanceRateBelow: { type: 'number' }, diversityGoalMiss: { type: 'number' } } } } },
-    credentialSource: { apiKey: { envVar: 'HR_ANALYTICS_API_KEY', configKey: 'analytics.apiKey' } },
-    inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['pipeline-report', 'time-to-fill', 'source-effectiveness', 'diversity-report', 'offer-acceptance-rate', 'custom-query'], description: 'Action to perform' }, dateRange: { type: 'object', properties: { start: { type: 'string', description: 'Start date' }, end: { type: 'string', description: 'End date' } }, description: 'Date range' }, filters: { type: 'object', description: 'Filters' }, groupBy: { type: 'array', items: { type: 'string' }, description: 'Group by fields' }, metrics: { type: 'array', items: { type: 'string' }, description: 'Metrics to analyze' } }, required: ['action'] },
-    outputSchema: { type: 'object', properties: { success: { type: 'boolean' }, mode: { type: 'string' }, system: { type: 'string' }, action: { type: 'string' }, request: { type: 'object' }, response: { type: ['object', 'null'] }, error: { type: 'string' } }, required: ['success', 'mode', 'system', 'action', 'request', 'response', 'error'] },
-    timeoutMs: 60000,
-  }),
-  createExternalActionSkill({
-    id: 'hr-assessment',
-    name: 'Candidate Assessment Platform',
-    description: 'Manage candidate assessments, tests, and evaluations through external assessment providers.',
-    system: 'assessment',
-    action: 'manage-assessments',
-    endpoint: { envVar: 'HR_ASSESSMENT_ENDPOINT', method: 'POST' },
-    auth: { type: 'api_key', header: 'Authorization', credentialEnvKeyMap: { apiKey: 'HR_ASSESSMENT_API_KEY' } },
-    configSchema: { type: 'object', properties: { provider: { type: 'string', enum: ['codility', 'hackerrank', 'criteria', 'shl', 'custom'] }, defaultTestLibrary: { type: 'string' }, autoScoring: { type: 'boolean' }, proctoringEnabled: { type: 'boolean' }, testLibrary: { type: 'array', items: { type: 'object' } }, scoringModels: { type: 'array', items: { type: 'object' } }, proctoringConfig: { type: 'object', properties: { enabled: { type: 'boolean' }, mode: { type: 'string', enum: ['ai', 'human', 'hybrid'] }, browserLockdown: { type: 'boolean' }, webcamRequired: { type: 'boolean' }, suspiciousActivityThreshold: { type: 'number' } } }, biasDetection: { type: 'object', properties: { enabled: { type: 'boolean' }, sensitivityLevel: { type: 'string', enum: ['low', 'medium', 'high'] }, flaggingThreshold: { type: 'number' }, reviewRequired: { type: 'boolean' } } } } },
-    credentialSource: { apiKey: { envVar: 'HR_ASSESSMENT_API_KEY', configKey: 'assessment.apiKey' } },
-    inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['create-invitation', 'get-results', 'list-assessments', 'create-test', 'get-test', 'cancel-invitation'], description: 'Action to perform' }, candidateId: { type: 'string', description: 'Candidate ID' }, candidateEmail: { type: 'string', description: 'Candidate email' }, assessmentId: { type: 'string', description: 'Assessment ID' }, testId: { type: 'string', description: 'Test ID' }, testData: { type: 'object', description: 'Test data' }, invitationData: { type: 'object', description: 'Invitation data' }, filters: { type: 'object', description: 'Filters' } }, required: ['action'] },
-    outputSchema: { type: 'object', properties: { success: { type: 'boolean' }, mode: { type: 'string' }, system: { type: 'string' }, action: { type: 'string' }, request: { type: 'object' }, response: { type: ['object', 'null'] }, error: { type: 'string' } }, required: ['success', 'mode', 'system', 'action', 'request', 'response', 'error'] },
-    timeoutMs: 30000,
-  }),
-  createExternalActionSkill({
-    id: 'hr-compliance',
-    name: 'HR Compliance Checker',
-    description: 'Verify hiring practices, job postings, and candidate data against compliance requirements (EEOC, GDPR, OFCCP, etc.).',
-    system: 'compliance',
-    action: 'check-compliance',
-    endpoint: { envVar: 'HR_COMPLIANCE_ENDPOINT', method: 'POST' },
-    auth: { type: 'api_key', header: 'X-API-Key', credentialEnvKeyMap: { apiKey: 'HR_COMPLIANCE_API_KEY' } },
-    configSchema: { type: 'object', properties: { regulations: { type: 'array', items: { type: 'string', enum: ['EEOC', 'GDPR', 'OFCCP', 'ADA', 'FCRA', 'state-specific'] } }, autoFlag: { type: 'boolean' }, severityThreshold: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] }, regulationLibrary: { type: 'array', items: { type: 'object' } }, auditTrail: { type: 'object', properties: { enabled: { type: 'boolean' }, retentionDays: { type: 'number' }, storageLocation: { type: 'string' }, exportFormat: { type: 'string', enum: ['json', 'csv', 'pdf', 'xml'] } } }, remediationTemplates: { type: 'array', items: { type: 'object' } }, jurisdictionRules: { type: 'array', items: { type: 'object' } } } },
-    credentialSource: { apiKey: { envVar: 'HR_COMPLIANCE_API_KEY', configKey: 'compliance.apiKey' } },
-    inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['check-job-posting', 'check-candidate-data', 'check-hiring-decision', 'generate-report', 'get-audit-trail'], description: 'Action to perform' }, jobPostingId: { type: 'string', description: 'Job posting ID' }, jobPostingContent: { type: 'string', description: 'Job posting content' }, candidateId: { type: 'string', description: 'Candidate ID' }, candidateData: { type: 'object', description: 'Candidate data' }, decisionData: { type: 'object', description: 'Decision data' }, dateRange: { type: 'object', properties: { start: { type: 'string', description: 'Start date' }, end: { type: 'string', description: 'End date' } }, description: 'Date range' } }, required: ['action'] },
-    outputSchema: { type: 'object', properties: { success: { type: 'boolean' }, mode: { type: 'string' }, system: { type: 'string' }, action: { type: 'string' }, request: { type: 'object' }, response: { type: ['object', 'null'] }, error: { type: 'string' } }, required: ['success', 'mode', 'system', 'action', 'request', 'response', 'error'] },
-    timeoutMs: 30000,
-  }),
-  createExternalActionSkill({
-    id: 'hr-calendar',
-    name: 'Calendar Integration',
-    description: 'Sync interviews, meetings, and HR events with external calendar systems (Google, Outlook, Calendly).',
-    system: 'calendar',
-    action: 'manage-events',
-    endpoint: { envVar: 'HR_CALENDAR_ENDPOINT', method: 'POST' },
-    auth: { type: 'bearer', credentialEnvKeyMap: { accessToken: 'HR_CALENDAR_ACCESS_TOKEN' } },
-    configSchema: { type: 'object', properties: { provider: { type: 'string', enum: ['google', 'outlook', 'calendly', 'custom'] }, defaultCalendarId: { type: 'string' }, timezone: { type: 'string' }, reminders: { type: 'array', items: { type: 'object' } }, autoSync: { type: 'boolean' }, syncProviders: { type: 'array', items: { type: 'object' } }, conflictResolution: { type: 'object', properties: { strategy: { type: 'string', enum: ['auto-reschedule', 'notify-only', 'block', 'manual'] }, bufferMinutes: { type: 'number' }, priorityRules: { type: 'array', items: { type: 'object' } } } }, reminderTemplates: { type: 'array', items: { type: 'object' } }, timezoneHandling: { type: 'object', properties: { defaultTimezone: { type: 'string' }, convertToUTC: { type: 'boolean' }, participantTimezones: { type: 'boolean' }, displayFormat: { type: 'string', enum: ['local', 'utc', 'both'] } } } } },
-    credentialSource: { accessToken: { envVar: 'HR_CALENDAR_ACCESS_TOKEN', configKey: 'calendar.accessToken', vaultSecretId: 'calendar-access-token' } },
-    inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['create-event', 'update-event', 'delete-event', 'get-event', 'list-events', 'check-availability', 'create-recurring'], description: 'Action to perform' }, eventId: { type: 'string', description: 'Event ID' }, eventData: { type: 'object', properties: { summary: { type: 'string', description: 'Event summary' }, description: { type: 'string', description: 'Event description' }, start: { type: 'string', description: 'Start time' }, end: { type: 'string', description: 'End time' }, attendees: { type: 'array', items: { type: 'string' }, description: 'Attendees' }, location: { type: 'string', description: 'Location' }, recurrence: { type: 'object', description: 'Recurrence rule' }, reminders: { type: 'array', items: { type: 'object' }, description: 'Reminders' } }, description: 'Event data' }, calendarId: { type: 'string', description: 'Calendar ID' }, timeRange: { type: 'object', properties: { start: { type: 'string', description: 'Start time' }, end: { type: 'string', description: 'End time' } }, description: 'Time range' }, filters: { type: 'object', description: 'Filters' } }, required: ['action'] },
-    outputSchema: { type: 'object', properties: { success: { type: 'boolean' }, mode: { type: 'string' }, system: { type: 'string' }, action: { type: 'string' }, request: { type: 'object' }, response: { type: ['object', 'null'] }, error: { type: 'string' } }, required: ['success', 'mode', 'system', 'action', 'request', 'response', 'error'] },
-    timeoutMs: 30000,
-  }),
+const hrSkills = [
+  { ...CANDIDATE_SCREENING, isSkill: false },
+  { ...RECRUITING_OPS, isSkill: false },
+  { ...HIRING_ANALYTICS_COMPLIANCE, isSkill: false },
 ];
 
-export const hrSkills = [...HR_SKILLS, ...HR_EXTERNAL_SKILLS];
+export { hrSkills };
+
+export const hrCanonicalSkills = hrSkills;

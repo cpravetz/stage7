@@ -1,5 +1,6 @@
 import { Tool } from '../../../types';
 import { createExternalActionSkill, createCodeSkill, SchemaProps } from '../code-skill-factory';
+import { lyricProsodyEvaluator, musicalCoCreation, leadSheetDemoDispatcher } from './songwriter-skills';
 
 const CREATIVE_EXTERNAL_OUTPUT_SCHEMA = {
   type: 'object',
@@ -244,5 +245,7 @@ const TREND_PLANNING_ADVISORY = createExternalActionSkill({
   outputSchema: CREATIVE_EXTERNAL_OUTPUT_SCHEMA,
   timeoutMs: 120000,
 });
+
+export { lyricProsodyEvaluator, musicalCoCreation, leadSheetDemoDispatcher };
 
 export const creativeSkills = [CREATIVE_DRAFTING, TREND_PLANNING_ADVISORY];

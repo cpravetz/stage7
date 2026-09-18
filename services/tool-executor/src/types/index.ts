@@ -50,7 +50,8 @@ export type SchemaRecord = Record<string, unknown> & {
 export type SkillTrigger =
   | { kind: 'user'; phrase_examples: string[] }
   | { kind: 'schedule'; cadence: string }
-  | { kind: 'event'; on: string };
+  | { kind: 'event'; on: string }
+  | { kind: 'data'; condition: string };
 
 export interface Tool {
   id: string;
@@ -60,12 +61,14 @@ export interface Tool {
   manifest: Record<string, unknown>;
   inputSchema?: SchemaRecord;
   outputSchema?: SchemaRecord;
+  configSchema?: SchemaRecord;
   createdAt: Date;
   updatedAt: Date;
   isSkill?: boolean;
   triggers?: SkillTrigger[];
   reasoningConfig?: Record<string, unknown>;
   externalConfig?: Record<string, unknown>;
+  confirmBeforeSend?: boolean;
 }
 
 export interface ToolExecution {
@@ -122,5 +125,17 @@ export class CredentialRequiredError extends Error {
     super(request.message);
     this.name = 'CredentialRequiredError';
     this.request = request;
+  }
+}
+
+export class ConfirmationRequiredError extends Error {
+  readonly toolId: string;
+  readonly toolName: string;
+
+  constructor(tool: Tool) {
+    super(`Tool "${tool.name}" requires explicit confirmation before execution`);
+    this.name = 'ConfirmationRequiredError';
+    this.toolId = tool.id;
+    this.toolName = tool.name;
   }
 }

@@ -1,7 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { asyncHandler } from '../utils/asyncHandler';
-import { VaultError } from '../utils/errors';
-import { EnvelopeEncryption } from '../encryption/envelopeEncryption';
+import { asyncHandler } from './src/utils/asyncHandler';
+import { VaultError } from './src/utils/errors';
+import { EnvelopeEncryption } from './src/encryption/envelopeEncryption';
 
 const router: Router = Router();
 const encryption = new EnvelopeEncryption();

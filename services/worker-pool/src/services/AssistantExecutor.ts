@@ -13,6 +13,26 @@ export class AssistantExecutor {
     this.toolExecutorUrl = process.env.TOOL_EXECUTOR_URL || 'http://tool-executor:3500';
   }
 
+  private sanitizeContext(context: Record<string, unknown>): Record<string, unknown> {
+    const sensitiveKeys = new Set([
+      'password', 'passwd', 'secret', 'token', 'apiKey', 'api_key',
+      'credentials', 'auth', 'privateKey', 'private_key', 'accessToken',
+      'access_token', 'refreshToken', 'refresh_token', 'vaultSecret',
+    ]);
+    const sanitizeValue = (value: unknown): unknown => {
+      if (Array.isArray(value)) return value.map(sanitizeValue);
+      if (value && typeof value === 'object') {
+        return this.sanitizeContext(value as Record<string, unknown>);
+      }
+      return value;
+    };
+    const sanitized: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(context)) {
+      sanitized[key] = sensitiveKeys.has(key) ? '[REDACTED]' : sanitizeValue(value);
+    }
+    return sanitized;
+  }
+
   async execute(
     definition: AssistantDefinition,
     prompt: string,
@@ -25,7 +45,7 @@ export class AssistantExecutor {
     );
 
     const contextBlock = context && Object.keys(context).length > 0
-      ? `\n\nRuntime Context:\n${JSON.stringify(context, null, 2)}`
+      ? `\n\nRuntime Context:\n${JSON.stringify(this.sanitizeContext(context), null, 2)}`
       : '';
 
     const knowledgeBlock = definition.knowledge && definition.knowledge.length > 0
@@ -87,7 +107,7 @@ export class AssistantExecutor {
         }
 
         logger.info(
-          { assistantId: definition.id, toolName: toolCall.name, args: toolCall.arguments },
+          { assistantId: definition.id, toolName: toolCall.name, args: this.sanitizeContext(toolCall.arguments) },
           'Assistant requested tool execution',
         );
         const toolResult = await this.executeToolCall(toolCall, definition.id);

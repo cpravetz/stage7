@@ -577,7 +577,7 @@ describe('createExternalActionSkill', () => {
   })
 
   describe('dry-run behavior', () => {
-    it('returns early with dry-run mode when no endpoint resolved', () => {
+    it('returns early with not-connected result when no endpoint resolved', () => {
       const skill = createExternalActionSkill({
         ...baseOptions,
         endpoint: { method: 'POST' },
@@ -585,8 +585,9 @@ describe('createExternalActionSkill', () => {
 
       const source = skill.manifest.sourceCode as string
       expect(source).toContain('if (!resolvedEndpoint) {')
-      expect(source).toContain('result.mode = "dry-run"')
-      expect(source).toContain('result.success = true')
+      expect(source).toContain('result.mode = "not-connected"')
+      expect(source).toContain('result.success = false')
+      expect(source).toContain('result.error = "Not connected: required endpoint is not configured"')
       expect(source).toContain('return result')
     })
 
@@ -601,6 +602,27 @@ describe('createExternalActionSkill', () => {
       expect(dryRunSection).not.toContain('fetch(')
     })
   })
+
+  describe('confirmBeforeSend', () => {
+    it('includes confirmBeforeSend in tool when provided', () => {
+      const skill = createExternalActionSkill({
+        ...baseOptions,
+        endpoint: { url: 'https://api.example.com', method: 'POST' },
+        confirmBeforeSend: true,
+      });
+
+      expect(skill.confirmBeforeSend).toBe(true);
+    });
+
+    it('defaults confirmBeforeSend to undefined when not provided', () => {
+      const skill = createExternalActionSkill({
+        ...baseOptions,
+        endpoint: { url: 'https://api.example.com', method: 'POST' },
+      });
+
+      expect(skill.confirmBeforeSend).toBeUndefined();
+    });
+  });
 
   describe('configSchema and custom manifest properties', () => {
     it('includes configSchema in manifest', () => {

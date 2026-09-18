@@ -1,6 +1,8 @@
 import { logger } from '@stage7-nextgen/shared';
 import { ToolCredentials, NamedCredentialSource } from '../services/CredentialProvider';
 import fs from 'fs';
+import http from 'http';
+import { randomUUID } from 'crypto';
 import { spawn } from 'child_process';
 
 export interface CodeExecutionOptions {
@@ -9,6 +11,10 @@ export interface CodeExecutionOptions {
   timeoutMs?: number;
   stdin?: string;
   input?: Record<string, unknown>;
+  // Optional environment variable name that tools use to persist state (e.g. 'CTO_HOME')
+  persistenceEnvVar?: string;
+  // Optional callback for tool execution bridge
+  executorCallback?: (toolId: string, input: Record<string, unknown>) => Promise<Record<string, unknown>>;
 }
 
 export interface CodeExecutionResult {
@@ -37,11 +43,11 @@ export class CodeExecutor {
       (credentials as CodeExecutorCredentials)?.sources ?? [];
 
     if (options.language === 'javascript' || options.language === 'typescript') {
-      return this.executeJavaScript(options.code, options.input, timeoutMs, startTime, resolvedCreds, sourceMappings);
+      return this.executeJavaScript(options, timeoutMs, startTime, resolvedCreds, sourceMappings);
     }
 
     if (options.language === 'python') {
-      return this.executePython(options.code, options.input, timeoutMs, startTime, resolvedCreds, sourceMappings);
+      return this.executePython(options, timeoutMs, startTime, resolvedCreds, sourceMappings);
     }
 
     return {
@@ -51,13 +57,48 @@ export class CodeExecutor {
     };
   }
 
+  private createCallbackBridge(
+    callback: (toolId: string, input: Record<string, unknown>) => Promise<Record<string, unknown>>
+  ): Promise<{ url: string; close: () => Promise<void> }> {
+    const token = randomUUID();
+    const server = http.createServer((req, res) => {
+      if (req.method !== 'POST' || req.url !== `/${token}`) {
+        res.writeHead(404);
+        res.end();
+        return;
+      }
+      let body = '';
+      req.on('data', (chunk) => (body += chunk));
+      req.on('end', async () => {
+        try {
+          const { toolId, input } = JSON.parse(body);
+          const result = await callback(toolId, input);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        } catch (e) {
+          res.writeHead(500);
+          res.end(JSON.stringify({ error: String(e) }));
+        }
+      });
+    });
+    return new Promise<{ url: string; close: () => Promise<void> }>((resolve) => {
+      server.listen(0, '127.0.0.1', () => {
+        const addr = server.address();
+        const port = typeof addr === 'object' && addr ? addr.port : 0;
+        (resolve as any)({
+          url: `http://127.0.0.1:${port}/${token}`,
+          close: () => new Promise<void>((r) => server.close(() => r())),
+        });
+      });
+    });
+  }
+
   private async executeJavaScript(
-    code: string,
-    input: Record<string, unknown> | undefined,
+    options: CodeExecutionOptions,
     timeoutMs: number,
     startTime: number,
     resolvedCreds: Record<string, string | undefined>,
-    sourceMappings: NamedCredentialSource[]
+    sourceMappings: NamedCredentialSource[],
   ): Promise<CodeExecutionResult> {
     const sandboxDir = fs.mkdtempSync('/tmp/js_sandbox_');
     const scriptPath = `${sandboxDir}/main.js`;
@@ -65,8 +106,18 @@ export class CodeExecutor {
     const sourceMapJson = JSON.stringify(sourceMappings);
 
     return new Promise((resolve) => {
-      try {
-        const wrapped = `const __tool_input = ${JSON.stringify(input || {})};
+      void (async () => {
+        let bridge: { url: string; close: () => Promise<void> } | undefined;
+        if (options.executorCallback) {
+          bridge = await this.createCallbackBridge(options.executorCallback);
+        }
+
+        const bridgeUrl = bridge?.url ?? '';
+        const hasBridge = !!bridge;
+
+        try {
+        const code = options.code;
+        const wrapped = `const __tool_input = ${JSON.stringify(options.input || {})};
 
 const __credential_sources = ${sourceMapJson};
 
@@ -128,7 +179,23 @@ const __resolveAuth = async (auth) => {
   return { headers, type };
 };
 ${code}`;
-        fs.writeFileSync(scriptPath, wrapped);
+
+        if (hasBridge) {
+          const bridgeCode = `const __bridge_url = '${bridgeUrl}';
+async function __execute_tool(toolId, input) {
+  const res = await fetch(__bridge_url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ toolId, input }),
+  });
+  if (!res.ok) throw new Error('Tool execution failed: ' + await res.text());
+  return res.json();
+}
+`;
+          fs.writeFileSync(scriptPath, bridgeCode + wrapped);
+        } else {
+          fs.writeFileSync(scriptPath, wrapped);
+        }
 
         const env: Record<string, string | undefined> = {
           ...process.env,
@@ -136,6 +203,14 @@ ${code}`;
           HOME: sandboxDir,
           PATH: process.env.PATH || '/usr/bin:/bin',
         };
+
+        if (options.persistenceEnvVar) {
+          try {
+            env[options.persistenceEnvVar] = process.env[options.persistenceEnvVar] || `/var/data/stage7/${options.persistenceEnvVar.toLowerCase()}`;
+          } catch (_) {
+            // Ignore failures when the optional persistence variable is unavailable.
+          }
+        }
 
         for (const [key, value] of Object.entries(resolvedCreds)) {
           if (value !== undefined) {
@@ -170,7 +245,12 @@ ${code}`;
         });
 
         const timeoutHandle = setTimeout(() => {
-          try { proc.kill('SIGKILL'); } catch {}
+          try { proc.kill('SIGKILL'); } catch {
+            // The process may already have exited.
+          }
+          if (bridge) {
+            bridge.close();
+          }
           cleanupAndResolve(resolve, sandboxDir, scriptPath, startTime, {
             success: false,
             error: `JavaScript execution timed out after ${timeoutMs}ms`,
@@ -178,8 +258,11 @@ ${code}`;
           });
         }, timeoutMs);
 
-        proc.on('close', (code) => {
+        proc.on('close', async (code: number | null) => {
           clearTimeout(timeoutHandle);
+          if (bridge) {
+            await bridge.close();
+          }
           if (code === 0) {
             cleanupAndResolve(resolve, sandboxDir, scriptPath, startTime, {
               success: true,
@@ -197,8 +280,11 @@ ${code}`;
           }
         });
 
-        proc.on('error', (err) => {
+        proc.on('error', async (err: Error) => {
           clearTimeout(timeoutHandle);
+          if (bridge) {
+            await bridge.close();
+          }
           cleanupAndResolve(resolve, sandboxDir, scriptPath, startTime, {
             success: false,
             error: err.message,
@@ -206,35 +292,48 @@ ${code}`;
           });
         });
       } catch (err) {
+        if (bridge) {
+          await bridge.close();
+        }
         cleanupAndResolve(resolve, sandboxDir, scriptPath, startTime, {
           success: false,
           error: err instanceof Error ? err.message : String(err),
           durationMs: Date.now() - startTime,
         });
       }
+      })();
     });
   }
 
-  private executePython(
-    code: string,
-    input: Record<string, unknown> | undefined,
+  private async executePython(
+    options: CodeExecutionOptions,
     timeoutMs: number,
     startTime: number,
     resolvedCreds: Record<string, string | undefined>,
-    sourceMappings: NamedCredentialSource[]
+    sourceMappings: NamedCredentialSource[],
   ): Promise<CodeExecutionResult> {
     const sandboxDir = fs.mkdtempSync('/tmp/py_sandbox_');
     const scriptPath = `${sandboxDir}/main.py`;
     const pythonBin = process.env.PYTHON_BIN || 'python3';
 
     return new Promise((resolve) => {
-      try {
+      void (async () => {
+        let bridge: { url: string; close: () => Promise<void> } | undefined;
+        if (options.executorCallback) {
+          bridge = await this.createCallbackBridge(options.executorCallback);
+        }
+
+        const bridgeUrl = bridge?.url ?? '';
+        const hasBridge = !!bridge;
+
+        try {
+        const code = options.code;
         const wrapped = `import json
 import os
 import base64
 import urllib.request
 
-__tool_input = ${JSON.stringify(input || {})}
+__tool_input = ${JSON.stringify(options.input || {})}
 
 __credential_sources = ${JSON.stringify(sourceMappings)}
 
@@ -291,7 +390,7 @@ async def __resolve_auth(auth):
             raw = u + ':' + p
             headers['Authorization'] = 'Basic ' + base64.b64encode(raw.encode()).decode()
     elif type_ == 'api_key':
-        hn = auth.get('header') or 'X-API-Key'
+        hn = auth.get('header') || 'X-API-Key'
         v = await resolve_val(auth.get('value') or auth.get('apiKey'))
         if v:
             headers[hn] = v
@@ -303,7 +402,22 @@ async def __resolve_auth(auth):
     return {'headers': headers, 'type': type_}
 
 ${code}`;
-        fs.writeFileSync(scriptPath, wrapped);
+
+        if (hasBridge) {
+          const bridgeCode = `__bridge_url = '${bridgeUrl}'
+import urllib.request
+import json as _json
+
+async def __execute_tool(tool_id, input):
+    data = _json.dumps({'toolId': tool_id, 'input': input}).encode()
+    req = urllib.request.Request(__bridge_url, data=data, headers={'Content-Type': 'application/json'}, method='POST')
+    with urllib.request.urlopen(req) as resp:
+        return _json.loads(resp.read().decode())
+`;
+          fs.writeFileSync(scriptPath, bridgeCode + wrapped);
+        } else {
+          fs.writeFileSync(scriptPath, wrapped);
+        }
 
         const env: Record<string, string | undefined> = {
           ...process.env,
@@ -312,6 +426,14 @@ ${code}`;
           HOME: sandboxDir,
           PATH: process.env.PATH || '/usr/bin:/bin',
         };
+
+        if (options.persistenceEnvVar) {
+          try {
+            env[options.persistenceEnvVar] = process.env[options.persistenceEnvVar] || `/var/data/stage7/${options.persistenceEnvVar.toLowerCase()}`;
+          } catch (_) {
+            // Ignore failures when the optional persistence variable is unavailable.
+          }
+        }
 
         for (const [key, value] of Object.entries(resolvedCreds)) {
           if (value !== undefined) {
@@ -346,7 +468,12 @@ ${code}`;
         });
 
         const timeoutHandle = setTimeout(() => {
-          try { proc.kill('SIGKILL'); } catch {}
+          try { proc.kill('SIGKILL'); } catch {
+            // The process may already have exited.
+          }
+          if (bridge) {
+            bridge.close();
+          }
           cleanupAndResolve(resolve, sandboxDir, scriptPath, startTime, {
             success: false,
             error: `Python execution timed out after ${timeoutMs}ms`,
@@ -354,8 +481,11 @@ ${code}`;
           });
         }, timeoutMs);
 
-        proc.on('close', (code) => {
+        proc.on('close', async (code: number | null) => {
           clearTimeout(timeoutHandle);
+          if (bridge) {
+            await bridge.close();
+          }
           if (code === 0) {
             cleanupAndResolve(resolve, sandboxDir, scriptPath, startTime, {
               success: true,
@@ -373,8 +503,11 @@ ${code}`;
           }
         });
 
-        proc.on('error', (err) => {
+        proc.on('error', async (err: Error) => {
           clearTimeout(timeoutHandle);
+          if (bridge) {
+            await bridge.close();
+          }
           cleanupAndResolve(resolve, sandboxDir, scriptPath, startTime, {
             success: false,
             error: err.message,
@@ -382,12 +515,16 @@ ${code}`;
           });
         });
       } catch (err) {
+        if (bridge) {
+          await bridge.close();
+        }
         cleanupAndResolve(resolve, sandboxDir, scriptPath, startTime, {
           success: false,
           error: err instanceof Error ? err.message : String(err),
           durationMs: Date.now() - startTime,
         });
       }
+      })();
     });
   }
 }
@@ -406,11 +543,16 @@ function cleanupAndResolve(
     if (fs.existsSync(sandboxDir)) {
       const entries = fs.readdirSync(sandboxDir);
       for (const entry of entries) {
-        try { fs.unlinkSync(`${sandboxDir}/${entry}`); } catch {}
+        try {
+          fs.unlinkSync(`${sandboxDir}/${entry}`);
+        } catch {
+          // Individual sandbox entries may already be gone.
+        }
       }
       fs.rmdirSync(sandboxDir);
     }
   } catch {
+    // Cleanup is best-effort; still return the execution result.
   }
   resolve(result);
 }

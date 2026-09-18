@@ -1,4 +1,4 @@
-import { Tool, SchemaRecord, SchemaProperty } from '../../types'
+import { Tool, SchemaRecord, SchemaProperty, SkillTrigger } from '../../types'
 
 export interface CodeSkillManifest {
   language: 'javascript' | 'typescript' | 'python'
@@ -16,6 +16,8 @@ export interface CreateCodeSkillOptions {
   manifest: Omit<CodeSkillManifest, 'language' | 'entrypoint'> & Partial<Pick<CodeSkillManifest, 'language' | 'entrypoint'>>
   inputSchema: SchemaRecord
   outputSchema: SchemaRecord
+  triggers?: SkillTrigger[]
+  confirmBeforeSend?: boolean
 }
 
 export function createCodeSkill(options: CreateCodeSkillOptions): Tool {
@@ -56,6 +58,8 @@ export function createCodeSkill(options: CreateCodeSkillOptions): Tool {
     outputSchema: options.outputSchema,
     createdAt: now,
     updatedAt: now,
+    triggers: options.triggers,
+    confirmBeforeSend: options.confirmBeforeSend,
   }
 }
 
@@ -89,20 +93,17 @@ export interface ExternalActionSkillOptions {
     value?: string
     apiKey?: string
     headers?: Record<string, string>
-    credentialEnvKeyMap?: {
-      token?: CredentialEnvKeyMapValue
-      accessToken?: CredentialEnvKeyMapValue
-      username?: CredentialEnvKeyMapValue
-      password?: CredentialEnvKeyMapValue
-      apiKey?: CredentialEnvKeyMapValue
-    }
+    credentialEnvKeyMap?: Record<string, CredentialEnvKeyMapValue>
   }
   inputSchema?: SchemaRecord
   outputSchema?: SchemaRecord
   configSchema?: SchemaRecord
   credentialSource?: Record<string, CredentialSourceEntry>
   bodyField?: 'body' | 'payload' | 'record' | string
+  triggers?: SkillTrigger[]
   timeoutMs?: number
+  manifest?: Record<string, unknown>
+  confirmBeforeSend?: boolean
 }
 
 type CredentialEnvKeyMap = NonNullable<ExternalActionSkillOptions['auth']>['credentialEnvKeyMap']
@@ -215,7 +216,9 @@ export function createExternalActionSkill(options: ExternalActionSkillOptions): 
     credentialSource,
     bodyField,
     timeoutMs,
+    confirmBeforeSend,
   } = options
+  const triggers = options.triggers
 
   const httpMethod = (endpoint?.method || 'POST').toUpperCase()
   const fixedEndpoint = endpoint?.url || endpoint?.path || ''
@@ -278,12 +281,13 @@ export function createExternalActionSkill(options: ExternalActionSkillOptions): 
       if (redactedHeaders.Authorization) redactedHeaders.Authorization = "[REDACTED]";
       if (redactedHeaders["api-key"]) redactedHeaders["api-key"] = "[REDACTED]";
 
+      // Cross-Cutting Principle #2: When endpoint is unconfigured, return honest not-connected contract
       if (!resolvedEndpoint) {
-        result.mode = "dry-run";
-        result.success = true;
+        result.mode = "not-connected";
+        result.success = false;
         result.request = { input: input, endpoint: resolvedEndpoint, method: ${JSON.stringify(httpMethod)}, headers: redactedHeaders };
         result.response = null;
-        result.error = null;
+        result.error = "Not connected: required endpoint is not configured";
         console.log(JSON.stringify(result));
         return result;
       }
@@ -337,6 +341,7 @@ export function createExternalActionSkill(options: ExternalActionSkillOptions): 
     language: 'javascript',
     entrypoint: 'index.js',
     sourceCode,
+    ...(options.manifest || {}),
     system,
     action,
   }
@@ -406,6 +411,8 @@ export function createExternalActionSkill(options: ExternalActionSkillOptions): 
       },
       required: ['success', 'mode', 'system', 'action', 'request', 'response', 'error'],
     } as SchemaRecord),
+    triggers,
+    confirmBeforeSend,
   })
 }
 

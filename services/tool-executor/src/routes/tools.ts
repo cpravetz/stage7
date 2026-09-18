@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express'
 import { z } from 'zod'
-import { Tool, PluginGenerationRequest, PluginGenerationResult, CredentialRequiredError } from '../types'
+import { Tool, PluginGenerationRequest, PluginGenerationResult, CredentialRequiredError, ConfirmationRequiredError } from '../types'
 import { ToolNotFoundError, ValidationError } from '../utils/errors'
 import asyncHandler from '../utils/asyncHandler'
 import logger from '../utils/logger'
@@ -12,10 +12,16 @@ const toolSchema = z.object({
   id: z.string(),
   name: z.string(),
   description: z.string(),
-  type: z.enum(['mcp', 'openapi', 'code']),
+  type: z.enum(['mcp', 'openapi', 'code', 'reasoning']),
   manifest: z.record(z.any()),
   inputSchema: z.record(z.any()).optional(),
   outputSchema: z.record(z.any()).optional(),
+  configSchema: z.record(z.any()).optional(),
+  triggers: z.array(z.any()).optional(),
+  reasoningConfig: z.record(z.any()).optional(),
+  externalConfig: z.record(z.any()).optional(),
+  confirmBeforeSend: z.boolean().optional(),
+  isSkill: z.boolean().optional(),
 })
 
 const pluginGenerationSchema = z.object({
@@ -81,15 +87,23 @@ router.post(
       throw new ValidationError('Skill execution requires assistant context (X-Assistant-Id header)');
     }
 
-    const execution = await executor.executeOrRequestCredentials(tool, req.body.input || {}, req.body.credentials)
+    try {
+      const execution = await executor.executeOrRequestCredentials(tool, req.body.input || {}, req.body.credentials)
 
-    if (execution instanceof CredentialRequiredError) {
-      res.status(428).json({ error: execution.message, request: execution.request })
-      return;
+      if (execution instanceof CredentialRequiredError) {
+        res.status(428).json({ error: execution.message, request: execution.request })
+        return;
+      }
+
+      const statusCode = execution.status === 'failed' ? 500 : 200
+      res.status(statusCode).json(execution)
+    } catch (err) {
+      if (err instanceof ConfirmationRequiredError) {
+        res.status(403).json({ error: err.message, toolId: err.toolId, toolName: err.toolName });
+        return;
+      }
+      throw err;
     }
-
-    const statusCode = execution.status === 'failed' ? 500 : 200
-    res.status(statusCode).json(execution)
   })
 )
 
@@ -151,15 +165,23 @@ router.post(
       throw new ValidationError('Skill execution requires assistant context (X-Assistant-Id header)');
     }
 
-    const execution = await executor.executeOrRequestCredentials(fullTool, input, credentials);
+    try {
+      const execution = await executor.executeOrRequestCredentials(fullTool, input, credentials);
 
-    if (execution instanceof CredentialRequiredError) {
-      res.status(428).json({ error: execution.message, request: execution.request });
-      return;
+      if (execution instanceof CredentialRequiredError) {
+        res.status(428).json({ error: execution.message, request: execution.request });
+        return;
+      }
+
+      const statusCode = execution.status === 'failed' ? 500 : 200;
+      res.status(statusCode).json(execution);
+    } catch (err) {
+      if (err instanceof ConfirmationRequiredError) {
+        res.status(403).json({ error: err.message, toolId: err.toolId, toolName: err.toolName });
+        return;
+      }
+      throw err;
     }
-
-    const statusCode = execution.status === 'failed' ? 500 : 200;
-    res.status(statusCode).json(execution);
   })
 )
 

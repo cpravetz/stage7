@@ -1,1001 +1,563 @@
-import { Tool } from '../../../types';
-import { createExternalActionSkill } from '../code-skill-factory';
+import { Tool, SchemaRecord } from '../../../types'
+import { createCodeSkill, createExternalActionSkill, createSchemaRecord, SchemaProps } from '../code-skill-factory'
+import { ctoTeamDeliveryHealthEvaluator } from './cto-team-delivery-health-evaluator';
+import { ctoDisasterRecoveryPlanner } from './cto-disaster-recovery-planner';
 
-const CTO_EXTERNAL_OUTPUT_SCHEMA: Record<string, unknown> = {
-  type: 'object',
-  properties: {
-    success: { type: 'boolean', description: 'Whether the external action succeeded' },
-    mode: { type: 'string', description: 'Execution mode: dry-run, live, or error' },
-    system: { type: 'string', description: 'External system name' },
-    action: { type: 'string', description: 'External action name' },
-    request: {
-      type: 'object',
-      properties: {
-        input: { type: 'object' },
-        endpoint: { type: 'string' },
-        method: { type: 'string' },
-        headers: { type: 'object' },
-      },
-    },
-    response: {
-      type: ['object', 'null'],
-      properties: {
-        status: { type: 'number' },
-        data: { type: ['object', 'string', 'null'] },
-      },
-    },
-    error: { type: 'string', description: 'Execution error message, when present' },
-  },
-  required: ['success', 'mode', 'system', 'action', 'request', 'response', 'error'],
-};
+const INFRA_PROVIDERS = [
+  'datadog',
+  'aws',
+  'gcp',
+  'azure',
+  'kubernetes',
+  'service-mesh',
+  'cost-optimization',
+  'iac-monitoring',
+  'database-operations',
+  'team-metrics',
+  'github-read',
+];
 
-/**
- * CTO / Engineering Leadership tool suite.
- *
- * Each tool is a `code`-type tool. The `manifest.sourceCode` is a JavaScript
- * string that the ToolExecutor runs inside a sandboxed node process. The
- * sandbox injects `__tool_input` (the user-supplied input object) as a global
- * before executing the script. Tools should `console.log(JSON.stringify(result))`
- * to return structured output.
- *
- * All tools share a common runtime contract:
- *   input:  { ...fields }
- *   output: { success: boolean, data?: any, error?: string, meta?: object }
- */
+const ENG_PROVIDERS = ['jira', 'pagerduty', 'github-write'];
 
-const CTO_TOOLS: Tool[] = [
-  {
-    id: 'architecture-review',
-    name: 'Architecture Review',
-    description: 'Perform an architecture review of a system or design, surfacing concerns, risks, and recommendations. Saves locally by default.',
-    type: 'code',
-    manifest: {
-      language: 'javascript',
-      entrypoint: 'index.js',
-      sourceCode: `const input = __tool_input || {};
-const fs = require('fs');
-const path = require('path');
+const DISASTER_PROVIDERS = ['disaster-recovery'];
 
-const system = input.system || '';
-const requirements = input.requirements || '';
-const baseDir = process.env.CTO_HOME || path.join('/tmp/cto');
-const storePath = path.join(baseDir, 'architecture-reviews.json');
-const patternsPath = process.env.CTO_ARCH_PATTERNS_PATH || path.join('/mnt/1tbHD/ckt_web/stage7/services/tool-executor/src/data/skills/cto', 'architecture-patterns.json');
+function infraQuerySource(): string {
+  return `(async () => {
+const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
+    const provider = input.provider;
+    const query = input.query;
 
-fs.mkdirSync(baseDir, { recursive: true });
-
-var patternsData = { patterns: [], technologies: [], concerns: [], recommendations: {} };
-if (fs.existsSync(patternsPath)) {
-  try { patternsData = JSON.parse(fs.readFileSync(patternsPath, 'utf8')); } catch(e) {}
-}
-
-var reqLower = requirements.toLowerCase();
-
-// 1. Parse requirements text for architectural patterns (weighted keyword matching)
-var detectedPatterns = (patternsData.patterns || []).map(function(p) {
-  var score = 0;
-  var matchedKeywords = [];
-  for (var i = 0; i < p.keywords.length; i++) {
-    if (reqLower.indexOf(p.keywords[i].toLowerCase()) !== -1) {
-      score += (p.weight || 1.0);
-      matchedKeywords.push(p.keywords[i]);
+    if (!provider || !INFRA_PROVIDERS.includes(provider)) {
+      throw new Error('Invalid or missing provider. Must be one of: ' + INFRA_PROVIDERS.join(', '));
     }
-  }
-  return { id: p.id, name: p.name, description: p.description, score: score, matchedKeywords: matchedKeywords, detected: score >= (p.weight || 1.0) };
-}).filter(function(p) { return p.detected; }).sort(function(a, b) { return b.score - a.score; });
 
-// 2. Detect technologies mentioned in requirements and infer architecture style
-var detectedTech = (patternsData.technologies || []).filter(function(t) {
-  return t.keywords.some(function(kw) { return reqLower.indexOf(kw.toLowerCase()) !== -1; });
-});
-
-var inferredStyle = [];
-var styleSet = {};
-detectedTech.forEach(function(t) { if (!styleSet[t.architectureStyle]) { styleSet[t.architectureStyle] = true; inferredStyle.push(t.architectureStyle); } });
-if (inferredStyle.length === 0 && detectedPatterns.length > 0) {
-  detectedPatterns.forEach(function(p) { if (!styleSet[p.id]) { styleSet[p.id] = true; inferredStyle.push(p.id); } });
+    return { success: false, provider, query, mode: 'not-connected', error: 'Not connected: provider module unavailable for ' + provider };
+  })();`;
 }
-if (inferredStyle.length === 0) { inferredStyle.push('monolith'); }
 
-// 3. Identify specific concerns based on requirements text analysis (not random)
-var identifiedConcerns = (patternsData.concerns || []).map(function(c) {
-  var evidence = [];
-  var score = 0;
-  for (var i = 0; i < c.keywords.length; i++) {
-    if (reqLower.indexOf(c.keywords[i].toLowerCase()) !== -1) {
-      evidence.push(c.keywords[i]);
-      score += (c.weight || 1.0);
+function engActionsSource(): string {
+  return `(async () => {
+const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
+    const provider = input.provider;
+    const action = input.action;
+    const params = input.params || {};
+    const dryRun = input.dryRun !== false;
+
+    if (!provider || !ENG_PROVIDERS.includes(provider)) {
+      throw new Error('Invalid or missing provider. Must be one of: ' + ENG_PROVIDERS.join(', '));
     }
+
+    if (!action) {
+      throw new Error('Missing required action parameter');
+    }
+
+    return { success: false, provider, action, params, dryRun, mode: 'not-connected', error: 'Not connected: external system unavailable for ' + provider };
+  })();`;
+}
+
+function disasterReadinessSource(): string {
+  return `(async () => {
+const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
+    const provider = input.provider;
+    const operation = input.operation;
+    const config = input.config || {};
+
+    if (!provider || !DISASTER_PROVIDERS.includes(provider)) {
+      throw new Error('Invalid or missing provider. Must be one of: ' + DISASTER_PROVIDERS.join(', '));
+    }
+
+    if (!operation) {
+      throw new Error('Missing required operation parameter');
+    }
+
+    return { success: false, provider, operation, config, mode: 'not-connected', error: 'Not connected: disaster recovery module unavailable' };
+  })();`;
+}
+
+function architectureAdvisorySource(): string {
+  return `(async () => {
+const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
+    const system = input.system;
+    const requirements = input.requirements || [];
+    const context = input.context || {};
+
+    if (!system) {
+      throw new Error('Missing required system parameter');
+    }
+
+    const reqList = Array.isArray(requirements) ? requirements : [];
+    const teamSize = context.teamSize || 0;
+    const currentStack = Array.isArray(context.currentStack) ? context.currentStack : [];
+    const constraints = Array.isArray(context.constraints) ? context.constraints : [];
+    const timeline = context.timeline || '';
+    const scale = context.scale || '';
+
+    const recommendations = reqList.map((req, i) => ({
+      category: 'architecture',
+      suggestion: 'Evaluate ' + req + ' for ' + system,
+      rationale: 'Requirement ' + (i + 1) + ' of ' + reqList.length + ' for system: ' + system,
+      priority: i === 0 ? 'high' : 'medium',
+      effort: 'medium',
+    }));
+
+    const risks = constraints.map((c, i) => ({
+      area: 'constraints',
+      description: 'Constraint: ' + c,
+      mitigation: 'Review and address constraint ' + (i + 1),
+    }));
+
+    const decisions = [];
+
+    if (teamSize > 0) {
+      recommendations.push({
+        category: 'team',
+        suggestion: 'Team size of ' + teamSize + ' supports ' + system,
+        rationale: 'Team capacity assessment based on team size parameter',
+        priority: 'medium',
+        effort: 'medium',
+      });
+    }
+
+    return { success: true, system, requirements: reqList, context, result: { recommendations, risks, decisions, teamSize, currentStack, timeline, scale } };
+  })();`;
+}
+
+const CTO_TRIGGERS = [
+  { kind: 'user' as const, phrase_examples: ['evaluate architecture debt', 'optimize cloud spend', 'synthesize this incident', 'dry-run engineering remediation'] },
+  { kind: 'schedule' as const, cadence: 'weekly engineering health review' },
+  { kind: 'event' as const, on: 'deployment, billing anomaly, or incident alert' },
+];
+
+const architectureWrapperSource = `(async () => {
+const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
+  const systems = Array.isArray(input.systems) ? input.systems : [];
+  if (!systems.length) {
+    return { success: false, mode: 'not-connected', error: 'Not connected: no system health inputs were supplied', data: null };
   }
-  var w = c.weight || 1.0;
-  return {
-    id: c.id, name: c.name, detected: score >= w, evidence: evidence, score: score,
-    severity: score >= w * 2 ? 'critical' : score >= w ? 'high' : score >= w * 0.5 ? 'medium' : 'low'
-  };
-}).filter(function(c) { return c.detected; }).sort(function(a, b) { return b.score - a.score; });
-
-// 4. Generate specific recommendations tied to found concerns
-var generatedRecommendations = [];
-var recsMap = patternsData.recommendations || {};
-identifiedConcerns.forEach(function(c) {
-  var concernRecs = recsMap[c.id] || [];
-  concernRecs.forEach(function(r) {
-    var desc = (r.description || '').split('{system}').join(system).split('{concern}').join(c.name.toLowerCase());
-    generatedRecommendations.push({
-      type: r.type || 'general', priority: r.priority || 'medium', category: r.category || 'general',
-      description: desc,
-      justification: 'Based on requirements text analysis - matched keywords: ' + c.evidence.join(', '),
-      concernId: c.id, concernScore: c.score
-    });
-  });
-});
-
-// Build summary
-var summary = '';
-if (detectedPatterns.length > 0) {
-  summary += 'Detected patterns: ' + detectedPatterns.map(function(p) { return p.name + '(' + p.score.toFixed(1) + ')'; }).join(', ') + '. ';
-}
-if (detectedTech.length > 0) {
-  summary += 'Technologies mentioned: ' + detectedTech.map(function(t) { return t.name; }).join(', ') + '. ';
-}
-summary += 'Inferred architecture: ' + inferredStyle.join(', ') + '. ';
-if (identifiedConcerns.length > 0) {
-  summary += 'Key concerns: ' + identifiedConcerns.map(function(c) { return c.name + ' [' + c.severity + ', score=' + c.score.toFixed(1) + ']'; }).join(', ') + '.';
-}
-
-var review = {
-  id: 'archreview_' + Date.now(), system: system, requirements: requirements,
-  detectedPatterns: detectedPatterns, detectedTechnologies: detectedTech, inferredArchitecture: inferredStyle,
-  concerns: identifiedConcerns, recommendations: generatedRecommendations, summary: summary,
-  createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), source: 'local',
-};
-
-var store = [];
-if (fs.existsSync(storePath)) {
-  try { store = JSON.parse(fs.readFileSync(storePath, 'utf8')); } catch(e) {}
-}
-if (!Array.isArray(store)) { store = []; }
-store.push(review);
-fs.writeFileSync(storePath, JSON.stringify(store, null, 2));
-
-console.log(JSON.stringify({ success: true, data: { review, storePath } }));`
-    },
-    inputSchema: {
-      type: 'object',
-      properties: {
-        system: { type: 'string', description: 'External system name' },
-        requirements: { type: 'string', description: 'Architecture requirements or design document' },
-      },
-    },
-    outputSchema: {
-      type: 'object',
-      properties: {
-        success: { type: 'boolean', description: 'Whether the architecture review was completed successfully' },
-        review: { type: 'object', description: 'The review result object with concerns, recommendations, and metadata' },
-        storePath: { type: 'string', description: 'File path where the review was saved' },
-      },
-      required: ['success', 'review', 'storePath'],
-    },
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  },
-  {
-    id: 'tech-stack-recommendation',
-    name: 'Tech Stack Recommendation',
-    description: 'Recommend a technology stack for a project based on scale, requirements, and constraints. Saves locally by default.',
-    type: 'code',
-    manifest: {
-      language: 'javascript',
-      entrypoint: 'index.js',
-      sourceCode: `const input = __tool_input || {};
-const fs = require('fs');
-const path = require('path');
-
-const project = input.project || '';
-const baseDir = process.env.CTO_HOME || path.join('/tmp/cto');
-const storePath = path.join(baseDir, 'tech-stack-recommendations.json');
-const stacksPath = process.env.CTO_TECH_STACKS_PATH || path.join('/mnt/1tbHD/ckt_web/stage7/services/tool-executor/src/data/skills/cto', 'tech-stacks.json');
-
-fs.mkdirSync(baseDir, { recursive: true });
-
-var stacksData = { factors: {}, candidates: [] };
-if (fs.existsSync(stacksPath)) {
-  try { stacksData = JSON.parse(fs.readFileSync(stacksPath, 'utf8')); } catch(e) {}
-}
-
-var teamSkills = (input.teamSkills || []).map(function(s) { return String(s).toLowerCase(); });
-var projectType = String(input.projectType || '').toLowerCase();
-var scaleStr = String(input.scale || '').toLowerCase();
-var constraints = input.constraints || {};
-var budgetStr = String(constraints.budget || '').toLowerCase();
-var complianceArr = (constraints.compliance || []).map(function(c) { return String(c).toLowerCase(); });
-var infraStr = String(constraints.existingInfrastructure || '').toLowerCase();
-var perfStr = String(constraints.performance || '').toLowerCase();
-var ttmStr = String(constraints.timeToMarket || '').toLowerCase();
-
-var scoredCandidates = (stacksData.candidates || []).map(function(candidate) {
-  var totalWeightedScore = 0;
-  var maxPossibleScore = 0;
-  var factorBreakdown = {};
-
-  var factorEntries = Object.entries(stacksData.factors || {});
-  for (var fi = 0; fi < factorEntries.length; fi++) {
-    var factorId = factorEntries[fi][0];
-    var factor = factorEntries[fi][1];
-    var weight = factor.weight || 0;
-    maxPossibleScore += weight * 10;
-
-    var inputValues = [];
-    if (factorId === 'teamExpertise') { inputValues = teamSkills; }
-    else if (factorId === 'projectType') { if (projectType) inputValues = [projectType]; }
-    else if (factorId === 'scale') { if (scaleStr) inputValues = [scaleStr]; }
-    else if (factorId === 'budget') { if (budgetStr) inputValues = [budgetStr]; }
-    else if (factorId === 'compliance') { inputValues = complianceArr; }
-    else if (factorId === 'infrastructure') { if (infraStr) inputValues = [infraStr]; }
-    else if (factorId === 'performance') { if (perfStr) inputValues = [perfStr]; }
-    else if (factorId === 'timeToMarket') { if (ttmStr) inputValues = [ttmStr]; }
-
-    var candidateFactorScores = (candidate.factorScores && candidate.factorScores[factorId]) || {};
-    var factorScore = 0;
-    for (var iv = 0; iv < inputValues.length; iv++) {
-      var val = inputValues[iv];
-      if (candidateFactorScores[val] !== undefined) {
-        factorScore += candidateFactorScores[val];
-      } else {
-        var ckArr = Object.keys(candidateFactorScores);
-        for (var ck = 0; ck < ckArr.length; ck++) {
-          if (ckArr[ck].indexOf(val) !== -1 || val.indexOf(ckArr[ck]) !== -1) {
-            factorScore += candidateFactorScores[ckArr[ck]] * 0.5;
-            break;
-          }
-        }
+  const evaluated = [];
+  const errors = [];
+  for (const system of systems) {
+    try {
+      const result = await __execute_tool('cto-architecture-advisory', {
+        system: system.name || 'unnamed',
+        requirements: Array.isArray(input.requirements) ? input.requirements : [],
+        context: Object.assign({}, input.context || {}, {
+          teamSize: system.teamSize || 0,
+          currentStack: system.currentStack || [],
+          constraints: system.constraints || [],
+          timeline: system.timeline || '',
+          scale: system.scale || '',
+        }),
+      });
+      if (result && result.success === false) {
+        errors.push({ system: system.name || 'unknown', error: result.error || 'Underlying tool returned failure' });
       }
+      evaluated.push(result);
+    } catch (e) {
+      errors.push({ system: system.name || 'unknown', error: e instanceof Error ? e.message : String(e) });
     }
-
-    var normalizedScore = maxPossibleScore > 0 ? (factorScore / 10) * weight * 100 : 0;
-    totalWeightedScore += normalizedScore;
-
-    factorBreakdown[factorId] = {
-      rawScore: Math.round(factorScore * 100) / 100,
-      weight: weight,
-      contribution: Math.round(normalizedScore * 100) / 100
-    };
   }
+  const scored = systems.map((system) => {
+    const s = typeof system === 'object' ? system : {};
+    const weights = { reliability: 3, security: 3, scalability: 2, maintainability: 2, cost: 1 };
+    const score = Object.keys(weights).reduce((sum, key) => sum + Number(s[key] || 0) * weights[key], 0);
+    return { name: s.name, score, priority: score >= 18 ? 'high' : score >= 12 ? 'medium' : 'low' };
+  }).sort((a, b) => b.score - a.score);
+  const roadmap = scored.map((item, index) => ({
+    rank: index + 1,
+    ...item,
+    action: item.priority === 'high' ? 'modernize now' : item.priority === 'medium' ? 'schedule next quarter' : 'monitor',
+  }));
+  return { success: true, mode: 'aggregated', data: { systems: scored, roadmap, evaluations: evaluated, generatedAt: new Date().toISOString() }, error: errors.length ? errors : null };
+})();`;
 
-  return {
-    id: candidate.id, name: candidate.name,
-    frontend: candidate.frontend, backend: candidate.backend,
-    database: candidate.database, hosting: candidate.hosting,
-    totalScore: Math.round(totalWeightedScore * 100) / 100,
-    factorBreakdown: factorBreakdown, tradeOffs: candidate.tradeOffs || [], ranked: 0
-  };
-});
+const cloudSpendWrapperSource = `(async () => {
+const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
+  const rows = Array.isArray(input.billingRows) ? input.billingRows : [];
+  if (!rows.length) {
+    return { success: false, mode: 'not-connected', error: 'Not connected: no cloud billing rows were supplied', data: null };
+  }
+  const recommendations = [];
+  const errors = [];
+  for (const row of rows) {
+    try {
+      const result = await __execute_tool('cto-infrastructure-query', {
+        provider: 'cost-optimization',
+        query: 'analyze spend for ' + (row.service || 'unknown') + ' with billing ' + (row.spend || 0) + ' and utilization ' + (row.utilization || 0),
+        options: { billingRow: row },
+      });
+      if (result && result.success === false) {
+        errors.push({ service: row.service || 'unknown', error: result.error || 'Underlying tool returned failure' });
+      }
+      recommendations.push(result);
+    } catch (e) {
+      errors.push({ service: row.service || 'unknown', error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  const rightsizing = rows.map((row) => {
+    const spend = Number(row.spend || 0);
+    const utilization = Number(row.utilization || 0);
+    const projectedSavings = Math.round(spend * Math.min(0.35, Math.max(0, (1 - utilization) * 0.45)) * 100) / 100;
+    return { service: row.service, currentSpend: spend, utilization, projectedSavings, action: utilization < 0.3 ? 'rightsizing or shutdown review' : utilization < 0.6 ? 'reserved capacity review' : 'monitor' };
+  });
+  const totalProjectedSavings = rightsizing.reduce((sum, item) => sum + item.projectedSavings, 0);
+  return { success: true, mode: 'aggregated', data: { recommendations: rightsizing, totalProjectedSavings, evaluationResults: recommendations, generatedAt: new Date().toISOString() }, error: errors.length ? errors : null };
+})();`;
 
-scoredCandidates.sort(function(a, b) { return b.totalScore - a.totalScore; });
-scoredCandidates.forEach(function(c, i) { c.ranked = i + 1; });
+const incidentWrapperSource = `(async () => {
+const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
+  const signals = Array.isArray(input.signals) ? input.signals : [];
+  if (!signals.length) {
+    return { success: false, mode: 'not-connected', error: 'Not connected: no telemetry, log, alert, or deployment signals were supplied', data: null };
+  }
+  const readinessResults = [];
+  const errors = [];
+  for (const signal of signals) {
+    try {
+      const result = await __execute_tool('cto-incident-disaster-readiness', {
+        provider: 'disaster-recovery',
+        operation: 'readiness-check',
+        config: { signal, context: input.context || {} },
+      });
+      if (result && result.success === false) {
+        errors.push({ source: signal.source || 'unknown', error: result.error || 'Underlying tool returned failure' });
+      }
+      readinessResults.push(result);
+    } catch (e) {
+      errors.push({ source: signal.source || 'unknown', error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  const hypotheses = signals.map((signal) => ({
+    source: signal.source,
+    evidence: signal.evidence,
+    hypothesis: signal.hypothesis || 'Correlate with the nearest deployment or dependency change',
+    confidence: Number(signal.confidence || 0),
+  }));
+  const mitigations = hypotheses.slice(0, 3).map((item, index) => ({
+    priority: index + 1,
+    action: item.confidence > 0.7 ? 'rollback or isolate the suspected change' : 'collect additional telemetry before changing production',
+    owner: 'incident commander',
+  }));
+  const stakeholderUpdate = 'Incident review in progress; production changes require explicit approval.';
+  return { success: true, mode: 'aggregated', data: { hypotheses, mitigations, stakeholderUpdate, readinessResults, generatedAt: new Date().toISOString() }, error: errors.length ? errors : null };
+})();`;
 
-var topN = Math.min(5, scoredCandidates.length);
+const remediationSource = `(async () => {
+const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
+  const endpointUrl = input.endpointUrl;
+  if (!endpointUrl) {
+    return { success: false, mode: 'not-connected', error: 'Not connected: CTO engineering endpoint is not configured', data: null };
+  }
+  const dryRun = input.dryRun !== false;
+  const confirmation = input.confirmation === true;
+  if (!dryRun && !confirmation) {
+    return { success: false, mode: 'confirmation-required', error: 'Explicit confirmation is required for live remediation', data: null };
+  }
+  try {
+    const response = await fetch(endpointUrl, {
+      method: input.method || 'POST',
+      headers: { 'Content-Type': 'application/json', ...(input.token ? { Authorization: 'Bearer ' + input.token } : {}) },
+      body: JSON.stringify(input.payload || {}),
+    });
+    const data = await response.json().catch(async () => ({ text: await response.text() }));
+    return { success: response.ok, mode: dryRun ? 'dry-run' : 'live', data: { response: { status: response.status, data } }, error: null };
+  } catch (error) {
+    return { success: false, mode: 'error', error: error instanceof Error ? error.message : String(error), data: null };
+  }
+})();`;
 
-var recommendation = {
-  id: 'stackrec_' + Date.now(), project: project, constraints: constraints,
-  rankedCandidates: scoredCandidates.slice(0, topN), allCandidates: scoredCandidates,
-  methodology: 'weighted multi-factor decision matrix',
-  summary: 'Top recommendation: ' + (scoredCandidates[0] ? scoredCandidates[0].name : 'N/A') + ' (score: ' + (scoredCandidates[0] ? scoredCandidates[0].totalScore : 0) + '/100). ' + (scoredCandidates[1] ? 'Runner-up: ' + scoredCandidates[1].name + ' (score: ' + scoredCandidates[1].totalScore + '/100). ' : ''),
-  createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), source: 'local',
-};
+export const ctoSkills: Tool[] = [
 
-var store = [];
-if (fs.existsSync(storePath)) {
-  try { store = JSON.parse(fs.readFileSync(storePath, 'utf8')); } catch(e) {}
-}
-if (!Array.isArray(store)) { store = []; }
-store.push(recommendation);
-fs.writeFileSync(storePath, JSON.stringify(store, null, 2));
+  (() => { const t = createCodeSkill({
+id: 'cto-infrastructure-query',
+name: 'Infrastructure Query',
+description: 'Read-only queries across infrastructure providers (Datadog, AWS, GCP, Azure, Kubernetes, Service Mesh, Cost Optimization, IaC Monitoring, Database Operations, Team Metrics, GitHub Read)',
+manifest: {
+sourceCode: infraQuerySource(),
+persistenceEnv: 'CTO_HOME',
+},
+inputSchema: createSchemaRecord({
+provider: SchemaProps.select(INFRA_PROVIDERS, {
+description: 'Infrastructure provider to query',
+required: true,
+}),
+query: SchemaProps.text({
+description: 'Query string or structured query object for the provider',
+required: true,
+}),
+options: SchemaProps.object({}, {
+description: 'Additional provider-specific options',
+additionalProperties: true,
+}),
+}, { required: ['provider', 'query'] }),
+outputSchema: createSchemaRecord({
+success: SchemaProps.boolean({ description: 'Whether the query succeeded' }),
+provider: SchemaProps.text({ description: 'Provider that was queried' }),
+query: SchemaProps.text({ description: 'Original query' }),
+result: SchemaProps.object({}, { description: 'Query result data', additionalProperties: true }),
+error: SchemaProps.text({ description: 'Error message if failed' }),
+}),
+  }); (t as any).isSkill = false; return t; })(),
 
-console.log(JSON.stringify({ success: true, data: { recommendation, storePath } }));`
-    },
-    inputSchema: {
-      type: 'object',
-      properties: {
-        project: { type: 'string', description: 'Project name or description' },
-        scale: { type: 'string', description: 'Expected scale or traffic' },
-        teamSkills: { type: 'array', items: { type: 'string' }, description: 'Team technical skills and expertise' },
-        projectType: { type: 'string', description: 'Project type: web, mobile, api, ml, real-time, data-intensive' },
-        constraints: {
-          type: 'object',
-          properties: {
-            budget: { type: 'string', description: 'Budget level: low, medium, high' },
-            compliance: { type: 'array', items: { type: 'string' }, description: 'Compliance requirements: SOC2, HIPAA, GDPR' },
-            existingInfrastructure: { type: 'string', description: 'Current cloud provider and stack' },
-            performance: { type: 'string', description: 'Performance requirements' },
-            timeToMarket: { type: 'string', description: 'Timeline: fast, moderate, slow' },
-          },
-        },
-      },
-    },
-    outputSchema: {
-      type: 'object',
-      properties: {
-        success: { type: 'boolean', description: 'Whether the tech stack recommendation was generated successfully' },
-        recommendation: { type: 'object', description: 'The recommendation with ranked candidates, factor breakdowns, and metadata' },
-        storePath: { type: 'string', description: 'File path where the recommendation was saved' },
-      },
-      required: ['success', 'recommendation', 'storePath'],
-    },
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  },
-];
+  (() => { const t = createExternalActionSkill({
+id: 'cto-engineering-actions',
+name: 'Engineering Actions',
+description: 'Mutating actions against external engineering systems (Jira, PagerDuty, GitHub Write). Requires confirmation before execution.',
+system: 'engineering',
+action: 'execute',
+inputSchema: createSchemaRecord({
+provider: SchemaProps.select(ENG_PROVIDERS, {
+description: 'External engineering system to act upon',
+required: true,
+}),
+action: SchemaProps.text({
+description: 'Specific action to perform (e.g., create-issue, acknowledge-incident, create-pr)',
+required: true,
+}),
+params: SchemaProps.object({}, {
+description: 'Action-specific parameters',
+additionalProperties: true,
+}),
+dryRun: SchemaProps.boolean({
+description: 'If true, simulate the action without making changes',
+default: true,
+}),
+}, { required: ['provider', 'action'] }),
+outputSchema: createSchemaRecord({
+success: SchemaProps.boolean({ description: 'Whether the action succeeded' }),
+mode: SchemaProps.text({ description: 'Execution mode: live, dry-run, or error' }),
+system: SchemaProps.text({ description: 'System that was targeted' }),
+action: SchemaProps.text({ description: 'Action that was performed' }),
+request: SchemaProps.object({
+input: SchemaProps.object({}, { additionalProperties: true }),
+endpoint: SchemaProps.text({}),
+method: SchemaProps.text({}),
+headers: SchemaProps.object({}, { additionalProperties: true }),
+}, { description: 'Request details' }),
+response: SchemaProps.object({
+status: SchemaProps.number({}),
+data: SchemaProps.object({}, { additionalProperties: true }),
+}, { description: 'Response from the external system' }),
+error: SchemaProps.text({ description: 'Error message if failed' }),
+}),
+configSchema: createSchemaRecord({
+confirmBeforeSend: SchemaProps.boolean({
+description: 'Require explicit confirmation before sending mutating requests',
+default: true,
+}),
+}),
+manifest: {
+confirmBeforeSend: true,
+persistenceEnv: 'CTO_HOME',
+},
+  }); (t as any).isSkill = false; return t; })(),
 
-const CTO_EXTERNAL_SKILLS: Tool[] = [
-  createExternalActionSkill({
-    id: 'cto-jira',
-    name: 'Jira',
-    description: 'Create, update, and query Jira issues and sprints. Uses configurable Jira instance with endpoint and auth.',
-    system: 'jira',
-    action: 'manage_issue',
-    endpoint: {
-      method: 'POST',
-      envVar: 'CTO_JIRA_BASE_URL',
+  (() => { const t = createCodeSkill({
+id: 'cto-incident-disaster-readiness',
+name: 'Incident & Disaster Readiness',
+description: 'Hybrid skill for disaster recovery operations and incident readiness checks',
+manifest: {
+sourceCode: disasterReadinessSource(),
+persistenceEnv: 'CTO_HOME',
+},
+inputSchema: createSchemaRecord({
+provider: SchemaProps.select(DISASTER_PROVIDERS, {
+description: 'Disaster recovery provider to use',
+required: true,
+}),
+operation: SchemaProps.text({
+description: 'Operation to perform (e.g., backup, restore, test-failover, readiness-check)',
+required: true,
+}),
+config: SchemaProps.object({}, {
+description: 'Operation-specific configuration',
+additionalProperties: true,
+}),
+}, { required: ['provider', 'operation'] }),
+outputSchema: createSchemaRecord({
+success: SchemaProps.boolean({ description: 'Whether the operation succeeded' }),
+provider: SchemaProps.text({ description: 'Provider that was used' }),
+operation: SchemaProps.text({ description: 'Operation that was performed' }),
+config: SchemaProps.object({}, { description: 'Configuration used', additionalProperties: true }),
+result: SchemaProps.object({}, { description: 'Operation result data', additionalProperties: true }),
+error: SchemaProps.text({ description: 'Error message if failed' }),
+}),
+  }); (t as any).isSkill = false; return t; })(),
+
+  (() => { const t = createCodeSkill({
+id: 'cto-architecture-advisory',
+name: 'Architecture & Tech Stack Advisory',
+description: 'Reasoning-based architectural guidance and tech stack recommendations',
+manifest: {
+sourceCode: architectureAdvisorySource(),
+reasoningConfig: {
+model: 'gpt-4',
+temperature: 0.3,
+maxTokens: 4000,
+},
+persistenceEnv: 'CTO_HOME',
+},
+inputSchema: createSchemaRecord({
+system: SchemaProps.text({
+description: 'Name or description of the system being architected',
+required: true,
+}),
+requirements: SchemaProps.objectArray(SchemaProps.text({}), {
+description: 'List of functional and non-functional requirements',
+minItems: 1,
+}),
+context: SchemaProps.object({
+teamSize: SchemaProps.integer({ description: 'Number of engineers on the team' }),
+currentStack: SchemaProps.stringArray({ description: 'Currently used technologies' }),
+constraints: SchemaProps.stringArray({ description: 'Technical, budget, or organizational constraints' }),
+timeline: SchemaProps.text({ description: 'Expected timeline for implementation' }),
+scale: SchemaProps.text({ description: 'Expected scale (users, requests, data volume)' }),
+}, {
+description: 'Additional context for the advisory',
+additionalProperties: true,
+}),
+}, { required: ['system', 'requirements'] }),
+outputSchema: createSchemaRecord({
+success: SchemaProps.boolean({ description: 'Whether the advisory completed' }),
+system: SchemaProps.text({ description: 'System that was analyzed' }),
+requirements: SchemaProps.objectArray(SchemaProps.text({}), { description: 'Requirements that were considered' }),
+context: SchemaProps.object({}, { description: 'Context that was provided', additionalProperties: true }),
+result: SchemaProps.object({
+recommendations: SchemaProps.objectArray(SchemaProps.object({
+category: SchemaProps.text({}),
+suggestion: SchemaProps.text({}),
+rationale: SchemaProps.text({}),
+priority: SchemaProps.select(['high', 'medium', 'low'], {}),
+effort: SchemaProps.select(['low', 'medium', 'high'], {}),
+}), {}),
+risks: SchemaProps.objectArray(SchemaProps.object({
+area: SchemaProps.text({}),
+description: SchemaProps.text({}),
+mitigation: SchemaProps.text({}),
+}), {}),
+decisions: SchemaProps.objectArray(SchemaProps.object({
+topic: SchemaProps.text({}),
+decision: SchemaProps.text({}),
+alternatives: SchemaProps.stringArray({}),
+}), {}),
+}, { description: 'Structured advisory output', additionalProperties: true }),
+error: SchemaProps.text({ description: 'Error message if failed' }),
+}),
+  }); (t as any).isSkill = false; return t; })(),
+
+  createCodeSkill({
+    id: 'cto-architecture-tech-debt-evaluator',
+    name: 'Architecture & Tech Debt Evaluator',
+    description: 'Evaluate supplied system health scores and produce a prioritized architecture modernization roadmap.',
+    manifest: {
+      sourceCode: architectureWrapperSource,
+      persistenceEnv: 'CTO_HOME',
+      ui: { view: 'architecture-roadmap' },
     },
-    auth: {
-      type: 'basic',
-      credentialEnvKeyMap: {
-        username: { envVar: 'CTO_JIRA_EMAIL' },
-        password: { envVar: 'CTO_JIRA_API_TOKEN' },
-      },
-    },
-    configSchema: {
-      type: 'object',
-      properties: {
-        baseUrl: { type: 'string', description: 'Jira base URL' },
-        email: { type: 'string', description: 'Jira user email' },
-        apiToken: { type: 'string', description: 'Jira API token' },
-        projectKey: { type: 'string', description: 'Default Jira project key' },
-        issueType: { type: 'string', description: 'Default Jira issue type' },
-        customFields: { type: 'array', items: { type: 'object' }, description: 'Custom field mappings' },
-        webhookUrl: { type: 'string', description: 'Webhook URL for Jira events' },
-        webhookEvents: { type: 'array', items: { type: 'string' }, description: 'Jira webhook events to subscribe to' },
-        transitionRules: { type: 'array', items: { type: 'object' }, description: 'Transition rules for issue workflows' },
-        defaultAssigneeType: { type: 'string', enum: ['user', 'group', 'auto'], description: 'Default assignee type for new issues' },
-      },
-      required: ['baseUrl', 'email', 'apiToken', 'projectKey', 'issueType'],
-    },
-    credentialSource: {
-      username: { envVar: 'CTO_JIRA_EMAIL' },
-      password: { envVar: 'CTO_JIRA_API_TOKEN' },
-    },
-    inputSchema: {
-      type: 'object',
-      properties: {
-        operation: { type: 'string', enum: ['create', 'update', 'get', 'query'], description: 'Operation type: create, update, get, or query' },
-        projectKey: { type: 'string', description: 'Jira project key' },
-        issueType: { type: 'string', description: 'Jira issue type' },
-        summary: { type: 'string', description: 'Issue summary/title' },
-        description: { type: 'string', description: 'Issue description' },
-        issueId: { type: 'string', description: 'Jira issue ID' },
-        fields: { type: 'object', description: 'Additional issue fields' },
-        endpointUrl: { type: 'string', description: 'Jira API endpoint URL' },
-      },
-      required: ['operation'],
-    },
-    outputSchema: CTO_EXTERNAL_OUTPUT_SCHEMA,
-    timeoutMs: 30000,
+    inputSchema: createSchemaRecord({
+      systems: SchemaProps.objectArray(SchemaProps.object({
+        name: SchemaProps.text({ description: 'System or service name' }),
+        reliability: SchemaProps.number({ description: 'Reliability score from 0 to 5' }),
+        security: SchemaProps.number({ description: 'Security posture score from 0 to 5' }),
+        scalability: SchemaProps.number({ description: 'Scalability score from 0 to 5' }),
+        maintainability: SchemaProps.number({ description: 'Maintainability score from 0 to 5' }),
+        cost: SchemaProps.number({ description: 'Cost pressure score from 0 to 5' }),
+      }), { description: 'System health and trade-off inputs' }),
+      requirements: SchemaProps.objectArray(SchemaProps.text({}), { description: 'Requirements to evaluate per system' }),
+      context: SchemaProps.object({}, { description: 'Additional context passed to underlying architecture advisory', additionalProperties: true }),
+    }, { required: ['systems'] }),
+    outputSchema: createSchemaRecord({
+      success: SchemaProps.boolean({ description: 'Whether evaluation completed' }),
+      data: SchemaProps.object({}, { description: 'Scored systems and prioritized roadmap' }),
+      mode: SchemaProps.text({ description: 'Execution mode' }),
+      error: SchemaProps.text({ description: 'Failure message' }),
+    }),
+    triggers: CTO_TRIGGERS,
   }),
-  createExternalActionSkill({
-    id: 'cto-datadog',
-    name: 'Datadog',
-    description: 'Query Datadog metrics, monitors, and DORA metrics. Uses configurable Datadog instance with endpoint and auth.',
-    system: 'datadog',
-    action: 'query_metrics',
-    endpoint: {
-      method: 'POST',
-      envVar: 'CTO_DATADOG_BASE_URL',
+
+  createCodeSkill({
+    id: 'cto-cloud-spend-infrastructure-optimizer',
+    name: 'Cloud Spend & Infrastructure Optimizer',
+    description: 'Analyze supplied cloud billing and utilization rows to recommend rightsizing and capacity actions.',
+    manifest: {
+      sourceCode: cloudSpendWrapperSource,
+      persistenceEnv: 'CTO_HOME',
+      ui: { view: 'cloud-cost-optimizer' },
     },
-    auth: {
-      type: 'api_key',
-      header: 'DD-API-KEY',
-      credentialEnvKeyMap: {
-        apiKey: { envVar: 'CTO_DATADOG_API_KEY' },
-      },
-    },
-    configSchema: {
-      type: 'object',
-      properties: {
-        baseUrl: { type: 'string', description: 'Datadog base URL' },
-        apiKey: { type: 'string', description: 'Datadog API key' },
-        applicationKey: { type: 'string', description: 'Datadog application key' },
-        site: { type: 'string', enum: ['us1', 'us3', 'us5', 'eu'], description: 'Datadog site' },
-        apiKeyPerEnv: { type: 'object', description: 'API keys per environment', properties: { development: { type: 'string' }, staging: { type: 'string' }, production: { type: 'string' } } },
-        dashboardIds: { type: 'array', items: { type: 'string' }, description: 'Default dashboard IDs' },
-        monitorTags: { type: 'array', items: { type: 'string' }, description: 'Default monitor tags' },
-      },
-      required: ['baseUrl', 'apiKey', 'applicationKey', 'site'],
-    },
-    credentialSource: {
-      apiKey: { envVar: 'CTO_DATADOG_API_KEY' },
-    },
-    inputSchema: {
-      type: 'object',
-      properties: {
-        operation: { type: 'string', enum: ['getDoraMetrics', 'getSystemHealth', 'query'], description: 'Operation type: getDoraMetrics, getSystemHealth, or query' },
-        service: { type: 'string', description: 'Service name' },
-        query: { type: 'string', description: 'Metric query string' },
-        timeRange: { type: 'string', description: 'Time range for the query' },
-        endpointUrl: { type: 'string', description: 'Datadog API endpoint URL' },
-      },
-      required: ['operation'],
-    },
-    outputSchema: CTO_EXTERNAL_OUTPUT_SCHEMA,
-    timeoutMs: 30000,
+    inputSchema: createSchemaRecord({
+      billingRows: SchemaProps.objectArray(SchemaProps.object({
+        service: SchemaProps.text({ description: 'Cloud service or account name' }),
+        spend: SchemaProps.number({ description: 'Billing amount for the period' }),
+        utilization: SchemaProps.number({ description: 'Average resource utilization from 0 to 1' }),
+      }), { description: 'Cloud billing and utilization records' }),
+      context: SchemaProps.object({}, { description: 'Additional context for cost analysis', additionalProperties: true }),
+    }, { required: ['billingRows'] }),
+    outputSchema: createSchemaRecord({
+      success: SchemaProps.boolean({ description: 'Whether optimization completed' }),
+      data: SchemaProps.object({}, { description: 'Recommendations and savings estimate' }),
+      mode: SchemaProps.text({ description: 'Execution mode' }),
+      error: SchemaProps.text({ description: 'Failure message' }),
+    }),
+    triggers: CTO_TRIGGERS,
   }),
-  createExternalActionSkill({
-    id: 'cto-github',
-    name: 'GitHub',
-    description: 'Interact with GitHub repositories, issues, PRs, and security alerts. Uses configurable GitHub instance with endpoint and auth.',
-    system: 'github',
-    action: 'manage_repo',
-    endpoint: {
-      method: 'POST',
-      envVar: 'CTO_GITHUB_BASE_URL',
+
+  createCodeSkill({
+    id: 'cto-incident-war-room-synthesizer',
+    name: 'Incident War Room Synthesizer',
+    description: 'Correlate supplied telemetry, logs, alerts, and deployment signals into hypotheses and mitigation steps.',
+    manifest: {
+      sourceCode: incidentWrapperSource,
+      persistenceEnv: 'CTO_HOME',
+      ui: { view: 'incident-timeline' },
     },
-    auth: {
-      type: 'bearer',
-      credentialEnvKeyMap: {
-        token: { envVar: 'CTO_GITHUB_TOKEN' },
-      },
-    },
-    configSchema: {
-      type: 'object',
-      properties: {
-        baseUrl: { type: 'string', description: 'GitHub API base URL' },
-        token: { type: 'string', description: 'GitHub access token' },
-        apiVersion: { type: 'string', description: 'GitHub API version' },
-        defaultOwner: { type: 'string', description: 'Default repository owner or organization' },
-        defaultVisibility: { type: 'string', enum: ['public', 'private', 'internal'], description: 'Default repository visibility' },
-        repoScopes: { type: 'array', items: { type: 'string' }, description: 'Repository scopes (owner/repo list)' },
-        authType: { type: 'string', enum: ['app', 'user'], description: 'GitHub auth type: app or user' },
-        webhookSecret: { type: 'string', description: 'Webhook secret for verifying GitHub webhooks' },
-      },
-      required: ['baseUrl', 'token', 'apiVersion'],
-    },
-    credentialSource: {
-      token: { envVar: 'CTO_GITHUB_TOKEN' },
-    },
-    inputSchema: {
-      type: 'object',
-      properties: {
-        operation: { type: 'string', enum: ['getSecurityAlerts', 'getRepositoryStats', 'createIssue', 'createPR'], description: 'Operation type: getSecurityAlerts, getRepositoryStats, createIssue, or createPR' },
-        repository: { type: 'string', description: 'Repository name (owner/repo)' },
-        severity: { type: 'string', enum: ['Critical', 'High', 'Medium', 'Low'], description: 'Vulnerability severity level' },
-        branch: { type: 'string', description: 'Git branch name' },
-        includeVulnerabilities: { type: 'boolean', description: 'Whether to include vulnerability data' },
-        endpointUrl: { type: 'string', description: 'GitHub API endpoint URL' },
-      },
-      required: ['operation'],
-    },
-    outputSchema: CTO_EXTERNAL_OUTPUT_SCHEMA,
-    timeoutMs: 30000,
+    inputSchema: createSchemaRecord({
+      signals: SchemaProps.objectArray(SchemaProps.object({
+        source: SchemaProps.text({ description: 'Telemetry, log, alert, or deployment source' }),
+        evidence: SchemaProps.text({ description: 'Observed evidence' }),
+        hypothesis: SchemaProps.text({ description: 'Optional root-cause hypothesis' }),
+        confidence: SchemaProps.number({ description: 'Confidence from 0 to 1' }),
+      }), { description: 'Incident signals to correlate' }),
+      context: SchemaProps.object({}, { description: 'Additional incident context', additionalProperties: true }),
+    }, { required: ['signals'] }),
+    outputSchema: createSchemaRecord({
+      success: SchemaProps.boolean({ description: 'Whether synthesis completed' }),
+      data: SchemaProps.object({}, { description: 'Hypotheses and mitigations' }),
+      mode: SchemaProps.text({ description: 'Execution mode' }),
+      error: SchemaProps.text({ description: 'Failure message' }),
+    }),
+    triggers: CTO_TRIGGERS,
   }),
-  createExternalActionSkill({
-    id: 'cto-aws',
-    name: 'AWS',
-    description: 'Query AWS cloud spend, resource status, and configuration. Uses configurable AWS endpoint with token auth.',
-    system: 'aws',
-    action: 'query_resources',
-    endpoint: {
-      method: 'POST',
-      envVar: 'CTO_AWS_BASE_URL',
+
+  createCodeSkill({
+    id: 'cto-engineering-action-iac-drift-remediation',
+    name: 'Engineering Action & IaC Drift Remediation',
+    description: 'Dry-run and, after explicit confirmation, apply approved engineering or IaC remediation through a configured endpoint.',
+    manifest: {
+      sourceCode: remediationSource,
+      persistenceEnv: 'CTO_HOME',
+      confirmBeforeSend: true,
+      ui: { view: 'remediation-approval' },
+      configSchema: createSchemaRecord({
+        endpointUrl: SchemaProps.url({ description: 'Configured engineering or IaC remediation endpoint' }),
+        token: SchemaProps.password({ description: 'Bearer token for the remediation endpoint' }),
+      }, { required: ['endpointUrl', 'token'] }),
     },
-    auth: {
-      type: 'bearer',
-      credentialEnvKeyMap: {
-        token: { envVar: 'CTO_AWS_API_TOKEN' },
-      },
-    },
-    configSchema: {
-      type: 'object',
-      properties: {
-        baseUrl: { type: 'string', description: 'AWS API base URL' },
-        token: { type: 'string', description: 'AWS API token' },
-        region: { type: 'string', description: 'Default AWS region' },
-        defaultResourceType: { type: 'string', description: 'Default resource type' },
-        costPeriod: { type: 'string', enum: ['DAILY', 'MONTHLY', 'QUARTERLY', 'YEARLY'], description: 'Default cost reporting period' },
-        roleArn: { type: 'string', description: 'IAM role ARN for cross-account access' },
-        profile: { type: 'string', description: 'AWS profile name' },
-        retryConfig: { type: 'object', description: 'Retry configuration', properties: { maxRetries: { type: 'number' }, backoffMs: { type: 'number' } } },
-      },
-      required: ['baseUrl', 'token', 'region'],
-    },
-    credentialSource: {
-      token: { envVar: 'CTO_AWS_API_TOKEN' },
-    },
-    inputSchema: {
-      type: 'object',
-      properties: {
-        operation: { type: 'string', enum: ['getCloudSpend', 'getResourceStatus', 'listResources'], description: 'Operation type: getCloudSpend, getResourceStatus, or listResources' },
-        period: { type: 'string', enum: ['DAILY', 'MONTHLY', 'QUARTERLY', 'YEARLY'], description: 'Reporting period: DAILY, MONTHLY, QUARTERLY, or YEARLY' },
-        resourceType: { type: 'string', description: 'AWS resource type' },
-        resourceId: { type: 'string', description: 'AWS resource ID' },
-        includeTags: { type: 'boolean', description: 'Whether to include resource tags' },
-        endpointUrl: { type: 'string', description: 'AWS API endpoint URL' },
-      },
-      required: ['operation'],
-    },
-    outputSchema: CTO_EXTERNAL_OUTPUT_SCHEMA,
-    timeoutMs: 60000,
-  }),
-  createExternalActionSkill({
-    id: 'cto-gcp',
-    name: 'GCP',
-    description: 'Query Google Cloud spend, resource status, and configuration. Uses configurable GCP endpoint with token auth.',
-    system: 'gcp',
-    action: 'query_resources',
-    endpoint: {
-      method: 'POST',
-      envVar: 'CTO_GCP_BASE_URL',
-    },
-    auth: {
-      type: 'bearer',
-      credentialEnvKeyMap: {
-        token: { envVar: 'CTO_GCP_ACCESS_TOKEN' },
-      },
-    },
-    configSchema: {
-      type: 'object',
-      properties: {
-        baseUrl: { type: 'string', description: 'GCP API base URL' },
-        token: { type: 'string', description: 'GCP access token' },
-        projectId: { type: 'string', description: 'Default Google Cloud project' },
-        region: { type: 'string', description: 'Default Google Cloud region' },
-        defaultResourceType: { type: 'string', description: 'Default resource type' },
-        credentials: { type: 'object', description: 'Service account credentials JSON', properties: { type: { type: 'string' }, project_id: { type: 'string' }, private_key: { type: 'string' }, client_email: { type: 'string' } } },
-      },
-      required: ['baseUrl', 'token', 'projectId'],
-    },
-    credentialSource: {
-      token: { envVar: 'CTO_GCP_ACCESS_TOKEN' },
-    },
-    inputSchema: {
-      type: 'object',
-      properties: {
-        operation: { type: 'string', enum: ['getCloudSpend', 'getResourceStatus', 'listResources'], description: 'Operation type: getCloudSpend, getResourceStatus, or listResources' },
-        period: { type: 'string', enum: ['DAILY', 'MONTHLY', 'QUARTERLY', 'YEARLY'], description: 'Reporting period: DAILY, MONTHLY, QUARTERLY, or YEARLY' },
-        resourceType: { type: 'string', description: 'GCP resource type' },
-        resourceId: { type: 'string', description: 'GCP resource ID' },
-        includeLabels: { type: 'boolean', description: 'Whether to include resource labels' },
-        endpointUrl: { type: 'string', description: 'GCP API endpoint URL' },
-      },
-      required: ['operation'],
-    },
-    outputSchema: CTO_EXTERNAL_OUTPUT_SCHEMA,
-    timeoutMs: 60000,
-  }),
-  createExternalActionSkill({
-    id: 'cto-azure',
-    name: 'Azure',
-    description: 'Query Azure cloud spend, resource status, and configuration. Uses configurable Azure endpoint with token auth.',
-    system: 'azure',
-    action: 'query_resources',
-    endpoint: {
-      method: 'POST',
-      envVar: 'CTO_AZURE_BASE_URL',
-    },
-    auth: {
-      type: 'bearer',
-      credentialEnvKeyMap: {
-        token: { envVar: 'CTO_AZURE_ACCESS_TOKEN' },
-      },
-    },
-    configSchema: {
-      type: 'object',
-      properties: {
-        baseUrl: { type: 'string', description: 'Azure API base URL' },
-        token: { type: 'string', description: 'Azure access token' },
-        subscriptionId: { type: 'string', description: 'Default Azure subscription' },
-        region: { type: 'string', description: 'Default Azure region' },
-        defaultResourceType: { type: 'string', description: 'Default resource type' },
-        tenantId: { type: 'string', description: 'Azure tenant ID' },
-        clientId: { type: 'string', description: 'Azure client (application) ID' },
-        clientSecret: { type: 'string', description: 'Azure client secret', sensitive: true, format: 'password' },
-      },
-      required: ['baseUrl', 'token', 'subscriptionId'],
-    },
-    credentialSource: {
-      token: { envVar: 'CTO_AZURE_ACCESS_TOKEN' },
-    },
-    inputSchema: {
-      type: 'object',
-      properties: {
-        operation: { type: 'string', enum: ['getCloudSpend', 'getResourceStatus', 'listResources'], description: 'Operation type: getCloudSpend, getResourceStatus, or listResources' },
-        period: { type: 'string', enum: ['DAILY', 'MONTHLY', 'QUARTERLY', 'YEARLY'], description: 'Reporting period: DAILY, MONTHLY, QUARTERLY, or YEARLY' },
-        resourceType: { type: 'string', description: 'Azure resource type' },
-        resourceId: { type: 'string', description: 'Azure resource ID' },
-        includeTags: { type: 'boolean', description: 'Whether to include resource tags' },
-        endpointUrl: { type: 'string', description: 'Azure API endpoint URL' },
-      },
-      required: ['operation'],
-    },
-    outputSchema: CTO_EXTERNAL_OUTPUT_SCHEMA,
-    timeoutMs: 60000,
-  }),
-  createExternalActionSkill({
-    id: 'cto-pagerduty',
-    name: 'PagerDuty',
-    description: 'Query PagerDuty incidents, on-call schedules, and escalation policies. Uses configurable PagerDuty endpoint with token auth.',
-    system: 'pagerduty',
-    action: 'query_incidents',
-    endpoint: {
-      method: 'POST',
-      envVar: 'CTO_PAGERDUTY_BASE_URL',
-    },
-    auth: {
-      type: 'bearer',
-      credentialEnvKeyMap: {
-        token: { envVar: 'CTO_PAGERDUTY_API_TOKEN' },
-      },
-    },
-    configSchema: {
-      type: 'object',
-      properties: {
-        baseUrl: { type: 'string', description: 'PagerDuty API base URL' },
-        token: { type: 'string', description: 'PagerDuty API token' },
-        defaultTeam: { type: 'string', description: 'Default PagerDuty team' },
-        escalationPolicyId: { type: 'string', description: 'Default escalation policy' },
-        apiVersion: { type: 'string', description: 'PagerDuty API version' },
-        integrationKey: { type: 'string', description: 'Integration key for events API' },
-        escalationPolicies: { type: 'array', items: { type: 'object' }, description: 'Escalation policy definitions' },
-        defaultService: { type: 'string', description: 'Default PagerDuty service' },
-      },
-      required: ['baseUrl', 'token', 'defaultTeam'],
-    },
-    credentialSource: {
-      token: { envVar: 'CTO_PAGERDUTY_API_TOKEN' },
-    },
-    inputSchema: {
-      type: 'object',
-      properties: {
-        operation: { type: 'string', enum: ['getActiveIncidents', 'getOnCallSchedule', 'createIncident'], description: 'Operation type: getActiveIncidents, getOnCallSchedule, or createIncident' },
-        team: { type: 'string', description: 'PagerDuty team name' },
-        since: { type: 'string', description: 'Start time (ISO string)' },
-        until: { type: 'string', description: 'End time (ISO string)' },
-        timeZone: { type: 'string', description: 'Timezone for the query' },
-        endpointUrl: { type: 'string', description: 'PagerDuty API endpoint URL' },
-      },
-      required: ['operation'],
-    },
-    outputSchema: CTO_EXTERNAL_OUTPUT_SCHEMA,
-    timeoutMs: 30000,
-  }),
-  createExternalActionSkill({
-    id: 'cto-kubernetes',
-    name: 'Kubernetes',
-    description: 'Query Kubernetes cluster health, pod status, and resource utilization. Uses configurable Kubernetes endpoint with token auth.',
-    system: 'kubernetes',
-    action: 'query_cluster',
-    endpoint: {
-      method: 'POST',
-      envVar: 'CTO_KUBERNETES_BASE_URL',
-    },
-    auth: {
-      type: 'bearer',
-      credentialEnvKeyMap: {
-        token: { envVar: 'CTO_KUBERNETES_API_TOKEN' },
-      },
-    },
-    configSchema: {
-      type: 'object',
-      properties: {
-        baseUrl: { type: 'string', description: 'Kubernetes API base URL' },
-        token: { type: 'string', description: 'Kubernetes API token' },
-        clusterName: { type: 'string', description: 'Default Kubernetes cluster' },
-        defaultNamespace: { type: 'string', description: 'Default namespace' },
-        context: { type: 'string', description: 'Kubernetes context' },
-        kubeconfig: { type: 'string', description: 'Kubeconfig content or path', multiline: true },
-      },
-      required: ['baseUrl', 'token', 'clusterName'],
-    },
-    credentialSource: {
-      token: { envVar: 'CTO_KUBERNETES_API_TOKEN' },
-    },
-    inputSchema: {
-      type: 'object',
-      properties: {
-        operation: { type: 'string', enum: ['get_pod_status', 'scan_image_vulnerabilities', 'get_resource_utilization', 'get_cluster_health', 'identify_at_risk_pods', 'get_namespace_summary'], description: 'Operation type: get_pod_status, scan_image_vulnerabilities, get_resource_utilization, get_cluster_health, identify_at_risk_pods, or get_namespace_summary' },
-        namespace: { type: 'string', description: 'Kubernetes namespace' },
-        pod_name: { type: 'string', description: 'Pod name' },
-        image: { type: 'string', description: 'Container image name' },
-        severity_threshold: { type: 'string', enum: ['low', 'medium', 'high', 'critical'], description: 'Vulnerability severity threshold' },
-        resource_threshold_percent: { type: 'number', description: 'Resource utilization threshold percentage' },
-        payload: { type: 'object', description: 'Additional operation payload' },
-        endpointUrl: { type: 'string', description: 'Kubernetes API endpoint URL' },
-      },
-      required: ['operation'],
-    },
-    outputSchema: CTO_EXTERNAL_OUTPUT_SCHEMA,
-    timeoutMs: 30000,
-  }),
-  createExternalActionSkill({
-    id: 'cto-cost-optimization',
-    name: 'Cost Optimization',
-    description: 'Analyze cloud spend, detect anomalies, and recommend cost optimizations. Uses configurable cost optimization endpoint with token auth.',
-    system: 'cost_optimization',
-    action: 'analyze_costs',
-    endpoint: {
-      method: 'POST',
-      envVar: 'CTO_COST_OPTIMIZATION_BASE_URL',
-    },
-    auth: {
-      type: 'bearer',
-      credentialEnvKeyMap: {
-        token: { envVar: 'CTO_COST_OPTIMIZATION_API_TOKEN' },
-      },
-    },
-    configSchema: {
-      type: 'object',
-      properties: {
-        baseUrl: { type: 'string', description: 'Cost optimization API base URL' },
-        token: { type: 'string', description: 'Cost optimization API token' },
-        cloudProvider: { type: 'string', enum: ['aws', 'gcp', 'azure', 'multi'], description: 'Default cloud provider scope' },
-        defaultDays: { type: 'number', description: 'Default analysis window in days' },
-        currency: { type: 'string', description: 'Reporting currency' },
-        anomalyThreshold: { type: 'number', description: 'Default anomaly threshold percentage' },
-        billingExportConfig: { type: 'object', description: 'Billing export configuration', properties: { exportBucket: { type: 'string' }, exportPrefix: { type: 'string' }, frequency: { type: 'string', enum: ['daily', 'hourly'] } } },
-        recommendationTypes: { type: 'array', items: { type: 'string' }, description: 'Recommendation types to include' },
-      },
-      required: ['baseUrl', 'token', 'cloudProvider'],
-    },
-    credentialSource: {
-      token: { envVar: 'CTO_COST_OPTIMIZATION_API_TOKEN' },
-    },
-    inputSchema: {
-      type: 'object',
-      properties: {
-        operation: { type: 'string', enum: ['analyze_spending', 'detect_anomalies', 'forecast_costs', 'recommend_reserved_instances', 'identify_waste', 'get_cost_by_service', 'get_cost_trends'], description: 'Operation type: analyze_spending, detect_anomalies, forecast_costs, recommend_reserved_instances, identify_waste, get_cost_by_service, or get_cost_trends' },
-        days: { type: 'number', description: 'Number of days for analysis' },
-        forecast_days: { type: 'number', description: 'Number of days to forecast' },
-        cloud_provider: { type: 'string', enum: ['aws', 'gcp', 'azure', 'multi'], description: 'Cloud provider: aws, gcp, azure, or multi' },
-        anomaly_threshold: { type: 'number', description: 'Anomaly detection threshold' },
-        confidence_level: { type: 'string', enum: ['low', 'medium', 'high'], description: 'Forecast confidence level: low, medium, or high' },
-        waste_threshold_percent: { type: 'number', description: 'Waste threshold percentage' },
-        payload: { type: 'object', description: 'Additional operation payload' },
-        endpointUrl: { type: 'string', description: 'Cost optimization API endpoint URL' },
-      },
-      required: ['operation'],
-    },
-    outputSchema: CTO_EXTERNAL_OUTPUT_SCHEMA,
-    timeoutMs: 60000,
-  }),
-  createExternalActionSkill({
-    id: 'cto-team-metrics',
-    name: 'Team Metrics',
-    description: 'Query engineering team capacity, on-call metrics, and burnout risks. Uses configurable team metrics endpoint with token auth.',
-    system: 'team_metrics',
-    action: 'query_team_metrics',
-    endpoint: {
-      method: 'POST',
-      envVar: 'CTO_TEAM_METRICS_BASE_URL',
-    },
-    auth: {
-      type: 'bearer',
-      credentialEnvKeyMap: {
-        token: { envVar: 'CTO_TEAM_METRICS_API_TOKEN' },
-      },
-    },
-    configSchema: {
-      type: 'object',
-      properties: {
-        baseUrl: { type: 'string', description: 'Team metrics API base URL' },
-        token: { type: 'string', description: 'Team metrics API token' },
-        defaultTeamId: { type: 'string', description: 'Default engineering team' },
-        defaultDays: { type: 'number', description: 'Default analysis window in days' },
-        forecastMonths: { type: 'number', description: 'Default capacity forecast horizon' },
-        dataSources: { type: 'array', items: { type: 'string' }, description: 'Data sources (github, jira, etc.)' },
-        timeWindows: { type: 'object', description: 'Time window configuration', properties: { workHoursStart: { type: 'string' }, workHoursEnd: { type: 'string' }, timezone: { type: 'string' } } },
-      },
-      required: ['baseUrl', 'token', 'defaultTeamId'],
-    },
-    credentialSource: {
-      token: { envVar: 'CTO_TEAM_METRICS_API_TOKEN' },
-    },
-    inputSchema: {
-      type: 'object',
-      properties: {
-        operation: { type: 'string', enum: ['get_team_capacity', 'analyze_on_call_metrics', 'identify_burnout_risks', 'forecast_capacity', 'get_mttr_metrics', 'get_team_health', 'get_oncall_coverage'], description: 'Operation type: get_team_capacity, analyze_on_call_metrics, identify_burnout_risks, forecast_capacity, get_mttr_metrics, get_team_health, or get_oncall_coverage' },
-        team_id: { type: 'string', description: 'Team identifier' },
-        days: { type: 'number', description: 'Number of days for analysis' },
-        forecast_months: { type: 'number', description: 'Number of months to forecast' },
-        burnout_threshold: { type: 'number', description: 'Burnout risk threshold' },
-        include_vacation: { type: 'boolean', description: 'Whether to include vacation time' },
-        confidence_level: { type: 'string', enum: ['low', 'medium', 'high'], description: 'Forecast confidence level: low, medium, or high' },
-        payload: { type: 'object', description: 'Additional operation payload' },
-        endpointUrl: { type: 'string', description: 'Team metrics API endpoint URL' },
-      },
-      required: ['operation'],
-    },
-    outputSchema: CTO_EXTERNAL_OUTPUT_SCHEMA,
-    timeoutMs: 60000,
-  }),
-  createExternalActionSkill({
-    id: 'cto-iac-monitoring',
-    name: 'IaC Monitoring',
-    description: 'Scan infrastructure-as-code drift, compliance status, and state history. Uses configurable IaC monitoring endpoint with API key auth.',
-    system: 'iac_monitoring',
-    action: 'scan_drift',
-    endpoint: {
-      method: 'POST',
-      envVar: 'CTO_IAC_MONITORING_BASE_URL',
-    },
-    auth: {
-      type: 'api_key',
-      header: 'X-IAC-API-Key',
-      credentialEnvKeyMap: {
-        apiKey: { envVar: 'CTO_IAC_MONITORING_API_KEY' },
-      },
-    },
-    configSchema: {
-      type: 'object',
-      properties: {
-        baseUrl: { type: 'string', description: 'IaC monitoring API base URL' },
-        apiKey: { type: 'string', description: 'IaC monitoring API key' },
-        tool: { type: 'string', enum: ['terraform', 'cloudformation', 'both'], description: 'Default infrastructure-as-code tool' },
-        defaultWorkspace: { type: 'string', description: 'Default Terraform workspace or stack' },
-        complianceFramework: { type: 'string', description: 'Default compliance framework' },
-        terraformCloudConfig: { type: 'object', description: 'Terraform Cloud configuration', properties: { organization: { type: 'string' }, token: { type: 'string' }, workspace: { type: 'string' } } },
-        stateBackendConfig: { type: 'object', description: 'Terraform state backend configuration', properties: { bucket: { type: 'string' }, prefix: { type: 'string' }, region: { type: 'string' } } },
-      },
-      required: ['baseUrl', 'apiKey', 'tool'],
-    },
-    credentialSource: {
-      apiKey: { envVar: 'CTO_IAC_MONITORING_API_KEY' },
-    },
-    inputSchema: {
-      type: 'object',
-      properties: {
-        operation: { type: 'string', enum: ['scan_drift', 'get_compliance_status', 'identify_non_compliant_resources', 'get_drift_history'], description: 'Operation type: scan_drift, get_compliance_status, identify_non_compliant_resources, or get_drift_history' },
-        payload: { type: 'object', description: 'Operation payload with tool, workspace, severity_threshold, and environment', properties: { tool: { type: 'string', enum: ['terraform', 'cloudformation', 'both'], description: 'IaC tool' }, workspace: { type: 'string', description: 'Workspace name' }, severity_threshold: { type: 'string', enum: ['critical', 'high', 'medium', 'low'], description: 'Severity threshold' }, environment: { type: 'string', description: 'Environment name' } } },
-        endpointUrl: { type: 'string', description: 'IaC monitoring API endpoint URL' },
-      },
-      required: ['operation', 'payload'],
-    },
-    outputSchema: CTO_EXTERNAL_OUTPUT_SCHEMA,
-    timeoutMs: 60000,
-  }),
-  createExternalActionSkill({
-    id: 'cto-database-operations',
-    name: 'Database Operations',
-    description: 'Query database instance health, backup status, and replication. Uses configurable database operations endpoint with token auth.',
-    system: 'database_operations',
-    action: 'query_database',
-    endpoint: {
-      method: 'POST',
-      envVar: 'CTO_DATABASE_OPERATIONS_BASE_URL',
-    },
-    auth: {
-      type: 'bearer',
-      credentialEnvKeyMap: {
-        token: { envVar: 'CTO_DATABASE_OPERATIONS_API_TOKEN' },
-      },
-    },
-    configSchema: {
-      type: 'object',
-      properties: {
-        baseUrl: { type: 'string', description: 'Database operations API base URL' },
-        token: { type: 'string', description: 'Database operations API token' },
-        defaultDatabaseType: { type: 'string', enum: ['postgres', 'mysql', 'mongodb', 'dynamodb', 'all'], description: 'Default database platform' },
-        retentionDays: { type: 'number', description: 'Default metric retention window' },
-        alertThresholdPercent: { type: 'number', description: 'Default resource alert threshold' },
-        connectionPooling: { type: 'object', description: 'Connection pooling configuration', properties: { maxConnections: { type: 'number' }, minConnections: { type: 'number' }, idleTimeoutMs: { type: 'number' } } },
-        readReplicas: { type: 'array', items: { type: 'string' }, description: 'Read replica endpoints' },
-        pointInTimeRecovery: { type: 'boolean', description: 'Whether point-in-time recovery is enabled' },
-      },
-      required: ['baseUrl', 'token', 'defaultDatabaseType'],
-    },
-    credentialSource: {
-      token: { envVar: 'CTO_DATABASE_OPERATIONS_API_TOKEN' },
-    },
-    inputSchema: {
-      type: 'object',
-      properties: {
-        operation: { type: 'string', enum: ['get_instance_health', 'get_backup_status', 'analyze_performance', 'check_scaling_readiness', 'get_replication_status'], description: 'Operation type: get_instance_health, get_backup_status, analyze_performance, check_scaling_readiness, or get_replication_status' },
-        payload: { type: 'object', description: 'Operation payload with database_type, instance_name, hours, and environment', properties: { database_type: { type: 'string', enum: ['postgres', 'mysql', 'mongodb', 'dynamodb', 'all'], description: 'Database type' }, instance_name: { type: 'string', description: 'Database instance name' }, hours: { type: 'number', description: 'Number of hours' }, environment: { type: 'string', description: 'Environment name' } } },
-        endpointUrl: { type: 'string', description: 'Database operations API endpoint URL' },
-      },
-      required: ['operation'],
-    },
-    outputSchema: CTO_EXTERNAL_OUTPUT_SCHEMA,
-    timeoutMs: 60000,
-  }),
-  createExternalActionSkill({
-    id: 'cto-service-mesh',
-    name: 'Service Mesh',
-    description: 'Query service mesh status, dependencies, and latency. Uses configurable service mesh endpoint with token auth.',
-    system: 'service_mesh',
-    action: 'query_mesh',
-    endpoint: {
-      method: 'POST',
-      envVar: 'CTO_SERVICE_MESH_BASE_URL',
-    },
-    auth: {
-      type: 'bearer',
-      credentialEnvKeyMap: {
-        token: { envVar: 'CTO_SERVICE_MESH_API_TOKEN' },
-      },
-    },
-    configSchema: {
-      type: 'object',
-      properties: {
-        baseUrl: { type: 'string', description: 'Service mesh API base URL' },
-        token: { type: 'string', description: 'Service mesh API token' },
-        defaultMesh: { type: 'string', enum: ['istio', 'linkerd', 'consul'], description: 'Default service mesh' },
-        defaultNamespace: { type: 'string', description: 'Default namespace' },
-        latencyThresholdMs: { type: 'number', description: 'Default latency threshold' },
-        meshType: { type: 'string', enum: ['istio', 'linkerd', 'consul'], description: 'Service mesh type' },
-        mTLSConfig: { type: 'object', description: 'mTLS configuration', properties: { enabled: { type: 'boolean' }, mode: { type: 'string', enum: ['strict', 'permissive', 'disabled'] }, certManager: { type: 'string' } } },
-      },
-      required: ['baseUrl', 'token', 'defaultMesh'],
-    },
-    credentialSource: {
-      token: { envVar: 'CTO_SERVICE_MESH_API_TOKEN' },
-    },
-    inputSchema: {
-      type: 'object',
-      properties: {
-        operation: { type: 'string', enum: ['get_mesh_status', 'get_service_dependencies', 'analyze_latency', 'check_traffic_policies', 'identify_bottlenecks'], description: 'Operation type: get_mesh_status, get_service_dependencies, analyze_latency, check_traffic_policies, or identify_bottlenecks' },
-        payload: { type: 'object', description: 'Operation payload with mesh_name, namespace, service_name, and latency_threshold_ms', properties: { mesh_name: { type: 'string', enum: ['istio', 'linkerd', 'consul'], description: 'Service mesh name' }, namespace: { type: 'string', description: 'Kubernetes namespace' }, service_name: { type: 'string', description: 'Service name' }, latency_threshold_ms: { type: 'number', description: 'Latency threshold in milliseconds' } } },
-        endpointUrl: { type: 'string', description: 'Service mesh API endpoint URL' },
-      },
-      required: ['operation', 'payload'],
-    },
-    outputSchema: CTO_EXTERNAL_OUTPUT_SCHEMA,
-    timeoutMs: 60000,
-  }),
-  createExternalActionSkill({
-    id: 'cto-disaster-recovery',
-    name: 'Disaster Recovery',
-    description: 'Query disaster recovery RPO/RTO status, backup compliance, and failover readiness. Uses configurable disaster recovery endpoint with token auth.',
-    system: 'disaster_recovery',
-    action: 'query_recovery',
-    endpoint: {
-      method: 'POST',
-      envVar: 'CTO_DISASTER_RECOVERY_BASE_URL',
-    },
-    auth: {
-      type: 'bearer',
-      credentialEnvKeyMap: {
-        token: { envVar: 'CTO_DISASTER_RECOVERY_API_TOKEN' },
-      },
-    },
-    configSchema: {
-      type: 'object',
-      properties: {
-        baseUrl: { type: 'string', description: 'Disaster recovery API base URL' },
-        token: { type: 'string', description: 'Disaster recovery API token' },
-        defaultRecoveryTarget: { type: 'string', enum: ['primary_database', 'backup_location', 'secondary_region'], description: 'Default recovery target' },
-        backupRetentionDays: { type: 'number', description: 'Required backup retention window' },
-        complianceFramework: { type: 'string', description: 'Recovery compliance framework' },
-        rpoTarget: { type: 'number', description: 'Recovery point objective target in minutes' },
-        rtoTarget: { type: 'number', description: 'Recovery time objective target in minutes' },
-        failoverRegions: { type: 'array', items: { type: 'string' }, description: 'Failover regions' },
-        testSchedule: { type: 'string', description: 'DR test schedule (cron)' },
-      },
-      required: ['baseUrl', 'token', 'defaultRecoveryTarget'],
-    },
-    credentialSource: {
-      token: { envVar: 'CTO_DISASTER_RECOVERY_API_TOKEN' },
-    },
-    inputSchema: {
-      type: 'object',
-      properties: {
-        operation: { type: 'string', enum: ['get_rpo_status', 'get_rto_status', 'check_backup_compliance', 'verify_failover_readiness', 'get_recovery_metrics'], description: 'Operation type: get_rpo_status, get_rto_status, check_backup_compliance, verify_failover_readiness, or get_recovery_metrics' },
-        payload: { type: 'object', description: 'Operation payload with recovery_target, backup_type, test_failover, environment, and time_range', properties: { recovery_target: { type: 'string', enum: ['primary_database', 'backup_location', 'secondary_region'], description: 'Recovery target' }, backup_type: { type: 'string', enum: ['full', 'incremental', 'differential', 'continuous'], description: 'Backup type' }, test_failover: { type: 'boolean', description: 'Whether to test failover' }, environment: { type: 'string', description: 'Environment name' }, time_range: { type: 'string', description: 'Time range' } } },
-        endpointUrl: { type: 'string', description: 'Disaster recovery API endpoint URL' },
-      },
-      required: ['operation'],
-    },
-    outputSchema: CTO_EXTERNAL_OUTPUT_SCHEMA,
-    timeoutMs: 60000,
+    inputSchema: createSchemaRecord({
+      endpointUrl: SchemaProps.url({ description: 'Configured engineering or IaC remediation endpoint' }),
+      token: SchemaProps.password({ description: 'Bearer token for the remediation endpoint' }),
+      method: SchemaProps.select(['POST', 'PUT', 'PATCH'], { description: 'HTTP method for the remediation request', default: 'POST' }),
+      payload: SchemaProps.object({}, { description: 'Approved remediation payload' }),
+      dryRun: SchemaProps.boolean({ description: 'Validate without applying; defaults to true', default: true }),
+      confirmation: SchemaProps.boolean({ description: 'Explicit approval for live execution', default: false }),
+    }, { required: ['endpointUrl'] }),
+    outputSchema: createSchemaRecord({
+      success: SchemaProps.boolean({ description: 'Whether action completed' }),
+      mode: SchemaProps.text({ description: 'Dry-run, live, not-connected, or error mode' }),
+      data: SchemaProps.object({}, { description: 'Remote response when available' }),
+      error: SchemaProps.text({ description: 'Failure or governance message' }),
+    }),
+    triggers: CTO_TRIGGERS,
   }),
 ];
 
-export const ctoSkills: Tool[] = [...CTO_TOOLS, ...CTO_EXTERNAL_SKILLS];
+export const ctoCanonicalSkills = [...ctoSkills, ctoTeamDeliveryHealthEvaluator, ctoDisasterRecoveryPlanner];

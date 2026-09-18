@@ -1,0 +1,116 @@
+import { restaurantSkills } from '../data/skills/restaurant';
+import { Tool } from '../types';
+
+function getSkill(id: string): Tool {
+  const s = restaurantSkills.find((t) => t.id === id);
+  if (!s) throw new Error('missing skill: ' + id);
+  return s;
+}
+
+describe('restaurantSkills', () => {
+  it('exports exactly ten skills', () => {
+    expect(restaurantSkills).toHaveLength(10);
+  });
+
+  it('exports unique skill ids', () => {
+    const ids = restaurantSkills.map((s) => s.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('six legacy tools are isSkill:false', () => {
+    const legacy = restaurantSkills.filter((s) => s.isSkill === false);
+    expect(legacy).toHaveLength(6);
+    const legacyIds = legacy.map((s) => s.id).sort();
+    expect(legacyIds).toEqual([
+      'restaurant-financial-advisory',
+      'restaurant-kitchen-service-operations',
+      'restaurant-menu-recipe-management',
+      'restaurant-reservations-guest-experience',
+      'restaurant-staffing-labor',
+      'restaurant-supply-chain-inventory',
+    ].sort());
+  });
+
+  it('legacy tools are self-contained (no __execute_tool)', () => {
+    const legacy = restaurantSkills.filter((s) => s.isSkill === false);
+    for (const s of legacy) {
+      expect((s.manifest.sourceCode as string)).not.toContain('__execute_tool(');
+    }
+  });
+
+  it('four canonical higher-order skills are exported (isSkill not forced false)', () => {
+    const ho = restaurantSkills.filter((s) => s.isSkill !== false);
+    expect(ho).toHaveLength(4);
+    const hoIds = ho.map((s) => s.id).sort();
+    expect(hoIds).toEqual([
+      'restaurant-menu-engineering-cost-strategist',
+      'restaurant-reservations-guest-profile-manager',
+      'restaurant-shift-prep-list-copilot',
+      'restaurant-supply-chain-inventory-reorder-manager',
+    ].sort());
+  });
+
+  it('higher-order wrappers call existing operations via __execute_tool', () => {
+    const pairs: Array<[string, string]> = [
+      ['restaurant-menu-engineering-cost-strategist', 'restaurant-menu-recipe-management'],
+      ['restaurant-shift-prep-list-copilot', 'restaurant-kitchen-service-operations'],
+      ['restaurant-reservations-guest-profile-manager', 'restaurant-reservations-guest-experience'],
+      ['restaurant-supply-chain-inventory-reorder-manager', 'restaurant-supply-chain-inventory'],
+    ];
+    for (const [wrapperId, calleeId] of pairs) {
+      const source = getSkill(wrapperId).manifest.sourceCode as string;
+      expect(source).toContain("__execute_tool('" + calleeId + "'");
+    }
+  });
+
+  it('no wrapper source contains hardcoded success stubs', () => {
+    const hoIds = [
+      'restaurant-menu-engineering-cost-strategist',
+      'restaurant-shift-prep-list-copilot',
+      'restaurant-reservations-guest-profile-manager',
+      'restaurant-supply-chain-inventory-reorder-manager',
+    ];
+    for (const id of hoIds) {
+      const source = getSkill(id).manifest.sourceCode as string;
+      expect(source).not.toMatch(/success:\s*true[^}]*console\.log/);
+      expect(source).toContain('try {');
+      expect(source).toContain('__execute_tool(');
+    }
+  });
+
+  it('external-action wrappers return not-connected without config', () => {
+    for (const id of ['restaurant-reservations-guest-profile-manager', 'restaurant-supply-chain-inventory-reorder-manager']) {
+      const source = getSkill(id).manifest.sourceCode as string;
+      expect(source).toContain('not-connected');
+      expect(source).toMatch(/RESTAURANT_RESERVATION_ENDPOINT|RESTAURANT_SUPPLY_ENDPOINT/);
+    }
+  });
+
+  it('confirmation/dry-run and input descriptions are present', () => {
+    for (const id of [
+      'restaurant-reservations-guest-profile-manager',
+      'restaurant-supply-chain-inventory-reorder-manager',
+    ]) {
+      const props = getSkill(id).inputSchema!.properties as Record<string, any>;
+      expect(props.dryRun).toBeDefined();
+      expect(props.dryRun.description).toBeTruthy();
+      expect(props.confirmBeforeSend).toBeDefined();
+      expect(props.confirmBeforeSend.description).toBeTruthy();
+      expect(props.operation).toBeDefined();
+      expect(props.operation.description).toBeTruthy();
+    }
+  });
+
+  it('all skills have inputSchema, outputSchema, createdAt, updatedAt', () => {
+    for (const skill of restaurantSkills) {
+      expect(skill.id).toBeTruthy();
+      expect(skill.name).toBeTruthy();
+      expect(skill.description).toBeTruthy();
+      expect(skill.inputSchema).toBeDefined();
+      expect(typeof skill.inputSchema!.properties).toBe('object');
+      expect(skill.outputSchema).toBeDefined();
+      expect(skill.createdAt).toBeInstanceOf(Date);
+      expect(skill.updatedAt).toBeInstanceOf(Date);
+    }
+  });
+});

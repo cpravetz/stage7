@@ -14,7 +14,16 @@ async function validateAssistantTools(tools: any[] | undefined) {
     try {
       const res = await fetch(`${toolExecutorUrl}/api/tool-executor/tools/${encodeURIComponent(name)}`);
       if (res.status === 404) {
-        // not a registered global tool/skill — assume inline/custom tool, allow
+        // not a registered global tool/skill — check for orphaned stub entries
+        if (typeof t === 'object' && t !== null) {
+          const desc = t.description as string || '';
+          const schema = t.inputSchema as Record<string, unknown> | undefined;
+          const props = schema?.properties as Record<string, unknown> | undefined;
+          if (desc.startsWith('Run ') && props && Object.keys(props).length === 0) {
+            throw NextGenError.badRequest(`Orphaned tool binding '${name}' resolves to no registered tool and has no real definition`);
+          }
+        }
+        // inline/custom tool with real definition — allow
         continue;
       }
       if (!res.ok) {
@@ -30,6 +39,24 @@ async function validateAssistantTools(tools: any[] | undefined) {
       throw NextGenError.badRequest(`Tool validation failed for '${name}': ${err instanceof Error ? err.message : String(err)}`);
     }
   }
+}
+
+export function validateCatalogIntegrity(catalog: any[]): { valid: boolean; orphaned: string[] } {
+  const orphaned: string[] = [];
+  for (const assistant of catalog) {
+    if (!assistant || !Array.isArray(assistant.tools)) continue;
+    for (const t of assistant.tools) {
+      const name = typeof t === 'string' ? t : t.name;
+      if (!name) continue;
+      const desc = t.description as string || '';
+      const schema = t.inputSchema as Record<string, unknown> | undefined;
+      const props = schema?.properties as Record<string, unknown> | undefined;
+      if (desc.startsWith('Run ') && props && Object.keys(props).length === 0) {
+        orphaned.push(`${assistant.id || 'unknown'}:${name}`);
+      }
+    }
+  }
+  return { valid: orphaned.length === 0, orphaned };
 }
 
 const router: Router = Router();

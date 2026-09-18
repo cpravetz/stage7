@@ -3,9 +3,10 @@ import express, { Application } from 'express'
 import { ToolRegistry } from '../services/ToolRegistry'
 import { ToolExecutor } from '../services/ToolExecutor'
 import { PluginGenerator } from '../services/PluginGenerator'
-import { Tool, PluginGenerationRequest, CredentialRequiredError } from '../types'
+import { Tool, PluginGenerationRequest, CredentialRequiredError, ConfirmationRequiredError } from '../types'
 import toolsRouter from '../routes/tools'
 import { ToolNotFoundError, ValidationError } from '../utils/errors'
+import { eventSkills } from '../data/skills/event/index'
 
 const app: Application = express()
 app.use(express.json())
@@ -202,6 +203,307 @@ describe('ToolExecutor', () => {
       delete process.env.OVERRIDE_TEST_TOKEN;
     }
   })
+
+  it('should enforce confirmBeforeSend — fails without dryRun or confirmation', async () => {
+    const confirmingTool: Tool = {
+      id: 'tool-confirm-1',
+      name: 'Delete Resource',
+      description: 'Delete a resource',
+      type: 'code',
+      manifest: {
+        language: 'javascript',
+        entrypoint: 'index.js',
+        sourceCode: 'console.log("delete");',
+      },
+      confirmBeforeSend: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const execution = await executor.execute(confirmingTool, { action: 'delete' });
+    expect(execution.status).toBe('failed');
+    expect(execution.error).toContain('requires explicit confirmation');
+  });
+
+  it('should allow confirmBeforeSend when dryRun is explicit', async () => {
+    const confirmingTool: Tool = {
+      id: 'tool-confirm-2',
+      name: 'Delete Resource Dry',
+      description: 'Delete a resource with dryRun',
+      type: 'code',
+      manifest: {
+        language: 'javascript',
+        entrypoint: 'index.js',
+        sourceCode: 'console.log("delete");',
+      },
+      confirmBeforeSend: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const execution = await executor.execute(confirmingTool, { action: 'delete', dryRun: true });
+    expect(execution.status).toBe('completed');
+  });
+
+  it('should allow confirmBeforeSend when confirmation is explicit', async () => {
+    const confirmingTool: Tool = {
+      id: 'tool-confirm-3',
+      name: 'Delete Resource Confirm',
+      description: 'Delete a resource with confirmation',
+      type: 'code',
+      manifest: {
+        language: 'javascript',
+        entrypoint: 'index.js',
+        sourceCode: 'console.log("delete");',
+      },
+      confirmBeforeSend: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const execution = await executor.execute(confirmingTool, { action: 'delete', confirmation: true });
+    expect(execution.status).toBe('completed');
+  });
+
+  it('should not require confirmation for tools without confirmBeforeSend', async () => {
+    const normalTool: Tool = {
+      id: 'tool-no-confirm',
+      name: 'Normal Tool',
+      description: 'A normal tool',
+      type: 'code',
+      manifest: {
+        language: 'javascript',
+        entrypoint: 'index.js',
+        sourceCode: 'console.log("ok");',
+      },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const execution = await executor.execute(normalTool, { action: 'delete' });
+    expect(execution.status).toBe('completed');
+  });
+
+  it('should enforce confirmBeforeSend from manifest metadata', async () => {
+    const confirmingTool: Tool = {
+      id: 'tool-confirm-manifest',
+      name: 'Delete Resource Manifest',
+      description: 'Delete a resource via manifest',
+      type: 'code',
+      manifest: {
+        language: 'javascript',
+        entrypoint: 'index.js',
+        sourceCode: 'console.log("delete");',
+        confirmBeforeSend: true,
+      },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const execution = await executor.execute(confirmingTool, { action: 'delete' });
+    expect(execution.status).toBe('failed');
+    expect(execution.error).toContain('requires explicit confirmation');
+  });
+
+  it('should prefer tool-level confirmBeforeSend over manifest', async () => {
+    const confirmingTool: Tool = {
+      id: 'tool-confirm-pref',
+      name: 'Delete Resource Pref',
+      description: 'Delete a resource',
+      type: 'code',
+      manifest: {
+        language: 'javascript',
+        entrypoint: 'index.js',
+        sourceCode: 'console.log("delete");',
+        confirmBeforeSend: false,
+      },
+      confirmBeforeSend: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const execution = await executor.execute(confirmingTool, { action: 'delete' });
+    expect(execution.status).toBe('failed');
+    expect(execution.error).toContain('requires explicit confirmation');
+  });
+
+  it('should enforce confirmBeforeSend from manifest when tool-level is absent', async () => {
+    const confirmingTool: Tool = {
+      id: 'tool-confirm-manifest-only',
+      name: 'Delete Resource Manifest Only',
+      description: 'Delete a resource',
+      type: 'code',
+      manifest: {
+        language: 'javascript',
+        entrypoint: 'index.js',
+        sourceCode: 'console.log("delete");',
+        confirmBeforeSend: true,
+      },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const execution = await executor.execute(confirmingTool, { action: 'delete' });
+    expect(execution.status).toBe('failed');
+    expect(execution.error).toContain('requires explicit confirmation');
+  });
+
+  it('should return not-connected result for external action skill with missing required config', async () => {
+    const externalTool: Tool = {
+      id: 'tool-external-1',
+      name: 'External API Tool',
+      description: 'Calls external API',
+      type: 'code',
+      manifest: {
+        language: 'javascript',
+        entrypoint: 'index.js',
+        sourceCode: 'console.log("test");',
+        system: 'test-system',
+        action: 'test-action',
+        configSchema: {
+          type: 'object',
+          properties: {
+            apiKey: { type: 'string' },
+            baseUrl: { type: 'string' },
+          },
+          required: ['apiKey', 'baseUrl'],
+        },
+      },
+      configSchema: {
+        type: 'object',
+        properties: {
+          apiKey: { type: 'string' },
+          baseUrl: { type: 'string' },
+        },
+        required: ['apiKey', 'baseUrl'],
+      },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const execution = await executor.execute(externalTool, { action: 'test' });
+    expect(execution.status).toBe('failed');
+    expect(execution.error).toContain('Not connected');
+    expect(execution.error).toContain('required config fields missing');
+    expect(execution.error).toContain('apiKey');
+    expect(execution.error).toContain('baseUrl');
+  });
+
+  it('should return failed result for non-external tool with missing required config', async () => {
+    const codeTool: Tool = {
+      id: 'tool-config-1',
+      name: 'Config Tool',
+      description: 'Tool with config',
+      type: 'code',
+      manifest: {
+        language: 'javascript',
+        entrypoint: 'index.js',
+        sourceCode: 'console.log("test");',
+        configSchema: {
+          type: 'object',
+          properties: {
+            apiKey: { type: 'string' },
+          },
+          required: ['apiKey'],
+        },
+      },
+      configSchema: {
+        type: 'object',
+        properties: {
+          apiKey: { type: 'string' },
+        },
+        required: ['apiKey'],
+      },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const execution = await executor.execute(codeTool, { action: 'test' });
+    expect(execution.status).toBe('failed');
+    expect(execution.error).toContain('Missing required config');
+    expect(execution.error).toContain('apiKey');
+  });
+
+  it('should execute successfully when required config and endpoint are provided', async () => {
+    const externalTool: Tool = {
+      id: 'tool-external-2',
+      name: 'External API Tool 2',
+      description: 'Calls external API',
+      type: 'code',
+      manifest: {
+        language: 'javascript',
+        entrypoint: 'index.js',
+        sourceCode: 'console.log("test");',
+        system: 'test-system',
+        action: 'test-action',
+        configSchema: {
+          type: 'object',
+          properties: {
+            apiKey: { type: 'string' },
+          },
+          required: ['apiKey'],
+        },
+      },
+      configSchema: {
+        type: 'object',
+        properties: {
+          apiKey: { type: 'string' },
+        },
+        required: ['apiKey'],
+      },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const execution = await executor.execute(externalTool, {
+      apiKey: 'my-key',
+      baseUrl: 'https://api.example.com',
+      action: 'test',
+    });
+    expect(execution.status).toBe('completed');
+  });
+
+  it('should route reasoning tools through ReasoningExecutor', async () => {
+    const reasoningTool: Tool = {
+      id: 'tool-reasoning-1',
+      name: 'Analyze Pattern',
+      description: 'Analyze a pattern',
+      type: 'reasoning',
+      manifest: {},
+      reasoningConfig: {
+        systemPrompt: 'You are a reasoning tool.',
+        outputFormat: 'json',
+      },
+      inputSchema: { type: 'object', properties: { query: { type: 'string' } } },
+      outputSchema: { type: 'object', properties: { summary: { type: 'string' } } },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const execution = await executor.execute(reasoningTool, { query: 'test pattern' });
+    expect(execution.status).toBe('completed');
+    expect(execution.toolId).toBe(reasoningTool.id);
+  });
+
+  it('should throw ConfirmationRequiredError directly for re-thrown confirmations', async () => {
+    const confirmingTool: Tool = {
+      id: 'tool-confirm-throw',
+      name: 'Confirm Tool',
+      description: 'Tool requiring confirmation',
+      type: 'code',
+      manifest: {
+        language: 'javascript',
+        entrypoint: 'index.js',
+        sourceCode: 'console.log("ok");',
+      },
+      confirmBeforeSend: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    await expect(executor.executeOrRequestCredentials(confirmingTool, { action: 'delete' }))
+      .rejects.toThrow(ConfirmationRequiredError);
+  });
 })
 
 describe('PluginGenerator', () => {
@@ -357,7 +659,7 @@ describe('REST endpoints', () => {
       expect(res.body.toolId).toBe('flat-tool-1');
     });
 
-    it('should resolve registered skill by name when using flat payload', async () => {
+    it('should reject registered skill by name without assistant context when using flat payload', async () => {
       // First register a skill
       const skillTool = {
         id: 'skill-1',
@@ -381,6 +683,36 @@ describe('REST endpoints', () => {
           name: 'Registered Skill',
           type: 'code',
           manifest: {}, // empty - should resolve from registry
+          input: { test: 'skill' },
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain('assistant context');
+    });
+
+    it('should resolve registered skill by name when using flat payload with X-Assistant-Id', async () => {
+      const skillTool = {
+        id: 'skill-1',
+        name: 'Registered Skill',
+        description: 'A registered skill',
+        type: 'code',
+        manifest: {
+          language: 'javascript',
+          entrypoint: 'index.js',
+          sourceCode: 'console.log("skill registered");',
+        },
+        isSkill: true,
+      };
+
+      await request(app).post('/api/tools').send(skillTool);
+
+      const res = await request(app)
+        .post('/api/tools/execute')
+        .set('X-Assistant-Id', 'assistant-123')
+        .send({
+          name: 'Registered Skill',
+          type: 'code',
+          manifest: {},
           input: { test: 'skill' },
         });
 
@@ -601,7 +933,6 @@ describe('REST endpoints', () => {
   describe('Event skill credential alignment', () => {
     it('should have credentialSource envVar matching auth token envVar for event skills', () => {
       // This test validates the event skill definitions
-      const { eventSkills } = require('../data/skills/event/index');
       
       for (const skill of eventSkills) {
         if (skill.manifest?.credentialSource && skill.manifest?.auth) {

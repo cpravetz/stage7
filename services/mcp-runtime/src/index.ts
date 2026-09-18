@@ -151,7 +151,8 @@ if (require.main === module) {
   });
 }
 
-export { MCPToolRegistry, ToolExecutor } from './server/ToolRegistry';
+export { MCPToolRegistry } from './server/ToolRegistry';
+export type { ToolExecutor } from './server/ToolRegistry';
 export { MCPServer } from './server/MCPServer';
 export { StdioTransport } from './transport/StdioTransport';
 export { HttpTransport } from './transport/HttpTransport';
