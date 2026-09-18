@@ -5,7 +5,17 @@ const CAREER_WRAPPER_CONFIG_SCHEMA: SchemaRecord = { type: 'object', properties:
 
 const PORTAL_RECRUITER_WORKFLOW_SOURCE = `(async () => {
 const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
-const application = await __execute_tool('career_apply_execute', { jobIds: input.jobIds || [], dryRun: input.dryRun !== false, connectedPortalTool: input.connectedPortalTool, coverLetters: input.coverLetters });
+let jobIds = input.jobIds || [];
+if (!jobIds.length) {
+  const pipeline = await __execute_tool('career_pipeline_report', {});
+  if (pipeline && pipeline.success && pipeline.data) {
+    const pipelineData = pipeline.data;
+    if (Array.isArray(pipelineData.tracking)) {
+      jobIds = pipelineData.tracking.map((entry) => entry.jobId || entry.id).filter(Boolean);
+    }
+  }
+}
+const application = await __execute_tool('career_apply_execute', { jobIds, dryRun: input.dryRun !== false, connectedPortalTool: input.connectedPortalTool, coverLetters: input.coverLetters });
 if (!application || application.success === false || application.error) {
 console.log(JSON.stringify({ success: false, mode: 'not-connected', error: application && application.error ? application.error : 'Not connected: application execution returned no result; ensure a profile, ranked listings, and a portal connector are available' }));
 return;
@@ -36,10 +46,8 @@ console.log(JSON.stringify({ success: true, data: { applications, outreach: outr
 const PORTAL_RECRUITER_WORKFLOW_INPUT = {
 type: 'object',
 properties: {
-jobIds: { type: 'array', items: { type: 'string' }, description: 'Explicit jobs to apply to' },
 dryRun: { type: 'boolean', description: 'Preview without submitting; defaults to true', default: true },
-connectedPortalTool: { type: 'string', description: 'MCP tool reference for a connected application portal' },
-coverLetters: { type: 'object', description: 'jobId -> generated cover letter text' },
+connectedPortalTool: { type: 'string', description: 'The job portal you want to submit applications through (e.g. LinkedIn, Indeed)' },
 targetCompany: { type: 'string', description: 'Target company for networking outreach' },
 targetPerson: { type: 'string', description: 'Target person for networking outreach' },
 relationshipStage: { type: 'string', enum: ['cold_outreach', 'follow_up', 'thank_you', 'referral_ask'], description: 'Relationship stage' },

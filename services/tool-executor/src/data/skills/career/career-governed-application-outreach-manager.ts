@@ -5,17 +5,25 @@ const CAREER_WRAPPER_CONFIG_SCHEMA: SchemaRecord = { type: 'object', properties:
 
 const GOVERNED_APPLICATION_OUTREACH_MANAGER_SOURCE = `(async () => {
 const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
-
-// Prepare application materials
-const prepare = await __execute_tool('career_profile_intake', {});
-if (!prepare || !prepare.success) {
-  console.log(JSON.stringify({ success: false, mode: 'not-connected', error: prepare && prepare.error ? prepare.error : 'Not connected: profile intake required' }));
-  return;
+let jobIds = input.jobIds || [];
+if (!jobIds.length) {
+  const pipeline = await __execute_tool('career_pipeline_report', {});
+  if (pipeline && pipeline.success && pipeline.data) {
+    const pipelineData = pipeline.data;
+    if (Array.isArray(pipelineData.tracking)) {
+      jobIds = pipelineData.tracking.map((entry) => entry.jobId || entry.id).filter(Boolean);
+    }
+  }
 }
-
-// Draft outreach / resume customizations
-const outreachDraft = await __execute_tool('career_networking_outreach', { targetCompany: input.targetCompany, targetPerson: input.targetPerson, relationshipStage: input.relationshipStage, channel: input.channel });
-const applyRes = await __execute_tool('career_apply_execute', { jobIds: input.jobIds || [], dryRun: input.dryRun !== false });
+  // Prepare application materials
+  const prepare = await __execute_tool('career_profile_intake', {});
+  if (!prepare || !prepare.success) {
+    console.log(JSON.stringify({ success: false, mode: 'not-connected', error: prepare && prepare.error ? prepare.error : 'Not connected: profile intake required' }));
+    return;
+  }
+  // Draft outreach / resume customizations
+  const outreachDraft = await __execute_tool('career_networking_outreach', { targetCompany: input.targetCompany, targetPerson: input.targetPerson, relationshipStage: input.relationshipStage, channel: input.channel });
+  const applyRes = await __execute_tool('career_apply_execute', { jobIds, dryRun: input.dryRun !== false });
 
 if ((!outreachDraft || !outreachDraft.success) && (!applyRes || !applyRes.success)) {
   console.log(JSON.stringify({ success: false, mode: 'not-connected', error: 'Not connected: neither outreach drafting nor application execution is available' }));
@@ -34,7 +42,6 @@ const GOVERNED_APPLICATION_OUTREACH_MANAGER_INPUT = {
     targetPerson: { type: 'string' },
     relationshipStage: { type: 'string' },
     channel: { type: 'string' },
-    jobIds: { type: 'array', items: { type: 'string' } },
     dryRun: { type: 'boolean' },
   },
   required: [],

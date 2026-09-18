@@ -37,7 +37,6 @@ console.log(JSON.stringify({ success: true, data: { template, totalTemplates: da
 const RESUME_TEMPLATE_MANAGER_INPUT = {
 type: 'object',
 properties: {
-templateId: { type: 'string', description: 'Unique resume or cover-letter template identifier' },
 name: { type: 'string', description: 'Template name' },
 type: { type: 'string', enum: ['resume', 'cover-letter'], description: 'Template type' },
 content: { type: 'string', description: 'Template content' },

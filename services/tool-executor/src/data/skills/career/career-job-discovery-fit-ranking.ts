@@ -30,11 +30,11 @@ console.log(JSON.stringify({ success: true, data: { ranked, total: ranked.length
 const JOB_DISCOVERY_FIT_RANKING_INPUT = {
 type: 'object',
 properties: {
-queries: { type: 'array', items: { type: 'string' }, description: 'Target role queries' },
+queries: { type: 'array', items: { type: 'string' }, description: 'Job titles you want to pursue (e.g. Software Engineer, Data Scientist)' },
 locations: { type: 'array', items: { type: 'string' }, description: 'Target locations' },
 minSalary: { type: 'number', description: 'Minimum target compensation' },
 maxSalary: { type: 'number', description: 'Maximum target compensation' },
-connectedJobBoardTools: { type: 'array', items: { type: 'string' }, description: 'Connected job-board MCP tool references' },
+connectedJobBoardTools: { type: 'array', items: { type: 'string' }, description: 'Job boards you have an account with (e.g. LinkedIn, Indeed)' },
 },
 };
 

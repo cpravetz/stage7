@@ -37,11 +37,11 @@ console.log(JSON.stringify({ success: true, data: { ranked: gaps, learningPlan: 
 const UPSKILL_ROLE_TARGETED_LEARNING_PLANNER_INPUT = {
 type: 'object',
 properties: {
-queries: { type: 'array', items: { type: 'string' }, description: 'Target role queries' },
+queries: { type: 'array', items: { type: 'string' }, description: 'Job titles you want to pursue (e.g. Software Engineer, Data Scientist)' },
 locations: { type: 'array', items: { type: 'string' }, description: 'Target locations' },
 minSalary: { type: 'number' },
 maxSalary: { type: 'number' },
-connectedJobBoardTools: { type: 'array', items: { type: 'string' }, description: 'Connected job-board MCP tool references' },
+connectedJobBoardTools: { type: 'array', items: { type: 'string' }, description: 'Job boards you have an account with (e.g. LinkedIn, Indeed)' },
 targetRole: { type: 'string', description: 'Target role for upskilling plan' },
 targetSkills: { type: 'array', items: { type: 'string' }, description: 'Skills to check against job titles' },
 topN: { type: 'integer', description: 'Number of top-ranked roles to include', default: 5 },

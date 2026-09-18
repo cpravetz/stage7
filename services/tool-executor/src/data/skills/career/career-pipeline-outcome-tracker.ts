@@ -12,7 +12,7 @@ return;
 }
 const pipelineData = pipeline.data && typeof pipeline.data === 'object' ? pipeline.data : {};
 const outcome = await __execute_tool('career_outcome', {
-  jobId: input.jobId || '',
+  jobId: input.jobId || (pipelineData.tracking && pipelineData.tracking.length ? pipelineData.tracking[0].jobId || pipelineData.tracking[0].id || '' : ''),
   status: input.status || '',
   feedback: input.feedback || '',
   offerDetails: input.offerDetails || null,
@@ -34,7 +34,6 @@ console.log(JSON.stringify({ success: true, data: { pipeline: pipelineData, outc
 const PIPELINE_OUTCOME_TRACKER_INPUT = {
 type: 'object',
 properties: {
-jobId: { type: 'string', description: 'Job identifier for the outcome to record' },
 status: { type: 'string', description: 'Application outcome status' },
 feedback: { type: 'string', description: 'Interview or application feedback' },
 offerDetails: { type: 'object', description: 'Offer details if applicable' },

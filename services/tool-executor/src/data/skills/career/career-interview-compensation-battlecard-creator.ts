@@ -12,8 +12,19 @@ if (!profileRes || !profileRes.success) {
 }
 const profile = profileRes.data && profileRes.data.profile ? profileRes.data.profile : profileRes.data || profileRes;
 
+let jobId = input.jobId || '';
+if (!jobId) {
+  const pipeline = await __execute_tool('career_pipeline_report', {});
+  if (pipeline && pipeline.success && pipeline.data) {
+    const pipelineData = pipeline.data;
+    if (Array.isArray(pipelineData.tracking) && pipelineData.tracking.length) {
+      jobId = pipelineData.tracking[0].jobId || pipelineData.tracking[0].id || '';
+    }
+  }
+}
+
 // Ask interview-prep generator for company-specific Q&A and negotiation guidance
-const prep = await __execute_tool('career_interview_prep', { jobId: input.jobId, company: input.company });
+const prep = await __execute_tool('career_interview_prep', { jobId, company: input.company });
 const advisory = await __execute_tool('career_advisory', { question: input.advisoryQuestion || 'Generate compensation negotiation points for this role' });
 
 if ((!prep || !prep.success) && (!advisory || !advisory.success)) {
@@ -35,7 +46,6 @@ console.log(JSON.stringify({ success: true, data: { battlecard, pdfPreview: null
 const INTERVIEW_COMPENSATION_BATTLECARD_INPUT = {
   type: 'object',
   properties: {
-    jobId: { type: 'string' },
     company: { type: 'string' },
     advisoryQuestion: { type: 'string' },
   },

@@ -5,7 +5,17 @@ const CAREER_WRAPPER_CONFIG_SCHEMA: SchemaRecord = { type: 'object', properties:
 
 const APPLICATION_EXECUTION_ORCHESTRATOR_SOURCE = `(async () => {
 const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
-const result = await __execute_tool('career_apply_execute', { jobIds: input.jobIds || [], autoApplyThreshold: input.autoApplyThreshold, dryRun: input.dryRun !== false, connectedPortalTool: input.connectedPortalTool, coverLetters: input.coverLetters });
+let jobIds = input.jobIds || [];
+if (!jobIds.length) {
+  const pipeline = await __execute_tool('career_pipeline_report', {});
+  if (pipeline && pipeline.success && pipeline.data) {
+    const pipelineData = pipeline.data;
+    if (Array.isArray(pipelineData.tracking)) {
+      jobIds = pipelineData.tracking.map((entry) => entry.jobId || entry.id).filter(Boolean);
+    }
+  }
+}
+const result = await __execute_tool('career_apply_execute', { jobIds, autoApplyThreshold: input.autoApplyThreshold, dryRun: input.dryRun !== false, connectedPortalTool: input.connectedPortalTool, coverLetters: input.coverLetters });
 if (!result || result.success === false || result.error) {
 console.log(JSON.stringify({ success: false, mode: 'not-connected', error: result && result.error ? result.error : 'Not connected: application execution returned no result; ensure a profile, ranked listings, and a portal connector are available' }));
 return;
@@ -22,11 +32,9 @@ console.log(JSON.stringify({ success: true, data: { applications, errors: data.e
 const APPLICATION_EXECUTION_ORCHESTRATOR_INPUT = {
 type: 'object',
 properties: {
-jobIds: { type: 'array', items: { type: 'string' }, description: 'Explicit jobs to apply to' },
 autoApplyThreshold: { type: 'number', description: 'Apply to every ranked job at or above this fit score' },
 dryRun: { type: 'boolean', description: 'Preview without submitting; defaults to true', default: true },
-connectedPortalTool: { type: 'string', description: 'MCP tool reference for a connected application portal' },
-coverLetters: { type: 'object', description: 'jobId -> generated cover letter text' },
+connectedPortalTool: { type: 'string', description: 'The job portal you want to submit applications through (e.g. LinkedIn, Indeed)' },
 },
 };
 
@@ -53,7 +61,7 @@ required: ['success', 'data'],
 
 const APPLICATION_EXECUTION_ORCHESTRATOR = createCodeSkill({
 id: 'career-application-execution-orchestrator',
-name: 'Application Execution & Orchestrator',
+name: 'Apply to Jobs',
 description: 'Orchestrates multi-portal application submission workflows with dry-run, confirm-before-send, and explicit audit trails. Delegates to career_apply_execute. Provides honest not-connected fallback when no portal is configured or no jobs are selected.',
 manifest: {
 language: 'javascript',

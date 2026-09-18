@@ -5,7 +5,17 @@ const CAREER_WRAPPER_CONFIG_SCHEMA: SchemaRecord = { type: 'object', properties:
 
 const INTERVIEW_PRACTICE_MOCK_INTERVIEWER_SOURCE = `(async () => {
 const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
-const result = await __execute_tool('career_interview_prep', { jobId: input.jobId, stage: input.stage, targetRole: input.targetRole, company: input.company });
+let jobId = input.jobId || '';
+if (!jobId) {
+  const pipeline = await __execute_tool('career_pipeline_report', {});
+  if (pipeline && pipeline.success && pipeline.data) {
+    const pipelineData = pipeline.data;
+    if (Array.isArray(pipelineData.tracking) && pipelineData.tracking.length) {
+      jobId = pipelineData.tracking[0].jobId || pipelineData.tracking[0].id || '';
+    }
+  }
+}
+const result = await __execute_tool('career_interview_prep', { jobId, stage: input.stage, targetRole: input.targetRole, company: input.company });
 if (!result || result.success === false || result.error) {
 console.log(JSON.stringify({ success: false, mode: 'not-connected', error: result && result.error ? result.error : 'Not connected: interview preparation could not be generated; ensure a profile and ranked job exist' }));
 return;
@@ -21,12 +31,10 @@ console.log(JSON.stringify({ success: true, data: { interviewPrep: practiceData,
 const INTERVIEW_PRACTICE_MOCK_INTERVIEWER_INPUT = {
 type: 'object',
 properties: {
-jobId: { type: 'string', description: 'Target job identifier from discovery rankings' },
 stage: { type: 'string', enum: ['phone_screen', 'technical', 'onsite', 'final'], description: 'Interview stage' },
 targetRole: { type: 'string', description: 'Target role title' },
 company: { type: 'string', description: 'Target company name' },
 },
-required: ['jobId'],
 };
 
 const INTERVIEW_PRACTICE_MOCK_INTERVIEWER_OUTPUT = {

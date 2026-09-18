@@ -27,6 +27,30 @@ interface HITLApproval {
 
 type SchemaRecord = Record<string, unknown>;
 
+type EnumOption = string | number | boolean | { value: unknown; label?: unknown } | Record<string, unknown>;
+
+interface AgentArtifact {
+  id?: string;
+  name?: string;
+  type?: string;
+  content?: string;
+  url?: string;
+}
+
+interface ToolCatalogEntry {
+  id: string;
+  name: string;
+  description: string;
+  isSkill?: boolean;
+  inputSchema?: Record<string, unknown>;
+  configSchema?: Record<string, unknown>;
+  manifest?: Record<string, unknown>;
+}
+
+interface EntityToolWithManifest extends EntityTool {
+  manifest?: Record<string, unknown>;
+}
+
 const formatTextValue = (value: unknown): string => {
   if (value === null || value === undefined) return '';
   if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value);
@@ -150,9 +174,9 @@ const SchemaFields = ({ schema, values, onChange, namePrefix = 'skill-field' }: 
               onChange={(e) => onChange(key, e.target.value)}
             >
               <option value="">Select an option</option>
-              {(fieldSchema.enum as unknown[]).map((option) => {
-                const optionValue = typeof option === 'object' && option !== null ? (option as any).value : option;
-                const optionLabel = typeof option === 'object' && option !== null ? (option as any).label : option;
+              {(fieldSchema.enum as EnumOption[]).map((option) => {
+                const optionValue = typeof option === 'object' && option !== null ? (option as Record<string, unknown>).value : option;
+                const optionLabel = typeof option === 'object' && option !== null ? (option as Record<string, unknown>).label ?? option : option;
                 return <option key={String(optionValue)} value={String(optionValue)}>{String(optionLabel)}</option>;
               })}
             </select>
@@ -237,7 +261,7 @@ const EntityWorkspace = () => {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [agentArtifacts, setAgentArtifacts] = useState<Array<any>>([]);
+  const [agentArtifacts, setAgentArtifacts] = useState<AgentArtifact[]>([]);
 
 
   const [editingSystemPrompt, setEditingSystemPrompt] = useState('');
@@ -272,7 +296,7 @@ const EntityWorkspace = () => {
         (selectedEntity.tools || []).map((t) => {
           const tool = typeof t === 'string'
             ? null
-            : (t as EntityTool & { displayName?: string; configSchema?: SchemaRecord });
+            : (t as EntityToolWithManifest);
           return {
             name: typeof t === 'string' ? t : t.name,
             displayName: tool?.displayName,
@@ -280,7 +304,7 @@ const EntityWorkspace = () => {
             inputSchema: typeof t === 'string' ? {} : t.inputSchema || {},
             configSchema: typeof t === 'string'
               ? undefined
-              : (tool?.configSchema || (t as any).manifest?.configSchema),
+              : (tool?.configSchema || tool?.manifest?.configSchema) as Record<string, unknown> | undefined,
             enabled: true,
             config: typeof t === 'string' ? {} : (t.config || {}),
           };
@@ -296,17 +320,17 @@ const EntityWorkspace = () => {
   }, [selectedEntity]);
 
   useEffect(() => {
-    fetchJSON<{ tools: Array<{ id: string; name: string; description: string; isSkill?: boolean; inputSchema?: Record<string, unknown>; configSchema?: Record<string, unknown>; manifest?: Record<string, unknown> }> }>('/api/tool-executor/tools')
+    fetchJSON<{ tools: ToolCatalogEntry[] }>('/api/tool-executor/tools')
       .then((data) => {
         const tools = data.tools || [];
-        setAvailableSkills(tools.filter((t: any) => t.isSkill).map((t: any) => ({
+        setAvailableSkills(tools.filter((t) => t.isSkill).map((t) => ({
           id: t.id,
           name: t.name,
           description: t.description,
           inputSchema: t.inputSchema,
-          configSchema: t.manifest?.configSchema || t.configSchema,
+          configSchema: (t.manifest?.configSchema || t.configSchema) as Record<string, unknown> | undefined,
         })));
-        setAvailableTools(tools.filter((t: any) => !t.isSkill).map((t: any) => ({ id: t.id, name: t.name, description: t.description })));
+        setAvailableTools(tools.filter((t) => !t.isSkill).map((t) => ({ id: t.id, name: t.name, description: t.description })));
       })
       .catch(() => {
         setAvailableSkills([]);
@@ -362,7 +386,6 @@ const EntityWorkspace = () => {
   const [runInputs, setRunInputs] = useState<Record<string, Record<string, unknown>>>({});
   const [runResults, setRunResults] = useState<Record<string, string>>({});
   const [runningMap, setRunningMap] = useState<Record<string, boolean>>({});
-  const [bindModalOpen, setBindModalOpen] = useState(false);
 
   useEffect(() => {
     setRunInputs((prev) => {
@@ -675,7 +698,6 @@ const EntityWorkspace = () => {
                   return (
                     <div key={tool.name} className="card skill-panel">
                       <h4>{getToolDisplayName(tool)}</h4>
-                      {getToolDescription(tool) && <p className="muted">{getToolDescription(tool)}</p>}
                       <div className="skill-body">
                         {hasSettings && (
                           <div className="skill-settings-summary">
@@ -750,62 +772,7 @@ const EntityWorkspace = () => {
                   );
                 })
               )}
-              <div style={{ marginTop: 8 }}>
-                <button onClick={() => setBindModalOpen(true)} className="secondary">Bind Skill</button>
-              </div>
             </div>
-            {bindModalOpen && (
-              <div className="modal-overlay">
-                <div className="modal">
-                  <div className="modal-header">
-                    <h3>Bind a Skill</h3>
-                    <button className="close" onClick={() => setBindModalOpen(false)}>×</button>
-                  </div>
-                  <div className="modal-body">
-                    {availableSkills.length === 0 ? (
-                      <p>No skills available.</p>
-                    ) : (
-                      <div className="skill-list">
-                        {availableSkills.map((s) => {
-                          const already = toolBindings.some((tb) => tb.name === s.id || tb.name === s.name);
-                          return (
-                            <div key={s.id} className="skill-list-item">
-                              <div style={{ flex: 1 }}>
-                                <strong>{s.name}</strong>
-                                <div className="muted">{s.description}</div>
-                              </div>
-                              <div>
-                                <button disabled={already} onClick={() => {
-                                  if (already) return;
-                                  const newBinding: ToolBinding = {
-                                    name: s.id,
-                                    displayName: s.name,
-                                    description: s.description || s.name,
-                                    enabled: true,
-                                    config: {},
-                                    inputSchema: s.inputSchema || { type: 'object', properties: {} },
-                                    configSchema: s.configSchema,
-                                  };
-                                  setToolBindings((prev) => {
-                                    const nb = [...prev, newBinding];
-                                    scheduleSave(nb);
-                                    return nb;
-                                  });
-                                  setBindModalOpen(false);
-                                }}>{already ? 'Bound' : 'Bind'}</button>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                  <div className="modal-footer">
-                    <button onClick={() => setBindModalOpen(false)} className="secondary">Close</button>
-                  </div>
-                </div>
-              </div>
-            )}
 
           </div>
         )}
@@ -949,47 +916,6 @@ const EntityWorkspace = () => {
                </div>
                {saveError && <div className="error-banner">{saveError}</div>}
              </div>
-              <div className="card">
-                <h3>Available Skills</h3>
-                <p className="hint">Choose a skill to add it to this assistant.</p>
-                {availableSkills.length === 0 ? (
-                  <p>No skills available.</p>
-                ) : (
-                  <ul className="available-tools-list">
-                    {availableSkills.map((s) => (
-                      <li key={s.id}>
-                        <strong>{s.name}</strong>
-                        <p>{s.description}</p>
-                        <button
-                          className="link-button"
-                            onClick={() => {
-                            if (!toolBindings.find((t) => t.name === s.id || t.name === s.name)) {
-                              setToolBindings((prev) => {
-                                const nb = [
-                                  ...prev,
-                                  {
-                                    name: s.id,
-                                    displayName: s.name,
-                                    description: s.description,
-                                    inputSchema: s.inputSchema || { type: 'object', properties: {} },
-                                    configSchema: s.configSchema,
-                                    enabled: true,
-                                    config: {},
-                                  },
-                                ];
-                                scheduleSave(nb);
-                                return nb;
-                              });
-                            }
-                          }}
-                        >
-                          Bind another Skill
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
               <div className="card">
                 <h3>Available General Tools</h3>
                 <p className="hint">Legacy Stage7 tools registered in the platform (not bindable to assistants).</p>
@@ -1282,11 +1208,11 @@ const EntityWorkspace = () => {
                       <strong>{a.name || a.id}</strong>
                       {a.type && <span className="badge">{a.type}</span>}
                     </div>
-                    {(a.content || (a as any).url) && (
+                    {(a.content || a.url) && (
                       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                         <button onClick={() => {
-                          if ((a as any).url) {
-                            window.open((a as any).url, '_blank');
+                          if (a.url) {
+                            window.open(a.url, '_blank');
                           } else {
                             const blob = new Blob([a.content || ''], { type: 'text/plain' });
                             const url = URL.createObjectURL(blob);
@@ -1294,9 +1220,9 @@ const EntityWorkspace = () => {
                           }
                         }}>Open</button>
                         <button onClick={() => {
-                          if ((a as any).url) {
+                          if (a.url) {
                             const aEl = document.createElement('a');
-                            aEl.href = (a as any).url;
+                            aEl.href = a.url;
                             aEl.target = '_blank';
                             document.body.appendChild(aEl);
                             aEl.click();

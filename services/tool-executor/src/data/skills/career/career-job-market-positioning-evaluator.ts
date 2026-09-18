@@ -40,7 +40,7 @@ console.log(JSON.stringify({ success: true, data: { marketSignals, recommendatio
 const JOB_MARKET_POSITIONING_EVALUATOR_INPUT = {
   type: 'object',
   properties: {
-    queries: { type: 'array', items: { type: 'string' } },
+    queries: { type: 'array', items: { type: 'string' }, description: 'Job titles you want to pursue (e.g. Software Engineer, Data Scientist)' },
     targetComp: { type: 'number' },
   },
 };
