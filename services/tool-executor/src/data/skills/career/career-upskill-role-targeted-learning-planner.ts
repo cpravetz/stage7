@@ -5,7 +5,7 @@ const CAREER_WRAPPER_CONFIG_SCHEMA: SchemaRecord = { type: 'object', properties:
 
 const UPSKILL_ROLE_TARGETED_LEARNING_PLANNER_SOURCE = `(async () => {
 const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
-const discovery = await __execute_tool('career_job_discovery', { queries: input.queries || [], locations: input.locations || [], minSalary: input.minSalary, maxSalary: input.maxSalary, connectedJobBoardTools: input.connectedJobBoardTools || [] });
+const discovery = await __execute_tool('career_job_discovery', { queries: input.jobTitles || [], locations: input.locations || [], minSalary: input.minSalary, maxSalary: input.maxSalary, connectedJobBoardTools: input.connectedJobBoardTools || [] });
 if (!discovery || discovery.success === false || discovery.error) {
 console.log(JSON.stringify({ success: false, mode: 'not-connected', error: discovery && discovery.error ? discovery.error : 'Not connected: job discovery yielded no data; connect a job-board source or run career_job_discovery first' }));
 return;
@@ -37,7 +37,7 @@ console.log(JSON.stringify({ success: true, data: { ranked: gaps, learningPlan: 
 const UPSKILL_ROLE_TARGETED_LEARNING_PLANNER_INPUT = {
 type: 'object',
 properties: {
-queries: { type: 'array', items: { type: 'string' }, description: 'Job titles you want to pursue (e.g. Software Engineer, Data Scientist)' },
+jobTitles: { type: 'array', items: { type: 'string' }, description: 'Job titles you want to pursue (e.g. Software Engineer, Data Scientist)' },
 locations: { type: 'array', items: { type: 'string' }, description: 'Target locations' },
 minSalary: { type: 'number' },
 maxSalary: { type: 'number' },

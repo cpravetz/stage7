@@ -13,7 +13,7 @@ if (!profileRes || !profileRes.success) {
 const profile = profileRes.data && profileRes.data.profile ? profileRes.data.profile : profileRes.data || profileRes;
 
 // Attempt discovery and ranking where available
-const discovery = await __execute_tool('career_job_discovery', { queries: input.queries || [] });
+const discovery = await __execute_tool('career_job_discovery', { queries: input.jobTitles || [] });
 const rank = await __execute_tool('career_rank', { items: (discovery && discovery.data && discovery.data.listings) || discovery && discovery.data || [] });
 
 if ((!discovery || !discovery.success) && (!rank || !rank.success)) {
@@ -40,7 +40,7 @@ console.log(JSON.stringify({ success: true, data: { marketSignals, recommendatio
 const JOB_MARKET_POSITIONING_EVALUATOR_INPUT = {
   type: 'object',
   properties: {
-    queries: { type: 'array', items: { type: 'string' }, description: 'Job titles you want to pursue (e.g. Software Engineer, Data Scientist)' },
+    jobTitles: { type: 'array', items: { type: 'string' }, description: 'Job titles you want to pursue (e.g. Software Engineer, Data Scientist)' },
     targetComp: { type: 'number' },
   },
 };
