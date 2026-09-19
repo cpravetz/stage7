@@ -8,7 +8,7 @@ const input = __tool_input || {};
 const fs = require('fs');
 const path = require('path');
 
-const eventId = input.eventId || input.gameId || '';
+const eventId = input.event || input.gameId || '';
 const teamA = input.teamA || 'Team A';
 const teamB = input.teamB || 'Team B';
 const sport = input.sport || 'generic';
@@ -96,7 +96,7 @@ console.log(JSON.stringify({ success: true, data: analysis }));
 const MATCHUP_ODDS_INPUT = {
   type: 'object',
   properties: {
-    eventId: SchemaProps.text({ description: 'Event/game identifier' }),
+    event: SchemaProps.text({ description: 'Event/game identifier' }),
     teamA: SchemaProps.text({ description: 'Team A name' }),
     teamB: SchemaProps.text({ description: 'Team B name' }),
     sport: SchemaProps.text({ description: 'Sport context', default: 'generic' }),
@@ -113,7 +113,7 @@ const MATCHUP_ODDS_INPUT = {
       },
     }, { description: 'Historical line movement data' }),
   },
-  required: ['eventId', 'oddsA', 'oddsB'],
+  required: ['event', 'oddsA', 'oddsB'],
 };
 
 const CODE_OUTPUT = {

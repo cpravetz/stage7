@@ -99,7 +99,7 @@ const apiKey = globalThis.process && globalThis.process.env && globalThis.proces
 const provider = globalThis.process && globalThis.process.env && globalThis.process.env.FINANCE_PROVIDER || 'default';
 
 if (!endpointUrl) {
-  console.log(JSON.stringify({ success: true, operation, mode: 'dry-run', report: null, dataResult: null, cleaningResult: null, documentResult: null, error: null }));
+  console.log(JSON.stringify({ success: false, operation, mode: 'not-connected', report: null, dataResult: null, cleaningResult: null, documentResult: null, error: 'Not connected: FINANCE_REPORTING_ENDPOINT is not configured' }));
   return;
 }
 

@@ -65,6 +65,21 @@ const formatNumberValue = (value: unknown): number | '' => (
   typeof value === 'number' ? value : ''
 );
 
+// Tool execution can fail before returning JSON (proxy errors, HTML error pages, empty bodies),
+// so read the body as text first rather than assuming res.json() will succeed.
+const parseToolExecuteResponse = async (res: Response): Promise<string> => {
+  const raw = await res.text();
+  if (!raw) {
+    return `Error: server returned an empty response (status ${res.status})`;
+  }
+  try {
+    return JSON.stringify(JSON.parse(raw), null, 2);
+  } catch {
+    const preview = raw.length > 500 ? `${raw.slice(0, 500)}…` : raw;
+    return `Error: server returned a non-JSON response (status ${res.status}):\n${preview}`;
+  }
+};
+
 const humanizeKey = (key: string): string => {
   const words = key
     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
@@ -85,8 +100,21 @@ const getSchemaProperties = (schema?: SchemaRecord): Record<string, SchemaRecord
     : {};
 };
 
+
+// Internal field to user-facing UI label mapping (recommendation #4).
+// Internal fields are retained for API use but displayed with friendly labels.
+const FIELD_LABEL_MAP: Record<string, string> = {
+  operation: 'Action',
+  provider: 'Service Provider',
+  endpointUrl: 'Connect Service',
+  baseUrl: 'Connect Service',
+  apiKey: 'API Key',
+  dryRun: 'Preview only',
+  confirmation: 'Approve & send',
+};
+
 const getSchemaTitle = (key: string, schema?: SchemaRecord): string => (
-  String(schema?.title || schema?.label || schema?.['x-label'] || humanizeKey(key))
+  String(schema?.title || schema?.label || schema?.['x-label'] || FIELD_LABEL_MAP[key] || humanizeKey(key))
 );
 
 const getSchemaDescription = (schema?: SchemaRecord): string => (
@@ -99,6 +127,32 @@ const isLongTextSchema = (key: string, schema?: SchemaRecord): boolean => (
   schema?.format === 'textarea' ||
   /message|prompt|content|description|instructions|text|body|query|keywords|topic|resume|job/i.test(key) ||
   /prompt|message|content|instructions/i.test(getSchemaDescription(schema))
+);
+
+// A file-upload field is an object schema shaped like { name, mimeType, content } —
+// content should come from a picked file, not be hand-typed as base64/text.
+const isFileUploadSchema = (schema?: SchemaRecord): boolean => {
+  if (!schema || schema.type !== 'object') return false;
+  const props = getSchemaProperties(schema);
+  return Boolean(props.name && props.mimeType && props.content);
+};
+
+const readFileAsUploadValue = (file: File): Promise<{ name: string; mimeType: string; content: string }> => (
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error || new Error('Failed to read file'));
+    reader.onload = () => {
+      const result = String(reader.result || '');
+      const isText = /^text\/|json|xml/.test(file.type) || /\.(md|txt)$/i.test(file.name);
+      const content = isText ? result : result.split(',')[1] || '';
+      resolve({ name: file.name, mimeType: file.type || 'application/octet-stream', content });
+    };
+    if (/^text\/|json|xml/.test(file.type) || /\.(md|txt)$/i.test(file.name)) {
+      reader.readAsText(file);
+    } else {
+      reader.readAsDataURL(file);
+    }
+  })
 );
 
 const getInitialInputValues = (schema?: SchemaRecord): Record<string, unknown> => {
@@ -191,6 +245,23 @@ const SchemaFields = ({ schema, values, onChange, namePrefix = 'skill-field' }: 
               value={arrayValue.map((item) => formatTextValue(item)).join(', ')}
               onChange={(e) => onChange(key, e.target.value.split(',').map((item) => item.trim()).filter(Boolean))}
             />
+          );
+        } else if (isFileUploadSchema(fieldSchema)) {
+          const fileValue = value && typeof value === 'object' ? value as Record<string, unknown> : undefined;
+          control = (
+            <div className="skill-file-upload">
+              <input
+                id={fieldId}
+                className={controlClass}
+                type="file"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  onChange(key, await readFileAsUploadValue(file));
+                }}
+              />
+              {fileValue?.name ? <span className="skill-file-name">Selected: {String(fileValue.name)}</span> : null}
+            </div>
           );
         } else if (fieldSchema.type === 'object' && getSchemaProperties(fieldSchema)) {
           const nestedValues = value && typeof value === 'object' && !Array.isArray(value)
@@ -726,14 +797,14 @@ const EntityWorkspace = () => {
                                       headers: { 'Content-Type': 'application/json' },
                                       body: JSON.stringify({ name: tool.name, arguments: args }),
                                     });
-                                    const data = await res.json();
-                                    setRunResults((r) => ({ ...r, [tool.name]: JSON.stringify(data, null, 2) }));
+                                    const resultText = await parseToolExecuteResponse(res);
+                                    setRunResults((r) => ({ ...r, [tool.name]: resultText }));
                                   } catch (err) {
                                     setRunResults((r) => ({ ...r, [tool.name]: String(err instanceof Error ? err.message : err) }));
                                   } finally {
                                     setRunningMap((m) => ({ ...m, [tool.name]: false }));
                                   }
-                                }} disabled={Boolean(runningMap[tool.name])}>{runningMap[tool.name] ? 'Running…' : ''}</button>
+                                }} disabled={Boolean(runningMap[tool.name])}>{runningMap[tool.name] ? 'Running…' : 'Run'}</button>
                               </div>
                               {runResults[tool.name] && (
                                 <div className="skill-result">
@@ -754,8 +825,8 @@ const EntityWorkspace = () => {
                                       headers: { 'Content-Type': 'application/json' },
                                       body: JSON.stringify({ name: tool.name, arguments: {} }),
                                     });
-                                    const data = await res.json();
-                                    setRunResults((r) => ({ ...r, [tool.name]: JSON.stringify(data, null, 2) }));
+                                    const resultText = await parseToolExecuteResponse(res);
+                                    setRunResults((r) => ({ ...r, [tool.name]: resultText }));
                                   } catch (err) {
                                     setRunResults((r) => ({ ...r, [tool.name]: String(err instanceof Error ? err.message : err) }));
                                   } finally {
@@ -887,8 +958,8 @@ const EntityWorkspace = () => {
                               headers: { 'Content-Type': 'application/json' },
                               body: JSON.stringify({ name: runTool.name, arguments: parsed }),
                             });
-                            const data = await res.json();
-                            setRunResult(JSON.stringify(data, null, 2));
+                            const data = await parseToolExecuteResponse(res);
+                            setRunResult(data);
                           } catch (err) {
                             setRunResult(err instanceof Error ? err.message : String(err));
                           } finally {

@@ -1,4 +1,4 @@
-import { Tool, ToolExecution, CredentialRequest, CredentialRequiredError, ConfirmationRequiredError, SchemaRecord } from '../types';
+import { Tool, ToolExecution, WorkflowState, CredentialRequest, CredentialRequiredError, ConfirmationRequiredError, SchemaRecord } from '../types';
 import logger from '../utils/logger';
 import { EmailExecutor } from '../executors/EmailExecutor';
 import { SearchExecutor } from '../executors/SearchExecutor';
@@ -51,6 +51,8 @@ private mcpServerConfigs = new Map<string, MCPServerConfig>();
 private pendingCredentialRequests = new Map<string, PendingCredentialRequest>();
 private pendingCredentialOverrides = new Map<string, Record<string, string>>();
 private nestedExecutionDepth = 0;
+private activeContextObject: string | null = null;
+private executionStates: Map<string, WorkflowState> = new Map();
 private toolRegistry: Map<string, Tool> | null = null;
 
 constructor(toolRegistry?: Map<string, Tool>) {
@@ -64,7 +66,8 @@ async execute(tool: Tool, input: Record<string, unknown>): Promise<ToolExecution
     logger.info({ executionId, toolId: tool.id, toolName: tool.name, toolType: tool.type }, 'Tool execution started');
 
     try {
-      this.enforceConfirmation(tool, input);
+      this.enforceConfirmation(tool, input, executionId);
+      this.validateSameContext(tool, input);
       const configResult = this.validateConfigSchema(tool, input, executionId);
       if (configResult) {
         return configResult;
@@ -75,6 +78,7 @@ async execute(tool: Tool, input: Record<string, unknown>): Promise<ToolExecution
       const completedAt = new Date();
 
       logger.info({ executionId, toolId: tool.id, status: 'completed' }, 'Tool execution completed');
+      this.transitionTo(executionId, 'executed');
 
       return {
         executionId,
@@ -82,6 +86,7 @@ async execute(tool: Tool, input: Record<string, unknown>): Promise<ToolExecution
         input,
         output,
         status: 'completed',
+        workflowState: this.getWorkflowState(executionId),
         startedAt,
         completedAt,
       };
@@ -97,6 +102,7 @@ async execute(tool: Tool, input: Record<string, unknown>): Promise<ToolExecution
         input,
         error: errorMessage,
         status: 'failed',
+        workflowState: this.getWorkflowState(executionId),
         startedAt,
         completedAt,
       };
@@ -114,7 +120,8 @@ async executeOrRequestCredentials(tool: Tool, input: Record<string, unknown>, pr
     }
 
     try {
-      this.enforceConfirmation(tool, input);
+      this.enforceConfirmation(tool, input, executionId);
+      this.validateSameContext(tool, input);
       const configResult = this.validateConfigSchema(tool, input, executionId);
       if (configResult) {
         return configResult;
@@ -280,14 +287,77 @@ this.pendingCredentialRequests.delete(executionId);
 return this.executeOrRequestCredentials(pending.tool, pending.input);
 }
 
-  private enforceConfirmation(tool: Tool, input: Record<string, unknown>): void {
+  private enforceConfirmation(tool: Tool, input: Record<string, unknown>, executionId: string): void {
     const confirmBeforeSend = tool.confirmBeforeSend === true || (tool.manifest?.confirmBeforeSend === true);
-    if (!confirmBeforeSend) return;
+    if (!confirmBeforeSend) {
+      this.setWorkflowState(executionId, 'analysis');
+      return;
+    }
     const hasDryRun = input.dryRun === true;
     const hasConfirmation = input.confirmation === true;
     if (!hasDryRun && !hasConfirmation) {
+      this.setWorkflowState(executionId, 'draft');
       throw new ConfirmationRequiredError(tool);
     }
+    if (hasConfirmation) {
+      this.transitionTo(executionId, 'approved');
+    } else {
+      this.setWorkflowState(executionId, 'analysis');
+    }
+  }
+
+  private extractContext(input: Record<string, unknown>): string | null {
+    const contextKeys = ['patient', 'patientId', 'targetRole', 'targetRoles', 'jobId', 'jobIds', 'jobTitle', 'campaign', 'campaignId', 'ticket', 'ticketId', 'ticket', 'case', 'matter', 'lead', 'opportunity', 'event', 'eventId', 'object', 'context', 'operation'];
+    for (const key of contextKeys) {
+      if (input[key] !== undefined && input[key] !== null && input[key] !== '') {
+        const val = input[key];
+        if (typeof val === 'string') return `${key}:${val}`;
+        if (Array.isArray(val) && val.length > 0) return `${key}:${val.map(String).join(',')}`;
+        if (typeof val === 'object') return `${key}:${JSON.stringify(val).slice(0, 60)}`;
+      }
+    }
+    return null;
+  }
+
+  private validateSameContext(tool: Tool, input: Record<string, unknown>): void {
+    const currentContext = this.extractContext(input);
+    if (currentContext && this.activeContextObject && this.activeContextObject !== currentContext) {
+      logger.warn({ activeContext: this.activeContextObject, currentContext, toolId: tool.id }, 'Cross-object handoff detected');
+    }
+    if (currentContext) {
+      this.activeContextObject = currentContext;
+    }
+  }
+
+  private readonly stateTransitions: Record<WorkflowState, WorkflowState[]> = {
+    analysis: ['recommendation', 'rejected'],
+    recommendation: ['draft', 'rejected'],
+    draft: ['approved', 'rejected'],
+    approved: ['executed', 'rejected'],
+    executed: [],
+    rejected: ['draft'],
+  };
+
+  private setWorkflowState(executionId: string, state: WorkflowState): void {
+    this.executionStates.set(executionId, state);
+  }
+
+  private getWorkflowState(executionId: string): WorkflowState | undefined {
+    return this.executionStates.get(executionId);
+  }
+
+  private transitionTo(executionId: string, state: WorkflowState): boolean {
+    const current = this.getWorkflowState(executionId);
+    if (!current) {
+      this.setWorkflowState(executionId, state);
+      return true;
+    }
+    const allowed = this.stateTransitions[current];
+    if (allowed && allowed.includes(state)) {
+      this.setWorkflowState(executionId, state);
+      return true;
+    }
+    return false;
   }
 
   private nestedExecutorCallback(): (toolId: string, input: Record<string, unknown>) => Promise<Record<string, unknown>> {

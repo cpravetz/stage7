@@ -295,6 +295,23 @@ const CONTENT_PERFORMANCE_SEO = createExternalActionSkill({
   timeoutMs: 120000,
 });
 
+export interface WorkflowStage {
+  name: string;
+  description: string;
+  skills: Tool[];
+}
+
+export interface AssistantWorkflow {
+  assistant: string;
+  productObject: string;
+  flow: string;
+  stages: WorkflowStage[];
+}
+
+CONTENT_DRAFTING_ADAPTATION.manifest.workflowStage = 'draft';
+CONTENT_PERFORMANCE_SEO.manifest.workflowStage = 'optimize';
+MULTI_CHANNEL_PUBLISHING.manifest.workflowStage = 'publish';
+
 export const contentSkills = [CONTENT_DRAFTING_ADAPTATION, MULTI_CHANNEL_PUBLISHING, CONTENT_PERFORMANCE_SEO];
 const CONTENT_HIGHER_ORDER_TRIGGERS = [
   { kind: 'user' as const, phrase_examples: ['evaluate content strategy', 'plan the editorial calendar', 'stage a CMS publish'] },
@@ -316,3 +333,19 @@ const GOVERNED_PUBLISHING_CMS_DISPATCHER: Tool = { id: 'governed-publishing-cms-
 
 for (const tool of contentSkills) { if (![CONTENT_STRATEGY_SEO_EVALUATOR.id, EDITORIAL_CALENDAR_ARTICLE_COPILOT.id, GOVERNED_PUBLISHING_CMS_DISPATCHER.id].includes(tool.id)) { tool.isSkill = false } }
 contentSkills.push(CONTENT_STRATEGY_SEO_EVALUATOR, EDITORIAL_CALENDAR_ARTICLE_COPILOT, GOVERNED_PUBLISHING_CMS_DISPATCHER)
+
+CONTENT_STRATEGY_SEO_EVALUATOR.manifest.workflowStage = 'optimize';
+EDITORIAL_CALENDAR_ARTICLE_COPILOT.manifest.workflowStage = 'plan';
+GOVERNED_PUBLISHING_CMS_DISPATCHER.manifest.workflowStage = 'publish';
+
+export const contentWorkflow: AssistantWorkflow = {
+  assistant: 'Content',
+  productObject: 'content piece',
+  flow: 'plan → draft → optimize → publish',
+  stages: [
+    { name: 'plan', description: 'Editorial calendar and brief planning', skills: contentSkills.filter((s) => s.manifest.workflowStage === 'plan') },
+    { name: 'draft', description: 'Content drafting and adaptation', skills: contentSkills.filter((s) => s.manifest.workflowStage === 'draft') },
+    { name: 'optimize', description: 'Performance, SEO, and strategy optimization', skills: contentSkills.filter((s) => s.manifest.workflowStage === 'optimize') },
+    { name: 'publish', description: 'Multi-channel publishing and dispatch', skills: contentSkills.filter((s) => s.manifest.workflowStage === 'publish') },
+  ],
+};

@@ -1,3 +1,4 @@
+import json
 import re
 
 with open('/mnt/1tbHD/ckt_web/stage7/services/tool-executor/src/data/skills/legal/index.ts', 'r') as f:
@@ -66,12 +67,25 @@ triggers = {
     }
 }
 
+def quoted(value):
+    return json.dumps(value, ensure_ascii=False)
+
+
 def format_triggers(t):
-    lines = ['  triggers: {']
-    for key, values in t.items():
-        vals = ', '.join([f'"{v}"' for v in values])
-        lines.append(f'    {key}: [{vals}],')
-    lines.append('  },')
+    lines = ['  triggers: [']
+    lines.append(
+        "    { kind: 'user', phrase_examples: ["
+        + ", ".join(quoted(value) for value in t["user"])
+        + "] },"
+    )
+    for value in t["schedule"]:
+        lines.append(f"    {{ kind: 'schedule', cadence: {quoted(value)} }},")
+    for value in t["event"]:
+        lines.append(f"    {{ kind: 'event', on: {quoted(value)} }},")
+    for value in t["data"]:
+        lines.append(f"    {{ kind: 'data', condition: {quoted(value)} }},")
+    lines[-1] = lines[-1].rstrip()
+    lines.append('  ],')
     return '\n'.join(lines)
 
 # The legal file has two types of skills:
@@ -155,9 +169,14 @@ for end_line, skill_id in insertions:
     triggers_str = format_triggers(triggers[skill_id])
     lines.insert(end_line, '  ' + triggers_str + '\n')
 
+updated = ''.join(lines)
+if 'triggers: [' not in updated or 'triggers: {' in updated:
+    raise RuntimeError('Validation failed: triggers must use SkillTrigger[] array format')
+
+print('Validation passed: triggers are in SkillTrigger[] array format')
 with open('/mnt/1tbHD/ckt_web/stage7/services/tool-executor/src/data/skills/legal/index.ts', 'w') as f:
     f.writelines(lines)
 
-content = ''.join(lines)
-count = content.count('triggers: {')
+content = updated
+count = content.count('triggers: [')
 print(f"Total triggers occurrences: {count}")

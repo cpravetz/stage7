@@ -24,7 +24,21 @@ const merged = [...existing];
 for (const r of ranked) { const idx = merged.findIndex((m) => m.id === r.id); if (idx >= 0) merged[idx] = r; else merged.push(r); }
 fs.mkdirSync(require('path').dirname(listPath), { recursive: true });
 fs.writeFileSync(listPath, JSON.stringify(merged, null, 2));
-console.log(JSON.stringify({ success: true, data: { ranked, total: ranked.length, queriesUsed: data.queriesUsed || input.queries || [], storagePath: listPath, note: data.note || undefined, delegatedTo: 'career_job_discovery', generatedAt: new Date().toISOString() } }));
+
+// If an auto-apply threshold is set, hand qualifying jobs straight to Apply to Jobs
+// instead of making the user re-enter the threshold on a separate skill.
+let autoApplied = null;
+if (typeof input.autoApplyThreshold === 'number') {
+  const qualifying = ranked.filter((job) => (job.fitScore || 0) >= input.autoApplyThreshold);
+  if (qualifying.length) {
+    const applyRes = await __execute_tool('career_apply_execute', { jobIds: qualifying.map((job) => job.id), dryRun: input.dryRun !== false });
+    autoApplied = applyRes && applyRes.success ? applyRes.data : { error: applyRes && applyRes.error ? applyRes.error : 'Auto-apply did not run' };
+  } else {
+    autoApplied = { note: 'No ranked jobs met the auto-apply threshold' };
+  }
+}
+
+console.log(JSON.stringify({ success: true, data: { ranked, total: ranked.length, queriesUsed: data.queriesUsed || input.queries || [], storagePath: listPath, autoApplied, note: data.note || undefined, delegatedTo: ['career_job_discovery'].concat(autoApplied ? ['career_apply_execute'] : []), generatedAt: new Date().toISOString() } }));
 })();`;
 
 const JOB_DISCOVERY_FIT_RANKING_INPUT = {
@@ -34,7 +48,9 @@ jobTitles: { type: 'array', items: { type: 'string' }, description: 'Job titles 
 locations: { type: 'array', items: { type: 'string' }, description: 'Target locations' },
 minSalary: { type: 'number', description: 'Minimum target compensation' },
 maxSalary: { type: 'number', description: 'Maximum target compensation' },
-connectedJobBoardTools: { type: 'array', items: { type: 'string' }, description: 'Job boards you have an account with (e.g. LinkedIn, Indeed)' },
+connectedJobBoardTools: { type: 'array', items: { type: 'string' }, description: 'Job boards you have a paid or member account with. Leave empty to search public boards that do not require membership.' },
+autoApplyThreshold: { type: 'number', description: 'If set, automatically submit an application (via Apply to Jobs) to every ranked job scoring at or above this fit score' },
+dryRun: { type: 'boolean', description: 'Preview auto-applications without submitting; defaults to true', default: true },
 },
 };
 
@@ -51,7 +67,8 @@ total: { type: 'number' },
 queriesUsed: { type: 'array' },
 storagePath: { type: 'string' },
 note: { type: 'string' },
-delegatedTo: { type: 'string' },
+autoApplied: { type: 'object' },
+delegatedTo: { type: 'array', items: { type: 'string' } },
 generatedAt: { type: 'string', format: 'date-time' },
 },
 },
@@ -63,14 +80,14 @@ required: ['success', 'data'],
 const JOB_DISCOVERY_FIT_RANKING = createCodeSkill({
 id: 'career-job-discovery-fit-ranking',
 name: 'Job Discovery & Fit Ranking',
-description: 'Discovers roles across boards, scores fit and ATS compatibility, and ranks opportunities by match quality. Delegates to career_job_discovery and stores ranked results. Reports not-connected when discovery yields no data.',
+description: 'Discovers roles across boards, scores fit and ATS compatibility, and ranks opportunities by match quality. Optionally auto-submits applications to roles meeting an auto-apply threshold via Apply to Jobs. Delegates to career_job_discovery and stores ranked results. Reports not-connected when discovery yields no data.',
 manifest: {
 language: 'javascript',
 entrypoint: 'index.js',
 sourceCode: JOB_DISCOVERY_FIT_RANKING_SOURCE,
 configSchema: CAREER_WRAPPER_CONFIG_SCHEMA,
 actionLabel: 'Discover & Rank',
-lowerOrderTools: ['career_job_discovery'],
+lowerOrderTools: ['career_job_discovery', 'career_apply_execute'],
 },
 inputSchema: JOB_DISCOVERY_FIT_RANKING_INPUT,
 outputSchema: JOB_DISCOVERY_FIT_RANKING_OUTPUT,

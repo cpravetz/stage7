@@ -40,8 +40,8 @@ properties: {
 name: { type: 'string', description: 'Template name' },
 type: { type: 'string', enum: ['resume', 'cover-letter'], description: 'Template type' },
 content: { type: 'string', description: 'Template content' },
-variables: { type: 'array', items: { type: 'string' }, description: 'Template variable names' },
-tags: { type: 'array', items: { type: 'string' }, description: 'Template tags' },
+variables: { type: 'array', items: { type: 'string' }, description: 'Template variable names (configuration, not run-time data)' },
+tags: { type: 'array', items: { type: 'string' }, description: 'Template tags (configuration, not run-time data)' },
 resumeFile: {
   type: 'object',
   description: 'Resume file used to create a resume template',

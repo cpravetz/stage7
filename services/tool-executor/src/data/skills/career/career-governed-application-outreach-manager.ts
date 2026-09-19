@@ -5,13 +5,13 @@ const CAREER_WRAPPER_CONFIG_SCHEMA: SchemaRecord = { type: 'object', properties:
 
 const GOVERNED_APPLICATION_OUTREACH_MANAGER_SOURCE = `(async () => {
 const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
-let jobIds = input.jobIds || [];
+let targetRoles = input.targetRoles || [];
 if (!jobIds.length) {
   const pipeline = await __execute_tool('career_pipeline_report', {});
   if (pipeline && pipeline.success && pipeline.data) {
     const pipelineData = pipeline.data;
     if (Array.isArray(pipelineData.tracking)) {
-      jobIds = pipelineData.tracking.map((entry) => entry.jobId || entry.id).filter(Boolean);
+      targetRoles = pipelineData.tracking.map((entry) => entry.jobId || entry.id).filter(Boolean);
     }
   }
 }
@@ -23,7 +23,7 @@ if (!jobIds.length) {
   }
   // Draft outreach / resume customizations
   const outreachDraft = await __execute_tool('career_networking_outreach', { targetCompany: input.targetCompany, targetPerson: input.targetPerson, relationshipStage: input.relationshipStage, channel: input.channel });
-  const applyRes = await __execute_tool('career_apply_execute', { jobIds, dryRun: input.dryRun !== false });
+  const applyRes = await __execute_tool('career_apply_execute', { targetRoles, dryRun: input.dryRun !== false });
 
 if ((!outreachDraft || !outreachDraft.success) && (!applyRes || !applyRes.success)) {
   console.log(JSON.stringify({ success: false, mode: 'not-connected', error: 'Not connected: neither outreach drafting nor application execution is available' }));
@@ -58,8 +58,8 @@ const GOVERNED_APPLICATION_OUTREACH_MANAGER_OUTPUT = {
 
 const GOVERNED_APPLICATION_OUTREACH_MANAGER = createCodeSkill({
   id: 'career-governed-application-outreach-manager',
-  name: 'Governed Application & Outreach Manager',
-  description: 'Customizes resumes and cover letters, drafts outreach messages, stages confirm-before-send submissions, and records audit logs. Delegates to career_networking_outreach and career_apply_execute.',
+  name: 'Application & Outreach Manager',
+  description: 'Customizes resumes and cover letters, drafts outreach messages, and stages submissions for your review before anything is sent, with a full audit log. Delegates to career_networking_outreach and career_apply_execute.',
   manifest: {
     language: 'javascript',
     entrypoint: 'index.js',

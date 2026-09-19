@@ -1,5 +1,5 @@
 import { ctoSkills } from '../data/skills/cto';
-import { ctoCanonicalSkills } from '../data/skills/cto-canonical';
+import { ctoCanonicalSkills } from '../data/skills/cto';
 import { Tool } from '../types';
 
 function getSkill(id: string): Tool {

@@ -1,3 +1,4 @@
+import json
 import re
 
 with open('/mnt/1tbHD/ckt_web/stage7/services/tool-executor/src/data/skills/product/index.ts', 'r') as f:
@@ -54,12 +55,23 @@ triggers = {
     }
 }
 
+def quoted(value):
+    return json.dumps(value, ensure_ascii=False)
+
+
 def format_triggers(t):
-    lines = ['  triggers: {']
-    for key, values in t.items():
-        vals = ', '.join([f'"{v}"' for v in values])
-        lines.append(f'    {key}: [{vals}],')
-    lines.append('  },')
+    lines = ['  triggers: [']
+    lines.append(
+        f"    {{ kind: 'user', phrase_examples: [{', '.join(quoted(v) for v in t['user'])}] }},"
+    )
+    for value in t["schedule"]:
+        lines.append(f"    {{ kind: 'schedule', cadence: {quoted(value)} }},")
+    for value in t["event"]:
+        lines.append(f"    {{ kind: 'event', on: {quoted(value)} }},")
+    for value in t["data"]:
+        lines.append(f"    {{ kind: 'data', condition: {quoted(value)} }},")
+    lines[-1] = lines[-1].rstrip()
+    lines.append('  ],')
     return '\n'.join(lines)
 
 skill_starts = []
@@ -72,7 +84,6 @@ current_skill_id = None
 skip_brace_counting_this_line = False
 
 for i, line in enumerate(lines):
-    # Check for template literal start/end
     if not in_template:
         backtick_pos = line.find('`')
         if backtick_pos != -1:
@@ -83,14 +94,13 @@ for i, line in enumerate(lines):
         if backtick_pos != -1:
             in_template = False
             continue
-    
+
     if in_template:
         continue
-    
-    # Check for factory function start
+
     if 'createCodeSkill({' in line:
         current_factory_start = i
-        brace_count = 0  # Will be incremented by brace counting below
+        brace_count = line.count('{')
         skip_brace_counting_this_line = True
         for j in range(i+1, min(i+10, len(lines))):
             m = re.search(r"id: '([^']+)'", lines[j])
@@ -100,7 +110,7 @@ for i, line in enumerate(lines):
                 break
     elif 'createExternalActionSkill({' in line:
         current_factory_start = i
-        brace_count = 0
+        brace_count = line.count('{')
         skip_brace_counting_this_line = True
         for j in range(i+1, min(i+10, len(lines))):
             m = re.search(r"id: '([^']+)'", lines[j])
@@ -108,8 +118,7 @@ for i, line in enumerate(lines):
                 current_skill_id = m.group(1)
                 skill_starts.append((i, current_skill_id, 'createExternalActionSkill'))
                 break
-    
-    # Count braces outside templates
+
     if current_factory_start != -1 and not skip_brace_counting_this_line:
         open_braces = line.count('{')
         close_braces = line.count('}')
@@ -125,7 +134,6 @@ for i, line in enumerate(lines):
 print(f"Found {len(skill_starts)} skill starts: {[s[1] for s in skill_starts]}")
 print(f"Found {len(skill_ends)} skill ends: {[e[1] for e in skill_ends]}")
 
-# Insert triggers before each skill end
 insertions = []
 for end_line, skill_id in skill_ends:
     if skill_id in triggers:
@@ -137,9 +145,12 @@ for end_line, skill_id in insertions:
     triggers_str = format_triggers(triggers[skill_id])
     lines.insert(end_line, triggers_str + '\n')
 
+content = ''.join(lines)
+if 'triggers: {' in content:
+    raise RuntimeError("Validation failed: triggers are still in object format instead of SkillTrigger[] array format")
+if 'triggers: [' not in content:
+    raise RuntimeError("Validation failed: no triggers array found in output")
+print("Validation passed: triggers are in SkillTrigger[] array format")
+
 with open('/mnt/1tbHD/ckt_web/stage7/services/tool-executor/src/data/skills/product/index.ts', 'w') as f:
     f.writelines(lines)
-
-content = ''.join(lines)
-count = content.count('triggers: {')
-print(f"Total triggers occurrences: {count}")

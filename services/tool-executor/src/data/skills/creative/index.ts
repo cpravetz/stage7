@@ -236,7 +236,7 @@ const TREND_PLANNING_ADVISORY = createExternalActionSkill({
       sceneCount: SchemaProps.number({ description: 'Number of scenes to plan' }),
       content: SchemaProps.text({ description: 'Existing content to revise/build upon', multiline: true }),
       outline: { type: 'object', description: 'Structured outline for content' },
-      campaignId: SchemaProps.text({ description: 'Associated campaign identifier' }),
+      campaign: SchemaProps.text({ description: 'Associated campaign identifier' }),
       endpointUrl: SchemaProps.text({ description: 'Optional endpoint override' }),
       dryRun: SchemaProps.boolean({ description: 'Validate without executing' }),
     },

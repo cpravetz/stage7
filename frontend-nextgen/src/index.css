@@ -1281,6 +1281,17 @@ a:hover {
   height: 16px;
 }
 
+.skill-file-upload {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.skill-file-name {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
 .skill-nested-fields {
   display: grid;
   gap: 8px;

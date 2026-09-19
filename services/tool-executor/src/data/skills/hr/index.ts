@@ -11,7 +11,7 @@ import { createExternalActionSkill, createCodeSkill, SchemaProps } from '../code
 
 const CANDIDATE_SCREENING = createCodeSkill({
   id: 'candidate-screening',
-  name: 'Candidate Screening & Scheduling Manager',
+  name: 'Applicant Review and Interview Coordination',
   description: 'Filters inbound applicant profiles against role criteria, dispatches initial screening surveys, and coordinates interview availability. Dry-run mode and explicit confirmation required for scheduling operations.',
   manifest: {
     language: 'javascript',
@@ -38,10 +38,13 @@ function computeScore(resumeText, jobRequirements) {
   const resumeWords = resumeText.toLowerCase().split(/[^a-zA-Z0-9_]+/).filter(Boolean);
   const reqWords = jobRequirements.toLowerCase().split(/[^a-zA-Z0-9_]+/).filter(Boolean);
   if (!reqWords.length) return 0;
-  const matched = reqWords.filter((w) => resumeWords.includes(w));
+  const exactMatched = reqWords.filter((w) => resumeWords.includes(w));
+  const partialMatched = reqWords.filter((w) => !exactMatched.includes(w) && w.length >= 3 && resumeWords.some((rw) => rw.includes(w)));
+  const matched = [...exactMatched, ...partialMatched];
   const raw = (matched.length / reqWords.length) * 100;
   const score = Math.max(1, Math.round(raw)) || 0;
-  return { score: Math.min(100, score), matched, gaps: reqWords.filter((w) => !resumeWords.includes(w)) };
+  const gaps = reqWords.filter((w) => !matched.includes(w));
+  return { score: Math.min(100, score), matched, gaps, partialMatched };
 }
 
 function assessCandidate(resumeText, assessmentData) {
@@ -339,6 +342,34 @@ const hrSkills = [
   { ...HIRING_ANALYTICS_COMPLIANCE, isSkill: false },
 ];
 
+export interface WorkflowStage {
+  name: string;
+  description: string;
+  skills: Tool[];
+}
+
+export interface AssistantWorkflow {
+  assistant: string;
+  productObject: string;
+  flow: string;
+  stages: WorkflowStage[];
+}
+
+CANDIDATE_SCREENING.manifest.workflowStage = 'screening';
+RECRUITING_OPS.manifest.workflowStage = 'interview';
+HIRING_ANALYTICS_COMPLIANCE.manifest.workflowStage = 'decision';
+
 export { hrSkills };
 
 export const hrCanonicalSkills = hrSkills;
+
+export const hrWorkflow: AssistantWorkflow = {
+  assistant: 'HR',
+  productObject: 'applicant',
+  flow: 'screening → interview → decision',
+  stages: [
+    { name: 'screening', description: 'Resume screening and candidate assessment', skills: hrSkills.filter((s) => s.manifest.workflowStage === 'screening') },
+    { name: 'interview', description: 'Interview scheduling and coordination', skills: hrSkills.filter((s) => s.manifest.workflowStage === 'interview') },
+    { name: 'decision', description: 'Hiring analytics and compliance evaluation', skills: hrSkills.filter((s) => s.manifest.workflowStage === 'decision') },
+  ],
+};

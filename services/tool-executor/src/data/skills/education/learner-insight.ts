@@ -60,7 +60,7 @@ export const LEARNER_INSIGHT = createExternalActionSkill({
     type: 'object',
     properties: {
       operation: SchemaProps.select(['learning-styles', 'performance', 'progress', 'motivation', 'engagement', 'at-risk', 'comprehensive'], { description: 'Analysis type' }),
-      learnerId: { type: 'string', description: 'Student/learner identifier' },
+      learner: SchemaProps.text({ description: 'Select learner' }),
       courseId: { type: 'string', description: 'Course identifier' },
       dateRange: { type: 'object', description: 'Analysis period' },
       includeComparisons: { type: 'boolean', description: 'Include class/cohort comparisons', default: true },
@@ -68,7 +68,7 @@ export const LEARNER_INSIGHT = createExternalActionSkill({
       endpointUrl: SchemaProps.text({ description: 'Optional endpoint override' }),
       dryRun: SchemaProps.boolean({ description: 'Validate without executing' }),
     },
-    required: ['operation', 'learnerId'],
+    required: ['operation', 'learner'],
   },
   outputSchema: EDUCATION_EXTERNAL_OUTPUT_SCHEMA,
   timeoutMs: 60000,

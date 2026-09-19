@@ -71,6 +71,8 @@ export interface Tool {
   confirmBeforeSend?: boolean;
 }
 
+export type WorkflowState = 'analysis' | 'recommendation' | 'draft' | 'approved' | 'executed' | 'rejected';
+
 export interface ToolExecution {
   executionId: string;
   toolId: string;
@@ -78,6 +80,7 @@ export interface ToolExecution {
   output?: Record<string, unknown>;
   error?: string;
   status: 'pending' | 'running' | 'completed' | 'failed';
+  workflowState?: WorkflowState;
   startedAt: Date;
   completedAt?: Date;
 }

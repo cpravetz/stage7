@@ -65,7 +65,7 @@ const VENDOR_CONTRACT_MANAGEMENT = createExternalActionSkill({
       contractData: { type: 'object', description: 'Contract terms: scope, deliverables, timeline, payment schedule, cancellation, liability' },
       paymentId: { type: 'string', description: 'Payment identifier' },
       paymentData: { type: 'object', description: 'Payment: amount, date, method, invoice reference, purpose' },
-      eventId: { type: 'string', description: 'Event identifier' },
+      event: { type: 'string', description: 'Event identifier' },
       filters: { type: 'object', description: 'List filters: category, status, event' },
       endpointUrl: SchemaProps.text({ description: 'Optional endpoint override' }),
       dryRun: SchemaProps.boolean({ description: 'Validate without executing' }),

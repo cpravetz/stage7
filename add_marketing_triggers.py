@@ -1,3 +1,4 @@
+import json
 import re
 
 with open('/mnt/1tbHD/ckt_web/stage7/services/tool-executor/src/data/skills/marketing/index.ts', 'r') as f:
@@ -60,13 +61,24 @@ triggers = {
     }
 }
 
+def quoted(value):
+    return json.dumps(value, ensure_ascii=False)
+
+
 def format_triggers(t):
-    lines = ['  triggers: {']
-    for key, values in t.items():
-        vals = ', '.join([f'"{v}"' for v in values])
-        lines.append(f'    {key}: [{vals}],')
-    lines.append('  },')
+    lines = ['  triggers: [']
+    for v in t['user']:
+        lines.append(f"    {{ kind: 'user', phrase_examples: [{', '.join(quoted(x) for x in t['user'])}] }},")
+        break
+    for v in t['schedule']:
+        lines.append(f"    {{ kind: 'schedule', cadence: {quoted(v)} }},")
+    for v in t['event']:
+        lines.append(f"    {{ kind: 'event', on: {quoted(v)} }},")
+    for v in t['data']:
+        lines.append(f"    {{ kind: 'data', condition: {quoted(v)} }},")
+    lines.append('  ],')
     return '\n'.join(lines)
+
 
 # Marketing has:
 # 1. Plain object skills (plan-campaign, analyze-performance) with createdAt: new Date(), updatedAt: new Date()
@@ -102,10 +114,10 @@ for i, line in enumerate(lines):
         if '`' in line:
             in_template = False
             continue
-    
+
     if in_template:
         continue
-    
+
     if 'createExternalActionSkill({' in line:
         current_factory_start = i
         brace_count = 0
@@ -115,7 +127,7 @@ for i, line in enumerate(lines):
             if m:
                 current_skill_id = m.group(1)
                 break
-    
+
     if current_factory_start != -1 and not skip_brace_counting:
         open_braces = line.count('{')
         close_braces = line.count('}')
@@ -139,9 +151,15 @@ for end_line, skill_id in insertions:
     triggers_str = format_triggers(triggers[skill_id])
     lines.insert(end_line, '  ' + triggers_str + '\n')
 
-with open('/mnt/1tbHD/ckt_web/stage7/services/tool-executor/src/data/skills/marketing/index.ts', 'w') as f:
-    f.writelines(lines)
+output = ''.join(lines)
 
-content = ''.join(lines)
-count = content.count('triggers: {')
-print(f"Total triggers occurrences: {count}")
+if 'triggers: {' in output:
+    raise ValueError("Validation failed: output still contains triggers in object format (triggers: {)")
+
+if 'triggers: [' not in output:
+    raise ValueError("Validation failed: output does not contain triggers in array format (triggers: [)")
+
+print("Validation passed: triggers are in SkillTrigger[] array format")
+
+with open('/mnt/1tbHD/ckt_web/stage7/services/tool-executor/src/data/skills/marketing/index.ts', 'w') as f:
+    f.write(output)

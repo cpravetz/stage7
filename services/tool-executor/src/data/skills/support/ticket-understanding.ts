@@ -14,7 +14,7 @@ export const TICKET_UNDERSTANDING = createCodeSkill({
 const fs = require('fs');
 const path = require('path');
 const operation = input.operation || 'resolve-ticket';
-const ticketId = input.ticketId || '';
+const ticketId = input.ticket || '';
 const issue = input.issue || '';
 const query = input.query || '';
 const text = input.text || '';
@@ -31,7 +31,7 @@ fs.mkdirSync(baseDir, { recursive: true });
 function loadJSON(fp) { if (!fs.existsSync(fp)) return []; try { return JSON.parse(fs.readFileSync(fp, 'utf8')); } catch(e) { return []; } }
 function resolveTicket(tid, iss) {
   const store = loadJSON(ticketPath);
-  const ticket = { id: 'ticket_' + Date.now(), ticketId: tid, issue: iss, resolution: '', status: 'open', createdAt: new Date().toISOString(), source: 'local' };
+  const ticket = { id: 'ticket_' + Date.now(), ticketId: tid, issue: iss, resolution: 'No resolution provided', status: 'open', createdAt: new Date().toISOString(), source: 'local' };
   store.push(ticket);
   fs.writeFileSync(ticketPath, JSON.stringify(store, null, 2));
   return { success: true, operation: 'resolve-ticket', data: { ticket, storePath: ticketPath } };
@@ -71,7 +71,7 @@ console.log(JSON.stringify(result));`,
     type: 'object',
     properties: {
       operation: SchemaProps.select(['resolve-ticket', 'sentiment-analysis', 'issue-analysis', 'search-kb'], { description: 'Operation to perform' }),
-      ticketId: SchemaProps.text({ description: 'Ticket identifier' }),
+      ticket: SchemaProps.text({ description: 'Ticket identifier' }),
       issue: SchemaProps.text({ description: 'Issue description to resolve' }),
       query: SchemaProps.text({ description: 'Search query for knowledge base' }),
       text: SchemaProps.text({ description: 'Text to analyze for sentiment' }),

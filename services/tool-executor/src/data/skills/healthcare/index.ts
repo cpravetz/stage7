@@ -16,7 +16,7 @@ const path = require('path');
 
 const symptoms = input.symptoms || [];
 const duration = input.duration || '';
-const patientId = input.patientId || '';
+      const patient = input.patient || '';
 const operation = input.operation || 'assess';
 const clinicalContext = input.clinicalContext || '';
 const patientHistory = input.patientHistory || [];
@@ -54,7 +54,7 @@ function assessUrgency(symptoms, vitalSigns) {
 
 const decision = {
   id: 'cds_' + Date.now(),
-  operation, patientId, symptoms, duration, clinicalContext,
+    operation, patient, symptoms, duration, clinicalContext,
   patientHistory, medications, allergies, vitalSigns, riskFactors,
   urgency: assessUrgency(symptoms, vitalSigns),
   differentialDiagnoses: symptoms.length ? symptoms.map(s => ({
@@ -82,7 +82,7 @@ console.log(JSON.stringify(result));
       operation: SchemaProps.select(['assess', 'risk', 'care-plan', 'triage'], { description: 'Clinical operation type: assess for symptom assessment, risk for risk scoring, care-plan for care planning, triage for urgency triage' }),
       symptoms: SchemaProps.stringArray({ description: 'List of patient symptoms (free text)' }),
       duration: SchemaProps.text({ description: 'Duration of symptoms (e.g., 3 days, 2 weeks)' }),
-      patientId: SchemaProps.text({ description: 'Patient identifier' }),
+      patient: SchemaProps.text({ description: 'Select patient' }),
       clinicalContext: SchemaProps.text({ description: 'Relevant clinical context, including chief complaint and history of present illness' }),
       patientHistory: SchemaProps.stringArray({ description: 'Relevant patient medical history items' }),
       medications: SchemaProps.stringArray({ description: 'Current medications (names/doses)' }),
@@ -152,11 +152,11 @@ const RECORDS_SCHEDULING_OPS = createExternalActionSkill({
     },
     required: ['baseUrl', 'token'],
   },
-  inputSchema: {
-    type: 'object',
-    properties: {
-      operation: SchemaProps.select(['medical-record', 'record-tagging', 'record-search', 'appointment-scheduler', 'schedule-optimizer'], { description: 'The operation to perform across records and scheduling subsystems' }),
-      patientId: SchemaProps.text({ description: 'Patient identifier' }),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        operation: SchemaProps.select(['medical-record', 'record-tagging', 'record-search', 'appointment-scheduler', 'schedule-optimizer'], { description: 'The operation to perform across records and scheduling subsystems' }),
+        patient: SchemaProps.text({ description: 'Select patient' }),
       recordType: SchemaProps.select(['encounter', 'diagnosis', 'medication', 'allergy', 'immunization', 'procedure', 'vital', 'lab', 'imaging', 'note'], { description: 'Type of medical record' }),
       data: SchemaProps.object({}, { description: 'Record data for create/update operations' }),
       tags: SchemaProps.stringArray({ description: 'Tags to apply or search for' }),
@@ -165,13 +165,13 @@ const RECORDS_SCHEDULING_OPS = createExternalActionSkill({
       filters: SchemaProps.object({}, { description: 'Search and filter criteria' }),
       dateRange: SchemaProps.object({ start: SchemaProps.text({ description: 'Start date' }), end: SchemaProps.text({ description: 'End date' }) }, { description: 'Date range for filtering' }),
       appointmentType: SchemaProps.text({ description: 'Type of appointment' }),
-      providerId: SchemaProps.text({ description: 'Provider identifier' }),
-      facilityId: SchemaProps.text({ description: 'Facility identifier' }),
+      provider: SchemaProps.text({ description: 'Provider identifier' }),
+      facility: SchemaProps.text({ description: 'Facility identifier' }),
       startTime: SchemaProps.text({ description: 'Appointment start time' }),
       endTime: SchemaProps.text({ description: 'Appointment end time' }),
       optimizationMode: SchemaProps.select(['utilization', 'continuity', 'access', 'balanced'], { description: 'Schedule optimization objective' }),
-      providerIds: SchemaProps.stringArray({ description: 'Provider identifiers for optimization' }),
-      facilityIds: SchemaProps.stringArray({ description: 'Facility identifiers for optimization' }),
+      providers: SchemaProps.stringArray({ description: 'Provider identifiers for optimization' }),
+      facilities: SchemaProps.stringArray({ description: 'Facility identifiers for optimization' }),
       limit: SchemaProps.integer({ description: 'Maximum number of results', default: 50 }),
       offset: SchemaProps.integer({ description: 'Result offset for pagination', default: 0 }),
       dryRun: SchemaProps.boolean({ description: 'Validate without executing', default: true }),
@@ -216,11 +216,11 @@ const PATIENT_COMMUNICATION = createExternalActionSkill({
     },
     required: ['baseUrl', 'apiKey'],
   },
-  inputSchema: {
-    type: 'object',
-    properties: {
-      operation: SchemaProps.select(['send', 'schedule', 'template', 'history', 'preferences', 'opt-out'], { description: 'Communication operation: send for direct messages, schedule for recurring, template for template ops, history for past messages, preferences for settings, opt-out for opt-out management' }),
-      patientId: SchemaProps.text({ description: 'Patient identifier' }),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        operation: SchemaProps.select(['send', 'schedule', 'template', 'history', 'preferences', 'opt-out'], { description: 'Communication operation: send for direct messages, schedule for recurring, template for template ops, history for past messages, preferences for settings, opt-out for opt-out management' }),
+        patient: SchemaProps.text({ description: 'Select patient' }),
       channel: SchemaProps.select(['email', 'sms', 'portal', 'voice', 'fax'], { description: 'Communication channel' }),
       templateId: SchemaProps.text({ description: 'Message template identifier' }),
       subject: SchemaProps.text({ description: 'Message subject' }),
@@ -277,9 +277,9 @@ const RESOURCE_COORDINATION = createExternalActionSkill({
       operation: SchemaProps.select(['allocate', 'release', 'transfer', 'status', 'forecast', 'request', 'approve', 'match', 'rank', 'filter', 'refer', 'network', 'capacity'], { description: 'Operation type: allocate/release/transfer/status/forecast for resource ops, match/rank/filter/refer/network/capacity for patient-resource matching' }),
       resourceType: SchemaProps.select(['bed', 'equipment', 'room', 'staff', 'device', 'supply'], { description: 'Type of resource' }),
       resourceId: SchemaProps.text({ description: 'Resource identifier' }),
-      facilityId: SchemaProps.text({ description: 'Facility identifier' }),
-      patientId: SchemaProps.text({ description: 'Patient identifier' }),
-      quantity: SchemaProps.integer({ description: 'Quantity to allocate' }),
+       facility: SchemaProps.text({ description: 'Facility identifier' }),
+       patient: SchemaProps.text({ description: 'Select patient' }),
+       quantity: SchemaProps.integer({ description: 'Quantity to allocate' }),
       startTime: SchemaProps.text({ description: 'Start time (ISO 8601)' }),
       endTime: SchemaProps.text({ description: 'End time (ISO 8601)' }),
       priority: SchemaProps.select(['routine', 'urgent', 'emergency'], { description: 'Request priority' }),
@@ -322,8 +322,8 @@ const metric = input.metric || '';
 const period = input.period || '30d';
 const dateRange = input.dateRange || {};
 const granularity = input.granularity || 'day';
-const facilityId = input.facilityId || '';
-const providerId = input.providerId || '';
+const facility = input.facility || '';
+  const provider = input.provider || '';
 const filterCriteria = input.filterCriteria || {};
 
 const baseDir = process.env.HEALTHCARE_HOME || path.join('/tmp/healthcare');
@@ -403,8 +403,8 @@ console.log(JSON.stringify(result));
       metric: SchemaProps.text({ description: 'Metric name to analyze (e.g., patient_volume, avg_length_of_stay, bed_occupancy)' }),
       period: SchemaProps.select(['7d', '30d', '90d', 'YTD', '1y'], { description: 'Time period for analysis', default: '30d' }),
       dateRange: SchemaProps.object({ start: SchemaProps.text({ description: 'Start date (ISO 8601)' }), end: SchemaProps.text({ description: 'End date (ISO 8601)' }) }, { description: 'Custom date range for analysis' }),
-      facilityId: SchemaProps.text({ description: 'Facility identifier for filtering' }),
-      providerId: SchemaProps.text({ description: 'Provider identifier for filtering' }),
+      facility: SchemaProps.text({ description: 'Facility identifier for filtering' }),
+      provider: SchemaProps.text({ description: 'Provider identifier for filtering' }),
       filterCriteria: SchemaProps.object({}, { description: 'Additional filter criteria as key-value pairs' }),
       granularity: SchemaProps.select(['day', 'week', 'month', 'quarter'], { description: 'Time granularity for aggregation', default: 'day' }),
       format: SchemaProps.select(['json', 'csv', 'pdf'], { description: 'Output format for export' }),
@@ -448,6 +448,19 @@ import { healthcarePatientCarePlanEducationalBriefingCopilot } from './healthcar
 import { APPOINTMENT_PATIENT_INTAKE_DISPATCHER as healthcareAppointmentPatientIntakeDispatcher } from './healthcare-appointment-patient-intake-dispatcher';
 import { careResourceReferralCoordinator } from './care-resource-referral-coordinator';
 
+export interface WorkflowStage {
+  name: string;
+  description: string;
+  skills: Tool[];
+}
+
+export interface AssistantWorkflow {
+  assistant: string;
+  productObject: string;
+  flow: string;
+  stages: WorkflowStage[];
+}
+
 export const healthcareSkills: Tool[] = [
   { ...CLINICAL_DECISION_SUPPORT, isSkill: false },
   { ...RECORDS_SCHEDULING_OPS, isSkill: false },
@@ -462,9 +475,35 @@ export const healthcareSkills: Tool[] = [
 ];
 
 export const healthcareCanonicalSkills: Tool[] = [
-  healthcareClinicalPracticeWorkflowEvaluator,
-  healthcareClinicalDecisionSupportEvaluator,
-  healthcarePatientCarePlanEducationalBriefingCopilot,
-  healthcareAppointmentPatientIntakeDispatcher,
-  careResourceReferralCoordinator,
+  { ...healthcareClinicalPracticeWorkflowEvaluator, isSkill: true },
+  { ...healthcareClinicalDecisionSupportEvaluator, isSkill: true },
+  { ...healthcarePatientCarePlanEducationalBriefingCopilot, isSkill: true },
+  { ...healthcareAppointmentPatientIntakeDispatcher, isSkill: true },
+  { ...careResourceReferralCoordinator, isSkill: true },
 ];
+
+const ALL_HEALTHCARE_SKILLS: Tool[] = [...healthcareSkills];
+
+ALL_HEALTHCARE_SKILLS.forEach((s) => {
+  if (s.id === 'healthcare_clinical_decision_support') s.manifest.workflowStage = 'review';
+  else if (s.id === 'healthcare_records_scheduling_ops') s.manifest.workflowStage = 'scheduling';
+  else if (s.id === 'healthcare_patient_communication') s.manifest.workflowStage = 'scheduling';
+  else if (s.id === 'healthcare_resource_coordination') s.manifest.workflowStage = 'coordination';
+  else if (s.id === 'healthcare_operational_analytics') s.manifest.workflowStage = 'review';
+  else if (s.id === 'healthcare-clinical-decision-support-evaluator') s.manifest.workflowStage = 'review';
+  else if (s.id === 'healthcare-clinical-practice-workflow-evaluator') s.manifest.workflowStage = 'review';
+  else if (s.id === 'healthcare-patient-care-plan-educational-briefing-copilot') s.manifest.workflowStage = 'review';
+  else if (s.id === 'healthcare-appointment-patient-intake-dispatcher') s.manifest.workflowStage = 'scheduling';
+  else if (s.id === 'care-resource-referral-coordinator') s.manifest.workflowStage = 'coordination';
+});
+
+export const healthcareWorkflow: AssistantWorkflow = {
+  assistant: 'Healthcare',
+  productObject: 'patient',
+  flow: 'review → scheduling → coordination',
+  stages: [
+    { name: 'review', description: 'Clinical review, decision support, and advisory (no patient-visible action)', skills: ALL_HEALTHCARE_SKILLS.filter((s) => s.manifest.workflowStage === 'review') },
+    { name: 'scheduling', description: 'Appointments, records, and patient-visible scheduling', skills: ALL_HEALTHCARE_SKILLS.filter((s) => s.manifest.workflowStage === 'scheduling') },
+    { name: 'coordination', description: 'Resource coordination and care referral', skills: ALL_HEALTHCARE_SKILLS.filter((s) => s.manifest.workflowStage === 'coordination') },
+  ],
+};

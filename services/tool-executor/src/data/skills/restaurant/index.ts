@@ -52,7 +52,7 @@ const RESERVATIONS_INPUT_SCHEMA: Record<string, unknown> = {
 const KITCHEN_INPUT_SCHEMA: Record<string, unknown> = {
   operation: { type: 'string', enum: ['service-flow', 'kitchen-display', 'station-coordinator', 'prep-scheduler', 'server-communication', 'quality-control'], description: 'The operation to perform' },
   dateRange: { type: 'object', properties: { start: { type: 'string', description: 'Start date (YYYY-MM-DD)' }, end: { type: 'string', description: 'End date (YYYY-MM-DD)' } }, description: 'Date range filter' },
-  ticketId: { type: 'string', description: 'Kitchen ticket identifier' },
+  ticket: { type: 'string', description: 'Kitchen ticket identifier' },
   station: { type: 'string', description: 'Kitchen station name' },
   course: { type: 'string', description: 'Current course being served' },
   message: { type: 'string', description: 'Message content for communication' },

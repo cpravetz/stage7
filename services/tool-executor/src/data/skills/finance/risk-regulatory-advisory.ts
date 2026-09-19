@@ -88,7 +88,7 @@ const endpointUrl = input.endpointUrl || (globalThis.process && globalThis.proce
 const apiKey = globalThis.process && globalThis.process.env && globalThis.process.env.FINANCE_API_KEY || '';
 
 if (!endpointUrl) {
-  console.log(JSON.stringify({ success: true, operation, mode: 'dry-run', riskAssessment: null, regulatoryResult: null, error: null }));
+  console.log(JSON.stringify({ success: false, operation, mode: 'not-connected', riskAssessment: null, regulatoryResult: null, error: 'Not connected: FINANCE_RISK_ENDPOINT is not configured' }));
   return;
 }
 
