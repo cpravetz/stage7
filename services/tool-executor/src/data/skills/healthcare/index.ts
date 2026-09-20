@@ -1,5 +1,6 @@
 import { Tool } from '../../../types';
 import { createExternalActionSkill, createCodeSkill, SchemaProps } from '../code-skill-factory';
+import { annotateStages, createWorkflow, WorkflowStage, AssistantWorkflow } from '../workflow-common';
 
 const CLINICAL_DECISION_SUPPORT = createCodeSkill({
   id: 'healthcare_clinical_decision_support',
@@ -448,19 +449,6 @@ import { healthcarePatientCarePlanEducationalBriefingCopilot } from './healthcar
 import { APPOINTMENT_PATIENT_INTAKE_DISPATCHER as healthcareAppointmentPatientIntakeDispatcher } from './healthcare-appointment-patient-intake-dispatcher';
 import { careResourceReferralCoordinator } from './care-resource-referral-coordinator';
 
-export interface WorkflowStage {
-  name: string;
-  description: string;
-  skills: Tool[];
-}
-
-export interface AssistantWorkflow {
-  assistant: string;
-  productObject: string;
-  flow: string;
-  stages: WorkflowStage[];
-}
-
 export const healthcareSkills: Tool[] = [
   { ...CLINICAL_DECISION_SUPPORT, isSkill: false },
   { ...RECORDS_SCHEDULING_OPS, isSkill: false },
@@ -484,26 +472,26 @@ export const healthcareCanonicalSkills: Tool[] = [
 
 const ALL_HEALTHCARE_SKILLS: Tool[] = [...healthcareSkills];
 
-ALL_HEALTHCARE_SKILLS.forEach((s) => {
-  if (s.id === 'healthcare_clinical_decision_support') s.manifest.workflowStage = 'review';
-  else if (s.id === 'healthcare_records_scheduling_ops') s.manifest.workflowStage = 'scheduling';
-  else if (s.id === 'healthcare_patient_communication') s.manifest.workflowStage = 'scheduling';
-  else if (s.id === 'healthcare_resource_coordination') s.manifest.workflowStage = 'coordination';
-  else if (s.id === 'healthcare_operational_analytics') s.manifest.workflowStage = 'review';
-  else if (s.id === 'healthcare-clinical-decision-support-evaluator') s.manifest.workflowStage = 'review';
-  else if (s.id === 'healthcare-clinical-practice-workflow-evaluator') s.manifest.workflowStage = 'review';
-  else if (s.id === 'healthcare-patient-care-plan-educational-briefing-copilot') s.manifest.workflowStage = 'review';
-  else if (s.id === 'healthcare-appointment-patient-intake-dispatcher') s.manifest.workflowStage = 'scheduling';
-  else if (s.id === 'care-resource-referral-coordinator') s.manifest.workflowStage = 'coordination';
+annotateStages(ALL_HEALTHCARE_SKILLS, {
+  'healthcare_clinical_decision_support': 'review',
+  'healthcare_records_scheduling_ops': 'scheduling',
+  'healthcare_patient_communication': 'scheduling',
+  'healthcare_resource_coordination': 'coordination',
+  'healthcare_operational_analytics': 'review',
+  'healthcare-clinical-decision-support-evaluator': 'review',
+  'healthcare-clinical-practice-workflow-evaluator': 'review',
+  'healthcare-patient-care-plan-educational-briefing-copilot': 'review',
+  'healthcare-appointment-patient-intake-dispatcher': 'scheduling',
+  'care-resource-referral-coordinator': 'coordination',
 });
 
-export const healthcareWorkflow: AssistantWorkflow = {
+export const healthcareWorkflow = createWorkflow({
   assistant: 'Healthcare',
   productObject: 'patient',
   flow: 'review → scheduling → coordination',
   stages: [
-    { name: 'review', description: 'Clinical review, decision support, and advisory (no patient-visible action)', skills: ALL_HEALTHCARE_SKILLS.filter((s) => s.manifest.workflowStage === 'review') },
-    { name: 'scheduling', description: 'Appointments, records, and patient-visible scheduling', skills: ALL_HEALTHCARE_SKILLS.filter((s) => s.manifest.workflowStage === 'scheduling') },
-    { name: 'coordination', description: 'Resource coordination and care referral', skills: ALL_HEALTHCARE_SKILLS.filter((s) => s.manifest.workflowStage === 'coordination') },
+    { name: 'review', description: 'Clinical review, decision support, and advisory (no patient-visible action)', stageIds: ['healthcare_clinical_decision_support', 'healthcare_operational_analytics', 'healthcare-clinical-decision-support-evaluator', 'healthcare-clinical-practice-workflow-evaluator', 'healthcare-patient-care-plan-educational-briefing-copilot'] },
+    { name: 'scheduling', description: 'Appointments, records, and patient-visible scheduling', stageIds: ['healthcare_records_scheduling_ops', 'healthcare_patient_communication', 'healthcare-appointment-patient-intake-dispatcher'] },
+    { name: 'coordination', description: 'Resource coordination and care referral', stageIds: ['healthcare_resource_coordination', 'care-resource-referral-coordinator'] },
   ],
-};
+}, ALL_HEALTHCARE_SKILLS);

@@ -35,7 +35,6 @@ export const TEAM_COORDINATION = withConfirmation(createExternalActionSkill({
       attendees: SchemaProps.stringArray({ description: 'Attendee list' }),
       startTime: SchemaProps.datetime({ description: 'Event start time' }),
       endTime: SchemaProps.datetime({ description: 'Event end time' }),
-      endpointUrl: SchemaProps.url({ description: 'Override endpoint URL' }),
     },
     required: ['operation'],
   },

@@ -7,9 +7,9 @@ import { APPLICATION_EXECUTION_ORCHESTRATOR } from './career-application-executi
 import { UPSKILL_ROLE_TARGETED_LEARNING_PLANNER } from './career-upskill-role-targeted-learning-planner';
 import { INTERVIEW_PRACTICE_MOCK_INTERVIEWER } from './career-interview-practice-mock-interviewer';
 import { PIPELINE_OUTCOME_TRACKER } from './career-pipeline-outcome-tracker';
-// Workspace/email sync removed per design; do not export as a skill
 import { RESUME_TEMPLATE_MANAGER } from './career-resume-template-manager';
 import { PORTAL_RECRUITER_WORKFLOW } from './career-portal-recruiter-workflow';
+import { annotateStages, createWorkflow, AssistantWorkflow } from '../workflow-common';
 
 export {
   JOB_MARKET_POSITIONING_EVALUATOR,
@@ -38,3 +38,33 @@ export const careerCanonicalSkills: Tool[] = [
 ];
 
 export const careerSkills = careerCanonicalSkills;
+
+annotateStages(careerSkills, {
+  'career-job-market-positioning-evaluator': 'profile',
+  'career-interview-compensation-battlecard-creator': 'prep',
+  'career-governed-application-outreach-manager': 'application',
+  'career-job-discovery-fit-ranking': 'fit ranking',
+  'career-application-execution-orchestrator': 'application',
+  'career-upskill-role-targeted-learning-planner': 'prep',
+  'career-interview-practice-mock-interviewer': 'prep',
+  'career-pipeline-outcome-tracker': 'tracking',
+  'career-resume-template-manager': 'profile',
+  'career-portal-recruiter-workflow': 'outcomes',
+});
+
+export const careerWorkflow: AssistantWorkflow = createWorkflow(
+  {
+    assistant: 'Career',
+    productObject: 'candidate / job',
+    flow: 'profile → fit ranking → application → prep → tracking → outcomes',
+    stages: [
+      { name: 'profile', description: 'Candidate profile, market positioning, and resume management', stageIds: ['career-job-market-positioning-evaluator', 'career-resume-template-manager'] },
+      { name: 'fit ranking', description: 'Job discovery and fit ranking', stageIds: ['career-job-discovery-fit-ranking'] },
+      { name: 'application', description: 'Application outreach and execution', stageIds: ['career-governed-application-outreach-manager', 'career-application-execution-orchestrator'] },
+      { name: 'prep', description: 'Interview prep and learning planning', stageIds: ['career-interview-compensation-battlecard-creator', 'career-upskill-role-targeted-learning-planner', 'career-interview-practice-mock-interviewer'] },
+      { name: 'tracking', description: 'Pipeline tracking and monitoring', stageIds: ['career-pipeline-outcome-tracker'] },
+      { name: 'outcomes', description: 'Recruiter workflow and outcome management', stageIds: ['career-portal-recruiter-workflow'] },
+    ],
+  },
+  careerSkills
+);

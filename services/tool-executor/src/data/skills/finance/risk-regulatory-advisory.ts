@@ -3,7 +3,6 @@ import { createCodeSkill, createSchemaRecord, SchemaProps } from '../code-skill-
 
 const riskRegulatoryInputSchema = createSchemaRecord({
   operation: SchemaProps.select(['risk-assessment', 'regulatory'], { description: 'Operation type: risk-assessment for financial risk analysis, regulatory for regulatory compliance review' }),
-  endpointUrl: SchemaProps.url({ description: 'Override endpoint URL for the external service' }),
   entityId: SchemaProps.text({ description: 'Entity or organization identifier' }),
   portfolio: SchemaProps.objectArray(SchemaProps.object({
     asset: SchemaProps.text({ description: 'Asset identifier' }),

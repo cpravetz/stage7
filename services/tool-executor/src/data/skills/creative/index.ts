@@ -1,5 +1,7 @@
 import { Tool } from '../../../types';
+import { createWorkflow } from '../workflow-common';
 import { createExternalActionSkill, createCodeSkill, SchemaProps } from '../code-skill-factory';
+import { AssistantWorkflow } from '../workflow-common';
 import { lyricProsodyEvaluator, musicalCoCreation, leadSheetDemoDispatcher } from './songwriter-skills';
 
 const CREATIVE_EXTERNAL_OUTPUT_SCHEMA = {
@@ -237,7 +239,6 @@ const TREND_PLANNING_ADVISORY = createExternalActionSkill({
       content: SchemaProps.text({ description: 'Existing content to revise/build upon', multiline: true }),
       outline: { type: 'object', description: 'Structured outline for content' },
       campaign: SchemaProps.text({ description: 'Associated campaign identifier' }),
-      endpointUrl: SchemaProps.text({ description: 'Optional endpoint override' }),
       dryRun: SchemaProps.boolean({ description: 'Validate without executing' }),
     },
     required: ['operation'],
@@ -248,4 +249,17 @@ const TREND_PLANNING_ADVISORY = createExternalActionSkill({
 
 export { lyricProsodyEvaluator, musicalCoCreation, leadSheetDemoDispatcher };
 
+CREATIVE_DRAFTING.manifest.workflowStage = 'create';
+TREND_PLANNING_ADVISORY.manifest.workflowStage = 'brief';
+
 export const creativeSkills = [CREATIVE_DRAFTING, TREND_PLANNING_ADVISORY];
+
+export const creativeWorkflow = createWorkflow({
+  assistant: 'Creative',
+  productObject: 'creative work',
+  flow: 'brief → create',
+  stages: [
+    { name: 'brief', description: 'Trend research and creative brief planning', stageIds: ['creative_trend_planning'] },
+    { name: 'create', description: 'Drafting lyrics, scripts, and creative content', stageIds: ['creative_drafting'] },
+  ],
+}, creativeSkills);

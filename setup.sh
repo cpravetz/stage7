@@ -8,12 +8,39 @@ press_any_key_to_continue() {
   echo ""
 }
 
+# Function to generate a random secret string
+generate_secret() {
+  LC_ALL=C tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 32
+}
+
 echo "🚀 Stage7 Setup and Launch Script 🚀"
 echo ""
 echo "Profile Structure:"
 echo "  - NextGen services are the default and always run"
 echo "  - All services are managed via Docker Compose"
+echo "  - Assistant selection: STAGE7_ASSISTANTS controls which assistants load"
+echo "  - Use --assistants to select one, many, or custom assistants"
 echo ""
+
+# --- Parse arguments ---
+SELECTED_ASSISTANTS=""
+for arg in "$@"; do
+  case "$arg" in
+    --assistants=*)
+      SELECTED_ASSISTANTS="${arg#--assistants=}"
+      shift
+      ;;
+    --assistants)
+      shift
+      SELECTED_ASSISTANTS="$1"
+      shift
+      ;;
+    *)
+      echo "Unknown option: $arg"
+      exit 1
+      ;;
+  esac
+done
 
 # --- 1. Check for Docker and Docker Compose prerequisites ---
 echo "Checking prerequisites: Docker and Docker Compose..."
@@ -30,7 +57,6 @@ then
     exit 1
 fi
 echo "Docker and Docker Compose are installed. ✅"
-#press_any_key_to_continue
 
 # --- 2. Setup .env file ---
 echo ""
@@ -54,13 +80,12 @@ echo "  - Open the '.env' file in your preferred text editor."
 echo "  - Fill in your API keys (e.g., GROQ_API_KEY) and any other custom settings."
 echo "  - Ensure 'SHARED_SECRET' and 'ADMIN_SECRET' are left blank for auto-generation,"
 echo "    unless you want to set them manually."
+echo "  - Set STAGE7_ASSISTANTS to select specific assistants (optional)."
+echo "    Format: comma-separated assistant IDs (e.g., cto,hr)"
+echo "    Leave empty to load all assistants."
 echo "============================================================================"
-#press_any_key_to_continue
 
 # Function to generate a random secret string
-generate_secret() {
-  LC_ALL=C tr -dc 'a-zA-Z0-9' </dev/urandom | head -c 32
-}
 
 # Generate and set SHARED_SECRET if not already set or empty
 if grep -q "^SHARED_SECRET=" "$ENV_FILE" && [ -z "$(grep '^SHARED_SECRET=' "$ENV_FILE" | cut -d '=' -f2-)" ]; then
@@ -87,7 +112,41 @@ else
 fi
 
 echo ".env file setup complete. ✅"
-#press_any_key_to_continue
+
+# --- Interactive assistant selection if not provided via CLI ---
+if [ -z "$SELECTED_ASSISTANTS" ]; then
+  echo ""
+  echo "============================================================================"
+  echo "Assistant Selection"
+  echo "============================================================================"
+  echo "You can select which assistants to deploy:"
+  echo "  1) All assistants (default - leave empty)"
+  echo "  2) Specific assistants by ID (comma-separated)"
+  echo "     Example: cto,hr"
+  echo ""
+  echo "Available assistant IDs from canonical catalog:"
+  awk '/definition\(/{gsub(/.*'\''/,""); gsub(/'\''.*/,""); id=$0; getline; name=$0; gsub(/.*'\''/,""); gsub(/'\''.*/,""); print "    - " id " (" name ")"}' "$ENV_EXAMPLE_FILE" 2>/dev/null || true
+  echo "    (Run with --assistants=<id1,id2,...> or edit STAGE7_ASSISTANTS in .env)"
+  echo "============================================================================"
+  read -p "Enter STAGE7_ASSISTANTS value (or press Enter for all): " SELECTED_ASSISTANTS
+fi
+
+# Update .env with selected assistants
+if [ -n "$SELECTED_ASSISTANTS" ]; then
+  if grep -q "^STAGE7_ASSISTANTS=" "$ENV_FILE"; then
+    sed -i '' -e "s/^STAGE7_ASSISTANTS=.*/STAGE7_ASSISTANTS=${SELECTED_ASSISTANTS}/" "$ENV_FILE" 2>/dev/null || \
+    sed -i "s/^STAGE7_ASSISTANTS=.*/STAGE7_ASSISTANTS=${SELECTED_ASSISTANTS}/" "$ENV_FILE"
+  else
+    echo "STAGE7_ASSISTANTS=${SELECTED_ASSISTANTS}" >> "$ENV_FILE"
+  fi
+  echo "STAGE7_ASSISTANTS set to: $SELECTED_ASSISTANTS"
+else
+  if grep -q "^STAGE7_ASSISTANTS=" "$ENV_FILE"; then
+    sed -i '' -e "s/^STAGE7_ASSISTANTS=.*/STAGE7_ASSISTANTS=/" "$ENV_FILE" 2>/dev/null || \
+    sed -i "s/^STAGE7_ASSISTANTS=.*/STAGE7_ASSISTANTS=/" "$ENV_FILE"
+  fi
+  echo "STAGE7_ASSISTANTS cleared (all assistants will load)"
+fi
 
 # --- 3. Tear down any old / orphan containers before rebuilding ---
 echo ""
@@ -102,7 +161,6 @@ if ! docker compose build --no-cache; then
     exit 1
 fi
 echo "Docker images built. ✅"
-#press_any_key_to_continue
 
 # --- 5. Start services ---
 echo ""

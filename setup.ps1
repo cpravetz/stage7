@@ -3,6 +3,57 @@
 
 $ErrorActionPreference = "Stop" # Exit immediately if a command exits with a non-zero status
 
+# Function to generate a random secret string
+function Generate-Secret {
+    $chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+    $secret = -join ((1..32) | ForEach-Object { $chars[(Get-Random -Maximum $chars.Length)] })
+    return $secret
+}
+
+# Function to get env value from file
+function Get-Env-Value {
+    param (
+        [string]$FilePath,
+        [string]$Key
+    )
+
+    $content = Get-Content $FilePath -ErrorAction SilentlyContinue
+    foreach ($line in $content) {
+        if ($line -match "^$Key=(.*)$") {
+            return $matches[1].Trim()
+        }
+    }
+    return $null
+}
+
+# Function to set env value in file
+function Set-Env-Value {
+    param (
+        [string]$FilePath,
+        [string]$Key,
+        [string]$Value
+    )
+
+    $content = Get-Content $FilePath -ErrorAction SilentlyContinue
+    $found = $false
+    $newContent = @()
+
+    foreach ($line in $content) {
+        if ($line -match "^$Key=") {
+            $newContent += "$Key=$Value"
+            $found = $true
+        } else {
+            $newContent += $line
+        }
+    }
+
+    if (-not $found) {
+        $newContent += "$Key=$Value"
+    }
+
+    $newContent | Set-Content $FilePath
+}
+
 # Function to pause script execution and wait for user input
 function Press-Any-Key-To-Continue {
     Write-Host ""
@@ -16,7 +67,18 @@ Write-Host ""
 Write-Host "Profile Structure:"
 Write-Host "  - NextGen services are the default and always run"
 Write-Host "  - All services are managed via Docker Compose"
+Write-Host "  - Assistant selection: STAGE7_ASSISTANTS controls which assistants load"
+Write-Host "  - Use -Assistants to select one, many, or custom assistants"
 Write-Host ""
+
+# --- Parse parameters ---
+$SelectedAssistants = ""
+param(
+    [string]$Assistants = ""
+)
+if ($Assistants) {
+    $SelectedAssistants = $Assistants
+}
 
 # --- 1. Check for Docker and Docker Compose prerequisites ---
 Write-Host "Checking prerequisites: Docker and Docker Compose..."
@@ -60,59 +122,11 @@ Write-Host "  - Open the '.env' file in your preferred text editor."
 Write-Host "  - Fill in your API keys (e.g., GROQ_API_KEY) and any other custom settings."
 Write-Host "  - Ensure 'SHARED_SECRET' and 'ADMIN_SECRET' are left blank for auto-generation,"
 Write-Host "    unless you want to set them manually."
+Write-Host "  - Set STAGE7_ASSISTANTS to select specific assistants (optional)."
+Write-Host "    Format: comma-separated assistant IDs (e.g., cto-canonical-assistant,hr-canonical-assistant)"
+Write-Host "    Leave empty to load all assistants."
 Write-Host "============================================================================"
 Press-Any-Key-To-Continue
-
-# Function to generate a random secret string
-function Generate-Secret {
-    $chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
-    $secret = -join ((1..32) | ForEach-Object { $chars[(Get-Random -Maximum $chars.Length)] })
-    return $secret
-}
-
-# Function to get env value from file
-function Get-Env-Value {
-    param (
-        [string]$FilePath,
-        [string]$Key
-    )
-    
-    $content = Get-Content $FilePath -ErrorAction SilentlyContinue
-    foreach ($line in $content) {
-        if ($line -match "^$Key=(.*)$") {
-            return $matches[1].Trim()
-        }
-    }
-    return $null
-}
-
-# Function to set env value in file
-function Set-Env-Value {
-    param (
-        [string]$FilePath,
-        [string]$Key,
-        [string]$Value
-    )
-    
-    $content = Get-Content $FilePath -ErrorAction SilentlyContinue
-    $found = $false
-    $newContent = @()
-    
-    foreach ($line in $content) {
-        if ($line -match "^$Key=") {
-            $newContent += "$Key=$Value"
-            $found = $true
-        } else {
-            $newContent += $line
-        }
-    }
-    
-    if (-not $found) {
-        $newContent += "$Key=$Value"
-    }
-    
-    $newContent | Set-Content $FilePath
-}
 
 # Generate and set SHARED_SECRET if not already set or empty
 $sharedSecret = Get-Env-Value -FilePath $ENV_FILE -Key "SHARED_SECRET"
@@ -139,6 +153,31 @@ if ($adminSecret -eq "") {
 
 Write-Host ".env file setup complete. ✅"
 Press-Any-Key-To-Continue
+
+# --- Interactive assistant selection if not provided via CLI ---
+if ([string]::IsNullOrWhiteSpace($SelectedAssistants)) {
+    Write-Host ""
+    Write-Host "============================================================================"
+    Write-Host "Assistant Selection"
+    Write-Host "============================================================================"
+    Write-Host "You can select which assistants to deploy:"
+    Write-Host "  1) All assistants (default - leave empty)"
+    Write-Host "  2) Specific assistants by ID (comma-separated)"
+    Write-Host "     Example: cto-canonical-assistant,hr-canonical-assistant"
+    Write-Host ""
+    Write-Host "Run with -Assistants=<id1,id2,...> or edit STAGE7_ASSISTANTS in .env"
+    Write-Host "============================================================================"
+    $SelectedAssistants = Read-Host "Enter STAGE7_ASSISTANTS value (or press Enter for all)"
+}
+
+# Update .env with selected assistants
+if (-not [string]::IsNullOrWhiteSpace($SelectedAssistants)) {
+    Set-Env-Value -FilePath $ENV_FILE -Key "STAGE7_ASSISTANTS" -Value $SelectedAssistants
+    Write-Host "STAGE7_ASSISTANTS set to: $SelectedAssistants"
+} else {
+    Set-Env-Value -FilePath $ENV_FILE -Key "STAGE7_ASSISTANTS" -Value ""
+    Write-Host "STAGE7_ASSISTANTS cleared (all assistants will load)"
+}
 
 # --- 3. Tear down any old / orphan containers before rebuilding ---
 Write-Host ""

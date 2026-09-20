@@ -65,7 +65,6 @@ export const LEARNER_INSIGHT = createExternalActionSkill({
       dateRange: { type: 'object', description: 'Analysis period' },
       includeComparisons: { type: 'boolean', description: 'Include class/cohort comparisons', default: true },
       metrics: SchemaProps.stringArray({ description: 'Specific metrics to analyze' }),
-      endpointUrl: SchemaProps.text({ description: 'Optional endpoint override' }),
       dryRun: SchemaProps.boolean({ description: 'Validate without executing' }),
     },
     required: ['operation', 'learner'],

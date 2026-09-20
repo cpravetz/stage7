@@ -26,10 +26,85 @@ export { songwritingSkills } from './songwriting';
 export { scriptwritingSkills } from './scriptwriting';
 export { assistantRegistries, getAssistantByName, getAssistantsByObject, getAssistantsWithSkillCount, getOverlappingSkills } from './registry';
 
-export { ctoCanonicalSkills, ctoWorkflow } from './cto';
-export { healthcareCanonicalSkills, healthcareWorkflow } from './healthcare';
-export { hrCanonicalSkills, hrWorkflow } from './hr';
-export { educationCanonicalSkills, educationWorkflow } from './education';
-export { marketingWorkflow } from './marketing';
-export { productWorkflow } from './product';
-export { contentWorkflow } from './content';
+import {
+  ctoCanonicalSkills,
+  ctoWorkflow,
+  healthcareCanonicalSkills,
+  healthcareWorkflow,
+  hrCanonicalSkills,
+  hrWorkflow,
+  educationCanonicalSkills,
+  educationWorkflow,
+  marketingWorkflow,
+  productWorkflow,
+  contentWorkflow,
+  careerWorkflow,
+  restaurantWorkflow,
+  salesWorkflow,
+  supportWorkflow,
+  creativeWorkflow,
+  sportsWorkflow,
+  eventWorkflow,
+  executiveWorkflow,
+  financeWorkflow,
+  hotelWorkflow,
+  investmentWorkflow,
+  legalWorkflow,
+  songwritingWorkflow,
+  scriptwritingWorkflow,
+  analyticsWorkflow,
+} from './workflows';
+
+export {
+  ctoCanonicalSkills,
+  ctoWorkflow,
+  healthcareCanonicalSkills,
+  healthcareWorkflow,
+  hrCanonicalSkills,
+  hrWorkflow,
+  educationCanonicalSkills,
+  educationWorkflow,
+  marketingWorkflow,
+  productWorkflow,
+  contentWorkflow,
+  careerWorkflow,
+  restaurantWorkflow,
+  salesWorkflow,
+  supportWorkflow,
+  creativeWorkflow,
+  sportsWorkflow,
+  eventWorkflow,
+  executiveWorkflow,
+  financeWorkflow,
+  hotelWorkflow,
+  investmentWorkflow,
+  legalWorkflow,
+  songwritingWorkflow,
+  scriptwritingWorkflow,
+  analyticsWorkflow,
+};
+
+export const allWorkflows = [
+  ctoWorkflow,
+  healthcareWorkflow,
+  hrWorkflow,
+  educationWorkflow,
+  marketingWorkflow,
+  productWorkflow,
+  contentWorkflow,
+  careerWorkflow,
+  restaurantWorkflow,
+  salesWorkflow,
+  supportWorkflow,
+  creativeWorkflow,
+  sportsWorkflow,
+  eventWorkflow,
+  executiveWorkflow,
+  financeWorkflow,
+  hotelWorkflow,
+  investmentWorkflow,
+  legalWorkflow,
+  songwritingWorkflow,
+  scriptwritingWorkflow,
+  analyticsWorkflow,
+];

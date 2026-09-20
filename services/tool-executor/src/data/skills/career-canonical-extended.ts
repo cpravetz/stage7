@@ -41,7 +41,7 @@ configSchema: CAREER_GMAIL_SYNC_CONFIG_SCHEMA,
 inputSchema: {
 type: 'object',
 properties: {
-endpointUrl: { type: 'string', description: 'Override Gmail endpoint URL' },
+
 },
 },
 outputSchema: {

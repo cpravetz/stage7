@@ -270,7 +270,6 @@ const careResourceReferralCoordinator = createCodeSkill({
     communicationSubject: SchemaProps.text({ description: 'Subject line for patient referral communication' }),
     communicationConfirmation: SchemaProps.boolean({ description: 'Explicit approval for sending patient communication about the referral', default: false }),
     communicationConfirmed: SchemaProps.boolean({ description: 'Alternate explicit approval flag for patient communication', default: false }),
-    endpointUrl: SchemaProps.url({ description: 'Optional referral coordination endpoint override' }),
     accessToken: SchemaProps.password({ description: 'Optional bearer token for an endpoint override' }),
     context: SchemaProps.object({}, { description: 'Additional coordination context that does not replace required clinical inputs', additionalProperties: true }),
   }),

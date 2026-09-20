@@ -67,7 +67,6 @@ const DAY_OF_OPERATIONS = createExternalActionSkill({
       checkInData: { type: 'object', description: 'Check-in data: method, timestamp, location' },
       issueData: { type: 'object', description: 'Issue: type, severity, location, description, assignedTo' },
       alertData: { type: 'object', description: 'Broadcast: message, channels, recipients, urgency' },
-      endpointUrl: SchemaProps.text({ description: 'Optional endpoint override' }),
       dryRun: SchemaProps.boolean({ description: 'Validate without executing' }),
     },
     required: ['operation', 'event'],

@@ -3,37 +3,27 @@ import { LESSON_ASSESSMENT_DRAFTING } from './lesson-assessment-drafting';
 import { LEARNER_INSIGHT } from './learner-insight';
 import { ADAPTIVE_PERSONALIZATION } from './adaptive-personalization';
 import { RESOURCE_LIBRARY_OPS } from './resource-library-ops';
-
-export interface WorkflowStage {
-  name: string;
-  description: string;
-  skills: Tool[];
-}
-
-export interface AssistantWorkflow {
-  assistant: string;
-  productObject: string;
-  flow: string;
-  stages: WorkflowStage[];
-}
-
-LESSON_ASSESSMENT_DRAFTING.manifest.workflowStage = 'assess';
-LEARNER_INSIGHT.manifest.workflowStage = 'plan';
-ADAPTIVE_PERSONALIZATION.manifest.workflowStage = 'plan';
-RESOURCE_LIBRARY_OPS.manifest.workflowStage = 'support';
+import { annotateStages, createWorkflow, AssistantWorkflow } from '../workflow-common';
 
 export const educationSkills = [LESSON_ASSESSMENT_DRAFTING, LEARNER_INSIGHT, ADAPTIVE_PERSONALIZATION, RESOURCE_LIBRARY_OPS];
 
-export const educationWorkflow: AssistantWorkflow = {
+annotateStages(educationSkills, {
+  'education_lesson_assessment_drafting': 'assess',
+  'education_learner_insight': 'plan',
+  'education_adaptive_personalization': 'plan',
+  'education_resource_library': 'support',
+});
+
+export const educationWorkflow = createWorkflow({
   assistant: 'Education',
   productObject: 'learner',
   flow: 'plan → assess → support',
   stages: [
-    { name: 'plan', description: 'Learner context and adaptive planning', skills: educationSkills.filter((s) => s.manifest.workflowStage === 'plan') },
-    { name: 'assess', description: 'Lesson, quiz, and activity assessment drafting', skills: educationSkills.filter((s) => s.manifest.workflowStage === 'assess') },
-    { name: 'support', description: 'Resource library and accessibility support', skills: educationSkills.filter((s) => s.manifest.workflowStage === 'support') },
+    { name: 'plan', description: 'Learner context and adaptive planning', stageIds: ['education_learner_insight', 'education_adaptive_personalization'] },
+    { name: 'assess', description: 'Lesson, quiz, and activity assessment drafting', stageIds: ['education_lesson_assessment_drafting'] },
+    { name: 'support', description: 'Resource library and accessibility support', stageIds: ['education_resource_library'] },
   ],
-};
+}, educationSkills);
 
 // CHANGE 1 verification: LEARNER_INSIGHT uses createExternalActionSkill.
 // The factory at code-skill-factory.ts:290-298 already returns the honest not-connected

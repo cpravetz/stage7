@@ -1,4 +1,4 @@
-import { Tool, ToolExecution, WorkflowState, CredentialRequest, CredentialRequiredError, ConfirmationRequiredError, SchemaRecord } from '../types';
+import { Tool, ToolExecution, WorkflowState, CredentialRequest, CredentialRequiredError, ConfirmationRequiredError, CrossObjectHandoffError, SchemaRecord, ApprovalSummary, HandoffRequest, ExecutionResult, RuntimeWorkflow, RuntimeWorkflowAction, RuntimeWorkflowStage } from '../types';
 import logger from '../utils/logger';
 import { EmailExecutor } from '../executors/EmailExecutor';
 import { SearchExecutor } from '../executors/SearchExecutor';
@@ -13,6 +13,9 @@ import { ReasoningExecutor } from '../executors/ReasoningExecutor';
 import { PluginGenerator } from '../services/PluginGenerator';
 import { ToolDiscovery } from '../services/ToolDiscovery';
 import { MCPClient, MCPHTTPClient, MCPServerConfig } from '../services/MCPClient';
+import { allWorkflows } from '../data/skills';
+import type { AssistantWorkflow } from '../data/skills/workflow-common';
+import { AssistantWorkspaceManager } from './AssistantWorkspaceManager';
 
 const BRAIN_URL = process.env.BRAIN_URL || 'http://brain:3100';
 const HEALING_SYSTEM_PROMPT = `You are a senior engineer debugging a failed code execution. Given the error message, source code, and input that caused the failure, provide a corrected version of the code. Output ONLY a single JSON object with this exact shape: { "sourceCode": "corrected code string", "explanation": "brief explanation of the fix" }`;
@@ -23,6 +26,7 @@ export type { FtpExecutionOptions, FtpExecutionResult } from '../executors/FtpEx
 export type { WebhookDispatchOptions, WebhookDispatchResult } from '../executors/WebhookExecutor';
 export type { DatabaseQueryOptions, DatabaseQueryResult } from '../executors/DatabaseExecutor';
 export type { FileStorageOptions, FileStorageResult } from '../executors/FileStorageExecutor';
+export type { ApprovalSummary } from '../types';
 
 interface PendingCredentialRequest {
 executionId: string;
@@ -31,39 +35,175 @@ toolName: string;
 tool: Tool;
 input: Record<string, unknown>;
 request: CredentialRequest;
-credentials: Record<string, string | undefined>;
+  credentials: Record<string, string | undefined>;
+  opts?: { workspaceId?: string; assistantId?: string; context?: Record<string, unknown> };
 }
 
 export class ToolExecutor {
-private emailExecutor = new EmailExecutor();
-private searchExecutor = new SearchExecutor();
-private codeExecutor = new CodeExecutor();
-private pluginGenerator = new PluginGenerator();
-private toolDiscovery = new ToolDiscovery();
-private ftpExecutor = new FtpExecutor();
-private webhookExecutor = new WebhookExecutor();
-private databaseExecutor = new DatabaseExecutor();
-private fileStorageExecutor = new FileStorageExecutor();
-private vendorApiExecutor = new VendorApiExecutor();
-private reasoningExecutor = new ReasoningExecutor();
-private mcpClients = new Map<string, MCPClient | MCPHTTPClient>();
-private mcpServerConfigs = new Map<string, MCPServerConfig>();
-private pendingCredentialRequests = new Map<string, PendingCredentialRequest>();
-private pendingCredentialOverrides = new Map<string, Record<string, string>>();
-private nestedExecutionDepth = 0;
-private activeContextObject: string | null = null;
-private executionStates: Map<string, WorkflowState> = new Map();
-private toolRegistry: Map<string, Tool> | null = null;
+  private emailExecutor = new EmailExecutor();
+  private searchExecutor = new SearchExecutor();
+  private codeExecutor = new CodeExecutor();
+  private pluginGenerator = new PluginGenerator();
+  private toolDiscovery = new ToolDiscovery();
+  private ftpExecutor = new FtpExecutor();
+  private webhookExecutor = new WebhookExecutor();
+  private databaseExecutor = new DatabaseExecutor();
+  private fileStorageExecutor = new FileStorageExecutor();
+  private vendorApiExecutor = new VendorApiExecutor();
+  private reasoningExecutor = new ReasoningExecutor();
+  private mcpClients = new Map<string, MCPClient | MCPHTTPClient>();
+  private mcpServerConfigs = new Map<string, MCPServerConfig>();
+  private pendingCredentialRequests = new Map<string, PendingCredentialRequest>();
+  private pendingCredentialOverrides = new Map<string, Record<string, string>>();
+  private nestedExecutionDepth = 0;
+  private activeContextObject: string | null = null;
+  private executionStates: Map<string, WorkflowState> = new Map();
+  private toolRegistry: Map<string, Tool> | null = null;
+  private handoffRequests = new Map<string, HandoffRequest>();
+  private executionContexts = new Map<string, { workspaceId?: string; assistantId?: string; context?: Record<string, unknown> }>();
+  private workspaceManager: AssistantWorkspaceManager | null = null;
 
-constructor(toolRegistry?: Map<string, Tool>) {
-this.toolRegistry = toolRegistry || null;
-}
+  constructor(toolRegistry?: Map<string, Tool>, workspaceManager?: AssistantWorkspaceManager) {
+    this.toolRegistry = toolRegistry || null;
+    this.workspaceManager = workspaceManager || null;
+  }
 
-async execute(tool: Tool, input: Record<string, unknown>): Promise<ToolExecution> {
+  private normalizeAssistantId(assistantId?: string): string {
+    return (assistantId || '')
+      .replace(/-canonical-assistant$/i, '')
+      .replace(/_/g, '-')
+      .trim()
+      .toLowerCase();
+  }
+
+  private findWorkflow(assistantId?: string): AssistantWorkflow | undefined {
+    if (!assistantId) return undefined;
+    const normalized = this.normalizeAssistantId(assistantId);
+    return allWorkflows.find((workflow) => (
+      this.normalizeAssistantId(workflow.assistant) === normalized ||
+      workflow.assistant.toLowerCase() === assistantId.toLowerCase()
+    ));
+  }
+
+  private getWorkflowStage(tool: Tool): string | undefined {
+    const stage = tool.manifest?.workflowStage;
+    return typeof stage === 'string' ? stage : undefined;
+  }
+
+  private ensureWorkspace(
+    tool: Tool,
+    input: Record<string, unknown>,
+    opts?: { workspaceId?: string; assistantId?: string; context?: Record<string, unknown> }
+  ): { workspaceId?: string; workflow?: AssistantWorkflow } {
+    if (!this.workspaceManager) {
+      return { workspaceId: opts?.workspaceId, workflow: this.findWorkflow(opts?.assistantId) };
+    }
+
+    const workflow = this.findWorkflow(opts?.assistantId);
+    if (opts?.workspaceId) {
+      const existing = this.workspaceManager.getWorkspace(opts.workspaceId);
+      if (!existing && workflow) {
+        const created = this.workspaceManager.createWorkspace(
+          workflow.assistant,
+          workflow.productObject,
+          this.getWorkflowStage(tool) || workflow.stages[0]?.name,
+        );
+        if (opts.context) created.context = { ...opts.context };
+        return { workspaceId: created.workspaceId, workflow };
+      }
+      if (existing && opts.context) {
+        existing.context = { ...(existing.context || {}), ...opts.context };
+        existing.updatedAt = new Date();
+        this.workspaceManager.persist();
+      }
+      return { workspaceId: opts.workspaceId, workflow: workflow || this.findWorkflow(existing?.assistant) };
+    }
+
+    if (opts?.assistantId && workflow) {
+      const created = this.workspaceManager.createOrResumeWorkspace(
+        workflow.assistant,
+        workflow.productObject,
+        {
+          context: opts.context,
+          initialStage: this.getWorkflowStage(tool) || workflow.stages[0]?.name,
+        },
+      ).workspace;
+      return { workspaceId: created.workspaceId, workflow };
+    }
+
+    return { workspaceId: opts?.workspaceId, workflow };
+  }
+
+  private recordWorkspaceExecution(
+    execution: ToolExecution,
+    tool: Tool,
+    opts?: { workspaceId?: string; assistantId?: string; context?: Record<string, unknown> },
+    workflow?: AssistantWorkflow,
+  ): void {
+    if (!this.workspaceManager || !opts?.workspaceId || !workflow) return;
+    try {
+      const workspace = this.workspaceManager.getWorkspace(opts.workspaceId);
+      if (!workspace) return;
+      const stage = this.getWorkflowStage(tool);
+      if (stage && workflow.stages.some((candidate) => candidate.name === stage)) {
+        this.workspaceManager.updateStage(opts.workspaceId, stage);
+      }
+      this.workspaceManager.recordExecutionFromResult(opts.workspaceId, {
+        executionId: execution.executionId,
+        toolId: tool.id,
+        toolName: tool.name,
+        status: execution.status === 'completed' ? 'completed' : 'failed',
+        startedAt: execution.startedAt,
+        completedAt: execution.completedAt,
+        workflowState: execution.workflowState,
+      });
+      const runtime = this.workspaceManager.buildRuntimeWorkflow(opts.workspaceId, workflow, execution.executionId);
+      if (runtime) this.workspaceManager.setNextActions(opts.workspaceId, runtime.nextActions);
+    } catch (error) {
+      logger.warn({ workspaceId: opts.workspaceId, error: error instanceof Error ? error.message : String(error) }, 'Failed to update workflow workspace');
+    }
+  }
+
+  private recordWorkspaceApproval(
+    tool: Tool,
+    input: Record<string, unknown>,
+    executionId: string,
+    opts?: { workspaceId?: string; assistantId?: string; context?: Record<string, unknown> },
+  ): void {
+    if (!this.workspaceManager || !opts?.workspaceId) return;
+    try {
+      const summary = this.generateApprovalSummary(tool, input);
+      this.workspaceManager.recordApproval(opts.workspaceId, {
+        executionId,
+        toolId: tool.id,
+        toolName: tool.name,
+        state: 'draft',
+        actor: 'user',
+        scope: summary.scope,
+        timestamp: new Date(),
+      });
+    } catch {
+      // Approval history is best-effort; execution safeguards remain authoritative.
+    }
+  }
+
+  async execute(tool: Tool, input: Record<string, unknown>, opts?: { workspaceId?: string; assistantId?: string; context?: Record<string, unknown> }): Promise<ToolExecution> {
     const executionId = `exec_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const startedAt = new Date();
 
-    logger.info({ executionId, toolId: tool.id, toolName: tool.name, toolType: tool.type }, 'Tool execution started');
+    if (opts?.workspaceId || opts?.assistantId || opts?.context) {
+      this.executionContexts.set(executionId, {
+        workspaceId: opts.workspaceId,
+        assistantId: opts.assistantId,
+        context: opts.context,
+      });
+    }
+
+    const workspace = this.ensureWorkspace(tool, input, opts);
+    if (workspace.workspaceId) opts = { ...opts, workspaceId: workspace.workspaceId };
+    const workflow = workspace.workflow;
+
+    logger.info({ executionId, toolId: tool.id, toolName: tool.name, toolType: tool.type, workspaceId: opts?.workspaceId, assistantId: opts?.assistantId }, 'Tool execution started');
 
     try {
       this.enforceConfirmation(tool, input, executionId);
@@ -80,7 +220,7 @@ async execute(tool: Tool, input: Record<string, unknown>): Promise<ToolExecution
       logger.info({ executionId, toolId: tool.id, status: 'completed' }, 'Tool execution completed');
       this.transitionTo(executionId, 'executed');
 
-      return {
+      const result: ToolExecution = {
         executionId,
         toolId: tool.id,
         input,
@@ -89,14 +229,30 @@ async execute(tool: Tool, input: Record<string, unknown>): Promise<ToolExecution
         workflowState: this.getWorkflowState(executionId),
         startedAt,
         completedAt,
+        workspaceId: opts?.workspaceId,
+        assistantId: opts?.assistantId,
+        context: opts?.context,
+        runtimeWorkflow: workflow ? this.buildRuntimeWorkflow({
+          executionId,
+          workflow,
+          workspaceId: opts?.workspaceId,
+          assistantId: opts?.assistantId,
+          context: opts?.context,
+        }) : undefined,
       };
+      this.recordWorkspaceExecution(result, tool, opts, workflow);
+      return result;
     } catch (error) {
+      if (error instanceof ConfirmationRequiredError) {
+        throw error;
+      }
+
       const completedAt = new Date();
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
       logger.error({ executionId, toolId: tool.id, error: errorMessage }, 'Tool execution failed');
 
-      return {
+      const result: ToolExecution = {
         executionId,
         toolId: tool.id,
         input,
@@ -105,15 +261,39 @@ async execute(tool: Tool, input: Record<string, unknown>): Promise<ToolExecution
         workflowState: this.getWorkflowState(executionId),
         startedAt,
         completedAt,
+        workspaceId: opts?.workspaceId,
+        assistantId: opts?.assistantId,
+        context: opts?.context,
+        runtimeWorkflow: workflow ? this.buildRuntimeWorkflow({
+          executionId,
+          workflow,
+          workspaceId: opts?.workspaceId,
+          assistantId: opts?.assistantId,
+          context: opts?.context,
+        }) : undefined,
       };
+      this.recordWorkspaceExecution(result, tool, opts, workflow);
+      return result;
     }
   }
 
-async executeOrRequestCredentials(tool: Tool, input: Record<string, unknown>, providedCredentials?: Record<string, string>): Promise<ToolExecution | CredentialRequiredError> {
+  async executeOrRequestCredentials(tool: Tool, input: Record<string, unknown>, providedCredentials?: Record<string, string>, opts?: { workspaceId?: string; assistantId?: string; context?: Record<string, unknown> }): Promise<ToolExecution | CredentialRequiredError> {
     const executionId = `exec_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const startedAt = new Date();
 
-    logger.info({ executionId, toolId: tool.id, toolName: tool.name, toolType: tool.type }, 'Tool execution started');
+    if (opts?.workspaceId || opts?.assistantId || opts?.context) {
+      this.executionContexts.set(executionId, {
+        workspaceId: opts.workspaceId,
+        assistantId: opts.assistantId,
+        context: opts.context,
+      });
+    }
+
+    const workspace = this.ensureWorkspace(tool, input, opts);
+    if (workspace.workspaceId) opts = { ...opts, workspaceId: workspace.workspaceId };
+    const workflow = workspace.workflow;
+
+    logger.info({ executionId, toolId: tool.id, toolName: tool.name, toolType: tool.type, workspaceId: opts?.workspaceId, assistantId: opts?.assistantId }, 'Tool execution started');
 
     if (providedCredentials && Object.keys(providedCredentials).length > 0) {
       this.pendingCredentialOverrides.set(tool.id, providedCredentials);
@@ -132,20 +312,37 @@ async executeOrRequestCredentials(tool: Tool, input: Record<string, unknown>, pr
       const completedAt = new Date();
 
       logger.info({ executionId, toolId: tool.id, status: 'completed' }, 'Tool execution completed');
+      this.transitionTo(executionId, 'executed');
 
-      return {
+      const result: ToolExecution = {
         executionId,
         toolId: tool.id,
         input,
         output,
         status: 'completed',
+        workflowState: this.getWorkflowState(executionId),
         startedAt,
         completedAt,
+        workspaceId: opts?.workspaceId,
+        assistantId: opts?.assistantId,
+        context: opts?.context,
+        runtimeWorkflow: workflow ? this.buildRuntimeWorkflow({
+          executionId,
+          workflow,
+          workspaceId: opts?.workspaceId,
+          assistantId: opts?.assistantId,
+          context: opts?.context,
+        }) : undefined,
       };
+      this.recordWorkspaceExecution(result, tool, opts, workflow);
+      return result;
     } catch (error) {
       const completedAt = new Date();
 
       if (error instanceof CredentialRequiredError) {
+        (error.request as CredentialRequest).workspaceId = opts?.workspaceId;
+        (error.request as CredentialRequest).assistantId = opts?.assistantId;
+        (error.request as CredentialRequest).context = opts?.context;
         this.pendingCredentialRequests.set(error.request.executionId, {
           executionId: error.request.executionId,
           toolId: error.request.toolId,
@@ -158,21 +355,35 @@ async executeOrRequestCredentials(tool: Tool, input: Record<string, unknown>, pr
         return error;
       }
       if (error instanceof ConfirmationRequiredError) {
+        this.recordWorkspaceApproval(tool, input, executionId, opts);
         throw error;
       }
 
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       logger.error({ executionId, toolId: tool.id, error: errorMessage }, 'Tool execution failed');
 
-      return {
+      const result: ToolExecution = {
         executionId,
         toolId: tool.id,
         input,
         error: errorMessage,
         status: 'failed',
+        workflowState: this.getWorkflowState(executionId),
         startedAt,
         completedAt,
+        workspaceId: opts?.workspaceId,
+        assistantId: opts?.assistantId,
+        context: opts?.context,
+        runtimeWorkflow: workflow ? this.buildRuntimeWorkflow({
+          executionId,
+          workflow,
+          workspaceId: opts?.workspaceId,
+          assistantId: opts?.assistantId,
+          context: opts?.context,
+        }) : undefined,
       };
+      this.recordWorkspaceExecution(result, tool, opts, workflow);
+      return result;
     }
   }
 
@@ -297,13 +508,95 @@ return this.executeOrRequestCredentials(pending.tool, pending.input);
     const hasConfirmation = input.confirmation === true;
     if (!hasDryRun && !hasConfirmation) {
       this.setWorkflowState(executionId, 'draft');
-      throw new ConfirmationRequiredError(tool);
+      const summary = this.generateApprovalSummary(tool, input);
+      logger.info({ executionId, toolId: tool.id, summary }, 'Confirmation required for tool execution');
+      throw new ConfirmationRequiredError(tool, summary);
     }
     if (hasConfirmation) {
       this.transitionTo(executionId, 'approved');
     } else {
       this.setWorkflowState(executionId, 'analysis');
     }
+  }
+
+  generateApprovalSummary(tool: Tool, input: Record<string, unknown>): ApprovalSummary {
+    const manifest = tool.manifest || {};
+    const action = (manifest.action as string) || (manifest.system as string) || tool.name;
+    const objectKeys = ['object', 'patient', 'campaign', 'ticket', 'account', 'event', 'lead', 'opportunity'];
+    let object: string | undefined;
+    for (const key of objectKeys) {
+      const val = input[key];
+      if (val !== undefined && val !== null && val !== '') {
+        object = typeof val === 'string' ? val : JSON.stringify(val);
+        break;
+      }
+    }
+    const scope: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(input)) {
+      if (key === 'dryRun' || key === 'confirmation') continue;
+      scope[key] = value;
+    }
+    const confirmBeforeSend = tool.confirmBeforeSend === true || (tool.manifest?.confirmBeforeSend === true);
+    const affectedRecords = this.countAffectedRecords(input);
+    const expectedSideEffects = this.inferSideEffects(action, input);
+    return {
+      toolName: tool.name,
+      toolId: tool.id,
+      action,
+      object,
+      scope,
+      confirmBeforeSend,
+      requiresConfirmation: confirmBeforeSend,
+      dryRun: input.dryRun === true,
+      affectedRecords,
+      expectedSideEffects,
+    };
+  }
+
+  previewAction(tool: Tool, input: Record<string, unknown>): ApprovalSummary {
+    return this.generateApprovalSummary(tool, input);
+  }
+
+  private countAffectedRecords(input: Record<string, unknown>): number {
+    const arrayKeys = ['records', 'items', 'patients', 'patients', 'leads', 'tickets', 'campaigns', 'accounts', 'events', 'opportunities', 'results', 'rows', 'entries', 'records', 'invoices', 'orders'];
+    for (const key of arrayKeys) {
+      const val = input[key];
+      if (Array.isArray(val)) return val.length;
+    }
+    if (input.operation && (input.operation === 'delete' || input.operation === 'remove' || input.operation === 'update' || input.operation === 'resolve')) {
+      return 1;
+    }
+    return 0;
+  }
+
+  private inferSideEffects(action: string, input: Record<string, unknown>): string[] {
+    const effects: string[] = [];
+    if (input.dryRun === true) {
+      effects.push('dry-run: no changes will be persisted');
+    }
+    const actionLower = action.toLowerCase();
+    if (actionLower.includes('create') || actionLower.includes('add') || actionLower.includes('new')) {
+      effects.push('creates new record(s)');
+    }
+    if (actionLower.includes('update') || actionLower.includes('edit') || actionLower.includes('modify')) {
+      effects.push('updates existing record(s)');
+    }
+    if (actionLower.includes('delete') || actionLower.includes('remove') || actionLower.includes('destroy')) {
+      effects.push('deletes record(s)');
+    }
+    if (actionLower.includes('send') || actionLower.includes('dispatch') || actionLower.includes('publish') || actionLower.includes('submit')) {
+      effects.push('sends or dispatches to external system');
+    }
+    if (actionLower.includes('approve') || actionLower.includes('accept') || actionLower.includes('confirm')) {
+      effects.push('changes approval state');
+    }
+    if (actionLower.includes('escalate') || actionLower.includes('flag') || actionLower.includes('alert')) {
+      effects.push('triggers notification or escalation');
+    }
+    if (effects.length === 0) {
+      effects.push('executes tool operation');
+    }
+    return effects;
   }
 
   private extractContext(input: Record<string, unknown>): string | null {
@@ -322,11 +615,64 @@ return this.executeOrRequestCredentials(pending.tool, pending.input);
   private validateSameContext(tool: Tool, input: Record<string, unknown>): void {
     const currentContext = this.extractContext(input);
     if (currentContext && this.activeContextObject && this.activeContextObject !== currentContext) {
-      logger.warn({ activeContext: this.activeContextObject, currentContext, toolId: tool.id }, 'Cross-object handoff detected');
+      const handoffId = `ho_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      this.handoffRequests.set(handoffId, {
+        id: handoffId,
+        sourceContext: this.activeContextObject,
+        destinationToolId: tool.id,
+        destinationToolName: tool.name,
+        objectContext: currentContext,
+        status: 'pending',
+        createdAt: new Date(),
+      });
+      logger.error({ activeContext: this.activeContextObject, currentContext, toolId: tool.id, handoffId }, 'Cross-object handoff rejected');
+      throw new CrossObjectHandoffError(this.activeContextObject, currentContext, tool.id, handoffId);
     }
     if (currentContext) {
       this.activeContextObject = currentContext;
     }
+  }
+
+  requestHandoff(destinationToolId: string, destinationToolName: string, objectContext: string): HandoffRequest {
+    const id = `ho_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const request: HandoffRequest = {
+      id,
+      sourceContext: this.activeContextObject || '',
+      destinationToolId,
+      destinationToolName,
+      objectContext,
+      status: 'pending',
+      createdAt: new Date(),
+    };
+    this.handoffRequests.set(id, request);
+    return request;
+  }
+
+  acceptHandoff(handoffId: string): boolean {
+    const request = this.handoffRequests.get(handoffId);
+    if (!request || request.status !== 'pending') return false;
+    request.status = 'accepted';
+    request.decision = 'accepted';
+    request.decisionAt = new Date();
+    this.activeContextObject = request.objectContext;
+    return true;
+  }
+
+  rejectHandoff(handoffId: string): boolean {
+    const request = this.handoffRequests.get(handoffId);
+    if (!request || request.status !== 'pending') return false;
+    request.status = 'rejected';
+    request.decision = 'rejected';
+    request.decisionAt = new Date();
+    return true;
+  }
+
+  getHandoffRequest(handoffId: string): HandoffRequest | undefined {
+    return this.handoffRequests.get(handoffId);
+  }
+
+  getHandoffRequests(): HandoffRequest[] {
+    return [...this.handoffRequests.values()];
   }
 
   private readonly stateTransitions: Record<WorkflowState, WorkflowState[]> = {
@@ -1017,8 +1363,114 @@ logger.warn({ toolId: generated.tool.id, err: deployErr instanceof Error ? deplo
 }
 
 return {
-error: `Unsupported tool type: ${tool.type}. Register a real executor or MCP server for this tool.`,
-toolName: tool.name,
-};
+    error: `Unsupported tool type: ${tool.type}. Register a real executor or MCP server for this tool.`,
+    toolName: tool.name,
+  };
 }
+
+  /**
+   * Build a runtime-visible workflow snapshot for an execution.
+   * Includes assistant/workflow identity, active product object, current stage,
+   * available/next actions, workflow state, and next step.
+   */
+  buildRuntimeWorkflow(params: {
+    executionId: string;
+    workflow: AssistantWorkflow;
+    workspaceId?: string;
+    assistantId?: string;
+    context?: Record<string, unknown>;
+    lastResultId?: string;
+  }): RuntimeWorkflow {
+    const { executionId, workflow, workspaceId, assistantId, context, lastResultId } = params;
+    const execState = this.getWorkflowState(executionId);
+    const workflowState: WorkflowState = execState || 'analysis';
+    const execContext = this.executionContexts.get(executionId) || { workspaceId, assistantId, context };
+    const effectiveContext = execContext.context || context || {};
+    const currentStage = workflow.stages[0]?.name || workflow.flow.split('→')[0]?.trim() || 'analysis';
+
+    const stages: RuntimeWorkflowStage[] = workflow.stages.map((stage, idx) => {
+      const isCurrent = stage.name === currentStage;
+      const skills: RuntimeWorkflowAction[] = (stage.skills || []).map((skill) => ({
+        id: skill.id,
+        name: skill.name,
+        description: skill.description,
+        type: skill.type,
+        confirmBeforeSend: skill.confirmBeforeSend,
+        isSkill: skill.isSkill,
+        stage: stage.name,
+        available: isCurrent,
+        reason: isCurrent ? undefined : `Not available in stage '${stage.name}' (current: '${currentStage}')`,
+      }));
+      return {
+        name: stage.name,
+        description: stage.description,
+        status: isCurrent ? 'current' : idx < workflow.stages.findIndex((s) => s.name === currentStage) ? 'completed' : 'pending',
+        skills,
+      };
+    });
+
+    const allowedTransitions = this.stateTransitions[workflowState] || [];
+    const nextActions = this.deriveNextActions(workflow, currentStage, workflowState);
+    const nextStep = this.deriveNextStep(workflow, currentStage, workflowState, allowedTransitions);
+
+    return {
+      executionId,
+      workspaceId: execContext.workspaceId || workspaceId,
+      assistantId: execContext.assistantId || assistantId,
+      assistant: workflow.assistant,
+      productObject: workflow.productObject,
+      flow: workflow.flow,
+      currentStage,
+      stages,
+      workflowState,
+      nextActions,
+      allowedTransitions,
+      stateHistory: [],
+      approvalHistory: [],
+      executionHistory: [],
+      lastResultId: execContext.workspaceId ? undefined : lastResultId,
+      context: { assistant: workflow.assistant, productObject: workflow.productObject, ...effectiveContext },
+      nextStep,
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
+  private deriveNextActions(workflow: AssistantWorkflow, currentStage: string, workflowState: WorkflowState): string[] {
+    const stage = workflow.stages.find((s) => s.name === currentStage);
+    const actions: string[] = [];
+    if (stage) {
+      for (const skill of stage.skills || []) {
+        actions.push(skill.name);
+      }
+    }
+    if (workflowState !== 'executed' && workflowState !== 'rejected') {
+      actions.push(`transition:${workflowState}`);
+    }
+    return actions;
+  }
+
+  private deriveNextStep(workflow: AssistantWorkflow, currentStage: string, workflowState: WorkflowState, allowedTransitions: WorkflowState[]): string | undefined {
+    if (workflowState === 'executed') {
+      return `Workflow complete for ${workflow.assistant}. Review results and close out.`;
+    }
+    if (workflowState === 'rejected') {
+      return `Workflow rejected for ${workflow.assistant}. Resume from a prior revision to retry.`;
+    }
+    const stage = workflow.stages.find((s) => s.name === currentStage);
+    if (stage && stage.skills && stage.skills.length > 0) {
+      return `Execute one of the available skills in stage '${currentStage}': ${stage.skills.map((s) => s.name).join(', ')}`;
+    }
+    if (allowedTransitions.length > 0) {
+      return `Advance workflow state from '${workflowState}' to one of: ${allowedTransitions.join(', ')}`;
+    }
+    return undefined;
+  }
+
+  getExecutionStates(): Map<string, WorkflowState> {
+    return new Map(this.executionStates);
+  }
+
+  clearExecutionState(executionId: string): boolean {
+    return this.executionStates.delete(executionId) && this.executionContexts.delete(executionId);
+  }
 }

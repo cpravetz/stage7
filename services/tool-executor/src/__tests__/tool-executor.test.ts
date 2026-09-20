@@ -220,9 +220,8 @@ describe('ToolExecutor', () => {
       updatedAt: new Date(),
     };
 
-    const execution = await executor.execute(confirmingTool, { action: 'delete' });
-    expect(execution.status).toBe('failed');
-    expect(execution.error).toContain('requires explicit confirmation');
+    await expect(executor.execute(confirmingTool, { action: 'delete' }))
+      .rejects.toThrow(/requires explicit confirmation/);
   });
 
   it('should allow confirmBeforeSend when dryRun is explicit', async () => {
@@ -300,9 +299,8 @@ describe('ToolExecutor', () => {
       updatedAt: new Date(),
     };
 
-    const execution = await executor.execute(confirmingTool, { action: 'delete' });
-    expect(execution.status).toBe('failed');
-    expect(execution.error).toContain('requires explicit confirmation');
+    await expect(executor.execute(confirmingTool, { action: 'delete' }))
+      .rejects.toThrow(/requires explicit confirmation/);
   });
 
   it('should prefer tool-level confirmBeforeSend over manifest', async () => {
@@ -322,9 +320,8 @@ describe('ToolExecutor', () => {
       updatedAt: new Date(),
     };
 
-    const execution = await executor.execute(confirmingTool, { action: 'delete' });
-    expect(execution.status).toBe('failed');
-    expect(execution.error).toContain('requires explicit confirmation');
+    await expect(executor.execute(confirmingTool, { action: 'delete' }))
+      .rejects.toThrow(/requires explicit confirmation/);
   });
 
   it('should enforce confirmBeforeSend from manifest when tool-level is absent', async () => {
@@ -343,9 +340,8 @@ describe('ToolExecutor', () => {
       updatedAt: new Date(),
     };
 
-    const execution = await executor.execute(confirmingTool, { action: 'delete' });
-    expect(execution.status).toBe('failed');
-    expect(execution.error).toContain('requires explicit confirmation');
+    await expect(executor.execute(confirmingTool, { action: 'delete' }))
+      .rejects.toThrow(/requires explicit confirmation/);
   });
 
   it('should return not-connected result for external action skill with missing required config', async () => {
@@ -503,6 +499,103 @@ describe('ToolExecutor', () => {
 
     await expect(executor.executeOrRequestCredentials(confirmingTool, { action: 'delete' }))
       .rejects.toThrow(ConfirmationRequiredError);
+  });
+
+  describe('Approval Summary Generation', () => {
+    it('should generate an approval summary for a tool with confirmBeforeSend=true', () => {
+      const confirmingTool: Tool = {
+        id: 'tool-approval-1',
+        name: 'Delete Patient Record',
+        description: 'Delete a patient record',
+        type: 'code',
+        manifest: {
+          language: 'javascript',
+          entrypoint: 'index.js',
+          sourceCode: 'console.log("delete");',
+          action: 'delete',
+        },
+        confirmBeforeSend: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      const summary = executor.generateApprovalSummary(confirmingTool, { patient: 'P12345', reason: 'cleanup' });
+
+      expect(summary.toolName).toBe('Delete Patient Record');
+      expect(summary.toolId).toBe('tool-approval-1');
+      expect(summary.action).toBe('delete');
+      expect(summary.object).toBe('P12345');
+      expect(summary.scope).toEqual({ patient: 'P12345', reason: 'cleanup' });
+      expect(summary.confirmBeforeSend).toBe(true);
+      expect(summary.requiresConfirmation).toBe(true);
+      expect(summary.dryRun).toBe(false);
+    });
+
+    it('should extract the first available object key from known list', () => {
+      const tool: Tool = {
+        id: 'tool-approval-2',
+        name: 'Create Campaign',
+        description: 'Create a campaign',
+        type: 'code',
+        manifest: { system: 'marketing', action: 'create' },
+        confirmBeforeSend: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      const summary = executor.generateApprovalSummary(tool, { campaign: 'C999', lead: 'L1' });
+
+      expect(summary.object).toBe('C999');
+      expect(summary.action).toBe('create');
+    });
+
+    it('should correctly identify dryRun state from input', () => {
+      const tool: Tool = {
+        id: 'tool-approval-3',
+        name: 'Send Email',
+        description: 'Send an email',
+        type: 'code',
+        manifest: { action: 'send' },
+        confirmBeforeSend: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      const summary = executor.generateApprovalSummary(tool, { to: 'a@b.com', dryRun: true });
+
+      expect(summary.dryRun).toBe(true);
+      expect(summary.requiresConfirmation).toBe(true);
+      expect(summary.scope).toEqual({ to: 'a@b.com' });
+    });
+
+    it('should include summary in ConfirmationRequiredError when thrown', async () => {
+      const confirmingTool: Tool = {
+        id: 'tool-approval-4',
+        name: 'Delete Ticket',
+        description: 'Delete a ticket',
+        type: 'code',
+        manifest: {
+          language: 'javascript',
+          entrypoint: 'index.js',
+          sourceCode: 'console.log("delete");',
+        },
+        confirmBeforeSend: true,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      try {
+        await executor.execute(confirmingTool, { ticket: 'T-1' });
+        throw new Error('Should have thrown');
+      } catch (err) {
+        expect(err).toBeInstanceOf(ConfirmationRequiredError);
+        const confirmationError = err as ConfirmationRequiredError;
+        expect(confirmationError.summary).toBeDefined();
+        expect(confirmationError.summary?.toolName).toBe('Delete Ticket');
+        expect(confirmationError.summary?.object).toBe('T-1');
+        expect(confirmationError.summary?.requiresConfirmation).toBe(true);
+      }
+    });
   });
 })
 

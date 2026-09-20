@@ -1,11 +1,18 @@
 import { Tool, SchemaRecord } from '../../../types';
 import { createCodeSkill, SchemaProps } from '../code-skill-factory';
 
-const CAREER_WRAPPER_CONFIG_SCHEMA: SchemaRecord = { type: 'object', properties: {} };
+const CAREER_WRAPPER_CONFIG_SCHEMA: SchemaRecord = {
+  type: 'object',
+  properties: {
+    premiumJobBoards: { type: 'array', items: { type: 'string' }, description: 'Configured premium or member job boards' },
+    freeJobBoards: { type: 'array', items: { type: 'string' }, description: 'Configured public job boards' },
+  },
+};
 
 const JOB_DISCOVERY_FIT_RANKING_SOURCE = `(async () => {
 const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
-const result = await __execute_tool('career_job_discovery', { queries: input.queries || [], locations: input.locations || [], minSalary: input.minSalary, maxSalary: input.maxSalary, connectedJobBoardTools: input.connectedJobBoardTools || [] });
+const configuredBoards = input.config && typeof input.config === 'object' ? input.config : {};
+const result = await __execute_tool('career_job_discovery', { queries: input.jobTitles || [], locations: input.locations || [], minSalary: input.minSalary, maxSalary: input.maxSalary, premiumJobBoards: configuredBoards.premiumJobBoards || [], freeJobBoards: configuredBoards.freeJobBoards || [] });
 if (!result || result.success === false || result.error) {
 console.log(JSON.stringify({ success: false, mode: 'not-connected', error: result && result.error ? result.error : 'Not connected: job discovery returned no data; connect a job-board source or run career_job_discovery first' }));
 return;
@@ -38,7 +45,7 @@ if (typeof input.autoApplyThreshold === 'number') {
   }
 }
 
-console.log(JSON.stringify({ success: true, data: { ranked, total: ranked.length, queriesUsed: data.queriesUsed || input.queries || [], storagePath: listPath, autoApplied, note: data.note || undefined, delegatedTo: ['career_job_discovery'].concat(autoApplied ? ['career_apply_execute'] : []), generatedAt: new Date().toISOString() } }));
+console.log(JSON.stringify({ success: true, data: { ranked, total: ranked.length, queriesUsed: data.queriesUsed || input.jobTitles || [], storagePath: listPath, autoApplied, note: data.note || undefined, delegatedTo: ['career_job_discovery'].concat(autoApplied ? ['career_apply_execute'] : []), generatedAt: new Date().toISOString() } }));
 })();`;
 
 const JOB_DISCOVERY_FIT_RANKING_INPUT = {
@@ -48,7 +55,6 @@ jobTitles: { type: 'array', items: { type: 'string' }, description: 'Job titles 
 locations: { type: 'array', items: { type: 'string' }, description: 'Target locations' },
 minSalary: { type: 'number', description: 'Minimum target compensation' },
 maxSalary: { type: 'number', description: 'Maximum target compensation' },
-connectedJobBoardTools: { type: 'array', items: { type: 'string' }, description: 'Job boards you have a paid or member account with. Leave empty to search public boards that do not require membership.' },
 autoApplyThreshold: { type: 'number', description: 'If set, automatically submit an application (via Apply to Jobs) to every ranked job scoring at or above this fit score' },
 dryRun: { type: 'boolean', description: 'Preview auto-applications without submitting; defaults to true', default: true },
 },

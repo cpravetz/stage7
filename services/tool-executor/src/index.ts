@@ -1,5 +1,7 @@
 import express from 'express';
 import toolRoutes from './routes/tools';
+import workflowRoutes from './routes/workflows';
+import workspaceRoutes from './routes/workspaces';
 import { Tool } from './types';
 import { toolRegistry } from './utils/sharedInstance';
 import { legacyGeneralTools } from './data/generalTools';
@@ -169,6 +171,8 @@ app.get('/api/tool-executor/tools', (_req, res) => {
 });
 
 app.use('/api/tool-executor', toolRoutes);
+app.use('/api/tool-executor/workflows', workflowRoutes);
+app.use('/api/tool-executor/workspaces', workspaceRoutes);
 
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   if (err instanceof ToolNotFoundError) {
@@ -183,9 +187,11 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
 
 const PORT = process.env.PORT || 3500;
 
-app.listen(PORT, () => {
-  logger.info({ port: PORT, tools: toolRegistry.list().length }, 'Tool Executor service listening');
-});
+if (require.main === module) {
+  app.listen(PORT, () => {
+    logger.info({ port: PORT, tools: toolRegistry.list().length }, 'Tool Executor service listening');
+  });
+}
 
 export { legacyGeneralTools } from './data/generalTools';
 export {

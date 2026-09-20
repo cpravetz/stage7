@@ -1,4 +1,5 @@
-import { createCodeSkill, SchemaProps } from '../code-skill-factory';
+import { createCodeSkill } from '../../../adk';
+import { SchemaProps } from '../code-skill-factory';
 
 const EVENT_PLANNING_BUDGETING = createCodeSkill({
   id: 'event_planning_budgeting',

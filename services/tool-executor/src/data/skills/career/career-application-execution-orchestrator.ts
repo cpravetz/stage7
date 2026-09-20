@@ -20,8 +20,8 @@ const result = await __execute_tool('career_apply_execute', {
   targetRoles,
   dryRun: input.dryRun !== false,
   coverLetters: input.coverLetters,
-  customResume: input.customResume,
-  customCoverLetter: input.customCoverLetter,
+  customResume: input.customResumeFile || input.customResume,
+  customCoverLetter: input.customCoverLetterFile || input.customCoverLetter,
 });
 if (!result || result.success === false || result.error) {
 console.log(JSON.stringify({ success: false, mode: 'not-connected', error: result && result.error ? result.error : 'Not connected: application execution returned no result; ensure a profile and targetRoles are available' }));
@@ -44,6 +44,8 @@ targetRole: { type: 'string', description: 'Single role to apply to' },
 dryRun: { type: 'boolean', description: 'Preview without submitting; defaults to true', default: true },
 customResume: { type: 'string', description: 'Custom resume text to use for this application when overriding your default resume' },
 customCoverLetter: { type: 'string', description: 'Custom cover letter text to use for this application' },
+customResumeFile: { type: 'object', description: 'Upload a resume file; text entry remains available as a fallback', properties: { name: { type: 'string' }, mimeType: { type: 'string' }, content: { type: 'string' } }, required: ['name', 'mimeType', 'content'] },
+customCoverLetterFile: { type: 'object', description: 'Upload a cover letter file; text entry remains available as a fallback', properties: { name: { type: 'string' }, mimeType: { type: 'string' }, content: { type: 'string' } }, required: ['name', 'mimeType', 'content'] },
 coverLetters: { type: 'array', items: { type: 'string' }, description: 'Optional cover-letter variants to use' },
 },
 };

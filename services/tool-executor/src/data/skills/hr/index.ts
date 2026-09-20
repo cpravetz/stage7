@@ -134,7 +134,6 @@ console.log(JSON.stringify(result));
       }, { description: 'Assessment criteria and data for candidate evaluation' }),
       dryRun: SchemaProps.boolean({ description: 'Validate without executing scheduling; defaults to true', default: true }),
       confirmation: SchemaProps.boolean({ description: 'Explicit approval for live scheduling dispatch', default: false }),
-      endpointUrl: SchemaProps.url({ description: 'Override scheduling endpoint URL' }),
     },
     required: ['operation'],
   },
@@ -182,7 +181,6 @@ const RECRUITING_OPS = createExternalActionSkill({
     properties: {
       operation: SchemaProps.select(['ats', 'job-board', 'linkedin', 'schedule-interview', 'calendar', 'email'], { description: 'Recruiting operation to perform' }),
       dryRun: SchemaProps.boolean({ description: 'Validate without executing; defaults to true', default: true }),
-      endpointUrl: SchemaProps.url({ description: 'Override endpoint URL' }),
       data: SchemaProps.object({}, { description: 'Operation payload data for job description or interview kit generation' }),
       filters: SchemaProps.object({}, { description: 'Filters for query operations' }),
       pagination: SchemaProps.object({}, { description: 'Pagination settings' }),
@@ -294,7 +292,6 @@ console.log(JSON.stringify(result));
       }, { description: 'Date range for the analysis period' }),
       data: SchemaProps.object({}, { description: 'Data payload for the operation — hiring records or compliance candidates' }),
       filters: SchemaProps.object({}, { description: 'Filters to apply to the data' }),
-      endpointUrl: SchemaProps.url({ description: 'Optional external analytics endpoint override' }),
       dryRun: SchemaProps.boolean({ description: 'Validate without executing; defaults to true', default: true }),
     },
     required: ['operation'],

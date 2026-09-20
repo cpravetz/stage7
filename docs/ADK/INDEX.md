@@ -1,144 +1,35 @@
-# Agent Development Kit (ADK) Documentation Index
+# ADK Documentation Index
 
+This folder contains both historical references and the current implementation notes. The active source of truth is the TypeScript ADK in the tool-executor package, especially the contracts and builder layer in the files below.
 
-**Status**: Complete, Production-Ready
+## Current implementation docs
 
-## 📚 Documentation Structure
+1. [README.md](./README.md) — current ADK guide and examples for creating assistants
+2. [ADK_DEVELOPER_GUIDE.md](./ADK_DEVELOPER_GUIDE.md) — practical developer workflow for tools, stages, skills, and policies
+3. [ADK_OVERVIEW.md](./ADK_OVERVIEW.md) — current repository-level summary of the builder-based design
 
-The ADK documentation is organized by use case. Find what you need:
+## Runtime and workflow references
 
-### 🚀 Getting Started (5 minutes)
+4. [../../services/tool-executor/src/adk/contracts.ts](../../services/tool-executor/src/adk/contracts.ts) — ADK contracts
+5. [../../services/tool-executor/src/adk/builders.ts](../../services/tool-executor/src/adk/builders.ts) — builder APIs
+6. [../../services/tool-executor/src/data/skills/index.ts](../../services/tool-executor/src/data/skills/index.ts) — exported sample skills and workflows
+7. [../../services/tool-executor/src/data/skills/event/index.ts](../../services/tool-executor/src/data/skills/event/index.ts) — concrete sample assistant workflow
+8. [../../services/tool-executor/src/routes/workflows.ts](../../services/tool-executor/src/routes/workflows.ts) — workflow runtime endpoints
+9. [../../services/tool-executor/src/routes/workspaces.ts](../../services/tool-executor/src/routes/workspaces.ts) — workspace lifecycle and approval state routes
 
-Start here if you're new to the ADK:
+## Historical documents
 
-1. **[README.md](./README.md)** - Main entry point
-   - Quick start in 5 minutes
-   - Architecture overview (3-layer model)
-   - Running existing assistants
-   - Creating your first assistant
+The following files still exist for archival comparison but should not be treated as the canonical description of the current implementation:
 
-### 👨‍💻 For Developers
+- [AGENT_ASSISTANT_SKILLS_TOOLS.md](./AGENT_ASSISTANT_SKILLS_TOOLS.md)
+- [AGENT_DELEGATION.md](./AGENT_DELEGATION.md)
+- [ASSISTANTS_BUILDER_MIGRATION_COMPLETE.md](./ASSISTANTS_BUILDER_MIGRATION_COMPLETE.md)
+- [SDK-ARCHITECTURE.md](./SDK-ARCHITECTURE.md)
 
-Build assistants and tools:
+## Recommended reading order
 
-2. **[SDK-ARCHITECTURE.md](./SDK-ARCHITECTURE.md)** - SDK-First Architecture & API Design
-   - Layered event-driven architecture overview (Frontend → Event → API → Librarian)
-   - LibrarianClient interface for persistent data storage (MongoDB/Redis/Chroma)
-   - Event system: structured state changes (domain.collection.operation format)
-   - Assistant state management and useMemo patterns
-   - sendEvent: frontend-backend communication via WebSocket
-   - Message flow: inbound/outbound patterns
-   - Core classes: `Assistant`, `Tool`, `Conversation`, `MessageParser`
-   - **Complete inventory**: All 20 backend assistant APIs + 24 frontend components
-   - Standard 6-step SDK-first migration pattern
-   - QuickAssistant pattern for boilerplate elimination
-   - Middleware stack, WebSocket integration, error handling
-
-3. **[TOOL-DEVELOPMENT.md](./TOOL-DEVELOPMENT.md)** - How to build tools
-   - Creating custom tools step-by-step
-   - Tool best practices (single responsibility, error handling, stateless)
-   - Configuration and secrets management
-   - Integration examples (CRM, data analysis, document generation)
-   - Unit testing tools
-
-4. **[ASSISTANT_STARTUP_GUIDE.md](./ASSISTANT_STARTUP_GUIDE.md)** - Reference guide
-   - Starting each assistant service
-   - Port allocation and conflicts resolution
-   - Service URLs and health checks
-   - Available tools per assistant
-
-### 🚢 For DevOps & Operations
-
-Deploy and manage systems:
-
-5. **[DEPLOYMENT.md](./DEPLOYMENT.md)** - Production deployment
-   - Docker Compose setup (complete template)
-   - Manual deployment instructions
-   - Production checklist (security, monitoring, reliability)
-   - Scaling guide (horizontal & vertical)
-   - Health checks and monitoring
-   - Troubleshooting common issues
-   - Backup & recovery procedures
-
-### 🏗️ Architecture & Design
-
-Understand the system:
-
-6. **[ADK_OVERVIEW.md](./ADK_OVERVIEW.md)** - System overview
-   - ADK purpose and principles
-   - Layered architecture (L1-L4)
-   - Key components and responsibilities
-   - Design patterns
-
-7. **[AGENT_DELEGATION.md](./AGENT_DELEGATION.md)** - Agent collaboration
-   - Agent-to-agent communication
-   - Task delegation patterns
-   - Multi-agent coordination
-
-### 🔐 Security & Integration
-
-Important reference materials:
-
-8. **[authentication.md](./authentication.md)** - Auth system
-   - JWT tokens and refresh
-   - Service credentials
-   - Security manager integration
-
-### 📖 Additional Resources
-
-9. **[ASSISTANTS_BUILDER_MIGRATION_COMPLETE.md](./ASSISTANTS_BUILDER_MIGRATION_COMPLETE.md)** - Migration status
-   - Historical reference: builder pattern → SDK-first migration
-   - Rationale for architectural changes
-   
----
-
-## Quick Links by Role
-
-### 👤 Product Manager / Non-Technical
-- Start: [README.md](./README.md)
-- Then: [ADK_OVERVIEW.md](./ADK_OVERVIEW.md)
-
-### 👨‍💻 Backend Developer (Creating New Assistants)
-1. [README.md](./README.md) - Quick start
-2. [SDK-ARCHITECTURE.md](./SDK-ARCHITECTURE.md) - Understand the pattern
-3. [TOOL-DEVELOPMENT.md](./TOOL-DEVELOPMENT.md) - Build custom tools
-4. [ASSISTANT_STARTUP_GUIDE.md](./ASSISTANT_STARTUP_GUIDE.md) - Deploy your assistant
-
-### 🎨 Frontend Developer
-1. [README.md](./README.md) - Quick start
-2. [SDK-ARCHITECTURE.md](./SDK-ARCHITECTURE.md) - Understand sendEvent & assistantState
-3. See specific assistant component in `services/mcsreact/src/assistants/*/`
-
-### 🚀 DevOps / Operations
-1. [DEPLOYMENT.md](./DEPLOYMENT.md) - Production setup
-2. [ASSISTANT_STARTUP_GUIDE.md](./ASSISTANT_STARTUP_GUIDE.md) - Service management
-3. [authentication.md](./authentication.md) - Security setup
-
----
-
-## FAQ & Troubleshooting
-
-**Q: How do I create a new assistant?**  
-A: See [README.md - Creating Assistants](./README.md#creating-assistants)
-
-**Q: How does the SDK-first architecture work?**  
-A: See [SDK-ARCHITECTURE.md](./SDK-ARCHITECTURE.md#architecture-at-a-glance)
-
-**Q: How do I deploy to production?**  
-A: See [DEPLOYMENT.md](./DEPLOYMENT.md)
-
-**Q: Where can I find examples of running assistants?**  
-A: See [ASSISTANT_STARTUP_GUIDE.md](./ASSISTANT_STARTUP_GUIDE.md)
-
-**Q: How do I build custom tools?**  
-A: See [TOOL-DEVELOPMENT.md](./TOOL-DEVELOPMENT.md)
-
----
-
-## Version History
-
-| Date | Changes |
-|------|---------|
-| Feb 2, 2026 | Consolidated SDK-first documentation into SDK-ARCHITECTURE.md; all 20 APIs + 24 components verified |
-| Jan 22, 2026 | Initial ADK framework documentation |
+1. Read [README.md](./README.md)
+2. Review [ADK_DEVELOPER_GUIDE.md](./ADK_DEVELOPER_GUIDE.md)
+3. Inspect the sample workflow in [../../services/tool-executor/src/data/skills/event/index.ts](../../services/tool-executor/src/data/skills/event/index.ts)
+4. Validate behavior with the test suite under [../../services/tool-executor/src/__tests__](../../services/tool-executor/src/__tests__)
 

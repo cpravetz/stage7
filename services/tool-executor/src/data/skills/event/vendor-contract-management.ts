@@ -67,7 +67,6 @@ const VENDOR_CONTRACT_MANAGEMENT = createExternalActionSkill({
       paymentData: { type: 'object', description: 'Payment: amount, date, method, invoice reference, purpose' },
       event: { type: 'string', description: 'Event identifier' },
       filters: { type: 'object', description: 'List filters: category, status, event' },
-      endpointUrl: SchemaProps.text({ description: 'Optional endpoint override' }),
       dryRun: SchemaProps.boolean({ description: 'Validate without executing' }),
     },
     required: ['operation'],

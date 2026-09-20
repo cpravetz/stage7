@@ -1,16 +1,41 @@
 import { AssistantDefinition, AssistantRuntimeConfig } from '@stage7-nextgen/shared';
 import { ArtifactsService } from "../shared/artifacts";
 import { logger } from '@stage7-nextgen/shared';
+import { buildAssistantManifest, filterCatalogByManifest, validateManifest } from '../data/assistantManifest';
 
 export class AssistantLoader {
   private persistence: ArtifactsService;
   private assistants: Map<string, AssistantDefinition>;
   private runtimes: Map<string, AssistantRuntimeConfig>;
+  private manifestCache: { validIds: string[]; catalog: AssistantDefinition[] } | null = null;
 
   constructor(persistence: ArtifactsService) {
     this.persistence = persistence;
     this.assistants = new Map();
     this.runtimes = new Map();
+  }
+
+  refreshManifestCache(): void {
+    const manifest = buildAssistantManifest(process.env.STAGE7_ASSISTANTS);
+    this.manifestCache = { validIds: manifest.validIds, catalog: manifest.catalog };
+  }
+
+  getManifestCatalog(): AssistantDefinition[] {
+    if (!this.manifestCache) {
+      this.refreshManifestCache();
+    }
+    return this.manifestCache!.catalog;
+  }
+
+  getManifestSelectedIds(): string[] {
+    if (!this.manifestCache) {
+      this.refreshManifestCache();
+    }
+    return this.manifestCache!.validIds;
+  }
+
+  getValidationResult(): { valid: boolean; missing: string[]; validIds: string[] } {
+    return validateManifest(this.getManifestSelectedIds());
   }
 
   async loadFromPersistence(): Promise<number> {

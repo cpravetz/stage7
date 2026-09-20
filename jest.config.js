@@ -3,6 +3,7 @@ module.exports = {
   testEnvironment: 'node',
   rootDir: '.',
   moduleDirectories: ['node_modules', 'src'],
+  modulePathIgnorePatterns: ['<rootDir>/\\.kilo/.*'],
   testMatch: [
     '<rootDir>/services/brain/src/__tests__/**/*.test.ts',
     '<rootDir>/services/mcp-runtime/src/__tests__/**/*.test.ts',

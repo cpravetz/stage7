@@ -82,11 +82,11 @@ The platform requires the following infrastructure services:
 ## 🚀 Key Features
 
 ### Agent Development Kit (ADK)
-- **Rapid Assistant Creation**: Build domain-specific AI assistants in minutes using the Quick Assistant pattern
-- **Dynamic Assistant Loading**: Assistants are loaded dynamically by the Worker Pool, eliminating port-per-assistant limitations
-- **Multi-Layer Architecture**: Clean separation between UI, domain-specific assistants, SDK, and core engine
-- **Zero-Boilerplate Pattern**: Eliminate ~250 lines of infrastructure code with the Quick Assistant pattern
-- **Full Documentation**: Comprehensive guides for creating, deploying, and extending assistants (see [ADK docs](./docs/ADK/README.md))
+- **Contract-Driven Composition**: Define Assistant identity, product objects, tools, skills, workflows, lanes, context, approval, configuration, and persistence through typed contracts.
+- **Reusable Builders**: Compose custom Assistants with `createTool`, `createSkill`, `createWorkflow`, `createWorkflowStage`, `createWorkflowLane`, and `createAssistant`.
+- **Workflow Governance**: Validate stage transitions, lane references, object context, configuration, approval requirements, and persistence policies before runtime use.
+- **Runtime Workflow Views**: Browse registered workflows and build runtime stage/action views through the tool-executor workflow and workspace APIs.
+- **Full Documentation**: See the current [ADK documentation](./docs/ADK/README.md) and [developer guide](./docs/ADK/ADK_DEVELOPER_GUIDE.md). Older architecture documents are historical references.
 
 ### Enterprise-Ready Plugin Ecosystem
 - **Extensible Plugin Types**: Develop plugins in Python, JavaScript, any language via Docker containers, or as OpenAPI/MCP tool definitions

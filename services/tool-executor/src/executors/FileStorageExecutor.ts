@@ -36,22 +36,24 @@ export class FileStorageExecutor {
 
     try {
       switch (operation) {
-        case 'read':
+        case 'read': {
           if (!fs.existsSync(resolvedPath)) {
             return { success: false, error: `File not found: ${resolvedPath}`, durationMs: Date.now() - startTime };
           }
           const data = fs.readFileSync(resolvedPath, 'utf-8');
           return { success: true, data, durationMs: Date.now() - startTime };
+        }
 
-        case 'write':
+        case 'write': {
           const dir = path.dirname(resolvedPath);
           if (!fs.existsSync(dir)) {
             fs.mkdirSync(dir, { recursive: true });
           }
           fs.writeFileSync(resolvedPath, content || '');
           return { success: true, data: { path: resolvedPath, bytes: (content || '').length }, durationMs: Date.now() - startTime };
+        }
 
-        case 'list':
+        case 'list': {
           if (!fs.existsSync(resolvedPath)) {
             return { success: false, error: `Directory not found: ${resolvedPath}`, durationMs: Date.now() - startTime };
           }
@@ -62,6 +64,7 @@ export class FileStorageExecutor {
             size: entry.isFile() ? (fs.statSync(path.join(resolvedPath, entry.name)).size || 0) : 0,
           }));
           return { success: true, data: listing, durationMs: Date.now() - startTime };
+        }
 
         case 'delete':
           if (!fs.existsSync(resolvedPath)) {

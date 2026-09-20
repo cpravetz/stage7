@@ -3,7 +3,6 @@ import { createCodeSkill, createSchemaRecord, SchemaProps } from '../code-skill-
 
 const reportingDataOpsInputSchema = createSchemaRecord({
   operation: SchemaProps.select(['reporting', 'data', 'cleaning', 'documents'], { description: 'Operation type: reporting for report generation, data for data retrieval, cleaning for data cleaning, documents for document management' }),
-  endpointUrl: SchemaProps.url({ description: 'Override endpoint URL for the external service' }),
   reportType: SchemaProps.select(['income-statement', 'balance-sheet', 'cash-flow', 'board-pack', 'kpi-dashboard', 'custom'], { description: 'Type of report to generate' }),
   dateRange: SchemaProps.object({
     start: SchemaProps.text({ description: 'Start date (ISO 8601)' }),

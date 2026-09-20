@@ -181,8 +181,8 @@ export class AssistantExecutor {
   }
 
 
-  async executeToolCall(tool: MCPToolCall, assistantId?: string): Promise<MCPToolResult> {
-    logger.info({ toolName: tool.name, arguments: tool.arguments }, 'Tool execution requested');
+  async executeToolCall(tool: MCPToolCall, assistantId?: string, workspaceId?: string): Promise<MCPToolResult> {
+    logger.info({ toolName: tool.name, arguments: tool.arguments, workspaceId }, 'Tool execution requested');
 
     try {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -196,6 +196,8 @@ export class AssistantExecutor {
           type: 'mcp',
           manifest: {},
           input: tool.arguments || {},
+          workspaceId,
+          assistantId,
         }),
       });
 

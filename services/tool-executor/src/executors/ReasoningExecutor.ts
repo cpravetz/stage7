@@ -68,25 +68,32 @@ export class ReasoningExecutor {
       (payload.options as Record<string, unknown>).optimizeFor = optimizeFor;
     }
 
-    let response: Response;
-    try {
-      response = await fetch(`${BRAIN_URL}/api/brain/complete`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-      logger.error({ toolId: tool.id, error: errorMessage }, 'Failed to connect to Brain service');
-      const wrappedError = new Error(`Brain service unavailable: ${errorMessage}`) as Error & { cause?: unknown };
-      wrappedError.cause = err;
-      throw wrappedError;
+    let response: Response | undefined;
+    let lastError: unknown;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        response = await fetch(`${BRAIN_URL}/api/brain/complete`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (response.ok) break;
+        const text = await response.text();
+        lastError = new Error(`Brain returned ${response.status}: ${text.slice(0, 200)}`);
+        if (![502, 503, 504].includes(response.status) || attempt === 2) break;
+        logger.warn({ toolId: tool.id, status: response.status, attempt }, 'Retrying transient Brain gateway error');
+        await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
+      } catch (err) {
+        lastError = err;
+        if (attempt === 2) break;
+        await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
+      }
     }
 
-    if (!response.ok) {
-      const text = await response.text();
-      logger.error({ toolId: tool.id, status: response.status, body: text.slice(0, 200) }, 'Brain service returned error');
-      throw new Error(`Brain returned ${response.status}: ${text.slice(0, 200)}`);
+    if (!response?.ok) {
+      const errorMessage = lastError instanceof Error ? lastError.message : 'Unknown error';
+      logger.error({ toolId: tool.id, error: errorMessage }, 'Brain service returned error');
+      throw lastError instanceof Error ? lastError : new Error(`Brain service unavailable: ${errorMessage}`);
     }
 
     const data = await response.json() as { content: string; model?: string; provider?: string; tokensUsed?: number };

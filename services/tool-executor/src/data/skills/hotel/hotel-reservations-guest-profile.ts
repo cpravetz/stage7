@@ -91,7 +91,6 @@ const RESERVATIONS_INPUT_SCHEMA = createSchemaRecord({
   payload: SchemaProps.object({}, { description: 'Full operation payload for connector-specific fields', additionalProperties: true }),
   dryRun: SchemaProps.boolean({ description: 'Validate the request without sending a live mutation', default: true }),
   confirmation: SchemaProps.boolean({ description: 'Explicit approval for a live mutating request; dryRun does not require approval', default: false }),
-  endpointUrl: SchemaProps.url({ description: 'Optional connector endpoint override' }),
 }, { required: ['operation', 'propertyId'] });
 
 export const RESERVATIONS_SKILL = withConfirmation(createExternalActionSkill({

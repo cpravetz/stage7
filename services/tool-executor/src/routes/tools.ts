@@ -1,10 +1,10 @@
 import { Router, Request, Response, NextFunction } from 'express'
 import { z } from 'zod'
-import { Tool, PluginGenerationRequest, PluginGenerationResult, CredentialRequiredError, ConfirmationRequiredError } from '../types'
+import { Tool, PluginGenerationRequest, PluginGenerationResult, CredentialRequiredError, ConfirmationRequiredError, ApprovalSummary } from '../types'
 import { ToolNotFoundError, ValidationError } from '../utils/errors'
 import asyncHandler from '../utils/asyncHandler'
 import logger from '../utils/logger'
-import { toolRegistry as registry, toolExecutor as executor, pluginGenerator as generator } from '../utils/sharedInstance'
+import { toolRegistry as registry, executor, pluginGenerator as generator } from '../utils/sharedInstance'
 
 const router: Router = Router()
 
@@ -88,7 +88,16 @@ router.post(
     }
 
     try {
-      const execution = await executor.executeOrRequestCredentials(tool, req.body.input || {}, req.body.credentials)
+      const execution = await executor.executeOrRequestCredentials(
+        tool,
+        req.body.input || {},
+        req.body.credentials,
+        {
+          workspaceId: req.body.workspaceId,
+          assistantId: req.body.assistantId || req.header('x-assistant-id'),
+          context: req.body.context,
+        }
+      )
 
       if (execution instanceof CredentialRequiredError) {
         res.status(428).json({ error: execution.message, request: execution.request })
@@ -161,12 +170,21 @@ router.post(
     }
 
     // If the resolved tool is a skill, require assistant context header
-    if (fullTool.isSkill && !req.header('x-assistant-id')) {
-      throw new ValidationError('Skill execution requires assistant context (X-Assistant-Id header)');
+    if (fullTool.isSkill && !req.header('x-assistant-id') && !req.body.assistantId) {
+      throw new ValidationError('Skill execution requires assistant context (X-Assistant-Id header or assistantId body field)');
     }
 
     try {
-      const execution = await executor.executeOrRequestCredentials(fullTool, input, credentials);
+      const execution = await executor.executeOrRequestCredentials(
+        fullTool,
+        input,
+        credentials,
+        {
+          workspaceId: req.body.workspaceId,
+          assistantId: req.body.assistantId || req.header('x-assistant-id'),
+          context: req.body.context,
+        }
+      )
 
       if (execution instanceof CredentialRequiredError) {
         res.status(428).json({ error: execution.message, request: execution.request });
@@ -242,6 +260,18 @@ router.post(
 
     const statusCode = result.status === 'completed' ? 200 : 500
     res.status(statusCode).json(result)
+  })
+)
+
+router.post(
+  '/tools/:id/preview',
+  asyncHandler(async (req: Request, res: Response) => {
+    const tool = registry.get(req.params.id)
+    if (!tool) {
+      throw new ToolNotFoundError(req.params.id)
+    }
+    const summary = executor.previewAction(tool, req.body.input || {})
+    res.json({ summary })
   })
 )
 

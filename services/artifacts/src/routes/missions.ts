@@ -141,6 +141,13 @@ router.get('/:missionId/artifacts', asyncHandler(async (req, res) => {
   const artifacts: Array<Record<string, unknown>> = [];
 
   if (plan) {
+    for (const artifact of (plan as { artifacts?: unknown[] }).artifacts || []) {
+      if (artifact && typeof artifact === 'object') {
+        artifacts.push(artifact as Record<string, unknown>);
+      } else if (typeof artifact === 'string') {
+        artifacts.push({ id: artifact, name: artifact });
+      }
+    }
     const phases = (plan as { phases?: Array<{ id: string; tasks?: Array<{ artifacts?: unknown[] }> }> }).phases || [];
     for (const phase of phases) {
       for (const task of phase.tasks || []) {

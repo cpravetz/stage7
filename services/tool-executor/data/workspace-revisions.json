@@ -1,0 +1,168 @@
+{
+  "ws_1789919000468_f5ah72esj": [
+    {
+      "revisionId": "rev_1789919000468_69q4cpops",
+      "workspaceId": "ws_1789919000468_f5ah72esj",
+      "trigger": "create",
+      "workspace": {
+        "workspaceId": "ws_1789919000468_f5ah72esj",
+        "assistant": "CTO",
+        "productObject": "system / incident",
+        "currentStage": "analysis",
+        "workflowState": "analysis",
+        "nextActions": [],
+        "approvalHistory": [],
+        "executionHistory": [],
+        "stateHistory": [
+          {
+            "from": "analysis",
+            "to": "recommendation",
+            "timestamp": "2026-09-20T15:43:20.469Z",
+            "trigger": "transition"
+          },
+          {
+            "from": "recommendation",
+            "to": "draft",
+            "timestamp": "2026-09-20T15:43:20.469Z",
+            "trigger": "transition"
+          },
+          {
+            "from": "draft",
+            "to": "approved",
+            "timestamp": "2026-09-20T15:43:20.469Z",
+            "trigger": "transition"
+          }
+        ],
+        "createdAt": "2026-09-20T15:43:20.468Z",
+        "updatedAt": "2026-09-20T15:43:20.468Z"
+      },
+      "timestamp": "2026-09-20T15:43:20.468Z"
+    },
+    {
+      "revisionId": "rev_1789919000469_juqybqxsk",
+      "workspaceId": "ws_1789919000468_f5ah72esj",
+      "trigger": "transition",
+      "workspace": {
+        "workspaceId": "ws_1789919000468_f5ah72esj",
+        "assistant": "CTO",
+        "productObject": "system / incident",
+        "currentStage": "analysis",
+        "workflowState": "recommendation",
+        "nextActions": [],
+        "approvalHistory": [],
+        "executionHistory": [],
+        "stateHistory": [
+          {
+            "from": "analysis",
+            "to": "recommendation",
+            "timestamp": "2026-09-20T15:43:20.469Z",
+            "trigger": "transition"
+          },
+          {
+            "from": "recommendation",
+            "to": "draft",
+            "timestamp": "2026-09-20T15:43:20.469Z",
+            "trigger": "transition"
+          },
+          {
+            "from": "draft",
+            "to": "approved",
+            "timestamp": "2026-09-20T15:43:20.469Z",
+            "trigger": "transition"
+          }
+        ],
+        "createdAt": "2026-09-20T15:43:20.468Z",
+        "updatedAt": "2026-09-20T15:43:20.469Z"
+      },
+      "timestamp": "2026-09-20T15:43:20.469Z",
+      "metadata": {
+        "from": "analysis",
+        "to": "recommendation"
+      }
+    },
+    {
+      "revisionId": "rev_1789919000469_hk1dualq2",
+      "workspaceId": "ws_1789919000468_f5ah72esj",
+      "trigger": "transition",
+      "workspace": {
+        "workspaceId": "ws_1789919000468_f5ah72esj",
+        "assistant": "CTO",
+        "productObject": "system / incident",
+        "currentStage": "analysis",
+        "workflowState": "draft",
+        "nextActions": [],
+        "approvalHistory": [],
+        "executionHistory": [],
+        "stateHistory": [
+          {
+            "from": "analysis",
+            "to": "recommendation",
+            "timestamp": "2026-09-20T15:43:20.469Z",
+            "trigger": "transition"
+          },
+          {
+            "from": "recommendation",
+            "to": "draft",
+            "timestamp": "2026-09-20T15:43:20.469Z",
+            "trigger": "transition"
+          },
+          {
+            "from": "draft",
+            "to": "approved",
+            "timestamp": "2026-09-20T15:43:20.469Z",
+            "trigger": "transition"
+          }
+        ],
+        "createdAt": "2026-09-20T15:43:20.468Z",
+        "updatedAt": "2026-09-20T15:43:20.469Z"
+      },
+      "timestamp": "2026-09-20T15:43:20.469Z",
+      "metadata": {
+        "from": "recommendation",
+        "to": "draft"
+      }
+    },
+    {
+      "revisionId": "rev_1789919000469_nf9aokwnn",
+      "workspaceId": "ws_1789919000468_f5ah72esj",
+      "trigger": "transition",
+      "workspace": {
+        "workspaceId": "ws_1789919000468_f5ah72esj",
+        "assistant": "CTO",
+        "productObject": "system / incident",
+        "currentStage": "analysis",
+        "workflowState": "approved",
+        "nextActions": [],
+        "approvalHistory": [],
+        "executionHistory": [],
+        "stateHistory": [
+          {
+            "from": "analysis",
+            "to": "recommendation",
+            "timestamp": "2026-09-20T15:43:20.469Z",
+            "trigger": "transition"
+          },
+          {
+            "from": "recommendation",
+            "to": "draft",
+            "timestamp": "2026-09-20T15:43:20.469Z",
+            "trigger": "transition"
+          },
+          {
+            "from": "draft",
+            "to": "approved",
+            "timestamp": "2026-09-20T15:43:20.469Z",
+            "trigger": "transition"
+          }
+        ],
+        "createdAt": "2026-09-20T15:43:20.468Z",
+        "updatedAt": "2026-09-20T15:43:20.469Z"
+      },
+      "timestamp": "2026-09-20T15:43:20.469Z",
+      "metadata": {
+        "from": "draft",
+        "to": "approved"
+      }
+    }
+  ]
+}

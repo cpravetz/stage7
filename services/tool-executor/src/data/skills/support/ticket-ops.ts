@@ -27,7 +27,7 @@ export const TICKET_OPS = createExternalActionSkill({
     properties: {
       operation: SchemaProps.select(['crm', 'escalation', 'follow-up'], { description: 'Ticket operation: crm for CRM sync, escalation for routing, follow-up for scheduling' }),
       dryRun: SchemaProps.boolean({ description: 'Validate without executing', default: true }),
-      endpointUrl: SchemaProps.url({ description: 'Override endpoint URL' }),
+
       ticket: SchemaProps.text({ description: 'Ticket identifier' }),
       customer: SchemaProps.text({ description: 'Customer identifier' }),
       entity: SchemaProps.select(['ticket', 'customer', 'contact', 'account', 'interaction'], { description: 'CRM entity type' }),

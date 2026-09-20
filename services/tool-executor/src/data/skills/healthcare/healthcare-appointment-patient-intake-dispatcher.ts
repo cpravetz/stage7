@@ -40,7 +40,7 @@ const intake = createCodeSkill({
   description: 'Stage patient intake in dry-run mode by default and dispatch it to a configured healthcare endpoint only after explicit confirmation, with honest disconnected and safety states.',
   manifest: { sourceCode: intakeSource, configSchema: intakeConfig, persistenceEnv: 'HEALTHCARE_HOME', healthcareHome: HEALTHCARE_HOME, endpointEnvVar: 'HEALTHCARE_INTAKE_ENDPOINT', confirmBeforeSend: true, ui: { view: 'intake-approval' }, metadata },
   inputSchema: createSchemaRecord({
-    endpointUrl: SchemaProps.url({ description: 'Optional intake endpoint override; configuration may also come from HEALTHCARE_INTAKE_ENDPOINT' }),
+
     endpoint: SchemaProps.url({ description: 'Optional alternate intake endpoint override' }),
     token: SchemaProps.password({ description: 'Optional bearer token override for the intake endpoint' }),
     accessToken: SchemaProps.password({ description: 'Optional alternate access-token override for the intake endpoint' }),

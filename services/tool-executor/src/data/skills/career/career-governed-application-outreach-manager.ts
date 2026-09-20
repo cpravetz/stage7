@@ -5,8 +5,8 @@ const CAREER_WRAPPER_CONFIG_SCHEMA: SchemaRecord = { type: 'object', properties:
 
 const GOVERNED_APPLICATION_OUTREACH_MANAGER_SOURCE = `(async () => {
 const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
-let targetRoles = input.targetRoles || [];
-if (!jobIds.length) {
+let targetRoles = Array.isArray(input.targetRoles) ? input.targetRoles : [];
+if (!targetRoles.length) {
   const pipeline = await __execute_tool('career_pipeline_report', {});
   if (pipeline && pipeline.success && pipeline.data) {
     const pipelineData = pipeline.data;

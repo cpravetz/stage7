@@ -4,53 +4,18 @@ describe('canonicalAssistantCatalog', () => {
   it('should contain exactly the 21 canonical assistants', () => {
     const ids = canonicalAssistantCatalog.map((a) => a.id);
     expect(ids.sort()).toEqual([
-      'analytics-canonical-assistant',
-      'career-canonical-assistant',
-      'content-canonical-assistant',
-      'cto-canonical-assistant',
-      'education-canonical-assistant',
-      'event-canonical-assistant',
-      'executive-canonical-assistant',
-      'finance-canonical-assistant',
-      'healthcare-canonical-assistant',
-      'hotel-canonical-assistant',
-      'hr-canonical-assistant',
-      'investment-canonical-assistant',
-      'legal-canonical-assistant',
-      'marketing-canonical-assistant',
-      'product-canonical-assistant',
-      'restaurant-canonical-assistant',
-      'sales-canonical-assistant',
-      'scriptwriter-canonical-assistant',
-      'songwriter-canonical-assistant',
-      'sports-canonical-assistant',
-      'support-canonical-assistant',
+      'analytics', 'career', 'content', 'cto', 'education', 'event', 'executive',
+      'finance', 'healthcare', 'hotel', 'hr', 'investment', 'legal', 'marketing',
+      'product', 'restaurant', 'sales', 'scriptwriter', 'songwriter', 'sports', 'support',
     ]);
   });
 
   it('should bind only canonical tool-executor skill IDs and no legacy lower-order tools', () => {
     const expectedToolCounts: Record<string, number> = {
-      'cto-canonical-assistant': 4,
-      'career-canonical-assistant': 10,
-      'content-canonical-assistant': 3,
-      'healthcare-canonical-assistant': 5,
-      'restaurant-canonical-assistant': 4,
-      'hr-canonical-assistant': 3,
-      'executive-canonical-assistant': 4,
-      'legal-canonical-assistant': 4,
-      'sales-canonical-assistant': 3,
-      'event-canonical-assistant': 3,
-      'songwriter-canonical-assistant': 3,
-      'scriptwriter-canonical-assistant': 3,
-      'sports-canonical-assistant': 6,
-      'finance-canonical-assistant': 4,
-      'investment-canonical-assistant': 4,
-      'hotel-canonical-assistant': 4,
-      'education-canonical-assistant': 4,
-      'support-canonical-assistant': 4,
-      'product-canonical-assistant': 5,
-      'marketing-canonical-assistant': 3,
-      'analytics-canonical-assistant': 1,
+      cto: 4, career: 10, content: 3, healthcare: 5, restaurant: 4, hr: 3,
+      executive: 4, legal: 4, sales: 3, event: 3, songwriter: 3, scriptwriter: 3,
+      sports: 6, finance: 4, investment: 4, hotel: 4, education: 4, support: 4,
+      product: 5, marketing: 3, analytics: 1,
     };
 
     expect(Object.keys(expectedToolCounts).length).toEqual(canonicalAssistantCatalog.length);

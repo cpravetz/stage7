@@ -3,7 +3,6 @@ import { createCodeSkill, createSchemaRecord, SchemaProps } from '../code-skill-
 
 const budgetTrackingInputSchema = createSchemaRecord({
   operation: SchemaProps.select(['track-budget', 'variance', 'forecast'], { description: 'Operation type: track-budget for budget vs actual, variance for variance analysis, forecast for budget forecast' }),
-  endpointUrl: SchemaProps.url({ description: 'Override endpoint URL for the budget service' }),
   budgetId: SchemaProps.text({ description: 'Budget identifier' }),
   fiscalYear: SchemaProps.integer({ description: 'Fiscal year', minimum: 2020, maximum: 2040 }),
   department: SchemaProps.text({ description: 'Department identifier' }),
