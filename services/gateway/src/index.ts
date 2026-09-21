@@ -31,7 +31,9 @@ NEXTGEN_SERVICES.forEach((svc) => {
 
 app.use('/api/gateway', express.json(), gatewayRoutes);
 app.use('/api/gateway', express.json(), messagingRoutes);
-app.use('/api/workers', express.json(), workersRoutes);
+// Keep worker proxy request bodies intact. The workers router parses JSON only
+// for its direct assistant-registration endpoint before proxying other calls.
+app.use('/api/workers', workersRoutes);
 app.use('/api', proxyRoutes);
 
 const PORT = process.env.PORT || 3000;

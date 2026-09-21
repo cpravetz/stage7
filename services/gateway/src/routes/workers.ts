@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+import express, { Router, Request, Response } from 'express';
 import httpProxy from 'http-proxy';
 import { asyncHandler, NextGenError, logger } from '@stage7-nextgen/shared';
 
@@ -24,7 +24,7 @@ router.use((req: Request, res: Response, next: Function) => {
   });
 });
 
-router.post('/assistants', asyncHandler(async (req: Request, res: Response) => {
+router.post('/assistants', express.json(), asyncHandler(async (req: Request, res: Response) => {
   const response = await fetch(`${WORKER_POOL_URL}/api/workers/assistants`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

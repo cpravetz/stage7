@@ -1,5 +1,6 @@
 import { Tool } from '../../types';
 import { createExternalActionSkill } from './code-skill-factory';
+import { CAREER_ADVISORY, CAREER_INTERVIEW_PREP } from './career/career-lower-order-tools';
 
 // ============================================================================
 // Career Canonical Extended — internal tools only.
@@ -72,4 +73,6 @@ export const careerCanonicalExtendedSkills: Tool[] = [];
 
 export const careerCanonicalInternalTools: Tool[] = [
 careerGmailSyncTool,
+CAREER_INTERVIEW_PREP,
+CAREER_ADVISORY,
 ];

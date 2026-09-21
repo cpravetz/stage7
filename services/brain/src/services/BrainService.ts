@@ -44,6 +44,23 @@ export interface BrainLogEntry {
 
 const MAX_LOG_ENTRIES = 200;
 
+function providerAttemptTimeoutMs(): number {
+  const configured = Number(process.env.BRAIN_PROVIDER_ATTEMPT_TIMEOUT_MS);
+  return Number.isFinite(configured) && configured > 0 ? configured : 10000;
+}
+
+async function withProviderTimeout<T>(operation: Promise<T>): Promise<T> {
+  let timeout: NodeJS.Timeout | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => reject(new Error(`Provider attempt timed out after ${providerAttemptTimeoutMs()}ms`)), providerAttemptTimeoutMs());
+  });
+  try {
+    return await Promise.race([operation, deadline]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
 export class BrainService {
   private router = new ModelRouter();
   private cache = SemanticCache.getInstance();
@@ -102,6 +119,8 @@ export class BrainService {
 
   async complete(prompt: string, options: CompletionOptions = {}): Promise<CompletionResult> {
     const startTime = Date.now();
+    const configuredDeadline = Number(process.env.BRAIN_COMPLETION_DEADLINE_MS);
+    const completionDeadline = startTime + (Number.isFinite(configuredDeadline) && configuredDeadline > 0 ? configuredDeadline : 45000);
     const modelIdOpt = options.model || 'auto';
     const providerOpt = options.provider || 'any';
     const promptPreview = prompt.slice(0, 120);
@@ -183,6 +202,7 @@ export class BrainService {
     messagesBase.push({ role: 'user', content: prompt });
 
     for (const candidate of candidates) {
+      if (Date.now() >= completionDeadline) break;
       const provider = this.providers.find((p) => p.id === candidate.provider);
       if (!provider) {
         logger.warn({ candidate }, 'Skipping candidate: provider not registered');
@@ -204,8 +224,11 @@ export class BrainService {
       const breaker = this.circuitBreakers.get(provider.id) || new CircuitBreaker();
 
       for (let attempt = 0; attempt < maxRetriesPerProvider; attempt++) {
+        if (Date.now() >= completionDeadline) break;
         try {
-          const response: CompletionResponse = await breaker.execute(async () => provider.complete(req));
+          const response: CompletionResponse = await withProviderTimeout(
+            breaker.execute(async () => provider.complete(req)),
+          );
 
           const result: CompletionResult = {
             content: response.content,
@@ -264,10 +287,11 @@ export class BrainService {
           logger.warn({ provider: provider.id, model: candidate.id, attempt, err: errMsg }, 'Candidate attempt failed');
 
           // classify error: provider-key / quota issues vs transient
-          const isKeyLimit = /key limit exceeded|limit exceeded|quota exceeded/i.test(errMsg) || /\b403\b/.test(errMsg);
-          if (isKeyLimit) {
+          const isProviderFatal = /key limit exceeded|limit exceeded|quota exceeded|invalid api key|incorrect api key|credit balance is too low|authentication|unauthorized/i.test(errMsg)
+            || /\b(401|403)\b/.test(errMsg);
+          if (isProviderFatal) {
             // provider-level fatal: mark provider unavailable by tripping its circuit-breaker
-            logger.error({ provider: provider.id, err: errMsg }, 'Provider key/quota error - tripping provider circuit-breaker (models retained)');
+            logger.error({ provider: provider.id, err: errMsg }, 'Provider configuration or quota error - tripping provider circuit-breaker (models retained)');
             try {
               const cb = this.circuitBreakers.get(provider.id);
               if (cb && typeof (cb as any).trip === 'function') {

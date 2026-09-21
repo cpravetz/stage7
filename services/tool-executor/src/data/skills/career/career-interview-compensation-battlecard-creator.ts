@@ -5,27 +5,11 @@ const CAREER_WRAPPER_CONFIG_SCHEMA: SchemaRecord = { type: 'object', properties:
 
 const INTERVIEW_COMPENSATION_BATTLECARD_SOURCE = `(async () => {
 const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
-const profileRes = await __execute_tool('career_profile_intake', {});
-if (!profileRes || !profileRes.success) {
-  console.log(JSON.stringify({ success: false, mode: 'not-connected', error: profileRes && profileRes.error ? profileRes.error : 'Not connected: no profile available; run career_profile_intake first' }));
-  return;
-}
-const profile = profileRes.data && profileRes.data.profile ? profileRes.data.profile : profileRes.data || profileRes;
-
 let jobId = input.targetRole || '';
-if (!jobId) {
-  const pipeline = await __execute_tool('career_pipeline_report', {});
-  if (pipeline && pipeline.success && pipeline.data) {
-    const pipelineData = pipeline.data;
-    if (Array.isArray(pipelineData.tracking) && pipelineData.tracking.length) {
-      jobId = pipelineData.tracking[0].jobId || pipelineData.tracking[0].id || '';
-    }
-  }
-}
 
 // Ask interview-prep generator for company-specific Q&A and negotiation guidance
-const prep = await __execute_tool('career_interview_prep', { jobId, company: input.company });
-const advisory = await __execute_tool('career_advisory', { question: 'Generate compensation negotiation points for this role' });
+const prep = await __execute_tool('career_interview_prep', { jobId, targetRole: input.targetRole, company: input.company });
+const advisory = await __execute_tool('career_advisory', { question: 'Generate compensation negotiation points for this role', targetRole: input.targetRole, company: input.company });
 
 if ((!prep || !prep.success) && (!advisory || !advisory.success)) {
   console.log(JSON.stringify({ success: false, mode: 'not-connected', error: 'Not connected: interview prep and negotiation guidance are unavailable; ensure connectors or dependencies are configured' }));

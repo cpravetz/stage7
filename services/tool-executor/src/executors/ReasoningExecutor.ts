@@ -2,6 +2,9 @@ import { Tool } from '../types';
 import logger from '../utils/logger';
 
 const BRAIN_URL = process.env.BRAIN_URL || 'http://brain:3100';
+const BRAIN_REQUEST_TIMEOUT_MS = Number(process.env.BRAIN_REQUEST_TIMEOUT_MS) > 0
+  ? Number(process.env.BRAIN_REQUEST_TIMEOUT_MS)
+  : 15000;
 
 export interface ReasoningConfig {
   systemPrompt?: string;
@@ -72,11 +75,15 @@ export class ReasoningExecutor {
     let lastError: unknown;
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), BRAIN_REQUEST_TIMEOUT_MS);
         response = await fetch(`${BRAIN_URL}/api/brain/complete`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
+          signal: controller.signal,
         });
+        clearTimeout(timeout);
         if (response.ok) break;
         const text = await response.text();
         lastError = new Error(`Brain returned ${response.status}: ${text.slice(0, 200)}`);

@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { asyncHandler } from '../utils/asyncHandler';
 import { BrainError } from '../utils/errors';
 import { StructuredOutputSampler } from '../services/StructuredOutputSampler';
+import { logger } from '../utils/logger';
 
 const router: Router = Router();
 
@@ -18,6 +19,8 @@ router.get('/health', (_req, res) => {
 });
 
 router.post('/complete', asyncHandler(async (req: any, res: any) => {
+  const requestId = `brain_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const startedAt = Date.now();
   const { prompt, options, systemPrompt, provider, model, maxTokens, budget, temperature } = req.body as {
     prompt: string;
     options?: CompletionOptions;
@@ -32,6 +35,7 @@ router.post('/complete', asyncHandler(async (req: any, res: any) => {
   if (!prompt) {
     throw BrainError.badRequest('Missing prompt');
   }
+  logger.info({ requestId, promptLength: prompt.length }, 'Brain completion request started');
   const mergedOptions: CompletionOptions = {
     ...(options || {}),
     systemPrompt: systemPrompt ?? options?.systemPrompt,
@@ -42,8 +46,14 @@ router.post('/complete', asyncHandler(async (req: any, res: any) => {
     temperature: temperature ?? options?.temperature,
     missionId: (req.body as any).missionId,
   };
-  const result = await brain.complete(prompt, mergedOptions);
-  res.json(result);
+  try {
+    const result = await brain.complete(prompt, mergedOptions);
+    logger.info({ requestId, model: result.model, provider: result.provider, durationMs: Date.now() - startedAt }, 'Brain completion request completed');
+    res.json(result);
+  } catch (error) {
+    logger.error({ requestId, durationMs: Date.now() - startedAt, error: error instanceof Error ? error.message : String(error) }, 'Brain completion request failed');
+    throw error;
+  }
 }));
 
 router.get('/providers', asyncHandler(async (_req: any, res: any) => {
