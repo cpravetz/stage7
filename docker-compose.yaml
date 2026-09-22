@@ -62,6 +62,8 @@ services:
       - "3200:3200"
     env_file:
       - .env
+    environment:
+      - STAGE7_ASSISTANTS=${STAGE7_ASSISTANTS}
     restart: unless-stopped
 
   temporal:
@@ -139,6 +141,8 @@ services:
       - "3500:3500"
     env_file:
       - .env
+    environment:
+      - STAGE7_ASSISTANTS=${STAGE7_ASSISTANTS}
     depends_on:
       - redis
       - artifacts

@@ -115,6 +115,11 @@ def main():
     for skill_id, values in SKILLS.items():
         apply(lines, skill_id, values)
     updated = "\n".join(lines) + "\n"
+    if "triggers: {" in updated:
+        raise RuntimeError("Validation failed: found 'triggers: {' (object format); expected SkillTrigger[] array format")
+    if "triggers: [" not in updated:
+        raise RuntimeError("Validation failed: 'triggers: [' not found; expected SkillTrigger[] array format")
+    print("Validation passed: triggers are in SkillTrigger[] array format")
     if updated == text:
         count = updated.count("triggers:")
         if count != len(SKILLS):

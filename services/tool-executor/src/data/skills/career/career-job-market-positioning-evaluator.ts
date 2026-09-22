@@ -12,37 +12,47 @@ if (!profileRes || !profileRes.success) {
 }
 const profile = profileRes.data && profileRes.data.profile ? profileRes.data.profile : profileRes.data || profileRes;
 
-// Attempt discovery and ranking where available
-const discovery = await __execute_tool('career_job_discovery', { queries: input.jobTitles || [] });
-const rank = await __execute_tool('career_rank', { items: (discovery && discovery.data && discovery.data.listings) || discovery && discovery.data || [] });
+// Reuse listings already found by the "Job Discovery & Fit Ranking" skill instead of
+// asking the user to re-enter the same job titles and target compensation here.
+const fs = require('fs');
+const baseDir = process.env.CAREER_HOME || '/tmp/career';
+const listPath = baseDir + '/listings/default.json';
+let listings = [];
+try { listings = fs.existsSync(listPath) ? JSON.parse(fs.readFileSync(listPath, 'utf8')) : []; } catch { listings = []; }
 
-if ((!discovery || !discovery.success) && (!rank || !rank.success)) {
-  // Still produce a positioning summary based on profile if possible
+let discovery = null;
+let rank = null;
+if (!listings.length) {
+  // No prior search results yet: derive a starting query from the candidate's own profile.
+  const inferredTitles = (profile && profile.targetTitles) || (profile && profile.personal && profile.personal.headline ? [profile.personal.headline] : []) || [];
+  discovery = await __execute_tool('career_job_discovery', { queries: inferredTitles });
+  rank = await __execute_tool('career_rank', { items: (discovery && discovery.data && discovery.data.listings) || (discovery && discovery.data) || [] });
+}
+
+if (!listings.length && (!discovery || !discovery.success) && (!rank || !rank.success)) {
   const resumeText = profile && (profile.resume && (profile.resume.rawText || profile.resume.parsedText)) ? (profile.resume.rawText || profile.resume.parsedText) : undefined;
   const positioning = {
-    summary: resumeText ? 'Profile parsed; limited market signals without connected job boards.' : 'Profile found but no market data available; connect job boards for richer positioning',
+    summary: resumeText ? 'Profile parsed; limited market signals until you run Job Discovery & Fit Ranking.' : 'Profile found but no market data available; run Job Discovery & Fit Ranking first for richer positioning',
     strengths: profile && profile.personal ? Object.keys(profile.personal).filter(k=>!!profile.personal[k]) : [],
   };
   console.log(JSON.stringify({ success: true, data: { positioning, delegatedTo: [], note: 'Partial: profile-only positioning', generatedAt: new Date().toISOString() } }));
   return;
 }
 
-const marketSignals = { discovery: discovery && discovery.success ? discovery.data : null, rank: rank && rank.success ? rank.data : null };
+const ranked = listings.length ? listings : ((rank && rank.success && rank.data && rank.data.top) || (discovery && discovery.success && discovery.data && discovery.data.ranked) || []);
+const marketSignals = { listingsUsed: listings.length ? 'stored-from-job-discovery' : 'live-lookup', discovery: discovery && discovery.success ? discovery.data : null, rank: rank && rank.success ? rank.data : null };
 const recommendation = {
-  topRoles: (rank && rank.success && rank.data && rank.data.top) || (discovery && discovery.success && discovery.data && discovery.data.ranked && discovery.data.ranked.slice(0,5)) || [],
-  targetComp: input.targetComp || (discovery && discovery.data && discovery.data.estimatedCompensation) || null,
+  topRoles: ranked.slice(0, 5),
+  targetComp: (ranked[0] && (ranked[0].estimatedCompensation || ranked[0].compensation)) || null,
   suggestedProfileEdits: []
 };
 
-console.log(JSON.stringify({ success: true, data: { marketSignals, recommendation, delegatedTo: ['career_profile_intake', discovery && discovery.success ? 'career_job_discovery' : null, rank && rank.success ? 'career_rank' : null].filter(Boolean), generatedAt: new Date().toISOString() } }));
+console.log(JSON.stringify({ success: true, data: { marketSignals, recommendation, delegatedTo: ['career_profile_intake', listings.length ? 'stored-listings' : 'career_job_discovery'].filter(Boolean), generatedAt: new Date().toISOString() } }));
 })();`;
 
 const JOB_MARKET_POSITIONING_EVALUATOR_INPUT = {
   type: 'object',
-  properties: {
-    jobTitles: { type: 'array', items: { type: 'string' }, description: 'Job titles you want to pursue (e.g. Software Engineer, Data Scientist)' },
-    targetComp: { type: 'number' },
-  },
+  properties: {},
 };
 
 const JOB_MARKET_POSITIONING_EVALUATOR_OUTPUT = {
@@ -56,8 +66,8 @@ const JOB_MARKET_POSITIONING_EVALUATOR_OUTPUT = {
 
 const JOB_MARKET_POSITIONING_EVALUATOR = createCodeSkill({
   id: 'career-job-market-positioning-evaluator',
-  name: 'Job Market Positioning Evaluator',
-  description: 'Evaluates candidate credentials against market trends, salary bands, and role criteria. Delegates to career_profile_intake and career_job_discovery/career_rank where available.',
+  name: 'Resume & Market Positioning Advisor',
+  description: 'Reviews your resume and profile against the roles already found by Job Discovery & Fit Ranking to suggest resume edits and a realistic target salary range. Run Job Discovery first for the best results.',
   manifest: {
     language: 'javascript',
     entrypoint: 'index.js',

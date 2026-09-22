@@ -2,7 +2,11 @@ import { useEffect, useState, useRef, type ReactNode } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useEntityStore, Entity, type EntityTool } from '../stores/entityStore';
 import { useFeedStore } from '../stores/feedStore';
-import { fetchJSON, postJSON, putJSON } from '../utils/api';
+import { fetchJSON, postJSON, putJSON, workspaceApi, workflowsApi } from '../utils/api';
+import { AssistantWorkflow, WorkflowState, AssistantWorkspace, ApprovalSummary, ExecutionSummary, RuntimeWorkflow, RuntimeWorkflowAction } from '../types/workflow';
+import { StateTransitionEvent } from '../types/workflow';
+import StateStatus from '../components/StateStatus';
+import ActionPreview from '../components/ActionPreview';
 
 interface ToolBinding {
   name: string;
@@ -65,6 +69,21 @@ const formatNumberValue = (value: unknown): number | '' => (
   typeof value === 'number' ? value : ''
 );
 
+// Tool execution can fail before returning JSON (proxy errors, HTML error pages, empty bodies),
+// so read the body as text first rather than assuming res.json() will succeed.
+const parseToolExecuteResponse = async (res: Response): Promise<string> => {
+  const raw = await res.text();
+  if (!raw) {
+    return `Error: server returned an empty response (status ${res.status})`;
+  }
+  try {
+    return JSON.stringify(JSON.parse(raw), null, 2);
+  } catch {
+    const preview = raw.length > 500 ? `${raw.slice(0, 500)}…` : raw;
+    return `Error: server returned a non-JSON response (status ${res.status}):\n${preview}`;
+  }
+};
+
 const humanizeKey = (key: string): string => {
   const words = key
     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
@@ -78,6 +97,162 @@ const humanizeKey = (key: string): string => {
   }).join(' ');
 };
 
+type JsonObject = Record<string, unknown>;
+
+const tryParseJson = (value: string): unknown => {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return undefined;
+  }
+};
+
+const getErrorMessage = (value: unknown): string => {
+  if (typeof value === 'string') return value;
+  if (value && typeof value === 'object') {
+    const record = value as JsonObject;
+    if (typeof record.message === 'string') return record.message;
+    if (typeof record.error === 'string') return record.error;
+  }
+  return formatTextValue(value) || 'Execution failed';
+};
+
+const getDisplayMessage = (value: unknown, fallback: string): string => {
+  if (value === null || value === undefined) return fallback;
+  return getErrorMessage(value) || fallback;
+};
+
+const StructuredResult = ({ text }: { text: string }): ReactNode => {
+  const parsed = tryParseJson(text);
+  if (parsed === undefined) {
+    return <pre className="code-block">{text}</pre>;
+  }
+
+  const renderValue = (value: unknown): ReactNode => {
+    if (value === null || value === undefined) return <span className="muted">—</span>;
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+      const stringValue = String(value);
+      return typeof value === 'string' && stringValue.length > 200
+        ? <span title={stringValue}>{stringValue.slice(0, 200)}…</span>
+        : <>{stringValue}</>;
+    }
+    if (Array.isArray(value)) {
+      const items = value as unknown[];
+      return (
+        <span>
+          <span className="muted">({items.length} items)</span>
+          {items.length > 0 && items.length <= 5 && (
+            <ul className="result-list">
+              {items.map((item, index) => <li key={index}>{renderValue(item)}</li>)}
+            </ul>
+          )}
+          {items.length > 5 && <span className="muted"> Showing first 5 of {items.length}</span>}
+        </span>
+      );
+    }
+    if (typeof value === 'object') {
+      const entries = Object.entries(value as JsonObject).filter(([, nestedValue]) => nestedValue !== null && nestedValue !== undefined);
+      if (entries.length === 0) return <span className="muted">—</span>;
+      return (
+        <div className="result-sub">
+          {entries.map(([key, nestedValue]) => (
+            <div key={key}>
+              <span className="muted">{humanizeKey(key)}:</span>{' '}
+              {renderValue(nestedValue)}
+            </div>
+          ))}
+        </div>
+      );
+    }
+    return <pre className="code-block">{String(value)}</pre>;
+  };
+
+  const renderObject = (object: JsonObject, depth = 0): ReactNode => {
+    const hasError = object.success === false ||
+      (object.error !== undefined && object.error !== null && object.error !== '');
+    if (hasError) {
+      return (
+        <div className="skill-result error">
+          <h6>Last result</h6>
+          <div className="error-banner">{getDisplayMessage((object.error !== undefined && object.error !== null && object.error !== '') ? object.error : object.message, 'Execution failed')}</div>
+          {typeof object.mode === 'string' && object.mode && <span className="badge">{object.mode}</span>}
+        </div>
+      );
+    }
+
+    if (object.mode === 'not-connected') {
+      const message = getDisplayMessage((object.error !== undefined && object.error !== null && object.error !== '') ? object.error : object.message, 'Not connected');
+      return (
+        <div className="skill-result warning">
+          <h6>Last result</h6>
+          <div className="warning-banner">{message}</div>
+          {Array.isArray(object.delegatedTo) && object.delegatedTo.length > 0 && (
+            <p className="muted">Delegated to: {object.delegatedTo.map((item) => String(item)).join(', ')}</p>
+          )}
+        </div>
+      );
+    }
+
+    if (typeof object.output === 'string' && depth < 5) {
+      const nested = tryParseJson(object.output);
+      if (nested !== undefined) {
+        if (nested !== null && typeof nested === 'object') {
+          return renderObject(nested as JsonObject, depth + 1);
+        }
+        return renderValue(nested);
+      }
+    }
+
+    const data = object.data && typeof object.data === 'object' && !Array.isArray(object.data)
+      ? object.data as JsonObject
+      : object;
+    const entries = Object.entries(data).filter(([key, value]) =>
+      !key.startsWith('_') && value !== null && value !== undefined
+    );
+
+    return (
+      <div className="skill-result success">
+        <h6>Last result</h6>
+        {entries.map(([key, value]) => (
+          <div key={key} className="result-field">
+            <strong>{humanizeKey(key)}:</strong>{' '}
+            {renderValue(value)}
+          </div>
+        ))}
+        {Array.isArray(object.delegatedTo) && object.delegatedTo.length > 0 && (
+          <p className="muted">Delegated to: {object.delegatedTo.map((item) => String(item)).join(', ')}</p>
+        )}
+      </div>
+    );
+  };
+
+  if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    return renderObject(parsed as JsonObject);
+  }
+  return <pre className="code-block">{text}</pre>;
+};
+
+const CONFIG_LABEL_MAP: Record<string, string> = {
+  maxIterations: 'Max Iterations',
+};
+
+const getAssistantKey = (entity: Entity): string => {
+  const fromId = entity.id
+    .replace(/-canonical-assistant$/i, '')
+    .replace(/_/g, '-')
+    .split('-')
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+  const fromName = entity.name.replace(/\s+assistant$/i, '').trim();
+  return fromName || fromId;
+};
+
+const isEntityWorkflow = (workflow: AssistantWorkflow, entity: Entity): boolean => {
+  const assistantKey = getAssistantKey(entity).toLowerCase();
+  return workflow.assistant.toLowerCase() === assistantKey ||
+    entity.name.toLowerCase().startsWith(workflow.assistant.toLowerCase());
+};
+
 const getSchemaProperties = (schema?: SchemaRecord): Record<string, SchemaRecord> => {
   const properties = schema?.properties;
   return properties && typeof properties === 'object' && !Array.isArray(properties)
@@ -85,8 +260,21 @@ const getSchemaProperties = (schema?: SchemaRecord): Record<string, SchemaRecord
     : {};
 };
 
+
+// Internal field to user-facing UI label mapping (recommendation #4).
+// Internal fields are retained for API use but displayed with friendly labels.
+const FIELD_LABEL_MAP: Record<string, string> = {
+  operation: 'Action',
+  provider: 'Service Provider',
+  endpointUrl: 'Connect Service',
+  baseUrl: 'Connect Service',
+  apiKey: 'API Key',
+  dryRun: 'Preview only',
+  confirmation: 'Approve & send',
+};
+
 const getSchemaTitle = (key: string, schema?: SchemaRecord): string => (
-  String(schema?.title || schema?.label || schema?.['x-label'] || humanizeKey(key))
+  String(schema?.title || schema?.label || schema?.['x-label'] || FIELD_LABEL_MAP[key] || humanizeKey(key))
 );
 
 const getSchemaDescription = (schema?: SchemaRecord): string => (
@@ -97,8 +285,34 @@ const isLongTextSchema = (key: string, schema?: SchemaRecord): boolean => (
   schema?.multiline === true ||
   schema?.format === 'long-text' ||
   schema?.format === 'textarea' ||
-  /message|prompt|content|description|instructions|text|body|query|keywords|topic|resume|job/i.test(key) ||
+  /message|prompt|content|description|instructions|text|body|query|keywords|topic|resume/i.test(key) ||
   /prompt|message|content|instructions/i.test(getSchemaDescription(schema))
+);
+
+// A file-upload field is an object schema shaped like { name, mimeType, content } —
+// content should come from a picked file, not be hand-typed as base64/text.
+const isFileUploadSchema = (schema?: SchemaRecord): boolean => {
+  if (!schema || schema.type !== 'object') return false;
+  const props = getSchemaProperties(schema);
+  return Boolean(props.name && props.mimeType && props.content);
+};
+
+const readFileAsUploadValue = (file: File): Promise<{ name: string; mimeType: string; content: string }> => (
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error || new Error('Failed to read file'));
+    reader.onload = () => {
+      const result = String(reader.result || '');
+      const isText = /^text\/|json|xml/.test(file.type) || /\.(md|txt)$/i.test(file.name);
+      const content = isText ? result : result.split(',')[1] || '';
+      resolve({ name: file.name, mimeType: file.type || 'application/octet-stream', content });
+    };
+    if (/^text\/|json|xml/.test(file.type) || /\.(md|txt)$/i.test(file.name)) {
+      reader.readAsText(file);
+    } else {
+      reader.readAsDataURL(file);
+    }
+  })
 );
 
 const getInitialInputValues = (schema?: SchemaRecord): Record<string, unknown> => {
@@ -184,13 +398,30 @@ const SchemaFields = ({ schema, values, onChange, namePrefix = 'skill-field' }: 
         } else if (fieldSchema.type === 'array') {
           const arrayValue = Array.isArray(value) ? value : [];
           control = (
-            <input
+            <textarea
               id={fieldId}
               className={controlClass}
-              type="text"
-              value={arrayValue.map((item) => formatTextValue(item)).join(', ')}
-              onChange={(e) => onChange(key, e.target.value.split(',').map((item) => item.trim()).filter(Boolean))}
+              rows={3}
+              value={arrayValue.map((item) => formatTextValue(item)).join('\n')}
+              onChange={(e) => onChange(key, e.target.value.split(/[\n,]/))}
             />
+          );
+        } else if (isFileUploadSchema(fieldSchema)) {
+          const fileValue = value && typeof value === 'object' ? value as Record<string, unknown> : undefined;
+          control = (
+            <div className="skill-file-upload">
+              <input
+                id={fieldId}
+                className={controlClass}
+                type="file"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  onChange(key, await readFileAsUploadValue(file));
+                }}
+              />
+              {fileValue?.name ? <span className="skill-file-name">Selected: {String(fileValue.name)}</span> : null}
+            </div>
           );
         } else if (fieldSchema.type === 'object' && getSchemaProperties(fieldSchema)) {
           const nestedValues = value && typeof value === 'object' && !Array.isArray(value)
@@ -248,7 +479,7 @@ const EntityWorkspace = () => {
   const { entities, selectedEntity, fetchEntity, selectEntity } = useEntityStore();
   const events = useFeedStore((s) => s.events);
   const connected = useFeedStore((s) => s.connected);
-  const [activeTab, setActiveTab] = useState<'overview' | 'tools' | 'configuration' | 'memory' | 'missions' | 'hitl' | 'artifacts' | 'conversation'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'tools' | 'configuration' | 'memory' | 'missions' | 'hitl' | 'artifacts' | 'conversation' | 'workspace'>('overview');
   const [missionInput, setMissionInput] = useState('');
   const [running, setRunning] = useState(false);
   const [missionHistory, setMissionHistory] = useState<Array<{ missionId: string; status: string; timestamp: string; output?: string }>>([]);
@@ -259,9 +490,29 @@ const EntityWorkspace = () => {
   const [loadingApprovals, setLoadingApprovals] = useState(false);
   const [memoryContext, setMemoryContext] = useState<Record<string, unknown>>({});
   const [error, setError] = useState<string | null>(null);
+  const [workflows, setWorkflows] = useState<AssistantWorkflow[]>([]);
+  const [workflowLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [agentArtifacts, setAgentArtifacts] = useState<AgentArtifact[]>([]);
+  const [agentArtifacts] = useState<AgentArtifact[]>([]);
+
+  // Sprint 5: assistant workspace state consumed from /api/tool-executor/workspaces
+  const [workspace, setWorkspace] = useState<AssistantWorkspace | null>(null);
+  const [workspaceLoading, setWorkspaceLoading] = useState(false);
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+  const [workflow, setWorkflow] = useState<AssistantWorkflow | null>(null);
+  const [stateHistory, setStateHistory] = useState<StateTransitionEvent[]>([]);
+  const [approvalSummary, setApprovalSummary] = useState<ApprovalSummary | null>(null);
+  const [executionSummary, setExecutionSummary] = useState<ExecutionSummary | null>(null);
+  const [nextActions, setNextActions] = useState<string[]>([]);
+  const [runtimeWorkflow, setRuntimeWorkflow] = useState<RuntimeWorkflow | null>(null);
+  const [runtimeWorkflowLoading, setRuntimeWorkflowLoading] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
+  const [startingFresh, setStartingFresh] = useState(false);
+  const [approving, setApproving] = useState(false);
+  const [useResultBusy, setUseResultBusy] = useState(false);
+  const [selectedToolForPreview, setSelectedToolForPreview] = useState<ToolBinding | null>(null);
+  const [previewInputs, setPreviewInputs] = useState<Record<string, unknown>>({});
 
 
   const [editingSystemPrompt, setEditingSystemPrompt] = useState('');
@@ -323,14 +574,25 @@ const EntityWorkspace = () => {
     fetchJSON<{ tools: ToolCatalogEntry[] }>('/api/tool-executor/tools')
       .then((data) => {
         const tools = data.tools || [];
-        setAvailableSkills(tools.filter((t) => t.isSkill).map((t) => ({
+        const lowerOrderIds = new Set<string>();
+        for (const t of tools) {
+          const lower = (t.manifest?.lowerOrderTools as string[] | undefined) || [];
+          for (const id of lower) if (id) lowerOrderIds.add(id);
+        }
+        const isSkillTool = (tool: ToolCatalogEntry): boolean => {
+          if (tool.isSkill === true) return true;
+          if (tool.isSkill === false) return false;
+          const triggers = tool.manifest?.triggers as Array<{ kind: string }> || [];
+          return triggers.some((t) => t.kind === 'user') && !lowerOrderIds.has(tool.id);
+        };
+        setAvailableSkills(tools.filter((t) => isSkillTool(t)).map((t) => ({
           id: t.id,
           name: t.name,
           description: t.description,
           inputSchema: t.inputSchema,
           configSchema: (t.manifest?.configSchema || t.configSchema) as Record<string, unknown> | undefined,
         })));
-        setAvailableTools(tools.filter((t) => !t.isSkill).map((t) => ({ id: t.id, name: t.name, description: t.description })));
+        setAvailableTools(tools.filter((t) => !isSkillTool(t)).map((t) => ({ id: t.id, name: t.name, description: t.description })));
       })
       .catch(() => {
         setAvailableSkills([]);
@@ -363,7 +625,9 @@ const EntityWorkspace = () => {
       const normalized: ToolBinding[] = [];
       let changed = false;
       for (const tool of previous) {
-        const skill = availableSkills.find((candidate) => candidate.id === tool.name || candidate.name === tool.name);
+        const legacyName = /application\s*&\s*recruiter\s+outreach\s+manager/i.test(tool.displayName || tool.name);
+        const lookupName = legacyName ? 'career-governed-application-outreach-manager' : tool.name;
+        const skill = availableSkills.find((candidate) => candidate.id === lookupName || candidate.name === lookupName);
         const name = skill?.id || tool.name;
         const displayName = skill?.name || tool.displayName || '';
         const description = tool.description || skill?.description || '';
@@ -587,9 +851,204 @@ const EntityWorkspace = () => {
     }
   };
 
+  // Sprint 5: workspace action handlers.
+  const handleUseThisResult = async () => {
+    if (!workspace) return;
+    setUseResultBusy(true);
+    try {
+      const resultId = `result-${Date.now()}`;
+      await postJSON(`/api/tool-executor/workspaces/${workspace.workspaceId}/last-result`, { resultId });
+      await workspaceApi.updateState(workspace.workspaceId, 'executed');
+      await refreshWorkspaceDetail(workspace.workspaceId);
+    } catch (err) {
+      setWorkspaceError(err instanceof Error ? err.message : 'Failed to use this result');
+    } finally {
+      setUseResultBusy(false);
+    }
+  };
+
+  const handleSaveDraft = async () => {
+    if (!workspace) return;
+    setSavingDraft(true);
+    try {
+      await workspaceApi.updateState(workspace.workspaceId, 'draft');
+      await refreshWorkspaceDetail(workspace.workspaceId);
+    } catch (err) {
+      setWorkspaceError(err instanceof Error ? err.message : 'Failed to save as draft');
+    } finally {
+      setSavingDraft(false);
+    }
+  };
+
+  const handleApprove = async () => {
+    if (!workspace) return;
+    setApproving(true);
+    try {
+      await workspaceApi.updateState(workspace.workspaceId, 'approved');
+      await refreshWorkspaceDetail(workspace.workspaceId);
+    } catch (err) {
+      setWorkspaceError(err instanceof Error ? err.message : 'Failed to approve');
+    } finally {
+      setApproving(false);
+    }
+  };
+
+  const handleStartFresh = async () => {
+    if (!workspace) return;
+    setStartingFresh(true);
+    try {
+      await workspaceApi.reset(workspace.workspaceId);
+      await refreshWorkspaceDetail(workspace.workspaceId);
+    } catch (err) {
+      setWorkspaceError(err instanceof Error ? err.message : 'Failed to start fresh');
+    } finally {
+      setStartingFresh(false);
+    }
+  };
+
+  const handleStageNavigate = async (stage: string) => {
+    if (!workspace) return;
+    try {
+      await workspaceApi.updateStage(workspace.workspaceId, stage);
+      await refreshWorkspaceDetail(workspace.workspaceId);
+    } catch (err) {
+      setWorkspaceError(err instanceof Error ? err.message : 'Failed to navigate stage');
+    }
+  };
+
+  const handleTransition = async (state: WorkflowState) => {
+    if (!workspace) return;
+    try {
+      await workspaceApi.transition(workspace.workspaceId, state);
+      await refreshWorkspaceDetail(workspace.workspaceId);
+    } catch (err) {
+      setWorkspaceError(err instanceof Error ? err.message : 'Failed to transition state');
+    }
+  };
+
+  const handlePreviewAction = (tool: ToolBinding) => {
+    const input = runInputs[tool.name] || getInitialInputValues(getToolInputSchema(tool));
+    setPreviewInputs(input);
+    setSelectedToolForPreview(tool);
+  };
+
+  const handlePreviewActionFromRuntime = (action: RuntimeWorkflowAction) => {
+    // Find the corresponding ToolBinding
+    const toolBinding = toolBindings.find((tb) => tb.name === action.id || tb.name === action.name);
+    if (toolBinding) {
+      const input = runInputs[toolBinding.name] || getInitialInputValues(getToolInputSchema(toolBinding));
+      setPreviewInputs(input);
+      setSelectedToolForPreview(toolBinding);
+    } else {
+      // If not bound, try to find in available skills
+      const skill = availableSkills.find((s) => s.id === action.id || s.name === action.name);
+      if (skill) {
+        const tempBinding: ToolBinding = {
+          name: skill.name,
+          displayName: skill.name,
+          description: skill.description,
+          inputSchema: skill.inputSchema || { type: 'object', properties: {} },
+          configSchema: skill.configSchema,
+          enabled: true,
+        };
+        const input = getInitialInputValues(skill.inputSchema || { type: 'object', properties: {} });
+        setPreviewInputs(input);
+        setSelectedToolForPreview(tempBinding);
+      }
+    }
+  };
+
+  const closePreview = () => {
+    if (useResultBusy || approving || savingDraft) return;
+    setSelectedToolForPreview(null);
+    setPreviewInputs({});
+  };
+
  useEffect(() => {
    if (activeTab === 'hitl') loadApprovals();
  }, [activeTab]);
+
+  useEffect(() => {
+    if (!entity) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await fetchJSON<{ workflows: AssistantWorkflow[] }>('/api/tool-executor/workflows');
+        const list = data.workflows || [];
+        if (cancelled) return;
+        setWorkflows(list);
+        const matched = list.find((wf) => isEntityWorkflow(wf, entity)) || null;
+        if (cancelled) return;
+        setWorkflow(matched);
+      } catch {
+        if (cancelled) return;
+        setWorkflow(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [entity]);
+
+  // Sprint 5: load (or create) the assistant workspace for this entity.
+  useEffect(() => {
+    if (!entity) return;
+    let cancelled = false;
+    setWorkspaceLoading(true);
+    setWorkspaceError(null);
+    (async () => {
+      try {
+        const assistantKey = workflow?.assistant || entity.id;
+        const list = await workspaceApi.list({ assistant: assistantKey });
+        let ws = list.workspaces?.[0] || null;
+        if (!ws) {
+          const productObject = workflow?.productObject || entity.metadata?.productObject as string || 'product';
+          const created = await workspaceApi.create(assistantKey, productObject);
+          ws = created.workspace;
+        }
+        if (cancelled) return;
+        setWorkspace(ws);
+        setNextActions(ws.nextActions || []);
+        refreshWorkspaceDetail(ws.workspaceId);
+      } catch (err) {
+        if (cancelled) return;
+        setWorkspaceError(err instanceof Error ? err.message : 'Failed to load workspace');
+      } finally {
+        if (!cancelled) setWorkspaceLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [entity, workflow]);
+
+  const refreshWorkspaceDetail = async (workspaceId: string) => {
+    try {
+      const [ws, history, approval, execution] = await Promise.all([
+        workspaceApi.get(workspaceId),
+        workspaceApi.stateHistory(workspaceId).catch(() => ({ stateHistory: [] as StateTransitionEvent[] })),
+        workspaceApi.approvalSummary(workspaceId).catch(() => null),
+        workspaceApi.executionSummary(workspaceId).catch(() => null),
+      ]);
+      setWorkspace(ws);
+      setStateHistory(history.stateHistory);
+      setApprovalSummary(approval);
+      setExecutionSummary(execution);
+
+      // Fetch runtime workflow for dynamic stage/skill availability
+      if (workflow && ws.workspaceId) {
+        setRuntimeWorkflowLoading(true);
+        try {
+          const assistantKey = workflow.assistant;
+          const runtime = await workflowsApi.getRuntime(assistantKey, { workspaceId: ws.workspaceId });
+          setRuntimeWorkflow(runtime.runtime);
+          setNextActions(runtime.runtime.nextActions || []);
+        } catch (err) {
+          console.warn('Failed to load runtime workflow:', err);
+        } finally {
+          setRuntimeWorkflowLoading(false);
+        }
+      }
+    } catch (err) {
+      setWorkspaceError(err instanceof Error ? err.message : 'Failed to refresh workspace');
+    }
+  };
 
  const filteredEvents = events.filter((e) => e.source === entity?.id || e.source === 'system');
 
@@ -602,19 +1061,27 @@ const EntityWorkspace = () => {
     );
   }
 
+  const visibleWorkflows = workflows.filter((workflow) => isEntityWorkflow(workflow, entity));
+
   const entityTabs =
     entity.type === 'assistant'
-      ? (['overview', 'tools', 'configuration', 'memory', 'missions', 'hitl', 'artifacts'] as const)
+      ? (['overview', 'workspace', 'tools', 'configuration', 'memory', 'missions', 'hitl', 'artifacts'] as const)
       : (['overview', 'tools', 'memory', 'missions', 'hitl', 'artifacts'] as const);
 
   return (
     <div className="page entity-workspace">
-      {error && (
-        <div className="error-banner">
-          <span>{error}</span>
-          <button onClick={() => setError(null)} className="close-btn">&times;</button>
-        </div>
-      )}
+{error && (
+          <div className="error-banner">
+            <span>{error}</span>
+            <button onClick={() => setError(null)} className="close-btn">&times;</button>
+          </div>
+        )}
+        {workspaceError && (
+          <div className="error-banner">
+            <span>Workspace: {workspaceError}</span>
+            <button onClick={() => setWorkspaceError(null)} className="close-btn">&times;</button>
+          </div>
+        )}
 
       <div className="entity-header">
         <div>
@@ -638,7 +1105,7 @@ const EntityWorkspace = () => {
             className={activeTab === tab ? 'tab active' : 'tab'}
             onClick={() => setActiveTab(tab)}
           >
-            {tab === 'hitl' ? 'Human-in-Loop' : tab === 'tools' ? 'Skills' : tab.charAt(0).toUpperCase() + tab.slice(1)}
+            {tab === 'hitl' ? 'Human-in-Loop' : tab === 'tools' ? 'Skills' : tab === 'workspace' ? 'Workspace' : tab.charAt(0).toUpperCase() + tab.slice(1)}
           </button>
         ))}
       </div>
@@ -684,6 +1151,23 @@ const EntityWorkspace = () => {
                  {saveError && <div className="error-banner">{saveError}</div>}
                </div>
             </div>
+             {visibleWorkflows.length > 0 && (
+               <div className="card">
+                 <h3>Workflows</h3>
+                 {visibleWorkflows.map((wf) => (
+                   <div key={wf.assistant} className="workflow-item">
+                     <strong>{wf.assistant}</strong>
+                     <span className="meta">Object: {wf.productObject}</span>
+                     <span className="flow">{wf.flow}</span>
+                     <div className="workflow-stages">
+                       {wf.stages.map((stage: WorkflowStage) => (
+                         <span key={stage.name} className="stage-tag">{stage.name}: {stage.description}</span>
+                       ))}
+                     </div>
+                   </div>
+                 ))}
+               </div>
+             )}
             {/* Bound Skills Panels (persistent settings + runtime inputs/results) */}
             <div className="card">
               <h3>Skills</h3>
@@ -717,6 +1201,13 @@ const EntityWorkspace = () => {
                                 namePrefix={`overview-${tool.name}`}
                               />
                               <div className="skill-run-actions">
+                                <button
+                                  type="button"
+                                  className="secondary"
+                                  onClick={() => handlePreviewAction(tool)}
+                                >
+                                  Preview
+                                </button>
                                 <button onClick={async () => {
                                   setRunningMap((m) => ({ ...m, [tool.name]: true }));
                                   try {
@@ -724,23 +1215,18 @@ const EntityWorkspace = () => {
                                     const res = await fetch(`/api/workers/assistants/${encodeURIComponent(entity!.id)}/tools/execute`, {
                                       method: 'POST',
                                       headers: { 'Content-Type': 'application/json' },
-                                      body: JSON.stringify({ name: tool.name, arguments: args }),
+                                      body: JSON.stringify({ name: tool.name, arguments: args, workspaceId: workspace?.workspaceId }),
                                     });
-                                    const data = await res.json();
-                                    setRunResults((r) => ({ ...r, [tool.name]: JSON.stringify(data, null, 2) }));
+                                    const resultText = await parseToolExecuteResponse(res);
+                                    setRunResults((r) => ({ ...r, [tool.name]: resultText }));
                                   } catch (err) {
                                     setRunResults((r) => ({ ...r, [tool.name]: String(err instanceof Error ? err.message : err) }));
                                   } finally {
                                     setRunningMap((m) => ({ ...m, [tool.name]: false }));
                                   }
-                                }} disabled={Boolean(runningMap[tool.name])}>{runningMap[tool.name] ? 'Running…' : ''}</button>
+                                }} disabled={Boolean(runningMap[tool.name])}>{runningMap[tool.name] ? 'Running…' : 'Run'}</button>
                               </div>
-                              {runResults[tool.name] && (
-                                <div className="skill-result">
-                                  <h6>Last result</h6>
-                                  <pre className="code-block">{runResults[tool.name]}</pre>
-                                </div>
-                              )}
+                              {runResults[tool.name] && <StructuredResult text={runResults[tool.name]} />}
                             </div>
                           ) : (
                             <div>
@@ -752,10 +1238,10 @@ const EntityWorkspace = () => {
                                     const res = await fetch(`/api/workers/assistants/${encodeURIComponent(entity!.id)}/tools/execute`, {
                                       method: 'POST',
                                       headers: { 'Content-Type': 'application/json' },
-                                      body: JSON.stringify({ name: tool.name, arguments: {} }),
+                                      body: JSON.stringify({ name: tool.name, arguments: {}, workspaceId: workspace?.workspaceId }),
                                     });
-                                    const data = await res.json();
-                                    setRunResults((r) => ({ ...r, [tool.name]: JSON.stringify(data, null, 2) }));
+                                    const resultText = await parseToolExecuteResponse(res);
+                                    setRunResults((r) => ({ ...r, [tool.name]: resultText }));
                                   } catch (err) {
                                     setRunResults((r) => ({ ...r, [tool.name]: String(err instanceof Error ? err.message : err) }));
                                   } finally {
@@ -763,7 +1249,7 @@ const EntityWorkspace = () => {
                                   }
                                 }} disabled={Boolean(runningMap[tool.name])}>{runningMap[tool.name] ? 'Running…' : 'Run'}</button>
                               </div>
-                              {runResults[tool.name] && <pre className="code-block">{runResults[tool.name]}</pre>}
+                              {runResults[tool.name] && <StructuredResult text={runResults[tool.name]} />}
                             </div>
                           )}
                         </div>
@@ -774,6 +1260,240 @@ const EntityWorkspace = () => {
               )}
             </div>
 
+          </div>
+        )}
+
+        {activeTab === 'workspace' && (
+          <div className="grid two-col">
+            <div className="card">
+              <h3>Assistant Workspace</h3>
+              {workspaceError && <div className="error-banner">{workspaceError}</div>}
+              {workspaceLoading || !workspace ? (
+                <p className="muted">Loading workspace…</p>
+              ) : (
+                <div style={{ display: 'grid', gap: 12 }}>
+                  <div className="input-row">
+                    <span className="muted">Workspace ID:</span>
+                    <code>{workspace.workspaceId}</code>
+                  </div>
+                  <div className="input-row">
+                    <span className="muted">Product Object:</span>
+                    <strong>{workspace.productObject}</strong>
+                  </div>
+                  <div className="input-row">
+                    <span className="muted">Current Stage:</span>
+                    <span className="badge info">{workspace.currentStage}</span>
+                  </div>
+                  <div className="input-row">
+                    <span className="muted">Workflow State:</span>
+                    <span className="badge">{workspace.workflowState}</span>
+                  </div>
+                  <div className="input-row">
+                    <span className="muted">Last Result:</span>
+                    <code>{workspace.lastResultId || '—'}</code>
+                  </div>
+                  <div className="input-row">
+                    <span className="muted">Updated:</span>
+                    <span className="muted">{new Date(workspace.updatedAt).toLocaleString()}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="card">
+              <h3>State & Controls</h3>
+              {workspaceLoading || !workspace ? (
+                <p className="muted">Loading…</p>
+              ) : (
+                <StateStatus workspaceId={workspace.workspaceId} onTransition={handleTransition} />
+              )}
+              <div className="button-row" style={{ marginTop: 12, flexWrap: 'wrap' }}>
+                <button className="secondary" onClick={handleSaveDraft} disabled={savingDraft || !workspace}>
+                  {savingDraft ? 'Saving…' : 'Save as draft'}
+                </button>
+                <button onClick={handleApprove} disabled={approving || !workspace}>
+                  {approving ? 'Approving…' : 'Approve'}
+                </button>
+                <button className="secondary" onClick={handleUseThisResult} disabled={useResultBusy || !workspace}>
+                  {useResultBusy ? 'Using…' : 'Use This Result In Next Step'}
+                </button>
+                <button className="danger" onClick={handleStartFresh} disabled={startingFresh || !workspace}>
+                  {startingFresh ? 'Starting…' : 'Start fresh'}
+                </button>
+              </div>
+              <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                Shares this result as input for the next action — available even after a failure so you can review what went wrong.
+              </p>
+            </div>
+
+            <div className="card">
+              <h3>Next Actions</h3>
+              {workspaceLoading || !workspace ? (
+                <p className="muted">Loading…</p>
+              ) : nextActions.length === 0 ? (
+                <p className="muted">No next actions recorded.</p>
+              ) : (
+                <ul className="tool-list">
+                  {nextActions.map((action, idx) => (
+                    <li key={idx}>
+                      <span>{action}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            {/* Runtime Workflow - Dynamic stage/skill view from backend */}
+            {runtimeWorkflow && (
+              <div className="card">
+                <h3>Runtime Workflow</h3>
+                <div style={{ marginBottom: 12 }}>
+                  <p className="muted">Flow: {runtimeWorkflow.flow}</p>
+                  <p className="muted">Next Step: {runtimeWorkflow.nextStep || '—'}</p>
+                </div>
+                <div className="runtime-workflow-stages">
+                  {runtimeWorkflow.stages.map((stage: RuntimeWorkflowStage) => (
+                    <div key={stage.name} className="runtime-stage" style={{ 
+                      border: stage.status === 'current' ? '2px solid #0ea5e9' : '1px solid #e5e7eb',
+                      borderRadius: 8,
+                      padding: 12,
+                      marginBottom: 8,
+                      background: stage.status === 'current' ? '#f0f9ff' : undefined
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                        <span className={`stage-tag ${stage.status}`} style={{ 
+                          background: stage.status === 'current' ? '#0ea5e9' : 
+                                   stage.status === 'completed' ? '#10b981' : 
+                                   stage.status === 'skipped' ? '#9ca3af' : '#f3f4f6',
+                          color: stage.status === 'current' || stage.status === 'completed' ? 'white' : '#374151'
+                        }}>
+                          {stage.name}
+                        </span>
+                        <span className="muted" style={{ fontSize: 12 }}>{stage.description}</span>
+                      </div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                        {stage.skills.map((skill: RuntimeWorkflowAction) => (
+                          <button
+                            key={skill.id}
+                            type="button"
+                            className="skill-action-btn"
+                            style={{
+                              padding: '6px 12px',
+                              borderRadius: 4,
+                              border: skill.available ? '1px solid #0ea5e9' : '1px solid #d1d5db',
+                              background: skill.available ? '#f0f9ff' : '#f9fafb',
+                              color: skill.available ? '#0ea5e9' : '#9ca3af',
+                              cursor: skill.available ? 'pointer' : 'not-allowed',
+                              opacity: skill.available ? 1 : 0.6,
+                              fontSize: 12,
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 4,
+                            }}
+                            onClick={() => skill.available && handlePreviewActionFromRuntime(skill)}
+                            disabled={!skill.available}
+                            title={skill.available ? 'Click to preview and execute' : skill.reason || 'Not available'}
+                          >
+                            <span>{skill.name}</span>
+                            {skill.confirmBeforeSend && <span className="badge" style={{ fontSize: 10 }}>⚠️ Confirm</span>}
+                            {skill.isSkill && <span className="badge" style={{ fontSize: 10 }}>Skill</span>}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="card">
+              <h3>State History</h3>
+              {workspaceLoading || !workspace ? (
+                <p className="muted">Loading…</p>
+              ) : stateHistory.length === 0 ? (
+                <p className="muted">No state transitions recorded yet.</p>
+              ) : (
+                <ul className="tool-list">
+                  {stateHistory.map((event, idx) => (
+                    <li key={idx}>
+                      <span>
+                        {event.from || 'initial'} → {event.to}
+                        {' '}
+                        <span className="muted">
+                          {new Date(event.timestamp).toLocaleString()}
+                          {event.trigger ? ` (${event.trigger})` : ''}
+                        </span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            <div className="card">
+              <h3>Approval Summary</h3>
+              {workspaceLoading || !workspace ? (
+                <p className="muted">Loading…</p>
+              ) : !approvalSummary || approvalSummary.approvals.length === 0 ? (
+                <p className="muted">No approvals recorded.</p>
+              ) : (
+                <div>
+                  {approvalSummary.pending.length > 0 && (
+                    <p className="hint">
+                      <span className="badge pending">{approvalSummary.pending.length} pending</span>
+                    </p>
+                  )}
+                  <ul className="tool-list">
+                    {approvalSummary.approvals.map((entry, idx) => (
+                      <li key={idx}>
+                        <span>
+                          <strong>{entry.toolName}</strong>
+                          {' · state: '}
+                          <span className="badge">{entry.state}</span>
+                          {' · actor: '}
+                          {entry.actor}
+                          {entry.scope && Object.keys(entry.scope).length > 0
+                            ? ` · scope: ${Object.keys(entry.scope).join(', ')}`
+                            : ''}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  {approvalSummary.lastActor && <p className="hint" style={{ marginTop: 8 }}>Last actor: {approvalSummary.lastActor}</p>}
+                </div>
+              )}
+            </div>
+
+            <div className="card">
+              <h3>Execution Summary</h3>
+              {workspaceLoading || !workspace ? (
+                <p className="muted">Loading…</p>
+              ) : !executionSummary || executionSummary.executions.length === 0 ? (
+                <p className="muted">No executions recorded.</p>
+              ) : (
+                <div>
+                  <p className="hint">
+                    Last status: <span className="badge">{executionSummary.lastStatus || '—'}</span>
+                    {executionSummary.lastResultId ? ` · last result: ${executionSummary.lastResultId}` : ''}
+                  </p>
+                  <ul className="tool-list">
+                    {executionSummary.executions.map((entry, idx) => (
+                      <li key={idx}>
+                        <span>
+                          <strong>{entry.toolName}</strong>
+                          {' · '}
+                          <span className={`badge ${entry.status}`}>{entry.status}</span>
+                          {' · '}
+                          {entry.workflowState}
+                          {' · '}
+                          {new Date(entry.startedAt).toLocaleString()}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -814,16 +1534,11 @@ const EntityWorkspace = () => {
                             <div className="skill-run-actions">
                               <button
                                 type="button"
-                                onClick={() => {
-                                  const inputSchema = getToolInputSchema(tool);
-                                  setRunInputs((prev) => ({
-                                    ...prev,
-                                    [tool.name]: prev[tool.name] || getInitialInputValues(inputSchema),
-                                  }));
-                                  setRunResult(null);
-                                  setRunTool(tool);
-                                }}
-                              >Run Skill</button>
+                                className="secondary"
+                                onClick={() => handlePreviewAction(tool)}
+                              >
+                                Preview
+                              </button>
                             </div>
                           </div>
                           <div className="tool-actions">
@@ -874,6 +1589,13 @@ const EntityWorkspace = () => {
                       )}
                     </div>
 
+                    <div style={{ marginTop: 12 }}>
+                      <ActionPreview
+                        toolId={runTool.name}
+                        input={runInputs[runTool.name] || {}}
+                      />
+                    </div>
+
                     <div className="actions">
                       <button
                         onClick={async () => {
@@ -885,10 +1607,10 @@ const EntityWorkspace = () => {
                             const res = await fetch(`/api/workers/assistants/${encodeURIComponent(entity.id)}/tools/execute`, {
                               method: 'POST',
                               headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({ name: runTool.name, arguments: parsed }),
+                              body: JSON.stringify({ name: runTool.name, arguments: { ...parsed, config: runTool.config || {} }, workspaceId: workspace?.workspaceId }),
                             });
-                            const data = await res.json();
-                            setRunResult(JSON.stringify(data, null, 2));
+                            const data = await parseToolExecuteResponse(res);
+                            setRunResult(data);
                           } catch (err) {
                             setRunResult(err instanceof Error ? err.message : String(err));
                           } finally {
@@ -903,7 +1625,7 @@ const EntityWorkspace = () => {
                     {runResult && (
                       <div className="card-inner" style={{ marginTop: 12 }}>
                         <h4>Result</h4>
-                        <pre className="code-block">{runResult}</pre>
+                        <StructuredResult text={runResult} />
                       </div>
                     )}
                   </div>
@@ -927,11 +1649,44 @@ const EntityWorkspace = () => {
                     </li>
                   ))}
                 </ul>
-              </div>
-           </div>
-         )}
+</div>
+            </div>
+          )}
 
-         {activeTab === 'configuration' && (
+          {selectedToolForPreview && (
+            <div className="modal-backdrop" onClick={closePreview}>
+              <div className="modal" onClick={(e) => e.stopPropagation()}>
+                <div className="panel-header">
+                  <h3>Preview: {getToolDisplayName(selectedToolForPreview)}</h3>
+                  <button onClick={closePreview} disabled={useResultBusy || approving || savingDraft}>Close</button>
+                </div>
+                <p className="muted">{getToolDescription(selectedToolForPreview)}</p>
+                <div className="skill-modal-fields">
+                  {Object.keys(getSchemaProperties(getToolInputSchema(selectedToolForPreview))).length > 0 ? (
+                    <SchemaFields
+                      schema={getToolInputSchema(selectedToolForPreview)}
+                      values={previewInputs}
+                      onChange={(key, value) => setPreviewInputs((prev) => ({ ...prev, [key]: value }))}
+                      namePrefix={`preview-${selectedToolForPreview.name}`}
+                    />
+                  ) : (
+                    <p className="muted">No inputs are defined for this skill.</p>
+                  )}
+                </div>
+                <div style={{ marginTop: 12 }}>
+                  <ActionPreview
+                    toolId={selectedToolForPreview.name}
+                    input={previewInputs}
+                  />
+                </div>
+                <div className="actions" style={{ marginTop: 12 }}>
+                  <button onClick={closePreview} disabled={useResultBusy || approving || savingDraft}>Close</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'configuration' && (
            <div>
              <div className="grid two-col">
                <div className="card">
@@ -1046,9 +1801,9 @@ const EntityWorkspace = () => {
                      <p className="muted">No metadata configured.</p>
                    ) : (
                      <div style={{ display: 'grid', gap: 8 }}>
-                       {Object.entries(metadataConfig).map(([k, v]) => (
+                       {Object.entries(metadataConfig).filter(([k]) => !['category', 'catalog', 'source'].includes(k.toLowerCase())).map(([k, v]) => (
                          <div key={k} className="input-row">
-                           <label style={{ width: 160 }}>{k}</label>
+                           <label style={{ width: 160 }}>{CONFIG_LABEL_MAP[k] || humanizeKey(k)}</label>
                            <input type="text" value={String(v ?? '')} onChange={(e) => setMetadataConfig((prev) => ({ ...prev, [k]: e.target.value }))} />
                            <button className="remove-btn" onClick={() => { const n = { ...metadataConfig }; delete n[k]; setMetadataConfig(n); }}>&times;</button>
                          </div>

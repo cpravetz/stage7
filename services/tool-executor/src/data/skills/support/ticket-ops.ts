@@ -27,9 +27,9 @@ export const TICKET_OPS = createExternalActionSkill({
     properties: {
       operation: SchemaProps.select(['crm', 'escalation', 'follow-up'], { description: 'Ticket operation: crm for CRM sync, escalation for routing, follow-up for scheduling' }),
       dryRun: SchemaProps.boolean({ description: 'Validate without executing', default: true }),
-      endpointUrl: SchemaProps.url({ description: 'Override endpoint URL' }),
-      ticketId: SchemaProps.text({ description: 'Ticket identifier' }),
-      customerId: SchemaProps.text({ description: 'Customer identifier' }),
+
+      ticket: SchemaProps.text({ description: 'Ticket identifier' }),
+      customer: SchemaProps.text({ description: 'Customer identifier' }),
       entity: SchemaProps.select(['ticket', 'customer', 'contact', 'account', 'interaction'], { description: 'CRM entity type' }),
       data: SchemaProps.object({}, { description: 'Data payload' }),
       filters: SchemaProps.object({}, { description: 'Filters for query operations' }),
@@ -64,3 +64,9 @@ export const TICKET_OPS = createExternalActionSkill({
 });
 
 TICKET_OPS.confirmBeforeSend = true;
+
+TICKET_OPS.triggers = [
+  { kind: 'user', phrase_examples: ['Escalate this ticket', 'Sync to CRM', 'Schedule a follow-up', 'Update ticket status'] },
+  { kind: 'schedule', cadence: 'Daily ticket ops review' },
+  { kind: 'event', on: 'Ticket escalated or SLA breached' },
+];

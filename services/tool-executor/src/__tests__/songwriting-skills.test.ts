@@ -32,9 +32,9 @@ describe('Songwriter Creative — Batch A', () => {
   }, {} as Record<string, Tool>);
 
   describe('skill set reconciliation', () => {
-    it('exports exactly three skills', () => {
-      expect(songwritingSkills).toHaveLength(3);
-    });
+  it('exports exactly four skills', () => {
+    expect(songwritingSkills).toHaveLength(4);
+  });
 
     it('reconciles the Advise higher-order skill', () => {
       expect(skillsByName['Advise Lyric & Structural Prosody Evaluator']).toBeDefined();

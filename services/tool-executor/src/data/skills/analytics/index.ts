@@ -1,5 +1,6 @@
 import { Tool } from '../../../types';
 import { createCodeSkill, SchemaProps } from '../code-skill-factory';
+import { annotateStages, createWorkflow, AssistantWorkflow } from '../workflow-common';
 
 const ANALYTICS_INPUT_SCHEMA = {
   type: 'object',
@@ -22,7 +23,6 @@ const ANALYTICS_INPUT_SCHEMA = {
     filters: SchemaProps.object({}, { description: 'Metric or warehouse filters', additionalProperties: true }),
     sourceMode: SchemaProps.select(['auto', 'warehouse', 'local'], { description: 'Data source selection; auto tries the warehouse and then the local cache', default: 'auto' }),
     dryRun: SchemaProps.boolean({ description: 'Prepare the query plan without executing a warehouse request', default: false }),
-    endpointUrl: SchemaProps.url({ description: 'Optional warehouse endpoint override' }),
     apiKey: SchemaProps.password({ description: 'Optional warehouse API key override; never include this in an explanation' }),
   },
   required: ['mode'],
@@ -385,4 +385,35 @@ const BUSINESS_INSIGHT_REPORT = createCodeSkill({
   ],
 });
 
+BUSINESS_INSIGHT_REPORT.tier = 'advise';
+BUSINESS_INSIGHT_REPORT.isSkill = true;
+BUSINESS_INSIGHT_REPORT.domainKnowledge = 'Business intelligence architectures, SQL/data modeling principles, statistical trend analysis, cross-functional KPI frameworks';
+
 export const analyticsSkills: Tool[] = [BUSINESS_INSIGHT_REPORT];
+
+annotateStages(analyticsSkills, {
+  analytics_business_insight_report: 'analyze',
+});
+
+export const analyticsWorkflow: AssistantWorkflow = createWorkflow({
+  assistant: 'Analytics',
+  productObject: 'metric / insight',
+  flow: 'report → analyze → query',
+  stages: [
+    {
+      name: 'report',
+      description: 'Produce grounded metric reports from warehouse or local data',
+      stageIds: ['analytics_business_insight_report'],
+    },
+    {
+      name: 'analyze',
+      description: 'Explain trends, anomalies, and changes in the selected metric',
+      stageIds: ['analytics_business_insight_report'],
+    },
+    {
+      name: 'query',
+      description: 'Run and explain a read-only warehouse query',
+      stageIds: ['analytics_business_insight_report'],
+    },
+  ],
+}, analyticsSkills);

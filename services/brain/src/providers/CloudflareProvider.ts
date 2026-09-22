@@ -1,4 +1,5 @@
 import { LLMProvider, ProviderInfo, CompletionRequest, CompletionResponse } from './Provider';
+import { fetchProvider } from '../utils/providerFetch';
 
 export class CloudflareProvider implements LLMProvider {
   readonly id = 'cloudflare';
@@ -44,7 +45,7 @@ export class CloudflareProvider implements LLMProvider {
     const messages = systemMsg ? [{ role: 'system', content: systemMsg.content }, ...userMessages] : userMessages;
 
     const url = `${this.apiBase}/accounts/${this.accountId}/ai/chat/completions`;
-    const res = await fetch(url, {
+    const res = await fetchProvider(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

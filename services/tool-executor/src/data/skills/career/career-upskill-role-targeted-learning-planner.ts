@@ -5,18 +5,15 @@ const CAREER_WRAPPER_CONFIG_SCHEMA: SchemaRecord = { type: 'object', properties:
 
 const UPSKILL_ROLE_TARGETED_LEARNING_PLANNER_SOURCE = `(async () => {
 const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
-const discovery = await __execute_tool('career_job_discovery', { queries: input.jobTitles || [], locations: input.locations || [], minSalary: input.minSalary, maxSalary: input.maxSalary, connectedJobBoardTools: input.connectedJobBoardTools || [] });
-if (!discovery || discovery.success === false || discovery.error) {
-console.log(JSON.stringify({ success: false, mode: 'not-connected', error: discovery && discovery.error ? discovery.error : 'Not connected: job discovery yielded no data; connect a job-board source or run career_job_discovery first' }));
+// This skill defines the target role directly (a title or a pasted job posting) instead
+// of re-running a full job search with location/salary filters that belong to Job Discovery.
+const targetRole = input.jobTitle || input.targetRole || '';
+const jobPosting = input.jobPosting || '';
+if (!targetRole && !jobPosting) {
+console.log(JSON.stringify({ success: false, mode: 'not-connected', error: 'Provide a jobTitle or paste a jobPosting to define the role you want to prepare for' }));
 return;
 }
-const discoveryData = discovery.data && typeof discovery.data === 'object' ? discovery.data : discovery;
-const ranked = Array.isArray(discoveryData.ranked) ? discoveryData.ranked : [];
-if (!ranked.length) {
-console.log(JSON.stringify({ success: false, mode: 'not-connected', error: 'Not connected: no ranked roles were returned for learning-plan analysis' }));
-return;
-}
-const advisory = await __execute_tool('career_advisory', { question: 'resume_strength', targetRole: input.targetRole || '', jobDescription: 'Create a targeted upskilling plan for these roles: ' + ranked.slice(0, input.topN || 5).map((job) => job.title || job.id).join(', ') });
+const advisory = await __execute_tool('career_advisory', { question: 'resume_strength', targetRole, jobDescription: jobPosting || ('Create a targeted upskilling plan for this role: ' + targetRole) });
 if (!advisory || advisory.success === false || advisory.error) {
 console.log(JSON.stringify({ success: false, mode: 'not-connected', error: advisory && advisory.error ? advisory.error : 'Not connected: career advisory could not produce learning recommendations' }));
 return;
@@ -27,24 +24,17 @@ console.log(JSON.stringify({ success: false, mode: 'not-connected', error: 'Not 
 return;
 }
 const targetSkills = Array.isArray(input.targetSkills) ? input.targetSkills.map((skill) => String(skill).toLowerCase()) : [];
-const gaps = ranked.slice(0, input.topN || 5).map((job) => {
-const description = String(job.description || job.title || '').toLowerCase();
-return { jobId: job.id, title: job.title, fitScore: job.fitScore || 0, missingSkills: targetSkills.filter((skill) => !description.includes(skill)) };
-});
-console.log(JSON.stringify({ success: true, data: { ranked: gaps, learningPlan: advisoryData, delegatedTo: ['career_job_discovery', 'career_advisory'], generatedAt: new Date().toISOString() } }));
+const postingText = String(jobPosting || targetRole).toLowerCase();
+const missingSkills = targetSkills.filter((skill) => !postingText.includes(skill));
+console.log(JSON.stringify({ success: true, data: { targetRole, missingSkills, learningPlan: advisoryData, delegatedTo: ['career_advisory'], generatedAt: new Date().toISOString() } }));
 })();`;
 
 const UPSKILL_ROLE_TARGETED_LEARNING_PLANNER_INPUT = {
 type: 'object',
 properties: {
-jobTitles: { type: 'array', items: { type: 'string' }, description: 'Job titles you want to pursue (e.g. Software Engineer, Data Scientist)' },
-locations: { type: 'array', items: { type: 'string' }, description: 'Target locations' },
-minSalary: { type: 'number' },
-maxSalary: { type: 'number' },
-connectedJobBoardTools: { type: 'array', items: { type: 'string' }, description: 'Job boards you have an account with (e.g. LinkedIn, Indeed)' },
-targetRole: { type: 'string', description: 'Target role for upskilling plan' },
-targetSkills: { type: 'array', items: { type: 'string' }, description: 'Skills to check against job titles' },
-topN: { type: 'integer', description: 'Number of top-ranked roles to include', default: 5 },
+jobTitle: { type: 'string', description: 'The job title you want to prepare for (e.g. Senior Data Scientist)' },
+jobPosting: { type: 'string', description: 'Paste a specific job posting to tailor the plan to its exact requirements', multiline: true },
+targetSkills: { type: 'array', items: { type: 'string' }, description: 'Skills you already have, to check against the role' },
 },
 };
 
@@ -56,18 +46,8 @@ mode: { type: 'string' },
 data: {
 type: 'object',
 properties: {
-ranked: {
-type: 'array',
-items: {
-type: 'object',
-properties: {
-jobId: { type: 'string' },
-title: { type: 'string' },
-fitScore: { type: 'number' },
+targetRole: { type: 'string' },
 missingSkills: { type: 'array', items: { type: 'string' } },
-},
-},
-},
 learningPlan: { type: 'object' },
 delegatedTo: { type: 'array', items: { type: 'string' } },
 generatedAt: { type: 'string', format: 'date-time' },
@@ -80,15 +60,15 @@ required: ['success', 'data'],
 
 const UPSKILL_ROLE_TARGETED_LEARNING_PLANNER = createCodeSkill({
 id: 'career-upskill-role-targeted-learning-planner',
-name: 'Upskill & Role-Targeted Learning Planner',
-description: 'Recommends concise upskilling plans and curated learning resources aligned to target roles. Delegates to career_job_discovery for role fit data and career_advisory for learning recommendations. Reports not-connected when either dependency yields no data.',
+name: 'Upskill & Learning Planner',
+description: 'Recommends a concise upskilling plan and curated learning resources for a specific job title or pasted job posting. Delegates to career_advisory. Reports not-connected when no usable recommendations come back.',
 manifest: {
 language: 'javascript',
 entrypoint: 'index.js',
 sourceCode: UPSKILL_ROLE_TARGETED_LEARNING_PLANNER_SOURCE,
 configSchema: CAREER_WRAPPER_CONFIG_SCHEMA,
 actionLabel: 'Generate upskill plan',
-lowerOrderTools: ['career_job_discovery', 'career_advisory'],
+lowerOrderTools: ['career_advisory'],
 },
 inputSchema: UPSKILL_ROLE_TARGETED_LEARNING_PLANNER_INPUT,
 outputSchema: UPSKILL_ROLE_TARGETED_LEARNING_PLANNER_OUTPUT,

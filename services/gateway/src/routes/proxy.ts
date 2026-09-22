@@ -31,7 +31,17 @@ const proxyRequest = async (req: any, res: any, serviceId: string): Promise<void
 
 const proxyHandler = asyncHandler(async (req: Request, res: Response) => {
   const serviceId = req.params.service as string;
-  await proxyRequest(req, res, serviceId);
+  try {
+    await proxyRequest(req, res, serviceId);
+  } catch (error) {
+    if (!res.headersSent) {
+      res.status(502).json({
+        error: 'Bad gateway',
+        service: serviceId,
+        details: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
 });
 
 router.get('/:service/*', proxyHandler);

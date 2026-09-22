@@ -1,0 +1,189 @@
+{
+  "ws_1789998170862_gmsi9i0t7": [
+    {
+      "revisionId": "rev_1789998170862_4xapczd7j",
+      "workspaceId": "ws_1789998170862_gmsi9i0t7",
+      "trigger": "create",
+      "workspace": {
+        "workspaceId": "ws_1789998170862_gmsi9i0t7",
+        "assistant": "CTO",
+        "productObject": "system / incident",
+        "currentStage": "analysis",
+        "workflowState": "analysis",
+        "nextActions": [],
+        "approvalHistory": [],
+        "executionHistory": [],
+        "stateHistory": [
+          {
+            "from": "analysis",
+            "to": "recommendation",
+            "timestamp": "2026-09-21T13:42:50.862Z",
+            "trigger": "transition"
+          },
+          {
+            "from": "recommendation",
+            "to": "draft",
+            "timestamp": "2026-09-21T13:42:50.863Z",
+            "trigger": "transition"
+          },
+          {
+            "from": "draft",
+            "to": "approved",
+            "timestamp": "2026-09-21T13:42:50.863Z",
+            "trigger": "transition"
+          }
+        ],
+        "createdAt": "2026-09-21T13:42:50.862Z",
+        "updatedAt": "2026-09-21T13:42:50.862Z"
+      },
+      "timestamp": "2026-09-21T13:42:50.862Z"
+    },
+    {
+      "revisionId": "rev_1789998170862_nriq4wq4b",
+      "workspaceId": "ws_1789998170862_gmsi9i0t7",
+      "trigger": "transition",
+      "workspace": {
+        "workspaceId": "ws_1789998170862_gmsi9i0t7",
+        "assistant": "CTO",
+        "productObject": "system / incident",
+        "currentStage": "analysis",
+        "workflowState": "recommendation",
+        "nextActions": [],
+        "approvalHistory": [],
+        "executionHistory": [],
+        "stateHistory": [
+          {
+            "from": "analysis",
+            "to": "recommendation",
+            "timestamp": "2026-09-21T13:42:50.862Z",
+            "trigger": "transition"
+          },
+          {
+            "from": "recommendation",
+            "to": "draft",
+            "timestamp": "2026-09-21T13:42:50.863Z",
+            "trigger": "transition"
+          },
+          {
+            "from": "draft",
+            "to": "approved",
+            "timestamp": "2026-09-21T13:42:50.863Z",
+            "trigger": "transition"
+          }
+        ],
+        "createdAt": "2026-09-21T13:42:50.862Z",
+        "updatedAt": "2026-09-21T13:42:50.862Z"
+      },
+      "timestamp": "2026-09-21T13:42:50.862Z",
+      "metadata": {
+        "from": "analysis",
+        "to": "recommendation"
+      }
+    },
+    {
+      "revisionId": "rev_1789998170863_mzjfvc331",
+      "workspaceId": "ws_1789998170862_gmsi9i0t7",
+      "trigger": "transition",
+      "workspace": {
+        "workspaceId": "ws_1789998170862_gmsi9i0t7",
+        "assistant": "CTO",
+        "productObject": "system / incident",
+        "currentStage": "analysis",
+        "workflowState": "draft",
+        "nextActions": [],
+        "approvalHistory": [],
+        "executionHistory": [],
+        "stateHistory": [
+          {
+            "from": "analysis",
+            "to": "recommendation",
+            "timestamp": "2026-09-21T13:42:50.862Z",
+            "trigger": "transition"
+          },
+          {
+            "from": "recommendation",
+            "to": "draft",
+            "timestamp": "2026-09-21T13:42:50.863Z",
+            "trigger": "transition"
+          },
+          {
+            "from": "draft",
+            "to": "approved",
+            "timestamp": "2026-09-21T13:42:50.863Z",
+            "trigger": "transition"
+          }
+        ],
+        "createdAt": "2026-09-21T13:42:50.862Z",
+        "updatedAt": "2026-09-21T13:42:50.863Z"
+      },
+      "timestamp": "2026-09-21T13:42:50.863Z",
+      "metadata": {
+        "from": "recommendation",
+        "to": "draft"
+      }
+    },
+    {
+      "revisionId": "rev_1789998170863_sdtdywuqz",
+      "workspaceId": "ws_1789998170862_gmsi9i0t7",
+      "trigger": "transition",
+      "workspace": {
+        "workspaceId": "ws_1789998170862_gmsi9i0t7",
+        "assistant": "CTO",
+        "productObject": "system / incident",
+        "currentStage": "analysis",
+        "workflowState": "approved",
+        "nextActions": [],
+        "approvalHistory": [],
+        "executionHistory": [],
+        "stateHistory": [
+          {
+            "from": "analysis",
+            "to": "recommendation",
+            "timestamp": "2026-09-21T13:42:50.862Z",
+            "trigger": "transition"
+          },
+          {
+            "from": "recommendation",
+            "to": "draft",
+            "timestamp": "2026-09-21T13:42:50.863Z",
+            "trigger": "transition"
+          },
+          {
+            "from": "draft",
+            "to": "approved",
+            "timestamp": "2026-09-21T13:42:50.863Z",
+            "trigger": "transition"
+          }
+        ],
+        "createdAt": "2026-09-21T13:42:50.862Z",
+        "updatedAt": "2026-09-21T13:42:50.863Z"
+      },
+      "timestamp": "2026-09-21T13:42:50.863Z",
+      "metadata": {
+        "from": "draft",
+        "to": "approved"
+      }
+    }
+  ],
+  "ws_1789998172067_c3mh6jipk": [
+    {
+      "revisionId": "rev_1789998172067_r2840k6eq",
+      "workspaceId": "ws_1789998172067_c3mh6jipk",
+      "trigger": "create",
+      "workspace": {
+        "workspaceId": "ws_1789998172067_c3mh6jipk",
+        "assistant": "TestAssistant",
+        "productObject": "test-object",
+        "currentStage": "analysis",
+        "workflowState": "analysis",
+        "nextActions": [],
+        "approvalHistory": [],
+        "executionHistory": [],
+        "stateHistory": [],
+        "createdAt": "2026-09-21T13:42:52.067Z",
+        "updatedAt": "2026-09-21T13:42:52.067Z"
+      },
+      "timestamp": "2026-09-21T13:42:52.067Z"
+    }
+  ]
+}

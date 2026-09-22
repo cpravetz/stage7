@@ -3,7 +3,6 @@ import { createCodeSkill, createSchemaRecord, SchemaProps } from '../code-skill-
 
 const riskRegulatoryInputSchema = createSchemaRecord({
   operation: SchemaProps.select(['risk-assessment', 'regulatory'], { description: 'Operation type: risk-assessment for financial risk analysis, regulatory for regulatory compliance review' }),
-  endpointUrl: SchemaProps.url({ description: 'Override endpoint URL for the external service' }),
   entityId: SchemaProps.text({ description: 'Entity or organization identifier' }),
   portfolio: SchemaProps.objectArray(SchemaProps.object({
     asset: SchemaProps.text({ description: 'Asset identifier' }),
@@ -88,7 +87,7 @@ const endpointUrl = input.endpointUrl || (globalThis.process && globalThis.proce
 const apiKey = globalThis.process && globalThis.process.env && globalThis.process.env.FINANCE_API_KEY || '';
 
 if (!endpointUrl) {
-  console.log(JSON.stringify({ success: true, operation, mode: 'dry-run', riskAssessment: null, regulatoryResult: null, error: null }));
+  console.log(JSON.stringify({ success: false, operation, mode: 'not-connected', riskAssessment: null, regulatoryResult: null, error: 'Not connected: FINANCE_RISK_ENDPOINT is not configured' }));
   return;
 }
 

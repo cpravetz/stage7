@@ -39,7 +39,7 @@ const source = `(async () => {
   const operation = String(input.operation || 'refer');
   const allowedOperations = ['refer', 'match', 'track', 'status'];
   const normalizedOperation = allowedOperations.includes(operation) ? operation : 'refer';
-  const patientId = String(input.patientId || '');
+  const patientId = String(input.patient || '');
   const referralId = String(input.referralId || '');
   const clinicalNeeds = Array.isArray(input.clinicalNeeds) ? input.clinicalNeeds.map((item) => String(item)).filter(Boolean) : [];
   const insurance = input.insurance && typeof input.insurance === 'object' ? input.insurance : {};
@@ -253,7 +253,7 @@ const careResourceReferralCoordinator = createCodeSkill({
   },
   inputSchema: createSchemaRecord({
     operation: SchemaProps.select(['refer', 'match', 'track', 'status'], { description: 'Referral operation: refer, match, track, or status', default: 'refer' }),
-    patientId: SchemaProps.text({ description: 'Minimum-necessary patient identifier' }),
+    patient: SchemaProps.text({ description: 'Minimum-necessary patient identifier' }),
     referralId: SchemaProps.text({ description: 'Referral identifier for track or status operations' }),
     clinicalNeeds: SchemaProps.stringArray({ description: 'Clinician-supplied care needs used for resource matching' }),
     insurance: SchemaProps.object({}, { description: 'Minimum-necessary insurance or network information', additionalProperties: true }),
@@ -270,7 +270,6 @@ const careResourceReferralCoordinator = createCodeSkill({
     communicationSubject: SchemaProps.text({ description: 'Subject line for patient referral communication' }),
     communicationConfirmation: SchemaProps.boolean({ description: 'Explicit approval for sending patient communication about the referral', default: false }),
     communicationConfirmed: SchemaProps.boolean({ description: 'Alternate explicit approval flag for patient communication', default: false }),
-    endpointUrl: SchemaProps.url({ description: 'Optional referral coordination endpoint override' }),
     accessToken: SchemaProps.password({ description: 'Optional bearer token for an endpoint override' }),
     context: SchemaProps.object({}, { description: 'Additional coordination context that does not replace required clinical inputs', additionalProperties: true }),
   }),

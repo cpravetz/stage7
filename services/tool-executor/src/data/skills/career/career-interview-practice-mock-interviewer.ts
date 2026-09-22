@@ -5,7 +5,7 @@ const CAREER_WRAPPER_CONFIG_SCHEMA: SchemaRecord = { type: 'object', properties:
 
 const INTERVIEW_PRACTICE_MOCK_INTERVIEWER_SOURCE = `(async () => {
 const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
-let jobId = input.jobId || '';
+let jobId = input.targetRole || '';
 if (!jobId) {
   const pipeline = await __execute_tool('career_pipeline_report', {});
   if (pipeline && pipeline.success && pipeline.data) {

@@ -69,7 +69,6 @@ export const RESOURCE_LIBRARY_OPS = createExternalActionSkill({
       query: { type: 'string', description: 'Search query' },
       filters: { type: 'object', description: 'Search filters' },
       accessibilityStandard: SchemaProps.select(['WCAG-2.1-AA', 'Section-508', 'custom'], { description: 'Accessibility standard for check' }),
-      endpointUrl: SchemaProps.text({ description: 'Optional endpoint override' }),
       dryRun: SchemaProps.boolean({ description: 'Validate without executing' }),
     },
     required: ['operation'],

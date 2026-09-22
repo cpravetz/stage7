@@ -1,5 +1,7 @@
 # Base image with all shared dependencies pre-built
 # Build with: docker build -f Dockerfile.base -t cktmcs:base .
+# Assistant selection: pass STAGE7_ASSISTANTS as build arg to limit which assistant
+# catalog entries are embedded. If omitted, all canonical assistants are included.
 FROM node:22-alpine
 
 WORKDIR /usr/src/app

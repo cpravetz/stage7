@@ -1,5 +1,5 @@
 import { hrSkills } from '../data/skills/hr';
-import { hrCanonicalSkills } from '../data/skills/hr-canonical';
+import { hrCanonicalSkills } from '../data/skills/hr';
 import { Tool } from '../types';
 
 function getSkill(id: string): Tool {
@@ -28,7 +28,7 @@ describe('hrSkills', () => {
     const expectedNames = [
       'Workforce Planning & Compensation Evaluator',
       'Job Description & Interview Kit Co-Pilot',
-      'Candidate Screening & Scheduling Manager',
+      'Applicant Review and Interview Coordination',
     ];
     const actualNames = hrSkills.map((s) => s.name).sort();
     expect(actualNames).toEqual(expectedNames.sort());
@@ -100,12 +100,12 @@ describe('hrSkills', () => {
   });
 
   describe('Governance tests', () => {
-    it('Candidate Screening & Scheduling Manager has confirmBeforeSend', () => {
+    it('Applicant Review and Interview Coordination has confirmBeforeSend', () => {
       const skill = getSkill('candidate-screening');
       expect(skill.confirmBeforeSend).toBe(true);
     });
 
-    it('Candidate Screening & Scheduling Manager has configSchema', () => {
+    it('Applicant Review and Interview Coordination has configSchema', () => {
       const skill = getSkill('candidate-screening');
       expect(skill.manifest.configSchema).toBeDefined();
       expect((skill.manifest.configSchema as any).properties).toBeDefined();
@@ -113,27 +113,27 @@ describe('hrSkills', () => {
       expect((skill.manifest.configSchema as any).properties!.dryRun).toBeDefined();
     });
 
-    it('Candidate Screening & Scheduling Manager has endpointEnvVar', () => {
+    it('Applicant Review and Interview Coordination has endpointEnvVar', () => {
       const skill = getSkill('candidate-screening');
       expect((skill.manifest as Record<string, unknown>).endpointEnvVar).toBeDefined();
     });
 
-    it('Candidate Screening & Scheduling Manager source has dryRun gate', () => {
+    it('Applicant Review and Interview Coordination source has dryRun gate', () => {
       const source = getSkill('candidate-screening').manifest.sourceCode as string;
       expect(source).toContain('dryRun');
     });
 
-    it('Candidate Screening & Scheduling Manager source has confirmation gate', () => {
+    it('Applicant Review and Interview Coordination source has confirmation gate', () => {
       const source = getSkill('candidate-screening').manifest.sourceCode as string;
       expect(source).toContain('confirmation');
     });
 
-    it('Candidate Screening & Scheduling Manager source has not-connected fallback', () => {
+    it('Applicant Review and Interview Coordination source has not-connected fallback', () => {
       const source = getSkill('candidate-screening').manifest.sourceCode as string;
       expect(source).toContain('not-connected');
     });
 
-    it('Candidate Screening & Scheduling Manager source does not fabricate success', () => {
+    it('Applicant Review and Interview Coordination source does not fabricate success', () => {
       const source = getSkill('candidate-screening').manifest.sourceCode as string;
       expect(source).not.toMatch(/console\.log\(JSON\.stringify\(\{ success:\s*true\s*\}\)\)/);
     });
@@ -161,9 +161,9 @@ describe('hrSkills', () => {
 
     it('canonical skill ids match expected values', () => {
       const canonicalIds = hrCanonicalSkills.map((s) => s.id).sort();
-      expect(canonicalIds).toContain('hr-workforce-planning-compensation-evaluator');
-      expect(canonicalIds).toContain('hr-job-description-interview-kit-copilot');
-      expect(canonicalIds).toContain('hr-candidate-screening-scheduling-manager');
+      expect(canonicalIds).toContain('hiring-analytics-compliance');
+      expect(canonicalIds).toContain('recruiting-ops');
+      expect(canonicalIds).toContain('candidate-screening');
     });
 
     it('all canonical skills have triggers, schemas, createdAt, updatedAt', () => {
@@ -181,7 +181,7 @@ describe('hrSkills', () => {
     });
 
     it('Represent canonical skill has endpointEnvVar and confirmBeforeSend', () => {
-      const rep = getCanonical('hr-candidate-screening-scheduling-manager');
+      const rep = getCanonical('candidate-screening');
       const manifest = rep.manifest as Record<string, unknown>;
       expect(manifest.endpointEnvVar).toBe('HR_SCREENING_ENDPOINT');
       expect(rep.confirmBeforeSend).toBe(true);

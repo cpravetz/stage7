@@ -1,4 +1,5 @@
 import { LLMProvider, ProviderInfo, CompletionRequest, CompletionResponse } from './Provider';
+import { fetchProvider } from '../utils/providerFetch';
 
 export class GeminiProvider implements LLMProvider {
   readonly id = 'gemini';
@@ -51,7 +52,7 @@ export class GeminiProvider implements LLMProvider {
     }
 
     const url = `${this.apiBase}/v1beta/models/${req.model}:generateContent?key=${this.apiKey}`;
-    const res = await fetch(url, {
+    const res = await fetchProvider(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),

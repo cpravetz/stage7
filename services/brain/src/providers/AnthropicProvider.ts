@@ -1,4 +1,5 @@
 import { LLMProvider, ProviderInfo, CompletionRequest, CompletionResponse } from './Provider';
+import { fetchProvider } from '../utils/providerFetch';
 
 export class AnthropicProvider implements LLMProvider {
   readonly id = 'anthropic';
@@ -44,7 +45,7 @@ export class AnthropicProvider implements LLMProvider {
     if (systemMsg) body['system'] = systemMsg.content;
     if (req.temperature !== undefined) body['temperature'] = req.temperature;
 
-    const res = await fetch(`${this.apiBase}/v1/messages`, {
+    const res = await fetchProvider(`${this.apiBase}/v1/messages`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

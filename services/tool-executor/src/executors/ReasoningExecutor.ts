@@ -2,6 +2,9 @@ import { Tool } from '../types';
 import logger from '../utils/logger';
 
 const BRAIN_URL = process.env.BRAIN_URL || 'http://brain:3100';
+const BRAIN_REQUEST_TIMEOUT_MS = Number(process.env.BRAIN_REQUEST_TIMEOUT_MS) > 0
+  ? Number(process.env.BRAIN_REQUEST_TIMEOUT_MS)
+  : 12000;
 
 export interface ReasoningConfig {
   systemPrompt?: string;
@@ -56,37 +59,77 @@ export class ReasoningExecutor {
 
     const optimizedPrompt = this.buildOptimizedTask(userPrompt, optimizeFor);
 
-    const payload: Record<string, unknown> = {
-      prompt: optimizedPrompt,
-      systemPrompt,
-      options: { temperature, maxTokens },
-    };
+    // Build candidate model list: explicit model/provider first, then
+    // fallbacks from env vars so the Brain can retry with alternate models
+    // when the primary is rate-limited or unavailable.
+    const candidates: Array<{ model?: string; provider?: string }> = [];
+    if (model) candidates.push({ model, provider });
+    if (process.env.BRAIN_FALLBACK_MODEL) candidates.push({ model: process.env.BRAIN_FALLBACK_MODEL });
+    if (process.env.BRAIN_FALLBACK_PROVIDER) candidates.push({ provider: process.env.BRAIN_FALLBACK_PROVIDER });
+    if (candidates.length === 0) candidates.push({}); // let Brain auto-select
 
-    if (model) payload.model = model;
-    if (provider) payload.provider = provider;
-    if (optimizeFor !== 'balanced') {
-      (payload.options as Record<string, unknown>).optimizeFor = optimizeFor;
+    let response: Response | undefined;
+    let lastError: unknown;
+    let lastStatus: number | undefined;
+
+    for (let attempt = 0; attempt < candidates.length; attempt += 1) {
+      const candidate = candidates[attempt];
+      const payload: Record<string, unknown> = {
+        prompt: optimizedPrompt,
+        systemPrompt,
+        options: { temperature, maxTokens },
+      };
+      if (candidate.model) payload.model = candidate.model;
+      if (candidate.provider) payload.provider = candidate.provider;
+      if (optimizeFor !== 'balanced') {
+        (payload.options as Record<string, unknown>).optimizeFor = optimizeFor;
+      }
+
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), BRAIN_REQUEST_TIMEOUT_MS);
+        response = await fetch(`${BRAIN_URL}/api/brain/complete`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+
+        if (response.ok) {
+          logger.info({ toolId: tool.id, model: candidate.model, provider: candidate.provider, attempt }, 'Brain succeeded');
+          break;
+        }
+
+        lastStatus = response.status;
+        const text = await response.text();
+        lastError = new Error(`Brain returned ${response.status}: ${text.slice(0, 200)}`);
+
+        // Rate limiting (429) and server errors (5xx) are transient — try next candidate
+        if (response.status === 429 || response.status >= 500) {
+          logger.warn({ toolId: tool.id, status: response.status, attempt, model: candidate.model }, 'Retrying with alternate model/provider');
+          await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
+          continue;
+        }
+
+        // Client errors (4xx except 429) won't be fixed by a different model
+        logger.warn({ toolId: tool.id, status: response.status, model: candidate.model }, 'Non-retryable Brain error, not trying alternate models');
+        break;
+      } catch (err) {
+        lastError = err;
+        if (attempt < candidates.length - 1) {
+          logger.warn({ toolId: tool.id, attempt, model: candidate.model }, 'Brain request failed, retrying with alternate model');
+          await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
+          continue;
+        }
+        break;
+      }
     }
 
-    let response: Response;
-    try {
-      response = await fetch(`${BRAIN_URL}/api/brain/complete`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-      logger.error({ toolId: tool.id, error: errorMessage }, 'Failed to connect to Brain service');
-      const wrappedError = new Error(`Brain service unavailable: ${errorMessage}`) as Error & { cause?: unknown };
-      wrappedError.cause = err;
-      throw wrappedError;
-    }
-
-    if (!response.ok) {
-      const text = await response.text();
-      logger.error({ toolId: tool.id, status: response.status, body: text.slice(0, 200) }, 'Brain service returned error');
-      throw new Error(`Brain returned ${response.status}: ${text.slice(0, 200)}`);
+    if (!response?.ok) {
+      const errorMessage = lastError instanceof Error ? lastError.message : 'Unknown error';
+      logger.error({ toolId: tool.id, error: errorMessage, lastStatus }, 'Brain service returned error after all retries');
+      throw lastError instanceof Error ? lastError : new Error(`Brain service unavailable: ${errorMessage}`);
     }
 
     const data = await response.json() as { content: string; model?: string; provider?: string; tokensUsed?: number };

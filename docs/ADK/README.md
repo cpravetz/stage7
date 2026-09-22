@@ -1,263 +1,207 @@
-# Agent Development Kit (ADK) - NextGen
+# Agent Development Kit (ADK) - Current Implementation
 
+This document describes the ADK that is actually implemented in this repository. The active implementation is not the historical microservice-only design described in older docs; it lives in the TypeScript composition layer under the tool executor and is validated by the ADK composition tests.
 
+## What is the current ADK?
 
-## Getting Started
+The active ADK is a builder-based composition model that defines:
 
-### Prerequisites
+- Tools and code skills
+- Workflow stages and lanes
+- Context and approval policies
+- Assistant definitions and runtime persistence policies
 
-- Node.js 22+
-- Docker & Docker Compose (v2)
+The primary implementation lives here:
 
-### Option A: Run an Existing Assistant
+- [../../services/tool-executor/src/adk/contracts.ts](../../services/tool-executor/src/adk/contracts.ts)
+- [../../services/tool-executor/src/adk/builders.ts](../../services/tool-executor/src/adk/builders.ts)
+- [../../services/tool-executor/src/adk/index.ts](../../services/tool-executor/src/adk/index.ts)
+
+## Quick start: create a custom assistant
+
+```ts
+import {
+  createAssistant,
+  createApprovalPolicy,
+  createContextPolicy,
+  createPersistencePolicy,
+  createSkill,
+  createTool,
+  createWorkflow,
+  createWorkflowLane,
+  createWorkflowStage,
+} from '../services/tool-executor/src/adk';
+
+const planningTool = createTool({
+  id: 'event_planning_budgeting',
+  name: 'Event Planning & Budgeting',
+  description: 'Create an event plan and budget.',
+  type: 'code',
+  inputSchema: {
+    type: 'object',
+    properties: { eventName: { type: 'string' } },
+    required: ['eventName'],
+  },
+  outputSchema: {
+    type: 'object',
+    properties: { success: { type: 'boolean' } },
+  },
+});
+
+const workflow = createWorkflow({
+  assistantId: 'event',
+  productObject: 'event / vendor',
+  flow: 'plan -> vendors -> day-of',
+  stages: [
+    createWorkflowStage({
+      id: 'plan',
+      name: 'Plan',
+      description: 'Create the event plan and budget.',
+      skillIds: [planningTool.id],
+      transitions: ['vendors'],
+    }),
+    createWorkflowStage({
+      id: 'vendors',
+      name: 'Vendors',
+      description: 'Manage vendor contracts.',
+      skillIds: [],
+      transitions: ['day-of'],
+    }),
+    createWorkflowStage({
+      id: 'day-of',
+      name: 'Day-of',
+      description: 'Run event operations.',
+      skillIds: [],
+    }),
+  ],
+  lanes: [
+    createWorkflowLane({
+      id: 'planning',
+      name: 'Planning',
+      description: 'Plan the event.',
+      stageIds: ['plan'],
+      modes: ['draft'],
+    }),
+    createWorkflowLane({
+      id: 'execution',
+      name: 'Execution',
+      description: 'Execute the event.',
+      stageIds: ['vendors', 'day-of'],
+      modes: ['review', 'live'],
+    }),
+  ],
+});
+
+const assistant = createAssistant({
+  identity: { id: 'event', name: 'Event', description: 'Event operations assistant' },
+  productObjects: ['event / vendor'],
+  workflow,
+  skills: [createSkill({ tool: planningTool, laneId: 'planning', stageId: 'plan' })],
+  configuration: { defaults: { region: 'us-east' }, requiredKeys: ['region'] },
+  contextPolicy: { objectKeys: ['eventId'] },
+  approvalPolicy: {
+    requiresConfirmation: (request) => request.action === 'book',
+    dryRunByDefault: true,
+    allowedStates: ['draft'],
+  },
+  persistence: createPersistencePolicy(new Map() as any),
+});
+```
+
+This pattern is validated in [../../services/tool-executor/src/__tests__/adk-composition.test.ts](../../services/tool-executor/src/__tests__/adk-composition.test.ts).
+
+## Core ADK concepts
+
+### Tool
+
+Tools are structured runtime capabilities with a manifest, input schema, output schema, and optional approval settings.
+
+```ts
+const tool = createTool({
+  id: 'send_email',
+  name: 'Send Email',
+  description: 'Send a customer email.',
+  type: 'code',
+  inputSchema: {
+    type: 'object',
+    properties: { email: { type: 'string' }, subject: { type: 'string' } },
+    required: ['email', 'subject'],
+  },
+});
+```
+
+### Workflow
+
+A workflow is a set of stages and lanes bound to a product object and flow name. The builder validates stage IDs, lane IDs, and transitions.
+
+### Context policy
+
+Context policies enforce object identity and stage continuity. They can reject a changed object ID or cross-object handoff when configured.
+
+### Approval policy
+
+Approval policies decide whether a tool action requires confirmation. They also support dry-run defaults and allowed workflow states.
+
+### Persistence policy
+
+The ADK supports in-memory or custom persistence ports, with revision tracking and namespace scoping.
+
+## Sample assistants already in the repo
+
+The project includes a set of concrete workflow definitions under [../../services/tool-executor/src/data/skills](../../services/tool-executor/src/data/skills):
+
+- [../../services/tool-executor/src/data/skills/event/index.ts](../../services/tool-executor/src/data/skills/event/index.ts) — event planning, vendor management, day-of operations
+- [../../services/tool-executor/src/data/skills/sales/index.ts](../../services/tool-executor/src/data/skills/sales/index.ts) — sales workflow
+- [../../services/tool-executor/src/data/skills/support/index.ts](../../services/tool-executor/src/data/skills/support/index.ts) — support workflow
+- [../../services/tool-executor/src/data/skills/product/index.ts](../../services/tool-executor/src/data/skills/product/index.ts) — product workflow
+- [../../services/tool-executor/src/data/skills/healthcare/index.ts](../../services/tool-executor/src/data/skills/healthcare/index.ts) — healthcare workflow
+
+The registry exports the full set through [../../services/tool-executor/src/data/skills/index.ts](../../services/tool-executor/src/data/skills/index.ts), and the runtime routes expose quick access through the workflow API in [../../services/tool-executor/src/routes/workflows.ts](../../services/tool-executor/src/routes/workflows.ts).
+
+Example event workflow:
+
+```ts
+export const eventWorkflow = createWorkflow({
+  assistant: 'Event',
+  productObject: 'event / vendor',
+  flow: 'plan → vendors → day-of',
+  stages: [
+    { name: 'plan', description: 'Event planning and budgeting', stageIds: ['event_planning_budgeting'] },
+    { name: 'vendors', description: 'Vendor and contract management', stageIds: ['event_vendor_contract_management'] },
+    { name: 'day-of', description: 'Day-of operations', stageIds: ['event_day_of_operations'] },
+  ],
+}, eventSkills);
+```
+
+The actual file is [../../services/tool-executor/src/data/skills/event/index.ts](../../services/tool-executor/src/data/skills/event/index.ts).
+
+## How to use the sample assistant runtime
+
+The service exposes workflow endpoints for listing workflows and building runtime workflow views:
+
+- GET /workflows
+- GET /workflows/:assistant
+- GET /workflows/:assistant/runtime
+- POST /workflows/:assistant/runtime
+
+These routes are defined in [../../services/tool-executor/src/routes/workflows.ts](../../services/tool-executor/src/routes/workflows.ts).
+
+The workspace-level API allows creating or resuming workspaces and moving them through workflow states in [../../services/tool-executor/src/routes/workspaces.ts](../../services/tool-executor/src/routes/workspaces.ts).
+
+## Validation and testing
+
+The current ADK implementation is verified by the test suite:
 
 ```bash
-# 1. Start NextGen services
-./setup.sh
-
-# 2. Start the frontend (in a new terminal)
-cd frontend-nextgen
-npm install
-npm run dev
-
-# 3. Open browser
-http://localhost:8080
+cd services/tool-executor
+npm test -- --runInBand src/__tests__/adk-composition.test.ts
 ```
 
-### Option B: Create a Custom Assistant
+The repository also includes governance and schema validation tests relevant to workflow composition and overlap rules.
 
-```bash
-# 1. Start NextGen services
-./setup.sh
+## Important clarification
 
-# 2. Register your assistant via the Worker Pool API
-curl -X POST http://localhost:3200/api/workers/assistants \
-  -H "Content-Type: application/json" \
-  -d '{"id":"my-assistant","tenantId":"tenant-1","name":"My Assistant","description":"Custom assistant","model":"llama3","capabilities":["chat"],"systemPrompt":"You are helpful.","tools":[],"metadata":{}}'
-   -d '{"id":"my-assistant","tenantId":"tenant-1","name":"My Assistant","description":"Custom assistant","capabilities":["chat"],"systemPrompt":"You are helpful.","tools":[],"metadata":{}}'
-
-# 3. Execute the assistant
-curl -X POST http://localhost:3200/api/workers/assistants/my-assistant/execute \
-  -H "Content-Type: application/json" \
-  -d '{"prompt":"Hello!"}'
-```
-
-### Setup Script
-
-`./setup.sh` performs the following:
-- Validates Docker and Docker Compose are installed
-- Creates `.env` from `.env.example` and generates `SHARED_SECRET` and `ADMIN_SECRET` if blank
-- Generates RSA key pairs under `shared/keys/`
-- Builds Docker images
-- Starts services with `docker compose up -d --wait --timeout 300`
-
-To stop services: `docker compose down`
-
----
-
-## Creating Assistants
-
-### Assistant Registration Pattern
-
-Assistants are registered dynamically via the Worker Pool API. There is no separate process or SDK bootstrap required.
-
-```bash
-POST /api/workers/assistants
-```
-
-**Request Body:**
-
-```json
-{
-  "id": "my-assistant",
-  "tenantId": "tenant-1",
-  "name": "My Assistant",
-  "description": "Handles domain-specific tasks",
-  "capabilities": ["chat", "tools"],
-  "systemPrompt": "You are a helpful domain expert.",
-  "tools": [],
-  "metadata": {}
-}
-```
-
-**Response:** `201 Created` with the registered `AssistantDefinition`.
-
-### Executing an Assistant
-
-```bash
-POST /api/workers/assistants/:id/execute
-```
-
-**Request Body:**
-
-```json
-{
-  "prompt": "What is the weather today?",
-  "context": {
-    "userId": "user-123",
-    "sessionId": "session-456"
-  }
-}
-```
-
-**Response:**
-
-```json
-{
-  "assistantId": "my-assistant",
-  "success": true,
-  "output": "I cannot check real-time weather...",
-  "tokensUsed": 42,
-  "durationMs": 1200
-}
-```
-
-### Registering MCP Tools
-
-Tools are registered with the MCP Runtime service and referenced in the assistant definition.
-
-```bash
-# Register an MCP tool
-POST http://localhost:3300/tools
-Content-Type: application/json
-
-{
-  "name": "get-weather",
-  "description": "Get current weather for a location",
-  "inputSchema": {
-    "type": "object",
-    "properties": {
-      "location": { "type": "string" }
-    },
-    "required": ["location"]
-  }
-}
-```
-
-Then include the tool in the assistant definition:
-
-```json
-{
-  "tools": [
-    {
-      "name": "get-weather",
-      "description": "Get current weather for a location",
-      "inputSchema": {
-        "type": "object",
-        "properties": {
-          "location": { "type": "string" }
-        },
-        "required": ["location"]
-      }
-    }
-  ]
-}
-```
-
----
-
-## Architecture Overview
-
-### NextGen Service Topology
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Frontend (React/Vite)                     │
-│                        Port 8080                             │
-└────────────────────────────┬────────────────────────────────┘
-                             │ HTTP + WebSocket
-┌────────────────────────────┴────────────────────────────────┐
-│                         Gateway                              │
-│                     Port 3000                                │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
-│  │   Proxy     │  │   WebSocket │  │   Message Router    │  │
-│  │  Routes     │  │   Gateway   │  │   (internal)        │  │
-│  └─────────────┘  └─────────────┘  └─────────────────────┘  │
-└────────────────────────────┬────────────────────────────────┘
-                             │
-          ┌──────────────────┼──────────────────┐
-          ▼                  ▼                  ▼
-┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
-│  Worker Pool    │ │  Agent Runtime  │ │  Tool Executor  │
-│    Port 3200    │ │    Port 3400    │ │    Port 3500    │
-│                 │ │                 │ │                 │
-│  • Assistant    │ │  • Agent state  │ │  • Sandboxed    │
-│    registry     │ │    machine      │ │    execution    │
-│  • Task queue   │ │  • Mission mgr  │ │  • API clients  │
-│  • Executor     │ │  • Collaboration│ │  • Code runner  │
-└────────┬────────┘ └────────┬────────┘ └────────┬────────┘
-         │                   │                   │
-         ▼                   ▼                   ▼
-┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
-│     Brain       │ │   Temporal      │ │   MCP Runtime   │
-│   (LLM/Orch)    │ │   Port 4100     │ │    Port 3300    │
-│                 │ │                 │ │                 │
-│  • Model select │ │  • Workflows    │ │  • Tool registry│
-│  • Prompt mgr   │ │  • Retries      │ │  • Stdio/HTTP   │
-│  • Token track  │ │  • Scheduling   │ │    transports   │
-└────────┬────────┘ └────────┬────────┘ └────────┬────────┘
-         │                   │                   │
-         ▼                   ▼                   ▼
-┌─────────────────────────────────────────────────────────────┐
-│                     Shared Infrastructure                   │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐  │
-│  │   Auth   │ │  Vault   │ │ Persist  │ │    Redis     │  │
-│  │ :4300    │ │  :4000   │ │  :4200   │ │    :6379     │  │
-│  └──────────┘ └──────────┘ └──────────┘ └──────────────┘  │
-│  ┌──────────┐                                             │
-│  │  Mongo   │                                             │
-│  │ :27017   │                                             │
-│  └──────────┘                                             │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### Message Flow
-
-```
-User Input
-    ↓
-Frontend (React)
-    ↓
-HTTP POST /api/workers/assistants/:id/execute
-    ↓
-Gateway (port 3000)
-    ↓
-Worker Pool (port 3200)
-    ↓
-AssistantExecutor
-    ↓
-Brain (LLM orchestration + tool selection)
-    ↓
-MCP Runtime (port 3300) / Tool Executor (port 3500)
-    ↓
-Agent Runtime (port 3400) for stateful workflows
-    ↓
-Temporal (port 4100) for durable workflows
-    ↓
-Response returned through Worker Pool → Gateway → Frontend
-```
-
-### Service Responsibilities
-
-| Service | Port | Responsibility |
-|---------|------|----------------|
-| **Frontend** | 8080 | React UI, chat interface |
-| **Gateway** | 3000 | Unified entry point, proxy routing, WebSocket |
-| **Worker Pool** | 3200 | Assistant registry, task queue, execution |
-| **Brain** | internal | LLM selection, prompt management, token tracking |
-| **MCP Runtime** | 3300 | MCP tool registry, stdio/HTTP transports |
-| **Agent Runtime** | 3400 | Agent state machines, missions, collaboration |
-| **Tool Executor** | 3500 | Sandboxed code execution, API clients |
-| **Temporal** | 4100 | Durable workflow orchestration |
-| **Auth** | 4300 | JWT, RBAC, service tokens |
-| **Vault** | 4000 | Envelope encryption, secrets management |
-| **Persistence** | 4200 | Session storage, tenant isolation |
-| **Redis** | 6379 | Cache, pub/sub, queues |
-| **Mongo** | 27017 | Document persistence |
-
----
-
-## API Reference
+Older ADK documents in this folder describe a superseded architecture. They are historical reference material, not the source of truth for the active runtime. Current code and tests in the tool executor should be treated as the canonical guide for assistant creation in this workspace.
 
 ### Worker Pool API
 

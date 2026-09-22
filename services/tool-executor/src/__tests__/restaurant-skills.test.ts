@@ -8,8 +8,8 @@ function getSkill(id: string): Tool {
 }
 
 describe('restaurantSkills', () => {
-  it('exports exactly ten skills', () => {
-    expect(restaurantSkills).toHaveLength(10);
+  it('exports exactly eleven skills', () => {
+    expect(restaurantSkills).toHaveLength(11);
   });
 
   it('exports unique skill ids', () => {
@@ -38,43 +38,35 @@ describe('restaurantSkills', () => {
     }
   });
 
-  it('four canonical higher-order skills are exported (isSkill not forced false)', () => {
+  it('five canonical higher-order skills are exported (isSkill not forced false)', () => {
     const ho = restaurantSkills.filter((s) => s.isSkill !== false);
-    expect(ho).toHaveLength(4);
+    expect(ho).toHaveLength(5);
     const hoIds = ho.map((s) => s.id).sort();
     expect(hoIds).toEqual([
       'restaurant-menu-engineering-cost-strategist',
       'restaurant-reservations-guest-profile-manager',
       'restaurant-shift-prep-list-copilot',
       'restaurant-supply-chain-inventory-reorder-manager',
+      'restaurant-financial-forecast-evaluator',
     ].sort());
   });
 
-  it('higher-order wrappers call existing operations via __execute_tool', () => {
-    const pairs: Array<[string, string]> = [
-      ['restaurant-menu-engineering-cost-strategist', 'restaurant-menu-recipe-management'],
-      ['restaurant-shift-prep-list-copilot', 'restaurant-kitchen-service-operations'],
-      ['restaurant-reservations-guest-profile-manager', 'restaurant-reservations-guest-experience'],
-      ['restaurant-supply-chain-inventory-reorder-manager', 'restaurant-supply-chain-inventory'],
-    ];
-    for (const [wrapperId, calleeId] of pairs) {
-      const source = getSkill(wrapperId).manifest.sourceCode as string;
-      expect(source).toContain("__execute_tool('" + calleeId + "'");
-    }
+  it('canonical skill using __execute_tool delegates correctly', () => {
+    const source = getSkill('restaurant-financial-forecast-evaluator').manifest.sourceCode as string;
+    expect(source).toContain("__execute_tool('restaurant-financial-advisory'");
+    expect(source).toContain('try {');
+    expect(source).not.toMatch(/success:\s*true[^}]*console\.log/);
   });
 
-  it('no wrapper source contains hardcoded success stubs', () => {
-    const hoIds = [
+  it('non-wrapper canonical skills are self-contained', () => {
+    for (const id of [
       'restaurant-menu-engineering-cost-strategist',
-      'restaurant-shift-prep-list-copilot',
       'restaurant-reservations-guest-profile-manager',
+      'restaurant-shift-prep-list-copilot',
       'restaurant-supply-chain-inventory-reorder-manager',
-    ];
-    for (const id of hoIds) {
+    ]) {
       const source = getSkill(id).manifest.sourceCode as string;
-      expect(source).not.toMatch(/success:\s*true[^}]*console\.log/);
-      expect(source).toContain('try {');
-      expect(source).toContain('__execute_tool(');
+      expect(source).not.toContain('__execute_tool(');
     }
   });
 

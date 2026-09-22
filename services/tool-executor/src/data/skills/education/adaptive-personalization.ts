@@ -15,7 +15,7 @@ const input = __tool_input || {};
 const fs = require('fs');
 const path = require('path');
 
-const learnerId = input.learnerId || '';
+      const learner = input.learner || '';
 const insightData = input.insightData || {};
 const courseContext = input.courseContext || {};
 const teacherGoals = input.teacherGoals || [];
@@ -25,10 +25,10 @@ const storePath = path.join(baseDir, 'adaptations.json');
 fs.mkdirSync(baseDir, { recursive: true });
 const store = fs.existsSync(storePath) ? JSON.parse(fs.readFileSync(storePath, 'utf8')) : [];
 
-if (!learnerId) {
-  console.log(JSON.stringify({ success: false, error: 'learnerId is required' }));
-  return;
-}
+    if (!learner) {
+      console.log(JSON.stringify({ success: false, error: 'learner is required' }));
+      return;
+    }
 
 const learningStyle = insightData.learningStyle || 'multimodal';
 const performanceLevel = insightData.performanceLevel || 'on-track';
@@ -93,7 +93,7 @@ const recommendations = {
 };
 
 const adaptation = {
-  learnerId,
+  learner,
   timestamp: new Date().toISOString(),
   insightSummary: { learningStyle, performanceLevel, progressRate, motivationLevel, engagementScore, riskFlags },
   adaptations,
@@ -111,12 +111,12 @@ console.log(JSON.stringify({ success: true, data: { adaptation, storePath } }));
   inputSchema: {
     type: 'object',
     properties: {
-      learnerId: SchemaProps.text({ description: 'Student/learner identifier' }),
+      learner: SchemaProps.text({ description: 'Select learner' }),
       insightData: { type: 'object', description: 'Output from Learner Insight skill: learningStyle, performanceLevel, progressRate, motivationLevel, engagementScore, riskFlags' },
       courseContext: { type: 'object', description: 'Course info: subject, grade, current unit, upcoming assessments' },
       teacherGoals: SchemaProps.stringArray({ description: 'Teacher priorities for this learner' }),
     },
-    required: ['learnerId'],
+      required: ['learner'],
   },
   outputSchema: {
     type: 'object',

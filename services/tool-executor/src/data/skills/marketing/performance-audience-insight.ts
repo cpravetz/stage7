@@ -13,7 +13,7 @@ const fs = require('fs');
 const path = require('path');
 
 const operation = input.operation || 'analyze-performance';
-const campaignId = input.campaignId || '';
+const campaignId = input.campaign || '';
 const metric = input.metric || '';
 const keywords = input.keywords || [];
 const audienceId = input.audienceId || '';
@@ -116,7 +116,7 @@ console.log(JSON.stringify(result));
     type: 'object',
     properties: {
       operation: SchemaProps.select(['analyze-performance', 'audience-insights', 'seo', 'market-research'], { description: 'Analysis operation to perform' }),
-      campaignId: SchemaProps.text({ description: 'Campaign identifier' }),
+      campaign: SchemaProps.text({ description: 'Campaign identifier' }),
       metric: SchemaProps.text({ description: 'Metric name to analyze' }),
       keywords: SchemaProps.stringArray({ description: 'Keywords for SEO or research' }),
       audienceId: SchemaProps.text({ description: 'Audience segment identifier' }),

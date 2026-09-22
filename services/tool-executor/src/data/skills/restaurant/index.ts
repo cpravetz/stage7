@@ -5,6 +5,7 @@ import { RESTAURANT_SHIFT_PREP_LIST_COPILOT } from './restaurant-shift-prep-list
 import { RESTAURANT_RESERVATIONS_GUEST_PROFILE_MANAGER } from './restaurant-reservations-guest-profile-manager';
 import { RESTAURANT_SUPPLY_CHAIN_INVENTORY_REORDER_MANAGER } from './restaurant-supply-chain-inventory-reorder-manager';
 import { RESTAURANT_FINANCIAL_FORECAST_EVALUATOR } from './restaurant-financial-forecast-evaluator';
+import { annotateStages, createWorkflow, AssistantWorkflow } from '../workflow-common';
 
 
 const EXTERNAL_OUTPUT_SCHEMA: Record<string, unknown> = {
@@ -52,7 +53,7 @@ const RESERVATIONS_INPUT_SCHEMA: Record<string, unknown> = {
 const KITCHEN_INPUT_SCHEMA: Record<string, unknown> = {
   operation: { type: 'string', enum: ['service-flow', 'kitchen-display', 'station-coordinator', 'prep-scheduler', 'server-communication', 'quality-control'], description: 'The operation to perform' },
   dateRange: { type: 'object', properties: { start: { type: 'string', description: 'Start date (YYYY-MM-DD)' }, end: { type: 'string', description: 'End date (YYYY-MM-DD)' } }, description: 'Date range filter' },
-  ticketId: { type: 'string', description: 'Kitchen ticket identifier' },
+  ticket: { type: 'string', description: 'Kitchen ticket identifier' },
   station: { type: 'string', description: 'Kitchen station name' },
   course: { type: 'string', description: 'Current course being served' },
   message: { type: 'string', description: 'Message content for communication' },
@@ -519,3 +520,30 @@ export const restaurantCanonicalSkills: Tool[] = [
   RESTAURANT_SUPPLY_CHAIN_INVENTORY_REORDER_MANAGER,
   RESTAURANT_FINANCIAL_FORECAST_EVALUATOR,
 ];
+
+
+
+annotateStages(restaurantSkills, {
+  'restaurant-reservations-guest-experience': 'reservation',
+  'restaurant-kitchen-service-operations': 'kitchen',
+  'restaurant-menu-recipe-management': 'service',
+  'restaurant-supply-chain-inventory': 'service',
+  'restaurant-staffing-labor': 'service',
+  'restaurant-financial-advisory': 'billing',
+  'restaurant-menu-engineering-cost-strategist': 'billing',
+  'restaurant-shift-prep-list-copilot': 'kitchen',
+  'restaurant-reservations-guest-profile-manager': 'reservation',
+  'restaurant-supply-chain-inventory-reorder-manager': 'service',
+  'restaurant-financial-forecast-evaluator': 'billing',
+});
+export const restaurantWorkflow = createWorkflow({
+  assistant: 'Restaurant',
+  productObject: 'reservation / table',
+  flow: 'reservation → service → kitchen → billing',
+  stages: [
+    { name: 'reservation', description: 'Reservation and guest experience management', stageIds: ['restaurant-reservations-guest-experience', 'restaurant-reservations-guest-profile-manager'] },
+    { name: 'service', description: 'Menu, supply chain, and staffing operations', stageIds: ['restaurant-menu-recipe-management', 'restaurant-supply-chain-inventory', 'restaurant-staffing-labor', 'restaurant-supply-chain-inventory-reorder-manager'] },
+    { name: 'kitchen', description: 'Kitchen and service operations', stageIds: ['restaurant-kitchen-service-operations', 'restaurant-shift-prep-list-copilot'] },
+    { name: 'billing', description: 'Financial advisory and billing', stageIds: ['restaurant-financial-advisory', 'restaurant-menu-engineering-cost-strategist', 'restaurant-financial-forecast-evaluator'] },
+  ],
+}, restaurantSkills);

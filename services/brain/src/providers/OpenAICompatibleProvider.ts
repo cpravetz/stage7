@@ -1,4 +1,5 @@
 import { LLMProvider, ProviderInfo, CompletionRequest, CompletionResponse, CompletionMessage } from './Provider';
+import { fetchProvider } from '../utils/providerFetch';
 
 export interface OpenAICompatibleConfig {
   id: string;
@@ -66,7 +67,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
         const headers: Record<string, string> = {
       'Connection': 'close', ...this.extraHeaders };
         if (this.apiKey) headers['Authorization'] = `Bearer ${this.apiKey}`;
-        const res = await fetch(`${this.apiBase}${this.listModelsPath}`, { headers });
+        const res = await fetchProvider(`${this.apiBase}${this.listModelsPath}`, { headers });
         if (res.ok) {
           const data = await res.json() as { data?: Array<{ id: string; context_length?: number; pricing?: { prompt?: string }; architecture?: { modality?: string } }> } | Array<{ id: string; name?: string }>;
           const arr = Array.isArray(data) ? data : (data.data || []);
@@ -81,6 +82,11 @@ export class OpenAICompatibleProvider implements LLMProvider {
             if (id.includes('code') || id.includes('coder')) caps.push('code');
             if (id.includes('reason') || id.includes('r1') || id.includes('think') || id.includes('o1') || id.includes('o3')) caps.push('reasoning');
             if (id.includes('creative') || id.includes('image') || id.includes('dall')) caps.push('creative');
+            // OpenAI-compatible local/free catalogs often omit capability metadata;
+            // keep general chat models eligible for advisory and drafting tasks.
+            if (this.id === 'openwebui' || id.endsWith(':free')) {
+              caps.push('reasoning', 'creative');
+            }
             return {
               id,
               capabilities: caps,
@@ -111,7 +117,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
       headers['Authorization'] = `Bearer ${this.apiKey}`;
     }
     // Try chat/completions first, fall back to /completions if the server doesn't support chat endpoint.
-    let res = await fetch(`${this.apiBase}${this.chatCompletionsPath}`, {
+    let res = await fetchProvider(`${this.apiBase}${this.chatCompletionsPath}`, {
       method: 'POST',
       headers,
       body: JSON.stringify({
@@ -133,7 +139,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
           if (available && available.length > 0) {
             const fallbackModel = available[0].id;
             const prompt = req.messages.map((m: CompletionMessage) => `${m.role}: ${m.content}`).join('\n');
-            res = await fetch(`${this.apiBase}${this.chatCompletionsPath}`, {
+            res = await fetchProvider(`${this.apiBase}${this.chatCompletionsPath}`, {
               method: 'POST',
               headers: headers,
               body: JSON.stringify({
@@ -162,7 +168,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
       }
       if (res.status === 405 || res.status === 404 || /Method Not Allowed/i.test(errText) || /Not Found/i.test(errText) || (res.status === 400 && /does not support chat|does not support/i.test(errText))) {
         const prompt = req.messages.map((m: CompletionMessage) => `${m.role}: ${m.content}`).join('\n');
-        res = await fetch(`${this.apiBase}${this.completionsPath}`, {
+        res = await fetchProvider(`${this.apiBase}${this.completionsPath}`, {
           method: 'POST',
           headers,
           body: JSON.stringify({

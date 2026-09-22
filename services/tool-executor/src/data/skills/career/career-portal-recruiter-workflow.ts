@@ -5,17 +5,17 @@ const CAREER_WRAPPER_CONFIG_SCHEMA: SchemaRecord = { type: 'object', properties:
 
 const PORTAL_RECRUITER_WORKFLOW_SOURCE = `(async () => {
 const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
-let jobIds = input.jobIds || [];
+let targetRoles = input.targetRoles || [];
 if (!jobIds.length) {
   const pipeline = await __execute_tool('career_pipeline_report', {});
   if (pipeline && pipeline.success && pipeline.data) {
     const pipelineData = pipeline.data;
     if (Array.isArray(pipelineData.tracking)) {
-      jobIds = pipelineData.tracking.map((entry) => entry.jobId || entry.id).filter(Boolean);
+      targetRoles = pipelineData.tracking.map((entry) => entry.jobId || entry.id).filter(Boolean);
     }
   }
 }
-const application = await __execute_tool('career_apply_execute', { jobIds, dryRun: input.dryRun !== false, connectedPortalTool: input.connectedPortalTool, coverLetters: input.coverLetters });
+const application = await __execute_tool('career_apply_execute', { targetRoles, dryRun: input.dryRun !== false, connectedPortalTool: input.applyAt, coverLetters: input.coverLetters });
 if (!application || application.success === false || application.error) {
 console.log(JSON.stringify({ success: false, mode: 'not-connected', error: application && application.error ? application.error : 'Not connected: application execution returned no result; ensure a profile, ranked listings, and a portal connector are available' }));
 return;
@@ -47,7 +47,7 @@ const PORTAL_RECRUITER_WORKFLOW_INPUT = {
 type: 'object',
 properties: {
 dryRun: { type: 'boolean', description: 'Preview without submitting; defaults to true', default: true },
-connectedPortalTool: { type: 'string', description: 'The job portal you want to submit applications through (e.g. LinkedIn, Indeed)' },
+applyAt: { type: 'string', description: 'Where to apply: the job posting URL or application portal' },
 targetCompany: { type: 'string', description: 'Target company for networking outreach' },
 targetPerson: { type: 'string', description: 'Target person for networking outreach' },
 relationshipStage: { type: 'string', enum: ['cold_outreach', 'follow_up', 'thank_you', 'referral_ask'], description: 'Relationship stage' },
@@ -78,15 +78,15 @@ required: ['success', 'data'],
 
 const PORTAL_RECRUITER_WORKFLOW = createCodeSkill({
 id: 'career-portal-recruiter-workflow',
-name: 'Portal Integration & Recruiter Workflow',
-description: 'Manages portal credential registration, confirm-before-send submission flows, and recruiter outreach sequencing. Delegates to career_apply_execute for submissions and career_networking_outreach for outreach drafting. Reports not-connected when either dependency yields no data.',
+name: 'Application + Recruiter Outreach',
+description: 'Drafts a recruiter outreach follow-up for a target company after an application is prepared, while keeping the application flow separate. Delegates to career_application_execute and career_networking_outreach when available.',
 manifest: {
 language: 'javascript',
 entrypoint: 'index.js',
 sourceCode: PORTAL_RECRUITER_WORKFLOW_SOURCE,
 lowerOrderTools: ['career_apply_execute', 'career_networking_outreach'],
 configSchema: CAREER_WRAPPER_CONFIG_SCHEMA,
-		actionLabel: 'Run portal & outreach workflow',
+		actionLabel: 'Draft outreach follow-up',
 },
 inputSchema: PORTAL_RECRUITER_WORKFLOW_INPUT,
 outputSchema: PORTAL_RECRUITER_WORKFLOW_OUTPUT,

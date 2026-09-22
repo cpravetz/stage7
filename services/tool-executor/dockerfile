@@ -20,4 +20,8 @@ WORKDIR /usr/src/app/services/tool-executor
 
 EXPOSE 3500
 
+# Assistant selection: STAGE7_ASSISTANTS env var (set via docker-compose) controls
+# which assistants are loaded at runtime. Leave empty for all assistants.
+ENV STAGE7_ASSISTANTS=${STAGE7_ASSISTANTS}
+
 CMD ["node", "dist/index.js"]

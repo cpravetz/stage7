@@ -181,12 +181,21 @@ sports_triggers = {
 }
 
 def format_triggers(triggers_dict):
-    """Format triggers dict as TypeScript object string"""
-    lines = []
+    """Format triggers as SkillTrigger[] TypeScript array string"""
+    lines = ['  triggers: [' ]
     for kind, phrases in triggers_dict.items():
-        phrases_str = ', '.join(f'"{p}"' for p in phrases)
-        lines.append(f'        {kind}: [{phrases_str}]')
-    return '{\n' + ',\n'.join(lines) + '\n      }'
+        phrases_str = ', '.join(json.dumps(p) for p in phrases)
+        if kind == 'user':
+            lines.append(f"    {{ kind: 'user', phrase_examples: [{phrases_str}] }},")
+        elif kind == 'schedule':
+            lines.append(f"    {{ kind: 'schedule', cadence: {phrases_str} }},")
+        elif kind == 'event':
+            lines.append(f"    {{ kind: 'event', on: {phrases_str} }},")
+        elif kind == 'data':
+            lines.append(f"    {{ kind: 'data', condition: {phrases_str} }}")
+    lines[-1] = lines[-1].rstrip()
+    lines.append('  ],')
+    return '\n'.join(lines)
 
 def add_triggers_to_cto(content):
     """Add triggers to CTO skills"""
@@ -342,9 +351,16 @@ with open(cto_path, 'r') as f:
 print("Processing CTO file...")
 new_cto_content = add_triggers_to_cto(cto_content)
 
-with open(cto_path, 'w') as f:
-    f.write(new_cto_content)
-print("CTO file updated.")
+try:
+    if 'triggers: [' not in new_cto_content or 'triggers: {' in new_cto_content:
+        raise ValueError("CTO triggers must be in SkillTrigger[] array format")
+except ValueError as error:
+    print(f"Validation failed for {cto_path}: {error}")
+else:
+    with open(cto_path, 'w') as f:
+        f.write(new_cto_content)
+    print("CTO file updated.")
+    print(f"Validation passed: {cto_path} triggers are in SkillTrigger[] array format")
 
 # Process Sports file
 sports_path = '/mnt/1tbHD/ckt_web/stage7/services/tool-executor/src/data/skills/sports/index.ts'
@@ -354,8 +370,15 @@ with open(sports_path, 'r') as f:
 print("Processing Sports file...")
 new_sports_content = add_triggers_to_sports(sports_content)
 
-with open(sports_path, 'w') as f:
-    f.write(new_sports_content)
-print("Sports file updated.")
+try:
+    if 'triggers: [' not in new_sports_content or 'triggers: {' in new_sports_content:
+        raise ValueError("Sports triggers must be in SkillTrigger[] array format")
+except ValueError as error:
+    print(f"Validation failed for {sports_path}: {error}")
+else:
+    with open(sports_path, 'w') as f:
+        f.write(new_sports_content)
+    print("Sports file updated.")
+    print(f"Validation passed: {sports_path} triggers are in SkillTrigger[] array format")
 
 print("Done!")

@@ -162,11 +162,11 @@ router.post('/assistants/:id/execute', asyncHandler(async (req, res) => {
 }));
 
 router.post('/assistants/:id/tools/execute', asyncHandler(async (req, res) => {
-  const { name, arguments: args } = req.body as { name?: string; arguments: Record<string, unknown> };
+  const { name, arguments: args, workspaceId } = req.body as { name?: string; arguments: Record<string, unknown>; workspaceId?: string };
   if (!name) {
     throw NextGenError.badRequest('Missing tool name');
   }
-  const result = await executor.executeToolCall({ name, arguments: args }, req.params.id as string);
+  const result = await executor.executeToolCall({ name, arguments: args }, req.params.id as string, workspaceId);
   res.json(result);
 }));
 

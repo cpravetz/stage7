@@ -87,10 +87,12 @@ describe('Integration: Multi-Tenancy Isolation', () => {
 
       expect(saveRes.status).toBe(201);
 
-      const getRes = await request(app).get('/api/artifacts/missions/test-mission');
+      const getRes = await request(app).get('/api/artifacts/missions/test-mission/artifacts');
       expect(getRes.status).toBe(200);
       const body = getRes.body as any;
-      expect(body.missionId || 'test-mission').toBeDefined();
+      expect(body.artifacts).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: 'agent-state-tenant-a', name: 'agent-state' }),
+      ]));
     });
   });
 });

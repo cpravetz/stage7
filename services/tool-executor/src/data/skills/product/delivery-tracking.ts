@@ -34,7 +34,6 @@ export const DELIVERY_TRACKING = withConfirmation(createExternalActionSkill({
       summary: SchemaProps.text({ description: 'Issue summary or title' }),
       status: SchemaProps.select(['todo', 'in-progress', 'done'], { description: 'Issue status' }),
       projectKey: SchemaProps.text({ description: 'Jira project key' }),
-      endpointUrl: SchemaProps.url({ description: 'Override endpoint URL' }),
     },
     required: ['operation'],
   },

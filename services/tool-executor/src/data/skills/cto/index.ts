@@ -266,6 +266,19 @@ const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
   }
 })();`;
 
+export interface WorkflowStage {
+  name: string;
+  description: string;
+  skills: Tool[];
+}
+
+export interface AssistantWorkflow {
+  assistant: string;
+  productObject: string;
+  flow: string;
+  stages: WorkflowStage[];
+}
+
 export const ctoSkills: Tool[] = [
 
   (() => { const t = createCodeSkill({
@@ -543,13 +556,10 @@ error: SchemaProps.text({ description: 'Error message if failed' }),
       }, { required: ['endpointUrl', 'token'] }),
     },
     inputSchema: createSchemaRecord({
-      endpointUrl: SchemaProps.url({ description: 'Configured engineering or IaC remediation endpoint' }),
-      token: SchemaProps.password({ description: 'Bearer token for the remediation endpoint' }),
-      method: SchemaProps.select(['POST', 'PUT', 'PATCH'], { description: 'HTTP method for the remediation request', default: 'POST' }),
       payload: SchemaProps.object({}, { description: 'Approved remediation payload' }),
       dryRun: SchemaProps.boolean({ description: 'Validate without applying; defaults to true', default: true }),
       confirmation: SchemaProps.boolean({ description: 'Explicit approval for live execution', default: false }),
-    }, { required: ['endpointUrl'] }),
+    }, { required: [] }),
     outputSchema: createSchemaRecord({
       success: SchemaProps.boolean({ description: 'Whether action completed' }),
       mode: SchemaProps.text({ description: 'Dry-run, live, not-connected, or error mode' }),
@@ -560,4 +570,28 @@ error: SchemaProps.text({ description: 'Error message if failed' }),
   }),
 ];
 
-export const ctoCanonicalSkills = [...ctoSkills, ctoTeamDeliveryHealthEvaluator, ctoDisasterRecoveryPlanner];
+export const ctoCanonicalSkills = ctoSkills.filter((s) => s.isSkill !== false);
+
+ctoSkills.forEach((s) => {
+  if (s.id === 'cto-infrastructure-query') s.manifest.workflowStage = 'monitor';
+  else if (s.id === 'cto-engineering-actions') s.manifest.workflowStage = 'execute';
+  else if (s.id === 'cto-incident-disaster-readiness') s.manifest.workflowStage = 'diagnose';
+  else if (s.id === 'cto-architecture-advisory') s.manifest.workflowStage = 'diagnose';
+  else if (s.id === 'cto-architecture-tech-debt-evaluator') s.manifest.workflowStage = 'plan';
+  else if (s.id === 'cto-cloud-spend-infrastructure-optimizer') s.manifest.workflowStage = 'plan';
+  else if (s.id === 'cto-incident-war-room-synthesizer') s.manifest.workflowStage = 'diagnose';
+  else if (s.id === 'cto-engineering-action-iac-drift-remediation') s.manifest.workflowStage = 'approve';
+});
+
+export const ctoWorkflow: AssistantWorkflow = {
+  assistant: 'CTO',
+  productObject: 'system / incident',
+  flow: 'monitor → diagnose → plan → approve → execute',
+  stages: [
+    { name: 'monitor', description: 'Read-only infrastructure and system health monitoring', skills: ctoSkills.filter((s) => s.manifest.workflowStage === 'monitor') },
+    { name: 'diagnose', description: 'Architecture, incident, and disaster readiness analysis', skills: ctoSkills.filter((s) => s.manifest.workflowStage === 'diagnose') },
+    { name: 'plan', description: 'Roadmap, cost optimization, and modernization planning', skills: ctoSkills.filter((s) => s.manifest.workflowStage === 'plan') },
+    { name: 'approve', description: 'Approval-gated change review before execution', skills: ctoSkills.filter((s) => s.manifest.workflowStage === 'approve') },
+    { name: 'execute', description: 'Mutating engineering and remediation actions', skills: ctoSkills.filter((s) => s.manifest.workflowStage === 'execute') },
+  ],
+};

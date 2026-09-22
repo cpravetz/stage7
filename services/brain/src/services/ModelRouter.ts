@@ -8,6 +8,26 @@ export interface ModelDefinition {
   capabilities: string[];
 }
 
+const FREE_PROVIDER_PRIORITY: Record<string, number> = {
+  openrouter: 0,
+  openwebui: 1,
+  ollama: 2,
+  huggingface: 3,
+  local: 4,
+};
+
+function providerPriority(provider: string): number {
+  return FREE_PROVIDER_PRIORITY[provider] ?? 10;
+}
+
+function modelSpecializationPenalty(model: ModelDefinition, task: string): number {
+  const id = model.id.toLowerCase();
+  const wantsCode = /\b(code|coding|programming|function|script|debug|refactor|implementation)\b/.test(task.toLowerCase());
+  if (wantsCode) return 0;
+  if (/safety|embed|embedding|coder|code|vision|omni/.test(id)) return 2;
+  return 0;
+}
+
 const CAPABILITY_KEYWORDS: Record<string, string[]> = {
   vision: ['image', 'picture', 'photo', 'visual', 'see', 'look', 'analyze image', 'describe image'],
   code: ['code', 'program', 'function', 'script', 'debug', 'refactor', 'implement', 'build', 'develop', 'software'],
@@ -102,6 +122,12 @@ export class ModelRouter {
     candidates.sort((a, b) => {
       const costDiff = a.costPer1kTokens - b.costPer1kTokens;
       if (costDiff !== 0) return costDiff;
+      const specializationDiff = modelSpecializationPenalty(a, options.task) - modelSpecializationPenalty(b, options.task);
+      if (specializationDiff !== 0) return specializationDiff;
+      if (options.freeOnly || (a.costPer1kTokens === 0 && b.costPer1kTokens === 0)) {
+        const providerDiff = providerPriority(a.provider) - providerPriority(b.provider);
+        if (providerDiff !== 0) return providerDiff;
+      }
       const aMatch = requiredCaps.filter((cap) => a.capabilities.includes(cap)).length;
       const bMatch = requiredCaps.filter((cap) => b.capabilities.includes(cap)).length;
       if (bMatch !== aMatch) return bMatch - aMatch;
@@ -142,9 +168,18 @@ export class ModelRouter {
       });
     }
 
+    const generalCandidates = candidates.filter((candidate) => modelSpecializationPenalty(candidate, options.task) === 0);
+    if (generalCandidates.length > 0) candidates = generalCandidates;
+
     candidates.sort((a, b) => {
       const costDiff = a.costPer1kTokens - b.costPer1kTokens;
       if (costDiff !== 0) return costDiff;
+      const specializationDiff = modelSpecializationPenalty(a, options.task) - modelSpecializationPenalty(b, options.task);
+      if (specializationDiff !== 0) return specializationDiff;
+      if (options.freeOnly || (a.costPer1kTokens === 0 && b.costPer1kTokens === 0)) {
+        const providerDiff = providerPriority(a.provider) - providerPriority(b.provider);
+        if (providerDiff !== 0) return providerDiff;
+      }
       const aMatch = requiredCaps.filter((cap) => a.capabilities.includes(cap)).length;
       const bMatch = requiredCaps.filter((cap) => b.capabilities.includes(cap)).length;
       if (bMatch !== aMatch) return bMatch - aMatch;

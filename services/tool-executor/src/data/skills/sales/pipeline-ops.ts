@@ -55,7 +55,7 @@ const PIPELINE_OPS = createExternalActionSkill({
     properties: {
       operation: SchemaProps.select(['crm', 'calendar', 'document-management'], { description: 'Pipeline operation domain: crm for CRM records, calendar for scheduling, document-management for proposals/docs' }),
       dryRun: SchemaProps.boolean({ description: 'Validate without executing', default: true }),
-      endpointUrl: SchemaProps.url({ description: 'Override endpoint URL for this request' }),
+
       entity: SchemaProps.select(['lead', 'contact', 'account', 'opportunity', 'activity', 'event', 'document'], { description: 'Entity type for the operation' }),
       entityId: SchemaProps.text({ description: 'Unique identifier of the entity' }),
       data: SchemaProps.object({}, { description: 'Data payload for create/update operations' }),

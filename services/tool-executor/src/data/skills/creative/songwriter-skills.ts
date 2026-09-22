@@ -341,7 +341,6 @@ export const leadSheetDemoDispatcher = withConfirmation(createCodeSkill({
         publishers: SchemaProps.stringArray({ title: 'Publishers', description: 'Publisher names for registration metadata', order: 2, hint: 'List of publisher names for registration' }),
         rightsNote: SchemaProps.text({ title: 'Rights Note', description: 'Rights or ownership note for the staged record', order: 3, hint: 'Any rights or ownership clarification for the record' }),
       }, { title: 'Registration', description: 'Optional copyright or registration metadata', order: 7, hint: 'Include writer/publisher metadata when staging a registration record' }),
-      endpointUrl: SchemaProps.url({ title: 'Endpoint URL', description: 'Optional provider endpoint override', order: 8, hint: 'Override the configured provider endpoint for this dispatch' }),
       apiKey: SchemaProps.password({ title: 'API Key', description: 'Optional provider API key override', order: 9, hint: 'Override the configured API key for this dispatch' }),
       dryRun: SchemaProps.boolean({ title: 'Dry Run', description: 'Stage the artifact without sending it; defaults to true', order: 10, default: true, hint: 'When true, the artifact is staged locally and no live dispatch occurs' }),
       confirmation: SchemaProps.boolean({ title: 'Confirmation', description: 'Explicit approval for a live dispatch; dry-run does not require approval', order: 11, default: false, hint: 'Set to true only when authorizing a live dispatch to the configured endpoint' }),

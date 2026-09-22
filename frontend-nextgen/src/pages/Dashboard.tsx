@@ -24,7 +24,6 @@ const Dashboard = () => {
   const [services, setServices] = useState<ServiceInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [agentsLoading, setAgentsLoading] = useState(false);
 
   const feedEvents = useFeedStore((state) => state.events);
   const feedConnected = useFeedStore((state) => state.connected);
@@ -81,11 +80,6 @@ const Dashboard = () => {
     }
   }, []);
 
-  const loadAgents = useCallback(async () => {
-    // Agents are mission-scoped and managed by Stage7; the dashboard shows agent counts derived from missions.
-    setAgentsLoading(false);
-  }, []);
-
   useEffect(() => {
     ensureConnected();
     loadServices();
@@ -95,7 +89,7 @@ const Dashboard = () => {
       fetchMissions();
     }, REFRESH_INTERVAL);
     return () => clearInterval(interval);
-  }, [loadServices, fetchMissions, loadAgents, ensureConnected]);
+  }, [loadServices, fetchMissions, ensureConnected]);
 
   const onlineCount = services.filter((s) => s.status === 'healthy').length;
   const degradedCount = services.filter((s) => s.status === 'degraded').length;
@@ -308,13 +302,6 @@ const Dashboard = () => {
             }}
           >
             <h3 style={{ margin: 0 }}>Agent Status</h3>
-            <button
-              className="secondary"
-              onClick={loadAgents}
-              disabled={agentsLoading}
-            >
-              {agentsLoading ? '...' : 'Refresh'}
-            </button>
           </div>
           <div
             style={{
@@ -324,49 +311,13 @@ const Dashboard = () => {
               fontSize: '13px',
             }}
           >
-            <span>
-              <strong>{agents.length}</strong> Total
-            </span>
             <span style={{ color: '#22c55e' }}>
-              <strong>{activeAgents}</strong> Active
+              <strong>{activeAgents}</strong> Active (derived from running missions)
             </span>
           </div>
-          {agentsLoading && agents.length === 0 ? (
-            <div className="loading">Loading agents...</div>
-          ) : (
-            <div className="table-container">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Type</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {agents.slice(0, 8).map((a) => (
-                    <tr key={a.id}>
-                      <td className="truncate">{a.name}</td>
-                      <td>{a.type}</td>
-                      <td>
-                        <span className={`badge ${a.status}`}>{a.status}</span>
-                      </td>
-                    </tr>
-                  ))}
-                  {agents.length === 0 && (
-                    <tr>
-                      <td colSpan={3}>No agents found</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
-          <div style={{ marginTop: '12px' }}>
-            <Link to="/agents" className="link-button">
-              View All Agents
-            </Link>
-          </div>
+          <p style={{ fontSize: '12px', color: '#94a3b8' }}>
+            Agents are mission-scoped and ephemeral. See Mission Room for agent details.
+          </p>
         </div>
       </div>
 

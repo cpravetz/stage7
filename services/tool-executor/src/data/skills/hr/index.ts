@@ -11,7 +11,7 @@ import { createExternalActionSkill, createCodeSkill, SchemaProps } from '../code
 
 const CANDIDATE_SCREENING = createCodeSkill({
   id: 'candidate-screening',
-  name: 'Candidate Screening & Scheduling Manager',
+  name: 'Applicant Review and Interview Coordination',
   description: 'Filters inbound applicant profiles against role criteria, dispatches initial screening surveys, and coordinates interview availability. Dry-run mode and explicit confirmation required for scheduling operations.',
   manifest: {
     language: 'javascript',
@@ -38,10 +38,13 @@ function computeScore(resumeText, jobRequirements) {
   const resumeWords = resumeText.toLowerCase().split(/[^a-zA-Z0-9_]+/).filter(Boolean);
   const reqWords = jobRequirements.toLowerCase().split(/[^a-zA-Z0-9_]+/).filter(Boolean);
   if (!reqWords.length) return 0;
-  const matched = reqWords.filter((w) => resumeWords.includes(w));
+  const exactMatched = reqWords.filter((w) => resumeWords.includes(w));
+  const partialMatched = reqWords.filter((w) => !exactMatched.includes(w) && w.length >= 3 && resumeWords.some((rw) => rw.includes(w)));
+  const matched = [...exactMatched, ...partialMatched];
   const raw = (matched.length / reqWords.length) * 100;
   const score = Math.max(1, Math.round(raw)) || 0;
-  return { score: Math.min(100, score), matched, gaps: reqWords.filter((w) => !resumeWords.includes(w)) };
+  const gaps = reqWords.filter((w) => !matched.includes(w));
+  return { score: Math.min(100, score), matched, gaps, partialMatched };
 }
 
 function assessCandidate(resumeText, assessmentData) {
@@ -131,7 +134,6 @@ console.log(JSON.stringify(result));
       }, { description: 'Assessment criteria and data for candidate evaluation' }),
       dryRun: SchemaProps.boolean({ description: 'Validate without executing scheduling; defaults to true', default: true }),
       confirmation: SchemaProps.boolean({ description: 'Explicit approval for live scheduling dispatch', default: false }),
-      endpointUrl: SchemaProps.url({ description: 'Override scheduling endpoint URL' }),
     },
     required: ['operation'],
   },
@@ -179,7 +181,6 @@ const RECRUITING_OPS = createExternalActionSkill({
     properties: {
       operation: SchemaProps.select(['ats', 'job-board', 'linkedin', 'schedule-interview', 'calendar', 'email'], { description: 'Recruiting operation to perform' }),
       dryRun: SchemaProps.boolean({ description: 'Validate without executing; defaults to true', default: true }),
-      endpointUrl: SchemaProps.url({ description: 'Override endpoint URL' }),
       data: SchemaProps.object({}, { description: 'Operation payload data for job description or interview kit generation' }),
       filters: SchemaProps.object({}, { description: 'Filters for query operations' }),
       pagination: SchemaProps.object({}, { description: 'Pagination settings' }),
@@ -291,7 +292,6 @@ console.log(JSON.stringify(result));
       }, { description: 'Date range for the analysis period' }),
       data: SchemaProps.object({}, { description: 'Data payload for the operation — hiring records or compliance candidates' }),
       filters: SchemaProps.object({}, { description: 'Filters to apply to the data' }),
-      endpointUrl: SchemaProps.url({ description: 'Optional external analytics endpoint override' }),
       dryRun: SchemaProps.boolean({ description: 'Validate without executing; defaults to true', default: true }),
     },
     required: ['operation'],
@@ -317,6 +317,8 @@ CANDIDATE_SCREENING.triggers = [
   { kind: 'event', on: 'Resume uploaded' },
   { kind: 'data', condition: 'Resume or applicant profile data available for screening' },
 ];
+CANDIDATE_SCREENING.tier = 'represent';
+CANDIDATE_SCREENING.domainKnowledge = 'Talent acquisition lifecycles, structured interview methodology, compensation benchmarking, employment law compliance (EEOC)';
 HIRING_ANALYTICS_COMPLIANCE.triggers = [
   { kind: 'user', phrase_examples: ['Generate hiring analytics', 'Run compliance check', 'Evaluate workforce plan', 'Assess compensation benchmarks'] },
   { kind: 'schedule', cadence: 'Weekly hiring pipeline report' },
@@ -325,6 +327,8 @@ HIRING_ANALYTICS_COMPLIANCE.triggers = [
   { kind: 'event', on: 'Interview feedback submitted' },
   { kind: 'data', condition: 'Hiring pipeline or compliance data available for analysis' },
 ];
+HIRING_ANALYTICS_COMPLIANCE.tier = 'advise';
+HIRING_ANALYTICS_COMPLIANCE.domainKnowledge = 'Talent acquisition lifecycles, structured interview methodology, compensation benchmarking, employment law compliance (EEOC)';
 RECRUITING_OPS.triggers = [
   { kind: 'user', phrase_examples: ['Draft job description', 'Create interview scorecard', 'Post to job board', 'Schedule interview'] },
   { kind: 'schedule', cadence: 'Weekly job posting and interview pipeline review' },
@@ -332,13 +336,43 @@ RECRUITING_OPS.triggers = [
   { kind: 'event', on: 'New candidate application received' },
   { kind: 'data', condition: 'Job req, candidate, or scheduling data available' },
 ];
+RECRUITING_OPS.tier = 'aid';
+RECRUITING_OPS.domainKnowledge = 'Talent acquisition lifecycles, structured interview methodology, compensation benchmarking, employment law compliance (EEOC)';
 
 const hrSkills = [
-  { ...CANDIDATE_SCREENING, isSkill: false },
-  { ...RECRUITING_OPS, isSkill: false },
-  { ...HIRING_ANALYTICS_COMPLIANCE, isSkill: false },
+  { ...CANDIDATE_SCREENING, tier: 'represent' as const, domainKnowledge: 'Talent acquisition lifecycles, structured interview methodology, compensation benchmarking, employment law compliance (EEOC)' },
+  { ...RECRUITING_OPS, tier: 'aid' as const, domainKnowledge: 'Talent acquisition lifecycles, structured interview methodology, compensation benchmarking, employment law compliance (EEOC)' },
+  { ...HIRING_ANALYTICS_COMPLIANCE, tier: 'advise' as const, domainKnowledge: 'Talent acquisition lifecycles, structured interview methodology, compensation benchmarking, employment law compliance (EEOC)' },
 ];
+
+export interface WorkflowStage {
+  name: string;
+  description: string;
+  skills: Tool[];
+}
+
+export interface AssistantWorkflow {
+  assistant: string;
+  productObject: string;
+  flow: string;
+  stages: WorkflowStage[];
+}
+
+CANDIDATE_SCREENING.manifest.workflowStage = 'screening';
+RECRUITING_OPS.manifest.workflowStage = 'interview';
+HIRING_ANALYTICS_COMPLIANCE.manifest.workflowStage = 'decision';
 
 export { hrSkills };
 
 export const hrCanonicalSkills = hrSkills;
+
+export const hrWorkflow: AssistantWorkflow = {
+  assistant: 'HR',
+  productObject: 'applicant',
+  flow: 'screening → interview → decision',
+  stages: [
+    { name: 'screening', description: 'Resume screening and candidate assessment', skills: hrSkills.filter((s) => s.manifest.workflowStage === 'screening') },
+    { name: 'interview', description: 'Interview scheduling and coordination', skills: hrSkills.filter((s) => s.manifest.workflowStage === 'interview') },
+    { name: 'decision', description: 'Hiring analytics and compliance evaluation', skills: hrSkills.filter((s) => s.manifest.workflowStage === 'decision') },
+  ],
+};

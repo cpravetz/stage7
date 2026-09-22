@@ -109,12 +109,21 @@ def apply(lines, skill_id, values):
         lines[anchor:anchor] = block.splitlines()
 
 
+def validate_triggers_shape(updated):
+    if 'triggers: {' in updated:
+        raise RuntimeError("Validation failed: found 'triggers: {' object format, expected SkillTrigger[] array format")
+    if 'triggers: [' not in updated:
+        raise RuntimeError("Validation failed: 'triggers: [' array format not found, expected SkillTrigger[] array format")
+    print('Validation passed: triggers are in SkillTrigger[] array format')
+
+
 def main():
     text = FILE.read_text()
     lines = text.splitlines()
     for skill_id, values in SKILLS.items():
         apply(lines, skill_id, values)
     updated = "\n".join(lines) + "\n"
+    validate_triggers_shape(updated)
     if updated == text:
         count = updated.count("triggers:")
         if count != len(SKILLS):

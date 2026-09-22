@@ -3,7 +3,6 @@ import { createCodeSkill, createSchemaRecord, SchemaProps } from '../code-skill-
 
 const budgetTrackingInputSchema = createSchemaRecord({
   operation: SchemaProps.select(['track-budget', 'variance', 'forecast'], { description: 'Operation type: track-budget for budget vs actual, variance for variance analysis, forecast for budget forecast' }),
-  endpointUrl: SchemaProps.url({ description: 'Override endpoint URL for the budget service' }),
   budgetId: SchemaProps.text({ description: 'Budget identifier' }),
   fiscalYear: SchemaProps.integer({ description: 'Fiscal year', minimum: 2020, maximum: 2040 }),
   department: SchemaProps.text({ description: 'Department identifier' }),
@@ -90,7 +89,7 @@ const endpointUrl = input.endpointUrl || (globalThis.process && globalThis.proce
 const apiKey = globalThis.process && globalThis.process.env && globalThis.process.env.FINANCE_API_KEY || '';
 
 if (!endpointUrl) {
-  console.log(JSON.stringify({ success: true, operation, mode: 'dry-run', budgetStatus: null, forecast: null, error: null }));
+  console.log(JSON.stringify({ success: false, operation, mode: 'not-connected', budgetStatus: null, forecast: null, error: 'Not connected: FINANCE_BUDGET_ENDPOINT is not configured' }));
   return;
 }
 

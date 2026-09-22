@@ -37,7 +37,6 @@ const MATTER_DOCUMENT_OPS = createExternalActionSkill({
       custodians: { type: 'array', items: { type: 'string' }, description: 'List of custodians for collection or search' },
       searchTerms: { type: 'array', items: { type: 'string' }, description: 'Search terms for eDiscovery' },
       dateRange: { type: 'object', description: 'Date range for operations (e.g., { start: "2023-01-01", end: "2023-12-31" })' },
-      endpointUrl: { type: 'string', description: 'Optional override for the endpoint URL' },
       dryRun: SchemaProps.boolean({ description: 'Validate without executing', default: true }),
     },
     required: ['operation'],

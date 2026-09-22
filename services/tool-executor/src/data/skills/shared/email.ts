@@ -172,7 +172,6 @@ export const emailIntegrationSkill = createExternalActionSkill({
       folderName: { type: 'string', description: 'Name of folder to create' },
       
       // Override config per-request
-      endpointUrl: { type: 'string', description: 'Override endpoint URL' },
       dryRun: { type: 'boolean', description: 'Validate without executing', default: true },
     },
     required: ['operation'],

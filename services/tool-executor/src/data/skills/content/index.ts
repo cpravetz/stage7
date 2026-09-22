@@ -225,7 +225,6 @@ const MULTI_CHANNEL_PUBLISHING = createExternalActionSkill({
       recipientList: { type: 'string', description: 'Recipient list/segment ID' },
       fromName: { type: 'string', description: 'From name' },
       fromEmail: { type: 'string', description: 'From email' },
-      endpointUrl: { type: 'string', description: 'Optional endpoint override' },
       dryRun: { type: 'boolean', description: 'Validate without publishing' },
     },
     required: ['channel', 'operation'],
@@ -286,7 +285,6 @@ const CONTENT_PERFORMANCE_SEO = createExternalActionSkill({
       demographics: { type: 'object', description: 'Demographic filters' },
       interests: { type: 'array', items: { type: 'string' }, description: 'Interest categories' },
       behaviors: { type: 'array', items: { type: 'object' }, description: 'Behavioral signals' },
-      endpointUrl: { type: 'string', description: 'Optional endpoint override' },
       dryRun: { type: 'boolean', description: 'Validate without executing' },
     },
     required: ['operation'],
@@ -294,6 +292,23 @@ const CONTENT_PERFORMANCE_SEO = createExternalActionSkill({
   outputSchema: CONTENT_EXTERNAL_OUTPUT_SCHEMA,
   timeoutMs: 120000,
 });
+
+export interface WorkflowStage {
+  name: string;
+  description: string;
+  skills: Tool[];
+}
+
+export interface AssistantWorkflow {
+  assistant: string;
+  productObject: string;
+  flow: string;
+  stages: WorkflowStage[];
+}
+
+CONTENT_DRAFTING_ADAPTATION.manifest.workflowStage = 'draft';
+CONTENT_PERFORMANCE_SEO.manifest.workflowStage = 'optimize';
+MULTI_CHANNEL_PUBLISHING.manifest.workflowStage = 'publish';
 
 export const contentSkills = [CONTENT_DRAFTING_ADAPTATION, MULTI_CHANNEL_PUBLISHING, CONTENT_PERFORMANCE_SEO];
 const CONTENT_HIGHER_ORDER_TRIGGERS = [
@@ -308,11 +323,29 @@ const EDITORIAL_CALENDAR_SOURCE = `(async () => { const input = __tool_input || 
 
 const PUBLISHING_DISPATCH_SOURCE = `(async () => { const input = __tool_input || {}; if (!input.endpointUrl && !input.channel) { console.log(JSON.stringify({ success: false, mode: 'not-connected', error: 'Not connected: provide a CMS endpoint or publishing channel' })); return; } if (input.dryRun !== true && input.confirmation !== true) { console.log(JSON.stringify({ success: false, mode: 'confirmation-required', error: 'Explicit confirmation is required for live publishing' })); return; } const result = await __execute_tool('content_multi_channel_publishing', { channel: input.channel || 'blog', operation: input.confirmation === true ? 'publish' : 'create', contentId: input.contentId, title: input.title, content: input.content, excerpt: input.excerpt, category: input.category, tags: input.tags, slug: input.slug, seoTitle: input.seoTitle, seoDescription: input.seoDescription, status: input.dryRun === true ? 'draft' : 'published', endpointUrl: input.endpointUrl, dryRun: input.dryRun !== false }); console.log(JSON.stringify({ success: Boolean(result && result.success), mode: input.dryRun === true ? 'dry-run' : result && result.mode ? result.mode : 'live', data: result && result.data ? result.data : null, error: result && result.error ? result.error : null })); })();`
 
-const CONTENT_STRATEGY_SEO_EVALUATOR: Tool = { id: 'content-strategy-seo-evaluator', name: 'Content Strategy & SEO Evaluator', description: 'Evaluate supplied content performance records or connected analytics results to recommend editorial, SEO, and distribution actions.', type: 'code', manifest: { language: 'javascript', entrypoint: 'index.js', sourceCode: CONTENT_STRATEGY_SOURCE, persistenceEnv: 'CONTENT_HOME', ui: { view: 'content-strategy' } }, inputSchema: { type: 'object', properties: { contentItems: { type: 'array', items: { type: 'object' }, description: 'Content performance records with impressions, clicks, conversions, and keyword match' }, contentIds: { type: 'array', items: { type: 'string' }, description: 'Content identifiers for connected analytics' }, channel: { type: 'string', description: 'Channel or platform' }, platform: { type: 'string', description: 'Specific analytics platform' }, metrics: { type: 'array', items: { type: 'string' }, description: 'Metrics to analyze' }, dateRange: { type: 'object', description: 'Analysis date range' }, endpointUrl: { type: 'string', description: 'Optional connected analytics endpoint override' }, keywordMatch: { type: 'number', description: 'Default search-intent match score from 0 to 100' } }, required: [] }, outputSchema: { type: 'object', properties: { success: { type: 'boolean', description: 'Whether evaluation completed' }, data: { type: 'object', description: 'Evaluated records and summary' }, mode: { type: 'string', description: 'Execution mode' }, error: { type: 'string', description: 'Failure message' } } }, triggers: CONTENT_HIGHER_ORDER_TRIGGERS, createdAt: new Date(), updatedAt: new Date(), isSkill: true }
+const CONTENT_STRATEGY_SEO_EVALUATOR: Tool = { id: 'content-strategy-seo-evaluator', name: 'Content Strategy & SEO Evaluator', description: 'Evaluate supplied content performance records or connected analytics results to recommend editorial, SEO, and distribution actions.', type: 'code', manifest: { language: 'javascript', entrypoint: 'index.js', sourceCode: CONTENT_STRATEGY_SOURCE, persistenceEnv: 'CONTENT_HOME', ui: { view: 'content-strategy' } }, inputSchema: { type: 'object', properties: { contentItems: { type: 'array', items: { type: 'object' }, description: 'Content performance records with impressions, clicks, conversions, and keyword match' }, contentIds: { type: 'array', items: { type: 'string' }, description: 'Content identifiers for connected analytics' }, channel: { type: 'string', description: 'Channel or platform' }, platform: { type: 'string', description: 'Specific analytics platform' },       metrics: { type: 'array', items: { type: 'string' }, description: 'Metrics to analyze' },
+      dateRange: { type: 'object', description: 'Analysis date range' },
+      keywordMatch: { type: 'number', description: 'Default search-intent match score from 0 to 100' } }, required: [] }, outputSchema: { type: 'object', properties: { success: { type: 'boolean', description: 'Whether evaluation completed' }, data: { type: 'object', description: 'Evaluated records and summary' }, mode: { type: 'string', description: 'Execution mode' }, error: { type: 'string', description: 'Failure message' } } }, triggers: CONTENT_HIGHER_ORDER_TRIGGERS, createdAt: new Date(), updatedAt: new Date(), isSkill: true }
 
 const EDITORIAL_CALENDAR_ARTICLE_COPILOT: Tool = { id: 'editorial-calendar-article-copilot', name: 'Editorial Calendar & Article Co-Pilot', description: 'Turn supplied editorial topics into a structured calendar and draft article briefs using the existing content drafting operation.', type: 'code', manifest: { language: 'javascript', entrypoint: 'index.js', sourceCode: EDITORIAL_CALENDAR_SOURCE, persistenceEnv: 'CONTENT_HOME', ui: { view: 'editorial-calendar' } }, inputSchema: { type: 'object', properties: { topics: { type: 'array', items: { type: 'object' }, description: 'Editorial topics with title, audience, intent, format, platform, keywords, tone, length, and deadline' }, startDate: { type: 'string', description: 'Calendar cycle start label' } }, required: ['topics'] }, outputSchema: { type: 'object', properties: { success: { type: 'boolean', description: 'Whether calendar generation completed' }, data: { type: 'object', description: 'Calendar and draft briefs' }, mode: { type: 'string', description: 'Execution mode' }, error: { type: 'string', description: 'Failure message' } } }, triggers: CONTENT_HIGHER_ORDER_TRIGGERS, createdAt: new Date(), updatedAt: new Date(), isSkill: true }
 
-const GOVERNED_PUBLISHING_CMS_DISPATCHER: Tool = { id: 'governed-publishing-cms-dispatcher', name: 'Governed Publishing & CMS Dispatcher', description: 'Dry-run and, after explicit confirmation, publish a validated content payload through the existing multi-channel publishing operation.', type: 'code', manifest: { language: 'javascript', entrypoint: 'index.js', sourceCode: PUBLISHING_DISPATCH_SOURCE, persistenceEnv: 'CONTENT_HOME', confirmBeforeSend: true, ui: { view: 'publishing-approval' } }, inputSchema: { type: 'object', properties: { endpointUrl: { type: 'string', description: 'Configured CMS endpoint override' }, channel: { type: 'string', description: 'Publishing channel' }, contentId: { type: 'string', description: 'Existing content identifier' }, title: { type: 'string', description: 'Content title' }, content: { type: 'string', description: 'Content body', multiline: true }, excerpt: { type: 'string', description: 'Content excerpt' }, category: { type: 'string', description: 'Content category' }, tags: { type: 'array', items: { type: 'string' }, description: 'Content tags' }, slug: { type: 'string', description: 'URL slug' }, seoTitle: { type: 'string', description: 'SEO title' }, seoDescription: { type: 'string', description: 'SEO meta description' }, dryRun: { type: 'boolean', description: 'Validate without publishing; defaults to true', default: true }, confirmation: { type: 'boolean', description: 'Explicit approval for live publishing', default: false } }, required: [] }, outputSchema: { type: 'object', properties: { success: { type: 'boolean', description: 'Whether publishing completed' }, mode: { type: 'string', description: 'Dry-run, live, not-connected, or error mode' }, data: { type: 'object', description: 'Publishing result' }, error: { type: 'string', description: 'Failure or governance message' } } }, triggers: CONTENT_HIGHER_ORDER_TRIGGERS, createdAt: new Date(), updatedAt: new Date(), isSkill: true }
+const GOVERNED_PUBLISHING_CMS_DISPATCHER: Tool = { id: 'governed-publishing-cms-dispatcher', name: 'Governed Publishing & CMS Dispatcher', description: 'Dry-run and, after explicit confirmation, publish a validated content payload through the existing multi-channel publishing operation.', type: 'code', manifest: { language: 'javascript', entrypoint: 'index.js', sourceCode: PUBLISHING_DISPATCH_SOURCE, persistenceEnv: 'CONTENT_HOME', confirmBeforeSend: true, ui: { view: 'publishing-approval' } },     inputSchema: { type: 'object', properties: { channel: { type: 'string', description: 'Publishing channel' }, contentId: { type: 'string', description: 'Existing content identifier' }, title: { type: 'string', description: 'Content title' }, content: { type: 'string', description: 'Content body', multiline: true }, excerpt: { type: 'string', description: 'Content excerpt' }, category: { type: 'string', description: 'Content category' }, tags: { type: 'array', items: { type: 'string' }, description: 'Content tags' }, slug: { type: 'string', description: 'URL slug' }, seoTitle: { type: 'string', description: 'SEO title' }, seoDescription: { type: 'string', description: 'SEO meta description' }, dryRun: { type: 'boolean', description: 'Validate without publishing; defaults to true', default: true }, confirmation: { type: 'boolean', description: 'Explicit approval for live publishing', default: false } }, required: [] }, outputSchema: { type: 'object', properties: { success: { type: 'boolean', description: 'Whether publishing completed' }, mode: { type: 'string', description: 'Dry-run, live, not-connected, or error mode' }, data: { type: 'object', description: 'Publishing result' }, error: { type: 'string', description: 'Failure or governance message' } } }, triggers: CONTENT_HIGHER_ORDER_TRIGGERS, createdAt: new Date(), updatedAt: new Date(), isSkill: true }
 
 for (const tool of contentSkills) { if (![CONTENT_STRATEGY_SEO_EVALUATOR.id, EDITORIAL_CALENDAR_ARTICLE_COPILOT.id, GOVERNED_PUBLISHING_CMS_DISPATCHER.id].includes(tool.id)) { tool.isSkill = false } }
 contentSkills.push(CONTENT_STRATEGY_SEO_EVALUATOR, EDITORIAL_CALENDAR_ARTICLE_COPILOT, GOVERNED_PUBLISHING_CMS_DISPATCHER)
+
+CONTENT_STRATEGY_SEO_EVALUATOR.manifest.workflowStage = 'optimize';
+EDITORIAL_CALENDAR_ARTICLE_COPILOT.manifest.workflowStage = 'plan';
+GOVERNED_PUBLISHING_CMS_DISPATCHER.manifest.workflowStage = 'publish';
+
+export const contentWorkflow: AssistantWorkflow = {
+  assistant: 'Content',
+  productObject: 'content piece',
+  flow: 'plan → draft → optimize → publish',
+  stages: [
+    { name: 'plan', description: 'Editorial calendar and brief planning', skills: contentSkills.filter((s) => s.manifest.workflowStage === 'plan') },
+    { name: 'draft', description: 'Content drafting and adaptation', skills: contentSkills.filter((s) => s.manifest.workflowStage === 'draft') },
+    { name: 'optimize', description: 'Performance, SEO, and strategy optimization', skills: contentSkills.filter((s) => s.manifest.workflowStage === 'optimize') },
+    { name: 'publish', description: 'Multi-channel publishing and dispatch', skills: contentSkills.filter((s) => s.manifest.workflowStage === 'publish') },
+  ],
+};

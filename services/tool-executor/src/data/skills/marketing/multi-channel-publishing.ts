@@ -57,7 +57,7 @@ const MULTI_CHANNEL_PUBLISHING = createExternalActionSkill({
     properties: {
       operation: SchemaProps.select(['social-media', 'email', 'document-management'], { description: 'Publishing operation channel' }),
       dryRun: SchemaProps.boolean({ description: 'Validate without executing', default: true }),
-      endpointUrl: SchemaProps.url({ description: 'Override endpoint URL' }),
+
       content: SchemaProps.text({ description: 'Content text or body', multiline: true }),
       title: SchemaProps.text({ description: 'Content title' }),
       subject: SchemaProps.text({ description: 'Email subject line' }),

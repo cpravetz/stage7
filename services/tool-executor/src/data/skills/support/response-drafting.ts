@@ -4,7 +4,7 @@ const RESPONSE_DRAFTING_SOURCE = `const input = __tool_input || {};
 const fs = require('fs');
 const path = require('path');
 const operation = input.operation || 'support-response';
-const ticketId = input.ticketId || '';
+const ticketId = input.ticket || '';
 const customerMessage = input.customerMessage || '';
 const tone = input.tone || 'empathetic';
 const template = input.template || '';
@@ -57,7 +57,7 @@ const RESPONSE_DRAFTING = createCodeSkill({
     type: 'object',
     properties: {
       operation: SchemaProps.select(['support-response', 'draft-response'], { description: 'Operation to perform' }),
-      ticketId: SchemaProps.text({ description: 'Ticket identifier for the response' }),
+      ticket: SchemaProps.text({ description: 'Ticket identifier for the response' }),
       customerMessage: SchemaProps.text({ description: 'Customer message to respond to' }),
       tone: SchemaProps.select(['professional', 'friendly', 'empathetic', 'technical'], { description: 'Tone of the generated response', default: 'empathetic' }),
       template: SchemaProps.text({ description: 'Response template to use' }),

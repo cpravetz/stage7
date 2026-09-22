@@ -1,5 +1,7 @@
 import express from 'express';
 import toolRoutes from './routes/tools';
+import workflowRoutes from './routes/workflows';
+import workspaceRoutes from './routes/workspaces';
 import { Tool } from './types';
 import { toolRegistry } from './utils/sharedInstance';
 import { legacyGeneralTools } from './data/generalTools';
@@ -150,9 +152,25 @@ const allDefaults = [
   ...careerCanonicalInternalTools,
 ];
 
+// A tool is exposed as a user-facing Skill when it has a user trigger, unless it
+// is explicitly marked isSkill:false or it is a lower-order tool that wrappers
+// delegate to via __execute_tool (and should not surface their own UX).
+//
+// Previously only canonicalIds (6 assistants: cto, healthcare, restaurant,
+// career, career-extended, hr) were promoted to isSkill:true, which hid every
+// Skill from the other 15 assistants entirely. The canonical set was also the
+// wrong signal: it was an artifact of which assistants exported a
+// canonicalSkills array, not a property of the tool itself.
+const lowerOrderIds = new Set<string>();
 for (const tool of allDefaults) {
-  if (canonicalIds.has(tool.id)) {
-    tool.isSkill = true;
+  const lower = (tool.manifest?.lowerOrderTools as string[] | undefined) || [];
+  for (const id of lower) if (id) lowerOrderIds.add(id);
+}
+
+for (const tool of allDefaults) {
+  if (tool.isSkill === undefined) {
+    const hasUserTrigger = (tool.triggers || []).some((trigger) => trigger.kind === 'user');
+    tool.isSkill = hasUserTrigger && !lowerOrderIds.has(tool.id);
   }
   if (!toolRegistry.get(tool.id)) {
     toolRegistry.register(tool);
@@ -169,6 +187,8 @@ app.get('/api/tool-executor/tools', (_req, res) => {
 });
 
 app.use('/api/tool-executor', toolRoutes);
+app.use('/api/tool-executor/workflows', workflowRoutes);
+app.use('/api/tool-executor/workspaces', workspaceRoutes);
 
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   if (err instanceof ToolNotFoundError) {
@@ -183,9 +203,11 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
 
 const PORT = process.env.PORT || 3500;
 
-app.listen(PORT, () => {
-  logger.info({ port: PORT, tools: toolRegistry.list().length }, 'Tool Executor service listening');
-});
+if (require.main === module) {
+  app.listen(PORT, () => {
+    logger.info({ port: PORT, tools: toolRegistry.list().length }, 'Tool Executor service listening');
+  });
+}
 
 export { legacyGeneralTools } from './data/generalTools';
 export {

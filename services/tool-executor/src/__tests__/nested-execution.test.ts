@@ -56,7 +56,7 @@ describe('ToolExecutor nested execution via CodeExecutor callback', () => {
     const output = exec.output as { output?: string };
     const parsed = JSON.parse(output.output as string);
     expect(parsed.success).toBe(false);
-    expect(parsed.error).toContain('Tool not found');
+    expect(parsed.error).toContain('not available');
   });
 
   it('rejects nested call to a skill tool', async () => {
