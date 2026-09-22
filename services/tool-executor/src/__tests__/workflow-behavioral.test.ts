@@ -2,12 +2,6 @@ import { ToolExecutor } from '../services/ToolExecutor';
 import { AssistantWorkspaceManager } from '../services/AssistantWorkspaceManager';
 import { Tool, WorkflowState } from '../types';
 import { createCodeSkill, createSchemaRecord, SchemaProps } from '../data/skills/code-skill-factory';
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
-
-const originalPersistencePath = process.env.WORKSPACE_PERSISTENCE_PATH;
-let persistenceFile: string | undefined;
 
 function createContextTool(overrides: { id?: string; name?: string; confirmBeforeSend?: boolean } = {}): Tool {
   return createCodeSkill({
@@ -85,20 +79,7 @@ describe('Behavioral Tests - Assistant Workspace Manager', () => {
   let manager: AssistantWorkspaceManager;
 
   beforeEach(() => {
-    persistenceFile = path.join(os.tmpdir(), `ws-behavioral-${process.pid}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.json`);
-    process.env.WORKSPACE_PERSISTENCE_PATH = persistenceFile;
     manager = new AssistantWorkspaceManager();
-  });
-
-  afterEach(() => {
-    if (persistenceFile && fs.existsSync(persistenceFile)) {
-      fs.unlinkSync(persistenceFile);
-    }
-    if (originalPersistencePath === undefined) {
-      delete process.env.WORKSPACE_PERSISTENCE_PATH;
-    } else {
-      process.env.WORKSPACE_PERSISTENCE_PATH = originalPersistencePath;
-    }
   });
 
   it('creates a workspace with correct initial state', () => {
@@ -269,70 +250,37 @@ describe('Behavioral Tests - Assistant Workspace Manager', () => {
     expect(ws.workflowState).toBe('draft');
   });
 
-  it('persists workspace to disk after creation', () => {
-    const tmpFile = path.join(os.tmpdir(), `ws-persist-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.json`);
-    const originalPath = process.env.WORKSPACE_PERSISTENCE_PATH;
-    process.env.WORKSPACE_PERSISTENCE_PATH = tmpFile;
-    try {
-      const mgr = new AssistantWorkspaceManager();
-      const ws = mgr.createWorkspace('CTO', 'system / incident');
-      const raw = fs.readFileSync(tmpFile, 'utf-8');
-      const data = JSON.parse(raw);
-      expect(data[ws.workspaceId]).toBeTruthy();
-      expect(data[ws.workspaceId].assistant).toBe('CTO');
-      expect(data[ws.workspaceId].workflowState).toBe('analysis');
-    } finally {
-      if (originalPath === undefined) delete process.env.WORKSPACE_PERSISTENCE_PATH;
-      else process.env.WORKSPACE_PERSISTENCE_PATH = originalPath;
-      try { fs.unlinkSync(tmpFile); } catch { fs.rmSync(tmpFile, { force: true }); }
-    }
+  it('persists workspace data in memory after creation', () => {
+    const ws = manager.createWorkspace('CTO', 'system / incident');
+    const retrieved = manager.getWorkspace(ws.workspaceId);
+    expect(retrieved).toBeDefined();
+    expect(retrieved!.assistant).toBe('CTO');
+    expect(retrieved!.productObject).toBe('system / incident');
+    expect(retrieved!.workflowState).toBe('analysis');
   });
 
-  it('loads workspace from disk on new instance', () => {
-    const tmpFile = path.join(os.tmpdir(), `ws-load-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.json`);
-    const originalPath = process.env.WORKSPACE_PERSISTENCE_PATH;
-    process.env.WORKSPACE_PERSISTENCE_PATH = tmpFile;
-    let wsId;
-    try {
-      const mgr1 = new AssistantWorkspaceManager();
-      const ws = mgr1.createWorkspace('Education', 'learner');
-      wsId = ws.workspaceId;
-      const mgr2 = new AssistantWorkspaceManager();
-      const loaded = mgr2.getWorkspace(wsId);
-      expect(loaded).toBeDefined();
-      expect(loaded!.assistant).toBe('Education');
-      expect(loaded!.productObject).toBe('learner');
-      expect(loaded!.createdAt).toBeInstanceOf(Date);
-      expect(loaded!.updatedAt).toBeInstanceOf(Date);
-    } finally {
-      if (originalPath === undefined) delete process.env.WORKSPACE_PERSISTENCE_PATH;
-      else process.env.WORKSPACE_PERSISTENCE_PATH = originalPath;
-      try { fs.unlinkSync(tmpFile); } catch { fs.rmSync(tmpFile, { force: true }); }
-    }
+  it('new manager instance does not retain previous workspace data (in-memory only)', () => {
+    const ws = manager.createWorkspace('Education', 'learner');
+    const wsId = ws.workspaceId;
+
+    const mgr2 = new AssistantWorkspaceManager();
+    const loaded = mgr2.getWorkspace(wsId);
+    expect(loaded).toBeUndefined();
+    expect(mgr2.getAllWorkspaces()).toEqual([]);
   });
 
-  it('survives restart with workflow state', () => {
-    const tmpFile = path.join(os.tmpdir(), `ws-restart-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.json`);
-    const originalPath = process.env.WORKSPACE_PERSISTENCE_PATH;
-    process.env.WORKSPACE_PERSISTENCE_PATH = tmpFile;
-    let wsId;
-    try {
-      const mgr1 = new AssistantWorkspaceManager();
-      const ws = mgr1.createWorkspace('CTO', 'system / incident');
-      wsId = ws.workspaceId;
-      expect(mgr1.transitionTo(wsId, 'recommendation')).toBe(true);
-      expect(mgr1.transitionTo(wsId, 'draft')).toBe(true);
-      expect(mgr1.transitionTo(wsId, 'approved')).toBe(true);
-      const mgr2 = new AssistantWorkspaceManager();
-      const loaded = mgr2.getWorkspace(wsId);
-      expect(loaded).toBeDefined();
-      expect(loaded!.workflowState).toBe('approved');
-      expect(loaded!.updatedAt).toBeInstanceOf(Date);
-    } finally {
-      if (originalPath === undefined) delete process.env.WORKSPACE_PERSISTENCE_PATH;
-      else process.env.WORKSPACE_PERSISTENCE_PATH = originalPath;
-      try { fs.unlinkSync(tmpFile); } catch { fs.rmSync(tmpFile, { force: true }); }
-    }
+  it('maintains workspace state within a single manager instance', () => {
+    const ws = manager.createWorkspace('CTO', 'system / incident');
+    const wsId = ws.workspaceId;
+
+    expect(manager.transitionTo(wsId, 'recommendation')).toBe(true);
+    expect(manager.transitionTo(wsId, 'draft')).toBe(true);
+    expect(manager.transitionTo(wsId, 'approved')).toBe(true);
+
+    const loaded = manager.getWorkspace(wsId);
+    expect(loaded).toBeDefined();
+    expect(loaded!.workflowState).toBe('approved');
+    expect(loaded!.updatedAt).toBeInstanceOf(Date);
   });
 });
 

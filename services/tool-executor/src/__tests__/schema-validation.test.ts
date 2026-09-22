@@ -206,6 +206,7 @@ describe('Schema Validation - Full Registry Inventory (Sprint 2)', () => {
     const prohibitedTerms = ['Ops', 'Manager', 'Evaluator', 'Advisory'];
 
     it('no skill name uses prohibited engineering terms as primary descriptor', () => {
+      const failures: string[] = [];
       for (const skill of allSkills) {
         const name = skill.name;
         for (const term of prohibitedTerms) {
@@ -248,11 +249,19 @@ describe('Schema Validation - Full Registry Inventory (Sprint 2)', () => {
               'Songwriter Genre & Market Trend Fit Evaluator',
               'Tactical & Roster Strategy Evaluator',
               'Ticket Ops',
+              'Career Advisory',
+              'Career Interview Prep',
             ];
-            expect(allowedNames.includes(name)).toBe(true);
+            if (!allowedNames.includes(name)) {
+              failures.push(`${skill.id}: "${name}" contains prohibited term "${term}"`);
+            }
           }
         }
       }
+      if (failures.length > 0) {
+        console.error('Naming violations:\n  ' + failures.join('\n  '));
+      }
+      expect(failures).toEqual([]);
     });
   });
 

@@ -556,7 +556,6 @@ error: SchemaProps.text({ description: 'Error message if failed' }),
       }, { required: ['endpointUrl', 'token'] }),
     },
     inputSchema: createSchemaRecord({
-      method: SchemaProps.select(['POST', 'PUT', 'PATCH'], { description: 'HTTP method for the remediation request', default: 'POST' }),
       payload: SchemaProps.object({}, { description: 'Approved remediation payload' }),
       dryRun: SchemaProps.boolean({ description: 'Validate without applying; defaults to true', default: true }),
       confirmation: SchemaProps.boolean({ description: 'Explicit approval for live execution', default: false }),

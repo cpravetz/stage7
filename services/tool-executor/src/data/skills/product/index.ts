@@ -1106,6 +1106,102 @@ return prd;
   }),
 ];
 
+
+// Product Operations orchestrator — higher-order skill that dispatches to the 5 external system integrations
+const PRODUCT_OPERATIONS = createCodeSkill({
+  id: 'product-operations',
+  name: 'Product Operations',
+  description: 'Unified interface for backlog management, documentation, team communication, scheduling, and document parsing. Dispatches to Jira, Confluence, Slack, calendar, or Markdown based on the selected operation.',
+  manifest: {
+    language: 'javascript',
+    entrypoint: 'index.js',
+    sourceCode: `(async () => {
+  const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
+  const operation = input.operation || '';
+  const data = input.data || {};
+  const toolMap = {
+    jira: 'product-jira',
+    confluence: 'product-confluence',
+    slack: 'product-slack',
+    calendar: 'product-calendar',
+    'markdown-parsing': 'product-markdown-parsing',
+  };
+  const toolId = toolMap[operation];
+  if (!toolId) {
+    console.log(JSON.stringify({ success: false, mode: 'not-connected', error: 'Unknown operation: ' + operation }));
+    return;
+  }
+  const result = await __execute_tool(toolId, data);
+  console.log(JSON.stringify(result));
+})()`,
+    lowerOrderTools: ['product-jira', 'product-confluence', 'product-slack', 'product-calendar', 'product-markdown-parsing'],
+  },
+  inputSchema: {
+    type: 'object',
+    properties: {
+      operation: { type: 'string', enum: ['jira', 'confluence', 'slack', 'calendar', 'markdown-parsing'], description: 'Which external system to operate on' },
+      data: { type: ['object', 'null'] as const, description: 'Parameters forwarded to the selected system' },
+    },
+    required: ['operation'],
+  },
+  outputSchema: {
+    type: 'object',
+    properties: {
+      success: { type: 'boolean' },
+      system: { type: 'string' },
+      action: { type: 'string' },
+      result: { type: 'object' },
+      error: { type: 'string' },
+    },
+    required: ['success', 'system', 'action'],
+  },
+  triggers: [
+    { kind: 'user', phrase_examples: ['Update Jira ticket', 'Create Confluence page', 'Post to Slack', 'Schedule meeting', 'Parse markdown'] },
+    { kind: 'schedule', cadence: 'Weekly product operations sync' },
+  ],
+});
+PRODUCT_OPERATIONS.tier = 'represent';
+PRODUCT_OPERATIONS.confirmBeforeSend = true;
+PRODUCT_OPERATIONS.domainKnowledge = 'Product management frameworks (RICE, WSJF, Jobs-to-be-Done), Agile/Scrum methodologies, user telemetry interpretation';
+
+// Mark the 5 external integrations as lower-order base tools (isSkill:false)
+const PRODUCT_EXTERNAL_TOOL_IDS = new Set([
+  'product-jira', 'product-confluence', 'product-slack', 'product-calendar', 'product-markdown-parsing',
+]);
+for (const s of PRODUCT_SKILLS) {
+  if (PRODUCT_EXTERNAL_TOOL_IDS.has(s.id)) {
+    s.isSkill = false;
+  }
+}
+
+// Set Advise/Aid/Represent tiers and confirmBeforeSend for all Product skills
+const PRODUCT_TIER: Record<string, 'advise' | 'aid' | 'represent'> = {
+  'create-roadmap': 'advise',
+  'write-prd': 'aid',
+  'product-data-analysis': 'advise',
+  'product-jira': 'represent',
+  'product-confluence': 'aid',
+  'product-slack': 'represent',
+  'product-calendar': 'represent',
+  'product-markdown-parsing': 'aid',
+  'product-operations': 'represent',
+};
+const PRODUCT_DOMAIN_KNOWLEDGE = 'Product management frameworks (RICE, WSJF, Jobs-to-be-Done), Agile/Scrum methodologies, user telemetry interpretation';
+for (const s of PRODUCT_SKILLS) {
+  if (PRODUCT_TIER[s.id]) {
+    (s as Tool).tier = PRODUCT_TIER[s.id];
+  }
+  if (PRODUCT_DOMAIN_KNOWLEDGE) {
+    (s as Tool).domainKnowledge = PRODUCT_DOMAIN_KNOWLEDGE;
+  }
+  // Represent-tier skills require confirmBeforeSend
+  if ((s as Tool).tier === 'represent' && (s as Tool).confirmBeforeSend === undefined) {
+    (s as Tool).confirmBeforeSend = true;
+  }
+}
+
+PRODUCT_SKILLS.push(PRODUCT_OPERATIONS);
+
 export const productSkills = PRODUCT_SKILLS;
 
 export interface WorkflowStage {
@@ -1125,6 +1221,7 @@ PRODUCT_SKILLS.forEach((s) => {
   if (s.id === 'create-roadmap') s.manifest.workflowStage = 'plan';
   else if (s.id === 'write-prd') s.manifest.workflowStage = 'specify';
   else if (s.id === 'product-data-analysis') s.manifest.workflowStage = 'analyze';
+  else if (s.id === 'product-operations') s.manifest.workflowStage = 'deliver';
   else s.manifest.workflowStage = 'deliver';
 });
 

@@ -206,7 +206,45 @@ describe('Skill Classification', () => {
       }
     }
   });
+  describe('Represent-tier skills require confirmBeforeSend', () => {
+    for (const group of allSkillArrays) {
+      const representSkills = group.skills.filter((s) => s.tier === 'represent');
+      if (representSkills.length === 0) continue;
+      it(`${group.name}: ${representSkills.length} Represent-tier skill(s) have confirmBeforeSend=true`, () => {
+        for (const skill of representSkills) {
+          expect(skill.confirmBeforeSend).toBe(true);
+        }
+      });
+    }
+  });
+
+  describe('Tiered skills carry domain knowledge', () => {
+    for (const group of allSkillArrays) {
+      const tieredSkills = group.skills.filter((s) => s.tier !== undefined);
+      if (tieredSkills.length === 0) continue;
+      it(`${group.name}: ${tieredSkills.length} tiered skill(s) carry domain knowledge`, () => {
+        for (const skill of tieredSkills) {
+          expect(skill.domainKnowledge).toBeTruthy();
+        }
+      });
+    }
+  });
+
+  describe('Higher-order skills have a behavior tier', () => {
+    for (const group of allSkillArrays) {
+      const canonicalSkills = group.skills.filter((s) => s.isSkill !== false);
+      const tieredCount = canonicalSkills.filter((s) => s.tier !== undefined).length;
+      if (tieredCount === 0) continue;
+      it(`${group.name}: all ${canonicalSkills.length} higher-order skill(s) have a tier`, () => {
+        for (const skill of canonicalSkills) {
+          expect(skill.tier).toBeDefined();
+          expect(['advise', 'aid', 'represent']).toContain(skill.tier);
+        }
+      });
+    }
+  });
 });
+
 
 describe('Schema Hygiene', () => {
   it('Healthcare: patientId renamed to patient in CLINICAL_DECISION_SUPPORT schema', () => {

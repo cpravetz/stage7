@@ -212,7 +212,7 @@ const Brain = () => {
                               : 'idle'
                         }`}
                       >
-                        {cb.state}
+                        {cb.state === 'closed' ? 'up' : cb.state === 'open' ? 'down' : cb.state}
                       </span>
                     </td>
                     <td>{cb.failures}</td>

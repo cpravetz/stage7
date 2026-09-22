@@ -30,13 +30,13 @@ console.log(JSON.stringify({ success: false, mode: 'not-connected', error: 'Not 
 return;
 }
 const outcome = await __execute_tool('career_outcome', {
-  jobId: matchedEntry.jobId || matchedEntry.id || input.targetRole || '',
-  jobTitle: matchedEntry.title || matchedEntry.jobTitle || input.jobTitle || '',
-  company: matchedEntry.company || input.company || '',
-  status: input.status || '',
-  feedback: input.feedback || '',
-  offerDetails: input.offerDetails || null,
-});
+   applicationId: matchedEntry.jobId || matchedEntry.id || input.targetRole || '',
+   jobTitle: matchedEntry.title || matchedEntry.jobTitle || input.jobTitle || '',
+   company: matchedEntry.company || input.company || '',
+   status: input.status || '',
+   feedback: input.feedback || '',
+   offerDetails: input.offerDetails || null,
+  });
 if (!outcome || outcome.success === false || outcome.error) {
 console.log(JSON.stringify({ success: false, mode: 'not-connected', error: outcome && outcome.error ? outcome.error : 'Not connected: outcome tracking returned no data' }));
 return;

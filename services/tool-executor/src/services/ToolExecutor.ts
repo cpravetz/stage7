@@ -1,5 +1,6 @@
 import { Tool, ToolExecution, WorkflowState, CredentialRequest, CredentialRequiredError, ConfirmationRequiredError, CrossObjectHandoffError, SchemaRecord, ApprovalSummary, HandoffRequest, ExecutionResult, RuntimeWorkflow, RuntimeWorkflowAction, RuntimeWorkflowStage } from '../types';
 import logger from '../utils/logger';
+import { ErrorHandler, ClassifiedError } from '../utils/ErrorHandler';
 import { EmailExecutor } from '../executors/EmailExecutor';
 import { SearchExecutor } from '../executors/SearchExecutor';
 import { CodeExecutor, CodeExecutorCredentials } from '../executors/CodeExecutor';
@@ -714,7 +715,13 @@ return this.executeOrRequestCredentials(pending.tool, pending.input);
 
       const callee = this.resolveNestedTool(toolId);
       if (!callee) {
-        return { success: false, error: `Tool not found: ${toolId}` };
+        const classified = ErrorHandler.classify(`Tool not found: ${toolId}`, toolId);
+        return {
+          success: false,
+          error: classified.userMessage,
+          mode: 'not-connected',
+          classified: { category: classified.category, severity: classified.severity, message: classified.message, userMessage: classified.userMessage, retryable: classified.retryable },
+        };
       }
       if (callee.isSkill === true) {
         return { success: false, error: `Nested execution is not allowed for skill tools: ${callee.id}` };
@@ -984,20 +991,34 @@ durationMs: result.durationMs,
 }
 
 lastError = result.error;
-if (healingAttempts >= MAX_HEALING_ATTEMPTS) break;
+    if (healingAttempts >= MAX_HEALING_ATTEMPTS) break;
 
-const healing = await this.healCodeTool(tool, input, lastError || 'Unknown execution error');
-if (!healing.success || !healing.fixedSourceCode) {
-logger.warn({ toolId: tool.id, healingError: healing.error }, 'Healing failed, aborting retries');
-break;
-}
+    // Classify the error — if it's a code execution error, try healing.
+    // If it's a timeout or transient error, also try healing.
+    const classified = ErrorHandler.classify(lastError, tool.id);
 
-codeToRun = healing.fixedSourceCode;
-healingAttempts++;
-logger.info({ toolId: tool.id, attempt: healingAttempts }, 'Retrying with healed code');
-}
+    if (ErrorHandler.isCodeExecutionError(classified)) {
+      const healing = await this.healCodeTool(tool, input, lastError || 'Unknown execution error');
+      if (!healing.success || !healing.fixedSourceCode) {
+        logger.warn({ toolId: tool.id, healingError: healing.error, classified: classified.category }, 'Healing failed, aborting retries');
+        break;
+      }
 
-return { error: lastError, exitCode: -1 };
+      codeToRun = healing.fixedSourceCode;
+      healingAttempts++;
+      logger.info({ toolId: tool.id, attempt: healingAttempts, category: classified.category }, 'Retrying with healed code');
+      continue;
+    }
+
+    // Non-code-execution error — don't heal, return classified error
+    logger.warn({ toolId: tool.id, classified: classified.category, severity: classified.severity }, 'Non-healable error, returning classified result');
+    return ErrorHandler.formatResult(classified);
+  }
+
+  // All healing attempts exhausted — return classified error
+  const finalClassified = ErrorHandler.classify(lastError, tool.id);
+  logger.warn({ toolId: tool.id, attempts: healingAttempts, classified: finalClassified.category }, 'Healing exhausted, returning classified error');
+  return ErrorHandler.formatResult(finalClassified);
 }
 
 switch (tool.type) {

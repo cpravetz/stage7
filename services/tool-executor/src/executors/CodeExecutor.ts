@@ -33,7 +33,7 @@ export interface CodeExecutorCredentials {
 export class CodeExecutor {
   async execute(options: CodeExecutionOptions, credentials?: CodeExecutorCredentials | Record<string, string | undefined>): Promise<CodeExecutionResult> {
     const startTime = Date.now();
-    const timeoutMs = options.timeoutMs || 10000;
+    const timeoutMs = options.timeoutMs || 30000;
 
     const resolvedCreds: Record<string, string | undefined> =
       (credentials as CodeExecutorCredentials)?.resolved ??

@@ -260,4 +260,17 @@ router.delete(
   })
 );
 
+router.patch(
+  '/:id',
+  asyncHandler(async (req: Request, res: Response) => {
+    const { runtimeInputs, ...rest } = req.body || {};
+    const updated = workspaceManager.updateWorkspace(req.params.id, { runtimeInputs, ...rest });
+    if (!updated) {
+      res.status(404).json({ error: 'Workspace not found' });
+      return;
+    }
+    res.json({ success: true, workspace: workspaceManager.getWorkspace(req.params.id) });
+  })
+);
+
 export default router;

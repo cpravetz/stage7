@@ -152,9 +152,25 @@ const allDefaults = [
   ...careerCanonicalInternalTools,
 ];
 
+// A tool is exposed as a user-facing Skill when it has a user trigger, unless it
+// is explicitly marked isSkill:false or it is a lower-order tool that wrappers
+// delegate to via __execute_tool (and should not surface their own UX).
+//
+// Previously only canonicalIds (6 assistants: cto, healthcare, restaurant,
+// career, career-extended, hr) were promoted to isSkill:true, which hid every
+// Skill from the other 15 assistants entirely. The canonical set was also the
+// wrong signal: it was an artifact of which assistants exported a
+// canonicalSkills array, not a property of the tool itself.
+const lowerOrderIds = new Set<string>();
 for (const tool of allDefaults) {
-  if (canonicalIds.has(tool.id)) {
-    tool.isSkill = true;
+  const lower = (tool.manifest?.lowerOrderTools as string[] | undefined) || [];
+  for (const id of lower) if (id) lowerOrderIds.add(id);
+}
+
+for (const tool of allDefaults) {
+  if (tool.isSkill === undefined) {
+    const hasUserTrigger = (tool.triggers || []).some((trigger) => trigger.kind === 'user');
+    tool.isSkill = hasUserTrigger && !lowerOrderIds.has(tool.id);
   }
   if (!toolRegistry.get(tool.id)) {
     toolRegistry.register(tool);

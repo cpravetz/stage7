@@ -6,10 +6,10 @@ import { ANALYTICS_PLANNING } from "./analytics-planning";
 import { annotateStages, createWorkflow, AssistantWorkflow } from "../workflow-common";
 
 export const supportSkills = [
-  { ...TICKET_UNDERSTANDING, isSkill: false },
-  { ...RESPONSE_DRAFTING, isSkill: false },
-  { ...TICKET_OPS, isSkill: false },
-  { ...ANALYTICS_PLANNING, isSkill: false },
+  TICKET_UNDERSTANDING,
+  RESPONSE_DRAFTING,
+  TICKET_OPS,
+  ANALYTICS_PLANNING,
 ];
 
 annotateStages(supportSkills, {

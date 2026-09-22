@@ -101,6 +101,8 @@ export const workspaceApi = {
     postJSON(`/api/tool-executor/workspaces/${workspaceId}/reset`, {}),
   delete: (workspaceId: string): Promise<void> =>
     deleteResource(`/api/tool-executor/workspaces/${workspaceId}`),
+  update: (workspaceId: string, data: Record<string, unknown>): Promise<AssistantWorkspace> =>
+    patchJSON(`/api/tool-executor/workspaces/${workspaceId}`, data),
 };
 
 export const workflowsApi = {

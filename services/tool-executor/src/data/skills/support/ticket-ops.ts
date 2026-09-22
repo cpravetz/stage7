@@ -64,3 +64,9 @@ export const TICKET_OPS = createExternalActionSkill({
 });
 
 TICKET_OPS.confirmBeforeSend = true;
+
+TICKET_OPS.triggers = [
+  { kind: 'user', phrase_examples: ['Escalate this ticket', 'Sync to CRM', 'Schedule a follow-up', 'Update ticket status'] },
+  { kind: 'schedule', cadence: 'Daily ticket ops review' },
+  { kind: 'event', on: 'Ticket escalated or SLA breached' },
+];

@@ -385,20 +385,14 @@ const BUSINESS_INSIGHT_REPORT = createCodeSkill({
   ],
 });
 
-const ANALYTICS_REPORTING_SOURCE = `(async () => { const input = typeof __tool_input !== 'undefined' ? __tool_input : {}; const result = await __execute_tool('analytics_business_insight_report', { mode: 'report', metric: input.metric || input.dataset, period: input.period || '30d', timeframe: input.timeframe || '30d', dimensions: input.dimensions || [], filters: input.filters || {}, sourceMode: input.sourceMode || 'auto', dryRun: input.dryRun === true }); console.log(JSON.stringify(result)); })();`
+BUSINESS_INSIGHT_REPORT.tier = 'advise';
+BUSINESS_INSIGHT_REPORT.isSkill = true;
+BUSINESS_INSIGHT_REPORT.domainKnowledge = 'Business intelligence architectures, SQL/data modeling principles, statistical trend analysis, cross-functional KPI frameworks';
 
-const ANALYTICS_QUERY_SOURCE = `(async () => { const input = typeof __tool_input !== 'undefined' ? __tool_input : {}; const result = await __execute_tool('analytics_business_insight_report', { mode: 'query', query: input.query || input.warehouseQuery, metric: input.metric || '', parameters: input.parameters || {}, dimensions: input.dimensions || [], filters: input.filters || {}, sourceMode: input.sourceMode || 'auto', dryRun: input.dryRun === true }); console.log(JSON.stringify(result)); })();`
-
-const ANALYTICS_REPORTING_WRAPPER: Tool = { id: 'analytics-grounded-reporting', name: 'Grounded Metric Reporting', description: 'Produce grounded metric reports from warehouse or local data with trend and anomaly context.', type: 'code', manifest: { language: 'javascript', entrypoint: 'index.js', sourceCode: ANALYTICS_REPORTING_SOURCE, lowerOrderTools: ['analytics_business_insight_report'] }, inputSchema: { type: 'object', properties: { metric: { type: 'string', description: 'Metric name to report on' }, dataset: { type: 'string', description: 'Dataset or metric alias' }, period: { type: 'string', description: 'Report period' }, timeframe: { type: 'string', description: 'Trend timeframe' }, dimensions: { type: 'array', items: { type: 'string' }, description: 'Dimensions to group by' }, filters: { type: 'object', description: 'Metric or warehouse filters' }, sourceMode: { type: 'string', enum: ['auto', 'warehouse', 'local'], description: 'Data source selection' }, dryRun: { type: 'boolean', description: 'Prepare the query plan without executing a warehouse request' } }, required: [] }, outputSchema: ANALYTICS_OUTPUT_SCHEMA, triggers: [{ kind: 'user', phrase_examples: ['Report on metric X for period Y', 'Pull a grounded metric report'] }, { kind: 'schedule', cadence: 'Weekly executive KPI trends summary' }], createdAt: new Date(), updatedAt: new Date(), isSkill: true }
-
-const ANALYTICS_QUERY_WRAPPER: Tool = { id: 'analytics-warehouse-query', name: 'Warehouse Query & Explanation', description: 'Run and explain a read-only warehouse query with grounding context.', type: 'code', manifest: { language: 'javascript', entrypoint: 'index.js', sourceCode: ANALYTICS_QUERY_SOURCE, lowerOrderTools: ['analytics_business_insight_report'] }, inputSchema: { type: 'object', properties: { query: { type: 'string', description: 'SQL or analytical query to execute' }, warehouseQuery: { type: 'string', description: 'Optional warehouse query override' }, metric: { type: 'string', description: 'Metric name to analyze' }, parameters: { type: 'object', description: 'Parameter values for the analytical query' }, dimensions: { type: 'array', items: { type: 'string' }, description: 'Dimensions to include in grouping or explanation' }, filters: { type: 'object', description: 'Metric or warehouse filters' }, sourceMode: { type: 'string', enum: ['auto', 'warehouse', 'local'], description: 'Data source selection' }, dryRun: { type: 'boolean', description: 'Prepare the query plan without executing a warehouse request' } }, required: [] }, outputSchema: ANALYTICS_OUTPUT_SCHEMA, triggers: [{ kind: 'user', phrase_examples: ['Explain this business query', 'Run a warehouse query'] }, { kind: 'schedule', cadence: 'Weekly query review' }], createdAt: new Date(), updatedAt: new Date(), isSkill: true }
-
-export const analyticsSkills: Tool[] = [BUSINESS_INSIGHT_REPORT, ANALYTICS_REPORTING_WRAPPER, ANALYTICS_QUERY_WRAPPER];
+export const analyticsSkills: Tool[] = [BUSINESS_INSIGHT_REPORT];
 
 annotateStages(analyticsSkills, {
   analytics_business_insight_report: 'analyze',
-  'analytics-grounded-reporting': 'report',
-  'analytics-warehouse-query': 'query',
 });
 
 export const analyticsWorkflow: AssistantWorkflow = createWorkflow({
@@ -409,7 +403,7 @@ export const analyticsWorkflow: AssistantWorkflow = createWorkflow({
     {
       name: 'report',
       description: 'Produce grounded metric reports from warehouse or local data',
-      stageIds: ['analytics-grounded-reporting'],
+      stageIds: ['analytics_business_insight_report'],
     },
     {
       name: 'analyze',
@@ -419,7 +413,7 @@ export const analyticsWorkflow: AssistantWorkflow = createWorkflow({
     {
       name: 'query',
       description: 'Run and explain a read-only warehouse query',
-      stageIds: ['analytics-warehouse-query'],
+      stageIds: ['analytics_business_insight_report'],
     },
   ],
 }, analyticsSkills);

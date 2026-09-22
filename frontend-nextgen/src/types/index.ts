@@ -11,4 +11,5 @@ export type {
   WorkflowStateContract,
   StateHistoryResponse,
   PreviewResponse,
+  RuntimeWorkflowResponse,
 } from './state';

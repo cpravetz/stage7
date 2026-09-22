@@ -1,18 +1,32 @@
-import * as fs from 'fs';
-import * as path from 'path';
 import { WorkflowState, AssistantWorkspace, WorkspaceApprovalEntry, WorkspaceExecutionEntry, WorkspaceRevision, StateTransitionEvent, WorkflowStateContract, RuntimeWorkflow, RuntimeWorkflowAction, RuntimeWorkflowStage } from '../types';
 import { AssistantWorkflow } from '../data/skills/workflow-common';
 import logger from '../utils/logger';
 
-const DEFAULT_PERSISTENCE_PATH = path.join(process.cwd(), 'data', 'workspaces.json');
-const DEFAULT_REVISIONS_PATH = path.join(process.cwd(), 'data', 'workspace-revisions.json');
+// Runtime persistence goes through the MongoDB-backed Artifacts service, not
+// local JSON. Local JSON was tied to a single process's CWD, was lost on
+// restart, and was never shared across replicas, so workspace state vanished
+// whenever the service was restarted or a request hit a different instance.
+// The artifacts service already owns assistant runtime config and mission
+// state in MongoDB; workspace state belongs there too. When ARTIFACTS_URL is
+// not set (e.g. some local dev setups) the manager degrades to in-memory only,
+// exactly like the old behaviour without the fragile JSON file.
+const ARTIFACTS_URL = process.env.ARTIFACTS_URL || '';
+const WORKSPACE_COLLECTION = 'assistant-workspaces';
+const REVISIONS_COLLECTION = 'assistant-workspace-revisions';
 
-function getPersistencePath(): string {
-  return process.env.WORKSPACE_PERSISTENCE_PATH || DEFAULT_PERSISTENCE_PATH;
-}
-
-function getRevisionsPath(): string {
-  return process.env.WORKSPACE_REVISIONS_PATH || DEFAULT_REVISIONS_PATH;
+async function artifactsFetch(path: string, init?: RequestInit): Promise<any | null> {
+  if (!ARTIFACTS_URL) return null;
+  try {
+    const res = await fetch(`${ARTIFACTS_URL}/api/artifacts/documents${path}`, {
+      headers: { 'Content-Type': 'application/json' },
+      ...init,
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch (err) {
+    logger.warn({ err: err instanceof Error ? err.message : String(err), path }, 'Artifacts persistence unavailable');
+    return null;
+  }
 }
 
 export class AssistantWorkspaceManager {
@@ -23,88 +37,70 @@ export class AssistantWorkspaceManager {
     this.load();
   }
 
-  private save(): void {
-    try {
-      const target = getPersistencePath();
-      const dir = path.dirname(target);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      const data: Record<string, AssistantWorkspace> = {};
-      for (const [id, ws] of this.workspaces) data[id] = ws;
-      fs.writeFileSync(target, JSON.stringify(data, null, 2));
-    } catch (err) {
-      logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Failed to persist workspaces');
-    }
-    this.saveRevisions();
-  }
-
-  private saveRevisions(): void {
-    try {
-      const target = getRevisionsPath();
-      const dir = path.dirname(target);
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      const data: Record<string, WorkspaceRevision[]> = {};
-      for (const [id, revs] of this.revisions) data[id] = revs;
-      fs.writeFileSync(target, JSON.stringify(data, null, 2));
-    } catch (err) {
-      logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Failed to persist workspace revisions');
+  private async persistDocument(collection: string, id: string, data: Record<string, unknown>): Promise<void> {
+    const existing = await artifactsFetch(`/${encodeURIComponent(id)}`);
+    if (existing) {
+      await artifactsFetch(`/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify({ data }) });
+    } else {
+      await artifactsFetch('/', {
+        method: 'POST',
+        body: JSON.stringify({ id, tenantId: 'default', collection, data }),
+      });
     }
   }
 
-  private load(): void {
+  private async deleteDocument(id: string): Promise<void> {
+    await artifactsFetch(`/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  }
+
+  private async save(): Promise<void> {
+    if (!ARTIFACTS_URL) return;
     try {
-      const target = getPersistencePath();
-      if (!fs.existsSync(target)) return;
-      const raw = fs.readFileSync(target, 'utf-8');
-      const data: Record<string, AssistantWorkspace> = JSON.parse(raw);
-      for (const [id, ws] of Object.entries(data)) {
-        if (ws && typeof ws === 'object') {
+      for (const [id, ws] of this.workspaces) {
+        await this.persistDocument(WORKSPACE_COLLECTION, id, ws as unknown as Record<string, unknown>);
+      }
+      for (const [id, revs] of this.revisions) {
+        await this.persistDocument(REVISIONS_COLLECTION, `revisions-${id}`, { workspaceId: id, revisions: revs });
+      }
+    } catch (err) {
+      logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Failed to persist workspaces to artifacts');
+    }
+  }
+
+  // Fire-and-forget wrapper so synchronous API methods don't have to await.
+  public persist(): void {
+    this.save().catch(() => {});
+  }
+
+  private async load(): Promise<void> {
+    if (!ARTIFACTS_URL) return;
+    try {
+      const res = await artifactsFetch('/search', {
+        method: 'POST',
+        body: JSON.stringify({ collection: WORKSPACE_COLLECTION, limit: 500 }),
+      });
+      const docs: any[] = res?.documents || [];
+      for (const doc of docs) {
+        const ws = doc.data as AssistantWorkspace;
+        if (ws && ws.workspaceId) {
           if (ws.createdAt && typeof ws.createdAt === 'string') ws.createdAt = new Date(ws.createdAt);
           if (ws.updatedAt && typeof ws.updatedAt === 'string') ws.updatedAt = new Date(ws.updatedAt);
-          if (ws.approvalHistory) for (const e of ws.approvalHistory) { if (e.timestamp && typeof e.timestamp === 'string') e.timestamp = new Date(e.timestamp); }
-          if (ws.executionHistory) for (const e of ws.executionHistory) { if (e.startedAt && typeof e.startedAt === 'string') e.startedAt = new Date(e.startedAt); if (e.completedAt && typeof e.completedAt === 'string') e.completedAt = new Date(e.completedAt); }
-          if (ws.stateHistory) for (const e of ws.stateHistory) { if (e.timestamp && typeof e.timestamp === 'string') e.timestamp = new Date(e.timestamp); }
-          this.workspaces.set(id, ws);
+          this.workspaces.set(ws.workspaceId, ws);
+        }
+      }
+      const revRes = await artifactsFetch('/search', {
+        method: 'POST',
+        body: JSON.stringify({ collection: REVISIONS_COLLECTION, limit: 500 }),
+      });
+      const revDocs: any[] = revRes?.documents || [];
+      for (const doc of revDocs) {
+        const data = doc.data as { workspaceId: string; revisions: WorkspaceRevision[] };
+        if (data?.workspaceId && Array.isArray(data.revisions)) {
+          this.revisions.set(data.workspaceId, data.revisions);
         }
       }
     } catch (err) {
-      logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Failed to load workspaces');
-      this.workspaces.clear();
-    }
-    this.loadRevisions();
-  }
-
-  private loadRevisions(): void {
-    try {
-      const target = getRevisionsPath();
-      if (!fs.existsSync(target)) return;
-      const raw = fs.readFileSync(target, 'utf-8');
-      const data: Record<string, WorkspaceRevision[]> = JSON.parse(raw);
-      for (const [id, revs] of Object.entries(data)) {
-        if (Array.isArray(revs)) {
-          const parsed = revs.map(r => ({
-            ...r,
-            timestamp: r.timestamp && typeof r.timestamp === 'string' ? new Date(r.timestamp) : new Date(r.timestamp),
-            workspace: r.workspace ? {
-              ...r.workspace,
-              createdAt: r.workspace.createdAt && typeof r.workspace.createdAt === 'string' ? new Date(r.workspace.createdAt) : r.workspace.createdAt,
-              updatedAt: r.workspace.updatedAt && typeof r.workspace.updatedAt === 'string' ? new Date(r.workspace.updatedAt) : r.workspace.updatedAt,
-              approvalHistory: r.workspace.approvalHistory?.map((e: WorkspaceApprovalEntry) => ({
-                ...e,
-                timestamp: e.timestamp && typeof e.timestamp === 'string' ? new Date(e.timestamp) : e.timestamp,
-              })) || [],
-              executionHistory: r.workspace.executionHistory?.map((e: WorkspaceExecutionEntry) => ({
-                ...e,
-                startedAt: e.startedAt && typeof e.startedAt === 'string' ? new Date(e.startedAt) : e.startedAt,
-                completedAt: e.completedAt && typeof e.completedAt === 'string' ? new Date(e.completedAt) : e.completedAt,
-              })) || [],
-            } : undefined,
-          }));
-          this.revisions.set(id, parsed);
-        }
-      }
-    } catch (err) {
-      logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Failed to load workspace revisions');
-      this.revisions.clear();
+      logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Failed to load workspaces from artifacts');
     }
   }
 
@@ -125,10 +121,6 @@ export class AssistantWorkspaceManager {
     this.revisions.set(workspaceId, revs);
   }
 
-  public persist(): void {
-    this.save();
-  }
-
   createWorkspace(assistant: string, productObject: string, initialStage?: string): AssistantWorkspace {
     const workspace: AssistantWorkspace = {
       workspaceId: `ws_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -145,7 +137,7 @@ export class AssistantWorkspaceManager {
     };
     this.workspaces.set(workspace.workspaceId, workspace);
     this.createRevision(workspace.workspaceId, 'create');
-    this.save();
+    this.persist();
     return workspace;
   }
 
@@ -165,7 +157,7 @@ export class AssistantWorkspaceManager {
         if (opts.context) {
           (existing as any).context = { ...((existing as any).context || {}), ...opts.context };
           existing.updatedAt = new Date();
-          this.save();
+          this.persist();
         }
         return { workspace: existing, resumed: true };
       }
@@ -174,7 +166,7 @@ export class AssistantWorkspaceManager {
     const ws = this.createWorkspace(assistant, productObject, opts?.initialStage);
     if (opts?.context) {
       (ws as any).context = { ...opts.context };
-      this.save();
+      this.persist();
     }
     return { workspace: ws, resumed: false };
   }
@@ -205,7 +197,7 @@ export class AssistantWorkspaceManager {
     }
     ws.updatedAt = new Date();
     this.createRevision(workspaceId, 'execution', { entry });
-    this.save();
+    this.persist();
     return ws;
   }
 
@@ -220,7 +212,7 @@ export class AssistantWorkspaceManager {
     ws.currentStage = stage;
     ws.updatedAt = new Date();
     this.createRevision(workspaceId, 'stage_change', { previousStage: prevStage, newStage: stage });
-    this.save();
+    this.persist();
     return true;
   }
 
@@ -231,7 +223,7 @@ export class AssistantWorkspaceManager {
     ws.workflowState = state;
     ws.updatedAt = new Date();
     this.createRevision(workspaceId, 'state_change', { previousState: prevState, newState: state });
-    this.save();
+    this.persist();
     return true;
   }
 
@@ -241,7 +233,7 @@ export class AssistantWorkspaceManager {
     ws.nextActions = actions;
     ws.updatedAt = new Date();
     this.createRevision(workspaceId, 'actions_update', { actions });
-    this.save();
+    this.persist();
     return true;
   }
 
@@ -251,7 +243,7 @@ export class AssistantWorkspaceManager {
     ws.approvalHistory.push(entry);
     ws.updatedAt = new Date();
     this.createRevision(workspaceId, 'approval', { entry });
-    this.save();
+    this.persist();
     return true;
   }
 
@@ -261,7 +253,7 @@ export class AssistantWorkspaceManager {
     ws.executionHistory.push(entry);
     ws.updatedAt = new Date();
     this.createRevision(workspaceId, 'execution', { entry });
-    this.save();
+    this.persist();
     return true;
   }
 
@@ -271,7 +263,25 @@ export class AssistantWorkspaceManager {
     ws.lastResultId = resultId;
     ws.updatedAt = new Date();
     this.createRevision(workspaceId, 'result_update', { resultId });
-    this.save();
+    this.persist();
+    return true;
+  }
+
+  updateWorkspace(workspaceId: string, data: Record<string, unknown>): boolean {
+    const ws = this.workspaces.get(workspaceId);
+    if (!ws) return false;
+    if (data.runtimeInputs !== undefined && data.runtimeInputs !== null) {
+      ws.runtimeInputs = data.runtimeInputs as string | Record<string, unknown>;
+    }
+    if (data.context !== undefined && typeof data.context === 'object') {
+      ws.context = { ...ws.context, ...data.context as Record<string, unknown> };
+    }
+    if (data.nextActions !== undefined) {
+      ws.nextActions = data.nextActions as string[];
+    }
+    ws.updatedAt = new Date();
+    this.createRevision(workspaceId, 'actions_update', { data });
+    this.persist();
     return true;
   }
 
@@ -314,7 +324,7 @@ export class AssistantWorkspaceManager {
       };
       ws.stateHistory.push(event);
       this.createRevision(workspaceId, 'transition', { from: prevState, to: state });
-      this.save();
+      this.persist();
       return true;
     }
     return false;
@@ -381,7 +391,7 @@ export class AssistantWorkspaceManager {
     restored.updatedAt = new Date();
     this.workspaces.set(workspaceId, restored);
     this.createRevision(workspaceId, 'resume', { fromRevision: revisionId });
-    this.save();
+    this.persist();
     return true;
   }
 
@@ -397,7 +407,7 @@ export class AssistantWorkspaceManager {
     ws.lastResultId = undefined;
     ws.updatedAt = new Date();
     this.createRevision(workspaceId, 'reset');
-    this.save();
+    this.persist();
     return true;
   }
 
@@ -405,7 +415,9 @@ export class AssistantWorkspaceManager {
     const deleted = this.workspaces.delete(workspaceId);
     if (deleted) {
       this.revisions.delete(workspaceId);
-      this.save();
+      this.deleteDocument(workspaceId).catch(() => {});
+      this.deleteDocument(`revisions-${workspaceId}`).catch(() => {});
+      this.persist();
     }
     return deleted;
   }
@@ -467,8 +479,8 @@ export class AssistantWorkspaceManager {
         confirmBeforeSend: skill.confirmBeforeSend,
         isSkill: skill.isSkill,
         stage: stage.name,
-        available: isCurrent,
-        reason: isCurrent ? undefined : `Not available in stage '${stage.name}' (current: '${ws.currentStage}')`,
+        available: true,
+        reason: undefined,
       }));
       return {
         name: stage.name,

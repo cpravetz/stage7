@@ -317,6 +317,8 @@ CANDIDATE_SCREENING.triggers = [
   { kind: 'event', on: 'Resume uploaded' },
   { kind: 'data', condition: 'Resume or applicant profile data available for screening' },
 ];
+CANDIDATE_SCREENING.tier = 'represent';
+CANDIDATE_SCREENING.domainKnowledge = 'Talent acquisition lifecycles, structured interview methodology, compensation benchmarking, employment law compliance (EEOC)';
 HIRING_ANALYTICS_COMPLIANCE.triggers = [
   { kind: 'user', phrase_examples: ['Generate hiring analytics', 'Run compliance check', 'Evaluate workforce plan', 'Assess compensation benchmarks'] },
   { kind: 'schedule', cadence: 'Weekly hiring pipeline report' },
@@ -325,6 +327,8 @@ HIRING_ANALYTICS_COMPLIANCE.triggers = [
   { kind: 'event', on: 'Interview feedback submitted' },
   { kind: 'data', condition: 'Hiring pipeline or compliance data available for analysis' },
 ];
+HIRING_ANALYTICS_COMPLIANCE.tier = 'advise';
+HIRING_ANALYTICS_COMPLIANCE.domainKnowledge = 'Talent acquisition lifecycles, structured interview methodology, compensation benchmarking, employment law compliance (EEOC)';
 RECRUITING_OPS.triggers = [
   { kind: 'user', phrase_examples: ['Draft job description', 'Create interview scorecard', 'Post to job board', 'Schedule interview'] },
   { kind: 'schedule', cadence: 'Weekly job posting and interview pipeline review' },
@@ -332,11 +336,13 @@ RECRUITING_OPS.triggers = [
   { kind: 'event', on: 'New candidate application received' },
   { kind: 'data', condition: 'Job req, candidate, or scheduling data available' },
 ];
+RECRUITING_OPS.tier = 'aid';
+RECRUITING_OPS.domainKnowledge = 'Talent acquisition lifecycles, structured interview methodology, compensation benchmarking, employment law compliance (EEOC)';
 
 const hrSkills = [
-  { ...CANDIDATE_SCREENING, isSkill: false },
-  { ...RECRUITING_OPS, isSkill: false },
-  { ...HIRING_ANALYTICS_COMPLIANCE, isSkill: false },
+  { ...CANDIDATE_SCREENING, tier: 'represent' as const, domainKnowledge: 'Talent acquisition lifecycles, structured interview methodology, compensation benchmarking, employment law compliance (EEOC)' },
+  { ...RECRUITING_OPS, tier: 'aid' as const, domainKnowledge: 'Talent acquisition lifecycles, structured interview methodology, compensation benchmarking, employment law compliance (EEOC)' },
+  { ...HIRING_ANALYTICS_COMPLIANCE, tier: 'advise' as const, domainKnowledge: 'Talent acquisition lifecycles, structured interview methodology, compensation benchmarking, employment law compliance (EEOC)' },
 ];
 
 export interface WorkflowStage {

@@ -69,6 +69,8 @@ export interface Tool {
   reasoningConfig?: Record<string, unknown>;
   externalConfig?: Record<string, unknown>;
   confirmBeforeSend?: boolean;
+  tier?: 'advise' | 'aid' | 'represent';
+  domainKnowledge?: string;
 }
 
 export type WorkflowState = 'analysis' | 'recommendation' | 'draft' | 'approved' | 'executed' | 'rejected';
@@ -198,6 +200,7 @@ export interface RuntimeWorkflowAction {
   description: string;
   type: Tool['type'];
   confirmBeforeSend?: boolean;
+  tier?: 'advise' | 'aid' | 'represent';
   isSkill?: boolean;
   stage?: string;
   available: boolean;
@@ -294,6 +297,7 @@ export interface AssistantWorkspace {
   executionHistory: WorkspaceExecutionEntry[];
   stateHistory: StateTransitionEvent[];
   context?: Record<string, unknown>;
+  runtimeInputs?: string | Record<string, unknown>;
   createdAt: Date;
   updatedAt: Date;
 }

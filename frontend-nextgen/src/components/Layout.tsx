@@ -15,9 +15,6 @@ const Layout = () => {
     <div className="layout">
       <Sidebar />
       <div className="main-content">
-        <header className="header">
-          <h1>stage7 Control Plane</h1>
-        </header>
         <main className="content">
           <Outlet />
         </main>

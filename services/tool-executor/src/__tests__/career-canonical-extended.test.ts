@@ -10,8 +10,15 @@ describe('careerCanonicalExtendedSkills', () => {
 expect(careerCanonicalExtendedSkills).toHaveLength(0);
   });
 
-  it('exports exactly 1 internal Gmail tool', () => {
-expect(careerCanonicalInternalTools).toHaveLength(1);
+it('exports exactly 1 internal Gmail tool', () => {
+    const gmailTools = careerCanonicalInternalTools.filter((t) => t.id === 'career_gmail_sync');
+    expect(gmailTools).toHaveLength(1);
+  });
+
+  it('exports career_interview_prep and career_advisory as internal tools', () => {
+    const ids = careerCanonicalInternalTools.map((t) => t.id);
+    expect(ids).toContain('career_interview_prep');
+    expect(ids).toContain('career_advisory');
   });
 
   it('internal Gmail tool has isSkill:false explicitly', () => {

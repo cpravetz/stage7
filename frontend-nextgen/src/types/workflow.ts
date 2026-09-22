@@ -66,6 +66,7 @@ export interface AssistantWorkspace {
   approvalHistory: WorkspaceApprovalEntry[];
   executionHistory: WorkspaceExecutionEntry[];
   stateHistory: StateTransitionEvent[];
+  runtimeInputs?: string | Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
 }

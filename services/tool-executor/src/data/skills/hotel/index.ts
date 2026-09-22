@@ -6,9 +6,9 @@ import { REVENUE_SKILL } from './hotel-revenue-performance-advisory';
 import { annotateStages, createWorkflow, AssistantWorkflow } from '../workflow-common';
 
 export const hotelSkills: Tool[] = [
-  { ...RESERVATIONS_SKILL, isSkill: false },
-  { ...PROPERTY_OPERATIONS_SKILL, isSkill: false },
-  { ...GUEST_EXPERIENCE_SKILL, isSkill: false },
+  RESERVATIONS_SKILL,
+  PROPERTY_OPERATIONS_SKILL,
+  GUEST_EXPERIENCE_SKILL,
   REVENUE_SKILL,
 ];
 

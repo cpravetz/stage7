@@ -73,7 +73,7 @@ describe('Workflow Governance - Sprint 7', () => {
         }
       });
 
-      it(`${assistant.name}: workflow stages cover all skills exactly once`, () => {
+      it(`${assistant.name}: workflow stages cover all skills appropriately`, () => {
         const stageSkillIds: string[] = [];
         for (const stage of assistant.workflow.stages) {
           expect(stage.name).toBeTruthy();
@@ -83,7 +83,13 @@ describe('Workflow Governance - Sprint 7', () => {
           }
         }
         const allSkillIds = assistant.skills.map(s => s.id);
-        expect(stageSkillIds.sort()).toEqual(allSkillIds.sort());
+        if (assistant.name === 'Analytics') {
+          // Analytics uses a single skill across all stages (mode parameter)
+          expect(new Set(stageSkillIds).size).toBe(allSkillIds.length);
+          expect(stageSkillIds.length).toBeGreaterThanOrEqual(allSkillIds.length);
+        } else {
+          expect(stageSkillIds.sort()).toEqual(allSkillIds.sort());
+        }
       });
 
       it(`${assistant.name}: workflow flow declaration matches stage names`, () => {
@@ -313,7 +319,7 @@ describe('Workflow Governance - Sprint 7', () => {
       }
     });
 
-    it('no skill belongs to multiple stages across the same workflow', () => {
+    it('no skill belongs to multiple stages across the same workflow (except Analytics single-skill model)', () => {
       const allWorkflows = [ctoWorkflow, educationWorkflow, marketingWorkflow, productWorkflow, contentWorkflow, hrWorkflow, healthcareWorkflow, careerWorkflow, restaurantWorkflow, salesWorkflow, supportWorkflow, creativeWorkflow, sportsWorkflow, eventWorkflow, executiveWorkflow, financeWorkflow, hotelWorkflow, investmentWorkflow, legalWorkflow, songwritingWorkflow, scriptwritingWorkflow, analyticsWorkflow];
       for (const workflow of allWorkflows) {
         const stageIds: string[] = [];
@@ -323,7 +329,12 @@ describe('Workflow Governance - Sprint 7', () => {
           }
         }
         const idSet = new Set(stageIds);
-        expect(idSet.size).toBe(stageIds.length);
+        if (workflow.assistant === 'Analytics') {
+          // Analytics uses single skill across all stages
+          expect(idSet.size).toBeLessThan(stageIds.length);
+        } else {
+          expect(idSet.size).toBe(stageIds.length);
+        }
       }
     });
 
@@ -604,9 +615,10 @@ describe('Workflow Governance - Sprint 7', () => {
       const reportStage = analyticsWorkflow.stages.find(s => s.name === 'report');
       const analyzeStage = analyticsWorkflow.stages.find(s => s.name === 'analyze');
       const queryStage = analyticsWorkflow.stages.find(s => s.name === 'query');
-      expect(reportStage?.skills.map(skill => skill.id)).toContain('analytics-grounded-reporting');
+      // Single skill handles all three modes via the 'mode' parameter
+      expect(reportStage?.skills.map(skill => skill.id)).toContain('analytics_business_insight_report');
       expect(analyzeStage?.skills.map(skill => skill.id)).toContain('analytics_business_insight_report');
-      expect(queryStage?.skills.map(skill => skill.id)).toContain('analytics-warehouse-query');
+      expect(queryStage?.skills.map(skill => skill.id)).toContain('analytics_business_insight_report');
       for (const stage of analyticsWorkflow.stages) {
         expect(stage.description).toBeTruthy();
       }
@@ -614,8 +626,6 @@ describe('Workflow Governance - Sprint 7', () => {
 
     it('annotates the analytics skills and registers its product and flow', () => {
       expect(analyticsSkills[0].manifest.workflowStage).toBe('analyze');
-      expect(analyticsSkills.find(s => s.id === 'analytics-grounded-reporting')?.manifest.workflowStage).toBe('report');
-      expect(analyticsSkills.find(s => s.id === 'analytics-warehouse-query')?.manifest.workflowStage).toBe('query');
       const registry = assistantRegistries.find(item => item.assistant === 'Analytics');
       expect(registry?.productObject).toBe('metric / insight');
       expect(registry?.workflowFlow).toBe('report → analyze → query');
