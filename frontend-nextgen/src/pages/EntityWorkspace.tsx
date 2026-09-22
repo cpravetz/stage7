@@ -3,7 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useEntityStore, Entity, type EntityTool } from '../stores/entityStore';
 import { useFeedStore } from '../stores/feedStore';
 import { fetchJSON, postJSON, putJSON, workspaceApi, workflowsApi } from '../utils/api';
-import { AssistantWorkflow, WorkflowState, AssistantWorkspace, ApprovalSummary, ExecutionSummary, RuntimeWorkflow, RuntimeWorkflowAction } from '../types/workflow';
+import { AssistantWorkflow, WorkflowState, WorkflowStage, AssistantWorkspace, ApprovalSummary, ExecutionSummary, RuntimeWorkflow, RuntimeWorkflowStage, RuntimeWorkflowAction } from '../types/workflow';
 import { StateTransitionEvent } from '../types/workflow';
 import StateStatus from '../components/StateStatus';
 import ActionPreview from '../components/ActionPreview';
@@ -491,7 +491,6 @@ const EntityWorkspace = () => {
   const [memoryContext, setMemoryContext] = useState<Record<string, unknown>>({});
   const [error, setError] = useState<string | null>(null);
   const [workflows, setWorkflows] = useState<AssistantWorkflow[]>([]);
-  const [workflowLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [agentArtifacts] = useState<AgentArtifact[]>([]);
