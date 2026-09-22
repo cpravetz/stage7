@@ -3,7 +3,7 @@
 **Author:** Jules (Software Engineer)
 **Target Document:** `docs/assistants_design_0922_v6.md`
 **Output File:** `design_gap_analysis_from_jules_0922.md`
-**Date:** September 22, 2024
+**Date:** September 22, 2026
 **Audience:** Human Engineers, Technical Product Managers, LLM Execution Agents
 
 ---
@@ -37,7 +37,7 @@ This audit evaluates the Stage7 NextGen platform against the definitive design s
 | **§0.11 — "Use This Result In" gated on success** | Available feed-forward targets derived from Produces → Consumes graph, disabled on failure. | ⚠️ PARTIAL GAP | Target selection is currently unconstrained by `Consumes` contract graph in frontend store. |
 | **§0.12 — Clean Skill Titles** | Skill displayed title is its name only. No category or step label prepended/appended. | ⚠️ PARTIAL GAP | Several skill definitions prepend category prefixes (e.g. `CTO: Architecture Evaluator`) in name properties. |
 | **§0.13 — Non-destructive Input Typing** | No field trims or transforms text while typing; only on submit. | ⚠️ PARTIAL GAP | Keystroke listeners in `frontend-nextgen` form components perform immediate trim on change. |
-| **§0.14 — Single Trigger Rule** | Every Skill has exactly ONE trigger (`User`, `Schedule`, or `Event`). Multi-trigger defaults forbidden. | ❌ NON-COMPLIANT | `analytics_business_insight_report` and `recruiting-ops` define multiple triggers or bundle multi-trigger sub-capabilities. |
+| **§0.14 — Single Trigger Rule** | Every Skill has exactly ONE trigger (`User`, `Schedule`, or `Event`). Multi-trigger defaults forbidden. | ❌ NON-COMPLIANT | `analytics_business_insight_report` and `recruiting-ops` define multiple triggers or bundle multi-trigger sub-capabilities. Must be split. |
 
 ---
 
@@ -59,11 +59,15 @@ The design document highlights 5 critical consolidation debt items that must be 
 
 4. **HR Recruiting Ops Split Candidate:**
    - **Status:** ❌ FAILED
-   - **Finding:** `recruiting-ops` bundles a User-triggered sub-capability (drafting Job Descriptions / Interview Kits) with an Event-triggered sub-capability (scheduling interviews upon candidate screening pass). It must be split along the trigger boundary into two separate skills.
+   - **Finding:** `recruiting-ops` bundles a User-triggered sub-capability (drafting Job Descriptions / Interview Kits) with an Event-triggered sub-capability (scheduling interviews upon candidate screening pass). It must be split along the trigger boundary into two separate skills:
+     - `hr-job-description-kit-builder` (User-triggered)
+     - `hr-candidate-interview-scheduler` (Event-triggered)
 
 5. **Analytics Business Insight Report Split Candidate:**
    - **Status:** ❌ FAILED
-   - **Finding:** `analytics_business_insight_report` uses an internal `mode` parameter spanning ad-hoc queries (User-triggered) and scheduled trend monitoring (Schedule-triggered). Must be split into two single-trigger skills.
+   - **Finding:** `analytics_business_insight_report` uses an internal `mode` parameter spanning ad-hoc queries (User-triggered) and scheduled trend monitoring (Schedule-triggered). Must be split along the trigger boundary into two separate skills:
+     - `analytics-adhoc-query-evaluator` (User-triggered)
+     - `analytics-scheduled-trend-monitor` (Schedule-triggered)
 
 ---
 
@@ -323,7 +327,7 @@ The design document highlights 5 critical consolidation debt items that must be 
 | Item ID / Tool Name | Item Type | Trigger | Inputs Audit | Config Audit | Consumes → Produces | Design Match | Specific Failure / Gap Explanation |
 |---|---|---|---|---|---|---|---|
 | `candidate-screening` | Higher-Order Skill | Event | Valid | `confirmBeforeSend` | `HR_SCREENING` → `scores` | `✓ MATCH` | Event trigger on application received. |
-| `recruiting-ops` | Higher-Order Skill | Multi-Trigger | Invalid | Credentials | `HR_RECRUITING` → `kits/schedules` | ❌ CONSOLIDATION DEBT | Bundles User (draft JD) and Event (schedule interview) capabilities under single `operation` field. |
+| `recruiting-ops` | Higher-Order Skill | Multi-Trigger | Invalid | Credentials | `HR_RECRUITING` → `kits/schedules` | ❌ CONSOLIDATION DEBT | Bundles User (draft JD) and Event (schedule interview) capabilities under single `operation` field. Must be split into `hr-job-description-kit-builder` and `hr-candidate-interview-scheduler`. |
 | `hiring-analytics-compliance` | Higher-Order Skill | Schedule | Valid | HR_HOME | `reasoning-based` → `metrics` | ⚠️ MERGED | Combines hiring analytics and compliance into one skill; design specifies two. |
 
 ---
@@ -368,7 +372,7 @@ The design document highlights 5 critical consolidation debt items that must be 
 
 | Item ID / Tool Name | Item Type | Trigger | Inputs Audit | Config Audit | Consumes → Produces | Design Match | Specific Failure / Gap Explanation |
 |---|---|---|---|---|---|---|---|
-| `analytics_business_insight_report` | Higher-Order Skill | Multi-Trigger | Invalid | API credentials | `self` → `insights` | ❌ CONSOLIDATION DEBT | `mode` parameter spans User (adhoc query) and Schedule (trend monitoring). Must be split. |
+| `analytics_business_insight_report` | Higher-Order Skill | Multi-Trigger | Invalid | API credentials | `self` → `insights` | ❌ CONSOLIDATION DEBT | `mode` parameter spans User (adhoc query) and Schedule (trend monitoring). Must be split into `analytics-adhoc-query-evaluator` and `analytics-scheduled-trend-monitor`. |
 | `analytics-grounded-reporting` | Wrapper Tool | - | Valid | Empty | Wraps `analytics_business_insight_report` | ❌ WRAPPER DEPRECATION | Pass-through wrapper with no distinct value. Deprecate per §6. |
 | `analytics-warehouse-query` | Wrapper Tool | - | Valid | Empty | Wraps `analytics_business_insight_report` | ❌ WRAPPER DEPRECATION | Pass-through wrapper with no distinct value. Deprecate per §6. |
 
@@ -395,10 +399,10 @@ The design document highlights 5 critical consolidation debt items that must be 
 | **Hotel** | 4 | 3 | 2 | Remove `operation` field from `hotel-property-operations`; define Domain KB Delivery. |
 | **Education** | 4 | 2 | 3 | Fix `configSchema` placeholder bug in `adaptive_personalization`; reconcile resource library split; define Domain KB Delivery. |
 | **Support** | 4 | 3 | 2 | Integrate CSAT/churn metrics into `ticket-understanding`; define Domain KB Delivery. |
-| **HR** | 3 | 1 | 3 | Split `recruiting-ops` into two single-trigger skills; unmerge hiring analytics/compliance; define Domain KB Delivery. |
+| **HR** | 3 | 1 | 3 | Split `recruiting-ops` into two single-trigger skills (`hr-job-description-kit-builder` and `hr-candidate-interview-scheduler`); unmerge hiring analytics/compliance; define Domain KB Delivery. |
 | **Product** | 8 | 3 | 6 | Consolidate 5 delivery sync fragments into 1 orchestrator skill; define Domain KB Delivery. |
 | **Marketing** | 8 | 3 | 6 | Consolidate 3 content execution fragments into 1 campaign execution skill; reconcile research split; define Domain KB Delivery. |
-| **Analytics** | 3 | 0 | 4 | Split `analytics_business_insight_report` by trigger boundary; deprecate 2 wrapper tools; define Domain KB Delivery. |
+| **Analytics** | 3 | 0 | 4 | Split `analytics_business_insight_report` by trigger boundary into two skills (`analytics-adhoc-query-evaluator` and `analytics-scheduled-trend-monitor`); deprecate 2 wrapper tools; define Domain KB Delivery. |
 
 ---
 
@@ -415,11 +419,11 @@ To address every reported gap and bring the codebase into full compliance with `
    - Reclassify `marketing-content-generation`, `marketing-social-media`, and `marketing-email` as internal lower-order tools (`isSkill: false`).
 3. **Analytics Assistant Wrapper Cleanup & Skill Split:**
    - Deprecate `analytics-grounded-reporting` and `analytics-warehouse-query`.
-   - Split `analytics_business_insight_report` into two single-trigger skills:
+   - Split multi-trigger `analytics_business_insight_report` into two single-trigger skills:
      - `analytics-adhoc-query-evaluator` (Trigger: `User`)
      - `analytics-scheduled-trend-monitor` (Trigger: `Schedule`)
 4. **HR Recruiting Ops Skill Split:**
-   - Split `recruiting-ops` into two single-trigger skills:
+   - Split multi-trigger `recruiting-ops` into two single-trigger skills:
      - `hr-job-description-kit-builder` (Trigger: `User`)
      - `hr-candidate-interview-scheduler` (Trigger: `Event`)
 
