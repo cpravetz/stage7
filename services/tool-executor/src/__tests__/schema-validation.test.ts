@@ -215,6 +215,7 @@ describe('Schema Validation - Full Registry Inventory (Sprint 2)', () => {
             // Transitional names allowed during Sprint 6 migration to product language
             const allowedNames = [
               'Business Insight & Trend Evaluator',
+              'Adhoc Query Evaluator',
               'Application & Outreach Manager',
               'Resume & Template Manager',
               'Content Strategy & SEO Evaluator',

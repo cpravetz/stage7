@@ -75,12 +75,11 @@ try {
   },
   inputSchema: regulatoryComplianceInputSchema,
   outputSchema: regulatoryComplianceOutputSchema,
-isSkill: true,
+  isSkill: false,
 });
 
 regulatoryComplianceSkill.triggers = [
   { kind: 'schedule', cadence: 'Regulatory filing deadline' },
-  { kind: 'event', on: 'Regulatory update published' },
 ];
 
 export { regulatoryComplianceSkill };

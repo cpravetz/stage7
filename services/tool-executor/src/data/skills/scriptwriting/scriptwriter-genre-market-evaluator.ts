@@ -152,9 +152,9 @@ export const SCRIPTWRITER_GENRE_MARKET_EVALUATOR = createCodeSkill({
     required: ['success', 'status'],
   },
   triggers: [
-    { kind: 'user', phrase_examples: ['Evaluate genre market fit for this script'] },
+    { kind: 'schedule', cadence: 'Periodic genre market fit monitoring' },
   ],
   tier: 'advise',
   domainKnowledge: 'Scriptwriting market analysis, genre trends, audience alignment',
-isSkill: true,
+  isSkill: true,
 });

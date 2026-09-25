@@ -130,6 +130,6 @@ console.log(JSON.stringify({ success: true, data: { adaptation, storePath } }));
   tier: 'aid',
   domainKnowledge: 'Adaptive learning theory, differentiated instruction, formative assessment, learner analytics',
   triggers: [
-    { kind: 'user', phrase_examples: ['Recommend learner adaptations', 'Create an intervention plan', 'Adjust pacing for a student'] },
+    { kind: 'event', on: 'Learner insight output available for personalization' },
   ],
 });

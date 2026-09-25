@@ -135,11 +135,24 @@ const Brain = () => {
     );
   }, [brainErrorEvents, serviceLogs]);
 
-  const errorCount = combinedLogs.filter((l) => l.type === 'error' && l.error).length;
-  const completionCount = combinedLogs.filter(
-    (l) => l.type === 'completion'
-  ).length;
-  const cacheHitCount = combinedLogs.filter((l) => l.type === 'cache_hit').length;
+    const errorCount = combinedLogs.filter((l) => l.type === 'error' && l.error).length;
+    const completionCount = combinedLogs.filter(
+      (l) => l.type === 'completion'
+    ).length;
+    const cacheHitCount = combinedLogs.filter((l) => l.type === 'cache_hit').length;
+
+    // Circuit-breaker "failures" and the activity-log "errors" are different metrics:
+    //   - breakers only trip on provider-level fatal errors (401/403/auth/quota),
+    //     and their failure count resets on any successful call.
+    //   - the log counts every failed attempt (transient, timeout, rate-limit, fatal,
+    //     no-model, final all-providers-failed) plus live WebSocket brain_error events.
+    const totalBreakerFailures = circuitBreakers.reduce(
+      (sum, cb) => sum + (cb.failures || 0),
+      0
+    );
+    const trippedBreakers = circuitBreakers.filter(
+      (cb) => cb.state === 'open'
+    ).length;
 
   return (
     <div className="page">
@@ -189,6 +202,11 @@ const Brain = () => {
             <p>No cache stats available.</p>
           )}
           <h3 style={{ marginTop: '16px' }}>Circuit Breakers</h3>
+          <p className="muted" style={{ fontSize: '12px', marginBottom: '12px' }}>
+            Provider-level fatal failures (401/403/auth/quota). Trips a breaker only on
+            configuration or quota errors; the failure count resets on any successful
+            call. Distinct from the attempt-error count in the Activity Log below.
+          </p>
           {circuitBreakers.length > 0 ? (
             <table className="data-table">
               <thead>
@@ -223,6 +241,12 @@ const Brain = () => {
           ) : (
             <p>No circuit breaker data.</p>
           )}
+          {trippedBreakers > 0 && (
+            <p className="muted" style={{ fontSize: '12px', marginTop: '8px' }}>
+              {trippedBreakers} provider(s) currently tripped ({totalBreakerFailures} fatal
+              failure(s) tracked). These are provider-level, not attempt-level.
+            </p>
+          )}
         </div>
       </div>
 
@@ -255,7 +279,9 @@ const Brain = () => {
         </div>
         <p className="muted" style={{ fontSize: '12px', marginBottom: '12px' }}>
           Real-time brain errors arrive over WebSocket. Service logs are fetched
-          periodically as a historical fallback.
+          periodically as a historical fallback. Note: these attempt-error counts are
+          distinct from the Circuit Breaker panel above, which only tracks
+          provider-level fatal failures (401/403/auth/quota).
         </p>
         {combinedLogs.length === 0 ? (
           <div className="empty-state">No brain activity logged yet.</div>

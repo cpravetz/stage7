@@ -11,6 +11,8 @@ COPY services ./services
 RUN npm install --legacy-peer-deps
 
 COPY shared-nextgen ./shared-nextgen
+# Includes knowledge/assistants/*.txt, which the assistant catalog reads at
+# startup. Without these files the service fails fast on boot.
 COPY services/worker-pool ./services/worker-pool
 
 RUN cd shared-nextgen && npm run build

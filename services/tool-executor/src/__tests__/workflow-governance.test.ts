@@ -615,10 +615,10 @@ describe('Workflow Governance - Sprint 7', () => {
       const reportStage = analyticsWorkflow.stages.find(s => s.name === 'report');
       const analyzeStage = analyticsWorkflow.stages.find(s => s.name === 'analyze');
       const queryStage = analyticsWorkflow.stages.find(s => s.name === 'query');
-      // Single skill handles all three modes via the 'mode' parameter
-      expect(reportStage?.skills.map(skill => skill.id)).toContain('analytics-business-insight-report');
-      expect(analyzeStage?.skills.map(skill => skill.id)).toContain('analytics-business-insight-report');
-      expect(queryStage?.skills.map(skill => skill.id)).toContain('analytics-business-insight-report');
+      // Split skill: trend monitor (schedule) and adhoc query evaluator (user)
+      expect(reportStage?.skills.map(skill => skill.id)).toContain('analytics-scheduled-trend-monitor');
+      expect(analyzeStage?.skills.map(skill => skill.id)).toContain('analytics-scheduled-trend-monitor');
+      expect(queryStage?.skills.map(skill => skill.id)).toContain('analytics-adhoc-query-evaluator');
       for (const stage of analyticsWorkflow.stages) {
         expect(stage.description).toBeTruthy();
       }

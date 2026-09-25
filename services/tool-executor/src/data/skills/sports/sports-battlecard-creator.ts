@@ -125,7 +125,7 @@ export const BATTLECARD_CREATOR = createCodeSkill({
   tier: 'aid',
   domainKnowledge: 'Sports scouting, opposition analysis, situational playbook creation',
   triggers: [
-    { kind: 'schedule', cadence: 'Pre-match briefing 48h prior' },
+    { kind: 'event', on: 'Match calendar entering pre-match window' },
   ],
-isSkill: true,
+isSkill: false,
 });

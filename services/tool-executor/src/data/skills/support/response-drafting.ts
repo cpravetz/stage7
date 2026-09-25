@@ -67,7 +67,7 @@ const RESPONSE_DRAFTING = createCodeSkill({
   triggers: [
     { kind: 'event', on: 'Ticket requires response drafting' },
   ],
-isSkill: true,
+isSkill: false,
 });
 
 RESPONSE_DRAFTING.domainKnowledge = 'Customer success metrics (CSAT, NPS, Churn Rate), SLA management, support escalation tiers, ticket triage';

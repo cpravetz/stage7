@@ -591,6 +591,60 @@ button:disabled {
   width: 280px;
 }
 
+.canvas-legend {
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.knowledge-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.knowledge-list li {
+  border: 1px solid #334155;
+  border-radius: 6px;
+  padding: 10px;
+}
+
+.knowledge-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+
+.knowledge-source {
+  font-size: 11px;
+  color: #94a3b8;
+  word-break: break-all;
+  margin-bottom: 6px;
+}
+
+.knowledge-content {
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 11px;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 4px;
+  padding: 8px;
+  margin: 6px 0 0;
+}
+
+.error-text {
+  color: #f87171;
+  font-size: 12px;
+}
+
 .live-feeds-page {
   display: flex;
   flex-direction: column;

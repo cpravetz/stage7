@@ -5,11 +5,12 @@ import {
   MCPToolResult,
 } from '@stage7-nextgen/shared';
 import { logger } from '@stage7-nextgen/shared';
+import { KnowledgeService } from './KnowledgeService';
 
 export class AssistantExecutor {
   private toolExecutorUrl: string;
 
-  constructor() {
+  constructor(private knowledge: KnowledgeService) {
     this.toolExecutorUrl = process.env.TOOL_EXECUTOR_URL || 'http://tool-executor:3500';
   }
 
@@ -48,8 +49,22 @@ export class AssistantExecutor {
       ? `\n\nRuntime Context:\n${JSON.stringify(this.sanitizeContext(context), null, 2)}`
       : '';
 
-    const knowledgeBlock = definition.knowledge && definition.knowledge.length > 0
-      ? `\n\nKnowledge Base:\n${definition.knowledge.map((k) => `- ${k.title}: ${k.content}`).join('\n')}`
+    // Knowledge is read from the store on every execution, not carried on the
+    // definition, so that entries recorded for this assistant — or shared with
+    // all of them — take effect without redeploying.
+    const knowledge = await this.knowledge.listForAssistant(definition.id);
+    if (knowledge.length === 0) {
+      logger.warn(
+        { assistantId: definition.id },
+        'Assistant has no knowledge in the store; executing without knowledge block',
+      );
+    }
+
+    // Knowledge content is authored as multi-line markdown in per-assistant
+    // files, so each entry is rendered as its own labelled section rather than
+    // flattened onto one line.
+    const knowledgeBlock = knowledge.length > 0
+      ? `\n\n## Your Knowledge\n${knowledge.map((k) => `### ${k.title}\n${k.content}`).join('\n\n')}`
       : '';
 
     const transactionBlock = definition.transactionGuidance && definition.transactionGuidance.length > 0

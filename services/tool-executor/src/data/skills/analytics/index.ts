@@ -57,7 +57,7 @@ const ANALYTICS_CONFIG_SCHEMA = {
  
 const ANALYTICS_SOURCE = `(async () => {
   const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
-  const mode = 'report';
+  const mode = input.mode || 'report';
   const metric = input.metric || input.dataset || '';
   const period = input.period || '30d';
   const timeframe = input.timeframe || '30d';
@@ -357,10 +357,10 @@ const ANALYTICS_SOURCE = `(async () => {
   }
 })()`;
  
-const BUSINESS_INSIGHT_REPORT = createCodeSkill({
-  id: 'analytics-business-insight-report',
-  name: 'Business Insight & Trend Evaluator',
-  description: 'Hybrid query-and-explain advisor for warehouse and local business metrics. Executes grounded reports, trend analysis, and read-only queries; returns an explicit Not Connected state when no usable source exists.',
+const ANALYTICS_SCHEDULED_TREND_MONITOR = createCodeSkill({
+  id: 'analytics-scheduled-trend-monitor',
+  name: 'Scheduled Trend Monitor',
+  description: 'Runs periodic grounded trend analysis on warehouse or local business metrics on a schedule. Detects trends, anomalies, and statistical signals over time windows.',
   manifest: {
     language: 'javascript',
     entrypoint: 'index.js',
@@ -374,18 +374,42 @@ const BUSINESS_INSIGHT_REPORT = createCodeSkill({
   inputSchema: ANALYTICS_INPUT_SCHEMA,
   outputSchema: ANALYTICS_OUTPUT_SCHEMA,
   triggers: [
-    { kind: 'user', phrase_examples: ['Report on this metric', 'Analyze my trends', 'Run this query'] },
+    { kind: 'schedule', cadence: 'Daily metric trend analysis' },
   ],
 });
- 
-BUSINESS_INSIGHT_REPORT.tier = 'advise';
-BUSINESS_INSIGHT_REPORT.isSkill = true;
-BUSINESS_INSIGHT_REPORT.domainKnowledge = 'Business intelligence architectures, SQL/data modeling principles, statistical trend analysis, cross-functional KPI frameworks';
- 
-export const analyticsSkills: Tool[] = [BUSINESS_INSIGHT_REPORT];
- 
+ANALYTICS_SCHEDULED_TREND_MONITOR.tier = 'advise';
+ANALYTICS_SCHEDULED_TREND_MONITOR.isSkill = false;
+ANALYTICS_SCHEDULED_TREND_MONITOR.domainKnowledge = 'Business intelligence architectures, SQL/data modeling principles, statistical trend analysis, cross-functional KPI frameworks';
+
+const ANALYTICS_ADHOC_QUERY_EVALUATOR = createCodeSkill({
+  id: 'analytics-adhoc-query-evaluator',
+  name: 'Adhoc Query Evaluator',
+  description: 'Executes read-only warehouse queries and explains the results. Triggered on demand by the user for ad-hoc analytical exploration.',
+  manifest: {
+    language: 'javascript',
+    entrypoint: 'index.js',
+    sourceCode: ANALYTICS_SOURCE,
+    configSchema: ANALYTICS_CONFIG_SCHEMA,
+    credentialSource: {
+      apiKey: { envVar: 'ANALYTICS_WAREHOUSE_API_KEY', configKey: 'analytics.warehouse.apiKey' },
+    },
+    timeoutMs: 120000,
+  },
+  inputSchema: ANALYTICS_INPUT_SCHEMA,
+  outputSchema: ANALYTICS_OUTPUT_SCHEMA,
+  triggers: [
+    { kind: 'user', phrase_examples: ['Run this query', 'Query my warehouse', 'Explain this metric'] },
+  ],
+});
+ANALYTICS_ADHOC_QUERY_EVALUATOR.tier = 'advise';
+ANALYTICS_ADHOC_QUERY_EVALUATOR.isSkill = true;
+ANALYTICS_ADHOC_QUERY_EVALUATOR.domainKnowledge = 'Business intelligence architectures, SQL/data modeling principles, statistical trend analysis, cross-functional KPI frameworks';
+  
+export const analyticsSkills: Tool[] = [ANALYTICS_SCHEDULED_TREND_MONITOR, ANALYTICS_ADHOC_QUERY_EVALUATOR];
+  
 annotateStages(analyticsSkills, {
-  'analytics-business-insight-report': 'analyze',
+  'analytics-scheduled-trend-monitor': 'analyze',
+  'analytics-adhoc-query-evaluator': 'query',
 });
  
 export const analyticsWorkflow: AssistantWorkflow = createWorkflow({
@@ -396,17 +420,17 @@ export const analyticsWorkflow: AssistantWorkflow = createWorkflow({
     {
       name: 'report',
       description: 'Produce grounded metric reports from warehouse or local data',
-      stageIds: ['analytics-business-insight-report'],
+      stageIds: ['analytics-scheduled-trend-monitor'],
     },
     {
       name: 'analyze',
       description: 'Explain trends, anomalies, and changes in the selected metric',
-      stageIds: ['analytics-business-insight-report'],
+      stageIds: ['analytics-scheduled-trend-monitor'],
     },
     {
       name: 'query',
       description: 'Run and explain a read-only warehouse query',
-      stageIds: ['analytics-business-insight-report'],
+      stageIds: ['analytics-adhoc-query-evaluator'],
     },
   ],
 }, analyticsSkills);

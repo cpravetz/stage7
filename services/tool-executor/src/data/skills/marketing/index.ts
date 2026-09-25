@@ -136,7 +136,7 @@ console.log(JSON.stringify({ success: true, data: { analysis, storePath } }));
     },
     outputSchema: ANALYZE_PERFORMANCE_OUTPUT_SCHEMA,
     triggers: [
-      { kind: 'user', phrase_examples: ["Analyze performance", "Check metrics", "Pull report"] },
+      { kind: 'schedule', cadence: 'Periodic campaign performance review' },
     ],
     createdAt: new Date(), updatedAt: new Date(),
   },
@@ -145,7 +145,7 @@ console.log(JSON.stringify({ success: true, data: { analysis, storePath } }));
 const MARKETING_EXTERNAL_SKILLS: Tool[] = [
   createExternalActionSkill({
     triggers: [
-      { kind: 'user', phrase_examples: ["Generate content", "Draft post", "Create copy"] },
+      { kind: 'event', on: 'Content brief received for campaign asset creation' },
     ],
     id: 'marketing-content-generation',
     name: 'Marketing Content Generation',
@@ -196,7 +196,7 @@ const MARKETING_EXTERNAL_SKILLS: Tool[] = [
   }),
   createExternalActionSkill({
     triggers: [
-      { kind: 'user', phrase_examples: ["Post to social", "Schedule post", "Check social metrics"] },
+      { kind: 'schedule', cadence: 'Scheduled social content publishing' },
     ],
     id: 'marketing-social-media',
     name: 'Marketing Social Media',
@@ -243,7 +243,7 @@ const MARKETING_EXTERNAL_SKILLS: Tool[] = [
   }),
   createExternalActionSkill({
     triggers: [
-      { kind: 'user', phrase_examples: ["Audit SEO", "Check rankings", "Run keyword research"] },
+      { kind: 'schedule', cadence: 'Periodic SEO audit' },
     ],
     id: 'marketing-seo',
     name: 'Marketing SEO',
@@ -336,7 +336,7 @@ const MARKETING_EXTERNAL_SKILLS: Tool[] = [
   }),
   createExternalActionSkill({
     triggers: [
-      { kind: 'user', phrase_examples: ["Analyze audience", "Check demographics", "Audience segmentation"] },
+      { kind: 'schedule', cadence: 'Ongoing audience segment monitoring' },
     ],
     id: 'marketing-audience-insights',
     name: 'Marketing Audience Insights',
@@ -383,7 +383,7 @@ const MARKETING_EXTERNAL_SKILLS: Tool[] = [
   }),
   createExternalActionSkill({
     triggers: [
-      { kind: 'user', phrase_examples: ["Send email campaign", "Draft email", "Check email metrics"] },
+      { kind: 'event', on: 'Campaign content is ready to send' },
     ],
     id: 'marketing-email',
     name: 'Marketing Email',
@@ -434,7 +434,7 @@ const MARKETING_EXTERNAL_SKILLS: Tool[] = [
   }),
   createExternalActionSkill({
     triggers: [
-      { kind: 'user', phrase_examples: ["Upload document", "Tag asset", "Search documents"] },
+      { kind: 'event', on: 'Document update received for marketing asset' },
     ],
     id: 'marketing-document-management',
     name: 'Marketing Document Management',
@@ -538,12 +538,13 @@ const MARKETING_CENTER = createCodeSkill({
     required: ['success', 'system', 'action'],
   },
   triggers: [
-    { kind: 'user', phrase_examples: ["Open marketing center", "Launch marketing operation", "Start marketing campaign"] },
+    { kind: 'event', on: 'Delivery sync event from planning or analytics' },
   ],
 });
 MARKETING_CENTER.tier = 'represent';
 MARKETING_CENTER.confirmBeforeSend = true;
 MARKETING_CENTER.domainKnowledge = 'Marketing frameworks (AIDA, RACE, buyer journey), channel-specific best practices (SEO, paid social, email), content strategy, campaign measurement';
+MARKETING_CENTER.isSkill = true;
 
 // Mark the 7 external marketing skills as lower-order base tools (isSkill:false)
 const MARKETING_EXTERNAL_TOOL_IDS = new Set([

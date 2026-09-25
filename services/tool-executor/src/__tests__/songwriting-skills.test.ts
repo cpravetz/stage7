@@ -110,11 +110,22 @@ describe('Songwriter Creative — Batch A', () => {
     });
   });
 
-  describe('user-prompt triggers', () => {
-    it('every skill has at least one user-prompt trigger', () => {
+  describe('trigger classification', () => {
+    it('Songwriter has exactly two user-triggered skills (design §9)', () => {
+      const userTriggered = songwritingSkills.filter((s) =>
+        (s.triggers || []).some((t) => t.kind === 'user')
+      );
+      expect(userTriggered.length).toBe(2);
+      const userTriggerIds = userTriggered.map((s) => s.id).sort();
+      expect(userTriggerIds).toEqual([
+        'songwriting-lead-sheet-demo-dispatcher',
+        'songwriting-musical-lyric-cocreation',
+      ]);
+    });
+
+    it('all user-triggered skills have proper phrase_examples', () => {
       for (const skill of songwritingSkills) {
         const userTriggers = (skill.triggers || []).filter((t) => t.kind === 'user');
-        expect(userTriggers.length).toBeGreaterThanOrEqual(1);
         for (const t of userTriggers) {
           expect(t.kind).toBe('user');
           expect(Array.isArray((t as { phrase_examples: string[] }).phrase_examples)).toBe(true);

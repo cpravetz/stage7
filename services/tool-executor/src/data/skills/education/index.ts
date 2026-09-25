@@ -32,8 +32,8 @@ export const educationWorkflow = createWorkflow({
 
 // CHANGE 3: HO skill wrappers — wrap existing skills as proper higher-order skills
 export const educationCanonicalSkills: Tool[] = [
-  { ...LESSON_ASSESSMENT_DRAFTING, isSkill: true },
-  { ...LEARNER_INSIGHT, isSkill: true },
-  { ...ADAPTIVE_PERSONALIZATION, isSkill: true },
+  { ...LESSON_ASSESSMENT_DRAFTING, isSkill: false },
+  { ...LEARNER_INSIGHT, isSkill: false },
+  { ...ADAPTIVE_PERSONALIZATION, isSkill: false },
   { ...RESOURCE_LIBRARY_OPS, isSkill: true },
 ];

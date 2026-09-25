@@ -226,9 +226,6 @@ console.log(JSON.stringify({ success: true, data: { draft, storePath } }));
     required: ['success'],
   },
   triggers: [
-    { kind: 'user', phrase_examples: ['Draft a lesson plan', 'Create a quiz', 'Design a classroom activity', 'Prepare course content'] },
-    { kind: 'schedule', cadence: 'Weekly curriculum and assessment review' },
-    { kind: 'event', on: 'Curriculum unit, objective, or assessment requirement changes' },
-    { kind: 'data', condition: 'Required subject, topic, standards, or learner context is missing' },
+    { kind: 'event', on: 'A submission is received for grading' },
   ],
 });

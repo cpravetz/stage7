@@ -137,13 +137,11 @@ console.log(JSON.stringify({ success: true, analysis }));
   },
   inputSchema: analyzeInvestmentInputSchema,
   outputSchema: analyzeInvestmentOutputSchema,
-isSkill: true,
+  isSkill: false,
 });
 
 analyzeInvestmentSkill.triggers = [
-  { kind: 'user', phrase_examples: ['Analyze an investment', 'Calculate risk metrics', 'Run Monte Carlo simulation'] },
-  { kind: 'event', on: 'New transaction recorded' },
-  { kind: 'event', on: 'Cash burn threshold exceeded' },
+  { kind: 'schedule', cadence: 'Periodic model refresh' },
 ];
 
 export { analyzeInvestmentSkill };

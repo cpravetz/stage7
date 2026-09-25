@@ -17,25 +17,82 @@ type Store = InMemoryStore | MongoStore;
 export class ArtifactsService {
   private store: Store;
   private mongoStore: MongoStore | null = null;
+  private readyPromise: Promise<void>;
+  private mongoConfigured = false;
+  private lastMongoError: unknown = null;
 
   constructor() {
     this.store = new InMemoryStore();
 
     if (process.env.MONGO_URI) {
+      this.mongoConfigured = true;
       this.mongoStore = new MongoStore();
-      this.connectMongo();
+      this.readyPromise = this.connectMongo();
+    } else {
+      this.readyPromise = Promise.resolve();
     }
   }
 
+  /**
+   * Resolves once the backing store has been chosen.
+   *
+   * `connectMongo` swaps `this.store` from the in-memory store to Mongo once
+   * connected. Any write issued before that swap lands in the in-memory map and
+   * is discarded when the store is replaced. Callers that persist data during
+   * startup must await this first, otherwise the write is silently lost.
+   */
+  ready(): Promise<void> {
+    return this.readyPromise;
+  }
+
+  /**
+   * True when writes survive process exit. False when running on the in-memory
+   * store, which is only a valid mode when Mongo is not configured at all.
+   */
+  isDurable(): boolean {
+    return this.store instanceof MongoStore;
+  }
+
+  /**
+   * True when MONGO_URI was set but the connection did not establish. This is a
+   * misconfiguration, not a supported mode: data written now would be lost on
+   * restart, so callers that must not lose data should refuse to start.
+   */
+  isDegraded(): boolean {
+    return this.mongoConfigured && !this.isDurable();
+  }
+
+  getMongoError(): unknown {
+    return this.lastMongoError;
+  }
+
   private async connectMongo(): Promise<void> {
-    try {
-      await this.mongoStore!.connect();
-      this.store = this.mongoStore!;
-      logger.info('ArtifactsService using MongoDB');
-    } catch (err) {
-      logger.warn({ err }, 'MongoDB connection failed, falling back to InMemoryStore');
-      this.mongoStore = null;
+    const attempts = 5;
+    let lastErr: unknown = null;
+
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      try {
+        await this.mongoStore!.connect();
+        this.store = this.mongoStore!;
+        logger.info({ attempts: attempt }, 'ArtifactsService using MongoDB');
+        return;
+      } catch (err) {
+        lastErr = err;
+        logger.warn({ attempt, attempts, err }, 'MongoDB connection attempt failed');
+        if (attempt < attempts) {
+          await new Promise((resolve) => setTimeout(resolve, 500 * attempt));
+        }
+      }
     }
+
+    this.lastMongoError = lastErr;
+    // Fall back so the process can still start in environments without Mongo,
+    // but isDurable() is false and isDegraded() is true so callers can refuse.
+    this.mongoStore = null;
+    logger.error(
+      { err: lastErr, uri: process.env.MONGO_URI },
+      'MongoDB unreachable after retries; artifacts are VOLATILE and will be lost on restart',
+    );
   }
 
   async createDocument(doc: Omit<PersistenceDocument, 'createdAt' | 'updatedAt'>): Promise<PersistenceDocument> {

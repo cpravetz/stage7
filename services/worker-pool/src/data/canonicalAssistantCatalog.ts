@@ -1,46 +1,8 @@
 import { AssistantDefinition } from '@stage7-nextgen/shared';
+import { loadAssistantKnowledge } from './assistantKnowledge';
 
 const SYSTEM_TENANT = 'system';
 
-
-interface KnowledgeEntry {
-  id: string;
-  title: string;
-  content: string;
-  source?: string;
-  tags?: string[];
-  domain?: string;
-}
-
-function kb(category: string): KnowledgeEntry[] {
-  const cap = category.charAt(0).toUpperCase() + category.slice(1);
-  return [
-    {
-      id: `${category}-domain-knowledge`,
-      title: `${cap} Domain Knowledge`,
-      content: `Domain knowledge base for ${cap} operations, frameworks, terminology, and best practices.`,
-      source: 'design-doc',
-      tags: [category, 'knowledge-base', 'domain'],
-      domain: category,
-    },
-    {
-      id: `${category}-safety-guidelines`,
-      title: `${cap} Safety & Honesty Guidelines`,
-      content: 'Always report not-connected when data is unavailable. Never fabricate results. Recommend professional review for material decisions. Flag assumptions explicitly.',
-      source: 'internal-docs',
-      tags: [category, 'safety', 'guidelines'],
-      domain: category,
-    },
-    {
-      id: `${category}-operational-playbooks`,
-      title: `${cap} Operational Playbooks`,
-      content: `Standard operating procedures and workflow playbooks for ${cap} tasks. Includes error handling, dry-run patterns, and escalation paths.`,
-      source: 'best-practices',
-      tags: [category, 'playbooks', 'operations'],
-      domain: category,
-    },
-  ];
-}
 
 function definition(
   id: string,
@@ -56,7 +18,7 @@ function definition(
     name,
     description,
     systemPrompt,
-    knowledge: kb(category),
+    knowledge: loadAssistantKnowledge(id),
     transactionGuidance: [],
     tools: toolIds.map((toolId) => ({
       name: toolId,
@@ -230,9 +192,10 @@ export const canonicalAssistantCatalog: AssistantDefinition[] = [
     'Lyric and prosody evaluation, musical co-creation, and lead sheet/demo dispatch.',
     'You are a songwriting collaborator. Evaluate lyrics and prosody, co-create musical ideas, and prepare lead sheets and demos for production. Respect creative intent and copyright.',
     [
-      'lyric-prosody-evaluator',
-      'musical-co-creation',
-      'lead-sheet-demo-dispatcher',
+      'songwriting-lyric-prosody-evaluator',
+      'songwriting-musical-lyric-cocreation',
+      'songwriting-lead-sheet-demo-dispatcher',
+      'songwriter-genre-trend-evaluator',
     ],
     'creative',
   ),
@@ -244,9 +207,10 @@ export const canonicalAssistantCatalog: AssistantDefinition[] = [
     'Narrative arc and pacing evaluation, scene/beat/dialogue co-pilot, and script formatting/submission.',
     'You are a screenwriting collaborator. Evaluate narrative structure and pacing, co-write scenes and dialogue, and format scripts to industry standards for submission.',
     [
-      'narrative-arc-pacing-evaluator',
-      'scene-beat-dialogue-copilot',
-      'script-formatting-submission-manager',
+      'scriptwriting-narrative-arc-pacing-evaluator',
+      'scriptwriting-scene-beat-dialogue-copilot',
+      'scriptwriting-genre-market-evaluator',
+      'scriptwriting-script-formatting-submission-manager',
     ],
     'creative',
   ),
@@ -258,12 +222,13 @@ export const canonicalAssistantCatalog: AssistantDefinition[] = [
     'Tactical roster strategy, game plans, scouting alerts, matchup odds, bankroll management, and line alerts.',
     'You are a sports analytics assistant. Evaluate roster strategy, create game plans and battlecards, dispatch scouting alerts, explain matchup odds, assist with bankroll management, and monitor line movements. All analysis is informational, not financial advice.',
     [
-      'tactical-roster-strategy-evaluator',
-      'game-plan-battlecard-creator',
-      'scouting-alert-dispatcher',
-      'matchup-odds-explainer',
-      'bankroll-co-pilot',
-      'line-alert-dispatcher',
+      'sports-tactical-roster-evaluator',
+      'sports-battlecard-creator',
+      'sports-scouting-alert-dispatcher',
+      'sports-matchup-odds-explainer',
+      'sports-bankroll-co-pilot',
+      'sports-line-alert-dispatcher',
+      'sports-ingame-predictive-modeling',
     ],
     'sports',
   ),
@@ -275,10 +240,10 @@ export const canonicalAssistantCatalog: AssistantDefinition[] = [
     'Financial modeling, reporting, risk/regulatory advisory, and budget tracking.',
     'You are a finance advisor. Build financial models, prepare reports, advise on risk and regulatory matters, and track budgets. Flag assumptions and recommend professional review for material decisions.',
     [
-      'financial-modeling-analysis',
-      'reporting-data-ops',
-      'risk-regulatory-advisory',
-      'budget-tracking',
+      'finance-analyze-investment',
+      'finance-build-model',
+      'finance-regulatory-compliance',
+      'finance-risk-assessment',
     ],
     'finance',
   ),
@@ -320,10 +285,10 @@ export const canonicalAssistantCatalog: AssistantDefinition[] = [
     'Lesson and assessment drafting, learner analytics, adaptive personalization, and resource library operations.',
     'You are an education advisor. Draft lessons and assessments, analyze learner insights, personalize adaptive learning paths, and manage resource libraries. Support evidence-based pedagogy and learner privacy.',
     [
-      'lesson-assessment-drafting',
-      'learner-insight-analytics',
-      'adaptive-personalization',
-      'resource-library-ops',
+      'education-lesson-assessment-drafting',
+      'education-learner-insight',
+      'education-adaptive-personalization',
+      'education-resource-library',
     ],
     'education',
   ),
@@ -335,9 +300,12 @@ export const canonicalAssistantCatalog: AssistantDefinition[] = [
     'Ticket understanding, response drafting, ticket operations, and analytics planning.',
     'You are a customer support assistant. Understand tickets, draft responses, manage ticket operations, and plan analytics. Resolve efficiently while maintaining empathy and policy compliance.',
     [
-      'ticket-understanding',
+      'support-resolve-ticket',
+      'support-sentiment-analysis',
+      'support-issue-analysis',
+      'support-search-kb',
       'response-drafting',
-      'ticket-operations',
+      'ticket-ops',
       'analytics-planning',
     ],
     'support',
@@ -350,11 +318,10 @@ export const canonicalAssistantCatalog: AssistantDefinition[] = [
     'Roadmap and PRD drafting, document ingestion, delivery tracking, product analytics, and team coordination.',
     'You are a product management assistant. Draft roadmaps and PRDs, ingest documents, track delivery, analyze product metrics, and coordinate cross-functional teams. Align decisions with strategy and user outcomes.',
     [
-      'roadmap-prd-drafting',
-      'document-ingestion',
-      'delivery-tracking',
-      'product-analytics-insight',
-      'team-coordination',
+      'create-roadmap',
+      'write-prd',
+      'product-data-analysis',
+      'product-operations',
     ],
     'product',
   ),
@@ -366,9 +333,11 @@ export const canonicalAssistantCatalog: AssistantDefinition[] = [
     'Campaign planning and drafting, multi-channel publishing, and performance/audience insight.',
     'You are a marketing strategist. Plan and draft campaigns, publish across channels, and analyze performance and audience insights. Optimize for reach, engagement, and conversion.',
     [
-      'campaign-planning-drafting',
-      'multi-channel-publishing',
-      'performance-audience-insight',
+      'plan-campaign',
+      'analyze-performance',
+      'marketing-market-research',
+      'marketing-audience-insights',
+      'marketing-center',
     ],
     'marketing',
   ),
@@ -380,7 +349,8 @@ export const canonicalAssistantCatalog: AssistantDefinition[] = [
     'Business insight and trend evaluation.',
     'You are a business analytics advisor. Evaluate trends, surface insights, and recommend data-driven actions. Validate assumptions and communicate uncertainty clearly.',
     [
-      'business-insight-trend-evaluator',
+      'analytics-scheduled-trend-monitor',
+      'analytics-adhoc-query-evaluator',
     ],
     'analytics',
   ),

@@ -47,9 +47,9 @@ console.log(JSON.stringify(result));`,
     required: ['success'],
   },
   triggers: [
-    { kind: 'user', phrase_examples: ['Resolve this support ticket', 'Create a resolution for this ticket'] },
+    { kind: 'event', on: 'A new support ticket is received' },
   ],
-isSkill: true,
+isSkill: false,
 });
 
 export const SUPPORT_SENTIMENT_ANALYSIS = createCodeSkill({
@@ -97,9 +97,9 @@ console.log(JSON.stringify(output));`,
     required: ['success'],
   },
   triggers: [
-    { kind: 'user', phrase_examples: ['Analyze this ticket sentiment', 'Score the customer tone'] },
+    { kind: 'event', on: 'A new support ticket is received' },
   ],
-isSkill: true,
+isSkill: false,
 });
 
 export const SUPPORT_ISSUE_ANALYSIS = createCodeSkill({
@@ -148,9 +148,9 @@ console.log(JSON.stringify(output));`,
     required: ['success'],
   },
   triggers: [
-    { kind: 'user', phrase_examples: ['Analyze this issue', 'Classify this ticket'] },
+    { kind: 'event', on: 'Ticket is escalated to tier 2' },
   ],
-isSkill: true,
+isSkill: false,
 });
 
 export const SUPPORT_SEARCH_KB = createCodeSkill({
@@ -194,7 +194,7 @@ console.log(JSON.stringify(result));`,
     required: ['success'],
   },
   triggers: [
-    { kind: 'user', phrase_examples: ['Search knowledge base for this issue', 'Find relevant articles for this problem'] },
+    { kind: 'event', on: 'A new support ticket is received' },
   ],
-isSkill: true,
+isSkill: false,
 });

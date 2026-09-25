@@ -148,9 +148,9 @@ export const SONGWRITER_GENRE_TREND_EVALUATOR = createCodeSkill({
     required: ['success'],
   },
   triggers: [
-    { kind: 'user', phrase_examples: ['Analyze genre trend fit for this song', 'Evaluate market positioning'] },
+    { kind: 'schedule', cadence: 'Periodic genre and market trend monitoring' },
   ],
   tier: 'advise',
   domainKnowledge: 'Songwriting genre analysis, market trend evaluation, audience fit assessment',
-isSkill: true,
+ isSkill: true,
 });

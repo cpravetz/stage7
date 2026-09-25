@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useEntityStore } from '../stores/entityStore';
+import { useEntityStore, type Entity } from '../stores/entityStore';
 
 interface Node {
   id: string;
@@ -13,14 +13,64 @@ interface Node {
 interface Edge {
   from: string;
   to: string;
-  type: 'delegation' | 'collaboration' | 'tool';
+  sharedTools: string[];
 }
+
+interface KnowledgeEntry {
+  id: string;
+  title: string;
+  content: string;
+  source?: string;
+  scope?: string;
+  origin?: string;
+}
+
+const toolNames = (entity: Entity): string[] =>
+  (entity.tools || [])
+    .map((t) => (typeof t === 'string' ? t : t.name))
+    .filter((n): n is string => typeof n === 'string' && n.length > 0);
+
+/**
+ * An edge is drawn only where two assistants genuinely share a tool binding.
+ * The Canvas is a read-only view over real assistant state, so it must not
+ * invent relationships that do not exist.
+ */
+const buildEdges = (entities: Entity[]): Edge[] => {
+  const byTool = new Map<string, string[]>();
+  for (const entity of entities) {
+    for (const tool of toolNames(entity)) {
+      const holders = byTool.get(tool) || [];
+      holders.push(entity.id);
+      byTool.set(tool, holders);
+    }
+  }
+
+  const edges = new Map<string, Set<string>>();
+  for (const [tool, holders] of byTool) {
+    for (let i = 0; i < holders.length; i++) {
+      for (let j = i + 1; j < holders.length; j++) {
+        const [a, b] = holders[i] < holders[j] ? [holders[i], holders[j]] : [holders[j], holders[i]];
+        const key = `${a}::${b}`;
+        const set = edges.get(key) || new Set<string>();
+        set.add(tool);
+        edges.set(key, set);
+      }
+    }
+  }
+
+  return Array.from(edges.entries()).map(([key, tools]) => {
+    const [from, to] = key.split('::');
+    return { from, to, sharedTools: Array.from(tools) };
+  });
+};
 
 const Canvas = () => {
   const { entities, fetchEntities } = useEntityStore();
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
+  const [knowledge, setKnowledge] = useState<KnowledgeEntry[] | null>(null);
+  const [knowledgeError, setKnowledgeError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchEntities();
@@ -34,7 +84,7 @@ const Canvas = () => {
     const cy = height / 2;
     const radius = Math.min(width, height) / 3;
 
-    const newNodes: Node[] = entities.map((e, i) => {
+    setNodes(entities.map((e, i) => {
       const angle = (2 * Math.PI * i) / entities.length - Math.PI / 2;
       return {
         id: e.id,
@@ -44,24 +94,30 @@ const Canvas = () => {
         x: cx + radius * Math.cos(angle),
         y: cy + radius * Math.sin(angle),
       };
-    });
-
-    const newEdges: Edge[] = [];
-    for (let i = 0; i < entities.length; i++) {
-      for (let j = i + 1; j < entities.length; j++) {
-        if (Math.random() > 0.6) {
-          newEdges.push({
-            from: entities[i].id,
-            to: entities[j].id,
-            type: Math.random() > 0.5 ? 'collaboration' : 'tool',
-          });
-        }
-      }
-    }
-
-    setNodes(newNodes);
-    setEdges(newEdges);
+    }));
+    setEdges(buildEdges(entities));
   }, [entities]);
+
+  // Load exactly the knowledge this assistant is given at execution time.
+  useEffect(() => {
+    if (!selected) {
+      setKnowledge(null);
+      setKnowledgeError(null);
+      return;
+    }
+    let cancelled = false;
+    setKnowledge(null);
+    setKnowledgeError(null);
+    fetch(`/api/workers/assistants/${encodeURIComponent(selected)}/knowledge`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((data) => {
+        if (!cancelled) setKnowledge(data.knowledge || []);
+      })
+      .catch((err) => {
+        if (!cancelled) setKnowledgeError(err instanceof Error ? err.message : 'Failed to load knowledge');
+      });
+    return () => { cancelled = true; };
+  }, [selected]);
 
   const selectedEntity = entities.find((e) => e.id === selected);
 
@@ -71,21 +127,24 @@ const Canvas = () => {
       <div className="canvas-layout">
         <div className="canvas-container">
           <svg className="canvas-svg" viewBox="0 0 800 500">
-            {edges.map((edge, i) => {
+            {edges.map((edge) => {
               const from = nodes.find((n) => n.id === edge.from);
               const to = nodes.find((n) => n.id === edge.to);
               if (!from || !to) return null;
+              const isConnected = selected === edge.from || selected === edge.to;
               return (
                 <line
-                  key={i}
+                  key={`${edge.from}::${edge.to}`}
                   x1={from.x}
                   y1={from.y}
                   x2={to.x}
                   y2={to.y}
-                  stroke={edge.type === 'delegation' ? '#f59e0b' : '#6366f1'}
-                  strokeWidth="2"
-                  markerEnd="url(#arrow)"
-                />
+                  stroke={isConnected ? '#fbbf24' : '#4b5563'}
+                  strokeWidth={isConnected ? 3 : 1}
+                  opacity={selected && !isConnected ? 0.2 : 0.7}
+                >
+                  <title>{`${edge.sharedTools.length} shared tool(s): ${edge.sharedTools.join(', ')}`}</title>
+                </line>
               );
             })}
             <defs>
@@ -112,6 +171,10 @@ const Canvas = () => {
               </g>
             ))}
           </svg>
+          <p className="canvas-legend">
+            {edges.length} connection{edges.length === 1 ? '' : 's'} — each line joins two assistants
+            that share at least one tool binding. Hover a line to see which.
+          </p>
         </div>
         <div className="canvas-sidebar">
           {selectedEntity ? (
@@ -121,12 +184,41 @@ const Canvas = () => {
               <p>{selectedEntity.description}</p>
               <div className="meta-grid">
                 <div><strong>Type:</strong> {selectedEntity.type}</div>
+                <div><strong>Tools:</strong> {toolNames(selectedEntity).length}</div>
               </div>
+
+              <h4>Knowledge supplied to this assistant</h4>
+              {knowledgeError && <p className="error-text">Failed to load knowledge: {knowledgeError}</p>}
+              {!knowledgeError && knowledge === null && <p>Loading knowledge…</p>}
+              {knowledge && knowledge.length === 0 && (
+                <p>No knowledge recorded. This assistant runs without a knowledge block.</p>
+              )}
+              {knowledge && knowledge.length > 0 && (
+                <ul className="knowledge-list">
+                  {knowledge.map((entry) => (
+                    <li key={entry.id}>
+                      <div className="knowledge-header">
+                        <strong>{entry.title}</strong>
+                        {entry.scope && <span className="badge">{entry.scope}</span>}
+                        {entry.origin && <span className="badge">{entry.origin}</span>}
+                      </div>
+                      {entry.source && <div className="knowledge-source">source: {entry.source}</div>}
+                      <details>
+                        <summary>{entry.content.length} characters</summary>
+                        <pre className="knowledge-content">{entry.content}</pre>
+                      </details>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           ) : (
             <div className="card">
               <h3>Select a Node</h3>
-              <p>Click on any node in the canvas to view entity details and live feed.</p>
+              <p>
+                Click any assistant to see its details and the knowledge that is
+                injected into its system prompt.
+              </p>
             </div>
           )}
         </div>

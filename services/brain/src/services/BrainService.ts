@@ -286,9 +286,13 @@ export class BrainService {
           const errMsg = err instanceof Error ? err.message : String(err);
           logger.warn({ provider: provider.id, model: candidate.id, attempt, err: errMsg }, 'Candidate attempt failed');
 
-          // classify error: provider-key / quota issues vs transient
+          // classify error: provider-key / quota issues vs transient vs rate-limit
           const isProviderFatal = /key limit exceeded|limit exceeded|quota exceeded|invalid api key|incorrect api key|credit balance is too low|authentication|unauthorized/i.test(errMsg)
             || /\b(401|403)\b/.test(errMsg);
+          // 429 / rate-limit / too-many-requests: move to the next candidate model
+          // (which may be on the same provider or a different one) rather than retrying
+          // the same model, since retrying would just hit the same rate limit.
+          const isRateLimit = /\b(429)\b/.test(errMsg) || /rate ?limit|too many requests|throttl/i.test(errMsg);
           if (isProviderFatal) {
             // provider-level fatal: mark provider unavailable by tripping its circuit-breaker
             logger.error({ provider: provider.id, err: errMsg }, 'Provider configuration or quota error - tripping provider circuit-breaker (models retained)');
@@ -314,6 +318,21 @@ export class BrainService {
               error: errMsg,
             });
             // break out to next candidate
+            break;
+          }
+          if (isRateLimit) {
+            // Rate-limited: do NOT retry the same model (backoff would just hit the
+            // same limit). Move to the next candidate model immediately.
+            logger.warn({ provider: provider.id, model: candidate.id, err: errMsg }, 'Model rate-limited - trying next candidate');
+            this.addLog({
+              type: 'error',
+              model: candidate.id,
+              provider: provider.id,
+              promptPreview,
+              success: false,
+              durationMs: Date.now() - startTime,
+              error: errMsg,
+            });
             break;
           }
 

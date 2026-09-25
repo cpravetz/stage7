@@ -1,16 +1,56 @@
 import express from 'express';
 import workerPoolRoutes from './routes/worker-pool';
 import assistantRoutes from './routes/assistants';
-import { assistantLoader } from './utils/sharedInstance';
+import { assistantLoader, knowledgeService, persistence } from './utils/sharedInstance';
 import { canonicalAssistantCatalog } from './data/canonicalAssistantCatalog';
 import { buildAssistantManifest, hasManifestSelection, getManifestValidationError } from './data/assistantManifest';
+import { toStoredAuthoredEntry } from './data/assistantKnowledge';
+import type { AssistantDefinition } from '@stage7-nextgen/shared';
 import { logger } from './utils/logger';
 import { registerAssistantTools } from './shared/mcp';
 
 const app: express.Application = express();
 app.use(express.json());
 
+/**
+ * Publishes each assistant's authored knowledge from its file into the shared
+ * knowledge store. Runs on every boot so that editing a knowledge file takes
+ * effect on restart, and is idempotent so it is safe to repeat.
+ */
+async function syncAuthoredKnowledge(catalog: AssistantDefinition[]): Promise<void> {
+  let published = 0;
+  for (const assistant of catalog) {
+    for (const entry of assistant.knowledge ?? []) {
+      await knowledgeService.publish(toStoredAuthoredEntry(assistant.id, entry), assistant.tenantId);
+      published++;
+    }
+  }
+  logger.info({ published }, 'Authored assistant knowledge synced to knowledge store');
+}
+
 async function initializeAssistants(): Promise<void> {
+  // The backing store must be settled before any write, otherwise writes during
+  // startup land in the in-memory store and are dropped when it is replaced.
+  await persistence.ready();
+
+  // If MONGO_URI is set but unreachable, this process would run on a volatile
+  // in-memory store and every knowledge write would be lost on restart. Refuse
+  // to start rather than run with data that cannot survive.
+  if (persistence.isDegraded()) {
+    const err = persistence.getMongoError();
+    throw new Error(
+      'MONGO_URI is configured but MongoDB is unreachable, so assistant knowledge would be ' +
+      `stored in memory and lost on restart. Refusing to start. Underlying error: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+  if (!persistence.isDurable()) {
+    logger.warn(
+      'MONGO_URI is not set; assistant knowledge is held in memory and will not survive a restart',
+    );
+  }
+
   const existing = assistantLoader.list();
   const manifest = buildAssistantManifest(process.env.STAGE7_ASSISTANTS);
 
@@ -58,19 +98,32 @@ async function initializeAssistants(): Promise<void> {
       }
     }
   }
-}
 
-initializeAssistants().then(() => {
-  logger.info({ assistants: assistantLoader.list().length }, 'Worker Pool ready');
-});
+  // Sync the knowledge for the assistants this instance is actually running.
+  const activeCatalog = hasManifestSelection(manifest)
+    ? (manifest.catalog ?? [])
+    : canonicalAssistantCatalog;
+  await syncAuthoredKnowledge(activeCatalog);
+}
 
 app.use('/api/workers', workerPoolRoutes);
 app.use('/api/workers', assistantRoutes);
 
 const PORT = process.env.PORT || 3200;
 
-app.listen(PORT, () => {
-  logger.info({ port: PORT, assistants: assistantLoader.list().length }, 'WorkerPool service listening');
-});
+// Do not accept traffic until the catalog is seeded and knowledge is synced.
+// Serving requests with an unsynced knowledge store would mean answering with
+// a prompt that is missing knowledge the assistant is supposed to have.
+initializeAssistants()
+  .then(() => {
+    logger.info({ assistants: assistantLoader.list().length }, 'Worker Pool ready');
+    app.listen(PORT, () => {
+      logger.info({ port: PORT, assistants: assistantLoader.list().length }, 'WorkerPool service listening');
+    });
+  })
+  .catch((err) => {
+    logger.error({ err }, 'Worker Pool failed to initialize; not starting');
+    process.exit(1);
+  });
 
 export default app;

@@ -188,14 +188,6 @@ export const ConfigurationPanel = ({
               }}
             />
           </div>
-          <button type="button" onClick={() => {
-            const newMeta = { ...metadataConfig };
-            const maxIters = Number(newMeta.maxIterations) || 8;
-            newMeta.maxIterations = maxIters;
-            setMetadataConfig(newMeta);
-          }} className="secondary">
-            Set maxIterations
-          </button>
           <div className="button-row" style={{ marginTop: 12, justifyContent: 'flex-end' }}>
             <button onClick={saveConfiguration} disabled={saving}>
               {saving ? 'Saving…' : 'Save Configuration'}

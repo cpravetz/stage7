@@ -1,1 +1,1 @@
-export { KnowledgeService, KnowledgeEntry } from '../services/KnowledgeService';
+export { KnowledgeService } from '../services/KnowledgeService';

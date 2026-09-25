@@ -88,10 +88,10 @@ export const SCRIPT_FORMATTING_SUBMISSION_MANAGER = createCodeSkill({
   inputSchema: SCRIPT_FORMATTING_INPUT,
   outputSchema: SCRIPT_FORMATTING_OUTPUT,
   triggers: [
-    { kind: 'user', phrase_examples: ['Format my script', 'Submit to Blacklist', 'Prepare for coverage'] },
+    { kind: 'event', on: 'Script is finalized and approved for formatting' },
   ],
   tier: 'represent',
   confirmBeforeSend: true,
   domainKnowledge: 'Screenplay formatting standards (Master Scene Heading style), script submission platforms, industry formatting guidelines',
-isSkill: true,
+isSkill: false,
 });

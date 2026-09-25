@@ -60,7 +60,7 @@ return summary;`,
     required: ['success', 'data'],
   },
   triggers: [
-    { kind: 'user', phrase_examples: ['Analyze retention', 'Check conversion', 'Review analytics'] },
+    { kind: 'event', on: 'A product launch or release event occurs' },
   ],
   tier: 'advise',
   domainKnowledge: 'Product analytics, funnel analysis, retention metrics, conversion optimization',

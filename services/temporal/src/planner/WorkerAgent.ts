@@ -145,6 +145,16 @@ export class WorkerAgent {
                 error: `${res.status}: ${text.slice(0, 200)}`,
               },
             });
+            // Rate-limit (429) or throttling: retrying the same model/provider would just hit
+            // the same limit, so move to the next attempt (which may target a different
+            // model and/or provider) immediately.
+            if (res.status === 429 || /rate ?limit|too many requests|throttl/i.test(text)) {
+              logger.warn(
+                { task: task.title, phase: phase.name, attempt: attempt.label, status: res.status },
+                'Brain call rate-limited - trying next attempt',
+              );
+              break;
+            }
             if (retry === MAX_RETRIES_PER_ATTEMPT - 1) {
               logger.warn(
                 { task: task.title, phase: phase.name, attempt: attempt.label, status: res.status },
@@ -215,6 +225,16 @@ export class WorkerAgent {
               error: err.message,
             },
           });
+// Rate-limit (429): retrying the same model/provider would just hit the same
+            // limit, so move to the next attempt (which may target a different
+            // model and/or provider) immediately.
+            if (err.message && (/\b(429)\b/.test(err.message) || /rate ?limit|too many requests|throttl/i.test(err.message))) {
+              logger.warn(
+                { task: task.title, phase: phase.name, attempt: attempt.label, err: err.message },
+                'Brain call rate-limited - trying next attempt',
+              );
+              break;
+            }
           logger.warn(
             { task: task.title, phase: phase.name, attempt: attempt.label, retry, err: err.message },
             'Brain call error, will retry',

@@ -86,7 +86,7 @@ try {
   },
   inputSchema: riskAssessmentInputSchema,
   outputSchema: riskAssessmentOutputSchema,
-isSkill: true,
+  isSkill: false,
 });
 
 riskAssessmentSkill.triggers = [

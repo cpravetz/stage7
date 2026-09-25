@@ -1,5 +1,5 @@
 import { LLMProvider, ProviderInfo, CompletionRequest, CompletionResponse, CompletionMessage } from './Provider';
-import { fetchProvider } from '../utils/providerFetch';
+import { fetchProvider, providerTimeoutMs } from '../utils/providerFetch';
 
 export interface OpenAICompatibleConfig {
   id: string;
@@ -116,21 +116,30 @@ export class OpenAICompatibleProvider implements LLMProvider {
     if (this.apiKey) {
       headers['Authorization'] = `Bearer ${this.apiKey}`;
     }
+
+    const upperId = this.id.toUpperCase().replace(/[^A-Z0-9]/g, '_');
+    const alt = upperId.replace(/UI$/, '');
+    const pathSuggestion = `Set ${upperId}_CHAT_PATH or ${upperId}_COMPLETIONS_PATH (or ${alt}_CHAT_PATH / ${alt}_COMPLETIONS_PATH) env var to the provider's supported completion endpoint (e.g. /api/chat/completions, /completions).`;
+
+    const buildBody = (model: string) => ({
+      model,
+      messages: req.messages,
+      max_tokens: req.maxTokens,
+      temperature: req.temperature,
+    });
+
     // Try chat/completions first, fall back to /completions if the server doesn't support chat endpoint.
     let res = await fetchProvider(`${this.apiBase}${this.chatCompletionsPath}`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({
-        model: req.model,
-        messages: req.messages,
-        max_tokens: req.maxTokens,
-        temperature: req.temperature,
-      }),
-    }).catch((e) => ({ ok: false, status: 0, text: async () => String(e) } as any));
+      body: JSON.stringify(buildBody(req.model)),
+    });
 
     let data: any;
+
     if (!res.ok) {
       const errText = await (res.text ? res.text() : Promise.resolve(String(res)));
+
       // If the server returns 400 with a "Model not found" message, try to
       // discover available models and retry with a known model once.
       if (res.status === 400 && /Model not found/i.test(errText)) {
@@ -138,19 +147,12 @@ export class OpenAICompatibleProvider implements LLMProvider {
           const available = await this.listModels();
           if (available && available.length > 0) {
             const fallbackModel = available[0].id;
-            const prompt = req.messages.map((m: CompletionMessage) => `${m.role}: ${m.content}`).join('\n');
             res = await fetchProvider(`${this.apiBase}${this.chatCompletionsPath}`, {
               method: 'POST',
-              headers: headers,
-              body: JSON.stringify({
-                model: fallbackModel,
-                messages: req.messages,
-                max_tokens: req.maxTokens,
-                temperature: req.temperature,
-              }),
-            }).catch((e) => ({ ok: false, status: 0, text: async () => String(e) } as any));
+              headers,
+              body: JSON.stringify(buildBody(fallbackModel)),
+            });
             if (res.ok) {
-              // proceed to parse below
               data = await res.json();
             } else {
               const errText2 = await (res.text ? res.text() : Promise.resolve(String(res)));
@@ -161,11 +163,9 @@ export class OpenAICompatibleProvider implements LLMProvider {
           // fall through to other fallback logic
         }
       }
+
       // If the server indicates the model or endpoint does not support chat (400),
       // or method not allowed / not found, try the older /completions endpoint.
-      if (res.status === 400 && /does not support chat|does not support/i.test(errText)) {
-        // fall through to completions path below
-      }
       if (res.status === 405 || res.status === 404 || /Method Not Allowed/i.test(errText) || /Not Found/i.test(errText) || (res.status === 400 && /does not support chat|does not support/i.test(errText))) {
         const prompt = req.messages.map((m: CompletionMessage) => `${m.role}: ${m.content}`).join('\n');
         res = await fetchProvider(`${this.apiBase}${this.completionsPath}`, {
@@ -177,20 +177,17 @@ export class OpenAICompatibleProvider implements LLMProvider {
             max_tokens: req.maxTokens,
             temperature: req.temperature,
           }),
-        }).catch((e) => ({ ok: false, status: 0, text: async () => String(e) } as any));
+        });
         if (!res.ok) {
           const errText2 = await (res.text ? res.text() : Promise.resolve(String(res)));
-          const upperId = this.id.toUpperCase().replace(/[^A-Z0-9]/g, '_');
-          const alt = upperId.replace(/UI$/, '');
-          const suggestion = `Set ${upperId}_CHAT_PATH or ${upperId}_COMPLETIONS_PATH (or ${alt}_CHAT_PATH / ${alt}_COMPLETIONS_PATH) env var to the provider's supported completion endpoint (e.g. /api/chat/completions, /completions).`;
-          throw new Error(`[${this.id}] completion failed (chat then completions): ${res.status} ${errText2}. ${suggestion}`);
+          throw new Error(`[${this.id}] completion failed (chat then completions): ${res.status} ${errText2}. ${pathSuggestion}`);
         }
         data = await res.json();
       } else {
-        const upperId = this.id.toUpperCase().replace(/[^A-Z0-9]/g, '_');
-        const alt = upperId.replace(/UI$/, '');
-        const suggestion = `Set ${upperId}_CHAT_PATH or ${upperId}_COMPLETIONS_PATH (or ${alt}_CHAT_PATH / ${alt}_COMPLETIONS_PATH) env var to the provider's supported completion endpoint (e.g. /api/chat/completions, /completions).`;
-        throw new Error(`[${this.id}] completion failed: ${res.status} ${errText}. ${suggestion}`);
+        // Generic failure: timeouts (AbortError), 429 rate limits, 4xx/5xx, etc.
+        // The env-var path suggestion is only meaningful for 404/405/"does not support chat"
+        // cases, so it is intentionally NOT included here.
+        throw new Error(`[${this.id}] completion failed: ${res.status} ${errText}`);
       }
     } else {
       data = await res.json();

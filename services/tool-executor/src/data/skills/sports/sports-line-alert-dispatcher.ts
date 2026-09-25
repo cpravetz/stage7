@@ -141,7 +141,7 @@ export const LINE_ALERT_DISPATCHER = createCodeSkill({
   domainKnowledge: 'Sports line movement analysis, market odds monitoring, bankroll exposure',
   confirmBeforeSend: true,
   triggers: [
-    { kind: 'user', phrase_examples: ['Check line movement', 'Dispatch line alert', 'Monitor odds change', 'Alert value spot'] }
+    { kind: 'event', on: 'Line movement or odds change detected' }
   ],
-isSkill: true,
+isSkill: false,
 });

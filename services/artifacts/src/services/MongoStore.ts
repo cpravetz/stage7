@@ -13,6 +13,9 @@ import { logger } from '@stage7-nextgen/shared';
 
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://mongo:27017';
 const MONGO_DB = process.env.MONGO_DB || 'stage7';
+// Bounded so an unreachable Mongo fails in seconds rather than the driver's
+// 30s default per attempt. Callers retry and then refuse to start.
+const MONGO_SERVER_SELECTION_TIMEOUT_MS = Number(process.env.MONGO_SERVER_SELECTION_TIMEOUT_MS) || 5000;
 
 type VectorDoc = { _id: string; vector: number[] };
 
@@ -37,7 +40,9 @@ export class MongoStore {
     if (this.connected) return;
 
     try {
-      this.client = new MongoClient(MONGO_URI);
+      this.client = new MongoClient(MONGO_URI, {
+        serverSelectionTimeoutMS: MONGO_SERVER_SELECTION_TIMEOUT_MS,
+      });
       await this.client.connect();
       this.db = this.client.db(MONGO_DB);
 

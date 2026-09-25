@@ -169,7 +169,7 @@ export const TACTICAL_ROSTER_EVALUATOR = createCodeSkill({
   tier: 'advise',
   domainKnowledge: 'Sports tactical analysis, roster optimization, opponent matchup evaluation',
   triggers: [
-    { kind: 'schedule', cadence: 'Pre-match tactical briefing 48h prior' },
+    { kind: 'event', on: 'Match calendar entering pre-match window' },
   ],
-isSkill: true,
+isSkill: false,
 });

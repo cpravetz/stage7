@@ -1,4 +1,6 @@
 import { AssistantExecutor } from '../services/AssistantExecutor';
+import { KnowledgeService } from '../services/KnowledgeService';
+import { ArtifactsService } from '@stage7-nextgen/artifacts';
 import { AssistantDefinition, MCPToolCall } from '@stage7-nextgen/shared';
 import { validateCatalogIntegrity } from '../routes/assistants';
 
@@ -55,9 +57,14 @@ afterAll(() => {
 
 describe('AssistantExecutor', () => {
   let executor: AssistantExecutor;
+  let artifacts: ArtifactsService;
+  let knowledgeService: KnowledgeService;
 
-  beforeEach(() => {
-    executor = new AssistantExecutor();
+  beforeEach(async () => {
+    artifacts = new ArtifactsService();
+    await artifacts.ready();
+    knowledgeService = new KnowledgeService(artifacts);
+    executor = new AssistantExecutor(knowledgeService);
   });
 
   describe('execute', () => {

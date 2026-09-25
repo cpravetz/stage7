@@ -10,6 +10,11 @@ export async function fetchProvider(input: string | URL, init: RequestInit = {})
   const timeout = setTimeout(() => controller.abort(), providerTimeoutMs());
   try {
     return await fetch(input, { ...init, signal: controller.signal });
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new Error(`Provider request timed out after ${providerTimeoutMs()}ms`);
+    }
+    throw err;
   } finally {
     clearTimeout(timeout);
   }

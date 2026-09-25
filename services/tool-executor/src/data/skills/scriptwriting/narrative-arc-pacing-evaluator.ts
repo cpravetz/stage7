@@ -100,9 +100,9 @@ export const NARRATIVE_ARC_PACING_EVALUATOR = createCodeSkill({
   inputSchema: NARRATIVE_ARC_PACING_INPUT,
   outputSchema: NARRATIVE_ARC_PACING_OUTPUT,
   triggers: [
-    { kind: 'user', phrase_examples: ['Analyze my script structure', 'Check pacing', 'Evaluate narrative arc'] },
+    { kind: 'event', on: 'Newly drafted scenes available for evaluation' },
   ],
   tier: 'advise',
   domainKnowledge: 'Narrative structure, pacing analysis, story theory, genre conventions',
-isSkill: true,
+isSkill: false,
 });

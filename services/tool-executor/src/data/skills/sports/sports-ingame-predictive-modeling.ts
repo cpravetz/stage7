@@ -127,5 +127,5 @@ export const INGAME_PREDICTIVE_MODELING = createCodeSkill({
   triggers: [
     { kind: 'event', on: 'Game in progress' },
   ],
-isSkill: true,
+isSkill: false,
 });

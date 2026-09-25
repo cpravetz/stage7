@@ -273,7 +273,7 @@ domainKnowledge: 'Lyric prosody metrics, syllable and stress patterning, rhyme e
     required: ['success'],
   },
   triggers: [
-    { kind: 'user', phrase_examples: ['Evaluate the meter and rhyme of these lyrics', 'Is this chorus structurally strong', 'Analyze the prosody of my song'] },
+    { kind: 'event', on: 'Newly co-created lyrics available for prosody analysis' },
   ],
 });
 

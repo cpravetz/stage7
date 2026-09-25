@@ -106,7 +106,7 @@ export const SCOUTING_ALERT_DISPATCHER = createCodeSkill({
   domainKnowledge: 'Sports scouting, player health monitoring, transfer market tracking',
   confirmBeforeSend: true,
   triggers: [
-    { kind: 'user', phrase_examples: ['Dispatch scouting alert', 'Send health alert', 'Notify transfer interest', 'Alert performance anomaly'] }
+    { kind: 'event', on: 'Player health or transfer state change detected' }
   ],
-isSkill: true,
+isSkill: false,
 });

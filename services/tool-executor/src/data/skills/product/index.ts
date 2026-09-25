@@ -806,7 +806,7 @@ return prd;
       required: ['success', 'status', 'system', 'action', 'request', 'response', 'error'],
     },
     timeoutMs: 60000,
-  triggers: [{ kind: 'user', phrase_examples: ["Analyze product data", "Run report", "Check metrics"] }],
+  triggers: [{ kind: 'event', on: 'A product launch or release event occurs' }],
   }),
   createExternalActionSkill({
     id: 'product-slack',
@@ -1076,12 +1076,13 @@ const PRODUCT_OPERATIONS = createCodeSkill({
     required: ['success', 'system', 'action'],
   },
   triggers: [
-    { kind: 'user', phrase_examples: ['Update Jira ticket', 'Create Confluence page', 'Post to Slack', 'Schedule meeting', 'Parse markdown'] },
+    { kind: 'event', on: 'Delivery sync event from planning or analytics' },
   ],
 });
 PRODUCT_OPERATIONS.tier = 'represent';
 PRODUCT_OPERATIONS.confirmBeforeSend = true;
 PRODUCT_OPERATIONS.domainKnowledge = 'Product management frameworks (RICE, WSJF, Jobs-to-be-Done), Agile/Scrum methodologies, user telemetry interpretation';
+PRODUCT_OPERATIONS.isSkill = true;
 
 // Mark the 5 external integrations as lower-order base tools (isSkill:false)
 const PRODUCT_EXTERNAL_TOOL_IDS = new Set([

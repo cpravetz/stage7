@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { AssistantExecutor } from '../services/AssistantExecutor';
-import { AssistantDefinition, asyncHandler, NextGenError } from '@stage7-nextgen/shared';
-import { assistantLoader as loader, assistantExecutor as executor } from '../utils/sharedInstance';
+import { AssistantDefinition, asyncHandler, NextGenError, StoredKnowledgeEntry, AssistantKnowledgeScope, AssistantKnowledgeOrigin, logger } from '@stage7-nextgen/shared';
+import { assistantLoader as loader, assistantExecutor as executor, knowledgeService } from '../utils/sharedInstance';
 import { registerAssistantTools } from '../shared/mcp';
 
 const toolExecutorUrl = process.env.TOOL_EXECUTOR_URL || 'http://tool-executor:3500';
@@ -96,6 +96,11 @@ router.post('/assistants', asyncHandler(async (req, res) => {
   if (saved.tools && saved.tools.length > 0) {
     registerAssistantTools(saved.tools);
   }
+  // Keep the knowledge store in step with the definition, so a newly created
+  // assistant is not missing knowledge that is already recorded against it.
+  if (saved.knowledge && saved.knowledge.length > 0) {
+    await knowledgeService.replaceAssistantKnowledge(saved.id, saved.knowledge, saved.tenantId);
+  }
   res.status(201).json(saved);
 }));
 
@@ -112,6 +117,66 @@ router.get('/assistants/:id', asyncHandler(async (req, res) => {
   res.json({ assistant, runtime });
 }));
 
+/**
+ * Knowledge the assistant would actually be given at execution time: its own
+ * authored entries plus everything shared with all assistants.
+ */
+router.get('/assistants/:id/knowledge', asyncHandler(async (req, res) => {
+  const assistant = loader.get(req.params.id as string);
+  if (!assistant) {
+    throw NextGenError.notFound('Assistant not found');
+  }
+  const knowledge = await knowledgeService.listForAssistant(req.params.id as string);
+  res.json({ assistantId: assistant.id, knowledge });
+}));
+
+/** Full contents of the knowledge store, for the Canvas and other services. */
+router.get('/knowledge', asyncHandler(async (_req, res) => {
+  const knowledge = await knowledgeService.listAll();
+  res.json({ knowledge });
+}));
+
+/**
+ * Records a knowledge entry.
+ *
+ * Automated acquisition of knowledge from reflective LLM output is not
+ * implemented yet. This endpoint is the operator-facing write path: shared
+ * entries recorded here are offered to every assistant, and assistant-scoped
+ * entries only to their owner.
+ */
+router.post('/knowledge', asyncHandler(async (req, res) => {
+  const body = req.body as Partial<StoredKnowledgeEntry>;
+  if (!body.id || !body.title || !body.content) {
+    throw NextGenError.badRequest('id, title and content are required');
+  }
+  const scope: AssistantKnowledgeScope = body.scope === 'assistant' ? 'assistant' : 'shared';
+  if (scope === 'assistant' && !body.assistantId) {
+    throw NextGenError.badRequest("assistantId is required when scope is 'assistant'");
+  }
+  const origin: AssistantKnowledgeOrigin = body.origin === 'authored' ? 'authored' : 'acquired';
+
+  const saved = await knowledgeService.publish({
+    id: body.id,
+    title: body.title,
+    content: body.content,
+    source: body.source,
+    tags: body.tags,
+    domain: body.domain,
+    assistantId: scope === 'shared' ? null : body.assistantId!,
+    scope,
+    origin,
+  });
+  res.status(201).json(saved);
+}));
+
+router.delete('/knowledge/:id', asyncHandler(async (req, res) => {
+  const removed = await knowledgeService.remove(req.params.id as string);
+  if (!removed) {
+    throw NextGenError.notFound('Knowledge entry not found');
+  }
+  res.status(204).send();
+}));
+
 router.put('/assistants/:id', asyncHandler(async (req, res) => {
   const updates = req.body as Partial<AssistantDefinition>;
   // Strip any user-supplied model override — assistants must not carry `model`
@@ -122,6 +187,17 @@ router.put('/assistants/:id', asyncHandler(async (req, res) => {
   const updated = await loader.update(req.params.id as string, updates);
   if (!updated) {
     throw NextGenError.notFound('Assistant not found');
+  }
+  // Knowledge edited through the configuration UI must reach the store, which
+  // is what the executor reads at execution time. Persisting it on the
+  // definition alone would have no effect on the system prompt.
+  if (Array.isArray(updates.knowledge)) {
+    const count = await knowledgeService.replaceAssistantKnowledge(
+      req.params.id as string,
+      updates.knowledge,
+      updated.tenantId,
+    );
+    logger.info({ assistantId: req.params.id, count }, 'Assistant knowledge updated from configuration');
   }
   if (updated.tools && updated.tools.length > 0) {
     registerAssistantTools(updated.tools);

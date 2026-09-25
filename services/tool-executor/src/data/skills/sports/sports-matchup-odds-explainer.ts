@@ -146,7 +146,7 @@ export const MATCHUP_ODDS_EXPLAINER = createCodeSkill({
   tier: 'advise',
   domainKnowledge: 'Sports odds analysis, implied probability, line movement, expected value',
   triggers: [
-    { kind: 'schedule', cadence: 'Pre-match briefing 48h prior' },
+    { kind: 'event', on: 'Odds become available or line movement detected' },
   ],
-isSkill: true,
+isSkill: false,
 });

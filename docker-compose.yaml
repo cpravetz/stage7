@@ -64,6 +64,12 @@ services:
       - .env
     environment:
       - STAGE7_ASSISTANTS=${STAGE7_ASSISTANTS}
+    # Assistant knowledge is persisted in Mongo. worker-pool must not boot
+    # before Mongo is accepting connections, or it would fall back to a
+    # volatile in-memory store and refuse to start.
+    depends_on:
+      mongo:
+        condition: service_healthy
     restart: unless-stopped
 
   temporal:

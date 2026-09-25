@@ -176,11 +176,11 @@ console.log(JSON.stringify({ success: true, model }));
   },
   inputSchema: buildModelInputSchema,
   outputSchema: buildModelOutputSchema,
-isSkill: true,
+  isSkill: false,
 });
 
 buildModelSkill.triggers = [
-  { kind: 'user', phrase_examples: ['Build a financial model', 'Create revenue projections', 'Run scenario analysis'] },
+  { kind: 'schedule', cadence: 'Periodic model refresh' },
 ];
 
 export { buildModelSkill };
