@@ -29,6 +29,8 @@ const OUTREACH_DRAFTING = createCodeSkill({
   id: 'outreach-drafting',
   name: 'Outreach Drafting',
   description: 'Draft personalized sales outreach emails with templated bodies, A/B subject variants, and multi-step sequences. Runs reasoning-only on local data; no external API required.',
+tier: 'aid',
+domainKnowledge: 'Sales outreach methodology, personalization frameworks, A/B subject line testing, and sequence design',
   manifest: { language: 'javascript', entrypoint: 'index.js', sourceCode: OUTREACH_DRAFTING_SOURCE },
   inputSchema: {
     type: 'object',
@@ -56,6 +58,7 @@ const OUTREACH_DRAFTING = createCodeSkill({
   triggers: [
     { kind: 'user', phrase_examples: ['Draft an outreach email', 'Write a follow-up', 'Create an email sequence'] },
   ],
+isSkill: true,
 });
 
 export { OUTREACH_DRAFTING };

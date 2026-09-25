@@ -148,4 +148,5 @@ export const MATCHUP_ODDS_EXPLAINER = createCodeSkill({
   triggers: [
     { kind: 'schedule', cadence: 'Pre-match briefing 48h prior' },
   ],
+isSkill: true,
 });

@@ -67,6 +67,7 @@ const MATTER_DOCUMENT_OPS = createExternalActionSkill({
     required: ['success', 'status', 'system', 'action', 'request', 'response', 'error'],
   },
   timeoutMs: 60000,
+isSkill: true,
 });
 
 MATTER_DOCUMENT_OPS.confirmBeforeSend = true;

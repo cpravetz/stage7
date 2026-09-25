@@ -56,7 +56,9 @@ const INVESTMENT_MARKET_DATA = createExternalActionSkill({
   ],
   timeoutMs: 30000,
   tier: 'represent',
-  confirmBeforeSend: true
+  domainKnowledge: 'Market data access conventions, quote and fundamentals retrieval, options chain interpretation, and dry-run safety gating',
+  confirmBeforeSend: true,
+isSkill: true,
 });
 
 export { INVESTMENT_MARKET_DATA };

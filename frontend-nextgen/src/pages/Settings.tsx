@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { fetchJSON, postJSON } from '../utils/api';
+import { postJSON } from '../utils/api';
 
 type SettingsState = {
   llm: {
@@ -84,22 +83,6 @@ const Settings = () => {
     setSettings((prev) => ({ ...prev, llm: { ...prev.llm, freeModelsOnly: value } }));
   };
 
-  const inputStyle: React.CSSProperties = {
-    background: '#0f172a',
-    border: '1px solid #334155',
-    borderRadius: 6,
-    padding: '8px 10px',
-    color: '#e2e8f0',
-    fontSize: 14,
-  };
-
-  const readonlyInputStyle: React.CSSProperties = {
-    ...inputStyle,
-    background: '#334155',
-    opacity: 0.8,
-    cursor: 'not-allowed',
-  };
-
   const labelStyle: React.CSSProperties = {
     display: 'flex',
     flexDirection: 'column',
@@ -112,25 +95,6 @@ const Settings = () => {
     textTransform: 'uppercase',
     letterSpacing: '0.05em',
   };
-
-  const renderField = (
-    label: string,
-    value: string,
-    onChange: (value: string) => void,
-    options?: { readOnly?: boolean; type?: string; placeholder?: string }
-  ) => (
-    <label style={labelStyle}>
-      <span style={labelTextStyle}>{label}</span>
-      <input
-        type={options?.type || 'text'}
-        value={value}
-        readOnly={!!options?.readOnly}
-        placeholder={options?.placeholder}
-        onChange={(e) => onChange(e.target.value)}
-        style={options?.readOnly ? readonlyInputStyle : inputStyle}
-      />
-    </label>
-  );
 
   if (loading) {
     return <div className="page"><h1>Settings</h1><p className="loading">Loading settings...</p></div>;

@@ -92,6 +92,7 @@ outputSchema: RESUME_TEMPLATE_MANAGER_OUTPUT,
 triggers: [
 { kind: 'user', phrase_examples: ['Update my resume', 'Manage templates', 'Upload a new resume variant'] },
 ],
+isSkill: true,
 });
 RESUME_TEMPLATE_MANAGER.configSchema = RESUME_TEMPLATE_MANAGER.manifest.configSchema as SchemaRecord;
 

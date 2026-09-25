@@ -62,6 +62,7 @@ const CAREER_PIPELINE_REPORT_OUTPUT = {
 
 const CAREER_PIPELINE_REPORT = createCodeSkill({
   id: 'career-pipeline-report',
+  isSkill: false,
   name: 'Pipeline Report',
   description: 'Aggregates application tracking data into a pipeline summary with status breakdowns and stale follow-up detection.',
   manifest: {

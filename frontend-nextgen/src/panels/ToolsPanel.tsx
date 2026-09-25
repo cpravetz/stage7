@@ -1,7 +1,6 @@
 import { ToolBinding } from '../types/workspace';
 import { SchemaFields } from '../components/SchemaFields';
-import { FeedSelector, buildFeedOptions, type FeedOption } from '../components/FeedSelector';
-import { getToolInputSchema, getToolConfigSchema, getToolDisplayName, getToolDescription, getSchemaProperties } from '../utils/workspaceHelpers';
+import { getToolConfigSchema, getToolDisplayName, getToolDescription, getSchemaProperties } from '../utils/workspaceHelpers';
 
 interface ToolsPanelProps {
   toolBindings: ToolBinding[];
@@ -26,14 +25,10 @@ export const ToolsPanel = ({
   toggleToolBinding,
   removeCustomTool,
   scheduleSave,
-  entity,
 }: ToolsPanelProps) => {
   const getDisplayName = (tool: ToolBinding) => getToolDisplayName(tool, availableSkills);
   const getDescription = (tool: ToolBinding) => getToolDescription(tool, availableSkills);
   const getConfigSchema = (tool: ToolBinding) => getToolConfigSchema(tool, availableSkills);
-  const getInputSchema = (tool: ToolBinding) => getToolInputSchema(tool, availableSkills);
-
-  const feedOptions = buildFeedOptions(availableSkills, toolBindings);
 
   return (
     <div className="grid two-col">

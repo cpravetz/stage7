@@ -616,9 +616,9 @@ describe('Workflow Governance - Sprint 7', () => {
       const analyzeStage = analyticsWorkflow.stages.find(s => s.name === 'analyze');
       const queryStage = analyticsWorkflow.stages.find(s => s.name === 'query');
       // Single skill handles all three modes via the 'mode' parameter
-      expect(reportStage?.skills.map(skill => skill.id)).toContain('analytics_business_insight_report');
-      expect(analyzeStage?.skills.map(skill => skill.id)).toContain('analytics_business_insight_report');
-      expect(queryStage?.skills.map(skill => skill.id)).toContain('analytics_business_insight_report');
+      expect(reportStage?.skills.map(skill => skill.id)).toContain('analytics-business-insight-report');
+      expect(analyzeStage?.skills.map(skill => skill.id)).toContain('analytics-business-insight-report');
+      expect(queryStage?.skills.map(skill => skill.id)).toContain('analytics-business-insight-report');
       for (const stage of analyticsWorkflow.stages) {
         expect(stage.description).toBeTruthy();
       }

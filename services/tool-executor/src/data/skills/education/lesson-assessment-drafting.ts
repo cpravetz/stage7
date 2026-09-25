@@ -7,6 +7,8 @@ export const LESSON_ASSESSMENT_DRAFTING = createCodeSkill({
   id: 'education-lesson-assessment-drafting',
   name: 'Lesson & Assessment Drafting',
   description: 'Draft lesson plans, quizzes, activities, and multimedia-integrated content for teacher review. Runs as reasoning-only on the assistant model using curriculum standards and learner context.',
+tier: 'advise',
+domainKnowledge: 'Curriculum standards alignment, lesson design, assessment authoring, and rubric construction for teacher review',
   manifest: {
     language: 'javascript',
     entrypoint: 'index.js',

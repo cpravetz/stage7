@@ -92,6 +92,7 @@ const LEADERSHIP_ADVISORY = createCodeSkill({
   inputSchema: LEADERSHIP_INPUT,
   outputSchema: COMMON_OUTPUT,
   triggers: [{ kind: 'user', phrase_examples: ['Coach me on leadership', 'Help me decide', 'Assess my leadership', 'Analyze communication'] }],
+isSkill: true,
 });
 
 export { LEADERSHIP_ADVISORY };

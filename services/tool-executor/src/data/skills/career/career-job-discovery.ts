@@ -82,6 +82,7 @@ const CAREER_JOB_DISCOVERY_OUTPUT = {
 
 const CAREER_JOB_DISCOVERY = createCodeSkill({
   id: 'career-job-discovery',
+  isSkill: false,
   name: 'Job Discovery',
   description: 'Searches configured job boards for listings matching the candidate profile. Returns normalized job objects with title, company, location, salary, and apply URL.',
   manifest: {

@@ -1,8 +1,7 @@
-import { ToolBinding, AssistantWorkflow, WorkflowStage, Entity } from '../types/workflow';
-import { sfGetSchemaProperties as getSchemaProperties, sfIsLongTextSchema as isLongTextSchema, sfIsFileUploadSchema as isFileUploadSchema, sfReadFileAsUploadValue as readFileAsUploadValue, sfFormatTextValue as formatTextValue, sfFormatNumberValue as formatNumberValue, sfHumanizeKey as humanizeKey, sfGetSchemaTitle as getSchemaTitle, sfGetSchemaDescription as getSchemaDescription } from '../components/SchemaFields';
+import { ToolBinding, AssistantWorkflow, Entity } from '../types/workflow';
+import { sfGetSchemaProperties as getSchemaProperties, sfHumanizeKey as humanizeKey } from '../components/SchemaFields';
 
 type SchemaRecord = Record<string, unknown>;
-type EnumOption = string | number | boolean | { value: unknown; label?: unknown } | Record<string, unknown>;
 
 export const CONFIG_LABEL_MAP: Record<string, string> = {
   maxIterations: 'Max Iterations',
@@ -13,7 +12,7 @@ export const getAssistantKey = (entity: Entity): string => {
     .replace(/-canonical-assistant$/i, '')
     .replace(/_/g, '-')
     .split('-')
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .map((part: string) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(' ');
   const fromName = entity.name.replace(/\s+assistant$/i, '').trim();
   return fromName || fromId;
@@ -23,16 +22,6 @@ export const isEntityWorkflow = (workflow: AssistantWorkflow, entity: Entity): b
   const assistantKey = getAssistantKey(entity).toLowerCase();
   return workflow.assistant.toLowerCase() === assistantKey ||
     entity.name.toLowerCase().startsWith(workflow.assistant.toLowerCase());
-};
-
-const FIELD_LABEL_MAP: Record<string, string> = {
-  operation: 'Action',
-  provider: 'Service Provider',
-  endpointUrl: 'Connect Service',
-  baseUrl: 'Connect Service',
-  apiKey: 'API Key',
-  dryRun: 'Preview only',
-  confirmation: 'Approve & send',
 };
 
 export const getToolDisplayName = (tool: ToolBinding, availableSkills?: Array<{ id: string; name: string; description: string }>): string => {

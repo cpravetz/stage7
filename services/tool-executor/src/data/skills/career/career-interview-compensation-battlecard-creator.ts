@@ -30,7 +30,8 @@ console.log(JSON.stringify({ success: true, data: { briefing, pdfPreview: null, 
 const INTERVIEW_COMPENSATION_BATTLECARD_INPUT = {
   type: 'object',
   properties: {
-    company: { type: 'string', description: 'Company you are interviewing with' },
+    company: { type: 'string', description: 'Company you are interviewing with', title: 'Company', order: 1, hint: 'The company you are interviewing with' },
+    targetRole: { type: 'string', description: 'Target role title', title: 'Target Role', order: 2, hint: 'The role you are interviewing for' },
   },
   required: [],
 };
@@ -61,5 +62,6 @@ const INTERVIEW_COMPENSATION_BATTLECARD = createCodeSkill({
   triggers: [
     { kind: 'user', phrase_examples: ['Prepare me for this interview', 'Interview prep checklist', 'Compensation negotiation script'] },
   ],
+isSkill: true,
 });
 export { INTERVIEW_COMPENSATION_BATTLECARD };

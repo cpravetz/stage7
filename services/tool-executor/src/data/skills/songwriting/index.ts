@@ -16,9 +16,9 @@ export const songwritingCanonicalSkills: Tool[] = [
 export const songwritingSkills: Tool[] = songwritingCanonicalSkills;
 
 annotateStages(songwritingSkills, {
-  'songwriting_lyric_prosody_evaluator': 'refine',
-  'songwriting_musical_lyric_cocreation': 'draft',
-  'songwriting_lead_sheet_demo_dispatcher': 'brief',
+  'songwriting-lyric-prosody-evaluator': 'refine',
+  'songwriting-musical-lyric-cocreation': 'draft',
+  'songwriting-lead-sheet-demo-dispatcher': 'brief',
   'songwriter-genre-trend-evaluator': 'trend',
 });
 
@@ -28,8 +28,8 @@ export const songwritingWorkflow: AssistantWorkflow = createWorkflow({
   flow: 'trend → brief → draft → refine',
   stages: [
     { name: 'trend', description: 'Genre and trend evaluation', stageIds: ['songwriter-genre-trend-evaluator'] },
-    { name: 'brief', description: 'Brief and lead sheet', stageIds: ['songwriting_lead_sheet_demo_dispatcher'] },
-    { name: 'draft', description: 'Drafting and co-creation', stageIds: ['songwriting_musical_lyric_cocreation'] },
-    { name: 'refine', description: 'Revision and refinement', stageIds: ['songwriting_lyric_prosody_evaluator'] },
+    { name: 'brief', description: 'Brief and lead sheet', stageIds: ['songwriting-lead-sheet-demo-dispatcher'] },
+    { name: 'draft', description: 'Drafting and co-creation', stageIds: ['songwriting-musical-lyric-cocreation'] },
+    { name: 'refine', description: 'Revision and refinement', stageIds: ['songwriting-lyric-prosody-evaluator'] },
   ],
 }, songwritingSkills);

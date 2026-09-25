@@ -20,6 +20,7 @@ export interface CreateCodeSkillOptions {
   confirmBeforeSend?: boolean
   tier?: 'advise' | 'aid' | 'represent'
   domainKnowledge?: string
+  isSkill?: boolean
 }
 
 export function createCodeSkill(options: CreateCodeSkillOptions): Tool {
@@ -64,6 +65,7 @@ export function createCodeSkill(options: CreateCodeSkillOptions): Tool {
     confirmBeforeSend: options.confirmBeforeSend,
     tier: options.tier,
     domainKnowledge: options.domainKnowledge,
+    isSkill: options.isSkill,
   }
 }
 
@@ -110,6 +112,7 @@ export interface ExternalActionSkillOptions {
   confirmBeforeSend?: boolean
   tier?: 'advise' | 'aid' | 'represent'
   domainKnowledge?: string
+  isSkill?: boolean
 }
 
 type CredentialEnvKeyMap = NonNullable<ExternalActionSkillOptions['auth']>['credentialEnvKeyMap']
@@ -225,6 +228,7 @@ export function createExternalActionSkill(options: ExternalActionSkillOptions): 
     confirmBeforeSend,
     tier,
     domainKnowledge,
+    isSkill,
   } = options
   const triggers = options.triggers
 
@@ -418,6 +422,7 @@ export function createExternalActionSkill(options: ExternalActionSkillOptions): 
     confirmBeforeSend,
     tier,
     domainKnowledge,
+    isSkill,
   })
 }
 

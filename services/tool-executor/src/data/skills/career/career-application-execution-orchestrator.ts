@@ -39,7 +39,7 @@ console.log(JSON.stringify({ success: true, data: { applications, errors: data.e
 const APPLICATION_EXECUTION_ORCHESTRATOR_INPUT = {
 type: 'object',
 properties: {
-targetRoles: { type: 'array', items: { type: 'string' }, description: 'Specific roles to apply to; if left blank, the pipeline will be used' },
+targetRoles: { type: 'array', items: { type: 'string' }, description: 'Specific roles to apply to; if left blank, the pipeline will be used', 'x-referenceSource': 'career-job-discovery-fit-ranking' },
 targetRole: { type: 'string', description: 'Single role to apply to' },
 dryRun: { type: 'boolean', description: 'Preview without submitting; defaults to true', default: true },
 customResume: { type: 'string', description: 'Custom resume text to use for this application when overriding your default resume' },
@@ -73,7 +73,7 @@ required: ['success', 'data'],
 
 const APPLICATION_EXECUTION_ORCHESTRATOR = createCodeSkill({
 id: 'career-application-execution-orchestrator',
-name: 'Apply to Jobs',
+name: 'Multi-Portal Application Orchestrator',
 description: 'Applies to a selected job or set of jobs using the board attached to each posting, with optional custom materials. Delegates to career-application-execution. Human review is still recommended before sending where required.',
 manifest: {
 language: 'javascript',
@@ -85,9 +85,11 @@ lowerOrderTools: ['career-application-execution'],
 },
 inputSchema: APPLICATION_EXECUTION_ORCHESTRATOR_INPUT,
 outputSchema: APPLICATION_EXECUTION_ORCHESTRATOR_OUTPUT,
+confirmBeforeSend: true,
 triggers: [
-{ kind: 'user', phrase_examples: ['Apply to these jobs', 'Submit applications', 'Auto-apply to ranked roles'] },
+{ kind: 'user', phrase_examples: ['Apply to selected jobs', 'Apply to these jobs', 'Submit applications'] },
 ],
+isSkill: true,
 });
 
 export { APPLICATION_EXECUTION_ORCHESTRATOR };

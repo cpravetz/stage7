@@ -248,7 +248,7 @@ describe('Skill Classification', () => {
 
 describe('Schema Hygiene', () => {
   it('Healthcare: patientId renamed to patient in CLINICAL_DECISION_SUPPORT schema', () => {
-    const cds = healthcareSkills.find((s) => s.id === 'healthcare_clinical_decision_support');
+    const cds = healthcareSkills.find((s) => s.id === 'healthcare-clinical-decision-support');
     expect(cds).toBeDefined();
     const props = (cds!.inputSchema as Record<string, unknown>).properties as Record<string, unknown>;
     expect(props).toHaveProperty('patient');
@@ -256,18 +256,18 @@ describe('Schema Hygiene', () => {
   });
 
   it('Education: learnerId renamed to learner in LEARNER_INSIGHT schema', () => {
-    const insight = educationSkills.find((s) => s.id === 'education_learner_insight');
+    const insight = educationSkills.find((s) => s.id === 'education-learner-insight');
     expect(insight).toBeDefined();
     const props = (insight!.inputSchema as Record<string, unknown>).properties as Record<string, unknown>;
     expect(props).toHaveProperty('learner');
     expect(props).not.toHaveProperty('learnerId');
   });
 
-  it('HR: Candidate Screening uses friendly name', () => {
-    const screening = hrSkills.find((s) => s.id === 'candidate-screening');
+  it('HR: resume screening uses a friendly, user-facing name', () => {
+    const screening = hrSkills.find((s) => s.id === 'hr-screen-resume');
     expect(screening).toBeDefined();
     expect(screening!.name).not.toMatch(/Candidate Screening & Scheduling Manager/);
-    expect(screening!.name).toMatch(/Applicant Review/);
+    expect(screening!.name).toMatch(/Screen Resume for Role Fit/);
   });
 
   it('CTO: base tools have isSkill:false', () => {

@@ -93,6 +93,7 @@ outputSchema: PORTAL_RECRUITER_WORKFLOW_OUTPUT,
 triggers: [
 { kind: 'user', phrase_examples: ['Submit my applications', 'Draft recruiter outreach', 'Run my portal workflow'] },
 ],
+isSkill: true,
 });
 
 export { PORTAL_RECRUITER_WORKFLOW };

@@ -5,13 +5,11 @@ interface ConfigurationPanelProps {
   editingSystemPrompt: string;
   setEditingSystemPrompt: (value: string) => void;
   transactionGuidanceEntries: string[];
-  setTransactionGuidanceEntries: React.Dispatch<React.SetStateAction<string[]>>;
   transactionInput: string;
   setTransactionInput: (value: string) => void;
   addTransactionGuidance: () => void;
   removeTransactionGuidance: (idx: number) => void;
   knowledgeEntries: Array<{ id: string; title: string; content: string; source?: string }>;
-  setKnowledgeEntries: React.Dispatch<React.SetStateAction<Array<{ id: string; title: string; content: string; source?: string }>>>;
   knowledgeTitle: string;
   setKnowledgeTitle: (value: string) => void;
   knowledgeContent: string;
@@ -31,13 +29,11 @@ export const ConfigurationPanel = ({
   editingSystemPrompt,
   setEditingSystemPrompt,
   transactionGuidanceEntries,
-  setTransactionGuidanceEntries,
   transactionInput,
   setTransactionInput,
   addTransactionGuidance,
   removeTransactionGuidance,
   knowledgeEntries,
-  setKnowledgeEntries,
   knowledgeTitle,
   setKnowledgeTitle,
   knowledgeContent,

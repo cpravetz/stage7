@@ -135,6 +135,7 @@ export const RESTAURANT_SHIFT_PREP_LIST_COPILOT = createCodeSkill({
       ]
     }
   ],
+isSkill: true,
 });
 
 RESTAURANT_SHIFT_PREP_LIST_COPILOT.tier = 'aid';

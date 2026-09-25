@@ -15,7 +15,7 @@ export const financeSkills: Tool[] = [
 annotateStages(financeSkills, {
   'finance-build-model': 'research',
   'finance-analyze-investment': 'analyze',
-  'finance-risk-assessment': 'analyze',
+  'finance-risk-assessment': 'trade',
   'finance-regulatory-compliance': 'report',
 });
 
@@ -25,8 +25,8 @@ export const financeWorkflow: AssistantWorkflow = createWorkflow({
   flow: 'research → analyze → trade → report',
   stages: [
     { name: 'research', description: 'Research and data gathering', stageIds: ['finance-build-model'] },
-    { name: 'analyze', description: 'Analysis and risk assessment', stageIds: ['finance-analyze-investment', 'finance-risk-assessment'] },
-    { name: 'trade', description: 'Trade planning and execution', stageIds: [] },
+    { name: 'analyze', description: 'Analysis and risk assessment', stageIds: ['finance-analyze-investment'] },
+    { name: 'trade', description: 'Trade planning and execution', stageIds: ['finance-risk-assessment'] },
     { name: 'report', description: 'Reporting and tracking', stageIds: ['finance-regulatory-compliance'] },
   ],
 }, financeSkills);

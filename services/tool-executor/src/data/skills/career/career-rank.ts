@@ -107,6 +107,7 @@ const CAREER_RANK_OUTPUT = {
 
 const CAREER_RANK = createCodeSkill({
   id: 'career-rank',
+  isSkill: false,
   name: 'Rank Opportunities',
   description: 'Scores and ranks job listings against the user profile using weighted criteria: role match, company preference, salary fit, location/remote, and keyword overlap.',
   manifest: {

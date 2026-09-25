@@ -98,4 +98,5 @@ export const GUEST_EXPERIENCE_SKILL = withConfirmation(createExternalActionSkill
   triggers: [
     { kind: 'user', phrase_examples: ['Recommend a local restaurant', 'Handle a guest request', 'Draft a guest message'] },
   ],
+isSkill: true,
 }));

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { fetchJSON, postJSON, putJSON, deleteResource } from '../utils/api';
+import { fetchJSON, postJSON, putJSON } from '../utils/api';
 
 type JsonSchema = {
   type?: string;
@@ -141,34 +141,6 @@ const Tools = () => {
     } finally {
       setRegistering(false);
     }
-  };
-
-  const handleDelete = async (toolId: string) => {
-    try {
-      await deleteResource(`/api/tool-executor/tools/${toolId}`);
-      setTools((prev) => prev.filter((t) => t.id !== toolId));
-      if (selectedTool?.id === toolId) setSelectedTool(null);
-      if (executingTool?.id === toolId) closeExecute();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete tool');
-    }
-  };
-
-  const openExecute = (tool: Tool) => {
-    setExecutingTool(tool);
-    setExecuteResult(null);
-    setExecuteError(null);
-    const props = tool.inputSchema?.properties || {};
-    const example: Record<string, unknown> = {};
-    for (const [key, schema] of Object.entries(props)) {
-      const s = schema as JsonSchema;
-      if (s.type === 'string') example[key] = '';
-      else if (s.type === 'number' || s.type === 'integer') example[key] = 0;
-      else if (s.type === 'boolean') example[key] = false;
-      else if (s.type === 'array') example[key] = [];
-      else example[key] = {};
-    }
-    setExecuteInputText(JSON.stringify(Object.keys(example).length ? example : {}, null, 2));
   };
 
   const closeExecute = () => {

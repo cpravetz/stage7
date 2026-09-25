@@ -172,6 +172,7 @@ export const RESTAURANT_RESERVATIONS_GUEST_PROFILE_MANAGER = createCodeSkill({
       ]
     }
   ],
+isSkill: true,
 });
 
 RESTAURANT_RESERVATIONS_GUEST_PROFILE_MANAGER.tier = 'aid';

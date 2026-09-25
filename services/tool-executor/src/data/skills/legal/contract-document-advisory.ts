@@ -63,6 +63,7 @@ const CONTRACT_DOCUMENT_ADVISORY = createCodeSkill({
     },
     required: ['success'],
   },
+isSkill: true,
 });
 
 CONTRACT_DOCUMENT_ADVISORY.tier = 'advise';

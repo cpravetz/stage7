@@ -176,6 +176,7 @@ console.log(JSON.stringify({ success: true, model }));
   },
   inputSchema: buildModelInputSchema,
   outputSchema: buildModelOutputSchema,
+isSkill: true,
 });
 
 buildModelSkill.triggers = [

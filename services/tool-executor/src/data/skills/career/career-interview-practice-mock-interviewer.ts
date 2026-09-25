@@ -73,6 +73,7 @@ outputSchema: INTERVIEW_PRACTICE_MOCK_INTERVIEWER_OUTPUT,
 triggers: [
 { kind: 'user', phrase_examples: ['Mock interview me', 'Practice for this interview', 'Run a mock session'] },
 ],
+isSkill: true,
 });
 INTERVIEW_PRACTICE_MOCK_INTERVIEWER.configSchema = INTERVIEW_PRACTICE_MOCK_INTERVIEWER.manifest.configSchema as SchemaRecord;
 

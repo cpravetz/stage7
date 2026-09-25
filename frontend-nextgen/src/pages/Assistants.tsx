@@ -42,11 +42,6 @@ const [transactionGuidance, setTransactionGuidance] = useState<string[]>([]);
 const [transactionInput, setTransactionInput] = useState('');
 const [registering, setRegistering] = useState(false);
 
-const [execId, setExecId] = useState('');
-  const [execPrompt, setExecPrompt] = useState('');
-  const [execResult, setExecResult] = useState<string | null>(null);
-  const [executing, setExecuting] = useState(false);
-
   const [editingId, setEditingId] = useState<string | null>(null);
 const [editForm, setEditForm] = useState<{
   name?: string;
@@ -194,21 +189,6 @@ const [editKnowledgeTitle, setEditKnowledgeTitle] = useState('');
       setEditForm({});
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update assistant');
-    }
-  };
-
-  const handleExecute = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setExecuting(true);
-    setExecResult(null);
-    setError(null);
-    try {
-      const data = await postJSON<{ output: unknown }>(`/api/workers/assistants/${execId}/execute`, { prompt: execPrompt });
-      setExecResult(typeof data.output === 'string' ? data.output : JSON.stringify(data.output, null, 2));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Execution failed');
-    } finally {
-      setExecuting(false);
     }
   };
 

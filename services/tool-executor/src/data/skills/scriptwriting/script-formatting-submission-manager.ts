@@ -93,4 +93,5 @@ export const SCRIPT_FORMATTING_SUBMISSION_MANAGER = createCodeSkill({
   tier: 'represent',
   confirmBeforeSend: true,
   domainKnowledge: 'Screenplay formatting standards (Master Scene Heading style), script submission platforms, industry formatting guidelines',
+isSkill: true,
 });

@@ -22,7 +22,7 @@ export const sfGetSchemaProperties = (schema?: SchemaRecord): Record<string, Sch
 };
 
 export const sfGetSchemaTitle = (key: string, schema?: SchemaRecord): string => (
-  String(schema?.title || schema?.label || schema?.['x-label'] || FIELD_LABEL_MAP[key] || sfHumanizeKey(key))
+  String(schema?.title || schema?.label || schema?.['x-label'] || schema?.['x-referenceLabel'] || FIELD_LABEL_MAP[key] || sfHumanizeKey(key))
 );
 
 export const sfGetSchemaDescription = (schema?: SchemaRecord): string => (
@@ -35,6 +35,18 @@ export const sfIsLongTextSchema = (key: string, schema?: SchemaRecord): boolean 
   schema?.format === 'textarea' ||
   /message|prompt|content|description|instructions|text|body|query|keywords|topic|resume/i.test(key) ||
   /prompt|message|content|instructions/i.test(sfGetSchemaDescription(schema))
+);
+
+export const sfIsReferenceSchema = (schema?: SchemaRecord): boolean => (
+  schema?.format === 'reference' || Boolean(schema?.['x-referenceSource'])
+);
+
+export const sfGetReferenceSource = (schema?: SchemaRecord): string => (
+  String(schema?.['x-referenceSource'] || '')
+);
+
+export const sfGetReferenceLabel = (key: string, schema?: SchemaRecord): string => (
+  String(schema?.['x-referenceLabel'] || schema?.title || schema?.label || key)
 );
 
 export const sfIsFileUploadSchema = (schema?: SchemaRecord): boolean => {
@@ -147,6 +159,38 @@ export const SchemaFields = ({ schema, values, onChange, namePrefix = 'skill-fie
               })}
             </select>
           );
+        } else if (sfIsReferenceSchema(fieldSchema)) {
+          const referenceSource = sfGetReferenceSource(fieldSchema);
+          const referenceLoadingMessage = referenceSource
+            ? `Loading references from ${referenceSource}...`
+            : 'Loading references...';
+          if (fieldSchema.type === 'array') {
+            const arrayValue = Array.isArray(value) ? value : [];
+            control = (
+              <div className="skill-reference-picker">
+                <div className="skill-reference-picker__hint">{referenceLoadingMessage}</div>
+                <div className="skill-reference-picker__options">
+                  <span className="skill-reference-picker__empty">Reference data not yet available.</span>
+                </div>
+                <input type="hidden" value={arrayValue.map((item) => sfFormatTextValue(item)).join(',')} />
+              </div>
+            );
+          } else {
+            control = (
+              <div className="skill-reference-picker">
+                <div className="skill-reference-picker__hint">{referenceLoadingMessage}</div>
+                <select
+                  id={fieldId}
+                  className={controlClass}
+                  value={typeof value === 'string' ? value : ''}
+                  onChange={(e) => onChange(key, e.target.value)}
+                  disabled
+                >
+                  <option value="">Select an option</option>
+                </select>
+              </div>
+            );
+          }
         } else if (fieldSchema.type === 'array') {
           const arrayValue = Array.isArray(value) ? value : [];
           control = (

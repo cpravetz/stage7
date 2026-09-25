@@ -53,6 +53,7 @@ const LEGAL_RESEARCH = createCodeSkill({
     },
     required: ['success'],
   },
+isSkill: true,
 });
 
 LEGAL_RESEARCH.tier = 'aid';

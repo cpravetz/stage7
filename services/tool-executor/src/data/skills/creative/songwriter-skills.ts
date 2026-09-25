@@ -248,6 +248,8 @@ export const lyricProsodyEvaluator = createCodeSkill({
   id: 'songwriting-lyric-prosody-evaluator',
   name: 'Advise Lyric & Structural Prosody Evaluator',
   description: 'Analyzes song lyrics for meter, syllable variance, rhyme signal, stress patterns, and thematic coherence, then returns concrete structural revision recommendations for the songwriter.',
+tier: 'advise',
+domainKnowledge: 'Lyric prosody metrics, syllable and stress patterning, rhyme evaluation, and structural songwriting craft',
   manifest: { language: 'javascript', entrypoint: 'index.js', sourceCode: LYRIC_PROSODY_SOURCE },
   inputSchema: {
     type: 'object',
@@ -279,6 +281,8 @@ export const musicalCoCreation = createCodeSkill({
   id: 'songwriting-musical-lyric-cocreation',
   name: 'Aid Musical & Lyric Co-Creation Engine',
   description: 'Generates a structured song draft with genre-aware chord progression, lyric sections, rhyme direction, transitions, and a section beat sheet from a creative brief.',
+tier: 'aid',
+domainKnowledge: 'Song craft co-creation, genre-aware chord progression, lyric section structure, and hook design',
   manifest: { language: 'javascript', entrypoint: 'index.js', sourceCode: COCREATION_SOURCE },
   inputSchema: {
     type: 'object',

@@ -100,6 +100,7 @@ outputSchema: JOB_DISCOVERY_FIT_RANKING_OUTPUT,
 triggers: [
 { kind: 'user', phrase_examples: ['Discover jobs', 'Find matching roles', 'Rank my job options'] },
 ],
+isSkill: true,
 });
 JOB_DISCOVERY_FIT_RANKING.configSchema = JOB_DISCOVERY_FIT_RANKING.manifest.configSchema as SchemaRecord;
 

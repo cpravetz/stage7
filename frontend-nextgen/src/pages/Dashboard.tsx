@@ -11,13 +11,6 @@ interface ServiceInfo {
   lastChecked: number;
 }
 
-interface Agent {
-  id: string;
-  name: string;
-  type: string;
-  status: string;
-}
-
 const REFRESH_INTERVAL = 20000;
 
 const Dashboard = () => {

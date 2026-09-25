@@ -77,6 +77,8 @@ const BILL_PAY_REBALANCING = createCodeSkill({
   id: 'bill-pay-rebalancing',
   name: 'Bill Pay & Rebalancing Execution Proxy',
   description: 'Tracks upcoming personal obligations, flags unusual bank fees, and stages rebalancing transfers for explicit user approval.',
+tier: 'represent',
+domainKnowledge: 'Personal finance obligation tracking, bank fee anomaly detection, and approval-gated rebalancing transfers',
   manifest: { language: 'javascript', entrypoint: 'index.js', sourceCode: BILL_PAY_REBALANCING_SOURCE },
   inputSchema: {
     type: 'object',
@@ -99,6 +101,7 @@ const BILL_PAY_REBALANCING = createCodeSkill({
   triggers: [
     { kind: 'user', phrase_examples: ['Track my bills', 'Review upcoming payments', 'Stage a transfer', 'Check portfolio drift', 'Flag unusual fees'] }
   ],
+isSkill: true,
 });
 
 BILL_PAY_REBALANCING.confirmBeforeSend = true;

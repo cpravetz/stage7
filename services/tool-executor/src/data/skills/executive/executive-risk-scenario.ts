@@ -75,6 +75,7 @@ const RISK_SCENARIO = createCodeSkill({
   inputSchema: RISK_SCENARIO_INPUT,
   outputSchema: COMMON_OUTPUT,
   triggers: [{ kind: 'user', phrase_examples: ['Assess risk', 'Model a scenario', 'What could go wrong'] }],
+isSkill: true,
 });
 
 export { RISK_SCENARIO };

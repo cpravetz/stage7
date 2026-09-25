@@ -161,4 +161,5 @@ export const BANKROLL_CO_PILOT = createCodeSkill({
   triggers: [
     { kind: 'schedule', cadence: 'Pre-bet risk check' },
   ],
+isSkill: true,
 });

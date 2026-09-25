@@ -34,7 +34,7 @@ export const sportsWorkflow = createWorkflow({
   flow: 'research → odds → analysis',
   stages: [
     { name: 'research', description: 'Research and scouting', stageIds: ['sports-scouting-alert-dispatcher', 'sports-line-alert-dispatcher'] },
-    { name: 'odds', description: 'Odds analysis and bankroll management', stageIds: ['sports-matchup-odds-explainer', 'sports-bankroll-co-pilot'] },
+    { name: 'odds', description: 'Odds analysis and bankroll management', stageIds: ['sports-matchup-odds-explainer', 'sports-bankroll-co-pilot', 'sports-ingame-predictive-modeling'] },
     { name: 'analysis', description: 'Tactical analysis and battlecard creation', stageIds: ['sports-tactical-roster-evaluator', 'sports-battlecard-creator'] },
   ],
 }, sportsSkills);

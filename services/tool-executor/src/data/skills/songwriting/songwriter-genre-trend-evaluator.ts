@@ -16,7 +16,7 @@ const GENRE_TREND_EVALUATOR_SOURCE = `(async () => {
       success: false,
       status: 'error',
       error: 'theme or lyrics is required',
-      delegatedTo: ['songwriting_lyric_prosody_evaluator', 'songwriting_musical_lyric_cocreation'],
+      delegatedTo: ['songwriting-lyric-prosody-evaluator', 'songwriting-musical-lyric-cocreation'],
       genre: genre,
       trendDataSource: trendDataSource,
     }));
@@ -24,14 +24,14 @@ const GENRE_TREND_EVALUATOR_SOURCE = `(async () => {
   }
 
   try {
-    const lyricResult = await __execute_tool('songwriting_lyric_prosody_evaluator', {
+    const lyricResult = await __execute_tool('songwriting-lyric-prosody-evaluator', {
       lyrics: lyrics || '(no lyrics provided)',
       genre: genre,
       structure: input.structure || 'verse-chorus',
       targetMeter: input.targetMeter || 8,
     });
     if (lyricResult && lyricResult.success) {
-      connected.push('songwriting_lyric_prosody_evaluator');
+      connected.push('songwriting-lyric-prosody-evaluator');
       results.lyricProsody = lyricResult.data;
     }
   } catch (_) {
@@ -39,7 +39,7 @@ const GENRE_TREND_EVALUATOR_SOURCE = `(async () => {
   }
 
   try {
-    const cocreationResult = await __execute_tool('songwriting_musical_lyric_cocreation', {
+    const cocreationResult = await __execute_tool('songwriting-musical-lyric-cocreation', {
       theme: theme || 'Untitled song',
       genre: genre,
       mood: input.mood || 'hopeful',
@@ -48,7 +48,7 @@ const GENRE_TREND_EVALUATOR_SOURCE = `(async () => {
       save: false,
     });
     if (cocreationResult && cocreationResult.success) {
-      connected.push('songwriting_musical_lyric_cocreation');
+      connected.push('songwriting-musical-lyric-cocreation');
       results.musicalCoCreation = cocreationResult.data;
     }
   } catch (_) {
@@ -59,11 +59,11 @@ const GENRE_TREND_EVALUATOR_SOURCE = `(async () => {
     console.log(JSON.stringify({
       success: false,
       status: 'not-connected',
-      error: 'Not connected: neither songwriting_lyric_prosody_evaluator nor songwriting_musical_lyric_cocreation is available. Connect at least one to assess genre trend fit.',
+      error: 'Not connected: neither songwriting-lyric-prosody-evaluator nor songwriting-musical-lyric-cocreation is available. Connect at least one to assess genre trend fit.',
       genre: genre,
       genreFocus: genreFocus,
       trendDataSource: trendDataSource,
-      delegatedTo: ['songwriting_lyric_prosody_evaluator', 'songwriting_musical_lyric_cocreation'],
+      delegatedTo: ['songwriting-lyric-prosody-evaluator', 'songwriting-musical-lyric-cocreation'],
     }));
     return;
   }
@@ -85,7 +85,7 @@ const GENRE_TREND_EVALUATOR_SOURCE = `(async () => {
     audienceAlignment: totalScore >= 2 ? 'strong' : totalScore >= 1 ? 'partial' : 'unassessed',
     lyricProsody: lyricAvailable ? results.lyricProsody : null,
     musicalCoCreation: musicalAvailable ? results.musicalCoCreation : null,
-    delegatedTo: ['songwriting_lyric_prosody_evaluator', 'songwriting_musical_lyric_cocreation'],
+    delegatedTo: ['songwriting-lyric-prosody-evaluator', 'songwriting-musical-lyric-cocreation'],
     generatedAt: new Date().toISOString(),
   };
 
@@ -103,7 +103,7 @@ const GENRE_TREND_EVALUATOR_SOURCE = `(async () => {
     success: true,
     status: 'live',
     data: evaluation,
-    delegatedTo: ['songwriting_lyric_prosody_evaluator', 'songwriting_musical_lyric_cocreation'],
+    delegatedTo: ['songwriting-lyric-prosody-evaluator', 'songwriting-musical-lyric-cocreation'],
   }));
 })()`;
 
@@ -152,4 +152,5 @@ export const SONGWRITER_GENRE_TREND_EVALUATOR = createCodeSkill({
   ],
   tier: 'advise',
   domainKnowledge: 'Songwriting genre analysis, market trend evaluation, audience fit assessment',
+isSkill: true,
 });

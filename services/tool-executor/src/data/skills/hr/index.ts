@@ -81,6 +81,7 @@ console.log(JSON.stringify(result));`,
     },
     required: ['status'],
   },
+isSkill: true,
 });
 
 HR_SCREEN_RESUME.confirmBeforeSend = true;
@@ -177,6 +178,7 @@ console.log(JSON.stringify(result));`,
     },
     required: ['status'],
   },
+isSkill: true,
 });
 
 HR_ASSESS_CANDIDATE.confirmBeforeSend = true;
@@ -264,6 +266,7 @@ console.log(JSON.stringify(result));`,
     },
     required: ['status'],
   },
+isSkill: true,
 });
 
 HR_SCHEDULE_INTERVIEW.confirmBeforeSend = true;
@@ -320,6 +323,7 @@ const HR_DRAFT_JD_INTERVIEW_KIT = createExternalActionSkill({
   },
   timeoutMs: 30000,
   confirmBeforeSend: true,
+isSkill: true,
 });
 
 HR_DRAFT_JD_INTERVIEW_KIT.triggers = [
@@ -375,6 +379,7 @@ const HR_TRIGGER_INTERVIEW_SCHEDULING = createExternalActionSkill({
   },
   timeoutMs: 30000,
   confirmBeforeSend: true,
+isSkill: true,
 });
 
 HR_TRIGGER_INTERVIEW_SCHEDULING.triggers = [
@@ -458,6 +463,7 @@ console.log(JSON.stringify(result));`,
     },
     required: ['status'],
   },
+isSkill: true,
 });
 
 HR_HIRING_ANALYTICS.triggers = [
@@ -542,6 +548,7 @@ console.log(JSON.stringify(result));`,
     },
     required: ['status'],
   },
+isSkill: true,
 });
 
 HR_COMPLIANCE_CHECK.triggers = [

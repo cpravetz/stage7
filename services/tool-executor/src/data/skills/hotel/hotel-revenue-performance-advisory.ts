@@ -245,4 +245,5 @@ export const REVENUE_SKILL = createCodeSkill({
   triggers: [
     { kind: 'schedule', cadence: 'Weekly revenue and performance review' },
   ],
+isSkill: true,
 });

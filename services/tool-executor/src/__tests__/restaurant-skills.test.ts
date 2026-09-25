@@ -8,8 +8,8 @@ function getSkill(id: string): Tool {
 }
 
 describe('restaurantSkills', () => {
-  it('exports exactly seven skills', () => {
-    expect(restaurantSkills).toHaveLength(7);
+  it('exports exactly five skills', () => {
+    expect(restaurantSkills).toHaveLength(5);
   });
 
   it('exports unique skill ids', () => {
@@ -17,24 +17,12 @@ describe('restaurantSkills', () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it('two legacy external tools are isSkill:false', () => {
+  it('has no legacy isSkill:false external tools', () => {
     const legacy = restaurantSkills.filter((s) => s.isSkill === false);
-    expect(legacy).toHaveLength(2);
-    const legacyIds = legacy.map((s) => s.id).sort();
-    expect(legacyIds).toEqual([
-      'restaurant-kitchen-service-operations',
-      'restaurant-reservations-guest-experience',
-    ].sort());
+    expect(legacy).toHaveLength(0);
   });
 
-  it('legacy external tools are self-contained (no __execute_tool)', () => {
-    const legacy = restaurantSkills.filter((s) => s.isSkill === false);
-    for (const s of legacy) {
-      expect((s.manifest.sourceCode as string)).not.toContain('__execute_tool(');
-    }
-  });
-
-  it('five canonical higher-order skills are exported (isSkill not forced false)', () => {
+  it('all exported skills are canonical skills (isSkill not false)', () => {
     const ho = restaurantSkills.filter((s) => s.isSkill !== false);
     expect(ho).toHaveLength(5);
     const hoIds = ho.map((s) => s.id).sort();
@@ -49,7 +37,7 @@ describe('restaurantSkills', () => {
 
   it('canonical skill using __execute_tool delegates correctly', () => {
     const source = getSkill('restaurant-financial-forecast-evaluator').manifest.sourceCode as string;
-    expect(source).toContain("__execute_tool('restaurant-financial-advisory'");
+    expect(source).toContain("__execute_tool('restaurant-menu-engineering-cost-strategist'");
     expect(source).toContain('try {');
     expect(source).not.toMatch(/success:\s*true[^}]*console\.log/);
   });

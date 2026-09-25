@@ -1,4 +1,4 @@
-import { FeedEvent } from '../types/feed';
+import { FeedEvent } from '../stores/feedStore';
 
 interface LiveFeedPanelProps {
   events: FeedEvent[];

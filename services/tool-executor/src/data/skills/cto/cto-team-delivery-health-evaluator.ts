@@ -116,6 +116,7 @@ export const ctoTeamDeliveryHealthEvaluator = createCodeSkill({
     { kind: 'user', phrase_examples: ['evaluate team delivery health', 'check DORA metrics', 'assess sprint velocity', 'team capacity review'] }
   ],
   tier: 'advise',
+isSkill: true,
 });
 
 ctoTeamDeliveryHealthEvaluator.configSchema = DORA_CONFIG_SCHEMA;

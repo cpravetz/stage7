@@ -101,6 +101,7 @@ outputSchema: PIPELINE_OUTCOME_TRACKER_OUTPUT,
 triggers: [
 { kind: 'user', phrase_examples: ['How is my pipeline', 'What needs follow-up', 'Track my outcomes'] },
 ],
+isSkill: true,
 });
 PIPELINE_OUTCOME_TRACKER.configSchema = PIPELINE_OUTCOME_TRACKER.manifest.configSchema as SchemaRecord;
 

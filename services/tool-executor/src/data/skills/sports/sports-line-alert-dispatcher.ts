@@ -87,18 +87,22 @@ console.log(JSON.stringify({ success: true, data: lineAlertSpec }));
 const LINE_ALERT_INPUT = {
   type: 'object',
   properties: {
-    entity: SchemaProps.text({ description: 'Entity, market, or line identifier' }),
-    sport: SchemaProps.text({ description: 'Sport context' }),
-    condition: SchemaProps.select(['line-movement', 'line-reached', 'value-spot'], { description: 'Alert trigger condition' }),
-    targetOdds: SchemaProps.number({ description: 'Target odds level for alert' }),
-    movementThreshold: SchemaProps.number({ description: 'Movement threshold for triggering alert', default: 0.05 }),
-    markets: SchemaProps.stringArray({ description: 'Markets to monitor (moneyline, spread, totals, etc.)' }),
-    direction: SchemaProps.select(['up', 'down', 'any'], { description: 'Direction of line movement', default: 'any' }),
-    message: SchemaProps.text({ description: 'Alert message' }),
-    channels: SchemaProps.stringArray({ description: 'Dispatch channels', default: ['user-device'] }),
-    confirmationId: SchemaProps.text({ description: 'Confirmation ID for gating' }),
-    dryRun: SchemaProps.boolean({ description: 'Always dry-run — represent actions never execute live', default: true }),
-    confirmationRequired: SchemaProps.boolean({ description: 'Confirmation required before sending', default: true }),
+    entity: SchemaProps.text({ description: 'Entity, market, or line identifier', title: 'Entity / Market', order: 1, hint: 'Team, player, or market identifier' }),
+    market: SchemaProps.text({ description: 'Market or line identifier (alias for entity)', title: 'Market', order: 2, hint: 'Alternative: specific betting market (e.g. moneyline, spread)' }),
+    sport: SchemaProps.text({ description: 'Sport context', title: 'Sport', order: 3, hint: 'e.g. NFL, NBA, MLB' }),
+    condition: SchemaProps.select(['line-movement', 'line-reached', 'value-spot'], { description: 'Alert trigger condition', title: 'Condition', order: 4, hint: 'When to trigger the alert' }),
+    targetOdds: SchemaProps.number({ description: 'Target odds level for alert', title: 'Target Odds', order: 5, hint: 'Specific odds level to alert on' }),
+    movementThreshold: SchemaProps.number({ description: 'Movement threshold for triggering alert', title: 'Movement Threshold', order: 6, hint: 'Minimum line movement to trigger', default: 0.05 }),
+    markets: SchemaProps.stringArray({ description: 'Markets to monitor (moneyline, spread, totals, etc.)', title: 'Markets', order: 7, hint: 'Which bet types to monitor' }),
+    direction: SchemaProps.select(['up', 'down', 'any'], { description: 'Direction of line movement', title: 'Direction', order: 8, hint: 'Direction of movement to watch', default: 'any' }),
+    message: SchemaProps.text({ description: 'Alert message', title: 'Message', order: 9, hint: 'Custom alert message' }),
+    channels: SchemaProps.stringArray({ description: 'Dispatch channels', title: 'Channels', order: 10, hint: 'Where to send alerts', default: ['user-device'] }),
+    confirmationId: SchemaProps.text({ description: 'Confirmation ID for gating', title: 'Confirmation ID', order: 11, hint: 'Optional confirmation token' }),
+    dryRun: SchemaProps.boolean({ description: 'Always dry-run — represent actions never execute live', title: 'Dry Run', order: 12, hint: 'Always enabled for represent actions', default: true }),
+    confirmationRequired: SchemaProps.boolean({ description: 'Confirmation required before sending', title: 'Require Confirmation', order: 13, hint: 'Gate dispatch behind confirmation', default: true }),
+    bankrollUnits: SchemaProps.number({ description: 'Current bankroll units', title: 'Bankroll Units', order: 14, hint: 'Current units at risk', default: 0 }),
+    bankrollMaxUnits: SchemaProps.number({ description: 'Maximum bankroll units', title: 'Max Bankroll Units', order: 15, hint: 'Maximum exposure limit', default: 100 }),
+    historicalVariance: SchemaProps.number({ description: 'Historical variance for signal detection', title: 'Historical Variance', order: 16, hint: 'Baseline variance for noise filtering', default: 0.03 }),
   },
   required: ['entity', 'sport'],
 };
@@ -139,4 +143,5 @@ export const LINE_ALERT_DISPATCHER = createCodeSkill({
   triggers: [
     { kind: 'user', phrase_examples: ['Check line movement', 'Dispatch line alert', 'Monitor odds change', 'Alert value spot'] }
   ],
+isSkill: true,
 });

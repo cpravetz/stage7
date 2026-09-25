@@ -79,6 +79,7 @@ const CAREER_NETWORKING_OUTREACH_OUTPUT = {
 
 const CAREER_NETWORKING_OUTREACH = createCodeSkill({
   id: 'career-networking-outreach',
+  isSkill: false,
   name: 'Networking Outreach',
   description: 'Drafts recruiter outreach messages for cold outreach, follow-ups, thank-you notes, and referral asks across email and LinkedIn.',
   manifest: {

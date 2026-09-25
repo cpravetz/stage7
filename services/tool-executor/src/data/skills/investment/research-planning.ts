@@ -205,12 +205,15 @@ const RESEARCH_PLANNING = createCodeSkill({
   id: 'research-planning',
   name: 'Research & Planning',
   description: 'Market research including analyst reports, earnings transcripts, SEC filings, ESG scores, plus comprehensive financial planning for retirement, tax, estate, and goal-based projections.',
+tier: 'advise',
+domainKnowledge: 'Equity research methods, earnings and filing analysis, ESG evaluation, and financial planning projections',
   manifest: { language: 'javascript', entrypoint: 'index.js', sourceCode: researchPlanningSourceCode },
   inputSchema: researchPlanningInputSchema,
   outputSchema: commonOutputSchema,
   triggers: [
     { kind: 'user', phrase_examples: ['Research this stock', 'Get analyst reports', 'Check ESG scores', 'Create financial plan', 'Check retirement readiness', 'Run tax optimization'] }
-  ]
+  ],
+isSkill: true,
 });
 
 export { RESEARCH_PLANNING };

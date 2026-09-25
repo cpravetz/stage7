@@ -30,12 +30,13 @@ console.log(JSON.stringify({ success: true, data: { targetRole, missingSkills, l
 })();`;
 
 const UPSKILL_ROLE_TARGETED_LEARNING_PLANNER_INPUT = {
-type: 'object',
-properties: {
-jobTitle: { type: 'string', description: 'The job title you want to prepare for (e.g. Senior Data Scientist)' },
-jobPosting: { type: 'string', description: 'Paste a specific job posting to tailor the plan to its exact requirements', multiline: true },
-targetSkills: { type: 'array', items: { type: 'string' }, description: 'Skills you already have, to check against the role' },
-},
+  type: 'object',
+  properties: {
+    jobTitle: { type: 'string', description: 'The job title you want to prepare for (e.g. Senior Data Scientist)', title: 'Job Title', order: 1, hint: 'e.g. Senior Data Scientist' },
+    jobPosting: { type: 'string', description: 'Paste a specific job posting to tailor the plan to its exact requirements', title: 'Job Posting', order: 2, hint: 'Optional: paste full job description', multiline: true },
+    targetSkills: { type: 'array', items: { type: 'string' }, description: 'Skills you already have, to check against the role', title: 'Your Skills', order: 3, hint: 'Comma-separated list of skills you possess' },
+    targetRole: { type: 'string', description: 'Target role title', title: 'Target Role', order: 4, hint: 'Alternative to jobTitle; the role you want to prepare for' },
+  },
 };
 
 const UPSKILL_ROLE_TARGETED_LEARNING_PLANNER_OUTPUT = {
@@ -75,6 +76,7 @@ outputSchema: UPSKILL_ROLE_TARGETED_LEARNING_PLANNER_OUTPUT,
 triggers: [
 { kind: 'user', phrase_examples: ['Plan my upskilling', 'What should I learn for this role', 'Close my skill gaps'] },
 ],
+isSkill: true,
 });
 UPSKILL_ROLE_TARGETED_LEARNING_PLANNER.configSchema = UPSKILL_ROLE_TARGETED_LEARNING_PLANNER.manifest.configSchema as SchemaRecord;
 

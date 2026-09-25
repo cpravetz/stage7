@@ -2,8 +2,8 @@ import { sportsSkills } from '../data/skills/sports';
 import { Tool } from '../types';
 
 describe('sportsSkills', () => {
-  it('exports exactly six skills', () => {
-    expect(sportsSkills).toHaveLength(6);
+  it('exports exactly seven skills', () => {
+    expect(sportsSkills).toHaveLength(7);
   });
 
   it('exports unique skill ids', () => {
@@ -18,11 +18,11 @@ describe('sportsSkills', () => {
     expect(perfGroup).toHaveLength(3);
   });
 
-  it('has Wagering Group — three skills', () => {
+  it('has Wagering Group — four skills', () => {
     const wagerGroup = sportsSkills.filter(s =>
-      ['sports-matchup-odds-explainer', 'sports-bankroll-co-pilot', 'sports-line-alert-dispatcher'].includes(s.id)
+      ['sports-matchup-odds-explainer', 'sports-bankroll-co-pilot', 'sports-line-alert-dispatcher', 'sports-ingame-predictive-modeling'].includes(s.id)
     );
-    expect(wagerGroup).toHaveLength(3);
+    expect(wagerGroup).toHaveLength(4);
   });
 
   describe('Performance Group skills', () => {
@@ -48,7 +48,7 @@ describe('sportsSkills', () => {
       expect((skill.manifest.configSchema as any).properties!.dataProvider).toBeDefined();
       const source = skill.manifest.sourceCode as string;
       expect(source).toContain('dataConnected');
-      expect(source).toContain('create-battlecard');
+      expect(source).toContain('battlecard-archives');
       expect(source).toContain('group-a');
       expect(source).not.toContain('SPORTS_GROUP_B_HOME');
     });
@@ -118,7 +118,7 @@ describe('sportsSkills', () => {
     });
 
     it('Wagering skills use Group B persistence paths and NOT Group A', () => {
-      const wagerIds = ['sports-matchup-odds-explainer', 'sports-bankroll-co-pilot', 'sports-line-alert-dispatcher'];
+      const wagerIds = ['sports-matchup-odds-explainer', 'sports-bankroll-co-pilot', 'sports-line-alert-dispatcher', 'sports-ingame-predictive-modeling'];
       for (const skill of sportsSkills.filter(s => wagerIds.includes(s.id))) {
         const source = skill.manifest.sourceCode as string;
         expect(source).toMatch(/SPORTS_GROUP_B_HOME|\/tmp\/sports\/group-b/);
@@ -159,7 +159,7 @@ describe('sportsSkills', () => {
 
     it('Wagering group tools reference only Group B env/data paths', () => {
       const wager = sportsSkills.filter(s =>
-        ['sports-matchup-odds-explainer', 'sports-bankroll-co-pilot', 'sports-line-alert-dispatcher'].includes(s.id)
+        ['sports-matchup-odds-explainer', 'sports-bankroll-co-pilot', 'sports-line-alert-dispatcher', 'sports-ingame-predictive-modeling'].includes(s.id)
       );
       for (const s of wager) {
         const src = (s.manifest.sourceCode || '') as string;

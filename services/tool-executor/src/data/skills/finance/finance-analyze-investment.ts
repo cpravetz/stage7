@@ -137,6 +137,7 @@ console.log(JSON.stringify({ success: true, analysis }));
   },
   inputSchema: analyzeInvestmentInputSchema,
   outputSchema: analyzeInvestmentOutputSchema,
+isSkill: true,
 });
 
 analyzeInvestmentSkill.triggers = [

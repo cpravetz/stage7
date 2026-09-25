@@ -303,6 +303,7 @@ export const ctoSkills: Tool[] = [
     error: SchemaProps.text({ description: 'Error message if failed' }),
   }),
   tier: 'advise',
+  domainKnowledge: 'Infrastructure querying conventions, observability tooling, cloud provider operations, and cost visibility',
   }); (t as any).isSkill = false; return t; })(),
 
   (() => { const t = createExternalActionSkill({
@@ -356,6 +357,7 @@ export const ctoSkills: Tool[] = [
     persistenceEnv: 'CTO_HOME',
   },
   tier: 'represent',
+  domainKnowledge: 'Engineering system mutation conventions, change management, rollback planning, and confirmation gating',
   confirmBeforeSend: true,
   }); (t as any).isSkill = false; return t; })(),
 
@@ -385,6 +387,7 @@ export const ctoSkills: Tool[] = [
     error: SchemaProps.text({ description: 'Error message if failed' }),
   }),
   tier: 'aid',
+  domainKnowledge: 'Incident response runbooks, disaster recovery planning, RTO/RPO targets, and service continuity',
   }); (t as any).isSkill = false; return t; })(),
 
   (() => { const t = createCodeSkill({
@@ -447,6 +450,7 @@ export const ctoSkills: Tool[] = [
     error: SchemaProps.text({ description: 'Error message if failed' }),
   }),
   tier: 'advise',
+  domainKnowledge: 'System design patterns, technology stack trade-offs, scalability boundaries, and architecture review criteria',
   }); (t as any).isSkill = false; return t; })(),
 
   createCodeSkill({
@@ -477,6 +481,7 @@ export const ctoSkills: Tool[] = [
     }),
     triggers: CTO_TRIGGERS,
     tier: 'advise',
+    domainKnowledge: 'Architecture pattern analysis, technology stack fit scoring, and modernization roadmap prioritization',
   }),
 
   createCodeSkill({
@@ -503,6 +508,7 @@ export const ctoSkills: Tool[] = [
     }),
     triggers: CTO_TRIGGERS,
     tier: 'advise',
+    domainKnowledge: 'Cloud cost attribution, rightsizing economics, capacity planning, and infrastructure unit economics',
   }),
 
   createCodeSkill({
@@ -530,6 +536,7 @@ export const ctoSkills: Tool[] = [
     }),
     triggers: CTO_TRIGGERS,
     tier: 'aid',
+    domainKnowledge: 'Incident correlation techniques, signal triage, hypothesis formation, and mitigation sequencing',
   }),
 
   createCodeSkill({
@@ -558,6 +565,7 @@ export const ctoSkills: Tool[] = [
     }),
     triggers: CTO_TRIGGERS,
     tier: 'represent',
+    domainKnowledge: 'Infrastructure-as-code drift detection, remediation safety, change review, and rollback guarantees',
     confirmBeforeSend: true,
   }),
 ];

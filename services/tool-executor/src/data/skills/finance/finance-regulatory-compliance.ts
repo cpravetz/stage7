@@ -75,6 +75,7 @@ try {
   },
   inputSchema: regulatoryComplianceInputSchema,
   outputSchema: regulatoryComplianceOutputSchema,
+isSkill: true,
 });
 
 regulatoryComplianceSkill.triggers = [

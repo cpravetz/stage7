@@ -94,6 +94,7 @@ export function createTool(parameters: CreateToolParameters): Tool {
     externalConfig: parameters.externalConfig,
     triggers: parameters.triggers,
     confirmBeforeSend: parameters.confirmBeforeSend,
+    isSkill: parameters.isSkill,
     createdAt: parameters.createdAt ?? now,
     updatedAt: parameters.updatedAt ?? now,
   };
@@ -110,6 +111,9 @@ export function createCodeSkill(parameters: CreateCodeSkillParameters): Tool {
     outputSchema: parameters.outputSchema,
     triggers: parameters.triggers,
     confirmBeforeSend: parameters.confirmBeforeSend,
+    tier: parameters.tier,
+    domainKnowledge: parameters.domainKnowledge,
+    isSkill: parameters.isSkill,
   };
   const tool = createLegacyCodeSkill(legacyParameters);
   tool.createdAt = parameters.createdAt ?? tool.createdAt;

@@ -177,7 +177,7 @@ describe('ADK assistant composition', () => {
   });
 
   it('keeps the migrated event skill public identity and code-skill behavior', () => {
-    expect(EVENT_PLANNING_BUDGETING.id).toBe('event_planning_budgeting');
+    expect(EVENT_PLANNING_BUDGETING.id).toBe('event-planning-budgeting');
     expect(EVENT_PLANNING_BUDGETING.name).toBe('Event Planning & Budgeting');
     expect(EVENT_PLANNING_BUDGETING.type).toBe('code');
     expect(EVENT_PLANNING_BUDGETING.manifest.language).toBe('javascript');

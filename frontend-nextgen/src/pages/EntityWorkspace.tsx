@@ -52,20 +52,10 @@ const EntityWorkspace = () => {
 
   const entity: Entity | null = selectedEntity || entities.find((e) => e.id === entityId) || null;
 
-  const runResults = viewModel.runResults || {};
-  const runningMap = viewModel.runningMap || {};
-  const setRunResults = (updater: ((prev: Record<string, string>) => Record<string, string>) | Record<string, string>) => {
-    const next = typeof updater === 'function' ? updater(runResults) : updater;
-    setViewModelField(entityId, 'runResults', next);
-  };
-  const setRunningMap = (updater: ((prev: Record<string, boolean>) => Record<string, boolean>) | Record<string, boolean>) => {
-    const next = typeof updater === 'function' ? updater(runningMap) : updater;
-    setViewModelField(entityId, 'runningMap', next);
-  };
   const runInputs = viewModel.runInputs || {};
   const setRunInputs = (updater: ((prev: Record<string, Record<string, unknown>>) => Record<string, Record<string, unknown>>) | Record<string, Record<string, unknown>>) => {
     const next = typeof updater === 'function' ? updater(runInputs) : updater;
-    setViewModelField(entityId, 'runInputs', next);
+    setViewModelField(entityId || '', 'runInputs', next);
   };
 
   useEffect(() => {
@@ -120,7 +110,7 @@ const EntityWorkspace = () => {
         const isSkillTool = (tool: ToolCatalogEntry): boolean => {
           if (tool.isSkill === true) return true;
           if (tool.isSkill === false) return false;
-          const triggers = tool.manifest?.triggers as Array<{ kind: string }> || [];
+          const triggers = tool.triggers as Array<{ kind: string }> || [];
           return triggers.some((t) => t.kind === 'user') && !lowerOrderIds.has(tool.id);
         };
         setAvailableSkills(tools.filter((t) => isSkillTool(t)).map((t) => ({
@@ -431,7 +421,6 @@ const EntityWorkspace = () => {
             missionInput={missionInput}
             setMissionInput={setMissionInput}
             running={running}
-            setRunning={setRunning}
             runMission={runMission}
             saving={saving}
             saveError={saveError}
@@ -459,13 +448,11 @@ const EntityWorkspace = () => {
             editingSystemPrompt={editingSystemPrompt}
             setEditingSystemPrompt={setEditingSystemPrompt}
             transactionGuidanceEntries={transactionGuidanceEntries}
-            setTransactionGuidanceEntries={setTransactionGuidanceEntries}
             transactionInput={transactionInput}
             setTransactionInput={setTransactionInput}
             addTransactionGuidance={addTransactionGuidance}
             removeTransactionGuidance={removeTransactionGuidance}
             knowledgeEntries={knowledgeEntries}
-            setKnowledgeEntries={setKnowledgeEntries}
             knowledgeTitle={knowledgeTitle}
             setKnowledgeTitle={setKnowledgeTitle}
             knowledgeContent={knowledgeContent}

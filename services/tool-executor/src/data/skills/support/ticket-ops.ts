@@ -61,6 +61,7 @@ export const TICKET_OPS = createExternalActionSkill({
   tier: 'represent',
   confirmBeforeSend: true,
   domainKnowledge: 'Customer success metrics (CSAT, NPS, Churn Rate), SLA management, support escalation tiers, ticket triage',
+isSkill: true,
 });
 
 TICKET_OPS.triggers = [

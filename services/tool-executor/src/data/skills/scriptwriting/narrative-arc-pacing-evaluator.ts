@@ -104,4 +104,5 @@ export const NARRATIVE_ARC_PACING_EVALUATOR = createCodeSkill({
   ],
   tier: 'advise',
   domainKnowledge: 'Narrative structure, pacing analysis, story theory, genre conventions',
+isSkill: true,
 });

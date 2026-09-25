@@ -72,6 +72,7 @@ const DAY_OF_OPERATIONS = createExternalActionSkill({
   outputSchema: EVENT_EXTERNAL_OUTPUT_SCHEMA,
   timeoutMs: 60000,
   tier: 'aid',
+isSkill: true,
 });
 
 DAY_OF_OPERATIONS.domainKnowledge = 'Event day-of operations: check-in workflows, seating assignment, real-time attendance monitoring, issue escalation, and run-of-show execution across event management platforms';

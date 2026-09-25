@@ -98,4 +98,5 @@ export const RESERVATIONS_SKILL = withConfirmation(createExternalActionSkill({
   triggers: [
     { kind: 'user', phrase_examples: ['Manage a reservation', 'Assign a room', 'Update a guest profile', 'Check a folio'] },
   ],
+isSkill: true,
 }));

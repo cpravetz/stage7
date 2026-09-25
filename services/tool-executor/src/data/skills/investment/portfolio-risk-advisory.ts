@@ -184,12 +184,15 @@ const PORTFOLIO_RISK_ADVISORY = createCodeSkill({
   id: 'portfolio-risk-advisory',
   name: 'Portfolio & Risk Advisory',
   description: 'Comprehensive portfolio analysis, optimization, risk assessment (VaR, stress testing), and investment evaluation using quantitative models and factor analysis.',
+tier: 'advise',
+domainKnowledge: 'Portfolio construction, value-at-risk and stress testing, factor analysis, and quantitative allocation methods',
   manifest: { language: 'javascript', entrypoint: 'index.js', sourceCode: portfolioAdvisorySourceCode },
   inputSchema: portfolioAdvisoryInputSchema,
   outputSchema: commonOutputSchema,
   triggers: [
     { kind: 'user', phrase_examples: ["Analyze my portfolio", "Optimize allocation", "Assess portfolio risk", "Run stress test", "Evaluate securities", "Check efficient frontier"] }
-  ]
+  ],
+isSkill: true,
 });
 
 export { PORTFOLIO_RISK_ADVISORY };

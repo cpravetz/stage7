@@ -85,6 +85,7 @@ const CAREER_PROFILE_INTAKE_OUTPUT = {
 
 const CAREER_PROFILE_INTAKE = createCodeSkill({
   id: 'career-profile-intake',
+  isSkill: false,
   name: 'Profile Intake',
   description: 'Collects and persists the candidate profile: personal details, target roles, skills, resume text, and job-search preferences. All other career tools read from this profile.',
   manifest: {

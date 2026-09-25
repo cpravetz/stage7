@@ -193,6 +193,7 @@ export const RESTAURANT_SUPPLY_CHAIN_INVENTORY_REORDER_MANAGER = createCodeSkill
       ]
     }
   ],
+isSkill: true,
 });
 
 RESTAURANT_SUPPLY_CHAIN_INVENTORY_REORDER_MANAGER.tier = 'aid';

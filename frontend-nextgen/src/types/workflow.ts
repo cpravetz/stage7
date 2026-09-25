@@ -142,3 +142,5 @@ export interface ExecutionSummary {
   lastStatus?: 'completed' | 'failed';
   lastResultId?: string;
 }
+export type { ToolBinding } from './workspace';
+export type { Entity } from '../stores/entityStore';

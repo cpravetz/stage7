@@ -81,5 +81,6 @@ const JOB_MARKET_POSITIONING_EVALUATOR = createCodeSkill({
   triggers: [
     { kind: 'schedule', cadence: 'After job discovery completes' },
   ],
+isSkill: true,
 });
 export { JOB_MARKET_POSITIONING_EVALUATOR };

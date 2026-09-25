@@ -145,6 +145,7 @@ export const RESTAURANT_MENU_ENGINEERING_COST_STRATEGIST = createCodeSkill({
       ]
     }
   ],
+isSkill: true,
 });
 
 RESTAURANT_MENU_ENGINEERING_COST_STRATEGIST.tier = 'advise';

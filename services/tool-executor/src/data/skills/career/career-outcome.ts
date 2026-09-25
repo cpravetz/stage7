@@ -104,6 +104,7 @@ const CAREER_OUTCOME_OUTPUT = {
 
 const CAREER_OUTCOME = createCodeSkill({
   id: 'career-outcome',
+  isSkill: false,
   name: 'Track Outcomes',
   description: 'Records application outcomes (offer, rejection, interview, screening, no-response) and updates career search stats. Also supports outcome analytics and trend reporting.',
   manifest: {

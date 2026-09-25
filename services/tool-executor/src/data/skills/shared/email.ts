@@ -177,6 +177,7 @@ export const emailIntegrationSkill = createExternalActionSkill({
   ],
   timeoutMs: 60000,
   confirmBeforeSend: true,
+isSkill: true,
 });
 
 emailIntegrationSkill.confirmBeforeSend = true;

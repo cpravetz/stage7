@@ -191,6 +191,7 @@ console.log(JSON.stringify({ success: true, data: { draft, storePath } }));
   },
   tier: 'aid',
   domainKnowledge: 'Creative content drafting, lyrical composition, script structure',
+isSkill: true,
 });
 
 const TREND_PLANNING_ADVISORY = createExternalActionSkill({
@@ -249,6 +250,7 @@ const TREND_PLANNING_ADVISORY = createExternalActionSkill({
   tier: 'aid',
   domainKnowledge: 'Creative trend research, audience preference analysis, genre signal assessment',
   timeoutMs: 120000,
+isSkill: true,
 });
 
 export { lyricProsodyEvaluator, musicalCoCreation, leadSheetDemoDispatcher };

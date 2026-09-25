@@ -108,4 +108,5 @@ export const PROPERTY_OPERATIONS_SKILL = withConfirmation(createExternalActionSk
   triggers: [
     { kind: 'user', phrase_examples: ['Update room status', 'Dispatch housekeeping', 'Create a maintenance issue', 'Check inventory'] },
   ],
+isSkill: true,
 }));

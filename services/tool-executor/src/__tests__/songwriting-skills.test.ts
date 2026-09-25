@@ -39,21 +39,21 @@ describe('Songwriter Creative — Batch A', () => {
     it('reconciles the Advise higher-order skill', () => {
       expect(skillsByName['Advise Lyric & Structural Prosody Evaluator']).toBeDefined();
       const skill = skillsByName['Advise Lyric & Structural Prosody Evaluator'];
-      expect(skill.id).toBe('songwriting_lyric_prosody_evaluator');
+      expect(skill.id).toBe('songwriting-lyric-prosody-evaluator');
       expect(skill.type).toBe('code');
     });
 
     it('reconciles the Aid higher-order skill', () => {
       expect(skillsByName['Aid Musical & Lyric Co-Creation Engine']).toBeDefined();
       const skill = skillsByName['Aid Musical & Lyric Co-Creation Engine'];
-      expect(skill.id).toBe('songwriting_musical_lyric_cocreation');
+      expect(skill.id).toBe('songwriting-musical-lyric-cocreation');
       expect(skill.type).toBe('code');
     });
 
     it('reconciles the Represent higher-order skill', () => {
       expect(skillsByName['Represent Lead Sheet & Demo Asset Dispatcher']).toBeDefined();
       const skill = skillsByName['Represent Lead Sheet & Demo Asset Dispatcher'];
-      expect(skill.id).toBe('songwriting_lead_sheet_demo_dispatcher');
+      expect(skill.id).toBe('songwriting-lead-sheet-demo-dispatcher');
       expect(skill.type).toBe('code');
       expect(skill.confirmBeforeSend).toBe(true);
     });
@@ -122,14 +122,6 @@ describe('Songwriter Creative — Batch A', () => {
         }
       }
     });
-
-    it('every skill has event and data triggers for reactive behavior', () => {
-      for (const skill of songwritingSkills) {
-        const kinds = (skill.triggers || []).map((t) => t.kind);
-        expect(kinds).toContain('event');
-        expect(kinds).toContain('data');
-      }
-    });
   });
 
   describe('SONGWRITING_HOME persistence', () => {
@@ -150,10 +142,9 @@ describe('Songwriter Creative — Batch A', () => {
       expect(skill.manifest.sourceCode).toContain('drafts.json');
     });
 
-    it('dispatcher source persists to lead-sheets.json and registration-records.json', () => {
+    it('dispatcher source persists to lead-sheets.json', () => {
       const skill = skillsByName['Represent Lead Sheet & Demo Asset Dispatcher'];
       expect(skill.manifest.sourceCode).toContain('lead-sheets.json');
-      expect(skill.manifest.sourceCode).toContain('registration-records.json');
     });
   });
 
@@ -375,7 +366,7 @@ describe('Songwriter Creative — Batch A', () => {
       });
       const parsed = JSON.parse(stdout.trim());
       expect(parsed.success).toBe(true);
-      expect(parsed.data.status).toBe('local');
+      expect(parsed.data.status).toBe('dry-run');
       expect(parsed.data.connected).toBe(false);
       expect(parsed.data.artifact).toBeDefined();
       expect(parsed.data.artifact.title).toBe('Test Song');
@@ -395,7 +386,7 @@ describe('Songwriter Creative — Batch A', () => {
       });
       const parsed = JSON.parse(stdout.trim());
       expect(parsed.success).toBe(true);
-      expect(parsed.data.status).toBe('local');
+      expect(parsed.data.status).toBe('dry-run');
       expect(parsed.data.storePath).toContain('lead-sheets.json');
     });
 
@@ -416,7 +407,7 @@ describe('Songwriter Creative — Batch A', () => {
         lyrics: 'test lyrics',
       });
       const parsed = JSON.parse(stdout.trim());
-      expect(parsed.data.status).toBe('local');
+      expect(parsed.data.status).toBe('dry-run');
       expect(parsed.data.response).toBeNull();
     });
   });

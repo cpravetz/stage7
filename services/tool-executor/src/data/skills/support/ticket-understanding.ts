@@ -49,6 +49,7 @@ console.log(JSON.stringify(result));`,
   triggers: [
     { kind: 'user', phrase_examples: ['Resolve this support ticket', 'Create a resolution for this ticket'] },
   ],
+isSkill: true,
 });
 
 export const SUPPORT_SENTIMENT_ANALYSIS = createCodeSkill({
@@ -98,6 +99,7 @@ console.log(JSON.stringify(output));`,
   triggers: [
     { kind: 'user', phrase_examples: ['Analyze this ticket sentiment', 'Score the customer tone'] },
   ],
+isSkill: true,
 });
 
 export const SUPPORT_ISSUE_ANALYSIS = createCodeSkill({
@@ -148,6 +150,7 @@ console.log(JSON.stringify(output));`,
   triggers: [
     { kind: 'user', phrase_examples: ['Analyze this issue', 'Classify this ticket'] },
   ],
+isSkill: true,
 });
 
 export const SUPPORT_SEARCH_KB = createCodeSkill({
@@ -193,4 +196,5 @@ console.log(JSON.stringify(result));`,
   triggers: [
     { kind: 'user', phrase_examples: ['Search knowledge base for this issue', 'Find relevant articles for this problem'] },
   ],
+isSkill: true,
 });

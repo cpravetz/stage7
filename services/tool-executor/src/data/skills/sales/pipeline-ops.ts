@@ -85,6 +85,7 @@ const PIPELINE_OPS = createExternalActionSkill({
     { kind: 'user', phrase_examples: ['Update my CRM record', 'Send this to the pipeline', 'Sync this deal'] },
   ],
   timeoutMs: 30000,
+isSkill: true,
 });
 
 PIPELINE_OPS.confirmBeforeSend = true;

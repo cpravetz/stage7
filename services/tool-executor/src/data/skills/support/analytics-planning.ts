@@ -67,4 +67,5 @@ console.log(JSON.stringify(result));`,
   triggers: [
     { kind: 'schedule', cadence: 'Daily CSAT analytics review' },
   ],
+isSkill: true,
 });

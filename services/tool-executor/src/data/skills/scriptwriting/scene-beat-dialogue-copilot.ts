@@ -100,4 +100,5 @@ export const SCENE_BEAT_DIALOGUE_COPILOT = createCodeSkill({
   ],
   tier: 'aid',
   domainKnowledge: 'Screenwriting craft, scene structure, dialogue writing, beat sheets',
+isSkill: true,
 });

@@ -116,6 +116,7 @@ export const INGAME_PREDICTIVE_MODELING = createCodeSkill({
   name: 'In-Game Predictive Modeling',
   description: 'Predicts win probabilities and key in-game events from live play-by-play data, lineup information, and momentum signals during an active game.',
   tier: 'advise',
+  domainKnowledge: 'Live sports predictive modeling, win probability estimation, momentum signal interpretation, and lineup impact analysis',
   manifest: {
     language: 'javascript',
     entrypoint: 'index.js',
@@ -126,4 +127,5 @@ export const INGAME_PREDICTIVE_MODELING = createCodeSkill({
   triggers: [
     { kind: 'event', on: 'Game in progress' },
   ],
+isSkill: true,
 });

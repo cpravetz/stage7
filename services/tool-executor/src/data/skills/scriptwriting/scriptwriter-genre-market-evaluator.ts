@@ -156,4 +156,5 @@ export const SCRIPTWRITER_GENRE_MARKET_EVALUATOR = createCodeSkill({
   ],
   tier: 'advise',
   domainKnowledge: 'Scriptwriting market analysis, genre trends, audience alignment',
+isSkill: true,
 });

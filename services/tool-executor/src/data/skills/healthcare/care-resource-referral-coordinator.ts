@@ -107,7 +107,7 @@ const source = `(async () => {
   }
 
   try {
-    const recordsResult = await executeTool('healthcare_records_scheduling_ops', {
+    const recordsResult = await executeTool('healthcare-records-scheduling-ops', {
       operation: 'appointment-scheduler',
       patientId,
       referralId: referralId || undefined,
@@ -139,7 +139,7 @@ const source = `(async () => {
     delegatedResults.records_scheduling = recordsResult;
 
     const lowerOrderOperation = 'refer';
-    const resourceResult = await executeTool('healthcare_resource_coordination', {
+    const resourceResult = await executeTool('healthcare-resource-coordination', {
       operation: lowerOrderOperation,
       patientId,
       referralId: referralId || undefined,
@@ -179,7 +179,7 @@ const source = `(async () => {
 
     let communicationResult = null;
     if (dryRun || communicationConfirmed || confirmed) {
-      communicationResult = await executeTool('healthcare_patient_communication', {
+      communicationResult = await executeTool('healthcare-patient-communication', {
         operation: 'send',
         patientId,
         channel: input.communicationChannel || 'portal',
@@ -238,7 +238,7 @@ const careResourceReferralCoordinator = createCodeSkill({
     configSchema: referralConfig,
     persistenceEnv: 'HEALTHCARE_HOME',
     healthcareHome: HEALTHCARE_HOME,
-    lowerOrderTools: ['healthcare_records_scheduling_ops', 'healthcare_resource_coordination', 'healthcare_patient_communication'],
+    lowerOrderTools: ['healthcare-records-scheduling-ops', 'healthcare-resource-coordination', 'healthcare-patient-communication'],
     confirmBeforeSend: true,
     ui: { view: 'care-resource-referral-coordination' },
     metadata,

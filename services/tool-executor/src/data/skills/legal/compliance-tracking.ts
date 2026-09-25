@@ -51,6 +51,7 @@ const COMPLIANCE_TRACKING = createCodeSkill({
     },
     required: ['success'],
   },
+isSkill: true,
 });
 
 COMPLIANCE_TRACKING.tier = 'advise';

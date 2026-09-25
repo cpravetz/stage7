@@ -215,6 +215,7 @@ export interface CreateToolParameters {
   externalConfig?: Record<string, unknown>;
   triggers?: SkillTrigger[];
   confirmBeforeSend?: boolean;
+  isSkill?: boolean;
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -237,6 +238,9 @@ export interface CreateCodeSkillParameters {
   outputSchema: SchemaRecord;
   triggers?: SkillTrigger[];
   confirmBeforeSend?: boolean;
+  tier?: 'advise' | 'aid' | 'represent';
+  domainKnowledge?: string;
+  isSkill?: boolean;
   createdAt?: Date;
   updatedAt?: Date;
 }

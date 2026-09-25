@@ -108,4 +108,5 @@ export const SCOUTING_ALERT_DISPATCHER = createCodeSkill({
   triggers: [
     { kind: 'user', phrase_examples: ['Dispatch scouting alert', 'Send health alert', 'Notify transfer interest', 'Alert performance anomaly'] }
   ],
+isSkill: true,
 });

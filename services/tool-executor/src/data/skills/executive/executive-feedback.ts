@@ -70,6 +70,7 @@ const FEEDBACK = createCodeSkill({
   inputSchema: FEEDBACK_INPUT,
   outputSchema: COMMON_OUTPUT,
   triggers: [{ kind: 'user', phrase_examples: ['Collect feedback', 'Analyze feedback', 'Review performance'] }],
+isSkill: true,
 });
 
 export { FEEDBACK };

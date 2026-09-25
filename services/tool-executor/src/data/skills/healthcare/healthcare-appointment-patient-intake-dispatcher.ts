@@ -40,6 +40,7 @@ const intake = createCodeSkill({
   description: 'Stage patient intake in dry-run mode by default and dispatch it to a configured healthcare endpoint only after explicit confirmation, with honest disconnected and safety states.',
   tier: 'represent',
   domainKnowledge: 'Patient intake scheduling, appointment management, and healthcare endpoint dispatch coordination',
+  confirmBeforeSend: true,
   manifest: { sourceCode: intakeSource, configSchema: intakeConfig, persistenceEnv: 'HEALTHCARE_HOME', healthcareHome: HEALTHCARE_HOME, endpointEnvVar: 'HEALTHCARE_INTAKE_ENDPOINT', confirmBeforeSend: true, ui: { view: 'intake-approval' }, metadata },
   inputSchema: createSchemaRecord({
 

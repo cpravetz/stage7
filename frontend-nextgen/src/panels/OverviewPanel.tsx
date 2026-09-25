@@ -1,10 +1,10 @@
 import { ToolBinding } from '../types/workspace';
 import { Entity } from '../stores/entityStore';
-import OutputTemplate, { parseExecutionResult } from '../components/OutputTemplate';
+import OutputTemplate from '../components/OutputTemplate';
 import FeedSelector, { buildFeedOptions, type SkillDef, type ProducedFeedEntry } from '../components/FeedSelector';
 import { useAssistantViewStore } from '../stores/assistantViewStore';
 import { SchemaFields, sfGetSchemaProperties as getSchemaProperties } from '../components/SchemaFields';
-import { getToolInputSchema, getToolConfigSchema, getToolDisplayName, getToolDescription, getInitialInputValues } from '../utils/workspaceHelpers';
+import { getToolInputSchema, getToolConfigSchema, getToolDisplayName } from '../utils/workspaceHelpers';
 
 interface OverviewPanelProps {
   entity: Entity;
@@ -16,14 +16,11 @@ interface OverviewPanelProps {
   missionInput: string;
   setMissionInput: (value: string) => void;
   running: boolean;
-  setRunning: (value: boolean) => void;
   runMission: () => void;
   saving: boolean;
   saveError: string | null;
   saveConfiguration: () => void;
 }
-
-type AvailableSkill = OverviewPanelProps['availableSkills'][0];
 
 export const OverviewPanel = ({
   entity,
@@ -35,7 +32,6 @@ export const OverviewPanel = ({
   missionInput,
   setMissionInput,
   running,
-  setRunning,
   runMission,
   saving,
   saveError,
@@ -60,7 +56,6 @@ export const OverviewPanel = ({
   });
 
   const getDisplayName = (tool: ToolBinding) => getToolDisplayName(tool, availableSkills);
-  const getDescription = (tool: ToolBinding) => getToolDescription(tool, availableSkills);
   const getConfigSchema = (tool: ToolBinding) => getToolConfigSchema(tool, availableSkills);
   const getInputSchema = (tool: ToolBinding) => getToolInputSchema(tool, availableSkills);
 

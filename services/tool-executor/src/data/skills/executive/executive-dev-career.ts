@@ -83,6 +83,7 @@ const DEV_CAREER = createCodeSkill({
   inputSchema: DEV_CAREER_INPUT,
   outputSchema: COMMON_OUTPUT,
   triggers: [{ kind: 'user', phrase_examples: ['Create a development plan', 'Analyze my skill gaps', 'Plan my career', 'Build a roadmap'] }],
+isSkill: true,
 });
 
 export { DEV_CAREER };

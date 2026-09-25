@@ -127,4 +127,5 @@ export const BATTLECARD_CREATOR = createCodeSkill({
   triggers: [
     { kind: 'schedule', cadence: 'Pre-match briefing 48h prior' },
   ],
+isSkill: true,
 });

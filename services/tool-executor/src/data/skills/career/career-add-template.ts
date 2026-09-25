@@ -73,6 +73,7 @@ const CAREER_ADD_TEMPLATE_OUTPUT = {
 
 const CAREER_ADD_TEMPLATE = createCodeSkill({
   id: 'career-add-template',
+  isSkill: false,
   name: 'Add Template',
   description: 'Register a new resume or cover letter template in the career workspace. Templates are named, versioned, and can be reused across applications with variable substitution.',
   manifest: {

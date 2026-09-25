@@ -26,6 +26,7 @@ export interface ToolCatalogEntry {
   name: string;
   description: string;
   isSkill?: boolean;
+  triggers?: Array<{ kind: string; [key: string]: unknown }>;
   inputSchema?: Record<string, unknown>;
   configSchema?: Record<string, unknown>;
   manifest?: Record<string, unknown>;

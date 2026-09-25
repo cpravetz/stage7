@@ -101,6 +101,7 @@ export const ctoDisasterRecoveryPlanner = createCodeSkill({
     { kind: 'user', phrase_examples: ['check disaster recovery readiness', 'assess RTO RPO compliance', 'DR failover test', 'incident readiness review'] }
   ],
   tier: 'advise',
+isSkill: true,
 });
 
 ctoDisasterRecoveryPlanner.configSchema = DR_CONFIG_SCHEMA;

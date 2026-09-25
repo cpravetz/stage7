@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useFeedStore } from '../stores/feedStore';
-import { postJSON } from '../utils/api';
 
 interface AgentInfo {
   id: string;
@@ -40,14 +39,14 @@ const AgentOutputsPanel: React.FC<{ missionId: string }> = ({ missionId }) => {
   const eventsByAgent = useMemo(() => {
     const map = new Map<string, Array<any>>();
     for (const e of events.filter((ev) => ev.missionId === missionId)) {
-      const key = e.metadata?.agentId || e.metadata?.agentRole || e.source || 'unknown';
+      const key = (e.metadata?.agentId as string | undefined) || (e.metadata?.agentRole as string | undefined) || e.source || 'unknown';
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(e);
     }
     return map;
   }, [events, missionId]);
 
-  const refreshAgent = async (id: string) => {
+  const refreshAgent = async () => {
     try {
       const res = await fetch(`/api/agent-runtime/missions/${encodeURIComponent(missionId)}/agents`);
       if (!res.ok) return;
@@ -75,7 +74,7 @@ const AgentOutputsPanel: React.FC<{ missionId: string }> = ({ missionId }) => {
                 {a.status && <span className={`badge ${a.status}`} style={{ marginLeft: 8 }}>{a.status}</span>}
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={() => refreshAgent(a.id)} style={{ fontSize: 12 }}>Refresh</button>
+                <button onClick={() => refreshAgent()} style={{ fontSize: 12 }}>Refresh</button>
               </div>
             </div>
             <div style={{ marginTop: 8 }}>

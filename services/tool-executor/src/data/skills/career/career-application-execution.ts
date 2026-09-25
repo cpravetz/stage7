@@ -28,7 +28,7 @@ const errors = [];
 const rolesToProcess = targetRoles.length ? targetRoles : listings;
 
 for (const role of rolesToProcess) {
-  const job = storedListings.find((l) => l.id === role || l.title === role);
+  const job = storedListings.find((l) => l.id === role);
   if (!job) {
     errors.push({ identifier: role, error: 'Job listing not found' });
     continue;
@@ -107,9 +107,7 @@ const CAREER_APPLY_EXECUTE = createCodeSkill({
   },
   inputSchema: CAREER_APPLY_EXECUTE_INPUT,
   outputSchema: CAREER_APPLY_EXECUTE_OUTPUT,
-  triggers: [
-    { kind: 'user', phrase_examples: ['Apply to these jobs', 'Submit applications', 'Auto-apply to ranked roles'] },
-  ],
+  isSkill: false,
 });
 CAREER_APPLY_EXECUTE.configSchema = CAREER_APPLY_EXECUTE.manifest.configSchema as SchemaRecord;
 

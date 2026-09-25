@@ -5,6 +5,8 @@ import { ToolNotFoundError, ValidationError } from '../utils/errors'
 import asyncHandler from '../utils/asyncHandler'
 import logger from '../utils/logger'
 import { toolRegistry as registry, executor, pluginGenerator as generator } from '../utils/sharedInstance'
+import { readFile } from 'fs/promises'
+import { join } from 'path'
 
 const router: Router = Router()
 
@@ -272,6 +274,37 @@ router.post(
     }
     const summary = executor.previewAction(tool, req.body.input || {})
     res.json({ summary })
+  })
+)
+
+router.get(
+  '/tools/reference-data/:sourceId',
+  asyncHandler(async (req: Request, res: Response) => {
+    const { sourceId } = req.params
+    const workspaceId = req.query.workspaceId as string | undefined
+    const careerHome = process.env.CAREER_HOME || '/tmp/career'
+    const listingsPath = join(careerHome, 'applications', 'listings.json')
+
+    let listings: unknown[]
+    try {
+      const fileContent = await readFile(listingsPath, 'utf-8')
+      const data = JSON.parse(fileContent)
+      listings = Array.isArray(data) ? data : (data.listings || [])
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+        logger.warn({ err, sourceId, listingsPath }, 'Failed to read reference data file')
+      }
+      listings = []
+    }
+
+    res.json({
+      success: true,
+      data: {
+        listings,
+        source: sourceId,
+        workspaceId,
+      },
+    })
   })
 )
 

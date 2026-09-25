@@ -88,6 +88,7 @@ const LEAD_DEAL_ADVISORY = createCodeSkill({
   triggers: [
     { kind: 'user', phrase_examples: ['Score these leads', 'Generate a sales forecast', 'Prioritize my deals'] },
   ],
+isSkill: true,
 });
 
 export { LEAD_DEAL_ADVISORY };
