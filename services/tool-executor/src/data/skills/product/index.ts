@@ -356,16 +356,7 @@ return roadmap;
       },
       required: ['success', 'roadmap'],
     },
-  triggers: [
-    { kind: 'user', phrase_examples: ["Create a roadmap", "Plan a release", "Check roadmap status"] },
-    { kind: 'schedule', cadence: "Weekly roadmap review" },
-    { kind: 'schedule', cadence: "Monthly portfolio review" },
-    { kind: 'event', on: "Milestone completed" },
-    { kind: 'event', on: "Roadmap updated" },
-    { kind: 'event', on: "New requirement added" },
-    { kind: 'data', condition: "Roadmap coverage gap detected" },
-    { kind: 'data', condition: "Dependency overdue" },
-  ],
+  triggers: [{ kind: 'user', phrase_examples: ["Create a roadmap", "Plan a release", "Check roadmap status"] }],
   }),
   createCodeSkill({
     id: 'write-prd',
@@ -587,16 +578,7 @@ return prd;
       },
       required: ['success', 'prd'],
     },
-  triggers: [
-    { kind: 'user', phrase_examples: ["Write a PRD", "Update requirements", "Review requirements"] },
-    { kind: 'schedule', cadence: "Sprint planning cycle" },
-    { kind: 'schedule', cadence: "Monthly PRD quality review" },
-    { kind: 'event', on: "Requirements changed" },
-    { kind: 'event', on: "Stakeholder feedback received" },
-    { kind: 'event', on: "PRD approved" },
-    { kind: 'data', condition: "Requirement coverage below threshold" },
-    { kind: 'data', condition: "Scope creep detected" },
-  ],
+  triggers: [{ kind: 'user', phrase_examples: ["Write a PRD", "Update requirements", "Review requirements"] }],
   }),
   createExternalActionSkill({
     id: 'product-jira',
@@ -637,7 +619,6 @@ return prd;
     inputSchema: {
       type: 'object',
       properties: {
-        operation: { type: 'string', enum: ['create', 'update', 'get'], description: 'Jira operation to perform' },
         projectKey: { type: 'string', description: 'Jira project key' },
         issueType: { type: 'string', description: 'Jira issue type (for example, Bug, Task, or Story)' },
         summary: { type: 'string', description: 'Issue summary or title' },
@@ -645,13 +626,12 @@ return prd;
         issueId: { type: 'string', description: 'Jira issue ID or key to update or retrieve' },
         fields: { type: 'object', description: 'Additional Jira issue fields as key-value pairs' },
       },
-      required: ['operation'],
     },
     outputSchema: {
       type: 'object',
       properties: {
         success: { type: 'boolean' },
-        mode: { type: 'string' },
+        status: { type: 'string' },
         system: { type: 'string' },
         action: { type: 'string' },
         request: {
@@ -672,19 +652,10 @@ return prd;
         },
         error: { type: 'string' },
       },
-      required: ['success', 'mode', 'system', 'action', 'request', 'response', 'error'],
+      required: ['success', 'status', 'system', 'action', 'request', 'response', 'error'],
     },
     timeoutMs: 30000,
-  triggers: [
-    { kind: 'user', phrase_examples: ["Create Jira ticket", "Update ticket", "Search tickets"] },
-    { kind: 'schedule', cadence: "Daily sync with Jira" },
-    { kind: 'schedule', cadence: "Weekly ticket health review" },
-    { kind: 'event', on: "Ticket created" },
-    { kind: 'event', on: "Ticket transitioned" },
-    { kind: 'event', on: "Comment added" },
-    { kind: 'data', condition: "Ticket backlog grows" },
-    { kind: 'data', condition: "Velocity drops" },
-  ],
+  triggers: [{ kind: 'user', phrase_examples: ["Create Jira ticket", "Update ticket", "Search tickets"] }],
   }),
   createExternalActionSkill({
     id: 'product-confluence',
@@ -725,7 +696,6 @@ return prd;
     inputSchema: {
       type: 'object',
       properties: {
-        operation: { type: 'string', enum: ['create', 'update', 'get'], description: 'Confluence operation to perform' },
         spaceKey: { type: 'string', description: 'Confluence space key' },
         title: { type: 'string', description: 'Page title' },
         body: { type: 'string', description: 'Page body content in the specified representation format' },
@@ -733,13 +703,12 @@ return prd;
         ancestorId: { type: 'string', description: 'Parent page ID for page hierarchy' },
         representation: { type: 'string', enum: ['storage', 'wiki', 'markdown'], description: 'Storage format representation (storage, wiki, or markdown)' },
       },
-      required: ['operation'],
     },
     outputSchema: {
       type: 'object',
       properties: {
         success: { type: 'boolean' },
-        mode: { type: 'string' },
+        status: { type: 'string' },
         system: { type: 'string' },
         action: { type: 'string' },
         request: {
@@ -760,19 +729,10 @@ return prd;
         },
         error: { type: 'string' },
       },
-      required: ['success', 'mode', 'system', 'action', 'request', 'response', 'error'],
+      required: ['success', 'status', 'system', 'action', 'request', 'response', 'error'],
     },
     timeoutMs: 30000,
-  triggers: [
-    { kind: 'user', phrase_examples: ["Create Confluence page", "Search docs", "Update documentation"] },
-    { kind: 'schedule', cadence: "Weekly doc review" },
-    { kind: 'schedule', cadence: "Monthly knowledge audit" },
-    { kind: 'event', on: "Page created" },
-    { kind: 'event', on: "Page updated" },
-    { kind: 'event', on: "Page commented" },
-    { kind: 'data', condition: "Stale pages detected" },
-    { kind: 'data', condition: "Doc coverage gap" },
-  ],
+  triggers: [{ kind: 'user', phrase_examples: ["Create Confluence page", "Search docs", "Update documentation"] }],
   }),
   createExternalActionSkill({
     id: 'product-data-analysis',
@@ -822,7 +782,7 @@ return prd;
       type: 'object',
       properties: {
         success: { type: 'boolean' },
-        mode: { type: 'string' },
+        status: { type: 'string' },
         system: { type: 'string' },
         action: { type: 'string' },
         request: {
@@ -843,20 +803,10 @@ return prd;
         },
         error: { type: 'string' },
       },
-      required: ['success', 'mode', 'system', 'action', 'request', 'response', 'error'],
+      required: ['success', 'status', 'system', 'action', 'request', 'response', 'error'],
     },
     timeoutMs: 60000,
-  triggers: [
-    { kind: 'user', phrase_examples: ["Analyze product data", "Run report", "Check metrics"] },
-    { kind: 'schedule', cadence: "Daily metrics digest" },
-    { kind: 'schedule', cadence: "Weekly product analytics" },
-    { kind: 'schedule', cadence: "Monthly deep dive" },
-    { kind: 'event', on: "Data source connected" },
-    { kind: 'event', on: "Report generated" },
-    { kind: 'event', on: "Data quality issue" },
-    { kind: 'data', condition: "Metric anomaly detected" },
-    { kind: 'data', condition: "Data freshness below threshold" },
-  ],
+  triggers: [{ kind: 'user', phrase_examples: ["Analyze product data", "Run report", "Check metrics"] }],
   }),
   createExternalActionSkill({
     id: 'product-slack',
@@ -892,19 +842,17 @@ return prd;
     inputSchema: {
       type: 'object',
       properties: {
-        operation: { type: 'string', enum: ['postMessage', 'updateMessage', 'deleteMessage', 'listChannels', 'createChannel'], description: 'Slack operation to perform' },
         channel: { type: 'string', description: 'Channel ID or name to post to or interact with' },
         text: { type: 'string', description: 'Message text content' },
         ts: { type: 'string', description: 'Message timestamp (for updateMessage or deleteMessage)' },
         channelName: { type: 'string', description: 'Name for new channel (for createChannel)' },
       },
-      required: ['operation'],
     },
     outputSchema: {
       type: 'object',
       properties: {
         success: { type: 'boolean' },
-        mode: { type: 'string' },
+        status: { type: 'string' },
         system: { type: 'string' },
         action: { type: 'string' },
         request: {
@@ -925,19 +873,10 @@ return prd;
         },
         error: { type: 'string' },
       },
-      required: ['success', 'mode', 'system', 'action', 'request', 'response', 'error'],
+      required: ['success', 'status', 'system', 'action', 'request', 'response', 'error'],
     },
     timeoutMs: 15000,
-  triggers: [
-    { kind: 'user', phrase_examples: ["Post to Slack", "Send message", "Check notifications"] },
-    { kind: 'schedule', cadence: "Daily message review" },
-    { kind: 'schedule', cadence: "Weekly channel summary" },
-    { kind: 'event', on: "Message posted" },
-    { kind: 'event', on: "Reaction added" },
-    { kind: 'event', on: "Thread updated" },
-    { kind: 'data', condition: "Response time exceeds SLA" },
-    { kind: 'data', condition: "Unread messages spike" },
-  ],
+  triggers: [{ kind: 'user', phrase_examples: ["Post to Slack", "Send message", "Check notifications"] }],
   }),
   createExternalActionSkill({
     id: 'product-calendar',
@@ -974,7 +913,6 @@ return prd;
     inputSchema: {
       type: 'object',
       properties: {
-        operation: { type: 'string', enum: ['create', 'update', 'delete', 'list'], description: 'Calendar operation to perform' },
         summary: { type: 'string', description: 'Event summary or title' },
         description: { type: 'string', description: 'Event description' },
         startTime: { type: 'string', description: 'Event start time (ISO 8601)' },
@@ -983,13 +921,12 @@ return prd;
         calendarId: { type: 'string', description: 'Calendar ID to schedule against' },
         event: { type: 'string', description: 'Event ID to update or delete' },
       },
-      required: ['operation'],
     },
     outputSchema: {
       type: 'object',
       properties: {
         success: { type: 'boolean' },
-        mode: { type: 'string' },
+        status: { type: 'string' },
         system: { type: 'string' },
         action: { type: 'string' },
         request: {
@@ -1010,19 +947,10 @@ return prd;
         },
         error: { type: 'string' },
       },
-      required: ['success', 'mode', 'system', 'action', 'request', 'response', 'error'],
+      required: ['success', 'status', 'system', 'action', 'request', 'response', 'error'],
     },
     timeoutMs: 30000,
-  triggers: [
-    { kind: 'user', phrase_examples: ["Check calendar", "Schedule review", "Find meeting times"] },
-    { kind: 'schedule', cadence: "Daily calendar sync" },
-    { kind: 'schedule', cadence: "Weekly planning review" },
-    { kind: 'event', on: "Event created" },
-    { kind: 'event', on: "Event cancelled" },
-    { kind: 'event', on: "Conflict detected" },
-    { kind: 'data', condition: "Calendar sync fails" },
-    { kind: 'data', condition: "Scheduling backlog grows" },
-  ],
+  triggers: [{ kind: 'user', phrase_examples: ["Check calendar", "Schedule review", "Find meeting times"] }],
   }),
   createExternalActionSkill({
     id: 'product-markdown-parsing',
@@ -1070,7 +998,7 @@ return prd;
       type: 'object',
       properties: {
         success: { type: 'boolean' },
-        mode: { type: 'string' },
+        status: { type: 'string' },
         system: { type: 'string' },
         action: { type: 'string' },
         request: {
@@ -1091,18 +1019,10 @@ return prd;
         },
         error: { type: 'string' },
       },
-      required: ['success', 'mode', 'system', 'action', 'request', 'response', 'error'],
+      required: ['success', 'status', 'system', 'action', 'request', 'response', 'error'],
     },
     timeoutMs: 20000,
-  triggers: [
-    { kind: 'user', phrase_examples: ["Parse markdown", "Convert document", "Extract content"] },
-    { kind: 'schedule', cadence: "Weekly parsing quality review" },
-    { kind: 'event', on: "Document uploaded" },
-    { kind: 'event', on: "Parse error" },
-    { kind: 'event', on: "Format changed" },
-    { kind: 'data', condition: "Parse failure rate high" },
-    { kind: 'data', condition: "Unsupported format detected" },
-  ],
+  triggers: [{ kind: 'user', phrase_examples: ["Parse markdown", "Convert document", "Extract content"] }],
   }),
 ];
 
@@ -1111,13 +1031,13 @@ return prd;
 const PRODUCT_OPERATIONS = createCodeSkill({
   id: 'product-operations',
   name: 'Product Operations',
-  description: 'Unified interface for backlog management, documentation, team communication, scheduling, and document parsing. Dispatches to Jira, Confluence, Slack, calendar, or Markdown based on the selected operation.',
+  description: 'Unified interface for backlog management, documentation, team communication, scheduling, and document parsing. Dispatches to Jira, Confluence, Slack, calendar, or Markdown based on the selected targetSystem.',
   manifest: {
     language: 'javascript',
     entrypoint: 'index.js',
     sourceCode: `(async () => {
   const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
-  const operation = input.operation || '';
+  const operation = input.targetSystem || 'jira';
   const data = input.data || {};
   const toolMap = {
     jira: 'product-jira',
@@ -1128,7 +1048,7 @@ const PRODUCT_OPERATIONS = createCodeSkill({
   };
   const toolId = toolMap[operation];
   if (!toolId) {
-    console.log(JSON.stringify({ success: false, mode: 'not-connected', error: 'Unknown operation: ' + operation }));
+    console.log(JSON.stringify({ success: false, status: 'not-connected', error: 'Unknown operation: ' + operation }));
     return;
   }
   const result = await __execute_tool(toolId, data);
@@ -1139,10 +1059,10 @@ const PRODUCT_OPERATIONS = createCodeSkill({
   inputSchema: {
     type: 'object',
     properties: {
-      operation: { type: 'string', enum: ['jira', 'confluence', 'slack', 'calendar', 'markdown-parsing'], description: 'Which external system to operate on' },
+      targetSystem: { type: 'string', enum: ['jira', 'confluence', 'slack', 'calendar', 'markdown-parsing'], description: 'Which external system to operate on' },
       data: { type: ['object', 'null'] as const, description: 'Parameters forwarded to the selected system' },
     },
-    required: ['operation'],
+    required: ['targetSystem'],
   },
   outputSchema: {
     type: 'object',
@@ -1157,7 +1077,6 @@ const PRODUCT_OPERATIONS = createCodeSkill({
   },
   triggers: [
     { kind: 'user', phrase_examples: ['Update Jira ticket', 'Create Confluence page', 'Post to Slack', 'Schedule meeting', 'Parse markdown'] },
-    { kind: 'schedule', cadence: 'Weekly product operations sync' },
   ],
 });
 PRODUCT_OPERATIONS.tier = 'represent';

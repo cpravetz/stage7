@@ -17,10 +17,7 @@ const HEALTHCARE_HOME = process.env.HEALTHCARE_HOME || '/tmp/healthcare';
 const SAFETY_BOUNDARY = 'Decision support and care coordination only: do not diagnose, prescribe, change treatment, allocate clinical resources autonomously, or make autonomous clinical decisions; use only authorized minimum-necessary data and approved secure endpoints for PHI; a qualified clinician or authorized care team must review all outputs and referrals.';
 const metadata = { domain: 'healthcare', persistenceEnv: 'HEALTHCARE_HOME', HEALTHCARE_HOME, homeEnv: 'HEALTHCARE_HOME', healthcareHome: HEALTHCARE_HOME, clinicalSafetyBoundary: SAFETY_BOUNDARY };
 const triggers = [
-  { kind: 'user' as const, phrase_examples: ['coordinate a care referral', 'match a patient to care resources', 'track this referral', 'review referral status'] },
-  { kind: 'schedule' as const, cadence: 'daily care referral and resource follow-up review' },
-  { kind: 'event' as const, on: 'referral request, resource availability change, care-plan update, or referral status change' },
-  { kind: 'data' as const, condition: 'patient care needs, resource directory, insurance, preference, or referral status data is available' },
+  { kind: 'user' as const, phrase_examples: ['coordinate a care referral', 'match a patient to care resources'] },
 ];
 
 const referralConfig = createSchemaRecord({
@@ -36,9 +33,6 @@ const source = `(async () => {
   const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
   const healthcareHome = process.env.HEALTHCARE_HOME || '/tmp/healthcare';
   const executeTool = typeof __execute_tool === 'function' ? __execute_tool : null;
-  const operation = String(input.operation || 'refer');
-  const allowedOperations = ['refer', 'match', 'track', 'status'];
-  const normalizedOperation = allowedOperations.includes(operation) ? operation : 'refer';
   const patientId = String(input.patient || '');
   const referralId = String(input.referralId || '');
   const clinicalNeeds = Array.isArray(input.clinicalNeeds) ? input.clinicalNeeds.map((item) => String(item)).filter(Boolean) : [];
@@ -54,8 +48,7 @@ const source = `(async () => {
   const communicationConfirmed = input.communicationConfirmation === true || input.communicationConfirmed === true;
   const missingInformation = [];
   if (!patientId) missingInformation.push('patientId');
-  if (normalizedOperation !== 'track' && normalizedOperation !== 'status' && clinicalNeeds.length === 0) missingInformation.push('clinicalNeeds');
-  if ((normalizedOperation === 'track' || normalizedOperation === 'status') && !referralId) missingInformation.push('referralId');
+  if (clinicalNeeds.length === 0) missingInformation.push('clinicalNeeds');
 
   const delegatedResults = {};
   const steps = ['records_scheduling', 'resource_coordination', 'patient_communication'];
@@ -63,9 +56,9 @@ const source = `(async () => {
   if (missingInformation.length) {
     console.log(JSON.stringify({
       success: false,
-      mode: 'not-connected',
+      status: 'not-connected',
       connected: false,
-      operation: normalizedOperation,
+      operation: 'refer',
       healthcareHome,
       missingInformation,
       error: 'Not connected: required referral information was not supplied; no resource or referral record was created',
@@ -77,9 +70,9 @@ const source = `(async () => {
   if (urgency === 'emergency') {
     console.log(JSON.stringify({
       success: false,
-      mode: 'safety-escalation',
+      status: 'safety-escalation',
       connected: false,
-      operation: normalizedOperation,
+      operation: 'refer',
       healthcareHome,
       error: 'Emergency care requires the approved clinical emergency pathway and authorized clinician coordination; this skill does not autonomously allocate or dispatch resources',
       safetyBoundary: ${JSON.stringify(SAFETY_BOUNDARY)},
@@ -90,9 +83,9 @@ const source = `(async () => {
   if (liveRequested && !confirmed) {
     console.log(JSON.stringify({
       success: false,
-      mode: 'confirmation-required',
+      status: 'confirmation-required',
       connected: false,
-      operation: normalizedOperation,
+      operation: 'refer',
       healthcareHome,
       error: 'Explicit confirmation is required before a live referral or resource mutation',
       safetyBoundary: ${JSON.stringify(SAFETY_BOUNDARY)},
@@ -103,9 +96,9 @@ const source = `(async () => {
   if (!executeTool) {
     console.log(JSON.stringify({
       success: false,
-      mode: 'not-connected',
+      status: 'not-connected',
       connected: false,
-      operation: normalizedOperation,
+      operation: 'refer',
       healthcareHome,
       error: 'Not connected: no lower-order healthcare tool is available',
       safetyBoundary: ${JSON.stringify(SAFETY_BOUNDARY)},
@@ -115,11 +108,11 @@ const source = `(async () => {
 
   try {
     const recordsResult = await executeTool('healthcare_records_scheduling_ops', {
-      operation: normalizedOperation === 'track' || normalizedOperation === 'status' ? 'record-search' : 'appointment-scheduler',
+      operation: 'appointment-scheduler',
       patientId,
       referralId: referralId || undefined,
       data: {
-        operation: normalizedOperation,
+        operation: 'refer',
         clinicalNeeds,
         insurance,
         preferences,
@@ -133,9 +126,8 @@ const source = `(async () => {
     if (!recordsResult || recordsResult.success === false) {
       console.log(JSON.stringify({
         success: false,
-        mode: recordsResult && recordsResult.mode ? recordsResult.mode : 'not-connected',
         connected: false,
-        operation: normalizedOperation,
+        operation: 'refer',
         healthcareHome,
         delegatedTo: steps,
         stepResults: delegatedResults,
@@ -146,7 +138,7 @@ const source = `(async () => {
     }
     delegatedResults.records_scheduling = recordsResult;
 
-    const lowerOrderOperation = normalizedOperation === 'match' ? 'match' : normalizedOperation === 'refer' ? 'refer' : 'status';
+    const lowerOrderOperation = 'refer';
     const resourceResult = await executeTool('healthcare_resource_coordination', {
       operation: lowerOrderOperation,
       patientId,
@@ -166,9 +158,8 @@ const source = `(async () => {
     if (!resourceResult || resourceResult.success === false) {
       console.log(JSON.stringify({
         success: false,
-        mode: resourceResult && resourceResult.mode ? resourceResult.mode : 'not-connected',
         connected: false,
-        operation: normalizedOperation,
+        operation: 'refer',
         healthcareHome,
         delegatedTo: steps,
         stepResults: delegatedResults,
@@ -194,8 +185,8 @@ const source = `(async () => {
         channel: input.communicationChannel || 'portal',
         templateId: input.communicationTemplateId || 'referral-status-update',
         subject: input.communicationSubject || 'Care Referral Update',
-        message: referralRecord ? 'Your care referral has been ' + (normalizedOperation === 'track' ? 'reviewed' : normalizedOperation === 'status' ? 'status checked' : 'submitted for coordination') + '. Referral status: ' + (referralStatus || 'pending') + '.' : 'Care referral coordination update available.',
-        variables: { patientId, referralId: referralId || undefined, referralStatus: referralStatus || 'pending', operation: normalizedOperation },
+        message: referralRecord ? 'Your care referral has been submitted for coordination. Referral status: ' + (referralStatus || 'pending') + '.' : 'Care referral coordination update available.',
+        variables: { patientId, referralId: referralId || undefined, referralStatus: referralStatus || 'pending', operation: 'refer' },
         scheduledAt: followUpRequired && followUpAt ? followUpAt : undefined,
         priority: urgency === 'urgent' ? 'urgent' : 'routine',
         dryRun,
@@ -206,9 +197,8 @@ const source = `(async () => {
     const allConnected = (!recordsResult || recordsResult.success !== false) && (!resourceResult || resourceResult.success !== false) && (!communicationResult || communicationResult.success !== false);
     console.log(JSON.stringify({
       success: true,
-      mode: dryRun ? 'dry-run' : 'live',
       connected: allConnected,
-      operation: normalizedOperation,
+      operation: 'refer',
       data: {
         referral: referralRecord,
         candidates,
@@ -226,9 +216,9 @@ const source = `(async () => {
   } catch (error) {
     console.log(JSON.stringify({
       success: false,
-      mode: 'error',
+      status: 'error',
       connected: false,
-      operation: normalizedOperation,
+      operation: 'refer',
       healthcareHome,
       delegatedTo: steps,
       error: error instanceof Error ? error.message : String(error),
@@ -241,6 +231,8 @@ const careResourceReferralCoordinator = createCodeSkill({
   id: 'care-resource-referral-coordinator',
   name: 'Care Resource & Referral Coordinator',
   description: 'Coordinate patient care-resource matching, referral creation, and referral status follow-up by delegating to healthcare records scheduling, resource coordination, and patient communication tools with dry-run and explicit-confirmation gates.',
+  tier: 'represent',
+  domainKnowledge: 'Care resource matching, referral coordination, and resource utilization optimization',
   manifest: {
     sourceCode: source,
     configSchema: referralConfig,
@@ -252,7 +244,6 @@ const careResourceReferralCoordinator = createCodeSkill({
     metadata,
   },
   inputSchema: createSchemaRecord({
-    operation: SchemaProps.select(['refer', 'match', 'track', 'status'], { description: 'Referral operation: refer, match, track, or status', default: 'refer' }),
     patient: SchemaProps.text({ description: 'Minimum-necessary patient identifier' }),
     referralId: SchemaProps.text({ description: 'Referral identifier for track or status operations' }),
     clinicalNeeds: SchemaProps.stringArray({ description: 'Clinician-supplied care needs used for resource matching' }),
@@ -275,9 +266,7 @@ const careResourceReferralCoordinator = createCodeSkill({
   }),
   outputSchema: createSchemaRecord({
     success: SchemaProps.boolean({ description: 'Whether referral coordination completed' }),
-    mode: SchemaProps.select(['dry-run', 'live', 'not-connected', 'confirmation-required', 'safety-escalation', 'error'], { description: 'Execution or governance mode' }),
     connected: SchemaProps.boolean({ description: 'Whether all connected lower-order tools returned successfully' }),
-    operation: SchemaProps.text({ description: 'Normalized referral operation' }),
     data: SchemaProps.object({
       referral: SchemaProps.object({}, { description: 'Referral record returned by the connected coordination tool', additionalProperties: true }),
       candidates: SchemaProps.objectArray(SchemaProps.object({}, { description: 'Candidate care resource', additionalProperties: true }), { description: 'Resource candidates returned by the connected coordination tool' }),
@@ -293,7 +282,7 @@ const careResourceReferralCoordinator = createCodeSkill({
     safetyBoundary: SchemaProps.text({ description: 'Clinical and governance safety boundary' }),
     missingInformation: SchemaProps.stringArray({ description: 'Required information missing before coordination' }),
     error: SchemaProps.text({ description: 'Failure, connectivity, or governance message' }),
-  }, { required: ['success', 'mode', 'connected'] }),
+  }, { required: ['success', 'connected'] }),
   triggers,
   confirmBeforeSend: true,
 });

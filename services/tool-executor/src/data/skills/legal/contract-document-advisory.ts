@@ -1,20 +1,10 @@
 import { createCodeSkill, SchemaProps } from '../code-skill-factory';
 
-const CONTRACT_DOCUMENT_ADVISORY = createCodeSkill({
-  id: 'contract-document-advisory',
-  name: 'Contract & Document Advisory',
-  description: 'Advisory tool for contract review, clause drafting, and risk assessment with local document storage.',
-  manifest: {
-    language: 'javascript',
-    entrypoint: 'index.js',
-    sourceCode: `const input = __tool_input || {};
+const CONTRACT_DOCUMENT_ADVISORY_SOURCE = `const input = __tool_input || {};
 const fs = require('fs');
 const path = require('path');
-const operation = input.operation || 'review-contract';
 const contractText = input.contractText || '';
-const clauseType = input.clauseType || 'general';
-const terms = input.terms || '';
-const facts = input.facts || '';
+const contractType = input.contractType || 'general';
 const jurisdiction = input.jurisdiction || 'US';
 const baseDir = process.env.LEGAL_HOME || path.join('/tmp/legal');
 const storePath = path.join(baseDir, 'advisory.json');
@@ -30,61 +20,32 @@ const riskRules = [
   { type: 'force-majeure', severity: 'low', clause: 'Force Majeure', terms: ['force majeure', 'act of god'], description: 'Review force majeure coverage' },
   { type: 'limitation', severity: 'medium', clause: 'Limitation of Liability', terms: ['limitation of liability', 'liability cap', 'damages cap'], description: 'Review liability limits' }
 ];
-const clauseTemplates = {
-  confidentiality: 'CONFIDENTIALITY. ' + terms,
-  indemnification: 'INDEMNIFICATION. ' + terms,
-  termination: 'TERMINATION. ' + terms,
-  general: 'GENERAL PROVISIONS. ' + terms
-};
-let result;
-  if (operation === 'review-contract') {
-  const normalizedText = contractText.toLowerCase();
-  const risks = riskRules.filter(r => r.terms.some(term => normalizedText.includes(term)));
-  const issues = risks.map(r => ({ issue: r.description, severity: r.severity, type: r.type, clause: r.clause }));
-  const clauses = risks.map(r => ({ clause: r.clause, status: 'review', note: r.description + '; manual legal review required' }));
-  const review = { id: 'review_' + Date.now(), contractType: input.contractType || 'general', textLength: contractText.length, risks, issues, clauses, jurisdiction, createdAt: new Date().toISOString(), source: 'local', method: 'keyword-heuristic', disclaimer: 'Heuristic review only; not legal advice and not a substitute for counsel.' };
-  store.push(review);
-  fs.writeFileSync(storePath, JSON.stringify(store, null, 2));
-  result = { success: true, data: { review, storePath, issueCount: issues.length } };
-} else if (operation === 'draft-clause') {
-  if (!terms.trim()) {
-    result = { success: false, error: 'terms is required to draft a clause' };
-  } else {
-    const text = clauseTemplates[clauseType.toLowerCase()] || clauseTemplates.general;
-    const clause = { id: 'clause_' + Date.now(), clauseType, terms, text, createdAt: new Date().toISOString(), source: 'local', disclaimer: 'Drafting aid only; counsel must review before use.' };
-    store.push(clause);
-    fs.writeFileSync(storePath, JSON.stringify(store, null, 2));
-    result = { success: true, data: { clause, storePath } };
-  }
-} else if (operation === 'risk-assessment') {
-  const factors = facts ? facts.split(/[.;]/).filter(f => f.trim()).map(f => {
-    const statement = f.trim();
-    const lower = statement.toLowerCase();
-    const riskLevel = /unlimited|penalt|breach|terminate without|no limitation/i.test(lower) ? 'high' : /notice|cap|review|arbitration/i.test(lower) ? 'medium' : 'low';
-    return { factor: statement, riskLevel, detail: 'Keyword heuristic; manual legal review required' };
-  }) : [];
-  const overallRisk = factors.length ? (factors.some(f => f.riskLevel === 'high') ? 'high' : factors.some(f => f.riskLevel === 'medium') ? 'medium' : 'low') : 'unknown';
-  const assessment = { id: 'risk_' + Date.now(), jurisdiction, factors, overallRisk, createdAt: new Date().toISOString(), source: 'local', method: 'keyword-heuristic', disclaimer: 'Heuristic assessment only; not legal advice.' };
-  store.push(assessment);
-  fs.writeFileSync(storePath, JSON.stringify(store, null, 2));
-  result = { success: true, data: { assessment, storePath, factorCount: factors.length } };
-} else {
-  result = { success: false, error: 'Unknown operation: ' + operation };
-}
-console.log(JSON.stringify(result));`,
+const normalizedText = contractText.toLowerCase();
+const risks = riskRules.filter(r => r.terms.some(term => normalizedText.includes(term)));
+const issues = risks.map(r => ({ issue: r.description, severity: r.severity, type: r.type, clause: r.clause }));
+const clauses = risks.map(r => ({ clause: r.clause, status: 'review', note: r.description + '; manual legal review required' }));
+const review = { id: 'review_' + Date.now(), contractType: input.contractType || 'general', textLength: contractText.length, risks, issues, clauses, jurisdiction, createdAt: new Date().toISOString(), source: 'local', method: 'keyword-heuristic', disclaimer: 'Heuristic review only; not legal advice and not a substitute for counsel.' };
+store.push(review);
+fs.writeFileSync(storePath, JSON.stringify(store, null, 2));
+console.log(JSON.stringify({ success: true, data: { review, storePath, issueCount: issues.length } }));`;
+
+const CONTRACT_DOCUMENT_ADVISORY = createCodeSkill({
+  id: 'contract-document-advisory',
+  name: 'Contract & Document Advisory',
+  description: 'Advisory tool for contract review, clause drafting, and risk assessment with local document storage.',
+  manifest: {
+    language: 'javascript',
+    entrypoint: 'index.js',
+    sourceCode: CONTRACT_DOCUMENT_ADVISORY_SOURCE,
   },
   inputSchema: {
     type: 'object',
     properties: {
-      operation: SchemaProps.select(['review-contract', 'draft-clause', 'risk-assessment'], { description: 'Operation: review-contract for contract review, draft-clause for clause drafting, risk-assessment for risk analysis' }),
       contractText: SchemaProps.text({ description: 'Full text of the contract to review' }),
       contractType: SchemaProps.text({ description: 'Type of contract (e.g., employment, NDA, service agreement, general)' }),
-      clauseType: SchemaProps.select(['confidentiality', 'indemnification', 'termination', 'general'], { description: 'Type of clause to draft (e.g., confidentiality, indemnification, termination, general)' }),
-      terms: SchemaProps.text({ description: 'Custom terms and requirements for the clause' }),
-      facts: SchemaProps.text({ description: 'Factual background for risk assessment' }),
       jurisdiction: SchemaProps.text({ description: 'Applicable legal jurisdiction (e.g., US, CA, NY, EU)' }),
     },
-    required: ['operation'],
+    required: ['contractText'],
   },
   outputSchema: {
     type: 'object',
@@ -94,11 +55,8 @@ console.log(JSON.stringify(result));`,
         type: 'object',
         properties: {
           review: { type: 'object' },
-          clause: { type: 'object' },
-          assessment: { type: 'object' },
           storePath: { type: 'string' },
           issueCount: { type: 'number' },
-          factorCount: { type: 'number' },
         },
       },
       error: { type: 'string' },
@@ -107,11 +65,11 @@ console.log(JSON.stringify(result));`,
   },
 });
 
+CONTRACT_DOCUMENT_ADVISORY.tier = 'advise';
+CONTRACT_DOCUMENT_ADVISORY.domainKnowledge = 'Contract law, commercial negotiation standards, regulatory compliance (GDPR, SOC2, HIPAA), legal/security liability mitigation';
+
 CONTRACT_DOCUMENT_ADVISORY.triggers = [
-  { kind: 'user', phrase_examples: ['Review this contract', 'Draft a clause', 'Assess risk'] },
-  { kind: 'schedule', cadence: '90/60/30-day contract renewal audit' },
-  { kind: 'event', on: 'Counterparty redline received' },
-  { kind: 'event', on: 'Regulatory feed update' },
+  { kind: 'event', on: 'Document or redline received' },
 ];
 
 export { CONTRACT_DOCUMENT_ADVISORY };

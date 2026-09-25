@@ -3,7 +3,7 @@ import { createCodeSkill, SchemaProps } from '../code-skill-factory';
 
 const CAREER_BASE_CONFIG_SCHEMA: SchemaRecord = { type: 'object', properties: {} };
 
-// career_outcome: records application outcomes and updates career search stats.
+// career-outcome: records application outcomes and updates career search stats.
 // Returns { success, data: { entry, stats, trackingPath, outcomesPath } }
 const CAREER_OUTCOME_SOURCE = `(async () => {
 const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
@@ -103,7 +103,7 @@ const CAREER_OUTCOME_OUTPUT = {
 };
 
 const CAREER_OUTCOME = createCodeSkill({
-  id: 'career_outcome',
+  id: 'career-outcome',
   name: 'Track Outcomes',
   description: 'Records application outcomes (offer, rejection, interview, screening, no-response) and updates career search stats. Also supports outcome analytics and trend reporting.',
   manifest: {
@@ -117,7 +117,6 @@ const CAREER_OUTCOME = createCodeSkill({
   outputSchema: CAREER_OUTCOME_OUTPUT,
   triggers: [
     { kind: 'user', phrase_examples: ['Record an outcome', 'Log an interview', 'Track a rejection'] },
-    { kind: 'event', on: 'Application status changes' },
   ],
 });
 CAREER_OUTCOME.configSchema = CAREER_OUTCOME.manifest.configSchema as SchemaRecord;

@@ -7,7 +7,7 @@ const INTERVIEW_PRACTICE_MOCK_INTERVIEWER_SOURCE = `(async () => {
 const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
 let jobId = input.targetRole || '';
 if (!jobId) {
-  const pipeline = await __execute_tool('career_pipeline_report', {});
+  const pipeline = await __execute_tool('career-pipeline-report', {});
   if (pipeline && pipeline.success && pipeline.data) {
     const pipelineData = pipeline.data;
     if (Array.isArray(pipelineData.tracking) && pipelineData.tracking.length) {
@@ -15,17 +15,17 @@ if (!jobId) {
     }
   }
 }
-const result = await __execute_tool('career_interview_prep', { jobId, stage: input.stage, targetRole: input.targetRole, company: input.company });
+const result = await __execute_tool('career-interview-prep', { jobId, stage: input.stage, targetRole: input.targetRole, company: input.company });
 if (!result || result.success === false || result.error) {
-console.log(JSON.stringify({ success: false, mode: 'not-connected', error: result && result.error ? result.error : 'Not connected: interview preparation could not be generated; ensure a profile and ranked job exist' }));
+console.log(JSON.stringify({ success: false, status: 'not-connected', error: result && result.error ? result.error : 'Not connected: interview preparation could not be generated; ensure a profile and ranked job exist' }));
 return;
 }
 const practiceData = result.data && typeof result.data === 'object' ? result.data : result;
 if (!practiceData || (!practiceData.summary && !practiceData.questions && !practiceData.answers && !practiceData.script && !practiceData.rationale)) {
-console.log(JSON.stringify({ success: false, mode: 'not-connected', error: 'Not connected: interview preparation returned no usable practice data' }));
+console.log(JSON.stringify({ success: false, status: 'not-connected', error: 'Not connected: interview preparation returned no usable practice data' }));
 return;
 }
-console.log(JSON.stringify({ success: true, data: { interviewPrep: practiceData, delegatedTo: 'career_interview_prep', mockSessionId: 'mock_' + Date.now(), generatedAt: new Date().toISOString() } }));
+console.log(JSON.stringify({ success: true, data: { interviewPrep: practiceData, delegatedTo: 'career-interview-prep', mockSessionId: 'mock_' + Date.now(), generatedAt: new Date().toISOString() } }));
 })();`;
 
 const INTERVIEW_PRACTICE_MOCK_INTERVIEWER_INPUT = {
@@ -41,7 +41,7 @@ const INTERVIEW_PRACTICE_MOCK_INTERVIEWER_OUTPUT = {
 type: 'object',
 properties: {
 success: { type: 'boolean' },
-mode: { type: 'string' },
+status: { type: 'string', description: 'Execution status' },
 data: {
 type: 'object',
 properties: {
@@ -59,24 +59,21 @@ required: ['success', 'data'],
 const INTERVIEW_PRACTICE_MOCK_INTERVIEWER = createCodeSkill({
 id: 'career-interview-practice-mock-interviewer',
 name: 'Interview Practice & Mock Interviewer',
-description: 'Runs interactive mock interviews using role/company battlecards, records performance, and produces actionable coaching notes. Delegates to career_interview_prep. Reports not-connected when no interview context is available.',
+description: 'Runs interactive mock interviews using role/company battlecards, records performance, and produces actionable coaching notes. Delegates to career-interview-prep. Reports not-connected when no interview context is available.',
 manifest: {
 language: 'javascript',
 entrypoint: 'index.js',
 sourceCode: INTERVIEW_PRACTICE_MOCK_INTERVIEWER_SOURCE,
 configSchema: CAREER_WRAPPER_CONFIG_SCHEMA,
-lowerOrderTools: ['career_interview_prep'],
+lowerOrderTools: ['career-interview-prep'],
  actionLabel: 'Start mock interview',
 },
 inputSchema: INTERVIEW_PRACTICE_MOCK_INTERVIEWER_INPUT,
 outputSchema: INTERVIEW_PRACTICE_MOCK_INTERVIEWER_OUTPUT,
 triggers: [
 { kind: 'user', phrase_examples: ['Mock interview me', 'Practice for this interview', 'Run a mock session'] },
-{ kind: 'schedule', cadence: 'Before each scheduled interview' },
-{ kind: 'event', on: 'Interview scheduled for a tracked application' },
 ],
 });
 INTERVIEW_PRACTICE_MOCK_INTERVIEWER.configSchema = INTERVIEW_PRACTICE_MOCK_INTERVIEWER.manifest.configSchema as SchemaRecord;
 
 export { INTERVIEW_PRACTICE_MOCK_INTERVIEWER };
-

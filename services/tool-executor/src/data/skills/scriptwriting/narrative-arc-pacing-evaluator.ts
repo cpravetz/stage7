@@ -93,7 +93,7 @@ const NARRATIVE_ARC_PACING_OUTPUT = {
 };
 
 export const NARRATIVE_ARC_PACING_EVALUATOR = createCodeSkill({
-  id: 'scriptwriting_narrative_arc_pacing_evaluator',
+  id: 'scriptwriting-narrative-arc-pacing-evaluator',
   name: 'Narrative Arc & Pacing Evaluator',
   description: 'Analyzes script structure for act breaks, scene density, narrative arc progression, and genre/audience alignment. Outputs pacing metrics and structural assessment.',
   manifest: { language: 'javascript', entrypoint: 'index.js', sourceCode: NARRATIVE_ARC_PACING_SOURCE },
@@ -101,7 +101,7 @@ export const NARRATIVE_ARC_PACING_EVALUATOR = createCodeSkill({
   outputSchema: NARRATIVE_ARC_PACING_OUTPUT,
   triggers: [
     { kind: 'user', phrase_examples: ['Analyze my script structure', 'Check pacing', 'Evaluate narrative arc'] },
-    { kind: 'event', on: 'Script draft ready for structural review' },
-    { kind: 'data', condition: 'New script content available for narrative analysis' },
   ],
+  tier: 'advise',
+  domainKnowledge: 'Narrative structure, pacing analysis, story theory, genre conventions',
 });

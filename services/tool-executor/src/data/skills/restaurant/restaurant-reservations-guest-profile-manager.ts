@@ -4,7 +4,6 @@ import { createCodeSkill, SchemaProps } from "../code-skill-factory";
 const RESTAURANT_RESERVATIONS_GUEST_PROFILE_MANAGER_SOURCE = `(async () => {
   const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
   const baseDir = process.env.RESTAURANT_HOME || '/tmp/restaurant';
-  const operation = input.operation || 'guest-profile';
   const endpoint = process.env.RESTAURANT_RESERVATION_ENDPOINT || '';
   const dryRun = input.dryRun !== false;
   const confirmBeforeSend = input.confirmBeforeSend !== false;
@@ -16,45 +15,22 @@ const RESTAURANT_RESERVATIONS_GUEST_PROFILE_MANAGER_SOURCE = `(async () => {
   let profiles = fs.existsSync(storePath) ? JSON.parse(fs.readFileSync(storePath, 'utf8')) : [];
 
   if (!endpoint) {
-    console.log(JSON.stringify({ success: false, mode: 'not-connected', operation, error: 'Not connected: RESTAURANT_RESERVATION_ENDPOINT is not configured. Reservation operations require a live endpoint.', endpoint: null }));
+    console.log(JSON.stringify({ success: false, status: 'not-connected', error: 'Not connected: RESTAURANT_RESERVATION_ENDPOINT is not configured. Reservation operations require a live endpoint.', endpoint: null }));
     return;
   }
 
-  if (operation === 'guest-profile') {
-    const guestId = input.guestId || ('guest_' + Date.now());
-    const name = input.name || 'Unknown';
-    const phone = input.phone || '';
-    const email = input.email || '';
-    const preferences = input.preferences || {};
-    const profile = { id: guestId, name, phone, email, preferences, visitCount: 0, createdAt: new Date().toISOString() };
-    if (dryRun || !confirmBeforeSend) {
-      profiles.push(profile);
-      fs.writeFileSync(storePath, JSON.stringify(profiles, null, 2));
-      console.log(JSON.stringify({ success: true, mode: dryRun ? 'dry-run' : 'live', operation, data: { profile, dryRun, savedLocally: true } }));
-    } else {
-      console.log(JSON.stringify({ success: false, mode: 'pending-confirmation', operation, error: 'Confirmation required before creating guest profile on live endpoint', profileId: guestId }));
-    }
-  } else if (operation === 'reservation') {
-    const reservationId = input.reservationId || ('res_' + Date.now());
-    const guestId = input.guestId || '';
-    const date = input.date || '';
-    const partySize = Number(input.partySize || 2);
-    const tableId = input.tableId || '';
-    const status = input.status || 'pending';
-    const reservation = { id: reservationId, guestId, date, partySize, tableId, status, createdAt: new Date().toISOString() };
-    if (dryRun || !confirmBeforeSend) {
-      profiles.push({ id: guestId, reservations: [reservation] });
-      fs.writeFileSync(storePath, JSON.stringify(profiles, null, 2));
-      console.log(JSON.stringify({ success: true, mode: dryRun ? 'dry-run' : 'live', operation, data: { reservation, dryRun, savedLocally: true } }));
-    } else {
-      console.log(JSON.stringify({ success: false, mode: 'pending-confirmation', operation, error: 'Confirmation required before creating reservation on live endpoint', reservationId }));
-    }
-  } else if (operation === 'guest-history') {
-    const guestId = input.guestId || '';
-    const history = profiles.filter(p => p.id === guestId);
-    console.log(JSON.stringify({ success: true, mode: 'local', operation, data: { guestId, history } }));
+  const guestId = input.guestId || ('guest_' + Date.now());
+  const name = input.name || 'Unknown';
+  const phone = input.phone || '';
+  const email = input.email || '';
+  const preferences = input.preferences || {};
+  const profile = { id: guestId, name, phone, email, preferences, visitCount: 0, createdAt: new Date().toISOString() };
+  if (dryRun || !confirmBeforeSend) {
+    profiles.push(profile);
+    fs.writeFileSync(storePath, JSON.stringify(profiles, null, 2));
+    console.log(JSON.stringify({ success: true, status: dryRun ? 'dry-run' : 'live', data: { profile, dryRun, savedLocally: true } }));
   } else {
-    console.log(JSON.stringify({ success: false, mode: 'not-connected', operation, error: 'Unknown operation: ' + operation }));
+    console.log(JSON.stringify({ success: false, status: 'pending-confirmation', error: 'Confirmation required before creating guest profile on live endpoint', profileId: guestId }));
   }
 })();`;
 
@@ -82,15 +58,6 @@ const RESTAURANT_RESERVATIONS_GUEST_PROFILE_MANAGER_CONFIG = {
 const RESTAURANT_RESERVATIONS_GUEST_PROFILE_MANAGER_INPUT = {
   "type": "object",
   "properties": {
-    "operation": {
-      "type": "string",
-      "enum": [
-        "guest-profile",
-        "reservation",
-        "guest-history"
-      ],
-      "description": "Reservation or guest profile operation"
-    },
     "guestId": {
       "type": "string",
       "description": "Guest identifier"
@@ -151,7 +118,7 @@ const RESTAURANT_RESERVATIONS_GUEST_PROFILE_MANAGER_OUTPUT = {
       "type": "boolean",
       "description": "Whether the operation succeeded"
     },
-    "mode": {
+    "status": {
       "type": "string",
       "enum": [
         "dry-run",
@@ -160,11 +127,7 @@ const RESTAURANT_RESERVATIONS_GUEST_PROFILE_MANAGER_OUTPUT = {
         "pending-confirmation",
         "error"
       ],
-      "description": "Execution mode"
-    },
-    "operation": {
-      "type": "string",
-      "description": "The operation performed"
+      "description": "Execution status"
     },
     "data": {
       "type": "object",
@@ -187,8 +150,7 @@ const RESTAURANT_RESERVATIONS_GUEST_PROFILE_MANAGER_OUTPUT = {
   },
   "required": [
     "success",
-    "mode",
-    "operation"
+    "status"
   ]
 };
 
@@ -208,14 +170,9 @@ export const RESTAURANT_RESERVATIONS_GUEST_PROFILE_MANAGER = createCodeSkill({
         "Create guest profile",
         "Check reservation status"
       ]
-    },
-    {
-      "kind": "schedule",
-      "cadence": "Daily reservation review"
-    },
-    {
-      "kind": "event",
-      "on": "Reservation requested"
     }
   ],
 });
+
+RESTAURANT_RESERVATIONS_GUEST_PROFILE_MANAGER.tier = 'aid';
+RESTAURANT_RESERVATIONS_GUEST_PROFILE_MANAGER.domainKnowledge = 'Restaurant reservation management, guest profile tracking, and booking coordination';

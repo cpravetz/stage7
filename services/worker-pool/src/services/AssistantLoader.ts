@@ -1,7 +1,7 @@
 import { AssistantDefinition, AssistantRuntimeConfig } from '@stage7-nextgen/shared';
-import { ArtifactsService } from "../shared/artifacts";
+import { ArtifactsService } from '@stage7-nextgen/artifacts';
 import { logger } from '@stage7-nextgen/shared';
-import { buildAssistantManifest, filterCatalogByManifest, validateManifest } from '../data/assistantManifest';
+import { buildAssistantManifest, validateManifest } from '../data/assistantManifest';
 
 export class AssistantLoader {
   private persistence: ArtifactsService;

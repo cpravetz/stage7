@@ -8,7 +8,7 @@ const CREATIVE_EXTERNAL_OUTPUT_SCHEMA = {
   type: 'object',
   properties: {
     success: { type: 'boolean' },
-    mode: { type: 'string', enum: ['dry-run', 'live', 'error'] },
+    status: { type: 'string', enum: ['success', 'error'] },
     system: { type: 'string' },
     action: { type: 'string' },
     request: {
@@ -29,11 +29,11 @@ const CREATIVE_EXTERNAL_OUTPUT_SCHEMA = {
     },
     error: { type: ['string', 'null'] },
   },
-  required: ['success', 'mode', 'system', 'action', 'request', 'response', 'error'],
+  required: ['success', 'status', 'system', 'action', 'request', 'response', 'error'],
 };
 
 const CREATIVE_DRAFTING = createCodeSkill({
-  id: 'creative_drafting',
+  id: 'creative-drafting',
   name: 'Creative Drafting',
   description:
     'Write original lyrics and scripts with full verses, choruses, bridges, scenes, and dialogue — not empty templates. Runs as reasoning-only on the assistant model using your creative direction.',
@@ -189,10 +189,12 @@ console.log(JSON.stringify({ success: true, data: { draft, storePath } }));
     },
     required: ['success'],
   },
+  tier: 'aid',
+  domainKnowledge: 'Creative content drafting, lyrical composition, script structure',
 });
 
 const TREND_PLANNING_ADVISORY = createExternalActionSkill({
-  id: 'creative_trend_planning',
+  id: 'creative-trend-planning',
   name: 'Trend & Planning Advisory',
   description: 'Research creative trends, chart data, genre signals, and audience preferences to inform songwriting, scripting, and release strategy. Combines scriptwriter planning and songwriter trend analysis.',
   system: 'creative_intelligence',
@@ -221,7 +223,6 @@ const TREND_PLANNING_ADVISORY = createExternalActionSkill({
   inputSchema: {
     type: 'object',
     properties: {
-      operation: SchemaProps.select(['trends', 'charts', 'genre-signals', 'audience-preferences', 'compare', 'plan', 'outline', 'structure', 'generate', 'revise'], { description: 'Operation type' }),
       format: SchemaProps.select(['video', 'podcast', 'presentation', 'film', 'music', 'lyrics'], { description: 'Creative format' }),
       genre: SchemaProps.text({ description: 'Genre to analyze' }),
       market: SchemaProps.text({ description: 'Target market/region' }),
@@ -241,9 +242,12 @@ const TREND_PLANNING_ADVISORY = createExternalActionSkill({
       campaign: SchemaProps.text({ description: 'Associated campaign identifier' }),
       dryRun: SchemaProps.boolean({ description: 'Validate without executing' }),
     },
-    required: ['operation'],
+    required: [],
   },
   outputSchema: CREATIVE_EXTERNAL_OUTPUT_SCHEMA,
+  triggers: [{ kind: 'user', phrase_examples: ['Research creative trends for this genre', 'Analyze audience preferences for this topic'] }],
+  tier: 'aid',
+  domainKnowledge: 'Creative trend research, audience preference analysis, genre signal assessment',
   timeoutMs: 120000,
 });
 
@@ -259,7 +263,7 @@ export const creativeWorkflow = createWorkflow({
   productObject: 'creative work',
   flow: 'brief → create',
   stages: [
-    { name: 'brief', description: 'Trend research and creative brief planning', stageIds: ['creative_trend_planning'] },
-    { name: 'create', description: 'Drafting lyrics, scripts, and creative content', stageIds: ['creative_drafting'] },
+    { name: 'brief', description: 'Trend research and creative brief planning', stageIds: ['creative-trend-planning'] },
+    { name: 'create', description: 'Drafting lyrics, scripts, and creative content', stageIds: ['creative-drafting'] },
   ],
 }, creativeSkills);

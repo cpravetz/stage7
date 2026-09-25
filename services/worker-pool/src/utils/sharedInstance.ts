@@ -1,6 +1,6 @@
 import { AssistantLoader } from '../services/AssistantLoader';
 import { AssistantExecutor } from '../services/AssistantExecutor';
-import { ArtifactsService } from "../shared/artifacts";
+import { ArtifactsService } from '@stage7-nextgen/artifacts';
 import { buildAssistantManifest, parseSTAGE7_ASSISTANTS, validateManifest, filterCatalogByManifest, type AssistantManifest } from '../data/assistantManifest';
 
 const persistence = new ArtifactsService();

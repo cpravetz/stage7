@@ -2,17 +2,14 @@ import { Tool } from '../../../types';
 import { createExternalActionSkill, createCodeSkill, SchemaProps } from '../code-skill-factory';
 
 // ============================================================================
-// SKILL 1: Candidate Screening & Scheduling Manager (Represent)
-// ============================================================================
-// Operations: screen-resume, assessment, schedule-interview
-// confirmBeforeSend: true, dryRun default: true
-// configSchema and endpointEnvVar for Represent skill governance
+// SKILL 1: hr-screen-resume (Represent)
+// User trigger: "Screen this resume for role fit"
 // ============================================================================
 
-const CANDIDATE_SCREENING = createCodeSkill({
-  id: 'candidate-screening',
-  name: 'Applicant Review and Interview Coordination',
-  description: 'Filters inbound applicant profiles against role criteria, dispatches initial screening surveys, and coordinates interview availability. Dry-run mode and explicit confirmation required for scheduling operations.',
+const HR_SCREEN_RESUME = createCodeSkill({
+  id: 'hr-screen-resume',
+  name: 'Screen Resume for Role Fit',
+  description: 'Filters inbound applicant profiles against role criteria and computes match score. Dry-run mode and explicit confirmation required.',
   manifest: {
     language: 'javascript',
     entrypoint: 'index.js',
@@ -20,11 +17,9 @@ const CANDIDATE_SCREENING = createCodeSkill({
 const fs = require('fs');
 const path = require('path');
 
-const operation = input.operation || 'screen-resume';
 const resumeText = input.resumeText || '';
 const jobRequirements = input.jobRequirements || '';
 const candidateName = input.candidateName || '';
-const assessmentData = input.assessmentData || {};
 const dryRun = input.dryRun !== false;
 const confirmation = input.confirmation === true;
 const endpoint = process.env.HR_SCREENING_ENDPOINT || '';
@@ -47,6 +42,81 @@ function computeScore(resumeText, jobRequirements) {
   return { score: Math.min(100, score), matched, gaps, partialMatched };
 }
 
+const { score, matched, gaps } = computeScore(resumeText, jobRequirements);
+const screening = { id: 'screen_' + Date.now(), candidateName, score, matched, gaps, createdAt: new Date().toISOString(), source: 'local' };
+store.push(screening);
+fs.writeFileSync(storePath, JSON.stringify(store, null, 2));
+
+const result = { status: 'success', data: { screening, storePath } };
+console.log(JSON.stringify(result));`,
+    configSchema: {
+      type: 'object',
+      properties: {
+        confirmBeforeSend: SchemaProps.boolean({ description: 'Require explicit confirmation before sending mutating scheduling requests', default: true }),
+        dryRun: SchemaProps.boolean({ description: 'Validate without executing; defaults to true', default: true }),
+        defaultEndpoint: SchemaProps.url({ description: 'Default screening and scheduling endpoint URL' }),
+        maxRetryAttempts: SchemaProps.number({ description: 'Retry attempts on scheduling failure', default: 3 }),
+        rateLimitPerMinute: SchemaProps.number({ description: 'Rate limit per minute for scheduling API', default: 60 }),
+      },
+    },
+    endpointEnvVar: 'HR_SCREENING_ENDPOINT',
+  },
+  inputSchema: {
+    type: 'object',
+    properties: {
+      resumeText: SchemaProps.text({ description: 'Resume text to screen against job requirements' }),
+      jobRequirements: SchemaProps.text({ description: 'Job requirements to match resume against' }),
+      candidateName: SchemaProps.text({ description: 'Candidate full name' }),
+      dryRun: SchemaProps.boolean({ description: 'Validate without executing scheduling; defaults to true', default: true }),
+      confirmation: SchemaProps.boolean({ description: 'Explicit approval for live scheduling dispatch', default: false }),
+    },
+    required: ['resumeText', 'jobRequirements', 'candidateName'],
+  },
+  outputSchema: {
+    type: 'object',
+    properties: {
+      status: { type: 'string', enum: ['success', 'error'] },
+      data: { type: 'object' },
+      error: { type: 'string' },
+    },
+    required: ['status'],
+  },
+});
+
+HR_SCREEN_RESUME.confirmBeforeSend = true;
+HR_SCREEN_RESUME.triggers = [
+  { kind: 'user', phrase_examples: ['Screen this resume for role fit'] },
+];
+HR_SCREEN_RESUME.tier = 'represent';
+HR_SCREEN_RESUME.domainKnowledge = 'Talent acquisition lifecycles, structured interview methodology, compensation benchmarking, employment law compliance (EEOC)';
+HR_SCREEN_RESUME.manifest.workflowStage = 'screening';
+
+// ============================================================================
+// SKILL 2: hr-assess-candidate (Represent)
+// Event trigger: "New application received"
+// ============================================================================
+
+const HR_ASSESS_CANDIDATE = createCodeSkill({
+  id: 'hr-assess-candidate',
+  name: 'Assess Candidate Skills and Experience',
+  description: 'Evaluates candidate technical skills, soft skills, and experience against assessment criteria. Triggered on new application received.',
+  manifest: {
+    language: 'javascript',
+    entrypoint: 'index.js',
+    sourceCode: `const input = __tool_input || {};
+const fs = require('fs');
+const path = require('path');
+
+const resumeText = input.resumeText || '';
+const candidateName = input.candidateName || '';
+const assessmentData = input.assessmentData || {};
+const dryRun = input.dryRun !== false;
+
+const hrHome = process.env.HR_HOME || path.join('/tmp/hr');
+const storePath = path.join(hrHome, 'screening.json');
+fs.mkdirSync(hrHome, { recursive: true });
+let store = fs.existsSync(storePath) ? JSON.parse(fs.readFileSync(storePath, 'utf8')) : [];
+
 function assessCandidate(resumeText, assessmentData) {
   const words = resumeText.toLowerCase().split(/[^a-zA-Z0-9_]+/).filter(Boolean);
   const data = assessmentData || {};
@@ -65,49 +135,105 @@ function assessCandidate(resumeText, assessmentData) {
   };
 }
 
-let result;
-switch (operation) {
-  case 'screen-resume': {
-    const { score, matched, gaps } = computeScore(resumeText, jobRequirements);
-    const screening = { id: 'screen_' + Date.now(), candidateName, score, matched, gaps, createdAt: new Date().toISOString(), source: 'local' };
-    store.push(screening);
-    fs.writeFileSync(storePath, JSON.stringify(store, null, 2));
-    result = { success: true, operation: 'screen-resume', mode: dryRun ? 'dry-run' : 'live', data: { screening, storePath } };
-    break;
-  }
-  case 'assessment': {
-    const assessment = assessCandidate(resumeText, assessmentData);
-    const record = { id: 'assess_' + Date.now(), candidateName, assessment, createdAt: new Date().toISOString(), source: 'local' };
-    store.push(record);
-    fs.writeFileSync(storePath, JSON.stringify(store, null, 2));
-    result = { success: true, operation: 'assessment', mode: dryRun ? 'dry-run' : 'live', data: { record, storePath } };
-    break;
-  }
-  case 'schedule-interview': {
-    if (!endpoint) {
-      result = { success: false, operation: 'schedule-interview', mode: 'not-connected', error: 'Not connected: HR_SCREENING_ENDPOINT is not configured', data: null };
-      break;
-    }
-    if (!dryRun && !confirmation) {
-      result = { success: false, operation: 'schedule-interview', mode: 'confirmation-required', error: 'Explicit confirmation required for scheduling', data: null };
-      break;
-    }
-    const schedule = { id: 'sched_' + Date.now(), candidateName, operation: 'schedule-interview', dryRun, confirmed: confirmation, scheduledAt: new Date().toISOString() };
-    const schedPath = path.join(hrHome, 'scheduling.json');
-    let schedStore = [];
-    if (fs.existsSync(schedPath)) {
-      try { schedStore = JSON.parse(fs.readFileSync(schedPath, 'utf8')); } catch (e) {}
-    }
-    schedStore.push(schedule);
-    fs.writeFileSync(schedPath, JSON.stringify(schedStore, null, 2));
-    result = { success: true, operation: 'schedule-interview', mode: dryRun ? 'dry-run' : 'live', data: { schedule, storePath: schedPath } };
-    break;
-  }
-  default:
-    result = { success: false, error: 'Unknown operation: ' + operation };
+const assessment = assessCandidate(resumeText, assessmentData);
+const record = { id: 'assess_' + Date.now(), candidateName, assessment, createdAt: new Date().toISOString(), source: 'local' };
+store.push(record);
+fs.writeFileSync(storePath, JSON.stringify(store, null, 2));
+
+const result = { status: 'success', data: { record, storePath } };
+console.log(JSON.stringify(result));`,
+    configSchema: {
+      type: 'object',
+      properties: {
+        confirmBeforeSend: SchemaProps.boolean({ description: 'Require explicit confirmation before sending mutating requests', default: true }),
+        dryRun: SchemaProps.boolean({ description: 'Validate without executing; defaults to true', default: true }),
+        defaultEndpoint: SchemaProps.url({ description: 'Default screening and scheduling endpoint URL' }),
+        maxRetryAttempts: SchemaProps.number({ description: 'Retry attempts on scheduling failure', default: 3 }),
+        rateLimitPerMinute: SchemaProps.number({ description: 'Rate limit per minute for scheduling API', default: 60 }),
+      },
+    },
+    endpointEnvVar: 'HR_SCREENING_ENDPOINT',
+  },
+  inputSchema: {
+    type: 'object',
+    properties: {
+      resumeText: SchemaProps.text({ description: 'Resume text to assess' }),
+      candidateName: SchemaProps.text({ description: 'Candidate full name' }),
+      assessmentData: SchemaProps.object({
+        technicalSkills: SchemaProps.stringArray({ description: 'Technical skills to assess against resume' }),
+        softSkills: SchemaProps.stringArray({ description: 'Soft skills to assess against resume' }),
+        experience: SchemaProps.text({ description: 'Experience level to check for in resume' }),
+      }, { description: 'Assessment criteria and data for candidate evaluation' }),
+      dryRun: SchemaProps.boolean({ description: 'Validate without executing; defaults to true', default: true }),
+    },
+    required: ['resumeText', 'candidateName', 'assessmentData'],
+  },
+  outputSchema: {
+    type: 'object',
+    properties: {
+      status: { type: 'string', enum: ['success', 'error'] },
+      data: { type: 'object' },
+      error: { type: 'string' },
+    },
+    required: ['status'],
+  },
+});
+
+HR_ASSESS_CANDIDATE.confirmBeforeSend = true;
+HR_ASSESS_CANDIDATE.triggers = [
+  { kind: 'event', on: 'New application received' },
+];
+HR_ASSESS_CANDIDATE.tier = 'represent';
+HR_ASSESS_CANDIDATE.domainKnowledge = 'Talent acquisition lifecycles, structured interview methodology, compensation benchmarking, employment law compliance (EEOC)';
+HR_ASSESS_CANDIDATE.manifest.workflowStage = 'screening';
+
+// ============================================================================
+// SKILL 3: hr-schedule-interview (Represent)
+// Event trigger: "Candidate passed screening"
+// ============================================================================
+
+const HR_SCHEDULE_INTERVIEW = createCodeSkill({
+  id: 'hr-schedule-interview',
+  name: 'Schedule Interview for Candidate',
+  description: 'Coordinates interview availability and schedules interviews. Requires explicit confirmation for live scheduling. Triggered when candidate passes screening.',
+  manifest: {
+    language: 'javascript',
+    entrypoint: 'index.js',
+    sourceCode: `const input = __tool_input || {};
+const fs = require('fs');
+const path = require('path');
+
+const candidateName = input.candidateName || '';
+const dryRun = input.dryRun !== false;
+const confirmation = input.confirmation === true;
+const endpoint = process.env.HR_SCREENING_ENDPOINT || '';
+
+if (!endpoint) {
+  const result = { status: 'error', error: 'Not connected: HR_SCREENING_ENDPOINT is not configured', data: null };
+  console.log(JSON.stringify(result));
+  process.exit(0);
 }
-console.log(JSON.stringify(result));
-`,
+
+if (!dryRun && !confirmation) {
+  const result = { status: 'error', error: 'Explicit confirmation required for scheduling', data: null };
+  console.log(JSON.stringify(result));
+  process.exit(0);
+}
+
+const hrHome = process.env.HR_HOME || path.join('/tmp/hr');
+fs.mkdirSync(hrHome, { recursive: true });
+
+const schedule = { id: 'sched_' + Date.now(), candidateName, dryRun, confirmed: confirmation, scheduledAt: new Date().toISOString() };
+const schedPath = path.join(hrHome, 'scheduling.json');
+let schedStore = [];
+if (fs.existsSync(schedPath)) {
+  try { schedStore = JSON.parse(fs.readFileSync(schedPath, 'utf8')); } catch (e) {}
+}
+schedStore.push(schedule);
+fs.writeFileSync(schedPath, JSON.stringify(schedStore, null, 2));
+
+const result = { status: 'success', data: { schedule, storePath: schedPath } };
+console.log(JSON.stringify(result));`,
     configSchema: {
       type: 'object',
       properties: {
@@ -123,43 +249,40 @@ console.log(JSON.stringify(result));
   inputSchema: {
     type: 'object',
     properties: {
-      operation: SchemaProps.select(['screen-resume', 'assessment', 'schedule-interview'], { description: 'Screening or scheduling operation to perform' }),
-      resumeText: SchemaProps.text({ description: 'Resume text to screen against job requirements' }),
-      jobRequirements: SchemaProps.text({ description: 'Job requirements to match resume against' }),
       candidateName: SchemaProps.text({ description: 'Candidate full name' }),
-      assessmentData: SchemaProps.object({
-        technicalSkills: SchemaProps.stringArray({ description: 'Technical skills to assess against resume' }),
-        softSkills: SchemaProps.stringArray({ description: 'Soft skills to assess against resume' }),
-        experience: SchemaProps.text({ description: 'Experience level to check for in resume' }),
-      }, { description: 'Assessment criteria and data for candidate evaluation' }),
       dryRun: SchemaProps.boolean({ description: 'Validate without executing scheduling; defaults to true', default: true }),
       confirmation: SchemaProps.boolean({ description: 'Explicit approval for live scheduling dispatch', default: false }),
     },
-    required: ['operation'],
+    required: ['candidateName'],
   },
   outputSchema: {
     type: 'object',
     properties: {
-      success: { type: 'boolean' },
-      operation: { type: 'string' },
-      mode: { type: 'string', enum: ['dry-run', 'live', 'not-connected', 'confirmation-required', 'error'] },
+      status: { type: 'string', enum: ['success', 'error'] },
       data: { type: 'object' },
       error: { type: 'string' },
     },
-    required: ['success', 'operation', 'mode'],
+    required: ['status'],
   },
 });
 
+HR_SCHEDULE_INTERVIEW.confirmBeforeSend = true;
+HR_SCHEDULE_INTERVIEW.triggers = [
+  { kind: 'event', on: 'Candidate passed screening' },
+];
+HR_SCHEDULE_INTERVIEW.tier = 'represent';
+HR_SCHEDULE_INTERVIEW.domainKnowledge = 'Talent acquisition lifecycles, structured interview methodology, compensation benchmarking, employment law compliance (EEOC)';
+HR_SCHEDULE_INTERVIEW.manifest.workflowStage = 'interview';
+
 // ============================================================================
-// SKILL 2: Job Description & Interview Kit Co-Pilot (Aid)
-// ============================================================================
-// Operations: ats, job-board, linkedin, schedule-interview, calendar, email
+// SKILL 4: hr-draft-jd-interview-kit (Aid)
+// User trigger
 // ============================================================================
 
-const RECRUITING_OPS = createExternalActionSkill({
-  id: 'recruiting-ops',
-  name: 'Job Description & Interview Kit Co-Pilot',
-  description: 'Generates structured job descriptions, interview scorecards, role-specific behavioral questions, and rubric guides. Coordinates with ATS, job boards, LinkedIn, scheduling, calendar, and email systems.',
+const HR_DRAFT_JD_INTERVIEW_KIT = createExternalActionSkill({
+  id: 'hr-draft-jd-interview-kit',
+  name: 'Draft Job Description & Interview Kit',
+  description: 'Generates structured job descriptions, interview scorecards, role-specific behavioral questions, and rubric guides.',
   system: 'recruiting-ops',
   action: 'execute',
   endpoint: { envVar: 'HR_RECRUITING_ENDPOINT', method: 'POST' },
@@ -179,42 +302,97 @@ const RECRUITING_OPS = createExternalActionSkill({
   inputSchema: {
     type: 'object',
     properties: {
-      operation: SchemaProps.select(['ats', 'job-board', 'linkedin', 'schedule-interview', 'calendar', 'email'], { description: 'Recruiting operation to perform' }),
       dryRun: SchemaProps.boolean({ description: 'Validate without executing; defaults to true', default: true }),
-      data: SchemaProps.object({}, { description: 'Operation payload data for job description or interview kit generation' }),
+      data: SchemaProps.object({}, { description: 'Payload data for job description or interview kit generation' }),
       filters: SchemaProps.object({}, { description: 'Filters for query operations' }),
       pagination: SchemaProps.object({}, { description: 'Pagination settings' }),
     },
-    required: ['operation'],
+    required: ['data'],
   },
   outputSchema: {
     type: 'object',
     properties: {
-      success: { type: 'boolean' },
-      mode: { type: 'string' },
-      system: { type: 'string' },
-      action: { type: 'string' },
-      operation: { type: 'string' },
-      request: { type: 'object' },
-      response: { type: ['object', 'null'] },
+      status: { type: 'string', enum: ['success', 'error'] },
+      data: { type: 'object' },
       error: { type: 'string' },
     },
-    required: ['success', 'mode', 'system', 'action', 'operation', 'request', 'response', 'error'],
+    required: ['status'],
   },
   timeoutMs: 30000,
   confirmBeforeSend: true,
-})
+});
+
+HR_DRAFT_JD_INTERVIEW_KIT.triggers = [
+  { kind: 'user', phrase_examples: ['Draft job description', 'Create interview scorecard', 'Generate interview kit'] },
+];
+HR_DRAFT_JD_INTERVIEW_KIT.tier = 'aid';
+HR_DRAFT_JD_INTERVIEW_KIT.domainKnowledge = 'Talent acquisition lifecycles, structured interview methodology, compensation benchmarking, employment law compliance (EEOC)';
+HR_DRAFT_JD_INTERVIEW_KIT.manifest.workflowStage = 'interview';
 
 // ============================================================================
-// SKILL 3: Workforce Planning & Compensation Evaluator (Advise)
-// ============================================================================
-// Operations: hiring-analytics, compliance
+// SKILL 5: hr-trigger-interview-scheduling (Aid)
+// Event trigger: "Candidate passed screening"
 // ============================================================================
 
-const HIRING_ANALYTICS_COMPLIANCE = createCodeSkill({
-  id: 'hiring-analytics-compliance',
-  name: 'Workforce Planning & Compensation Evaluator',
-  description: 'Evaluates team headcount needs, attrition trends, and market salary data to recommend hiring roadmaps and compensation structures. Generates hiring metrics, pipeline reports, diversity analytics, and compliance checks.',
+const HR_TRIGGER_INTERVIEW_SCHEDULING = createExternalActionSkill({
+  id: 'hr-trigger-interview-scheduling',
+  name: 'Trigger Interview Scheduling',
+  description: 'Coordinates with ATS, calendar, and email systems to schedule interviews. Triggered when candidate passes screening.',
+  system: 'recruiting-ops',
+  action: 'execute',
+  endpoint: { envVar: 'HR_RECRUITING_ENDPOINT', method: 'POST' },
+  auth: { type: 'api_key', header: 'X-API-Key', credentialEnvKeyMap: { apiKey: 'HR_RECRUITING_API_KEY' } },
+  configSchema: {
+    type: 'object',
+    properties: {
+      confirmBeforeSend: SchemaProps.boolean({ description: 'Require explicit confirmation before sending mutating requests', default: true }),
+      dryRun: SchemaProps.boolean({ description: 'Validate without executing; defaults to true', default: true }),
+      defaultSource: SchemaProps.text({ description: 'Default sourcing channel for job descriptions' }),
+      apiVersion: SchemaProps.text({ description: 'API version for recruiting operations' }),
+      rateLimitPerMinute: SchemaProps.number({ description: 'Rate limit per minute', default: 60 }),
+      retryAttempts: SchemaProps.number({ description: 'Retry attempts on failure', default: 3 }),
+    },
+  },
+  credentialSource: { apiKey: { envVar: 'HR_RECRUITING_API_KEY', configKey: 'recruiting.apiKey' } },
+  inputSchema: {
+    type: 'object',
+    properties: {
+      dryRun: SchemaProps.boolean({ description: 'Validate without executing; defaults to true', default: true }),
+      data: SchemaProps.object({}, { description: 'Scheduling payload data' }),
+      filters: SchemaProps.object({}, { description: 'Filters for query operations' }),
+      pagination: SchemaProps.object({}, { description: 'Pagination settings' }),
+    },
+    required: ['data'],
+  },
+  outputSchema: {
+    type: 'object',
+    properties: {
+      status: { type: 'string', enum: ['success', 'error'] },
+      data: { type: 'object' },
+      error: { type: 'string' },
+    },
+    required: ['status'],
+  },
+  timeoutMs: 30000,
+  confirmBeforeSend: true,
+});
+
+HR_TRIGGER_INTERVIEW_SCHEDULING.triggers = [
+  { kind: 'event', on: 'Candidate passed screening' },
+];
+HR_TRIGGER_INTERVIEW_SCHEDULING.tier = 'aid';
+HR_TRIGGER_INTERVIEW_SCHEDULING.domainKnowledge = 'Talent acquisition lifecycles, structured interview methodology, compensation benchmarking, employment law compliance (EEOC)';
+HR_TRIGGER_INTERVIEW_SCHEDULING.manifest.workflowStage = 'interview';
+
+// ============================================================================
+// SKILL 6: hr-hiring-analytics (Advise)
+// Schedule trigger: "Weekly hiring pipeline report"
+// ============================================================================
+
+const HR_HIRING_ANALYTICS = createCodeSkill({
+  id: 'hr-hiring-analytics',
+  name: 'Hiring Pipeline Analytics',
+  description: 'Evaluates team headcount needs, attrition trends, and market salary data. Generates hiring metrics, pipeline reports, and diversity analytics. Runs weekly.',
   manifest: {
     language: 'javascript',
     entrypoint: 'index.js',
@@ -222,10 +400,8 @@ const HIRING_ANALYTICS_COMPLIANCE = createCodeSkill({
 const fs = require('fs');
 const path = require('path');
 
-const operation = input.operation || 'hiring-analytics';
 const hrHome = process.env.HR_HOME || path.join('/tmp/hr');
 const analyticsPath = path.join(hrHome, 'analytics.json');
-const compliancePath = path.join(hrHome, 'compliance.json');
 
 fs.mkdirSync(hrHome, { recursive: true });
 
@@ -243,6 +419,79 @@ function computeAnalytics(data) {
   return { totalCandidates, byStage, avgTimeToFill: Math.round(avgTimeToFill * 10) / 10, diversity };
 }
 
+const store = loadStore(analyticsPath);
+if (!store.length) {
+  const result = { status: 'error', error: 'Not connected: no hiring analytics records found in ' + analyticsPath, data: { report: null } };
+  console.log(JSON.stringify(result));
+  process.exit(0);
+}
+
+const report = computeAnalytics(store);
+const result = { status: 'success', data: { report, generatedAt: new Date().toISOString() } };
+console.log(JSON.stringify(result));`,
+    configSchema: {
+      type: 'object',
+      properties: {
+        dryRun: SchemaProps.boolean({ description: 'Validate without executing; defaults to true', default: true }),
+      },
+    },
+  },
+  inputSchema: {
+    type: 'object',
+    properties: {
+      dateRange: SchemaProps.object({
+        start: SchemaProps.text({ description: 'Start date for analysis period in ISO 8601 format' }),
+        end: SchemaProps.text({ description: 'End date for analysis period in ISO 8601 format' }),
+      }, { description: 'Date range for the analysis period' }),
+      data: SchemaProps.object({}, { description: 'Hiring records for analytics' }),
+      filters: SchemaProps.object({}, { description: 'Filters to apply to the data' }),
+      dryRun: SchemaProps.boolean({ description: 'Validate without executing; defaults to true', default: true }),
+    },
+    required: [],
+  },
+  outputSchema: {
+    type: 'object',
+    properties: {
+      status: { type: 'string', enum: ['success', 'error'] },
+      data: { type: 'object' },
+      error: { type: 'string' },
+    },
+    required: ['status'],
+  },
+});
+
+HR_HIRING_ANALYTICS.triggers = [
+  { kind: 'schedule', cadence: 'Weekly hiring pipeline report' },
+];
+HR_HIRING_ANALYTICS.tier = 'advise';
+HR_HIRING_ANALYTICS.domainKnowledge = 'Talent acquisition lifecycles, structured interview methodology, compensation benchmarking, employment law compliance (EEOC)';
+HR_HIRING_ANALYTICS.manifest.workflowStage = 'decision';
+
+// ============================================================================
+// SKILL 7: hr-compliance-check (Advise)
+// Schedule trigger: "Monthly compliance audit"
+// ============================================================================
+
+const HR_COMPLIANCE_CHECK = createCodeSkill({
+  id: 'hr-compliance-check',
+  name: 'Compliance Audit Check',
+  description: 'Generates compliance checks for EEO statements, GDPR consent, and ADEA violations. Runs monthly.',
+  manifest: {
+    language: 'javascript',
+    entrypoint: 'index.js',
+    sourceCode: `const input = __tool_input || {};
+const fs = require('fs');
+const path = require('path');
+
+const hrHome = process.env.HR_HOME || path.join('/tmp/hr');
+const compliancePath = path.join(hrHome, 'compliance.json');
+
+fs.mkdirSync(hrHome, { recursive: true });
+
+function loadStore(filePath) {
+  return fs.existsSync(filePath) ? JSON.parse(fs.readFileSync(filePath, 'utf8')) : [];
+}
+
 function checkCompliance(data) {
   const records = data || [];
   const findings = [];
@@ -254,95 +503,62 @@ function checkCompliance(data) {
   return { findings, compliant: findings.length === 0, totalChecked: records.length };
 }
 
-let result;
-switch (operation) {
-  case 'hiring-analytics': {
-    const store = loadStore(analyticsPath);
-    if (!store.length) {
-      result = { success: false, mode: 'not-connected', error: 'Not connected: no hiring analytics records found in ' + analyticsPath, data: { report: null } };
-      break;
-    }
-    const report = computeAnalytics(store);
-    result = { success: true, operation: 'hiring-analytics', mode: 'local', data: { report, generatedAt: new Date().toISOString() } };
-    break;
-  }
-  case 'compliance': {
-    const store = loadStore(compliancePath);
-    if (!store.length) {
-      result = { success: false, mode: 'not-connected', error: 'Not connected: no compliance records found in ' + compliancePath, data: { check: null } };
-      break;
-    }
-    const check = checkCompliance(store);
-    result = { success: true, operation: 'compliance', mode: 'local', data: { check, generatedAt: new Date().toISOString() } };
-    break;
-  }
-  default:
-    result = { success: false, error: 'Unknown operation: ' + operation };
+const store = loadStore(compliancePath);
+if (!store.length) {
+  const result = { status: 'error', error: 'Not connected: no compliance records found in ' + compliancePath, data: { check: null } };
+  console.log(JSON.stringify(result));
+  process.exit(0);
 }
-console.log(JSON.stringify(result));
-`,
+
+const check = checkCompliance(store);
+const result = { status: 'success', data: { check, generatedAt: new Date().toISOString() } };
+console.log(JSON.stringify(result));`,
+    configSchema: {
+      type: 'object',
+      properties: {
+        dryRun: SchemaProps.boolean({ description: 'Validate without executing; defaults to true', default: true }),
+      },
+    },
   },
   inputSchema: {
     type: 'object',
     properties: {
-      operation: SchemaProps.select(['hiring-analytics', 'compliance'], { description: 'Operation to perform: hiring-analytics for pipeline reports, compliance for regulatory checks' }),
       dateRange: SchemaProps.object({
         start: SchemaProps.text({ description: 'Start date for analysis period in ISO 8601 format' }),
         end: SchemaProps.text({ description: 'End date for analysis period in ISO 8601 format' }),
       }, { description: 'Date range for the analysis period' }),
-      data: SchemaProps.object({}, { description: 'Data payload for the operation — hiring records or compliance candidates' }),
+      data: SchemaProps.object({}, { description: 'Compliance candidates data' }),
       filters: SchemaProps.object({}, { description: 'Filters to apply to the data' }),
       dryRun: SchemaProps.boolean({ description: 'Validate without executing; defaults to true', default: true }),
     },
-    required: ['operation'],
+    required: [],
   },
   outputSchema: {
     type: 'object',
     properties: {
-      success: { type: 'boolean' },
-      operation: { type: 'string' },
-      mode: { type: 'string', description: 'Execution mode: local, not-connected, or error' },
+      status: { type: 'string', enum: ['success', 'error'] },
       data: { type: 'object' },
       error: { type: 'string' },
     },
-    required: ['success', 'operation', 'mode'],
+    required: ['status'],
   },
 });
 
-CANDIDATE_SCREENING.confirmBeforeSend = true;
-CANDIDATE_SCREENING.triggers = [
-  { kind: 'user', phrase_examples: ['Screen this resume', 'Assess this candidate', 'Schedule this interview', 'Evaluate this applicant'] },
-  { kind: 'schedule', cadence: 'Daily resume intake review' },
-  { kind: 'event', on: 'New application received' },
-  { kind: 'event', on: 'Resume uploaded' },
-  { kind: 'data', condition: 'Resume or applicant profile data available for screening' },
-];
-CANDIDATE_SCREENING.tier = 'represent';
-CANDIDATE_SCREENING.domainKnowledge = 'Talent acquisition lifecycles, structured interview methodology, compensation benchmarking, employment law compliance (EEOC)';
-HIRING_ANALYTICS_COMPLIANCE.triggers = [
-  { kind: 'user', phrase_examples: ['Generate hiring analytics', 'Run compliance check', 'Evaluate workforce plan', 'Assess compensation benchmarks'] },
-  { kind: 'schedule', cadence: 'Weekly hiring pipeline report' },
+HR_COMPLIANCE_CHECK.triggers = [
   { kind: 'schedule', cadence: 'Monthly compliance audit' },
-  { kind: 'event', on: 'New candidate application received' },
-  { kind: 'event', on: 'Interview feedback submitted' },
-  { kind: 'data', condition: 'Hiring pipeline or compliance data available for analysis' },
 ];
-HIRING_ANALYTICS_COMPLIANCE.tier = 'advise';
-HIRING_ANALYTICS_COMPLIANCE.domainKnowledge = 'Talent acquisition lifecycles, structured interview methodology, compensation benchmarking, employment law compliance (EEOC)';
-RECRUITING_OPS.triggers = [
-  { kind: 'user', phrase_examples: ['Draft job description', 'Create interview scorecard', 'Post to job board', 'Schedule interview'] },
-  { kind: 'schedule', cadence: 'Weekly job posting and interview pipeline review' },
-  { kind: 'event', on: 'New job req opened' },
-  { kind: 'event', on: 'New candidate application received' },
-  { kind: 'data', condition: 'Job req, candidate, or scheduling data available' },
-];
-RECRUITING_OPS.tier = 'aid';
-RECRUITING_OPS.domainKnowledge = 'Talent acquisition lifecycles, structured interview methodology, compensation benchmarking, employment law compliance (EEOC)';
+HR_COMPLIANCE_CHECK.tier = 'advise';
+HR_COMPLIANCE_CHECK.domainKnowledge = 'Talent acquisition lifecycles, structured interview methodology, compensation benchmarking, employment law compliance (EEOC)';
+HR_COMPLIANCE_CHECK.manifest.workflowStage = 'decision';
 
 const hrSkills = [
-  { ...CANDIDATE_SCREENING, tier: 'represent' as const, domainKnowledge: 'Talent acquisition lifecycles, structured interview methodology, compensation benchmarking, employment law compliance (EEOC)' },
-  { ...RECRUITING_OPS, tier: 'aid' as const, domainKnowledge: 'Talent acquisition lifecycles, structured interview methodology, compensation benchmarking, employment law compliance (EEOC)' },
-  { ...HIRING_ANALYTICS_COMPLIANCE, tier: 'advise' as const, domainKnowledge: 'Talent acquisition lifecycles, structured interview methodology, compensation benchmarking, employment law compliance (EEOC)' },
+  HR_SCREEN_RESUME,
+  HR_ASSESS_CANDIDATE,
+  HR_SCHEDULE_INTERVIEW,
+  HR_DRAFT_JD_INTERVIEW_KIT,
+  HR_TRIGGER_INTERVIEW_SCHEDULING,
+  HR_HIRING_ANALYTICS,
+  HR_COMPLIANCE_CHECK,
 ];
 
 export interface WorkflowStage {
@@ -357,10 +573,6 @@ export interface AssistantWorkflow {
   flow: string;
   stages: WorkflowStage[];
 }
-
-CANDIDATE_SCREENING.manifest.workflowStage = 'screening';
-RECRUITING_OPS.manifest.workflowStage = 'interview';
-HIRING_ANALYTICS_COMPLIANCE.manifest.workflowStage = 'decision';
 
 export { hrSkills };
 

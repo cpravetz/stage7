@@ -3,7 +3,7 @@ import { createCodeSkill, SchemaProps } from '../code-skill-factory';
 
 const CAREER_BASE_CONFIG_SCHEMA: SchemaRecord = { type: 'object', properties: {} };
 
-// career_job_discovery: searches job boards and returns normalized listings.
+// career-job-discovery: searches job boards and returns normalized listings.
 // Returns { success, data: { listings, total, queriesUsed } }
 const CAREER_JOB_DISCOVERY_SOURCE = `(async () => {
 const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
@@ -20,7 +20,7 @@ const boards = [...premiumJobBoards, ...freeJobBoards];
 if (boards.length && !queries.length) {
   console.log(JSON.stringify({
     success: false,
-    mode: 'not-connected',
+    status: 'not-connected',
     error: 'Not connected: no search queries provided. Provide at least one job title or query to search the configured boards.',
   }));
   return;
@@ -31,7 +31,7 @@ if (boards.length && !queries.length) {
 if (boards.length) {
   console.log(JSON.stringify({
     success: false,
-    mode: 'not-connected',
+    status: 'not-connected',
     error: 'Not connected: job-board scraping is not configured' + (boards.length ? ' for boards: ' + boards.join(', ') : '') + '. Connect a job-board MCP or configure a scraping endpoint to search for real listings.',
   }));
   return;
@@ -43,7 +43,7 @@ if (boards.length) {
 // configuration would be credentials, not the entire API or scrape constants.
 console.log(JSON.stringify({
   success: false,
-  mode: 'not-connected',
+  status: 'not-connected',
   error: 'Not connected: job-board scraping is not configured. Provide queries to search, or connect a job-board MCP / configure a scraping endpoint to search for real listings.',
 }));
 })();`;
@@ -81,7 +81,7 @@ const CAREER_JOB_DISCOVERY_OUTPUT = {
 };
 
 const CAREER_JOB_DISCOVERY = createCodeSkill({
-  id: 'career_job_discovery',
+  id: 'career-job-discovery',
   name: 'Job Discovery',
   description: 'Searches configured job boards for listings matching the candidate profile. Returns normalized job objects with title, company, location, salary, and apply URL.',
   manifest: {
@@ -95,7 +95,6 @@ const CAREER_JOB_DISCOVERY = createCodeSkill({
   outputSchema: CAREER_JOB_DISCOVERY_OUTPUT,
   triggers: [
     { kind: 'user', phrase_examples: ['Discover jobs', 'Search job boards', 'Find new listings'] },
-    { kind: 'schedule', cadence: 'Daily target job discovery digest' },
   ],
 });
 CAREER_JOB_DISCOVERY.configSchema = CAREER_JOB_DISCOVERY.manifest.configSchema as SchemaRecord;

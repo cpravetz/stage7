@@ -5,9 +5,9 @@ const CAREER_WRAPPER_CONFIG_SCHEMA: SchemaRecord = { type: 'object', properties:
 
 const JOB_MARKET_POSITIONING_EVALUATOR_SOURCE = `(async () => {
 const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
-const profileRes = await __execute_tool('career_profile_intake', {});
+const profileRes = await __execute_tool('career-profile-intake', {});
 if (!profileRes || !profileRes.success) {
-  console.log(JSON.stringify({ success: false, mode: 'not-connected', error: profileRes && profileRes.error ? profileRes.error : 'Not connected: no profile available; run career_profile_intake first' }));
+  console.log(JSON.stringify({ success: false, status: 'not-connected', error: profileRes && profileRes.error ? profileRes.error : 'Not connected: no profile available; run career-profile-intake first' }));
   return;
 }
 const profile = profileRes.data && profileRes.data.profile ? profileRes.data.profile : profileRes.data || profileRes;
@@ -25,8 +25,8 @@ let rank = null;
 if (!listings.length) {
   // No prior search results yet: derive a starting query from the candidate's own profile.
   const inferredTitles = (profile && profile.targetTitles) || (profile && profile.personal && profile.personal.headline ? [profile.personal.headline] : []) || [];
-  discovery = await __execute_tool('career_job_discovery', { queries: inferredTitles });
-  rank = await __execute_tool('career_rank', { items: (discovery && discovery.data && discovery.data.listings) || (discovery && discovery.data) || [] });
+  discovery = await __execute_tool('career-job-discovery', { queries: inferredTitles });
+  rank = await __execute_tool('career-rank', { items: (discovery && discovery.data && discovery.data.listings) || (discovery && discovery.data) || [] });
 }
 
 if (!listings.length && (!discovery || !discovery.success) && (!rank || !rank.success)) {
@@ -47,7 +47,7 @@ const recommendation = {
   suggestedProfileEdits: []
 };
 
-console.log(JSON.stringify({ success: true, data: { marketSignals, recommendation, delegatedTo: ['career_profile_intake', listings.length ? 'stored-listings' : 'career_job_discovery'].filter(Boolean), generatedAt: new Date().toISOString() } }));
+console.log(JSON.stringify({ success: true, data: { marketSignals, recommendation, delegatedTo: ['career-profile-intake', listings.length ? 'stored-listings' : 'career-job-discovery'].filter(Boolean), generatedAt: new Date().toISOString() } }));
 })();`;
 
 const JOB_MARKET_POSITIONING_EVALUATOR_INPUT = {
@@ -72,14 +72,14 @@ const JOB_MARKET_POSITIONING_EVALUATOR = createCodeSkill({
     language: 'javascript',
     entrypoint: 'index.js',
     sourceCode: JOB_MARKET_POSITIONING_EVALUATOR_SOURCE,
-    lowerOrderTools: ['career_profile_intake', 'career_job_discovery', 'career_rank'],
+    lowerOrderTools: ['career-profile-intake', 'career-job-discovery', 'career-rank'],
     configSchema: CAREER_WRAPPER_CONFIG_SCHEMA,
     actionLabel: 'Evaluate positioning',
   },
   inputSchema: JOB_MARKET_POSITIONING_EVALUATOR_INPUT,
   outputSchema: JOB_MARKET_POSITIONING_EVALUATOR_OUTPUT,
   triggers: [
-    { kind: 'user', phrase_examples: ['Evaluate my market positioning', 'How should I position my resume', 'Job market fit analysis'] },
+    { kind: 'schedule', cadence: 'After job discovery completes' },
   ],
 });
 export { JOB_MARKET_POSITIONING_EVALUATOR };

@@ -41,7 +41,6 @@ if (movementThreshold > historicalVariance * 3) { signalType = 'genuine-value'; 
 else if (movementThreshold > historicalVariance) { signalType = 'moderate-movement'; }
 const alertType = signalType === 'genuine-value' ? 'action-recommended' : 'informational';
 const movementAssessment = { exposureRatio, actionRecommendation, signalType, historicalVariance, movementThreshold };
-
 const lineAlertSpec = {
   id: 'la_' + Buffer.from(entity + sport).toString('base64').slice(0, 12),
   entity,
@@ -134,10 +133,10 @@ export const LINE_ALERT_DISPATCHER = createCodeSkill({
   },
   inputSchema: LINE_ALERT_INPUT,
   outputSchema: CODE_OUTPUT,
+  tier: 'represent',
+  domainKnowledge: 'Sports line movement analysis, market odds monitoring, bankroll exposure',
+  confirmBeforeSend: true,
   triggers: [
-    { kind: 'user', phrase_examples: ['Alert on line move', 'Line reached', 'Track this market', 'Value spot'] },
-    { kind: 'schedule', cadence: 'Continuous line monitoring' },
-    { kind: 'event', on: 'Line movement alert' },
-    { kind: 'event', on: 'Target odds reached' },
+    { kind: 'user', phrase_examples: ['Check line movement', 'Dispatch line alert', 'Monitor odds change', 'Alert value spot'] }
   ],
 });

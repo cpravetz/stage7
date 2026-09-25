@@ -1,7 +1,6 @@
 import { WorkerPool } from '../pool/WorkerPool';
 import { WorkerStatus, WorkerTask } from '../types/worker';
-import { ArtifactsService } from '../shared/artifacts';
-import { logger } from '../utils/logger';
+import { ArtifactsService } from '@stage7-nextgen/artifacts';
 
 export class PersistentWorkerPool {
   private pool: WorkerPool;

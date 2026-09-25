@@ -182,7 +182,7 @@ describe('Songwriter Creative — Batch A', () => {
 
     it('source code defaults to dry-run mode', () => {
       const source = dispatcher.manifest.sourceCode as string;
-      expect(source).toContain("mode: 'dry-run'");
+      expect(source).toContain("status: 'dry-run'");
       expect(source).toContain("connected: false");
     });
 
@@ -367,28 +367,25 @@ describe('Songwriter Creative — Batch A', () => {
       expect(draft1.sections[0].chord).toBe(draft2.sections[0].chord);
     });
 
-    it('dispatcher stages a lead sheet in dry-run mode by default', () => {
+    it('dispatcher stages a lead sheet locally by default', () => {
       const { stdout } = executeSkillSource(dispatcher.manifest.sourceCode as string, {
-        operation: 'format-lead-sheet',
         title: 'Test Song',
         lyrics: 'Verse line one\nChorus line two',
         chords: ['I', 'V', 'vi', 'IV'],
       });
       const parsed = JSON.parse(stdout.trim());
       expect(parsed.success).toBe(true);
-      expect(parsed.data.mode).toBe('dry-run');
+      expect(parsed.data.status).toBe('local');
       expect(parsed.data.connected).toBe(false);
       expect(parsed.data.artifact).toBeDefined();
       expect(parsed.data.artifact.title).toBe('Test Song');
-      expect(parsed.data.artifact.operation).toBe('format-lead-sheet');
       expect(parsed.data.artifact.format).toBe('lead-sheet');
       expect(parsed.data.storePath).toContain('lead-sheets.json');
       expect(parsed.data.message).toContain('Not connected');
     });
 
-    it('dispatcher stages registration records separately', () => {
+    it('dispatcher handles registration input through the lead-sheet path', () => {
       const { stdout } = executeSkillSource(dispatcher.manifest.sourceCode as string, {
-        operation: 'stage-registration',
         title: 'Registered Song',
         registration: {
           writers: ['Songwriter A'],
@@ -398,14 +395,12 @@ describe('Songwriter Creative — Batch A', () => {
       });
       const parsed = JSON.parse(stdout.trim());
       expect(parsed.success).toBe(true);
-      expect(parsed.data.mode).toBe('dry-run');
-      expect(parsed.data.artifact.operation).toBe('stage-registration');
-      expect(parsed.data.storePath).toContain('registration-records.json');
+      expect(parsed.data.status).toBe('local');
+      expect(parsed.data.storePath).toContain('lead-sheets.json');
     });
 
     it('dispatcher reports honest not-connected status when no endpoint configured', () => {
       const { stdout } = executeSkillSource(dispatcher.manifest.sourceCode as string, {
-        operation: 'format-lead-sheet',
         title: 'Test',
         lyrics: 'test lyrics',
       });
@@ -417,12 +412,11 @@ describe('Songwriter Creative — Batch A', () => {
     it('dispatcher does not attempt live fetch in default dry-run mode', () => {
       const source = dispatcher.manifest.sourceCode as string;
       const { stdout } = executeSkillSource(source, {
-        operation: 'format-lead-sheet',
         title: 'Test',
         lyrics: 'test lyrics',
       });
       const parsed = JSON.parse(stdout.trim());
-      expect(parsed.data.mode).toBe('dry-run');
+      expect(parsed.data.status).toBe('local');
       expect(parsed.data.response).toBeNull();
     });
   });

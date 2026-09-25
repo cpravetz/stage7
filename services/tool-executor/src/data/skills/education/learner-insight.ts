@@ -5,7 +5,7 @@ const EDUCATION_EXTERNAL_OUTPUT_SCHEMA = {
   type: 'object',
   properties: {
     success: { type: 'boolean' },
-    mode: { type: 'string', enum: ['dry-run', 'live', 'error'] },
+    status: { type: 'string' },
     system: { type: 'string' },
     action: { type: 'string' },
     request: {
@@ -26,11 +26,11 @@ const EDUCATION_EXTERNAL_OUTPUT_SCHEMA = {
     },
     error: { type: ['string', 'null'] },
   },
-  required: ['success', 'mode', 'system', 'action', 'request', 'response', 'error'],
+  required: ['success', 'status', 'system', 'action', 'request', 'response', 'error'],
 };
 
 export const LEARNER_INSIGHT = createExternalActionSkill({
-  id: 'education_learner_insight',
+  id: 'education-learner-insight',
   name: 'Learner Insight',
   description: 'Analyze learning analytics, learning styles, performance, progress, and motivation from connected LMS/assessment platforms. Hybrid: pulls real data then reasons on it.',
   system: 'education_analytics',
@@ -59,7 +59,6 @@ export const LEARNER_INSIGHT = createExternalActionSkill({
   inputSchema: {
     type: 'object',
     properties: {
-      operation: SchemaProps.select(['learning-styles', 'performance', 'progress', 'motivation', 'engagement', 'at-risk', 'comprehensive'], { description: 'Analysis type' }),
       learner: SchemaProps.text({ description: 'Select learner' }),
       courseId: { type: 'string', description: 'Course identifier' },
       dateRange: { type: 'object', description: 'Analysis period' },
@@ -67,14 +66,14 @@ export const LEARNER_INSIGHT = createExternalActionSkill({
       metrics: SchemaProps.stringArray({ description: 'Specific metrics to analyze' }),
       dryRun: SchemaProps.boolean({ description: 'Validate without executing' }),
     },
-    required: ['operation', 'learner'],
+    required: ['learner'],
   },
   outputSchema: EDUCATION_EXTERNAL_OUTPUT_SCHEMA,
   timeoutMs: 60000,
+  tier: 'advise',
   triggers: [
-    { kind: 'user', phrase_examples: ['Analyze learner progress', 'Review student performance', 'Identify engagement risks'] },
-    { kind: 'schedule', cadence: 'Weekly student progress rollup' },
-    { kind: 'event', on: 'Assignment submission, grade, attendance, or assessment result is recorded' },
-    { kind: 'data', condition: 'Engagement, performance, or progress crosses an at-risk threshold' },
+    { kind: 'schedule', cadence: 'Daily learner-data monitoring via LMS integration' },
   ],
 });
+
+LEARNER_INSIGHT.domainKnowledge = "Pedagogical frameworks (Bloom's Taxonomy, Spaced Repetition), curriculum design, assessment scoring methods, student engagement metrics";

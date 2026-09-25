@@ -1,5 +1,5 @@
 import { Tool } from '../../../types';
-import { createExternalActionSkill } from '../code-skill-factory';
+import { createCodeSkill, createExternalActionSkill, SchemaProps } from '../code-skill-factory';
 
 const PLAN_CAMPAIGN_OUTPUT_SCHEMA = {
   type: 'object',
@@ -47,7 +47,7 @@ const EXTERNAL_OUTPUT_SCHEMA = {
   type: 'object',
   properties: {
     success: { type: 'boolean' },
-    mode: { type: 'string', enum: ['dry-run', 'live', 'error'] },
+    status: { type: 'string', enum: ['success', 'error'] },
     system: { type: 'string' },
     action: { type: 'string' },
     request: {
@@ -68,7 +68,7 @@ const EXTERNAL_OUTPUT_SCHEMA = {
     },
     error: { type: ['string', 'null'] },
   },
-  required: ['success', 'mode', 'system', 'action', 'request', 'response', 'error'],
+  required: ['success', 'status', 'system', 'action', 'request', 'response', 'error'],
 };
 
 const MARKETING_SKILLS: Tool[] = [
@@ -103,15 +103,8 @@ console.log(JSON.stringify({ success: true, data: { campaign, storePath } }));
     },
     outputSchema: PLAN_CAMPAIGN_OUTPUT_SCHEMA,
     triggers: [
-    { kind: 'user', phrase_examples: ["Plan a campaign", "Define campaign", "Create campaign plan"] },
-    { kind: 'schedule', cadence: "Quarterly planning cycle" },
-    { kind: 'schedule', cadence: "Weekly campaign review" },
-    { kind: 'event', on: "Campaign created" },
-    { kind: 'event', on: "Campaign approved" },
-    { kind: 'event', on: "Campaign launched" },
-    { kind: 'data', condition: "Budget threshold triggers reallocation" },
-    { kind: 'data', condition: "Campaign performance drops" },
-  ],
+      { kind: 'user', phrase_examples: ["Plan a campaign", "Define campaign", "Create campaign plan"] },
+    ],
     createdAt: new Date(), updatedAt: new Date(),
   },
   {
@@ -143,16 +136,8 @@ console.log(JSON.stringify({ success: true, data: { analysis, storePath } }));
     },
     outputSchema: ANALYZE_PERFORMANCE_OUTPUT_SCHEMA,
     triggers: [
-    { kind: 'user', phrase_examples: ["Analyze performance", "Check metrics", "Pull report"] },
-    { kind: 'schedule', cadence: "Daily metrics digest" },
-    { kind: 'schedule', cadence: "Weekly performance report" },
-    { kind: 'schedule', cadence: "Monthly executive review" },
-    { kind: 'event', on: "Report generated" },
-    { kind: 'event', on: "KPI crossed" },
-    { kind: 'event', on: "Campaign ended" },
-    { kind: 'data', condition: "KPI underperforms" },
-    { kind: 'data', condition: "Metric anomaly detected" },
-  ],
+      { kind: 'user', phrase_examples: ["Analyze performance", "Check metrics", "Pull report"] },
+    ],
     createdAt: new Date(), updatedAt: new Date(),
   },
 ];
@@ -160,15 +145,8 @@ console.log(JSON.stringify({ success: true, data: { analysis, storePath } }));
 const MARKETING_EXTERNAL_SKILLS: Tool[] = [
   createExternalActionSkill({
     triggers: [
-    { kind: 'user', phrase_examples: ["Generate content", "Draft post", "Create copy"] },
-    { kind: 'schedule', cadence: "Daily content queue review" },
-    { kind: 'schedule', cadence: "Weekly content calendar sync" },
-    { kind: 'event', on: "Content approved" },
-    { kind: 'event', on: "Content published" },
-    { kind: 'event', on: "Content rejected" },
-    { kind: 'data', condition: "Content backlog grows" },
-    { kind: 'data', condition: "Engagement drops" },
-  ],
+      { kind: 'user', phrase_examples: ["Generate content", "Draft post", "Create copy"] },
+    ],
     id: 'marketing-content-generation',
     name: 'Marketing Content Generation',
     description: 'Create, revise, schedule, and publish campaign content through a configurable CMS or content platform.',
@@ -200,7 +178,6 @@ const MARKETING_EXTERNAL_SKILLS: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        operation: { type: 'string', enum: ['create', 'update', 'publish', 'schedule'], description: 'Content operation to perform' },
         contentType: { type: 'string', description: 'Type of content (e.g., blog, landing-page, ad-copy, email)' },
         title: { type: 'string', description: 'Content title or headline' },
         body: { type: 'string', description: 'Full content body text' },
@@ -212,22 +189,15 @@ const MARKETING_EXTERNAL_SKILLS: Tool[] = [
         campaign: { type: 'string', description: 'Associated campaign identifier' },
         dryRun: { type: 'boolean', description: 'If true, simulate the operation without making changes' },
       },
-      required: ['operation'],
+      required: [],
     },
     outputSchema: EXTERNAL_OUTPUT_SCHEMA,
     timeoutMs: 60000,
   }),
   createExternalActionSkill({
     triggers: [
-    { kind: 'user', phrase_examples: ["Post to social", "Schedule post", "Check social metrics"] },
-    { kind: 'schedule', cadence: "Daily social queue processing" },
-    { kind: 'schedule', cadence: "Weekly social performance review" },
-    { kind: 'event', on: "Post published" },
-    { kind: 'event', on: "Post shared" },
-    { kind: 'event', on: "Comment received" },
-    { kind: 'data', condition: "Engagement rate drops" },
-    { kind: 'data', condition: "Follower growth stalls" },
-  ],
+      { kind: 'user', phrase_examples: ["Post to social", "Schedule post", "Check social metrics"] },
+    ],
     id: 'marketing-social-media',
     name: 'Marketing Social Media',
     description: 'Create, schedule, publish, and monitor social posts across configurable social media platforms.',
@@ -258,7 +228,6 @@ const MARKETING_EXTERNAL_SKILLS: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        operation: { type: 'string', enum: ['create', 'schedule', 'publish', 'list'], description: 'Social media operation to perform' },
         platform: { type: 'string', description: 'Target social platform (e.g., linkedin, x, facebook, instagram, tiktok)' },
         content: { type: 'string', description: 'Post content/text' },
         message: { type: 'string', description: 'Alternative field for post content' },
@@ -267,22 +236,15 @@ const MARKETING_EXTERNAL_SKILLS: Tool[] = [
         media: { type: 'array', items: { type: 'object' }, description: 'Array of media attachments (images, videos)' },
         dryRun: { type: 'boolean', description: 'If true, simulate the operation without making changes' },
       },
-      required: ['operation'],
+      required: [],
     },
     outputSchema: EXTERNAL_OUTPUT_SCHEMA,
     timeoutMs: 60000,
   }),
   createExternalActionSkill({
     triggers: [
-    { kind: 'user', phrase_examples: ["Audit SEO", "Check rankings", "Run keyword research"] },
-    { kind: 'schedule', cadence: "Monthly rank tracking" },
-    { kind: 'schedule', cadence: "Weekly SEO audit" },
-    { kind: 'event', on: "Page published" },
-    { kind: 'event', on: "Ranking changed" },
-    { kind: 'event', on: "Crawl error detected" },
-    { kind: 'data', condition: "Ranking drops" },
-    { kind: 'data', condition: "Keyword gap detected" },
-  ],
+      { kind: 'user', phrase_examples: ["Audit SEO", "Check rankings", "Run keyword research"] },
+    ],
     id: 'marketing-seo',
     name: 'Marketing SEO',
     description: 'Audit, research, optimize, and track search visibility through a configurable SEO system.',
@@ -314,7 +276,6 @@ const MARKETING_EXTERNAL_SKILLS: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        operation: { type: 'string', enum: ['audit', 'research', 'optimize', 'track'], description: 'SEO operation to perform' },
         url: { type: 'string', description: 'Target URL for SEO analysis or optimization' },
         keywords: { type: 'array', items: { type: 'string' }, description: 'List of target keywords' },
         content: { type: 'string', description: 'Content to optimize or analyze' },
@@ -322,22 +283,15 @@ const MARKETING_EXTERNAL_SKILLS: Tool[] = [
         searchEngine: { type: 'string', description: 'Target search engine (e.g., google, bing, yandex)' },
         dryRun: { type: 'boolean', description: 'If true, simulate the operation without making changes' },
       },
-      required: ['operation'],
+      required: [],
     },
     outputSchema: EXTERNAL_OUTPUT_SCHEMA,
     timeoutMs: 60000,
   }),
   createExternalActionSkill({
     triggers: [
-    { kind: 'user', phrase_examples: ["Research market", "Competitor analysis", "Market survey"] },
-    { kind: 'schedule', cadence: "Monthly market report" },
-    { kind: 'schedule', cadence: "Quarterly competitive review" },
-    { kind: 'event', on: "Competitor launches" },
-    { kind: 'event', on: "Market shift detected" },
-    { kind: 'event', on: "Survey completed" },
-    { kind: 'data', condition: "Market share drops" },
-    { kind: 'data', condition: "Trend shift detected" },
-  ],
+      { kind: 'user', phrase_examples: ["Research market", "Competitor analysis", "Market survey"] },
+    ],
     id: 'marketing-market-research',
     name: 'Marketing Market Research',
     description: 'Search markets, competitors, trends, and customer signals through configurable research providers.',
@@ -368,7 +322,6 @@ const MARKETING_EXTERNAL_SKILLS: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        operation: { type: 'string', enum: ['search', 'analyze', 'report', 'monitor'], description: 'Research operation to perform' },
         query: { type: 'string', description: 'Research query or topic' },
         market: { type: 'string', description: 'Target market/region to research' },
         competitors: { type: 'array', items: { type: 'string' }, description: 'List of competitor names or domains to analyze' },
@@ -376,22 +329,15 @@ const MARKETING_EXTERNAL_SKILLS: Tool[] = [
         filters: { type: 'object', description: 'Additional filters for the research query' },
         dryRun: { type: 'boolean', description: 'If true, simulate the operation without making changes' },
       },
-      required: ['operation'],
+      required: [],
     },
     outputSchema: EXTERNAL_OUTPUT_SCHEMA,
     timeoutMs: 60000,
   }),
   createExternalActionSkill({
     triggers: [
-    { kind: 'user', phrase_examples: ["Analyze audience", "Check demographics", "Audience segmentation"] },
-    { kind: 'schedule', cadence: "Weekly audience report" },
-    { kind: 'schedule', cadence: "Monthly segment review" },
-    { kind: 'event', on: "New segment identified" },
-    { kind: 'event', on: "Audience behavior changed" },
-    { kind: 'event', on: "Persona updated" },
-    { kind: 'data', condition: "Engagement drops by segment" },
-    { kind: 'data', condition: "Audience size shrinks" },
-  ],
+      { kind: 'user', phrase_examples: ["Analyze audience", "Check demographics", "Audience segmentation"] },
+    ],
     id: 'marketing-audience-insights',
     name: 'Marketing Audience Insights',
     description: 'Segment audiences and analyze demographics, behavior, preferences, and campaign response signals.',
@@ -423,7 +369,6 @@ const MARKETING_EXTERNAL_SKILLS: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        operation: { type: 'string', enum: ['segment', 'profile', 'analyze', 'compare'], description: 'Audience insights operation to perform' },
         audienceId: { type: 'string', description: 'Identifier of the audience segment to analyze' },
         demographics: { type: 'object', description: 'Demographic filters (age, gender, location, income, etc.)' },
         behaviors: { type: 'array', items: { type: 'object' }, description: 'Behavioral signals to analyze (purchases, page views, engagement)' },
@@ -431,23 +376,15 @@ const MARKETING_EXTERNAL_SKILLS: Tool[] = [
         dateRange: { type: 'object', description: 'Date range for analysis (e.g., { start: "2024-01-01", end: "2024-12-31" })' },
         dryRun: { type: 'boolean', description: 'If true, simulate the operation without making changes' },
       },
-      required: ['operation'],
+      required: [],
     },
     outputSchema: EXTERNAL_OUTPUT_SCHEMA,
     timeoutMs: 60000,
   }),
   createExternalActionSkill({
     triggers: [
-    { kind: 'user', phrase_examples: ["Send email campaign", "Draft email", "Check email metrics"] },
-    { kind: 'schedule', cadence: "Daily email queue review" },
-    { kind: 'schedule', cadence: "Weekly campaign performance" },
-    { kind: 'event', on: "Email sent" },
-    { kind: 'event', on: "Email opened" },
-    { kind: 'event', on: "Email clicked" },
-    { kind: 'event', on: "Unsubscribe" },
-    { kind: 'data', condition: "Open rate below threshold" },
-    { kind: 'data', condition: "Unsubscribe rate high" },
-  ],
+      { kind: 'user', phrase_examples: ["Send email campaign", "Draft email", "Check email metrics"] },
+    ],
     id: 'marketing-email',
     name: 'Marketing Email',
     description: 'Draft, schedule, send, and measure marketing email campaigns through a configurable email system.',
@@ -480,7 +417,6 @@ const MARKETING_EXTERNAL_SKILLS: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        operation: { type: 'string', enum: ['draft', 'schedule', 'send', 'measure'], description: 'Email operation to perform' },
         to: { type: 'array', items: { type: 'string' }, description: 'Recipient email addresses' },
         subject: { type: 'string', description: 'Email subject line' },
         htmlBody: { type: 'string', description: 'HTML email body content' },
@@ -491,22 +427,15 @@ const MARKETING_EXTERNAL_SKILLS: Tool[] = [
         attachments: { type: 'array', items: { type: 'object' }, description: 'Email attachments metadata' },
         dryRun: { type: 'boolean', description: 'If true, simulate the operation without making changes' },
       },
-      required: ['operation'],
+      required: [],
     },
     outputSchema: EXTERNAL_OUTPUT_SCHEMA,
     timeoutMs: 60000,
   }),
   createExternalActionSkill({
     triggers: [
-    { kind: 'user', phrase_examples: ["Upload document", "Tag asset", "Search documents"] },
-    { kind: 'schedule', cadence: "Weekly asset review" },
-    { kind: 'schedule', cadence: "Monthly compliance audit" },
-    { kind: 'event', on: "Document uploaded" },
-    { kind: 'event', on: "Asset approved" },
-    { kind: 'event', on: "Version updated" },
-    { kind: 'data', condition: "Asset backlog grows" },
-    { kind: 'data', condition: "Tag accuracy drops" },
-  ],
+      { kind: 'user', phrase_examples: ["Upload document", "Tag asset", "Search documents"] },
+    ],
     id: 'marketing-document-management',
     name: 'Marketing Document Management',
     description: 'Create, store, retrieve, and organize marketing assets and campaign documents in a configurable document system.',
@@ -537,7 +466,6 @@ const MARKETING_EXTERNAL_SKILLS: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        operation: { type: 'string', enum: ['create', 'read', 'update', 'delete', 'search'], description: 'Document operation to perform' },
         document: { type: 'object', description: 'Document object to create or update' },
         documentId: { type: 'string', description: 'Unique identifier of the document' },
         folderId: { type: 'string', description: 'Target folder identifier' },
@@ -545,12 +473,116 @@ const MARKETING_EXTERNAL_SKILLS: Tool[] = [
         contentType: { type: 'string', description: 'MIME type or content type of the document' },
         dryRun: { type: 'boolean', description: 'If true, simulate the operation without making changes' },
       },
-      required: ['operation'],
+      required: [],
     },
     outputSchema: EXTERNAL_OUTPUT_SCHEMA,
     timeoutMs: 60000,
   }),
 ];
+
+const MARKETING_CENTER = createCodeSkill({
+  id: 'marketing-center',
+  name: 'Marketing Center',
+  description: 'Unified interface for marketing operations across content generation, social media, email, SEO, market research, audience insights, and document management. Dispatches to the appropriate external marketing skill based on the selected targetChannel.',
+  manifest: {
+    language: 'javascript',
+    entrypoint: 'index.js',
+    sourceCode: `(async () => {
+  const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
+  const targetChannel = input.targetChannel || 'content-generation';
+  const data = input.data || {};
+  const toolMap = {
+    'content-generation': 'marketing-content-generation',
+    'social-media': 'marketing-social-media',
+    'email': 'marketing-email',
+    'seo': 'marketing-seo',
+    'market-research': 'marketing-market-research',
+    'audience-insights': 'marketing-audience-insights',
+    'document-management': 'marketing-document-management',
+  };
+  const toolId = toolMap[targetChannel];
+  if (!toolId) {
+    console.log(JSON.stringify({ success: false, error: 'Unknown channel: ' + targetChannel }));
+    return;
+  }
+  const result = await __execute_tool(toolId, data);
+  console.log(JSON.stringify(result));
+})()`,
+    lowerOrderTools: [
+      'marketing-content-generation',
+      'marketing-social-media',
+      'marketing-email',
+      'marketing-seo',
+      'marketing-market-research',
+      'marketing-audience-insights',
+      'marketing-document-management',
+    ],
+  },
+  inputSchema: {
+    type: 'object',
+    properties: {
+      targetChannel: SchemaProps.select(['content-generation', 'social-media', 'email', 'seo', 'market-research', 'audience-insights', 'document-management'], { description: 'Which marketing channel to dispatch to' }),
+      data: { type: ['object', 'null'] as const, description: 'Parameters forwarded to the selected marketing channel' },
+    },
+    required: ['targetChannel'],
+  },
+  outputSchema: {
+    type: 'object',
+    properties: {
+      success: { type: 'boolean' },
+      system: { type: 'string' },
+      action: { type: 'string' },
+      result: { type: 'object' },
+      error: { type: 'string' },
+    },
+    required: ['success', 'system', 'action'],
+  },
+  triggers: [
+    { kind: 'user', phrase_examples: ["Open marketing center", "Launch marketing operation", "Start marketing campaign"] },
+  ],
+});
+MARKETING_CENTER.tier = 'represent';
+MARKETING_CENTER.confirmBeforeSend = true;
+MARKETING_CENTER.domainKnowledge = 'Marketing frameworks (AIDA, RACE, buyer journey), channel-specific best practices (SEO, paid social, email), content strategy, campaign measurement';
+
+// Mark the 7 external marketing skills as lower-order base tools (isSkill:false)
+const MARKETING_EXTERNAL_TOOL_IDS = new Set([
+  'marketing-content-generation',
+  'marketing-social-media',
+  'marketing-email',
+  'marketing-seo',
+  'marketing-market-research',
+  'marketing-audience-insights',
+  'marketing-document-management',
+]);
+for (const s of MARKETING_EXTERNAL_SKILLS) {
+  if (MARKETING_EXTERNAL_TOOL_IDS.has(s.id)) {
+    s.isSkill = false;
+  }
+}
+
+// Set tiers and domainKnowledge for all marketing skills
+const MARKETING_TIER: Record<string, 'advise' | 'aid' | 'represent'> = {
+  'plan-campaign': 'aid',
+  'analyze-performance': 'advise',
+  'marketing-center': 'represent',
+};
+const MARKETING_DOMAIN_KNOWLEDGE = 'Marketing frameworks (AIDA, RACE, buyer journey), channel-specific best practices (SEO, paid social, email), content strategy, campaign measurement';
+for (const s of MARKETING_SKILLS) {
+  if (MARKETING_TIER[s.id]) {
+    (s as Tool).tier = MARKETING_TIER[s.id];
+  }
+  if (MARKETING_DOMAIN_KNOWLEDGE) {
+    (s as Tool).domainKnowledge = MARKETING_DOMAIN_KNOWLEDGE;
+  }
+  if ((s as Tool).tier === 'represent' && (s as Tool).confirmBeforeSend === undefined) {
+    (s as Tool).confirmBeforeSend = true;
+  }
+}
+
+MARKETING_SKILLS.push(MARKETING_CENTER);
+
+export const marketingSkills = [...MARKETING_SKILLS, ...MARKETING_EXTERNAL_SKILLS];
 
 export interface WorkflowStage {
   name: string;
@@ -568,6 +600,7 @@ export interface AssistantWorkflow {
 MARKETING_SKILLS.forEach((s) => {
   if (s.id === 'plan-campaign') s.manifest.workflowStage = 'plan';
   else if (s.id === 'analyze-performance') s.manifest.workflowStage = 'analyze';
+  else if (s.id === 'marketing-center') s.manifest.workflowStage = 'plan';
 });
 
 MARKETING_EXTERNAL_SKILLS.forEach((s) => {
@@ -580,7 +613,8 @@ MARKETING_EXTERNAL_SKILLS.forEach((s) => {
   else if (s.id === 'marketing-document-management') s.manifest.workflowStage = 'publish';
 });
 
-export const marketingSkills = [...MARKETING_SKILLS, ...MARKETING_EXTERNAL_SKILLS];
+export { MARKETING_CENTER };
+export const marketingCenter = MARKETING_CENTER;
 
 export const marketingWorkflow: AssistantWorkflow = {
   assistant: 'Marketing',

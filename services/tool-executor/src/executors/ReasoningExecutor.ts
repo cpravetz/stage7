@@ -4,7 +4,7 @@ import logger from '../utils/logger';
 const BRAIN_URL = process.env.BRAIN_URL || 'http://brain:3100';
 const BRAIN_REQUEST_TIMEOUT_MS = Number(process.env.BRAIN_REQUEST_TIMEOUT_MS) > 0
   ? Number(process.env.BRAIN_REQUEST_TIMEOUT_MS)
-  : 12000;
+  : 60000;
 
 export interface ReasoningConfig {
   systemPrompt?: string;

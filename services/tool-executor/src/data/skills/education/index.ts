@@ -8,10 +8,10 @@ import { annotateStages, createWorkflow, AssistantWorkflow } from '../workflow-c
 export const educationSkills = [LESSON_ASSESSMENT_DRAFTING, LEARNER_INSIGHT, ADAPTIVE_PERSONALIZATION, RESOURCE_LIBRARY_OPS];
 
 annotateStages(educationSkills, {
-  'education_lesson_assessment_drafting': 'assess',
-  'education_learner_insight': 'plan',
-  'education_adaptive_personalization': 'plan',
-  'education_resource_library': 'support',
+  'education-lesson-assessment-drafting': 'assess',
+  'education-learner-insight': 'plan',
+  'education-adaptive-personalization': 'plan',
+  'education-resource-library': 'support',
 });
 
 export const educationWorkflow = createWorkflow({
@@ -19,9 +19,9 @@ export const educationWorkflow = createWorkflow({
   productObject: 'learner',
   flow: 'plan → assess → support',
   stages: [
-    { name: 'plan', description: 'Learner context and adaptive planning', stageIds: ['education_learner_insight', 'education_adaptive_personalization'] },
-    { name: 'assess', description: 'Lesson, quiz, and activity assessment drafting', stageIds: ['education_lesson_assessment_drafting'] },
-    { name: 'support', description: 'Resource library and accessibility support', stageIds: ['education_resource_library'] },
+    { name: 'plan', description: 'Learner context and adaptive planning', stageIds: ['education-learner-insight', 'education-adaptive-personalization'] },
+    { name: 'assess', description: 'Lesson, quiz, and activity assessment drafting', stageIds: ['education-lesson-assessment-drafting'] },
+    { name: 'support', description: 'Resource library and accessibility support', stageIds: ['education-resource-library'] },
   ],
 }, educationSkills);
 

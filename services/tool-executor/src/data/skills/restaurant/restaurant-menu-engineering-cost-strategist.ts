@@ -4,7 +4,6 @@ import { createCodeSkill, SchemaProps } from "../code-skill-factory";
 const RESTAURANT_MENU_ENGINEERING_COST_STRATEGIST_SOURCE = `(async () => {
   const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
   const baseDir = process.env.RESTAURANT_HOME || '/tmp/restaurant';
-  const operation = input.operation || 'menu-engineering';
   const fs = require('fs');
   const path = require('path');
   const dataDir = path.join(baseDir, 'menu-cost');
@@ -12,64 +11,20 @@ const RESTAURANT_MENU_ENGINEERING_COST_STRATEGIST_SOURCE = `(async () => {
   const storePath = path.join(dataDir, 'menu.json');
   let items = fs.existsSync(storePath) ? JSON.parse(fs.readFileSync(storePath, 'utf8')) : [];
 
-  if (operation === 'menu-engineering') {
-    const itemIds = Array.isArray(input.itemIds) ? input.itemIds : [];
-    const popularity = input.popularity || {};
-    const profitability = input.profitability || {};
-    const analyzed = itemIds.map(id => {
-      const pop = Number(popularity[id] || 50);
-      const prof = Number(profitability[id] || 0.3);
-      const quadrant = pop > 50 && prof > 0.3 ? 'star' : pop > 50 ? 'puzzle' : prof > 0.3 ? 'plowhorse' : 'dog';
-      return { id, popularity: pop, profitability: prof, quadrant, score: Math.round((pop * 0.4 + prof * 0.6) * 100) / 100 };
-    });
-    const stars = analyzed.filter(i => i.quadrant === 'star').length;
-    const puzzles = analyzed.filter(i => i.quadrant === 'puzzle').length;
-    const plowhorses = analyzed.filter(i => i.quadrant === 'plowhorse').length;
-    const dogs = analyzed.filter(i => i.quadrant === 'dog').length;
-    console.log(JSON.stringify({ success: true, operation, data: { items: analyzed, summary: { total: analyzed.length, stars, puzzles, plowhorses, dogs } } }));
-  } else if (operation === 'cost-analysis') {
-    const itemId = input.itemId || '';
-    const ingredientCosts = input.ingredientCosts || {};
-    const sellingPrice = Number(input.sellingPrice || 0);
-    let totalCost = 0;
-    for (const name of Object.keys(ingredientCosts)) {
-      totalCost += Number(ingredientCosts[name]) * (input.quantities && input.quantities[name] !== undefined ? input.quantities[name] : 1);
-    }
-    const foodCostPct = sellingPrice > 0 ? Math.round((totalCost / sellingPrice) * 10000) / 100 : 0;
-    const targetPct = Number(input.targetFoodCostPct || 30);
-    const idealPrice = totalCost > 0 ? Math.round((totalCost / (targetPct / 100)) * 100) / 100 : 0;
-    console.log(JSON.stringify({ success: true, operation, data: { itemId, totalCost: Math.round(totalCost * 100) / 100, foodCostPct, targetFoodCostPct: targetPct, idealPrice } }));
-  } else if (operation === 'pricing-optimizer') {
-    const itemIds = Array.isArray(input.itemIds) ? input.itemIds : [];
-    const costs = input.costs || {};
-    const targetMargin = Number(input.targetMargin || 0.7);
-    const competitorPrices = input.competitorPrices || {};
-    const optimized = itemIds.map(id => {
-      const cost = Number(costs[id] || 0);
-      const targetPrice = cost > 0 ? Math.round((cost / (1 - targetMargin)) * 100) / 100 : 0;
-      const compPrice = Number(competitorPrices[id] || targetPrice);
-      const finalPrice = Math.min(targetPrice, compPrice);
-      return { id, cost, targetPrice, competitorPrice: compPrice, finalPrice, margin: cost > 0 ? Math.round((1 - cost / finalPrice) * 10000) / 100 : 0 };
-    });
-    console.log(JSON.stringify({ success: true, operation, data: { items: optimized, targetMargin } }));
-  } else if (operation === 'menu-mix-analysis') {
-    const items = Array.isArray(input.items) ? input.items : [];
-    const categories = input.categories || {};
-    const categoryTotals = {};
-    const categoryCounts = {};
-    for (const item of items) {
-      const cat = categories[item.id] || 'uncategorized';
-      categoryTotals[cat] = (categoryTotals[cat] || 0) + (item.revenue || 0);
-      categoryCounts[cat] = (categoryCounts[cat] || 0) + 1;
-    }
-    const totalRevenue = Object.values(categoryTotals).reduce((s, v) => s + v, 0);
-    const mix = Object.keys(categoryTotals).map(cat => ({
-      category: cat, revenue: categoryTotals[cat], pctOfRevenue: totalRevenue > 0 ? Math.round((categoryTotals[cat] / totalRevenue) * 10000) / 100 : 0, itemCount: categoryCounts[cat],
-    }));
-    console.log(JSON.stringify({ success: true, operation, data: { mix, totalRevenue } }));
-  } else {
-    console.log(JSON.stringify({ success: false, operation, error: 'Unknown operation: ' + operation }));
-  }
+  const itemIds = Array.isArray(input.itemIds) ? input.itemIds : [];
+  const popularity = input.popularity || {};
+  const profitability = input.profitability || {};
+  const analyzed = itemIds.map(id => {
+    const pop = Number(popularity[id] || 50);
+    const prof = Number(profitability[id] || 0.3);
+    const quadrant = pop > 50 && prof > 0.3 ? 'star' : pop > 50 ? 'puzzle' : prof > 0.3 ? 'plowhorse' : 'dog';
+    return { id, popularity: pop, profitability: prof, quadrant, score: Math.round((pop * 0.4 + prof * 0.6) * 100) / 100 };
+  });
+  const stars = analyzed.filter(i => i.quadrant === 'star').length;
+  const puzzles = analyzed.filter(i => i.quadrant === 'puzzle').length;
+  const plowhorses = analyzed.filter(i => i.quadrant === 'plowhorse').length;
+  const dogs = analyzed.filter(i => i.quadrant === 'dog').length;
+  console.log(JSON.stringify({ success: true, data: { items: analyzed, summary: { total: analyzed.length, stars, puzzles, plowhorses, dogs } } }));
 })();`;
 
 const RESTAURANT_MENU_ENGINEERING_COST_STRATEGIST_CONFIG = {
@@ -96,16 +51,6 @@ const RESTAURANT_MENU_ENGINEERING_COST_STRATEGIST_CONFIG = {
 const RESTAURANT_MENU_ENGINEERING_COST_STRATEGIST_INPUT = {
   "type": "object",
   "properties": {
-    "operation": {
-      "type": "string",
-      "enum": [
-        "menu-engineering",
-        "cost-analysis",
-        "pricing-optimizer",
-        "menu-mix-analysis"
-      ],
-      "description": "Menu cost optimization operation"
-    },
     "itemIds": {
       "type": "array",
       "items": {
@@ -168,10 +113,6 @@ const RESTAURANT_MENU_ENGINEERING_COST_STRATEGIST_OUTPUT = {
       "type": "boolean",
       "description": "Whether the analysis succeeded"
     },
-    "operation": {
-      "type": "string",
-      "description": "The operation performed"
-    },
     "data": {
       "type": "object",
       "description": "Analysis result data"
@@ -182,8 +123,7 @@ const RESTAURANT_MENU_ENGINEERING_COST_STRATEGIST_OUTPUT = {
     }
   },
   "required": [
-    "success",
-    "operation"
+    "success"
   ]
 };
 
@@ -203,14 +143,9 @@ export const RESTAURANT_MENU_ENGINEERING_COST_STRATEGIST = createCodeSkill({
         "Optimize menu pricing",
         "Classify menu items"
       ]
-    },
-    {
-      "kind": "schedule",
-      "cadence": "Weekly menu review"
-    },
-    {
-      "kind": "event",
-      "on": "Menu item added or updated"
     }
   ],
 });
+
+RESTAURANT_MENU_ENGINEERING_COST_STRATEGIST.tier = 'advise';
+RESTAURANT_MENU_ENGINEERING_COST_STRATEGIST.domainKnowledge = 'Restaurant menu engineering, food cost analysis, pricing optimization, and category mix analysis';

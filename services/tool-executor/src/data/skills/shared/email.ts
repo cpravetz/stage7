@@ -4,10 +4,9 @@ const EMAIL_EXTERNAL_OUTPUT_SCHEMA = {
   type: 'object',
   properties: {
     success: { type: 'boolean' },
-    mode: { type: 'string', enum: ['dry-run', 'live', 'error', 'not-connected'] },
+    status: { type: 'string', enum: ['dry-run', 'live', 'error', 'not-connected'] },
     system: { type: 'string' },
     action: { type: 'string' },
-    operation: { type: 'string' },
     request: {
       type: ['object', 'null'],
       properties: {
@@ -26,7 +25,7 @@ const EMAIL_EXTERNAL_OUTPUT_SCHEMA = {
     },
     error: { type: ['string', 'null'] },
   },
-  required: ['success', 'mode', 'system', 'action', 'operation', 'request', 'response', 'error'],
+  required: ['success', 'status', 'system', 'action', 'request', 'response', 'error'],
 };
 
 export const emailIntegrationSkill = createExternalActionSkill({
@@ -102,10 +101,6 @@ export const emailIntegrationSkill = createExternalActionSkill({
   inputSchema: {
     type: 'object',
     properties: {
-      operation: SchemaProps.select(
-        ['list-messages', 'fetch-message', 'search-messages', 'send-message', 'delete-message', 'mark-read', 'mark-unread', 'list-folders', 'create-folder'],
-        { description: 'Email operation to perform' }
-      ),
       // Common
       protocol: SchemaProps.select(['imap', 'pop3', 'smtp'], { description: 'Protocol to use for this operation', default: 'imap' }),
       folder: { type: 'string', description: 'IMAP folder/mailbox (e.g., INBOX, Sent, Drafts)', default: 'INBOX' },
@@ -174,14 +169,11 @@ export const emailIntegrationSkill = createExternalActionSkill({
       // Override config per-request
       dryRun: { type: 'boolean', description: 'Validate without executing', default: true },
     },
-    required: ['operation'],
+    required: [],
   },
   outputSchema: EMAIL_EXTERNAL_OUTPUT_SCHEMA,
   triggers: [
     { kind: 'user', phrase_examples: ['check my email', 'send an email', 'search emails', 'read latest emails'] },
-    { kind: 'schedule', cadence: 'daily email sync' },
-    { kind: 'event', on: 'new email received' },
-    { kind: 'event', on: 'email sent' },
   ],
   timeoutMs: 60000,
   confirmBeforeSend: true,

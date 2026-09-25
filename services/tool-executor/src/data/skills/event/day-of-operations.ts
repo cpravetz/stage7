@@ -4,7 +4,6 @@ const EVENT_EXTERNAL_OUTPUT_SCHEMA = {
   type: 'object',
   properties: {
     success: { type: 'boolean' },
-    mode: { type: 'string', enum: ['dry-run', 'live', 'error'] },
     system: { type: 'string' },
     action: { type: 'string' },
     request: {
@@ -25,11 +24,11 @@ const EVENT_EXTERNAL_OUTPUT_SCHEMA = {
     },
     error: { type: ['string', 'null'] },
   },
-  required: ['success', 'mode', 'system', 'action', 'request', 'response', 'error'],
+  required: ['success', 'system', 'action', 'request', 'response', 'error'],
 };
 
 const DAY_OF_OPERATIONS = createExternalActionSkill({
-  id: 'event_day_of_operations',
+  id: 'event-day-of-operations',
   name: 'Day-of Operations',
   description: 'Execute day-of event operations: seating, check-in, real-time monitoring, and issue response. Real-time proxy to event management platforms.',
   system: 'event_operations',
@@ -58,7 +57,6 @@ const DAY_OF_OPERATIONS = createExternalActionSkill({
   inputSchema: {
     type: 'object',
     properties: {
-      operation: SchemaProps.select(['seating-assign', 'seating-optimize', 'seating-print', 'checkin-start', 'checkin-scan', 'checkin-manual', 'checkin-report', 'monitor-attendance', 'monitor-capacity', 'monitor-flow', 'issue-log', 'issue-resolve', 'broadcast-alert', 'run-of-show-update', 'vendor-checkin'], { description: 'Day-of operation' }),
       event: { type: 'string', description: 'Event identifier' },
       sessionId: { type: 'string', description: 'Session/agenda item identifier' },
       attendeeId: { type: 'string', description: 'Attendee identifier' },
@@ -69,18 +67,17 @@ const DAY_OF_OPERATIONS = createExternalActionSkill({
       alertData: { type: 'object', description: 'Broadcast: message, channels, recipients, urgency' },
       dryRun: SchemaProps.boolean({ description: 'Validate without executing' }),
     },
-    required: ['operation', 'event'],
+    required: ['event'],
   },
   outputSchema: EVENT_EXTERNAL_OUTPUT_SCHEMA,
   timeoutMs: 60000,
+  tier: 'aid',
 });
 
+DAY_OF_OPERATIONS.domainKnowledge = 'Event day-of operations: check-in workflows, seating assignment, real-time attendance monitoring, issue escalation, and run-of-show execution across event management platforms';
 DAY_OF_OPERATIONS.confirmBeforeSend = true;
 DAY_OF_OPERATIONS.triggers = [
-  { kind: 'user', phrase_examples: ['Start check-in', 'Assign seating', 'Resolve issue'] },
-  { kind: 'schedule', cadence: 'Day-of operations briefing' },
-  { kind: 'event', on: 'Guest arrival' },
-  { kind: 'event', on: 'Capacity limit reached' },
+  { kind: 'event', on: 'Event day begins' },
 ];
 
 export { DAY_OF_OPERATIONS };

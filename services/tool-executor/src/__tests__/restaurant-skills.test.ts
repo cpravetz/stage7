@@ -8,8 +8,8 @@ function getSkill(id: string): Tool {
 }
 
 describe('restaurantSkills', () => {
-  it('exports exactly eleven skills', () => {
-    expect(restaurantSkills).toHaveLength(11);
+  it('exports exactly seven skills', () => {
+    expect(restaurantSkills).toHaveLength(7);
   });
 
   it('exports unique skill ids', () => {
@@ -17,21 +17,17 @@ describe('restaurantSkills', () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it('six legacy tools are isSkill:false', () => {
+  it('two legacy external tools are isSkill:false', () => {
     const legacy = restaurantSkills.filter((s) => s.isSkill === false);
-    expect(legacy).toHaveLength(6);
+    expect(legacy).toHaveLength(2);
     const legacyIds = legacy.map((s) => s.id).sort();
     expect(legacyIds).toEqual([
-      'restaurant-financial-advisory',
       'restaurant-kitchen-service-operations',
-      'restaurant-menu-recipe-management',
       'restaurant-reservations-guest-experience',
-      'restaurant-staffing-labor',
-      'restaurant-supply-chain-inventory',
     ].sort());
   });
 
-  it('legacy tools are self-contained (no __execute_tool)', () => {
+  it('legacy external tools are self-contained (no __execute_tool)', () => {
     const legacy = restaurantSkills.filter((s) => s.isSkill === false);
     for (const s of legacy) {
       expect((s.manifest.sourceCode as string)).not.toContain('__execute_tool(');
@@ -88,8 +84,6 @@ describe('restaurantSkills', () => {
       expect(props.dryRun.description).toBeTruthy();
       expect(props.confirmBeforeSend).toBeDefined();
       expect(props.confirmBeforeSend.description).toBeTruthy();
-      expect(props.operation).toBeDefined();
-      expect(props.operation.description).toBeTruthy();
     }
   });
 

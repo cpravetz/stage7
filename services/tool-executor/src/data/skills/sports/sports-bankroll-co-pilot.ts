@@ -8,7 +8,6 @@ const input = __tool_input || {};
 const fs = require('fs');
 const path = require('path');
 
-const action = input.action || 'assess';
 const bankroll = Number(input.bankroll) || 0;
 const unitSize = Number(input.unitSize) || 0;
 const unitLimit = Number(input.unitLimit) || 100;
@@ -87,8 +86,7 @@ const responsiblePlay = {
 };
 
 const result = {
-  id: 'bk_' + Buffer.from(sessionId + action).toString('base64').slice(0, 12),
-  action,
+  id: 'bk_' + Buffer.from(sessionId).toString('base64').slice(0, 12),
   bankroll,
   unitSize,
   unitLimit,
@@ -122,7 +120,6 @@ console.log(JSON.stringify({ success: true, data: result }));
 const BANKROLL_COPILOT_INPUT = {
   type: 'object',
   properties: {
-    action: SchemaProps.select(['assess', 'unit-sizing', 'kelly-analysis', 'session-review', 'stress-test'], { description: 'Bankroll action' }),
     bankroll: SchemaProps.number({ description: 'Total betting bankroll' }),
     unitSize: SchemaProps.number({ description: 'Standard unit size in currency' }),
     unitLimit: SchemaProps.number({ description: 'Maximum units per session', default: 100 }),
@@ -135,7 +132,7 @@ const BANKROLL_COPILOT_INPUT = {
     cooldownMinutes: SchemaProps.number({ description: 'Cooldown between sessions in minutes', default: 5 }),
     confidenceLevel: SchemaProps.number({ description: 'Confidence for variance calc (0-1)', default: 0.95 }),
   },
-  required: ['action'],
+  required: [],
 };
 
 const CODE_OUTPUT = {
@@ -159,9 +156,9 @@ export const BANKROLL_CO_PILOT = createCodeSkill({
   },
   inputSchema: BANKROLL_COPILOT_INPUT,
   outputSchema: CODE_OUTPUT,
+  tier: 'aid',
+  domainKnowledge: 'Bankroll management mathematics, Kelly Criterion, responsible gambling',
   triggers: [
-    { kind: 'user', phrase_examples: ['Check bankroll', 'Unit sizing', 'Kelly criterion', 'Session review', 'Can I afford this bet'] },
     { kind: 'schedule', cadence: 'Pre-bet risk check' },
-    { kind: 'event', on: 'Wager submitted' },
   ],
 });

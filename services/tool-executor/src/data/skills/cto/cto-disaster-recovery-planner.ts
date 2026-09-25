@@ -20,14 +20,12 @@ const rpoTarget = config.rpoTargetMinutes != null ? config.rpoTargetMinutes : 15
 
 const readinessResult = await __execute_tool('cto-incident-disaster-readiness', {
   provider: 'disaster-recovery',
-  operation: 'readiness-check',
   config: { rtoTarget, rpoTarget, failoverAuto: config.failoverAuto !== false, context: input.context || {} },
 });
 
 if (!readinessResult || readinessResult.success === false) {
   console.log(JSON.stringify({
     success: false,
-    mode: 'not-connected',
     error: readinessResult && readinessResult.error ? readinessResult.error : 'Not connected: disaster recovery module unavailable; ensure cto-incident-disaster-readiness is connected',
     rtoTarget,
     rpoTarget,
@@ -95,16 +93,14 @@ export const ctoDisasterRecoveryPlanner = createCodeSkill({
     properties: {
       success: SchemaProps.boolean({ description: 'Whether readiness check completed' }),
       data: SchemaProps.object({}, { additionalProperties: true, description: 'DR readiness assessment' }),
-      mode: SchemaProps.text({ description: 'Execution mode' }),
       error: SchemaProps.text({ description: 'Failure message' }),
     },
     required: ['success', 'data'],
   },
   triggers: [
-    { kind: 'user', phrase_examples: ['check disaster recovery readiness', 'assess RTO RPO compliance', 'DR failover test', 'incident readiness review'] },
-    { kind: 'schedule', cadence: 'quarterly disaster recovery drill' },
-    { kind: 'event', on: 'infrastructure failure, region outage, or DR test completion' },
+    { kind: 'user', phrase_examples: ['check disaster recovery readiness', 'assess RTO RPO compliance', 'DR failover test', 'incident readiness review'] }
   ],
+  tier: 'advise',
 });
 
 ctoDisasterRecoveryPlanner.configSchema = DR_CONFIG_SCHEMA;

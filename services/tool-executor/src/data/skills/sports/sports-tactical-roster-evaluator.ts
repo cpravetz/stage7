@@ -11,7 +11,6 @@ const path = require('path');
 const entity = input.entity || input.teamId || input.playerId || '';
 const opponent = input.opponent || input.opponentId || '';
 const sport = input.sport || 'generic';
-const mode = input.mode || 'evaluate';
 const timeframe = input.timeframe || '30d';
 
 const baseDir = process.env.SPORTS_GROUP_A_HOME || '/tmp/sports/group-a';
@@ -94,7 +93,6 @@ function computeTacticalEvaluation(entity, opponent, playerMetrics, opponentMetr
     entity,
     opponent,
     sport,
-    mode,
     dataPoints: synergyScores.length,
     synergyScores,
     weaknessIndices,
@@ -122,7 +120,6 @@ const TACTICAL_ROSTER_EVALUATOR_INPUT = {
     entity: SchemaProps.text({ description: 'Team or player identifier for tactical evaluation' }),
     opponent: SchemaProps.text({ description: 'Opponent team identifier for matchup analysis' }),
     sport: SchemaProps.text({ description: 'Sport context (basketball, football, soccer, etc.)' }),
-    mode: SchemaProps.select(['evaluate', 'compare', 'optimize'], { description: 'Evaluation mode' }),
     timeframe: SchemaProps.select(['7d', '30d', '90d', 'season'], { description: 'Analysis window', default: '30d' }),
     formation: SchemaProps.text({ description: 'Current formation or lineup scheme', default: 'standard' }),
     playerMetrics: SchemaProps.object({
@@ -169,9 +166,9 @@ export const TACTICAL_ROSTER_EVALUATOR = createCodeSkill({
   },
   inputSchema: TACTICAL_ROSTER_EVALUATOR_INPUT,
   outputSchema: CODE_OUTPUT,
+  tier: 'advise',
+  domainKnowledge: 'Sports tactical analysis, roster optimization, opponent matchup evaluation',
   triggers: [
-    { kind: 'user', phrase_examples: ['Evaluate our lineup', 'Tactical assessment', 'Roster strategy', 'How do we match up'] },
     { kind: 'schedule', cadence: 'Pre-match tactical briefing 48h prior' },
-    { kind: 'event', on: 'Performance baseline drop' },
   ],
 });

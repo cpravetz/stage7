@@ -4,10 +4,9 @@ const EXTERNAL_OUTPUT_SCHEMA = {
   type: 'object',
   properties: {
     success: { type: 'boolean', description: 'Whether the operation succeeded' },
-    mode: { type: 'string', enum: ['dry-run', 'live', 'error'] },
+    status: { type: 'string' },
     system: { type: 'string' },
     action: { type: 'string' },
-    operation: { type: 'string' },
     request: {
       type: ['object', 'null'],
       properties: {
@@ -26,13 +25,15 @@ const EXTERNAL_OUTPUT_SCHEMA = {
     },
     error: { type: ['string', 'null'] },
   },
-  required: ['success', 'mode', 'system', 'action', 'operation', 'request', 'response', 'error'],
+  required: ['success', 'status', 'system', 'action', 'request', 'response', 'error'],
 };
 
 const PIPELINE_OPS = createExternalActionSkill({
   id: 'pipeline-ops',
   name: 'Pipeline Ops',
-  description: 'Prepare CRM, calendar, and document-management requests for a configured sales endpoint. Without a configured endpoint, requests remain dry runs and no external system is changed.',
+  description: 'Prepare CRM requests for a configured sales endpoint. Without a configured endpoint, requests remain dry runs and no external system is changed.',
+  tier: 'represent',
+  domainKnowledge: 'Sales pipeline management, CRM operations, and deal tracking',
   system: 'pipeline-ops',
   action: 'execute',
   endpoint: { envVar: 'SALES_PIPELINE_ENDPOINT', method: 'POST' },
@@ -53,7 +54,6 @@ const PIPELINE_OPS = createExternalActionSkill({
   inputSchema: {
     type: 'object',
     properties: {
-      operation: SchemaProps.select(['crm', 'calendar', 'document-management'], { description: 'Pipeline operation domain: crm for CRM records, calendar for scheduling, document-management for proposals/docs' }),
       dryRun: SchemaProps.boolean({ description: 'Validate without executing', default: true }),
 
       entity: SchemaProps.select(['lead', 'contact', 'account', 'opportunity', 'activity', 'event', 'document'], { description: 'Entity type for the operation' }),
@@ -78,20 +78,11 @@ const PIPELINE_OPS = createExternalActionSkill({
       leadId: SchemaProps.text({ description: 'Associated lead identifier' }),
       opportunityId: SchemaProps.text({ description: 'Associated opportunity identifier' }),
     },
-    required: ['operation'],
+    required: [],
   },
   outputSchema: EXTERNAL_OUTPUT_SCHEMA,
   triggers: [
-    { kind: 'user', phrase_examples: ['Sync my CRM', 'Schedule a meeting', 'Send proposal'] },
-    { kind: 'schedule', cadence: 'Daily CRM sync' },
-    { kind: 'schedule', cadence: 'Daily meeting prep' },
-    { kind: 'schedule', cadence: 'Weekly proposal pipeline review' },
-    { kind: 'event', on: 'Record updated in CRM' },
-    { kind: 'event', on: 'Meeting scheduled' },
-    { kind: 'event', on: 'Proposal viewed' },
-    { kind: 'event', on: 'Proposal signed' },
-    { kind: 'event', on: 'Sync conflict detected' },
-    { kind: 'event', on: 'Data quality below threshold' },
+    { kind: 'user', phrase_examples: ['Update my CRM record', 'Send this to the pipeline', 'Sync this deal'] },
   ],
   timeoutMs: 30000,
 });

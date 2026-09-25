@@ -3,7 +3,7 @@ import { createCodeSkill, SchemaProps } from '../code-skill-factory';
 
 const CAREER_BASE_CONFIG_SCHEMA: SchemaRecord = { type: 'object', properties: {} };
 
-// career_pipeline_report: aggregates application tracking into a pipeline summary.
+// career-pipeline-report: aggregates application tracking into a pipeline summary.
 // Returns { success, data: { tracking, byStatus, total, staleFollowUps } }
 const CAREER_PIPELINE_REPORT_SOURCE = `(async () => {
 const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
@@ -61,7 +61,7 @@ const CAREER_PIPELINE_REPORT_OUTPUT = {
 };
 
 const CAREER_PIPELINE_REPORT = createCodeSkill({
-  id: 'career_pipeline_report',
+  id: 'career-pipeline-report',
   name: 'Pipeline Report',
   description: 'Aggregates application tracking data into a pipeline summary with status breakdowns and stale follow-up detection.',
   manifest: {
@@ -75,7 +75,6 @@ const CAREER_PIPELINE_REPORT = createCodeSkill({
   outputSchema: CAREER_PIPELINE_REPORT_OUTPUT,
   triggers: [
     { kind: 'user', phrase_examples: ['How is my pipeline', 'Show my applications', 'What needs follow-up'] },
-    { kind: 'schedule', cadence: 'Weekly pipeline summary' },
   ],
 });
 CAREER_PIPELINE_REPORT.configSchema = CAREER_PIPELINE_REPORT.manifest.configSchema as SchemaRecord;

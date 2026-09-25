@@ -43,26 +43,20 @@ const INVESTMENT_MARKET_DATA = createExternalActionSkill({
     type: 'object',
     properties: {
       success: { type: 'boolean' },
-      mode: { type: 'string' },
       system: { type: 'string' },
       action: { type: 'string' },
       request: { type: 'object' },
       response: { type: ['object', 'null'] },
       error: { type: 'string' }
     },
-    required: ['success', 'mode', 'system', 'action', 'request', 'response', 'error']
+    required: ['success', 'system', 'action', 'request', 'response', 'error']
   },
   triggers: [
-    { kind: 'user', phrase_examples: ["Get market data for", "Research this stock", "Look up fundamentals", "Check options chain"] },
-    { kind: 'schedule', cadence: 'Daily market data refresh' },
-    { kind: 'schedule', cadence: 'Weekly research digest' },
-    { kind: 'event', on: 'Earnings release filed' },
-    { kind: 'event', on: 'Breaking market news' },
-    { kind: 'event', on: 'Stock price alert triggered' },
-    { kind: 'event', on: 'Volatility exceeds threshold' },
-    { kind: 'event', on: 'New sector rotation detected' }
+    { kind: 'user', phrase_examples: ["Get market data for", "Research this stock", "Look up fundamentals", "Check options chain"] }
   ],
-  timeoutMs: 30000
+  timeoutMs: 30000,
+  tier: 'represent',
+  confirmBeforeSend: true
 });
 
 export { INVESTMENT_MARKET_DATA };

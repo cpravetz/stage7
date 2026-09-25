@@ -11,9 +11,9 @@ export const eventSkills: Tool[] = [
 ];
 
 annotateStages(eventSkills, {
-  'event_planning_budgeting': 'plan',
-  'event_vendor_contract_management': 'vendors',
-  'event_day_of_operations': 'day-of',
+  'event-planning-budgeting': 'plan',
+  'event-vendor-contract-management': 'vendors',
+  'event-day-of-operations': 'day-of',
 });
 
 export const eventWorkflow = createWorkflow({
@@ -21,8 +21,8 @@ export const eventWorkflow = createWorkflow({
   productObject: 'event / vendor',
   flow: 'plan → vendors → day-of',
   stages: [
-    { name: 'plan', description: 'Event planning and budgeting', stageIds: ['event_planning_budgeting'] },
-    { name: 'vendors', description: 'Vendor and contract management', stageIds: ['event_vendor_contract_management'] },
-    { name: 'day-of', description: 'Day-of operations', stageIds: ['event_day_of_operations'] },
+    { name: 'plan', description: 'Event planning and budgeting', stageIds: ['event-planning-budgeting'] },
+    { name: 'vendors', description: 'Vendor and contract management', stageIds: ['event-vendor-contract-management'] },
+    { name: 'day-of', description: 'Day-of operations', stageIds: ['event-day-of-operations'] },
   ],
 }, eventSkills);

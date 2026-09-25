@@ -25,7 +25,6 @@ export const TICKET_OPS = createExternalActionSkill({
   inputSchema: {
     type: 'object',
     properties: {
-      operation: SchemaProps.select(['crm', 'escalation', 'follow-up'], { description: 'Ticket operation: crm for CRM sync, escalation for routing, follow-up for scheduling' }),
       dryRun: SchemaProps.boolean({ description: 'Validate without executing', default: true }),
 
       ticket: SchemaProps.text({ description: 'Ticket identifier' }),
@@ -44,29 +43,26 @@ export const TICKET_OPS = createExternalActionSkill({
       template: SchemaProps.text({ description: 'Template for the follow-up message' }),
       customMessage: SchemaProps.text({ description: 'Custom follow-up message' }),
     },
-    required: ['operation'],
+    required: [],
   },
   outputSchema: {
     type: 'object',
     properties: {
       success: { type: 'boolean' },
-      mode: { type: 'string', enum: ['dry-run', 'live', 'error'] },
       system: { type: 'string' },
       action: { type: 'string' },
-      operation: { type: 'string' },
       request: { type: ['object', 'null'] },
       response: { type: ['object', 'null'] },
       error: { type: ['string', 'null'] },
     },
-    required: ['success', 'mode', 'system', 'action', 'operation', 'request', 'response', 'error'],
+    required: ['success', 'system', 'action', 'request', 'response', 'error'],
   },
   timeoutMs: 30000,
+  tier: 'represent',
+  confirmBeforeSend: true,
+  domainKnowledge: 'Customer success metrics (CSAT, NPS, Churn Rate), SLA management, support escalation tiers, ticket triage',
 });
 
-TICKET_OPS.confirmBeforeSend = true;
-
 TICKET_OPS.triggers = [
-  { kind: 'user', phrase_examples: ['Escalate this ticket', 'Sync to CRM', 'Schedule a follow-up', 'Update ticket status'] },
-  { kind: 'schedule', cadence: 'Daily ticket ops review' },
-  { kind: 'event', on: 'Ticket escalated or SLA breached' },
+  { kind: 'event', on: 'Ticket escalated to tier 2' },
 ];

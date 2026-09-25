@@ -3,7 +3,7 @@ import { createCodeSkill, SchemaProps } from '../code-skill-factory';
 
 const CAREER_BASE_CONFIG_SCHEMA: SchemaRecord = { type: 'object', properties: {} };
 
-// ── career_profile_intake ──────────────────────────────────────────────
+// ── career-profile-intake ──────────────────────────────────────────────
 const CAREER_PROFILE_INTAKE_SOURCE = `(async () => {
 const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
 const fs = require('fs');
@@ -84,7 +84,7 @@ const CAREER_PROFILE_INTAKE_OUTPUT = {
 };
 
 const CAREER_PROFILE_INTAKE = createCodeSkill({
-  id: 'career_profile_intake',
+  id: 'career-profile-intake',
   name: 'Profile Intake',
   description: 'Collects and persists the candidate profile: personal details, target roles, skills, resume text, and job-search preferences. All other career tools read from this profile.',
   manifest: {
@@ -99,7 +99,6 @@ const CAREER_PROFILE_INTAKE = createCodeSkill({
   outputSchema: CAREER_PROFILE_INTAKE_OUTPUT,
   triggers: [
     { kind: 'user', phrase_examples: ['Set up my profile', 'Update my resume', 'Save my preferences'] },
-    { kind: 'event', on: 'Profile updated or resume uploaded' },
   ],
 });
 CAREER_PROFILE_INTAKE.configSchema = CAREER_PROFILE_INTAKE.manifest.configSchema as SchemaRecord;

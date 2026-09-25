@@ -118,7 +118,7 @@ describe('ctoSkills', () => {
     it('all canonical skills have triggers, schemas, createdAt, updatedAt', () => {
       for (const skill of ctoCanonicalSkills) {
         expect(skill.triggers).toBeDefined();
-        expect(skill.triggers!.length).toBeGreaterThanOrEqual(3);
+        expect(skill.triggers!.length).toBe(1);
         expect(skill.inputSchema).toBeDefined();
         expect(skill.outputSchema).toBeDefined();
         expect(skill.id).toBeTruthy();
@@ -129,12 +129,10 @@ describe('ctoSkills', () => {
       }
     });
 
-    it('canonical triggers include user, schedule, event kinds', () => {
+    it('canonical triggers have exactly one user trigger', () => {
       for (const skill of ctoCanonicalSkills) {
-        const kinds = skill.triggers!.map((t) => t.kind);
-        expect(kinds).toContain('user');
-        expect(kinds).toContain('schedule');
-        expect(kinds).toContain('event');
+        expect(skill.triggers!.length).toBe(1);
+        expect(skill.triggers![0].kind).toBe('user');
       }
     });
   });

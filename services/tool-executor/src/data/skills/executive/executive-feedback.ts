@@ -69,7 +69,7 @@ const FEEDBACK = createCodeSkill({
   manifest: { language: 'javascript', entrypoint: 'index.js', sourceCode: FEEDBACK_SOURCE },
   inputSchema: FEEDBACK_INPUT,
   outputSchema: COMMON_OUTPUT,
-  triggers: [{ kind: 'user', phrase_examples: ['Collect feedback', 'Analyze feedback', 'Review performance'] }, { kind: 'schedule', cadence: 'Quarterly feedback cycle' }],
+  triggers: [{ kind: 'user', phrase_examples: ['Collect feedback', 'Analyze feedback', 'Review performance'] }],
 });
 
 export { FEEDBACK };

@@ -136,7 +136,7 @@ describe('createExternalActionSkill', () => {
     })
 
     const source = skill.manifest.sourceCode as string
-    expect(source).toContain('mode: "dry-run"')
+    expect(source).toContain('result.success = false')
   })
 
   it('sets live mode when fixed endpoint provided', () => {
@@ -146,7 +146,7 @@ describe('createExternalActionSkill', () => {
     })
 
     const source = skill.manifest.sourceCode as string
-    expect(source).toContain('mode: "live"')
+    expect(source).toContain('result.success = res.ok')
   })
 
   describe('auth credential mapping', () => {
@@ -536,7 +536,7 @@ describe('createExternalActionSkill', () => {
 
       const source = skill.manifest.sourceCode as string
       expect(source).toContain('success: false')
-      expect(source).toContain('mode:')
+      expect(source).toContain('error: null')
       expect(source).toContain('system:')
       expect(source).toContain('action:')
       expect(source).toContain('request: null')
@@ -585,7 +585,7 @@ describe('createExternalActionSkill', () => {
 
       const source = skill.manifest.sourceCode as string
       expect(source).toContain('if (!resolvedEndpoint) {')
-      expect(source).toContain('result.mode = "not-connected"')
+      expect(source).toContain('result.success = false')
       expect(source).toContain('result.success = false')
       expect(source).toContain('result.error = "Not connected: required endpoint is not configured"')
       expect(source).toContain('return result')

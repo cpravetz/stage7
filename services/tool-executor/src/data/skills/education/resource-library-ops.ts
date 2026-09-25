@@ -5,7 +5,7 @@ const EDUCATION_EXTERNAL_OUTPUT_SCHEMA = {
   type: 'object',
   properties: {
     success: { type: 'boolean' },
-    mode: { type: 'string', enum: ['dry-run', 'live', 'error'] },
+    status: { type: 'string' },
     system: { type: 'string' },
     action: { type: 'string' },
     request: {
@@ -26,13 +26,13 @@ const EDUCATION_EXTERNAL_OUTPUT_SCHEMA = {
     },
     error: { type: ['string', 'null'] },
   },
-  required: ['success', 'mode', 'system', 'action', 'request', 'response', 'error'],
+  required: ['success', 'status', 'system', 'action', 'request', 'response', 'error'],
 };
 
 export const RESOURCE_LIBRARY_OPS = createExternalActionSkill({
-  id: 'education_resource_library',
+  id: 'education-resource-library',
   name: 'Resource Library Ops',
-  description: 'Organize, tag, analyze, and accessibility-check educational resources in a connected repository (LMS, Google Drive, SharePoint, custom). Proxy skill for real repository operations.',
+  description: 'Search and manage educational resources in a connected repository (LMS, Google Drive, SharePoint, custom). Proxy skill for real repository operations.',
   system: 'education_repository',
   action: 'manage_resources',
   endpoint: { envVar: 'EDUCATION_RESOURCE_ENDPOINT', method: 'POST' },
@@ -61,7 +61,6 @@ export const RESOURCE_LIBRARY_OPS = createExternalActionSkill({
   inputSchema: {
     type: 'object',
     properties: {
-      operation: SchemaProps.select(['organize', 'tag', 'analyze', 'accessibility-check', 'search', 'upload', 'update', 'delete', 'share', 'export'], { description: 'Operation' }),
       resourceId: { type: 'string', description: 'Resource identifier' },
       file: { type: 'object', description: 'File metadata for upload: name, mimeType, content (base64), size' },
       folder: { type: 'string', description: 'Target folder/path' },
@@ -71,14 +70,12 @@ export const RESOURCE_LIBRARY_OPS = createExternalActionSkill({
       accessibilityStandard: SchemaProps.select(['WCAG-2.1-AA', 'Section-508', 'custom'], { description: 'Accessibility standard for check' }),
       dryRun: SchemaProps.boolean({ description: 'Validate without executing' }),
     },
-    required: ['operation'],
   },
   outputSchema: EDUCATION_EXTERNAL_OUTPUT_SCHEMA,
   timeoutMs: 120000,
+  tier: 'aid',
+  domainKnowledge: "Pedagogical frameworks (Bloom's Taxonomy, Spaced Repetition), curriculum design, assessment scoring methods, student engagement metrics",
   triggers: [
-    { kind: 'user', phrase_examples: ['Organize learning resources', 'Tag a course file', 'Check resource accessibility'] },
-    { kind: 'schedule', cadence: 'Monthly resource library and accessibility audit' },
-    { kind: 'event', on: 'A resource is uploaded, updated, shared, or removed' },
-    { kind: 'data', condition: 'Resource metadata, taxonomy, or accessibility evidence is incomplete' },
+    { kind: 'user', phrase_examples: ['Curate learning resources for this subject'] },
   ],
 });

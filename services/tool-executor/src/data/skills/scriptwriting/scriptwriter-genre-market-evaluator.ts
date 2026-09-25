@@ -9,16 +9,15 @@ const GENRE_MARKET_EVALUATOR_SOURCE = `(async () => {
   const genreFocus = String(input.genreFocus || genre);
   const topic = String(input.topic || '');
   const script = String(input.script || '');
-  const operation = input.operation || 'genre-market-fit';
   const connected = [];
   const results = {};
 
   if (!topic && !script) {
     console.log(JSON.stringify({
       success: false,
-      mode: 'error',
+      status: 'error',
       error: 'topic or script is required',
-      delegatedTo: ['scriptwriting_narrative_arc_pacing_evaluator', 'scriptwriting_scene_beat_dialogue_copilot'],
+      delegatedTo: ['scriptwriting-narrative-arc-pacing-evaluator', 'scriptwriting-scene-beat-dialogue-copilot'],
       genre: genre,
       marketDataSource: marketDataSource,
       targetFormat: targetFormat,
@@ -27,7 +26,7 @@ const GENRE_MARKET_EVALUATOR_SOURCE = `(async () => {
   }
 
   try {
-    const pacingResult = await __execute_tool('scriptwriting_narrative_arc_pacing_evaluator', {
+    const pacingResult = await __execute_tool('scriptwriting-narrative-arc-pacing-evaluator', {
       script: script || '(no script provided)',
       format: targetFormat,
       genre: genre,
@@ -35,7 +34,7 @@ const GENRE_MARKET_EVALUATOR_SOURCE = `(async () => {
       targetDuration: input.targetDuration || 0,
     });
     if (pacingResult && pacingResult.success) {
-      connected.push('scriptwriting_narrative_arc_pacing_evaluator');
+      connected.push('scriptwriting-narrative-arc-pacing-evaluator');
       results.narrativeArcPacing = pacingResult.data;
     }
   } catch (_) {
@@ -43,7 +42,7 @@ const GENRE_MARKET_EVALUATOR_SOURCE = `(async () => {
   }
 
   try {
-    const copilotResult = await __execute_tool('scriptwriting_scene_beat_dialogue_copilot', {
+    const copilotResult = await __execute_tool('scriptwriting-scene-beat-dialogue-copilot', {
       topic: topic || 'Untitled script',
       format: targetFormat,
       genre: genre,
@@ -52,7 +51,7 @@ const GENRE_MARKET_EVALUATOR_SOURCE = `(async () => {
       save: false,
     });
     if (copilotResult && copilotResult.success) {
-      connected.push('scriptwriting_scene_beat_dialogue_copilot');
+      connected.push('scriptwriting-scene-beat-dialogue-copilot');
       results.sceneBeatDialogue = copilotResult.data;
     }
   } catch (_) {
@@ -62,13 +61,13 @@ const GENRE_MARKET_EVALUATOR_SOURCE = `(async () => {
   if (!connected.length) {
     console.log(JSON.stringify({
       success: false,
-      mode: 'not-connected',
-      error: 'Not connected: neither scriptwriting_narrative_arc_pacing_evaluator nor scriptwriting_scene_beat_dialogue_copilot is available. Connect at least one to assess genre market fit.',
+      status: 'not-connected',
+      error: 'Not connected: neither scriptwriting-narrative-arc-pacing-evaluator nor scriptwriting-scene-beat-dialogue-copilot is available. Connect at least one to assess genre market fit.',
       genre: genre,
       genreFocus: genreFocus,
       marketDataSource: marketDataSource,
       targetFormat: targetFormat,
-      delegatedTo: ['scriptwriting_narrative_arc_pacing_evaluator', 'scriptwriting_scene_beat_dialogue_copilot'],
+      delegatedTo: ['scriptwriting-narrative-arc-pacing-evaluator', 'scriptwriting-scene-beat-dialogue-copilot'],
     }));
     return;
   }
@@ -91,7 +90,7 @@ const GENRE_MARKET_EVALUATOR_SOURCE = `(async () => {
     marketSignal: genre + ' genre market signal from ' + marketDataSource + ' for ' + targetFormat + ' format',
     narrativeArcPacing: pacingAvailable ? results.narrativeArcPacing : null,
     sceneBeatDialogue: copilotAvailable ? results.sceneBeatDialogue : null,
-    delegatedTo: ['scriptwriting_narrative_arc_pacing_evaluator', 'scriptwriting_scene_beat_dialogue_copilot'],
+    delegatedTo: ['scriptwriting-narrative-arc-pacing-evaluator', 'scriptwriting-scene-beat-dialogue-copilot'],
     generatedAt: new Date().toISOString(),
   };
 
@@ -101,16 +100,15 @@ const GENRE_MARKET_EVALUATOR_SOURCE = `(async () => {
   const storePath = path.join(baseDir, 'genre-market-evaluations.json');
   fs.mkdirSync(baseDir, { recursive: true });
   const store = fs.existsSync(storePath) ? JSON.parse(fs.readFileSync(storePath, 'utf8')) : [];
-  const evaluation = { id: 'market_eval_' + Date.now(), operation: operation, marketFit: marketFit, createdAt: new Date().toISOString() };
+  const evaluation = { id: 'market_eval_' + Date.now(), status: 'live', marketFit: marketFit, createdAt: new Date().toISOString() };
   store.push(evaluation);
   fs.writeFileSync(storePath, JSON.stringify(store, null, 2), { mode: 0o600 });
 
   console.log(JSON.stringify({
     success: true,
-    mode: 'live',
-    operation: operation,
+    status: 'live',
     data: evaluation,
-    delegatedTo: ['scriptwriting_narrative_arc_pacing_evaluator', 'scriptwriting_scene_beat_dialogue_copilot'],
+    delegatedTo: ['scriptwriting-narrative-arc-pacing-evaluator', 'scriptwriting-scene-beat-dialogue-copilot'],
   }));
 })()`;
 
@@ -124,14 +122,13 @@ const GENRE_MARKET_CONFIG_SCHEMA = {
 };
 
 export const SCRIPTWRITER_GENRE_MARKET_EVALUATOR = createCodeSkill({
-  id: 'scriptwriting_genre_market_evaluator',
+  id: 'scriptwriting-genre-market-evaluator',
   name: 'Scriptwriter Genre & Market Evaluator',
   description: 'Evaluates a script or topic for genre and market/audience trend fit by delegating to narrative-arc-pacing-evaluator and scene-beat-dialogue-copilot for structural and scene-level analysis. Reports not-connected when neither dependency is available.',
   manifest: { language: 'javascript', entrypoint: 'index.js', sourceCode: GENRE_MARKET_EVALUATOR_SOURCE, configSchema: GENRE_MARKET_CONFIG_SCHEMA },
   inputSchema: {
     type: 'object',
     properties: {
-      operation: SchemaProps.select(['genre-market-fit', 'audience-alignment', 'market-signal'], { description: 'Type of market fit analysis to perform', default: 'genre-market-fit', hint: 'Choose the market analysis operation' }),
       genre: SchemaProps.text({ description: 'Genre or storytelling mode', default: 'drama', hint: 'e.g. drama, comedy, thriller, documentary' }),
       genreFocus: SchemaProps.text({ description: 'Primary genre for market focus area', hint: 'The specific genre being assessed for market fit' }),
       marketDataSource: SchemaProps.select(['spotify', 'soundcharts', 'billboard', 'general', 'custom'], { description: 'Source for market/audience trend data', hint: 'Data provider for market trend analysis' }),
@@ -147,17 +144,16 @@ export const SCRIPTWRITER_GENRE_MARKET_EVALUATOR = createCodeSkill({
     type: 'object',
     properties: {
       success: { type: 'boolean', description: 'Whether the market fit evaluation completed successfully' },
-      mode: { type: 'string', description: 'Execution mode: live, not-connected, or error' },
-      operation: { type: 'string', description: 'The operation performed' },
+      status: { type: 'string', description: 'Execution status: live, not-connected, or error' },
       data: { type: 'object', description: 'Market fit evaluation with delegated results from narrative arc pacing and scene beat dialogue' },
       delegatedTo: { type: 'array', items: { type: 'string' }, description: 'Lower-order tool IDs this skill delegates to' },
       error: { type: 'string', description: 'Error message if failed' },
     },
-    required: ['success', 'mode', 'operation'],
+    required: ['success', 'status'],
   },
   triggers: [
-    { kind: 'user', phrase_examples: ['Does this script fit current market trends', 'Evaluate audience alignment for this format', 'Assess genre market fit'] },
-    { kind: 'event', on: 'A script draft or concept is ready for market analysis' },
-    { kind: 'data', condition: 'Genre or market trend fit needs assessment before release or submission' },
+    { kind: 'user', phrase_examples: ['Evaluate genre market fit for this script'] },
   ],
+  tier: 'advise',
+  domainKnowledge: 'Scriptwriting market analysis, genre trends, audience alignment',
 });

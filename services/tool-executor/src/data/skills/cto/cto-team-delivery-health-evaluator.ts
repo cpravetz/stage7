@@ -31,7 +31,6 @@ const teamMetricsResult = await __execute_tool('cto-infrastructure-query', {
 if (!teamMetricsResult || teamMetricsResult.success === false) {
   console.log(JSON.stringify({
     success: false,
-    mode: 'not-connected',
     error: 'Not connected: team-metrics provider unavailable; ensure cto-infrastructure-query is connected with team-metrics provider',
     thresholds,
   }));
@@ -109,16 +108,14 @@ export const ctoTeamDeliveryHealthEvaluator = createCodeSkill({
     properties: {
       success: SchemaProps.boolean({ description: 'Whether evaluation completed' }),
       data: SchemaProps.object({}, { additionalProperties: true, description: 'DORA assessment, team capacity, and sprint velocity' }),
-      mode: SchemaProps.text({ description: 'Execution mode' }),
       error: SchemaProps.text({ description: 'Failure message' }),
     },
     required: ['success', 'data'],
   },
   triggers: [
-    { kind: 'user', phrase_examples: ['evaluate team delivery health', 'check DORA metrics', 'assess sprint velocity', 'team capacity review'] },
-    { kind: 'schedule', cadence: 'weekly team delivery health review' },
-    { kind: 'event', on: 'sprint completion, deployment anomaly, or team capacity alert' },
+    { kind: 'user', phrase_examples: ['evaluate team delivery health', 'check DORA metrics', 'assess sprint velocity', 'team capacity review'] }
   ],
+  tier: 'advise',
 });
 
 ctoTeamDeliveryHealthEvaluator.configSchema = DORA_CONFIG_SCHEMA;

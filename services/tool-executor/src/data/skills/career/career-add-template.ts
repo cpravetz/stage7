@@ -3,7 +3,7 @@ import { createCodeSkill, SchemaProps } from '../code-skill-factory';
 
 const CAREER_BASE_CONFIG_SCHEMA: SchemaRecord = { type: 'object', properties: {} };
 
-// career_add_template: registers a new resume or cover letter template.
+// career-add-template: registers a new resume or cover letter template.
 // Returns { success, data: { template, outPath } }
 const CAREER_ADD_TEMPLATE_SOURCE = `(async () => {
 const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
@@ -72,7 +72,7 @@ const CAREER_ADD_TEMPLATE_OUTPUT = {
 };
 
 const CAREER_ADD_TEMPLATE = createCodeSkill({
-  id: 'career_add_template',
+  id: 'career-add-template',
   name: 'Add Template',
   description: 'Register a new resume or cover letter template in the career workspace. Templates are named, versioned, and can be reused across applications with variable substitution.',
   manifest: {

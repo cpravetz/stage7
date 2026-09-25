@@ -81,7 +81,7 @@ const SCRIPT_FORMATTING_OUTPUT = {
 };
 
 export const SCRIPT_FORMATTING_SUBMISSION_MANAGER = createCodeSkill({
-  id: 'scriptwriting_script_formatting_submission_manager',
+  id: 'scriptwriting-script-formatting-submission-manager',
   name: 'Script Formatting & Submission Manager',
   description: 'Formats raw script text to industry-standard screenplay format (scene headings, character cues, parentheticals, action lines) and manages submission queues for platforms like Blacklist, coverage services, and contests.',
   manifest: { language: 'javascript', entrypoint: 'index.js', sourceCode: SCRIPT_FORMATTING_SOURCE },
@@ -89,7 +89,8 @@ export const SCRIPT_FORMATTING_SUBMISSION_MANAGER = createCodeSkill({
   outputSchema: SCRIPT_FORMATTING_OUTPUT,
   triggers: [
     { kind: 'user', phrase_examples: ['Format my script', 'Submit to Blacklist', 'Prepare for coverage'] },
-    { kind: 'event', on: 'Script ready for formatting and submission' },
-    { kind: 'data', condition: 'Script draft available and target platform specified' },
   ],
+  tier: 'represent',
+  confirmBeforeSend: true,
+  domainKnowledge: 'Screenplay formatting standards (Master Scene Heading style), script submission platforms, industry formatting guidelines',
 });

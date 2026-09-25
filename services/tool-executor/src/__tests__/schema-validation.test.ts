@@ -301,8 +301,8 @@ describe('Schema Validation - Full Registry Inventory (Sprint 2)', () => {
       const decision = getRetainedOverlapDecision('DEC-009');
       expect(decision).toBeDefined();
       expect(decision!.decision).toBe('retain-separate');
-      expect(decision!.skillIds).toContain('songwriter_genre_trend_evaluator');
-      expect(decision!.skillIds).toContain('scriptwriting_genre_market_evaluator');
+      expect(decision!.skillIds).toContain('songwriter-genre-trend-evaluator');
+      expect(decision!.skillIds).toContain('scriptwriting-genre-market-evaluator');
     });
 
     it('DEC-010 sports capabilities are retained with isolation rationale', () => {

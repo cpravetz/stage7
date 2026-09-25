@@ -5,9 +5,9 @@ const CAREER_WRAPPER_CONFIG_SCHEMA: SchemaRecord = { type: 'object', properties:
 
 const PIPELINE_OUTCOME_TRACKER_SOURCE = `(async () => {
 const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
-const pipeline = await __execute_tool('career_pipeline_report', {});
+const pipeline = await __execute_tool('career-pipeline-report', {});
 if (!pipeline || pipeline.success === false || pipeline.error) {
-console.log(JSON.stringify({ success: false, mode: 'not-connected', error: pipeline && pipeline.error ? pipeline.error : 'Not connected: pipeline reporting returned no data; track applications first' }));
+console.log(JSON.stringify({ success: false, status: 'not-connected', error: pipeline && pipeline.error ? pipeline.error : 'Not connected: pipeline reporting returned no data; track applications first' }));
 return;
 }
 const pipelineData = pipeline.data && typeof pipeline.data === 'object' ? pipeline.data : {};
@@ -22,14 +22,14 @@ if (input.targetRole) {
     && (!input.company || String(entry.company || '').toLowerCase() === String(input.company).toLowerCase())) || null;
 }
 if (!input.targetRole && !input.jobTitle) {
-console.log(JSON.stringify({ success: false, mode: 'not-connected', error: 'Provide a targetRole or a jobTitle so this outcome can be tied to the correct role' }));
+console.log(JSON.stringify({ success: false, status: 'not-connected', error: 'Provide a targetRole or a jobTitle so this outcome can be tied to the correct role' }));
 return;
 }
 if ((input.targetRole || input.jobTitle) && !matchedEntry) {
-console.log(JSON.stringify({ success: false, mode: 'not-connected', error: 'Not connected: no pipeline entry matched the given targetRole/jobTitle; check Job Discovery & Fit Ranking or Apply to Jobs history' }));
+console.log(JSON.stringify({ success: false, status: 'not-connected', error: 'Not connected: no pipeline entry matched the given targetRole/jobTitle; check Job Discovery & Fit Ranking or Apply to Jobs history' }));
 return;
 }
-const outcome = await __execute_tool('career_outcome', {
+const outcome = await __execute_tool('career-outcome', {
    applicationId: matchedEntry.jobId || matchedEntry.id || input.targetRole || '',
    jobTitle: matchedEntry.title || matchedEntry.jobTitle || input.jobTitle || '',
    company: matchedEntry.company || input.company || '',
@@ -38,17 +38,17 @@ const outcome = await __execute_tool('career_outcome', {
    offerDetails: input.offerDetails || null,
   });
 if (!outcome || outcome.success === false || outcome.error) {
-console.log(JSON.stringify({ success: false, mode: 'not-connected', error: outcome && outcome.error ? outcome.error : 'Not connected: outcome tracking returned no data' }));
+console.log(JSON.stringify({ success: false, status: 'not-connected', error: outcome && outcome.error ? outcome.error : 'Not connected: outcome tracking returned no data' }));
 return;
 }
 const outcomeData = outcome.data && typeof outcome.data === 'object' ? outcome.data : {};
 const hasPipelineData = Boolean(pipelineData) && (Number.isFinite(pipelineData.total) || tracking.length || Object.keys(pipelineData.byStatus || {}).length > 0);
 const hasOutcomeData = Number.isFinite(outcomeData.totalOutcomes) || outcomeData.outcome || Array.isArray(outcomeData.outcomes);
 if (!hasPipelineData && !hasOutcomeData) {
-console.log(JSON.stringify({ success: false, mode: 'not-connected', error: 'Not connected: pipeline reporting and outcome tracking yielded no data' }));
+console.log(JSON.stringify({ success: false, status: 'not-connected', error: 'Not connected: pipeline reporting and outcome tracking yielded no data' }));
 return;
 }
-console.log(JSON.stringify({ success: true, data: { pipeline: pipelineData, outcomes: outcomeData, role: { jobId: matchedEntry.jobId || matchedEntry.id, jobTitle: matchedEntry.title || matchedEntry.jobTitle, company: matchedEntry.company }, staleFollowUps: pipelineData.staleFollowUps || [], delegatedTo: ['career_pipeline_report', 'career_outcome'], generatedAt: new Date().toISOString() } }));
+console.log(JSON.stringify({ success: true, data: { pipeline: pipelineData, outcomes: outcomeData, role: { jobId: matchedEntry.jobId || matchedEntry.id, jobTitle: matchedEntry.title || matchedEntry.jobTitle, company: matchedEntry.company }, staleFollowUps: pipelineData.staleFollowUps || [], delegatedTo: ['career-pipeline-report', 'career-outcome'], generatedAt: new Date().toISOString() } }));
 })();`;
 
 const PIPELINE_OUTCOME_TRACKER_INPUT = {
@@ -67,7 +67,7 @@ const PIPELINE_OUTCOME_TRACKER_OUTPUT = {
 type: 'object',
 properties: {
 success: { type: 'boolean' },
-mode: { type: 'string' },
+status: { type: 'string', description: 'Execution status' },
 data: {
 type: 'object',
 properties: {
@@ -87,24 +87,21 @@ required: ['success', 'data'],
 const PIPELINE_OUTCOME_TRACKER = createCodeSkill({
 id: 'career-pipeline-outcome-tracker',
 name: 'Pipeline & Outcome Tracker',
-description: 'Tracks application statuses, records outcomes and feedback, and combines pipeline reporting with outcome history. Delegates to career_pipeline_report and career_outcome, with honest not-connected fallbacks for either dependency.',
+description: 'Tracks application statuses, records outcomes and feedback, and combines pipeline reporting with outcome history. Delegates to career-pipeline-report and career-outcome, with honest not-connected fallbacks for either dependency.',
 manifest: {
 language: 'javascript',
 entrypoint: 'index.js',
 sourceCode: PIPELINE_OUTCOME_TRACKER_SOURCE,
 configSchema: CAREER_WRAPPER_CONFIG_SCHEMA,
-lowerOrderTools: ['career_pipeline_report', 'career_outcome'],
+lowerOrderTools: ['career-pipeline-report', 'career-outcome'],
  actionLabel: 'Show pipeline & record outcome',
 },
 inputSchema: PIPELINE_OUTCOME_TRACKER_INPUT,
 outputSchema: PIPELINE_OUTCOME_TRACKER_OUTPUT,
 triggers: [
 { kind: 'user', phrase_examples: ['How is my pipeline', 'What needs follow-up', 'Track my outcomes'] },
-{ kind: 'schedule', cadence: 'Weekly pipeline summary' },
-{ kind: 'event', on: 'An application status changes' },
 ],
 });
 PIPELINE_OUTCOME_TRACKER.configSchema = PIPELINE_OUTCOME_TRACKER.manifest.configSchema as SchemaRecord;
 
 export { PIPELINE_OUTCOME_TRACKER };
-

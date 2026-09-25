@@ -91,7 +91,7 @@ const LEADERSHIP_ADVISORY = createCodeSkill({
   manifest: { language: 'javascript', entrypoint: 'index.js', sourceCode: LEADERSHIP_SOURCE },
   inputSchema: LEADERSHIP_INPUT,
   outputSchema: COMMON_OUTPUT,
-  triggers: [{ kind: 'user', phrase_examples: ['Coach me', 'Help me decide', 'Assess my leadership', 'Analyze communication'] }, { kind: 'schedule', cadence: 'Weekly leadership review' }],
+  triggers: [{ kind: 'user', phrase_examples: ['Coach me on leadership', 'Help me decide', 'Assess my leadership', 'Analyze communication'] }],
 });
 
 export { LEADERSHIP_ADVISORY };

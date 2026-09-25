@@ -4,7 +4,7 @@ import { createCodeSkill, SchemaProps } from '../code-skill-factory';
 const EDUCATION_HOME = process.env.EDUCATION_HOME || '/tmp/education';
 
 export const LESSON_ASSESSMENT_DRAFTING = createCodeSkill({
-  id: 'education_lesson_assessment_drafting',
+  id: 'education-lesson-assessment-drafting',
   name: 'Lesson & Assessment Drafting',
   description: 'Draft lesson plans, quizzes, activities, and multimedia-integrated content for teacher review. Runs as reasoning-only on the assistant model using curriculum standards and learner context.',
   manifest: {

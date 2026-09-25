@@ -59,13 +59,10 @@ describe('hrSkills', () => {
         expect(skill.outputSchema!.properties).toBeDefined();
       });
 
-      it(`${skill.id} has triggers with all required kinds`, () => {
+      it(`${skill.id} has a single user trigger`, () => {
         expect(skill.triggers).toBeDefined();
-        expect(skill.triggers!.length).toBeGreaterThanOrEqual(3);
-        const kinds = skill.triggers!.map((t) => t.kind);
-        expect(kinds).toContain('user');
-        expect(kinds).toContain('schedule');
-        expect(kinds).toContain('event');
+        expect(skill.triggers!.length).toBe(1);
+        expect(skill.triggers![0].kind).toBe('user');
       });
 
       it(`${skill.id} has property descriptions (full SchemaProps descriptions)`, () => {
@@ -169,7 +166,7 @@ describe('hrSkills', () => {
     it('all canonical skills have triggers, schemas, createdAt, updatedAt', () => {
       for (const skill of hrCanonicalSkills) {
         expect(skill.triggers).toBeDefined();
-        expect(skill.triggers!.length).toBeGreaterThanOrEqual(3);
+        expect(skill.triggers!.length).toBe(1);
         expect(skill.inputSchema).toBeDefined();
         expect(skill.outputSchema).toBeDefined();
         expect(skill.id).toBeTruthy();
@@ -188,12 +185,10 @@ describe('hrSkills', () => {
       expect(rep.manifest.configSchema).toBeDefined();
     });
 
-    it('canonical triggers include user, schedule, event, data kinds', () => {
+    it('canonical triggers have exactly one user trigger', () => {
       for (const skill of hrCanonicalSkills) {
-        const kinds = skill.triggers!.map((t) => t.kind);
-        expect(kinds).toContain('user');
-        expect(kinds).toContain('schedule');
-        expect(kinds).toContain('event');
+        expect(skill.triggers!.length).toBe(1);
+        expect(skill.triggers![0].kind).toBe('user');
       }
     });
   });

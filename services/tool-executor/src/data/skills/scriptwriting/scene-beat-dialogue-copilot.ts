@@ -89,7 +89,7 @@ const SCENE_BEAT_DIALOGUE_OUTPUT = {
 };
 
 export const SCENE_BEAT_DIALOGUE_COPILOT = createCodeSkill({
-  id: 'scriptwriting_scene_beat_dialogue_copilot',
+  id: 'scriptwriting-scene-beat-dialogue-copilot',
   name: 'Scene, Beat & Dialogue Copilot',
   description: 'Generates structured scenes with beats, dialogue exchanges, and pacing guidance for a given topic, genre, and format. Outputs complete scene outlines ready for writer review.',
   manifest: { language: 'javascript', entrypoint: 'index.js', sourceCode: SCENE_BEAT_DIALOGUE_SOURCE },
@@ -97,7 +97,7 @@ export const SCENE_BEAT_DIALOGUE_COPILOT = createCodeSkill({
   outputSchema: SCENE_BEAT_DIALOGUE_OUTPUT,
   triggers: [
     { kind: 'user', phrase_examples: ['Generate a scene', 'Write dialogue for', 'Outline beats for'] },
-    { kind: 'event', on: 'Writer requests scene generation' },
-    { kind: 'data', condition: 'New scene concept or beat sheet available' },
   ],
+  tier: 'aid',
+  domainKnowledge: 'Screenwriting craft, scene structure, dialogue writing, beat sheets',
 });

@@ -199,7 +199,7 @@ export function getRetainedOverlapDecisions(): RetainedOverlapDecision[] {
     },
     {
       decisionId: 'DEC-003',
-      skillIds: ['product-jira', 'product-confluence', 'product-slack', 'product-calendar', 'cto-github-ops', 'cto-incident-war-room', 'marketing-content-generation', 'marketing-social-media', 'marketing-email', 'marketing-seo', 'marketing-document-management', 'healthcare_records_scheduling_ops', 'healthcare_communication_automation', 'hr_recruiting_ops'],
+      skillIds: ['product-jira', 'product-confluence', 'product-slack', 'product-calendar', 'cto-github-ops', 'cto-incident-war-room', 'marketing-content-generation', 'marketing-social-media', 'marketing-email', 'marketing-seo', 'marketing-document-management', 'healthcare_records_scheduling_ops', 'healthcare_communication_automation', 'hr-draft-jd-interview-kit'],
       assistantNames: ['Product', 'CTO', 'Marketing', 'Healthcare', 'HR'],
       userOutcome: 'Execute an external action through a connected system',
       object: 'Varies: product backlog items, product docs, team communication, scheduling, engineering issues, marketing content, healthcare records',
@@ -210,7 +210,7 @@ export function getRetainedOverlapDecisions(): RetainedOverlapDecision[] {
     },
     {
       decisionId: 'DEC-004',
-      skillIds: ['healthcare_patient_communication', 'marketing-email', 'marketing-social-media', 'hr_recruiting_ops'],
+      skillIds: ['healthcare_patient_communication', 'marketing-email', 'marketing-social-media', 'hr-draft-jd-interview-kit'],
       assistantNames: ['Healthcare', 'Marketing', 'HR'],
       userOutcome: 'Deliver a message or notification to a recipient',
       object: 'Varies: patients, campaign audiences, social audiences, candidates',
@@ -265,7 +265,7 @@ export function getRetainedOverlapDecisions(): RetainedOverlapDecision[] {
     },
     {
       decisionId: 'DEC-009',
-      skillIds: ['songwriter_genre_trend_evaluator', 'scriptwriting_genre_market_evaluator'],
+      skillIds: ['songwriter_genre_trend_evaluator', 'scriptwriting-genre-market-evaluator'],
       assistantNames: ['Songwriting', 'Scriptwriting'],
       userOutcome: 'Create creative content in a specific medium',
       object: 'Varies: songs/lyrics (Songwriting), scripts/scenes (Scriptwriting)',

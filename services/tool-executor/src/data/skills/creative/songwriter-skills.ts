@@ -170,13 +170,11 @@ const DISPATCH_SOURCE = `
 const input = __tool_input || {};
 const fs = require('fs');
 const path = require('path');
-const operation = input.operation || 'format-lead-sheet';
 const title = String(input.title || 'Untitled song');
 const lyrics = String(input.lyrics || '');
 const chords = Array.isArray(input.chords) ? input.chords : [];
 const artifact = {
   id: 'song_asset_' + Date.now(),
-  operation: operation,
   title: title,
   format: input.format || 'lead-sheet',
   lyrics: lyrics,
@@ -186,7 +184,7 @@ const artifact = {
 };
 const baseDir = process.env.SONGWRITING_HOME || path.join('/tmp', 'songwriting');
 fs.mkdirSync(baseDir, { recursive: true });
-const storePath = path.join(baseDir, operation === 'stage-registration' ? 'registration-records.json' : 'lead-sheets.json');
+const storePath = path.join(baseDir, 'lead-sheets.json');
 const store = fs.existsSync(storePath) ? JSON.parse(fs.readFileSync(storePath, 'utf8')) : [];
 store.push({ ...artifact, status: 'staged' });
 fs.writeFileSync(storePath, JSON.stringify(store, null, 2), { mode: 0o600 });
@@ -194,7 +192,7 @@ const endpoint = String(input.endpointUrl || process.env.SONGWRITING_DISPATCH_EN
 const apiKey = String(input.apiKey || process.env.SONGWRITING_DISPATCH_API_KEY || '');
 const result = {
   success: true,
-  mode: 'dry-run',
+  status: 'dry-run',
   connected: false,
   artifact: artifact,
   storePath: storePath,
@@ -210,13 +208,13 @@ if (input.dryRun === false && endpoint && (input.confirmed === true || input.con
       const text = await response.text();
       let data = null;
       try { data = text ? JSON.parse(text) : null; } catch (_) { data = { text: text }; }
-      result.mode = 'live';
+      result.status = 'live';
       result.connected = true;
       result.response = { status: response.status, data: data };
       result.message = response.ok ? 'Artifact dispatched after confirmation.' : 'Asset endpoint returned an error; staged artifact remains available.';
       console.log(JSON.stringify({ success: true, data: result }));
     } catch (error) {
-      result.mode = 'error';
+      result.status = 'error';
       result.message = 'Artifact dispatch failed; staged artifact remains available.';
       result.error = error instanceof Error ? error.message : String(error);
       console.log(JSON.stringify({ success: false, data: result }));
@@ -247,7 +245,7 @@ function withConfirmation(skill: Tool): Tool {
 }
 
 export const lyricProsodyEvaluator = createCodeSkill({
-  id: 'songwriting_lyric_prosody_evaluator',
+  id: 'songwriting-lyric-prosody-evaluator',
   name: 'Advise Lyric & Structural Prosody Evaluator',
   description: 'Analyzes song lyrics for meter, syllable variance, rhyme signal, stress patterns, and thematic coherence, then returns concrete structural revision recommendations for the songwriter.',
   manifest: { language: 'javascript', entrypoint: 'index.js', sourceCode: LYRIC_PROSODY_SOURCE },
@@ -274,13 +272,11 @@ export const lyricProsodyEvaluator = createCodeSkill({
   },
   triggers: [
     { kind: 'user', phrase_examples: ['Evaluate the meter and rhyme of these lyrics', 'Is this chorus structurally strong', 'Analyze the prosody of my song'] },
-    { kind: 'event', on: 'A lyric draft or chorus is revised' },
-    { kind: 'data', condition: 'Meter variance, rhyme density, or thematic coherence falls below the song brief threshold' },
   ],
 });
 
 export const musicalCoCreation = createCodeSkill({
-  id: 'songwriting_musical_lyric_cocreation',
+  id: 'songwriting-musical-lyric-cocreation',
   name: 'Aid Musical & Lyric Co-Creation Engine',
   description: 'Generates a structured song draft with genre-aware chord progression, lyric sections, rhyme direction, transitions, and a section beat sheet from a creative brief.',
   manifest: { language: 'javascript', entrypoint: 'index.js', sourceCode: COCREATION_SOURCE },
@@ -310,13 +306,11 @@ export const musicalCoCreation = createCodeSkill({
   },
   triggers: [
     { kind: 'user', phrase_examples: ['Write a song about this theme', 'Generate chords and lyrics for this brief', 'Create a verse-chorus draft'] },
-    { kind: 'event', on: 'A songwriter brief or artist direction changes' },
-    { kind: 'data', condition: 'A draft needs a new section, transition, or rhyme variation' },
   ],
 });
 
 export const leadSheetDemoDispatcher = withConfirmation(createCodeSkill({
-  id: 'songwriting_lead_sheet_demo_dispatcher',
+  id: 'songwriting-lead-sheet-demo-dispatcher',
   name: 'Represent Lead Sheet & Demo Asset Dispatcher',
   description: 'Formats completed lyrics and chords into a lead sheet or demo metadata, stages registration records, and optionally dispatches the artifact to a configured provider after explicit confirmation.',
   manifest: {
@@ -330,7 +324,6 @@ export const leadSheetDemoDispatcher = withConfirmation(createCodeSkill({
   inputSchema: {
     type: 'object',
     properties: {
-      operation: SchemaProps.select(['format-lead-sheet', 'prepare-demo-assets', 'stage-registration'], { title: 'Operation', description: 'Asset operation to stage or dispatch', order: 1, default: 'format-lead-sheet', hint: 'Choose the asset preparation or registration workflow' }),
       draftId: SchemaProps.text({ title: 'Draft ID', description: 'Optional source draft identifier', order: 2, hint: 'Links the staged artifact to its source draft' }),
       title: SchemaProps.text({ title: 'Title', description: 'Song title for the lead sheet or registration record', order: 3, default: 'Untitled song', hint: 'Display title for the formatted artifact' }),
       lyrics: SchemaProps.textarea({ title: 'Lyrics', description: 'Final lyric text to format', order: 4, hint: 'Complete lyric text to include in the lead sheet or demo asset' }),
@@ -345,25 +338,24 @@ export const leadSheetDemoDispatcher = withConfirmation(createCodeSkill({
       dryRun: SchemaProps.boolean({ title: 'Dry Run', description: 'Stage the artifact without sending it; defaults to true', order: 10, default: true, hint: 'When true, the artifact is staged locally and no live dispatch occurs' }),
       confirmation: SchemaProps.boolean({ title: 'Confirmation', description: 'Explicit approval for a live dispatch; dry-run does not require approval', order: 11, default: false, hint: 'Set to true only when authorizing a live dispatch to the configured endpoint' }),
     },
-    required: ['operation'],
+    required: ['format'],
   },
   outputSchema: {
     type: 'object',
     properties: {
       success: { type: 'boolean', description: 'Whether staging or dispatch completed successfully' },
-      mode: { type: 'string', enum: ['dry-run', 'live', 'error'], description: 'Execution mode: dry-run, live, or error' },
       connected: { type: 'boolean', description: 'Whether a configured endpoint was used for dispatch' },
       artifact: { type: 'object', description: 'Formatted lead sheet, demo metadata, or registration artifact' },
       response: { type: ['object', 'null'], description: 'Provider response when a live dispatch succeeds or fails' },
       storePath: { type: 'string', description: 'Category-specific local staging path in SONGWRITING_HOME' },
       message: { type: 'string', description: 'Human-readable connection, staging, or dispatch status' },
-      error: { type: 'string', description: 'Dispatch error message when mode is error' },
+      error: { type: 'string', description: 'Dispatch error message when status is error' },
     },
-    required: ['success', 'mode', 'connected', 'artifact', 'storePath', 'message'],
+    required: ['success', 'status', 'connected', 'artifact', 'storePath', 'message'],
   },
   triggers: [
-    { kind: 'user', phrase_examples: ['Format this song as a lead sheet', 'Prepare demo metadata', 'Stage the registration record'] },
-    { kind: 'event', on: 'A song draft is marked complete' },
-    { kind: 'data', condition: 'A completed lyric and chord artifact is ready for review or dispatch' },
+    { kind: 'user', phrase_examples: ['Format this song as a lead sheet', 'Prepare demo metadata'] },
   ],
+  tier: 'aid',
+  domainKnowledge: 'Songwriting lead sheet formatting, demo metadata preparation, and asset dispatch',
 }));

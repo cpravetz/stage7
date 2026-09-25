@@ -4,7 +4,7 @@ import { createCodeSkill, SchemaProps } from '../code-skill-factory';
 const EDUCATION_HOME = process.env.EDUCATION_HOME || '/tmp/education';
 
 export const ADAPTIVE_PERSONALIZATION = createCodeSkill({
-  id: 'education_adaptive_personalization',
+  id: 'education-adaptive-personalization',
   name: 'Adaptive Personalization Advisory',
   description: 'Recommend instructional adaptations and engagement strategies based on Learner Insight output. Reasoning-only: consumes learner analytics to suggest differentiation, pacing, and interventions.',
   manifest: {
@@ -127,10 +127,9 @@ console.log(JSON.stringify({ success: true, data: { adaptation, storePath } }));
     },
     required: ['success'],
   },
+  tier: 'aid',
+  domainKnowledge: 'Adaptive learning theory, differentiated instruction, formative assessment, learner analytics',
   triggers: [
     { kind: 'user', phrase_examples: ['Recommend learner adaptations', 'Create an intervention plan', 'Adjust pacing for a student'] },
-    { kind: 'schedule', cadence: 'Weekly learner adaptation review' },
-    { kind: 'event', on: 'New learner insight, assessment result, or teacher goal is available' },
-    { kind: 'data', condition: 'Learner risk, engagement, or mastery threshold requires an instructional response' },
   ],
 });

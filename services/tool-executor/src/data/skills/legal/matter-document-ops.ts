@@ -26,7 +26,6 @@ const MATTER_DOCUMENT_OPS = createExternalActionSkill({
   inputSchema: {
     type: 'object',
     properties: {
-      operation: SchemaProps.select(['case-management', 'document-tagging', 'ediscovery'], { description: 'Operation: case-management for matter tracking, document-tagging for classification, ediscovery for ESI processing' }),
       matterId: { type: 'string', description: 'Matter or case identifier' },
       caseId: { type: 'string', description: 'Case identifier for case management operations' },
       caseData: { type: 'object', description: 'Case data object for create/update operations' },
@@ -39,13 +38,12 @@ const MATTER_DOCUMENT_OPS = createExternalActionSkill({
       dateRange: { type: 'object', description: 'Date range for operations (e.g., { start: "2023-01-01", end: "2023-12-31" })' },
       dryRun: SchemaProps.boolean({ description: 'Validate without executing', default: true }),
     },
-    required: ['operation'],
   },
   outputSchema: {
     type: 'object',
     properties: {
       success: { type: 'boolean' },
-      mode: { type: 'string', enum: ['dry-run', 'live', 'error'] },
+      status: { type: 'string', description: 'Outcome status (e.g., completed, dry-run, error, not-connected)' },
       system: { type: 'string' },
       action: { type: 'string' },
       request: {
@@ -66,17 +64,17 @@ const MATTER_DOCUMENT_OPS = createExternalActionSkill({
       },
       error: { type: ['string', 'null'] },
     },
-    required: ['success', 'mode', 'system', 'action', 'request', 'response', 'error'],
+    required: ['success', 'status', 'system', 'action', 'request', 'response', 'error'],
   },
   timeoutMs: 60000,
 });
 
 MATTER_DOCUMENT_OPS.confirmBeforeSend = true;
+MATTER_DOCUMENT_OPS.tier = 'represent';
+MATTER_DOCUMENT_OPS.domainKnowledge = 'Matter management, document tagging taxonomies, eDiscovery collection and search (EDRM), custodian mapping, and legal hold procedures';
+
 MATTER_DOCUMENT_OPS.triggers = [
   { kind: 'user', phrase_examples: ['Manage this matter', 'Tag this document', 'Review eDiscovery'] },
-  { kind: 'schedule', cadence: 'Weekly matter status review' },
-  { kind: 'event', on: 'Matter stage changed' },
-  { kind: 'event', on: 'Document uploaded' },
 ];
 
 export { MATTER_DOCUMENT_OPS };

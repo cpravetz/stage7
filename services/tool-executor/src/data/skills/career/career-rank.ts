@@ -3,7 +3,7 @@ import { createCodeSkill, SchemaProps } from '../code-skill-factory';
 
 const CAREER_BASE_CONFIG_SCHEMA: SchemaRecord = { type: 'object', properties: {} };
 
-// career_rank: scores and ranks job listings against the user profile.
+// career-rank: scores and ranks job listings against the user profile.
 // Returns { success, data: { ranked, totalScored, totalAfterFilter, rankPath, weights } }
 const CAREER_RANK_SOURCE = `(async () => {
 const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
@@ -106,7 +106,7 @@ const CAREER_RANK_OUTPUT = {
 };
 
 const CAREER_RANK = createCodeSkill({
-  id: 'career_rank',
+  id: 'career-rank',
   name: 'Rank Opportunities',
   description: 'Scores and ranks job listings against the user profile using weighted criteria: role match, company preference, salary fit, location/remote, and keyword overlap.',
   manifest: {

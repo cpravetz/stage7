@@ -82,7 +82,7 @@ const DEV_CAREER = createCodeSkill({
   manifest: { language: 'javascript', entrypoint: 'index.js', sourceCode: DEV_CAREER_SOURCE },
   inputSchema: DEV_CAREER_INPUT,
   outputSchema: COMMON_OUTPUT,
-  triggers: [{ kind: 'user', phrase_examples: ['Create a development plan', 'Analyze my skill gaps', 'Plan my career', 'Build a roadmap'] }, { kind: 'schedule', cadence: 'Quarterly career review' }],
+  triggers: [{ kind: 'user', phrase_examples: ['Create a development plan', 'Analyze my skill gaps', 'Plan my career', 'Build a roadmap'] }],
 });
 
 export { DEV_CAREER };

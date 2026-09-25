@@ -55,10 +55,6 @@ const OUTREACH_DRAFTING = createCodeSkill({
   },
   triggers: [
     { kind: 'user', phrase_examples: ['Draft an outreach email', 'Write a follow-up', 'Create an email sequence'] },
-    { kind: 'schedule', cadence: 'Weekly outreach draft review' },
-    { kind: 'event', on: 'Lead engaged' },
-    { kind: 'event', on: 'Demo booked' },
-    { kind: 'event', on: 'Reply received' },
   ],
 });
 

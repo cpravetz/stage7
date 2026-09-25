@@ -8,14 +8,13 @@ const GENRE_TREND_EVALUATOR_SOURCE = `(async () => {
   const genreFocus = String(input.genreFocus || genre);
   const theme = String(input.theme || '');
   const lyrics = String(input.lyrics || '');
-  const operation = input.operation || 'genre-trend-fit';
   const connected = [];
   const results = {};
 
   if (!theme && !lyrics) {
     console.log(JSON.stringify({
       success: false,
-      mode: 'error',
+      status: 'error',
       error: 'theme or lyrics is required',
       delegatedTo: ['songwriting_lyric_prosody_evaluator', 'songwriting_musical_lyric_cocreation'],
       genre: genre,
@@ -59,7 +58,7 @@ const GENRE_TREND_EVALUATOR_SOURCE = `(async () => {
   if (!connected.length) {
     console.log(JSON.stringify({
       success: false,
-      mode: 'not-connected',
+      status: 'not-connected',
       error: 'Not connected: neither songwriting_lyric_prosody_evaluator nor songwriting_musical_lyric_cocreation is available. Connect at least one to assess genre trend fit.',
       genre: genre,
       genreFocus: genreFocus,
@@ -96,14 +95,13 @@ const GENRE_TREND_EVALUATOR_SOURCE = `(async () => {
   const storePath = path.join(baseDir, 'genre-trend-evaluations.json');
   fs.mkdirSync(baseDir, { recursive: true });
   const store = fs.existsSync(storePath) ? JSON.parse(fs.readFileSync(storePath, 'utf8')) : [];
-  const evaluation = { id: 'trend_eval_' + Date.now(), operation: operation, trendFit: trendFit, createdAt: new Date().toISOString() };
+  const evaluation = { id: 'trend_eval_' + Date.now(), trendFit: trendFit, createdAt: new Date().toISOString() };
   store.push(evaluation);
   fs.writeFileSync(storePath, JSON.stringify(store, null, 2), { mode: 0o600 });
 
   console.log(JSON.stringify({
     success: true,
-    mode: 'live',
-    operation: operation,
+    status: 'live',
     data: evaluation,
     delegatedTo: ['songwriting_lyric_prosody_evaluator', 'songwriting_musical_lyric_cocreation'],
   }));
@@ -119,14 +117,13 @@ const GENRE_TREND_CONFIG_SCHEMA = {
 };
 
 export const SONGWRITER_GENRE_TREND_EVALUATOR = createCodeSkill({
-  id: 'songwriter_genre_trend_evaluator',
+  id: 'songwriter-genre-trend-evaluator',
   name: 'Songwriter Genre & Market Trend Fit Evaluator',
   description: 'Evaluates a song or lyric draft for genre and market/audience trend fit by delegating to lyric-prosody-evaluator and musical-co-creation for structural and musical context analysis. Reports not-connected when neither dependency is available.',
   manifest: { language: 'javascript', entrypoint: 'index.js', sourceCode: GENRE_TREND_EVALUATOR_SOURCE, configSchema: GENRE_TREND_CONFIG_SCHEMA },
   inputSchema: {
     type: 'object',
     properties: {
-      operation: SchemaProps.select(['genre-trend-fit', 'audience-alignment', 'market-signal'], { title: 'Operation', description: 'Type of trend fit analysis to perform', order: 1, default: 'genre-trend-fit', hint: 'Choose the trend analysis operation' }),
       genre: SchemaProps.text({ title: 'Genre', description: 'Musical genre to evaluate', order: 2, default: 'pop', hint: 'e.g. pop, rock, hiphop, country, folk, edm, rnb' }),
       genreFocus: SchemaProps.text({ title: 'Genre Focus', description: 'Primary genre for trend focus area', order: 3, hint: 'The specific genre being assessed for market fit' }),
       trendDataSource: SchemaProps.select(['spotify', 'soundcharts', 'billboard', 'musixmatch', 'chartmetric', 'general'], { title: 'Trend Data Source', description: 'Source for market trend data', order: 4, hint: 'Data provider for trend signal analysis' }),
@@ -144,17 +141,15 @@ export const SONGWRITER_GENRE_TREND_EVALUATOR = createCodeSkill({
     type: 'object',
     properties: {
       success: { type: 'boolean', description: 'Whether the trend fit evaluation completed successfully' },
-      mode: { type: 'string', description: 'Execution mode: live, not-connected, or error' },
-      operation: { type: 'string', description: 'The operation performed' },
       data: { type: 'object', description: 'Trend fit evaluation with delegated results from lyric prosody and musical co-creation' },
       delegatedTo: { type: 'array', items: { type: 'string' }, description: 'Lower-order tool IDs this skill delegates to' },
       error: { type: 'string', description: 'Error message if failed' },
     },
-    required: ['success', 'mode', 'operation'],
+    required: ['success'],
   },
   triggers: [
-    { kind: 'user', phrase_examples: ['Does this song fit current genre trends', 'Evaluate market fit for this track', 'Assess audience alignment'] },
-    { kind: 'event', on: 'A song draft or lyric is ready for trend analysis' },
-    { kind: 'data', condition: 'Genre or market trend fit needs assessment before release' },
+    { kind: 'user', phrase_examples: ['Analyze genre trend fit for this song', 'Evaluate market positioning'] },
   ],
+  tier: 'advise',
+  domainKnowledge: 'Songwriting genre analysis, market trend evaluation, audience fit assessment',
 });

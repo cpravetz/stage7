@@ -3,7 +3,7 @@ import { createCodeSkill, SchemaProps } from '../code-skill-factory';
 
 const CAREER_BASE_CONFIG_SCHEMA: SchemaRecord = { type: 'object', properties: {} };
 
-// career_networking_outreach: drafts recruiter outreach messages.
+// career-networking-outreach: drafts recruiter outreach messages.
 // Returns { success, data: { summary, message, options, rationale } }
 const CAREER_NETWORKING_OUTREACH_SOURCE = `(async () => {
 const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
@@ -25,9 +25,9 @@ const stageTemplates = {
 };
 const stage = stageTemplates[relationshipStage] || stageTemplates.cold_outreach;
 
-const message = 'Hi ' + (targetPerson ? targetPerson : 'there') + ',\n\n' +
+const message = 'Hi ' + (targetPerson ? targetPerson : 'there') + ',\\n\\n' +
   'I am reaching out because I am interested in opportunities at ' + targetCompany + '. ' +
-  'I would welcome the chance to connect and learn more about the team and any open roles.\n\n' +
+  'I would welcome the chance to connect and learn more about the team and any open roles.\\n\\n' +
   'Best regards';
 
 console.log(JSON.stringify({
@@ -78,7 +78,7 @@ const CAREER_NETWORKING_OUTREACH_OUTPUT = {
 };
 
 const CAREER_NETWORKING_OUTREACH = createCodeSkill({
-  id: 'career_networking_outreach',
+  id: 'career-networking-outreach',
   name: 'Networking Outreach',
   description: 'Drafts recruiter outreach messages for cold outreach, follow-ups, thank-you notes, and referral asks across email and LinkedIn.',
   manifest: {

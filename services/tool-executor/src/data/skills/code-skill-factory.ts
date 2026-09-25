@@ -18,6 +18,8 @@ export interface CreateCodeSkillOptions {
   outputSchema: SchemaRecord
   triggers?: SkillTrigger[]
   confirmBeforeSend?: boolean
+  tier?: 'advise' | 'aid' | 'represent'
+  domainKnowledge?: string
 }
 
 export function createCodeSkill(options: CreateCodeSkillOptions): Tool {
@@ -60,6 +62,8 @@ export function createCodeSkill(options: CreateCodeSkillOptions): Tool {
     updatedAt: now,
     triggers: options.triggers,
     confirmBeforeSend: options.confirmBeforeSend,
+    tier: options.tier,
+    domainKnowledge: options.domainKnowledge,
   }
 }
 
@@ -104,6 +108,8 @@ export interface ExternalActionSkillOptions {
   timeoutMs?: number
   manifest?: Record<string, unknown>
   confirmBeforeSend?: boolean
+  tier?: 'advise' | 'aid' | 'represent'
+  domainKnowledge?: string
 }
 
 type CredentialEnvKeyMap = NonNullable<ExternalActionSkillOptions['auth']>['credentialEnvKeyMap']
@@ -217,6 +223,8 @@ export function createExternalActionSkill(options: ExternalActionSkillOptions): 
     bodyField,
     timeoutMs,
     confirmBeforeSend,
+    tier,
+    domainKnowledge,
   } = options
   const triggers = options.triggers
 
@@ -262,7 +270,6 @@ export function createExternalActionSkill(options: ExternalActionSkillOptions): 
 
     const result = {
       success: false,
-      mode: "${hasFixedEndpoint ? 'live' : 'dry-run'}",
       system: ${JSON.stringify(system)},
       action: ${JSON.stringify(action)},
       request: null,
@@ -283,7 +290,6 @@ export function createExternalActionSkill(options: ExternalActionSkillOptions): 
 
       // Cross-Cutting Principle #2: When endpoint is unconfigured, return honest not-connected contract
       if (!resolvedEndpoint) {
-        result.mode = "not-connected";
         result.success = false;
         result.request = { input: input, endpoint: resolvedEndpoint, method: ${JSON.stringify(httpMethod)}, headers: redactedHeaders };
         result.response = null;
@@ -319,7 +325,6 @@ export function createExternalActionSkill(options: ExternalActionSkillOptions): 
       }
 
       result.success = res.ok;
-      result.mode = "live";
       result.request = { input: input, endpoint: resolvedEndpoint, method: ${JSON.stringify(httpMethod)}, headers: redactedHeaders };
       result.response = { status: res.status, data: responseData };
       result.error = null;
@@ -328,7 +333,6 @@ export function createExternalActionSkill(options: ExternalActionSkillOptions): 
     } catch (err) {
       ${clearTimeoutCode}
       result.success = false;
-      result.mode = "error";
       result.error = err instanceof Error ? err.message : String(err);
       result.request = { input: input, endpoint: resolvedEndpoint, method: ${JSON.stringify(httpMethod)} };
       result.response = null;
@@ -388,7 +392,6 @@ export function createExternalActionSkill(options: ExternalActionSkillOptions): 
       type: 'object',
       properties: {
         success: { type: 'boolean' },
-        mode: { type: 'string' },
         system: { type: 'string' },
         action: { type: 'string' },
         request: {
@@ -409,10 +412,12 @@ export function createExternalActionSkill(options: ExternalActionSkillOptions): 
         },
         error: { type: 'string' },
       },
-      required: ['success', 'mode', 'system', 'action', 'request', 'response', 'error'],
+      required: ['success', 'system', 'action', 'request', 'response', 'error'],
     } as SchemaRecord),
     triggers,
     confirmBeforeSend,
+    tier,
+    domainKnowledge,
   })
 }
 

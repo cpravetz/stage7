@@ -4,7 +4,6 @@ const EVENT_EXTERNAL_OUTPUT_SCHEMA = {
   type: 'object',
   properties: {
     success: { type: 'boolean' },
-    mode: { type: 'string', enum: ['dry-run', 'live', 'error'] },
     system: { type: 'string' },
     action: { type: 'string' },
     request: {
@@ -25,11 +24,11 @@ const EVENT_EXTERNAL_OUTPUT_SCHEMA = {
     },
     error: { type: ['string', 'null'] },
   },
-  required: ['success', 'mode', 'system', 'action', 'request', 'response', 'error'],
+  required: ['success', 'system', 'action', 'request', 'response', 'error'],
 };
 
 const VENDOR_CONTRACT_MANAGEMENT = createExternalActionSkill({
-  id: 'event_vendor_contract_management',
+  id: 'event-vendor-contract-management',
   name: 'Vendor & Contract Management',
   description: 'Manage vendor database, contracts, and payments for events. Real external integration with vendor management platforms, payment processors, and contract tools.',
   system: 'event_vendor',
@@ -58,7 +57,6 @@ const VENDOR_CONTRACT_MANAGEMENT = createExternalActionSkill({
   inputSchema: {
     type: 'object',
     properties: {
-      operation: SchemaProps.select(['vendor-create', 'vendor-update', 'vendor-get', 'vendor-list', 'contract-create', 'contract-sign', 'contract-get', 'payment-schedule', 'payment-send', 'payment-track', 'invoice-generate', '1099-prepare'], { description: 'Operation' }),
       vendorId: { type: 'string', description: 'Vendor identifier' },
       vendorData: { type: 'object', description: 'Vendor info: name, category, contact, services, pricing, insurance, certifications' },
       contractId: { type: 'string', description: 'Contract identifier' },
@@ -69,18 +67,17 @@ const VENDOR_CONTRACT_MANAGEMENT = createExternalActionSkill({
       filters: { type: 'object', description: 'List filters: category, status, event' },
       dryRun: SchemaProps.boolean({ description: 'Validate without executing' }),
     },
-    required: ['operation'],
+    required: ['contractId'],
   },
   outputSchema: EVENT_EXTERNAL_OUTPUT_SCHEMA,
   timeoutMs: 60000,
+  tier: 'aid',
 });
 
+VENDOR_CONTRACT_MANAGEMENT.domainKnowledge = 'Event vendor management: vendor sourcing and categorization, contract negotiation and signing, payment scheduling and tracking, invoice generation, and 1099 tax preparation for event vendors';
 VENDOR_CONTRACT_MANAGEMENT.confirmBeforeSend = true;
 VENDOR_CONTRACT_MANAGEMENT.triggers = [
-  { kind: 'user', phrase_examples: ['Create vendor', 'Sign contract', 'Schedule payment'] },
-  { kind: 'schedule', cadence: 'Weekly vendor review' },
-  { kind: 'event', on: 'Event date confirmed' },
-  { kind: 'event', on: 'Contract deadline approaching' },
+  { kind: 'event', on: 'Vendor contract request' },
 ];
 
 export { VENDOR_CONTRACT_MANAGEMENT };

@@ -719,7 +719,7 @@ return this.executeOrRequestCredentials(pending.tool, pending.input);
         return {
           success: false,
           error: classified.userMessage,
-          mode: 'not-connected',
+          status: 'not-connected',
           classified: { category: classified.category, severity: classified.severity, message: classified.message, userMessage: classified.userMessage, retryable: classified.retryable },
         };
       }

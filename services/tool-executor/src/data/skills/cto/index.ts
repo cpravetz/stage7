@@ -31,7 +31,7 @@ const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
       throw new Error('Invalid or missing provider. Must be one of: ' + INFRA_PROVIDERS.join(', '));
     }
 
-    return { success: false, provider, query, mode: 'not-connected', error: 'Not connected: provider module unavailable for ' + provider };
+    return { success: false, provider, query, error: 'Not connected: provider module unavailable for ' + provider };
   })();`;
 }
 
@@ -51,7 +51,7 @@ const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
       throw new Error('Missing required action parameter');
     }
 
-    return { success: false, provider, action, params, dryRun, mode: 'not-connected', error: 'Not connected: external system unavailable for ' + provider };
+    return { success: false, provider, action, params, dryRun, error: 'Not connected: external system unavailable for ' + provider };
   })();`;
 }
 
@@ -59,18 +59,13 @@ function disasterReadinessSource(): string {
   return `(async () => {
 const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
     const provider = input.provider;
-    const operation = input.operation;
     const config = input.config || {};
 
     if (!provider || !DISASTER_PROVIDERS.includes(provider)) {
       throw new Error('Invalid or missing provider. Must be one of: ' + DISASTER_PROVIDERS.join(', '));
     }
 
-    if (!operation) {
-      throw new Error('Missing required operation parameter');
-    }
-
-    return { success: false, provider, operation, config, mode: 'not-connected', error: 'Not connected: disaster recovery module unavailable' };
+    return { success: false, provider, config, error: 'Not connected: disaster recovery module unavailable' };
   })();`;
 }
 
@@ -124,15 +119,13 @@ const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
 
 const CTO_TRIGGERS = [
   { kind: 'user' as const, phrase_examples: ['evaluate architecture debt', 'optimize cloud spend', 'synthesize this incident', 'dry-run engineering remediation'] },
-  { kind: 'schedule' as const, cadence: 'weekly engineering health review' },
-  { kind: 'event' as const, on: 'deployment, billing anomaly, or incident alert' },
 ];
 
 const architectureWrapperSource = `(async () => {
 const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
   const systems = Array.isArray(input.systems) ? input.systems : [];
   if (!systems.length) {
-    return { success: false, mode: 'not-connected', error: 'Not connected: no system health inputs were supplied', data: null };
+    return { success: false, error: 'Not connected: no system health inputs were supplied', data: null };
   }
   const evaluated = [];
   const errors = [];
@@ -168,14 +161,14 @@ const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
     ...item,
     action: item.priority === 'high' ? 'modernize now' : item.priority === 'medium' ? 'schedule next quarter' : 'monitor',
   }));
-  return { success: true, mode: 'aggregated', data: { systems: scored, roadmap, evaluations: evaluated, generatedAt: new Date().toISOString() }, error: errors.length ? errors : null };
+  return { success: true, data: { systems: scored, roadmap, evaluations: evaluated, generatedAt: new Date().toISOString() }, error: errors.length ? errors : null };
 })();`;
 
 const cloudSpendWrapperSource = `(async () => {
 const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
   const rows = Array.isArray(input.billingRows) ? input.billingRows : [];
   if (!rows.length) {
-    return { success: false, mode: 'not-connected', error: 'Not connected: no cloud billing rows were supplied', data: null };
+    return { success: false, error: 'Not connected: no cloud billing rows were supplied', data: null };
   }
   const recommendations = [];
   const errors = [];
@@ -201,14 +194,14 @@ const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
     return { service: row.service, currentSpend: spend, utilization, projectedSavings, action: utilization < 0.3 ? 'rightsizing or shutdown review' : utilization < 0.6 ? 'reserved capacity review' : 'monitor' };
   });
   const totalProjectedSavings = rightsizing.reduce((sum, item) => sum + item.projectedSavings, 0);
-  return { success: true, mode: 'aggregated', data: { recommendations: rightsizing, totalProjectedSavings, evaluationResults: recommendations, generatedAt: new Date().toISOString() }, error: errors.length ? errors : null };
+  return { success: true, data: { recommendations: rightsizing, totalProjectedSavings, evaluationResults: recommendations, generatedAt: new Date().toISOString() }, error: errors.length ? errors : null };
 })();`;
 
 const incidentWrapperSource = `(async () => {
 const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
   const signals = Array.isArray(input.signals) ? input.signals : [];
   if (!signals.length) {
-    return { success: false, mode: 'not-connected', error: 'Not connected: no telemetry, log, alert, or deployment signals were supplied', data: null };
+    return { success: false, error: 'Not connected: no telemetry, log, alert, or deployment signals were supplied', data: null };
   }
   const readinessResults = [];
   const errors = [];
@@ -216,7 +209,6 @@ const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
     try {
       const result = await __execute_tool('cto-incident-disaster-readiness', {
         provider: 'disaster-recovery',
-        operation: 'readiness-check',
         config: { signal, context: input.context || {} },
       });
       if (result && result.success === false) {
@@ -239,19 +231,19 @@ const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
     owner: 'incident commander',
   }));
   const stakeholderUpdate = 'Incident review in progress; production changes require explicit approval.';
-  return { success: true, mode: 'aggregated', data: { hypotheses, mitigations, stakeholderUpdate, readinessResults, generatedAt: new Date().toISOString() }, error: errors.length ? errors : null };
+  return { success: true, data: { hypotheses, mitigations, stakeholderUpdate, readinessResults, generatedAt: new Date().toISOString() }, error: errors.length ? errors : null };
 })();`;
 
 const remediationSource = `(async () => {
 const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
   const endpointUrl = input.endpointUrl;
   if (!endpointUrl) {
-    return { success: false, mode: 'not-connected', error: 'Not connected: CTO engineering endpoint is not configured', data: null };
+    return { success: false, error: 'not-connected: CTO engineering endpoint is not configured', data: null };
   }
   const dryRun = input.dryRun !== false;
   const confirmation = input.confirmation === true;
   if (!dryRun && !confirmation) {
-    return { success: false, mode: 'confirmation-required', error: 'Explicit confirmation is required for live remediation', data: null };
+    return { success: false, error: 'Explicit confirmation is required for live remediation', data: null };
   }
   try {
     const response = await fetch(endpointUrl, {
@@ -260,9 +252,9 @@ const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
       body: JSON.stringify(input.payload || {}),
     });
     const data = await response.json().catch(async () => ({ text: await response.text() }));
-    return { success: response.ok, mode: dryRun ? 'dry-run' : 'live', data: { response: { status: response.status, data } }, error: null };
+    return { success: response.ok, data: { response: { status: response.status, data } }, error: null };
   } catch (error) {
-    return { success: false, mode: 'error', error: error instanceof Error ? error.message : String(error), data: null };
+    return { success: false, error: error instanceof Error ? error.message : String(error), data: null };
   }
 })();`;
 
@@ -282,180 +274,179 @@ export interface AssistantWorkflow {
 export const ctoSkills: Tool[] = [
 
   (() => { const t = createCodeSkill({
-id: 'cto-infrastructure-query',
-name: 'Infrastructure Query',
-description: 'Read-only queries across infrastructure providers (Datadog, AWS, GCP, Azure, Kubernetes, Service Mesh, Cost Optimization, IaC Monitoring, Database Operations, Team Metrics, GitHub Read)',
-manifest: {
-sourceCode: infraQuerySource(),
-persistenceEnv: 'CTO_HOME',
-},
-inputSchema: createSchemaRecord({
-provider: SchemaProps.select(INFRA_PROVIDERS, {
-description: 'Infrastructure provider to query',
-required: true,
-}),
-query: SchemaProps.text({
-description: 'Query string or structured query object for the provider',
-required: true,
-}),
-options: SchemaProps.object({}, {
-description: 'Additional provider-specific options',
-additionalProperties: true,
-}),
-}, { required: ['provider', 'query'] }),
-outputSchema: createSchemaRecord({
-success: SchemaProps.boolean({ description: 'Whether the query succeeded' }),
-provider: SchemaProps.text({ description: 'Provider that was queried' }),
-query: SchemaProps.text({ description: 'Original query' }),
-result: SchemaProps.object({}, { description: 'Query result data', additionalProperties: true }),
-error: SchemaProps.text({ description: 'Error message if failed' }),
-}),
+  id: 'cto-infrastructure-query',
+  name: 'Infrastructure Query',
+  description: 'Read-only queries across infrastructure providers (Datadog, AWS, GCP, Azure, Kubernetes, Service Mesh, Cost Optimization, IaC Monitoring, Database Operations, Team Metrics, GitHub Read)',
+  manifest: {
+    sourceCode: infraQuerySource(),
+    persistenceEnv: 'CTO_HOME',
+  },
+  inputSchema: createSchemaRecord({
+    provider: SchemaProps.select(INFRA_PROVIDERS, {
+      description: 'Infrastructure provider to query',
+      required: true,
+    }),
+    query: SchemaProps.text({
+      description: 'Query string or structured query object for the provider',
+      required: true,
+    }),
+    options: SchemaProps.object({}, {
+      description: 'Additional provider-specific options',
+      additionalProperties: true,
+    }),
+  }, { required: ['provider', 'query'] }),
+  outputSchema: createSchemaRecord({
+    success: SchemaProps.boolean({ description: 'Whether the query succeeded' }),
+    provider: SchemaProps.text({ description: 'Provider that was queried' }),
+    query: SchemaProps.text({ description: 'Original query' }),
+    result: SchemaProps.object({}, { description: 'Query result data', additionalProperties: true }),
+    error: SchemaProps.text({ description: 'Error message if failed' }),
+  }),
+  tier: 'advise',
   }); (t as any).isSkill = false; return t; })(),
 
   (() => { const t = createExternalActionSkill({
-id: 'cto-engineering-actions',
-name: 'Engineering Actions',
-description: 'Mutating actions against external engineering systems (Jira, PagerDuty, GitHub Write). Requires confirmation before execution.',
-system: 'engineering',
-action: 'execute',
-inputSchema: createSchemaRecord({
-provider: SchemaProps.select(ENG_PROVIDERS, {
-description: 'External engineering system to act upon',
-required: true,
-}),
-action: SchemaProps.text({
-description: 'Specific action to perform (e.g., create-issue, acknowledge-incident, create-pr)',
-required: true,
-}),
-params: SchemaProps.object({}, {
-description: 'Action-specific parameters',
-additionalProperties: true,
-}),
-dryRun: SchemaProps.boolean({
-description: 'If true, simulate the action without making changes',
-default: true,
-}),
-}, { required: ['provider', 'action'] }),
-outputSchema: createSchemaRecord({
-success: SchemaProps.boolean({ description: 'Whether the action succeeded' }),
-mode: SchemaProps.text({ description: 'Execution mode: live, dry-run, or error' }),
-system: SchemaProps.text({ description: 'System that was targeted' }),
-action: SchemaProps.text({ description: 'Action that was performed' }),
-request: SchemaProps.object({
-input: SchemaProps.object({}, { additionalProperties: true }),
-endpoint: SchemaProps.text({}),
-method: SchemaProps.text({}),
-headers: SchemaProps.object({}, { additionalProperties: true }),
-}, { description: 'Request details' }),
-response: SchemaProps.object({
-status: SchemaProps.number({}),
-data: SchemaProps.object({}, { additionalProperties: true }),
-}, { description: 'Response from the external system' }),
-error: SchemaProps.text({ description: 'Error message if failed' }),
-}),
-configSchema: createSchemaRecord({
-confirmBeforeSend: SchemaProps.boolean({
-description: 'Require explicit confirmation before sending mutating requests',
-default: true,
-}),
-}),
-manifest: {
-confirmBeforeSend: true,
-persistenceEnv: 'CTO_HOME',
-},
+  id: 'cto-engineering-actions',
+  name: 'Engineering Actions',
+  description: 'Mutating actions against external engineering systems (Jira, PagerDuty, GitHub Write). Requires confirmation before execution.',
+  system: 'engineering',
+  action: 'execute',
+  inputSchema: createSchemaRecord({
+    provider: SchemaProps.select(ENG_PROVIDERS, {
+      description: 'External engineering system to act upon',
+      required: true,
+    }),
+    action: SchemaProps.text({
+      description: 'Specific action to perform (e.g., create-issue, acknowledge-incident, create-pr)',
+      required: true,
+    }),
+    params: SchemaProps.object({}, {
+      description: 'Action-specific parameters',
+      additionalProperties: true,
+    }),
+    dryRun: SchemaProps.boolean({
+      description: 'If true, simulate the action without making changes',
+      default: true,
+    }),
+  }, { required: ['provider', 'action'] }),
+  outputSchema: createSchemaRecord({
+    success: SchemaProps.boolean({ description: 'Whether the action succeeded' }),
+    system: SchemaProps.text({ description: 'System that was targeted' }),
+    action: SchemaProps.text({ description: 'Action that was performed' }),
+    request: SchemaProps.object({
+      input: SchemaProps.object({}, { additionalProperties: true }),
+      endpoint: SchemaProps.text({}),
+      method: SchemaProps.text({}),
+      headers: SchemaProps.object({}, { additionalProperties: true }),
+    }, { description: 'Request details' }),
+    response: SchemaProps.object({
+      status: SchemaProps.number({}),
+      data: SchemaProps.object({}, { additionalProperties: true }),
+    }, { description: 'Response from the external system' }),
+    error: SchemaProps.text({ description: 'Error message if failed' }),
+  }),
+  configSchema: createSchemaRecord({
+    confirmBeforeSend: SchemaProps.boolean({
+      description: 'Require explicit confirmation before sending mutating requests',
+      default: true,
+    }),
+  }),
+  manifest: {
+    confirmBeforeSend: true,
+    persistenceEnv: 'CTO_HOME',
+  },
+  tier: 'represent',
+  confirmBeforeSend: true,
   }); (t as any).isSkill = false; return t; })(),
 
   (() => { const t = createCodeSkill({
-id: 'cto-incident-disaster-readiness',
-name: 'Incident & Disaster Readiness',
-description: 'Hybrid skill for disaster recovery operations and incident readiness checks',
-manifest: {
-sourceCode: disasterReadinessSource(),
-persistenceEnv: 'CTO_HOME',
-},
-inputSchema: createSchemaRecord({
-provider: SchemaProps.select(DISASTER_PROVIDERS, {
-description: 'Disaster recovery provider to use',
-required: true,
-}),
-operation: SchemaProps.text({
-description: 'Operation to perform (e.g., backup, restore, test-failover, readiness-check)',
-required: true,
-}),
-config: SchemaProps.object({}, {
-description: 'Operation-specific configuration',
-additionalProperties: true,
-}),
-}, { required: ['provider', 'operation'] }),
-outputSchema: createSchemaRecord({
-success: SchemaProps.boolean({ description: 'Whether the operation succeeded' }),
-provider: SchemaProps.text({ description: 'Provider that was used' }),
-operation: SchemaProps.text({ description: 'Operation that was performed' }),
-config: SchemaProps.object({}, { description: 'Configuration used', additionalProperties: true }),
-result: SchemaProps.object({}, { description: 'Operation result data', additionalProperties: true }),
-error: SchemaProps.text({ description: 'Error message if failed' }),
-}),
+  id: 'cto-incident-disaster-readiness',
+  name: 'Incident & Disaster Readiness',
+  description: 'Hybrid skill for disaster recovery operations and incident readiness checks',
+  manifest: {
+    sourceCode: disasterReadinessSource(),
+    persistenceEnv: 'CTO_HOME',
+  },
+  inputSchema: createSchemaRecord({
+    provider: SchemaProps.select(DISASTER_PROVIDERS, {
+      description: 'Disaster recovery provider to use',
+      required: true,
+    }),
+    config: SchemaProps.object({}, {
+      description: 'Operation-specific configuration',
+      additionalProperties: true,
+    }),
+  }, { required: ['provider', 'config'] }),
+  outputSchema: createSchemaRecord({
+    success: SchemaProps.boolean({ description: 'Whether the operation succeeded' }),
+    provider: SchemaProps.text({ description: 'Provider that was used' }),
+    config: SchemaProps.object({}, { description: 'Configuration used', additionalProperties: true }),
+    result: SchemaProps.object({}, { description: 'Operation result data', additionalProperties: true }),
+    error: SchemaProps.text({ description: 'Error message if failed' }),
+  }),
+  tier: 'aid',
   }); (t as any).isSkill = false; return t; })(),
 
   (() => { const t = createCodeSkill({
-id: 'cto-architecture-advisory',
-name: 'Architecture & Tech Stack Advisory',
-description: 'Reasoning-based architectural guidance and tech stack recommendations',
-manifest: {
-sourceCode: architectureAdvisorySource(),
-reasoningConfig: {
-model: 'gpt-4',
-temperature: 0.3,
-maxTokens: 4000,
-},
-persistenceEnv: 'CTO_HOME',
-},
-inputSchema: createSchemaRecord({
-system: SchemaProps.text({
-description: 'Name or description of the system being architected',
-required: true,
-}),
-requirements: SchemaProps.objectArray(SchemaProps.text({}), {
-description: 'List of functional and non-functional requirements',
-minItems: 1,
-}),
-context: SchemaProps.object({
-teamSize: SchemaProps.integer({ description: 'Number of engineers on the team' }),
-currentStack: SchemaProps.stringArray({ description: 'Currently used technologies' }),
-constraints: SchemaProps.stringArray({ description: 'Technical, budget, or organizational constraints' }),
-timeline: SchemaProps.text({ description: 'Expected timeline for implementation' }),
-scale: SchemaProps.text({ description: 'Expected scale (users, requests, data volume)' }),
-}, {
-description: 'Additional context for the advisory',
-additionalProperties: true,
-}),
-}, { required: ['system', 'requirements'] }),
-outputSchema: createSchemaRecord({
-success: SchemaProps.boolean({ description: 'Whether the advisory completed' }),
-system: SchemaProps.text({ description: 'System that was analyzed' }),
-requirements: SchemaProps.objectArray(SchemaProps.text({}), { description: 'Requirements that were considered' }),
-context: SchemaProps.object({}, { description: 'Context that was provided', additionalProperties: true }),
-result: SchemaProps.object({
-recommendations: SchemaProps.objectArray(SchemaProps.object({
-category: SchemaProps.text({}),
-suggestion: SchemaProps.text({}),
-rationale: SchemaProps.text({}),
-priority: SchemaProps.select(['high', 'medium', 'low'], {}),
-effort: SchemaProps.select(['low', 'medium', 'high'], {}),
-}), {}),
-risks: SchemaProps.objectArray(SchemaProps.object({
-area: SchemaProps.text({}),
-description: SchemaProps.text({}),
-mitigation: SchemaProps.text({}),
-}), {}),
-decisions: SchemaProps.objectArray(SchemaProps.object({
-topic: SchemaProps.text({}),
-decision: SchemaProps.text({}),
-alternatives: SchemaProps.stringArray({}),
-}), {}),
-}, { description: 'Structured advisory output', additionalProperties: true }),
-error: SchemaProps.text({ description: 'Error message if failed' }),
-}),
+  id: 'cto-architecture-advisory',
+  name: 'Architecture & Tech Stack Advisory',
+  description: 'Reasoning-based architectural guidance and tech stack recommendations',
+  manifest: {
+    sourceCode: architectureAdvisorySource(),
+    reasoningConfig: {
+      model: 'gpt-4',
+      temperature: 0.3,
+      maxTokens: 4000,
+    },
+    persistenceEnv: 'CTO_HOME',
+  },
+  inputSchema: createSchemaRecord({
+    system: SchemaProps.text({
+      description: 'Name or description of the system being architected',
+      required: true,
+    }),
+    requirements: SchemaProps.objectArray(SchemaProps.text({}), {
+      description: 'List of functional and non-functional requirements',
+      minItems: 1,
+    }),
+    context: SchemaProps.object({
+      teamSize: SchemaProps.integer({ description: 'Number of engineers on the team' }),
+      currentStack: SchemaProps.stringArray({ description: 'Currently used technologies' }),
+      constraints: SchemaProps.stringArray({ description: 'Technical, budget, or organizational constraints' }),
+      timeline: SchemaProps.text({ description: 'Expected timeline for implementation' }),
+      scale: SchemaProps.text({ description: 'Expected scale (users, requests, data volume)' }),
+    }, {
+      description: 'Additional context for the advisory',
+      additionalProperties: true,
+    }),
+  }, { required: ['system', 'requirements'] }),
+  outputSchema: createSchemaRecord({
+    success: SchemaProps.boolean({ description: 'Whether the advisory completed' }),
+    system: SchemaProps.text({ description: 'System that was analyzed' }),
+    requirements: SchemaProps.objectArray(SchemaProps.text({}), { description: 'Requirements that were considered' }),
+    context: SchemaProps.object({}, { description: 'Context that was provided', additionalProperties: true }),
+    result: SchemaProps.object({
+      recommendations: SchemaProps.objectArray(SchemaProps.object({
+        category: SchemaProps.text({}),
+        suggestion: SchemaProps.text({}),
+        rationale: SchemaProps.text({}),
+        priority: SchemaProps.select(['high', 'medium', 'low'], {}),
+        effort: SchemaProps.select(['low', 'medium', 'high'], {}),
+      }), {}),
+      risks: SchemaProps.objectArray(SchemaProps.object({
+        area: SchemaProps.text({}),
+        description: SchemaProps.text({}),
+        mitigation: SchemaProps.text({}),
+      }), {}),
+      decisions: SchemaProps.objectArray(SchemaProps.object({
+        topic: SchemaProps.text({}),
+        decision: SchemaProps.text({}),
+        alternatives: SchemaProps.stringArray({}),
+      }), {}),
+    }, { description: 'Structured advisory output', additionalProperties: true }),
+    error: SchemaProps.text({ description: 'Error message if failed' }),
+  }),
+  tier: 'advise',
   }); (t as any).isSkill = false; return t; })(),
 
   createCodeSkill({
@@ -482,10 +473,10 @@ error: SchemaProps.text({ description: 'Error message if failed' }),
     outputSchema: createSchemaRecord({
       success: SchemaProps.boolean({ description: 'Whether evaluation completed' }),
       data: SchemaProps.object({}, { description: 'Scored systems and prioritized roadmap' }),
-      mode: SchemaProps.text({ description: 'Execution mode' }),
       error: SchemaProps.text({ description: 'Failure message' }),
     }),
     triggers: CTO_TRIGGERS,
+    tier: 'advise',
   }),
 
   createCodeSkill({
@@ -508,10 +499,10 @@ error: SchemaProps.text({ description: 'Error message if failed' }),
     outputSchema: createSchemaRecord({
       success: SchemaProps.boolean({ description: 'Whether optimization completed' }),
       data: SchemaProps.object({}, { description: 'Recommendations and savings estimate' }),
-      mode: SchemaProps.text({ description: 'Execution mode' }),
       error: SchemaProps.text({ description: 'Failure message' }),
     }),
     triggers: CTO_TRIGGERS,
+    tier: 'advise',
   }),
 
   createCodeSkill({
@@ -535,10 +526,10 @@ error: SchemaProps.text({ description: 'Error message if failed' }),
     outputSchema: createSchemaRecord({
       success: SchemaProps.boolean({ description: 'Whether synthesis completed' }),
       data: SchemaProps.object({}, { description: 'Hypotheses and mitigations' }),
-      mode: SchemaProps.text({ description: 'Execution mode' }),
       error: SchemaProps.text({ description: 'Failure message' }),
     }),
     triggers: CTO_TRIGGERS,
+    tier: 'aid',
   }),
 
   createCodeSkill({
@@ -562,11 +553,12 @@ error: SchemaProps.text({ description: 'Error message if failed' }),
     }, { required: [] }),
     outputSchema: createSchemaRecord({
       success: SchemaProps.boolean({ description: 'Whether action completed' }),
-      mode: SchemaProps.text({ description: 'Dry-run, live, not-connected, or error mode' }),
       data: SchemaProps.object({}, { description: 'Remote response when available' }),
       error: SchemaProps.text({ description: 'Failure or governance message' }),
     }),
     triggers: CTO_TRIGGERS,
+    tier: 'represent',
+    confirmBeforeSend: true,
   }),
 ];
 

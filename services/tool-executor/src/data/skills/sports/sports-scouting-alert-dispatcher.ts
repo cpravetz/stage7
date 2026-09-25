@@ -102,10 +102,10 @@ export const SCOUTING_ALERT_DISPATCHER = createCodeSkill({
   },
   inputSchema: SCOUTING_ALERT_INPUT,
   outputSchema: CODE_OUTPUT,
+  tier: 'represent',
+  domainKnowledge: 'Sports scouting, player health monitoring, transfer market tracking',
+  confirmBeforeSend: true,
   triggers: [
-    { kind: 'user', phrase_examples: ['Alert staff', 'Dispatch scouting alert', 'Player health update', 'Transfer news'] },
-    { kind: 'schedule', cadence: 'Real-time monitoring' },
-    { kind: 'event', on: 'Performance anomaly detected' },
-    { kind: 'event', on: 'Injury report received' },
+    { kind: 'user', phrase_examples: ['Dispatch scouting alert', 'Send health alert', 'Notify transfer interest', 'Alert performance anomaly'] }
   ],
 });

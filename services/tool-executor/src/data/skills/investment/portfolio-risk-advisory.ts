@@ -188,15 +188,7 @@ const PORTFOLIO_RISK_ADVISORY = createCodeSkill({
   inputSchema: portfolioAdvisoryInputSchema,
   outputSchema: commonOutputSchema,
   triggers: [
-    { kind: 'user', phrase_examples: ["Analyze my portfolio", "Optimize allocation", "Assess portfolio risk", "Run stress test", "Evaluate securities", "Check efficient frontier"] },
-    { kind: 'schedule', cadence: 'Weekly portfolio review' },
-    { kind: 'schedule', cadence: 'Monthly rebalancing check' },
-    { kind: 'schedule', cadence: 'Quarterly risk assessment' },
-    { kind: 'event', on: 'Portfolio transaction executed' },
-    { kind: 'event', on: 'Allocation drift detected' },
-    { kind: 'event', on: 'Risk limit breached' },
-    { kind: 'event', on: 'New holding added' },
-    { kind: 'event', on: 'Benchmark rebalance' }
+    { kind: 'user', phrase_examples: ["Analyze my portfolio", "Optimize allocation", "Assess portfolio risk", "Run stress test", "Evaluate securities", "Check efficient frontier"] }
   ]
 });
 

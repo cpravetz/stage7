@@ -18,10 +18,10 @@ export const scriptwritingCanonicalSkills: Tool[] = [
 export const scriptwritingSkills: Tool[] = scriptwritingCanonicalSkills;
 
 annotateStages(scriptwritingSkills, {
-  'scriptwriting_narrative_arc_pacing_evaluator': 'brief',
-  'scriptwriting_scene_beat_dialogue_copilot': 'draft',
-  'scriptwriting_script_formatting_submission_manager': 'finalize',
-  'scriptwriting_genre_market_evaluator': 'revise',
+  'scriptwriting-narrative-arc-pacing-evaluator': 'brief',
+  'scriptwriting-scene-beat-dialogue-copilot': 'draft',
+  'scriptwriting-script-formatting-submission-manager': 'finalize',
+  'scriptwriting-genre-market-evaluator': 'revise',
 });
 
 export const scriptwritingWorkflow: AssistantWorkflow = createWorkflow({
@@ -29,9 +29,9 @@ export const scriptwritingWorkflow: AssistantWorkflow = createWorkflow({
   productObject: 'script',
   flow: 'brief → draft → revise → finalize',
   stages: [
-    { name: 'brief', description: 'Brief and narrative arc evaluation', stageIds: ['scriptwriting_narrative_arc_pacing_evaluator'] },
-    { name: 'draft', description: 'Scene, beat, and dialogue drafting', stageIds: ['scriptwriting_scene_beat_dialogue_copilot'] },
-    { name: 'revise', description: 'Genre and market evaluation for revision', stageIds: ['scriptwriting_genre_market_evaluator'] },
-    { name: 'finalize', description: 'Formatting and submission', stageIds: ['scriptwriting_script_formatting_submission_manager'] },
+    { name: 'brief', description: 'Brief and narrative arc evaluation', stageIds: ['scriptwriting-narrative-arc-pacing-evaluator'] },
+    { name: 'draft', description: 'Scene, beat, and dialogue drafting', stageIds: ['scriptwriting-scene-beat-dialogue-copilot'] },
+    { name: 'revise', description: 'Genre and market evaluation for revision', stageIds: ['scriptwriting-genre-market-evaluator'] },
+    { name: 'finalize', description: 'Formatting and submission', stageIds: ['scriptwriting-script-formatting-submission-manager'] },
   ],
 }, scriptwritingSkills);

@@ -5,6 +5,16 @@ import workspaceRoutes from './routes/workspaces';
 import { Tool } from './types';
 import { toolRegistry } from './utils/sharedInstance';
 import { legacyGeneralTools } from './data/generalTools';
+import logger from './utils/logger';
+import { ToolNotFoundError, ValidationError } from './utils/errors';
+
+process.on('unhandledRejection', (reason, promise) => {
+  logger.error({ reason: String(reason) }, 'Unhandled Rejection');
+});
+process.on('uncaughtException', (error) => {
+  logger.error({ error: error.message, stack: error.stack }, 'Uncaught Exception');
+});
+
 import {
   careerSkills,
   productSkills,
@@ -40,8 +50,13 @@ import {
   careerCanonicalExtendedSkills,
   careerCanonicalInternalTools,
 } from './data/skills/career-canonical-extended';
-import logger from './utils/logger';
-import { ToolNotFoundError, ValidationError } from './utils/errors';
+
+process.on('unhandledRejection', (reason, promise) => {
+  logger.error({ reason: String(reason) }, 'Unhandled Rejection');
+});
+process.on('uncaughtException', (error) => {
+  logger.error({ error: error.message, stack: error.stack }, 'Uncaught Exception');
+});
 
 const app: express.Application = express();
 app.use(express.json());

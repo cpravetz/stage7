@@ -3,7 +3,7 @@ import { createCodeSkill, SchemaProps } from '../code-skill-factory';
 
 const CAREER_BASE_CONFIG_SCHEMA: SchemaRecord = { type: 'object', properties: {} };
 
-// career_apply_execute: submits applications to jobs. Supports dry-run and bulk.
+// career-application-execution: submits applications to jobs. Supports dry-run and bulk.
 // Returns { success, data: { applications, errors, submitted, dryRun, bulk, trackingPath } }
 const CAREER_APPLY_EXECUTE_SOURCE = `(async () => {
 const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
@@ -95,7 +95,7 @@ const CAREER_APPLY_EXECUTE_OUTPUT = {
 };
 
 const CAREER_APPLY_EXECUTE = createCodeSkill({
-  id: 'career_apply_execute',
+  id: 'career-application-execution',
   name: 'Apply to Jobs',
   description: 'Submits applications to one or more jobs using the stored resume and a generated or selected cover letter. Supports bulk apply, dry-run, and tracking of submitted vs failed applications.',
   manifest: {
@@ -109,7 +109,6 @@ const CAREER_APPLY_EXECUTE = createCodeSkill({
   outputSchema: CAREER_APPLY_EXECUTE_OUTPUT,
   triggers: [
     { kind: 'user', phrase_examples: ['Apply to these jobs', 'Submit applications', 'Auto-apply to ranked roles'] },
-    { kind: 'event', on: 'New ranked listing or user confirms application submission' },
   ],
 });
 CAREER_APPLY_EXECUTE.configSchema = CAREER_APPLY_EXECUTE.manifest.configSchema as SchemaRecord;

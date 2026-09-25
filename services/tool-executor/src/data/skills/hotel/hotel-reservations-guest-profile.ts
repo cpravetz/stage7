@@ -3,20 +3,11 @@ import { createExternalActionSkill, createSchemaRecord, SchemaProps } from '../c
 
 const HOTEL_HOME = process.env.HOTEL_HOME || '/tmp/hotel';
 
-const RESERVATION_OPERATIONS = [
-  'manage-reservation',
-  'room-assignment',
-  'guest-profile',
-  'external-booking',
-  'billing',
-];
-
 const EXTERNAL_OUTPUT_SCHEMA = createSchemaRecord({
   success: SchemaProps.boolean({ description: 'Whether the external operation completed successfully' }),
-  mode: SchemaProps.select(['dry-run', 'live', 'error'], { description: 'Execution mode returned by the connector' }),
+  status: SchemaProps.select(['dry-run', 'live', 'error'], { description: 'Execution status returned by the connector' }),
   system: SchemaProps.text({ description: 'Hotel system that handled the operation' }),
   action: SchemaProps.text({ description: 'High-level action executed by the connector' }),
-  operation: SchemaProps.text({ description: 'Selected hotel operation' }),
   request: SchemaProps.object({
     input: SchemaProps.object({}, { description: 'Input sent to the hotel connector', additionalProperties: true }),
     endpoint: SchemaProps.text({ description: 'Resolved hotel connector endpoint' }),
@@ -29,7 +20,7 @@ const EXTERNAL_OUTPUT_SCHEMA = createSchemaRecord({
   }, { description: 'Response from the hotel connector' }),
   error: SchemaProps.text({ description: 'Error message when the operation fails' }),
 }, {
-  required: ['success', 'mode', 'system', 'action', 'operation', 'request', 'response', 'error'],
+  required: ['success', 'status', 'system', 'action', 'request', 'response', 'error'],
 });
 
 const EXTERNAL_CONFIG_SCHEMA = createSchemaRecord({
@@ -58,10 +49,6 @@ function withConfirmation(skill: Tool): Tool {
 }
 
 const RESERVATIONS_INPUT_SCHEMA = createSchemaRecord({
-  operation: SchemaProps.select(RESERVATION_OPERATIONS, {
-    description: 'Reservation, room, guest, booking, or billing operation to perform',
-    required: true,
-  }),
   propertyId: SchemaProps.text({ description: 'Hotel property identifier', required: true }),
   reservationId: SchemaProps.text({ description: 'Reservation identifier' }),
   guestId: SchemaProps.text({ description: 'Guest profile identifier' }),
@@ -91,7 +78,7 @@ const RESERVATIONS_INPUT_SCHEMA = createSchemaRecord({
   payload: SchemaProps.object({}, { description: 'Full operation payload for connector-specific fields', additionalProperties: true }),
   dryRun: SchemaProps.boolean({ description: 'Validate the request without sending a live mutation', default: true }),
   confirmation: SchemaProps.boolean({ description: 'Explicit approval for a live mutating request; dryRun does not require approval', default: false }),
-}, { required: ['operation', 'propertyId'] });
+}, { required: ['propertyId'] });
 
 export const RESERVATIONS_SKILL = withConfirmation(createExternalActionSkill({
   id: 'hotel-reservations-guest-profile',
@@ -106,8 +93,9 @@ export const RESERVATIONS_SKILL = withConfirmation(createExternalActionSkill({
   outputSchema: EXTERNAL_OUTPUT_SCHEMA,
   configSchema: EXTERNAL_CONFIG_SCHEMA,
   timeoutMs: 60000,
+  tier: 'represent',
+  domainKnowledge: 'Hotel reservations, guest profiles, PMS operations, and billing',
   triggers: [
     { kind: 'user', phrase_examples: ['Manage a reservation', 'Assign a room', 'Update a guest profile', 'Check a folio'] },
-    { kind: 'schedule', cadence: 'Daily reservation and billing review' },
   ],
 }));

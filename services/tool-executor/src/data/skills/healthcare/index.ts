@@ -3,7 +3,7 @@ import { createExternalActionSkill, createCodeSkill, SchemaProps } from '../code
 import { annotateStages, createWorkflow, WorkflowStage, AssistantWorkflow } from '../workflow-common';
 
 const CLINICAL_DECISION_SUPPORT = createCodeSkill({
-  id: 'healthcare_clinical_decision_support',
+  id: 'healthcare-clinical-decision-support',
   name: 'Clinical Decision Support',
   description:
     'Clinical reasoning assistant for healthcare professionals. Provides differential diagnosis suggestions, risk assessments, and care plan recommendations with heavy safety caveats. Always recommends consulting a qualified clinician. This tool does not replace clinical judgment.',
@@ -18,7 +18,6 @@ const path = require('path');
 const symptoms = input.symptoms || [];
 const duration = input.duration || '';
       const patient = input.patient || '';
-const operation = input.operation || 'assess';
 const clinicalContext = input.clinicalContext || '';
 const patientHistory = input.patientHistory || [];
 const medications = input.medications || [];
@@ -55,7 +54,7 @@ function assessUrgency(symptoms, vitalSigns) {
 
 const decision = {
   id: 'cds_' + Date.now(),
-    operation, patient, symptoms, duration, clinicalContext,
+    patient, symptoms, duration, clinicalContext,
   patientHistory, medications, allergies, vitalSigns, riskFactors,
   urgency: assessUrgency(symptoms, vitalSigns),
   differentialDiagnoses: symptoms.length ? symptoms.map(s => ({
@@ -80,7 +79,6 @@ console.log(JSON.stringify(result));
   inputSchema: {
     type: 'object',
     properties: {
-      operation: SchemaProps.select(['assess', 'risk', 'care-plan', 'triage'], { description: 'Clinical operation type: assess for symptom assessment, risk for risk scoring, care-plan for care planning, triage for urgency triage' }),
       symptoms: SchemaProps.stringArray({ description: 'List of patient symptoms (free text)' }),
       duration: SchemaProps.text({ description: 'Duration of symptoms (e.g., 3 days, 2 weeks)' }),
       patient: SchemaProps.text({ description: 'Select patient' }),
@@ -101,7 +99,7 @@ console.log(JSON.stringify(result));
       includeDifferential: SchemaProps.boolean({ description: 'Whether to include differential diagnosis suggestions', default: true }),
       includeRiskScore: SchemaProps.boolean({ description: 'Whether to include risk stratification scoring', default: true }),
     },
-    required: ['operation', 'symptoms'],
+    required: ['symptoms'],
   },
   outputSchema: {
     type: 'object',
@@ -120,14 +118,12 @@ console.log(JSON.stringify(result));
     required: ['success'],
   },
   triggers: [
-    { kind: 'user', phrase_examples: ['Assess symptoms', 'Evaluate risk', 'Clinical decision support', 'What could this be'] },
-    { kind: 'event', on: 'Abnormal lab result' },
-    { kind: 'event', on: 'Patient reports new symptoms' },
+    { kind: 'event', on: 'New symptoms reported or abnormal lab result' },
   ],
 });
 
 const RECORDS_SCHEDULING_OPS = createExternalActionSkill({
-  id: 'healthcare_records_scheduling_ops',
+  id: 'healthcare-records-scheduling-ops',
   name: 'Records & Scheduling Ops',
   description: 'Manage medical records, apply tags, search records, schedule appointments, and optimize provider schedules through the healthcare records and scheduling system.',
   system: 'healthcare',
@@ -156,7 +152,6 @@ const RECORDS_SCHEDULING_OPS = createExternalActionSkill({
     inputSchema: {
       type: 'object',
       properties: {
-        operation: SchemaProps.select(['medical-record', 'record-tagging', 'record-search', 'appointment-scheduler', 'schedule-optimizer'], { description: 'The operation to perform across records and scheduling subsystems' }),
         patient: SchemaProps.text({ description: 'Select patient' }),
       recordType: SchemaProps.select(['encounter', 'diagnosis', 'medication', 'allergy', 'immunization', 'procedure', 'vital', 'lab', 'imaging', 'note'], { description: 'Type of medical record' }),
       data: SchemaProps.object({}, { description: 'Record data for create/update operations' }),
@@ -177,19 +172,17 @@ const RECORDS_SCHEDULING_OPS = createExternalActionSkill({
       offset: SchemaProps.integer({ description: 'Result offset for pagination', default: 0 }),
       dryRun: SchemaProps.boolean({ description: 'Validate without executing', default: true }),
     },
-    required: ['operation'],
+    required: [],
   },
-  outputSchema: { type: 'object', properties: { success: { type: 'boolean' }, mode: { type: 'string', enum: ['dry-run', 'live', 'error'] }, system: { type: 'string' }, action: { type: 'string' }, request: { type: ['object', 'null'], properties: { input: { type: 'object' }, endpoint: { type: 'string' }, method: { type: 'string' }, headers: { type: 'object' } } }, response: { type: ['object', 'null'], properties: { status: { type: 'number' }, data: { type: ['object', 'string', 'null'] } } }, error: { type: ['string', 'null'] } }, required: ['success', 'mode', 'system', 'action', 'request', 'response', 'error'] } as any,
+  outputSchema: { type: 'object', properties: { success: { type: 'boolean' }, status: { type: 'string', enum: ['success', 'error'] }, system: { type: 'string' }, action: { type: 'string' }, request: { type: ['object', 'null'], properties: { input: { type: 'object' }, endpoint: { type: 'string' }, method: { type: 'string' }, headers: { type: 'object' } } }, response: { type: ['object', 'null'], properties: { status: { type: 'number' }, data: { type: ['object', 'string', 'null'] } } }, error: { type: ['string', 'null'] } }, required: ['success', 'status', 'system', 'action', 'request', 'response', 'error'] } as any,
   timeoutMs: 60000,
   triggers: [
-    { kind: 'user', phrase_examples: ['Create medical record', 'Search patient records', 'Schedule appointment', 'Optimize schedule', 'Tag record'] },
-    { kind: 'schedule', cadence: 'Daily record sync' },
-    { kind: 'schedule', cadence: 'Weekly scheduling review' },
+    { kind: 'event', on: 'New appointment requested or record update' },
   ],
 });
 
 const PATIENT_COMMUNICATION = createExternalActionSkill({
-  id: 'healthcare_patient_communication',
+  id: 'healthcare-patient-communication',
   name: 'Patient Communication',
   description: 'Send secure patient communications including appointment reminders, test results, care instructions, and manage recurring communication schedules.',
   system: 'healthcare',
@@ -220,7 +213,6 @@ const PATIENT_COMMUNICATION = createExternalActionSkill({
     inputSchema: {
       type: 'object',
       properties: {
-        operation: SchemaProps.select(['send', 'schedule', 'template', 'history', 'preferences', 'opt-out'], { description: 'Communication operation: send for direct messages, schedule for recurring, template for template ops, history for past messages, preferences for settings, opt-out for opt-out management' }),
         patient: SchemaProps.text({ description: 'Select patient' }),
       channel: SchemaProps.select(['email', 'sms', 'portal', 'voice', 'fax'], { description: 'Communication channel' }),
       templateId: SchemaProps.text({ description: 'Message template identifier' }),
@@ -233,20 +225,17 @@ const PATIENT_COMMUNICATION = createExternalActionSkill({
       frequency: SchemaProps.select(['once', 'daily', 'weekly', 'monthly', 'custom'], { description: 'Communication frequency for scheduled messages' }),
       dryRun: SchemaProps.boolean({ description: 'Validate without executing', default: true }),
     },
-    required: ['operation'],
+    required: [],
   },
-  outputSchema: { type: 'object', properties: { success: { type: 'boolean' }, mode: { type: 'string', enum: ['dry-run', 'live', 'error'] }, system: { type: 'string' }, action: { type: 'string' }, request: { type: ['object', 'null'], properties: { input: { type: 'object' }, endpoint: { type: 'string' }, method: { type: 'string' }, headers: { type: 'object' } } }, response: { type: ['object', 'null'], properties: { status: { type: 'number' }, data: { type: ['object', 'string', 'null'] } } }, error: { type: ['string', 'null'] } }, required: ['success', 'mode', 'system', 'action', 'request', 'response', 'error'] } as any,
+  outputSchema: { type: 'object', properties: { success: { type: 'boolean' }, status: { type: 'string', enum: ['success', 'error'] }, system: { type: 'string' }, action: { type: 'string' }, request: { type: ['object', 'null'], properties: { input: { type: 'object' }, endpoint: { type: 'string' }, method: { type: 'string' }, headers: { type: 'object' } } }, response: { type: ['object', 'null'], properties: { status: { type: 'number' }, data: { type: ['object', 'string', 'null'] } } }, error: { type: ['string', 'null'] } }, required: ['success', 'status', 'system', 'action', 'request', 'response', 'error'] } as any,
   timeoutMs: 60000,
   triggers: [
-    { kind: 'user', phrase_examples: ['Send patient message', 'Schedule reminder', 'Check communication status'] },
-    { kind: 'schedule', cadence: 'Daily reminder queue' },
-    { kind: 'event', on: 'Appointment confirmed' },
-    { kind: 'event', on: 'Patient replied' },
+    { kind: 'event', on: 'Patient message requested' },
   ],
 });
 
 const RESOURCE_COORDINATION = createExternalActionSkill({
-  id: 'healthcare_resource_coordination',
+  id: 'healthcare-resource-coordination',
   name: 'Resource Coordination',
   description: 'Coordinate beds, equipment, staff, and rooms across facilities, and match patients to optimal resources based on clinical needs, insurance, and preferences.',
   system: 'healthcare',
@@ -275,7 +264,6 @@ const RESOURCE_COORDINATION = createExternalActionSkill({
   inputSchema: {
     type: 'object',
     properties: {
-      operation: SchemaProps.select(['allocate', 'release', 'transfer', 'status', 'forecast', 'request', 'approve', 'match', 'rank', 'filter', 'refer', 'network', 'capacity'], { description: 'Operation type: allocate/release/transfer/status/forecast for resource ops, match/rank/filter/refer/network/capacity for patient-resource matching' }),
       resourceType: SchemaProps.select(['bed', 'equipment', 'room', 'staff', 'device', 'supply'], { description: 'Type of resource' }),
       resourceId: SchemaProps.text({ description: 'Resource identifier' }),
        facility: SchemaProps.text({ description: 'Facility identifier' }),
@@ -292,20 +280,17 @@ const RESOURCE_COORDINATION = createExternalActionSkill({
       maxResults: SchemaProps.integer({ description: 'Maximum results to return', default: 10 }),
       dryRun: SchemaProps.boolean({ description: 'Validate without executing', default: true }),
     },
-    required: ['operation'],
+    required: [],
   },
-  outputSchema: { type: 'object', properties: { success: { type: 'boolean' }, mode: { type: 'string', enum: ['dry-run', 'live', 'error'] }, system: { type: 'string' }, action: { type: 'string' }, request: { type: ['object', 'null'], properties: { input: { type: 'object' }, endpoint: { type: 'string' }, method: { type: 'string' }, headers: { type: 'object' } } }, response: { type: ['object', 'null'], properties: { status: { type: 'number' }, data: { type: ['object', 'string', 'null'] } } }, error: { type: ['string', 'null'] } }, required: ['success', 'mode', 'system', 'action', 'request', 'response', 'error'] } as any,
+  outputSchema: { type: 'object', properties: { success: { type: 'boolean' }, status: { type: 'string', enum: ['success', 'error'] }, system: { type: 'string' }, action: { type: 'string' }, request: { type: ['object', 'null'], properties: { input: { type: 'object' }, endpoint: { type: 'string' }, method: { type: 'string' }, headers: { type: 'object' } } }, response: { type: ['object', 'null'], properties: { status: { type: 'number' }, data: { type: ['object', 'string', 'null'] } } }, error: { type: ['string', 'null'] } }, required: ['success', 'status', 'system', 'action', 'request', 'response', 'error'] } as any,
   timeoutMs: 60000,
   triggers: [
-    { kind: 'user', phrase_examples: ['Allocate resource', 'Check bed availability', 'Match patient to provider', 'Find available care'] },
-    { kind: 'schedule', cadence: 'Hourly capacity review' },
-    { kind: 'event', on: 'Resource requested' },
-    { kind: 'event', on: 'Match accepted' },
+    { kind: 'event', on: 'Resource request received' },
   ],
 });
 
 const OPERATIONAL_ANALYTICS = createCodeSkill({
-  id: 'healthcare_operational_analytics',
+  id: 'healthcare-operational-analytics',
   name: 'Operational Analytics',
   description:
     'Generate healthcare operational analytics including clinical KPIs, throughput metrics, resource utilization, and financial summaries. Computes insights locally with reasoning over available data and can reference the healthcare analytics platform for deeper reporting.',
@@ -317,7 +302,6 @@ const input = __tool_input || {};
 const fs = require('fs');
 const path = require('path');
 
-const operation = input.operation || 'dashboard';
 const reportType = input.reportType || 'operational';
 const metric = input.metric || '';
 const period = input.period || '30d';
@@ -363,7 +347,6 @@ function computeKPIs(data) {
 }
 
 let result;
-if (operation === 'dashboard') {
   const slice = sliceData(period, records);
   const kpis = {
     patientVolume: computeKPIs(slice.filter(d => d.type === 'volume')),
@@ -372,26 +355,6 @@ if (operation === 'dashboard') {
     throughput: computeKPIs(slice.filter(d => d.type === 'throughput')),
   };
   result = { success: true, data: { type: 'dashboard', reportType, period, granularity, kpis, recordCount: slice.length, source: 'local', note: 'For deeper analytics use the Healthcare Analytics platform.' } };
-} else if (operation === 'report') {
-  const slice = sliceData(period, records);
-  const filtered = Object.keys(filterCriteria).length ? slice.filter(d => Object.entries(filterCriteria).every(([k, v]) => d[k] === v)) : slice;
-  const kpis = computeKPIs(filtered);
-  result = { success: true, data: { type: 'report', reportType, period, granularity, filters: filterCriteria, kpis, recordCount: filtered.length, source: 'local' } };
-} else if (operation === 'kpi') {
-  const filtered = Object.keys(filterCriteria).length ? records.filter(d => Object.entries(filterCriteria).every(([k, v]) => d[k] === v)) : records;
-  const kpis = computeKPIs(filtered);
-  result = { success: true, data: { type: 'kpi', metric, kpis, recordCount: filtered.length, source: 'local' } };
-} else if (operation === 'trend') {
-  const slice = sliceData(period, records);
-  const values = slice.map(d => d.value).filter(v => typeof v === 'number');
-  const trend = values.length > 1 ? (values[values.length - 1] - values[0]) / Math.abs(values[0] || 1) : 0;
-  result = { success: true, data: { type: 'trend', metric, period, trend, direction: trend > 0.1 ? 'increasing' : trend < -0.1 ? 'decreasing' : 'stable', dataPoints: values.length, source: 'local' } };
-} else if (operation === 'export') {
-  const slice = sliceData(period, records);
-  result = { success: true, data: { type: 'export', recordCount: slice.length, exportPath: analyticsPath, source: 'local' } };
-} else {
-  result = { success: false, error: 'Unknown operation: ' + operation };
-}
 
 console.log(JSON.stringify(result));
 `,
@@ -399,7 +362,6 @@ console.log(JSON.stringify(result));
   inputSchema: {
     type: 'object',
     properties: {
-      operation: SchemaProps.select(['dashboard', 'report', 'kpi', 'trend', 'cohort', 'export', 'schedule'], { description: 'Analytics operation: dashboard for overview, report for detailed, kpi for single metric, trend for trend analysis, cohort for group analysis, export for data export' }),
       reportType: SchemaProps.select(['clinical', 'operational', 'financial', 'quality', 'population'], { description: 'Report category type' }),
       metric: SchemaProps.text({ description: 'Metric name to analyze (e.g., patient_volume, avg_length_of_stay, bed_occupancy)' }),
       period: SchemaProps.select(['7d', '30d', '90d', 'YTD', '1y'], { description: 'Time period for analysis', default: '30d' }),
@@ -410,7 +372,7 @@ console.log(JSON.stringify(result));
       granularity: SchemaProps.select(['day', 'week', 'month', 'quarter'], { description: 'Time granularity for aggregation', default: 'day' }),
       format: SchemaProps.select(['json', 'csv', 'pdf'], { description: 'Output format for export' }),
     },
-    required: ['operation'],
+    required: [],
   },
   outputSchema: {
     type: 'object',
@@ -436,11 +398,7 @@ console.log(JSON.stringify(result));
     required: ['success'],
   },
   triggers: [
-    { kind: 'user', phrase_examples: ['Generate analytics dashboard', 'Check KPIs', 'Analyze trends', 'Operational report'] },
-    { kind: 'schedule', cadence: 'Daily metrics digest' },
-    { kind: 'schedule', cadence: 'Weekly KPI review' },
-    { kind: 'event', on: 'KPI threshold crossed' },
-    { kind: 'event', on: 'Data source updated' },
+    { kind: 'schedule', cadence: 'Daily healthcare metrics digest' },
   ],
 });
 import { healthcareClinicalPracticeWorkflowEvaluator } from './healthcare-clinical-practice-workflow-evaluator';
@@ -473,11 +431,11 @@ export const healthcareCanonicalSkills: Tool[] = [
 const ALL_HEALTHCARE_SKILLS: Tool[] = [...healthcareSkills];
 
 annotateStages(ALL_HEALTHCARE_SKILLS, {
-  'healthcare_clinical_decision_support': 'review',
-  'healthcare_records_scheduling_ops': 'scheduling',
-  'healthcare_patient_communication': 'scheduling',
-  'healthcare_resource_coordination': 'coordination',
-  'healthcare_operational_analytics': 'review',
+  'healthcare-clinical-decision-support': 'review',
+  'healthcare-records-scheduling-ops': 'scheduling',
+  'healthcare-patient-communication': 'scheduling',
+  'healthcare-resource-coordination': 'coordination',
+  'healthcare-operational-analytics': 'review',
   'healthcare-clinical-decision-support-evaluator': 'review',
   'healthcare-clinical-practice-workflow-evaluator': 'review',
   'healthcare-patient-care-plan-educational-briefing-copilot': 'review',
@@ -490,8 +448,8 @@ export const healthcareWorkflow = createWorkflow({
   productObject: 'patient',
   flow: 'review → scheduling → coordination',
   stages: [
-    { name: 'review', description: 'Clinical review, decision support, and advisory (no patient-visible action)', stageIds: ['healthcare_clinical_decision_support', 'healthcare_operational_analytics', 'healthcare-clinical-decision-support-evaluator', 'healthcare-clinical-practice-workflow-evaluator', 'healthcare-patient-care-plan-educational-briefing-copilot'] },
-    { name: 'scheduling', description: 'Appointments, records, and patient-visible scheduling', stageIds: ['healthcare_records_scheduling_ops', 'healthcare_patient_communication', 'healthcare-appointment-patient-intake-dispatcher'] },
-    { name: 'coordination', description: 'Resource coordination and care referral', stageIds: ['healthcare_resource_coordination', 'care-resource-referral-coordinator'] },
+    { name: 'review', description: 'Clinical review, decision support, and advisory (no patient-visible action)', stageIds: ['healthcare-clinical-decision-support', 'healthcare-operational-analytics', 'healthcare-clinical-decision-support-evaluator', 'healthcare-clinical-practice-workflow-evaluator', 'healthcare-patient-care-plan-educational-briefing-copilot'] },
+    { name: 'scheduling', description: 'Appointments, records, and patient-visible scheduling', stageIds: ['healthcare-records-scheduling-ops', 'healthcare-patient-communication', 'healthcare-appointment-patient-intake-dispatcher'] },
+    { name: 'coordination', description: 'Resource coordination and care referral', stageIds: ['healthcare-resource-coordination', 'care-resource-referral-coordinator'] },
   ],
 }, ALL_HEALTHCARE_SKILLS);

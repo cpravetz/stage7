@@ -3,17 +3,7 @@ import { createCodeSkill, createSchemaRecord, SchemaProps } from '../code-skill-
 
 const HOTEL_HOME = process.env.HOTEL_HOME || '/tmp/hotel';
 
-const REVENUE_OPERATIONS = [
-  'revenue',
-  'operational-analytics',
-  'staff-performance',
-];
-
 const REVENUE_INPUT_SCHEMA = createSchemaRecord({
-  operation: SchemaProps.select(REVENUE_OPERATIONS, {
-    description: 'Revenue, operational analytics, or staff-performance advisory operation',
-    required: true,
-  }),
   propertyId: SchemaProps.text({ description: 'Hotel property identifier', required: true }),
   dateRange: SchemaProps.object({
     start: SchemaProps.text({ description: 'Analysis range start date or timestamp' }),
@@ -54,27 +44,11 @@ const REVENUE_INPUT_SCHEMA = createSchemaRecord({
   targetAdr: SchemaProps.number({ description: 'Target average daily rate', minimum: 0 }),
   params: SchemaProps.object({}, { description: 'Additional advisory parameters', additionalProperties: true }),
   dryRun: SchemaProps.boolean({ description: 'Return an advisory draft without persisting or sending changes', default: true }),
-}, { required: ['operation', 'propertyId'] });
+}, { required: ['propertyId'] });
 
 const REVENUE_SOURCE = `(async () => {
   const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
-  const operation = input.operation || 'revenue';
   const propertyId = input.propertyId || 'default';
-  const validOperations = ['revenue', 'operational-analytics', 'staff-performance'];
-  if (!validOperations.includes(operation)) {
-    const output = {
-      success: false,
-      mode: 'error',
-      operation,
-      propertyId,
-      data: { status: 'error' },
-      source: 'error',
-      storePath: '',
-      error: 'Unknown hotel analytics operation: ' + operation + '. Use revenue, operational-analytics, or staff-performance.',
-    };
-    console.log(JSON.stringify(output));
-    return output;
-  }
   const hotelHome = process.env.HOTEL_HOME || '/tmp/hotel';
   const fs = require('fs');
   const path = require('path');
@@ -163,8 +137,7 @@ const REVENUE_SOURCE = `(async () => {
   if (!effectiveRecords.length) {
     const output = {
       success: false,
-      mode: 'not-connected',
-      operation,
+      status: 'not-connected',
       propertyId,
       data: {
         status: 'not-connected',
@@ -186,59 +159,18 @@ const REVENUE_SOURCE = `(async () => {
   const stale = recordSource === 'local-cache' && (!pms.connected || pms.records.length === 0);
 
   function buildResult() {
-    switch (operation) {
-      case 'revenue': {
-        const forecast = {
-          revenue: Math.round(summary.revenue * (1 + growthRate) * 100) / 100,
-          occupancy: Math.min(100, Math.round(targetOccupancy * 100) / 100),
-          adr: Math.round(targetAdr * 100) / 100,
-          assumptions: { growthRate: growthRate * 100, currency: input.currency || 'USD' },
-        };
-        return {
-          operation,
-          propertyId,
-          summary,
-          forecast,
-          stale,
-          recommendations: ['Compare the forecast with current pickup before changing rates.', 'Review channel mix and length-of-stay constraints before publishing a rate change.'],
-        };
-      }
-      case 'operational-analytics': {
-        return {
-          operation,
-          propertyId,
-          summary,
-          channels: Array.isArray(input.channels) ? input.channels : [],
-          dimensions: Array.isArray(input.dimensions) ? input.dimensions : [],
-          stale,
-          observations: ['Validate occupancy, ADR, and RevPAR against the selected date range.', 'Investigate outliers by channel and department before acting.'],
-        };
-      }
-      case 'staff-performance': {
-        const staff = Array.isArray(input.staffing) ? input.staffing : [];
-        const metrics = staff.map((row) => ({
-          staffId: row.staffId || input.staffId || '',
-          department: row.department || input.department || '',
-          tasksCompleted: asNumber(row.tasksCompleted, 0),
-          hoursWorked: asNumber(row.hoursWorked, 0),
-          guestSatisfaction: asNumber(row.guestSatisfaction, 0),
-        }));
-        return {
-          operation,
-          propertyId,
-          staffMetrics: metrics,
-          summary: {
-            staffCount: metrics.length,
-            totalTasks: metrics.reduce((sum, row) => sum + row.tasksCompleted, 0),
-            averageSatisfaction: metrics.length ? metrics.reduce((sum, row) => sum + row.guestSatisfaction, 0) / metrics.length : 0,
-          },
-          stale,
-          recommendations: ['Review workload and satisfaction together before changing assignments.', 'Use a defined review period and department scope for staffing decisions.'],
-        };
-      }
-      default:
-        throw new Error('Unknown hotel analytics operation: ' + operation);
-    }
+    const forecast = {
+      revenue: Math.round(summary.revenue * (1 + growthRate) * 100) / 100,
+      occupancy: Math.min(100, Math.round(targetOccupancy * 100) / 100),
+      adr: Math.round(targetAdr * 100) / 100,
+      assumptions: { growthRate: growthRate * 100, currency: input.currency || 'USD' },
+    };
+    return {
+      summary,
+      forecast,
+      stale,
+      recommendations: ['Compare the forecast with current pickup before changing rates.', 'Review channel mix and length-of-stay constraints before publishing a rate change.'],
+    };
   }
 
   let result;
@@ -247,8 +179,7 @@ const REVENUE_SOURCE = `(async () => {
   } catch (error) {
     const output = {
       success: false,
-      mode: 'error',
-      operation,
+      status: 'error',
       propertyId,
       data: {},
       source,
@@ -261,8 +192,7 @@ const REVENUE_SOURCE = `(async () => {
 
   const output = {
     success: true,
-    mode: pms.connected && pms.records.length ? 'live' : 'dry-run',
-    operation,
+    status: pms.connected && pms.records.length ? 'live' : 'dry-run',
     propertyId,
     data: {
       ...result,
@@ -276,7 +206,7 @@ const REVENUE_SOURCE = `(async () => {
   };
 
   if (!input.dryRun) {
-    stored.push({ operation, propertyId, createdAt: new Date().toISOString(), records: effectiveRecords, result, source, stale });
+    stored.push({ propertyId, createdAt: new Date().toISOString(), records: effectiveRecords, result, source, stale });
     fs.writeFileSync(storePath, JSON.stringify(stored, null, 2));
   }
   console.log(JSON.stringify(output));
@@ -299,10 +229,11 @@ export const REVENUE_SKILL = createCodeSkill({
     credentialSource: { token: { envVar: 'HOTEL_API_TOKEN', configKey: 'hotel.token' } },
   },
   inputSchema: REVENUE_INPUT_SCHEMA,
+  tier: 'advise',
+  domainKnowledge: 'Hotel revenue management, ADR, RevPAR, occupancy analytics, and staff performance',
   outputSchema: createSchemaRecord({
     success: SchemaProps.boolean({ description: 'Whether the advisory analysis completed' }),
-    mode: SchemaProps.select(['dry-run', 'live', 'not-connected', 'error'], { description: 'Execution and connector state' }),
-    operation: SchemaProps.select(REVENUE_OPERATIONS, { description: 'Analytics operation performed' }),
+    status: SchemaProps.select(['dry-run', 'live', 'not-connected', 'error'], { description: 'Execution and connector state' }),
     propertyId: SchemaProps.text({ description: 'Property analyzed' }),
     data: SchemaProps.object({}, { description: 'Grounded analytics and recommendations', additionalProperties: true }),
     source: SchemaProps.select(['supplied', 'local-cache', 'pms', 'not-connected', 'error'], { description: 'Data source used for the analysis' }),
@@ -310,9 +241,8 @@ export const REVENUE_SKILL = createCodeSkill({
     storePath: SchemaProps.text({ description: 'Local analytics store path' }),
     note: SchemaProps.text({ description: 'Connector or data-source disclosure' }),
     error: SchemaProps.text({ description: 'Error message when analysis fails' }),
-  }, { required: ['success', 'mode', 'operation', 'propertyId', 'data', 'source'] }),
+  }, { required: ['success', 'status', 'propertyId', 'data', 'source'] }),
   triggers: [
-    { kind: 'user', phrase_examples: ['Analyze hotel revenue', 'Review occupancy and ADR', 'Assess staff performance'] },
     { kind: 'schedule', cadence: 'Weekly revenue and performance review' },
   ],
 });

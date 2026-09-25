@@ -4,6 +4,7 @@ import { BATTLECARD_CREATOR } from "./sports-battlecard-creator";
 import { SCOUTING_ALERT_DISPATCHER } from "./sports-scouting-alert-dispatcher";
 import { MATCHUP_ODDS_EXPLAINER } from "./sports-matchup-odds-explainer";
 import { BANKROLL_CO_PILOT } from "./sports-bankroll-co-pilot";
+import { INGAME_PREDICTIVE_MODELING } from "./sports-ingame-predictive-modeling";
 import { LINE_ALERT_DISPATCHER } from "./sports-line-alert-dispatcher";
 import { annotateStages, createWorkflow, AssistantWorkflow } from "../workflow-common";
 
@@ -14,6 +15,7 @@ export const sportsSkills = [
   MATCHUP_ODDS_EXPLAINER,
   BANKROLL_CO_PILOT,
   LINE_ALERT_DISPATCHER,
+  INGAME_PREDICTIVE_MODELING,
 ];
 
 annotateStages(sportsSkills, {
@@ -22,6 +24,7 @@ annotateStages(sportsSkills, {
   'sports-scouting-alert-dispatcher': 'research',
   'sports-matchup-odds-explainer': 'odds',
   'sports-bankroll-co-pilot': 'odds',
+  'sports-ingame-predictive-modeling': 'odds',
   'sports-line-alert-dispatcher': 'research',
 });
 

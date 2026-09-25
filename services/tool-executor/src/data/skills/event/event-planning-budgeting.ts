@@ -2,7 +2,7 @@ import { createCodeSkill } from '../../../adk';
 import { SchemaProps } from '../code-skill-factory';
 
 const EVENT_PLANNING_BUDGETING = createCodeSkill({
-  id: 'event_planning_budgeting',
+  id: 'event-planning-budgeting',
   name: 'Event Planning & Budgeting',
   description:
     'Create comprehensive event plans and budgets with timelines, vendor categories, cost estimates, and risk mitigation. Reasoning-only: generates the plan draft for approval before any bookings.',
@@ -157,9 +157,6 @@ console.log(JSON.stringify({ success: true, data: { plan, storePath } }));
   },
   triggers: [
     { kind: 'user', phrase_examples: ['Plan an event', 'Create a budget', 'Build a timeline'] },
-    { kind: 'schedule', cadence: 'Weekly event pipeline review' },
-    { kind: 'event', on: 'New event request' },
-    { kind: 'event', on: 'Venue inquiry received' },
   ],
 });
 

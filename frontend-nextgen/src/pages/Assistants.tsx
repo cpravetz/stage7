@@ -374,7 +374,7 @@ const [editKnowledgeTitle, setEditKnowledgeTitle] = useState('');
                   <td>{a.tools?.length || 0}</td>
                   <td><span className="badge active">persisted</span></td>
                   <td className="actions-cell">
-                    <Link to={`/entity/${a.id}`} className="link-button">Workspace</Link>
+                    <Link to={`/entity/${a.id}`} className="link-button">Open</Link>
                     <button onClick={() => handleEdit(a)} className="link-button">Edit</button>
                     <button onClick={() => handleDelete(a.id)} className="link-button danger">Delete</button>
                   </td>

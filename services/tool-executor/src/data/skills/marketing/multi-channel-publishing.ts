@@ -4,7 +4,7 @@ const EXTERNAL_OUTPUT_SCHEMA = {
   type: 'object',
   properties: {
     success: { type: 'boolean' },
-    mode: { type: 'string', enum: ['dry-run', 'live', 'error'] },
+    status: { type: 'string', enum: ['dry-run', 'live', 'error'] },
     system: { type: 'string' },
     action: { type: 'string' },
     request: {
@@ -25,7 +25,7 @@ const EXTERNAL_OUTPUT_SCHEMA = {
     },
     error: { type: ['string', 'null'] },
   },
-  required: ['success', 'mode', 'system', 'action', 'request', 'response', 'error'],
+  required: ['success', 'status', 'system', 'action', 'request', 'response', 'error'],
 };
 
 const MULTI_CHANNEL_PUBLISHING = createExternalActionSkill({
@@ -55,9 +55,7 @@ const MULTI_CHANNEL_PUBLISHING = createExternalActionSkill({
   inputSchema: {
     type: 'object',
     properties: {
-      operation: SchemaProps.select(['social-media', 'email', 'document-management'], { description: 'Publishing operation channel' }),
       dryRun: SchemaProps.boolean({ description: 'Validate without executing', default: true }),
-
       content: SchemaProps.text({ description: 'Content text or body', multiline: true }),
       title: SchemaProps.text({ description: 'Content title' }),
       subject: SchemaProps.text({ description: 'Email subject line' }),
@@ -69,19 +67,15 @@ const MULTI_CHANNEL_PUBLISHING = createExternalActionSkill({
       folderId: SchemaProps.text({ description: 'Document folder identifier' }),
       tags: SchemaProps.stringArray({ description: 'Content tags' }),
     },
-    required: ['operation'],
+    required: [],
   },
   outputSchema: EXTERNAL_OUTPUT_SCHEMA,
   timeoutMs: 60000,
+  tier: 'represent',
+  confirmBeforeSend: true,
+  triggers: [
+    { kind: 'user', phrase_examples: ['Publish content', 'Schedule post', 'Send email campaign', 'Post to social media'] }
+  ],
 });
-
-MULTI_CHANNEL_PUBLISHING.confirmBeforeSend = true;
-MULTI_CHANNEL_PUBLISHING.triggers = [
-  { kind: 'user', phrase_examples: ['Publish this content', 'Schedule a post', 'Send an email blast'] },
-  { kind: 'schedule', cadence: 'Weekly content calendar review' },
-  { kind: 'schedule', cadence: 'Campaign launch check' },
-  { kind: 'event', on: 'Content approved' },
-  { kind: 'event', on: 'Ad spend threshold reached' },
-];
 
 export { MULTI_CHANNEL_PUBLISHING };

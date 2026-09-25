@@ -74,7 +74,7 @@ const RISK_SCENARIO = createCodeSkill({
   manifest: { language: 'javascript', entrypoint: 'index.js', sourceCode: RISK_SCENARIO_SOURCE, reasoningConfig: { model: 'gpt-4', temperature: 0.3, maxTokens: 4000 } },
   inputSchema: RISK_SCENARIO_INPUT,
   outputSchema: COMMON_OUTPUT,
-  triggers: [{ kind: 'user', phrase_examples: ['Assess risk', 'Model a scenario', 'What could go wrong'] }, { kind: 'schedule', cadence: 'Monthly risk review' }],
+  triggers: [{ kind: 'user', phrase_examples: ['Assess risk', 'Model a scenario', 'What could go wrong'] }],
 });
 
 export { RISK_SCENARIO };

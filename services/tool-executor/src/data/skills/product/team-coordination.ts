@@ -28,7 +28,6 @@ export const TEAM_COORDINATION = withConfirmation(createExternalActionSkill({
   inputSchema: {
     type: 'object',
     properties: {
-      operation: SchemaProps.select(['schedule', 'message', 'notify'], { description: 'Coordination operation to perform' }),
       dryRun: SchemaProps.boolean({ description: 'Validate without executing', default: true }),
       channel: SchemaProps.text({ description: 'Target channel or group' }),
       message: SchemaProps.text({ description: 'Message content' }),
@@ -36,25 +35,24 @@ export const TEAM_COORDINATION = withConfirmation(createExternalActionSkill({
       startTime: SchemaProps.datetime({ description: 'Event start time' }),
       endTime: SchemaProps.datetime({ description: 'Event end time' }),
     },
-    required: ['operation'],
   },
   outputSchema: {
     type: 'object',
     properties: {
       success: { type: 'boolean' },
-      mode: { type: 'string' },
+      status: { type: 'string' },
       system: { type: 'string' },
       action: { type: 'string' },
       request: { type: 'object' },
       response: { type: ['object', 'null'] },
       error: { type: 'string' },
     },
-    required: ['success', 'mode', 'system', 'action', 'request', 'response', 'error'],
+    required: ['success', 'status', 'system', 'action', 'request', 'response', 'error'],
   },
   timeoutMs: 15000,
   triggers: [
     { kind: 'user', phrase_examples: ['Schedule a meeting', 'Send a message', 'Notify the team'] },
-    { kind: 'schedule', cadence: 'Daily team activity review' },
-    { kind: 'event', on: 'Team member added' },
   ],
+  tier: 'aid',
+  domainKnowledge: 'Team coordination, scheduling, and communication workflows',
 }));

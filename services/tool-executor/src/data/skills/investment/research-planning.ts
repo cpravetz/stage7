@@ -87,12 +87,12 @@ async function searchResearch(params) {
   });
   const page = Math.max(1, Number(pagination.page) || 1);
   const limit = Math.max(1, Number(pagination.limit) || 10);
-  return { results: results.slice((page - 1) * limit, page * limit), total: results.length, source: 'supplied-input', mode: 'local', notice: suppliedDocuments.length ? 'Results are limited to documents supplied with this request.' : 'No research documents or external research provider were supplied; no research results were returned.' };
+  return { results: results.slice((page - 1) * limit, page * limit), total: results.length, source: 'supplied-input', status: 'local', notice: suppliedDocuments.length ? 'Results are limited to documents supplied with this request.' : 'No research documents or external research provider were supplied; no research results were returned.' };
 }
 
 async function getDocument(params) {
   const document = suppliedDocuments.find(d => d.id === params.documentId) || null;
-  return { document, source: 'supplied-input', mode: 'local', notice: document ? 'Document returned from request input.' : 'No matching supplied document or external research provider was available.' };
+  return { document, source: 'supplied-input', status: 'local', notice: document ? 'Document returned from request input.' : 'No matching supplied document or external research provider was available.' };
 }
 
 async function getAnalystEstimates(params) {
@@ -209,18 +209,8 @@ const RESEARCH_PLANNING = createCodeSkill({
   inputSchema: researchPlanningInputSchema,
   outputSchema: commonOutputSchema,
   triggers: [
-    { kind: 'user', phrase_examples: ['Research this stock', 'Get analyst reports', 'Check ESG scores', 'Create financial plan', 'Check retirement readiness', 'Run tax optimization'] },
-    { kind: 'schedule', cadence: 'Weekly research digest' },
-    { kind: 'schedule', cadence: 'Monthly market overview' },
-    { kind: 'schedule', cadence: 'Annual plan review' },
-    { kind: 'schedule', cadence: 'Quarterly projection update' },
-    { kind: 'event', on: 'Earnings release filed' },
-    { kind: 'event', on: 'Breaking market news' },
-    { kind: 'event', on: 'Analyst upgrade/downgrade' },
-    { kind: 'event', on: 'Life event recorded' },
-    { kind: 'event', on: 'Goal achieved' },
-    { kind: 'event', on: 'Regulation changed' },
-  ],
+    { kind: 'user', phrase_examples: ['Research this stock', 'Get analyst reports', 'Check ESG scores', 'Create financial plan', 'Check retirement readiness', 'Run tax optimization'] }
+  ]
 });
 
 export { RESEARCH_PLANNING };

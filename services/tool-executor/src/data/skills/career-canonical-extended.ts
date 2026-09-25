@@ -24,7 +24,7 @@ required: ['endpointUrl', 'apiKey', 'accountId'],
 };
 
 const careerGmailSyncTool = createExternalActionSkill({
-id: 'career_gmail_sync',
+id: 'career-gmail-sync',
 name: 'Career Gmail Sync',
 description: 'Internal Gmail connector for career workspace sync. Synchronizes career artifacts via Gmail API. Requires explicit configuration (endpointUrl, apiKey, accountId) and provides honest not-connected fallback when unconfigured.',
 system: 'gmail',
@@ -49,14 +49,14 @@ outputSchema: {
 type: 'object',
 properties: {
 success: { type: 'boolean' },
-mode: { type: 'string', enum: ['dry-run', 'live', 'not-connected', 'error'] },
+status: { type: 'string', enum: ['dry-run', 'live', 'not-connected', 'error'] },
 system: { type: 'string' },
 action: { type: 'string' },
 request: { type: ['object', 'null'] },
 response: { type: ['object', 'null'] },
 error: { type: ['string', 'null'] },
 },
-required: ['success', 'mode', 'system', 'action', 'request', 'response', 'error'],
+required: ['success', 'status', 'system', 'action', 'request', 'response', 'error'],
 },
 timeoutMs: 30000,
 });

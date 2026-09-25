@@ -11,7 +11,6 @@ const path = require('path');
 const entity = input.entity || input.teamId || '';
 const opponent = input.opponent || input.opponentId || '';
 const sport = input.sport || 'generic';
-const operation = input.operation || 'create-battlecard';
 
 const baseDir = process.env.SPORTS_GROUP_A_HOME || '/tmp/sports/group-a';
 const storePath = path.join(baseDir, 'battlecard-archives.json');
@@ -67,7 +66,6 @@ const BATTLECARD_CREATOR_INPUT = {
     entity: SchemaProps.text({ description: 'Team identifier' }),
     opponent: SchemaProps.text({ description: 'Opponent team identifier' }),
     sport: SchemaProps.text({ description: 'Sport context' }),
-    operation: SchemaProps.select(['create-battlecard', 'update-card', 'review-card'], { description: 'Battlecard operation' }),
     situation: SchemaProps.select(['neutral', 'home-advantage', 'away-pressure', 'playoff', 'elimination'], { description: 'Game situation', default: 'neutral' }),
     formation: SchemaProps.text({ description: 'Offensive formation', default: 'standard' }),
     defensiveScheme: SchemaProps.text({ description: 'Defensive scheme', default: 'standard' }),
@@ -124,9 +122,9 @@ export const BATTLECARD_CREATOR = createCodeSkill({
   },
   inputSchema: BATTLECARD_CREATOR_INPUT,
   outputSchema: CODE_OUTPUT,
+  tier: 'aid',
+  domainKnowledge: 'Sports scouting, opposition analysis, situational playbook creation',
   triggers: [
-    { kind: 'user', phrase_examples: ['Create battlecard', 'Opposition report', 'Scout this team', 'Game plan'] },
     { kind: 'schedule', cadence: 'Pre-match briefing 48h prior' },
-    { kind: 'event', on: 'New opponent data available' },
   ],
 });

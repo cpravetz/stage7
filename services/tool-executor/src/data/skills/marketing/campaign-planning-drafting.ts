@@ -3,7 +3,7 @@ import { createCodeSkill, SchemaProps } from '../code-skill-factory';
 const CAMPAIGN_PLANNING_DRAFTING = createCodeSkill({
   id: 'campaign-planning-drafting',
   name: 'Campaign Planning & Drafting',
-  description: 'Plan marketing campaigns with budget, channels, and timeline, and draft campaign content. Runs as reasoning-only using provided context — no external API required.',
+  description: 'Plan marketing campaigns with budget, channels, and timeline. Runs as reasoning-only using provided context — no external API required.',
   manifest: {
     language: 'javascript',
     entrypoint: 'index.js',
@@ -12,7 +12,6 @@ const input = __tool_input || {};
 const fs = require('fs');
 const path = require('path');
 
-const operation = input.operation || 'plan-campaign';
 const product = input.product || '';
 const budget = input.budget || 0;
 const channels = input.channels || [];
@@ -25,49 +24,25 @@ const storePath = path.join(marketingHome, 'campaigns.json');
 fs.mkdirSync(marketingHome, { recursive: true });
 const store = fs.existsSync(storePath) ? JSON.parse(fs.readFileSync(storePath, 'utf8')) : [];
 
-let result;
-switch (operation) {
-  case 'plan-campaign': {
-    const campaign = {
-      id: 'camp_' + Date.now(),
-      product,
-      budget,
-      channels,
-      timeline: [],
-      kpis: [],
-      createdAt: new Date().toISOString(),
-      source: 'local',
-    };
-    store.push(campaign);
-    fs.writeFileSync(storePath, JSON.stringify(store, null, 2));
-    result = { success: true, operation: 'plan-campaign', data: { campaign, storePath } };
-    break;
-  }
-  case 'content-generation': {
-    const draft = {
-      id: 'draft_' + Date.now(),
-      title: contentTitle,
-      body: contentBody,
-      tone,
-      channels,
-      createdAt: new Date().toISOString(),
-      source: 'reasoning',
-    };
-    store.push(draft);
-    fs.writeFileSync(storePath, JSON.stringify(store, null, 2));
-    result = { success: true, operation: 'content-generation', data: { draft, storePath } };
-    break;
-  }
-  default:
-    result = { success: false, error: 'Unknown operation: ' + operation };
-}
+const campaign = {
+  id: 'camp_' + Date.now(),
+  product,
+  budget,
+  channels,
+  timeline: [],
+  kpis: [],
+  createdAt: new Date().toISOString(),
+  source: 'local',
+};
+store.push(campaign);
+fs.writeFileSync(storePath, JSON.stringify(store, null, 2));
+const result = { success: true, data: { campaign, storePath } };
 console.log(JSON.stringify(result));
 `,
   },
   inputSchema: {
     type: 'object',
     properties: {
-      operation: SchemaProps.select(['plan-campaign', 'content-generation'], { description: 'Operation to perform' }),
       product: SchemaProps.text({ description: 'Name or description of the product being marketed' }),
       budget: SchemaProps.number({ description: 'Total budget allocated for the campaign' }),
       channels: SchemaProps.stringArray({ description: 'Marketing channels to use (e.g., email, social, search)' }),
@@ -75,18 +50,22 @@ console.log(JSON.stringify(result));
       contentBody: SchemaProps.text({ description: 'Content body text', multiline: true }),
       tone: SchemaProps.select(['professional', 'casual', 'persuasive', 'conversational', 'technical'], { description: 'Tone of voice', default: 'professional' }),
     },
-    required: ['operation'],
+    required: [],
   },
   outputSchema: {
     type: 'object',
     properties: {
       success: { type: 'boolean' },
-      operation: { type: 'string' },
       data: { type: 'object' },
       error: { type: 'string' },
     },
-    required: ['success', 'operation'],
+    required: ['success'],
   },
+  tier: 'advise',
+  domainKnowledge: 'Campaign planning, content drafting, and marketing calendar management',
+  triggers: [
+    { kind: 'user', phrase_examples: ['Plan a campaign', 'Draft marketing content', 'Create campaign timeline', 'Set campaign budget'] }
+  ],
 });
 
 export { CAMPAIGN_PLANNING_DRAFTING };

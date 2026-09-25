@@ -61,7 +61,7 @@ return summary;`,
   },
   triggers: [
     { kind: 'user', phrase_examples: ['Analyze retention', 'Check conversion', 'Review analytics'] },
-    { kind: 'schedule', cadence: 'Weekly analytics review' },
-    { kind: 'event', on: 'Feature launched' },
   ],
+  tier: 'advise',
+  domainKnowledge: 'Product analytics, funnel analysis, retention metrics, conversion optimization',
 });

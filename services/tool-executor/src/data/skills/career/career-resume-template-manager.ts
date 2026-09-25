@@ -10,10 +10,10 @@ const templateId = input.templateId || input.name || (resumeFile.name ? 'resume-
 const templateName = input.name || resumeFile.name || '';
 const templateContent = input.content || resumeFile.content || '';
 if (!templateId || !templateName || !templateContent) {
-console.log(JSON.stringify({ success: false, mode: 'not-connected', error: 'Not connected: provide a template name and content, or upload a resume file to manage' }));
+console.log(JSON.stringify({ success: false, status: 'not-connected', error: 'Not connected: provide a template name and content, or upload a resume file to manage' }));
 return;
 }
-const result = await __execute_tool('career_add_template', {
+const result = await __execute_tool('career-add-template', {
   templateId,
   name: templateName,
   type: input.type || 'resume',
@@ -22,16 +22,16 @@ const result = await __execute_tool('career_add_template', {
   tags: input.tags || [],
 });
 if (!result || result.success === false || result.error) {
-console.log(JSON.stringify({ success: false, mode: 'not-connected', error: result && result.error ? result.error : 'Not connected: resume template manager could not save the template' }));
+console.log(JSON.stringify({ success: false, status: 'not-connected', error: result && result.error ? result.error : 'Not connected: resume template manager could not save the template' }));
 return;
 }
 const data = result.data && typeof result.data === 'object' ? result.data : result;
 const template = data.template || data;
 if (!template || (!template.templateId && !template.name)) {
-console.log(JSON.stringify({ success: false, mode: 'not-connected', error: 'Not connected: template manager returned no saved template' }));
+console.log(JSON.stringify({ success: false, status: 'not-connected', error: 'Not connected: template manager returned no saved template' }));
 return;
 }
-console.log(JSON.stringify({ success: true, data: { template, totalTemplates: data.totalTemplates, templatePath: data.templatePath || result.templatePath, delegatedTo: 'career_add_template', generatedAt: new Date().toISOString() } }));
+console.log(JSON.stringify({ success: true, data: { template, totalTemplates: data.totalTemplates, templatePath: data.templatePath || result.templatePath, delegatedTo: 'career-add-template', generatedAt: new Date().toISOString() } }));
 })();`;
 
 const RESUME_TEMPLATE_MANAGER_INPUT = {
@@ -59,7 +59,7 @@ const RESUME_TEMPLATE_MANAGER_OUTPUT = {
 type: 'object',
 properties: {
 success: { type: 'boolean' },
-mode: { type: 'string' },
+status: { type: 'string', description: 'Execution status' },
 data: {
 type: 'object',
 properties: {
@@ -78,24 +78,21 @@ required: ['success', 'data'],
 const RESUME_TEMPLATE_MANAGER = createCodeSkill({
 id: 'career-resume-template-manager',
 name: 'Resume & Template Manager',
-description: 'Manages resume and cover-letter templates, including ATS-friendly variants. Delegates to career_add_template and reports not-connected when no template content or resume file is available.',
+description: 'Manages resume and cover-letter templates, including ATS-friendly variants. Delegates to career-add-template and reports not-connected when no template content or resume file is available.',
 manifest: {
 language: 'javascript',
 entrypoint: 'index.js',
 sourceCode: RESUME_TEMPLATE_MANAGER_SOURCE,
 configSchema: CAREER_WRAPPER_CONFIG_SCHEMA,
-lowerOrderTools: ['career_add_template'],
+lowerOrderTools: ['career-add-template'],
  actionLabel: 'Manage templates',
 },
 inputSchema: RESUME_TEMPLATE_MANAGER_INPUT,
 outputSchema: RESUME_TEMPLATE_MANAGER_OUTPUT,
 triggers: [
 { kind: 'user', phrase_examples: ['Update my resume', 'Manage templates', 'Upload a new resume variant'] },
-{ kind: 'schedule', cadence: 'Weekly resume template review' },
-{ kind: 'event', on: 'Resume uploaded or profile updated' },
 ],
 });
 RESUME_TEMPLATE_MANAGER.configSchema = RESUME_TEMPLATE_MANAGER.manifest.configSchema as SchemaRecord;
 
 export { RESUME_TEMPLATE_MANAGER };
-

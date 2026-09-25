@@ -71,6 +71,7 @@ export interface Tool {
   confirmBeforeSend?: boolean;
   tier?: 'advise' | 'aid' | 'represent';
   domainKnowledge?: string;
+  knowledgeIds?: string[];
 }
 
 export type WorkflowState = 'analysis' | 'recommendation' | 'draft' | 'approved' | 'executed' | 'rejected';

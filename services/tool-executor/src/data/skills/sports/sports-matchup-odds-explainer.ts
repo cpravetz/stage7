@@ -143,9 +143,9 @@ export const MATCHUP_ODDS_EXPLAINER = createCodeSkill({
   },
   inputSchema: MATCHUP_ODDS_INPUT,
   outputSchema: CODE_OUTPUT,
+  tier: 'advise',
+  domainKnowledge: 'Sports odds analysis, implied probability, line movement, expected value',
   triggers: [
-    { kind: 'user', phrase_examples: ['Explain the odds', 'Matchup analysis', 'Expected value', 'How do the odds look', 'Line movement'] },
     { kind: 'schedule', cadence: 'Pre-match briefing 48h prior' },
-    { kind: 'event', on: 'Line movement alert' },
   ],
 });

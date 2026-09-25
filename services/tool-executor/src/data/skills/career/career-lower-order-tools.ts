@@ -3,7 +3,7 @@ import { Tool } from '../../../types';
 const now = () => new Date();
 
 export const CAREER_INTERVIEW_PREP: Tool = {
-  id: 'career_interview_prep',
+  id: 'career-interview-prep',
   name: 'Career Interview Prep',
   description: 'Generate interview questions and preparation guidance for a target role and company.',
   type: 'reasoning',
@@ -22,7 +22,7 @@ export const CAREER_INTERVIEW_PREP: Tool = {
 };
 
 export const CAREER_ADVISORY: Tool = {
-  id: 'career_advisory',
+  id: 'career-advisory',
   name: 'Career Advisory',
   description: 'Provide career, compensation, and learning-plan guidance from supplied role context.',
   type: 'reasoning',

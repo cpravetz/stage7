@@ -97,12 +97,7 @@ const BILL_PAY_REBALANCING = createCodeSkill({
   },
   outputSchema: { type: 'object', properties: { success: { type: 'boolean' }, data: { type: 'object' }, storePath: { type: 'string' }, error: { type: 'string' } }, required: ['success'] },
   triggers: [
-    { kind: 'user', phrase_examples: ['Track my bills', 'Review upcoming payments', 'Stage a transfer', 'Check portfolio drift', 'Flag unusual fees'] },
-    { kind: 'schedule', cadence: 'Monthly net worth audit' },
-    { kind: 'schedule', cadence: 'Tax estimation reminders' },
-    { kind: 'event', on: 'Portfolio drift exceeds variance target' },
-    { kind: 'event', on: 'New bank fee detected' },
-    { kind: 'event', on: 'Bill due date approaching' },
+    { kind: 'user', phrase_examples: ['Track my bills', 'Review upcoming payments', 'Stage a transfer', 'Check portfolio drift', 'Flag unusual fees'] }
   ],
 });
 

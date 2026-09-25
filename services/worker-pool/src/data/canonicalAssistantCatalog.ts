@@ -2,6 +2,46 @@ import { AssistantDefinition } from '@stage7-nextgen/shared';
 
 const SYSTEM_TENANT = 'system';
 
+
+interface KnowledgeEntry {
+  id: string;
+  title: string;
+  content: string;
+  source?: string;
+  tags?: string[];
+  domain?: string;
+}
+
+function kb(category: string): KnowledgeEntry[] {
+  const cap = category.charAt(0).toUpperCase() + category.slice(1);
+  return [
+    {
+      id: `${category}-domain-knowledge`,
+      title: `${cap} Domain Knowledge`,
+      content: `Domain knowledge base for ${cap} operations, frameworks, terminology, and best practices.`,
+      source: 'design-doc',
+      tags: [category, 'knowledge-base', 'domain'],
+      domain: category,
+    },
+    {
+      id: `${category}-safety-guidelines`,
+      title: `${cap} Safety & Honesty Guidelines`,
+      content: 'Always report not-connected when data is unavailable. Never fabricate results. Recommend professional review for material decisions. Flag assumptions explicitly.',
+      source: 'internal-docs',
+      tags: [category, 'safety', 'guidelines'],
+      domain: category,
+    },
+    {
+      id: `${category}-operational-playbooks`,
+      title: `${cap} Operational Playbooks`,
+      content: `Standard operating procedures and workflow playbooks for ${cap} tasks. Includes error handling, dry-run patterns, and escalation paths.`,
+      source: 'best-practices',
+      tags: [category, 'playbooks', 'operations'],
+      domain: category,
+    },
+  ];
+}
+
 function definition(
   id: string,
   name: string,
@@ -16,7 +56,7 @@ function definition(
     name,
     description,
     systemPrompt,
-    knowledge: [],
+    knowledge: kb(category),
     transactionGuidance: [],
     tools: toolIds.map((toolId) => ({
       name: toolId,
