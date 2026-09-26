@@ -39,7 +39,7 @@ if (!listings.length && (!discovery || !discovery.success) && (!rank || !rank.su
   return;
 }
 
-const ranked = listings.length ? listings : ((rank && rank.success && rank.data && rank.data.top) || (discovery && discovery.success && discovery.data && discovery.data.ranked) || []);
+const ranked = listings.length ? listings : ((rank && rank.success && rank.data && rank.data.ranked) || (discovery && discovery.success && discovery.data && discovery.data.listings) || []);
 const marketSignals = { listingsUsed: listings.length ? 'stored-from-job-discovery' : 'live-lookup', discovery: discovery && discovery.success ? discovery.data : null, rank: rank && rank.success ? rank.data : null };
 const recommendation = {
   topRoles: ranked.slice(0, 5),

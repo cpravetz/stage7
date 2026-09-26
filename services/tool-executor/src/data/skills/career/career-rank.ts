@@ -54,6 +54,11 @@ function scoreJob(job) {
   score += kwScore * weights.keywords;
   if (kwScore > 0.5) rationale.push('Strong keyword overlap');
   return {
+    // Preserve every field from the incoming listing. Downstream skills store these
+    // ranked rows as the workspace listings and need applyUrl, location, salary and
+    // description; a lean row here would strip them.
+    ...job,
+    id: job.id,
     jobId: job.id,
     title: job.title,
     company: job.company,

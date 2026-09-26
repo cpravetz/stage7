@@ -17,28 +17,28 @@ if (!targetRoles.length) {
 }
 const application = await __execute_tool('career-application-execution', { targetRoles, dryRun: input.dryRun !== false, connectedPortalTool: input.applyAt, coverLetters: input.coverLetters });
 if (!application || application.success === false || application.error) {
-console.log(JSON.stringify({ success: false, status: 'not-connected', error: application && application.error ? application.error : 'Not connected: application execution returned no result; ensure a profile, ranked listings, and a portal connector are available' }));
-return;
+  console.log(JSON.stringify({ success: false, error: application && application.error ? application.error : 'Application execution failed' }));
+  return;
 }
 const applicationData = application.data && typeof application.data === 'object' ? application.data : application;
 const applications = Array.isArray(applicationData.applications) ? applicationData.applications : [];
 if (!applications.length) {
-console.log(JSON.stringify({ success: false, status: 'not-connected', error: 'Not connected: no applications were selected or prepared for the recruiter workflow' }));
-return;
+  console.log(JSON.stringify({ success: true, data: { applications: [], outreach: null, note: 'No applications were selected or prepared for the recruiter workflow', delegatedTo: ['career-application-execution', 'career-networking-outreach'], generatedAt: new Date().toISOString() } }));
+  return;
 }
 if (!input.targetCompany || !input.relationshipStage) {
-console.log(JSON.stringify({ success: false, status: 'not-connected', error: 'Not connected: recruiter outreach requires targetCompany and relationshipStage' }));
-return;
+  console.log(JSON.stringify({ success: false, error: 'Recruiter outreach requires targetCompany and relationshipStage' }));
+  return;
 }
 const outreach = await __execute_tool('career-networking-outreach', { targetCompany: input.targetCompany, targetPerson: input.targetPerson, relationshipStage: input.relationshipStage, channel: input.channel, connectedSendTool: input.connectedSendTool });
 if (!outreach || outreach.success === false || outreach.error) {
-console.log(JSON.stringify({ success: false, status: 'not-connected', error: outreach && outreach.error ? outreach.error : 'Not connected: networking outreach could not be generated; provide target company and relationship stage' }));
-return;
+  console.log(JSON.stringify({ success: false, error: outreach && outreach.error ? outreach.error : 'Networking outreach could not be generated; provide target company and relationship stage' }));
+  return;
 }
 const outreachData = outreach.data && typeof outreach.data === 'object' ? outreach.data : outreach;
 if (!outreachData.summary && !outreachData.message && !outreachData.draft && !outreachData.options && !outreachData.rationale) {
-console.log(JSON.stringify({ success: false, status: 'not-connected', error: 'Not connected: networking outreach returned no usable draft' }));
-return;
+  console.log(JSON.stringify({ success: false, error: 'Networking outreach returned no usable draft' }));
+  return;
 }
 console.log(JSON.stringify({ success: true, data: { applications, outreach: outreachData, delegatedTo: ['career-application-execution', 'career-networking-outreach'], generatedAt: new Date().toISOString() } }));
 })();`;
@@ -80,16 +80,17 @@ const PORTAL_RECRUITER_WORKFLOW = createCodeSkill({
 id: 'career-portal-recruiter-workflow',
 name: 'Application + Recruiter Outreach',
 description: 'Drafts a recruiter outreach follow-up for a target company after an application is prepared, while keeping the application flow separate. Delegates to career-application-execution and career-networking-outreach when available.',
-manifest: {
-language: 'javascript',
-entrypoint: 'index.js',
-sourceCode: PORTAL_RECRUITER_WORKFLOW_SOURCE,
-lowerOrderTools: ['career-application-execution', 'career-networking-outreach'],
-configSchema: CAREER_WRAPPER_CONFIG_SCHEMA,
-		actionLabel: 'Draft outreach follow-up',
-},
-inputSchema: PORTAL_RECRUITER_WORKFLOW_INPUT,
-outputSchema: PORTAL_RECRUITER_WORKFLOW_OUTPUT,
+  manifest: {
+    language: 'javascript',
+    entrypoint: 'index.js',
+    sourceCode: PORTAL_RECRUITER_WORKFLOW_SOURCE,
+    lowerOrderTools: ['career-application-execution', 'career-networking-outreach'],
+    configSchema: CAREER_WRAPPER_CONFIG_SCHEMA,
+    actionLabel: 'Draft outreach follow-up',
+  },
+  inputSchema: PORTAL_RECRUITER_WORKFLOW_INPUT,
+  outputSchema: PORTAL_RECRUITER_WORKFLOW_OUTPUT,
+  confirmBeforeSend: true,
 triggers: [
 { kind: 'user', phrase_examples: ['Submit my applications', 'Draft recruiter outreach', 'Run my portal workflow'] },
 ],

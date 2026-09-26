@@ -40,6 +40,7 @@ export interface BrainLogEntry {
   error?: string;
   tokensUsed?: number;
   estimatedCost?: number;
+  modelIssue?: boolean;
 }
 
 const MAX_LOG_ENTRIES = 200;
@@ -70,6 +71,10 @@ export class BrainService {
   private brainLog: BrainLogEntry[] = [];
   private llmSettingsCache: { freeModelsOnly: boolean; fetchedAt: number } | null = null;
   private LLMS_SETTINGS_TTL_MS = 30000; // 30 seconds
+
+  // Track recently successful model+provider combinations to prioritize them
+  private recentSuccesses: Map<string, number> = new Map();
+  private readonly RECENT_SUCCESS_TTL_MS = 300000; // 5 minutes
 
   constructor() {
     this.providers = buildProviderRegistry();
@@ -117,6 +122,31 @@ export class BrainService {
     return this.router.listModels();
   }
 
+  private prioritizeRecentSuccesses(candidates: ModelDefinition[]): ModelDefinition[] {
+    const now = Date.now();
+    const recent = candidates
+      .filter((m) => {
+        const key = `${m.provider}:${m.id}`;
+        const ts = this.recentSuccesses.get(key);
+        return ts !== undefined && (now - ts) < this.RECENT_SUCCESS_TTL_MS;
+      })
+      .sort((a, b) => {
+        const ka = `${a.provider}:${a.id}`;
+        const kb = `${b.provider}:${b.id}`;
+        return (this.recentSuccesses.get(kb) || 0) - (this.recentSuccesses.get(ka) || 0);
+      });
+
+    if (recent.length === 0) return candidates;
+
+    // Move recently successful models to the front, keep the rest after
+    const remaining = candidates.filter((m) => !recent.includes(m));
+    return [...recent, ...remaining];
+  }
+
+  private recordSuccess(provider: string, model: string) {
+    this.recentSuccesses.set(`${provider}:${model}`, Date.now());
+  }
+
   async complete(prompt: string, options: CompletionOptions = {}): Promise<CompletionResult> {
     const startTime = Date.now();
     const configuredDeadline = Number(process.env.BRAIN_COMPLETION_DEADLINE_MS);
@@ -158,6 +188,9 @@ export class BrainService {
       freeOnly: settings?.freeModelsOnly,
     });
 
+    // Reorder candidates to prioritize recently successful models
+    candidates = this.prioritizeRecentSuccesses(candidates);
+
     // If no candidates found and we were preferring free models, retry without that constraint.
     if ((!candidates || candidates.length === 0) && settings?.freeModelsOnly) {
       logger.warn({ task: prompt.slice(0, 80) }, 'No free-model candidates found; retrying with paid models allowed');
@@ -172,8 +205,8 @@ export class BrainService {
     }
 
     if (!candidates || candidates.length === 0) {
-      // As a last-resort fallback, allow any free chat-capable model from the registry.
-      const fallback = this.router.listModels().filter((m) => (m.costPer1kTokens === 0) && (m.capabilities.includes('chat') || m.capabilities.includes('creative')));
+      // As a last-resort fallback, allow any free chat-capable model from free providers.
+      const fallback = this.router.listModels().filter((m) => (m.costPer1kTokens === 0 || ['openrouter', 'openwebui', 'local', 'huggingface'].includes(m.provider)) && (m.capabilities.includes('chat') || m.capabilities.includes('creative')));
       if (fallback.length > 0) {
         logger.warn({ task: prompt.slice(0, 80), fallbackCount: fallback.length }, 'Using fallback free chat-capable models');
         candidates = fallback;
@@ -254,6 +287,9 @@ export class BrainService {
             estimatedCost,
           });
 
+          // Record this provider/model as recently successful for prioritization
+          this.recordSuccess(result.provider, result.model);
+
           await this.cache.set(cacheKey, result);
 
           // if missionId provided, append a cost_estimate event to artifacts persistence
@@ -281,11 +317,16 @@ export class BrainService {
             logger.warn({ err: e instanceof Error ? e.message : String(e) }, 'Error while attempting to publish cost event');
           }
           return result;
-        } catch (err) {
+        }         catch (err) {
           lastErr = err;
           const errMsg = err instanceof Error ? err.message : String(err);
           logger.warn({ provider: provider.id, model: candidate.id, attempt, err: errMsg }, 'Candidate attempt failed');
 
+          // Model-specific errors: the specific model is invalid or misconfigured,
+          // but other models on this provider may still work. Do NOT trip the
+          // provider circuit breaker — just skip to the next candidate model.
+          const isModelSpecific = /is not found for API version|model .* does not exist|model .* not found/i.test(errMsg)
+            || /\b(404)\b/.test(errMsg);
           // classify error: provider-key / quota issues vs transient vs rate-limit
           const isProviderFatal = /key limit exceeded|limit exceeded|quota exceeded|invalid api key|incorrect api key|credit balance is too low|authentication|unauthorized/i.test(errMsg)
             || /\b(401|403)\b/.test(errMsg);
@@ -316,8 +357,25 @@ export class BrainService {
               success: false,
               durationMs: Date.now() - startTime,
               error: errMsg,
+              modelIssue: false,
             });
             // break out to next candidate
+            break;
+          }
+          if (isModelSpecific) {
+            // Model-specific error (e.g. 404 for a specific model). Skip this model
+            // but keep the provider active so other models on this provider can still be tried.
+            logger.warn({ provider: provider.id, model: candidate.id, err: errMsg }, 'Model-specific error - skipping to next candidate');
+            this.addLog({
+              type: 'error',
+              model: candidate.id,
+              provider: provider.id,
+              promptPreview,
+              success: false,
+              durationMs: Date.now() - startTime,
+              error: errMsg,
+              modelIssue: true,
+            });
             break;
           }
           if (isRateLimit) {
@@ -362,7 +420,7 @@ export class BrainService {
 
     // As a last-resort, attempt one direct call to any free chat-capable model
     try {
-      const fallbackModels = this.router.listModels().filter((m) => (m.costPer1kTokens === 0) && (m.capabilities.includes('chat') || m.capabilities.includes('creative')));
+      const fallbackModels = this.router.listModels().filter((m) => (m.costPer1kTokens === 0 || ['openrouter', 'openwebui', 'local', 'huggingface'].includes(m.provider)) && (m.capabilities.includes('chat') || m.capabilities.includes('creative')));
       if (fallbackModels.length > 0) {
         const candidate = fallbackModels[0];
         const provider = this.providers.find((p) => p.id === candidate.provider);

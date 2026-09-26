@@ -283,7 +283,9 @@ router.get(
     const { sourceId } = req.params
     const workspaceId = req.query.workspaceId as string | undefined
     const careerHome = process.env.CAREER_HOME || '/tmp/career'
-    const listingsPath = join(careerHome, 'applications', 'listings.json')
+    // Job discovery writes to listings/default.json. The previous path
+    // (applications/listings.json) never existed, so this endpoint always returned empty.
+    const listingsPath = join(careerHome, 'listings', 'default.json')
 
     let listings: unknown[]
     try {

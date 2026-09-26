@@ -601,7 +601,7 @@ return this.executeOrRequestCredentials(pending.tool, pending.input);
   }
 
   private extractContext(input: Record<string, unknown>): string | null {
-    const contextKeys = ['patient', 'patientId', 'targetRole', 'targetRoles', 'jobId', 'jobIds', 'jobTitle', 'campaign', 'campaignId', 'ticket', 'ticketId', 'ticket', 'case', 'matter', 'lead', 'opportunity', 'event', 'eventId', 'object', 'context', 'operation'];
+    const contextKeys = ['patient', 'patientId', 'jobId', 'campaign', 'campaignId', 'ticket', 'ticketId', 'case', 'matter', 'lead', 'opportunity', 'event', 'eventId'];
     for (const key of contextKeys) {
       if (input[key] !== undefined && input[key] !== null && input[key] !== '') {
         const val = input[key];
@@ -973,10 +973,10 @@ let healingAttempts = 0;
 let lastError: string | undefined;
 
 while (healingAttempts <= MAX_HEALING_ATTEMPTS) {
-const result = await this.codeExecutor.execute(
-{ language: language as 'javascript' | 'typescript' | 'python', code: codeToRun, input, executorCallback: this.nestedExecutorCallback() },
-{ resolved, sources } as CodeExecutorCredentials,
-);
+  const result = await this.codeExecutor.execute(
+        { language: language as 'javascript' | 'typescript' | 'python', code: codeToRun, input, executorCallback: this.nestedExecutorCallback(), timeoutMs: (manifest && typeof manifest === 'object' && (manifest as Record<string, unknown>).timeoutMs) as number | undefined },
+        { resolved, sources } as CodeExecutorCredentials,
+      );
 
 if (result.success) {
 if (healingAttempts > 0 && manifest && typeof manifest === 'object') {
@@ -1364,10 +1364,10 @@ try {
 const deployed = await this.pluginGenerator.deploy(generated.tool);
 if (deployed.success) {
 logger.info({ toolId: generated.tool.id, deployPath: deployed.deployPath }, 'Auto-generated plugin deployed');
-const retryResult = await this.codeExecutor.execute(
-{ language: 'javascript', code: (generated.tool.manifest as Record<string, unknown>)?.sourceCode as string || '', input, executorCallback: this.nestedExecutorCallback() },
-{ resolved, sources } as CodeExecutorCredentials,
-);
+  const retryResult = await this.codeExecutor.execute(
+        { language: 'javascript', code: (generated.tool.manifest as Record<string, unknown>)?.sourceCode as string || '', input, executorCallback: this.nestedExecutorCallback(), timeoutMs: (generated.tool.manifest as Record<string, unknown>) && (generated.tool.manifest as Record<string, unknown>).timeoutMs as number | undefined },
+        { resolved, sources } as CodeExecutorCredentials,
+      );
 if (retryResult.success) {
 return {
 output: retryResult.output,

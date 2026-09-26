@@ -3,6 +3,7 @@ import { OpenAICompatibleProvider } from './OpenAICompatibleProvider';
 import { AnthropicProvider } from './AnthropicProvider';
 import { GeminiProvider } from './GeminiProvider';
 import { CloudflareProvider } from './CloudflareProvider';
+import { buildCustomProvidersFromEnv } from './customProviders';
 
 export function buildProviderRegistry(): LLMProvider[] {
   const providers: LLMProvider[] = [];
@@ -160,6 +161,12 @@ export function buildProviderRegistry(): LLMProvider[] {
 
   if (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY) {
     providers.push(new GeminiProvider());
+  }
+
+  const existingIds = new Set(providers.map((p) => p.id));
+  const customProviders = buildCustomProvidersFromEnv(existingIds);
+  if (customProviders.length > 0) {
+    providers.push(...customProviders);
   }
 
   return providers;

@@ -24,14 +24,14 @@ const result = await __execute_tool('career-application-execution', {
   customCoverLetter: input.customCoverLetterFile || input.customCoverLetter,
 });
 if (!result || result.success === false || result.error) {
-console.log(JSON.stringify({ success: false, status: 'not-connected', error: result && result.error ? result.error : 'Not connected: application execution returned no result; ensure a profile and targetRoles are available' }));
-return;
+  console.log(JSON.stringify({ success: false, error: result && result.error ? result.error : 'Application execution failed' }));
+  return;
 }
 const data = result.data && typeof result.data === 'object' ? result.data : result;
 const applications = Array.isArray(data.applications) ? data.applications : [];
 if (!applications.length) {
-console.log(JSON.stringify({ success: false, status: 'not-connected', error: 'Not connected: no applications were submitted; provide targetRoles or select specific roles to apply to' }));
-return;
+  console.log(JSON.stringify({ success: true, data: { applications: [], errors: data.errors || [], dryRun: data.dryRun, trackingPath: data.trackingPath, note: 'No roles were submitted. Add targetRoles or select specific roles from Job Discovery, then retry.', delegatedTo: 'career-application-execution', orchestratedAt: new Date().toISOString() } }));
+  return;
 }
 console.log(JSON.stringify({ success: true, data: { applications, errors: data.errors || [], dryRun: data.dryRun, trackingPath: data.trackingPath, delegatedTo: 'career-application-execution', orchestratedAt: new Date().toISOString() } }));
 })();`;

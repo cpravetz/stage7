@@ -17,7 +17,7 @@ const coverLetters = input.coverLetters || [];
 const customResume = input.customResume || '';
 const customCoverLetter = input.customCoverLetter || '';
 
-const listingsPath = path.join(baseDir, 'applications', 'listings.json');
+const listingsPath = baseDir + '/listings/default.json';
 const storedListings = fs.existsSync(listingsPath) ? JSON.parse(fs.readFileSync(listingsPath, 'utf8')) : [];
 const trackingPath = path.join(baseDir, 'applications', 'tracking.json');
 const tracking = fs.existsSync(trackingPath) ? JSON.parse(fs.readFileSync(trackingPath, 'utf8')) : [];
@@ -57,7 +57,7 @@ fs.mkdirSync(path.dirname(trackingPath), { recursive: true });
 fs.writeFileSync(trackingPath, JSON.stringify(tracking, null, 2));
 
 console.log(JSON.stringify({
-  success: errors.length === 0,
+  success: true,
   data: { applications, errors, submitted: applications.filter((a) => a.status === 'submitted').length, dryRun, bulk: false, trackingPath, generatedAt: new Date().toISOString() },
 }));
 })();`;

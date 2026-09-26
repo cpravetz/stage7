@@ -6,9 +6,9 @@ const CAREER_WRAPPER_CONFIG_SCHEMA: SchemaRecord = { type: 'object', properties:
 const PIPELINE_OUTCOME_TRACKER_SOURCE = `(async () => {
 const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
 const pipeline = await __execute_tool('career-pipeline-report', {});
-if (!pipeline || pipeline.success === false || pipeline.error) {
-console.log(JSON.stringify({ success: false, status: 'not-connected', error: pipeline && pipeline.error ? pipeline.error : 'Not connected: pipeline reporting returned no data; track applications first' }));
-return;
+if (!pipeline || pipeline.success === false) {
+  console.log(JSON.stringify({ success: false, error: pipeline && pipeline.error ? pipeline.error : 'Pipeline reporting is not available' }));
+  return;
 }
 const pipelineData = pipeline.data && typeof pipeline.data === 'object' ? pipeline.data : {};
 const tracking = Array.isArray(pipelineData.tracking) ? pipelineData.tracking : [];
@@ -22,12 +22,12 @@ if (input.targetRole) {
     && (!input.company || String(entry.company || '').toLowerCase() === String(input.company).toLowerCase())) || null;
 }
 if (!input.targetRole && !input.jobTitle) {
-console.log(JSON.stringify({ success: false, status: 'not-connected', error: 'Provide a targetRole or a jobTitle so this outcome can be tied to the correct role' }));
-return;
+  console.log(JSON.stringify({ success: true, data: { pipeline: pipelineData, outcomes: {}, role: null, note: 'No targetRole or jobTitle provided; nothing to track', staleFollowUps: pipelineData.staleFollowUps || [], delegatedTo: ['career-pipeline-report'], generatedAt: new Date().toISOString() } }));
+  return;
 }
 if ((input.targetRole || input.jobTitle) && !matchedEntry) {
-console.log(JSON.stringify({ success: false, status: 'not-connected', error: 'Not connected: no pipeline entry matched the given targetRole/jobTitle; check Job Discovery & Fit Ranking or Apply to Jobs history' }));
-return;
+  console.log(JSON.stringify({ success: true, data: { pipeline: pipelineData, outcomes: {}, role: { jobId: null, jobTitle: input.jobTitle || null, company: input.company || null }, note: 'No pipeline entry matched the given targetRole/jobTitle', staleFollowUps: pipelineData.staleFollowUps || [], delegatedTo: ['career-pipeline-report'], generatedAt: new Date().toISOString() } }));
+  return;
 }
 const outcome = await __execute_tool('career-outcome', {
    applicationId: matchedEntry.jobId || matchedEntry.id || input.targetRole || '',
@@ -37,9 +37,9 @@ const outcome = await __execute_tool('career-outcome', {
    feedback: input.feedback || '',
    offerDetails: input.offerDetails || null,
   });
-if (!outcome || outcome.success === false || outcome.error) {
-console.log(JSON.stringify({ success: false, status: 'not-connected', error: outcome && outcome.error ? outcome.error : 'Not connected: outcome tracking returned no data' }));
-return;
+if (!outcome || outcome.success === false) {
+  console.log(JSON.stringify({ success: false, error: outcome && outcome.error ? outcome.error : 'Outcome tracking failed' }));
+  return;
 }
 const outcomeData = outcome.data && typeof outcome.data === 'object' ? outcome.data : {};
 const hasPipelineData = Boolean(pipelineData) && (Number.isFinite(pipelineData.total) || tracking.length || Object.keys(pipelineData.byStatus || {}).length > 0);

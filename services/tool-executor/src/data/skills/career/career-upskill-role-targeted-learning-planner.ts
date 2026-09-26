@@ -10,18 +10,18 @@ const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
 const targetRole = input.jobTitle || input.targetRole || '';
 const jobPosting = input.jobPosting || '';
 if (!targetRole && !jobPosting) {
-console.log(JSON.stringify({ success: false, status: 'not-connected', error: 'Provide a jobTitle or paste a jobPosting to define the role you want to prepare for' }));
-return;
+  console.log(JSON.stringify({ success: false, error: 'Provide a jobTitle or paste a jobPosting to define the role you want to prepare for' }));
+  return;
 }
 const advisory = await __execute_tool('career-advisory', { question: 'resume_strength', targetRole, jobDescription: jobPosting || ('Create a targeted upskilling plan for this role: ' + targetRole) });
 if (!advisory || advisory.success === false || advisory.error) {
-console.log(JSON.stringify({ success: false, status: 'not-connected', error: advisory && advisory.error ? advisory.error : 'Not connected: career advisory could not produce learning recommendations' }));
-return;
+  console.log(JSON.stringify({ success: false, error: advisory && advisory.error ? advisory.error : 'Career advisory could not produce learning recommendations' }));
+  return;
 }
 const advisoryData = advisory.data && typeof advisory.data === 'object' ? advisory.data : advisory;
 if (!advisoryData.summary && !advisoryData.recommendations && !advisoryData.options && !advisoryData.rationale) {
-console.log(JSON.stringify({ success: false, status: 'not-connected', error: 'Not connected: career advisory returned no usable recommendations' }));
-return;
+  console.log(JSON.stringify({ success: false, error: 'Career advisory returned no usable recommendations' }));
+  return;
 }
 const targetSkills = Array.isArray(input.targetSkills) ? input.targetSkills.map((skill) => String(skill).toLowerCase()) : [];
 const postingText = String(jobPosting || targetRole).toLowerCase();
@@ -63,20 +63,21 @@ const UPSKILL_ROLE_TARGETED_LEARNING_PLANNER = createCodeSkill({
 id: 'career-upskill-role-targeted-learning-planner',
 name: 'Upskill & Learning Planner',
 description: 'Recommends a concise upskilling plan and curated learning resources for a specific job title or pasted job posting. Delegates to career-advisory. Reports not-connected when no usable recommendations come back.',
-manifest: {
-language: 'javascript',
-entrypoint: 'index.js',
-sourceCode: UPSKILL_ROLE_TARGETED_LEARNING_PLANNER_SOURCE,
-configSchema: CAREER_WRAPPER_CONFIG_SCHEMA,
-actionLabel: 'Generate upskill plan',
-lowerOrderTools: ['career-advisory'],
-},
-inputSchema: UPSKILL_ROLE_TARGETED_LEARNING_PLANNER_INPUT,
-outputSchema: UPSKILL_ROLE_TARGETED_LEARNING_PLANNER_OUTPUT,
-triggers: [
-{ kind: 'user', phrase_examples: ['Plan my upskilling', 'What should I learn for this role', 'Close my skill gaps'] },
-],
-isSkill: true,
+  manifest: {
+    language: 'javascript',
+    entrypoint: 'index.js',
+    sourceCode: UPSKILL_ROLE_TARGETED_LEARNING_PLANNER_SOURCE,
+    configSchema: CAREER_WRAPPER_CONFIG_SCHEMA,
+    lowerOrderTools: ['career-advisory'],
+    actionLabel: 'Generate upskill plan',
+    timeoutMs: 60000,
+  },
+  inputSchema: UPSKILL_ROLE_TARGETED_LEARNING_PLANNER_INPUT,
+  outputSchema: UPSKILL_ROLE_TARGETED_LEARNING_PLANNER_OUTPUT,
+  triggers: [
+    { kind: 'user', phrase_examples: ['Plan my upskilling', 'What should I learn for this role', 'Close my skill gaps'] },
+  ],
+  isSkill: true,
 });
 UPSKILL_ROLE_TARGETED_LEARNING_PLANNER.configSchema = UPSKILL_ROLE_TARGETED_LEARNING_PLANNER.manifest.configSchema as SchemaRecord;
 

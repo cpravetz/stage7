@@ -14,6 +14,10 @@ export const FIELD_LABEL_MAP: Record<string, string> = {
   confirmation: 'Approve & send',
 };
 
+export const REFERENCE_SOURCE_LABELS: Record<string, string> = {
+  'career-job-discovery-fit-ranking': 'Job Discovery & Fit Ranking',
+};
+
 export const sfGetSchemaProperties = (schema?: SchemaRecord): Record<string, SchemaRecord> => {
   const properties = schema?.properties;
   return properties && typeof properties === 'object' && !Array.isArray(properties)
@@ -44,6 +48,20 @@ export const sfIsReferenceSchema = (schema?: SchemaRecord): boolean => (
 export const sfGetReferenceSource = (schema?: SchemaRecord): string => (
   String(schema?.['x-referenceSource'] || '')
 );
+
+export const sfGetReferenceSourceLabel = (schema?: SchemaRecord): string => {
+  const sourceId = String(schema?.['x-referenceSource'] || '');
+  if (schema?.['x-referenceLabel']) {
+    return String(schema['x-referenceLabel']);
+  }
+  if (sourceId && REFERENCE_SOURCE_LABELS[sourceId]) {
+    return REFERENCE_SOURCE_LABELS[sourceId];
+  }
+  if (sourceId) {
+    return sfHumanizeKey(sourceId.replace(/-/g, '_'));
+  }
+  return '';
+};
 
 export const sfGetReferenceLabel = (key: string, schema?: SchemaRecord): string => (
   String(schema?.['x-referenceLabel'] || schema?.title || schema?.label || key)
@@ -161,8 +179,9 @@ export const SchemaFields = ({ schema, values, onChange, namePrefix = 'skill-fie
           );
         } else if (sfIsReferenceSchema(fieldSchema)) {
           const referenceSource = sfGetReferenceSource(fieldSchema);
-          const referenceLoadingMessage = referenceSource
-            ? `Loading references from ${referenceSource}...`
+          const referenceSourceLabel = sfGetReferenceSourceLabel(fieldSchema);
+          const referenceLoadingMessage = referenceSourceLabel
+            ? `Loading references from ${referenceSourceLabel}...`
             : 'Loading references...';
           if (fieldSchema.type === 'array') {
             const arrayValue = Array.isArray(value) ? value : [];

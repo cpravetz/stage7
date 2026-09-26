@@ -98,7 +98,7 @@ export class ModelRouter {
       if (options.maxTokens && m.maxTokens < options.maxTokens) return false;
       if (options.budget !== undefined && m.costPer1kTokens > options.budget) return false;
       if (options.freeOnly) {
-        if (!(m.costPer1kTokens === 0 || ['openwebui', 'local', 'huggingface'].includes(m.provider))) return false;
+        if (!(m.costPer1kTokens === 0 || ['openrouter', 'openwebui', 'local', 'huggingface'].includes(m.provider))) return false;
       }
       return requiredCaps.every((cap) => m.capabilities.includes(cap));
     });
@@ -109,7 +109,7 @@ export class ModelRouter {
         if (options.maxTokens && m.maxTokens < options.maxTokens) return false;
         if (options.budget !== undefined && m.costPer1kTokens > options.budget) return false;
         if (options.freeOnly) {
-          if (!(m.costPer1kTokens === 0 || ['openwebui', 'local', 'huggingface'].includes(m.provider))) return false;
+          if (!(m.costPer1kTokens === 0 || ['openrouter', 'openwebui', 'local', 'huggingface'].includes(m.provider))) return false;
         }
         return requiredCaps.length === 0 || requiredCaps.some((cap) => m.capabilities.includes(cap));
       });
@@ -151,7 +151,7 @@ export class ModelRouter {
       if (options.maxTokens && m.maxTokens < options.maxTokens) return false;
       if (options.budget !== undefined && m.costPer1kTokens > options.budget) return false;
       if (options.freeOnly) {
-        if (!(m.costPer1kTokens === 0 || ['openwebui', 'local', 'huggingface'].includes(m.provider))) return false;
+        if (!(m.costPer1kTokens === 0 || ['openrouter', 'openwebui', 'local', 'huggingface'].includes(m.provider))) return false;
       }
       return requiredCaps.every((cap) => m.capabilities.includes(cap));
     });
@@ -162,7 +162,7 @@ export class ModelRouter {
         if (options.maxTokens && m.maxTokens < options.maxTokens) return false;
         if (options.budget !== undefined && m.costPer1kTokens > options.budget) return false;
         if (options.freeOnly) {
-          if (!(m.costPer1kTokens === 0 || ['openwebui', 'local', 'huggingface'].includes(m.provider))) return false;
+          if (!(m.costPer1kTokens === 0 || ['openrouter', 'openwebui', 'local', 'huggingface'].includes(m.provider))) return false;
         }
         return requiredCaps.length === 0 || requiredCaps.some((cap) => m.capabilities.includes(cap));
       });

@@ -18,7 +18,7 @@ if (!targetRoles.length) {
   // Prepare application materials
   const prepare = await __execute_tool('career-profile-intake', {});
   if (!prepare || !prepare.success) {
-    console.log(JSON.stringify({ success: false, status: 'not-connected', error: prepare && prepare.error ? prepare.error : 'Not connected: profile intake required' }));
+    console.log(JSON.stringify({ success: false, error: prepare && prepare.error ? prepare.error : 'Profile intake required' }));
     return;
   }
   // Draft outreach / resume customizations
@@ -26,7 +26,7 @@ if (!targetRoles.length) {
   const applyRes = await __execute_tool('career-application-execution', { targetRoles, dryRun: input.dryRun !== false });
 
 if ((!outreachDraft || !outreachDraft.success) && (!applyRes || !applyRes.success)) {
-  console.log(JSON.stringify({ success: false, status: 'not-connected', error: 'Not connected: neither outreach drafting nor application execution is available' }));
+  console.log(JSON.stringify({ success: false, error: 'Neither outreach drafting nor application execution is available' }));
   return;
 }
 

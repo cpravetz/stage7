@@ -67,9 +67,9 @@ describe('Behavioral Tests - Cross-Object Handoff Enforcement', () => {
     expect(result.error).toContain('Cross-object handoff');
   });
 
-  it('rejects cross-object handoff when switching from object to different object', async () => {
-    await executor.execute(readTool, { object: 'account-1' });
-    const result = await executor.execute(readTool, { object: 'account-2' });
+  it('rejects cross-object handoff when switching from patient to campaign', async () => {
+    await executor.execute(readTool, { patient: { id: 'patient-1', name: 'John' } });
+    const result = await executor.execute(readTool, { campaign: { id: 'campaign-1', name: 'Summer Campaign' } });
     expect(result.status).toBe('failed');
     expect(result.error).toContain('Cross-object handoff');
   });

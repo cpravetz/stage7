@@ -17,12 +17,12 @@ if (!jobId) {
 }
 const result = await __execute_tool('career-interview-prep', { jobId, stage: input.stage, targetRole: input.targetRole, company: input.company });
 if (!result || result.success === false || result.error) {
-console.log(JSON.stringify({ success: false, status: 'not-connected', error: result && result.error ? result.error : 'Not connected: interview preparation could not be generated; ensure a profile and ranked job exist' }));
+console.log(JSON.stringify({ success: false, error: result && result.error ? result.error : 'Interview preparation could not be generated; ensure a profile and ranked job exist' }));
 return;
 }
 const practiceData = result.data && typeof result.data === 'object' ? result.data : result;
 if (!practiceData || (!practiceData.summary && !practiceData.questions && !practiceData.answers && !practiceData.script && !practiceData.rationale)) {
-console.log(JSON.stringify({ success: false, status: 'not-connected', error: 'Not connected: interview preparation returned no usable practice data' }));
+console.log(JSON.stringify({ success: false, error: 'Interview preparation returned no usable practice data' }));
 return;
 }
 console.log(JSON.stringify({ success: true, data: { interviewPrep: practiceData, delegatedTo: 'career-interview-prep', mockSessionId: 'mock_' + Date.now(), generatedAt: new Date().toISOString() } }));
@@ -60,14 +60,15 @@ const INTERVIEW_PRACTICE_MOCK_INTERVIEWER = createCodeSkill({
 id: 'career-interview-practice-mock-interviewer',
 name: 'Interview Practice & Mock Interviewer',
 description: 'Runs interactive mock interviews using role/company battlecards, records performance, and produces actionable coaching notes. Delegates to career-interview-prep. Reports not-connected when no interview context is available.',
-manifest: {
-language: 'javascript',
-entrypoint: 'index.js',
-sourceCode: INTERVIEW_PRACTICE_MOCK_INTERVIEWER_SOURCE,
-configSchema: CAREER_WRAPPER_CONFIG_SCHEMA,
-lowerOrderTools: ['career-interview-prep'],
- actionLabel: 'Start mock interview',
-},
+  manifest: {
+    language: 'javascript',
+    entrypoint: 'index.js',
+    sourceCode: INTERVIEW_PRACTICE_MOCK_INTERVIEWER_SOURCE,
+    configSchema: CAREER_WRAPPER_CONFIG_SCHEMA,
+    lowerOrderTools: ['career-interview-prep'],
+    actionLabel: 'Start mock interview',
+    timeoutMs: 60000,
+  },
 inputSchema: INTERVIEW_PRACTICE_MOCK_INTERVIEWER_INPUT,
 outputSchema: INTERVIEW_PRACTICE_MOCK_INTERVIEWER_OUTPUT,
 triggers: [

@@ -12,7 +12,7 @@ const prep = await __execute_tool('career-interview-prep', { jobId, targetRole: 
 const advisory = await __execute_tool('career-advisory', { question: 'Generate compensation negotiation points for this role', targetRole: input.targetRole, company: input.company });
 
 if ((!prep || !prep.success) && (!advisory || !advisory.success)) {
-  console.log(JSON.stringify({ success: false, status: 'not-connected', error: 'Not connected: interview prep and negotiation guidance are unavailable; ensure connectors or dependencies are configured' }));
+  console.log(JSON.stringify({ success: false, error: 'Interview prep and negotiation guidance are unavailable; ensure the assistant model is configured and a profile with target role is available' }));
   return;
 }
 
@@ -56,12 +56,13 @@ const INTERVIEW_COMPENSATION_BATTLECARD = createCodeSkill({
     lowerOrderTools: ['career-interview-prep', 'career-advisory'],
     configSchema: CAREER_WRAPPER_CONFIG_SCHEMA,
     actionLabel: 'Create interview briefing',
+    timeoutMs: 60000,
   },
   inputSchema: INTERVIEW_COMPENSATION_BATTLECARD_INPUT,
   outputSchema: INTERVIEW_COMPENSATION_BATTLECARD_OUTPUT,
   triggers: [
     { kind: 'user', phrase_examples: ['Prepare me for this interview', 'Interview prep checklist', 'Compensation negotiation script'] },
   ],
-isSkill: true,
+  isSkill: true,
 });
 export { INTERVIEW_COMPENSATION_BATTLECARD };

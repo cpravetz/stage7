@@ -5,6 +5,7 @@ import { vi } from 'vitest';
 import {
   sfGetReferenceLabel,
   sfGetReferenceSource,
+  sfGetReferenceSourceLabel,
   sfIsReferenceSchema,
   SchemaFields,
   type SchemaRecord,
@@ -37,6 +38,31 @@ describe('sfGetReferenceSource', () => {
   it('returns empty string when x-referenceSource is not set', () => {
     expect(sfGetReferenceSource({})).toBe('');
     expect(sfGetReferenceSource(undefined)).toBe('');
+  });
+});
+
+describe('sfGetReferenceSourceLabel', () => {
+  it('returns human-friendly label for known reference source', () => {
+    const schema: SchemaRecord = { 'x-referenceSource': 'career-job-discovery-fit-ranking' };
+    expect(sfGetReferenceSourceLabel(schema)).toBe('Job Discovery & Fit Ranking');
+  });
+
+  it('prioritizes x-referenceLabel over known source mapping', () => {
+    const schema: SchemaRecord = {
+      'x-referenceSource': 'career-job-discovery-fit-ranking',
+      'x-referenceLabel': 'Custom Label',
+    };
+    expect(sfGetReferenceSourceLabel(schema)).toBe('Custom Label');
+  });
+
+  it('falls back to humanized kebab-case source when no mapping exists', () => {
+    const schema: SchemaRecord = { 'x-referenceSource': 'unknown-source-id' };
+    expect(sfGetReferenceSourceLabel(schema)).toBe('Unknown Source ID');
+  });
+
+  it('returns empty string when x-referenceSource is not set', () => {
+    expect(sfGetReferenceSourceLabel({})).toBe('');
+    expect(sfGetReferenceSourceLabel(undefined)).toBe('');
   });
 });
 
@@ -156,5 +182,21 @@ describe('SchemaFields reference picker rendering', () => {
     const { container } = render(<SchemaFields schema={schema} values={{}} onChange={onChange} />);
     const select = container.querySelector('.skill-reference-picker select');
     expect(select).toBeInTheDocument();
+  });
+
+  it('shows human-friendly source label in loading message', () => {
+    const schema: SchemaRecord = {
+      type: 'object',
+      properties: {
+        targetRoles: {
+          type: 'array',
+          format: 'reference',
+          'x-referenceSource': 'career-job-discovery-fit-ranking',
+        },
+      },
+    };
+    const { container } = render(<SchemaFields schema={schema} values={{}} onChange={onChange} />);
+    const hint = container.querySelector('.skill-reference-picker__hint');
+    expect(hint?.textContent).toBe('Loading references from Job Discovery & Fit Ranking...');
   });
 });
