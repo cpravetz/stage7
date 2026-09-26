@@ -396,10 +396,12 @@ The Auth service includes RBAC:
 
 - [INDEX.md](./INDEX.md) - Complete documentation navigation
 - [ADK_OVERVIEW.md](./ADK_OVERVIEW.md) - ADK system overview
+- [USER_GUIDE.md](./USER_GUIDE.md) - End-user guide for using assistants
+- [ADK_DEVELOPER_GUIDE.md](./ADK_DEVELOPER_GUIDE.md) - Assistant developer guide
 - [SDK-ARCHITECTURE.md](./SDK-ARCHITECTURE.md) - Technical API reference
-- [TOOL-DEVELOPMENT.md](./ADK/TOOL-DEVELOPMENT.md) - Build custom tools
-- [DEPLOYMENT.md](./ADK/DEPLOYMENT.md) - Production deployment
-- [ASSISTANT_STARTUP_GUIDE.md](./ADK/ASSISTANT_STARTUP_GUIDE.md) - Service reference
+- [TOOL-DEVELOPMENT.md](./TOOL-DEVELOPMENT.md) - Skill/tools developer guide
+- [DEPLOYMENT.md](./DEPLOYMENT.md) - Production deployment
+- [ASSISTANT_STARTUP_GUIDE.md](./ASSISTANT_STARTUP_GUIDE.md) - Service reference
 
 ### Core Systems
 

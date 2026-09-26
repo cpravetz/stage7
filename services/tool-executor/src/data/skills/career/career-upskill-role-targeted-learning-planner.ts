@@ -7,7 +7,7 @@ const UPSKILL_ROLE_TARGETED_LEARNING_PLANNER_SOURCE = `(async () => {
 const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
 // This skill defines the target role directly (a title or a pasted job posting) instead
 // of re-running a full job search with location/salary filters that belong to Job Discovery.
-const targetRole = input.jobTitle || input.targetRole || '';
+const targetRole = input.jobTitle || '';
 const jobPosting = input.jobPosting || '';
 if (!targetRole && !jobPosting) {
   console.log(JSON.stringify({ success: false, error: 'Provide a jobTitle or paste a jobPosting to define the role you want to prepare for' }));
@@ -32,10 +32,9 @@ console.log(JSON.stringify({ success: true, data: { targetRole, missingSkills, l
 const UPSKILL_ROLE_TARGETED_LEARNING_PLANNER_INPUT = {
   type: 'object',
   properties: {
-    jobTitle: { type: 'string', description: 'The job title you want to prepare for (e.g. Senior Data Scientist)', title: 'Job Title', order: 1, hint: 'e.g. Senior Data Scientist' },
+    jobTitle: { type: 'string', description: 'The job title you want to prepare for (e.g. Senior Data Scientist)', title: 'Target Role', order: 1, hint: 'e.g. Senior Data Scientist' },
     jobPosting: { type: 'string', description: 'Paste a specific job posting to tailor the plan to its exact requirements', title: 'Job Posting', order: 2, hint: 'Optional: paste full job description', multiline: true },
     targetSkills: { type: 'array', items: { type: 'string' }, description: 'Skills you already have, to check against the role', title: 'Your Skills', order: 3, hint: 'Comma-separated list of skills you possess' },
-    targetRole: { type: 'string', description: 'Target role title', title: 'Target Role', order: 4, hint: 'Alternative to jobTitle; the role you want to prepare for' },
   },
 };
 

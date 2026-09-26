@@ -24,7 +24,7 @@ Everything else is built in.
 - [Step 2: Get the Stage7 files](#step-2-get-the-stage7-files)
 - [Step 3: Choose the Career Coach only](#step-3-choose-the-career-coach-only)
 - [Step 4: Connect a free AI model](#step-4-connect-a-free-ai-model)
-- [Step 4b: Search LinkedIn, Indeed, and Google Jobs (optional)](#step-4b-search-linkedin-indeed-and-google-jobs-optional)
+- [Step 4b: Ready to search](#step-4b-ready-to-search)
 - [Step 5: Run the setup](#step-5-run-the-setup)
 - [Step 6: Open Stage7 and create your account](#step-6-open-stage7-and-create-your-account)
 - [Step 7: Tell Stage7 to prefer free models](#step-7-tell-stage7-to-prefer-free-models)
@@ -138,31 +138,12 @@ If you follow Option A or B and leave all the other provider lines in `.env` emp
 charged. Stage7 only uses a provider if you have given it a key, so a blank line means that provider is
 switched off.
 
-## Step 4b: Search LinkedIn, Indeed, and Google Jobs (optional)
+## Step 4b: Ready to search
 
-Job searching already works with no configuration - Greenhouse, Ashby and Lever are searched
-automatically and need no key. This step is optional and adds the big job boards.
-
-LinkedIn, Indeed and Glassdoor do not let anyone read their listings automatically, so Stage7 will not try
-to scrape them. Instead, one SerpAPI key gives access to a search service that returns those same
-listings properly - and its Google Jobs feed already carries the LinkedIn, Indeed and Glassdoor postings,
-so one key covers all of them.
-
-1. Create a free account at <https://serpapi.com>.
-2. Copy your API key from the dashboard.
-3. Open your `.env` file and add this line:
-
-   ```dotenv
-   SERPAPI_API_KEY=paste-your-key-here
-   ```
-
-4. Run setup again so the change takes effect.
-
-You now also get **Monster** and **Wellfound** (good for startup and remote roles).
-
-The free tier includes a monthly allowance of searches, which is enough for a focused job search. If you
-skip this step, nothing else breaks - the other three sources keep working and the per-board report will
-show that the aggregators were skipped and why.
+Job searching works with no configuration required. The Skill searches public job board
+APIs automatically - Greenhouse, Ashby and Lever - with no key, no account, and no cost.
+Each board's status is reported so you can always tell a real empty result apart from a
+source that couldn't be reached.
 
 ## Step 5: Run the setup
 
@@ -310,25 +291,10 @@ per-board report so you can see exactly which sources were searched and how many
 | **Greenhouse** | No | Every company that posts via Greenhouse |
 | **Ashby** | No | Every company that posts via Ashby |
 | **Lever** | No | Every company that posts via Lever |
-| **Google Jobs** | SerpAPI key | Aggregates listings from LinkedIn, Indeed, Glassdoor, ZipRecruiter and company career sites |
-| **LinkedIn** | SerpAPI key | LinkedIn's own listings |
-| **Indeed** | SerpAPI key | Indeed's own listings |
-| **Glassdoor** | SerpAPI key | Glassdoor's own listings |
-| **Monster** | SerpAPI key | Monster's own listings |
-| **Wellfound** | SerpAPI key | Startup and remote roles |
 
-**The first three need no key, no account, and no configuration.** Most medium and large employers post
-their openings through one of those three, so a stock install already returns real, current listings. Give
+**All three need no key, no account, and no configuration.** Most medium and large employers post
+their openings through one of these three, so a stock install already returns real, current listings. Give
 the skill a few company names and it will find their boards automatically.
-
-**To add the big job boards**, add a free SerpAPI key - see [Step 4b](#step-4b-search-linkedin-indeed-and-google-jobs-optional).
-One key covers all six remaining sources at once. The free tier includes a monthly allowance of searches,
-which is plenty for a focused search.
-
-Stage7 deliberately does not scrape LinkedIn, Indeed or Glassdoor directly. Those sites block automated
-access and it breaks their terms of service, so a scraper would work for a while and then quietly fail.
-SerpAPI returns the same listings legitimately, and its Google Jobs feed already carries the LinkedIn,
-Indeed and Glassdoor postings.
 
 #### Job Discovery
 
@@ -559,14 +525,11 @@ needs, not a crash. The most common causes are:
 **Job searches come back empty.** First look at the per-board report in the result - it tells you which
 sources were searched and what each one returned. Then:
 
-- **A board says "no board with that name."** The company posts somewhere else. Check the company's own
-  careers page for the exact board name, or pin it in the Tools tab under **boardTokens**.
-- **Everything says "unavailable."** Check your internet connection, then try fewer companies.
-- **The boards worked but nothing matched.** Your filters are too tight. Widen the salary range, drop the
-  location filter, or clear your search terms.
-- **Only the aggregator rows are missing.** LinkedIn, Indeed, Glassdoor, Monster and Wellfound need the
-  optional key from [Step 4b](#step-4b-search-linkedin-indeed-and-google-jobs-optional). The other
-  sources work without it.
+ - **Board says "no board with that name."** The company posts somewhere else. Check the company's own
+   careers page for the exact board name, or pin it in config under **boardTokens**.
+ - **Everything says "unavailable."** Check your internet connection, then try fewer companies.
+ - **The boards worked but nothing matched.** Your filters are too tight. Widen the salary range, drop the
+   location filter, or clear your search terms.
 
 **An application says "job listing not found".** The role is not in your saved list. Run Job Discovery &
 Fit Ranking, then use the roles it returns.

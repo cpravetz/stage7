@@ -69,8 +69,8 @@ const CAREER_APPLY_EXECUTE_INPUT = {
     listings: { type: 'array', items: { type: 'string' }, description: 'Job listing identifiers to apply to' },
     dryRun: { type: 'boolean', default: true },
     coverLetters: { type: 'array', items: { type: 'string' } },
-    customResume: { type: 'string' },
-    customCoverLetter: { type: 'string' },
+    customResume: { type: 'string', multiline: true },
+    customCoverLetter: { type: 'string', multiline: true },
   },
 };
 

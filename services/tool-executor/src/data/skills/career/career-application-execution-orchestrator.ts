@@ -6,7 +6,6 @@ const CAREER_WRAPPER_CONFIG_SCHEMA: SchemaRecord = { type: 'object', properties:
 const APPLICATION_EXECUTION_ORCHESTRATOR_SOURCE = `(async () => {
 const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
 let targetRoles = Array.isArray(input.targetRoles) ? input.targetRoles : [];
-if (!targetRoles.length && input.targetRole) targetRoles = [input.targetRole];
 if (!targetRoles.length) {
   const pipeline = await __execute_tool('career-pipeline-report', {});
   if (pipeline && pipeline.success && pipeline.data) {
@@ -40,10 +39,9 @@ const APPLICATION_EXECUTION_ORCHESTRATOR_INPUT = {
 type: 'object',
 properties: {
 targetRoles: { type: 'array', items: { type: 'string' }, description: 'Specific roles to apply to; if left blank, the pipeline will be used', 'x-referenceSource': 'career-job-discovery-fit-ranking' },
-targetRole: { type: 'string', description: 'Single role to apply to' },
-dryRun: { type: 'boolean', description: 'Preview without submitting; defaults to true', default: true },
-customResume: { type: 'string', description: 'Custom resume text to use for this application when overriding your default resume' },
-customCoverLetter: { type: 'string', description: 'Custom cover letter text to use for this application' },
+  dryRun: { type: 'boolean', description: 'Preview without submitting; defaults to true', default: true },
+  customResume: { type: 'string', description: 'Custom resume text to use for this application when overriding your default resume', multiline: true },
+  customCoverLetter: { type: 'string', description: 'Custom cover letter text to use for this application', multiline: true },
 customResumeFile: { type: 'object', description: 'Upload a resume file; text entry remains available as a fallback', properties: { name: { type: 'string' }, mimeType: { type: 'string' }, content: { type: 'string' } }, required: ['name', 'mimeType', 'content'] },
 customCoverLetterFile: { type: 'object', description: 'Upload a cover letter file; text entry remains available as a fallback', properties: { name: { type: 'string' }, mimeType: { type: 'string' }, content: { type: 'string' } }, required: ['name', 'mimeType', 'content'] },
 coverLetters: { type: 'array', items: { type: 'string' }, description: 'Optional cover-letter variants to use' },
@@ -73,7 +71,7 @@ required: ['success', 'data'],
 
 const APPLICATION_EXECUTION_ORCHESTRATOR = createCodeSkill({
 id: 'career-application-execution-orchestrator',
-name: 'Multi-Portal Application Orchestrator',
+  name: 'Apply to Selected Jobs',
 description: 'Applies to a selected job or set of jobs using the board attached to each posting, with optional custom materials. Delegates to career-application-execution. Human review is still recommended before sending where required.',
 manifest: {
 language: 'javascript',

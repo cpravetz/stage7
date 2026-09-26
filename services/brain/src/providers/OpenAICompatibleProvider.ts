@@ -1,6 +1,71 @@
 import { LLMProvider, ProviderInfo, CompletionRequest, CompletionResponse, CompletionMessage } from './Provider';
 import { fetchProvider, providerTimeoutMs } from '../utils/providerFetch';
 
+const FALLBACK_CONTEXT_WINDOW = 8192;
+
+function toNumber(value: unknown): number | null {
+  const n = typeof value === 'number' ? value : typeof value === 'string' ? parseFloat(value) : NaN;
+  return Number.isFinite(n) ? n : null;
+}
+
+// Gateways disagree on pricing metadata, and a missing price is not the same as a
+// zero price. Getting this wrong makes paid models look free, which silently
+// defeats the free-only and budget filters in ModelRouter.
+//
+//   OpenRouter : pricing: { prompt: "0.0000025" }        (USD per token)
+//   Requesty   : input_price: 0.00000174                  (USD per token)
+//                pricing: [{ prompt_tokens_threshold, input_price, output_price }]
+//
+// Both forms are USD per token, so costPer1kTokens is the value x 1000.
+function readCostPer1kTokens(model: Record<string, unknown>): number {
+  const pricing = model.pricing;
+  let per1k: number | null = null;
+
+  if (Array.isArray(pricing) && pricing.length > 0) {
+    const tier = (pricing[0] || {}) as Record<string, unknown>;
+    const raw = toNumber(tier.input_price) ?? toNumber(tier.prompt);
+    if (raw !== null) per1k = raw * 1000;
+  } else if (pricing && typeof pricing === 'object') {
+    const raw = toNumber((pricing as Record<string, unknown>).prompt);
+    if (raw !== null) per1k = raw * 1000;
+  }
+
+  // Flat field wins when present; authoritative on gateways that publish both.
+  const flat = toNumber(model.input_price);
+  if (flat !== null) per1k = flat * 1000;
+
+  // No pricing metadata at all. 0 means "assume free", matching prior behaviour
+  // for local catalogues such as Ollama, but callers must not read it as a quote.
+  return per1k ?? 0;
+}
+
+function readContextWindow(model: Record<string, unknown>): number {
+  for (const candidate of [model.context_length, model.context_window, model.max_input_tokens]) {
+    const n = toNumber(candidate);
+    if (n !== null && n > 0) return n;
+  }
+  return FALLBACK_CONTEXT_WINDOW;
+}
+
+function readCapabilities(model: Record<string, unknown>, id: string): string[] {
+  const architecture = (model.architecture || {}) as Record<string, unknown>;
+  const modality = architecture.modality;
+  const supports = (key: string): boolean => model[key] === true || model[key] === 'true';
+
+  const caps: string[] = ['chat'];
+  if (supports('supports_vision') || modality === 'vision+text' || id.includes('vision')) caps.push('vision');
+  if (id.includes('code') || id.includes('coder')) caps.push('code');
+  if (
+    supports('supports_reasoning') ||
+    id.includes('reason') || id.includes('r1') || id.includes('think') ||
+    id.includes('o1') || id.includes('o3')
+  ) caps.push('reasoning');
+  if (supports('supports_image_generation') || id.includes('creative') || id.includes('image') || id.includes('dall')) {
+    caps.push('creative');
+  }
+  return caps;
+}
+
 export interface OpenAICompatibleConfig {
   id: string;
   name: string;
@@ -69,19 +134,17 @@ export class OpenAICompatibleProvider implements LLMProvider {
         if (this.apiKey) headers['Authorization'] = `Bearer ${this.apiKey}`;
         const res = await fetchProvider(`${this.apiBase}${this.listModelsPath}`, { headers });
         if (res.ok) {
-          const data = await res.json() as { data?: Array<{ id: string; context_length?: number; pricing?: { prompt?: string }; architecture?: { modality?: string } }> } | Array<{ id: string; name?: string }>;
+          const data = await res.json() as
+            | { data?: Array<Record<string, unknown>> }
+            | Array<Record<string, unknown>>;
           const arr = Array.isArray(data) ? data : (data.data || []);
-          const mapped = arr.map((m) => {
+          const mapped = arr.map((m: Record<string, unknown>) => {
             const id = m.id || (m as any).name || '';
             if (!id) return null;
-            const pricing = (m as any).pricing;
-            const cost = pricing ? (parseFloat(pricing.prompt || '0') || 0) * 1000 : 0;
-            if (id.includes('embed') || (m as any).architecture?.modality === 'embedding') return { id, capabilities: ['embedding'], maxTokens: (m as any).context_length || 8192, costPer1kTokens: cost };
-            const caps: string[] = ['chat'];
-            if (id.includes('vision') || (m as any).architecture?.modality === 'vision+text') caps.push('vision');
-            if (id.includes('code') || id.includes('coder')) caps.push('code');
-            if (id.includes('reason') || id.includes('r1') || id.includes('think') || id.includes('o1') || id.includes('o3')) caps.push('reasoning');
-            if (id.includes('creative') || id.includes('image') || id.includes('dall')) caps.push('creative');
+            const cost = readCostPer1kTokens(m);
+            const isEmbedding = id.includes('embed') || (m.architecture as any)?.modality === 'embedding';
+            if (isEmbedding) return { id, capabilities: ['embedding'], maxTokens: readContextWindow(m), costPer1kTokens: cost };
+            const caps = readCapabilities(m, id);
             // OpenAI-compatible local/free catalogs often omit capability metadata;
             // keep general chat models eligible for advisory and drafting tasks.
             if (this.id === 'openwebui' || id.endsWith(':free')) {
@@ -90,7 +153,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
             return {
               id,
               capabilities: caps,
-              maxTokens: (m as any).context_length || 8192,
+              maxTokens: readContextWindow(m),
               costPer1kTokens: cost,
             };
           }).filter((m): m is { id: string; capabilities: string[]; maxTokens: number; costPer1kTokens: number } => !!m);

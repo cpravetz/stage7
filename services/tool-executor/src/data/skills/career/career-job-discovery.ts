@@ -5,24 +5,18 @@ const CAREER_BASE_CONFIG_SCHEMA: SchemaRecord = { type: 'object', properties: {}
 
 // career-job-discovery: searches real job boards and returns normalized listings.
 //
-// Sources, in two tiers:
+// Sources:
 //
-//   Tier 1 - applicant tracking systems with public, no-auth JSON APIs. These need no
-//   key and no account, so discovery returns real results on a stock install:
+//   Public job board APIs with no auth required. These need no key and no account,
+//   so discovery returns real results on a stock install:
 //     - Greenhouse  https://boards-api.greenhouse.io/v1/boards/<token>/jobs
 //     - Ashby        https://api.ashbyhq.com/posting-api/job-board/<name>
 //     - Lever        https://api.lever.co/v0/postings/<company>
 //
-//   Tier 2 - the large aggregators (LinkedIn, Indeed, Glassdoor, Monster, Wellfound) plus
-//   Google Jobs. These block unauthenticated scraping, so we do not scrape them. Instead a
-//   single SERPAPI_API_KEY unlocks SerpAPI's per-board engines, and its google_jobs engine
-//   already aggregates LinkedIn, Indeed and Glassdoor listings. Without a key these sources
-//   are reported as skipped rather than silently returning nothing.
-//
 // Every run reports per-board status so a caller can always tell a real empty result
 // (board has no matching roles) apart from a source that never ran.
 //
-// Returns { success, data: { listings, total, byBoard, serpApiConfigured, storagePath, ... } }
+// Returns { success, data: { listings, total, byBoard, storagePath, ... } }
 const CAREER_JOB_DISCOVERY_SOURCE = `(async () => {
 const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
 const fs = require('fs');
@@ -77,34 +71,7 @@ async function getJson(url, headers) {
   } finally {
     clearTimeout(timer);
   }
-}
-
-// Maps common board names to SerpAPI engines so the freeJobBoards/premiumJobBoards
-// inputs keep working as the user-facing way to pick sources.
-const BOARD_ENGINE_MAP = [
-  { match: /greenhouse/i, ats: 'greenhouse' },
-  { match: /ashby/i, ats: 'ashby' },
-  { match: /lever/i, ats: 'lever' },
-  { match: /linkedin/i, engine: 'linkedin_jobs' },
-  { match: /indeed/i, engine: 'indeed' },
-  { match: /glassdoor/i, engine: 'glassdoor' },
-  { match: /monster/i, engine: 'monster' },
-  { match: /wellfound|angellist/i, engine: 'wellfound' },
-  { match: /google|careers?\\.google/i, engine: 'google_jobs' },
-];
-
-function resolveSerpKey(cfgInput) {
-  // Order: explicit input, then env, then the Vault. Never throws - an absent key just
-  // means the aggregator tier is reported as skipped.
-  if (cfgInput.serpApiKey) return Promise.resolve(String(cfgInput.serpApiKey));
-  const fromEnv = process.env.SERPAPI_API_KEY || process.env.SERP_API_KEY || '';
-  if (fromEnv) return Promise.resolve(fromEnv);
-  const vaultUrl = (process.env.VAULT_URL || 'http://vault:4000').replace(/\\/+$/, '');
-  return fetch(vaultUrl + '/secrets/career-serpapi/decrypt', { headers: { 'X-Tenant-Id': 'system' } })
-    .then((r) => (r.ok ? r.json() : null))
-    .then((d) => (d && d.plaintext ? d.plaintext : ''))
-    .catch(() => '');
-}
+ }
 
 // ---------------------------------------------------------------- ATS collectors
 
@@ -265,83 +232,13 @@ async function collectLever(company, cap, byBoard) {
   const jobs = res.data.slice(0, cap).map((j) => fromLever(j, company));
   byBoard.push({ board: 'lever:' + company, status: 'ok', count: jobs.length, note: 'Public Lever postings API. No key required.' });
   return jobs;
-}
-
-// ------------------------------------------------------------- SerpAPI collectors
-
-// SerpAPI returns different array keys and field names per engine, so read defensively
-// across the shapes the jobs engines actually use.
-function pickArray(data) {
-  if (!data) return [];
-  if (Array.isArray(data)) return data;
-  for (const key of ['jobs_results', 'organic_results', 'data', 'job_results', 'results']) {
-    if (Array.isArray(data[key])) return data[key];
-  }
-  return [];
-}
-function fromSerp(row, engine) {
-  const title = row.title || row.text || row.job_title || row.position || '';
-  const company = row.company_name || row.companyName || row.employer || row.company || row.hiring_company || '';
-  let applyUrl = '';
-  if (Array.isArray(row.apply_options) && row.apply_options.length && row.apply_options[0] && row.apply_options[0].link) applyUrl = row.apply_options[0].link;
-  if (!applyUrl) applyUrl = row.applyUrl || row.apply_url || row.url || row.link || row.job_url || row.jobUrl || '';
-  let salaryRaw = null, salaryMin = null, salaryMax = null;
-  const det = row.detected_extensions || {};
-  if (det.salary) salaryRaw = String(det.salary);
-  if (row.salary) salaryRaw = String(row.salary);
-  if (row.compensation) salaryRaw = String(row.compensation);
-  if (salaryRaw) {
-    const nums = salaryRaw.replace(/,/g, '').match(/\\d+(?:\\.\\d+)?/g);
-    if (nums && nums.length) {
-      const vals = nums.map(Number);
-      salaryMin = Math.min.apply(null, vals);
-      salaryMax = Math.max.apply(null, vals);
-    }
-  }
-  return {
-    id: 'serp_' + String(row.job_id || row.id || stableId('serp', [title, company, engine])),
-    title,
-    company,
-    location: row.location || row.candidate_required_location || row.city || '',
-    remote: !!row.is_remote || /remote/i.test(String(row.location || '')),
-    description: stripHtml(row.description || row.snippet || row.job_description || ''),
-    applyUrl,
-    source: engine,
-    sourceUrl: row.via ? ('via ' + row.via) : engine,
-    postedAt: row.detected_extensions && row.detected_extensions.posted_at ? String(row.detected_extensions.posted_at) : (row.posted_at || row.date_posted || null),
-    employmentType: (row.detected_extensions && row.detected_extensions.schedule_type) || row.employment_type || '',
-    department: '',
-    salary: salaryMin != null ? { min: salaryMin, max: salaryMax, currency: null, raw: salaryRaw } : null,
-  };
-}
-
-async function collectSerpEngine(engine, query, location, cap, apiKey, byBoard) {
-  const url = 'https://serpapi.com/search?engine=' + encodeURIComponent(engine) +
-    '&q=' + encodeURIComponent(query) +
-    (location ? '&location=' + encodeURIComponent(location) : '') +
-    '&num=' + Math.min(cap, 20) +
-    '&api_key=' + encodeURIComponent(apiKey);
-  const res = await getJson(url);
-  if (!res.ok || !res.data) {
-    byBoard.push({ board: engine, status: 'unavailable', count: 0, note: res.status === 401 ? 'SerpAPI rejected the key.' : 'SerpAPI search failed.' });
-    return [];
-  }
-  if (res.data.error) {
-    byBoard.push({ board: engine, status: 'unavailable', count: 0, note: 'SerpAPI error: ' + String(res.data.error).slice(0, 120) });
-    return [];
-  }
-  const rows = pickArray(res.data).slice(0, cap).map((r) => fromSerp(r, engine));
-  byBoard.push({ board: engine, status: 'ok', count: rows.length, note: 'SerpAPI ' + engine + ' engine.' });
-  return rows;
-}
+ }
 
 // ------------------------------------------------------------------ orchestrate
 
 const companies = asList(input.companies || input.targetCompanies || input.company);
 const queries = asList(input.queries || input.query);
 const locations = asList(input.locations);
-const freeJobBoards = asList(input.freeJobBoards);
-const premiumJobBoards = asList(input.premiumJobBoards);
 const explicitTokens = input.boardTokens && typeof input.boardTokens === 'object' ? input.boardTokens : {};
 const maxPerBoard = Math.max(1, num(input.maxPerBoard, 50));
 const enrich = input.enrichDescriptions !== false;
@@ -387,37 +284,6 @@ if (ghTokens.length === 0 && ashbyTokens.length === 0 && leverTokens.length === 
       }
     }
   }
-}
-
-// Tier 2: aggregators, only with a SerpAPI key.
-const serpApiKey = await resolveSerpKey(input);
-const serpApiConfigured = !!serpApiKey;
-
-const requestedEngines = asList(input.searchEngines || input.engines);
-const boardNamedEngines = [];
-for (const board of [...freeJobBoards, ...premiumJobBoards]) {
-  for (const entry of BOARD_ENGINE_MAP) {
-    if (entry.match.test(board) && entry.engine && boardNamedEngines.indexOf(entry.engine) < 0) {
-      boardNamedEngines.push(entry.engine);
-    }
-  }
-}
-// Google Jobs is the default aggregator query surface: it already indexes LinkedIn,
-// Indeed and Glassdoor listings, so one call covers the big three.
-const serpEngines = [];
-for (const e of [...requestedEngines, ...boardNamedEngines, 'google_jobs']) {
-  if (serpEngines.indexOf(e) < 0) serpEngines.push(e);
-}
-
-const anyAtsHit = byBoard.some((b) => b.status === 'ok');
-if (queries.length > 0 && serpApiConfigured) {
-  const searchQuery = queries.join(' OR ');
-  const searchLocation = locations.filter((l) => !/remote/i.test(l))[0] || '';
-  for (const engine of serpEngines) {
-    listings = listings.concat(await collectSerpEngine(engine, searchQuery, searchLocation, maxPerBoard, serpApiKey, byBoard));
-  }
-} else if (queries.length > 0 && !serpApiConfigured && !anyAtsHit) {
-  byBoard.push({ board: 'aggregators', status: 'skipped', count: 0, note: 'LinkedIn, Indeed, Glassdoor, Monster, Wellfound and Google Jobs are not scraped. Add SERPAPI_API_KEY to your .env to search them; the google_jobs engine already aggregates LinkedIn, Indeed and Glassdoor listings.' });
 }
 
 // ------------------------------------------------------------------ normalize
@@ -504,7 +370,6 @@ fs.writeFileSync(storagePath, JSON.stringify({
   listings: deduped,
   total: deduped.length,
   byBoard,
-  serpApiConfigured,
   generatedAt: new Date().toISOString(),
 }, null, 2));
 
@@ -517,7 +382,7 @@ if (okBoards.length > 0 && deduped.length > 0) {
 } else if (okBoards.length > 0 && deduped.length === 0) {
   note = 'Reached ' + okBoards.length + ' board' + (okBoards.length === 1 ? '' : 's') + ' but nothing matched your filters (' + beforeFilter + ' listings were returned). Widen your search or add more companies.';
 } else if (companies.length === 0 && queries.length === 0) {
-  note = 'Nothing to search. Provide "companies" (company names to check on Greenhouse, Ashby and Lever) or "queries" (job titles to search the aggregators).';
+  note = 'Nothing to search. Provide "companies" (company names to check on Greenhouse, Ashby and Lever) or "queries" (job titles to search).';
 } else {
   note = 'No listings found. The boards checked returned no matching roles. See byBoard for the status of each source.';
 }
@@ -533,8 +398,6 @@ console.log(JSON.stringify({
     companiesSearched: companies,
     boardsSearched: okBoards.map((b) => b.board),
     boardsUnavailable: noMatch.map((b) => b.board),
-    serpApiConfigured,
-    enginesRequested: queries.length > 0 ? serpEngines : [],
     note,
     storagePath,
     generatedAt: new Date().toISOString(),
@@ -545,7 +408,7 @@ console.log(JSON.stringify({
 const CAREER_JOB_DISCOVERY_INPUT = {
   type: 'object',
   properties: {
-    queries: { type: 'array', items: { type: 'string' }, description: 'Job titles to search the job-board aggregators' },
+    queries: { type: 'array', items: { type: 'string' }, description: 'Job titles to search for' },
     query: { type: 'string', description: 'Single search query' },
     companies: { type: 'array', items: { type: 'string' }, description: 'Company names. Checked against the public Greenhouse, Ashby and Lever job board APIs.' },
     targetCompanies: { type: 'array', items: { type: 'string' }, description: 'Alias for companies' },
@@ -561,14 +424,6 @@ const CAREER_JOB_DISCOVERY_INPUT = {
         lever: { type: 'array', items: { type: 'string' } },
       },
     },
-    searchEngines: {
-      type: 'array',
-      items: { type: 'string' },
-      description: 'SerpAPI engines to use: google_jobs, indeed, linkedin_jobs, glassdoor, monster, wellfound',
-    },
-    serpApiKey: { type: 'string', sensitive: true, description: 'Optional SerpAPI key. Falls back to SERPAPI_API_KEY then the Vault.' },
-    freeJobBoards: { type: 'array', items: { type: 'string' } },
-    premiumJobBoards: { type: 'array', items: { type: 'string' } },
     maxPerBoard: { type: 'number', default: 50 },
     enrichDescriptions: { type: 'boolean', default: true },
   },
@@ -589,8 +444,6 @@ const CAREER_JOB_DISCOVERY_OUTPUT = {
         companiesSearched: { type: 'array' },
         boardsSearched: { type: 'array' },
         boardsUnavailable: { type: 'array' },
-        serpApiConfigured: { type: 'boolean' },
-        enginesRequested: { type: 'array' },
         note: { type: 'string' },
         storagePath: { type: 'string' },
         generatedAt: { type: 'string', format: 'date-time' },
@@ -607,16 +460,15 @@ const CAREER_JOB_DISCOVERY = createCodeSkill({
   name: 'Job Discovery',
   description:
     'Searches real job boards and returns normalized job objects with title, company, location, salary, and apply URL. ' +
-    'Reads the public Greenhouse, Ashby and Lever job board APIs with no key required, and uses a SerpAPI key to search ' +
-    'Google Jobs, LinkedIn, Indeed, Glassdoor, Monster and Wellfound. Reports per-board status so empty results are never silent.',
+    'Reads the public Greenhouse, Ashby and Lever job board APIs with no key required. Reports per-board status so ' +
+    'empty results are never silent.',
   manifest: {
     language: 'javascript',
     entrypoint: 'index.js',
     sourceCode: CAREER_JOB_DISCOVERY_SOURCE,
     configSchema: CAREER_BASE_CONFIG_SCHEMA,
     actionLabel: 'Discover jobs',
-    readsEnvironment: ['SERPAPI_API_KEY', 'CAREER_HOME', 'VAULT_URL'],
-    vaultSecrets: ['career-serpapi'],
+    readsEnvironment: ['CAREER_HOME'],
   },
   inputSchema: CAREER_JOB_DISCOVERY_INPUT,
   outputSchema: CAREER_JOB_DISCOVERY_OUTPUT,

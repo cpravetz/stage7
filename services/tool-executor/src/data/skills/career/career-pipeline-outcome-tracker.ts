@@ -13,26 +13,23 @@ if (!pipeline || pipeline.success === false) {
 const pipelineData = pipeline.data && typeof pipeline.data === 'object' ? pipeline.data : {};
 const tracking = Array.isArray(pipelineData.tracking) ? pipelineData.tracking : [];
 // Recording an outcome always requires knowing which role it belongs to: match by
-// jobId if given, otherwise by jobTitle (+ optional company) rather than guessing the first row.
+// targetRole against the job identifier.
 let matchedEntry = null;
 if (input.targetRole) {
-  matchedEntry = tracking.find((entry) => (entry.jobId || entry.id) === input.targetRole) || null;
-} else if (input.jobTitle) {
-  matchedEntry = tracking.find((entry) => String(entry.title || entry.jobTitle || '').toLowerCase() === String(input.jobTitle).toLowerCase()
-    && (!input.company || String(entry.company || '').toLowerCase() === String(input.company).toLowerCase())) || null;
+  matchedEntry = tracking.find((entry) => (entry.jobId || entry.id || entry.identifier) === input.targetRole) || null;
 }
-if (!input.targetRole && !input.jobTitle) {
-  console.log(JSON.stringify({ success: true, data: { pipeline: pipelineData, outcomes: {}, role: null, note: 'No targetRole or jobTitle provided; nothing to track', staleFollowUps: pipelineData.staleFollowUps || [], delegatedTo: ['career-pipeline-report'], generatedAt: new Date().toISOString() } }));
+if (!input.targetRole) {
+  console.log(JSON.stringify({ success: true, data: { pipeline: pipelineData, outcomes: {}, role: null, note: 'No targetRole provided; nothing to track', staleFollowUps: pipelineData.staleFollowUps || [], delegatedTo: ['career-pipeline-report'], generatedAt: new Date().toISOString() } }));
   return;
 }
-if ((input.targetRole || input.jobTitle) && !matchedEntry) {
-  console.log(JSON.stringify({ success: true, data: { pipeline: pipelineData, outcomes: {}, role: { jobId: null, jobTitle: input.jobTitle || null, company: input.company || null }, note: 'No pipeline entry matched the given targetRole/jobTitle', staleFollowUps: pipelineData.staleFollowUps || [], delegatedTo: ['career-pipeline-report'], generatedAt: new Date().toISOString() } }));
+if (input.targetRole && !matchedEntry) {
+  console.log(JSON.stringify({ success: true, data: { pipeline: pipelineData, outcomes: {}, role: { jobId: null, jobTitle: null, company: null }, note: 'No pipeline entry matched the given targetRole', staleFollowUps: pipelineData.staleFollowUps || [], delegatedTo: ['career-pipeline-report'], generatedAt: new Date().toISOString() } }));
   return;
 }
 const outcome = await __execute_tool('career-outcome', {
-   applicationId: matchedEntry.jobId || matchedEntry.id || input.targetRole || '',
-   jobTitle: matchedEntry.title || matchedEntry.jobTitle || input.jobTitle || '',
-   company: matchedEntry.company || input.company || '',
+   applicationId: matchedEntry.jobId || matchedEntry.id || matchedEntry.identifier || input.targetRole || '',
+   jobTitle: matchedEntry.title || matchedEntry.jobTitle || (matchedEntry.job && matchedEntry.job.title) || '',
+   company: matchedEntry.company || (matchedEntry.job && matchedEntry.job.company) || input.company || '',
    status: input.status || '',
    feedback: input.feedback || '',
    offerDetails: input.offerDetails || null,
@@ -48,17 +45,16 @@ if (!hasPipelineData && !hasOutcomeData) {
 console.log(JSON.stringify({ success: false, status: 'not-connected', error: 'Not connected: pipeline reporting and outcome tracking yielded no data' }));
 return;
 }
-console.log(JSON.stringify({ success: true, data: { pipeline: pipelineData, outcomes: outcomeData, role: { jobId: matchedEntry.jobId || matchedEntry.id, jobTitle: matchedEntry.title || matchedEntry.jobTitle, company: matchedEntry.company }, staleFollowUps: pipelineData.staleFollowUps || [], delegatedTo: ['career-pipeline-report', 'career-outcome'], generatedAt: new Date().toISOString() } }));
+console.log(JSON.stringify({ success: true, data: { pipeline: pipelineData, outcomes: outcomeData, role: { jobId: matchedEntry.jobId || matchedEntry.id || matchedEntry.identifier, jobTitle: matchedEntry.title || matchedEntry.jobTitle || (matchedEntry.job && matchedEntry.job.title) || '', company: matchedEntry.company || (matchedEntry.job && matchedEntry.job.company) || '' }, staleFollowUps: pipelineData.staleFollowUps || [], delegatedTo: ['career-pipeline-report', 'career-outcome'], generatedAt: new Date().toISOString() } }));
 })();`;
 
 const PIPELINE_OUTCOME_TRACKER_INPUT = {
 type: 'object',
 properties: {
-targetRole: { type: 'string', description: 'Role to record an outcome for (from Job Discovery or Apply to Jobs)' },
-jobTitle: { type: 'string', description: 'Job title to match instead of targetRole' },
-company: { type: 'string', description: 'Company name, used with jobTitle to disambiguate' },
+targetRole: { type: 'string', description: 'Job identifier (jobId) to record an outcome for, from Job Discovery or Apply to Jobs' },
+company: { type: 'string', description: 'Company name, for reference' },
 status: { type: 'string', description: 'Application outcome status' },
-feedback: { type: 'string', description: 'Interview or application feedback' },
+feedback: { type: 'string', description: 'Interview or application feedback', multiline: true },
 offerDetails: { type: 'object', description: 'Offer details if applicable' },
 },
 };
