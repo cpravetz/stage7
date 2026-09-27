@@ -136,6 +136,8 @@ const sections = sectionNames.map(function (name, index) {
 const fullText = sections.map(function (section) {
   return section.section.toUpperCase() + ' [' + section.chord + ']\\n' + section.lines.join('\\n');
 }).join('\\n\\n');
+const beatSheetSummary = sections.map(function (section, index) { return (index + 1) + '. ' + section.section.toUpperCase() + ': ' + section.purpose; }).join('\\n');
+const formattedSong = 'Title: ' + topic + '\\nTheme: ' + theme + ' | Genre: ' + genre + ' | Mood: ' + mood + ' | Structure: ' + structure + '\\nChord Progression: ' + progression.join(' - ') + '\\n\\n--- LYRICS ---\\n\\n' + fullText + '\\n\\n--- BEAT SHEET ---\\n' + beatSheetSummary;
 const draft = {
   id: 'song_' + Date.now(),
   format: 'song',
@@ -149,11 +151,12 @@ const draft = {
   sections: sections,
   lyrics: { sections: sections, fullText: fullText },
   beatSheet: sections.map(function (section, index) { return { order: index + 1, section: section.section, musicalFocus: section.purpose }; }),
+  formattedOutput: formattedSong,
   revision: input.existingContent ? { basedOn: 'existingContent', changes: ['Preserve the supplied direction', 'Regenerate section-level musical and lyric options'] } : null,
   source: 'local',
   createdAt: new Date().toISOString()
 };
-const result = { success: true, data: { draft: draft } };
+const result = { success: true, data: { draft: draft, formattedSong: formattedSong } };
 if (input.save !== false) {
   const baseDir = process.env.SONGWRITING_HOME || path.join('/tmp', 'songwriting');
   fs.mkdirSync(baseDir, { recursive: true });
@@ -303,7 +306,7 @@ domainKnowledge: 'Song craft co-creation, genre-aware chord progression, lyric s
     type: 'object',
     properties: {
       success: { type: 'boolean', description: 'Whether the song draft was generated successfully' },
-      data: { type: 'object', description: 'Generated song draft, chords, sections, beat sheet, and optional store path' },
+      data: { type: 'object', description: 'Generated song draft, chords, sections, beat sheet, formatted plain-text song, and optional store path' },
       error: { type: 'string', description: 'Validation or execution error message' },
     },
     required: ['success'],
