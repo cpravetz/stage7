@@ -355,6 +355,9 @@ describe('Songwriter Creative — Batch A', () => {
       expect(parsed.data.draft.chordProgression).toEqual(['I', 'V', 'vi', 'IV']);
       expect(parsed.data.draft.beatSheet).toBeDefined();
       expect(parsed.data.draft.source).toBe('local');
+      expect(parsed.data.formattedSong).toContain('Title: love');
+      expect(parsed.data.formattedSong).toContain('--- LYRICS ---');
+      expect(parsed.data.formattedSong).toContain('--- BEAT SHEET ---');
       expect(parsed.data.storePath).toContain('songwriting');
     });
 

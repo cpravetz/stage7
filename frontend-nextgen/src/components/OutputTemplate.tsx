@@ -265,6 +265,19 @@ const OutputTemplate: React.FC<OutputTemplateProps> = ({ outputSchema, result })
       ? (record.data as Record<string, unknown>)
       : record;
 
+  for (const plainTextKey of ['formattedSong', 'formattedOutput', 'songText', 'content', 'fullText']) {
+    const textVal = data[plainTextKey] || (record[plainTextKey] as unknown);
+    if (typeof textVal === 'string' && textVal.trim() !== '') {
+      return (
+        <div className="skill-result success">
+          <div className="result-field" style={{ whiteSpace: 'pre-wrap' }}>
+            {textVal.trim()}
+          </div>
+        </div>
+      );
+    }
+  }
+
   const properties = outputGetSchemaProperties(outputSchema);
   const schemaKeys = Object.keys(properties).filter((k) => !k.startsWith('_'));
 
