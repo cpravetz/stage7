@@ -158,10 +158,17 @@ if (format === 'lyrics' || format === 'song') {
   return;
 }
 
+let formattedOutput = '';
+if (draft.lyrics) {
+  formattedOutput = 'Title: ' + (topic || theme || 'Untitled Song') + '\\nTheme: ' + theme + ' | Genre: ' + genre + ' | Mood: ' + mood + '\\n\\n--- LYRICS ---\\n\\n' + draft.lyrics.fullText;
+} else if (draft.script) {
+  formattedOutput = 'Title: ' + (topic || 'Untitled Script') + '\\nFormat: ' + format + ' | Topic: ' + topic + '\\n\\n--- SCENES ---\\n\\n' + draft.script.scenes.map(s => s.title + '\\n' + s.dialogue).join('\\n\\n');
+}
+
 store.push(draft);
 fs.writeFileSync(storePath, JSON.stringify(store, null, 2));
 
-console.log(JSON.stringify({ success: true, data: { draft, storePath } }));
+console.log(JSON.stringify({ success: true, data: { draft, formattedOutput, storePath } }));
 `,
   },
   inputSchema: {
