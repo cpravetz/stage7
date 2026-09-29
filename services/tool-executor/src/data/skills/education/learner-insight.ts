@@ -71,6 +71,7 @@ export const LEARNER_INSIGHT = createExternalActionSkill({
   outputSchema: EDUCATION_EXTERNAL_OUTPUT_SCHEMA,
   timeoutMs: 60000,
   tier: 'advise',
+  isSkill: true,
   triggers: [
     { kind: 'schedule', cadence: 'Daily learner-data monitoring via LMS integration' },
   ],

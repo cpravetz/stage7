@@ -24,13 +24,17 @@ const readinessResult = await __execute_tool('cto-incident-disaster-readiness', 
 });
 
 if (!readinessResult || readinessResult.success === false) {
-  console.log(JSON.stringify({
+  const result = {
     success: false,
     error: readinessResult && readinessResult.error ? readinessResult.error : 'Not connected: disaster recovery module unavailable; ensure cto-incident-disaster-readiness is connected',
     rtoTarget,
     rpoTarget,
+  };
+  console.log(JSON.stringify({
+    ...result,
+    present: [{ id: 'error', title: 'Disaster Recovery Planner', kind: 'text', body: result.error + '\\n\\nRTO Target: ' + rtoTarget + ' minutes\\nRPO Target: ' + rpoTarget + ' minutes' }]
   }));
-  return;
+  return result;
 }
 
 const checkData = readinessResult.result || readinessResult.data || {};
@@ -59,7 +63,30 @@ const recommendations = assessments.filter((a) => a.status !== 'ready').map((a) 
   actions: [...(!a.rtoMet ? ['Reduce recovery time to meet RTO target of ' + rtoTarget + ' minutes'] : []), ...(!a.rpoMet ? ['Reduce data loss tolerance to meet RPO target of ' + rpoTarget + ' minutes'] : [])],
 }));
 
-console.log(JSON.stringify({
+const reportLines = [
+  'Disaster Recovery Readiness Assessment',
+  'RTO Target: ' + rtoTarget + ' minutes',
+  'RPO Target: ' + rpoTarget + ' minutes',
+  'Overall Status: ' + overallStatus.toUpperCase(),
+  'Systems Assessed: ' + assessments.length,
+  'Systems Ready: ' + readyCount,
+  '',
+  'System Assessments:',
+];
+assessments.forEach((a) => {
+  reportLines.push('  ' + a.name + ': RTO ' + a.rtoActual + 'm (' + (a.rtoMet ? 'MET' : 'NOT MET') + '), RPO ' + a.rpoActual + 'm (' + (a.rpoMet ? 'MET' : 'NOT MET') + ') — ' + a.status.toUpperCase() + ' — Backup Verified: ' + (a.backupVerified ? 'YES' : 'NO') + ' — Last Tested: ' + a.lastTested);
+});
+if (recommendations.length) {
+  reportLines.push('', 'Recommendations:');
+  recommendations.forEach((r) => {
+    reportLines.push('  ' + r.system + ':');
+    r.actions.forEach((action) => {
+      reportLines.push('    - ' + action);
+    });
+  });
+}
+
+const result = {
   success: true,
   data: {
     readiness: { overallStatus, readySystems: readyCount, totalSystems: assessments.length, rtoTarget, rpoTarget, includeTeams: config.includeTeams !== false },
@@ -68,7 +95,12 @@ console.log(JSON.stringify({
     generatedAt: new Date().toISOString(),
   },
   delegatedTo: 'cto-incident-disaster-readiness',
+};
+console.log(JSON.stringify({
+  ...result,
+  present: [{ id: 'report', title: 'Disaster Recovery Readiness Report', kind: 'text', body: reportLines.join('\\n') }]
 }));
+return result;
 })()`;
 
 export const ctoDisasterRecoveryPlanner = createCodeSkill({
@@ -94,14 +126,21 @@ export const ctoDisasterRecoveryPlanner = createCodeSkill({
       success: SchemaProps.boolean({ description: 'Whether readiness check completed' }),
       data: SchemaProps.object({}, { additionalProperties: true, description: 'DR readiness assessment' }),
       error: SchemaProps.text({ description: 'Failure message' }),
+      present: SchemaProps.objectArray(SchemaProps.object({
+        id: SchemaProps.text({}),
+        title: SchemaProps.text({}),
+        kind: SchemaProps.text({}),
+        body: SchemaProps.text({}),
+      }), { description: 'Pre-formatted user-facing output blocks' }),
     },
     required: ['success', 'data'],
   },
-  triggers: [
-    { kind: 'user', phrase_examples: ['check disaster recovery readiness', 'assess RTO RPO compliance', 'DR failover test', 'incident readiness review'] }
+triggers: [
+    { kind: 'schedule' as const, cadence: 'Periodic DR readiness check' }
   ],
   tier: 'advise',
-isSkill: true,
+  domainKnowledge: 'Disaster recovery planning, RTO/RPO targets, business continuity, incident readiness assessment',
+  isSkill: true,
 });
 
 ctoDisasterRecoveryPlanner.configSchema = DR_CONFIG_SCHEMA;

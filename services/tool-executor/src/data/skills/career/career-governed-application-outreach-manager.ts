@@ -74,6 +74,9 @@ const GOVERNED_APPLICATION_OUTREACH_MANAGER = createCodeSkill({
   triggers: [
     { kind: 'user', phrase_examples: ['Prepare my outreach', 'Draft application packets', 'Stage outreach for review'] },
   ],
+tier: 'represent',
+confirmBeforeSend: true,
+domainKnowledge: 'Career coaching, job search strategy, resume and cover letter optimization, interview preparation, compensation negotiation',
 isSkill: true,
 });
 

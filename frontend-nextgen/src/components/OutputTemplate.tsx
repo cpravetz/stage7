@@ -1,4 +1,5 @@
 import React, { type ReactNode } from 'react';
+import type { PresentationBlock } from '@stage7-nextgen/shared';
 
 const ACRONYMS = new Set([
   'API', 'URL', 'ID', 'JSON', 'HTML', 'SEO', 'CRM', 'HTTP', 'UUID', 'CSV', 'PDF', 'XML', 'RSS', 'SSL', 'TLS',
@@ -43,35 +44,62 @@ export const parseExecutionResult = (result: unknown, depth = 0): unknown => {
   if (typeof result === 'object') {
     const record = result as Record<string, unknown>;
 
-    if (typeof record.output === 'string') {
-      const parsedOutput = outputTryParseJson(record.output);
-      if (parsedOutput !== undefined && parsedOutput !== null && typeof parsedOutput === 'object') {
-        const merged: Record<string, unknown> = { ...(parsedOutput as Record<string, unknown>) };
-        for (const [key, val] of Object.entries(record)) {
-          if (key !== 'output') {
-            merged[key] = val;
+    // Unwrap successive transport envelopes. Tool results arrive as an MCP content array whose
+    // text is the executor payload, whose own `output` is the skill's JSON string. Peel whichever
+    // envelopes are present so the renderer only ever sees the skill's own result object.
+    let current: Record<string, unknown> = record;
+    let unwrapped = false;
+
+    for (let depth = 0; depth < 6 && !unwrapped; depth += 1) {
+      if (Array.isArray(current.content)) {
+        const textItem = current.content.find(
+          (item): item is Record<string, unknown> =>
+            Boolean(item) && typeof item === 'object' && typeof (item as Record<string, unknown>).text === 'string',
+        );
+        if (textItem) {
+          const parsedContent = outputTryParseJson(textItem.text as string);
+          const base =
+            parsedContent !== undefined && parsedContent !== null && typeof parsedContent === 'object'
+              ? (parsedContent as Record<string, unknown>)
+              : { text: textItem.text };
+          if (current.isError === true && !base.error) {
+            base.error = base.text || 'Tool execution failed';
           }
+          current = base;
+          unwrapped = true;
         }
-        return parseExecutionResult(merged, depth + 1);
+      }
+      if (!unwrapped && typeof current.output === 'string') {
+        const parsedOutput = outputTryParseJson(current.output);
+        if (parsedOutput !== undefined && parsedOutput !== null && typeof parsedOutput === 'object') {
+          const merged: Record<string, unknown> = { ...(parsedOutput as Record<string, unknown>) };
+          for (const [key, val] of Object.entries(current)) {
+            if (key !== 'output') merged[key] = val;
+          }
+          current = merged;
+          unwrapped = true;
+        }
       }
     }
 
-    const unwrapped: Record<string, unknown> = {};
+    if (unwrapped) return parseExecutionResult(current, depth + 1);
+
+    const flattened: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(record)) {
       if (typeof value === 'string') {
         const parsed = outputTryParseJson(value);
         if (parsed !== undefined && parsed !== null && typeof parsed === 'object') {
-          unwrapped[key] = parseExecutionResult(parsed, depth + 1);
+          flattened[key] = parseExecutionResult(parsed, depth + 1);
         } else {
-          unwrapped[key] = value;
+          flattened[key] = value;
         }
       } else if (value !== null && typeof value === 'object') {
-        unwrapped[key] = parseExecutionResult(value, depth + 1);
+        flattened[key] = parseExecutionResult(value, depth + 1);
       } else {
-        unwrapped[key] = value;
+        flattened[key] = value;
       }
     }
-    return unwrapped;
+    return flattened;
   }
 
   return result;
@@ -115,8 +143,117 @@ const outputExtractDisplayMessage = (value: unknown, fallback: string): string =
 
 const INTERNAL_KEYS = new Set([
   'success', 'status', 'error', 'message', 'exitCode', 'durationMs',
-  'mode', 'delegatedTo', 'data', 'output',
+  'mode', 'delegatedTo', 'data', 'output', 'present',
 ]);
+
+// Envelope-level keys that describe transport, not result content. A skill whose declared
+// outputSchema is { success, data, error } must not have those keys read off its payload.
+const ENVELOPE_KEYS = new Set(['success', 'error', 'status', 'message', 'output', 'present']);
+
+const outputIsPresentationBlock = (value: unknown): value is PresentationBlock => {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Record<string, unknown>;
+  return typeof candidate.body === 'string' && candidate.body.trim() !== '';
+};
+
+/**
+ * Collect the presentation blocks a result exposes, wherever they sit in the envelope. Only the
+ * generic contract is inspected: an array of { body: string } blocks. No skill-specific fields.
+ */
+const outputCollectPresentation = (value: unknown, depth = 0): PresentationBlock[] => {
+  if (depth > 6 || value === null || value === undefined) return [];
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => outputCollectPresentation(item, depth + 1));
+  }
+  if (typeof value !== 'object') return [];
+
+  const record = value as Record<string, unknown>;
+  const blocks: PresentationBlock[] = [];
+
+  if (outputIsPresentationBlock(record)) {
+    blocks.push(record);
+    return blocks;
+  }
+  if (Array.isArray(record.present)) {
+    for (const item of record.present) {
+      if (outputIsPresentationBlock(item)) blocks.push(item);
+    }
+  }
+  for (const [key, nested] of Object.entries(record)) {
+    if (key === 'present') continue;
+    if (nested && typeof nested === 'object') {
+      blocks.push(...outputCollectPresentation(nested, depth + 1));
+    }
+  }
+  return blocks;
+};
+
+/**
+ * Descend through `data` wrappers until reaching the object that actually holds the result. A skill
+ * returning `{ success, data: {...} }` nests one level; a delegating skill nests a second. Descending
+ * stops as soon as a level carries fields of its own, so a payload with a legitimate `data` property
+ * is never skipped over.
+ */
+const outputResolvePayload = (
+  record: Record<string, unknown>,
+  outputSchema: Record<string, unknown> | undefined,
+): Record<string, unknown> => {
+  const schemaKeys = Object.keys(outputGetSchemaProperties(outputSchema));
+  let current: Record<string, unknown> = record;
+
+  for (let depth = 0; depth < 4; depth += 1) {
+    const inner = current.data;
+    if (!inner || typeof inner !== 'object' || Array.isArray(inner)) break;
+    const innerRecord = inner as Record<string, unknown>;
+
+    if (schemaKeys.some((key) => key in innerRecord)) return innerRecord;
+    const innerKeys = Object.keys(innerRecord);
+    const isBareEnvelope = innerKeys.length > 0 && innerKeys.every((key) => ENVELOPE_KEYS.has(key));
+    if (!isBareEnvelope) return innerRecord;
+
+    current = innerRecord;
+  }
+
+  if (current.data && typeof current.data === 'object' && !Array.isArray(current.data)) {
+    return current.data as Record<string, unknown>;
+  }
+  return current;
+};
+
+// The blocks, without a wrapper, so a failure path can show the skill's own report underneath a
+// status banner instead of discarding the report and leaving the user with a one-line error.
+const outputRenderPresentationBlocks = (blocks: PresentationBlock[]): ReactNode => (
+  <>
+    {blocks.map((block, i) => (
+      <div key={block.id || i} className="result-field" style={{ marginBottom: i < blocks.length - 1 ? 16 : 0 }}>
+        {block.title ? <strong style={{ display: 'block' }}>{block.title}</strong> : null}
+        <div style={{ whiteSpace: 'pre-wrap' }}>{block.body.trim()}</div>
+      </div>
+    ))}
+  </>
+);
+
+// Generic heuristic: when an object looks like a mapping of uniform items (e.g. numeric
+// keys or multiple properties whose values are objects with the same shape), render
+// it as a list of items rather than a table of properties. This keeps shared code
+// generic and avoids skill-specific assumptions.
+const outputShouldRenderAsList = (obj: Record<string, unknown>): boolean => {
+  const entries = Object.entries(obj);
+  if (entries.length === 0) return false;
+
+  // If keys are numeric or sequential, treat as list-like.
+  const numericKeys = entries.every(([k]) => /^[0-9]+$/.test(k));
+  if (numericKeys) return true;
+
+  // If many values are objects and share most top-level keys, render as list.
+  const objectValues = entries.filter(([, v]) => v && typeof v === 'object' && !Array.isArray(v));
+  if (objectValues.length >= 2) {
+    const keySets = objectValues.map(([, v]) => Object.keys(v as Record<string, unknown>).sort().join('|'));
+    const common = keySets.reduce((a, b) => (a === b ? a : ''));
+    if (common) return true;
+  }
+  return false;
+};
 
 const MAX_RENDER_DEPTH = 5;
 const MAX_ARRAY_ITEMS = 5;
@@ -214,32 +351,49 @@ const OutputTemplate: React.FC<OutputTemplateProps> = ({ outputSchema, result })
 
   const record = parsed as Record<string, unknown>;
 
-  if (record.status === 'not-connected') {
-    const message = outputExtractDisplayMessage(
-      record.error || record.message || record.reason,
-      'Not connected to the service',
-    );
+  // Presentation blocks are the skill's own user-facing report, and a skill is required to emit
+  // them on failure paths too — a not-connected or blocked run usually has more to say than the
+  // one-line error. So they are collected before the status branches below, and the status only
+  // decides the styling, never whether the report is shown.
+  const presentation = outputCollectPresentation(record);
+
+  const notConnected = record.status === 'not-connected';
+  const errText =
+    record.error !== undefined && record.error !== null && record.error !== ''
+      ? outputExtractDisplayMessage(record.error, 'Execution failed')
+      : (notConnected
+          ? outputExtractDisplayMessage(record.message || record.reason, 'Not connected to the service')
+          : null);
+  const failureState =
+    notConnected ||
+    record.success === false ||
+    record.status === 'failed' ||
+    (record.error !== undefined && record.error !== null && record.error !== '');
+
+  if (presentation.length > 0) {
     return (
-      <div className="skill-result warning">
-        <div className="warning-banner">{message}</div>
+      <div className={'skill-result ' + (notConnected ? 'warning' : failureState ? 'error' : 'success')}>
+        {notConnected && errText ? <div className="warning-banner">{errText}</div> : null}
+        {!notConnected && errText ? <div className="error-banner">{errText}</div> : null}
+        {outputRenderPresentationBlocks(presentation)}
       </div>
     );
   }
 
-  const isError =
-    record.success === false ||
-    (record.error !== undefined && record.error !== null && record.error !== '') ||
-    record.status === 'failed';
+  if (notConnected) {
+    return (
+      <div className="skill-result warning">
+        <div className="warning-banner">{errText}</div>
+      </div>
+    );
+  }
+
+  const isError = failureState;
 
   if (isError) {
-    const errValue =
-      record.error !== undefined && record.error !== null && record.error !== ''
-        ? record.error
-        : record.message;
-    const message = outputExtractDisplayMessage(errValue, 'Execution failed');
     return (
       <div className="skill-result error">
-        <div className="error-banner">{message}</div>
+        <div className="error-banner">{errText || 'Execution failed'}</div>
       </div>
     );
   }
@@ -260,26 +414,45 @@ const OutputTemplate: React.FC<OutputTemplateProps> = ({ outputSchema, result })
     );
   }
 
-  const data: Record<string, unknown> =
-    record.data && typeof record.data === 'object' && !Array.isArray(record.data)
-      ? (record.data as Record<string, unknown>)
-      : record;
+  // A skill controls its own user-facing formatting by returning presentation blocks. The core
+  // only knows the generic { id, title, body } shape, never a specific skill's field names.
+  // (Collected above, before the status branches, so failure paths keep their report.)
 
-  for (const plainTextKey of ['formattedSong', 'formattedOutput', 'songText', 'content', 'fullText']) {
-    const textVal = data[plainTextKey] || (record[plainTextKey] as unknown);
-    if (typeof textVal === 'string' && textVal.trim() !== '') {
+  // Skills emit { success, data: <payload> } and delegating skills emit one more layer of
+  // `data`, so descend to the level that actually holds the result before rendering.
+  const data = outputResolvePayload(record, outputSchema);
+
+  // If payload is an object that actually represents a list (numeric keys or
+  // mapping of uniform objects), render it as a list of items instead of a
+  // table of properties. This keeps rendering generic and skill-agnostic.
+  if (data && typeof data === 'object') {
+    const d = data as Record<string, unknown>;
+    if (outputShouldRenderAsList(d)) {
       return (
         <div className="skill-result success">
-          <div className="result-field" style={{ whiteSpace: 'pre-wrap' }}>
-            {textVal.trim()}
-          </div>
+          {outputRenderValue(Object.values(d), 0)}
         </div>
       );
+    }
+
+    for (const candidate of ['jobs', 'results', 'items']) {
+      const arr = d[candidate];
+      if (Array.isArray(arr) && arr.length > 0) {
+        return (
+          <div className="skill-result success">
+            {outputRenderValue(arr, 0)}
+          </div>
+        );
+      }
     }
   }
 
   const properties = outputGetSchemaProperties(outputSchema);
-  const schemaKeys = Object.keys(properties).filter((k) => !k.startsWith('_'));
+  // Only render schema fields the payload actually carries. Rendering a { success, data, error }
+  // schema against a payload that has none of those keys produced a panel of empty dashes.
+  const schemaKeys = Object.keys(properties).filter(
+    (k) => !k.startsWith('_') && !ENVELOPE_KEYS.has(k) && data[k] !== undefined,
+  );
 
   if (schemaKeys.length > 0) {
     return (

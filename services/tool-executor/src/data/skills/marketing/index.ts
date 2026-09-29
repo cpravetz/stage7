@@ -564,12 +564,19 @@ for (const s of MARKETING_EXTERNAL_SKILLS) {
 
 // Set tiers and domainKnowledge for all marketing skills
 const MARKETING_TIER: Record<string, 'advise' | 'aid' | 'represent'> = {
-  'plan-campaign': 'aid',
+  'plan-campaign': 'advise',
   'analyze-performance': 'advise',
   'marketing-center': 'represent',
+  'marketing-content-generation': 'aid',
+  'marketing-social-media': 'represent',
+  'marketing-email': 'represent',
+  'marketing-seo': 'aid',
+  'marketing-market-research': 'aid',
+  'marketing-audience-insights': 'aid',
+  'marketing-document-management': 'represent',
 };
 const MARKETING_DOMAIN_KNOWLEDGE = 'Marketing frameworks (AIDA, RACE, buyer journey), channel-specific best practices (SEO, paid social, email), content strategy, campaign measurement';
-for (const s of MARKETING_SKILLS) {
+for (const s of [...MARKETING_SKILLS, ...MARKETING_EXTERNAL_SKILLS]) {
   if (MARKETING_TIER[s.id]) {
     (s as Tool).tier = MARKETING_TIER[s.id];
   }

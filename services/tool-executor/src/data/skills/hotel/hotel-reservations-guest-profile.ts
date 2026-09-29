@@ -37,17 +37,6 @@ const EXTERNAL_CONFIG_SCHEMA = createSchemaRecord({
   apiVersion: SchemaProps.text({ description: 'Optional hotel API version' }),
 });
 
-function withConfirmation(skill: Tool): Tool {
-  return {
-    ...skill,
-    confirmBeforeSend: true,
-    manifest: {
-      ...skill.manifest,
-      confirmBeforeSend: true,
-    },
-  };
-}
-
 const RESERVATIONS_INPUT_SCHEMA = createSchemaRecord({
   propertyId: SchemaProps.text({ description: 'Hotel property identifier', required: true }),
   reservationId: SchemaProps.text({ description: 'Reservation identifier' }),
@@ -80,7 +69,7 @@ const RESERVATIONS_INPUT_SCHEMA = createSchemaRecord({
   confirmation: SchemaProps.boolean({ description: 'Explicit approval for a live mutating request; dryRun does not require approval', default: false }),
 }, { required: ['propertyId'] });
 
-export const RESERVATIONS_SKILL = withConfirmation(createExternalActionSkill({
+export const RESERVATIONS_SKILL = createExternalActionSkill({
   id: 'hotel-reservations-guest-profile',
   name: 'Reservations & Guest Profile',
   description: 'Unified PMS router for reservation lifecycle, room assignment, guest profiles, external bookings, and billing. Mutating requests require confirmation and default to dry-run.',
@@ -98,5 +87,6 @@ export const RESERVATIONS_SKILL = withConfirmation(createExternalActionSkill({
   triggers: [
     { kind: 'user', phrase_examples: ['Manage a reservation', 'Assign a room', 'Update a guest profile', 'Check a folio'] },
   ],
-isSkill: true,
-}));
+  confirmBeforeSend: true,
+  isSkill: true,
+});

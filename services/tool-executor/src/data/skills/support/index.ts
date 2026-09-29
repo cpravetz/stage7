@@ -5,7 +5,8 @@ import { TICKET_OPS } from "./ticket-ops";
 import { ANALYTICS_PLANNING } from "./analytics-planning";
 import { annotateStages, createWorkflow, AssistantWorkflow } from "../workflow-common";
 
-export const supportSkills = [
+// All 7 Support skills are canonical (isSkill=true). No base tools for Support per design.
+export const supportCanonicalSkills: Tool[] = [
   SUPPORT_RESOLVE_TICKET,
   SUPPORT_SENTIMENT_ANALYSIS,
   SUPPORT_ISSUE_ANALYSIS,
@@ -14,6 +15,10 @@ export const supportSkills = [
   TICKET_OPS,
   ANALYTICS_PLANNING,
 ];
+
+export const supportLowerOrderTools: Tool[] = [];
+
+export const supportSkills = [...supportCanonicalSkills, ...supportLowerOrderTools];
 
 annotateStages(supportSkills, {
   'support-resolve-ticket': 'intake',

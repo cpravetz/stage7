@@ -11,12 +11,19 @@ import { FileStorageExecutor, FileStorageOptions } from '../executors/FileStorag
 import { VendorApiExecutor } from '../executors/VendorApiExecutor';
 import { credentialProvider, NamedCredentialSource } from '../services/CredentialProvider';
 import { ReasoningExecutor } from '../executors/ReasoningExecutor';
+import { WeatherExecutor, WeatherOptions } from '../executors/WeatherExecutor';
+import { MathExecutor, MathOptions } from '../executors/MathExecutor';
+import { ApiClientExecutor, ApiClientOptions } from '../executors/ApiClientExecutor';
+import { DataAnalysisExecutor, DataAnalysisOptions } from '../executors/DataAnalysisExecutor';
+import { CalendarExecutor, CalendarOptions } from '../executors/CalendarExecutor';
+import { NativeExecutorKey } from '../types';
 import { PluginGenerator } from '../services/PluginGenerator';
 import { ToolDiscovery } from '../services/ToolDiscovery';
 import { MCPClient, MCPHTTPClient, MCPServerConfig } from '../services/MCPClient';
 import { allWorkflows } from '../data/skills';
 import type { AssistantWorkflow } from '../data/skills/workflow-common';
 import { AssistantWorkspaceManager } from './AssistantWorkspaceManager';
+import { validateAgainstOutputSchema, parseToolOutputJson } from '../utils/schemaValidator';
 
 const BRAIN_URL = process.env.BRAIN_URL || 'http://brain:3100';
 const HEALING_SYSTEM_PROMPT = `You are a senior engineer debugging a failed code execution. Given the error message, source code, and input that caused the failure, provide a corrected version of the code. Output ONLY a single JSON object with this exact shape: { "sourceCode": "corrected code string", "explanation": "brief explanation of the fix" }`;
@@ -52,6 +59,11 @@ export class ToolExecutor {
   private fileStorageExecutor = new FileStorageExecutor();
   private vendorApiExecutor = new VendorApiExecutor();
   private reasoningExecutor = new ReasoningExecutor();
+  private weatherExecutor = new WeatherExecutor();
+  private mathExecutor = new MathExecutor();
+  private apiClientExecutor = new ApiClientExecutor();
+  private dataAnalysisExecutor = new DataAnalysisExecutor();
+  private calendarExecutor = new CalendarExecutor();
   private mcpClients = new Map<string, MCPClient | MCPHTTPClient>();
   private mcpServerConfigs = new Map<string, MCPServerConfig>();
   private pendingCredentialRequests = new Map<string, PendingCredentialRequest>();
@@ -723,8 +735,17 @@ return this.executeOrRequestCredentials(pending.tool, pending.input);
           classified: { category: classified.category, severity: classified.severity, message: classified.message, userMessage: classified.userMessage, retryable: classified.retryable },
         };
       }
-      if (callee.isSkill === true) {
-        return { success: false, error: `Nested execution is not allowed for skill tools: ${callee.id}` };
+      // Skills are allowed to delegate to lower-order skills. MAX_NESTING_DEPTH is the real
+      // recursion guard, so an isSkill check here only disabled the delegation half of every
+      // composite skill (the caller swallowed the refusal and still reported success).
+      // A represent-tier skill that would really act still needs approval: a dry run is safe to
+      // nest, a live one is not.
+      const needsApproval = callee.confirmBeforeSend === true || callee.manifest?.confirmBeforeSend === true;
+      if (needsApproval && input.dryRun !== true) {
+        return {
+          success: false,
+          error: `Nested execution requires confirmation for ${callee.id}; run it directly or pass dryRun.`,
+        };
       }
 
       this.nestedExecutionDepth++;
@@ -959,6 +980,99 @@ const name = tool.name.toLowerCase();
 const manifest = tool.manifest as Record<string, unknown> | undefined;
 const capabilities = Array.isArray(manifest?.capabilities) ? manifest.capabilities as string[] : [];
 
+
+  // === Explicit native executor binding (checked BEFORE name heuristics) ===
+  const executorKey = manifest?.executor as NativeExecutorKey | undefined;
+  if (executorKey) {
+    // Input normalization: shallow-copy input and add camelCase aliases for snake_case keys
+    const normalizedInput: Record<string, unknown> = { ...input };
+    for (const key of Object.keys(input)) {
+      if (key.includes('_')) {
+        const camelKey = key.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
+        if (camelKey !== key) {
+          normalizedInput[camelKey] = input[key];
+        }
+      }
+    }
+
+    try {
+      let result: { success: boolean; error?: string; durationMs?: number } | undefined;
+      switch (executorKey) {
+        case 'weather': {
+          result = await this.weatherExecutor.execute(normalizedInput as unknown as WeatherOptions, resolved);
+          break;
+        }
+        case 'math': {
+          result = await this.mathExecutor.execute(normalizedInput as MathOptions, resolved);
+          break;
+        }
+        case 'search': {
+          result = await this.searchExecutor.execute(normalizedInput as { query: string; maxResults?: number; searchType?: 'web' | 'images' | 'news'; freshness?: 'day' | 'week' | 'month' | 'year' }, resolved);
+          break;
+        }
+        case 'files': {
+          result = await this.fileStorageExecutor.execute(normalizedInput as { operation: 'read' | 'write' | 'list' | 'delete' | 'exists' | 'mkdir'; path: string; content?: string; bucket?: string }, resolved);
+          break;
+        }
+        case 'ftp': {
+          result = await this.ftpExecutor.execute(normalizedInput as { host: string; port: number; username: string; password: string; operation: 'list' | 'upload' | 'download' | 'delete' | 'mkdir'; remotePath?: string; localPath?: string; content?: string }, resolved);
+          break;
+        }
+        case 'webhook': {
+          result = await this.webhookExecutor.execute(normalizedInput as { url: string; method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'; headers?: Record<string, string>; body?: Record<string, unknown>; secret?: string; event?: string; retries?: number; timeoutMs?: number }, resolved);
+          break;
+        }
+        case 'database': {
+          result = await this.databaseExecutor.execute(normalizedInput as { engine: 'sqlite' | 'postgres' | 'mysql'; connectionString?: string; host?: string; port?: number; database?: string; username?: string; password?: string; query: string; params?: unknown[]; timeoutMs?: number }, resolved);
+          break;
+        }
+        case 'email': {
+          result = await this.emailExecutor.execute(normalizedInput as { to: string | string[]; subject: string; text?: string; html?: string; from?: string; attachments?: Array<{ filename?: string; content?: string | Buffer; path?: string }> }, resolved);
+          break;
+        }
+        case 'vendor': {
+          const vendor = manifest?.vendor as 'jira' | 'confluence' | 'slack' | 'github' | undefined;
+          if (!vendor) {
+            return { error: 'vendor executor requires manifest.vendor to be one of: jira, confluence, slack, github' };
+          }
+          result = await this.vendorApiExecutor.execute(
+            { vendor, operation: (normalizedInput.operation as string) || 'query', input: normalizedInput },
+            resolved,
+          );
+          break;
+        }
+        case 'data_analysis': {
+          result = await this.dataAnalysisExecutor.execute(normalizedInput as { dataset: string | Array<Record<string, unknown>>; analysisType?: 'summary' | 'trend' | 'correlation' | 'distribution'; xColumn?: string; yColumn?: string; targetColumn?: string; topValuesLimit?: number }, resolved);
+          break;
+        }
+        case 'calendar': {
+          result = await this.calendarExecutor.execute(normalizedInput as { action: 'create' | 'update' | 'list' | 'delete' | 'check_availability' | 'export'; calendarPath?: string; summary?: string; start?: string; end?: string; durationMinutes?: number; attendees?: Array<{ email: string; name?: string }>; uid?: string; rangeStart?: string; rangeEnd?: string; windowStart?: string; windowEnd?: string; slotMinutes?: number; busy?: Array<{ attendee?: string; start: string; end: string }> }, resolved);
+          break;
+        }
+        case 'api_client': {
+          result = await this.apiClientExecutor.execute(normalizedInput as { path: string; method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | 'OPTIONS'; query?: Record<string, string | number | boolean>; headers?: Record<string, string>; body?: unknown; timeoutMs?: number; auth?: 'none' | 'bearer' | 'basic' | 'apiKeyHeader'; acceptErrorResponses?: boolean }, resolved);
+          break;
+        }
+        default: {
+          // Unknown executor key - fall through to legacy heuristics
+        }
+      }
+
+      if (result && typeof result === 'object' && 'success' in result) {
+        if (!result.success) {
+          return { error: result.error };
+        }
+        // Return success result with data fields and durationMs where available
+        const { success, error, durationMs, ...data } = result;
+        return { ...data, ...(durationMs !== undefined ? { durationMs } : {}) };
+      }
+    } catch (err) {
+      const error = err instanceof Error ? err.message : String(err);
+      logger.error({ toolId: tool.id, executorKey, error }, 'Native executor failed');
+      return { error };
+    }
+  }
+  // If no executorKey, fall through to existing heuristic-based dispatch
 if (tool.type === 'code' || manifest?.language) {
 const language = (manifest?.language as string) || 'javascript';
 const sourceCode = (manifest?.sourceCode as string) || '';
@@ -983,10 +1097,23 @@ if (healingAttempts > 0 && manifest && typeof manifest === 'object') {
 (manifest as Record<string, unknown>).sourceCode = codeToRun;
 logger.info({ toolId: tool.id, healingAttempts }, 'Healed code persisted to tool manifest');
 }
+// Hold code tools to their declared outputSchema. A skill that promises a contract and emits
+// something else was previously indistinguishable from one that kept it.
+const schemaIssues = validateAgainstOutputSchema(
+parseToolOutputJson(result.output),
+tool.outputSchema,
+);
+if (schemaIssues.length > 0) {
+logger.error(
+{ toolId: tool.id, issues: schemaIssues },
+'Tool result does not match its declared outputSchema',
+);
+}
 return {
 output: result.output,
 exitCode: result.exitCode ?? 0,
 durationMs: result.durationMs,
+...(schemaIssues.length > 0 ? { outputSchemaIssues: schemaIssues } : {}),
 };
 }
 

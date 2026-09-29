@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express'
 import { z } from 'zod'
 import { Tool, PluginGenerationRequest, PluginGenerationResult, CredentialRequiredError, ConfirmationRequiredError, ApprovalSummary } from '../types'
+import { createToolSchema } from '../types/manifest'
 import { ToolNotFoundError, ValidationError } from '../utils/errors'
 import asyncHandler from '../utils/asyncHandler'
 import logger from '../utils/logger'
@@ -10,21 +11,7 @@ import { join } from 'path'
 
 const router: Router = Router()
 
-const toolSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  description: z.string(),
-  type: z.enum(['mcp', 'openapi', 'code', 'reasoning']),
-  manifest: z.record(z.any()),
-  inputSchema: z.record(z.any()).optional(),
-  outputSchema: z.record(z.any()).optional(),
-  configSchema: z.record(z.any()).optional(),
-  triggers: z.array(z.any()).optional(),
-  reasoningConfig: z.record(z.any()).optional(),
-  externalConfig: z.record(z.any()).optional(),
-  confirmBeforeSend: z.boolean().optional(),
-  isSkill: z.boolean().optional(),
-})
+const toolSchema = createToolSchema
 
 const pluginGenerationSchema = z.object({
   description: z.string(),

@@ -1,5 +1,6 @@
 import { Tool, SchemaRecord } from '../../../types';
 import { createCodeSkill, SchemaProps } from '../code-skill-factory';
+import { sportsResultSchema, SPORTS_WAGERING_SAFETY_BOUNDARY } from './sports-contract';
 
 const SPORTS_GROUP_B_HOME = process.env.SPORTS_GROUP_B_HOME || '/tmp/sports/group-b';
 
@@ -81,7 +82,7 @@ store.specs[sport].push(lineAlertSpec.id);
 
 fs.writeFileSync(storePath, JSON.stringify(store, null, 2));
 
-console.log(JSON.stringify({ success: true, data: lineAlertSpec }));
+console.log(JSON.stringify({ success: true, data: lineAlertSpec, present: [{ id: 'line-alert', type: 'text', body: 'Line alert dispatched for ' + entity + ' (' + sport + '): condition=' + condition + ', movement threshold=' + movementThreshold + ', signal type=' + signalType + ', alert type=' + alertType + ', action recommendation=' + actionRecommendation + ', exposure ratio=' + exposureRatio.toFixed(3) + ', markets=' + JSON.stringify(markets) + ', channels=' + JSON.stringify(lineAlertSpec.channels) + '. ' + lineAlertSpec.neverPlaceWagers + '. }] }));
 `;
 
 const LINE_ALERT_INPUT = {
@@ -107,16 +108,6 @@ const LINE_ALERT_INPUT = {
   required: ['entity', 'sport'],
 };
 
-const CODE_OUTPUT = {
-  type: 'object',
-  properties: {
-    success: { type: 'boolean' },
-    data: { type: 'object' },
-    error: { type: 'string' },
-  },
-  required: ['success'],
-};
-
 export const LINE_ALERT_DISPATCHER = createCodeSkill({
   id: 'sports-line-alert-dispatcher',
   name: 'Line-Alert Dispatcher',
@@ -136,12 +127,12 @@ export const LINE_ALERT_DISPATCHER = createCodeSkill({
     },
   },
   inputSchema: LINE_ALERT_INPUT,
-  outputSchema: CODE_OUTPUT,
+  outputSchema: sportsResultSchema('Line alert dispatch result'),
   tier: 'represent',
   domainKnowledge: 'Sports line movement analysis, market odds monitoring, bankroll exposure',
   confirmBeforeSend: true,
   triggers: [
     { kind: 'event', on: 'Line movement or odds change detected' }
   ],
-isSkill: false,
+  isSkill: false,
 });

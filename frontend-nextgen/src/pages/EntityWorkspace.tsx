@@ -122,7 +122,8 @@ const EntityWorkspace = () => {
           manifest: t.manifest,
           triggers: t.triggers,
         })));
-        setAvailableTools(tools.filter((t) => !isSkillTool(t)).map((t) => ({ id: t.id, name: t.name, description: t.description })));
+        // Exclude both top-level skills and lower-order (helper) tools from the Available tools list
+        setAvailableTools(tools.filter((t) => !isSkillTool(t) && !lowerOrderIds.has(t.id)).map((t) => ({ id: t.id, name: t.name, description: t.description })));
       })
       .catch(() => {
         setAvailableSkills([]);

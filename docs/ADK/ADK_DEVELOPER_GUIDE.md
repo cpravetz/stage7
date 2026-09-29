@@ -44,6 +44,106 @@ const planningTool = createTool({
 });
 ```
 
+## Skill output and how it is presented
+
+**Core never knows what a skill produces.** There are no skill-specific field names anywhere in
+the shared rendering path. A skill that wants to control its own user-facing layout returns
+presentation blocks, which are a generic, typed contract.
+
+The contract lives in
+[../../shared-nextgen/src/types/common.ts](../../shared-nextgen/src/types/common.ts) and is the only
+thing a renderer needs to know:
+
+```ts
+export interface PresentationBlock {
+  id: string;          // stable identifier, used as a React key and in tests
+  title?: string;      // optional heading shown above the block
+  body: string;        // pre-formatted plain text, rendered verbatim
+  kind?: 'text' | 'markdown' | string;
+}
+
+export interface PresentableOutput {
+  success?: boolean;
+  status?: string;
+  message?: string;
+  error?: string;
+  data?: unknown;              // machine-readable payload
+  present?: PresentationBlock[]; // ordered, user-facing blocks
+}
+```
+
+A skill result therefore looks like this:
+
+```json
+{
+  "success": true,
+  "data": { "score": 82, "flags": [] },
+  "present": [
+    { "id": "report", "title": "Report", "kind": "text", "body": "REPORT\n======\n..." }
+  ]
+}
+```
+
+Rules:
+
+- `body` is **pre-formatted plain text with the layout you want the user to see**. It is rendered
+  verbatim with line breaks preserved. Do not put raw JSON in `body`; machine-readable values go in
+  `data`.
+- `data` stays available for programmatic consumers, tests, and other skills that delegate to you.
+  When `present` is present, the UI renders `present` and does not dump `data` as JSON.
+- `present` is optional. A skill that emits only `data` still renders, via a generic key/value view
+  driven by its declared `outputSchema`. Emitting `present` is how you avoid that fallback.
+- Order is meaningful: blocks render in array order.
+
+`outputSchema` is validated at runtime for code tools. A result that does not match its declared
+`outputSchema` is logged as an error and the mismatches are attached to the execution as
+`outputSchemaIssues`, so contract drift is observable rather than silent. Declare `present` in your
+`outputSchema` when you emit it:
+
+```ts
+outputSchema: {
+  type: 'object',
+  properties: {
+    success: { type: 'boolean', description: 'Whether the skill completed' },
+    data: { type: 'object', description: 'Machine-readable payload' },
+    present: {
+      type: 'array',
+      description: 'Pre-formatted, user-facing text blocks.',
+      items: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', description: 'Stable identifier for the block' },
+          title: { type: 'string', description: 'Optional heading shown above the block' },
+          kind: { type: 'string', description: "How to interpret the body. Defaults to 'text'." },
+          body: { type: 'string', description: 'Pre-formatted plain text' },
+        },
+        required: ['id', 'body'],
+      },
+    },
+  },
+  required: ['success', 'present'],
+}
+```
+
+### Delegating to other skills
+
+A composite skill calls a lower-order skill with `__execute_tool` inside its source. The callee
+returns `{ success, error, ... }` on failure rather than throwing, so a composite skill must check
+the result:
+
+```js
+const result = await __execute_tool('some-skill', args);
+if (result && result.success) {
+  // use result.data
+} else {
+  // record the failure; do not report a complete evaluation you did not perform
+}
+```
+
+Nested execution is bounded by `MAX_NESTING_DEPTH` in
+[../../services/tool-executor/src/services/ToolExecutor.ts](../../services/tool-executor/src/services/ToolExecutor.ts).
+A skill marked `confirmBeforeSend` cannot be nested unless the caller passes `dryRun: true`.
+
 ## Creating a workflow
 
 ```ts

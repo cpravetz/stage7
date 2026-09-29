@@ -3,7 +3,7 @@ import { INVESTMENT_MARKET_DATA } from './investment-market-data';
 import { PORTFOLIO_RISK_ADVISORY } from './portfolio-risk-advisory';
 import { RESEARCH_PLANNING } from './research-planning';
 import { BILL_PAY_REBALANCING } from './bill-pay-rebalancing';
-import { annotateStages, createWorkflow, AssistantWorkflow } from '../workflow-common';
+import { annotateStages, createWorkflow } from '../workflow-common';
 
 export const investmentSkills: Tool[] = [
   INVESTMENT_MARKET_DATA,

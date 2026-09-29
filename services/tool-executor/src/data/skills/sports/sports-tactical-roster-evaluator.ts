@@ -1,5 +1,6 @@
 import { Tool, SchemaRecord } from '../../../types';
 import { createCodeSkill, SchemaProps } from '../code-skill-factory';
+import { sportsResultSchema, SPORTS_PERFORMANCE_SAFETY_BOUNDARY } from './sports-contract';
 
 const SPORTS_GROUP_A_HOME = process.env.SPORTS_GROUP_A_HOME || '/tmp/sports/group-a';
 
@@ -111,7 +112,7 @@ evaluation.source = fetched.source;
 store.evaluations.push(evaluation);
 fs.writeFileSync(storePath, JSON.stringify(store, null, 2));
 
-console.log(JSON.stringify({ success: true, data: evaluation }));
+console.log(JSON.stringify({ success: true, data: evaluation, present: [{ id: 'tactical-report', type: 'text', body: 'Tactical & Roster Evaluation for ' + entity + ' vs ' + opponent + ' (' + sport + '): ' + evaluation.overallAssessment + '. ' + evaluation.dataPoints + ' metrics analyzed. Recommendations: ' + evaluation.recommendations.length + '. Expected edge: ' + (evaluation.lineupOptimization.expectedEdge * 100).toFixed(1) + '%.' }] }));
 `;
 
 const TACTICAL_ROSTER_EVALUATOR_INPUT = {
@@ -138,16 +139,6 @@ const TACTICAL_ROSTER_EVALUATOR_INPUT = {
   required: ['entity', 'opponent'],
 };
 
-const CODE_OUTPUT = {
-  type: 'object',
-  properties: {
-    success: { type: 'boolean' },
-    data: { type: 'object' },
-    error: { type: 'string' },
-  },
-  required: ['success'],
-};
-
 export const TACTICAL_ROSTER_EVALUATOR = createCodeSkill({
   id: 'sports-tactical-roster-evaluator',
   name: 'Tactical & Roster Strategy Evaluator',
@@ -165,11 +156,11 @@ export const TACTICAL_ROSTER_EVALUATOR = createCodeSkill({
     },
   },
   inputSchema: TACTICAL_ROSTER_EVALUATOR_INPUT,
-  outputSchema: CODE_OUTPUT,
+  outputSchema: sportsResultSchema('Tactical evaluation result'),
   tier: 'advise',
   domainKnowledge: 'Sports tactical analysis, roster optimization, opponent matchup evaluation',
   triggers: [
     { kind: 'event', on: 'Match calendar entering pre-match window' },
   ],
-isSkill: false,
+  isSkill: false,
 });

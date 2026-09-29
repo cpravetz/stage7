@@ -1,22 +1,22 @@
 import { Tool } from '../../../types';
-import { buildModelSkill } from './finance-build-model';
-import { analyzeInvestmentSkill } from './finance-analyze-investment';
-import { riskAssessmentSkill } from './finance-risk-assessment';
-import { regulatoryComplianceSkill } from './finance-regulatory-compliance';
+import { financeModelingAnalysisSkill } from './finance-modeling-analysis';
+import { riskRegulatoryAdvisorySkill } from './risk-regulatory-advisory';
+import { budgetTrackingSkill } from './budget-tracking';
+import { reportingDataOpsSkill } from './reporting-data-ops';
 import { annotateStages, createWorkflow, AssistantWorkflow } from '../workflow-common';
 
 export const financeSkills: Tool[] = [
-  buildModelSkill,
-  analyzeInvestmentSkill,
-  riskAssessmentSkill,
-  regulatoryComplianceSkill,
+  financeModelingAnalysisSkill,
+  riskRegulatoryAdvisorySkill,
+  budgetTrackingSkill,
+  reportingDataOpsSkill,
 ];
 
 annotateStages(financeSkills, {
-  'finance-build-model': 'research',
-  'finance-analyze-investment': 'analyze',
-  'finance-risk-assessment': 'trade',
-  'finance-regulatory-compliance': 'report',
+  'finance-modeling-analysis': 'research',
+  'risk-regulatory-advisory': 'analyze',
+  'budget-tracking': 'trade',
+  'reporting-data-ops': 'report',
 });
 
 export const financeWorkflow: AssistantWorkflow = createWorkflow({
@@ -24,9 +24,9 @@ export const financeWorkflow: AssistantWorkflow = createWorkflow({
   productObject: 'account / transaction',
   flow: 'research → analyze → trade → report',
   stages: [
-    { name: 'research', description: 'Research and data gathering', stageIds: ['finance-build-model'] },
-    { name: 'analyze', description: 'Analysis and risk assessment', stageIds: ['finance-analyze-investment'] },
-    { name: 'trade', description: 'Trade planning and execution', stageIds: ['finance-risk-assessment'] },
-    { name: 'report', description: 'Reporting and tracking', stageIds: ['finance-regulatory-compliance'] },
+    { name: 'research', description: 'Research and financial modeling', stageIds: ['finance-modeling-analysis'] },
+    { name: 'analyze', description: 'Analysis and risk/regulatory advisory', stageIds: ['risk-regulatory-advisory'] },
+    { name: 'trade', description: 'Budget tracking and variance control', stageIds: ['budget-tracking'] },
+    { name: 'report', description: 'Reporting and data ops', stageIds: ['reporting-data-ops'] },
   ],
 }, financeSkills);

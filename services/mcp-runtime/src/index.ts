@@ -87,8 +87,19 @@ const executor: ToolExecutor = {
 
 const registry = new MCPToolRegistry(executor);
 
-function registerGeneralTools(): void {
-  for (const tool of legacyGeneralTools) {
+const TOOL_EXECUTOR_STARTUP_TIMEOUT_MS = Number(process.env.TOOL_EXECUTOR_STARTUP_TIMEOUT_MS || 2000);
+
+interface ToolDefinition {
+  id: string;
+  name: string;
+  description: string;
+  type: string;
+  inputSchema?: Record<string, unknown>;
+  outputSchema?: Record<string, unknown>;
+}
+
+function registerGeneralTools(tools: ToolDefinition[], source: string): void {
+  for (const tool of tools) {
     const mcpTool: MCPTool = {
       name: tool.id,
       description: tool.description,
@@ -101,10 +112,59 @@ function registerGeneralTools(): void {
     };
     registry.register(mcpTool);
   }
-  logger.info({ count: registry.size() }, 'Registered general MCP tools');
+  logger.info({ count: registry.size(), source }, 'Registered general MCP tools');
 }
 
-registerGeneralTools();
+/**
+ * The tool-executor is the single source of truth for tool definitions: it owns
+ * the real, in-process executors. Prefer its advertised list and only fall back
+ * to the bundled mirror when it is unreachable at startup.
+ */
+async function fetchGeneralToolDefinitions(): Promise<ToolDefinition[] | null> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), TOOL_EXECUTOR_STARTUP_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${TOOL_EXECUTOR_URL}/api/tool-executor/tools`, {
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      logger.warn({ status: response.status }, 'Tool-executor tool list unavailable; using bundled fallback definitions');
+      return null;
+    }
+    const body = await response.json() as { tools?: ToolDefinition[] };
+    const tools = Array.isArray(body?.tools)
+      ? body.tools.filter((tool): tool is ToolDefinition =>
+          !!tool && typeof tool.id === 'string' && typeof tool.name === 'string' && typeof tool.description === 'string')
+      : [];
+    if (tools.length === 0) {
+      logger.warn({}, 'Tool-executor returned an empty tool list; using bundled fallback definitions');
+      return null;
+    }
+    return tools;
+  } catch (err) {
+    logger.warn(
+      { err: err instanceof Error ? err.message : String(err) },
+      'Failed to fetch tool list from tool-executor; using bundled fallback definitions'
+    );
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function bootstrap(): Promise<void> {
+  const remoteTools = await fetchGeneralToolDefinitions();
+  registerGeneralTools(remoteTools || legacyGeneralTools, remoteTools ? 'tool-executor' : 'bundled-fallback');
+
+  if (require.main === module) {
+    const PORT = process.env.PORT || 3300;
+    app.listen(PORT, () => {
+      logger.info({ port: PORT, tools: registry.size() }, 'MCP runtime service listening');
+    });
+  }
+}
+
+void bootstrap();
 
 export function registerAssistantTools(tools: MCPTool[]): void {
   for (const tool of tools) {
@@ -142,14 +202,6 @@ app.post('/api/mcp-runtime/mcp', async (req, res) => {
     res.status(400).json({ content: [{ type: 'error', error: `Unknown method: ${(req.body as { method?: string }).method}` }], isError: true });
   }
 });
-
-const PORT = process.env.PORT || 3300;
-
-if (require.main === module) {
-  app.listen(PORT, () => {
-    logger.info({ port: PORT, tools: registry.size() }, 'MCP runtime service listening');
-  });
-}
 
 export { MCPToolRegistry } from './server/ToolRegistry';
 export type { ToolExecutor } from './server/ToolRegistry';

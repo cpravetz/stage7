@@ -59,11 +59,40 @@ describe('ToolExecutor nested execution via CodeExecutor callback', () => {
     expect(parsed.error).toContain('not available');
   });
 
-  it('rejects nested call to a skill tool', async () => {
+  it('allows a skill to delegate to another skill', async () => {
     const registry = new Map<string, Tool>();
     const executor = new ToolExecutor(registry);
 
-    const skillTool = makeCodeTool('skill-tool', 'Skill Tool', 'console.log("hi");', true);
+    const callee = makeCodeTool(
+      'callee-skill',
+      'Callee Skill',
+      'console.log(JSON.stringify({ success: true, data: { from: "callee" } }));',
+      true,
+    );
+    registry.set(callee.id, callee);
+
+    const wrapper = makeCodeTool(
+      'wrapper-skill',
+      'Wrapper Skill',
+      'const r = await __execute_tool("callee-skill", {}); console.log(JSON.stringify({ success: true, result: r }));',
+    );
+
+    const exec = await executor.execute(wrapper, {});
+    expect(exec.status).toBe('completed');
+    const output = exec.output as { output?: string };
+    const parsed = JSON.parse(output.output as string);
+    expect(parsed.result).toEqual({ success: true, data: { from: 'callee' } });
+  });
+
+  it('rejects nested call to a skill tool that needs approval', async () => {
+    const registry = new Map<string, Tool>();
+    const executor = new ToolExecutor(registry);
+
+    // Skills delegate freely; what still needs approval is acting on the user's behalf.
+    const skillTool: Tool = {
+      ...makeCodeTool('skill-tool', 'Skill Tool', 'console.log("hi");', true),
+      confirmBeforeSend: true,
+    };
     registry.set(skillTool.id, skillTool);
 
     const wrapper = makeCodeTool(
@@ -77,7 +106,35 @@ describe('ToolExecutor nested execution via CodeExecutor callback', () => {
     const output = exec.output as { output?: string };
     const parsed = JSON.parse(output.output as string);
     expect(parsed.success).toBe(false);
-    expect(parsed.error).toContain('skill tools');
+    expect(parsed.error).toContain('confirmation');
+  });
+
+  it('allows nested call to an approval-gated skill in dry-run mode', async () => {
+    const registry = new Map<string, Tool>();
+    const executor = new ToolExecutor(registry);
+
+    const skillTool: Tool = {
+      ...makeCodeTool(
+        'skill-tool',
+        'Skill Tool',
+        'console.log(JSON.stringify({ success: true, data: { dryRun: true } }));',
+        true,
+      ),
+      confirmBeforeSend: true,
+    };
+    registry.set(skillTool.id, skillTool);
+
+    const wrapper = makeCodeTool(
+      'wrapper-skill',
+      'Wrapper Skill',
+      'const r = await __execute_tool("skill-tool", { dryRun: true }); console.log(JSON.stringify({ success: true, result: r }));',
+    );
+
+    const exec = await executor.execute(wrapper, {});
+    expect(exec.status).toBe('completed');
+    const output = exec.output as { output?: string };
+    const parsed = JSON.parse(output.output as string);
+    expect(parsed.result).toEqual({ success: true, data: { dryRun: true } });
   });
 
   it('resolves callee by name when id is not registered', async () => {

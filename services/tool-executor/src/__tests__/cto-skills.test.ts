@@ -15,8 +15,8 @@ function getCanonical(id: string): Tool {
 }
 
 describe('ctoSkills', () => {
-  it('exports exactly eight CTO domain tools', () => {
-    expect(ctoSkills).toHaveLength(8);
+  it('exports exactly ten CTO domain tools', () => {
+    expect(ctoSkills).toHaveLength(10);
   });
 
   it('exports unique skill ids', () => {
@@ -43,15 +43,17 @@ describe('ctoSkills', () => {
     }
   });
 
-  it('four canonical higher-order tools are exported (isSkill not forced false)', () => {
+  it('six canonical higher-order tools are exported (isSkill not forced false)', () => {
     const ho = ctoSkills.filter((s) => s.isSkill !== false);
-    expect(ho).toHaveLength(4);
+    expect(ho).toHaveLength(6);
     const hoIds = ho.map((s) => s.id).sort();
     expect(hoIds).toEqual([
       'cto-architecture-tech-debt-evaluator',
       'cto-cloud-spend-infrastructure-optimizer',
-      'cto-incident-war-room-synthesizer',
+      'cto-disaster-recovery-planner',
       'cto-engineering-action-iac-drift-remediation',
+      'cto-incident-war-room-synthesizer',
+      'cto-team-delivery-health-evaluator',
     ].sort());
   });
 
@@ -103,16 +105,18 @@ describe('ctoSkills', () => {
   });
 
   describe('Canonical skills', () => {
-    it('exports exactly four canonical skills', () => {
-      expect(ctoCanonicalSkills).toHaveLength(4);
+    it('exports exactly six canonical skills', () => {
+      expect(ctoCanonicalSkills).toHaveLength(6);
     });
 
     it('canonical skill ids match expected values', () => {
       const canonicalIds = ctoCanonicalSkills.map((s) => s.id).sort();
       expect(canonicalIds).toContain('cto-architecture-tech-debt-evaluator');
       expect(canonicalIds).toContain('cto-cloud-spend-infrastructure-optimizer');
-      expect(canonicalIds).toContain('cto-incident-war-room-synthesizer');
+      expect(canonicalIds).toContain('cto-disaster-recovery-planner');
       expect(canonicalIds).toContain('cto-engineering-action-iac-drift-remediation');
+      expect(canonicalIds).toContain('cto-incident-war-room-synthesizer');
+      expect(canonicalIds).toContain('cto-team-delivery-health-evaluator');
     });
 
     it('all canonical skills have triggers, schemas, createdAt, updatedAt', () => {
@@ -129,10 +133,18 @@ describe('ctoSkills', () => {
       }
     });
 
-    it('canonical triggers have exactly one user trigger', () => {
+    it('canonical triggers have exactly one trigger of the correct kind', () => {
+      const expected: Record<string, string> = {
+        'cto-architecture-tech-debt-evaluator': 'schedule',
+        'cto-cloud-spend-infrastructure-optimizer': 'schedule',
+        'cto-disaster-recovery-planner': 'schedule',
+        'cto-engineering-action-iac-drift-remediation': 'event',
+        'cto-incident-war-room-synthesizer': 'event',
+        'cto-team-delivery-health-evaluator': 'schedule',
+      };
       for (const skill of ctoCanonicalSkills) {
         expect(skill.triggers!.length).toBe(1);
-        expect(skill.triggers![0].kind).toBe('user');
+        expect(skill.triggers![0].kind).toBe(expected[skill.id]);
       }
     });
   });

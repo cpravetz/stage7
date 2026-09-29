@@ -53,12 +53,38 @@ export type SkillTrigger =
   | { kind: 'event'; on: string }
   | { kind: 'data'; condition: string };
 
+export type NativeExecutorKey =
+  | 'search'
+  | 'weather'
+  | 'math'
+  | 'files'
+  | 'ftp'
+  | 'webhook'
+  | 'database'
+  | 'email'
+  | 'vendor'
+  | 'data_analysis'
+  | 'calendar'
+  | 'api_client';
+
+export interface ToolManifest {
+  executor?: NativeExecutorKey;
+  vendor?: 'jira' | 'confluence' | 'slack' | 'github';
+  type?: 'mcp' | 'openapi' | 'code' | 'reasoning' | 'native';
+  language?: string;
+  sourceCode?: string;
+  server?: string;
+  urlTemplate?: string;
+  actionLabel?: string;
+  [key: string]: unknown;
+}
+
 export interface Tool {
   id: string;
   name: string;
   description: string;
-  type: 'mcp' | 'openapi' | 'code' | 'reasoning';
-  manifest: Record<string, unknown>;
+  type: 'mcp' | 'openapi' | 'code' | 'reasoning' | 'native';
+  manifest: ToolManifest;
   inputSchema?: SchemaRecord;
   outputSchema?: SchemaRecord;
   configSchema?: SchemaRecord;
@@ -72,6 +98,7 @@ export interface Tool {
   tier?: 'advise' | 'aid' | 'represent';
   domainKnowledge?: string;
   knowledgeIds?: string[];
+  actionLabel?: string;
 }
 
 export type WorkflowState = 'analysis' | 'recommendation' | 'draft' | 'approved' | 'executed' | 'rejected';

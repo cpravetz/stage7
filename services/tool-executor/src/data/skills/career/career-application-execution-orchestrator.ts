@@ -87,6 +87,8 @@ confirmBeforeSend: true,
 triggers: [
 { kind: 'user', phrase_examples: ['Apply to selected jobs', 'Apply to these jobs', 'Submit applications'] },
 ],
+tier: 'represent',
+domainKnowledge: 'Career coaching, job search strategy, resume and cover letter optimization, interview preparation, compensation negotiation',
 isSkill: true,
 });
 

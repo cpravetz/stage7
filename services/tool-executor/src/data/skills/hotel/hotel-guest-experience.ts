@@ -37,17 +37,6 @@ const EXTERNAL_CONFIG_SCHEMA = createSchemaRecord({
   apiVersion: SchemaProps.text({ description: 'Optional hotel API version' }),
 });
 
-function withConfirmation(skill: Tool): Tool {
-  return {
-    ...skill,
-    confirmBeforeSend: true,
-    manifest: {
-      ...skill.manifest,
-      confirmBeforeSend: true,
-    },
-  };
-}
-
 const GUEST_EXPERIENCE_INPUT_SCHEMA = createSchemaRecord({
   propertyId: SchemaProps.text({ description: 'Hotel property identifier', required: true }),
   guestId: SchemaProps.text({ description: 'Guest identifier' }),
@@ -80,7 +69,7 @@ const GUEST_EXPERIENCE_INPUT_SCHEMA = createSchemaRecord({
   confirmation: SchemaProps.boolean({ description: 'Explicit approval for a live mutating request; dryRun does not require approval', default: false }),
 }, { required: ['propertyId'] });
 
-export const GUEST_EXPERIENCE_SKILL = withConfirmation(createExternalActionSkill({
+export const GUEST_EXPERIENCE_SKILL = createExternalActionSkill({
   id: 'hotel-guest-experience',
   name: 'Guest Experience',
   description: 'Unified PMS router for concierge knowledge, local recommendations, guest services, and guest communications. Mutating requests require confirmation and default to dry-run.',
@@ -98,5 +87,6 @@ export const GUEST_EXPERIENCE_SKILL = withConfirmation(createExternalActionSkill
   triggers: [
     { kind: 'user', phrase_examples: ['Recommend a local restaurant', 'Handle a guest request', 'Draft a guest message'] },
   ],
-isSkill: true,
-}));
+  confirmBeforeSend: true,
+  isSkill: true,
+});

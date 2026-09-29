@@ -59,11 +59,10 @@ export const TICKET_OPS = createExternalActionSkill({
   },
   timeoutMs: 30000,
   tier: 'represent',
+  triggers: [
+    { kind: 'event', on: 'Ticket response or status change' },
+  ],
   confirmBeforeSend: true,
   domainKnowledge: 'Customer success metrics (CSAT, NPS, Churn Rate), SLA management, support escalation tiers, ticket triage',
-  isSkill: false,
+  isSkill: true,
 });
-
-TICKET_OPS.triggers = [
-  { kind: 'event', on: 'Ticket escalated to tier 2' },
-];

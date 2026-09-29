@@ -1,13 +1,55 @@
 import { Tool } from '../types'
+import { ToolStore } from './ToolStore'
 
 export class ToolRegistry {
   private tools: Map<string, Tool> = new Map()
+  private store: ToolStore | undefined
+
+  constructor(store?: ToolStore) {
+    this.store = store
+  }
 
   register(tool: Tool): void {
     if (this.tools.has(tool.id)) {
       throw new Error(`Tool with id '${tool.id}' is already registered`)
     }
 
+    this.applyTool(tool)
+    this.persist(tool)
+  }
+
+  /**
+   * Idempotent variant of register(): overwrites an existing entry instead of
+   * throwing. Used for hydration and re-registration paths, where a duplicate
+   * id is expected rather than exceptional. All lower-order-tool
+   * reconciliation behaviour is identical to register().
+   */
+  registerOrReplace(tool: Tool): void {
+    this.applyTool(tool)
+    this.persist(tool)
+  }
+
+  /**
+   * Registers a BUILT-IN default tool: identical semantics to register()
+   * (throws on a duplicate id, same lower-order reconciliation) but never
+   * written to the store. The store holds runtime tools only, so persisting
+   * the ~150 built-ins on every boot would bloat it and let a stale snapshot
+   * resurrect a tool that was later deleted from the code.
+   */
+  registerDefault(tool: Tool): void {
+    if (this.tools.has(tool.id)) {
+      throw new Error(`Tool with id '${tool.id}' is already registered`)
+    }
+
+    this.applyTool(tool)
+  }
+
+  private persist(tool: Tool): void {
+    if (!this.store) return
+    this.store.save(tool)
+  }
+
+  private applyTool(tool: Tool): void {
     const lowerOrderToolIds = new Set<string>()
     const lowerOrderToolSources = new Map<string, string>()
 
@@ -51,7 +93,11 @@ export class ToolRegistry {
   }
 
   unregister(id: string): boolean {
-    return this.tools.delete(id)
+    const removed = this.tools.delete(id)
+    if (removed && this.store) {
+      this.store.remove(id)
+    }
+    return removed
   }
 
   get(id: string): Tool | undefined {

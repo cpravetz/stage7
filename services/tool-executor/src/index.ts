@@ -2,11 +2,15 @@ import express from 'express';
 import toolRoutes from './routes/tools';
 import workflowRoutes from './routes/workflows';
 import workspaceRoutes from './routes/workspaces';
+import watchRoutes from './routes/watches';
+import mcpServerRoutes from './routes/mcpServers';
 import { Tool } from './types';
-import { toolRegistry } from './utils/sharedInstance';
+import { toolRegistry, toolStore } from './utils/sharedInstance';
 import { legacyGeneralTools } from './data/generalTools';
+import { nativeTools } from './data/nativeTools';
 import logger from './utils/logger';
 import { ToolNotFoundError, ValidationError } from './utils/errors';
+import { PluginGenerator } from './services/PluginGenerator';
 
 process.on('unhandledRejection', (reason, promise) => {
   logger.error({ reason: String(reason) }, 'Unhandled Rejection');
@@ -61,64 +65,6 @@ process.on('uncaughtException', (error) => {
 const app: express.Application = express();
 app.use(express.json());
 
-const defaultTools: Tool[] = [
-  {
-    id: 'get_weather',
-    name: 'Get Weather',
-    description: 'Retrieve current weather information for a specified location.',
-    type: 'code',
-    manifest: { module: 'weather', action: 'get_current' },
-    inputSchema: { location: { type: 'string', required: true } },
-    outputSchema: { temperature: 'number', condition: 'string', humidity: 'number' },
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  },
-  {
-    id: 'calculate',
-    name: 'Calculate',
-    description: 'Perform mathematical calculations and evaluations safely.',
-    type: 'code',
-    manifest: { module: 'math', action: 'evaluate' },
-    inputSchema: { expression: { type: 'string', required: true } },
-    outputSchema: { result: 'number' },
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  },
-  {
-    id: 'search_web',
-    name: 'Search Web',
-    description: 'Search the internet for information using a query string.',
-    type: 'code',
-    manifest: { module: 'search', action: 'web_search' },
-    inputSchema: { query: { type: 'string', required: true }, max_results: { type: 'number', default: 5 } },
-    outputSchema: { results: 'array', snippets: 'array' },
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  },
-  {
-    id: 'api_client',
-    name: 'API Client',
-    description: 'Make generic REST API calls to external services.',
-    type: 'openapi',
-    manifest: { method: 'GET', urlTemplate: 'https://api.example.com/{path}' },
-    inputSchema: { path: { type: 'string', required: true }, params: { type: 'object' } },
-    outputSchema: { status: 'number', data: 'object' },
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  },
-  {
-    id: 'file_ops',
-    name: 'File Operations',
-    description: 'Read, write, and manage files in a secure sandboxed environment.',
-    type: 'code',
-    manifest: { module: 'files', action: 'manage' },
-    inputSchema: { operation: { type: 'string', required: true, enum: ['read', 'write', 'list'] }, path: { type: 'string', required: true } },
-    outputSchema: { content: 'string', success: 'boolean' },
-    createdAt: new Date(),
-    updatedAt: new Date(),
-  },
-];
-
 const canonicalTools = [
   ...ctoCanonicalSkills,
   ...healthcareCanonicalSkills,
@@ -160,7 +106,7 @@ const skillTools = domainSkillArrays.flatMap((arr) =>
 );
 
 const allDefaults = [
-  ...defaultTools,
+  ...nativeTools,
   ...legacyGeneralTools,
   ...skillTools,
   ...canonicalTools,
@@ -188,10 +134,68 @@ for (const tool of allDefaults) {
     tool.isSkill = hasUserTrigger && !lowerOrderIds.has(tool.id);
   }
   if (!toolRegistry.get(tool.id)) {
-    toolRegistry.register(tool);
+    // registerDefault: built-ins are never written to the runtime ToolStore.
+    toolRegistry.registerDefault(tool);
   }
 }
 logger.info({ count: toolRegistry.list().length }, 'Registered default tools');
+
+// Re-register tools that were created at runtime (POST /tools,
+// POST /plugins/generate, ToolDiscovery) and persisted by ToolStore.
+// Built-in defaults always win: a persisted copy whose id collides with a
+// default is skipped, so a stale snapshot can never shadow a real tool.
+{
+  let restored = 0;
+  let skipped = 0;
+  let persisted: Tool[] = [];
+  try {
+    persisted = toolStore.loadAll();
+  } catch (err) {
+    logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Failed to load persisted tool store');
+  }
+  for (const tool of persisted) {
+    if (toolRegistry.get(tool.id)) {
+      skipped++;
+      continue;
+    }
+    try {
+      toolRegistry.registerOrReplace(tool);
+      restored++;
+    } catch (err) {
+      logger.warn({ toolId: tool.id, err: err instanceof Error ? err.message : String(err) }, 'Skipped persisted tool that failed to register');
+    }
+  }
+  logger.info({ restored, skipped, total: persisted.length }, 'Hydrated persisted tools from store');
+}
+
+// Adopt plugins that were deployed to disk (PluginGenerator.deploy) so code
+// tools survive a restart. Same skip-if-already-registered rule: each plugin
+// directory is loaded in its own try/catch so one bad directory cannot stop boot.
+{
+  let adopted = 0;
+  let skippedPlugins = 0;
+  let deployed: Array<{ id: string; name: string; deployPath: string; language: string }> = [];
+  try {
+    deployed = PluginGenerator.listDeployed();
+  } catch (err) {
+    logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Failed to list deployed plugins');
+  }
+  for (const plugin of deployed) {
+    if (toolRegistry.get(plugin.id)) {
+      skippedPlugins++;
+      continue;
+    }
+    try {
+      const tool = PluginGenerator.loadDeployed(plugin.id);
+      if (!tool) continue;
+      toolRegistry.registerOrReplace(tool);
+      adopted++;
+    } catch (err) {
+      logger.warn({ pluginId: plugin.id, err: err instanceof Error ? err.message : String(err) }, 'Failed to adopt deployed plugin');
+    }
+  }
+  logger.info({ adopted, skipped: skippedPlugins, total: deployed.length }, 'Adopted deployed plugins');
+}
 
 app.get('/api/tool-executor/health', (_req, res) => {
   res.json({ status: 'ok', service: 'tool-executor', tools: toolRegistry.list().length });
@@ -202,8 +206,10 @@ app.get('/api/tool-executor/tools', (_req, res) => {
 });
 
 app.use('/api/tool-executor', toolRoutes);
+app.use('/api/tool-executor', mcpServerRoutes);
 app.use('/api/tool-executor/workflows', workflowRoutes);
 app.use('/api/tool-executor/workspaces', workspaceRoutes);
+app.use('/api/tool-executor/watches', watchRoutes);
 
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   if (err instanceof ToolNotFoundError) {

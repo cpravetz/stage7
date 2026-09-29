@@ -38,6 +38,7 @@ const RESPONSE_DRAFTING = createCodeSkill({
   name: 'Response Drafting',
   description: 'Generate contextual support responses using ticket context, knowledge base articles, and response templates.',
   tier: 'aid',
+  domainKnowledge: 'Customer success metrics (CSAT, NPS, Churn Rate), SLA management, support escalation tiers, ticket triage',
   manifest: {
     language: 'javascript',
     entrypoint: 'index.js',
@@ -65,11 +66,9 @@ const RESPONSE_DRAFTING = createCodeSkill({
     required: ['success', 'response'],
   },
   triggers: [
-    { kind: 'event', on: 'Ticket requires response drafting' },
+    { kind: 'event', on: 'Ticket classification output is available' },
   ],
-isSkill: false,
+  isSkill: true,
 });
-
-RESPONSE_DRAFTING.domainKnowledge = 'Customer success metrics (CSAT, NPS, Churn Rate), SLA management, support escalation tiers, ticket triage';
 
 export { RESPONSE_DRAFTING };

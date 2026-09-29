@@ -3,8 +3,9 @@ export interface MCPTool {
   name: string;
   displayName?: string;
   description: string;
-  type?: 'mcp' | 'openapi' | 'code' | 'reasoning';
+  type?: 'mcp' | 'openapi' | 'code' | 'reasoning' | 'native';  // 'native' = in-process TypeScript executor selected by manifest.executor
   manifest?: Record<string, unknown>;
+  actionLabel?: string;
   inputSchema: Record<string, unknown>;
   outputSchema?: Record<string, unknown>;
   configSchema?: Record<string, unknown>;

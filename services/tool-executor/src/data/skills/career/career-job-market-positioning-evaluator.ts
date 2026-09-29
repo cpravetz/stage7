@@ -81,6 +81,8 @@ const JOB_MARKET_POSITIONING_EVALUATOR = createCodeSkill({
   triggers: [
     { kind: 'schedule', cadence: 'After job discovery completes' },
   ],
+tier: 'advise',
+domainKnowledge: 'Career coaching, job search strategy, resume and cover letter optimization, interview preparation, compensation negotiation',
 isSkill: true,
 });
 export { JOB_MARKET_POSITIONING_EVALUATOR };

@@ -12,7 +12,7 @@ type Tool = {
   id: string;
   name: string;
   description: string;
-  type: 'code' | 'openapi' | 'mcp';
+  type: 'code' | 'openapi' | 'mcp' | 'native';
   manifest?: Record<string, unknown>;
   inputSchema?: JsonSchema;
   outputSchema?: JsonSchema;
@@ -58,7 +58,7 @@ const Tools = () => {
   const [id, setId] = useState('');
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [type, setType] = useState<'code' | 'openapi' | 'mcp'>('code');
+  const [type, setType] = useState<'code' | 'openapi' | 'mcp' | 'native'>('code');
   const [inputSchemaText, setInputSchemaText] = useState(JSON.stringify(DEFAULT_SCHEMA, null, 2));
   const [outputSchemaText, setOutputSchemaText] = useState(JSON.stringify(DEFAULT_SCHEMA, null, 2));
   const [registering, setRegistering] = useState(false);
@@ -221,6 +221,7 @@ const Tools = () => {
               <option value="code">Code</option>
               <option value="openapi">OpenAPI</option>
               <option value="mcp">MCP</option>
+              <option value="native">Native</option>
             </select>
 
             <label className="field-label">
@@ -414,7 +415,7 @@ const Tools = () => {
 
             <div className="actions">
               <button onClick={handleExecute} disabled={executing}>
-                {executing ? 'Executing...' : 'Run'}
+                {executing ? 'Executing...' : (typeof executingTool?.manifest?.actionLabel === 'string' && executingTool.manifest.actionLabel.trim()) || 'Run'}
               </button>
               <button onClick={closeExecute} disabled={executing}>Cancel</button>
             </div>

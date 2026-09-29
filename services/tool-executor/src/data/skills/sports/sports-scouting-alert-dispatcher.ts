@@ -1,5 +1,6 @@
 import { Tool, SchemaRecord } from '../../../types';
 import { createCodeSkill, SchemaProps } from '../code-skill-factory';
+import { sportsResultSchema, SPORTS_PERFORMANCE_SAFETY_BOUNDARY } from './sports-contract';
 
 const SPORTS_GROUP_A_HOME = process.env.SPORTS_GROUP_A_HOME || '/tmp/sports/group-a';
 
@@ -51,7 +52,7 @@ const alert = {
 store.alerts.push(alert);
 fs.writeFileSync(storePath, JSON.stringify(store, null, 2));
 
-console.log(JSON.stringify({ success: true, data: alert }));
+console.log(JSON.stringify({ success: true, data: alert, present: [{ id: 'scouting-alert', type: 'text', body: 'Scouting alert dispatched for ' + entity + ': type=' + alertType + ', severity=' + alert.severity + ', health=' + alert.healthStatus + (alert.performanceAnomaly ? ', anomaly=' + alert.performanceAnomaly : '') + (alert.transferInterest ? ', transfer=' + alert.transferInterest : '') + ', channels=' + JSON.stringify(alert.channels) + ', source=' + alert.source + '.' }] }));
 `;
 
 const SCOUTING_ALERT_INPUT = {
@@ -70,16 +71,6 @@ const SCOUTING_ALERT_INPUT = {
     confirmationRequired: SchemaProps.boolean({ description: 'Confirmation required before sending', default: true }),
   },
   required: ['entity', 'alertType'],
-};
-
-const CODE_OUTPUT = {
-  type: 'object',
-  properties: {
-    success: { type: 'boolean' },
-    data: { type: 'object' },
-    error: { type: 'string' },
-  },
-  required: ['success'],
 };
 
 export const SCOUTING_ALERT_DISPATCHER = createCodeSkill({
@@ -101,12 +92,12 @@ export const SCOUTING_ALERT_DISPATCHER = createCodeSkill({
     },
   },
   inputSchema: SCOUTING_ALERT_INPUT,
-  outputSchema: CODE_OUTPUT,
+  outputSchema: sportsResultSchema('Scouting alert dispatch result'),
   tier: 'represent',
   domainKnowledge: 'Sports scouting, player health monitoring, transfer market tracking',
   confirmBeforeSend: true,
   triggers: [
     { kind: 'event', on: 'Player health or transfer state change detected' }
   ],
-isSkill: false,
+  isSkill: false,
 });

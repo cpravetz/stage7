@@ -73,12 +73,13 @@ export function loadAssistantKnowledge(assistantId: string): AssistantKnowledgeE
   try {
     raw = readFileSync(file, 'utf8');
   } catch (err) {
-    throw new Error(
+    const error = new Error(
       `Missing knowledge file for assistant "${assistantId}" at ${file}. ` +
         `Create it, or remove the assistant from the catalog. ` +
         `Underlying error: ${(err as Error).message}`,
-      { cause: err },
     );
+    (error as Error & { cause?: unknown }).cause = err;
+    throw error;
   }
 
   const entry = parseKnowledgeFile(assistantId, raw);

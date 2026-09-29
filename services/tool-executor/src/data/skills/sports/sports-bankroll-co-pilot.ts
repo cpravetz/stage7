@@ -1,5 +1,6 @@
 import { Tool, SchemaRecord } from '../../../types';
 import { createCodeSkill, SchemaProps } from '../code-skill-factory';
+import { sportsResultSchema, SPORTS_WAGERING_SAFETY_BOUNDARY } from './sports-contract';
 
 const SPORTS_GROUP_B_HOME = process.env.SPORTS_GROUP_B_HOME || '/tmp/sports/group-b';
 
@@ -114,7 +115,7 @@ const result = {
 };
 
 fs.writeFileSync(storePath, JSON.stringify(store, null, 2));
-console.log(JSON.stringify({ success: true, data: result }));
+console.log(JSON.stringify({ success: true, data: result, present: [{ id: 'bankroll-check', type: 'text', body: 'Bankroll check for session ' + sessionId + ': ' + result.recommendation + (result.blocked ? ' (BLOCKED: ' + result.reason + ')' : '') + '. Bankroll: ' + bankroll + ' ' + currency + ', stake: ' + stake + ', Kelly fraction: ' + (kellyFraction != null ? kellyFraction.toFixed(4) : 'N/A') + ', session exposure: ' + result.responsiblePlay.bankrollPercent + '%. ' + result.responsiblePlay.disclaimer }] }));
 `;
 
 const BANKROLL_COPILOT_INPUT = {
@@ -135,16 +136,6 @@ const BANKROLL_COPILOT_INPUT = {
   required: [],
 };
 
-const CODE_OUTPUT = {
-  type: 'object',
-  properties: {
-    success: { type: 'boolean' },
-    data: { type: 'object' },
-    error: { type: 'string' },
-  },
-  required: ['success'],
-};
-
 export const BANKROLL_CO_PILOT = createCodeSkill({
   id: 'sports-bankroll-co-pilot',
   name: 'Bankroll Co-Pilot',
@@ -155,11 +146,11 @@ export const BANKROLL_CO_PILOT = createCodeSkill({
     sourceCode: BANKROLL_COPILOT_SOURCE,
   },
   inputSchema: BANKROLL_COPILOT_INPUT,
-  outputSchema: CODE_OUTPUT,
+  outputSchema: sportsResultSchema('Bankroll check result'),
   tier: 'aid',
   domainKnowledge: 'Bankroll management mathematics, Kelly Criterion, responsible gambling',
   triggers: [
     { kind: 'schedule', cadence: 'Pre-bet risk check' },
   ],
-isSkill: false,
+  isSkill: false,
 });

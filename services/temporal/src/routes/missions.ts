@@ -31,6 +31,16 @@ router.post(
   }),
 );
 
+router.post(
+  '/watches/:watchId/run',
+  asyncHandler(async (req: Request, res: Response) => {
+    const watchId = req.params.watchId as string
+    if (!watchId) throw NextGenError.badRequest('watchId required')
+    const workflowId = await client.startWatch(watchId)
+    res.status(202).json({ workflowId, status: 'started' })
+  }),
+)
+
 router.get(
   '/missions',
   asyncHandler(async (req: Request, res: Response) => {

@@ -35,7 +35,8 @@ export class DatabaseExecutor {
 
     const resolvedConnectionString = options.connectionString ||
       credentials.connectionString ||
-      this.buildConnectionString(options, credentials);
+      this.buildConnectionString(options, credentials) ||
+      undefined;
 
     if (!resolvedConnectionString && engine !== 'sqlite') {
       return {
@@ -62,10 +63,22 @@ export class DatabaseExecutor {
   }
 
   private buildConnectionString(options: DatabaseQueryOptions, credentials: ToolCredentials): string {
-    const host = options.host || credentials.host || 'localhost';
-    const port = options.port || credentials.port || (options.engine === 'postgres' ? 5432 : 3306);
-    const database = options.database || credentials.database || 'test';
-    const username = options.username || credentials.username || 'user';
+    const suppliedHost = options.host || credentials.host;
+    const suppliedPort = options.port || (credentials.port ? Number(credentials.port) : undefined);
+    const suppliedDatabase = options.database || credentials.database;
+    const suppliedUsername = options.username || credentials.username;
+
+    // Only fabricate defaults when the caller actually supplied connection details.
+    // With no connection string, host, port, database or username there is nothing to
+    // connect to, so report missing configuration instead of inventing a localhost target.
+    if (!suppliedHost && !suppliedPort && !suppliedDatabase && !suppliedUsername) {
+      return '';
+    }
+
+    const host = suppliedHost || 'localhost';
+    const port = suppliedPort || (options.engine === 'postgres' ? 5432 : 3306);
+    const database = suppliedDatabase || 'test';
+    const username = suppliedUsername || 'user';
     const password = options.password || credentials.password || '';
 
     if (options.engine === 'postgres') {

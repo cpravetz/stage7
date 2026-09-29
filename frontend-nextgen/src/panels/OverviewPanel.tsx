@@ -4,6 +4,7 @@ import OutputTemplate from '../components/OutputTemplate';
 import FeedSelector, { buildFeedOptions, type SkillDef, type ProducedFeedEntry } from '../components/FeedSelector';
 import { useAssistantViewStore } from '../stores/assistantViewStore';
 import { SchemaFields, sfGetSchemaProperties as getSchemaProperties } from '../components/SchemaFields';
+import WatchControls from '../components/WatchControls';
 import { getToolInputSchema, getToolConfigSchema, getToolDisplayName } from '../utils/workspaceHelpers';
 
 interface OverviewPanelProps {
@@ -116,15 +117,6 @@ export const OverviewPanel = ({
           <button onClick={runMission} disabled={running || !missionInput.trim()}>
             {running ? 'Running...' : 'Run Mission'}
           </button>
-          <button
-            type="button"
-            className="secondary"
-            onClick={saveConfiguration}
-            disabled={saving}
-            style={{ marginTop: 8 }}
-          >
-            {saving ? 'Saving…' : 'Save Configuration'}
-          </button>
           <p className="hint">
             Mission will use {enabledTools.length} bound tools
             · {knowledgeEntries.length} knowledge entries · {transactionGuidanceEntries.length} guidance rules
@@ -203,8 +195,11 @@ export const OverviewPanel = ({
                                 onClick={() => handleRunTool(tool)}
                                 disabled={toolRunning}
                               >
-                                {toolRunning ? 'Running…' : 'Run'}
+                                {toolRunning ? 'Running…' : (typeof skill?.manifest?.actionLabel === 'string' && skill.manifest.actionLabel.trim()) || 'Run'}
                               </button>
+                            )}
+                            {tool.name === 'career-job-discovery' && (
+                              <WatchControls skillId={tool.name} defaultQuery={String((toolRunInputs && (toolRunInputs as any).query) || '')} />
                             )}
                           </div>
                         </div>

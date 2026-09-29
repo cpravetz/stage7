@@ -67,15 +67,13 @@ const MATTER_DOCUMENT_OPS = createExternalActionSkill({
     required: ['success', 'status', 'system', 'action', 'request', 'response', 'error'],
   },
   timeoutMs: 60000,
-isSkill: true,
+  isSkill: true,
+  confirmBeforeSend: true,
+  tier: 'represent',
+  domainKnowledge: 'Matter management, document tagging taxonomies, eDiscovery collection and search (EDRM), custodian mapping, and legal hold procedures',
+  triggers: [
+    { kind: 'user', phrase_examples: ['Manage this matter', 'Tag this document', 'Review eDiscovery'] },
+  ],
 });
-
-MATTER_DOCUMENT_OPS.confirmBeforeSend = true;
-MATTER_DOCUMENT_OPS.tier = 'represent';
-MATTER_DOCUMENT_OPS.domainKnowledge = 'Matter management, document tagging taxonomies, eDiscovery collection and search (EDRM), custodian mapping, and legal hold procedures';
-
-MATTER_DOCUMENT_OPS.triggers = [
-  { kind: 'user', phrase_examples: ['Manage this matter', 'Tag this document', 'Review eDiscovery'] },
-];
 
 export { MATTER_DOCUMENT_OPS };

@@ -51,14 +51,12 @@ const COMPLIANCE_TRACKING = createCodeSkill({
     },
     required: ['success'],
   },
-isSkill: true,
+  isSkill: true,
+  tier: 'advise',
+  domainKnowledge: 'Regulatory compliance frameworks (GDPR, HIPAA, SOX, PCI-DSS, FERPA), audit horizon planning, and compliance risk scorecarding',
+  triggers: [
+    { kind: 'schedule', cadence: 'Monthly compliance audit' },
+  ],
 });
-
-COMPLIANCE_TRACKING.tier = 'advise';
-COMPLIANCE_TRACKING.domainKnowledge = 'Regulatory compliance frameworks (GDPR, HIPAA, SOX, PCI-DSS, FERPA), audit horizon planning, and compliance risk scorecarding';
-
-COMPLIANCE_TRACKING.triggers = [
-  { kind: 'schedule', cadence: 'Monthly compliance audit' },
-];
 
 export { COMPLIANCE_TRACKING };

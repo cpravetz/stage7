@@ -21,6 +21,7 @@ export interface CreateCodeSkillOptions {
   tier?: 'advise' | 'aid' | 'represent'
   domainKnowledge?: string
   isSkill?: boolean
+  timeoutMs?: number
 }
 
 export function createCodeSkill(options: CreateCodeSkillOptions): Tool {
@@ -328,12 +329,30 @@ export function createExternalActionSkill(options: ExternalActionSkillOptions): 
         responseData = null;
       }
 
-      result.success = res.ok;
-      result.request = { input: input, endpoint: resolvedEndpoint, method: ${JSON.stringify(httpMethod)}, headers: redactedHeaders };
-      result.response = { status: res.status, data: responseData };
-      result.error = null;
-      console.log(JSON.stringify(result));
-      return result;
+        result.success = res.ok;
+        result.request = { input: input, endpoint: resolvedEndpoint, method: ${JSON.stringify(httpMethod)}, headers: redactedHeaders };
+        result.response = { status: res.status, data: responseData };
+        result.error = null;
+
+        // Build a minimal, deterministic presentation derived from the external response
+        try {
+          const present = [];
+          const summaryParts = [];
+          if (responseData && typeof responseData === 'object') {
+            if (responseData.summary) summaryParts.push(String(responseData.summary));
+            if (responseData.message) summaryParts.push(String(responseData.message));
+          }
+          summaryParts.push('Action: ' + ${JSON.stringify(action)});
+          summaryParts.push('System: ' + ${JSON.stringify(system)});
+          const body = summaryParts.join('\n');
+          present.push({ id: 'external-summary', title: 'External action result', kind: 'text', body });
+          result.present = present;
+        } catch (e) {
+          result.present = [{ id: 'external-summary', title: 'External action result', kind: 'text', body: 'Result available; could not format presentation.' }];
+        }
+
+        console.log(JSON.stringify(result));
+        return result;
     } catch (err) {
       ${clearTimeoutCode}
       result.success = false;
@@ -341,7 +360,14 @@ export function createExternalActionSkill(options: ExternalActionSkillOptions): 
       result.request = { input: input, endpoint: resolvedEndpoint, method: ${JSON.stringify(httpMethod)} };
       result.response = null;
       console.log(JSON.stringify(result));
-      return result;
+        // Attach an error presentation so the UI can render an honest failure
+        try {
+          result.present = [{ id: 'external-error', title: 'External action failed', kind: 'text', body: result.error || 'External action failed' }];
+        } catch (e) {
+          // ignore
+        }
+        console.log(JSON.stringify(result));
+        return result;
     }
   })();`
 

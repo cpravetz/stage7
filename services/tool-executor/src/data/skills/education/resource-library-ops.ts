@@ -74,6 +74,7 @@ export const RESOURCE_LIBRARY_OPS = createExternalActionSkill({
   outputSchema: EDUCATION_EXTERNAL_OUTPUT_SCHEMA,
   timeoutMs: 120000,
   tier: 'aid',
+  isSkill: true,
   domainKnowledge: "Pedagogical frameworks (Bloom's Taxonomy, Spaced Repetition), curriculum design, assessment scoring methods, student engagement metrics",
   triggers: [
     { kind: 'user', phrase_examples: ['Curate learning resources for this subject'] },

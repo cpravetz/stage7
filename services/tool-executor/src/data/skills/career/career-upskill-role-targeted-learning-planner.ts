@@ -76,6 +76,8 @@ description: 'Recommends a concise upskilling plan and curated learning resource
   triggers: [
     { kind: 'user', phrase_examples: ['Plan my upskilling', 'What should I learn for this role', 'Close my skill gaps'] },
   ],
+  tier: 'advise',
+  domainKnowledge: 'Career coaching, job search strategy, resume and cover letter optimization, interview preparation, compensation negotiation',
   isSkill: true,
 });
 UPSKILL_ROLE_TARGETED_LEARNING_PLANNER.configSchema = UPSKILL_ROLE_TARGETED_LEARNING_PLANNER.manifest.configSchema as SchemaRecord;

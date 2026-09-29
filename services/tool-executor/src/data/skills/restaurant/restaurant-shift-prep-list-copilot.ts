@@ -1,21 +1,33 @@
-import { Tool } from "../../../types";
-import { createCodeSkill, SchemaProps } from "../code-skill-factory";
+import { Tool } from '../../../types';
+import { createCodeSkill, SchemaProps, createSchemaRecord } from '../code-skill-factory';
+import { restaurantResultSchema, RESTAURANT_SAFETY_BOUNDARY, RESTAURANT_PRESENT_SCHEMA } from './restaurant-contract';
 
 const RESTAURANT_SHIFT_PREP_LIST_COPILOT_SOURCE = `(async () => {
   const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
-  const baseDir = process.env.RESTAURANT_HOME || '/tmp/restaurant';
-  const fs = require('fs');
-  const path = require('path');
-  const dataDir = path.join(baseDir, 'shift-prep');
-  fs.mkdirSync(dataDir, { recursive: true });
-  const storePath = path.join(dataDir, 'prep-list.json');
-  let prepList = fs.existsSync(storePath) ? JSON.parse(fs.readFileSync(storePath, 'utf8')) : [];
+  const NL = '\\n';
+  const SAFETY = ${JSON.stringify(RESTAURANT_SAFETY_BOUNDARY)};
+
+  function fail(status, message, title) {
+    console.log(JSON.stringify({
+      success: false,
+      status: status,
+      error: message,
+      data: null,
+      present: [{ id: 'notice', title: title, kind: 'text', body: message + NL + NL + SAFETY }],
+    }));
+  }
 
   const date = input.date || new Date().toISOString().split('T')[0];
   const forecastCovers = Number(input.forecastCovers || 0);
   const prepRatios = input.prepRatios || {};
   const currentStock = input.currentStock || {};
   const shift = input.shift || 'all';
+
+  if (forecastCovers <= 0 && Object.keys(prepRatios).length === 0) {
+    fail('not-connected', 'Not connected: forecast covers and prep ratios are required to generate a prep list.', 'Input required');
+    return;
+  }
+
   const items = Object.keys(prepRatios).map(name => {
     const ratio = Number(prepRatios[name] || 0);
     const needed = Math.ceil(forecastCovers * ratio);
@@ -26,117 +38,71 @@ const RESTAURANT_SHIFT_PREP_LIST_COPILOT_SOURCE = `(async () => {
   const totalOnHand = items.reduce((s, i) => s + i.quantityOnHand, 0);
   const totalShortage = items.reduce((s, i) => s + i.shortage, 0);
   const prep = { id: 'prep_' + date + '_' + shift, date, shift, forecastCovers, items, totals: { items: items.length, quantityNeeded: totalNeeded, quantityOnHand: totalOnHand, shortage: totalShortage } };
-  prepList.push(prep);
-  fs.writeFileSync(storePath, JSON.stringify(prepList, null, 2));
-  console.log(JSON.stringify({ success: true, data: prep }));
-})();`;
 
-const RESTAURANT_SHIFT_PREP_LIST_COPILOT_CONFIG = {
-  "type": "object",
-  "properties": {
-    "confirmBeforeSend": {
-      "type": "boolean",
-      "description": "Require confirmation before submitting prep orders",
-      "default": false
-    },
-    "defaultShift": {
-      "type": "string",
-      "description": "Default shift for prep generation",
-      "default": "all"
-    },
-    "autoReorderThreshold": {
-      "type": "number",
-      "description": "Auto-reorder when shortage exceeds this value",
-      "default": 0
-    }
+  // ---- Report ------------------------------------------------------------------
+  const lines = [];
+  lines.push('Prep list for ' + shift + ' shift on ' + date + ' (covers: ' + forecastCovers + ').');
+  lines.push('');
+  if (items.length > 0) {
+    lines.push('Per-item breakdown:');
+    items.forEach(function (item) {
+      lines.push('  ' + item.name + ': needed=' + item.quantityNeeded + ', on-hand=' + item.quantityOnHand + ', shortage=' + item.shortage + ', order=' + item.orderQty + ' (ratio ' + item.prepRatio + ' per cover)');
+    });
+  } else {
+    lines.push('No prep items were supplied.');
   }
-};
+  lines.push('');
+  lines.push('Totals: items=' + items.length + ', quantity needed=' + totalNeeded + ', on-hand=' + totalOnHand + ', shortage=' + totalShortage);
+  lines.push('');
+  lines.push(SAFETY);
 
-const RESTAURANT_SHIFT_PREP_LIST_COPILOT_INPUT = {
-  "type": "object",
-  "properties": {
-    "date": {
-      "type": "string",
-      "description": "Date (YYYY-MM-DD)"
-    },
-    "forecastCovers": {
-      "type": "number",
-      "description": "Forecasted number of covers"
-    },
-    "prepRatios": {
-      "type": "object",
-      "description": "Prep quantity ratio per cover by item name"
-    },
-    "currentStock": {
-      "type": "object",
-      "description": "Current stock levels by item name"
-    },
-    "shift": {
-      "type": "string",
-      "description": "Shift name (breakfast, lunch, dinner, all)"
-    },
-    "openCovers": {
-      "type": "number",
-      "description": "Expected open covers for allocation"
-    },
-    "serviceDuration": {
-      "type": "number",
-      "description": "Service duration in minutes",
-      "default": 90
-    },
-    "staffPerCover": {
-      "type": "number",
-      "description": "Staff required per cover",
-      "default": 0.2
-    },
-    "availableStaff": {
-      "type": "number",
-      "description": "Available staff count"
-    }
-  }
-};
+  console.log(JSON.stringify({
+    success: true,
+    status: 'local',
+    data: prep,
+    present: [{ id: 'prep-list-report', title: 'Shift Prep List', kind: 'text', body: lines.join(NL) }],
+  }));
+})()`;
 
-const RESTAURANT_SHIFT_PREP_LIST_COPILOT_OUTPUT = {
-  "type": "object",
-  "properties": {
-    "success": {
-      "type": "boolean",
-      "description": "Whether the operation succeeded"
-    },
-    "data": {
-      "type": "object",
-      "description": "Prep or allocation result data"
-    },
-    "error": {
-      "type": "string",
-      "description": "Error message if failed"
-    }
-  },
-  "required": [
-    "success"
-  ]
-};
-
-export const RESTAURANT_SHIFT_PREP_LIST_COPILOT = createCodeSkill({
-  id: "restaurant-shift-prep-list-copilot",
-  name: "Restaurant Shift Prep List Copilot",
-  description: "Generate shift prep lists from forecasted covers and prep ratios, compute shortages, and allocate staff based on cover volume and service duration with deterministic calculations.",
-  manifest: { language: "javascript", entrypoint: "index.js", sourceCode: RESTAURANT_SHIFT_PREP_LIST_COPILOT_SOURCE, configSchema: RESTAURANT_SHIFT_PREP_LIST_COPILOT_CONFIG },
-  inputSchema: RESTAURANT_SHIFT_PREP_LIST_COPILOT_INPUT,
-  outputSchema: RESTAURANT_SHIFT_PREP_LIST_COPILOT_OUTPUT,
-  triggers: [
-    {
-      "kind": "user",
-      "phrase_examples": [
-        "Generate prep list",
-        "Check shift inventory",
-        "Plan prep for tomorrow",
-        "Allocate staff"
-      ]
-    }
-  ],
-isSkill: true,
+const RESTAURANT_SHIFT_PREP_LIST_COPILOT_CONFIG = createSchemaRecord({
+  confirmBeforeSend: SchemaProps.boolean({ description: 'Require confirmation before submitting prep orders', default: false }),
+  defaultShift: SchemaProps.text({ description: 'Default shift for prep generation', default: 'all' }),
+  autoReorderThreshold: SchemaProps.number({ description: 'Auto-reorder when shortage exceeds this value', default: 0 }),
 });
 
-RESTAURANT_SHIFT_PREP_LIST_COPILOT.tier = 'aid';
-RESTAURANT_SHIFT_PREP_LIST_COPILOT.domainKnowledge = 'Restaurant shift planning, prep list generation, and staff allocation based on cover forecasts';
+const RESTAURANT_SHIFT_PREP_LIST_COPILOT_INPUT = createSchemaRecord({
+  date: SchemaProps.text({ description: 'Date (YYYY-MM-DD)' }),
+  forecastCovers: SchemaProps.number({ description: 'Forecasted number of covers' }),
+  prepRatios: SchemaProps.object({}, { description: 'Prep quantity ratio per cover by item name' }),
+  currentStock: SchemaProps.object({}, { description: 'Current stock levels by item name' }),
+  shift: SchemaProps.select(['breakfast', 'lunch', 'dinner', 'all'], { description: 'Shift name', default: 'all' }),
+  openCovers: SchemaProps.number({ description: 'Expected open covers for allocation' }),
+  serviceDuration: SchemaProps.number({ description: 'Service duration in minutes', default: 90 }),
+  staffPerCover: SchemaProps.number({ description: 'Staff required per cover', default: 0.2 }),
+  availableStaff: SchemaProps.number({ description: 'Available staff count' }),
+});
+
+export const RESTAURANT_SHIFT_PREP_LIST_COPILOT = createCodeSkill({
+  id: 'restaurant-shift-prep-list-copilot',
+  name: 'Restaurant Shift Prep List Copilot',
+  description: 'Generate shift prep lists from forecasted covers and prep ratios, compute shortages, and allocate staff based on cover volume and service duration with deterministic calculations.',
+  manifest: { language: 'javascript', entrypoint: 'index.js', sourceCode: RESTAURANT_SHIFT_PREP_LIST_COPILOT_SOURCE, configSchema: RESTAURANT_SHIFT_PREP_LIST_COPILOT_CONFIG },
+  inputSchema: RESTAURANT_SHIFT_PREP_LIST_COPILOT_INPUT,
+  outputSchema: restaurantResultSchema('Prep items with quantities, shortages, order quantities, and totals'),
+  triggers: [
+    {
+      kind: 'user',
+      phrase_examples: [
+        'Generate prep list',
+        'Check shift inventory',
+        'Plan prep for tomorrow',
+        'Allocate staff',
+      ],
+    },
+    { kind: 'schedule', cadence: 'Daily shift prep list generation' },
+  ],
+  isSkill: true,
+  tier: 'aid',
+  domainKnowledge: 'Restaurant shift planning, prep list generation, and staff allocation based on cover forecasts',
+  confirmBeforeSend: false,
+});

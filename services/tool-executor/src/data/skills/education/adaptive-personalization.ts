@@ -127,7 +127,8 @@ console.log(JSON.stringify({ success: true, data: { adaptation, storePath } }));
     },
     required: ['success'],
   },
-  tier: 'aid',
+  tier: 'advise',
+  isSkill: true,
   domainKnowledge: 'Adaptive learning theory, differentiated instruction, formative assessment, learner analytics',
   triggers: [
     { kind: 'event', on: 'Learner insight output available for personalization' },

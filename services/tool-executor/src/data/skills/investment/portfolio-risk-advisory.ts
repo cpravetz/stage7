@@ -1,6 +1,6 @@
-import { createCodeSkill, SchemaProps } from '../code-skill-factory';
+import { createCodeSkill, SchemaProps, createSchemaRecord } from '../code-skill-factory';
 import { SchemaRecord } from '../../../types';
-import { createSchemaRecord } from '../code-skill-factory';
+import { investmentResultSchema } from './investment-contract';
 
 const INVESTMENT_HOME = process.env.INVESTMENT_HOME || '/tmp/investment';
 
@@ -29,29 +29,123 @@ const portfolioAdvisoryInputSchema: SchemaRecord = createSchemaRecord({
   peerGroup: SchemaProps.text({ description: 'Peer group for comparison' })
 }, { required: ['action'] });
 
-const commonOutputSchema = {
-  type: 'object',
-  properties: {
-    success: { type: 'boolean' },
-    data: { type: 'object' },
-    storePath: { type: 'string' },
-    error: { type: 'string' }
-  },
-  required: ['success']
-};
-
 const portfolioAdvisorySourceCode = `
 const fs = require('fs');
 const path = require('path');
 const input = __tool_input || {};
+const NL = '\\n';
 
 const baseDir = process.env.INVESTMENT_HOME || '${INVESTMENT_HOME}';
 const storePath = path.join(baseDir, 'portfolio-advisory.json');
-fs.mkdirSync(baseDir, { recursive: true });
+try { fs.mkdirSync(baseDir, { recursive: true }); } catch (e) {}
 
 const store = fs.existsSync(storePath) ? JSON.parse(fs.readFileSync(storePath, 'utf8')) : [];
 
+function emit(success, status, data, error, present) {
+  const payload = { success: success, status: status, data: data || null, error: error || null, present: present || [] };
+  console.log(JSON.stringify(payload));
+  return payload;
+}
+function fmtPct(v) { return v == null ? 'N/A' : (v * 100).toFixed(1) + '%'; }
+function fmtMoney(v) { return v == null ? 'N/A' : '$' + Number(v).toFixed(2); }
+function fmtNum(v, d) { return v == null ? 'N/A' : Number(v).toFixed(d || 2); }
 function roundMoney(value) { return Math.round((Number(value) || 0) * 100) / 100; }
+
+function formatAllocation(result) {
+  const L = [];
+  L.push('Total value: ' + fmtMoney(result.totalValue));
+  L.push('Risk tolerance: ' + result.riskTolerance);
+  if (result.expectedReturn !== null) L.push('Expected return: ' + fmtPct(result.expectedReturn));
+  L.push('Sharpe ratio: ' + fmtNum(result.sharpeRatio));
+  L.push('Max drawdown: ' + fmtNum(result.maxDrawdown));
+  const allocKeys = Object.keys(result.allocation || {});
+  if (allocKeys.length) {
+    L.push('');
+    L.push('Allocation by asset class:');
+    allocKeys.forEach(function (k) { L.push('  ' + k + ': ' + fmtPct(result.allocation[k])); });
+  }
+  L.push('');
+  L.push('Holdings: ' + (result.holdings ? result.holdings.length : 0) + ' positive-value holdings.');
+  return L;
+}
+
+function formatWeights(result) {
+  const L = [];
+  L.push('Objective: ' + result.objective);
+  const weightKeys = Object.keys(result.weights || {});
+  if (weightKeys.length) {
+    L.push('Allocation (starting):');
+    weightKeys.forEach(function (k) { L.push('  ' + k + ': ' + fmtPct(result.weights[k])); });
+  }
+  L.push('Expected return: ' + fmtPct(result.expectedReturn));
+  L.push('Volatility: ' + fmtPct(result.volatility));
+  L.push('Sharpe ratio: ' + fmtNum(result.sharpeRatio));
+  const constraintKeys = Object.keys(result.constraints || {});
+  if (constraintKeys.length) {
+    L.push('Constraints applied:');
+    constraintKeys.forEach(function (k) {
+      var v = result.constraints[k];
+      if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
+        L.push('  ' + k + ': ' + v);
+      } else if (v && typeof v === 'object') {
+        L.push('  ' + k + ': ' + Object.keys(v).map(function (sk) { return sk + '=' + v[sk]; }).join(', '));
+      }
+    });
+  }
+  return L;
+}
+
+function formatRisk(result) {
+  const L = [];
+  L.push('Portfolio value: ' + fmtMoney(result.portfolioValue));
+  L.push('Confidence level: ' + fmtPct(result.confidenceLevel));
+  L.push('Holding period: ' + (result.holdingPeriod ? result.holdingPeriod + ' days' : 'N/A'));
+  const varKeys = Object.keys(result.results || {});
+  if (varKeys.length) {
+    L.push('');
+    L.push('Risk metrics:');
+    varKeys.forEach(function (k) {
+      const metric = result.results[k];
+      if (metric && typeof metric === 'object' && 'varAmount' in metric) {
+        L.push('  ' + k + ': VaR = ' + fmtMoney(metric.varAmount));
+      } else if (metric && typeof metric === 'object') {
+        L.push('  ' + k + ': ' + Object.keys(metric).map(function (mk) { return mk + '=' + metric[mk]; }).join(', '));
+      } else {
+      }
+    });
+  }
+  const weightEntries = Array.isArray(result.weights) ? result.weights : Object.values(result.weights || {});
+  if (weightEntries.length) {
+    L.push('');
+    L.push('Weights:');
+    weightEntries.slice(0, 5).forEach(function (w) { L.push('  ' + (w.symbol || 'unknown') + ': ' + fmtPct(w.weight)); });
+    if (weightEntries.length > 5) L.push('  ... and ' + (weightEntries.length - 5) + ' more.');
+  }
+  return L;
+}
+
+function formatEvaluation(result) {
+  const L = [];
+  const criteriaKeys = Object.keys(result.criteria || {});
+  const weightKeys = Object.keys(result.weights || {});
+  L.push('Evaluated ' + (result.scores ? result.scores.length : 0) + ' investments.');
+  if (criteriaKeys.length) L.push('Criteria: ' + criteriaKeys.join(', '));
+  if (weightKeys.length) L.push('Weights: ' + weightKeys.map(function (k) { return k + ' = ' + result.weights[k]; }).join(', '));
+  const ranked = result.ranked || [];
+  if (ranked.length) {
+    L.push('');
+    L.push('Ranking (best first):');
+    ranked.forEach(function (item) { L.push('  ' + item.symbol + ': ' + fmtNum(item.score, 4)); });
+  }
+  return L;
+}
+
+function formatNotice(result) {
+  const L = [];
+  if (result.notice) L.push(result.notice);
+  L.push('Source: ' + result.source);
+  return L;
+}
 
 async function analyzePortfolio(holdings, riskTolerance) {
   const validHoldings = Array.isArray(holdings) ? holdings.filter(h => h && Number(h.value ?? h.amount) > 0) : [];
@@ -104,9 +198,13 @@ async function optimizePortfolio(params) {
 
 async function assessRisk(params) {
   const portfolio = params.portfolio || params.holdings || [];
-  const values = portfolio.map(p => Number(p.value ?? p.amount ?? 0)).filter(value => Number.isFinite(value) && value > 0);
+  let holdings = portfolio;
+  if (portfolio && typeof portfolio === 'object' && !Array.isArray(portfolio) && Array.isArray(portfolio.holdings)) {
+    holdings = portfolio.holdings;
+  }
+  const values = holdings.map(p => Number(p.value ?? p.amount ?? 0)).filter(value => Number.isFinite(value) && value > 0);
   const portfolioValue = values.reduce((sum, value) => sum + value, 0) || null;
-  const weights = portfolioValue ? portfolio.map(p => ({ symbol: p.symbol || p.asset || 'unknown', weight: (Number(p.value ?? p.amount ?? 0) / portfolioValue) })) : [];
+  const weights = portfolioValue ? holdings.map(p => ({ symbol: p.symbol || p.asset || 'unknown', weight: (Number(p.value ?? p.amount ?? 0) / portfolioValue) })) : [];
   const volatility = Number(params.volatility);
   const holdingPeriod = Number.isFinite(Number(params.holdingPeriod)) ? Number(params.holdingPeriod) : null;
   const confidenceLevel = Number.isFinite(Number(params.confidenceLevel)) ? Number(params.confidenceLevel) : null;
@@ -146,53 +244,92 @@ async function evaluateInvestment(params) {
   return { scores: scored, ranked, criteria, weights, source: 'supplied-input', notice: ranked.length ? 'Scores are weighted calculations from supplied criteria and weights.' : 'No numeric criteria were supplied; no ranking was produced.' };
 }
 
-async function handleAction() {
-  const action = input.action;
-  let result;
-  switch (action) {
-    case 'analyze-portfolio':
-      result = await analyzePortfolio(input.holdings || [], input.riskTolerance);
-      break;
-    case 'optimize':
-    case 'rebalance':
-    case 'efficient-frontier':
-    case 'risk-budgeting':
-      result = await optimizePortfolio(input);
-      break;
-    case 'risk-assessment':
-    case 'stress-test':
-      result = await assessRisk(input);
-      break;
-    case 'evaluate':
-    case 'factor-exposure':
-    case 'scenario-analysis':
-      result = await evaluateInvestment(input);
-      break;
-    default:
-      throw new Error('Unknown action: ' + action);
+function buildPresent(action, result) {
+  const lines = [];
+  if (action === 'analyze-portfolio') {
+    lines.push('Portfolio Analysis');
+    lines.push('=================');
+    lines.push('');
+    formatAllocation(result).forEach(function (l) { lines.push(l); });
+  } else if (action === 'optimize' || action === 'rebalance' || action === 'efficient-frontier' || action === 'risk-budgeting') {
+    lines.push('Portfolio Optimization');
+    lines.push('======================');
+    lines.push('');
+    formatWeights(result).forEach(function (l) { lines.push(l); });
+  } else if (action === 'risk-assessment' || action === 'stress-test') {
+    lines.push('Risk Assessment');
+    lines.push('===============');
+    lines.push('');
+    formatRisk(result).forEach(function (l) { lines.push(l); });
+  } else if (action === 'evaluate' || action === 'factor-exposure' || action === 'scenario-analysis') {
+    lines.push('Investment Evaluation');
+    lines.push('=====================');
+    lines.push('');
+    formatEvaluation(result).forEach(function (l) { lines.push(l); });
   }
-  const record = { id: 'adv_' + Date.now(), action, input, result, createdAt: new Date().toISOString() };
-  store.push(record);
-  fs.writeFileSync(storePath, JSON.stringify(store, null, 2));
-  return { success: true, data: result, storePath };
+  lines.push('');
+  formatNotice(result).forEach(function (l) { lines.push(l); });
+  return [{ id: 'report', title: action, kind: 'text', body: lines.join(NL) }];
 }
 
-handleAction().then(r => console.log(JSON.stringify(r))).catch(e => console.log(JSON.stringify({ success: false, error: e.message })));
+(async () => {
+  try {
+    const action = input.action;
+    let result;
+    switch (action) {
+      case 'analyze-portfolio':
+        result = await analyzePortfolio(input.holdings || [], input.riskTolerance);
+        break;
+      case 'optimize':
+      case 'rebalance':
+      case 'efficient-frontier':
+      case 'risk-budgeting':
+        result = await optimizePortfolio(input);
+        break;
+      case 'risk-assessment':
+      case 'stress-test':
+        result = await assessRisk(input);
+        break;
+      case 'evaluate':
+      case 'factor-exposure':
+      case 'scenario-analysis':
+        result = await evaluateInvestment(input);
+        break;
+      default:
+        throw new Error('Unknown action: ' + action);
+    }
+    const record = { id: 'adv_' + Date.now(), action, input, result, createdAt: new Date().toISOString() };
+    store.push(record);
+    fs.writeFileSync(storePath, JSON.stringify(store, null, 2));
+    result.storePath = storePath;
+    const present = buildPresent(action, result);
+    emit(true, 'ok', result, null, present);
+  } catch (error) {
+    const msg = (error && error.message) ? error.message : String(error);
+    emit(false, 'error', null, msg, [{
+      id: 'error',
+      title: 'Error',
+      kind: 'text',
+      body: 'Portfolio advisory action "' + (input.action || '(unspecified)') + '" failed: ' + msg
+    }]);
+  }
+})();
 `;
 
 const PORTFOLIO_RISK_ADVISORY = createCodeSkill({
   id: 'portfolio-risk-advisory',
   name: 'Portfolio & Risk Advisory',
   description: 'Comprehensive portfolio analysis, optimization, risk assessment (VaR, stress testing), and investment evaluation using quantitative models and factor analysis.',
-tier: 'advise',
-domainKnowledge: 'Portfolio construction, value-at-risk and stress testing, factor analysis, and quantitative allocation methods',
-  manifest: { language: 'javascript', entrypoint: 'index.js', sourceCode: portfolioAdvisorySourceCode },
+  tier: 'advise',
+  domainKnowledge: 'Portfolio construction, value-at-risk and stress testing, factor analysis, and quantitative allocation methods',
+  manifest: { language: 'javascript', entrypoint: 'index.js', sourceCode: portfolioAdvisorySourceCode, persistenceEnv: 'INVESTMENT_HOME', workflowStage: 'analyze' },
   inputSchema: portfolioAdvisoryInputSchema,
-  outputSchema: commonOutputSchema,
+  outputSchema: investmentResultSchema('Portfolio analysis results including allocation, returns, VaR, and evaluation scores'),
   triggers: [
+    { kind: 'event', on: 'market data update' },
     { kind: 'user', phrase_examples: ["Analyze my portfolio", "Optimize allocation", "Assess portfolio risk", "Run stress test", "Evaluate securities", "Check efficient frontier"] }
   ],
-isSkill: true,
+  isSkill: true,
 });
 
 export { PORTFOLIO_RISK_ADVISORY };

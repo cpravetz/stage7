@@ -1,81 +1,244 @@
 import { Tool, SchemaRecord } from '../../../types';
-import { createCodeSkill, SchemaProps } from '../code-skill-factory';
+import { createCodeSkill, SchemaProps, createSchemaRecord } from '../code-skill-factory';
+import { executiveResultSchema } from './executive-contract';
+
+function withUxMetadata(schema: SchemaRecord): SchemaRecord {
+  const properties = schema.properties as Record<string, Record<string, unknown>> | undefined;
+  if (!properties) return schema;
+  Object.entries(properties).forEach(([key, property], index) => {
+    if (!property || typeof property !== 'object') return;
+    property.title = property.title || key.replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase());
+    property.order = typeof property.order === 'number' ? property.order : index + 1;
+    property.hint = property.hint || property.description || 'See the tool documentation for details.';
+  });
+  return schema;
+}
 
 const EXECUTIVE_HOME = process.env.EXECUTIVE_HOME || '/tmp/executive';
+const SAFETY_BOUNDARY = 'Executive advisory only: do not commit organizational resources, make binding decisions, or present recommendations as settled fact without explicit approval.';
 
 const RISK_SCENARIO_SOURCE = `(async () => {
   const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
+  const NL = '\\n';
+  const SAFETY = ${JSON.stringify(SAFETY_BOUNDARY)};
+
+  function fail(status, message, title, extra) {
+    const base = { success: false, status: status, error: message, data: null, present: [{ id: 'notice', title: title, kind: 'text', body: message + NL + NL + SAFETY }] };
+    if (extra) { for (const key in extra) { base[key] = extra[key]; } }
+    console.log(JSON.stringify(base));
+  }
+
   const focusArea = input.focusArea || 'risk-assessment';
   const executiveId = input.executiveId || '';
-  const baseDir = process.env.EXECUTIVE_HOME || '${EXECUTIVE_HOME}';
+  const baseDir = process.env.EXECUTIVE_HOME || '/tmp/executive';
   const fs = require('fs');
   const path = require('path');
   const storePath = path.join(baseDir, 'risk-scenario.json');
   fs.mkdirSync(baseDir, { recursive: true });
   let store = fs.existsSync(storePath) ? JSON.parse(fs.readFileSync(storePath, 'utf8')) : [];
-  const context = { domain: input.domain || '', timeframe: input.timeframe || '', constraints: input.constraints || [], objectives: input.objectives || [] };
+  const context = { 
+    domain: input.domain || '', 
+    timeframe: input.timeframe || '', 
+    constraints: Array.isArray(input.constraints) ? input.constraints : [], 
+    objectives: Array.isArray(input.objectives) ? input.objectives : [] 
+  };
 
   let result;
+  let present;
   switch (focusArea) {
     case 'risk-assessment': {
-      const domains = input.domains || ['Strategic', 'Operational', 'Financial', 'Reputational', 'Compliance'];
-      const risks = input.risks || [];
-      const assessed = risks.length ? risks.map(r => ({ name: r.name || r, domain: domains.find(d => (r.name || r).toLowerCase().includes(d.toLowerCase())) || 'General', likelihood: r.likelihood || 'medium', impact: r.impact || 'medium', score: Math.floor(Math.random() * 9) + 1, mitigation: r.mitigation || 'To be defined', owner: r.owner || 'Unassigned', status: 'identified' })) : domains.map(d => ({ name: d + ' Risk', domain: d, likelihood: 'medium', impact: 'medium', score: Math.floor(Math.random() * 9) + 1, mitigation: 'To be assessed', owner: 'Unassigned', status: 'identified' }));
-      result = { focusArea: 'risk-assessment', executiveId, context, risks: assessed, riskRegister: assessed.filter(r => r.score >= 7), summary: 'Risk assessment complete. ' + assessed.filter(r => r.score >= 7).length + ' high-priority risks identified.' };
+      const domains = Array.isArray(input.domains) ? input.domains : ['Strategic', 'Operational', 'Financial', 'Reputational', 'Compliance'];
+      const risks = Array.isArray(input.risks) ? input.risks : [];
+      
+      if (!risks.length && !Array.isArray(input.domains)) {
+        fail('not-connected', 'Not connected: no risks supplied and no domains specified for assessment', 'Input required');
+        return;
+      }
+
+      function computeScore(risk) {
+        const likelihoodMap = { low: 1, medium: 3, high: 5, critical: 7 };
+        const impactMap = { low: 1, medium: 3, high: 5, critical: 7 };
+        const likelihood = risk && risk.likelihood ? String(risk.likelihood).toLowerCase() : 'medium';
+        const impact = risk && risk.impact ? String(risk.impact).toLowerCase() : 'medium';
+        const l = likelihoodMap[likelihood] || 3;
+        const i = impactMap[impact] || 3;
+        return Math.max(1, Math.min(10, Math.round((l * i) / 2.5)));
+      }
+
+      const assessed = risks.length ? risks.map(function(r) {
+        const name = r && r.name ? String(r.name) : (r ? String(r) : 'Unnamed Risk');
+        const domain = domains.find(function(d) { return name.toLowerCase().includes(String(d).toLowerCase()); }) || 'General';
+        const likelihood = r && r.likelihood ? String(r.likelihood) : 'medium';
+        const impact = r && r.impact ? String(r.impact) : 'medium';
+        const score = computeScore(r);
+        const mitigation = r && r.mitigation ? String(r.mitigation) : 'To be defined';
+        const owner = r && r.owner ? String(r.owner) : 'Unassigned';
+        return { name, domain, likelihood, impact, score, mitigation, owner, status: 'identified' };
+      }) : domains.map(function(d) { return { name: String(d) + ' Risk', domain: String(d), likelihood: 'medium', impact: 'medium', score: 5, mitigation: 'To be assessed', owner: 'Unassigned', status: 'identified' }; });
+
+      const highPriority = assessed.filter(function(r) { return r.score >= 7; });
+      const summaryLines = [
+        'Risk Assessment Summary',
+        '=======================',
+        '',
+        'Executive: ' + (executiveId || 'unspecified'),
+        'Timeframe: ' + (context.timeframe || 'unspecified'),
+        'Domains assessed: ' + domains.join(', '),
+        'Total risks identified: ' + assessed.length,
+        'High-priority risks (score >= 7): ' + highPriority.length,
+        '',
+      ];
+
+      if (highPriority.length > 0) {
+        summaryLines.push('High-priority risks:');
+        highPriority.forEach(function(r) {
+          summaryLines.push('  - ' + r.name + ' (' + r.domain + ') — Likelihood: ' + r.likelihood + ', Impact: ' + r.impact + ', Score: ' + r.score + '/10');
+          summaryLines.push('    Owner: ' + r.owner + ', Mitigation: ' + r.mitigation);
+        });
+        summaryLines.push('');
+      }
+
+      summaryLines.push('All assessed risks:');
+      assessed.forEach(function(r) {
+        summaryLines.push('  - ' + r.name + ' (' + r.domain + ') — Likelihood: ' + r.likelihood + ', Impact: ' + r.impact + ', Score: ' + r.score + '/10, Owner: ' + r.owner);
+      });
+
+      const reportBody = summaryLines.join(NL);
+
+      result = {
+        focusArea: 'risk-assessment',
+        executiveId,
+        context,
+        risks: assessed,
+        riskRegister: highPriority,
+        summary: 'Risk assessment complete. ' + highPriority.length + ' high-priority risks identified.',
+      };
+
+      present = [
+        { id: 'summary', title: 'Executive Risk Assessment', kind: 'text', body: reportBody },
+      ];
       break;
     }
+
     case 'scenario-modeler': {
-      const scenarios = input.scenarios || [];
-      const baseMetrics = input.baseMetrics || {};
-      const modeled = scenarios.length ? scenarios.map(s => ({ name: s.name || s, assumptions: s.assumptions || {}, probability: s.probability || null, impact: s.impact || null, projectedOutcome: s.projectedOutcome || null, sensitivity: s.sensitivity || [], response: s.response || 'No response plan' })) : [{ name: 'Baseline Scenario', assumptions: {}, probability: 1, projectedOutcome: baseMetrics, response: 'Baseline plan' }];
-      result = { focusArea: 'scenario-modeler', executiveId, context, scenarios: modeled, baseMetrics, summary: 'Scenario modeling complete for ' + modeled.length + ' scenarios.' };
+      const scenarios = Array.isArray(input.scenarios) ? input.scenarios : [];
+      const baseMetrics = input.baseMetrics && typeof input.baseMetrics === 'object' ? input.baseMetrics : {};
+
+      if (!scenarios.length && Object.keys(baseMetrics).length === 0) {
+        fail('not-connected', 'Not connected: no scenarios supplied and no base metrics provided for modeling', 'Input required');
+        return;
+      }
+
+      const modeled = scenarios.length ? scenarios.map(function(s) {
+        const name = s && s.name ? String(s.name) : (s ? String(s) : 'Unnamed Scenario');
+        const assumptions = s && s.assumptions && typeof s.assumptions === 'object' ? s.assumptions : {};
+        const probability = s && s.probability !== undefined && s.probability !== null ? Number(s.probability) : null;
+        const impact = s && s.impact ? s.impact : (Object.keys(baseMetrics).length > 0 ? { derivedFrom: 'baseMetrics', metrics: baseMetrics } : null);
+        const projectedOutcome = s && s.projectedOutcome ? s.projectedOutcome : (Object.keys(baseMetrics).length > 0 ? { note: 'Projection requires scenario-specific assumptions', baseMetrics: baseMetrics } : null);
+        const sensitivity = Array.isArray(s.sensitivity) ? s.sensitivity : [];
+        const response = s && s.response ? String(s.response) : 'No response plan defined';
+        return { name, assumptions, probability, impact, projectedOutcome, sensitivity, response };
+      }) : [{ name: 'Baseline Scenario', assumptions: {}, probability: 1, projectedOutcome: baseMetrics, response: 'Baseline plan' }];
+
+      const summaryLines = [
+        'Scenario Modeling Summary',
+        '=========================',
+        '',
+        'Executive: ' + (executiveId || 'unspecified'),
+        'Timeframe: ' + (context.timeframe || 'unspecified'),
+        'Scenarios modeled: ' + modeled.length,
+        '',
+      ];
+
+      modeled.forEach(function(s, i) {
+        summaryLines.push((i + 1) + '. ' + s.name);
+        summaryLines.push('   Assumptions: ' + (Object.keys(s.assumptions).length ? JSON.stringify(s.assumptions) : 'none'));
+        summaryLines.push('   Probability: ' + (s.probability !== null ? s.probability : 'not specified'));
+        summaryLines.push('   Impact: ' + (s.impact ? JSON.stringify(s.impact) : 'not specified'));
+        summaryLines.push('   Projected Outcome: ' + (s.projectedOutcome ? JSON.stringify(s.projectedOutcome) : 'not specified'));
+        summaryLines.push('   Sensitivity: ' + (s.sensitivity.length ? s.sensitivity.join(', ') : 'none'));
+        summaryLines.push('   Response: ' + s.response);
+        summaryLines.push('');
+      });
+
+      const reportBody = summaryLines.join(NL);
+
+      result = {
+        focusArea: 'scenario-modeler',
+        executiveId,
+        context,
+        scenarios: modeled,
+        baseMetrics,
+        summary: 'Scenario modeling complete for ' + modeled.length + ' scenarios.',
+      };
+
+      present = [
+        { id: 'summary', title: 'Executive Scenario Modeling', kind: 'text', body: reportBody },
+      ];
       break;
     }
-    default: throw new Error('Unknown focusArea: ' + focusArea);
+
+    default:
+      fail('error', 'Unknown focusArea: ' + focusArea, 'Invalid focusArea');
+      return;
   }
+
   store.push(result);
   fs.writeFileSync(storePath, JSON.stringify(store, null, 2));
-  console.log(JSON.stringify({ success: true, focusArea, data: result, storePath }));
+  console.log(JSON.stringify({
+    success: true,
+    status: 'ok',
+    data: result,
+    error: null,
+    present,
+  }));
 })();`;
 
-const RISK_SCENARIO_INPUT = {
-  type: 'object',
-  properties: {
-    focusArea: SchemaProps.select(['risk-assessment', 'scenario-modeler'], { description: 'Risk and scenario area', required: true }),
-    executiveId: SchemaProps.text({ description: 'Executive identifier' }),
-    domain: SchemaProps.text({ description: 'Risk domain' }),
-    timeframe: SchemaProps.text({ description: 'Assessment timeframe' }),
-    constraints: SchemaProps.stringArray({ description: 'Constraints' }),
-    objectives: SchemaProps.stringArray({ description: 'Objectives' }),
-    risks: SchemaProps.objectArray(SchemaProps.object({ name: SchemaProps.text({}), domain: SchemaProps.text({}), likelihood: SchemaProps.text({}), impact: SchemaProps.text({}), mitigation: SchemaProps.text({}), owner: SchemaProps.text({}) }, {}), { description: 'Identified risks' }),
-    domains: SchemaProps.stringArray({ description: 'Risk domains' }),
-    scenarios: SchemaProps.objectArray(SchemaProps.object({ name: SchemaProps.text({}), assumptions: SchemaProps.object({}, { additionalProperties: true }), probability: SchemaProps.number({}), impact: SchemaProps.object({}, { additionalProperties: true }), projectedOutcome: SchemaProps.object({}, { additionalProperties: true }), sensitivity: SchemaProps.stringArray({}), response: SchemaProps.text({}) }, {}), { description: 'Scenarios to model' }),
-    baseMetrics: SchemaProps.object({}, { description: 'Baseline metrics', additionalProperties: true }),
-  },
-  required: ['focusArea'],
-};
+const RISK_SCENARIO_INPUT = createSchemaRecord({
+  focusArea: SchemaProps.select(['risk-assessment', 'scenario-modeler'], { description: 'Risk and scenario area', required: true }),
+  executiveId: SchemaProps.text({ description: 'Executive identifier' }),
+  domain: SchemaProps.text({ description: 'Risk domain' }),
+  timeframe: SchemaProps.text({ description: 'Assessment timeframe' }),
+  constraints: SchemaProps.stringArray({ description: 'Constraints' }),
+  objectives: SchemaProps.stringArray({ description: 'Objectives' }),
+  risks: SchemaProps.objectArray(SchemaProps.object({
+    name: SchemaProps.text({}),
+    domain: SchemaProps.text({}),
+    likelihood: SchemaProps.select(['low', 'medium', 'high', 'critical'], {}),
+    impact: SchemaProps.select(['low', 'medium', 'high', 'critical'], {}),
+    mitigation: SchemaProps.text({}),
+    owner: SchemaProps.text({}),
+  }), { description: 'Identified risks' }),
+  domains: SchemaProps.stringArray({ description: 'Risk domains' }),
+  scenarios: SchemaProps.objectArray(SchemaProps.object({
+    name: SchemaProps.text({}),
+    assumptions: SchemaProps.object({}, { additionalProperties: true }),
+    probability: SchemaProps.number({}),
+    impact: SchemaProps.object({}, { additionalProperties: true }),
+    projectedOutcome: SchemaProps.object({}, { additionalProperties: true }),
+    sensitivity: SchemaProps.stringArray({}),
+    response: SchemaProps.text({}),
+  }), { description: 'Scenarios to model' }),
+  baseMetrics: SchemaProps.object({}, { description: 'Baseline metrics', additionalProperties: true }),
+}, { required: ['focusArea'] });
 
-const COMMON_OUTPUT = {
-  type: 'object',
-  properties: {
-    success: { type: 'boolean' },
-    focusArea: { type: 'string' },
-    data: { type: 'object' },
-    storePath: { type: 'string' },
-    error: { type: 'string' },
-  },
-  required: ['success', 'focusArea', 'data'],
-};
-
-const RISK_SCENARIO = createCodeSkill({
-  id: 'executive-risk-scenario',
-  name: 'Risk & Scenario Advisory',
-  description: 'Reasoning-based risk assessment and scenario modeling for strategic decisions. Use focusArea to select.',
-  manifest: { language: 'javascript', entrypoint: 'index.js', sourceCode: RISK_SCENARIO_SOURCE, reasoningConfig: { model: 'gpt-4', temperature: 0.3, maxTokens: 4000 } },
-  inputSchema: RISK_SCENARIO_INPUT,
-  outputSchema: COMMON_OUTPUT,
-  triggers: [{ kind: 'user', phrase_examples: ['Assess risk', 'Model a scenario', 'What could go wrong'] }],
-isSkill: true,
+const RISK_SCENARIO_CONFIG = createSchemaRecord({
+  executiveHome: SchemaProps.text({ description: 'Executive workspace path; defaults to EXECUTIVE_HOME' }),
 });
 
-export { RISK_SCENARIO };
+export const RISK_SCENARIO = createCodeSkill({
+  id: 'executive-risk-scenario',
+  name: 'Risk & Scenario Advisory',
+  description: 'Risk assessment and scenario modeling for strategic decisions. Derives scores from input likelihood/impact; computes projections from supplied assumptions. Use focusArea to select.',
+  tier: 'advise',
+  domainKnowledge: 'Risk assessment, scenario planning, executive decision support',
+  manifest: { sourceCode: RISK_SCENARIO_SOURCE, configSchema: RISK_SCENARIO_CONFIG, persistenceEnv: 'EXECUTIVE_HOME', ui: { view: 'risk-scenario' } },
+  inputSchema: RISK_SCENARIO_INPUT,
+  outputSchema: executiveResultSchema('Risk assessment or scenario modeling results with derived scores and projections'),
+  triggers: [{ kind: 'user', phrase_examples: ['Assess risk', 'Model a scenario', 'What could go wrong'] }],
+  isSkill: true,
+});
+
+RISK_SCENARIO.configSchema = RISK_SCENARIO_CONFIG;
+withUxMetadata(RISK_SCENARIO.inputSchema as SchemaRecord);
+if (RISK_SCENARIO.configSchema) withUxMetadata(RISK_SCENARIO.configSchema);

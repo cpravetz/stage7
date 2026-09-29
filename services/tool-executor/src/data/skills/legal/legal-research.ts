@@ -53,14 +53,12 @@ const LEGAL_RESEARCH = createCodeSkill({
     },
     required: ['success'],
   },
-isSkill: true,
+  isSkill: true,
+  tier: 'aid',
+  domainKnowledge: 'Statutory and case-law research methodology, jurisdictional hierarchy, citation formatting, and precedent analysis',
+  triggers: [
+    { kind: 'user', phrase_examples: ['Research a legal question', 'Search statutes', 'Search case law'] },
+  ],
 });
-
-LEGAL_RESEARCH.tier = 'aid';
-LEGAL_RESEARCH.domainKnowledge = 'Statutory and case-law research methodology, jurisdictional hierarchy, citation formatting, and precedent analysis';
-
-LEGAL_RESEARCH.triggers = [
-  { kind: 'user', phrase_examples: ['Research a legal question', 'Search statutes', 'Search case law'] },
-];
 
 export { LEGAL_RESEARCH };

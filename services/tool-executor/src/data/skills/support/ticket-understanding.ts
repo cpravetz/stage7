@@ -49,7 +49,7 @@ console.log(JSON.stringify(result));`,
   triggers: [
     { kind: 'event', on: 'A new support ticket is received' },
   ],
-isSkill: false,
+  isSkill: true,
 });
 
 export const SUPPORT_SENTIMENT_ANALYSIS = createCodeSkill({
@@ -99,7 +99,7 @@ console.log(JSON.stringify(output));`,
   triggers: [
     { kind: 'event', on: 'A new support ticket is received' },
   ],
-isSkill: false,
+  isSkill: true,
 });
 
 export const SUPPORT_ISSUE_ANALYSIS = createCodeSkill({
@@ -150,13 +150,13 @@ console.log(JSON.stringify(output));`,
   triggers: [
     { kind: 'event', on: 'Ticket is escalated to tier 2' },
   ],
-isSkill: false,
+  isSkill: true,
 });
 
 export const SUPPORT_SEARCH_KB = createCodeSkill({
   id: 'support-search-kb',
   name: 'Search Knowledge Base',
-  description: 'Search the support knowledge base for relevant articles. User-triggered for issue resolution assistance.',
+  description: 'Search the support knowledge base for relevant articles. Triggered automatically on new ticket receipt.',
   tier: 'advise',
   domainKnowledge: 'Knowledge base search, article retrieval, support documentation lookup, and self-service resolution.',
   manifest: {
@@ -196,5 +196,5 @@ console.log(JSON.stringify(result));`,
   triggers: [
     { kind: 'event', on: 'A new support ticket is received' },
   ],
-isSkill: false,
+  isSkill: true,
 });

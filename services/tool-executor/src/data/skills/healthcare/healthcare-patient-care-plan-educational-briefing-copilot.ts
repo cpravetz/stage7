@@ -1,5 +1,6 @@
-import { Tool, SchemaRecord } from '../../../types'
+import { SchemaRecord } from '../../../types'
 import { createCodeSkill, SchemaProps, createSchemaRecord } from '../code-skill-factory'
+import { healthcareResultSchema } from './healthcare-contract'
 
 function withUxMetadata(schema: SchemaRecord): SchemaRecord {
   const properties = schema.properties as Record<string, Record<string, unknown>> | undefined
@@ -23,7 +24,104 @@ const triggers = [
   { kind: 'data' as const, condition: 'workflow, evidence, education, or intake data is available for review' },
 ]
 
-const carePlanSource = `(async () => {   const input = typeof __tool_input !== 'undefined' ? __tool_input : {};   const healthcareHome = process.env.HEALTHCARE_HOME || '/tmp/healthcare';   const condition = String(input.condition || input.careNeed || '');   const goals = Array.isArray(input.goals) ? input.goals : [];   const medications = Array.isArray(input.medications) ? input.medications : [];   const educationTopics = Array.isArray(input.educationTopics) ? input.educationTopics : [];   if (!condition || !goals.length || !educationTopics.length) {     console.log(JSON.stringify({ success: false, status: 'not-connected', error: 'Not connected: condition, goals, and education topics are required' }));     return;   }   const medicationLines = medications.map((medication) => {     const name = typeof medication === 'string' ? medication : ((medication && medication.name) || 'unnamed therapy');     const instruction = typeof medication === 'string' ? '' : String((medication && medication.instruction) || '');     return { name, instruction: instruction || 'verify the instruction with the prescribing clinician' };   });   const topicLines = educationTopics.map((topic) => ({ topic: String(topic), format: 'plain-language briefing', content: 'Explain only the supplied clinician-approved topic and invite questions.' }));   const result = {     success: true,     status: 'local',     data: {       condition,       goals: goals.map((goal, index) => ({ rank: index + 1, goal: String(goal), measure: 'patient-reported or clinician-defined target' })),       medications: medicationLines,       education: topicLines,       briefing: {         purpose: 'This briefing summarizes the supplied care plan for ' + condition + '.',         medicationSafety: 'Medication details are copied from the supplied plan; do not start, stop, or change a dose from this briefing.',         teachBack: ['Please describe the plan in your own words.', 'What questions or concerns should the care team address?']       },       disclaimer: 'This briefing is for education and decision support only. Do not start, stop, or change treatment from this output. A qualified clinician must review all content.'     },     warning: 'Decision support and education only: do not diagnose, prescribe, change treatment, or make autonomous clinical decisions; use only authorized minimum-necessary data and approved secure endpoints for PHI; a qualified clinician must review all outputs.'   };   console.log(JSON.stringify(result)); })()`
+const carePlanSource = `(async () => {
+  const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
+  const NL = '\\n';
+  const SAFETY = ${JSON.stringify(SAFETY_BOUNDARY)};
+
+  function fail(status, message, title) {
+    console.log(JSON.stringify({
+      success: false,
+      status: status,
+      error: message,
+      data: null,
+      present: [{ id: 'notice', title: title, kind: 'text', body: message + NL + NL + SAFETY }],
+    }));
+  }
+
+  const condition = String(input.condition || input.careNeed || '');
+  const goals = Array.isArray(input.goals) ? input.goals : [];
+  const medications = Array.isArray(input.medications) ? input.medications : [];
+  const educationTopics = Array.isArray(input.educationTopics) ? input.educationTopics : [];
+
+  if (!condition || !goals.length || !educationTopics.length) {
+    fail('not-connected', 'Not connected: condition, goals, and education topics are required', 'Input required');
+    return;
+  }
+
+  const medicationLines = medications.map((medication) => {
+    const name = typeof medication === 'string' ? medication : ((medication && medication.name) || 'unnamed therapy');
+    const instruction = typeof medication === 'string' ? '' : String((medication && medication.instruction) || '');
+    return { name, instruction: instruction || 'verify the instruction with the prescribing clinician' };
+  });
+
+  // Education content is structural only: the topics are listed verbatim from the supplied input so
+  // the user can confirm which topics were covered. No explanatory prose is invented.
+  const topicLines = educationTopics.map((topic) => ({
+    topic: String(topic),
+    format: 'plain-language briefing',
+    note: 'Topic supplied by the clinician; a human clinician should explain it in plain language.',
+  }));
+
+  const goalRanked = goals.map((goal, index) => ({
+    rank: index + 1,
+    goal: String(goal),
+    measure: 'patient-reported or clinician-defined target',
+  }));
+
+  // ---- Report -----------------------------------------------------------------
+  const lines = [];
+  lines.push('Patient care-plan briefing for: ' + condition);
+  lines.push('');
+  lines.push('Care goals (' + goals.length + '):');
+  goalRanked.forEach(function (g) {
+    lines.push('  ' + g.rank + '. ' + g.goal + '  [measure: ' + g.measure + ']');
+  });
+  lines.push('');
+  if (medicationLines.length > 0) {
+    lines.push('Medications / therapies (' + medicationLines.length + '):');
+    medicationLines.forEach(function (m) {
+      lines.push('  - ' + m.name + (m.instruction ? '  (' + m.instruction + ')' : ''));
+    });
+    lines.push('  Medication details are copied from the supplied plan; do not start, stop, or change a dose from this briefing.');
+    lines.push('');
+  } else {
+    lines.push('Medications / therapies: none supplied. Verify with the prescribing clinician.');
+    lines.push('');
+  }
+  lines.push('Education topics (' + educationTopics.length + ') - structural coverage only, not clinical instruction:');
+  topicLines.forEach(function (t, i) {
+    lines.push('  ' + (i + 1) + '. ' + t.topic);
+  });
+  lines.push('  These topics are listed verbatim from what the clinician supplied. A human clinician should explain each topic in plain language.');
+  lines.push('');
+  lines.push('Teach-back questions:');
+  lines.push('  - Please describe the plan in your own words.');
+  lines.push('  - What questions or concerns should the care team address?');
+  lines.push('');
+  lines.push(SAFETY);
+
+  console.log(JSON.stringify({
+    success: true,
+    status: 'local',
+    data: {
+      condition,
+      goals: goalRanked,
+      medications: medicationLines,
+      education: topicLines,
+      briefing: {
+        purpose: 'This briefing summarizes the supplied care plan for ' + condition + '.',
+        medicationSafety: 'Medication details are copied from the supplied plan; do not start, stop, or change a dose from this briefing.',
+        teachBack: ['Please describe the plan in your own words.', 'What questions or concerns should the care team address?'],
+      },
+      disclaimer: 'This briefing is for education and decision support only. Do not start, stop, or change treatment from this output. A qualified clinician must review all content.',
+      safetyBoundary: SAFETY,
+    },
+    present: [
+      { id: 'briefing', title: 'Care plan briefing', kind: 'text', body: lines.join(NL) },
+    ],
+  }));
+})();`;
 
 const carePlanConfig = createSchemaRecord({
   healthcareHome: SchemaProps.text({ description: 'Healthcare workspace path or base URL; defaults to HEALTHCARE_HOME' }),
@@ -49,19 +147,13 @@ const healthcarePatientCarePlanEducationalBriefingCopilot = createCodeSkill({
     educationTopics: SchemaProps.stringArray({ description: 'Topics to explain to the patient' }),
     followUp: SchemaProps.text({ description: 'Clinician-defined follow-up interval' }),
   }, { required: ['condition', 'goals', 'educationTopics'] }),
-  outputSchema: createSchemaRecord({
-    success: SchemaProps.boolean({ description: 'Whether the briefing was generated' }),
-    data: SchemaProps.object({}, { description: 'Structured care plan and educational briefing' }),
-    warning: SchemaProps.text({ description: 'Clinical safety disclaimer' }),
-    error: SchemaProps.text({ description: 'Failure message' }),
-  }, { required: ['success', 'data'] }),
+  outputSchema: healthcareResultSchema('Structured care plan: goals, medications, education topics, briefing, and safety boundary'),
   triggers,
 })
 
 healthcarePatientCarePlanEducationalBriefingCopilot.configSchema = carePlanConfig
 
 withUxMetadata(healthcarePatientCarePlanEducationalBriefingCopilot.inputSchema as SchemaRecord)
-withUxMetadata(healthcarePatientCarePlanEducationalBriefingCopilot.outputSchema as SchemaRecord)
 if (healthcarePatientCarePlanEducationalBriefingCopilot.configSchema) withUxMetadata(healthcarePatientCarePlanEducationalBriefingCopilot.configSchema)
 
 export { healthcarePatientCarePlanEducationalBriefingCopilot }

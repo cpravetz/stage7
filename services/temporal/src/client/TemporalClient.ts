@@ -1,5 +1,10 @@
-import { Client, Connection } from '@temporalio/client';
+import { Client, Connection, WorkflowExecutionAlreadyStartedError } from '@temporalio/client';
 import { missionWorkflow } from '../workflows/missionWorkflow';
+import { watchWorkflow } from '../workflows/watchWorkflow';
+import { watchOrchestrator } from '../workflows/watchOrchestrator';
+import { runWatchActivity } from '../activities/watchActivity';
+import { fetchWatchActivity } from '../activities/watchActivity';
+import { runWatchLoop } from '../workflows/watchLoop';
 import { WorkflowInput, WorkflowResult } from '../types/workflow';
 import { logger } from '@stage7-nextgen/shared';
 
@@ -14,9 +19,69 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   ]);
 }
 
+/**
+ * True when Temporal refused the start because that workflow id is already running.
+ *
+ * The scheduler re-offers every enabled watch on every poll, so this is the normal steady-state
+ * result once an orchestrator is up. It is a success, not a failure: treating it as a failure made
+ * every poll spawn another in-process loop, so a single watch accumulated one non-durable runner per
+ * minute, forever, each firing the watch independently.
+ */
+function isAlreadyStarted(err: unknown): boolean {
+  if (err instanceof WorkflowExecutionAlreadyStartedError) return true;
+  const name = (err as { name?: string } | null)?.name;
+  const message = (err as { message?: string } | null)?.message || '';
+  return name === 'WorkflowExecutionAlreadyStartedError' || /already started/i.test(message);
+}
+
+interface SingleWatchOutcome {
+  status: 'completed' | 'failed';
+  output?: unknown;
+  error?: string;
+  startedAt: number;
+  completedAt: number;
+}
+
+/**
+ * One in-process watch cycle, for the fallback path of the single-shot watch workflow.
+ *
+ * The durable workflow cannot be invoked directly outside a workflow context, so the fallback calls
+ * the activity itself and reports the activity's real outcome rather than assuming success.
+ */
+async function runSingleWatch(watchId: string): Promise<SingleWatchOutcome> {
+  const startedAt = Date.now();
+  try {
+    const outcome = await runWatchActivity({ watchId });
+    const completedAt = Date.now();
+    if (outcome && outcome.success === true) {
+      return { status: 'completed', output: outcome, startedAt, completedAt };
+    }
+    return {
+      status: 'failed',
+      output: outcome,
+      error: (outcome && outcome.error) || 'Watch run did not report success',
+      startedAt,
+      completedAt,
+    };
+  } catch (err) {
+    return {
+      status: 'failed',
+      error: err instanceof Error ? err.message : String(err),
+      startedAt,
+      completedAt: Date.now(),
+    };
+  }
+}
+
 export class TemporalClient {
   private client: Client | null = null;
   private namespace: string;
+  /**
+   * Watch ids with an in-process orchestrator currently running. The scheduler polls on an interval
+   * and re-offers every enabled watch each time, so without this the fallback path would start a
+   * second, third, and nth loop for the same watch and the watch would run once per loop per poll.
+   */
+  private watchFallbacks = new Map<string, Promise<unknown>>();
 
   constructor(namespace = 'default') {
     this.namespace = namespace;
@@ -190,6 +255,112 @@ export class TemporalClient {
       });
 
     return workflowId;
+  }
+
+  async startWatch(watchId: string): Promise<string> {
+    const workflowId = `watch-${watchId}`
+    logger.info({ watchId }, 'Starting watch workflow')
+
+    if (this.client) {
+      try {
+        await withTimeout(
+          this.client.workflow.start(watchWorkflow, {
+            taskQueue: 'stage7-workers',
+            workflowId,
+            args: [{ watchId }],
+          }),
+          TEMPORAL_TIMEOUT_MS,
+        )
+        return workflowId
+      } catch (err) {
+        if (isAlreadyStarted(err)) {
+          logger.debug({ watchId }, 'Watch workflow already running');
+          return workflowId;
+        }
+        logger.warn({ err: (err as Error).message }, 'Temporal watch workflow start failed, falling back to direct execution')
+      }
+    }
+
+    // Fallback: execute directly
+    (async () => {
+      const startTime = Date.now()
+      try {
+        const result = await runSingleWatch(watchId)
+        await this.persistFinalState({ missionId: `watch-${watchId}`, tenantId: '', assistantId: '', prompt: '', contextChunks: [], metadata: {} } as any, { status: result.status as any, output: result.output, error: result.error, startedAt: startTime, completedAt: Date.now() } as any, startTime)
+        await this.broadcastMissionUpdate({ type: 'watch_completed', missionId: `watch-${watchId}`, workflowId, status: result.status, output: result.output, timestamp: Date.now() })
+      } catch (err: any) {
+        logger.error({ err: err.message }, 'Watch workflow failed in fallback')
+      }
+    })()
+
+    return workflowId
+  }
+
+  async startWatchOrchestrator(watchId: string): Promise<string> {
+    const workflowId = `watch-orch-${watchId}`;
+    // Debug, not info: this runs on every scheduler poll, and a line that reads like "started" on
+    // each poll is exactly what made the duplicate-loop defect hard to spot in the logs.
+    logger.debug({ watchId }, 'Watch orchestrator poll');
+
+    if (this.client) {
+      try {
+        await withTimeout(
+          this.client.workflow.start(watchOrchestrator, {
+            taskQueue: 'stage7-workers',
+            workflowId,
+            args: [{ watchId }],
+          }),
+          TEMPORAL_TIMEOUT_MS,
+        );
+        return workflowId;
+      } catch (err) {
+        if (isAlreadyStarted(err)) {
+          // The durable orchestrator is already running, which is the state we want. Returning here
+          // is what stops every subsequent poll from adding a duplicate non-durable runner.
+          logger.debug({ watchId }, 'Watch orchestrator already running');
+          return workflowId;
+        }
+        logger.warn({ err: (err as Error).message }, 'Temporal watch orchestrator start failed, falling back to direct execution');
+      }
+    }
+
+    this.startWatchFallback(watchId, async () =>
+      runWatchLoop(watchId, {
+        fetchWatch: (id) => fetchWatchActivity({ watchId: id }),
+        runWatch: (id) => runWatchActivity({ watchId: id }),
+        sleep: (ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
+      }),
+    );
+
+    return workflowId;
+  }
+
+  /**
+   * Run a watch loop in this process, at most once per watch at a time.
+   *
+   * Deliberately fire-and-forget: the caller is the scheduler poll, which must not block on a loop
+   * that sleeps for a whole cadence. The promise is retained so a later poll for the same watch is
+   * a no-op rather than a duplicate.
+   */
+  private startWatchFallback(watchId: string, loop: () => Promise<unknown>): void {
+    if (this.watchFallbacks.has(watchId)) {
+      logger.info({ watchId }, 'Watch orchestrator fallback already running; not starting another');
+      return;
+    }
+    const running = loop()
+      .then((result) => {
+        logger.info({ watchId, result }, 'Watch orchestrator fallback finished');
+        return result;
+      })
+      .catch((err) => {
+        logger.error({ watchId, err: (err as Error).message }, 'Watch orchestrator failed in fallback');
+        throw err;
+      })
+      .finally(() => {
+        // Only clear if this is still the current loop; a replacement may already own the slot.
+        if (this.watchFallbacks.get(watchId) === running) this.watchFallbacks.delete(watchId);
+      });
+    this.watchFallbacks.set(watchId, running);
   }
 
   async getMissionResult(workflowId: string): Promise<WorkflowResult | null> {

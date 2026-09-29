@@ -1,5 +1,6 @@
 import { Tool, SchemaRecord } from '../../../types';
 import { createCodeSkill, SchemaProps } from '../code-skill-factory';
+import { sportsResultSchema, SPORTS_WAGERING_SAFETY_BOUNDARY } from './sports-contract';
 
 const SPORTS_GROUP_B_HOME = process.env.SPORTS_GROUP_B_HOME || '/tmp/sports/group-b';
 
@@ -90,7 +91,7 @@ const analysis = {
 store.analyses.push(analysis);
 fs.writeFileSync(storePath, JSON.stringify(store, null, 2));
 
-console.log(JSON.stringify({ success: true, data: analysis }));
+console.log(JSON.stringify({ success: true, data: analysis, present: [{ id: 'odds-analysis', type: 'text', body: 'Matchup Odds: ' + teamA + ' vs ' + teamB + ' (' + sport + '). Odds: ' + oddsA + ' / ' + oddsB + (drawOdds ? ' / draw ' + drawOdds : '') + '. Implied probabilities: ' + (impliedProbA * 100).toFixed(1) + '% / ' + (impliedProbB * 100).toFixed(1) + '%. Vig: ' + vig.toFixed(2) + '%. Matchup: ' + analysis.matchupAssessment.relativeStrength + '. ' + analysis.responsiblePlay.responsibleGamingNote }] }));
 `;
 
 const MATCHUP_ODDS_INPUT = {
@@ -116,16 +117,6 @@ const MATCHUP_ODDS_INPUT = {
   required: ['event', 'oddsA', 'oddsB'],
 };
 
-const CODE_OUTPUT = {
-  type: 'object',
-  properties: {
-    success: { type: 'boolean' },
-    data: { type: 'object' },
-    error: { type: 'string' },
-  },
-  required: ['success'],
-};
-
 export const MATCHUP_ODDS_EXPLAINER = createCodeSkill({
   id: 'sports-matchup-odds-explainer',
   name: 'Matchup & Odds Explainer',
@@ -142,11 +133,11 @@ export const MATCHUP_ODDS_EXPLAINER = createCodeSkill({
     },
   },
   inputSchema: MATCHUP_ODDS_INPUT,
-  outputSchema: CODE_OUTPUT,
+  outputSchema: sportsResultSchema('Odds explanation result'),
   tier: 'advise',
   domainKnowledge: 'Sports odds analysis, implied probability, line movement, expected value',
   triggers: [
     { kind: 'event', on: 'Odds become available or line movement detected' },
   ],
-isSkill: false,
+  isSkill: false,
 });

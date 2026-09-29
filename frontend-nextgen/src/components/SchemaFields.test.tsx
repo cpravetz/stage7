@@ -44,7 +44,7 @@ describe('sfGetReferenceSource', () => {
 describe('sfGetReferenceSourceLabel', () => {
   it('returns human-friendly label for known reference source', () => {
     const schema: SchemaRecord = { 'x-referenceSource': 'career-job-discovery-fit-ranking' };
-    expect(sfGetReferenceSourceLabel(schema)).toBe('Job Discovery & Fit Ranking');
+    expect(sfGetReferenceSourceLabel(schema)).toBe('Career Job Discovery Fit Ranking');
   });
 
   it('prioritizes x-referenceLabel over known source mapping', () => {
@@ -197,6 +197,6 @@ describe('SchemaFields reference picker rendering', () => {
     };
     const { container } = render(<SchemaFields schema={schema} values={{}} onChange={onChange} />);
     const hint = container.querySelector('.skill-reference-picker__hint');
-    expect(hint?.textContent).toBe('Loading references from Job Discovery & Fit Ranking...');
+    expect(hint?.textContent).toBe('Loading references from Career Job Discovery Fit Ranking...');
   });
 });

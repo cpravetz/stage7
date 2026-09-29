@@ -1,5 +1,6 @@
 import { Tool, SchemaRecord } from '../../../types';
 import { createCodeSkill, SchemaProps } from '../code-skill-factory';
+import { sportsResultSchema, SPORTS_PERFORMANCE_SAFETY_BOUNDARY } from './sports-contract';
 
 const SPORTS_GROUP_A_HOME = process.env.SPORTS_GROUP_A_HOME || '/tmp/sports/group-a';
 
@@ -57,7 +58,7 @@ playbook.source = dataConnected ? 'api-connected' : 'local';
 store.cards.push(playbook);
 fs.writeFileSync(storePath, JSON.stringify(store, null, 2));
 
-console.log(JSON.stringify({ success: true, data: playbook }));
+console.log(JSON.stringify({ success: true, data: playbook, present: [{ id: 'battlecard', type: 'text', body: 'Battlecard generated for ' + entity + ' vs ' + opponent + ' (' + sport + '): ' + matchupCheatSheet.length + ' key matchups, ' + situationalPlays.length + ' situational plays, formation: ' + playbook.formation + '. Data source: ' + playbook.source + '.' }] }));
 `;
 
 const BATTLECARD_CREATOR_INPUT = {
@@ -91,16 +92,6 @@ const BATTLECARD_CREATOR_INPUT = {
   required: ['entity', 'opponent'],
 };
 
-const CODE_OUTPUT = {
-  type: 'object',
-  properties: {
-    success: { type: 'boolean' },
-    data: { type: 'object' },
-    error: { type: 'string' },
-  },
-  required: ['success'],
-};
-
 export const BATTLECARD_CREATOR = createCodeSkill({
   id: 'sports-battlecard-creator',
   name: 'Game Plan & Opposition Battlecard Creator',
@@ -121,11 +112,11 @@ export const BATTLECARD_CREATOR = createCodeSkill({
     },
   },
   inputSchema: BATTLECARD_CREATOR_INPUT,
-  outputSchema: CODE_OUTPUT,
+  outputSchema: sportsResultSchema('Battlecard result'),
   tier: 'aid',
   domainKnowledge: 'Sports scouting, opposition analysis, situational playbook creation',
   triggers: [
     { kind: 'event', on: 'Match calendar entering pre-match window' },
   ],
-isSkill: false,
+  isSkill: false,
 });

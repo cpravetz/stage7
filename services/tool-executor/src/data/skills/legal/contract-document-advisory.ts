@@ -63,14 +63,12 @@ const CONTRACT_DOCUMENT_ADVISORY = createCodeSkill({
     },
     required: ['success'],
   },
-isSkill: true,
+  isSkill: true,
+  tier: 'advise',
+  domainKnowledge: 'Contract law, commercial negotiation standards, regulatory compliance (GDPR, SOC2, HIPAA), legal/security liability mitigation',
+  triggers: [
+    { kind: 'event', on: 'Document or redline received' },
+  ],
 });
-
-CONTRACT_DOCUMENT_ADVISORY.tier = 'advise';
-CONTRACT_DOCUMENT_ADVISORY.domainKnowledge = 'Contract law, commercial negotiation standards, regulatory compliance (GDPR, SOC2, HIPAA), legal/security liability mitigation';
-
-CONTRACT_DOCUMENT_ADVISORY.triggers = [
-  { kind: 'event', on: 'Document or redline received' },
-];
 
 export { CONTRACT_DOCUMENT_ADVISORY };

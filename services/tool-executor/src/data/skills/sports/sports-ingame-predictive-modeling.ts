@@ -1,5 +1,6 @@
 import { Tool, SchemaRecord } from '../../../types';
 import { createCodeSkill, SchemaProps } from '../code-skill-factory';
+import { sportsResultSchema, SPORTS_WAGERING_SAFETY_BOUNDARY } from './sports-contract';
 
 const SPORTS_GROUP_B_HOME = process.env.SPORTS_GROUP_B_HOME || '/tmp/sports/group-b';
 
@@ -72,7 +73,7 @@ const prediction = {
 store.predictions.push(prediction);
 fs.writeFileSync(storePath, JSON.stringify(store, null, 2));
 
-console.log(JSON.stringify({ success: true, data: prediction }));
+console.log(JSON.stringify({ success: true, data: prediction, present: [{ id: 'ingame-prediction', type: 'text', body: 'In-game prediction for ' + eventId + ' (' + sport + '): win probability ' + (winProb * 100).toFixed(1) + '%, momentum: ' + momentum + ', key events: ' + keyEvents.length + ', plays analyzed: ' + playByPlay.length + '. Game status: ' + gameStatus + '.' }] }));
 `;
 
 const INGAME_PREDICTIVE_INPUT = {
@@ -101,16 +102,6 @@ const INGAME_PREDICTIVE_INPUT = {
   required: ['event'],
 };
 
-const CODE_OUTPUT = {
-  type: 'object',
-  properties: {
-    success: { type: 'boolean' },
-    data: { type: 'object' },
-    error: { type: 'string' },
-  },
-  required: ['success'],
-};
-
 export const INGAME_PREDICTIVE_MODELING = createCodeSkill({
   id: 'sports-ingame-predictive-modeling',
   name: 'In-Game Predictive Modeling',
@@ -123,9 +114,9 @@ export const INGAME_PREDICTIVE_MODELING = createCodeSkill({
     sourceCode: INGAME_PREDICTIVE_SOURCE,
   },
   inputSchema: INGAME_PREDICTIVE_INPUT,
-  outputSchema: CODE_OUTPUT,
+  outputSchema: sportsResultSchema('In-game prediction result'),
   triggers: [
     { kind: 'event', on: 'Game in progress' },
   ],
-isSkill: false,
+  isSkill: false,
 });

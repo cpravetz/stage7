@@ -11,6 +11,7 @@ export interface ToolBinding {
 
 export interface EntityToolWithManifest extends EntityTool {
   manifest?: Record<string, unknown>;
+  actionLabel?: string;
 }
 
 export interface AgentArtifact {
@@ -30,6 +31,7 @@ export interface ToolCatalogEntry {
   inputSchema?: Record<string, unknown>;
   configSchema?: Record<string, unknown>;
   manifest?: Record<string, unknown>;
+  actionLabel?: string;
 }
 
 export interface HITLApproval {

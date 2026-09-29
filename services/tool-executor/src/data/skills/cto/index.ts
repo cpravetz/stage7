@@ -24,48 +24,67 @@ const DISASTER_PROVIDERS = ['disaster-recovery'];
 function infraQuerySource(): string {
   return `(async () => {
 const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
+    const INFRA_PROVIDERS = ['datadog','aws','gcp','azure','kubernetes','service-mesh','cost-optimization','iac-monitoring','database-operations','team-metrics','github-read'];
     const provider = input.provider;
     const query = input.query;
 
     if (!provider || !INFRA_PROVIDERS.includes(provider)) {
-      throw new Error('Invalid or missing provider. Must be one of: ' + INFRA_PROVIDERS.join(', '));
+      const result = { success: false, provider, query, error: 'Invalid or missing provider. Must be one of: ' + INFRA_PROVIDERS.join(', ') };
+      console.log(JSON.stringify({ ...result, present: [{ id: 'error', title: 'Infrastructure Query Error', kind: 'text', body: result.error }] }));
+      return result;
     }
 
-    return { success: false, provider, query, error: 'Not connected: provider module unavailable for ' + provider };
+    const result = { success: false, provider, query, error: 'Not connected: provider module unavailable for ' + provider };
+    console.log(JSON.stringify({ ...result, present: [{ id: 'error', title: 'Infrastructure Query', kind: 'text', body: 'Provider: ' + provider + '\\nQuery: ' + query + '\\n\\nNot connected: provider module unavailable for ' + provider }] }));
+    return result;
   })();`;
 }
 
 function engActionsSource(): string {
   return `(async () => {
 const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
+    const ENG_PROVIDERS = ['jira','pagerduty','github-write'];
     const provider = input.provider;
     const action = input.action;
     const params = input.params || {};
     const dryRun = input.dryRun !== false;
 
     if (!provider || !ENG_PROVIDERS.includes(provider)) {
-      throw new Error('Invalid or missing provider. Must be one of: ' + ENG_PROVIDERS.join(', '));
+      const result = { success: false, provider, action, params, dryRun, error: 'Invalid or missing provider. Must be one of: ' + ENG_PROVIDERS.join(', ') };
+      console.log(JSON.stringify({ ...result, present: [{ id: 'error', title: 'Engineering Actions Error', kind: 'text', body: result.error }] }));
+      return result;
     }
 
     if (!action) {
-      throw new Error('Missing required action parameter');
+      const result = { success: false, provider, action, params, dryRun, error: 'Missing required action parameter' };
+      console.log(JSON.stringify({ ...result, present: [{ id: 'error', title: 'Engineering Actions Error', kind: 'text', body: result.error }] }));
+      return result;
     }
 
-    return { success: false, provider, action, params, dryRun, error: 'Not connected: external system unavailable for ' + provider };
+    const result = { success: false, provider, action, params, dryRun, error: 'Not connected: external system unavailable for ' + provider };
+    const body = 'Provider: ' + provider + '\\nAction: ' + action + '\\nParams: ' + JSON.stringify(params) + '\\nDry Run: ' + dryRun + '\\n\\nNot connected: external system unavailable for ' + provider;
+    console.log(JSON.stringify({ ...result, present: [{ id: 'result', title: 'Engineering Action', kind: 'text', body: body }] }));
+    return result;
   })();`;
 }
 
 function disasterReadinessSource(): string {
   return `(async () => {
 const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
+    const DISASTER_PROVIDERS = ['disaster-recovery'];
     const provider = input.provider;
     const config = input.config || {};
 
     if (!provider || !DISASTER_PROVIDERS.includes(provider)) {
-      throw new Error('Invalid or missing provider. Must be one of: ' + DISASTER_PROVIDERS.join(', '));
+      const result = { success: false, provider, config, error: 'Invalid or missing provider. Must be one of: ' + DISASTER_PROVIDERS.join(', ') };
+      console.log(JSON.stringify({ ...result, present: [{ id: 'error', title: 'Disaster Readiness Error', kind: 'text', body: result.error }] }));
+      return result;
     }
 
-    return { success: false, provider, config, error: 'Not connected: disaster recovery module unavailable' };
+    const result = { success: false, provider, config, error: 'Not connected: disaster recovery module unavailable' };
+    const body = 'Provider: ' + provider + '\\nConfig: ' + JSON.stringify(config) + '\\n\\nNot connected: disaster recovery module unavailable';
+    console.log(JSON.stringify({ ...result, present: [{ id: 'result', title: 'Disaster Readiness', kind: 'text', body: body }] }));
+    return result;
   })();`;
 }
 
@@ -77,7 +96,9 @@ const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
     const context = input.context || {};
 
     if (!system) {
-      throw new Error('Missing required system parameter');
+      const result = { success: false, system, requirements: [], context, result: { recommendations: [], risks: [], decisions: [] }, error: 'Missing required system parameter' };
+      console.log(JSON.stringify({ ...result, present: [{ id: 'error', title: 'Architecture Advisory Error', kind: 'text', body: result.error }] }));
+      return result;
     }
 
     const reqList = Array.isArray(requirements) ? requirements : [];
@@ -113,19 +134,55 @@ const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
       });
     }
 
-    return { success: true, system, requirements: reqList, context, result: { recommendations, risks, decisions, teamSize, currentStack, timeline, scale } };
+    const result = { success: true, system, requirements: reqList, context, result: { recommendations, risks, decisions, teamSize, currentStack, timeline, scale } };
+    const reportLines = [
+      'Architecture Advisory for: ' + system,
+      'Requirements: ' + reqList.length,
+      'Team Size: ' + teamSize,
+      'Current Stack: ' + (currentStack.length ? currentStack.join(', ') : 'none'),
+      'Constraints: ' + (constraints.length ? constraints.join(', ') : 'none'),
+      'Timeline: ' + (timeline || 'not specified'),
+      'Scale: ' + (scale || 'not specified'),
+      '',
+      'Recommendations:',
+    ];
+    recommendations.forEach((r, i) => {
+      reportLines.push('  ' + (i + 1) + '. [' + r.priority.toUpperCase() + '] ' + r.suggestion + ' — ' + r.rationale);
+    });
+    if (risks.length) {
+      reportLines.push('', 'Risks:');
+      risks.forEach((r, i) => {
+        reportLines.push('  ' + (i + 1) + '. ' + r.description + ' — ' + r.mitigation);
+      });
+    }
+    console.log(JSON.stringify({ ...result, present: [{ id: 'report', title: 'Architecture Advisory', kind: 'text', body: reportLines.join('\\n') }] }));
+    return result;
   })();`;
 }
 
-const CTO_TRIGGERS = [
-  { kind: 'user' as const, phrase_examples: ['evaluate architecture debt', 'optimize cloud spend', 'synthesize this incident', 'dry-run engineering remediation'] },
+const ARCH_DEBT_TRIGGERS = [
+  { kind: 'schedule' as const, cadence: 'Periodic tech-debt monitoring' },
+];
+
+const CLOUD_SPEND_TRIGGERS = [
+  { kind: 'schedule' as const, cadence: 'Periodic spend monitoring' },
+];
+
+const INCIDENT_WAR_ROOM_TRIGGERS = [
+  { kind: 'event' as const, on: 'Incoming incident signals fired' },
+];
+
+const IAC_REMEDIATION_TRIGGERS = [
+  { kind: 'event' as const, on: 'Detected infrastructure drift fired' },
 ];
 
 const architectureWrapperSource = `(async () => {
 const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
   const systems = Array.isArray(input.systems) ? input.systems : [];
   if (!systems.length) {
-    return { success: false, error: 'Not connected: no system health inputs were supplied', data: null };
+    const result = { success: false, error: 'Not connected: no system health inputs were supplied', data: {} };
+    console.log(JSON.stringify({ ...result, present: [{ id: 'error', title: 'Architecture Evaluation', kind: 'text', body: result.error }] }));
+    return result;
   }
   const evaluated = [];
   const errors = [];
@@ -161,14 +218,33 @@ const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
     ...item,
     action: item.priority === 'high' ? 'modernize now' : item.priority === 'medium' ? 'schedule next quarter' : 'monitor',
   }));
-  return { success: true, data: { systems: scored, roadmap, evaluations: evaluated, generatedAt: new Date().toISOString() }, error: errors.length ? errors : null };
+  const result = { success: true, data: { systems: scored, roadmap, evaluations: evaluated, generatedAt: new Date().toISOString() }, error: errors.length ? errors : null };
+  const reportLines = [
+    'Architecture & Tech Debt Evaluation',
+    'Systems Evaluated: ' + systems.length,
+    '',
+    'Prioritized Roadmap:',
+  ];
+  roadmap.forEach((item) => {
+    reportLines.push('  ' + item.rank + '. ' + item.name + ' — Score: ' + item.score + ' (' + item.priority.toUpperCase() + ') — ' + item.action);
+  });
+  if (errors.length) {
+    reportLines.push('', 'Errors from underlying evaluations:');
+    errors.forEach((e, i) => {
+      reportLines.push('  ' + (i + 1) + '. ' + e.system + ': ' + e.error);
+    });
+  }
+  console.log(JSON.stringify({ ...result, present: [{ id: 'report', title: 'Architecture Modernization Roadmap', kind: 'text', body: reportLines.join('\\n') }] }));
+  return result;
 })();`;
 
 const cloudSpendWrapperSource = `(async () => {
 const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
   const rows = Array.isArray(input.billingRows) ? input.billingRows : [];
   if (!rows.length) {
-    return { success: false, error: 'Not connected: no cloud billing rows were supplied', data: null };
+    const result = { success: false, error: 'Not connected: no cloud billing rows were supplied', data: {} };
+    console.log(JSON.stringify({ ...result, present: [{ id: 'error', title: 'Cloud Spend Optimization', kind: 'text', body: result.error }] }));
+    return result;
   }
   const recommendations = [];
   const errors = [];
@@ -194,14 +270,34 @@ const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
     return { service: row.service, currentSpend: spend, utilization, projectedSavings, action: utilization < 0.3 ? 'rightsizing or shutdown review' : utilization < 0.6 ? 'reserved capacity review' : 'monitor' };
   });
   const totalProjectedSavings = rightsizing.reduce((sum, item) => sum + item.projectedSavings, 0);
-  return { success: true, data: { recommendations: rightsizing, totalProjectedSavings, evaluationResults: recommendations, generatedAt: new Date().toISOString() }, error: errors.length ? errors : null };
+  const result = { success: true, data: { recommendations: rightsizing, totalProjectedSavings, evaluationResults: recommendations, generatedAt: new Date().toISOString() }, error: errors.length ? errors : null };
+  const reportLines = [
+    'Cloud Spend & Infrastructure Optimization',
+    'Billing Rows Analyzed: ' + rows.length,
+    'Total Projected Savings: $' + totalProjectedSavings.toFixed(2),
+    '',
+    'Recommendations:',
+  ];
+  rightsizing.forEach((item) => {
+    reportLines.push('  - ' + item.service + ': Spend $' + item.currentSpend.toFixed(2) + ', Utilization ' + (item.utilization * 100).toFixed(1) + '%, Projected Savings $' + item.projectedSavings.toFixed(2) + ' — ' + item.action);
+  });
+  if (errors.length) {
+    reportLines.push('', 'Errors from underlying queries:');
+    errors.forEach((e, i) => {
+      reportLines.push('  ' + (i + 1) + '. ' + e.service + ': ' + e.error);
+    });
+  }
+  console.log(JSON.stringify({ ...result, present: [{ id: 'report', title: 'Cloud Cost Optimization Report', kind: 'text', body: reportLines.join('\\n') }] }));
+  return result;
 })();`;
 
 const incidentWrapperSource = `(async () => {
 const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
   const signals = Array.isArray(input.signals) ? input.signals : [];
   if (!signals.length) {
-    return { success: false, error: 'Not connected: no telemetry, log, alert, or deployment signals were supplied', data: null };
+    const result = { success: false, error: 'Not connected: no telemetry, log, alert, or deployment signals were supplied', data: {} };
+    console.log(JSON.stringify({ ...result, present: [{ id: 'error', title: 'Incident War Room', kind: 'text', body: result.error }] }));
+    return result;
   }
   const readinessResults = [];
   const errors = [];
@@ -231,19 +327,47 @@ const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
     owner: 'incident commander',
   }));
   const stakeholderUpdate = 'Incident review in progress; production changes require explicit approval.';
-  return { success: true, data: { hypotheses, mitigations, stakeholderUpdate, readinessResults, generatedAt: new Date().toISOString() }, error: errors.length ? errors : null };
+  const result = { success: true, data: { hypotheses, mitigations, stakeholderUpdate, readinessResults, generatedAt: new Date().toISOString() }, error: errors.length ? errors : null };
+  const reportLines = [
+    'Incident War Room Synthesis',
+    'Signals Analyzed: ' + signals.length,
+    'Hypotheses Generated: ' + hypotheses.length,
+    'Mitigations Proposed: ' + mitigations.length,
+    '',
+    'Hypotheses:',
+  ];
+  hypotheses.forEach((h, i) => {
+    reportLines.push('  ' + (i + 1) + '. [' + (h.confidence * 100).toFixed(0) + '%] ' + h.source + ': ' + h.hypothesis + ' — Evidence: ' + h.evidence);
+  });
+  reportLines.push('', 'Mitigations:');
+  mitigations.forEach((m) => {
+    reportLines.push('  ' + m.priority + '. ' + m.action + ' (Owner: ' + m.owner + ')');
+  });
+  reportLines.push('', 'Stakeholder Update: ' + stakeholderUpdate);
+  if (errors.length) {
+    reportLines.push('', 'Errors from disaster readiness checks:');
+    errors.forEach((e, i) => {
+      reportLines.push('  ' + (i + 1) + '. ' + e.source + ': ' + e.error);
+    });
+  }
+  console.log(JSON.stringify({ ...result, present: [{ id: 'report', title: 'Incident War Room Report', kind: 'text', body: reportLines.join('\\n') }] }));
+  return result;
 })();`;
 
 const remediationSource = `(async () => {
 const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
   const endpointUrl = input.endpointUrl;
   if (!endpointUrl) {
-    return { success: false, error: 'not-connected: CTO engineering endpoint is not configured', data: null };
+    const result = { success: false, error: 'not-connected: CTO engineering endpoint is not configured', data: {} };
+    console.log(JSON.stringify({ ...result, present: [{ id: 'error', title: 'Engineering Remediation', kind: 'text', body: 'Endpoint not configured. Please configure the CTO engineering endpoint to use this skill.' }] }));
+    return result;
   }
   const dryRun = input.dryRun !== false;
   const confirmation = input.confirmation === true;
   if (!dryRun && !confirmation) {
-    return { success: false, error: 'Explicit confirmation is required for live remediation', data: null };
+    const result = { success: false, error: 'Explicit confirmation is required for live remediation', data: {} };
+    console.log(JSON.stringify({ ...result, present: [{ id: 'error', title: 'Engineering Remediation', kind: 'text', body: 'Explicit confirmation is required for live remediation. Set confirmation=true to proceed.' }] }));
+    return result;
   }
   try {
     const response = await fetch(endpointUrl, {
@@ -252,9 +376,14 @@ const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
       body: JSON.stringify(input.payload || {}),
     });
     const data = await response.json().catch(async () => ({ text: await response.text() }));
-    return { success: response.ok, data: { response: { status: response.status, data } }, error: null };
+    const result = { success: response.ok, data: { response: { status: response.status, data } }, error: null };
+    const body = 'Endpoint: ' + endpointUrl + '\\nMethod: ' + (input.method || 'POST') + '\\nDry Run: ' + dryRun + '\\nStatus: ' + response.status + '\\nResponse: ' + JSON.stringify(data, null, 2);
+    console.log(JSON.stringify({ ...result, present: [{ id: 'result', title: 'Engineering Remediation Result', kind: 'text', body: body }] }));
+    return result;
   } catch (error) {
-    return { success: false, error: error instanceof Error ? error.message : String(error), data: null };
+    const result = { success: false, error: error instanceof Error ? error.message : String(error), data: null };
+    console.log(JSON.stringify({ ...result, present: [{ id: 'error', title: 'Engineering Remediation Error', kind: 'text', body: result.error }] }));
+    return result;
   }
 })();`;
 
@@ -301,6 +430,12 @@ export const ctoSkills: Tool[] = [
     query: SchemaProps.text({ description: 'Original query' }),
     result: SchemaProps.object({}, { description: 'Query result data', additionalProperties: true }),
     error: SchemaProps.text({ description: 'Error message if failed' }),
+    present: SchemaProps.objectArray(SchemaProps.object({
+      id: SchemaProps.text({}),
+      title: SchemaProps.text({}),
+      kind: SchemaProps.text({}),
+      body: SchemaProps.text({}),
+    }), { description: 'Pre-formatted user-facing output blocks' }),
   }),
   tier: 'advise',
   domainKnowledge: 'Infrastructure querying conventions, observability tooling, cloud provider operations, and cost visibility',
@@ -345,6 +480,12 @@ export const ctoSkills: Tool[] = [
       data: SchemaProps.object({}, { additionalProperties: true }),
     }, { description: 'Response from the external system' }),
     error: SchemaProps.text({ description: 'Error message if failed' }),
+    present: SchemaProps.objectArray(SchemaProps.object({
+      id: SchemaProps.text({}),
+      title: SchemaProps.text({}),
+      kind: SchemaProps.text({}),
+      body: SchemaProps.text({}),
+    }), { description: 'Pre-formatted user-facing output blocks' }),
   }),
   configSchema: createSchemaRecord({
     confirmBeforeSend: SchemaProps.boolean({
@@ -385,6 +526,12 @@ export const ctoSkills: Tool[] = [
     config: SchemaProps.object({}, { description: 'Configuration used', additionalProperties: true }),
     result: SchemaProps.object({}, { description: 'Operation result data', additionalProperties: true }),
     error: SchemaProps.text({ description: 'Error message if failed' }),
+    present: SchemaProps.objectArray(SchemaProps.object({
+      id: SchemaProps.text({}),
+      title: SchemaProps.text({}),
+      kind: SchemaProps.text({}),
+      body: SchemaProps.text({}),
+    }), { description: 'Pre-formatted user-facing output blocks' }),
   }),
   tier: 'aid',
   domainKnowledge: 'Incident response runbooks, disaster recovery planning, RTO/RPO targets, and service continuity',
@@ -448,6 +595,12 @@ export const ctoSkills: Tool[] = [
       }), {}),
     }, { description: 'Structured advisory output', additionalProperties: true }),
     error: SchemaProps.text({ description: 'Error message if failed' }),
+    present: SchemaProps.objectArray(SchemaProps.object({
+      id: SchemaProps.text({}),
+      title: SchemaProps.text({}),
+      kind: SchemaProps.text({}),
+      body: SchemaProps.text({}),
+    }), { description: 'Pre-formatted user-facing output blocks' }),
   }),
   tier: 'advise',
   domainKnowledge: 'System design patterns, technology stack trade-offs, scalability boundaries, and architecture review criteria',
@@ -478,8 +631,14 @@ export const ctoSkills: Tool[] = [
       success: SchemaProps.boolean({ description: 'Whether evaluation completed' }),
       data: SchemaProps.object({}, { description: 'Scored systems and prioritized roadmap' }),
       error: SchemaProps.text({ description: 'Failure message' }),
+      present: SchemaProps.objectArray(SchemaProps.object({
+        id: SchemaProps.text({}),
+        title: SchemaProps.text({}),
+        kind: SchemaProps.text({}),
+        body: SchemaProps.text({}),
+      }), { description: 'Pre-formatted user-facing output blocks' }),
     }),
-    triggers: CTO_TRIGGERS,
+    triggers: ARCH_DEBT_TRIGGERS,
     tier: 'advise',
     domainKnowledge: 'Architecture pattern analysis, technology stack fit scoring, and modernization roadmap prioritization',
   }),
@@ -505,8 +664,14 @@ export const ctoSkills: Tool[] = [
       success: SchemaProps.boolean({ description: 'Whether optimization completed' }),
       data: SchemaProps.object({}, { description: 'Recommendations and savings estimate' }),
       error: SchemaProps.text({ description: 'Failure message' }),
+      present: SchemaProps.objectArray(SchemaProps.object({
+        id: SchemaProps.text({}),
+        title: SchemaProps.text({}),
+        kind: SchemaProps.text({}),
+        body: SchemaProps.text({}),
+      }), { description: 'Pre-formatted user-facing output blocks' }),
     }),
-    triggers: CTO_TRIGGERS,
+    triggers: CLOUD_SPEND_TRIGGERS,
     tier: 'advise',
     domainKnowledge: 'Cloud cost attribution, rightsizing economics, capacity planning, and infrastructure unit economics',
   }),
@@ -533,8 +698,14 @@ export const ctoSkills: Tool[] = [
       success: SchemaProps.boolean({ description: 'Whether synthesis completed' }),
       data: SchemaProps.object({}, { description: 'Hypotheses and mitigations' }),
       error: SchemaProps.text({ description: 'Failure message' }),
+      present: SchemaProps.objectArray(SchemaProps.object({
+        id: SchemaProps.text({}),
+        title: SchemaProps.text({}),
+        kind: SchemaProps.text({}),
+        body: SchemaProps.text({}),
+      }), { description: 'Pre-formatted user-facing output blocks' }),
     }),
-    triggers: CTO_TRIGGERS,
+    triggers: INCIDENT_WAR_ROOM_TRIGGERS,
     tier: 'aid',
     domainKnowledge: 'Incident correlation techniques, signal triage, hypothesis formation, and mitigation sequencing',
   }),
@@ -562,12 +733,22 @@ export const ctoSkills: Tool[] = [
       success: SchemaProps.boolean({ description: 'Whether action completed' }),
       data: SchemaProps.object({}, { description: 'Remote response when available' }),
       error: SchemaProps.text({ description: 'Failure or governance message' }),
+      present: SchemaProps.objectArray(SchemaProps.object({
+        id: SchemaProps.text({}),
+        title: SchemaProps.text({}),
+        kind: SchemaProps.text({}),
+        body: SchemaProps.text({}),
+      }), { description: 'Pre-formatted user-facing output blocks' }),
     }),
-    triggers: CTO_TRIGGERS,
+    triggers: IAC_REMEDIATION_TRIGGERS,
     tier: 'represent',
     domainKnowledge: 'Infrastructure-as-code drift detection, remediation safety, change review, and rollback guarantees',
     confirmBeforeSend: true,
   }),
+
+  ctoTeamDeliveryHealthEvaluator,
+
+  ctoDisasterRecoveryPlanner,
 ];
 
 export const ctoCanonicalSkills = ctoSkills.filter((s) => s.isSkill !== false);
@@ -581,6 +762,8 @@ ctoSkills.forEach((s) => {
   else if (s.id === 'cto-cloud-spend-infrastructure-optimizer') s.manifest.workflowStage = 'plan';
   else if (s.id === 'cto-incident-war-room-synthesizer') s.manifest.workflowStage = 'diagnose';
   else if (s.id === 'cto-engineering-action-iac-drift-remediation') s.manifest.workflowStage = 'approve';
+  else if (s.id === 'cto-team-delivery-health-evaluator') s.manifest.workflowStage = 'plan';
+  else if (s.id === 'cto-disaster-recovery-planner') s.manifest.workflowStage = 'plan';
 });
 
 export const ctoWorkflow: AssistantWorkflow = {

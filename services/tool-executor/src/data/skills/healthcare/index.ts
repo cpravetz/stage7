@@ -1,12 +1,15 @@
 import { Tool } from '../../../types';
 import { createExternalActionSkill, createCodeSkill, SchemaProps } from '../code-skill-factory';
 import { annotateStages, createWorkflow, WorkflowStage, AssistantWorkflow } from '../workflow-common';
+import { HEALTHCARE_EXTERNAL_OUTPUT_SCHEMA } from './healthcare-contract';
 
 const CLINICAL_DECISION_SUPPORT = createCodeSkill({
   id: 'healthcare-clinical-decision-support',
   name: 'Clinical Decision Support',
   description:
     'Clinical reasoning assistant for healthcare professionals. Provides differential diagnosis suggestions, risk assessments, and care plan recommendations with heavy safety caveats. Always recommends consulting a qualified clinician. This tool does not replace clinical judgment.',
+  tier: 'advise',
+  domainKnowledge: 'Clinical reasoning, differential diagnosis, risk assessment, and care plan recommendations',
   manifest: {
     language: 'javascript',
     entrypoint: 'index.js',
@@ -126,6 +129,9 @@ const RECORDS_SCHEDULING_OPS = createExternalActionSkill({
   id: 'healthcare-records-scheduling-ops',
   name: 'Records & Scheduling Ops',
   description: 'Manage medical records, apply tags, search records, schedule appointments, and optimize provider schedules through the healthcare records and scheduling system.',
+  tier: 'represent',
+  domainKnowledge: 'Medical records management, appointment scheduling, and provider schedule optimization',
+  confirmBeforeSend: true,
   system: 'healthcare',
   action: 'records-scheduling',
   endpoint: { envVar: 'HEALTHCARE_OPS_ENDPOINT', method: 'POST' },
@@ -174,7 +180,7 @@ const RECORDS_SCHEDULING_OPS = createExternalActionSkill({
     },
     required: [],
   },
-  outputSchema: { type: 'object', properties: { success: { type: 'boolean' }, status: { type: 'string', enum: ['success', 'error'] }, system: { type: 'string' }, action: { type: 'string' }, request: { type: ['object', 'null'], properties: { input: { type: 'object' }, endpoint: { type: 'string' }, method: { type: 'string' }, headers: { type: 'object' } } }, response: { type: ['object', 'null'], properties: { status: { type: 'number' }, data: { type: ['object', 'string', 'null'] } } }, error: { type: ['string', 'null'] } }, required: ['success', 'status', 'system', 'action', 'request', 'response', 'error'] } as any,
+  outputSchema: HEALTHCARE_EXTERNAL_OUTPUT_SCHEMA,
   timeoutMs: 60000,
   triggers: [
     { kind: 'event', on: 'New appointment requested or record update' },
@@ -185,6 +191,9 @@ const PATIENT_COMMUNICATION = createExternalActionSkill({
   id: 'healthcare-patient-communication',
   name: 'Patient Communication',
   description: 'Send secure patient communications including appointment reminders, test results, care instructions, and manage recurring communication schedules.',
+  tier: 'represent',
+  domainKnowledge: 'Secure patient communication, appointment reminders, and care instructions',
+  confirmBeforeSend: true,
   system: 'healthcare',
   action: 'patient-communication',
   endpoint: { envVar: 'HEALTHCARE_COMM_ENDPOINT', method: 'POST' },
@@ -227,7 +236,7 @@ const PATIENT_COMMUNICATION = createExternalActionSkill({
     },
     required: [],
   },
-  outputSchema: { type: 'object', properties: { success: { type: 'boolean' }, status: { type: 'string', enum: ['success', 'error'] }, system: { type: 'string' }, action: { type: 'string' }, request: { type: ['object', 'null'], properties: { input: { type: 'object' }, endpoint: { type: 'string' }, method: { type: 'string' }, headers: { type: 'object' } } }, response: { type: ['object', 'null'], properties: { status: { type: 'number' }, data: { type: ['object', 'string', 'null'] } } }, error: { type: ['string', 'null'] } }, required: ['success', 'status', 'system', 'action', 'request', 'response', 'error'] } as any,
+  outputSchema: HEALTHCARE_EXTERNAL_OUTPUT_SCHEMA,
   timeoutMs: 60000,
   triggers: [
     { kind: 'event', on: 'Patient message requested' },
@@ -238,6 +247,9 @@ const RESOURCE_COORDINATION = createExternalActionSkill({
   id: 'healthcare-resource-coordination',
   name: 'Resource Coordination',
   description: 'Coordinate beds, equipment, staff, and rooms across facilities, and match patients to optimal resources based on clinical needs, insurance, and preferences.',
+  tier: 'represent',
+  domainKnowledge: 'Healthcare resource coordination, bed/equipment/staff management, and patient-resource matching',
+  confirmBeforeSend: true,
   system: 'healthcare',
   action: 'resource-coordination',
   endpoint: { envVar: 'HEALTHCARE_RESOURCE_ENDPOINT', method: 'POST' },
@@ -282,7 +294,7 @@ const RESOURCE_COORDINATION = createExternalActionSkill({
     },
     required: [],
   },
-  outputSchema: { type: 'object', properties: { success: { type: 'boolean' }, status: { type: 'string', enum: ['success', 'error'] }, system: { type: 'string' }, action: { type: 'string' }, request: { type: ['object', 'null'], properties: { input: { type: 'object' }, endpoint: { type: 'string' }, method: { type: 'string' }, headers: { type: 'object' } } }, response: { type: ['object', 'null'], properties: { status: { type: 'number' }, data: { type: ['object', 'string', 'null'] } } }, error: { type: ['string', 'null'] } }, required: ['success', 'status', 'system', 'action', 'request', 'response', 'error'] } as any,
+  outputSchema: HEALTHCARE_EXTERNAL_OUTPUT_SCHEMA,
   timeoutMs: 60000,
   triggers: [
     { kind: 'event', on: 'Resource request received' },
@@ -294,6 +306,8 @@ const OPERATIONAL_ANALYTICS = createCodeSkill({
   name: 'Operational Analytics',
   description:
     'Generate healthcare operational analytics including clinical KPIs, throughput metrics, resource utilization, and financial summaries. Computes insights locally with reasoning over available data and can reference the healthcare analytics platform for deeper reporting.',
+  tier: 'advise',
+  domainKnowledge: 'Healthcare operational analytics, clinical KPIs, throughput metrics, and resource utilization',
   manifest: {
     language: 'javascript',
     entrypoint: 'index.js',

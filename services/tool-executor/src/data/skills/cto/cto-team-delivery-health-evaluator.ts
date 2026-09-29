@@ -29,12 +29,16 @@ const teamMetricsResult = await __execute_tool('cto-infrastructure-query', {
 });
 
 if (!teamMetricsResult || teamMetricsResult.success === false) {
-  console.log(JSON.stringify({
+  const result = {
     success: false,
     error: 'Not connected: team-metrics provider unavailable; ensure cto-infrastructure-query is connected with team-metrics provider',
     thresholds,
+  };
+  console.log(JSON.stringify({
+    ...result,
+    present: [{ id: 'error', title: 'Team Delivery Health', kind: 'text', body: result.error + '\\n\\nThresholds: ' + JSON.stringify(thresholds, null, 2) }]
   }));
-  return;
+  return result;
 }
 
 const metrics = teamMetricsResult.result || teamMetricsResult.data || {};
@@ -72,7 +76,32 @@ const velocity = sprints.map((sprint) => ({
 
 const avgVelocity = velocity.length ? velocity.reduce((sum, v) => sum + v.velocity, 0) / velocity.length : 0;
 
-console.log(JSON.stringify({
+const reportLines = [
+  'Team Delivery Health Evaluation',
+  'Period: ' + (input.period || 'month'),
+  'Systems: ' + (input.systems && input.systems.length ? input.systems.join(', ') : 'all'),
+  '',
+  'DORA Assessment:',
+  '  Deployment Frequency: ' + doraAssessment.deploymentFrequency.value + ' (threshold: ' + doraAssessment.deploymentFrequency.threshold + ') — ' + doraAssessment.deploymentFrequency.status.toUpperCase(),
+  '  Lead Time: ' + doraAssessment.leadTime.value + ' days (threshold: ' + doraAssessment.leadTime.threshold + ') — ' + doraAssessment.leadTime.status.toUpperCase(),
+  '  Change Failure Rate: ' + (doraAssessment.changeFailureRate.value * 100).toFixed(2) + '% (threshold: ' + (doraAssessment.changeFailureRate.threshold * 100).toFixed(2) + '%) — ' + doraAssessment.changeFailureRate.status.toUpperCase(),
+  '  Time to Restore: ' + doraAssessment.timeToRestore.value + ' hours (threshold: ' + doraAssessment.timeToRestore.threshold + ') — ' + doraAssessment.timeToRestore.status.toUpperCase(),
+  '',
+  'Team Capacity:',
+];
+capacity.forEach((member) => {
+  reportLines.push('  ' + member.name + ' (' + member.role + '): ' + (member.capacity * 100).toFixed(0) + '% — ' + member.status.toUpperCase() + ' — ' + member.availableHours + ' hrs/week');
+});
+reportLines.push('  Total Capacity: ' + capacity.reduce((sum, m) => sum + (m.capacity || 0), 0).toFixed(2));
+reportLines.push('  Average Capacity: ' + (capacity.length ? (capacity.reduce((sum, m) => sum + (m.capacity || 0), 0) / capacity.length * 100).toFixed(0) : 0) + '%');
+reportLines.push('', 'Sprint Velocity:');
+velocity.forEach((v) => {
+  reportLines.push('  ' + v.sprint + ': Planned ' + v.plannedPoints + ', Completed ' + v.completedPoints + ', Velocity ' + v.velocity.toFixed(2));
+});
+reportLines.push('  Average Velocity: ' + avgVelocity.toFixed(2));
+reportLines.push('  Trend: ' + (velocity.length >= 2 ? (velocity[velocity.length - 1].velocity > velocity[0].velocity ? 'improving' : velocity[velocity.length - 1].velocity < velocity[0].velocity ? 'declining' : 'stable') : 'insufficient-data'));
+
+const result = {
   success: true,
   data: {
     doraAssessment,
@@ -83,7 +112,12 @@ console.log(JSON.stringify({
   },
   delegatedTo: 'cto-infrastructure-query (team-metrics)',
   calculate_dora_metrics: true,
+};
+console.log(JSON.stringify({
+  ...result,
+  present: [{ id: 'report', title: 'Team Delivery Health Report', kind: 'text', body: reportLines.join('\\n') }]
 }));
+return result;
 })()`;
 
 export const ctoTeamDeliveryHealthEvaluator = createCodeSkill({
@@ -109,14 +143,21 @@ export const ctoTeamDeliveryHealthEvaluator = createCodeSkill({
       success: SchemaProps.boolean({ description: 'Whether evaluation completed' }),
       data: SchemaProps.object({}, { additionalProperties: true, description: 'DORA assessment, team capacity, and sprint velocity' }),
       error: SchemaProps.text({ description: 'Failure message' }),
+      present: SchemaProps.objectArray(SchemaProps.object({
+        id: SchemaProps.text({}),
+        title: SchemaProps.text({}),
+        kind: SchemaProps.text({}),
+        body: SchemaProps.text({}),
+      }), { description: 'Pre-formatted user-facing output blocks' }),
     },
     required: ['success', 'data'],
   },
   triggers: [
-    { kind: 'user', phrase_examples: ['evaluate team delivery health', 'check DORA metrics', 'assess sprint velocity', 'team capacity review'] }
+    { kind: 'schedule' as const, cadence: 'Periodic DORA/velocity monitoring' }
   ],
   tier: 'advise',
-isSkill: true,
+  domainKnowledge: 'DORA metrics, team capacity planning, sprint velocity analysis, engineering delivery health assessment',
+  isSkill: true,
 });
 
 ctoTeamDeliveryHealthEvaluator.configSchema = DORA_CONFIG_SCHEMA;

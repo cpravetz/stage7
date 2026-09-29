@@ -122,14 +122,14 @@ required: ['success', 'data'],
 
 const JOB_DISCOVERY_FIT_RANKING = createCodeSkill({
 id: 'career-job-discovery-fit-ranking',
-name: 'Job Discovery & Fit Ranking',
-description: 'Searches real job boards for roles matching your profile, scores fit and ATS compatibility, and ranks opportunities by match quality. Reads the public Greenhouse, Ashby and Lever board APIs with no key required. Reports per-source status so empty results are never silent. Optionally auto-submits applications to roles meeting an auto-apply threshold via Apply to Jobs.',
+name: 'Job Search & Fit Ranking',
+description: 'Searches job boards for roles matching your profile, scores fit and ATS compatibility, and ranks opportunities by match quality. Reads the public Greenhouse, Ashby and Lever board APIs with no key required. Reports per-source status so empty results are never silent. Optionally auto-submits applications to roles meeting an auto-apply threshold via Apply to Jobs.',
 manifest: {
 language: 'javascript',
 entrypoint: 'index.js',
 sourceCode: JOB_DISCOVERY_FIT_RANKING_SOURCE,
 configSchema: CAREER_WRAPPER_CONFIG_SCHEMA,
-actionLabel: 'Discover & Rank',
+actionLabel: 'Search & Rank',
 lowerOrderTools: ['career-job-discovery', 'career-application-execution'],
 },
 inputSchema: JOB_DISCOVERY_FIT_RANKING_INPUT,
@@ -137,6 +137,8 @@ outputSchema: JOB_DISCOVERY_FIT_RANKING_OUTPUT,
 triggers: [
 { kind: 'user', phrase_examples: ['Discover jobs', 'Find matching roles', 'Rank my job options'] },
 ],
+tier: 'advise',
+domainKnowledge: 'Career coaching, job search strategy, resume and cover letter optimization, interview preparation, compensation negotiation',
 isSkill: true,
 });
 JOB_DISCOVERY_FIT_RANKING.configSchema = JOB_DISCOVERY_FIT_RANKING.manifest.configSchema as SchemaRecord;

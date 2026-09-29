@@ -50,7 +50,9 @@ export class PluginGenerator {
       const discovered = await this.discovery.discoverAndRegister(request.description, {
         register: (tool: Tool) => {
           if (this.registry) {
-            this.registry.register(tool);
+            // registerOrReplace: a re-discovered tool may already be present
+            // (e.g. restored from the ToolStore on boot), which must not throw.
+            this.registry.registerOrReplace(tool);
           }
         },
       });
@@ -150,7 +152,9 @@ export class PluginGenerator {
       }, null, 2), 'utf-8');
 
       if (this.registry) {
-        this.registry.register(tool);
+        // registerOrReplace so re-deploying an already-registered plugin id
+        // overwrites rather than throwing on a duplicate.
+        this.registry.registerOrReplace(tool);
         logger.info({ toolId: tool.id }, 'Plugin deployed and registered with ToolRegistry');
       } else {
         logger.info({ toolId: tool.id, deployPath: pluginDir }, 'Plugin deployed locally');

@@ -94,6 +94,8 @@ description: 'Drafts a recruiter outreach follow-up for a target company after a
 triggers: [
 { kind: 'user', phrase_examples: ['Submit my applications', 'Draft recruiter outreach', 'Run my portal workflow'] },
 ],
+tier: 'represent',
+domainKnowledge: 'Career coaching, job search strategy, resume and cover letter optimization, interview preparation, compensation negotiation',
 isSkill: true,
 });
 

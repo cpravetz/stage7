@@ -45,6 +45,15 @@ const defaultCategories = [
   { category: 'Decor & Experience', typicalPct: 0.05, items: ['Flowers', 'Furniture', 'Activities', 'Swag'] },
 ];
 
+function renderBudgetMarkdown(budgetObj) {
+  const lines = ['| Category | Allocated | % |', '|---|---:|---:|'];
+  Object.keys(budgetObj).forEach(cat => {
+    const b = budgetObj[cat];
+      lines.push('| ' + cat + ' | $' + b.allocated.toLocaleString() + ' | ' + (b.pct * 100).toFixed(1) + '% |');
+  });
+  return lines.join('\n');
+}
+
 if (task === 'plan') {
   const phases = [
     { phase: 'Concept & Goals', weeksBefore: 24, tasks: ['Define objectives, audience, KPIs', 'Set date options', 'Initial budget framework', 'Select event type/format'] },
@@ -89,7 +98,8 @@ if (task === 'plan') {
   };
 } else if (task === 'budget') {
   if (!budgetTotal) {
-    console.log(JSON.stringify({ success: false, error: 'budgetTotal is required for budget task' }));
+    const resp = { success: false, status: 'failed', error: 'budgetTotal is required for budget task', present: [{ id: 'error', body: 'budgetTotal is required for budget task' }] };
+    console.log(JSON.stringify(resp));
     return;
   }
 
@@ -121,14 +131,44 @@ if (task === 'plan') {
     { milestone: 'Post-event report', targetDate: 'Week +2', owner: 'Planner', status: 'pending' },
   ];
 } else {
-  console.log(JSON.stringify({ success: false, error: 'Invalid task. Use "plan", "budget", or "timeline".' }));
+  const resp = { success: false, status: 'failed', error: 'Invalid task. Use "plan", "budget", or "timeline".', present: [{ id: 'error', body: 'Invalid task. Use "plan", "budget", or "timeline".' }] };
+  console.log(JSON.stringify(resp));
   return;
 }
 
 store.push(plan);
 fs.writeFileSync(storePath, JSON.stringify(store, null, 2));
 
-console.log(JSON.stringify({ success: true, data: { plan, storePath } }));
+// Build presentation blocks derived from real computed data
+const present = [];
+  present.push({
+  id: 'overview',
+  title: 'Event summary',
+  kind: 'markdown',
+  body: \`**\${eventName}**\\n\\n- Type: \${eventType}\\n- Date: \${date || 'TBD'}\\n- Venue: \${venue || 'TBD'}\\n- Expected attendees: \${expectedAttendees}\`,
+});
+
+if (plan.plan && plan.plan.budget) {
+  present.push({ id: 'budget', title: 'Budget allocation', kind: 'markdown', body: renderBudgetMarkdown(plan.plan.budget) });
+}
+
+  if (plan.plan && plan.plan.timeline && plan.plan.timeline.length) {
+  const tl = plan.plan.timeline.slice(0, 12).map(item => \`- \${item.task || item.milestone} (\${item.due || item.targetDate || 'TBD'})\`).join('\n');
+  present.push({ id: 'timeline', title: 'Top timeline items', kind: 'markdown', body: tl });
+}
+
+  if (plan.plan && plan.plan.vendors && plan.plan.vendors.length) {
+  const vs = plan.plan.vendors.map(v => \`- \${v.name} — \${v.category} — \${v.contact || 'no contact'} — est $\${(v.estimatedCost||0).toLocaleString()}\`).join('\n');
+  present.push({ id: 'vendors', title: 'Vendors', kind: 'markdown', body: vs });
+}
+
+  if (plan.plan && plan.plan.risks && plan.plan.risks.length) {
+  const rs = plan.plan.risks.map(r => \`- \${r.risk} — \${r.likelihood}/\${r.impact} — Mitigation: \${r.mitigation}\`).join('\n');
+  present.push({ id: 'risks', title: 'Risk register (top items)', kind: 'markdown', body: rs });
+}
+
+const result = { success: true, status: 'ok', data: { plan, storePath }, present };
+console.log(JSON.stringify(result));
 `,
   },
   inputSchema: {
@@ -152,10 +192,25 @@ console.log(JSON.stringify({ success: true, data: { plan, storePath } }));
     type: 'object',
     properties: {
       success: { type: 'boolean' },
-      data: { type: 'object' },
-      error: { type: 'string' },
+      status: { type: ['string', 'null'], description: 'ok, partial, failed, blocked, not-connected, or confirmation-required' },
+      data: { type: ['object', 'null'] },
+      error: { type: ['string', 'null'] },
+      present: {
+        type: 'array',
+        description: 'User-formatted presentation blocks derived from the computed result',
+        items: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            title: { type: 'string' },
+            body: { type: 'string' },
+            kind: { type: 'string' },
+          },
+          required: ['id', 'body'],
+        },
+      },
     },
-    required: ['success'],
+    required: ['success', 'present'],
   },
   triggers: [
     { kind: 'user', phrase_examples: ['Plan an event', 'Create a budget', 'Build a timeline'] },

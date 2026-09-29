@@ -47,7 +47,8 @@ const MAX_LOG_ENTRIES = 200;
 
 function providerAttemptTimeoutMs(): number {
   const configured = Number(process.env.BRAIN_PROVIDER_ATTEMPT_TIMEOUT_MS);
-  return Number.isFinite(configured) && configured > 0 ? configured : 10000;
+  // Some providers (local or self-hosted) can take longer; default to 30s.
+  return Number.isFinite(configured) && configured > 0 ? configured : 30000;
 }
 
 async function withProviderTimeout<T>(operation: Promise<T>): Promise<T> {
@@ -78,9 +79,11 @@ export class BrainService {
 
   constructor() {
     this.providers = buildProviderRegistry();
+    const defaultThreshold = Number(process.env.BRAIN_CIRCUIT_THRESHOLD) || 8;
+    const defaultCooldown = Number(process.env.BRAIN_CIRCUIT_COOLDOWN_MS) || 60000; // 60s
     for (const p of this.providers) {
       this.registerProviderModels(p);
-      this.circuitBreakers.set(p.id, new CircuitBreaker(5, 30000));
+      this.circuitBreakers.set(p.id, new CircuitBreaker(defaultThreshold, defaultCooldown));
     }
     logger.info({ providers: this.providers.map((p) => p.id) }, 'Brain initialized with providers');
   }
@@ -254,7 +257,7 @@ export class BrainService {
       };
 
       logger.info({ provider: provider.id, model: candidate.id }, 'Dispatching completion (candidate)');
-      const breaker = this.circuitBreakers.get(provider.id) || new CircuitBreaker();
+      const breaker = this.circuitBreakers.get(provider.id) || new CircuitBreaker(Number(process.env.BRAIN_CIRCUIT_THRESHOLD) || 8, Number(process.env.BRAIN_CIRCUIT_COOLDOWN_MS) || 60000);
 
       for (let attempt = 0; attempt < maxRetriesPerProvider; attempt++) {
         if (Date.now() >= completionDeadline) break;

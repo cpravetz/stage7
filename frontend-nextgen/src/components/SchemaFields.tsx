@@ -14,9 +14,6 @@ export const FIELD_LABEL_MAP: Record<string, string> = {
   confirmation: 'Approve & send',
 };
 
-export const REFERENCE_SOURCE_LABELS: Record<string, string> = {
-  'career-job-discovery-fit-ranking': 'Job Discovery & Fit Ranking',
-};
 
 export const sfGetSchemaProperties = (schema?: SchemaRecord): Record<string, SchemaRecord> => {
   const properties = schema?.properties;
@@ -53,9 +50,6 @@ export const sfGetReferenceSourceLabel = (schema?: SchemaRecord): string => {
   const sourceId = String(schema?.['x-referenceSource'] || '');
   if (schema?.['x-referenceLabel']) {
     return String(schema['x-referenceLabel']);
-  }
-  if (sourceId && REFERENCE_SOURCE_LABELS[sourceId]) {
-    return REFERENCE_SOURCE_LABELS[sourceId];
   }
   if (sourceId) {
     return sfHumanizeKey(sourceId.replace(/-/g, '_'));
@@ -218,7 +212,8 @@ export const SchemaFields = ({ schema, values, onChange, namePrefix = 'skill-fie
               className={controlClass}
               rows={3}
               value={arrayValue.map((item) => sfFormatTextValue(item)).join('\n')}
-              onChange={(e) => onChange(key, e.target.value.split(/[\n,]/))}
+              onChange={(e) => onChange(key, e.target.value.split('\n'))}
+              onBlur={(e) => onChange(key, e.target.value.split('\n').map((s) => s.trim()).filter(Boolean))}
             />
           );
         } else if (sfIsFileUploadSchema(fieldSchema)) {

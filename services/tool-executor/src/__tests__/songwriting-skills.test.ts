@@ -39,21 +39,21 @@ describe('Songwriter Creative — Batch A', () => {
     it('reconciles the Advise higher-order skill', () => {
       expect(skillsByName['Advise Lyric & Structural Prosody Evaluator']).toBeDefined();
       const skill = skillsByName['Advise Lyric & Structural Prosody Evaluator'];
-      expect(skill.id).toBe('songwriting-lyric-prosody-evaluator');
+      expect(skill.id).toBe('songwriting_lyric_prosody_evaluator');
       expect(skill.type).toBe('code');
     });
 
     it('reconciles the Aid higher-order skill', () => {
       expect(skillsByName['Aid Musical & Lyric Co-Creation Engine']).toBeDefined();
       const skill = skillsByName['Aid Musical & Lyric Co-Creation Engine'];
-      expect(skill.id).toBe('songwriting-musical-lyric-cocreation');
+      expect(skill.id).toBe('songwriting_musical_lyric_cocreation');
       expect(skill.type).toBe('code');
     });
 
     it('reconciles the Represent higher-order skill', () => {
       expect(skillsByName['Represent Lead Sheet & Demo Asset Dispatcher']).toBeDefined();
       const skill = skillsByName['Represent Lead Sheet & Demo Asset Dispatcher'];
-      expect(skill.id).toBe('songwriting-lead-sheet-demo-dispatcher');
+      expect(skill.id).toBe('songwriting_lead_sheet_demo_dispatcher');
       expect(skill.type).toBe('code');
       expect(skill.confirmBeforeSend).toBe(true);
     });
@@ -118,8 +118,8 @@ describe('Songwriter Creative — Batch A', () => {
       expect(userTriggered.length).toBe(2);
       const userTriggerIds = userTriggered.map((s) => s.id).sort();
       expect(userTriggerIds).toEqual([
-        'songwriting-lead-sheet-demo-dispatcher',
-        'songwriting-musical-lyric-cocreation',
+        'songwriting_lead_sheet_demo_dispatcher',
+        'songwriting_musical_lyric_cocreation',
       ]);
     });
 
@@ -137,7 +137,8 @@ describe('Songwriter Creative — Batch A', () => {
 
   describe('SONGWRITING_HOME persistence', () => {
     it('all three source codes reference SONGWRITING_HOME', () => {
-      for (const skill of songwritingSkills) {
+      const localSkills = songwritingSkills.filter((s) => s.id !== 'songwriter_genre_trend_evaluator');
+      for (const skill of localSkills) {
         const source = skill.manifest.sourceCode as string;
         expect(source).toContain('SONGWRITING_HOME');
       }
@@ -184,15 +185,17 @@ describe('Songwriter Creative — Batch A', () => {
 
     it('source code defaults to dry-run mode', () => {
       const source = dispatcher.manifest.sourceCode as string;
-      expect(source).toContain("status: 'dry-run'");
+      expect(source).toContain("status: dryRun ? 'dry-run' : 'staged'");
       expect(source).toContain("connected: false");
     });
 
     it('source code gates live dispatch behind dryRun === false and confirmation', () => {
       const source = dispatcher.manifest.sourceCode as string;
-      expect(source).toContain("input.dryRun === false");
+      expect(source).toContain("input.dryRun !== false");
       expect(source).toContain("input.confirmed === true");
       expect(source).toContain("input.confirmation === true");
+      // shouldDispatch must require an endpoint, an explicit live flag, and confirmation.
+      expect(source).toContain('Boolean(ep) && !isDryRun && isConfirmed');
     });
 
     it('source code reports honest not-connected behavior without an endpoint', () => {
@@ -214,20 +217,21 @@ describe('Songwriter Creative — Batch A', () => {
       const skill = skillsByName['Advise Lyric & Structural Prosody Evaluator'];
       const source = skill.manifest.sourceCode as string;
       expect(source).toContain('estimateSyllables');
-      expect(source).toContain('stressPattern');
+      expect(source).toContain('lineMetrics');
       expect(source).toContain('rhymePairs');
       expect(source).toContain('meterVariance');
+      expect(source).toContain('meterConsistency');
       expect(source).toContain('recommendations');
     });
 
     it('co-creation source contains chord progression and section generation logic', () => {
       const skill = skillsByName['Aid Musical & Lyric Co-Creation Engine'];
       const source = skill.manifest.sourceCode as string;
-      expect(source).toContain('chordSets');
       expect(source).toContain('progression');
       expect(source).toContain('sectionNames');
       expect(source).toContain('sections');
       expect(source).toContain('beatSheet');
+      expect(source).toContain('rhymeScheme');
     });
 
     it('dispatcher source contains actual fetch logic for live dispatch', () => {
@@ -300,7 +304,7 @@ describe('Songwriter Creative — Batch A', () => {
       const { stdout } = executeSkillSource(evaluator.manifest.sourceCode as string, { lyrics: '' });
       const parsed = JSON.parse(stdout.trim());
       expect(parsed.success).toBe(false);
-      expect(parsed.error).toContain('lyrics is required');
+      expect(parsed.error).toContain('Paste lyrics');
     });
 
     it('evaluator produces real prosody analysis from lyrics', () => {
@@ -348,17 +352,20 @@ describe('Songwriter Creative — Batch A', () => {
       expect(Array.isArray(parsed.data.draft.sections)).toBe(true);
       expect(parsed.data.draft.sections.length).toBe(4);
       expect(parsed.data.draft.sections[0]).toHaveProperty('section');
-      expect(parsed.data.draft.sections[0]).toHaveProperty('chord');
+      expect(Array.isArray(parsed.data.draft.sections[0].chordProgression)).toBe(true);
       expect(parsed.data.draft.sections[0]).toHaveProperty('lines');
       expect(parsed.data.draft.sections[0]).toHaveProperty('purpose');
       expect(parsed.data.draft.sections[0]).toHaveProperty('transition');
-      expect(parsed.data.draft.chordProgression).toEqual(['I', 'V', 'vi', 'IV']);
+      // Progressions are per section now, so the song-level field is the vocabulary they draw from.
+      expect(parsed.data.draft.chordVocabulary).toEqual(expect.arrayContaining(['I', 'V', 'vi', 'IV']));
+      expect(parsed.data.draft.verseLinesAreDistinct).toBe(true);
       expect(parsed.data.draft.beatSheet).toBeDefined();
       expect(parsed.data.draft.source).toBe('local');
-      expect(parsed.data.formattedSong).toContain('Title: love');
-      expect(parsed.data.formattedSong).toContain('--- LYRICS ---');
-      expect(parsed.data.formattedSong).toContain('--- BEAT SHEET ---');
       expect(parsed.data.storePath).toContain('songwriting');
+      const song = (parsed.present || []).find((b: any) => b.id === 'song');
+      expect(song).toBeDefined();
+      expect(song.body).toContain('--- LYRICS & CHORDS ---');
+      expect(song.body).toContain('--- BEAT SHEET ---');
     });
 
     it('co-creation engine is deterministic for the same seed', () => {
@@ -369,7 +376,7 @@ describe('Songwriter Creative — Batch A', () => {
       const draft1 = JSON.parse(out1.trim()).data.draft;
       const draft2 = JSON.parse(out2.trim()).data.draft;
       expect(draft1.sections[0].lines[0]).toBe(draft2.sections[0].lines[0]);
-      expect(draft1.sections[0].chord).toBe(draft2.sections[0].chord);
+      expect(draft1.sections[0].chordProgression).toEqual(draft2.sections[0].chordProgression);
     });
 
     it('dispatcher stages a lead sheet locally by default', () => {
@@ -380,13 +387,13 @@ describe('Songwriter Creative — Batch A', () => {
       });
       const parsed = JSON.parse(stdout.trim());
       expect(parsed.success).toBe(true);
-      expect(parsed.data.status).toBe('dry-run');
-      expect(parsed.data.connected).toBe(false);
-      expect(parsed.data.artifact).toBeDefined();
-      expect(parsed.data.artifact.title).toBe('Test Song');
-      expect(parsed.data.artifact.format).toBe('lead-sheet');
-      expect(parsed.data.storePath).toContain('lead-sheets.json');
-      expect(parsed.data.message).toContain('Not connected');
+      expect(parsed.status).toBe('dry-run');
+      expect(parsed.connected).toBe(false);
+      expect(parsed.artifact).toBeDefined();
+      expect(parsed.artifact.title).toBe('Test Song');
+      expect(parsed.artifact.format).toBe('lead-sheet');
+      expect(parsed.storePath).toContain('lead-sheets.json');
+      expect(parsed.message).toContain('No asset endpoint is configured');
     });
 
     it('dispatcher handles registration input through the lead-sheet path', () => {
@@ -400,8 +407,8 @@ describe('Songwriter Creative — Batch A', () => {
       });
       const parsed = JSON.parse(stdout.trim());
       expect(parsed.success).toBe(true);
-      expect(parsed.data.status).toBe('dry-run');
-      expect(parsed.data.storePath).toContain('lead-sheets.json');
+      expect(parsed.status).toBe('dry-run');
+      expect(parsed.storePath).toContain('lead-sheets.json');
     });
 
     it('dispatcher reports honest not-connected status when no endpoint configured', () => {
@@ -410,8 +417,8 @@ describe('Songwriter Creative — Batch A', () => {
         lyrics: 'test lyrics',
       });
       const parsed = JSON.parse(stdout.trim());
-      expect(parsed.data.connected).toBe(false);
-      expect(parsed.data.message).toContain('Not connected');
+      expect(parsed.connected).toBe(false);
+      expect(parsed.message).toContain('No asset endpoint is configured');
     });
 
     it('dispatcher does not attempt live fetch in default dry-run mode', () => {
@@ -421,8 +428,8 @@ describe('Songwriter Creative — Batch A', () => {
         lyrics: 'test lyrics',
       });
       const parsed = JSON.parse(stdout.trim());
-      expect(parsed.data.status).toBe('dry-run');
-      expect(parsed.data.response).toBeNull();
+      expect(parsed.status).toBe('dry-run');
+      expect(parsed.response).toBeNull();
     });
   });
 });
