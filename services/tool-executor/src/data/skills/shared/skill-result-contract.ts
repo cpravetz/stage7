@@ -75,7 +75,7 @@ export const EXTERNAL_ACTION_OUTPUT_SCHEMA = {
     system: { type: 'string' },
     action: { type: 'string' },
     request: {
-      type: 'object',
+      type: ['object', 'null'],
       properties: {
         input: { type: 'object' },
         endpoint: { type: 'string' },
@@ -84,14 +84,14 @@ export const EXTERNAL_ACTION_OUTPUT_SCHEMA = {
       },
     },
     response: {
-      type: 'object',
+      type: ['object', 'null'],
       properties: {
         status: { type: 'number' },
-        data: { type: 'object' },
+        data: { type: ['object', 'string', 'null'] },
       },
     },
-    error: { type: 'string' },
+    error: { type: ['string', 'null'] },
     present: PRESENT_SCHEMA,
   },
-  required: ['success', 'system', 'action', 'request', 'response', 'error'],
+  required: ['success', 'system', 'action'],
 };

@@ -36,7 +36,7 @@ export const INVENTORY_MANAGER_SKILL = createDeclarativeCodeSkill({
   async handler(input, ctx) {
     const inventory = ctx.store.load('hotel_inventory');
     if (input.itemId && input.quantity !== undefined) {
-      const idx = inventory.findIndex((item) => item.itemId === input.itemId);
+      const idx = inventory.findIndex((item: any) => item.itemId === input.itemId);
       const updatedItem = {
         itemId: input.itemId,
         category: input.category || 'general',
@@ -58,7 +58,7 @@ export const INVENTORY_MANAGER_SKILL = createDeclarativeCodeSkill({
         ],
       };
     }
-    const lowStock = inventory.filter((item) => item.quantity < item.minStockLevel);
+    const lowStock = inventory.filter((item: any) => item.quantity < item.minStockLevel);
     return {
       success: true,
       data: { inventory, lowStock },

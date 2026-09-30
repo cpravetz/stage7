@@ -3,19 +3,26 @@
  * Loaded by spawned Node.js skill processes via require('stage7-runtime').
  */
 
-const fs = require('fs');
-const path = require('path');
+import fs from 'fs';
+import path from 'path';
 
-function createRuntimeContext(opts = {}) {
+declare const __tool_input: any;
+declare const __execute_tool: any;
+
+export interface RuntimeOptions {
+  persistenceEnvVar?: string;
+}
+
+export function createRuntimeContext(opts: RuntimeOptions = {}) {
   const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
   const persistenceEnvVar = opts.persistenceEnvVar || 'STORAGE_DIR';
   const baseDir = (typeof process !== 'undefined' && process.env && process.env[persistenceEnvVar]) || '/tmp/stage7';
 
   const store = {
-    getFilePath(key) {
+    getFilePath(key: string) {
       return path.join(baseDir, `${key}.json`);
     },
-    load(key, defaultValue = []) {
+    load(key: string, defaultValue: any = []) {
       try {
         const filePath = this.getFilePath(key);
         if (fs.existsSync(filePath)) {
@@ -27,7 +34,7 @@ function createRuntimeContext(opts = {}) {
       }
       return defaultValue;
     },
-    save(key, data) {
+    save(key: string, data: any) {
       try {
         fs.mkdirSync(baseDir, { recursive: true });
         const filePath = this.getFilePath(key);
@@ -39,7 +46,7 @@ function createRuntimeContext(opts = {}) {
   };
 
   const emit = {
-    success(result = {}) {
+    success(result: any = {}) {
       const output = {
         success: true,
         data: result.data || null,
@@ -51,7 +58,7 @@ function createRuntimeContext(opts = {}) {
       console.log(JSON.stringify(output));
       return output;
     },
-    failure(error, result = {}) {
+    failure(error: any, result: any = {}) {
       const output = {
         success: false,
         data: result.data || null,
@@ -90,7 +97,7 @@ function createRuntimeContext(opts = {}) {
     },
   };
 
-  const delegate = async (toolId, toolInput) => {
+  const delegate = async (toolId: string, toolInput: any) => {
     if (typeof __execute_tool === 'function') {
       return await __execute_tool(toolId, toolInput);
     }
@@ -98,15 +105,15 @@ function createRuntimeContext(opts = {}) {
   };
 
   const render = {
-    text(id, title, bodyOrLines) {
+    text(id: string, title: string, bodyOrLines: string | string[]) {
       const body = Array.isArray(bodyOrLines) ? bodyOrLines.join('\n') : String(bodyOrLines);
       return { id, title, kind: 'text', body };
     },
-    markdown(id, title, bodyOrLines) {
+    markdown(id: string, title: string, bodyOrLines: string | string[]) {
       const body = Array.isArray(bodyOrLines) ? bodyOrLines.join('\n') : String(bodyOrLines);
       return { id, title, kind: 'markdown', body };
     },
-    list(id, title, items) {
+    list(id: string, title: string, items: string[]) {
       const body = items.map((i) => `- ${i}`).join('\n');
       return { id, title, kind: 'text', body };
     },

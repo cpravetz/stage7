@@ -35,7 +35,7 @@ export const ROOM_STATUS_MANAGER_SKILL = createDeclarativeCodeSkill({
   async handler(input, ctx) {
     const roomStatuses = ctx.store.load('room_statuses');
     if (input.roomId && input.status) {
-      const idx = roomStatuses.findIndex((r) => r.roomId === input.roomId);
+      const idx = roomStatuses.findIndex((r: any) => r.roomId === input.roomId);
       const updatedRecord = {
         roomId: input.roomId,
         status: input.status,
