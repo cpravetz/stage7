@@ -1,43 +1,10 @@
-import { createCodeSkill, SchemaProps } from '../code-skill-factory';
+import { createDeclarativeCodeSkill, SchemaProps } from '../code-skill-factory';
 
-const CONTRACT_DOCUMENT_ADVISORY_SOURCE = `const input = __tool_input || {};
-const fs = require('fs');
-const path = require('path');
-const contractText = input.contractText || '';
-const contractType = input.contractType || 'general';
-const jurisdiction = input.jurisdiction || 'US';
-const baseDir = process.env.LEGAL_HOME || path.join('/tmp/legal');
-const storePath = path.join(baseDir, 'advisory.json');
-fs.mkdirSync(baseDir, { recursive: true });
-const store = fs.existsSync(storePath) ? JSON.parse(fs.readFileSync(storePath, 'utf8')) : [];
-const riskRules = [
-  { type: 'liability', severity: 'high', clause: 'Indemnification', terms: ['indemnif', 'consequential damages', 'unlimited liability'], description: 'Review liability and indemnification language' },
-  { type: 'termination', severity: 'medium', clause: 'Termination', terms: ['termination', 'terminate', 'notice period'], description: 'Review termination rights and notice requirements' },
-  { type: 'ip', severity: 'medium', clause: 'Intellectual Property', terms: ['intellectual property', 'work product', 'ownership'], description: 'Review intellectual property ownership language' },
-  { type: 'confidentiality', severity: 'low', clause: 'Confidentiality', terms: ['confidential', 'non-disclosure', 'nda'], description: 'Review confidentiality obligations' },
-  { type: 'payment', severity: 'high', clause: 'Payment Terms', terms: ['payment', 'invoice', 'net-'], description: 'Review payment timing and remedies' },
-  { type: 'dispute', severity: 'medium', clause: 'Dispute Resolution', terms: ['arbitration', 'dispute', 'governing law'], description: 'Review dispute resolution and governing law' },
-  { type: 'force-majeure', severity: 'low', clause: 'Force Majeure', terms: ['force majeure', 'act of god'], description: 'Review force majeure coverage' },
-  { type: 'limitation', severity: 'medium', clause: 'Limitation of Liability', terms: ['limitation of liability', 'liability cap', 'damages cap'], description: 'Review liability limits' }
-];
-const normalizedText = contractText.toLowerCase();
-const risks = riskRules.filter(r => r.terms.some(term => normalizedText.includes(term)));
-const issues = risks.map(r => ({ issue: r.description, severity: r.severity, type: r.type, clause: r.clause }));
-const clauses = risks.map(r => ({ clause: r.clause, status: 'review', note: r.description + '; manual legal review required' }));
-const review = { id: 'review_' + Date.now(), contractType: input.contractType || 'general', textLength: contractText.length, risks, issues, clauses, jurisdiction, createdAt: new Date().toISOString(), source: 'local', method: 'keyword-heuristic', disclaimer: 'Heuristic review only; not legal advice and not a substitute for counsel.' };
-store.push(review);
-fs.writeFileSync(storePath, JSON.stringify(store, null, 2));
-console.log(JSON.stringify({ success: true, data: { review, storePath, issueCount: issues.length } }));`;
-
-const CONTRACT_DOCUMENT_ADVISORY = createCodeSkill({
+const CONTRACT_DOCUMENT_ADVISORY = createDeclarativeCodeSkill({
   id: 'contract-document-advisory',
   name: 'Contract & Document Advisory',
   description: 'Advisory tool for contract review, clause drafting, and risk assessment with local document storage.',
-  manifest: {
-    language: 'javascript',
-    entrypoint: 'index.js',
-    sourceCode: CONTRACT_DOCUMENT_ADVISORY_SOURCE,
-  },
+  persistenceEnvVar: 'LEGAL_HOME',
   inputSchema: {
     type: 'object',
     properties: {
@@ -69,6 +36,53 @@ const CONTRACT_DOCUMENT_ADVISORY = createCodeSkill({
   triggers: [
     { kind: 'event', on: 'Document or redline received' },
   ],
+  async handler(input, ctx) {
+    const contractText = input.contractText || '';
+    const contractType = input.contractType || 'general';
+    const jurisdiction = input.jurisdiction || 'US';
+
+    const riskRules = [
+      { type: 'liability', severity: 'high', clause: 'Indemnification', terms: ['indemnif', 'consequential damages', 'unlimited liability'], description: 'Review liability and indemnification language' },
+      { type: 'termination', severity: 'medium', clause: 'Termination', terms: ['termination', 'terminate', 'notice period'], description: 'Review termination rights and notice requirements' },
+      { type: 'ip', severity: 'medium', clause: 'Intellectual Property', terms: ['intellectual property', 'work product', 'ownership'], description: 'Review intellectual property ownership language' },
+      { type: 'confidentiality', severity: 'low', clause: 'Confidentiality', terms: ['confidential', 'non-disclosure', 'nda'], description: 'Review confidentiality obligations' },
+      { type: 'payment', severity: 'high', clause: 'Payment Terms', terms: ['payment', 'invoice', 'net-'], description: 'Review payment timing and remedies' },
+      { type: 'dispute', severity: 'medium', clause: 'Dispute Resolution', terms: ['arbitration', 'dispute', 'governing law'], description: 'Review dispute resolution and governing law' },
+      { type: 'force-majeure', severity: 'low', clause: 'Force Majeure', terms: ['force majeure', 'act of god'], description: 'Review force majeure coverage' },
+      { type: 'limitation', severity: 'medium', clause: 'Limitation of Liability', terms: ['limitation of liability', 'liability cap', 'damages cap'], description: 'Review liability limits' },
+    ];
+
+    const normalizedText = contractText.toLowerCase();
+    const risks = riskRules.filter((r) => r.terms.some((term) => normalizedText.includes(term)));
+    const issues = risks.map((r) => ({ issue: r.description, severity: r.severity, type: r.type, clause: r.clause }));
+    const clauses = risks.map((r) => ({ clause: r.clause, status: 'review', note: r.description + '; manual legal review required' }));
+
+    const store = ctx.store.load('advisory');
+    const review = {
+      id: `review_${Date.now()}`,
+      contractType,
+      textLength: contractText.length,
+      risks,
+      issues,
+      clauses,
+      jurisdiction,
+      createdAt: new Date().toISOString(),
+      source: 'local',
+      method: 'keyword-heuristic',
+      disclaimer: 'Heuristic review only; not legal advice and not a substitute for counsel.',
+    };
+
+    store.push(review);
+    ctx.store.save('advisory', store);
+
+    return {
+      success: true,
+      data: { review, issueCount: issues.length },
+      present: [
+        ctx.render.text('report', 'Contract Risk Assessment', `Identified ${issues.length} potential risk clauses in ${contractType} contract (${jurisdiction}).`),
+      ],
+    };
+  },
 });
 
 export { CONTRACT_DOCUMENT_ADVISORY };

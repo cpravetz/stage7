@@ -1,4 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express'
+import rateLimit from 'express-rate-limit'
 import { z } from 'zod'
 import { Tool, PluginGenerationRequest, PluginGenerationResult, CredentialRequiredError, ConfirmationRequiredError, ApprovalSummary } from '../types'
 import { createToolSchema } from '../types/manifest'
@@ -7,7 +8,7 @@ import asyncHandler from '../utils/asyncHandler'
 import logger from '../utils/logger'
 import { toolRegistry as registry, executor, pluginGenerator as generator } from '../utils/sharedInstance'
 import { readFile } from 'fs/promises'
-import { join } from 'path'
+import { join, basename } from 'path'
 
 const router: Router = Router()
 
@@ -264,32 +265,66 @@ router.post(
   })
 )
 
+const referenceDataLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+})
+
 router.get(
   '/tools/reference-data/:sourceId',
+  referenceDataLimiter,
   asyncHandler(async (req: Request, res: Response) => {
     const { sourceId } = req.params
+    const safeSourceId = basename(sourceId).replace(/[^a-zA-Z0-9_-]/g, '')
     const workspaceId = req.query.workspaceId as string | undefined
     const careerHome = process.env.CAREER_HOME || '/tmp/career'
-    // Job discovery writes to listings/default.json. The previous path
-    // (applications/listings.json) never existed, so this endpoint always returned empty.
-    const listingsPath = join(careerHome, 'listings', 'default.json')
 
-    let listings: unknown[]
-    try {
-      const fileContent = await readFile(listingsPath, 'utf-8')
-      const data = JSON.parse(fileContent)
-      listings = Array.isArray(data) ? data : (data.listings || [])
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-        logger.warn({ err, sourceId, listingsPath }, 'Failed to read reference data file')
+    if (!safeSourceId) {
+      res.json({
+        success: true,
+        data: {
+          listings: [],
+          source: sourceId,
+          workspaceId,
+        },
+      })
+      return
+    }
+
+    const candidatePaths = [
+      join(careerHome, 'listings', 'default.json'),
+      join('/tmp', safeSourceId, 'data.json'),
+      join('/tmp', 'stage7-store', `${safeSourceId}.json`),
+      join('/tmp', `${safeSourceId}.json`),
+      join(process.cwd(), 'store', `${safeSourceId}.json`),
+    ]
+
+    let listings: unknown[] = []
+    for (const path of candidatePaths) {
+      try {
+        const fileContent = await readFile(path, 'utf-8')
+        const data = JSON.parse(fileContent)
+        if (Array.isArray(data)) {
+          listings = data
+        } else if (data && typeof data === 'object') {
+          listings = data.listings || data.items || data.ranked || data.results || data.data || []
+        }
+        if (Array.isArray(listings) && listings.length > 0) {
+          break
+        }
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+          logger.warn({ err, sourceId, path }, 'Failed to read reference data file candidate')
+        }
       }
-      listings = []
     }
 
     res.json({
       success: true,
       data: {
-        listings,
+        listings: Array.isArray(listings) ? listings : [],
         source: sourceId,
         workspaceId,
       },

@@ -42,6 +42,14 @@ export function createRuntimeContext(opts: RuntimeOptions = {}) {
       } catch (e) {
         // Best effort save
       }
+      // Also sync to global persistent collection store under /tmp/stage7-store/ for inter-skill access
+      try {
+        const globalStoreDir = '/tmp/stage7-store';
+        fs.mkdirSync(globalStoreDir, { recursive: true });
+        fs.writeFileSync(path.join(globalStoreDir, `${key}.json`), JSON.stringify(data, null, 2), 'utf8');
+      } catch (e) {
+        // Best effort sync
+      }
     },
   };
 
