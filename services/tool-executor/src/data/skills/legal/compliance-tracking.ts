@@ -1,30 +1,10 @@
-import { createCodeSkill, SchemaProps } from '../code-skill-factory';
+import { createDeclarativeCodeSkill, SchemaProps } from '../code-skill-factory';
 
-const COMPLIANCE_TRACKING_SOURCE = `const input = __tool_input || {};
-const fs = require('fs');
-const path = require('path');
-const documentText = input.documentText || '';
-const regulation = input.regulation || 'GDPR';
-const jurisdiction = input.jurisdiction || 'US';
-const effectiveDate = input.effectiveDate || new Date().toISOString();
-const baseDir = process.env.LEGAL_HOME || path.join('/tmp/legal');
-const compliancePath = path.join(baseDir, 'compliance.json');
-fs.mkdirSync(baseDir, { recursive: true });
-const store = fs.existsSync(compliancePath) ? JSON.parse(fs.readFileSync(compliancePath, 'utf8')) : [];
-const report = { id: 'comp_' + Date.now(), regulation, jurisdiction, effectiveDate, totalRules: 0, violations: null, compliant: null, checks: [], status: 'manual-review-required', createdAt: new Date().toISOString(), source: 'local', notice: 'No regulatory rule set or connected compliance provider is configured; no compliance conclusion was produced.' };
-store.push(report);
-fs.writeFileSync(compliancePath, JSON.stringify(store, null, 2));
-console.log(JSON.stringify({ success: true, data: { report, storePath: compliancePath, violationCount: null } }));`;
-
-const COMPLIANCE_TRACKING = createCodeSkill({
+const COMPLIANCE_TRACKING = createDeclarativeCodeSkill({
   id: 'compliance-tracking',
   name: 'Compliance Tracking',
   description: 'Track and verify compliance against regulatory requirements with local analysis.',
-  manifest: {
-    language: 'javascript',
-    entrypoint: 'index.js',
-    sourceCode: COMPLIANCE_TRACKING_SOURCE,
-  },
+  persistenceEnvVar: 'LEGAL_HOME',
   inputSchema: {
     type: 'object',
     properties: {
@@ -57,6 +37,38 @@ const COMPLIANCE_TRACKING = createCodeSkill({
   triggers: [
     { kind: 'schedule', cadence: 'Monthly compliance audit' },
   ],
+  async handler(input, ctx) {
+    const regulation = input.regulation || 'GDPR';
+    const jurisdiction = input.jurisdiction || 'US';
+    const effectiveDate = input.effectiveDate || new Date().toISOString();
+
+    const store = ctx.store.load('compliance');
+    const report = {
+      id: `comp_${Date.now()}`,
+      regulation,
+      jurisdiction,
+      effectiveDate,
+      totalRules: 0,
+      violations: null,
+      compliant: null,
+      checks: [],
+      status: 'manual-review-required',
+      createdAt: new Date().toISOString(),
+      source: 'local',
+      notice: 'No regulatory rule set or connected compliance provider is configured; no compliance conclusion was produced.',
+    };
+
+    store.push(report);
+    ctx.store.save('compliance', store);
+
+    return {
+      success: true,
+      data: { report, violationCount: null },
+      present: [
+        ctx.render.text('report', 'Compliance Check Report', `Regulation: ${regulation}, Jurisdiction: ${jurisdiction}. Status: manual-review-required.`),
+      ],
+    };
+  },
 });
 
 export { COMPLIANCE_TRACKING };
