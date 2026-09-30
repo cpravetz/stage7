@@ -198,7 +198,7 @@ emit(true, 'ok', { pipeline: pipelineData, outcomes: outcomeData, role: roleInfo
 const PIPELINE_OUTCOME_TRACKER_INPUT = {
 type: 'object',
 properties: {
-targetRole: { type: 'string', description: 'Job title or role identifier to track or record an outcome for' },
+targetRole: { type: 'string', description: 'Job title or role identifier to track or record an outcome for', 'x-referenceSource': 'career-job-discovery-fit-ranking', 'x-referenceValueField': 'title', 'x-referenceLabel': 'your job search results' },
 company: { type: 'string', description: 'Company name for the application' },
 status: { type: 'string', enum: ['applied', 'interviewing', 'offer', 'rejected', 'withdrawn', 'accepted', 'no-response'], description: 'Application outcome status', default: 'applied' },
 feedback: { type: 'string', description: 'Interview or application feedback', multiline: true },

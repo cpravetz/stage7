@@ -1,5 +1,5 @@
 import { AssistantDefinition } from '@stage7-nextgen/shared';
-import { canonicalAssistantCatalog } from './canonicalAssistantCatalog';
+import { loadAssistantCatalog } from './assistantCatalog';
 
 export interface AssistantManifest {
   selectedIds: string[];
@@ -22,7 +22,7 @@ export function parseSTAGE7_ASSISTANTS(envValue?: string): string[] {
 
 export function validateManifest(
   assistantIds: string[],
-  catalog: AssistantDefinition[] = canonicalAssistantCatalog,
+  catalog: AssistantDefinition[] = loadAssistantCatalog(),
 ): { valid: boolean; missing: string[]; validIds: string[] } {
   const catalogIds = new Set(catalog.map((a) => normalizeAssistantId(a.id)));
   const normalizedIds = assistantIds.map(normalizeAssistantId);
@@ -37,7 +37,7 @@ export function validateManifest(
 
 export function filterCatalogByManifest(
   assistantIds: string[],
-  catalog: AssistantDefinition[] = canonicalAssistantCatalog,
+  catalog: AssistantDefinition[] = loadAssistantCatalog(),
 ): AssistantDefinition[] {
   if (assistantIds.length === 0) return catalog;
   const idSet = new Set(assistantIds.map(normalizeAssistantId));
@@ -46,7 +46,7 @@ export function filterCatalogByManifest(
 
 export function buildAssistantManifest(
   envValue?: string,
-  catalog: AssistantDefinition[] = canonicalAssistantCatalog,
+  catalog: AssistantDefinition[] = loadAssistantCatalog(),
 ): AssistantManifest {
   const selectedIds = parseSTAGE7_ASSISTANTS(envValue);
   const { valid, missing, validIds } = validateManifest(selectedIds, catalog);

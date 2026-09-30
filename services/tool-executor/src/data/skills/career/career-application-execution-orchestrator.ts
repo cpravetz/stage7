@@ -38,7 +38,7 @@ console.log(JSON.stringify({ success: true, data: { applications, errors: data.e
 const APPLICATION_EXECUTION_ORCHESTRATOR_INPUT = {
 type: 'object',
 properties: {
-targetRoles: { type: 'array', items: { type: 'string' }, description: 'Specific roles to apply to; if left blank, the pipeline will be used', 'x-referenceSource': 'career-job-discovery-fit-ranking' },
+targetRoles: { type: 'array', items: { type: 'string' }, description: 'Specific roles to apply to; if left blank, the pipeline will be used', 'x-referenceSource': 'career-job-discovery-fit-ranking', 'x-referenceLabel': 'your job search results' },
   dryRun: { type: 'boolean', description: 'Preview without submitting; defaults to true', default: true },
   customResume: { type: 'string', description: 'Custom resume text to use for this application when overriding your default resume', multiline: true },
   customCoverLetter: { type: 'string', description: 'Custom cover letter text to use for this application', multiline: true },

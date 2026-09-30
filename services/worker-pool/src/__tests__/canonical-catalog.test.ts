@@ -1,32 +1,55 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import path from 'node:path';
-import { canonicalAssistantCatalog } from '../data/canonicalAssistantCatalog';
+import { loadAssistantCatalog, listAssistantIds, ASSISTANTS_DIR } from '../data/assistantCatalog';
 import { KNOWLEDGE_DIR } from '../data/assistantKnowledge';
 
-describe('canonicalAssistantCatalog', () => {
-  it('should contain exactly the 21 canonical assistants', () => {
-    const ids = canonicalAssistantCatalog.map((a) => a.id);
-    expect(ids.sort()).toEqual([
-      'analytics', 'career', 'content', 'cto', 'education', 'event', 'executive',
-      'finance', 'healthcare', 'hotel', 'hr', 'investment', 'legal', 'marketing',
-      'product', 'restaurant', 'sales', 'scriptwriter', 'songwriter', 'sports', 'support',
-    ]);
+const catalog = loadAssistantCatalog();
+
+describe('assistant catalog discovery', () => {
+  it('should discover every assistant folder', () => {
+    // Deliberately not a hardcoded list of 21. That assertion is what would
+    // force a common-file edit to add an assistant, which is exactly what the
+    // folder layout exists to remove. The filesystem IS the expected set; see
+    // the next test for that comparison.
+    const ids = catalog.map((a) => a.id);
+    expect(ids.length).toBe(listAssistantIds().length);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it('should bind only canonical tool-executor skill IDs and no legacy lower-order tools', () => {
-    const expectedToolCounts: Record<string, number> = {
-      cto: 4, career: 10, content: 3, healthcare: 5, restaurant: 4, hr: 3,
-      executive: 4, legal: 4, sales: 3, event: 3,       songwriter: 4, scriptwriter: 4,
-      sports: 7, finance: 4, investment: 4, hotel: 4, education: 4, support: 7,
-      product: 4, marketing: 5, analytics: 2,
-    };
+  it('should discover assistants from folders alone, with no shared registry to edit', () => {
+    // The point of the folder layout: the set of assistants is whatever is on
+    // disk. This is asserted against the filesystem rather than a hardcoded list
+    // so that adding an assistant genuinely requires no common-file edit.
+    const onDisk = readdirSync(ASSISTANTS_DIR, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name)
+      .sort();
 
-    expect(Object.keys(expectedToolCounts).length).toEqual(canonicalAssistantCatalog.length);
+    expect(listAssistantIds()).toEqual(onDisk);
+    expect(catalog.map((a) => a.id).sort()).toEqual(onDisk);
+  });
 
-    for (const assistant of canonicalAssistantCatalog) {
-      const toolNames = assistant.tools.map((t) => t.name);
-      expect(toolNames).toHaveLength(expectedToolCounts[assistant.id]);
-      // Every binding must be a string skill ID (no orphaned stub objects).
+  it('should give every assistant folder a knowledge file', () => {
+    // The knowledge file is the second half of an assistant's folder. A folder
+    // with a manifest but no knowledge fails at load time, so assert the pairing
+    // explicitly rather than only through the loader's own throw.
+    for (const id of listAssistantIds()) {
+      expect(existsSync(path.join(ASSISTANTS_DIR, id, 'assistant.json'))).toBe(true);
+      expect(existsSync(path.join(KNOWLEDGE_DIR, `${id}.txt`))).toBe(true);
+    }
+  });
+
+  it('should bind only canonical skill IDs and no legacy lower-order tools', () => {
+    // Derived from the manifests on disk rather than a table in this file: the
+    // old copy of this expectation was hardcoded counts, which cannot detect a
+    // skill being renamed or dropped and still passing.
+    for (const assistant of catalog) {
+      const manifest = JSON.parse(
+        readFileSync(path.join(ASSISTANTS_DIR, assistant.id, 'assistant.json'), 'utf8'),
+      );
+      expect(assistant.tools.map((t) => t.name)).toEqual(manifest.tools);
+
+      expect(assistant.tools.length).toBeGreaterThan(0);
       for (const tool of assistant.tools) {
         expect(typeof tool).toBe('object');
         expect(typeof tool.name).toBe('string');
@@ -36,7 +59,7 @@ describe('canonicalAssistantCatalog', () => {
   });
 
   it('should load real knowledge from disk for every assistant', () => {
-    for (const assistant of canonicalAssistantCatalog) {
+    for (const assistant of catalog) {
       const knowledge = assistant.knowledge ?? [];
       expect(knowledge.length).toBeGreaterThan(0);
 
@@ -61,8 +84,10 @@ describe('canonicalAssistantCatalog', () => {
   });
 
   it('should have meaningful system prompts', () => {
-    for (const assistant of canonicalAssistantCatalog) {
+    for (const assistant of catalog) {
       expect(assistant.systemPrompt.length).toBeGreaterThan(40);
+      expect(assistant.description.length).toBeGreaterThan(0);
+      expect(assistant.name.length).toBeGreaterThan(0);
     }
   });
 });

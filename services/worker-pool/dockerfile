@@ -15,6 +15,40 @@ COPY shared-nextgen ./shared-nextgen
 # startup. Without these files the service fails fast on boot.
 COPY services/worker-pool ./services/worker-pool
 
+# Assistants are discovered from folders. When a selection is requested, drop
+# every other assistant folder from the image so the container carries only the
+# assistants it will actually seed, and their knowledge files stay in step.
+#
+# Both trees are pruned together on purpose: a knowledge file without its
+# assistant folder is dead weight, and an assistant folder without its
+# knowledge file is a hard startup failure. Pruning one but not the other
+# would produce either of those states.
+ARG STAGE7_ASSISTANTS=""
+RUN set -eu; \
+    if [ -n "$STAGE7_ASSISTANTS" ]; then \
+      echo "Restricting assistants to: $STAGE7_ASSISTANTS"; \
+      mkdir -p /tmp/keep; \
+      for a in $(echo "$STAGE7_ASSISTANTS" | tr ',' ' '); do \
+        case "$a" in \
+          *-canonical-assistant) a="${a%-canonical-assistant}" ;; \
+        esac; \
+        if [ -d "services/worker-pool/assistants/$a" ]; then \
+          cp -r "services/worker-pool/assistants/$a" /tmp/keep/; \
+        else \
+          echo "ERROR: requested assistant '$a' has no folder at services/worker-pool/assistants/$a" >&2; \
+          exit 1; \
+        fi; \
+      done; \
+      rm -rf services/worker-pool/assistants; \
+      mkdir -p services/worker-pool/assistants; \
+      cp -r /tmp/keep/. services/worker-pool/assistants/; \
+      for f in services/worker-pool/knowledge/assistants/*.txt; do \
+        b=$(basename "$f" .txt); \
+        [ -d "services/worker-pool/assistants/$b" ] || rm -f "$f"; \
+      done; \
+      rm -rf /tmp/keep; \
+    fi
+
 RUN cd shared-nextgen && npm run build
 RUN cd services/worker-pool && rm -rf dist && npm run build
 

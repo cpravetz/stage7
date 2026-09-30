@@ -17,8 +17,19 @@ const profile = profileRes.data && profileRes.data.profile ? profileRes.data.pro
 const fs = require('fs');
 const baseDir = process.env.CAREER_HOME || '/tmp/career';
 const listPath = baseDir + '/listings/default.json';
+// Read the listings array out of the stored file. Job discovery writes an OBJECT envelope
+// carrying { listings, byBoard, failures, ... }, not a bare array. Assigning the parsed
+// envelope straight to the listings variable made its .length undefined, so the
+// "reuse the stored search" branch below never fired and this skill re-ran a full
+// discovery on every call.
 let listings = [];
-try { listings = fs.existsSync(listPath) ? JSON.parse(fs.readFileSync(listPath, 'utf8')) : []; } catch { listings = []; }
+try {
+  if (fs.existsSync(listPath)) {
+    const parsed = JSON.parse(fs.readFileSync(listPath, 'utf8'));
+    if (Array.isArray(parsed)) listings = parsed;
+    else if (parsed && Array.isArray(parsed.listings)) listings = parsed.listings;
+  }
+} catch { listings = []; }
 
 let discovery = null;
 let rank = null;
@@ -179,6 +190,13 @@ const JOB_MARKET_POSITIONING_EVALUATOR = createCodeSkill({
   inputSchema: JOB_MARKET_POSITIONING_EVALUATOR_INPUT,
   outputSchema: JOB_MARKET_POSITIONING_EVALUATOR_OUTPUT,
   triggers: [
+    // user: this is a panel the user opens deliberately, and the "user" trigger
+    // is what marks a tool as user-invocable. Without it the tool was visible
+    // only because of its explicit isSkill:true, which contradicted its own
+    // trigger data and would have broken silently the moment that flag was
+    // reconciled with the trigger-derived value in index.ts.
+    { kind: 'user', phrase_examples: ['How does my resume compare to these roles', 'What salary should I target', 'Review my positioning'] },
+    // schedule: retained so the automatic post-discovery read still happens.
     { kind: 'schedule', cadence: 'After job discovery completes' },
   ],
 tier: 'advise',

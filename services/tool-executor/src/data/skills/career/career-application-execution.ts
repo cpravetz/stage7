@@ -18,7 +18,18 @@ const customResume = input.customResume || '';
 const customCoverLetter = input.customCoverLetter || '';
 
 const listingsPath = baseDir + '/listings/default.json';
-const storedListings = fs.existsSync(listingsPath) ? JSON.parse(fs.readFileSync(listingsPath, 'utf8')) : [];
+// The stored file is an OBJECT envelope carrying { listings, byBoard, failures, ... },
+// written by career-job-discovery. Reading it as a bare array left storedListings as that
+// envelope, so the .find below threw a TypeError on every run that reached it. Accept
+// either shape so an older bare-array file still works.
+const storedListings = (function () {
+  if (!fs.existsSync(listingsPath)) return [];
+  let parsed;
+  try { parsed = JSON.parse(fs.readFileSync(listingsPath, 'utf8')); } catch (e) { return []; }
+  if (Array.isArray(parsed)) return parsed;
+  if (parsed && Array.isArray(parsed.listings)) return parsed.listings;
+  return [];
+})();
 const trackingPath = path.join(baseDir, 'applications', 'tracking.json');
 const tracking = fs.existsSync(trackingPath) ? JSON.parse(fs.readFileSync(trackingPath, 'utf8')) : [];
 
@@ -65,8 +76,8 @@ console.log(JSON.stringify({
 const CAREER_APPLY_EXECUTE_INPUT = {
   type: 'object',
   properties: {
-    targetRoles: { type: 'array', items: { type: 'string' } },
-    listings: { type: 'array', items: { type: 'string' }, description: 'Job listing identifiers to apply to' },
+    targetRoles: { type: 'array', items: { type: 'string' }, description: 'Job listing identifiers to apply to', 'x-referenceSource': 'career-job-discovery-fit-ranking', 'x-referenceLabel': 'your job search results' },
+    listings: { type: 'array', items: { type: 'string' }, description: 'Job listing identifiers to apply to', 'x-referenceSource': 'career-job-discovery-fit-ranking', 'x-referenceLabel': 'your job search results' },
     dryRun: { type: 'boolean', default: true },
     coverLetters: { type: 'array', items: { type: 'string' } },
     customResume: { type: 'string', multiline: true },

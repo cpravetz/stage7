@@ -300,7 +300,7 @@ const INTERVIEW_COMPENSATION_BATTLECARD_INPUT = {
   type: 'object',
   properties: {
     company: { type: 'string', description: 'Company you are interviewing with', title: 'Company', order: 1, hint: 'The company you are interviewing with' },
-    targetRole: { type: 'string', description: 'Target role title', title: 'Target Role', order: 2, hint: 'The role you are interviewing for' },
+    targetRole: { type: 'string', description: 'Target role title', title: 'Target Role', order: 2, hint: 'The role you are interviewing for', 'x-referenceSource': 'career-job-discovery-fit-ranking', 'x-referenceValueField': 'title', 'x-referenceLabel': 'your job search results' },
   },
   required: [],
 };

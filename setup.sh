@@ -124,8 +124,21 @@ if [ -z "$SELECTED_ASSISTANTS" ]; then
   echo "  2) Specific assistants by ID (comma-separated)"
   echo "     Example: cto,hr"
   echo ""
-  echo "Available assistant IDs from canonical catalog:"
-  awk '/definition\(/{gsub(/.*'\''/,""); gsub(/'\''.*/,""); id=$0; getline; name=$0; gsub(/.*'\''/,""); gsub(/'\''.*/,""); print "    - " id " (" name ")"}' "$ENV_EXAMPLE_FILE" 2>/dev/null || true
+  echo "Available assistant IDs (from services/worker-pool/assistants/):"
+  ASSISTANT_DIR="services/worker-pool/assistants"
+  if [ -d "$ASSISTANT_DIR" ]; then
+    for d in "$ASSISTANT_DIR"/*/; do
+      id=$(basename "$d")
+      # Prefer the name in assistant.json; fall back to the folder name.
+      if [ -f "$d/assistant.json" ]; then
+        nm=$(sed -n 's/^[[:space:]]*"name":[[:space:]]*"\(.*\)",\{0,1\}$/\1/p' "$d/assistant.json" | head -1)
+        [ -n "$nm" ] && echo "    - $id ($nm)" && continue
+      fi
+      echo "    - $id"
+    done
+  else
+    echo "    (assistant folder not found at $ASSISTANT_DIR)"
+  fi
   echo "    (Run with --assistants=<id1,id2,...> or edit STAGE7_ASSISTANTS in .env)"
   echo "============================================================================"
   read -p "Enter STAGE7_ASSISTANTS value (or press Enter for all): " SELECTED_ASSISTANTS

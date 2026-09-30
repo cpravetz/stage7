@@ -1,5 +1,5 @@
 import React, { type ReactNode } from 'react';
-import type { PresentationBlock } from '@stage7-nextgen/shared';
+import type { PresentationBlock, PresentationLink } from '@stage7-nextgen/shared';
 
 const ACRONYMS = new Set([
   'API', 'URL', 'ID', 'JSON', 'HTML', 'SEO', 'CRM', 'HTTP', 'UUID', 'CSV', 'PDF', 'XML', 'RSS', 'SSL', 'TLS',
@@ -228,10 +228,36 @@ const outputRenderPresentationBlocks = (blocks: PresentationBlock[]): ReactNode 
       <div key={block.id || i} className="result-field" style={{ marginBottom: i < blocks.length - 1 ? 16 : 0 }}>
         {block.title ? <strong style={{ display: 'block' }}>{block.title}</strong> : null}
         <div style={{ whiteSpace: 'pre-wrap' }}>{block.body.trim()}</div>
+        {outputRenderPresentationLinks(block.links)}
       </div>
     ))}
   </>
 );
+
+// A skill that found a set of real things — postings, documents, articles — attaches them to its
+// block as links. Rendering them here is what makes a result actionable: a report that says it
+// found 81 postings and shows none of them leaves the user with a number and no way to act on it.
+// Each opens in a new tab, since the target is an external posting page.
+const outputRenderPresentationLinks = (links?: PresentationLink[]): ReactNode => {
+  if (!Array.isArray(links) || links.length === 0) return null;
+  const usable = links.filter(
+    (link): link is PresentationLink =>
+      Boolean(link) && typeof link.url === 'string' && /^https?:\/\//i.test(link.url.trim()) && typeof link.label === 'string' && link.label.trim() !== '',
+  );
+  if (usable.length === 0) return null;
+  return (
+    <ul className="result-links">
+      {usable.map((link, i) => (
+        <li key={`${link.url}-${i}`}>
+          <a href={link.url} target="_blank" rel="noopener noreferrer">
+            {link.label}
+          </a>
+          {link.detail ? <span className="muted"> — {link.detail}</span> : null}
+        </li>
+      ))}
+    </ul>
+  );
+};
 
 // Generic heuristic: when an object looks like a mapping of uniform items (e.g. numeric
 // keys or multiple properties whose values are objects with the same shape), render

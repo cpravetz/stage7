@@ -45,16 +45,22 @@ export {
 };
 
 export const careerCanonicalSkills: Tool[] = [
+  // Panel order for the Career Assistant, in the sequence a candidate actually
+  // works in: shape the profile, then manage resume and templates, then search,
+  // apply, follow up, track, prepare, and upskill. This array is the order the
+  // Career panel renders, and assistants/career/assistant.json mirrors it. The
+  // mirror is checked by worker-pool's assistant-manifest-skills test, so the
+  // two cannot drift apart silently.
   JOB_MARKET_POSITIONING_EVALUATOR,
-  INTERVIEW_COMPENSATION_BATTLECARD,
-  GOVERNED_APPLICATION_OUTREACH_MANAGER,
+  RESUME_TEMPLATE_MANAGER,
   JOB_DISCOVERY_FIT_RANKING,
   APPLICATION_EXECUTION_ORCHESTRATOR,
-  UPSKILL_ROLE_TARGETED_LEARNING_PLANNER,
-  INTERVIEW_PRACTICE_MOCK_INTERVIEWER,
-  PIPELINE_OUTCOME_TRACKER,
-  RESUME_TEMPLATE_MANAGER,
+  GOVERNED_APPLICATION_OUTREACH_MANAGER,
   PORTAL_RECRUITER_WORKFLOW,
+  PIPELINE_OUTCOME_TRACKER,
+  INTERVIEW_PRACTICE_MOCK_INTERVIEWER,
+  INTERVIEW_COMPENSATION_BATTLECARD,
+  UPSKILL_ROLE_TARGETED_LEARNING_PLANNER,
 ];
 
 export const careerLowerOrderTools: Tool[] = [

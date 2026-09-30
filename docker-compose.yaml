@@ -58,6 +58,11 @@ services:
     build:
       context: .
       dockerfile: services/worker-pool/dockerfile
+      args:
+        # Prunes the image down to the selected assistant folders. Must match the
+        # runtime env below, otherwise the container would find fewer folders
+        # than STAGE7_ASSISTANTS names and fail validation on boot.
+        STAGE7_ASSISTANTS: ${STAGE7_ASSISTANTS}
     ports:
       - "3200:3200"
     env_file:

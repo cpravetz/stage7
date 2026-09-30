@@ -36,6 +36,21 @@ export interface ServiceResponse<T> {
 
 export type PresentationBlockKind = 'text' | 'markdown' | string;
 
+/**
+ * A single outbound link belonging to a presentation block. `body` is plain text and
+ * cannot carry a clickable link, so a block that reports a set of real artifacts (job
+ * postings, documents, articles) attaches them here instead of pasting raw URLs into
+ * prose. The renderer shows each one as an anchor that opens in a new tab.
+ */
+export interface PresentationLink {
+  /** Text of the link, e.g. "Senior Engineer — Acme". */
+  label: string;
+  /** Absolute http(s) URL. Entries without one are ignored by the renderer. */
+  url: string;
+  /** Optional secondary line, e.g. location, salary or source board. */
+  detail?: string;
+}
+
 export interface PresentationBlock {
   /** Stable identifier for the block, e.g. 'report', 'artifact'. Used for keys and tests. */
   id: string;
@@ -48,6 +63,12 @@ export interface PresentationBlock {
   body: string;
   /** How to interpret `body`. Defaults to 'text' (verbatim, whitespace preserved). */
   kind?: PresentationBlockKind;
+  /**
+   * Optional outbound links rendered under `body`, each opening in a new tab. A block
+   * whose whole point is a set of items (rather than a count of them) lists them here
+   * so none of them is left for the user to go and find.
+   */
+  links?: PresentationLink[];
 }
 
 /** The generic envelope a skill or tool result is expected to conform to. */

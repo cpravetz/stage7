@@ -179,16 +179,7 @@ const INDEED_MANAGER_CARDS = `
   </article>
 </div>`;
 
-const GLASSDOOR_MANAGER_CARDS = `
-<article data-job-id="GD700" data-employer-name="Zeta Foods" data-location="Denver, CO">
-  <a class="jobTitle" href="https://www.glassdoor.com/job-listing/GD700">Design Manager</a>
-</article>
-<article data-job-id="GD701" data-employer-name="Eta Bank" data-location="New York, NY">
-  <a class="jobTitle" href="https://www.glassdoor.com/job-listing/GD701">Platform Engineering Manager</a>
-</article>`;
 
-const MONSTER_MANAGER_CARDS =
-  '<ul class="job-listing"><li data-job-id="MN77" data-company-name="Theta Insurance" data-location="Boston, MA"><h2><a href="/job/MN77">Data Manager</a></h2></li></ul>';
 
 const LINKEDIN_MANAGER_CARDS = `
 <ul class="jobs-search__results-list">
@@ -200,23 +191,8 @@ const LINKEDIN_MANAGER_CARDS = `
 const WELLFOUND_MANAGER_CARDS =
   '<div class="styles__results"><a href="/jobs/88001" class="styles__card">Growth Manager at Kappa AI</a></div>';
 
-const INDEED_ENGINEER_CARDS = `
-<div id="searchResultsPages">
-  <article data-jk="AAA111" data-company-name="Alpha Analytics" data-location="Austin, TX">
-    <h2><a href="/viewjob?jk=AAA111">Senior Platform Engineer</a></h2>
-  </article>
-  <article data-jk="AAA222" data-company-name="Beta Robotics" data-location="Remote">
-    <h2><a href="/viewjob?jk=AAA222">Staff Site Reliability Engineer</a></h2>
-  </article>
-</div>`;
 
-const GLASSDOOR_ENGINEER_CARDS = `
-<article data-job-id="GD900" data-employer-name="Delta Logistics" data-location="Chicago, IL">
-  <a class="jobTitle" href="https://www.glassdoor.com/job-listing/GD900">Backend Engineer II</a>
-</article>`;
 
-const MONSTER_ENGINEER_CARDS =
-  '<ul class="job-listing"><li data-job-id="MN42" data-company-name="Zeta Foods" data-location="Denver, CO"><h2><a href="/job/MN42">Cloud Engineer</a></h2></li></ul>';
 
 const LINKEDIN_ENGINEER_CARDS = `
 <ul class="jobs-search__results-list">
@@ -232,12 +208,6 @@ const WELLFOUND_ENGINEER_CARDS =
 // extractor needs: the board answered and the layout looks normal, so this is a
 // real, complete "no match" rather than a retrieval failure. That distinction is
 // what lets the "No company names were provided" guidance be reached at all.
-const INDEED_EMPTY_SHELL = `
-<div id="searchResultsPages">
-  <p>No jobs found</p>
-  <article class="jcs-JobCard sponsored">Sponsored placeholder</article>
-  <article class="jcs-JobCard">We could not find any jobs matching your search.</article>
-</div>`;
 
 const GLASSDOOR_EMPTY_SHELL =
   '<div class="react-job-listing"><article data-job-id="GD-none">No results matched your search.</article></div>';
@@ -292,31 +262,42 @@ interface Route {
 }
 
 /** The five general boards, one route each, in the order the skill probes them. */
-function generalBoardRoutes(bodies: [string, string, string, string, string]): Route[] {
-  return [
-    { urlPrefix: 'https://www.indeed.com/jobs?q=', body: bodies[0] },
-    { urlPrefix: 'https://www.glassdoor.com/Job/jobs.htm?', body: bodies[1] },
-    { urlPrefix: 'https://www.monster.com/jobs/search?q=', body: bodies[2] },
-    { urlPrefix: 'https://www.linkedin.com/jobs/search?keywords=', body: bodies[3] },
-    { urlPrefix: 'https://wellfound.com/jobs?query=', body: bodies[4] },
-  ];
+// General boards are opt-in (useGeneralBoards) because the two that survive
+// here both block or client-render for this host. Keyed by name, not position:
+// a positional list silently shifted once a board was removed from the middle.
+const GENERAL_BOARD_URLS: Record<string, string> = {
+  linkedin: 'https://www.linkedin.com/jobs/search?keywords=',
+  wellfound: 'https://wellfound.com/jobs?query=',
+};
+
+function generalBoardRoutes(bodies: Record<string, string | undefined>): Route[] {
+  const routes: Route[] = [];
+  for (const [board, body] of Object.entries(bodies)) {
+    if (body) routes.push({ urlPrefix: GENERAL_BOARD_URLS[board], body });
+  }
+  return routes;
 }
 
-const MANAGER_ROUTES: Route[] = generalBoardRoutes([
-  INDEED_MANAGER_CARDS,
-  GLASSDOOR_MANAGER_CARDS,
-  MONSTER_MANAGER_CARDS,
-  LINKEDIN_MANAGER_CARDS,
-  WELLFOUND_MANAGER_CARDS,
-]);
+// A well-formed feed with no matching roles: the documented container is
+// present and empty, which is a real answer, not a failure.
+const FEED_ROUTES_EMPTY: Route[] = [
+  { urlPrefix: 'https://remoteok.com/api', body: '[{"legal":"notice"}]' },
+  { urlPrefix: 'https://remotive.com/api/remote-jobs', body: '{"jobs":[]}' },
+  { urlPrefix: 'https://www.arbeitnow.com/api/job-board-api', body: '{"data":[]}' },
+  { urlPrefix: 'https://jobicy.com/api/v2/remote-jobs', body: '{"jobs":[]}' },
+  { urlPrefix: 'https://weworkremotely.com/remote-jobs.rss', body: '<?xml version="1.0"?><rss version="2.0"><channel><title>WWR</title></channel></rss>' },
+  { urlPrefix: 'https://himalayas.app/jobs/rss', body: '<?xml version="1.0"?><rss version="2.0"><channel><title>Himalayas</title></channel></rss>' },
+];
 
-const EMPTY_ROUTES: Route[] = generalBoardRoutes([
-  INDEED_EMPTY_SHELL,
-  GLASSDOOR_EMPTY_SHELL,
-  MONSTER_EMPTY_SHELL,
-  LINKEDIN_EMPTY_SHELL,
-  WELLFOUND_EMPTY_SHELL,
-]);
+const MANAGER_ROUTES: Route[] = generalBoardRoutes({
+  linkedin: LINKEDIN_MANAGER_CARDS,
+  wellfound: WELLFOUND_MANAGER_CARDS,
+});
+
+const EMPTY_ROUTES: Route[] = generalBoardRoutes({
+  linkedin: LINKEDIN_EMPTY_SHELL,
+  wellfound: WELLFOUND_EMPTY_SHELL,
+});
 
 // Job detail URLs are a longer prefix than the list URL, so the detail route is
 // declared first: the interceptor takes the first matching prefix.
@@ -327,13 +308,10 @@ const ENGINEER_ROUTES: Route[] = [
   { urlPrefix: 'https://api.lever.co/v0/postings/acme?', body: LEVER_ACME_POSTINGS },
   { urlPrefix: 'https://www.acme.com/', status: 404, body: 'gone' },
   { urlPrefix: 'https://acme.com/', status: 404, body: 'gone' },
-  ...generalBoardRoutes([
-    INDEED_ENGINEER_CARDS,
-    GLASSDOOR_ENGINEER_CARDS,
-    MONSTER_ENGINEER_CARDS,
-    LINKEDIN_ENGINEER_CARDS,
-    WELLFOUND_ENGINEER_CARDS,
-  ]),
+  ...generalBoardRoutes({
+    linkedin: LINKEDIN_ENGINEER_CARDS,
+    wellfound: WELLFOUND_ENGINEER_CARDS,
+  }),
 ];
 
 const priorNodeOptions = process.env.NODE_OPTIONS;
@@ -438,13 +416,14 @@ async function run(
   return { result, tool, schemaIssues: output?.outputSchemaIssues || [] };
 }
 
-const GENERAL_BOARD_HOSTS = [
-  'www.indeed.com',
-  'www.glassdoor.com',
-  'www.monster.com',
-  'www.linkedin.com',
-  'wellfound.com',
-];
+// The general-board tier is opt-in (useGeneralBoards) and now holds only the
+// two boards that actually serve a server-rendered list. Indeed, Glassdoor and
+// Monster were removed: they refuse automated requests at the network layer
+// from this host, so they contributed a permanent failure to every run.
+const GENERAL_BOARD_HOSTS = ['www.linkedin.com', 'wellfound.com'];
+
+// The company-agnostic feeds are the default tier and need no company name.
+const FEED_HOSTS = ['remoteok.com', 'remotive.com', 'arbeitnow.com', 'jobicy.com', 'weworkremotely.com', 'himalayas.app'];
 
 /**
  * Runs career-job-discovery against the currently installed routes.
@@ -608,7 +587,7 @@ describe('Career Coach skills emit user-facing output', () => {
     it('returns present blocks without raw JSON fields or storage paths', async () => {
       installRoutes(MANAGER_ROUTES);
       const { result, tool, schemaIssues } = await runJobDiscovery(
-        { queries: ['Manager'] },
+        { queries: ['Manager'], useGeneralBoards: true, usePublicFeeds: false },
         GENERAL_BOARD_HOSTS,
       );
 
@@ -622,21 +601,28 @@ describe('Career Coach skills emit user-facing output', () => {
       validateOutput(result, tool);
     }, 15000);
 
-    it('reports not-connected with a clear message when no companies are given', async () => {
-      installRoutes(EMPTY_ROUTES);
-      const { result } = await runJobDiscovery({ queries: ['Manager'] }, GENERAL_BOARD_HOSTS);
+    it('searches without any company when only a query is given', async () => {
+      // The company-agnostic feeds need no company name, which is the whole
+      // point of that tier: a query-only run now searches instead of refusing.
+      installRoutes(FEED_ROUTES_EMPTY);
+      const { result } = await runJobDiscovery({ queries: ['Manager'] }, FEED_HOSTS);
 
+      expect(result.success).toBe(true);
+      expect(result.error ?? null).toBeNull();
       const body = (result.present as PresentBlock[]).map((b) => b.body).join('\n');
-      expect(body).toContain('No company names were provided');
-    }, 15000);
+      expect(body).toContain('searched company-agnostic public feeds');
+      // Every feed was read and genuinely had nothing: a real, complete zero.
+      expect(body).toContain('Sources that had no matching listings'.slice(0, 0) || 'Sources consulted');
+    }, 20000);
 
     it('does not leak ISO datetime strings to the user', async () => {
       installRoutes(ENGINEER_ROUTES);
       // The Greenhouse board answers with real ISO-8601 updated_at instants, so the
       // skill genuinely has datetimes to render and this is a real formatting test
       // rather than a pass over a present body that contains no dates at all.
+      // General boards are opt-in now, so the run asks for them explicitly.
       const { result } = await runJobDiscovery(
-        { queries: ['Engineer'], companies: ['Acme'] },
+        { queries: ['Engineer'], companies: ['Acme'], useGeneralBoards: true },
         [...GENERAL_BOARD_HOSTS, 'boards-api.greenhouse.io'],
       );
 

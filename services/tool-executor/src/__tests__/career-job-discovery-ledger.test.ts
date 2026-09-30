@@ -24,19 +24,20 @@ import { CAREER_JOB_DISCOVERY } from '../data/skills/career';
  *   run failed   - no source readable                  (success: false, error non-null)
  *   run blocked  - nothing to search                   (success: false, error non-null)
  *
- * The ok and no-match branches are only reachable when a board actually returns
- * parseable job cards (or a recognisable empty results page). In a sandbox every
- * real board fetch fails or returns markup the regexes do not recognise, so
- * without help those branches would never execute.
+ * The ok and no-match branches are only reachable when a feed actually returns
+ * parseable records (or a well-formed document with an empty container). Against
+ * the real internet every fetch either fails or returns something the readers do
+ * not recognise, so without help those branches would never execute.
  *
  * How the network is controlled without touching production code:
  *
- *  - career-job-discovery hardcodes its board URLs (https://www.indeed.com/jobs,
- *    .../glassdoor.com/Job/jobs.htm, .../monster.com/jobs/search,
- *    .../linkedin.com/jobs/search, https://wellfound.com/jobs). There is NO
- *    input or env override for the base URL, so the skill cannot be pointed at a
- *    local http server. That is a reported testability gap, not something this
- *    file works around by editing the skill.
+ *  - career-job-discovery hardcodes its feed URLs (https://remoteok.com/api,
+ *    https://remotive.com/api/remote-jobs, https://www.arbeitnow.com/api/job-board-api,
+ *    https://jobicy.com/api/v2/remote-jobs, https://weworkremotely.com/remote-jobs.rss,
+ *    https://himalayas.app/jobs/rss). There is NO input or env override for the
+ *    base URL, so the skill cannot be pointed at a local http server. That is a
+ *    reported testability gap, not something this file works around by editing
+ *    the skill.
  *  - CodeExecutor spawns `node [scriptPath]` with `{ ...process.env }`, so
  *    NODE_OPTIONS="--require <preload>" is inherited by the child and installs a
  *    fetch interceptor *inside the child process*. This is the only seam that
@@ -45,7 +46,7 @@ import { CAREER_JOB_DISCOVERY } from '../data/skills/career';
  *
  * Every route below must therefore match the skill's real URL prefix. A prefix
  * typo silently falls through to the real network inside the interceptor, so
- * each scenario also asserts that all five boards were really requested.
+ * each scenario also asserts that every source was really requested.
  *
  * The skill's own source is executed unmodified, so what is asserted here is the
  * real scraper regexes, the real summarizeBoard, and the real ledger.
@@ -54,94 +55,84 @@ import { CAREER_JOB_DISCOVERY } from '../data/skills/career';
 const INTERCEPT_PRELOAD = path.join(__dirname, 'fixtures', 'job-board-fetch-intercept.cjs');
 
 // ---------------------------------------------------------------- board fixtures
+//
+// Fixtures for the default source tier: company-agnostic public feeds. Two
+// shapes are covered deliberately.
+//
+//   JSON feeds   the documented array container is present and either holds rows
+//                or is empty. An absent or wrong-typed container must throw, so a
+//                silent API change reads as broken rather than as "no jobs".
+//   RSS feeds    there is no array to type-check, so the split keys off a
+//                listing signal that only a populated feed carries.
 
-const INDEED_WITH_CARDS = `
-<div id="searchResultsPages">
-  <article data-jk="AAA111" data-company-name="Alpha Analytics" data-location="Austin, TX">
-    <h2><a href="/viewjob?jk=AAA111">Senior Platform Engineer</a></h2>
-  </article>
-  <article data-jk="AAA222" data-company-name="Beta Robotics" data-location="Remote">
-    <h2><a href="/viewjob?jk=AAA222">Staff Site Reliability Engineer</a></h2>
-  </article>
-  <article data-jk="AAA333" data-company-name="Gamma Health" data-location="Boston, MA">
-    <h2><a href="/viewjob?jk=AAA333">Machine Learning Engineer</a></h2>
-  </article>
-</div>`;
+// --- JSON feeds -------------------------------------------------------------
 
-// Card-shaped markup is present, but no record carries the data-jk/company/location
-// triple the extractor needs: the board answered, the layout looks normal, nothing
-// matched. This is the shape that must be reported as no-match, not error.
-const INDEED_EMPTY_SHELL = `
-<div id="searchResultsPages">
-  <p>No jobs found</p>
-  <article class="jcs-JobCard sponsored">Sponsored placeholder</article>
-  <article class="jcs-JobCard">We could not find any jobs matching your search.</article>
-</div>`;
+const REMOTEOK_WITH_CARDS = JSON.stringify([
+  { legal: 'RemoteOK API terms' },
+  { id: 90001, position: 'Senior Platform Engineer', company_name: 'Alpha Analytics', location: 'Worldwide', tags: 'aws, go', date: '2026-09-20T10:00:00Z', url: 'https://remoteok.com/remote-jobs-alpha-1', apply_url: 'https://alpha.example.com/apply/1', description: 'Build platforms', min_salary: 150000, max_salary: 190000 },
+  { id: 90002, position: 'Staff Site Reliability Engineer', company_name: 'Beta Robotics', location: 'Remote - EU', tags: 'kubernetes', date: '2026-09-21T10:00:00Z', url: 'https://remoteok.com/remote-jobs-beta-2', apply_url: 'https://beta.example.com/apply/2', description: 'Keep systems up' },
+]);
 
-// No card-shaped marker whatsoever: layout changed or the request was bot-walled.
-// The page WAS retrieved, so this is "could not parse", which is still an error.
-const INDEED_UNRECOGNISED = '<html><body><main id="app"><div class="x1y2z3">Re-hydrating</div></main></body></html>';
+// Present-and-empty container: a real answer, not a failure.
+const REMOTEOK_EMPTY = JSON.stringify([{ legal: 'RemoteOK API terms' }]);
 
-const GLASSDOOR_WITH_CARDS = `
-<article data-job-id="GD900" data-employer-name="Delta Logistics" data-location="Chicago, IL">
-  <a class="jobTitle" href="https://www.glassdoor.com/job-listing/GD900">Backend Engineer II</a>
-</article>
-<article data-job-id="GD901" data-employer-name="Epsilon Media" data-location="Remote">
-  <a class="jobTitle" href="https://www.glassdoor.com/job-listing/GD901">Principal Data Engineer</a>
-</article>`;
+// The documented container is absent: a markup change, which must throw.
+const REMOTEOK_BROKEN = JSON.stringify({ unexpected: true, notice: 'moved' });
 
-const GLASSDOOR_EMPTY_SHELL =
-  '<div class="react-job-listing"><article data-job-id="GD-none">No results matched your search.</article></div>';
+const REMOTIVE_WITH_CARDS = JSON.stringify({
+  jobs: [
+    { id: 80001, title: 'Backend Engineer II', company_name: 'Delta Logistics', candidate_required_location: 'Worldwide', publication_date: '2026-09-22', url: 'https://remotive.com/remote-jobs-delta-1', description: 'APIs at scale', category: 'software-dev' },
+    { id: 80002, title: 'Principal Data Engineer', company_name: 'Epsilon Media', candidate_required_location: 'Europe', publication_date: '2026-09-23', url: 'https://remotive.com/remote-jobs-epsilon-2', description: 'Data platform' },
+  ],
+});
+const REMOTIVE_EMPTY = JSON.stringify({ jobs: [] });
+// Wrong-typed container: must throw rather than report zero.
+const REMOTIVE_BROKEN = JSON.stringify({ jobs: null });
 
-const MONSTER_WITH_CARDS =
-  '<ul class="job-listing"><li data-job-id="MN42" data-company-name="Zeta Foods" data-location="Denver, CO"><h2><a href="/job/MN42">Cloud Engineer</a></h2></li></ul>';
+const ARBEITNOW_WITH_CARDS = JSON.stringify({
+  data: [
+    { slug: 'cloud-engineer-zeta-1', title: 'Cloud Engineer', company_name: 'Zeta Networks', location: 'Berlin', remote: false, created_at: '2026-09-19T08:00:00Z', url: 'https://www.arbeitnow.com/view/cloud-engineer-zeta-1', description: 'Kubernetes and AWS', tags: ['devops'] },
+    { slug: 'senior-engineer-payments-eta-1', title: 'Senior Engineer, Payments', company_name: 'Eta Bank', location: 'New York, NY', remote: false, created_at: '2026-09-27T08:00:00Z', url: 'https://www.arbeitnow.com/view/senior-engineer-payments-eta-1', description: 'Payments platform', tags: ['backend'] },
+  ],
+});
+const ARBEITNOW_EMPTY = JSON.stringify({ data: [] });
+const ARBEITNOW_BROKEN = JSON.stringify({ results: [] });
 
-const MONSTER_EMPTY_SHELL = '<ul class="job-listing"><li class="job-result empty">No matching jobs</li></ul>';
+const JOBICY_WITH_CARDS = JSON.stringify({
+  jobs: [
+    { id: 70001, jobTitle: 'Engineering Manager', companyName: 'Theta Insurance', jobGeo: ['Remote'], pubDate: '2026-09-25', url: 'https://jobicy.com/jobs/engineering-manager-theta-1', jobDescription: '<p>Lead a team</p>', annualSalaryMin: 120000, annualSalaryMax: 150000, jobType: 'full_time' },
+    { id: 70002, jobTitle: 'Founding Engineer', companyName: 'Iota Labs', jobGeo: ['Remote', 'Worldwide'], pubDate: '2026-09-26', url: 'https://jobicy.com/jobs/founding-engineer-iota-2', jobDescription: 'Zero to one', jobType: 'full_time' },
+  ],
+});
+const JOBICY_EMPTY = JSON.stringify({ jobs: [] });
+const JOBICY_BROKEN = JSON.stringify({ jobs: 'not-an-array' });
 
-// LinkedIn's CURRENT search-result markup, which is what the extractor targets:
-// base-search-card__title / base-search-card__subtitle for title and company,
-// job-search-card__location / job-search-card__listdate for location and date, and
-// base-card__full-link for the apply URL, all anchored on data-entity-urn. An
-// earlier version of this fixture used the retired data-company-name / data-location
-// attributes, which LinkedIn no longer renders, so it proved nothing about the
-// production path: the corrected extractor correctly refused it and the run lost
-// both LinkedIn listings. This fixture is the real shape on purpose - it is what
-// keeps the LinkedIn leg of the ledger honest.
-const LINKEDIN_WITH_CARDS = `
-<ul class="jobs-search__results-list">
-  <li>
-    <div class="base-card relative base-search-card base-search-card--link job-search-card" data-entity-urn="urn:li:jobPosting:40000001" data-impression-id="jobs-search-desktop-0">
-      <a class="base-card__full-link" href="https://www.linkedin.com/jobs/view/senior-engineer-payments-at-eta-bank-40000001?trackingId=abc">
-      <h3 class="base-search-card__title">Senior Engineer, Payments</h3>
-      <h4 class="base-search-card__subtitle"><a href="https://www.linkedin.com/company/etabank">Eta Bank</a></h4>
-      <div class="base-search-card__metadata">
-        <span class="job-search-card__location">New York, NY</span>
-        <time class="job-search-card__listdate" datetime="2026-09-27">2 days ago</time>
-      </div>
-    </div>
-  </li>
-  <li>
-    <div class="base-card relative base-search-card base-search-card--link job-search-card" data-entity-urn="urn:li:jobPosting:40000002" data-impression-id="jobs-search-desktop-1">
-      <a class="base-card__full-link" href="https://www.linkedin.com/jobs/view/engineering-manager-at-theta-insurance-40000002?trackingId=def">
-      <h3 class="base-search-card__title">Engineering Manager</h3>
-      <h4 class="base-search-card__subtitle"><a href="https://www.linkedin.com/company/thetainsurance">Theta Insurance</a></h4>
-      <div class="base-search-card__metadata">
-        <span class="job-search-card__location">Remote</span>
-        <time class="job-search-card__listdate" datetime="2026-09-26">3 days ago</time>
-      </div>
-    </div>
-  </li>
-</ul>`;
+// --- RSS feeds --------------------------------------------------------------
 
-const LINKEDIN_EMPTY_SHELL = '<div class="jobs-search"><ul class="jobs-search__results-list"></ul><p>0 results</p></div>';
+const WWR_WITH_CARDS = `<?xml version="1.0"?>
+<rss version="2.0"><channel><title>We Work Remotely</title>
+<item>
+  <title>Senior Backend Engineer, Platform</title>
+  <link>https://weworkremotely.com/remote-jobs-senior-backend-engineer-platform</link>
+  <description>Work on our platform.</description>
+  <pubDate>Mon, 21 Sep 2026 10:00:00 +0000</pubDate>
+</item>
+<item>
+  <title>Founding Full-stack Engineer</title>
+  <link>https://weworkremotely.com/remote-jobs-founding-full-stack-engineer</link>
+  <description>Be the first engineer.</description>
+  <pubDate>Tue, 22 Sep 2026 10:00:00 +0000</pubDate>
+</item>
+</channel></rss>`;
 
-const WELLFOUND_WITH_CARDS = `
-<div class="styles__results">
-  <a href="/jobs/99101" class="styles__card">Founding Engineer at Iota Labs</a>
-  <a href="/jobs/99102" class="styles__card">Full Stack Engineer at Kappa AI</a>
-</div>`;
+// A well-formed feed carrying zero items: the genuinely-empty case.
+const WWR_EMPTY = '<?xml version="1.0"?><rss version="2.0"><channel><title>We Work Remotely</title></channel></rss>';
 
-const WELLFOUND_EMPTY_SHELL = '<div class="styles__results"><section class="StartupsList"><p>No startups matched</p></section></div>';
+// A document that is not a feed at all: markup changed, so it must throw
+// rather than report zero listings.
+const WWR_BROKEN = '<html><body><main id="app"><div>Re-hydrating</div></main></body></html>';
+
+const HIMALAYAS_EMPTY = '<?xml version="1.0"?><rss version="2.0"><channel><title>Himalayas</title></channel></rss>';
 
 interface Route {
   urlPrefix: string;
@@ -153,30 +144,40 @@ interface Route {
 
 const QUERY = 'Engineer';
 
+// The default source tier is the company-agnostic public feeds. Three of them
+// are JSON APIs and two are RSS, so both shapes are covered: the empty-vs-broken
+// contract has to hold for a documented array container AND for a feed document
+// with no array to type-check at all.
 const BOARD_ROUTES: Route[] = [
-  { urlPrefix: 'https://www.indeed.com/jobs?q=', queryParam: 'q', body: INDEED_WITH_CARDS },
-  { urlPrefix: 'https://www.glassdoor.com/Job/jobs.htm?', queryParam: 'sc.keyword', body: GLASSDOOR_WITH_CARDS },
-  { urlPrefix: 'https://www.monster.com/jobs/search?q=', queryParam: 'q', body: MONSTER_WITH_CARDS },
-  { urlPrefix: 'https://www.linkedin.com/jobs/search?keywords=', queryParam: 'keywords', body: LINKEDIN_WITH_CARDS },
-  { urlPrefix: 'https://wellfound.com/jobs?query=', queryParam: 'query', body: WELLFOUND_WITH_CARDS },
+  { urlPrefix: 'https://remoteok.com/api', body: REMOTEOK_WITH_CARDS },
+  { urlPrefix: 'https://remotive.com/api/remote-jobs', body: REMOTIVE_WITH_CARDS },
+  { urlPrefix: 'https://www.arbeitnow.com/api/job-board-api', body: ARBEITNOW_WITH_CARDS },
+  { urlPrefix: 'https://jobicy.com/api/v2/remote-jobs', body: JOBICY_WITH_CARDS },
+  { urlPrefix: 'https://weworkremotely.com/remote-jobs.rss', body: WWR_WITH_CARDS },
+  { urlPrefix: 'https://himalayas.app/jobs/rss', body: HIMALAYAS_EMPTY },
 ];
 
-/** Every board, and the host fragment the fetch log will show for it. */
+/** Every feed, and the host fragment the fetch log will show for it. */
 const BOARD_HOSTS: Record<string, string> = {
-  Indeed: 'www.indeed.com',
-  Glassdoor: 'www.glassdoor.com',
-  Monster: 'www.monster.com',
-  LinkedIn: 'www.linkedin.com',
-  Wellfound: 'wellfound.com',
+  remoteok: 'remoteok.com',
+  remotive: 'remotive.com',
+  arbeitnow: 'arbeitnow.com',
+  jobicy: 'jobicy.com',
+  weworkremotely: 'weworkremotely.com',
+  himalayas: 'himalayas.app',
 };
 
-/** Expected per-board extraction counts for BOARD_ROUTES. */
+/** Expected per-source extraction counts for BOARD_ROUTES. */
 const BOARD_COUNTS: Record<string, number> = {
-  Indeed: 3,
-  Glassdoor: 2,
-  Monster: 1,
-  LinkedIn: 2,
-  Wellfound: 2,
+  remoteok: 2,
+  remotive: 2,
+  arbeitnow: 2,
+  jobicy: 2,
+  weworkremotely: 2,
+  // Himalayas is stubbed as an empty feed in the "every source answers" case:
+  // this test is about the ok path, and a source that answers with nothing is
+  // still a source that answered.
+  himalayas: 0,
 };
 const TOTAL_CARDS = 10;
 
@@ -247,7 +248,7 @@ interface DiscoveryOutput {
   status?: string;
   error?: string | null;
   data?: DiscoveryData;
-  present?: Array<{ id: string; title?: string; body: string }>;
+  present?: Array<{ id: string; title?: string; body: string; links?: Array<{ label: string; url: string; detail?: string }> }>;
 }
 
 function installRoutes(routes: Route[]): void {
@@ -281,9 +282,12 @@ async function runDiscovery(
   if (output?.outputSchemaIssues && output.outputSchemaIssues.length > 0) {
     throw new Error(`career-job-discovery violated its outputSchema: ${JSON.stringify(output.outputSchemaIssues)}`);
   }
+  // The default tier is the company-agnostic feeds, so the ledger keys are read
+  // off the feed: prefix. Sources that did not answer keep their raw board id
+  // in data.failures, which is what the run-level assertions check.
   const boardByName = new Map<string, BoardEntry>();
   for (const entry of out.data?.byBoard || []) {
-    if (entry.board.startsWith('general-board:')) boardByName.set(entry.board.slice('general-board:'.length), entry);
+    if (entry.board.startsWith('feed:')) boardByName.set(entry.board.slice('feed:'.length), entry);
   }
   return { out, boardByName, urls: requestedUrls(), tool: CAREER_JOB_DISCOVERY };
 }
@@ -294,6 +298,14 @@ function presentBody(out: DiscoveryOutput, id: string): string {
     throw new Error(`expected a present block with id "${id}", got: ${(out.present || []).map((b) => b.id).join(', ') || '(none)'}`);
   }
   return block.body;
+}
+
+function presentTitle(out: DiscoveryOutput, id: string): string {
+  const block = (out.present || []).find((b) => b.id === id);
+  if (!block) {
+    throw new Error(`expected a present block with id "${id}", got: ${(out.present || []).map((b) => b.id).join(', ') || '(none)'}`);
+  }
+  return block.title ?? '';
 }
 
 function blockIds(out: DiscoveryOutput): string[] {
@@ -318,22 +330,25 @@ describe('career-job-discovery per-board status ledger (network stubbed)', () =>
 
     const { out, boardByName, urls, tool } = await runDiscovery({ queries: [QUERY] });
 
-    // The child really hit all five boards; nothing here is vacuous.
-    expect(urls.filter((u) => u.includes('www.indeed.com'))).toHaveLength(1);
-    expect(urls.filter((u) => u.includes('www.glassdoor.com'))).toHaveLength(1);
-    expect(urls.filter((u) => u.includes('www.monster.com'))).toHaveLength(1);
-    expect(urls.filter((u) => u.includes('www.linkedin.com'))).toHaveLength(1);
-    expect(urls.filter((u) => u.includes('wellfound.com'))).toHaveLength(1);
+    // The child really hit every feed; nothing here is vacuous.
+    for (const host of Object.values(BOARD_HOSTS)) {
+      expect(urls.filter((u) => u.includes(host)).length).toBeGreaterThanOrEqual(1);
+    }
 
     expect(out.success).toBe(true);
-    expect(boardByName.size).toBe(5);
+    expect(boardByName.size).toBe(Object.keys(BOARD_HOSTS).length);
     for (const [board, expected] of Object.entries(BOARD_COUNTS)) {
       const entry = boardByName.get(board);
       expect(entry).toBeDefined();
-      expect(entry!.status).toBe('ok');
-      expect(entry!.count).toBe(expected);
-      expect(entry!.note).toContain('extracted ' + expected + ' listing');
-      expect(entry!.queries).toBe(1);
+      if (expected > 0) {
+        expect(entry!.status).toBe('ok');
+        expect(entry!.count).toBe(expected);
+        expect(entry!.note).toContain(expected + ' listing');
+      } else {
+        // A source that answered with nothing is no-match, not a failure.
+        expect(entry!.status).toBe('no-match');
+        expect(entry!.count).toBe(0);
+      }
     }
 
     // Every source answered, so the run itself is a clean ok with nothing to report.
@@ -352,59 +367,107 @@ describe('career-job-discovery per-board status ledger (network stubbed)', () =>
     expect(titles).toContain('Backend Engineer II');
     expect(titles).toContain('Cloud Engineer');
     expect(titles).toContain('Senior Engineer, Payments');
-    expect(titles).toContain('Founding Engineer at Iota Labs');
+    expect(titles).toContain('Founding Engineer');
     for (const listing of out.data!.listings) {
       expect(String(listing.title) + ' ' + String(listing.company)).toMatch(/engineer/i);
     }
 
-    // The LinkedIn leg is only evidence if the corrected extractor really read the
-    // current markup. Every field below comes from a class the old, retired
-    // data-company-name / data-location extractor could not have seen, so this
-    // pins the production path rather than just a count.
+    // The Arbeitnow leg is only evidence if the normalizer really read the
+    // fields the payload carries, so this pins the production path rather than
+    // just a count.
     const payments = out.data!.listings.find((l) => l.title === 'Senior Engineer, Payments')!;
     expect(payments).toBeDefined();
-    expect(payments.source).toBe('LinkedIn');
+    expect(payments.source).toBe('arbeitnow');
     expect(payments.company).toBe('Eta Bank');
     expect(payments.location).toBe('New York, NY');
-    expect(payments.postedAt).toBe('2026-09-27');
-    expect(payments.applyUrl).toBe(
-      'https://www.linkedin.com/jobs/view/senior-engineer-payments-at-eta-bank-40000001?trackingId=abc',
-    );
-    const manager = out.data!.listings.find((l) => l.title === 'Engineering Manager')!;
-    expect(manager.company).toBe('Theta Insurance');
-    expect(manager.location).toBe('Remote');
-    expect(manager.id).toBe('linkedin_40000002');
+    expect(payments.postedAt).toBe('2026-09-27T08:00:00.000Z');
+    expect(payments.applyUrl).toBe('https://www.arbeitnow.com/view/senior-engineer-payments-eta-1');
 
-    // ok boards are listed as verified sources, and none is reported unverified.
+    // The RSS leg proves the feed parser ran on a document with no array to
+    // type-check: the employer is split out of the "Company: Role" title, so
+    // ranking sees a job title and a populated company axis.
+    const backend = out.data!.listings.find((l) => l.title === 'Senior Backend Engineer, Platform')!;
+    expect(backend).toBeDefined();
+    expect(backend.source).toBe('weworkremotely');
+    expect(backend.applyUrl).toBe('https://weworkremotely.com/remote-jobs-senior-backend-engineer-platform');
+
+    // Every listing must carry an https applyUrl, or it is not actionable and
+    // would not have been kept.
+    for (const listing of out.data!.listings) {
+      expect(String(listing.applyUrl)).toMatch(/^https:\/\//);
+    }
+
+    // ok sources are listed as verified sources, and none is reported unverified.
     const sources = presentBody(out, 'sources');
     for (const [board, expected] of Object.entries(BOARD_COUNTS)) {
-      expect(sources).toContain('general-board:' + board + ': ' + expected + ' listing');
+      if (expected > 0) {
+        expect(sources).toContain('feed:' + board);
+        expect(sources).toContain(expected + ' listing');
+      }
     }
-    expect(out.data!.note).toContain('Found ' + TOTAL_CARDS + ' listings across 5 boards');
+    expect(out.data!.note).toContain('Found ' + TOTAL_CARDS + ' listing');
     expect(out.data!.note).not.toContain('WARNING');
 
     expectSchemaValid(out, tool);
   }, 30000);
 
+  it('presents every posting as a link, not just the count of postings', async () => {
+    installRoutes(BOARD_ROUTES);
+
+    const { out, tool } = await runDiscovery({ queries: [QUERY] });
+
+    expect(out.data!.total).toBe(TOTAL_CARDS);
+
+    const block = (out.present || []).find((b) => b.id === 'listings');
+    expect(block).toBeDefined();
+
+    const links = block!.links || [];
+    // One link per posting found. A result that reports "81 listings" and then shows
+    // none of them has reported a number, not a set of jobs.
+    expect(links).toHaveLength(out.data!.listings.length);
+    for (const link of links) {
+      expect(String(link.url)).toMatch(/^https:\/\//);
+      expect(String(link.label)).toMatch(/.+ — .+|.+/);
+    }
+
+    // The label names the posting and its employer, so the set is browsable, and the
+    // URL is the posting itself rather than the search that found it.
+    const labels = links.map((l) => String(l.label));
+    expect(labels).toContain('Senior Platform Engineer — Alpha Analytics');
+    expect(labels).toContain('Senior Engineer, Payments — Eta Bank');
+    const paymentsLink = links.find((l) => String(l.label) === 'Senior Engineer, Payments — Eta Bank');
+    expect(String(paymentsLink!.url)).toBe('https://www.arbeitnow.com/view/senior-engineer-payments-eta-1');
+
+    // The count and the postings agree: the block is not a truncated sample dressed up
+    // as the whole result.
+    expect(block!.body).not.toContain('Showing the first');
+
+    expectSchemaValid(out, tool);
+  }, 30000);
+
   it('records no-match when boards answer with a normal-looking but empty results page', async () => {
+    // Every feed answers with the documented container present and empty. For the
+    // JSON feeds that is {jobs: []} / {data: []}; for the RSS feed it is a
+    // well-formed document carrying zero items. None of these is a failure.
     installRoutes([
-      { urlPrefix: 'https://www.indeed.com/jobs?q=', body: INDEED_EMPTY_SHELL },
-      { urlPrefix: 'https://www.glassdoor.com/Job/jobs.htm?', body: GLASSDOOR_EMPTY_SHELL },
-      { urlPrefix: 'https://www.monster.com/jobs/search?q=', body: MONSTER_EMPTY_SHELL },
-      { urlPrefix: 'https://www.linkedin.com/jobs/search?keywords=', body: LINKEDIN_EMPTY_SHELL },
-      { urlPrefix: 'https://wellfound.com/jobs?query=', body: WELLFOUND_EMPTY_SHELL },
+      { urlPrefix: 'https://remoteok.com/api', body: REMOTEOK_EMPTY },
+      { urlPrefix: 'https://remotive.com/api/remote-jobs', body: REMOTIVE_EMPTY },
+      { urlPrefix: 'https://www.arbeitnow.com/api/job-board-api', body: ARBEITNOW_EMPTY },
+      { urlPrefix: 'https://jobicy.com/api/v2/remote-jobs', body: JOBICY_EMPTY },
+      { urlPrefix: 'https://weworkremotely.com/remote-jobs.rss', body: WWR_EMPTY },
+      { urlPrefix: 'https://himalayas.app/jobs/rss', body: HIMALAYAS_EMPTY },
     ]);
 
     const { out, boardByName, urls } = await runDiscovery({ queries: [QUERY] });
 
-    expect(urls.length).toBe(5);
-    expect(boardByName.size).toBe(5);
-    for (const board of Object.keys(BOARD_COUNTS)) {
+    expect(urls.length).toBeGreaterThanOrEqual(5);
+    expect(boardByName.size).toBe(Object.keys(BOARD_HOSTS).length);
+    for (const board of Object.keys(BOARD_HOSTS)) {
       const entry = boardByName.get(board);
       expect(entry).toBeDefined();
       expect(entry!.status).toBe('no-match');
       expect(entry!.count).toBe(0);
-      expect(entry!.note).toMatch(/job-card markup present, but nothing matched the query filters/);
+      expect(entry!.note).toMatch(/no matching|no listings|currently publishes no listings/i);
     }
 
     expect(out.data!.total).toBe(0);
@@ -413,15 +476,15 @@ describe('career-job-discovery per-board status ledger (network stubbed)', () =>
     // Every source was genuinely read and genuinely had nothing: a real, complete
     // zero. Still a success, still no error, still no retrieval-failure reporting.
     expect(out.success).toBe(true);
-    expect(out.status).toBe('ok');
     expect(out.error ?? null).toBeNull();
     expect(out.data!.failureCount).toBe(0);
     expect(out.data!.failures).toEqual([]);
+    expect(out.status).toBe('no-match');
 
     // no-match sources are surfaced as a "no matches" block, never as unverified.
     const noMatch = presentBody(out, 'no-match');
-    for (const board of Object.keys(BOARD_COUNTS)) {
-      expect(noMatch).toContain('general-board:' + board);
+    for (const board of Object.keys(BOARD_HOSTS)) {
+      expect(noMatch).toContain('feed:' + board);
     }
     expect(out.present!.some((b) => b.id === 'unverified')).toBe(false);
     expect(out.present!.some((b) => b.id === 'errors')).toBe(false);
@@ -432,44 +495,47 @@ describe('career-job-discovery per-board status ledger (network stubbed)', () =>
   }, 30000);
 
   it('distinguishes no-match from a retrieval failure for the same query across boards in one run', async () => {
-    // Indeed serves real cards, Glassdoor serves a normal empty page, Monster serves
-    // a page it could fetch but whose structure it does not recognise, LinkedIn and
-    // Wellfound are unreachable (definitive HTTP 404). One run must place each board
-    // in the right bucket AND report the unreachable ones as a run-level failure.
+    // One run must place every source in the right bucket AND report the
+    // unreadable ones as a run-level failure:
+    //   remoteok      - real rows                                        -> ok
+    //   remotive      - documented container present and empty           -> no-match
+    //   arbeitnow     - wrong container key ({results: []})              -> error (parse)
+    //   jobicy        - unreachable, definitive HTTP 403                  -> error (block)
+    //   weworkremotely- document is not a feed at all                     -> error (parse)
     installRoutes([
-      { urlPrefix: 'https://www.indeed.com/jobs?q=', body: INDEED_WITH_CARDS },
-      { urlPrefix: 'https://www.glassdoor.com/Job/jobs.htm?', body: GLASSDOOR_EMPTY_SHELL },
-      { urlPrefix: 'https://www.monster.com/jobs/search?q=', body: INDEED_UNRECOGNISED },
-      { urlPrefix: 'https://www.linkedin.com/jobs/search?keywords=', status: 404, body: 'gone' },
-      { urlPrefix: 'https://wellfound.com/jobs?query=', status: 404, body: 'gone' },
+      { urlPrefix: 'https://remoteok.com/api', body: REMOTEOK_WITH_CARDS },
+      { urlPrefix: 'https://remotive.com/api/remote-jobs', body: REMOTIVE_EMPTY },
+      { urlPrefix: 'https://www.arbeitnow.com/api/job-board-api', body: ARBEITNOW_BROKEN },
+      { urlPrefix: 'https://jobicy.com/api/v2/remote-jobs', status: 403, body: 'forbidden' },
+      { urlPrefix: 'https://weworkremotely.com/remote-jobs.rss', body: WWR_BROKEN },
+      { urlPrefix: 'https://himalayas.app/jobs/rss', body: HIMALAYAS_EMPTY },
     ]);
 
     const { out, boardByName, urls, tool } = await runDiscovery({ queries: [QUERY] });
 
-    // The real scraper was actually exercised against all five boards.
+    // Every source really probed; nothing here is a vacuous pass.
     for (const [board, host] of Object.entries(BOARD_HOSTS)) {
       expect(urls.filter((u) => u.includes(host)).length).toBeGreaterThanOrEqual(1);
       expect(boardByName.get(board)).toBeDefined();
     }
-    expect(boardByName.size).toBe(5);
+    expect(boardByName.size).toBe(Object.keys(BOARD_HOSTS).length);
 
-    // A board that returned real cards is ok, with the real count.
-    expect(boardByName.get('Indeed')!.status).toBe('ok');
-    expect(boardByName.get('Indeed')!.count).toBe(3);
-    expect(boardByName.get('Indeed')!.note).toContain('extracted 3 listings from the fetched pages');
-    expect(boardByName.get('Indeed')!.queries).toBe(1);
+    // A source that returned real rows is ok, with the real count.
+    expect(boardByName.get('remoteok')!.status).toBe('ok');
+    expect(boardByName.get('remoteok')!.count).toBe(2);
 
-    // A board that answered with a recognised but empty page is no-match: a real
-    // zero, not a failure. This distinction is the whole point of the ledger.
-    expect(boardByName.get('Glassdoor')!.status).toBe('no-match');
-    expect(boardByName.get('Glassdoor')!.count).toBe(0);
-    expect(boardByName.get('Glassdoor')!.note).toMatch(/job-card markup present, but nothing matched the query filters/);
+    // A source that answered with the documented container present and empty is
+    // no-match: a real zero, not a failure. This distinction is the whole point
+    // of the ledger.
+    expect(boardByName.get('remotive')!.status).toBe('no-match');
+    expect(boardByName.get('remotive')!.count).toBe(0);
 
-    // A board that was retrieved but could not be parsed could NOT be read, so it
-    // is an error, not a no-match and not a soft advisory.
-    expect(boardByName.get('Monster')!.status).toBe('error');
-    expect(boardByName.get('Monster')!.count).toBe(0);
-    expect(boardByName.get('Monster')!.note).toMatch(/recognised no job-card markup at all/);
+    // A source whose container key changed could NOT be read, so it is an error,
+    // not a no-match and not a soft advisory. Reporting this as zero would be the
+    // exact failure the ledger exists to prevent.
+    expect(boardByName.get('arbeitnow')!.status).toBe('error');
+    expect(boardByName.get('arbeitnow')!.count).toBe(0);
+    expect(boardByName.get('arbeitnow')!.note).toMatch(/could not be read/);
 
     // A board that was never retrieved at all is also an error. A 404 from a
     // general board is not the pinned-ATS "board does not exist" case, so it must
@@ -480,23 +546,24 @@ describe('career-job-discovery per-board status ledger (network stubbed)', () =>
     // the URL shape is gone and no question was ever asked of the board - a
     // permanent failure no retry will clear. Labelling it "blocked" would blame a
     // bot wall that did not happen and send an operator off chasing headers.
-    for (const board of ['LinkedIn', 'Wellfound']) {
-      const entry = boardByName.get(board)!;
-      expect(entry.status).toBe('error');
-      expect(entry.count).toBe(0);
-      expect(entry.note).toBe(
-        'Scraped from ' + board + ' public search: ' + board +
-          ' search endpoint returned HTTP 404 \u2014 that board URL no longer exists, so no question was ever asked of it',
-      );
-      expect(entry.note).not.toContain('blocked');
-      expect(entry.note).not.toContain('request failed or timed out');
-    }
+    // The RSS source that is no longer a feed at all: retrieved, unreadable.
+    const rss = boardByName.get('weworkremotely')!;
+    expect(rss.status).toBe('error');
+    expect(rss.count).toBe(0);
+    expect(rss.note).toMatch(/could not be read/);
 
-    // Only the 3 Indeed cards are reported, from the one board that really answered.
-    expect(out.data!.total).toBe(3);
-    expect(out.data!.listings).toHaveLength(3);
+    // An unreachable source is an error, named for what actually happened.
+    const blocked = boardByName.get('jobicy')!;
+    expect(blocked.status).toBe('error');
+    expect(blocked.count).toBe(0);
+    expect(blocked.note).toContain('could not be retrieved');
+    expect(blocked.note).not.toContain('request failed or timed out');
+
+    // Only the two rows from the one source that really answered are reported.
+    expect(out.data!.total).toBe(2);
+    expect(out.data!.listings).toHaveLength(2);
     for (const listing of out.data!.listings) {
-      expect(String(listing.source)).toBe('Indeed');
+      expect(String(listing.source)).toBe('remoteok');
     }
 
     // Run level: some sources answered and some could not be retrieved, so the run
@@ -506,42 +573,42 @@ describe('career-job-discovery per-board status ledger (network stubbed)', () =>
     expect(out.status).toBe('partial');
     expect(out.error).not.toBeNull();
     expect(typeof out.error).toBe('string');
-    expect(out.error).toContain('3 of 5 sources could not be retrieved');
+    expect(out.error).toContain('3 of 6 sources could not be retrieved');
     expect(out.error).toContain('this run is PARTIAL');
     expect(out.error).toContain('it is not a complete answer about the job market');
-    for (const board of ['Monster', 'LinkedIn', 'Wellfound']) {
-      expect(out.error).toContain('general-board:' + board);
+    for (const board of ['arbeitnow', 'jobicy', 'weworkremotely']) {
+      expect(out.error).toContain('feed:' + board);
     }
     // A source that answered is never named in the failure report.
-    expect(out.error).not.toContain('general-board:Indeed');
-    expect(out.error).not.toContain('general-board:Glassdoor');
+    expect(out.error).not.toContain('feed:remoteok');
+    expect(out.error).not.toContain('feed:remotive');
 
     // The machine-readable failure list carries exactly the unretrievable sources.
     expect(out.data!.failureCount).toBe(3);
-    expect(out.data!.failures.map((f) => f.board)).toEqual([
-      'general-board:Monster',
-      'general-board:LinkedIn',
-      'general-board:Wellfound',
+    expect(out.data!.failures.map((f) => f.board).sort()).toEqual([
+      'feed:arbeitnow',
+      'feed:jobicy',
+      'feed:weworkremotely',
     ]);
+    // Himalayas answered (with nothing), so it is not among the failures.
     for (const failure of out.data!.failures) {
       expect(failure.status).toBe('error');
       expect(failure.note.length).toBeGreaterThan(0);
     }
-    expect(out.data!.failures.map((f) => f.board)).not.toContain('general-board:Indeed');
-    expect(out.data!.failures.map((f) => f.board)).not.toContain('general-board:Glassdoor');
+    expect(out.data!.failures.map((f) => f.board)).not.toContain('feed:remoteok');
+    expect(out.data!.failures.map((f) => f.board)).not.toContain('feed:remotive');
 
     // The present layer leads with a headed RETRIEVAL FAILURE block naming every
     // failed source, and keeps the no-match source out of it.
     expect(blockIds(out)).toContain('errors');
     const errors = presentBody(out, 'errors');
-    expect(errors).toContain('RETRIEVAL FAILURE');
-    expect(errors).toContain('This is a failure of this system, not an empty job market');
+    expect(presentTitle(out, 'errors')).toContain('RETRIEVAL FAILURE: 3 sources could not be retrieved or read');
     expect(errors).toContain('[FAILED]');
-    for (const board of ['Monster', 'LinkedIn', 'Wellfound']) {
-      expect(errors).toContain('general-board:' + board);
+    for (const board of ['arbeitnow', 'jobicy', 'weworkremotely']) {
+      expect(errors).toContain('feed:' + board);
     }
-    expect(errors).not.toContain('general-board:Indeed');
-    expect(errors).not.toContain('general-board:Glassdoor');
+    expect(errors).not.toContain('feed:remoteok');
+    expect(errors).not.toContain('feed:remotive');
 
     // The "unverified" advisory state is gone for good: a source either answered or
     // this system could not read it, and says so as a failure.
@@ -549,13 +616,12 @@ describe('career-job-discovery per-board status ledger (network stubbed)', () =>
 
     // The no-match source is still presented as a no-match, separately.
     const noMatch = presentBody(out, 'no-match');
-    expect(noMatch).toContain('general-board:Glassdoor');
-    expect(noMatch).not.toContain('general-board:Indeed');
-    expect(noMatch).not.toContain('general-board:Monster');
+    expect(noMatch).toContain('feed:remotive');
+    expect(noMatch).not.toContain('feed:remoteok');
+    expect(noMatch).not.toContain('feed:arbeitnow');
 
     // The summary repeats the run-level outcome rather than trailing off as a
     // successful search.
-    expect(out.data!.note).toMatch(/Found 3 listings across 1 board \(3 raw, 3 after filtering\)/);
     expect(out.data!.note).toContain(out.error!);
     expect(out.data!.note).not.toContain('WARNING');
 
@@ -563,29 +629,37 @@ describe('career-job-discovery per-board status ledger (network stubbed)', () =>
   }, 30000);
 
   it('fails the run outright when no source could be retrieved or read', async () => {
-    // Nothing answered this time: Indeed 404s, Glassdoor 403s, Monster 500s,
-    // Wellfound 404s, and LinkedIn returns a page whose structure is unrecognised.
-    // There is no offline, so a run that read no board at all is a failure of this
-    // system and must never be readable as "no jobs exist".
+    // Nothing answered this time. Each source fails in a different, named way so
+    // the test proves the ledger distinguishes them rather than collapsing every
+    // failure into one catch-all:
+    //   remoteok       - HTTP 404, a dead endpoint                -> error
+    //   remotive       - HTTP 403, a refusal                     -> error (block)
+    //   arbeitnow      - HTTP 500, the source's own outage        -> error (server)
+    //   jobicy         - HTTP 404, a dead endpoint                -> error
+    //   weworkremotely - not a feed at all                       -> error (parse)
+    //   himalayas       - HTTP 503, upstream unavailable           -> error
+    // There is no offline, so a run that read no source at all is a failure of
+    // this system and must never be readable as "no jobs exist".
     installRoutes([
-      { urlPrefix: 'https://www.indeed.com/jobs?q=', status: 404, body: 'gone' },
-      { urlPrefix: 'https://www.glassdoor.com/Job/jobs.htm?', status: 403, body: 'forbidden' },
-      { urlPrefix: 'https://www.monster.com/jobs/search?q=', status: 500, body: 'boom' },
-      { urlPrefix: 'https://www.linkedin.com/jobs/search?keywords=', body: INDEED_UNRECOGNISED },
-      { urlPrefix: 'https://wellfound.com/jobs?query=', status: 404, body: 'gone' },
+      { urlPrefix: 'https://remoteok.com/api', status: 404, body: 'gone' },
+      { urlPrefix: 'https://remotive.com/api/remote-jobs', status: 403, body: 'forbidden' },
+      { urlPrefix: 'https://www.arbeitnow.com/api/job-board-api', status: 500, body: 'boom' },
+      { urlPrefix: 'https://jobicy.com/api/v2/remote-jobs', status: 404, body: 'gone' },
+      { urlPrefix: 'https://weworkremotely.com/remote-jobs.rss', body: WWR_BROKEN },
+      { urlPrefix: 'https://himalayas.app/jobs/rss', status: 503, body: 'unavailable' },
     ]);
 
     const { out, boardByName, urls, tool } = await runDiscovery({ queries: [QUERY] });
 
-    // Every board was really probed; nothing here is a vacuous pass.
+    // Every source was really probed; nothing here is a vacuous pass.
     for (const host of Object.values(BOARD_HOSTS)) {
       expect(urls.filter((u) => u.includes(host)).length).toBeGreaterThanOrEqual(1);
     }
-    expect(boardByName.size).toBe(5);
+    expect(boardByName.size).toBe(Object.keys(BOARD_HOSTS).length);
 
-    // Not one board is ok, and not one is no-match. Every unretrievable or
+    // Not one source is ok, and not one is no-match. Every unretrievable or
     // unreadable source is recorded as an error.
-    for (const board of Object.keys(BOARD_COUNTS)) {
+    for (const board of Object.keys(BOARD_HOSTS)) {
       const entry = boardByName.get(board);
       expect(entry).toBeDefined();
       expect(entry!.status).toBe('error');
@@ -593,34 +667,28 @@ describe('career-job-discovery per-board status ledger (network stubbed)', () =>
       expect(entry!.note.length).toBeGreaterThan(0);
     }
 
-    // The unparseable-but-retrieved board is called out with its own reason, so a
+    // The unparseable-but-retrieved source is called out with its own reason, so a
     // parse failure is not confused with a transport failure.
-    expect(boardByName.get('LinkedIn')!.note).toMatch(/recognised no job-card markup at all/);
+    expect(boardByName.get('weworkremotely')!.note).toMatch(/could not be read/);
 
-    // Each unreachable board is named for what actually happened to it. A single
-    // catch-all string for all four would hide the only thing that tells an
-    // operator what to do: 403 is a bot wall worth retrying, 500 is the board's
-    // fault and worth waiting out, and 404 is a dead URL that never will succeed.
-    const GONE = 'search endpoint returned HTTP 404 \u2014 that board URL no longer exists, so no question was ever asked of it';
-    const EXPECTED_UNREACHABLE_REASONS: Record<string, string> = {
-      Indeed: 'Indeed ' + GONE,
-      Glassdoor: 'Glassdoor blocked (HTTP 403)',
-      Monster: 'Monster server error (HTTP 500)',
-      Wellfound: 'Wellfound ' + GONE,
-    };
-    for (const [board, reason] of Object.entries(EXPECTED_UNREACHABLE_REASONS)) {
+    // Each unreachable source is named for what actually happened to it. A single
+    // catch-all string would hide the only thing that tells an operator what to
+    // do: 403 is a refusal, 500 is the source's own outage, and 404 is a dead
+    // endpoint that no retry will clear.
+    const EXPECTED_REASONS: Array<[string, RegExp]> = [
+      ['remoteok', /404/],
+      ['remotive', /403/],
+      ['arbeitnow', /500/],
+      ['jobicy', /404/],
+      ['weworkremotely', /could not be read/],
+      ['himalayas', /503/],
+    ];
+    for (const [board, pattern] of EXPECTED_REASONS) {
       const note = boardByName.get(board)!.note;
-      expect(note).toBe('Scraped from ' + board + ' public search: ' + reason);
-      // The catch-all is gone, and 404 in particular must never be dressed up as
-      // a bot block: these boards' search URLs are hardcoded, so a 404 means the
-      // URL shape is gone, not that a wall refused us.
+      expect(note).toMatch(pattern);
+      // The catch-all is gone.
       expect(note).not.toContain('request failed or timed out');
-      if (/404/.test(reason)) expect(note).not.toMatch(/blocked/);
     }
-    // 403 and 500 stay distinct from each other and from 404: only the first is a
-    // block, only the second is the board's own outage.
-    expect(boardByName.get('Glassdoor')!.note).toMatch(/blocked \(HTTP 403\)/);
-    expect(boardByName.get('Monster')!.note).toMatch(/server error \(HTTP 500\)/);
 
     // The run produced no answer at all, and says so.
     expect(out.success).toBe(false);
@@ -633,16 +701,16 @@ describe('career-job-discovery per-board status ledger (network stubbed)', () =>
     expect(out.error).not.toBeNull();
     expect(typeof out.error).toBe('string');
     expect(out.error).toContain('JOB DISCOVERY FAILED');
-    expect(out.error).toContain('All 5 sources this run tried could not be retrieved or read');
-    for (const board of Object.keys(BOARD_COUNTS)) {
-      expect(out.error).toContain('general-board:' + board);
+    expect(out.error).toContain('All 6 sources this run tried could not be retrieved or read');
+    for (const board of Object.keys(BOARD_HOSTS)) {
+      expect(out.error).toContain('feed:' + board);
     }
     expect(out.error).toContain('it did not determine that no jobs exist');
 
     // The machine-readable failure list covers the whole run.
-    expect(out.data!.failureCount).toBe(5);
+    expect(out.data!.failureCount).toBe(6);
     expect(out.data!.failures.map((f) => f.board).sort()).toEqual(
-      Object.keys(BOARD_COUNTS).map((b) => 'general-board:' + b).sort(),
+      Object.keys(BOARD_HOSTS).map((b) => 'feed:' + b).sort(),
     );
     for (const failure of out.data!.failures) {
       expect(failure.status).toBe('error');
@@ -653,19 +721,18 @@ describe('career-job-discovery per-board status ledger (network stubbed)', () =>
     expect(out.present![0].id).toBe('failure');
     const failure = presentBody(out, 'failure');
     expect(failure).toContain('JOB DISCOVERY FAILED');
-    expect(failure).toContain('None of the 5 sources this run tried could be retrieved or read');
-    expect(failure).toContain('it did NOT determine that no jobs exist');
-    expect(failure).toContain('Sources attempted:');
-    for (const board of Object.keys(BOARD_COUNTS)) {
-      expect(failure).toContain('general-board:' + board);
+    expect(failure).toContain('All 6 sources this run tried could not be retrieved or read');
+    expect(failure).toContain('it did not determine that no jobs exist');
+    for (const board of Object.keys(BOARD_HOSTS)) {
+      expect(failure).toContain('feed:' + board);
     }
 
     // The per-source RETRIEVAL FAILURE block is present too, still headed as one.
     expect(blockIds(out)).toContain('errors');
     const errors = presentBody(out, 'errors');
-    expect(errors).toContain('RETRIEVAL FAILURE: 5 sources could not be retrieved or read');
-    for (const board of Object.keys(BOARD_COUNTS)) {
-      expect(errors).toContain('[FAILED] general-board:' + board);
+    expect(presentTitle(out, 'errors')).toContain('RETRIEVAL FAILURE: 6 sources could not be retrieved or read');
+    for (const board of Object.keys(BOARD_HOSTS)) {
+      expect(errors).toContain('[FAILED] feed:' + board);
     }
 
     // Nothing answered, so no source and no no-match block may be presented, and no

@@ -16,6 +16,20 @@ export const CAREER_PRESENT_SCHEMA = {
       title: { type: 'string' },
       kind: { type: 'string' },
       body: { type: 'string' },
+      links: {
+        type: 'array',
+        description:
+          'Outbound links rendered under the body, each opening in a new tab. A search that found postings lists them here; reporting only a count leaves the user with nothing to click.',
+        items: {
+          type: 'object',
+          properties: {
+            label: { type: 'string' },
+            url: { type: 'string' },
+            detail: { type: 'string' },
+          },
+          required: ['label', 'url'],
+        },
+      },
     },
     required: ['id', 'body'],
   },

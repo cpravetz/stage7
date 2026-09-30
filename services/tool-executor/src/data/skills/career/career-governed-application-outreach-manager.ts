@@ -38,7 +38,7 @@ console.log(JSON.stringify({ success: true, data: result }));
 const GOVERNED_APPLICATION_OUTREACH_MANAGER_INPUT = {
   type: 'object',
   properties: {
-    targetRoles: { type: 'array', items: { type: 'string' }, description: 'Roles to apply to', title: 'Target Roles', order: 1, hint: 'Roles you want to apply for (optional; can pull from pipeline)' },
+    targetRoles: { type: 'array', items: { type: 'string' }, description: 'Roles to apply to', title: 'Target Roles', order: 1, hint: 'Roles you want to apply for (optional; can pull from pipeline)', 'x-referenceSource': 'career-job-discovery-fit-ranking', 'x-referenceLabel': 'your job search results' },
     targetCompany: { type: 'string', description: '', title: 'Target Company', order: 2, hint: 'Company for outreach context' },
     targetPerson: { type: 'string', description: '', title: 'Contact Person', order: 3, hint: 'Specific person to reach out to' },
     relationshipStage: { type: 'string', description: '', title: 'Relationship Stage', order: 4, hint: 'e.g. cold, warm, referral' },

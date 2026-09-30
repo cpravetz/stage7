@@ -111,12 +111,42 @@ if (listings.length) {
 }
 const ranked = rankResult && rankResult.success && rankResult.data ? (Array.isArray(rankResult.data.ranked) ? rankResult.data.ranked : []) : [];
 
+// Persist the ranked rows back into the shared listings file.
+//
+// career-job-discovery writes this file as an OBJECT carrying { listings,
+// byBoard, failures, ... }, not as a bare array. This block used to read it as
+// an array, so Array.isArray(existing) was false, merged started as [], and the
+// write replaced the whole file with only the ranked rows — destroying the
+// byBoard and failures ledger that the run-level outcome depends on. Read the
+// listings array out of whichever shape is on disk and write the object back.
 const listPath = baseDir + '/listings/default.json';
-const existing = fs.existsSync(listPath) ? JSON.parse(fs.readFileSync(listPath, 'utf8')) : [];
-const merged = Array.isArray(existing) ? existing.slice() : [];
-for (const r of ranked) { const idx = merged.findIndex((m) => m.id === r.id); if (idx >= 0) merged[idx] = r; else merged.push(r); }
+const existingListings = (function () {
+  if (!fs.existsSync(listPath)) return [];
+  let parsed;
+  try { parsed = JSON.parse(fs.readFileSync(listPath, 'utf8')); } catch (e) { return []; }
+  // Tolerate both shapes: a bare array from an older write, and the current
+  // object envelope.
+  if (Array.isArray(parsed)) return parsed;
+  if (parsed && Array.isArray(parsed.listings)) return parsed.listings;
+  return [];
+})();
+const merged = existingListings.slice();
+for (const r of ranked) {
+  const idx = merged.findIndex((m) => m.id === r.id);
+  if (idx >= 0) merged[idx] = Object.assign({}, merged[idx], r); else merged.push(r);
+}
 fs.mkdirSync(path.dirname(listPath), { recursive: true });
-fs.writeFileSync(listPath, JSON.stringify(merged, null, 2));
+// Rewrite the same envelope discovery uses, carrying the discovery ledger
+// forward rather than dropping it.
+fs.writeFileSync(listPath, JSON.stringify({
+  listings: merged,
+  total: merged.length,
+  byBoard: discoveryData.byBoard || [],
+  failures: discoveryFailures,
+  failureCount: discoveryFailures.length,
+  ranked: ranked.length,
+  generatedAt: new Date().toISOString(),
+}, null, 2));
 
 let autoApplied = null;
 if (typeof input.autoApplyThreshold === 'number') {
@@ -154,6 +184,42 @@ summaryLines.push('Ranked roles: ' + ranked.length + ' (from ' + (discoveryData.
 if (jobTitles.length) summaryLines.push('Titles searched: ' + jobTitles.join(', '));
 if (companies.length) summaryLines.push('Companies: ' + companies.join(', '));
 presentBlocks.push({ id: 'summary', title: runStatus === 'partial' ? 'Partial Search Results' : 'Search Results', kind: 'text', body: summaryLines.join('\\n') });
+
+// The ranked roles themselves, each linked to its posting. The summary line above says
+// how many roles were ranked; without the roles attached, that count is the whole of what
+// the user is shown, and a search result they cannot open is not a result. Emitted on
+// every non-empty run, whatever the status, so a partial run's roles are visible alongside
+// the warning about the sources that never answered.
+const RANKED_LINK_CAP = 200;
+function rankedLink(job) {
+  if (!job) return null;
+  const url = String(job.applyUrl || job.sourceUrl || '').trim();
+  // http(s) only: these become anchors in the UI.
+  if (!/^https?:\\/\\//i.test(url)) return null;
+  const title = String(job.title || '').trim();
+  if (!title) return null;
+  const company = String(job.company || '').trim();
+  const detail = [];
+  if (company) detail.push(company);
+  if (typeof job.score === 'number') detail.push('fit ' + job.score);
+  if (job.location) detail.push(job.location);
+  return { label: title, url: url, detail: detail.join(' · ') || undefined };
+}
+if (ranked.length) {
+  const links = ranked.map(rankedLink).filter(Boolean);
+  if (links.length) {
+    const shown = links.slice(0, RANKED_LINK_CAP);
+    presentBlocks.push({
+      id: 'ranked-listings',
+      title: 'Ranked roles (' + links.length + ')',
+      kind: 'text',
+      body: shown.length < links.length
+        ? 'Showing the top ' + shown.length + ' of ' + links.length + ' ranked roles. The full set is in data.ranked.'
+        : 'Every ranked role, linked to the posting. Each opens in a new tab.',
+      links: shown,
+    });
+  }
+}
 
 if (partialDiscovery) {
 presentBlocks.push({
@@ -216,8 +282,22 @@ generatedAt: { type: 'string', format: 'date-time' },
 error: { type: 'string', description: 'Null on a clean run. Non-null on partial, failed and blocked runs, naming what could not be retrieved' },
 present: {
 type: 'array',
-description: 'User-formatted blocks; a partial run always carries a block headed PARTIAL RESULT',
-items: { type: 'object', properties: { id: { type: 'string' }, title: { type: 'string' }, kind: { type: 'string' }, body: { type: 'string' } }, required: ['id', 'body'] },
+description: 'User-formatted blocks; a partial run always carries a block headed PARTIAL RESULT, and every non-empty run carries the ranked roles as links',
+items: {
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    title: { type: 'string' },
+    kind: { type: 'string' },
+    body: { type: 'string' },
+    links: {
+      type: 'array',
+      description: 'The ranked roles, each linked to its posting',
+      items: { type: 'object', properties: { label: { type: 'string' }, url: { type: 'string' }, detail: { type: 'string' } }, required: ['label', 'url'] },
+    },
+  },
+  required: ['id', 'body'],
+},
 },
 },
 required: ['success', 'data'],

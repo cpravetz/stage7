@@ -140,7 +140,7 @@ const INTERVIEW_PRACTICE_MOCK_INTERVIEWER_INPUT = {
 type: 'object',
 properties: {
 stage: { type: 'string', enum: ['phone_screen', 'technical', 'onsite', 'final'], description: 'Interview stage' },
-  targetRole: { type: 'string', description: 'Target role title' },
+  targetRole: { type: 'string', description: 'Target role title', 'x-referenceSource': 'career-job-discovery-fit-ranking', 'x-referenceValueField': 'title', 'x-referenceLabel': 'your job search results' },
   company: { type: 'string', description: 'Target company name' },
 },
 };

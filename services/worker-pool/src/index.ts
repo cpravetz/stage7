@@ -2,7 +2,6 @@ import express from 'express';
 import workerPoolRoutes from './routes/worker-pool';
 import assistantRoutes from './routes/assistants';
 import { assistantLoader, knowledgeService, persistence } from './utils/sharedInstance';
-import { canonicalAssistantCatalog } from './data/canonicalAssistantCatalog';
 import { buildAssistantManifest, hasManifestSelection, getManifestValidationError } from './data/assistantManifest';
 import { toStoredAuthoredEntry } from './data/assistantKnowledge';
 import type { AssistantDefinition } from '@stage7-nextgen/shared';
@@ -63,30 +62,27 @@ async function initializeAssistants(): Promise<void> {
     logger.info({ selected: manifest.validIds.length }, 'STAGE7_ASSISTANTS manifest active, filtering catalog');
   }
 
+  // Assistants come from folders on disk. manifest.catalog is that set already
+  // narrowed by STAGE7_ASSISTANTS, so there is no second list of what exists:
+  // the folders are the inventory, and an unselected folder is simply one the
+  // operator did not ask for.
+  const catalog = manifest.catalog;
+
   if (existing.length === 0) {
-    const catalog = hasManifestSelection(manifest) ? manifest.catalog : undefined;
-    if (catalog && catalog.length > 0) {
-      logger.info({ count: catalog.length }, 'Seeding assistant catalog from manifest selection');
-      for (const assistant of catalog) {
-        const saved = await assistantLoader.register(assistant);
-        if (saved.tools && saved.tools.length > 0) {
-          registerAssistantTools(saved.tools);
-        }
-      }
-    } else if (catalog && catalog.length === 0) {
-      logger.warn('STAGE7_ASSISTANTS manifest produced empty catalog; no assistants seeded');
+    if (catalog.length > 0) {
+      logger.info(
+        { count: catalog.length, source: 'assistants/<id>/assistant.json' },
+        'Seeding assistant catalog from discovered assistant folders',
+      );
     } else {
-      logger.info({ count: canonicalAssistantCatalog.length }, 'Seeding assistant catalog from canonical definitions');
-      for (const assistant of canonicalAssistantCatalog) {
-        const saved = await assistantLoader.register(assistant);
-        if (saved.tools && saved.tools.length > 0) {
-          registerAssistantTools(saved.tools);
-        }
-      }
+      logger.warn('No assistant folders were discovered; initialization is robust to an empty catalog');
     }
 
-    if ((catalog?.length ?? canonicalAssistantCatalog.length) === 0) {
-      logger.warn('No assistant catalogs available to seed; initialization is robust to empty catalogs');
+    for (const assistant of catalog) {
+      const saved = await assistantLoader.register(assistant);
+      if (saved.tools && saved.tools.length > 0) {
+        registerAssistantTools(saved.tools);
+      }
     }
 
     logger.info({ count: assistantLoader.list().length }, 'Assistant catalog seeded');
@@ -100,10 +96,7 @@ async function initializeAssistants(): Promise<void> {
   }
 
   // Sync the knowledge for the assistants this instance is actually running.
-  const activeCatalog = hasManifestSelection(manifest)
-    ? (manifest.catalog ?? [])
-    : canonicalAssistantCatalog;
-  await syncAuthoredKnowledge(activeCatalog);
+  await syncAuthoredKnowledge(catalog);
 }
 
 app.use('/api/workers', workerPoolRoutes);
