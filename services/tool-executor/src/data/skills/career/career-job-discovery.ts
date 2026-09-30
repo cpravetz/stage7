@@ -793,5 +793,6 @@ export const CAREER_JOB_DISCOVERY: Tool = createCodeSkill({
     },
   ],
   tier: 'aid',
+  domainKnowledge: 'Job board search & discovery operations across ATS systems, public feeds, and aggregator APIs.',
   isSkill: false,
 });

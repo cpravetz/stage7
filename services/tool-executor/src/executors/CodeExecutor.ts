@@ -103,6 +103,16 @@ export class CodeExecutor {
     const sandboxDir = fs.mkdtempSync('/tmp/js_sandbox_');
     const scriptPath = `${sandboxDir}/main.js`;
 
+    // Copy stage7-runtime.js into sandboxDir so skills can require('stage7-runtime')
+    try {
+      const runtimeSrc = path.resolve(__dirname, '../data/skills/shared/stage7-runtime.js');
+      if (fs.existsSync(runtimeSrc)) {
+        fs.copyFileSync(runtimeSrc, `${sandboxDir}/stage7-runtime.js`);
+      }
+    } catch (_) {
+      // Best effort runtime copy
+    }
+
     const sourceMapJson = JSON.stringify(sourceMappings);
 
     return new Promise((resolve) => {

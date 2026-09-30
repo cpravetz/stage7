@@ -1,10 +1,8 @@
-import { createExternalActionSkill, createSchemaRecord, SchemaProps } from '../code-skill-factory';
+import { createDeclarativeCodeSkill, createSchemaRecord, SchemaProps } from '../code-skill-factory';
 import {
-  HOTEL_EXTERNAL_CONFIG_SCHEMA,
   HOTEL_EXTERNAL_OUTPUT_SCHEMA,
   HOTEL_LOCATION_INPUT,
   HOTEL_PROPERTY_BASE_INPUT,
-  withConfirmation,
 } from './hotel-external-common';
 
 const HOUSEKEEPING_INPUT_SCHEMA = createSchemaRecord({
@@ -33,20 +31,15 @@ const HOUSEKEEPING_INPUT_SCHEMA = createSchemaRecord({
   payload: SchemaProps.object({}, { description: 'Full operation payload for connector-specific fields', additionalProperties: true }),
 }, { required: ['propertyId'] });
 
-export const HOUSEKEEPING_MANAGER_SKILL = withConfirmation(createExternalActionSkill({
+export const HOUSEKEEPING_MANAGER_SKILL = createDeclarativeCodeSkill({
   id: 'hotel-housekeeping-manager',
   name: 'Housekeeping & Room Turnover',
   description: 'Create, update, assign, dispatch, and complete housekeeping tasks and room turnover work. Mutating requests require confirmation and default to dry-run.',
-  system: 'hotel-pms',
-  action: 'housekeeping',
-  endpoint: { envVar: 'HOTEL_HOME', method: 'POST' },
-  auth: { type: 'bearer', credentialEnvKeyMap: { token: 'HOTEL_API_TOKEN' } },
-  credentialSource: { token: { envVar: 'HOTEL_API_TOKEN', configKey: 'hotel.token' } },
+  persistenceEnvVar: 'HOTEL_HOME',
   inputSchema: HOUSEKEEPING_INPUT_SCHEMA,
   outputSchema: HOTEL_EXTERNAL_OUTPUT_SCHEMA,
-  configSchema: HOTEL_EXTERNAL_CONFIG_SCHEMA,
-  timeoutMs: 60000,
   tier: 'represent',
+  confirmBeforeSend: true,
   domainKnowledge: 'Hotel housekeeping operations: room turnover sequencing, attendant assignment, cleanliness states, inspection standards, and staffing workload balance.',
   triggers: [
     { kind: 'event', on: 'Room status change requiring housekeeping turnover' },
@@ -54,4 +47,34 @@ export const HOUSEKEEPING_MANAGER_SKILL = withConfirmation(createExternalActionS
     { kind: 'user', phrase_examples: ['Assign a housekeeper to room 204', 'Mark room 301 as cleaned', 'Dispatch the morning housekeeping round'] },
   ],
   isSkill: true,
-}));
+  async handler(input, ctx) {
+    const tasks = ctx.store.load('housekeeping_tasks');
+    const action = input.action || 'list';
+    if (action === 'create' || action === 'update' || action === 'assign') {
+      const newTask = {
+        taskId: input.taskId || `task_${Date.now()}`,
+        roomId: input.roomId,
+        staffId: input.staffId,
+        status: input.housekeepingStatus || 'dirty',
+        priority: input.priority || 'medium',
+        updatedAt: new Date().toISOString(),
+      };
+      tasks.push(newTask);
+      ctx.store.save('housekeeping_tasks', tasks);
+      return {
+        success: true,
+        data: { task: newTask, totalTasks: tasks.length },
+        present: [
+          ctx.render.text('housekeeping-update', 'Housekeeping Task Updated', `Task ${newTask.taskId} for Room ${newTask.roomId || 'N/A'} is now ${newTask.status}.`),
+        ],
+      };
+    }
+    return {
+      success: true,
+      data: { tasks, totalTasks: tasks.length },
+      present: [
+        ctx.render.text('housekeeping-list', 'Housekeeping Tasks', `Total active housekeeping tasks: ${tasks.length}`),
+      ],
+    };
+  },
+});

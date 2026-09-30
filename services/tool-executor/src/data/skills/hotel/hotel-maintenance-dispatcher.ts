@@ -1,10 +1,8 @@
-import { createExternalActionSkill, createSchemaRecord, SchemaProps } from '../code-skill-factory';
+import { createDeclarativeCodeSkill, createSchemaRecord, SchemaProps } from '../code-skill-factory';
 import {
-  HOTEL_EXTERNAL_CONFIG_SCHEMA,
   HOTEL_EXTERNAL_OUTPUT_SCHEMA,
   HOTEL_LOCATION_INPUT,
   HOTEL_PROPERTY_BASE_INPUT,
-  withConfirmation,
 } from './hotel-external-common';
 
 const MAINTENANCE_INPUT_SCHEMA = createSchemaRecord({
@@ -35,24 +33,49 @@ const MAINTENANCE_INPUT_SCHEMA = createSchemaRecord({
   payload: SchemaProps.object({}, { description: 'Full operation payload for connector-specific fields', additionalProperties: true }),
 }, { required: ['propertyId'] });
 
-export const MAINTENANCE_DISPATCHER_SKILL = withConfirmation(createExternalActionSkill({
+export const MAINTENANCE_DISPATCHER_SKILL = createDeclarativeCodeSkill({
   id: 'hotel-maintenance-dispatcher',
   name: 'Maintenance Dispatch & Resolution',
   description: 'Create, update, assign, dispatch, complete, close, resolve, and escalate maintenance work orders from reported property issues. Mutating requests require confirmation and default to dry-run.',
-  system: 'hotel-pms',
-  action: 'maintenance',
-  endpoint: { envVar: 'HOTEL_HOME', method: 'POST' },
-  auth: { type: 'bearer', credentialEnvKeyMap: { token: 'HOTEL_API_TOKEN' } },
-  credentialSource: { token: { envVar: 'HOTEL_API_TOKEN', configKey: 'hotel.token' } },
+  persistenceEnvVar: 'HOTEL_HOME',
   inputSchema: MAINTENANCE_INPUT_SCHEMA,
   outputSchema: HOTEL_EXTERNAL_OUTPUT_SCHEMA,
-  configSchema: HOTEL_EXTERNAL_CONFIG_SCHEMA,
-  timeoutMs: 60000,
   tier: 'represent',
+  confirmBeforeSend: true,
   domainKnowledge: 'Hotel maintenance operations: work-order lifecycle, trade specialization, severity and priority triage, preventive maintenance scheduling, and guest-impact assessment during repairs.',
   triggers: [
     { kind: 'event', on: 'Maintenance issue reported for a room or facility area' },
     { kind: 'user', phrase_examples: ['Report a leaking faucet in room 212', 'Dispatch a technician', 'Escalate the HVAC work order'] },
   ],
   isSkill: true,
-}));
+  async handler(input, ctx) {
+    const workOrders = ctx.store.load('maintenance_work_orders');
+    const action = input.action || 'list';
+    if (action === 'create' || action === 'update' || action === 'assign' || action === 'dispatch') {
+      const order = {
+        taskId: input.taskId || `wo_${Date.now()}`,
+        roomId: input.roomId,
+        category: input.category || 'general',
+        severity: input.severity || 'minor',
+        status: input.status || 'open',
+        updatedAt: new Date().toISOString(),
+      };
+      workOrders.push(order);
+      ctx.store.save('maintenance_work_orders', workOrders);
+      return {
+        success: true,
+        data: { workOrder: order },
+        present: [
+          ctx.render.text('maintenance-update', 'Maintenance Work Order Processed', `Work Order ${order.taskId} status: ${order.status}`),
+        ],
+      };
+    }
+    return {
+      success: true,
+      data: { workOrders },
+      present: [
+        ctx.render.text('maintenance-list', 'Maintenance Work Orders', `Total work orders: ${workOrders.length}`),
+      ],
+    };
+  },
+});
