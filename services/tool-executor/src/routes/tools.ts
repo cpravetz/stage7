@@ -270,26 +270,39 @@ router.get(
     const { sourceId } = req.params
     const workspaceId = req.query.workspaceId as string | undefined
     const careerHome = process.env.CAREER_HOME || '/tmp/career'
-    // Job discovery writes to listings/default.json. The previous path
-    // (applications/listings.json) never existed, so this endpoint always returned empty.
-    const listingsPath = join(careerHome, 'listings', 'default.json')
 
-    let listings: unknown[]
-    try {
-      const fileContent = await readFile(listingsPath, 'utf-8')
-      const data = JSON.parse(fileContent)
-      listings = Array.isArray(data) ? data : (data.listings || [])
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-        logger.warn({ err, sourceId, listingsPath }, 'Failed to read reference data file')
+    const candidatePaths = [
+      join(careerHome, 'listings', 'default.json'),
+      join('/tmp', sourceId, 'data.json'),
+      join('/tmp', 'stage7-store', `${sourceId}.json`),
+      join('/tmp', `${sourceId}.json`),
+      join(process.cwd(), 'store', `${sourceId}.json`),
+    ]
+
+    let listings: unknown[] = []
+    for (const path of candidatePaths) {
+      try {
+        const fileContent = await readFile(path, 'utf-8')
+        const data = JSON.parse(fileContent)
+        if (Array.isArray(data)) {
+          listings = data
+        } else if (data && typeof data === 'object') {
+          listings = data.listings || data.items || data.ranked || data.results || data.data || []
+        }
+        if (Array.isArray(listings) && listings.length > 0) {
+          break
+        }
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+          logger.warn({ err, sourceId, path }, 'Failed to read reference data file candidate')
+        }
       }
-      listings = []
     }
 
     res.json({
       success: true,
       data: {
-        listings,
+        listings: Array.isArray(listings) ? listings : [],
         source: sourceId,
         workspaceId,
       },
