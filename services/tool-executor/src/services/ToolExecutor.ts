@@ -69,6 +69,7 @@ export class ToolExecutor {
   private pendingCredentialRequests = new Map<string, PendingCredentialRequest>();
   private pendingCredentialOverrides = new Map<string, Record<string, string>>();
   private nestedExecutionDepth = 0;
+  private currentExecutionApproved = false;
   private activeContextObject: string | null = null;
   private executionStates: Map<string, WorkflowState> = new Map();
   private toolRegistry: Map<string, Tool> | null = null;
@@ -513,6 +514,9 @@ return this.executeOrRequestCredentials(pending.tool, pending.input);
 
   private enforceConfirmation(tool: Tool, input: Record<string, unknown>, executionId: string): void {
     const confirmBeforeSend = tool.confirmBeforeSend === true || (tool.manifest?.confirmBeforeSend === true);
+    // Every execution re-derives its own gate, so reset the approval marker here
+    // rather than letting a previous run's approval leak into this one.
+    this.currentExecutionApproved = false;
     if (!confirmBeforeSend) {
       this.setWorkflowState(executionId, 'analysis');
       return;
@@ -526,6 +530,7 @@ return this.executeOrRequestCredentials(pending.tool, pending.input);
       throw new ConfirmationRequiredError(tool, summary);
     }
     if (hasConfirmation) {
+      this.currentExecutionApproved = true;
       this.transitionTo(executionId, 'approved');
     } else {
       this.setWorkflowState(executionId, 'analysis');
@@ -740,17 +745,26 @@ return this.executeOrRequestCredentials(pending.tool, pending.input);
       // composite skill (the caller swallowed the refusal and still reported success).
       // A represent-tier skill that would really act still needs approval: a dry run is safe to
       // nest, a live one is not.
+      // The approval the caller already cleared propagates. The caller only reaches this
+      // callback after enforceConfirmation approved it, so re-deriving the requirement here
+      // discards a decision the user already made, at a layer they cannot act on, and no
+      // gated skill could ever reach a gated callee. With nothing approved the gate stands.
       const needsApproval = callee.confirmBeforeSend === true || callee.manifest?.confirmBeforeSend === true;
-      if (needsApproval && input.dryRun !== true) {
+      const inheritedApproval = this.currentExecutionApproved;
+      if (needsApproval && input.dryRun !== true && !inheritedApproval) {
         return {
           success: false,
           error: `Nested execution requires confirmation for ${callee.id}; run it directly or pass dryRun.`,
         };
       }
+      // Carry the approval into the callee so its own enforceConfirmation admits it.
+      const calleeInput = inheritedApproval && input.confirmation !== true
+        ? { ...input, confirmation: true }
+        : input;
 
       this.nestedExecutionDepth++;
       try {
-        const result = await this.executeOrRequestCredentials(callee, input);
+        const result = await this.executeOrRequestCredentials(callee, calleeInput);
         if (result instanceof CredentialRequiredError) {
           return { success: false, error: `Credentials required for nested tool: ${callee.name}` };
         }
@@ -1448,6 +1462,7 @@ const result = await this.searchExecutor.execute(
 query: (input.query as string) || (input.q as string) || '',
 maxResults: (input.maxResults as number) || (input.max_results as number) || 10,
 searchType: (input.searchType as 'web' | 'images' | 'news') || 'web',
+    freshness: (input.freshness as 'day' | 'week' | 'month' | 'year') || undefined,
 },
 resolved,
 );

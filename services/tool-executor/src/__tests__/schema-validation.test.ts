@@ -101,7 +101,15 @@ describe('Schema Validation - Full Registry Inventory (Sprint 2)', () => {
         const manifest = skill.manifest as Record<string, unknown>;
         const isExternal = manifest.system !== undefined && manifest.action !== undefined;
         if (isExternal) {
-          expect(skill.confirmBeforeSend === true || skill.confirmBeforeSend === false || skill.confirmBeforeSend === undefined).toBe(true);
+          // Intended invariant: when confirmBeforeSend governance metadata is present on an
+          // external-action skill it must be a real boolean, at EITHER location the runtime
+          // gate reads, and the two locations must not contradict each other.
+          const topLevel = skill.confirmBeforeSend;
+          const manifestLevel = manifest.confirmBeforeSend;
+          expect(topLevel === undefined || typeof topLevel === 'boolean').toBe(true);
+          expect(manifestLevel === undefined || typeof manifestLevel === 'boolean').toBe(true);
+          expect(topLevel === true && manifestLevel === false).toBe(false);
+          expect(topLevel === false && manifestLevel === true).toBe(false);
         }
         expect(typeof skill.triggers === 'undefined' || Array.isArray(skill.triggers)).toBe(true);
       }

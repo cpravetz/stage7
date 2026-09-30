@@ -598,3 +598,382 @@ Questions 1–7 from the design review are all still open. The "too many inputs"
 ---
 
 *Report regenerated from the live skill registry, not from source inspection. Test results captured at time of writing: 2025 passing, 9 failing across 4 suites.*
+
+---
+
+# Addendum: Remediation Pass II — 2026-09-29
+
+This addendum is **additive**. It records work completed after the audit above and does not modify any prior section. All items in parts A–D are uncommitted working-tree modifications under `services/tool-executor/`.
+
+**Test status at time of writing:** `npx tsc --noEmit` exits 0. `npx jest` reports **31 suites / 2157 tests passing, 0 failures** — superseding the 4-suite / 9-test red state recorded in [Regressions introduced by this remediation](#regressions-introduced-by-this-remediation), which described the state at the end of the earlier pass.
+
+**Scope note:** parts A–E were re-verified against the working tree at the time of this addendum. Part F records open items; where a claim reported by a peer did not reproduce, that is stated explicitly rather than carried forward as fact.
+
+---
+
+## A. Web-search capability audit and remediation
+
+A sweep of all **139** files under `services/tool-executor/src/data/skills/` found that the internal general web-search tool `search_web` — defined at `src/data/nativeTools.ts:80`, implemented by `SearchExecutor.ts`, backed by Google / LangSearch / SearxNG / DuckDuckGo — had **zero call sites**.
+
+Only one skill hardcoded public hosts: `career-job-discovery` (Greenhouse / Ashby / Lever public APIs plus regex HTML scrapers for Indeed, Glassdoor, Monster, LinkedIn, Wellfound and company career pages). Every other `fetch()` call site is an operator-configured env-var endpoint (~50 skills) — legitimate vendor integrations, not web search.
+
+### A.1 Remediation applied
+
+| # | File | Defect | Fix |
+|---|------|--------|-----|
+| 1 | `src/data/skills/legal/legal-research.ts` | Hardcoded stub: `resultCount: 0`, `results: []`, a false notice claiming "no legal research provider is configured" (none was ever wired), and an unused `maxResults` param. No `configSchema`, so it was not awaiting a vendor. | Delegates to `search_web` with a constructed query (jurisdiction + source types + `after:`/`before:` bounds). Distinguishes **four** outcomes: results / genuinely-zero-results / search errored / search unavailable. |
+| 2 | `src/services/ToolExecutor.ts:1451` + `src/executors/SearchExecutor.ts` | `freshness` was declared in the `search_web` schema but silently dropped by the heuristic dispatch path at `ToolExecutor.ts:1445-1453`, which forwarded only `query` / `maxResults` / `searchType`. | Now forwarded. Google honours it via `dateRestrict` (day→`d1`, week→`w1`, month→`m1`, year→`y1`); SearxNG via `time_range`; LangSearch already did. DuckDuckGo's Instant Answer API cannot support it and now logs a warning naming the dropped value. `legal-research`'s user-facing disclosure was corrected to state this per-provider caveat. |
+
+### A.2 Explicitly NOT changed, by decision
+
+- **`career-job-discovery` keeps its site-specific scrapers.** Scraping specific named sites for specific structured fields is a distinct capability from general web search and must not be diluted to force a `search_web` dependency.
+- **~50 operator-configured endpoint skills** were left alone — these are configured vendor integrations, not web search.
+- **~20 local-reasoning skills** were left alone — these state in their own output that they never touch the web.
+
+---
+
+## B. Truthfulness defects fixed
+
+### B.1 Sports — false `dataConnected` claim (5 skills)
+
+`src/data/skills/sports/` computed `dataConnected` as `envVar.length > 0` while **no request was ever made**. An operator setting e.g. `ODDS_DATA_API_URL` was told the skill was data-connected while every number was synthesized.
+
+| # | Change | Detail |
+|---|--------|--------|
+| 1 | All 5 skills now issue a real request | With an `AbortController` timeout; the flag is derived from the actual outcome |
+| 2 | Four outcome states | `not-configured` / `http-error` / `network-error` / `ok` |
+| 3 | `parseSportsbookLines` removed | Dead code |
+| 4 | `fetchPlayerStats` → `resolvePlayerMetrics` | The old function never fetched anything; the new one actually calls the endpoint |
+
+Wagering-group safety boundary and Group A/B isolation are preserved.
+
+### B.2 Career `byBoard` ledger — broken scraper indistinguishable from an empty board
+
+In `src/data/skills/career/career-job-discovery.ts`, general-board scrapers could silently stop matching when a site changed, yet results were recorded `status: 'ok'`. That made a broken scraper indistinguishable from a genuinely empty board, defeating the skill's own header guarantee that an empty result is never silently reported as success.
+
+| Status | Meaning |
+|--------|---------|
+| `ok` | Extraction actually happened |
+| `no-match` | Structure verified, nothing matched |
+| `degraded` | Fetched, but structure unrecognised |
+| `no-page` | Career-page scraper only — all probed URLs 404'd or were unreachable (`career-job-discovery.ts:540`) |
+
+A new `present` block renders unverified sources with an explicit warning (`career-job-discovery.ts:813-818`). An all-degraded run can no longer render as "no jobs found".
+
+---
+
+## C. Test coverage gap closed
+
+`src/__tests__/tool-reference-integrity.test.ts` resolved `__execute_tool` targets against **skill arrays only**, so a literal `__execute_tool('search_web', …)` would have **failed** the test — the core tools were out of scope.
+
+The file now also covers `nativeTools` + `legacyGeneralTools` (**51** delegatable tools including names) and adds three tests:
+
+| New test | Guard |
+|-----------|-------|
+| Native/general tools are in the delegation set | Regression guard |
+| Every `__execute_tool` target is reachable in the default registry | Mirrors `resolveNestedTool`'s id-then-name fallback |
+| Registry composition stays in sync with `src/index.ts` `allDefaults` | Checked **in both directions** |
+
+---
+
+## D. Production bug fixed
+
+**`career-job-discovery.ts` regex escaping.** Its `sourceCode` is a template literal, so single-backslash escapes were consumed before execution: `([\s\S]*?)<\/a>` became `([sS]*?)</a>`, whose bare `/` closed the regex early and killed the child process with `SyntaxError: Invalid regular expression flags`. Double-escaped 4 regexes plus 2 `split('\n')` calls.
+
+---
+
+## E. Known limitations — NOT yet fixed
+
+**E.1 — `career-job-discovery` `ok` path unexercised.** The `ok` general-board path could not be exercised in the sandbox: all board fetches fail or return unrecognised markup there. The `no-match` path executed (LinkedIn), but `ok` is **verified by code reading only**. A run against live job boards is advisable.
+
+**E.2 — `research-planning` search action is an in-memory filter.** The `search` action in `src/data/skills/investment/research-planning.ts` filters a caller-supplied `documents` array in memory and labels the result `source: 'supplied-input'` (lines 87, 92, 131). Only 2 of its 15 actions are retrieval-shaped; the other 13 are planning math or need structured financial vendors. **Left unchanged pending a decision**, because adopting web search there alters a data contract callers may depend on.
+
+---
+
+## F. Open items deferred from this pass
+
+These are recorded as **open**, not done.
+
+| # | Item | State |
+|---|------|-------|
+| F.1 | `investment/research-planning` search action | **OPEN** — see E.2. Deferred pending a decision on the data contract. |
+| F.2 | `confirmBeforeSend`-inside-`manifest` pattern | **NOT REPRODUCED as described.** A peer reported `governed-publishing-cms-dispatcher.ts` carrying `confirmBeforeSend: true` inside `manifest` rather than as a top-level `createCodeSkill` option, with the Tool field therefore `undefined` (`createCodeSkill` reads `options.confirmBeforeSend` at `code-skill-factory.ts:66`) and the represent-tier gate failing. On re-check, that file sets it at **both** levels — top-level at line 312 and inside `manifest` at line 318 — so the Tool field is correctly populated. A brace-tracking sweep of all 139 skill files found **0** manifest-only occurrences. The reported failure mode does not currently exist; repeating the sweep when new skills land is still worthwhile. |
+| F.3 | Support exposes 0 user-facing skills | **STALE — already remediated in the prior pass.** The claim was that all 7 Support tools are `isSkill: false`, so `classifySkill()` types every entry as `base`. On re-check all 7 are `isSkill: true` (`support/index.ts:8` records this explicitly, and `supportCanonicalSkills` contains all 7 with `supportLowerOrderTools` empty). The empty-canonical-array detail is accurate but not Support-specific: `buildRegistry(supportSkills, [], …)` at `registry.ts:149` is one of **16** domains passing an empty canonical array, against **7** passing a non-empty list. The `X-Assistant-Id` gate is real and sits at `routes/tools.ts:75` and `:162` — `if (tool.isSkill && !req.header('x-assistant-id'))` throws `ValidationError` — not at `:88`/`:175` as reported. This is the same promotion risk already recorded as resolved in [17. Support Assistant](#17-support-assistant); the current evidence does not justify re-opening it. |
+
+---
+
+*Addendum recorded 2026-09-29. Verification: `npx tsc --noEmit` exit 0; `npx jest` 31 suites / 2157 tests passing, 0 failures. Parts A–E re-verified against the working tree at the time of writing; F.2 and F.3 re-checked and found not to reproduce as described.*
+
+---
+
+# Addendum: Remediation Pass III — 2026-09-29
+
+This addendum is **additive**. It records work completed after [Remediation Pass II](#addendum-remediation-pass-ii--2026-09-29) and modifies no prior section. All items in parts A–E are uncommitted, unstaged working-tree modifications under `services/tool-executor/`.
+
+**Test status at time of writing:** `npx tsc --noEmit` exits 0. `npx jest` reports **34 suites / 2275 tests passing, 0 failures** — superseding the 33 / 2270 figure first recorded for this addendum, itself superseding the 31 / 2157 figure in Pass II, itself superseding the 4-suite / 9-test red state recorded in [Regressions introduced by this remediation](#regressions-introduced-by-this-remediation).
+
+**Scope note:** parts A–E were re-verified against the working tree before being written down. Where line numbers here differ from those cited in earlier working notes, the working-tree numbers are the ones recorded. Part F records the state of the items this addendum opened: **F.1, F.2 and F.3 are now all closed** — see [F. Open items — all three now closed](#f-open-items--all-three-now-closed). The one item still open is recorded in [H. Open item — transient spawn failures treated as permanent](#h-open-item--transient-spawn-failures-treated-as-permanent) and is **not** claimed as done. A production bug found while verifying F.1 is recorded separately in [G. Production bug fixed — salary parsing always null](#g-production-bug-fixed--salary-parsing-always-null).
+
+---
+
+## A. Approval-propagation defect in the executor
+
+`ToolExecutor.ts` `nestedExecutorCallback()` re-derived the nested callee's confirmation requirement **from scratch**, *after* the calling skill had already cleared its own gate. An approved represent-tier parent delegating to a gated child was refused anyway. The consequence is precise and severe: **a gated parent could never live-execute a gated child.** The user's approval was silently discarded and re-demanded at a layer they cannot act on.
+
+Live impact: this broke `marketing-center` dispatch into `marketing-social-media`, `marketing-email` and `marketing-document-management`.
+
+### A.1 Fix applied
+
+| # | Location | Change |
+|---|----------|--------|
+| 1 | `src/services/ToolExecutor.ts:72` | New executor-scoped `currentExecutionApproved` flag |
+| 2 | `src/services/ToolExecutor.ts:519` | Reset at the **top of every `enforceConfirmation` call**, so a prior run's approval cannot leak into a later execution |
+| 3 | `src/services/ToolExecutor.ts:533` | Set in the approved branch only |
+| 4 | `src/services/ToolExecutor.ts:752-763` | The nested refusal is **retained** but conditioned on `!inheritedApproval`; on inherited approval the callee receives `confirmation: true` so its own gate admits it |
+
+Unchanged: the `dryRun` escape hatch, and the `MAX_NESTING_DEPTH` guard.
+
+**The gate was not deleted.** A nested call into a gated callee is still refused when nothing has approved it — asserted in the negative as well as the positive.
+
+### A.2 Proof
+
+Three tests in `src/__tests__/nested-execution.test.ts`:
+
+| Test | What it pins |
+|------|--------------|
+| Approved parent permits a gated child | the propagation branch |
+| Unapproved parent is still refused | the refusal survives the fix |
+| An earlier approved execution does not approve a later unapproved one | the per-`enforceConfirmation` reset — the anti-leak guard |
+
+---
+
+## B. Gating holes the fix exposed
+
+Removing the workaround exposed two genuine gaps. Both are now closed.
+
+| # | Skill | Why it was ungated | Why it is a live hole | State |
+|---|-------|--------------------|----------------------|-------|
+| 1 | `content-multi-channel-publishing` (`system: content_publishing`, `action: publish`) | Ungated only *because* gating it would have made approved publishing impossible under the defect in A. | It is `isSkill: false`, so `routes/tools.ts:75` requires **no assistant context** — making `POST /tools/content-multi-channel-publishing/execute` a live CMS write with no approval anywhere in the path. The dispatcher's in-skill `confirmation` check is a data field, not a runtime gate. | Now gated |
+| 2 | `marketing-seo` (`action: optimize-seo`) | Assumed read-only. | An unguarded POST of the full input to `MARKETING_SEO_ENDPOINT`, against providers (Search Console, Semrush, Ahrefs) that all expose write surfaces, with a schema field documented as "analysis or optimization". | Now gated |
+
+**Item 2 was initially misjudged.** One analysis concluded `marketing-seo` was read-only; reading the source refuted that. It was deliberately **not** added to the read-only action set in `confirmation-gate.ts` — doing so would have silenced the gate on a live write rather than fixing anything.
+
+New `src/__tests__/approved-delegation-regression.test.ts` runs both approved paths end to end, and asserts the unapproved path is still refused for both.
+
+> **Coverage caveat, verified.** The pre-existing content test at `content-skills.test.ts:433` does **not** cover this. Its helper registers no callee, so gating the skill would neither break it nor catch the regression. The gap was invisible to the existing suite by construction.
+
+---
+
+## C. Vacuous assertions replaced, and what they uncovered
+
+The governance tests asserted gate state with expressions of the form `expect(x === true || x === false || x === undefined).toBe(true)`. **These can never fail** — the disjunction is a tautology over the full domain of `boolean | undefined`. Six such occurrences were removed across `schema-validation.test.ts`, `skill-classification.test.ts` and `workflow-governance.test.ts` (one written with a four-clause variant).
+
+### C.1 Why the first replacement turned 14 tests red
+
+The predicate they were built around matched **prose**. The mutating-skill test scanned `description` for words including `action`, `schedule` and `execute`. Screenplays contain ACTION lines, so `scriptwriting-scene-beat-dialogue-copilot` matched "action" and was reported as a mutating skill; a warehouse query is "executed", so `analytics-adhoc-query-evaluator` matched too. The 14 red tests were the predicate being wrong, not the skills.
+
+### C.2 The behavioral predicate
+
+Replaced with `src/__tests__/confirmation-gate.ts`, which uses only the two signals the runtime actually honours:
+
+```
+a skill mutates  ==  tier === 'represent'
+                 OR  (declares an external-action contract AND its action is not read-only)
+```
+
+| Clause | Signal | Note |
+|--------|--------|------|
+| Tier | `tier === 'represent'` | The declared "acts on the user's behalf" tier. **Insufficient alone** — three confirmed-mutating skills are `aid`, including `education-resource-library`, which uploads to a connected repository. |
+| Action | `manifest.system` + `manifest.action` | Structured data written by the author beside the endpoint, not prose. **Fail-closed**: an action counts as mutating unless *positively* declared read-only, because a gate must default to asking rather than to staying quiet. |
+
+### C.3 Confirmed real gaps — fixed
+
+| Skill | Why it mutates | State |
+|-------|----------------|-------|
+| `marketing-content-generation` | Writes campaign content into a connected CMS; its sibling channels (social, email, document-management) all gate their live dispatch | Gated (`marketing/index.ts:158`) |
+| `product-confluence` | Creates and updates Confluence pages (`action: manage_page`); sibling integrations all gate their live call | Gated (`product/index.ts:668`) |
+| `education-resource-library` | Uploads, tags and curates resources in Drive/SharePoint/LMS | Gated (`education/resource-library-ops.ts:78`) |
+
+### C.4 Rejected as false positives
+
+| Skill | Why it is not a gap |
+|-------|---------------------|
+| `content-multi-channel-publishing` | The in-skill `confirmation` field is a **data field, not a runtime gate** — the declared contract is satisfied. Gated anyway, on the independent `isSkill: false` reachability grounds in B, not on this predicate. |
+| `career-application-execution` | `dryRun` by default (`career-application-execution.ts:15`, schema `default: true`); it never contacts an employer unless the caller explicitly opts out of the dry run. |
+
+### C.5 Non-vacuity is mutation-proven
+
+The new predicate is itself pinned by deliberate mutation: removing the `confirmBeforeSend` flag from `product-confluence`, and separately from `governed-publishing-cms-dispatcher`, each turns the suite **red**. A predicate that cannot detect a missing gate is the defect that was just fixed, so this is checked, not assumed.
+
+---
+
+## D. Failure-semantics correction
+
+**Stated principle:** *"There is no offline. Any inability to retrieve search results is a failure within our system, not the network."*
+
+A soft-advisory path built in an earlier pass violated this principle directly: it returned `success: true` with a note asking the user to treat the results as "inconclusive". That asks the **user** to do the error handling the system exists to do. It is corrected here, everywhere it appeared.
+
+### D.1 `career-job-discovery.ts`
+
+`degraded`, `no-page`, `unavailable` and `unverified` are **all removed**. One status — `error` — now means *could not retrieve or parse*. `no-match` is retained as the **only legitimate empty**: retrieved, structure recognised, nothing matched. A definitive HTTP 404 on a pinned ATS board also qualifies as `no-match`, because that is a real answer about the board, not a failure to ask.
+
+| Run condition | Contract |
+|----------------|----------|
+| All sources answered | `success: true`, `status: 'ok'` |
+| Some answered, some did not | `status: 'partial'`, **non-null `error`** naming each failure, plus a `RETRIEVAL FAILURE` block |
+| None readable | `success: false`, `status: 'failed'`, with a `failure` block leading the output |
+
+**Why partial rather than total.** Discarding real, correctly-retrieved listings because other boards were down would destroy correct work. But partial is **loud** — never a clean pass, never an `ok`. The Pass II `degraded` / `no-page` split is superseded by this, not merely supplemented.
+
+### D.2 `research-planning.ts` — the same defect, twice
+
+| Was | Now |
+|-----|-----|
+| A failed search returned `success: true, status: 'ok'` with the failure buried in a data field | `status: 'partial'` with a **non-null** `error` when material *was* returned |
+| A hard search error counted as a failure only if the caller supplied no documents | `success: false` when nothing real could be returned |
+
+Zero results remains a **legitimate answer** and is reported as such — "the search worked and there is nothing" is not "the search failed".
+
+`legal-research.ts` was already correct: it has no second source, so it always reported honestly. **That asymmetry is what exposed the shape problem elsewhere** — a skill with one source cannot express partial retrieval failure, which is exactly why the failure was invisible in `legal-research` and obvious in the two-source skills.
+
+### D.3 Two latent bugs fixed in career en route
+
+| # | Bug | Effect |
+|---|-----|--------|
+| 1 | The ATS probe loop read `byBoard[byBoard.length-1]` on a path where nothing was pushed | A 404 on one board could **flip an unrelated board's status** — cross-contaminated results |
+| 2 | 404s were collapsed together with network errors | An "this board does not exist" answer was indistinguishable from "we could not reach the network" |
+
+Both are closed at `career-job-discovery.ts:335-350` (`recordAtsFailure`).
+
+---
+
+## E. Test-suite findings
+
+| # | Finding | State |
+|---|---------|-------|
+| 1 | **Career ledger tests — executed coverage.** The `ok` path and the total-failure path are now *executed*, not reasoned about. A new `src/__tests__/career-job-discovery-ledger.test.ts` stubs the network with a child-process fetch interceptor installed via `NODE_OPTIONS=--require`, and runs the **unmodified** skill end to end. This closes E.1 from Pass II. | Done |
+| 2 | **A vacuous pass was caught and fixed while writing #1.** The interceptor route table used `https://www.wellfound.com/...`, but the skill requests `wellfound.com` — the `www.` route never matched, so the stub fell through to the real network and the test passed without testing anything. | Fixed |
+| 3 | **`career-skills.test.ts` flake.** The test passing `companies: ['Acme']` makes **real outbound job-board calls** with a 20s timeout and 2 retries, consuming 8.9–13.3s of budget on a good run. Its per-test budget was **hardcoded, overriding the CLI flag**; raised 15s to 30s. 8 consecutive clean runs confirmed. | Mitigated, **not fixed** — see F.1. **Since closed**: F.1 was taken up and all three live-network tests now use a stubbed harness — see [F.1](#f1-career-skillstestts-live-network-dependency--closed). The state cell is left as originally recorded. |
+| 4 | **`tool-reference-integrity.test.ts` resolution set** extended to `nativeTools` + `legacyGeneralTools` (**51** delegatable tools) with three added tests. | Done |
+| 5 | **`career-job-discovery.ts` regex escaping bug (production).** `([\s\S]*?)<\/a>` inside a template literal became `([sS]*?)</a>`, whose bare `/` closed the regex early and killed the child process. | Already recorded as Pass II D; carried forward for completeness |
+
+> **Test-design weakness, stated plainly.** Finding 3 is a mitigation, not a repair. That test measures **job-board network reachability**, not the assertion it names. It will go red when a job board rate-limits, changes markup, or is unreachable from the build host, and it will go green again when the network cooperates — regardless of whether the code under test is correct.
+>
+> **Since closed.** F.1 was taken up, and the weakness above is repaired rather than merely mitigated: the test no longer measures job-board reachability at all. It was also **passing vacuously** — see F.1.
+
+---
+
+## F. Open items — all three now closed
+
+All three items this addendum opened are now closed. **F.3** was closed before this addendum was first written and its entry is unchanged. **F.1** and **F.2** were taken up afterwards and are recorded below in full. The one item still open is not in this section; it is [H. Open item — transient spawn failures treated as permanent](#h-open-item--transient-spawn-failures-treated-as-permanent).
+
+| # | Item | State |
+|---|------|-------|
+| F.1 | **Career ISO-datetime test still depends on live job-board reachability** (E.3). A stub for those endpoints, in **TEST code only**, would make it fast and deterministic. | **CLOSED.** The brief had identified one live-network test; **two more also passed `queries` without `companies`,** which still drives all five general-board scrapers. All three now run against the existing child-process fetch-interceptor harness. **No production change was involved.** See [F.1](#f1--live-network-dependency-in-tests-closed). |
+| F.2 | **`career-job-discovery-fit-ranking.ts:46`** consumes `discovery.success` / `discovery.error` but does **not** forward the new `status: 'partial'` or `data.failures` from the updated job-discovery contract. | **CLOSED.** Both consumers of `career-job-discovery` now map the full upstream status contract. See [F.2](#f2--partial-result-propagation-closed). |
+| F.3 | **Vacuous assertion at `skill-classification.test.ts:79`** — the two-clause `expect(skill.isSkill === true \|\| skill.isSkill === false).toBe(true)` inside an `if (skill.isSkill !== undefined)` guard. | **FIXED.** *(unchanged since first written)* Replaced with `expect(typeof skill.isSkill).toBe('boolean');`, a real type check that fails for `isSkill: 'true'`, `0`, `1`, `null`, etc. No sibling test covered the intent, so it was a replacement rather than a removal. A follow-up sweep of `src/__tests__/` for this pattern returned **no further occurrences**. |
+
+---
+
+### F.1 — live-network dependency in tests, CLOSED
+
+Three tests in `src/__tests__/career-skills.test.ts` made **real outbound job-board calls**. The brief had identified one of them; finding the rest was part of the work — the other two passed `queries` without `companies`, which still drives all five general-board scrapers, so they were just as live as the one that had been flagged. All three now use the existing child-process fetch-interceptor harness (the same `NODE_OPTIONS=--require` seam as `career-job-discovery-ledger.test.ts`), and the skill's own `sourceCode` runs **unmodified** — what is asserted is the real scraper regexes, the real ATS normalisers and the real output formatting.
+
+| # | Measurement | Before | After |
+|---|-------------|--------|-------|
+| 1 | `career-skills.test.ts` suite time | ~9.2s | **~3.2s** |
+| 2 | Slowest single test in the file | 4566ms | **59ms** |
+| 3 | Per-test budget in the file | 30000 (the Pass II workaround) | **15000** — the value the file shipped with at HEAD |
+
+**The budget revert is a reversal, not a tightening.** Pass II raised it 15000 to 30000 as a mitigation. The mitigation is gone, so the workaround was reverted; `git show HEAD:...career-skills.test.ts` contains 11 occurrences of `15000` and none of `30000`, confirming 15000 is the pre-workaround value rather than a new choice.
+
+**A harness precondition now prevents silent regression.** A drifted URL prefix would let the interceptor fall through to the real network and the test would pass without testing anything — the exact trap already caught once in E.2. `runJobDiscovery()` therefore takes the list of hosts each test expects to be stubbed and **throws** if any of them was never requested. It throws rather than calling `expect()` for the same reason the ledger sibling does: the assertion belongs to the test body, the precondition belongs to the fixture.
+
+> **The ISO-datetime test had been passing vacuously.** This is the most consequential finding in F.1. Every job board was unreachable from the build host, so the run produced **zero listings** — and with zero listings there were **zero datetimes to check**. The assertion `expect(body).not.toMatch(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/)` could not fail, because the string it was checking for had nothing to match against. The test was green *because the network was broken*. It now runs against a Greenhouse board that answers with real ISO-8601 `updated_at` instants, so the formatting it claims to test is genuinely exercised.
+
+**Nothing was preserved for the unreachable case, and that is a decision, not an omission.** The stated principle in D is that there is no offline state. The original open item argued that fixing F.1 would "remove the incidental coverage of real offline behaviour that currently falls out of the live test" — that trade-off is withdrawn. On inspection the two tests that appeared to depend on it **require reachable boards**: one asserts `result.success === true`, which a total failure breaks, and the other asserts a no-match message that only the reachable-but-empty branch emits. There was no offline coverage to lose, because the offline state was producing the vacuous pass documented above.
+
+---
+
+### F.2 — partial-result propagation, CLOSED
+
+`career-job-discovery-fit-ranking.ts` consumed only `discovery.success === false`, so an upstream `partial` — some job boards unretrievable — surfaced **downstream as a clean pass**. That is the exact failure mode D was written to eliminate, reintroduced one layer up.
+
+It now maps the full upstream contract:
+
+| Upstream `status` | Downstream treatment |
+|-------------------|---------------------|
+| `ok` | Clean pass |
+| `no-match` | Legitimate empty — **never** a failure |
+| `partial` | `status: 'partial'` with a **non-null** error; the **real rankings are retained**, not discarded; `data.failures[]`, `data.complete: false` and `data.discoveryStatus` are forwarded; a `PARTIAL RESULT — N source(s) were never read` present block is emitted |
+| `failed` / `blocked` | `success: false`, carrying the upstream error and the upstream status |
+
+**A second defect on the same path:** the failure branch returned no `data` object at all, despite the skill's own `outputSchema` requiring one. That is now returned.
+
+`career-job-market-positioning-evaluator.ts` had the same gap and a worse one. `byBoard` passed through **opaquely**, so a partial read looked like a complete one; and a **total** discovery failure reported `success: true` with a soft "profile-only positioning" note — the exact soft-advisory pattern D.2 called out and corrected in `research-planning`, surviving one layer further up. It now carries the upstream `status` and `failures`, maps `partial` to a `PARTIAL MARKET READ` block, and maps `failed` to `success: false`.
+
+**No other callers exist.** `career-job-discovery` is invoked only by these two skills; the remaining references to it in `career/index.ts` and the `lowerOrderTools` arrays are delegation metadata, not invocations. The fix is therefore complete, not partial.
+
+---
+
+## G. Production bug found and fixed — salary parsing always null
+
+Found while verifying F.1. This is a **production** defect, not a test artifact, and it was live before any of this remediation work.
+
+Four `new RegExp('<string>')` calls inside the `manifest.sourceCode` template literal of `career-job-discovery.ts` — working-tree lines **367, 372, 431, 432**, and **289, 294, 353, 354 at HEAD** — were broken by template-literal escape consumption. `\\d` collapsed to `\d`, and the JS engine then read `'\d'` as the string `'d'`, making the effective regex **`d+(?:.d+)?`** — which matches only a **literal letter "d"**. Consequently `fromGreenhouse` and `fromLever` returned `salary: null` for **every** real pay range. It is pre-existing at HEAD and was **not** introduced by the recent work.
+
+```
+new RegExp('\\d+(?:\\.\\d+)?', 'g')   // as written in the source file
+  \  is eaten by the enclosing template literal
+  new RegExp('\d+(?:\.\d+)?', 'g')     // ...becomes this
+  '\d' is the string 'd'
+  effective regex:  d+(?:.d+)?            // matches a literal "d", never a digit
+```
+
+> **Important correction to the obvious fix — record this, it will mislead the next reader.** Converting the strings to **regex literals** such as `/\d+/` **does not work**. `\d` is consumed as a template escape in a regex literal *exactly as* it is in a string. An initial attempt using that form was applied, tested, and **still emitted `d+(?:.d+)?`**. This is not a distinction between string and literal form; the escape is consumed by the *template literal*, which encloses both.
+
+The fix that actually works uses **backslash-free character classes**, which no escape processing can alter:
+
+| Site | Before (broken) | After (fixed) |
+|------|-----------------|---------------|
+| Greenhouse min/max | `new RegExp('\\d+(?:\\.\\d+)?', 'g')` | `/[0-9]+(?:[.][0-9]+)?/g` |
+| Greenhouse currency | `new RegExp('([$£€])\\s?\\d')` | `/([$£€])[^0-9]*[0-9]/` |
+| Lever guard | `new RegExp('\\d')` | `/[0-9]/` |
+| Lever min/max | `new RegExp('\\d+(?:\\.\\d+)?', 'g')` | `/[0-9]+(?:[.][0-9]+)?/g` |
+
+Verified against the real parsers:
+
+- `fromGreenhouse("$150,000 - $190,000 USD")` → `{ min: 150000, max: 190000, currency: "USD", raw: "$150,000 - $190,000 USD" }`
+- `fromLever("120000-160000")` → `{ min: 120000, max: 160000, ... }`
+
+New `src/__tests__/career-job-discovery-salary.test.ts` (**5 tests**) pins both parsers and adds guards against this class recurring — including one that rejects any `new RegExp(...)` whose string argument carries a backslash escape, and one that asserts the emitted regex actually matches digits in real salary strings. **Mutation-verified:** the original broken code fails **5/5**, and the insufficient regex-literal form fails **4/5**. A test that the wrong fix passes is not evidence; the second mutation is the one that catches the trap documented above.
+
+**This is the third instance of the same template-literal escape class in this one file.** The Pass II fix recorded in D addressed the job-card scraper regexes; these are a **separate set of sites** and were missed by it. The class is not yet eliminated from the file — it has now appeared three times, and the new test's blanket guard is the response.
+
+---
+
+## H. Open item — transient spawn failures are treated as permanent
+
+**This item is OPEN and is NOT claimed as done.**
+
+`ErrorHandler.classify` (`src/utils/ErrorHandler.ts:51`) has branches for timeout, missing tool, not-connected and validation, but **none for spawn or resource errors**. `EAGAIN`, `EMFILE` and `ENOMEM` therefore fall through to the bottom of the classifier and are returned as `UNKNOWN / PERMANENT / retryable: false`.
+
+The consequence runs straight through the executor. `isCodeExecutionError` (`ErrorHandler.ts:164`) returns true only for `EXECUTION` or `TIMEOUT`; the healing loop in `ToolExecutor` is gated on exactly that call, and on a false result it falls through to `return ErrorHandler.formatResult(classified)` with **zero retries** (`ToolExecutor.ts:1155-1157`). A transient spawn hiccup — process table full, momentary fork pressure — therefore becomes an **unretried permanent failure for every code skill in the registry**, on the strength of an error the system knows nothing about.
+
+| Step | What happens |
+|------|--------------|
+| 1 | Spawn fails with `EAGAIN` / `EMFILE` / `ENOMEM` |
+| 2 | `classify` finds no matching branch → `UNKNOWN / PERMANENT / retryable: false` |
+| 3 | `isCodeExecutionError` → `false` (not `EXECUTION`, not `TIMEOUT`) |
+| 4 | Healing is skipped, the loop breaks, **0 retries** |
+| 5 | The caller receives a permanent failure for a condition that would clear on its own |
+
+**Characterisation method and its limits, stated plainly.** This was established by **fault injection**, not by observation. It was **not** seen failing in practice: 24/24 clean runs, including runs under deliberate CPU load, produced no such failure. So the severity here is *latent blast radius*, not observed incidence — a real defect on a path that has simply not been hit, rather than a recurring outage. That distinction is the reason it is recorded as an open item rather than as a fix.
+
+**Recommendation:** classify spawn/resource errors as transient, and add a bounded respawn with backoff in `CodeExecutor`. No change has been made.
+
+---
+
+*Addendum recorded 2026-09-29; F.1, F.2, G and H added 2026-09-30. Verification at time of writing: `npx tsc --noEmit` exit 0; `npx jest` **34 suites / 2275 tests passing, 0 failures**. Parts A–E were re-verified against the working tree — executor flag/reset/set sites, the retained-but-conditioned nested refusal, both newly gated skills, all three confirmed gaps, the two rejected false positives, the six removed tautologies, the absence of `degraded`/`no-page`/`unavailable`/`unverified` from the job-discovery contract, the `research-planning` partial/failed branches, and `career-job-discovery-fit-ranking.ts:46` were each confirmed by direct read, not by report. The vacuous-assertion sweep (`grep -rn "=== true || .*=== false" src/__tests__/` and `grep -rn "=== true || .*=== false || .*=== undefined" src/__tests__/`) returns empty — **no vacuous assertion forms remain in `src/__tests__/`**.*
+
+> **Working-tree state, corrected.** The tree currently holds **24 modified files and 5 untracked test files** (`approved-delegation-regression.test.ts`, `career-job-discovery-ledger.test.ts`, `career-job-discovery-salary.test.ts`, `confirmation-gate.ts`, `fixtures/`). The "22 modified" figure recorded elsewhere in this addendum was an **undercount**. The git stash list is **empty** and the working tree is intact — all work is uncommitted, unstaged modifications.

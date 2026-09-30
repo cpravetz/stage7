@@ -14,10 +14,25 @@ const CAREER_BASE_CONFIG_SCHEMA: SchemaRecord = { type: 'object', properties: {}
 //     - Ashby        https://api.ashbyhq.com/posting-api/job-board/<name>
 //     - Lever        https://api.lever.co/v0/postings/<company>
 //
-// Every run reports per-board status so a caller can always tell a real empty result
-// (board has no matching roles) apart from a source that never ran.
+// Every run reports a per-source status derived from what actually happened, never
+// merely from the fact that an HTTP request returned:
+//   ok       - pages fetched AND listings extracted
+//   no-match - pages fetched, page structure recognised, genuinely nothing matched.
+//               A real answer from a source we did read, not a failure.
+//   error    - the source could NOT be retrieved, or was retrieved but its structure
+//               could NOT be recognised (request failed, page unreachable, layout
+//               changed). There is no offline: an inability to retrieve is a failure
+//               inside this system, so it surfaces through success / status / error
+//               rather than riding along as a caveat on a passing run.
+// A source is never reported as ok when nothing was extracted, and a retrieval
+// failure is never reported as no-match.
 //
-// Returns { success, data: { listings, total, byBoard, storagePath, ... } }
+// A run is a failure when no source it consulted could be read, and a partial
+// success when some sources answered and others could not be retrieved at all.
+// A run in which every source was read and genuinely had no matching roles is an
+// ok run whose answer is zero.
+//
+// Returns { success, status, data: { listings, total, byBoard, failures, ... }, error }
 const CAREER_JOB_DISCOVERY_SOURCE = `0; (async () => {
 const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
 const fs = require('fs');
@@ -115,15 +130,35 @@ async function fetchHtml(url) {
   return await httpGet(url, null, false);
 }
 
+// Sums the per-query attempts of one board into a single honest status.
+//   ok       - at least one listing was actually extracted
+//   no-match - every reachable page looked structurally normal (card-shaped markup
+//              present) but nothing matched the query filters. A real answer.
+//   error    - the request failed, or the page was fetched but no card-shaped markup
+//              was recognised at all (layout change / bot wall). The source was not
+//              read, so this is a failure and is never reported as ok or as no-match.
+function summarizeBoard(attempts) {
+  const total = attempts.reduce((n, a) => n + (a.count || 0), 0);
+  if (total > 0) return { status: 'ok', count: total, reason: 'extracted ' + total + ' listing' + (total === 1 ? '' : 's') + ' from the fetched pages' };
+  const reachable = attempts.filter((a) => a.fetched);
+  if (!attempts.length || reachable.length === 0) {
+    return { status: 'error', count: 0, reason: 'request failed or timed out for all ' + attempts.length + ' quer' + (attempts.length === 1 ? 'y' : 'ies') };
+  }
+  const shaped = reachable.filter((a) => a.structure);
+  if (shaped.length === 0) {
+    return { status: 'error', count: 0, reason: 'fetched ' + reachable.length + ' of ' + attempts.length + ' page(s) but recognised no job-card markup at all \u2014 the layout has probably changed, so this source could not be read' };
+  }
+  return { status: 'no-match', count: 0, reason: 'fetched ' + reachable.length + ' of ' + attempts.length + ' page(s), job-card markup present, but nothing matched the query filters' };
+}
+
 async function searchWellfound(query, location) {
   const q = encodeURIComponent(query);
   const loc = location ? encodeURIComponent(location) : '';
   const url = 'https://wellfound.com/jobs?query=' + q + (loc ? '&location=' + loc : '') + '&sort_by=recent';
   const res = await fetchHtml(url);
-  if (!res.ok) return [];
+  if (!res.ok) return { jobs: [], fetched: false, structure: false };
   const html = res.data;
   const jobs = [];
-  const re = /data-job-id="(\\d+)"|/g;
   // Fallback generic scraping: look for job links and company names
   const linkRe = /<a[^>]+href="([^"]+)"[^>]*class="[^"]*(?:job|result|styles__card)[^"]*"[^>]*>([\\s\\S]*?)<\\/a>/gi;
   let m;
@@ -139,26 +174,43 @@ async function searchWellfound(query, location) {
     jobs.push({ id, title: stripHtml(title), company: stripHtml(company), location: stripHtml(locationText), applyUrl: href.startsWith('http') ? href : ('https://wellfound.com' + href), source: 'Wellfound', postedAt: null, salary: null });
     seen++;
   }
-  return jobs;
+  // Cheap positive signal: a real results page still carries card markup even when
+  // zero roles match the query. No markup at all means we are not looking at a page
+  // we understand, so an empty result must not be reported as "no matching roles".
+  const shellRe = /data-job-id="[^"]*"|styles__card|styles__job|jobPosting|StartupsList/i;
+  return { jobs: jobs, fetched: true, structure: shellRe.test(html) };
 }
 
+const GENERAL_BOARD_SCRAPERS = [
+  { name: 'Indeed', fn: searchIndeed },
+  { name: 'Glassdoor', fn: searchGlassdoor },
+  { name: 'Monster', fn: searchMonster },
+  { name: 'LinkedIn', fn: searchLinkedIn },
+  { name: 'Wellfound', fn: searchWellfound },
+];
+
+// Each scraper reports { jobs, fetched, structure }, so an empty result can be told
+// apart from a scraper whose regex no longer matches the site's HTML.
 async function searchGeneralBoards(queryList, location) {
   const results = [];
+  const attempts = {};
+  for (const b of GENERAL_BOARD_SCRAPERS) attempts[b.name] = [];
   for (const q of queryList) {
+    let outcomes;
     try {
-      const [indeed, glassdoor, monster, linkedin, wellfound] = await Promise.all([
-        searchIndeed(q, location),
-        searchGlassdoor(q, location),
-        searchMonster(q, location),
-        searchLinkedIn(q, location),
-        searchWellfound(q, location),
-      ]);
-      results.push(...indeed, ...glassdoor, ...monster, ...linkedin, ...wellfound);
+      outcomes = await Promise.all(GENERAL_BOARD_SCRAPERS.map((b) => b.fn(q, location)));
     } catch (e) {
       console.error('General board search error for query "' + q + '": ' + (e instanceof Error ? e.message : String(e)));
+      for (const b of GENERAL_BOARD_SCRAPERS) attempts[b.name].push({ fetched: false, structure: false, count: 0 });
+      continue;
     }
+    GENERAL_BOARD_SCRAPERS.forEach((b, i) => {
+      const o = outcomes[i] || { jobs: [], fetched: false, structure: false };
+      attempts[b.name].push({ fetched: !!o.fetched, structure: !!o.structure, count: (o.jobs || []).length });
+      for (const j of o.jobs || []) results.push(j);
+    });
   }
-  return results;
+  return { jobs: results, attempts: attempts };
 }
 
 async function searchIndeed(query, location) {
@@ -166,7 +218,7 @@ async function searchIndeed(query, location) {
   const loc = location ? encodeURIComponent(location) : '';
   const url = 'https://www.indeed.com/jobs?q=' + q + (loc ? '&l=' + loc : '') + '&fromage=14';
   const res = await fetchHtml(url);
-  if (!res.ok) return [];
+  if (!res.ok) return { jobs: [], fetched: false, structure: false };
   const html = res.data;
   const jobs = [];
   const re = /data-jk="([^"]+)".*?data-company-name="([^"]+)".*?data-location="([^"]+)"/gs;
@@ -186,7 +238,8 @@ async function searchIndeed(query, location) {
       salary: null,
     });
   }
-  return jobs;
+  const shellRe = /data-jk="[^"]*"|jcs-JobCard|job_seen_beacon|<article/i;
+  return { jobs: jobs, fetched: true, structure: shellRe.test(html) };
 }
 
 async function searchGlassdoor(query, location) {
@@ -194,7 +247,7 @@ async function searchGlassdoor(query, location) {
   const loc = location ? encodeURIComponent(location) : '';
   const url = 'https://www.glassdoor.com/Job/jobs.htm?sc.keyword=' + q + (loc ? '&locT=C&locId=' + loc : '') + '&fromAge=14';
   const res = await fetchHtml(url);
-  if (!res.ok) return [];
+  if (!res.ok) return { jobs: [], fetched: false, structure: false };
   const html = res.data;
   const jobs = [];
   const re = /data-job-id="([^"]+)".*?data-employer-name="([^"]+)".*?data-location="([^"]+)"/gs;
@@ -214,7 +267,8 @@ async function searchGlassdoor(query, location) {
       salary: null,
     });
   }
-  return jobs;
+  const shellRe = /data-job-id="[^"]*"|jobTitle|react-job-listing|JobCard|<article/i;
+  return { jobs: jobs, fetched: true, structure: shellRe.test(html) };
 }
 
 async function searchMonster(query, location) {
@@ -222,7 +276,7 @@ async function searchMonster(query, location) {
   const loc = location ? encodeURIComponent(location) : '';
   const url = 'https://www.monster.com/jobs/search?q=' + q + (loc ? '&where=' + loc : '') + '&age=14';
   const res = await fetchHtml(url);
-  if (!res.ok) return [];
+  if (!res.ok) return { jobs: [], fetched: false, structure: false };
   const html = res.data;
   const jobs = [];
   const re = /data-job-id="([^"]+)".*?data-company-name="([^"]+)".*?data-location="([^"]+)"/gs;
@@ -242,7 +296,8 @@ async function searchMonster(query, location) {
       salary: null,
     });
   }
-  return jobs;
+  const shellRe = /data-job-id="[^"]*"|job-result|jobResult|jobCard|job-listing|<article/i;
+  return { jobs: jobs, fetched: true, structure: shellRe.test(html) };
 }
 
 async function searchLinkedIn(query, location) {
@@ -250,7 +305,7 @@ async function searchLinkedIn(query, location) {
   const loc = location ? encodeURIComponent(location) : '';
   const url = 'https://www.linkedin.com/jobs/search?keywords=' + q + (loc ? '&location=' + loc : '') + '&f_TPR=r604800';
   const res = await fetchHtml(url);
-  if (!res.ok) return [];
+  if (!res.ok) return { jobs: [], fetched: false, structure: false };
   const html = res.data;
   const jobs = [];
   const re = /data-entity-urn="urn:li:jobPosting:(\\d+)".*?data-company-name="([^"]+)".*?data-location="([^"]+)"/gs;
@@ -270,10 +325,33 @@ async function searchLinkedIn(query, location) {
       salary: null,
     });
   }
-  return jobs;
+  const shellRe = /data-entity-urn="urn:li:jobPosting:[^"]*"|base-card|base-SearchCard|jobs-search__results-list/i;
+  return { jobs: jobs, fetched: true, structure: shellRe.test(html) };
 }
 
 // ---------------------------------------------------------------- ATS collectors
+
+// Classifies a failed ATS board fetch. A definitive HTTP 404 is a real answer: no
+// board of that kind exists under that name, so there was never anything there to
+// read. Everything else - timeout, connection failure, 5xx, or a payload we cannot
+// read as a jobs array - means the question was never asked. There is no offline, so
+// that case is a failure of this system and is recorded as one, whether the board was
+// pinned by the caller or probed automatically.
+function recordAtsFailure(byBoard, board, res, pinned) {
+  if (res.status === 404) {
+    if (pinned) {
+      byBoard.push({ board: board, status: 'no-match', count: 0, note: 'The board does not exist: the ATS returned HTTP 404 for that board name. A definitive answer, not a retrieval failure.' });
+    }
+    return;
+  }
+  const detail = res.error ? ' (' + res.error + ')' : (res.status ? ' (HTTP ' + res.status + ')' : ' (no response)');
+  byBoard.push({
+    board: board,
+    status: 'error',
+    count: 0,
+    note: (pinned ? 'Pinned board could not be retrieved' : 'Auto-probed board could not be retrieved') + detail + '. This source was never read, so nothing is known about what it lists.',
+  });
+}
 
 function fromGreenhouse(job, boardToken) {
   const title = job.title || '';
@@ -286,12 +364,12 @@ function fromGreenhouse(job, boardToken) {
     const salaryEntry = meta.find((m) => m && /pay|salary|compensation/i.test(m.name || ''));
     if (salaryEntry && value) salaryRaw = value;
     if (/salary|compensation|pay range/i.test(entry && entry.name ? entry.name : '')) {
-      const nums = value.replace(/,/g, '').match(new RegExp('\\d+(?:\\.\\d+)?', 'g'));
+      const nums = value.replace(/,/g, '').match(/[0-9]+(?:[.][0-9]+)?/g);
       if (nums && nums.length) {
         const vals = nums.map(Number);
         salaryMin = Math.min.apply(null, vals);
         salaryMax = Math.max.apply(null, vals);
-        const cur = value.match(new RegExp('([$£€])\\s?\\d'));
+        const cur = value.match(/([$£€])[^0-9]*[0-9]/);
         if (cur) currency = cur[1] === '£' ? 'GBP' : cur[1] === '€' ? 'EUR' : 'USD';
       }
     }
@@ -350,8 +428,8 @@ function fromLever(job, company) {
   // Only salaryRange is a pay field. additionalPlain is free-text ad copy and will pick up
   // stray years ("Y Combinator 2012"), so it is deliberately not used.
   const range = job.salaryRange || null;
-  if (range && typeof range === 'string' && new RegExp('\\d').test(range)) {
-    const nums = range.replace(/,/g, '').match(new RegExp('\\d+(?:\\.\\d+)?', 'g'));
+  if (range && typeof range === 'string' && /[0-9]/.test(range)) {
+    const nums = range.replace(/,/g, '').match(/[0-9]+(?:[.][0-9]+)?/g);
     if (nums && nums.length) {
       const vals = nums.map(Number);
       salaryMin = Math.min.apply(null, vals);
@@ -382,9 +460,7 @@ async function collectGreenhouse(boardToken, cap, byBoard, enrich, pinned) {
   const url = 'https://boards-api.greenhouse.io/v1/boards/' + encodeURIComponent(boardToken) + '/jobs';
   const res = await getJson(url);
   if (!res.ok || !res.data || !Array.isArray(res.data.jobs)) {
-    if (pinned) {
-      byBoard.push({ board: 'greenhouse:' + boardToken, status: 'unavailable', count: 0, note: res.status === 404 ? 'No Greenhouse board with that name.' : 'Could not reach Greenhouse.' });
-    }
+    recordAtsFailure(byBoard, 'greenhouse:' + boardToken, res, pinned);
     return [];
   }
   let jobs = res.data.jobs.slice(0, cap);
@@ -414,11 +490,11 @@ async function collectGreenhouse(boardToken, cap, byBoard, enrich, pinned) {
   return jobs;
 }
 
-async function collectAshby(boardName, cap, byBoard) {
+async function collectAshby(boardName, cap, byBoard, pinned) {
   const url = 'https://api.ashbyhq.com/posting-api/job-board/' + encodeURIComponent(boardName) + '?includeCompensation=true';
   const res = await getJson(url);
   if (!res.ok || !res.data || !Array.isArray(res.data.jobs)) {
-    // Only record unavailable if explicitly pinned by user
+    recordAtsFailure(byBoard, 'ashby:' + boardName, res, !!pinned);
     return [];
   }
   const jobs = res.data.jobs.slice(0, cap).map((j) => fromAshby(j, boardName));
@@ -426,11 +502,11 @@ async function collectAshby(boardName, cap, byBoard) {
   return jobs;
 }
 
-async function collectLever(company, cap, byBoard) {
+async function collectLever(company, cap, byBoard, pinned) {
   const url = 'https://api.lever.co/v0/postings/' + encodeURIComponent(company) + '?mode=json';
   const res = await getJson(url);
   if (!res.ok || !Array.isArray(res.data)) {
-    // Only record unavailable if explicitly pinned by user
+    recordAtsFailure(byBoard, 'lever:' + company, res, !!pinned);
     return [];
   }
   const jobs = res.data.slice(0, cap).map((j) => fromLever(j, company));
@@ -454,11 +530,15 @@ async function searchCompanyCareerPage(company, cap, byBoard, queryList) {
     'https://' + host + '.com/teams',
   ];
   const jobs = [];
+  const probes = [];
   for (const url of candidates) {
     try {
       const res = await fetchHtml(url);
-      if (!res.ok) continue;
+      // Several of these templates legitimately do not exist (404). That is a
+      // different condition from "careers page found, no roles listed".
+      if (!res.ok) { probes.push({ url: url, fetched: false, httpStatus: res.status, usable: false }); continue; }
       const html = res.data;
+      probes.push({ url: url, fetched: true, httpStatus: res.status, usable: stripHtml(html).length >= 200 });
       const linkRe = /<a[^>]+href="([^"]+)"[^>]*>([\\s\\S]*?)<\\/a>/gi;
       let m;
       const seen = new Set();
@@ -479,8 +559,19 @@ async function searchCompanyCareerPage(company, cap, byBoard, queryList) {
         return jobs;
       }
     } catch (e) {
-      // ignore and try next
+      probes.push({ url: url, fetched: false, httpStatus: 0, usable: false });
     }
+  }
+  // Nothing was found. Report which of the three conditions actually applies instead
+  // of letting a totally unreachable site read as "company has no openings".
+  const responded = probes.filter((pr) => pr.fetched);
+  const usable = responded.filter((pr) => pr.usable);
+  if (responded.length === 0) {
+    byBoard.push({ board: 'company-site:' + company, status: 'error', count: 0, note: 'None of the ' + candidates.length + ' guessed career-page URLs responded (HTTP 404 or unreachable), so this company career page could not be read. This is a retrieval failure, not a company with no openings.' });
+  } else if (usable.length === 0) {
+    byBoard.push({ board: 'company-site:' + company, status: 'error', count: 0, note: responded.length + ' career-page URL(s) responded but returned empty or near-empty pages, so this source could not be read. This is a retrieval failure, not a company with no openings.' });
+  } else {
+    byBoard.push({ board: 'company-site:' + company, status: 'no-match', count: 0, note: usable.length + ' of ' + candidates.length + ' career-page URLs returned real pages, but no job-like links matched on them.' });
   }
   return [];
 }
@@ -509,10 +600,10 @@ for (const t of ghTokens) {
   listings = listings.concat(await collectGreenhouse(t, maxPerBoard, byBoard, enrich, true));
 }
 for (const t of ashbyTokens) {
-  listings = listings.concat(await collectAshby(t, maxPerBoard, byBoard));
+  listings = listings.concat(await collectAshby(t, maxPerBoard, byBoard, true));
 }
 for (const t of leverTokens) {
-  listings = listings.concat(await collectLever(t, maxPerBoard, byBoard));
+  listings = listings.concat(await collectLever(t, maxPerBoard, byBoard, true));
 }
 
 // Tier 1: otherwise probe ATS platforms for each named company, first hit wins.
@@ -523,16 +614,13 @@ if (ghTokens.length === 0 && ashbyTokens.length === 0 && leverTokens.length === 
     let found = false;
     for (const probe of [
       { ats: 'greenhouse', fn: () => collectGreenhouse(token, maxPerBoard, byBoard, enrich, false) },
-      { ats: 'ashby', fn: () => collectAshby(token, maxPerBoard, byBoard) },
-      { ats: 'lever', fn: () => collectLever(token, maxPerBoard, byBoard) },
+      { ats: 'ashby', fn: () => collectAshby(token, maxPerBoard, byBoard, false) },
+      { ats: 'lever', fn: () => collectLever(token, maxPerBoard, byBoard, false) },
     ]) {
       if (found) break;
       const rows = await probe.fn();
       if (rows.length > 0) { found = true; listings = listings.concat(rows); }
-      else {
-        const last = byBoard[byBoard.length - 1];
-        if (last && last.status === 'unavailable') last.status = 'no-match';
-}
+    }
     // If ATS probes didn't find anything, try scraping the company's career pages.
     if (!found) {
       const siteRows = await searchCompanyCareerPage(company, maxPerBoard, byBoard, queries);
@@ -540,18 +628,25 @@ if (ghTokens.length === 0 && ashbyTokens.length === 0 && leverTokens.length === 
     }
   }
 }
-}
 
-// Also search general job boards (Indeed, Glassdoor, Monster, LinkedIn) by scraping
-// their public search pages. No API keys needed.
+// Also search general job boards (Indeed, Glassdoor, Monster, LinkedIn, Wellfound) by
+// scraping their public search pages. No API keys needed. Each board gets its own ledger
+// entry carrying the real outcome of its scraper.
 if (queries.length) {
   const loc = locations.length ? locations[0] : '';
-  const generalJobs = await searchGeneralBoards(queries, loc);
-  if (generalJobs.length) {
-    byBoard.push({ board: 'general-boards', status: 'ok', count: generalJobs.length, note: 'Scraped from Indeed, Glassdoor, Monster, LinkedIn public search' });
-    listings = listings.concat(generalJobs.slice(0, maxPerBoard * 2));
-  } else {
-    byBoard.push({ board: 'general-boards', status: 'no-match', count: 0, note: 'General board search returned no results' });
+  const general = await searchGeneralBoards(queries, loc);
+  for (const b of GENERAL_BOARD_SCRAPERS) {
+    const summary = summarizeBoard(general.attempts[b.name] || []);
+    byBoard.push({
+      board: 'general-board:' + b.name,
+      status: summary.status,
+      count: summary.count,
+      note: 'Scraped from ' + b.name + ' public search: ' + summary.reason,
+      queries: queries.length,
+    });
+  }
+  if (general.jobs.length) {
+    listings = listings.concat(general.jobs.slice(0, maxPerBoard * 2));
   }
 }
 
@@ -635,28 +730,81 @@ deduped.sort((a, b) => {
 
 const storagePath = path.join(baseDir, 'listings', 'default.json');
 fs.mkdirSync(path.dirname(storagePath), { recursive: true });
+const okBoards = byBoard.filter((b) => b.status === 'ok');
+const noMatchBoards = byBoard.filter((b) => b.status === 'no-match');
+// Sources that could not be retrieved, or could not be read once retrieved. There is
+// no offline, so every one of these is a failure of this system. They are never folded
+// into "no matches" and never softened into an advisory on an otherwise passing run.
+const failures = byBoard.filter((b) => b.status === 'error');
+const failureSummary = failures.length
+  ? failures.length + ' of ' + byBoard.length + ' source' + (byBoard.length === 1 ? '' : 's') +
+    ' could not be retrieved: ' + failures.map((b) => b.board).join(', ') +
+    '. Those sources were never read, so this run is PARTIAL \u2014 it is not a complete answer about the job market.'
+  : null;
+
 fs.writeFileSync(storagePath, JSON.stringify({
   listings: deduped,
   total: deduped.length,
   byBoard,
+  failures: failures.map((b) => ({ board: b.board, status: b.status, note: b.note })),
+  failureCount: failures.length,
   generatedAt: new Date().toISOString(),
 }, null, 2));
 
-const okBoards = byBoard.filter((b) => b.status === 'ok');
-const noMatch = byBoard.filter((b) => b.status === 'no-match' || b.status === 'unavailable');
+// Run-level outcome. A source that answered and genuinely had nothing is a real
+// answer, so a run made only of those is a success whose answer is zero. A source
+// that could not be retrieved or could not be read is a failure, and is surfaced
+// through success / status / error rather than as advice the caller has to act on.
+const consulted = byBoard.length;
+const answered = okBoards.length + noMatchBoards.length;
+// An explicitly pinned ATS board counts as something to search, even with no company
+// name and no query: the caller named the board they wanted read.
+const nothingToSearch = companies.length === 0 && queries.length === 0 &&
+  ghTokens.length === 0 && ashbyTokens.length === 0 && leverTokens.length === 0;
+
+let runSuccess = true;
+let runStatus = 'ok';
+let runError = null;
+
+if (nothingToSearch) {
+  runSuccess = false;
+  runStatus = 'blocked';
+  runError = 'Nothing to search. Provide "companies" (e.g., ["Google", "Microsoft"]) to check their job boards, "queries" (e.g., ["Engineering Manager"]) to search general and company job boards, or "boardTokens" to pin an exact ATS board.';
+} else if (consulted === 0 || answered === 0) {
+  // Every source this run consulted failed. A run that could not answer its own
+  // question is a failure, not a thin result, and it must not read as "no jobs exist".
+  runSuccess = false;
+  runStatus = 'failed';
+  runError = 'JOB DISCOVERY FAILED. All ' + consulted + ' source' + (consulted === 1 ? '' : 's') +
+    ' this run tried could not be retrieved or read: ' + failures.map((b) => b.board).join(', ') +
+    '. No job board was successfully searched, so this run produced no answer at all about the job market \u2014 it did not determine that no jobs exist. Every failure is listed under "Retrieval failures" below.';
+} else if (failures.length > 0) {
+  // Some sources answered, others could not be retrieved. The run produced a real
+  // partial answer, and the sources it could not reach are reported as errors.
+  runStatus = 'partial';
+  runError = failureSummary;
+}
+
 let note;
-if (okBoards.length > 0 && deduped.length > 0) {
+if (runStatus === 'blocked' || runStatus === 'failed') {
+  note = runError;
+} else if (deduped.length > 0) {
   note = 'Found ' + deduped.length + ' listing' + (deduped.length === 1 ? '' : 's') + ' across ' +
-    okBoards.length + ' board' + (okBoards.length === 1 ? '' : 's') + ' (' + beforeFilter + ' raw, ' + deduped.length + ' after filtering).';
-} else if (okBoards.length > 0 && deduped.length === 0) {
-  note = 'Reached ' + okBoards.length + ' board' + (okBoards.length === 1 ? '' : 's') + ' but nothing matched your filters (' + beforeFilter + ' listings were returned). Widen your search or add more companies.';
-} else if (companies.length === 0 && queries.length === 0) {
-  note = 'Nothing to search. Provide "companies" (e.g., ["Google", "Microsoft"]) to check their job boards, or "queries" (e.g., ["Engineering Manager"]) to search general and company job boards.';
+    okBoards.length + ' board' + (okBoards.length === 1 ? '' : 's') + ' (' + beforeFilter + ' raw, ' + deduped.length + ' after filtering).' +
+    (runError ? ' ' + runError : '');
+} else if (okBoards.length > 0) {
+  note = 'Reached ' + okBoards.length + ' board' + (okBoards.length === 1 ? '' : 's') + ' but nothing matched your filters (' + beforeFilter + ' listings were returned). Widen your search or add more companies.' +
+    (runError ? ' ' + runError : '');
 } else {
-  note = 'No listings found. The boards checked returned no matching roles.';
-  if (companies.length === 0 && queries.length > 0) {
-    note = 'Searched general job boards (Indeed, Glassdoor, Monster, LinkedIn) for "' + queries.join(', ') + '" but found no matches. No company names were provided. Try different search terms or specify companies to check their career pages directly.';
-  }
+  // Every board this run consulted was successfully retrieved and parsed, and every
+  // one of them genuinely had no matching roles. That is a real, complete answer.
+  note = 'No listings found. All ' + noMatchBoards.length + ' board' + (noMatchBoards.length === 1 ? '' : 's') +
+    ' checked were conclusively consulted and found no matches for these filters.' +
+    (companies.length === 0 && queries.length > 0
+      ? ' Searched general job boards (Indeed, Glassdoor, Monster, LinkedIn, Wellfound) for "' + queries.join(', ') +
+        '" and found no matches. No company names were provided. Try different search terms or specify companies to check their career pages directly.'
+      : ' Try different search terms, or add more companies to check their career pages directly.') +
+    (runError ? ' ' + runError : '');
 }
 
 function fmtMoney(v) {
@@ -718,20 +866,54 @@ if (okBoards.length > 0) {
   presentBlocks.push({ id: 'sources', title: 'Data Sources', kind: 'text', body: boardLines.join('\\n') });
 }
 
-if (noMatch.length > 0) {
-  const noMatchLines = ['No matches from:'];
-  noMatch.forEach(function (b) { noMatchLines.push('  ' + b.board + ' \u2014 ' + b.note); });
+if (noMatchBoards.length > 0) {
+  const noMatchLines = ['No matches from (successfully retrieved, structure recognised, nothing matched):'];
+  noMatchBoards.forEach(function (b) { noMatchLines.push('  ' + b.board + ' \u2014 ' + b.note); });
   presentBlocks.push({ id: 'no-match', title: 'Sources with no matches', kind: 'text', body: noMatchLines.join('\\n') });
 }
 
+if (failures.length > 0) {
+  // A retrieval failure is a failure, so it is labelled and headed as one. There is no
+  // "unverified" middle state left: a source either answered, or this system could not
+  // read it and the run says so.
+  const failureLines = [
+    'RETRIEVAL FAILURE: ' + failures.length + ' source' + (failures.length === 1 ? '' : 's') +
+    ' could not be retrieved or read. This is a failure of this system, not an empty job market.',
+    '',
+  ];
+  failures.forEach(function (b) { failureLines.push('  [FAILED] ' + b.board + ' \u2014 ' + b.note); });
+  presentBlocks.push({ id: 'errors', title: 'Retrieval failures (' + failures.length + ') \u2014 these sources were never read', kind: 'text', body: failureLines.join('\\n') });
+}
+
+if (runStatus === 'failed') {
+  // A run where nothing could be read is unmistakably a failure: it leads the output,
+  // it names every source it tried, and it refuses to read as "no jobs exist".
+  const lines = [
+    'JOB DISCOVERY FAILED',
+    '===================',
+    '',
+    'None of the ' + consulted + ' source' + (consulted === 1 ? '' : 's') + ' this run tried could be retrieved or read.',
+    'No job board was successfully searched. This run produced no answer about the job market,',
+    'and in particular it did NOT determine that no jobs exist.',
+    '',
+    'Sources attempted:',
+  ];
+  failures.forEach(function (b) { lines.push('  ' + b.board + ' \u2014 ' + b.note); });
+  presentBlocks.unshift({ id: 'failure', title: 'Job discovery FAILED \u2014 no source could be retrieved', kind: 'text', body: lines.join('\\n') });
+}
+
 console.log(JSON.stringify({
-  success: true,
+  success: runSuccess,
+  status: runStatus,
   data: {
     listings: deduped,
     total: deduped.length,
     byBoard,
+    failures: failures.map((b) => ({ board: b.board, status: b.status, note: b.note })),
+    failureCount: failures.length,
     note,
   },
+  error: runError,
   present: presentBlocks,
 }));
 await Promise.resolve();
@@ -767,8 +949,11 @@ const CAREER_JOB_DISCOVERY = createCodeSkill({
   name: 'Job Discovery',
   description:
     'Searches real job boards and returns normalized job objects with title, company, location, salary, and apply URL. ' +
-    'Reads the public Greenhouse, Ashby and Lever job board APIs with no key required. Reports per-board status so ' +
-    'empty results are never silent.',
+    'Reads the public Greenhouse, Ashby and Lever job board APIs with no key required. Reports a per-source ' +
+    'status derived from the real outcome of each scraper (ok / no-match / error). A source that was retrieved ' +
+    'and genuinely had no matching roles is a real answer (no-match); a source that could not be retrieved or ' +
+    'could not be parsed is a failure, surfaced as status "partial" or "failed" with a non-null error, never as ' +
+    'a caveat on a passing run.',
   manifest: {
     language: 'javascript',
     entrypoint: 'index.js',
@@ -778,7 +963,7 @@ const CAREER_JOB_DISCOVERY = createCodeSkill({
     readsEnvironment: ['CAREER_HOME'],
   },
   inputSchema: CAREER_JOB_DISCOVERY_INPUT,
-  outputSchema: careerResultSchema('Job listings, per-board source status, and search metadata'),
+  outputSchema: careerResultSchema('Job listings, per-board source status (ok / no-match / error), the per-source retrieval failures, and search metadata'),
   triggers: [
     { kind: 'user', phrase_examples: ['Discover jobs', 'Search job boards', 'Find new listings'] },
   ],

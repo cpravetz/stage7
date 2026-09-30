@@ -14,6 +14,8 @@ import {
 } from '../data/skills/career';
 
 const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 function extractCompany(prompt: string): string {
   const match = /\bat ([^.]+)\.?/.exec(String(prompt || ''));
@@ -111,13 +113,255 @@ beforeAll(async () => {
   process.env.BRAIN_URL = `http://127.0.0.1:${address.port}`;
 });
 
+beforeAll(() => {
+  if (!fs.existsSync(INTERCEPT_PRELOAD)) {
+    throw new Error(`Missing job-board fetch interceptor preload at ${INTERCEPT_PRELOAD}`);
+  }
+  careerStubHome = fs.mkdtempSync(path.join(os.tmpdir(), 'career-skills-home-'));
+  const requireFlag = `--require ${INTERCEPT_PRELOAD}`;
+  process.env.NODE_OPTIONS = priorNodeOptions ? `${priorNodeOptions} ${requireFlag}` : requireFlag;
+});
+
 afterAll(async () => {
   if (priorBrainUrl === undefined) delete process.env.BRAIN_URL;
   else process.env.BRAIN_URL = priorBrainUrl;
   if (brainServer) {
     await new Promise<void>((resolve) => brainServer.close(() => resolve()));
   }
+  restoreEnv('NODE_OPTIONS', priorNodeOptions);
+  restoreEnv('CAREER_TEST_FETCH_ROUTES', priorRoutes);
+  restoreEnv('CAREER_TEST_FETCH_LOG', priorFetchLog);
+  try {
+    fs.rmSync(careerStubHome, { recursive: true, force: true });
+  } catch {
+    // best effort
+  }
 });
+
+// ------------------------------------------------------------- job-board network
+//
+// career-job-discovery hardcodes every job-board URL (the Greenhouse / Ashby /
+// Lever board APIs, the guessed company career pages, and the Indeed / Glassdoor
+// / Monster / LinkedIn / Wellfound scrapers). There is no input or env override
+// for a base URL, so the skill cannot be pointed at a local server. And the
+// assertions in this file are about how a real result set is FORMATTED, which a
+// stub that returns nothing cannot demonstrate: with every board unreachable the
+// skill returns no listings at all, so the "no ISO datetime leaks" assertion had
+// no datetime to be checked against and passed vacuously.
+//
+// So the boards are stubbed with content, using the same seam the sibling
+// career-job-discovery-ledger.test.ts already uses: CodeExecutor spawns a real
+// `node` child with `{ ...process.env }`, so NODE_OPTIONS="--require <preload>"
+// installs a fetch interceptor INSIDE the child that actually runs the skill.
+//
+// fixtures/job-board-fetch-intercept.cjs matches the skill's real URL prefixes
+// and falls through to the real fetch for anything unmatched, so it can neither
+// leak a live request out of this file nor silently swallow unrelated traffic
+// (the local BRAIN_URL stub above still goes out over the real stack).
+//
+// The skill's own source runs unmodified: what is asserted here is the real
+// scraper regexes, the real ATS normalisers, and the real output formatting.
+
+const INTERCEPT_PRELOAD = path.join(__dirname, 'fixtures', 'job-board-fetch-intercept.cjs');
+
+// Card-shaped markup. The layout must carry the exact attribute triple each
+// scraper's regex needs, and every title must contain the query term so it
+// survives the skill's post-fetch filter.
+const INDEED_MANAGER_CARDS = `
+<div id="searchResultsPages">
+  <article data-jk="MG101" data-company-name="Delta Logistics" data-location="Chicago, IL">
+    <h2><a href="/viewjob?jk=MG101">Engineering Manager</a></h2>
+  </article>
+  <article data-jk="MG102" data-company-name="Epsilon Media" data-location="Remote">
+    <h2><a href="/viewjob?jk=MG102">Product Manager</a></h2>
+  </article>
+</div>`;
+
+const GLASSDOOR_MANAGER_CARDS = `
+<article data-job-id="GD700" data-employer-name="Zeta Foods" data-location="Denver, CO">
+  <a class="jobTitle" href="https://www.glassdoor.com/job-listing/GD700">Design Manager</a>
+</article>
+<article data-job-id="GD701" data-employer-name="Eta Bank" data-location="New York, NY">
+  <a class="jobTitle" href="https://www.glassdoor.com/job-listing/GD701">Platform Engineering Manager</a>
+</article>`;
+
+const MONSTER_MANAGER_CARDS =
+  '<ul class="job-listing"><li data-job-id="MN77" data-company-name="Theta Insurance" data-location="Boston, MA"><h2><a href="/job/MN77">Data Manager</a></h2></li></ul>';
+
+const LINKEDIN_MANAGER_CARDS = `
+<ul class="jobs-search__results-list">
+  <li><div data-entity-urn="urn:li:jobPosting:50000001" data-company-name="Iota Labs" data-location="Austin, TX">
+    <h3><a href="https://www.linkedin.com/jobs/view/50000001">Engineering Manager, Infrastructure</a></h3>
+  </div></li>
+</ul>`;
+
+const WELLFOUND_MANAGER_CARDS =
+  '<div class="styles__results"><a href="/jobs/88001" class="styles__card">Growth Manager at Kappa AI</a></div>';
+
+const INDEED_ENGINEER_CARDS = `
+<div id="searchResultsPages">
+  <article data-jk="AAA111" data-company-name="Alpha Analytics" data-location="Austin, TX">
+    <h2><a href="/viewjob?jk=AAA111">Senior Platform Engineer</a></h2>
+  </article>
+  <article data-jk="AAA222" data-company-name="Beta Robotics" data-location="Remote">
+    <h2><a href="/viewjob?jk=AAA222">Staff Site Reliability Engineer</a></h2>
+  </article>
+</div>`;
+
+const GLASSDOOR_ENGINEER_CARDS = `
+<article data-job-id="GD900" data-employer-name="Delta Logistics" data-location="Chicago, IL">
+  <a class="jobTitle" href="https://www.glassdoor.com/job-listing/GD900">Backend Engineer II</a>
+</article>`;
+
+const MONSTER_ENGINEER_CARDS =
+  '<ul class="job-listing"><li data-job-id="MN42" data-company-name="Zeta Foods" data-location="Denver, CO"><h2><a href="/job/MN42">Cloud Engineer</a></h2></li></ul>';
+
+const LINKEDIN_ENGINEER_CARDS = `
+<ul class="jobs-search__results-list">
+  <li><div data-entity-urn="urn:li:jobPosting:40000001" data-company-name="Eta Bank" data-location="New York, NY">
+    <h3><a href="https://www.linkedin.com/jobs/view/40000001">Senior Engineer, Payments</a></h3>
+  </div></li>
+</ul>`;
+
+const WELLFOUND_ENGINEER_CARDS =
+  '<div class="styles__results"><a href="/jobs/99101" class="styles__card">Founding Engineer at Iota Labs</a></div>';
+
+// Card-shaped markup is present but nothing carries the attribute triple the
+// extractor needs: the board answered and the layout looks normal, so this is a
+// real, complete "no match" rather than a retrieval failure. That distinction is
+// what lets the "No company names were provided" guidance be reached at all.
+const INDEED_EMPTY_SHELL = `
+<div id="searchResultsPages">
+  <p>No jobs found</p>
+  <article class="jcs-JobCard sponsored">Sponsored placeholder</article>
+  <article class="jcs-JobCard">We could not find any jobs matching your search.</article>
+</div>`;
+
+const GLASSDOOR_EMPTY_SHELL =
+  '<div class="react-job-listing"><article data-job-id="GD-none">No results matched your search.</article></div>';
+
+const MONSTER_EMPTY_SHELL = '<ul class="job-listing"><li class="job-result empty">No matching jobs</li></ul>';
+
+const LINKEDIN_EMPTY_SHELL = '<div class="jobs-search"><ul class="jobs-search__results-list"></ul><p>0 results</p></div>';
+
+const WELLFOUND_EMPTY_SHELL = '<div class="styles__results"><section class="StartupsList"><p>No startups matched</p></section></div>';
+
+// A real Greenhouse board payload. updated_at is a genuine ISO-8601 instant, so
+// the skill has an actual timestamp to render: without a listing, its
+// formatPostedAt formatting is never exercised by this file at all.
+const GREENHOUSE_ACME_JOBS = JSON.stringify({
+  jobs: [
+    {
+      id: 7001,
+      title: 'Senior Platform Engineer',
+      company_name: 'Acme',
+      location: { name: 'Austin, TX' },
+      absolute_url: 'https://boards.greenhouse.io/acme/jobs/7001',
+      updated_at: '2026-08-14T09:30:00.000Z',
+      metadata: [{ name: 'Salary', value: '$150,000 - $190,000 USD' }],
+    },
+    {
+      id: 7002,
+      title: 'Site Reliability Engineer',
+      company_name: 'Acme',
+      location: { name: 'Remote' },
+      absolute_url: 'https://boards.greenhouse.io/acme/jobs/7002',
+      updated_at: '2026-08-02T17:05:00.000Z',
+      metadata: [],
+    },
+  ],
+});
+
+const GREENHOUSE_ACME_JOB_DETAIL = JSON.stringify({
+  content: '<p>Own the services that power Acme.</p>',
+});
+
+// The ATS probe order is Greenhouse, then Ashby, then Lever, then the guessed
+// company career pages, and it stops at the first hit. Greenhouse answers here,
+// so Ashby, Lever and the acme.com scraper are never reached; they are still
+// routed so that no route this file owns can escape to the real network.
+const ASHBY_ACME_JOBS = JSON.stringify({ jobs: [] });
+const LEVER_ACME_POSTINGS = JSON.stringify([]);
+
+interface Route {
+  urlPrefix: string;
+  status?: number;
+  body?: string;
+}
+
+/** The five general boards, one route each, in the order the skill probes them. */
+function generalBoardRoutes(bodies: [string, string, string, string, string]): Route[] {
+  return [
+    { urlPrefix: 'https://www.indeed.com/jobs?q=', body: bodies[0] },
+    { urlPrefix: 'https://www.glassdoor.com/Job/jobs.htm?', body: bodies[1] },
+    { urlPrefix: 'https://www.monster.com/jobs/search?q=', body: bodies[2] },
+    { urlPrefix: 'https://www.linkedin.com/jobs/search?keywords=', body: bodies[3] },
+    { urlPrefix: 'https://wellfound.com/jobs?query=', body: bodies[4] },
+  ];
+}
+
+const MANAGER_ROUTES: Route[] = generalBoardRoutes([
+  INDEED_MANAGER_CARDS,
+  GLASSDOOR_MANAGER_CARDS,
+  MONSTER_MANAGER_CARDS,
+  LINKEDIN_MANAGER_CARDS,
+  WELLFOUND_MANAGER_CARDS,
+]);
+
+const EMPTY_ROUTES: Route[] = generalBoardRoutes([
+  INDEED_EMPTY_SHELL,
+  GLASSDOOR_EMPTY_SHELL,
+  MONSTER_EMPTY_SHELL,
+  LINKEDIN_EMPTY_SHELL,
+  WELLFOUND_EMPTY_SHELL,
+]);
+
+// Job detail URLs are a longer prefix than the list URL, so the detail route is
+// declared first: the interceptor takes the first matching prefix.
+const ENGINEER_ROUTES: Route[] = [
+  { urlPrefix: 'https://boards-api.greenhouse.io/v1/boards/acme/jobs/', body: GREENHOUSE_ACME_JOB_DETAIL },
+  { urlPrefix: 'https://boards-api.greenhouse.io/v1/boards/acme/jobs', body: GREENHOUSE_ACME_JOBS },
+  { urlPrefix: 'https://api.ashbyhq.com/posting-api/job-board/acme?', body: ASHBY_ACME_JOBS },
+  { urlPrefix: 'https://api.lever.co/v0/postings/acme?', body: LEVER_ACME_POSTINGS },
+  { urlPrefix: 'https://www.acme.com/', status: 404, body: 'gone' },
+  { urlPrefix: 'https://acme.com/', status: 404, body: 'gone' },
+  ...generalBoardRoutes([
+    INDEED_ENGINEER_CARDS,
+    GLASSDOOR_ENGINEER_CARDS,
+    MONSTER_ENGINEER_CARDS,
+    LINKEDIN_ENGINEER_CARDS,
+    WELLFOUND_ENGINEER_CARDS,
+  ]),
+];
+
+const priorNodeOptions = process.env.NODE_OPTIONS;
+const priorRoutes = process.env.CAREER_TEST_FETCH_ROUTES;
+const priorFetchLog = process.env.CAREER_TEST_FETCH_LOG;
+
+let careerStubHome: string;
+let fetchLogPath: string;
+
+/** Routes are read by the child at preload time, so each test installs its own. */
+function installRoutes(routes: Route[]): void {
+  fetchLogPath = path.join(careerStubHome, `fetch-${Date.now()}-${Math.floor(Math.random() * 1e6)}.log`);
+  fs.writeFileSync(fetchLogPath, '');
+  process.env.CAREER_TEST_FETCH_LOG = fetchLogPath;
+  process.env.CAREER_TEST_FETCH_ROUTES = Buffer.from(JSON.stringify(routes), 'utf8').toString('base64');
+}
+
+/** Every URL the child actually requested, so a prefix typo cannot pass silently. */
+function requestedUrls(): string[] {
+  return fs
+    .readFileSync(fetchLogPath, 'utf8')
+    .split('\n')
+    .map((line: string) => line.trim())
+    .filter(Boolean);
+}
+
+function restoreEnv(key: string, value: string | undefined): void {
+  if (value === undefined) delete process.env[key];
+  else process.env[key] = value;
+}
 
 interface PresentBlock {
   id: string;
@@ -163,6 +407,41 @@ async function run(
     }
   }
   return { result, tool, schemaIssues: output?.outputSchemaIssues || [] };
+}
+
+const GENERAL_BOARD_HOSTS = [
+  'www.indeed.com',
+  'www.glassdoor.com',
+  'www.monster.com',
+  'www.linkedin.com',
+  'wellfound.com',
+];
+
+/**
+ * Runs career-job-discovery against the currently installed routes.
+ *
+ * The host check is a harness precondition, not an assertion about the skill: the
+ * interceptor falls through to the real network for any URL it does not match, so
+ * a route prefix that drifts out of sync with the skill would otherwise turn this
+ * file back into a live-network test that merely happens to pass. Failing loudly
+ * here keeps the stub provably non-vacuous. It throws rather than calling expect()
+ * for the same reason the ledger sibling file does: the assertion belongs to the
+ * test body, this belongs to the fixture.
+ */
+async function runJobDiscovery(
+  input: Record<string, unknown>,
+  expectedHosts: string[],
+): Promise<{ result: SkillResult; tool: Tool; schemaIssues: ReturnType<typeof validateAgainstOutputSchema> }> {
+  const outcome = await run(CAREER_JOB_DISCOVERY, input);
+  const urls = requestedUrls();
+  const missing = expectedHosts.filter((host) => !urls.some((u) => u.includes(host)));
+  if (missing.length > 0) {
+    throw new Error(
+      `career-job-discovery never requested stubbed host(s) ${missing.join(', ')}, so the interceptor ` +
+        `fell through to the real network. Requested: ${urls.join(', ') || '(none)'}`,
+    );
+  }
+  return outcome;
 }
 
 const LOWER_ORDER_TOOLS = [CAREER_PIPELINE_REPORT, CAREER_OUTCOME, CAREER_ADD_TEMPLATE];
@@ -251,9 +530,11 @@ describe('Career Coach skills emit user-facing output', () => {
 
   describe('Job Discovery', () => {
     it('returns present blocks without raw JSON fields or storage paths', async () => {
-      const { result, tool, schemaIssues } = await run(CAREER_JOB_DISCOVERY, {
-        queries: ['Manager'],
-      });
+      installRoutes(MANAGER_ROUTES);
+      const { result, tool, schemaIssues } = await runJobDiscovery(
+        { queries: ['Manager'] },
+        GENERAL_BOARD_HOSTS,
+      );
 
       expect(result.success).toBe(true);
       assertPresentClean(result.present, CAREER_JOB_DISCOVERY.id);
@@ -266,19 +547,22 @@ describe('Career Coach skills emit user-facing output', () => {
     }, 15000);
 
     it('reports not-connected with a clear message when no companies are given', async () => {
-      const { result } = await run(CAREER_JOB_DISCOVERY, {
-        queries: ['Manager'],
-      });
+      installRoutes(EMPTY_ROUTES);
+      const { result } = await runJobDiscovery({ queries: ['Manager'] }, GENERAL_BOARD_HOSTS);
 
       const body = (result.present as PresentBlock[]).map((b) => b.body).join('\n');
       expect(body).toContain('No company names were provided');
     }, 15000);
 
     it('does not leak ISO datetime strings to the user', async () => {
-      const { result } = await run(CAREER_JOB_DISCOVERY, {
-        queries: ['Engineer'],
-        companies: ['Acme'],
-      });
+      installRoutes(ENGINEER_ROUTES);
+      // The Greenhouse board answers with real ISO-8601 updated_at instants, so the
+      // skill genuinely has datetimes to render and this is a real formatting test
+      // rather than a pass over a present body that contains no dates at all.
+      const { result } = await runJobDiscovery(
+        { queries: ['Engineer'], companies: ['Acme'] },
+        [...GENERAL_BOARD_HOSTS, 'boards-api.greenhouse.io'],
+      );
 
       const body = (result.present as PresentBlock[]).map((b) => b.body).join('\n');
       expect(body).not.toMatch(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);

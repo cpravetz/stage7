@@ -233,4 +233,123 @@ describe('ToolExecutor nested execution via CodeExecutor callback', () => {
 
     expect(overrides.get('base-cleanup')).toBeUndefined();
   });
+
+  it('permits an approved gated parent to reach a gated callee (approval propagates)', async () => {
+    const registry = new Map<string, Tool>();
+    const executor = new ToolExecutor(registry);
+
+    const gatedChild: Tool = {
+      ...makeCodeTool(
+        'gated-child',
+        'Gated Child',
+        'console.log(JSON.stringify({ success: true, data: { sent: true } }));',
+        true,
+      ),
+      confirmBeforeSend: true,
+    };
+    registry.set(gatedChild.id, gatedChild);
+
+    const gatedParent: Tool = {
+      ...makeCodeTool(
+        'gated-parent',
+        'Gated Parent',
+        'const r = await __execute_tool("gated-child", { message: "hello" }); console.log(JSON.stringify({ success: true, result: r }));',
+        true,
+      ),
+      confirmBeforeSend: true,
+    };
+
+    // The parent cleared its own gate, so the nested gated call is approved too.
+    const exec = await executor.execute(gatedParent, { confirmation: true });
+    expect(exec.status).toBe('completed');
+    const output = exec.output as { output?: string };
+    const parsed = JSON.parse(output.output as string);
+    // Not merely "not refused": the callee really ran and returned its own result.
+    expect(parsed.result).toEqual({ success: true, data: { sent: true } });
+  });
+
+  it('still refuses a live nested call into a gated callee when the parent was not approved', async () => {
+    const registry = new Map<string, Tool>();
+    const executor = new ToolExecutor(registry);
+
+    const gatedChild: Tool = {
+      ...makeCodeTool(
+        'gated-child-unapproved',
+        'Gated Child Unapproved',
+        'console.log(JSON.stringify({ success: true, data: { sent: true } }));',
+        true,
+      ),
+      confirmBeforeSend: true,
+    };
+    registry.set(gatedChild.id, gatedChild);
+
+    const gatedParent: Tool = {
+      ...makeCodeTool(
+        'gated-parent-unapproved',
+        'Gated Parent Unapproved',
+        'const r = await __execute_tool("gated-child-unapproved", { message: "hello" }); console.log(JSON.stringify({ success: true, result: r }));',
+        true,
+      ),
+      confirmBeforeSend: true,
+    };
+
+    // Nothing has approved this execution, so the parent's own gate fires first.
+    await expect(executor.execute(gatedParent, {})).rejects.toThrow(/confirmation/i);
+
+    // A non-gated parent that has not been approved is refused at the nested layer,
+    // and the gated callee never runs.
+    const wrapper = makeCodeTool(
+      'ungated-wrapper',
+      'Ungated Wrapper',
+      'const r = await __execute_tool("gated-child-unapproved", { message: "hello" }); console.log(JSON.stringify({ success: false, error: r.error }));',
+    );
+    const wrapperExec = await executor.execute(wrapper, {});
+    expect(wrapperExec.status).toBe('completed');
+    const wrapperOutput = wrapperExec.output as { output?: string };
+    const wrapperParsed = JSON.parse(wrapperOutput.output as string);
+    expect(wrapperParsed.success).toBe(false);
+    expect(wrapperParsed.error).toContain('Nested execution requires confirmation for gated-child-unapproved');
+  });
+
+  it('does not let an earlier approved execution approve a later unapproved one', async () => {
+    const registry = new Map<string, Tool>();
+    const executor = new ToolExecutor(registry);
+
+    const gatedChild: Tool = {
+      ...makeCodeTool(
+        'gated-child-leak',
+        'Gated Child Leak',
+        'console.log(JSON.stringify({ success: true, data: { sent: true } }));',
+        true,
+      ),
+      confirmBeforeSend: true,
+    };
+    registry.set(gatedChild.id, gatedChild);
+
+    const gatedParent: Tool = {
+      ...makeCodeTool(
+        'gated-parent-leak',
+        'Gated Parent Leak',
+        'const r = await __execute_tool("gated-child-leak", { message: "hello" }); console.log(JSON.stringify({ success: true, result: r }));',
+        true,
+      ),
+      confirmBeforeSend: true,
+    };
+
+    const approved = await executor.execute(gatedParent, { confirmation: true });
+    expect(approved.status).toBe('completed');
+    expect(JSON.parse((approved.output as { output: string }).output).result)
+      .toEqual({ success: true, data: { sent: true } });
+
+    // The previous run's approval must not survive into this one.
+    const wrapper = makeCodeTool(
+      'ungated-wrapper-leak',
+      'Ungated Wrapper Leak',
+      'const r = await __execute_tool("gated-child-leak", { message: "hello" }); console.log(JSON.stringify({ success: false, error: r.error }));',
+    );
+    const wrapperExec = await executor.execute(wrapper, {});
+    const wrapperParsed = JSON.parse((wrapperExec.output as { output: string }).output);
+    expect(wrapperParsed.success).toBe(false);
+    expect(wrapperParsed.error).toContain('Nested execution requires confirmation for gated-child-leak');
+  });
 });

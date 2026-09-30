@@ -663,6 +663,9 @@ return prd;
     description: 'Create and update Confluence pages and spaces. Uses configurable Confluence instance with endpoint and auth.',
     system: 'confluence',
     action: 'manage_page',
+    // Creates and updates Confluence pages. Sibling integrations
+    // (product-jira, product-slack, product-calendar) all gate their live call.
+    confirmBeforeSend: true,
     endpoint: {
       method: 'POST',
       envVar: 'CONFLUENCE_BASE_URL',

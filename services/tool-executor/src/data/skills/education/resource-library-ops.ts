@@ -73,6 +73,9 @@ export const RESOURCE_LIBRARY_OPS = createExternalActionSkill({
   },
   outputSchema: EDUCATION_EXTERNAL_OUTPUT_SCHEMA,
   timeoutMs: 120000,
+  // Uploads, tags and curates resources in a connected repository
+  // (Drive/SharePoint/LMS). User-triggered, so the live call must be gated.
+  confirmBeforeSend: true,
   tier: 'aid',
   isSkill: true,
   domainKnowledge: "Pedagogical frameworks (Bloom's Taxonomy, Spaced Repetition), curriculum design, assessment scoring methods, student engagement metrics",

@@ -152,6 +152,10 @@ const MARKETING_EXTERNAL_SKILLS: Tool[] = [
     description: 'Create, revise, schedule, and publish campaign content through a configurable CMS or content platform.',
     system: 'cms',
     action: 'generate-content',
+    // Writes campaign content into a connected CMS. The sibling channels
+    // (social, email, document-management) all gate their live dispatch, so
+    // this one must too.
+    confirmBeforeSend: true,
     endpoint: { envVar: 'MARKETING_CMS_ENDPOINT', method: 'POST' },
     auth: {
       type: 'api_key',
@@ -249,7 +253,16 @@ const MARKETING_EXTERNAL_SKILLS: Tool[] = [
     name: 'Marketing SEO',
     description: 'Audit, research, optimize, and track search visibility through a configurable SEO system.',
     system: 'seo',
+    // 'optimize' is a change verb, not a read verb. The generated transport POSTs
+    // the whole input (url, keywords, content, market, ...) to the provider with no
+    // read-only constraint anywhere in the source, and every provider named in
+    // configSchema (google-search-console, semrush, ahrefs) exposes a write surface
+    // (property settings, sitemap submit, project/metadata changes). `isSkill: false`
+    // also means this tool is directly executable with no approval in the path.
+    // Gating it here is safe: an approved marketing-center propagates its
+    // confirmation into this callee (ToolExecutor.nestedExecutorCallback).
     action: 'optimize-seo',
+    confirmBeforeSend: true,
     endpoint: { envVar: 'MARKETING_SEO_ENDPOINT', method: 'POST' },
     auth: {
       type: 'api_key',

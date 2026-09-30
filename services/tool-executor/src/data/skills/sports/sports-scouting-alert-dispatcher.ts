@@ -25,7 +25,30 @@ if (fs.existsSync(storePath)) {
 }
 
 const telemetryApi = process.env.WEARABLE_TELEMETRY_ENDPOINT || '';
-const dataConnected = telemetryApi.length > 0;
+const requestTimeoutMs = Number(process.env.SPORTS_REQUEST_TIMEOUT_MS) || 10000;
+
+async function fetchTelemetryData(apiUrl) {
+  if (!apiUrl) {
+    return { ok: false, status: 'not-configured', data: null, error: 'WEARABLE_TELEMETRY_ENDPOINT not set' };
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
+  try {
+    const res = await fetch(apiUrl, { signal: controller.signal });
+    if (!res.ok) {
+      return { ok: false, status: 'http-error', data: null, error: 'HTTP ' + res.status };
+    }
+    const data = await res.json();
+    clearTimeout(timer);
+    return { ok: true, status: 'ok', data };
+  } catch (err) {
+    clearTimeout(timer);
+    return { ok: false, status: 'network-error', data: null, error: err && err.message ? err.message : String(err) };
+  }
+}
+
+const telemetryResult = await fetchTelemetryData(telemetryApi);
+const dataConnected = telemetryResult.ok === true;
 
 const healthStatus = input.healthStatus || 'monitoring';
 const performanceAnomaly = input.performanceAnomaly || null;
@@ -47,12 +70,13 @@ const alert = {
   message: input.message || 'Scouting alert for ' + entity,
   dispatchedAt: new Date().toISOString(),
   source: dataConnected ? 'telemetry-api' : 'local',
+  connectivityStatus: telemetryResult.status,
 };
 
 store.alerts.push(alert);
 fs.writeFileSync(storePath, JSON.stringify(store, null, 2));
 
-console.log(JSON.stringify({ success: true, data: alert, present: [{ id: 'scouting-alert', type: 'text', body: 'Scouting alert dispatched for ' + entity + ': type=' + alertType + ', severity=' + alert.severity + ', health=' + alert.healthStatus + (alert.performanceAnomaly ? ', anomaly=' + alert.performanceAnomaly : '') + (alert.transferInterest ? ', transfer=' + alert.transferInterest : '') + ', channels=' + JSON.stringify(alert.channels) + ', source=' + alert.source + '.' }] }));
+console.log(JSON.stringify({ success: true, status: telemetryResult.ok ? 'ok' : 'not-connected', data: alert, error: telemetryResult.ok ? null : telemetryResult.error, present: [{ id: 'scouting-alert', type: 'text', body: 'Scouting alert dispatched for ' + entity + ': type=' + alertType + ', severity=' + alert.severity + ', health=' + alert.healthStatus + (alert.performanceAnomaly ? ', anomaly=' + alert.performanceAnomaly : '') + (alert.transferInterest ? ', transfer=' + alert.transferInterest : '') + ', channels=' + JSON.stringify(alert.channels) + ', source=' + alert.source + '.' }] }));
 `;
 
 const SCOUTING_ALERT_INPUT = {
@@ -101,3 +125,4 @@ export const SCOUTING_ALERT_DISPATCHER = createCodeSkill({
   ],
   isSkill: false,
 });
+

@@ -23,7 +23,30 @@ if (fs.existsSync(storePath)) {
 }
 
 const statsApi = process.env.SPORTS_PERFORM_API || process.env.OPTA_API_URL || '';
-const dataConnected = statsApi.length > 0;
+const requestTimeoutMs = Number(process.env.SPORTS_REQUEST_TIMEOUT_MS) || 10000;
+
+async function fetchStatsData(apiUrl) {
+  if (!apiUrl) {
+    return { ok: false, status: 'not-configured', data: null, error: 'SPORTS_PERFORM_API and OPTA_API_URL not set' };
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
+  try {
+    const res = await fetch(apiUrl, { signal: controller.signal });
+    if (!res.ok) {
+      return { ok: false, status: 'http-error', data: null, error: 'HTTP ' + res.status };
+    }
+    const data = await res.json();
+    clearTimeout(timer);
+    return { ok: true, status: 'ok', data };
+  } catch (err) {
+    clearTimeout(timer);
+    return { ok: false, status: 'network-error', data: null, error: err && err.message ? err.message : String(err) };
+  }
+}
+
+const statsResult = await fetchStatsData(statsApi);
+const dataConnected = statsResult.ok === true;
 
 const situation = input.situation || 'neutral';
 const keyMatchups = Array.isArray(input.keyMatchups) ? input.keyMatchups : [];
@@ -54,11 +77,12 @@ const playbook = {
 playbook.id = 'bpc_' + Buffer.from(entity + opponent + situation).toString('base64').slice(0, 12);
 playbook.generatedAt = new Date().toISOString();
 playbook.source = dataConnected ? 'api-connected' : 'local';
+playbook.connectivityStatus = statsResult.status;
 
 store.cards.push(playbook);
 fs.writeFileSync(storePath, JSON.stringify(store, null, 2));
 
-console.log(JSON.stringify({ success: true, data: playbook, present: [{ id: 'battlecard', type: 'text', body: 'Battlecard generated for ' + entity + ' vs ' + opponent + ' (' + sport + '): ' + matchupCheatSheet.length + ' key matchups, ' + situationalPlays.length + ' situational plays, formation: ' + playbook.formation + '. Data source: ' + playbook.source + '.' }] }));
+console.log(JSON.stringify({ success: true, status: statsResult.ok ? 'ok' : 'not-connected', data: playbook, error: statsResult.ok ? null : statsResult.error, present: [{ id: 'battlecard', type: 'text', body: 'Battlecard generated for ' + entity + ' vs ' + opponent + ' (' + sport + '): ' + matchupCheatSheet.length + ' key matchups, ' + situationalPlays.length + ' situational plays, formation: ' + playbook.formation + '. Data source: ' + playbook.source + '.' }] }));
 `;
 
 const BATTLECARD_CREATOR_INPUT = {
@@ -120,3 +144,4 @@ export const BATTLECARD_CREATOR = createCodeSkill({
   ],
   isSkill: false,
 });
+

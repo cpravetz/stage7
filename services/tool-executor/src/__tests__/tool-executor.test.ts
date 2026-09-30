@@ -344,6 +344,48 @@ describe('ToolExecutor', () => {
       .rejects.toThrow(/requires explicit confirmation/);
   });
 
+  // Regression guard for the DUAL-READ contract.
+  // createCodeSkill only propagates options.confirmBeforeSend to the top-level
+  // Tool.confirmBeforeSend (src/data/skills/code-skill-factory.ts:66), while
+  // enforceConfirmation reads BOTH the top-level flag and manifest.confirmBeforeSend
+  // (src/services/ToolExecutor.ts:514-519). Several skills therefore set it in both
+  // places. The manifest-only form DOES satisfy the gate; this test pins that so the
+  // "manifest.confirmBeforeSend is ignored" claim cannot resurface as a code change.
+  it('dual-read contract: confirmBeforeSend is honoured from top-level OR manifest', async () => {
+    const baseTool = (id: string): Tool => ({
+      id,
+      name: 'Delete Resource Dual Read',
+      description: 'Delete a resource',
+      type: 'code',
+      manifest: {
+        language: 'javascript',
+        entrypoint: 'index.js',
+        sourceCode: 'console.log("delete");',
+      },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    // 1. Top-level confirmBeforeSend: true -> gate fires.
+    const topLevelOnly = baseTool('tool-dual-top-level');
+    topLevelOnly.confirmBeforeSend = true;
+    await expect(executor.execute(topLevelOnly, { action: 'delete' }))
+      .rejects.toThrow(/requires explicit confirmation/);
+
+    // 2. manifest.confirmBeforeSend: true ONLY (top-level absent) -> gate ALSO fires.
+    //    This is the contested case; do not "fix" it by dropping the manifest read.
+    const manifestOnly = baseTool('tool-dual-manifest-only');
+    manifestOnly.manifest.confirmBeforeSend = true;
+    await expect(executor.execute(manifestOnly, { action: 'delete' }))
+      .rejects.toThrow(/requires explicit confirmation/);
+    expect(executor.previewAction(manifestOnly, { action: 'delete' }).requiresConfirmation).toBe(true);
+
+    // 3. Neither set -> gate does not fire and execution proceeds.
+    const neither = baseTool('tool-dual-neither');
+    const execution = await executor.execute(neither, { action: 'delete' });
+    expect(execution.status).toBe('completed');
+  });
+
   it('should return not-connected result for external action skill with missing required config', async () => {
     const externalTool: Tool = {
       id: 'tool-external-1',

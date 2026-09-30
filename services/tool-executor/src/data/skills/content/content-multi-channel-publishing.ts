@@ -77,6 +77,15 @@ export const MULTI_CHANNEL_PUBLISHING = createExternalActionSkill({
   },
   outputSchema: CONTENT_EXTERNAL_OUTPUT_SCHEMA,
   timeoutMs: 120000,
-  manifest: { workflowStage: 'publish' },
+  // This is a live write and it is directly invocable: `isSkill: false` means
+  // routes/tools.ts does not require assistant context to run it, so
+  // POST /tools/content-multi-channel-publishing/execute reaches the CMS with
+  // status "published" and no approval anywhere in the path. Being the dispatcher's
+  // transport is not the same as being reachable only through the dispatcher.
+  // The gate is enforced here rather than inherited, and approval propagation
+  // (ToolExecutor.nestedExecutorCallback carrying an approved parent's
+  // confirmation into the callee) is what keeps the approved publish path working.
+  confirmBeforeSend: true,
+  manifest: { workflowStage: 'publish', confirmBeforeSend: true },
   isSkill: false,
 });

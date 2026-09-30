@@ -21,6 +21,12 @@ import { legalSkills } from '../data/skills/legal';
 import { restaurantSkills } from '../data/skills/restaurant';
 import { salesSkills } from '../data/skills/sales';
 import { Tool } from '../types';
+import {
+  READ_ONLY_EXTERNAL_ACTIONS,
+  declaresExternalAction,
+  isCorrectlyGated,
+  isMutatingSkill,
+} from './confirmation-gate';
 
 describe('Skill Classification', () => {
   const allSkillArrays: { name: string; skills: Tool[]; canonical?: Tool[] }[] = [
@@ -70,7 +76,7 @@ describe('Skill Classification', () => {
       for (const skill of group.skills) {
         it(`${group.name}: ${skill.id} has explicit isSkill where set`, () => {
           if (skill.isSkill !== undefined) {
-            expect(skill.isSkill === true || skill.isSkill === false).toBe(true);
+            expect(typeof skill.isSkill).toBe('boolean');
           }
         });
       }
@@ -193,18 +199,54 @@ describe('Skill Classification', () => {
     }
   });
 
-  describe('confirmBeforeSend on mutating actions', () => {
+  describe('Mutating skills enforce the confirmation gate', () => {
+    // Predicate lives in ./confirmation-gate: represent-tier skills and skills
+    // that declare a write external action (manifest.system + manifest.action)
+    // mutate; prose in `description` is not a behaviour signal.
     for (const group of allSkillArrays) {
       for (const skill of group.skills) {
-        const desc = (skill.description || '').toLowerCase();
-        const isMutating = desc.includes('send') || desc.includes('publish') || desc.includes('schedule') || desc.includes('apply') || desc.includes('remediate') || desc.includes('execute') || desc.includes('mutating') || desc.includes('action');
-        if (isMutating && group.name !== 'creative' && group.name !== 'songwriting') {
-          it(`${group.name}: ${skill.id} has confirmBeforeSend for mutating action`, () => {
-            expect(skill.confirmBeforeSend === true || skill.confirmBeforeSend === false || skill.confirmBeforeSend === undefined).toBe(true);
-          });
-        }
+        it(`${group.name}: ${skill.id} does not mutate without enforcing the gate`, () => {
+          if (!isMutatingSkill(skill)) {
+            // Read-only skill: no approval prompt is owed. The two suite-level
+            // tests below pin that this classification is neither empty nor
+            // universal, so an empty branch here is not a silent pass.
+            return;
+          }
+          // Mutating: confirmation must be enforced at one of the two
+          // locations ToolExecutor.enforceConfirmation reads, or at a gated
+          // parent that dispatches this tool.
+          expect(isCorrectlyGated(skill, group.skills)).toBe(true);
+        });
       }
     }
+
+    it('the mutating predicate classifies both mutating and read-only skills (it is not vacuous)', () => {
+      const all = allSkillArrays.flatMap((group) => group.skills);
+      const mutating = all.filter((skill) => isMutatingSkill(skill));
+      const readOnly = all.filter((skill) => !isMutatingSkill(skill));
+      expect(mutating.length).toBeGreaterThan(0);
+      expect(readOnly.length).toBeGreaterThan(0);
+      // Every mutating skill in the corpus is gated, or the gate can never fire.
+      const ungated = all
+        .filter((skill) => isMutatingSkill(skill))
+        .filter((skill) => !isCorrectlyGated(skill, all))
+        .map((skill) => skill.id);
+      expect(ungated).toEqual([]);
+    });
+
+    it('every skill declaring a read-only external action is a recognised read verb', () => {
+      const declared = allSkillArrays
+        .flatMap((group) => group.skills)
+        .filter((skill) => declaresExternalAction(skill))
+        .filter((skill) => !isMutatingSkill(skill))
+        .map((skill) => ({ id: skill.id, action: skill.manifest.action as string }));
+      expect(declared.length).toBeGreaterThan(0);
+      for (const entry of declared) {
+        expect(
+          entry.action.startsWith('analyze') || READ_ONLY_EXTERNAL_ACTIONS.has(entry.action),
+        ).toBe(true);
+      }
+    });
   });
   describe('Represent-tier skills require confirmBeforeSend', () => {
     for (const group of allSkillArrays) {

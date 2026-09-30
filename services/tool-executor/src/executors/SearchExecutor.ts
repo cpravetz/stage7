@@ -25,6 +25,14 @@ interface SearchProvider {
 const RETRY_DELAY_MS = 1000;
 const MAX_RETRIES = 2;
 
+// Google Custom Search expects a relative age (d7/w1/m1/y1), not the bare recency label.
+const GOOGLE_DATE_RESTRICT: Record<NonNullable<SearchOptions['freshness']>, string> = {
+  day: 'd1',
+  week: 'w1',
+  month: 'm1',
+  year: 'y1',
+};
+
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -102,6 +110,13 @@ class GoogleSearchProvider extends BaseSearchProvider {
 
     if (options.searchType === 'images') {
       params.set('searchType', 'image');
+    }
+
+    if (options.freshness) {
+      const dateRestrict = GOOGLE_DATE_RESTRICT[options.freshness];
+      if (dateRestrict) {
+        params.set('dateRestrict', dateRestrict);
+      }
     }
 
     const response = await fetch(`${this.baseUrl}?${params.toString()}`, {
@@ -248,6 +263,11 @@ class DuckDuckGoProvider extends BaseSearchProvider {
   }
 
   async search(query: string, options: SearchOptions): Promise<SearchResult[]> {
+    // The Instant Answer API has no recency filter; say so rather than dropping it silently.
+    if (options.freshness) {
+      logger.warn({ provider: this.name, freshness: options.freshness }, 'Provider cannot apply freshness; results are unfiltered by date');
+    }
+
     const params = new URLSearchParams({
       q: query,
       format: 'json',
@@ -321,6 +341,11 @@ class SearxNGProvider extends BaseSearchProvider {
           engines: 'google,bing,brave,duckduckgo',
           format: 'json',
         });
+
+        // SearxNG time_range takes the same day/week/month/year vocabulary as freshness.
+        if (options.freshness) {
+          params.set('time_range', options.freshness);
+        }
 
         const response = await fetch(`${searxngUrl}?${params.toString()}`, {
           method: 'GET',

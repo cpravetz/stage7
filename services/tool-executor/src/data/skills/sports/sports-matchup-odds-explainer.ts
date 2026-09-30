@@ -23,15 +23,42 @@ if (fs.existsSync(storePath)) {
   try { store = JSON.parse(fs.readFileSync(storePath, 'utf8')); } catch (e) {}
 }
 
-function parseSportsbookLines(data) {
-  const oddsApi = process.env.ODDS_DATA_API_URL || '';
-  if (oddsApi && data) return data;
-  return null;
+const oddsApi = process.env.ODDS_DATA_API_URL || '';
+const requestTimeoutMs = Number(process.env.SPORTS_REQUEST_TIMEOUT_MS) || 10000;
+
+async function fetchSportsbookOdds(apiUrl, event) {
+  if (!apiUrl) {
+    return { ok: false, status: 'not-configured', data: null, error: 'ODDS_DATA_API_URL not set' };
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
+  try {
+    const url = apiUrl + (apiUrl.endsWith('/') ? '' : '/') + 'events/' + encodeURIComponent(event) + '/odds';
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok) {
+      return { ok: false, status: 'http-error', data: null, error: 'HTTP ' + res.status };
+    }
+    const data = await res.json();
+    clearTimeout(timer);
+    return { ok: true, status: 'ok', data };
+  } catch (err) {
+    clearTimeout(timer);
+    return { ok: false, status: 'network-error', data: null, error: err && err.message ? err.message : String(err) };
+  }
 }
 
-const oddsA = Number(input.oddsA) || 1.0;
-const oddsB = Number(input.oddsB) || 1.0;
-const drawOdds = Number(input.drawOdds) || null;
+const oddsResult = await fetchSportsbookOdds(oddsApi, eventId);
+
+let oddsA = Number(input.oddsA) || 1.0;
+let oddsB = Number(input.oddsB) || 1.0;
+let drawOdds = Number(input.drawOdds) || null;
+
+if (oddsResult.ok && oddsResult.data) {
+  oddsA = Number(oddsResult.data.oddsA) || oddsA;
+  oddsB = Number(oddsResult.data.oddsB) || oddsB;
+  drawOdds = oddsResult.data.drawOdds ? Number(oddsResult.data.drawOdds) : drawOdds;
+}
+
 const stake = Number(input.stake) || 0;
 
 function impliedProbability(odds) {
@@ -70,6 +97,8 @@ const responsiblePlay = {
   riskLevel: stake > 0 && (evA !== null ? Math.abs(evA) : 0) > stake * 0.5 ? 'moderate' : 'low',
 };
 
+const sourceLabel = oddsResult.ok ? 'odds-api' : 'algorithmic';
+
 const analysis = {
   id: 'mo_' + Buffer.from(eventId).toString('base64').slice(0, 12),
   eventId,
@@ -85,13 +114,14 @@ const analysis = {
   },
   responsiblePlay,
   generatedAt: new Date().toISOString(),
-  source: 'algorithmic',
+  source: sourceLabel,
+  connectivityStatus: oddsResult.status,
 };
 
 store.analyses.push(analysis);
 fs.writeFileSync(storePath, JSON.stringify(store, null, 2));
 
-console.log(JSON.stringify({ success: true, data: analysis, present: [{ id: 'odds-analysis', type: 'text', body: 'Matchup Odds: ' + teamA + ' vs ' + teamB + ' (' + sport + '). Odds: ' + oddsA + ' / ' + oddsB + (drawOdds ? ' / draw ' + drawOdds : '') + '. Implied probabilities: ' + (impliedProbA * 100).toFixed(1) + '% / ' + (impliedProbB * 100).toFixed(1) + '%. Vig: ' + vig.toFixed(2) + '%. Matchup: ' + analysis.matchupAssessment.relativeStrength + '. ' + analysis.responsiblePlay.responsibleGamingNote }] }));
+console.log(JSON.stringify({ success: true, status: oddsResult.ok ? 'ok' : 'not-connected', data: analysis, error: oddsResult.ok ? null : oddsResult.error, present: [{ id: 'odds-analysis', type: 'text', body: 'Matchup Odds: ' + teamA + ' vs ' + teamB + ' (' + sport + '). Odds: ' + oddsA + ' / ' + oddsB + (drawOdds ? ' / draw ' + drawOdds : '') + '. Implied probabilities: ' + (impliedProbA * 100).toFixed(1) + '% / ' + (impliedProbB * 100).toFixed(1) + '%. Vig: ' + vig.toFixed(2) + '%. Matchup: ' + analysis.matchupAssessment.relativeStrength + '. ' + analysis.responsiblePlay.responsibleGamingNote }] }));
 `;
 
 const MATCHUP_ODDS_INPUT = {
@@ -141,3 +171,4 @@ export const MATCHUP_ODDS_EXPLAINER = createCodeSkill({
   ],
   isSkill: false,
 });
+

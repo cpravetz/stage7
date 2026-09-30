@@ -24,7 +24,30 @@ if (fs.existsSync(storePath)) {
 }
 
 const oddsApi = process.env.ODDS_DATA_API_URL || '';
-const dataConnected = oddsApi.length > 0;
+const requestTimeoutMs = Number(process.env.SPORTS_REQUEST_TIMEOUT_MS) || 10000;
+
+async function fetchOddsData(apiUrl) {
+  if (!apiUrl) {
+    return { ok: false, status: 'not-configured', data: null, error: 'ODDS_DATA_API_URL not set' };
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
+  try {
+    const res = await fetch(apiUrl, { signal: controller.signal });
+    if (!res.ok) {
+      return { ok: false, status: 'http-error', data: null, error: 'HTTP ' + res.status };
+    }
+    const data = await res.json();
+    clearTimeout(timer);
+    return { ok: true, status: 'ok', data };
+  } catch (err) {
+    clearTimeout(timer);
+    return { ok: false, status: 'network-error', data: null, error: err && err.message ? err.message : String(err) };
+  }
+}
+
+const oddsResult = await fetchOddsData(oddsApi);
+const dataConnected = oddsResult.ok === true;
 
 const condition = input.condition || 'line-movement';
 const targetOdds = Number(input.targetOdds) || null;
@@ -74,6 +97,7 @@ const lineAlertSpec = {
   channels: input.channels || ['user-device'],
   dispatchedAt: new Date().toISOString(),
   source: dataConnected ? 'odds-api' : 'local',
+  connectivityStatus: oddsResult.status,
 };
 
 store.alerts.push(lineAlertSpec);
@@ -82,7 +106,8 @@ store.specs[sport].push(lineAlertSpec.id);
 
 fs.writeFileSync(storePath, JSON.stringify(store, null, 2));
 
-console.log(JSON.stringify({ success: true, data: lineAlertSpec, present: [{ id: 'line-alert', type: 'text', body: 'Line alert dispatched for ' + entity + ' (' + sport + '): condition=' + condition + ', movement threshold=' + movementThreshold + ', signal type=' + signalType + ', alert type=' + alertType + ', action recommendation=' + actionRecommendation + ', exposure ratio=' + exposureRatio.toFixed(3) + ', markets=' + JSON.stringify(markets) + ', channels=' + JSON.stringify(lineAlertSpec.channels) + '. ' + lineAlertSpec.neverPlaceWagers + '. }] }));
+const presentBody = 'Line alert dispatched for ' + entity + ' (' + sport + '): condition=' + condition + ', movement threshold=' + movementThreshold + ', signal type=' + signalType + ', alert type=' + alertType + ', action recommendation=' + actionRecommendation + ', exposure ratio=' + exposureRatio.toFixed(3) + ', markets=' + JSON.stringify(markets) + ', channels=' + JSON.stringify(lineAlertSpec.channels) + '. ' + lineAlertSpec.neverPlaceWagers + '. ';
+console.log(JSON.stringify({ success: true, status: oddsResult.ok ? 'ok' : 'not-connected', data: lineAlertSpec, error: oddsResult.ok ? null : oddsResult.error, present: [{ id: 'line-alert', type: 'text', body: presentBody }] }));
 `;
 
 const LINE_ALERT_INPUT = {
@@ -136,3 +161,4 @@ export const LINE_ALERT_DISPATCHER = createCodeSkill({
   ],
   isSkill: false,
 });
+

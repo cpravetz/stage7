@@ -22,6 +22,13 @@ import { songwritingSkills, songwritingWorkflow } from '../data/skills/songwriti
 import { scriptwritingSkills, scriptwritingWorkflow } from '../data/skills/scriptwriting';
 import { assistantRegistries, getOverlappingSkills } from '../data/skills/registry';
 import { Tool } from '../types';
+import {
+  enforcesConfirmation,
+  isCorrectlyGated,
+  isMutatingSkill,
+} from './confirmation-gate';
+
+type WorkflowLike = typeof ctoWorkflow;
 
 describe('Workflow Governance - Sprint 7', () => {
 
@@ -388,46 +395,87 @@ describe('Workflow Governance - Sprint 7', () => {
   });
 
   describe('Mutating operations require approval', () => {
-    it('CTO: execute-stage skills require confirmBeforeSend', () => {
-      const executeStage = ctoWorkflow.stages.find(s => s.name === 'execute');
-      expect(executeStage).toBeDefined();
-      for (const skill of executeStage!.skills) {
-        expect(skill.confirmBeforeSend === true || skill.confirmBeforeSend === false || skill.confirmBeforeSend === undefined).toBe(true);
+    // A skill in a mutating workflow stage must not be able to run live
+    // without an approval prompt. "Mutating" is decided by the shared
+    // predicate in ./confirmation-gate (represent tier, or a declared write
+    // external action) rather than by prose in the description, and "gated"
+    // means the flag is enforced at one of the two locations the runtime reads
+    // OR at a gated skill that dispatches this tool.
+    const stageSkills = (workflow: WorkflowLike, stageName: string): Tool[] => {
+      const stage = workflow.stages.find(s => s.name === stageName);
+      expect(stage).toBeDefined();
+      return stage!.skills;
+    };
+
+    it('CTO: execute-stage mutating skills enforce the gate', () => {
+      const skills = stageSkills(ctoWorkflow, 'execute');
+      expect(skills.length).toBeGreaterThan(0);
+      for (const skill of skills) {
+        expect({ id: skill.id, mutating: isMutatingSkill(skill), gated: isCorrectlyGated(skill, ctoSkills) })
+          .toEqual({ id: skill.id, mutating: isMutatingSkill(skill), gated: true });
       }
     });
 
-    it('HR: screening and interview-stage mutating operations have confirmation handling', () => {
-      for (const skill of hrSkills) {
-        const desc = (skill.description || '').toLowerCase();
-        const isMutating = desc.includes('schedule') || desc.includes('send') || desc.includes('dispatch') || desc.includes('post');
-        if (isMutating) {
-          expect(skill.confirmBeforeSend === true || skill.confirmBeforeSend === false || skill.confirmBeforeSend === undefined).toBe(true);
-        }
+    it('HR: screening and interview-stage mutating skills enforce the gate', () => {
+      const skills = [...stageSkills(hrWorkflow, 'screening'), ...stageSkills(hrWorkflow, 'interview')];
+      expect(skills.length).toBeGreaterThan(0);
+      expect(skills.filter((skill) => isMutatingSkill(skill)).length).toBeGreaterThan(0);
+      for (const skill of skills) {
+        expect(isCorrectlyGated(skill, hrSkills)).toBe(true);
       }
     });
 
-    it('Content: publish-stage skills require confirmBeforeSend', () => {
-      const publishStage = contentWorkflow.stages.find(s => s.name === 'publish');
-      expect(publishStage).toBeDefined();
-      for (const skill of publishStage!.skills) {
-        const desc = (skill.description || '').toLowerCase();
-        const isMutating = desc.includes('publish') || desc.includes('send');
-        if (isMutating) {
-          expect(skill.confirmBeforeSend === true || skill.manifest.confirmBeforeSend === true || skill.confirmBeforeSend === false || skill.confirmBeforeSend === undefined).toBe(true);
-        }
+    it('Content: publish-stage mutating skills enforce the gate', () => {
+      const skills = stageSkills(contentWorkflow, 'publish');
+      expect(skills.length).toBeGreaterThan(0);
+      // The stage must contain at least one skill that enforces the gate
+      // itself: the governance skill is the approval surface for the stage.
+      const selfGated = skills.filter((skill) => enforcesConfirmation(skill));
+      expect(selfGated.map((skill) => skill.id)).toContain('governed-publishing-cms-dispatcher');
+      for (const skill of skills) {
+        expect(isCorrectlyGated(skill, contentSkills)).toBe(true);
       }
     });
 
-    it('Healthcare: patient-visible action skills have confirmation or safety boundaries', () => {
-      const schedulingStage = healthcareWorkflow.stages.find(s => s.name === 'scheduling');
-      expect(schedulingStage).toBeDefined();
-      for (const skill of schedulingStage!.skills) {
-        const desc = (skill.description || '').toLowerCase();
-        const isMutating = desc.includes('send') || desc.includes('schedule') || desc.includes('create') || desc.includes('update');
-        if (isMutating) {
-          expect(skill.confirmBeforeSend === true || skill.confirmBeforeSend === false || skill.confirmBeforeSend === undefined).toBe(true);
+    it('Healthcare: scheduling-stage mutating skills enforce the gate', () => {
+      const skills = stageSkills(healthcareWorkflow, 'scheduling');
+      expect(skills.length).toBeGreaterThan(0);
+      expect(skills.filter((skill) => isMutatingSkill(skill)).length).toBeGreaterThan(0);
+      for (const skill of skills) {
+        expect(isCorrectlyGated(skill, healthcareSkills)).toBe(true);
+      }
+    });
+
+    it('no workflow stage can dispatch a live write without an approval prompt', () => {
+      // Same invariant, sweep across every assistant workflow so a new
+      // mutating stage cannot be added ungated.
+      const allWorkflows: WorkflowLike[] = [
+        ctoWorkflow, educationWorkflow, marketingWorkflow, productWorkflow, contentWorkflow,
+        hrWorkflow, healthcareWorkflow, careerWorkflow, restaurantWorkflow, salesWorkflow,
+        supportWorkflow, creativeWorkflow, sportsWorkflow, eventWorkflow, executiveWorkflow,
+        financeWorkflow, hotelWorkflow, investmentWorkflow, legalWorkflow, songwritingWorkflow,
+        scriptwritingWorkflow, analyticsWorkflow,
+      ];
+      const owners: Record<string, Tool[]> = {
+        CTO: ctoSkills, Education: educationSkills, Marketing: marketingSkills, Product: productSkills,
+        Content: contentSkills, HR: hrSkills, Healthcare: healthcareSkills, Career: careerSkills,
+        Restaurant: restaurantSkills, Sales: salesSkills, Support: supportSkills, Creative: creativeSkills,
+        Sports: sportsSkills, Event: eventSkills, Executive: executiveSkills, Finance: financeSkills,
+        Hotel: hotelSkills, Investment: investmentSkills, Legal: legalSkills, Songwriting: songwritingSkills,
+        Scriptwriting: scriptwritingSkills, Analytics: analyticsSkills,
+      };
+      const violations: string[] = [];
+      for (const workflow of allWorkflows) {
+        const siblings = owners[workflow.assistant] || [];
+        for (const stage of workflow.stages) {
+          for (const skill of stage.skills) {
+            if (!isCorrectlyGated(skill, siblings)) {
+              violations.push(`${workflow.assistant}/${stage.name}/${skill.id}`);
+            }
+          }
         }
       }
+      expect(violations).toEqual([]);
     });
   });
 

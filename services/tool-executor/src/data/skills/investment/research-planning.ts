@@ -16,7 +16,10 @@ const researchPlanningInputSchema = createSchemaRecord({
     sector: SchemaProps.text({ description: 'Sector filter' }),
     rating: SchemaProps.text({ description: 'Rating filter' })
   }, { description: 'Filters for research queries' }),
-  pagination: SchemaProps.object({ page: SchemaProps.number({ description: 'One-based page number', minimum: 1 }), limit: SchemaProps.number({ description: 'Maximum results per page', minimum: 1 }) }, { description: 'Pagination parameters' }),
+  pagination: SchemaProps.object({ page: SchemaProps.number({ description: 'One-based page number', minimum: 1 }), limit: SchemaProps.number({ description: 'Maximum results per page', minimum: 1 }) }, { description: 'Pagination parameters. Applies to supplied documents; web results are bounded by maxResults.' }),
+  maxResults: SchemaProps.number({ description: 'Maximum number of web results to request from the general web search tool (1-50)', minimum: 1, maximum: 50 }),
+  searchType: SchemaProps.select(['web', 'images', 'news'], { description: 'Type of web search to run for the web portion of a search' }),
+  freshness: SchemaProps.select(['day', 'week', 'month', 'year'], { description: 'Recency filter for the web portion of a search, applied by the search providers that honor one' }),
   clientProfile: SchemaProps.object({
     age: SchemaProps.number({ description: 'Client age' }),
     income: SchemaProps.number({ description: 'Annual income' }),
@@ -71,25 +74,184 @@ function fmtPct(v) { return v == null ? 'N/A' : (v * 100).toFixed(1) + '%'; }
 
 const suppliedDocuments = Array.isArray(input.documents) ? input.documents : [];
 
-async function searchResearch(params) {
-  const { query, filters = {}, pagination = { page: 1, limit: 10 } } = params;
-  const normalizedQuery = (query || '').toLowerCase().trim();
-  const results = suppliedDocuments.filter(d => {
+const SEARCH_TOOL = 'search_web';
+const SUPPLIED_SOURCE = 'supplied-input';
+const WEB_SOURCE = 'web-search';
+
+// runWebSearch performs one real retrieval against the general web search tool and
+// classifies the outcome honestly. The outcomes are kept distinct on purpose:
+//   not-connected  the tool is absent or unregistered, so nothing was searched
+//   error          the search was attempted and failed, so the error is reported
+//   no-results     the search ran and the providers returned nothing: a real answer
+//   ok             results were returned
+// An absent tool and a failed search are deliberately not collapsed together: only
+// one of them means anything was actually looked up, and reporting them alike would
+// hide a missing capability behind an apparent empty result.
+//
+// The five outcomes map onto the top-level contract in searchResearch, never onto a
+// buried data field:
+//   ok             + material returned            -> success true,  status 'ok'
+//   no-results     + nothing returned             -> success true,  status 'no-results'
+//   no-results     + supplied docs returned       -> success true,  status 'ok'
+//   not-requested  (no web search asked for)      -> success true,  status 'ok'
+//   not-connected  + supplied docs returned       -> success true,  status 'partial', error set
+//   not-connected  + nothing returned             -> success false, status 'not-connected', error set
+//   error          + supplied docs returned       -> success true,  status 'partial', error set
+//   error          + nothing returned             -> success false, status 'error', error set
+async function runWebSearch(query, maxResults, searchType, freshness) {
+  const executeTool = typeof __execute_tool === 'function' ? __execute_tool : null;
+  if (!executeTool) {
+    return {
+      status: 'not-connected',
+      results: [],
+      providerCount: 0,
+      error: null,
+      notice: 'The web portion of this request is not connected: the general "' + SEARCH_TOOL + '" tool is not available to this skill, so nothing was searched and no external sources were fetched. Only the documents supplied with this request were searched. This is a missing capability, not an empty result set.'
+    };
+  }
+  let response = null;
+  try {
+    response = await executeTool(SEARCH_TOOL, { query: query, maxResults: maxResults, searchType: searchType, freshness: freshness });
+  } catch (error) {
+    const message = error && error.message ? error.message : String(error);
+    return { status: 'error', results: [], providerCount: 0, error: message, notice: 'The web search was attempted and failed, so the web portion of this request is missing rather than empty: ' + message + '. Only the documents supplied with this request were searched.' };
+  }
+  if (!response || response.error || response.success === false) {
+    const rawStatus = String((response && response.status) || '');
+    const rawMessage = String((response && (response.error || response.message)) || 'The web search tool returned no usable response.');
+    const lowerMessage = rawMessage.toLowerCase();
+    // An unregistered or unconfigured tool is a missing capability, not a failed
+    // search. Reporting it as an error would overstate what actually went wrong.
+    if (rawStatus === 'not-connected' || rawStatus === 'unavailable' || lowerMessage.indexOf('not registered') !== -1 || lowerMessage.indexOf('not-connected') !== -1) {
+      return { status: 'not-connected', results: [], providerCount: 0, error: null, notice: 'The web portion of this request is not connected: the general "' + SEARCH_TOOL + '" tool reported that it is not registered in this environment, so nothing was searched and no external sources were fetched. Only the documents supplied with this request were searched. This is a missing capability, not an empty result set.' };
+    }
+    return { status: 'error', results: [], providerCount: 0, error: rawMessage, notice: 'The web search was attempted and returned an error, so the web portion of this request is missing rather than empty: ' + rawMessage + '. Only the documents supplied with this request were searched.' };
+  }
+  const rawResults = Array.isArray(response.results) ? response.results : [];
+  const results = rawResults
+    .filter(function (item) { return item && typeof item === 'object' && item.url; })
+    .slice(0, maxResults)
+    .map(function (item, index) {
+      return {
+        id: 'web_' + (index + 1),
+        title: String(item.title || ('Web result ' + (index + 1))),
+        url: String(item.url),
+        snippet: String(item.snippet || ''),
+        provider: 'web search',
+        type: 'web-source',
+        source: WEB_SOURCE
+      };
+    });
+  if (!results.length) {
+    return { status: 'no-results', results: [], providerCount: Number(response.count) || 0, error: null, notice: 'The web search ran and the search providers returned no results for this query. That is a real answer from the providers, not a failure and not a suppressed error. Only the documents supplied with this request were searched.' };
+  }
+  return { status: 'ok', results: results, providerCount: Number(response.count) || results.length, error: null, notice: 'Returned ' + results.length + ' public web ' + (results.length === 1 ? 'result' : 'results') + ' for this query. These are pointers to published pages, not analyst research, filings, or recommendations.' };
+}
+
+function filterSuppliedDocuments(filters, normalizedQuery) {
+  return suppliedDocuments.filter(function (d) {
     const matchesQuery = !normalizedQuery || (d.title || '').toLowerCase().includes(normalizedQuery) || (d.summary || '').toLowerCase().includes(normalizedQuery);
     const matchesProvider = !filters.provider || d.provider === filters.provider;
     const matchesType = !filters.documentType || d.type === filters.documentType;
     const matchesSector = !filters.sector || (d.sector || '').toLowerCase().includes(filters.sector.toLowerCase());
     const matchesRating = !filters.rating || d.rating === filters.rating;
     return matchesQuery && matchesProvider && matchesType && matchesSector && matchesRating;
-  });
+  }).map(function (d) { return Object.assign({}, d, { source: SUPPLIED_SOURCE }); });
+}
+
+async function searchResearch(params) {
+  const { query, filters = {}, pagination = { page: 1, limit: 10 } } = params;
+  const rawQuery = String(query || '').trim();
+  const normalizedQuery = rawQuery.toLowerCase();
   const page = Math.max(1, Number(pagination.page) || 1);
   const limit = Math.max(1, Number(pagination.limit) || 10);
-  return { results: results.slice((page - 1) * limit, page * limit), total: results.length, source: 'supplied-input', status: 'local', notice: suppliedDocuments.length ? 'Results are limited to documents supplied with this request.' : 'No research documents were supplied; no research results were returned.' };
+
+  // Supplied documents stay the primary, caller-trusted source. Their filter and
+  // pagination behaviour is unchanged, and they are never relabelled as web material.
+  const suppliedMatches = filterSuppliedDocuments(filters, normalizedQuery);
+  const suppliedPage = suppliedMatches.slice((page - 1) * limit, page * limit);
+
+  const maxResults = Math.max(1, Math.min(50, Number(params.maxResults) || 10));
+  const searchType = ['web', 'images', 'news'].indexOf(params.searchType) >= 0 ? String(params.searchType) : 'web';
+  const freshness = ['day', 'week', 'month', 'year'].indexOf(params.freshness) >= 0 ? String(params.freshness) : null;
+
+  // search_web requires a query, so with no query there is nothing to retrieve. That
+  // is reported as not-requested rather than as zero web results.
+  const web = rawQuery
+    ? await runWebSearch(rawQuery, maxResults, searchType, freshness)
+    : { status: 'not-requested', results: [], providerCount: 0, error: null, notice: 'No query was supplied, so no web search was run: the web search tool requires a query. Only the documents supplied with this request were searched.' };
+
+  // Caller-trusted material first, public web pointers after, each carrying its own
+  // 'source' value so no web snippet can be mistaken for a supplied document.
+  const results = suppliedPage.concat(web.results);
+  const source = suppliedPage.length && web.results.length
+    ? 'supplied-input+web-search'
+    : (web.results.length ? WEB_SOURCE : SUPPLIED_SOURCE);
+
+  const notice = [
+    suppliedMatches.length
+      ? 'Supplied documents are the primary source: ' + suppliedMatches.length + ' of ' + suppliedDocuments.length + ' supplied document(s) matched, and page ' + page + ' (limit ' + limit + ') of those is shown. These are the caller-supplied documents.'
+      : (suppliedDocuments.length ? 'No supplied documents matched this query or these filters.' : 'No research documents were supplied with this request, so there was no caller material to search.'),
+    web.notice,
+    'Freshness for the web portion: ' + (freshness || 'not set (no recency filter was requested)') + '. That recency bound is applied by the Google, LangSearch and SearxNG providers. It cannot be applied by DuckDuckGo, whose Instant Answer API has no recency parameter and which logs a warning naming the dropped value. The provider that actually served this query is not reported back to this skill, so treat the recency bound as applied per provider rather than assured, and check the search tool logs if the bound is material.',
+    'The provider, documentType, rating, and sector filters and the pagination settings apply only to the supplied documents. Web results are public search-engine snippets and are not filtered, ranked, or verified against those fields, and they are not analyst estimates, filings, or investment advice.'
+  ].join(' ');
+
+  // Top-level outcome for this search. There is no offline: a web search that could not be
+  // run, or that was run and failed, is a failure of this system, and it is reported through
+  // the top-level success / status / error. Partial success is legitimate here because the
+  // caller-supplied documents are a genuine second source, so when real material was still
+  // returned the run is reported as 'partial' with a non-null error naming the web failure,
+  // never as a clean 'ok' that a caller could mistake for a pass. A web search that ran and
+  // genuinely found nothing is a real answer from the providers, not a failure, and is not
+  // treated as one. A web search that was never requested is a clean 'ok'.
+  const webFailed = web.status === 'not-connected' || web.status === 'error';
+  const returnedCount = results.length;
+  const webFailureReason = web.status === 'not-connected'
+    ? 'the web portion of this request could not be run at all: the general "' + SEARCH_TOOL + '" tool is not connected, so nothing was searched and no external sources were fetched'
+    : 'the web portion of this request was attempted and failed, so it is missing rather than empty: ' + (web.error || 'the web search tool returned no usable response');
+  const webFailureSentence = webFailureReason.charAt(0).toUpperCase() + webFailureReason.slice(1) + '. The web outcome is recorded as webStatus "' + web.status + '".';
+
+  let runStatus = 'ok';
+  let runError = null;
+  if (webFailed && !returnedCount) {
+    runStatus = web.status === 'not-connected' ? 'not-connected' : 'error';
+    runError = 'RESEARCH SEARCH FAILED. ' + webFailureSentence + ' No supplied documents matched this query or these filters either, so this run produced no research material at all. It did not determine that no research on this query exists, and it is not an empty result set.';
+  } else if (webFailed) {
+    runStatus = 'partial';
+    runError = 'RESEARCH SEARCH PARTIAL. ' + webFailureSentence + ' The ' + returnedCount + ' caller-supplied document(s) returned here are the only material this run produced, so this is a partial answer and not a complete one about this query.';
+  } else if (web.status === 'no-results' && !returnedCount) {
+    runStatus = 'no-results';
+  }
+
+  return {
+    results: results,
+    total: suppliedMatches.length,
+    suppliedTotal: suppliedMatches.length,
+    suppliedPage: suppliedPage.length,
+    webTotal: web.results.length,
+    counts: { supplied: suppliedMatches.length, web: web.results.length },
+    webStatus: web.status,
+    webNotice: web.notice,
+    webError: web.error,
+    webProviderCount: web.providerCount,
+    webRequest: { tool: SEARCH_TOOL, query: rawQuery, maxResults: maxResults, searchType: searchType, freshness: freshness },
+    source: source,
+    status: runStatus,
+    runError: runError,
+    notice: notice
+  };
 }
 
 async function getDocument(params) {
-  const document = suppliedDocuments.find(d => d.id === params.documentId) || null;
-  return { document, source: 'supplied-input', status: 'local', notice: document ? 'Document returned from request input.' : 'No matching supplied document was found.' };
+  const supplied = suppliedDocuments.find(function (d) { return d.id === params.documentId; }) || null;
+  if (supplied) {
+    return { document: Object.assign({}, supplied, { source: SUPPLIED_SOURCE }), foundIn: SUPPLIED_SOURCE, source: SUPPLIED_SOURCE, status: 'local', notice: 'Document returned from the request input supplied by the caller.' };
+  }
+  // Web results are pointers to public pages, not stored documents with retrievable
+  // bodies, so this action deliberately does not resolve them. "Not found" is the
+  // accurate answer: no document with that ID was supplied with the request.
+  return { document: null, foundIn: null, source: SUPPLIED_SOURCE, status: 'local', notice: 'No matching supplied document was found for that ID. This action reads only the documents supplied with the request; web search results are public source pointers and are not retrievable documents.' };
 }
 
 async function getAnalystEstimates(params) {
@@ -150,21 +312,33 @@ function buildPresent(action, result) {
   if (action === 'search') {
     L.push('Research Search Results');
     L.push('=======================');
-    L.push('Total results: ' + (result.total || 0));
-    L.push('Showing page ' + (input.pagination && input.pagination.page ? input.pagination.page : 1) + ' (limit ' + (input.pagination && input.pagination.limit ? input.pagination.limit : 10) + ').');
-    const results = result.results || [];
-    if (results.length) {
-      L.push('');
-      L.push('Documents:');
-      results.forEach(function (d) {
+    L.push('Supplied documents matched: ' + (result.total || 0) + ' (showing page ' + (input.pagination && input.pagination.page ? input.pagination.page : 1) + ', limit ' + (input.pagination && input.pagination.limit ? input.pagination.limit : 10) + ').');
+    L.push('Web results returned: ' + (result.webTotal || 0) + ' (web search status: ' + (result.webStatus || 'unknown') + ').');
+    const allResults = result.results || [];
+    const suppliedDocs = allResults.filter(function (d) { return d.source === SUPPLIED_SOURCE; });
+    const webDocs = allResults.filter(function (d) { return d.source === WEB_SOURCE; });
+    L.push('');
+    if (suppliedDocs.length) {
+      L.push('Supplied documents (caller-owned, searched in the request input):');
+      suppliedDocs.forEach(function (d) {
         L.push('  - ' + (d.title || d.id || '(untitled)') + ' [' + (d.provider || 'unknown provider') + '] (' + (d.date || 'no date') + ')');
         if (d.rating) L.push('      Rating: ' + d.rating);
         if (d.sector) L.push('      Sector: ' + d.sector);
         if (d.summary) L.push('      Summary: ' + d.summary.slice(0, 160) + (d.summary.length > 160 ? '...' : ''));
       });
     } else {
-      L.push('');
-      L.push('No documents matched the query.');
+      L.push('No supplied documents matched the query or the filters.');
+    }
+    L.push('');
+    L.push('Web results (public search-engine snippets, not the supplied documents):');
+    if (webDocs.length) {
+      webDocs.forEach(function (d, i) {
+        L.push('  ' + (i + 1) + '. ' + (d.title || '(untitled)'));
+        L.push('     ' + (d.url || '(no url)'));
+        if (d.snippet) L.push('     ' + d.snippet.slice(0, 240) + (d.snippet.length > 240 ? '...' : ''));
+      });
+    } else {
+      L.push('  None. ' + (result.webNotice || 'No web search outcome was reported.'));
     }
   } else if (action === 'get-document') {
     L.push('Research Document');
@@ -333,7 +507,16 @@ function fmtNum(v, d) { return v == null ? 'N/A' : Number(v).toFixed(d || 2); }
     fs.writeFileSync(storePath, JSON.stringify(store, null, 2));
     result.storePath = storePath;
     const present = buildPresent(action, result);
-    emit(true, 'ok', result, null, present);
+    // The top level reports what actually happened. A web search that was not connected
+    // or that errored is a failure of this system, not an empty result set: it is
+    // success: false with a non-null error when nothing real came back at all, and
+    // status 'partial' with a non-null error when caller-supplied documents were still
+    // returned. It is never reported as a clean 'ok'. Only the search action computes
+    // this; the other actions have no web dependency and keep their existing contract.
+    const runStatus = (action === 'search' && result && result.status) ? result.status : 'ok';
+    const runError = (action === 'search' && result && result.runError) ? result.runError : null;
+    const runSuccess = runStatus === 'ok' || runStatus === 'no-results' || runStatus === 'partial';
+    emit(runSuccess, runStatus, result, runError, present);
   } catch (error) {
     const msg = (error && error.message) ? error.message : String(error);
     emit(false, 'error', null, msg, [{
@@ -349,10 +532,10 @@ function fmtNum(v, d) { return v == null ? 'N/A' : Number(v).toFixed(d || 2); }
 const RESEARCH_PLANNING = createCodeSkill({
   id: 'research-planning',
   name: 'Research & Planning',
-  description: 'Market research including analyst reports, earnings transcripts, SEC filings, ESG scores, plus comprehensive financial planning for retirement, tax, estate, and goal-based projections.',
+  description: 'Market and security research: filters the research documents supplied with the request, and supplements them with a real live web search for public source pointers via the general web search tool, labelling supplied material and web results apart and reporting whether the web portion returned results, returned none, errored, or was unavailable; a web portion that could not be retrieved is surfaced at the top level as a partial result with an error, or as a failure when nothing was returned at all, never as a clean pass. Financial planning actions compute projections from supplied profile values and assumptions. Analyst estimates, the earnings calendar, ESG scores, and price alerts are declared but not connected to any data provider and return no data.',
   tier: 'aid',
   domainKnowledge: 'Equity research methods, earnings and filing analysis, ESG evaluation, and financial planning projections',
-  manifest: { language: 'javascript', entrypoint: 'index.js', sourceCode: researchPlanningSourceCode, persistenceEnv: 'INVESTMENT_HOME', workflowStage: 'track' },
+  manifest: { language: 'javascript', entrypoint: 'index.js', sourceCode: researchPlanningSourceCode, persistenceEnv: 'INVESTMENT_HOME', lowerOrderTools: ['search_web'], workflowStage: 'track' },
   inputSchema: researchPlanningInputSchema,
   outputSchema: investmentResultSchema('Research results, planning projections, and analysis records'),
   triggers: [

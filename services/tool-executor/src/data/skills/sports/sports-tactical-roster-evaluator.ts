@@ -34,15 +34,58 @@ function parseTimeframe(tf) {
 
 const windowStart = parseTimeframe(timeframe);
 
-function fetchPlayerStats(entity, opponent) {
-  const statsApi = process.env.SPORTS_PERFORM_API || process.env.OPTA_API_URL || '';
+const statsApi = process.env.SPORTS_PERFORM_API || process.env.OPTA_API_URL || '';
+const requestTimeoutMs = Number(process.env.SPORTS_REQUEST_TIMEOUT_MS) || 10000;
+
+async function resolvePlayerMetrics(entityId, opponentId) {
+  const localPlayer = input.playerMetrics || {};
+  const localOpponent = input.opponentMetrics || {};
+
   if (!statsApi) {
-    return { playerMetrics: input.playerMetrics || {}, opponentMetrics: input.opponentMetrics || {}, source: 'local-fallback' };
+    return {
+      playerMetrics: localPlayer,
+      opponentMetrics: localOpponent,
+      source: 'local-input',
+      connectivityStatus: 'not-configured',
+    };
   }
-  return { playerMetrics: input.playerMetrics || {}, opponentMetrics: input.opponentMetrics || {}, source: 'api-connected' };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
+  try {
+    const url = statsApi + (statsApi.endsWith('/') ? '' : '/') + 'players/' + encodeURIComponent(entityId) + '?opponent=' + encodeURIComponent(opponentId);
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok) {
+      clearTimeout(timer);
+      return {
+        playerMetrics: localPlayer,
+        opponentMetrics: localOpponent,
+        source: 'local-input-fallback',
+        connectivityStatus: 'http-error',
+        error: 'HTTP ' + res.status,
+      };
+    }
+    const data = await res.json();
+    clearTimeout(timer);
+    return {
+      playerMetrics: data.player || localPlayer,
+      opponentMetrics: data.opponent || localOpponent,
+      source: 'api-connected',
+      connectivityStatus: 'ok',
+    };
+  } catch (err) {
+    clearTimeout(timer);
+    return {
+      playerMetrics: localPlayer,
+      opponentMetrics: localOpponent,
+      source: 'local-input-fallback',
+      connectivityStatus: 'network-error',
+      error: err && err.message ? err.message : String(err),
+    };
+  }
 }
 
-function computeTacticalEvaluation(entity, opponent, playerMetrics, opponentMetrics) {
+function computeTacticalEvaluation(entityId, opponentId, playerMetrics, opponentMetrics) {
   const synergyScores = [];
   const weaknessIndices = [];
   const recommendations = [];
@@ -91,8 +134,8 @@ function computeTacticalEvaluation(entity, opponent, playerMetrics, opponentMetr
   };
 
   return {
-    entity,
-    opponent,
+    entity: entityId,
+    opponent: opponentId,
     sport,
     dataPoints: synergyScores.length,
     synergyScores,
@@ -103,16 +146,17 @@ function computeTacticalEvaluation(entity, opponent, playerMetrics, opponentMetr
   };
 }
 
-const fetched = fetchPlayerStats(entity, opponent);
+const fetched = await resolvePlayerMetrics(entity, opponent);
 const evaluation = computeTacticalEvaluation(entity, opponent, fetched.playerMetrics, fetched.opponentMetrics);
 evaluation.id = 'tre_' + Buffer.from(entity + opponent).toString('base64').slice(0, 12);
 evaluation.generatedAt = new Date().toISOString();
 evaluation.source = fetched.source;
+evaluation.connectivityStatus = fetched.connectivityStatus;
 
 store.evaluations.push(evaluation);
 fs.writeFileSync(storePath, JSON.stringify(store, null, 2));
 
-console.log(JSON.stringify({ success: true, data: evaluation, present: [{ id: 'tactical-report', type: 'text', body: 'Tactical & Roster Evaluation for ' + entity + ' vs ' + opponent + ' (' + sport + '): ' + evaluation.overallAssessment + '. ' + evaluation.dataPoints + ' metrics analyzed. Recommendations: ' + evaluation.recommendations.length + '. Expected edge: ' + (evaluation.lineupOptimization.expectedEdge * 100).toFixed(1) + '%.' }] }));
+console.log(JSON.stringify({ success: true, status: fetched.connectivityStatus === 'ok' ? 'ok' : (fetched.connectivityStatus === 'not-configured' ? 'not-connected' : 'partial'), data: evaluation, error: fetched.error || null, present: [{ id: 'tactical-report', type: 'text', body: 'Tactical & Roster Evaluation for ' + entity + ' vs ' + opponent + ' (' + sport + '): ' + evaluation.overallAssessment + '. ' + evaluation.dataPoints + ' metrics analyzed. Recommendations: ' + evaluation.recommendations.length + '. Expected edge: ' + (evaluation.lineupOptimization.expectedEdge * 100).toFixed(1) + '%. Source: ' + evaluation.source + '.' }] }));
 `;
 
 const TACTICAL_ROSTER_EVALUATOR_INPUT = {
@@ -164,3 +208,4 @@ export const TACTICAL_ROSTER_EVALUATOR = createCodeSkill({
   ],
   isSkill: false,
 });
+
