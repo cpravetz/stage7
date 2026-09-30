@@ -7,7 +7,7 @@ import asyncHandler from '../utils/asyncHandler'
 import logger from '../utils/logger'
 import { toolRegistry as registry, executor, pluginGenerator as generator } from '../utils/sharedInstance'
 import { readFile } from 'fs/promises'
-import { join } from 'path'
+import { join, basename } from 'path'
 
 const router: Router = Router()
 
@@ -268,15 +268,28 @@ router.get(
   '/tools/reference-data/:sourceId',
   asyncHandler(async (req: Request, res: Response) => {
     const { sourceId } = req.params
+    const safeSourceId = basename(sourceId).replace(/[^a-zA-Z0-9_-]/g, '')
     const workspaceId = req.query.workspaceId as string | undefined
     const careerHome = process.env.CAREER_HOME || '/tmp/career'
 
+    if (!safeSourceId) {
+      res.json({
+        success: true,
+        data: {
+          listings: [],
+          source: sourceId,
+          workspaceId,
+        },
+      })
+      return
+    }
+
     const candidatePaths = [
       join(careerHome, 'listings', 'default.json'),
-      join('/tmp', sourceId, 'data.json'),
-      join('/tmp', 'stage7-store', `${sourceId}.json`),
-      join('/tmp', `${sourceId}.json`),
-      join(process.cwd(), 'store', `${sourceId}.json`),
+      join('/tmp', safeSourceId, 'data.json'),
+      join('/tmp', 'stage7-store', `${safeSourceId}.json`),
+      join('/tmp', `${safeSourceId}.json`),
+      join(process.cwd(), 'store', `${safeSourceId}.json`),
     ]
 
     let listings: unknown[] = []
