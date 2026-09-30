@@ -516,3 +516,75 @@ export const SchemaProps = {
   object: (properties: Record<string, SchemaProperty>, options?: Omit<Partial<SchemaProperty>, 'type'>) =>
     createSchemaProperty('object', { properties, ...options }),
 }
+
+export interface DeclarativeSkillOptions {
+  id: string
+  name: string
+  description: string
+  persistenceEnvVar?: string
+  inputSchema: SchemaRecord
+  outputSchema: SchemaRecord
+  triggers?: SkillTrigger[]
+  confirmBeforeSend?: boolean
+  tier?: 'advise' | 'aid' | 'represent'
+  domainKnowledge?: string
+  isSkill?: boolean
+  workflowStage?: string
+  handler: (input: any, ctx: any) => Promise<any> | any
+}
+
+export function createDeclarativeCodeSkill(options: DeclarativeSkillOptions): Tool {
+  const persistenceEnvVar = options.persistenceEnvVar || 'STORAGE_DIR'
+  let rawFnStr = options.handler.toString().trim()
+  if (/^async\s+[a-zA-Z0-9_$]+\s*\(/.test(rawFnStr)) {
+    rawFnStr = rawFnStr.replace(/^async\s+[a-zA-Z0-9_$]+/, 'async function')
+  } else if (/^[a-zA-Z0-9_$]+\s*\(/.test(rawFnStr) && !rawFnStr.startsWith('function')) {
+    rawFnStr = 'function ' + rawFnStr
+  }
+
+  const sourceCode = `(async () => {
+    let stage7Runtime;
+    try {
+      stage7Runtime = require('stage7-runtime');
+    } catch (e) {
+      // Fallback
+    }
+    const ctx = stage7Runtime ? stage7Runtime.context({ persistenceEnvVar: ${JSON.stringify(persistenceEnvVar)} }) : {
+      input: typeof __tool_input !== 'undefined' ? __tool_input : {},
+      emit: {
+        success: (res) => { console.log(JSON.stringify(res)); return res; },
+        failure: (err) => { console.log(JSON.stringify({ success: false, error: String(err) })); }
+      }
+    };
+
+    const handler = ${rawFnStr};
+    try {
+      const result = await handler(ctx.input, ctx);
+      if (result) {
+        ctx.emit.success(result);
+      }
+    } catch (err) {
+      ctx.emit.failure(err);
+    }
+  })();`
+
+  const needsConfirmation = options.tier === 'represent' || options.confirmBeforeSend === true
+
+  return createCodeSkill({
+    id: options.id,
+    name: options.name,
+    description: options.description,
+    manifest: {
+      sourceCode,
+      ...(options.workflowStage ? { workflowStage: options.workflowStage } : {}),
+      ...(needsConfirmation ? { confirmBeforeSend: true } : {}),
+    },
+    inputSchema: options.inputSchema,
+    outputSchema: options.outputSchema,
+    triggers: options.triggers,
+    confirmBeforeSend: needsConfirmation ? true : options.confirmBeforeSend,
+    tier: options.tier,
+    domainKnowledge: options.domainKnowledge,
+    isSkill: options.isSkill,
+  })
+}

@@ -2,6 +2,7 @@ import { logger } from '@stage7-nextgen/shared';
 import { ToolCredentials, NamedCredentialSource } from '../services/CredentialProvider';
 import fs from 'fs';
 import http from 'http';
+import path from 'path';
 import { randomUUID } from 'crypto';
 import { spawn } from 'child_process';
 
@@ -102,6 +103,19 @@ export class CodeExecutor {
   ): Promise<CodeExecutionResult> {
     const sandboxDir = fs.mkdtempSync('/tmp/js_sandbox_');
     const scriptPath = `${sandboxDir}/main.js`;
+
+    // Copy stage7-runtime into sandboxDir so skills can require('stage7-runtime')
+    try {
+      const runtimeJsSrc = path.resolve(__dirname, '../data/skills/shared/stage7-runtime.js');
+      const runtimeTsSrc = path.resolve(__dirname, '../data/skills/shared/stage7-runtime.ts');
+      if (fs.existsSync(runtimeJsSrc)) {
+        fs.copyFileSync(runtimeJsSrc, `${sandboxDir}/stage7-runtime.js`);
+      } else if (fs.existsSync(runtimeTsSrc)) {
+        fs.copyFileSync(runtimeTsSrc, `${sandboxDir}/stage7-runtime.js`);
+      }
+    } catch (_) {
+      // Best effort runtime copy
+    }
 
     const sourceMapJson = JSON.stringify(sourceMappings);
 

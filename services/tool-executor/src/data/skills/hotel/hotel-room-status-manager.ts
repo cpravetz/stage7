@@ -1,9 +1,7 @@
-import { createExternalActionSkill, createSchemaRecord, SchemaProps } from '../code-skill-factory';
+import { createDeclarativeCodeSkill, createSchemaRecord, SchemaProps } from '../code-skill-factory';
 import {
-  HOTEL_EXTERNAL_CONFIG_SCHEMA,
   HOTEL_EXTERNAL_OUTPUT_SCHEMA,
   HOTEL_PROPERTY_BASE_INPUT,
-  withConfirmation,
 } from './hotel-external-common';
 
 const ROOM_STATUS_INPUT_SCHEMA = createSchemaRecord({
@@ -19,24 +17,51 @@ const ROOM_STATUS_INPUT_SCHEMA = createSchemaRecord({
   payload: SchemaProps.object({}, { description: 'Full operation payload for connector-specific fields', additionalProperties: true }),
 }, { required: ['propertyId'] });
 
-export const ROOM_STATUS_MANAGER_SKILL = withConfirmation(createExternalActionSkill({
+export const ROOM_STATUS_MANAGER_SKILL = createDeclarativeCodeSkill({
   id: 'hotel-room-status-manager',
   name: 'Room Status & Availability',
   description: 'Update room status and saleable availability, including marking a room occupied on arrival, available on departure, or out of order. Mutating requests require confirmation and default to dry-run.',
-  system: 'hotel-pms',
-  action: 'room-status',
-  endpoint: { envVar: 'HOTEL_HOME', method: 'POST' },
-  auth: { type: 'bearer', credentialEnvKeyMap: { token: 'HOTEL_API_TOKEN' } },
-  credentialSource: { token: { envVar: 'HOTEL_API_TOKEN', configKey: 'hotel.token' } },
+  persistenceEnvVar: 'HOTEL_HOME',
   inputSchema: ROOM_STATUS_INPUT_SCHEMA,
   outputSchema: HOTEL_EXTERNAL_OUTPUT_SCHEMA,
-  configSchema: HOTEL_EXTERNAL_CONFIG_SCHEMA,
-  timeoutMs: 45000,
   tier: 'represent',
+  confirmBeforeSend: true,
   domainKnowledge: 'Hotel room status and inventory control: arrival and departure sequencing, housekeeping-state gating of saleable inventory, out-of-order rooms, and room-state audit trails.',
   triggers: [
     { kind: 'event', on: 'Guest check-in or check-out' },
     { kind: 'user', phrase_examples: ['Mark room 405 occupied', 'Set room 118 to available', 'Take room 210 out of order'] },
   ],
   isSkill: true,
-}));
+  async handler(input, ctx) {
+    const roomStatuses = ctx.store.load('room_statuses');
+    if (input.roomId && input.status) {
+      const idx = roomStatuses.findIndex((r: any) => r.roomId === input.roomId);
+      const updatedRecord = {
+        roomId: input.roomId,
+        status: input.status,
+        notes: input.notes || '',
+        updatedAt: new Date().toISOString(),
+      };
+      if (idx >= 0) {
+        roomStatuses[idx] = updatedRecord;
+      } else {
+        roomStatuses.push(updatedRecord);
+      }
+      ctx.store.save('room_statuses', roomStatuses);
+      return {
+        success: true,
+        data: { room: updatedRecord },
+        present: [
+          ctx.render.text('room-status-update', 'Room Status Updated', `Room ${input.roomId} is now ${input.status}.`),
+        ],
+      };
+    }
+    return {
+      success: true,
+      data: { roomStatuses },
+      present: [
+        ctx.render.text('room-status-list', 'Room Statuses', `Tracked room statuses count: ${roomStatuses.length}`),
+      ],
+    };
+  },
+});
