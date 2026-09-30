@@ -98,14 +98,39 @@ const MONSTER_WITH_CARDS =
 
 const MONSTER_EMPTY_SHELL = '<ul class="job-listing"><li class="job-result empty">No matching jobs</li></ul>';
 
+// LinkedIn's CURRENT search-result markup, which is what the extractor targets:
+// base-search-card__title / base-search-card__subtitle for title and company,
+// job-search-card__location / job-search-card__listdate for location and date, and
+// base-card__full-link for the apply URL, all anchored on data-entity-urn. An
+// earlier version of this fixture used the retired data-company-name / data-location
+// attributes, which LinkedIn no longer renders, so it proved nothing about the
+// production path: the corrected extractor correctly refused it and the run lost
+// both LinkedIn listings. This fixture is the real shape on purpose - it is what
+// keeps the LinkedIn leg of the ledger honest.
 const LINKEDIN_WITH_CARDS = `
 <ul class="jobs-search__results-list">
-  <li><div data-entity-urn="urn:li:jobPosting:40000001" data-company-name="Eta Bank" data-location="New York, NY">
-    <h3><a href="https://www.linkedin.com/jobs/view/40000001">Senior Engineer, Payments</a></h3>
-  </div></li>
-  <li><div data-entity-urn="urn:li:jobPosting:40000002" data-company-name="Theta Insurance" data-location="Remote">
-    <h3><a href="https://www.linkedin.com/jobs/view/40000002">Engineering Manager</a></h3>
-  </div></li>
+  <li>
+    <div class="base-card relative base-search-card base-search-card--link job-search-card" data-entity-urn="urn:li:jobPosting:40000001" data-impression-id="jobs-search-desktop-0">
+      <a class="base-card__full-link" href="https://www.linkedin.com/jobs/view/senior-engineer-payments-at-eta-bank-40000001?trackingId=abc">
+      <h3 class="base-search-card__title">Senior Engineer, Payments</h3>
+      <h4 class="base-search-card__subtitle"><a href="https://www.linkedin.com/company/etabank">Eta Bank</a></h4>
+      <div class="base-search-card__metadata">
+        <span class="job-search-card__location">New York, NY</span>
+        <time class="job-search-card__listdate" datetime="2026-09-27">2 days ago</time>
+      </div>
+    </div>
+  </li>
+  <li>
+    <div class="base-card relative base-search-card base-search-card--link job-search-card" data-entity-urn="urn:li:jobPosting:40000002" data-impression-id="jobs-search-desktop-1">
+      <a class="base-card__full-link" href="https://www.linkedin.com/jobs/view/engineering-manager-at-theta-insurance-40000002?trackingId=def">
+      <h3 class="base-search-card__title">Engineering Manager</h3>
+      <h4 class="base-search-card__subtitle"><a href="https://www.linkedin.com/company/thetainsurance">Theta Insurance</a></h4>
+      <div class="base-search-card__metadata">
+        <span class="job-search-card__location">Remote</span>
+        <time class="job-search-card__listdate" datetime="2026-09-26">3 days ago</time>
+      </div>
+    </div>
+  </li>
 </ul>`;
 
 const LINKEDIN_EMPTY_SHELL = '<div class="jobs-search"><ul class="jobs-search__results-list"></ul><p>0 results</p></div>';
@@ -332,6 +357,24 @@ describe('career-job-discovery per-board status ledger (network stubbed)', () =>
       expect(String(listing.title) + ' ' + String(listing.company)).toMatch(/engineer/i);
     }
 
+    // The LinkedIn leg is only evidence if the corrected extractor really read the
+    // current markup. Every field below comes from a class the old, retired
+    // data-company-name / data-location extractor could not have seen, so this
+    // pins the production path rather than just a count.
+    const payments = out.data!.listings.find((l) => l.title === 'Senior Engineer, Payments')!;
+    expect(payments).toBeDefined();
+    expect(payments.source).toBe('LinkedIn');
+    expect(payments.company).toBe('Eta Bank');
+    expect(payments.location).toBe('New York, NY');
+    expect(payments.postedAt).toBe('2026-09-27');
+    expect(payments.applyUrl).toBe(
+      'https://www.linkedin.com/jobs/view/senior-engineer-payments-at-eta-bank-40000001?trackingId=abc',
+    );
+    const manager = out.data!.listings.find((l) => l.title === 'Engineering Manager')!;
+    expect(manager.company).toBe('Theta Insurance');
+    expect(manager.location).toBe('Remote');
+    expect(manager.id).toBe('linkedin_40000002');
+
     // ok boards are listed as verified sources, and none is reported unverified.
     const sources = presentBody(out, 'sources');
     for (const [board, expected] of Object.entries(BOARD_COUNTS)) {
@@ -431,10 +474,22 @@ describe('career-job-discovery per-board status ledger (network stubbed)', () =>
     // A board that was never retrieved at all is also an error. A 404 from a
     // general board is not the pinned-ATS "board does not exist" case, so it must
     // not be laundered into no-match.
+    //
+    // The reason is asserted precisely because a 404 is NOT the same condition as
+    // a block. These boards' search URLs are hardcoded in the skill, so a 404 means
+    // the URL shape is gone and no question was ever asked of the board - a
+    // permanent failure no retry will clear. Labelling it "blocked" would blame a
+    // bot wall that did not happen and send an operator off chasing headers.
     for (const board of ['LinkedIn', 'Wellfound']) {
-      expect(boardByName.get(board)!.status).toBe('error');
-      expect(boardByName.get(board)!.count).toBe(0);
-      expect(boardByName.get(board)!.note).toMatch(/request failed or timed out/);
+      const entry = boardByName.get(board)!;
+      expect(entry.status).toBe('error');
+      expect(entry.count).toBe(0);
+      expect(entry.note).toBe(
+        'Scraped from ' + board + ' public search: ' + board +
+          ' search endpoint returned HTTP 404 \u2014 that board URL no longer exists, so no question was ever asked of it',
+      );
+      expect(entry.note).not.toContain('blocked');
+      expect(entry.note).not.toContain('request failed or timed out');
     }
 
     // Only the 3 Indeed cards are reported, from the one board that really answered.
@@ -541,9 +596,31 @@ describe('career-job-discovery per-board status ledger (network stubbed)', () =>
     // The unparseable-but-retrieved board is called out with its own reason, so a
     // parse failure is not confused with a transport failure.
     expect(boardByName.get('LinkedIn')!.note).toMatch(/recognised no job-card markup at all/);
-    for (const board of ['Indeed', 'Glassdoor', 'Monster', 'Wellfound']) {
-      expect(boardByName.get(board)!.note).toMatch(/request failed or timed out/);
+
+    // Each unreachable board is named for what actually happened to it. A single
+    // catch-all string for all four would hide the only thing that tells an
+    // operator what to do: 403 is a bot wall worth retrying, 500 is the board's
+    // fault and worth waiting out, and 404 is a dead URL that never will succeed.
+    const GONE = 'search endpoint returned HTTP 404 \u2014 that board URL no longer exists, so no question was ever asked of it';
+    const EXPECTED_UNREACHABLE_REASONS: Record<string, string> = {
+      Indeed: 'Indeed ' + GONE,
+      Glassdoor: 'Glassdoor blocked (HTTP 403)',
+      Monster: 'Monster server error (HTTP 500)',
+      Wellfound: 'Wellfound ' + GONE,
+    };
+    for (const [board, reason] of Object.entries(EXPECTED_UNREACHABLE_REASONS)) {
+      const note = boardByName.get(board)!.note;
+      expect(note).toBe('Scraped from ' + board + ' public search: ' + reason);
+      // The catch-all is gone, and 404 in particular must never be dressed up as
+      // a bot block: these boards' search URLs are hardcoded, so a 404 means the
+      // URL shape is gone, not that a wall refused us.
+      expect(note).not.toContain('request failed or timed out');
+      if (/404/.test(reason)) expect(note).not.toMatch(/blocked/);
     }
+    // 403 and 500 stay distinct from each other and from 404: only the first is a
+    // block, only the second is the board's own outage.
+    expect(boardByName.get('Glassdoor')!.note).toMatch(/blocked \(HTTP 403\)/);
+    expect(boardByName.get('Monster')!.note).toMatch(/server error \(HTTP 500\)/);
 
     // The run produced no answer at all, and says so.
     expect(out.success).toBe(false);

@@ -15,14 +15,14 @@ const SKILLS_DIR = path.join(ROOT, 'services', 'tool-executor', 'src', 'data', '
 const DOC_PATH = path.join(ROOT, 'docs', 'NEXTGEN_MISSING_SKILLS.md');
 
 const CATEGORIES = [
-  'analytics', 'career', 'content', 'creative', 'cto', 'education', 'event',
+  'analytics', 'career', 'content', 'cto', 'education', 'event',
   'executive', 'finance', 'healthcare', 'hotel', 'hr', 'investment', 'legal',
   'marketing', 'product', 'restaurant', 'sales', 'sports', 'support',
 ];
 
 const EXPORT_KEYS = {
   analytics: 'analyticsSkills', career: 'careerSkills', content: 'contentSkills',
-  creative: 'creativeSkills', cto: 'ctoSkills', education: 'educationSkills',
+  cto: 'ctoSkills', education: 'educationSkills',
   event: 'eventSkills', executive: 'executiveSkills', finance: 'financeSkills',
   healthcare: 'healthcareSkills', hotel: 'hotelSkills', hr: 'hrSkills',
   investment: 'investmentSkills', legal: 'legalSkills', marketing: 'marketingSkills',

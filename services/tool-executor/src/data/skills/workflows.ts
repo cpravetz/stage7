@@ -9,7 +9,6 @@ export { careerWorkflow } from './career';
 export { restaurantWorkflow } from './restaurant';
 export { salesWorkflow } from './sales';
 export { supportWorkflow } from './support';
-export { creativeWorkflow } from './creative';
 export { sportsWorkflow } from './sports';
 export { eventWorkflow } from './event';
 export { executiveWorkflow } from './executive';

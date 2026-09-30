@@ -9,7 +9,6 @@ import { sportsSkills } from '../data/skills/sports';
 import { supportSkills } from '../data/skills/support';
 import { contentSkills } from '../data/skills/content';
 import { hrSkills } from '../data/skills/hr';
-import { creativeSkills } from '../data/skills/creative';
 import { scriptwritingSkills } from '../data/skills/scriptwriting';
 import { songwritingSkills } from '../data/skills/songwriting';
 import { analyticsSkills } from '../data/skills/analytics';
@@ -52,7 +51,6 @@ const ALL_SKILL_ARRAYS: { name: string; skills: Tool[] }[] = [
   { name: 'support', skills: supportSkills },
   { name: 'content', skills: contentSkills },
   { name: 'hr', skills: hrSkills },
-  { name: 'creative', skills: creativeSkills },
   { name: 'scriptwriting', skills: scriptwritingSkills },
   { name: 'songwriting', skills: songwritingSkills },
   { name: 'analytics', skills: analyticsSkills },

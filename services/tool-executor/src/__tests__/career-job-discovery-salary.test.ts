@@ -297,16 +297,36 @@ describe('career-job-discovery sourceCode cannot re-introduce escape-eaten regex
     expect(offenders.map((o) => `L${o.line}: ${o.text.trim()}`)).toEqual([]);
   });
 
+  // Shape of a backslash-free digit class, as it appears EMITTED. Deliberately
+  // loose: it is a canary for "this line parses digits with no backslash escape",
+  // not a salary detector, which is why it is applied to two scopes below.
+  const DIGIT_CLASS_SHAPE = /\[\^?0-9\]|\[0-9\]\+|\[0-9\]\/\.test|typeof range === 'string' && \/\[0-9\]/;
+
   it('keeps the salary regexes backslash-free so the template literal cannot alter them', () => {
     // A regex literal containing \d would NOT be safe: the template literal
     // still eats the backslash. Character classes carry no backslash at all,
     // so nothing about them can be altered by the enclosing literal.
-    const salaryLines = sourceCode
+    //
+    // Scoped to the salary parsers on purpose. A whole-file scan for this shape
+    // also sweeps up the LinkedIn job-id capture (/^([0-9]+)"/), which is not a
+    // salary regex at all: it is a correct, backslash-free id parse that has
+    // nothing to do with pay. Counting it as a fifth salary site made this test
+    // fail on a line that was doing exactly the right thing, and bumping the
+    // count to 5 would have been wrong twice over - it would bless a non-salary
+    // line as a salary site, and it would re-derive the expected number from
+    // whatever the source happens to contain today instead of from the contract.
+    const sliceStart = sourceCode.indexOf('function fromGreenhouse(');
+    const sliceEnd = sourceCode.indexOf('async function collectGreenhouse(');
+    expect(sliceStart).toBeGreaterThanOrEqual(0);
+    expect(sliceEnd).toBeGreaterThan(sliceStart);
+    const parserSlice = sourceCode.slice(sliceStart, sliceEnd);
+    // Report real line numbers in the emitted source, not slice-relative ones.
+    const lineOffset = sourceCode.slice(0, sliceStart).split('\n').length;
+
+    const salaryLines = parserSlice
       .split('\n')
-      .map((line, i) => ({ line: i + 1, text: line }))
-      .filter(({ text }) =>
-        /\[\^?0-9\]|\[0-9\]\+|\[0-9\]\/\.test|typeof range === 'string' && \/\[0-9\]/.test(text),
-      );
+      .map((line, i) => ({ line: i + 1 + lineOffset, text: line }))
+      .filter(({ text }) => DIGIT_CLASS_SHAPE.test(text));
 
     // Exactly the four repaired sites, asserted verbatim as they are EMITTED.
     const texts = salaryLines.map((s) => s.text.trim());
@@ -320,6 +340,38 @@ describe('career-job-discovery sourceCode cannot re-introduce escape-eaten regex
     );
     expect(salaryLines.length).toBe(4);
     for (const { line, text } of salaryLines) {
+      expect({ line, hasBackslash: text.includes('\\') }).toEqual({ line, hasBackslash: false });
+    }
+  });
+
+  it('keeps every digit-parsing regex in the skill backslash-free, salary or not', () => {
+    // This is the whole-file canary the salary-site count used to stand in for,
+    // now stated as the invariant it was a proxy for: ANY emitted line that parses
+    // digits with a character class must carry no backslash, wherever it lives.
+    // The LinkedIn job-id capture is pinned here as a known NON-salary line, so
+    // the loose canary has a named, reviewed shape instead of an accidental one.
+    const digitLines = sourceCode
+      .split('\n')
+      .map((line, i) => ({ line: i + 1, text: line }))
+      .filter(({ text }) => DIGIT_CLASS_SHAPE.test(text));
+
+    // Asserted by content, not by line number: pinning line numbers here would
+    // break on an unrelated edit above without any behaviour having changed.
+    expect(digitLines.map((l) => l.text.trim())).toEqual(
+      expect.arrayContaining([
+        'const idMatch = card.match(/^([0-9]+)"/);',
+        "const nums = value.replace(/,/g, '').match(/[0-9]+(?:[.][0-9]+)?/g);",
+        "if (range && typeof range === 'string' && /[0-9]/.test(range)) {",
+        'const cur = value.match(/([$£€])[^0-9]*[0-9]/);',
+        "const nums = range.replace(/,/g, '').match(/[0-9]+(?:[.][0-9]+)?/g);",
+      ]),
+    );
+    // ...and the reported line numbers are real, so a backslash offender is
+    // still locatable in the emitted source.
+    for (const { line } of digitLines) {
+      expect(line).toBeGreaterThan(0);
+    }
+    for (const { line, text } of digitLines) {
       expect({ line, hasBackslash: text.includes('\\') }).toEqual({ line, hasBackslash: false });
     }
   });

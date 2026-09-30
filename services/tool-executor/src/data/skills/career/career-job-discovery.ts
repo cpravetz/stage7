@@ -88,12 +88,20 @@ function sleep(ms) { return new Promise((res) => setTimeout(res, ms)); }
 
 async function httpGet(url, headers, expectJson) {
   let attempt = 0;
+  // The last HTTP status actually observed, and the last transport error. Retrying
+  // a 5xx must not erase it: a persistent 500 that burns every retry used to be
+  // reported as status 0, which read as a network failure and blamed our own
+  // connection for the board's outage.
+  let lastStatus = 0;
+  let lastError = null;
   while (attempt <= MAX_RETRIES) {
     attempt++;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     try {
       const res = await fetch(url, { signal: controller.signal, headers: headers || {} });
+      lastStatus = res.status;
+      lastError = null;
       if (!res.ok) {
         if (res.status >= 500 || res.status === 0) {
           if (attempt <= MAX_RETRIES) await sleep(RETRY_DELAY_MS * attempt);
@@ -110,16 +118,22 @@ async function httpGet(url, headers, expectJson) {
       clearTimeout(timer);
       return { ok: true, data: text };
     } catch (err) {
+      // A throw here is a transport-level failure (DNS, refused, aborted), so the
+      // status really is 0 and it really is a network failure.
+      lastStatus = 0;
+      lastError = err && err.message ? err.message : String(err);
       if (attempt <= MAX_RETRIES) {
         await sleep(RETRY_DELAY_MS * attempt);
         continue;
       }
-      return { ok: false, status: 0, data: null, error: err && err.message ? err.message : String(err) };
+      return { ok: false, status: 0, data: null, error: lastError };
     } finally {
       clearTimeout(timer);
     }
   }
-  return { ok: false, status: 0, data: null, error: 'Max retries exceeded' };
+  // Every retry was spent on retryable statuses (5xx / 0). Report the last status
+  // the server actually gave us, not a fabricated 0.
+  return { ok: false, status: lastStatus, data: null, error: lastError || 'Max retries exceeded' };
 }
 
 async function getJson(url, headers) {
@@ -137,12 +151,36 @@ async function fetchHtml(url) {
 //   error    - the request failed, or the page was fetched but no card-shaped markup
 //              was recognised at all (layout change / bot wall). The source was not
 //              read, so this is a failure and is never reported as ok or as no-match.
-function summarizeBoard(attempts) {
+function summarizeBoard(attempts, boardName) {
   const total = attempts.reduce((n, a) => n + (a.count || 0), 0);
   if (total > 0) return { status: 'ok', count: total, reason: 'extracted ' + total + ' listing' + (total === 1 ? '' : 's') + ' from the fetched pages' };
   const reachable = attempts.filter((a) => a.fetched);
   if (!attempts.length || reachable.length === 0) {
-    return { status: 'error', count: 0, reason: 'request failed or timed out for all ' + attempts.length + ' quer' + (attempts.length === 1 ? 'y' : 'ies') };
+    // All attempts failed to reach the server. Classify by HTTP status.
+    const statuses = attempts.map((a) => a.status).filter((s) => s != null);
+    // A 4xx is a bot wall only when the board actually answered and refused us
+    // (401/403/407/429 and friends). 404 is a different condition: the hardcoded
+    // search URL does not exist at that shape, so the board never received a
+    // question at all. Both are retrieval failures, but calling a 404 "blocked"
+    // is a false diagnosis, and a permanent one that no retry or backoff will
+    // clear, so it is named as what it is.
+    const wallCodes = [...new Set(statuses.filter((s) => s >= 400 && s < 500 && s !== 404))];
+    const serverCodes = [...new Set(statuses.filter((s) => s >= 500))];
+    const goneCodes = [...new Set(statuses.filter((s) => s === 404))];
+    const hasNetwork = statuses.some((s) => s === 0);
+    let reason;
+    if (wallCodes.length) {
+      reason = boardName + ' blocked (HTTP ' + wallCodes.join(', ') + ')';
+    } else if (serverCodes.length) {
+      reason = boardName + ' server error (HTTP ' + serverCodes.join(', ') + ')';
+    } else if (goneCodes.length) {
+      reason = boardName + ' search endpoint returned HTTP ' + goneCodes.join(', ') + ' \u2014 that board URL no longer exists, so no question was ever asked of it';
+    } else if (hasNetwork) {
+      reason = boardName + ' network failure';
+    } else {
+      reason = 'request failed for all ' + attempts.length + ' quer' + (attempts.length === 1 ? 'y' : 'ies');
+    }
+    return { status: 'error', count: 0, reason: reason };
   }
   const shaped = reachable.filter((a) => a.structure);
   if (shaped.length === 0) {
@@ -156,7 +194,7 @@ async function searchWellfound(query, location) {
   const loc = location ? encodeURIComponent(location) : '';
   const url = 'https://wellfound.com/jobs?query=' + q + (loc ? '&location=' + loc : '') + '&sort_by=recent';
   const res = await fetchHtml(url);
-  if (!res.ok) return { jobs: [], fetched: false, structure: false };
+  if (!res.ok) return { jobs: [], fetched: false, structure: false, status: res.status };
   const html = res.data;
   const jobs = [];
   // Fallback generic scraping: look for job links and company names
@@ -178,7 +216,7 @@ async function searchWellfound(query, location) {
   // zero roles match the query. No markup at all means we are not looking at a page
   // we understand, so an empty result must not be reported as "no matching roles".
   const shellRe = /data-job-id="[^"]*"|styles__card|styles__job|jobPosting|StartupsList/i;
-  return { jobs: jobs, fetched: true, structure: shellRe.test(html) };
+  return { jobs: jobs, fetched: true, structure: shellRe.test(html), status: res.status };
 }
 
 const GENERAL_BOARD_SCRAPERS = [
@@ -201,12 +239,12 @@ async function searchGeneralBoards(queryList, location) {
       outcomes = await Promise.all(GENERAL_BOARD_SCRAPERS.map((b) => b.fn(q, location)));
     } catch (e) {
       console.error('General board search error for query "' + q + '": ' + (e instanceof Error ? e.message : String(e)));
-      for (const b of GENERAL_BOARD_SCRAPERS) attempts[b.name].push({ fetched: false, structure: false, count: 0 });
+      for (const b of GENERAL_BOARD_SCRAPERS) attempts[b.name].push({ fetched: false, structure: false, count: 0, status: 0 });
       continue;
     }
     GENERAL_BOARD_SCRAPERS.forEach((b, i) => {
-      const o = outcomes[i] || { jobs: [], fetched: false, structure: false };
-      attempts[b.name].push({ fetched: !!o.fetched, structure: !!o.structure, count: (o.jobs || []).length });
+      const o = outcomes[i] || { jobs: [], fetched: false, structure: false, status: 0 };
+      attempts[b.name].push({ fetched: !!o.fetched, structure: !!o.structure, count: (o.jobs || []).length, status: o.status });
       for (const j of o.jobs || []) results.push(j);
     });
   }
@@ -218,7 +256,7 @@ async function searchIndeed(query, location) {
   const loc = location ? encodeURIComponent(location) : '';
   const url = 'https://www.indeed.com/jobs?q=' + q + (loc ? '&l=' + loc : '') + '&fromage=14';
   const res = await fetchHtml(url);
-  if (!res.ok) return { jobs: [], fetched: false, structure: false };
+  if (!res.ok) return { jobs: [], fetched: false, structure: false, status: res.status };
   const html = res.data;
   const jobs = [];
   const re = /data-jk="([^"]+)".*?data-company-name="([^"]+)".*?data-location="([^"]+)"/gs;
@@ -239,7 +277,7 @@ async function searchIndeed(query, location) {
     });
   }
   const shellRe = /data-jk="[^"]*"|jcs-JobCard|job_seen_beacon|<article/i;
-  return { jobs: jobs, fetched: true, structure: shellRe.test(html) };
+  return { jobs: jobs, fetched: true, structure: shellRe.test(html), status: res.status };
 }
 
 async function searchGlassdoor(query, location) {
@@ -247,7 +285,7 @@ async function searchGlassdoor(query, location) {
   const loc = location ? encodeURIComponent(location) : '';
   const url = 'https://www.glassdoor.com/Job/jobs.htm?sc.keyword=' + q + (loc ? '&locT=C&locId=' + loc : '') + '&fromAge=14';
   const res = await fetchHtml(url);
-  if (!res.ok) return { jobs: [], fetched: false, structure: false };
+  if (!res.ok) return { jobs: [], fetched: false, structure: false, status: res.status };
   const html = res.data;
   const jobs = [];
   const re = /data-job-id="([^"]+)".*?data-employer-name="([^"]+)".*?data-location="([^"]+)"/gs;
@@ -268,7 +306,7 @@ async function searchGlassdoor(query, location) {
     });
   }
   const shellRe = /data-job-id="[^"]*"|jobTitle|react-job-listing|JobCard|<article/i;
-  return { jobs: jobs, fetched: true, structure: shellRe.test(html) };
+  return { jobs: jobs, fetched: true, structure: shellRe.test(html), status: res.status };
 }
 
 async function searchMonster(query, location) {
@@ -276,7 +314,7 @@ async function searchMonster(query, location) {
   const loc = location ? encodeURIComponent(location) : '';
   const url = 'https://www.monster.com/jobs/search?q=' + q + (loc ? '&where=' + loc : '') + '&age=14';
   const res = await fetchHtml(url);
-  if (!res.ok) return { jobs: [], fetched: false, structure: false };
+  if (!res.ok) return { jobs: [], fetched: false, structure: false, status: res.status };
   const html = res.data;
   const jobs = [];
   const re = /data-job-id="([^"]+)".*?data-company-name="([^"]+)".*?data-location="([^"]+)"/gs;
@@ -297,7 +335,7 @@ async function searchMonster(query, location) {
     });
   }
   const shellRe = /data-job-id="[^"]*"|job-result|jobResult|jobCard|job-listing|<article/i;
-  return { jobs: jobs, fetched: true, structure: shellRe.test(html) };
+  return { jobs: jobs, fetched: true, structure: shellRe.test(html), status: res.status };
 }
 
 async function searchLinkedIn(query, location) {
@@ -305,28 +343,57 @@ async function searchLinkedIn(query, location) {
   const loc = location ? encodeURIComponent(location) : '';
   const url = 'https://www.linkedin.com/jobs/search?keywords=' + q + (loc ? '&location=' + loc : '') + '&f_TPR=r604800';
   const res = await fetchHtml(url);
-  if (!res.ok) return { jobs: [], fetched: false, structure: false };
+  if (!res.ok) return { jobs: [], fetched: false, structure: false, status: res.status };
   const html = res.data;
   const jobs = [];
-  const re = /data-entity-urn="urn:li:jobPosting:(\\d+)".*?data-company-name="([^"]+)".*?data-location="([^"]+)"/gs;
-  let m;
-  while ((m = re.exec(html)) && jobs.length < 20) {
-    const [, id, company, location] = m;
-    const titleMatch = html.slice(m.index).match(new RegExp('<h3[^>]*><a[^>]*>([^<]+)</a></h3>'));
+
+  // Split on each job card by the entity URN anchor
+  const cards = html.split('data-entity-urn="urn:li:jobPosting:');
+  for (let i = 1; i < cards.length && jobs.length < 20; i++) {
+    const card = cards[i];
+
+    // Job ID: digits up to the next quote
+    const idMatch = card.match(/^([0-9]+)"/);
+    if (!idMatch) continue;
+    const id = idMatch[1];
+
+    // Title: base-search-card__title"> up to <
+    const titleMatch = card.match(/base-search-card__title"[^>]*>([^<]+)</);
     const title = titleMatch ? stripHtml(titleMatch[1]) : 'Unknown';
+
+    // Company: base-search-card__subtitle"> then to </h4>, strip any nested <a> tag
+    const companyMatch = card.match(/base-search-card__subtitle"[^>]*>([\\s\\S]*?)<\\/h4>/);
+    let company = '';
+    if (companyMatch) {
+      company = stripHtml(companyMatch[1].replace(/<a[^>]*>/g, '').replace(/<\\/a>/g, ''));
+    }
+
+    // Location: job-search-card__location"> up to <
+    const locationMatch = card.match(/job-search-card__location"[^>]*>([^<]+)</);
+    const locationText = locationMatch ? stripHtml(locationMatch[1]) : '';
+
+    // Posted date: job-search-card__listdate" datetime=" up to "
+    const dateMatch = card.match(/job-search-card__listdate"[^>]*datetime="([^"]+)"/);
+    const postedAt = dateMatch ? dateMatch[1] : null;
+
+    // Apply URL: base-card__full-link" href=" up to "
+    const urlMatch = card.match(/base-card__full-link"[^>]*href="([^"]+)"/);
+    const applyUrl = urlMatch ? urlMatch[1] : ('https://www.linkedin.com/jobs/view/' + id);
+
     jobs.push({
       id: 'linkedin_' + id,
       title,
-      company: stripHtml(company),
-      location: stripHtml(location),
-      applyUrl: 'https://www.linkedin.com/jobs/view/' + id,
+      company,
+      location: locationText,
+      applyUrl,
       source: 'LinkedIn',
-      postedAt: null,
+      postedAt,
       salary: null,
     });
   }
+
   const shellRe = /data-entity-urn="urn:li:jobPosting:[^"]*"|base-card|base-SearchCard|jobs-search__results-list/i;
-  return { jobs: jobs, fetched: true, structure: shellRe.test(html) };
+  return { jobs: jobs, fetched: true, structure: shellRe.test(html), status: res.status };
 }
 
 // ---------------------------------------------------------------- ATS collectors
@@ -636,7 +703,7 @@ if (queries.length) {
   const loc = locations.length ? locations[0] : '';
   const general = await searchGeneralBoards(queries, loc);
   for (const b of GENERAL_BOARD_SCRAPERS) {
-    const summary = summarizeBoard(general.attempts[b.name] || []);
+    const summary = summarizeBoard(general.attempts[b.name] || [], b.name);
     byBoard.push({
       board: 'general-board:' + b.name,
       status: summary.status,

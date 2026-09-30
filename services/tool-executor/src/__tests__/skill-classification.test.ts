@@ -8,7 +8,6 @@ import { sportsSkills } from '../data/skills/sports';
 import { supportSkills } from '../data/skills/support';
 import { contentSkills } from '../data/skills/content';
 import { hrSkills, hrCanonicalSkills } from '../data/skills/hr';
-import { creativeSkills } from '../data/skills/creative';
 import { scriptwritingSkills } from '../data/skills/scriptwriting';
 import { songwritingSkills } from '../data/skills/songwriting';
 import { analyticsSkills } from '../data/skills/analytics';
@@ -40,7 +39,6 @@ describe('Skill Classification', () => {
     { name: 'support', skills: supportSkills },
     { name: 'content', skills: contentSkills },
     { name: 'hr', skills: hrSkills, canonical: hrCanonicalSkills },
-    { name: 'creative', skills: creativeSkills },
     { name: 'scriptwriting', skills: scriptwritingSkills },
     { name: 'songwriting', skills: songwritingSkills },
     { name: 'analytics', skills: analyticsSkills },

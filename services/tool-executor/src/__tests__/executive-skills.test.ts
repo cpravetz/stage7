@@ -30,6 +30,32 @@ const CANONICAL_SKILLS: Tool[] = [
   SPEECH_COMMUNICATION_COPILOT,
 ];
 
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+// LEADERSHIP_ADVISORY resolves its store from process.env.EXECUTIVE_HOME
+// (default /tmp/executive) inside the spawned child. Point it at a unique temp
+// dir so concurrent jest workers cannot read or clobber each other's state
+// through the shared default path.
+const priorExecutiveHome = process.env.EXECUTIVE_HOME;
+let executiveHome: string;
+
+beforeAll(() => {
+  executiveHome = fs.mkdtempSync(path.join(os.tmpdir(), 'executive-skills-home-'));
+  process.env.EXECUTIVE_HOME = executiveHome;
+});
+
+afterAll(() => {
+  if (priorExecutiveHome === undefined) delete process.env.EXECUTIVE_HOME;
+  else process.env.EXECUTIVE_HOME = priorExecutiveHome;
+  try {
+    fs.rmSync(executiveHome, { recursive: true, force: true });
+  } catch {
+    // best effort
+  }
+});
+
 async function run(
   tool: Tool,
   input: Record<string, unknown>,

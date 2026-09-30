@@ -10,85 +10,246 @@ const role = input.targetRole || '';
 const company = input.company || '';
 const NL = '\\n';
 
-function emit(success, status, data, error, present) {
-  console.log(JSON.stringify({ success: success, status: status, data: data || null, error: error || null, present: present || [] }));
+// Deadline budget. nginx proxies /api with the default proxy_read_timeout of
+// 60s, so this skill must always answer inside that window. The manifest
+// timeoutMs below is 52000, and the bridge close, fs cleanup and JSON
+// serialisation that follow the deadline consume the rest.
+//
+// The budget is what actually guarantees the emit. CodeExecutor only returns the
+// child's captured stdout when the child exits cleanly (proc 'close' with code 0);
+// its SIGKILL path discards stdout entirely. So a script still awaiting at 52s
+// yields a bare timeout error, not a result. On expiry this flushes a
+// not-connected result and exits 0.
+//
+// 44000, raised from 30000. A run is sequential per topic -- delegation, then a
+// direct brain call only if that failed -- so the worst case is the SUM of the
+// two per-topic deadlines below. At the old 30000 budget that sum (43s) could
+// not fit, which is precisely how a healthy brain came to be reported offline.
+const SKILL_BUDGET_MS = Number(process.env.CAREER_BATTLECARD_BUDGET_MS) > 0
+  ? Number(process.env.CAREER_BATTLECARD_BUDGET_MS)
+  : 44000;
+// Bound on waiting for a delegated tool. The nested call exposes no signal of
+// its own, so this caps how long the skill WAITS for it; the request keeps
+// running in the parent and the child simply stops blocking on it. Sized to the
+// observed 23s delegation latency (a 27s outlier is capped and falls through to
+// the brain call), and to leave room for the fallback inside SKILL_BUDGET_MS.
+const DELEGATED_TIMEOUT_MS = Number(process.env.CAREER_DELEGATED_TIMEOUT_MS) > 0
+  ? Number(process.env.CAREER_DELEGATED_TIMEOUT_MS)
+  : 24000;
+// Bound on a single direct brain call, matching the SPORTS_REQUEST_TIMEOUT_MS
+// pattern in sports-battlecard-creator.ts. Without it a brain that accepts the
+// connection and never responds hangs the skill until the outer SIGKILL.
+//
+// 19000, not 10000: observed brain latency for these two prompts is 16-19s, so a
+// 10s abort discarded answers the brain had already produced. Aborting tears
+// down only the client socket, so the brain still ran to completion and logged a
+// full-duration OK while the skill treated the topic as unanswered -- which is
+// what made the Brain log and the skill's verdict disagree.
+const BRAIN_FALLBACK_TIMEOUT_MS = Number(process.env.CAREER_BRAIN_FALLBACK_TIMEOUT_MS) > 0
+  ? Number(process.env.CAREER_BRAIN_FALLBACK_TIMEOUT_MS)
+  : 19000;
+
+let settled = false;
+
+function payload(success, status, data, error, present) {
   return { success: success, status: status, data: data || null, error: error || null, present: present || [] };
 }
 
-async function callBrain(prompt) {
-  const brainUrl = process.env.BRAIN_URL || 'http://localhost:3000';
-  const res = await fetch(brainUrl + '/api/brain/complete', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      systemPrompt: 'You are a career coach. Provide concise, practical guidance.',
-      prompt: prompt,
-      options: { temperature: 0.4, maxTokens: 2048 },
-    }),
-  });
-  if (!res.ok) return null;
-  const data = await res.json();
-  return data.content || data.summary || null;
+function emit(success, status, data, error, present) {
+  if (settled) return null;
+  settled = true;
+  const out = payload(success, status, data, error, present);
+  console.log(JSON.stringify(out));
+  return out;
 }
 
-let prep = null, advisory = null, prepError = null, advisoryError = null;
+// Emits exactly one result and exits immediately, dropping any handle left open
+// by work still in flight. process.exit inside the write callback guarantees
+// stdout is flushed first, which a bare process.exit(0) would not.
+function emitAndExit(success, status, data, error, present) {
+  if (settled) return;
+  settled = true;
+  const out = JSON.stringify(payload(success, status, data, error, present));
+  process.stdout.write(out + '\\n', function () { process.exit(0); });
+}
+
+const NOT_CONNECTED_BODY = [{ id: 'error', title: 'Not Connected', kind: 'text', body: 'Interview preparation requires a configured assistant model. Contact your administrator to verify BRAIN_URL and model availability.' }];
+const NOT_CONNECTED_ERROR = 'Interview prep and negotiation guidance are unavailable; ensure the assistant model (brain) is configured and reachable at BRAIN_URL';
+
+// __execute_tool has two return shapes, and conflating them is what made a
+// healthy brain look dead.
+//
+//   - a skill callee emits { success, status, data, ... } as JSON, which the
+//     bridge parses and hands back verbatim;
+//   - a reasoning callee (career-interview-prep, career-advisory are both
+//     type: 'reasoning' base tools) produces a ToolExecution shaped
+//     { status: 'completed', output: { summary, _raw, ... } } with NO 'success'
+//     key at all. The bridge only ever sets success:false, on failure.
+//
+// So result.success is undefined for a delegation that in fact succeeded.
+// Treating that as failure recorded two working brain calls as missing, fired a
+// redundant direct-brain fallback for each, and pushed the skill past its
+// deadline. Unwrap both shapes, and decide success on presence of usable text.
+function unwrapDelegated(res) {
+  if (!res || typeof res !== 'object') return null;
+  if (res.status === 'failed') return null;
+  if (res.success === false) return null;
+  if (res.success === true) {
+    const data = res.data;
+    if (data && typeof data === 'object') return data;
+    return data != null ? { summary: data } : null;
+  }
+  if (res.status === 'completed') {
+    const out = res.output;
+    if (out && typeof out === 'object') {
+      if (out.success === false) return null;
+      return (out.data && typeof out.data === 'object') ? out.data : out;
+    }
+    if (typeof out === 'string' && out.trim()) return { summary: out };
+  }
+  return null;
+}
+
+// Pulls displayable text out of a delegation payload. A reasoning callee returns
+// { summary, _raw, _model, ... } where summary is the model's answer.
+function delegatedText(payload) {
+  if (!payload) return null;
+  if (typeof payload === 'string') return payload.trim() ? payload : null;
+  if (typeof payload !== 'object') return null;
+  if (typeof payload.summary === 'string' && payload.summary.trim()) return payload.summary;
+  if (typeof payload._raw === 'string' && payload._raw.trim()) return payload._raw;
+  return null;
+}
+
+// Resolves a topic from its delegated tool, falling back to a direct brain call
+// only when the delegation yields nothing usable. The fallback is deliberately
+// NOT started concurrently: it asks the same brain for the same content, so
+// racing them would spend a second pair of brain calls on every healthy run just
+// to discard the slower answer. Sequential costs an extra call only when the
+// delegation actually failed.
+function resolveTopic(toolId, toolInput, brainPrompt, brainUnwrap) {
+  return (async function () {
+    let raw = null;
+    try {
+      raw = await withDeadline(__execute_tool(toolId, toolInput), DELEGATED_TIMEOUT_MS);
+    } catch (e) {
+      raw = null;
+    }
+    const payload = unwrapDelegated(raw);
+    const text = delegatedText(payload);
+    if (text) return { via: 'delegated', payload: payload, text: text };
+    const direct = await callBrain(brainPrompt);
+    const brainPayload = brainUnwrap(direct);
+    const brainText = delegatedText(brainPayload);
+    return brainText ? { via: 'brain', payload: brainPayload, text: brainText } : null;
+  })();
+}
+
+// Caps how long a step is waited on without cancelling it.
+function withDeadline(promise, ms) {
+  return new Promise(function (resolve) {
+    let done = false;
+    const timer = setTimeout(function () { if (!done) { done = true; resolve(null); } }, ms);
+    Promise.resolve(promise).then(
+      function (v) { if (!done) { done = true; clearTimeout(timer); resolve(v); } },
+      function () { if (!done) { done = true; clearTimeout(timer); resolve(null); } }
+    );
+  });
+}
+
+function brainBaseUrl() {
+  return String(process.env.BRAIN_URL || '').trim();
+}
+
+async function callBrain(prompt) {
+  // Never dial a port that may not be served: with no BRAIN_URL configured the
+  // caller falls straight through to the not-connected emit.
+  const base = brainBaseUrl();
+  if (!base) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(function () { controller.abort(); }, BRAIN_FALLBACK_TIMEOUT_MS);
+  try {
+    const res = await fetch(base + '/api/brain/complete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify({
+        systemPrompt: 'You are a career coach. Provide concise, practical guidance.',
+        prompt: prompt,
+        options: { temperature: 0.4, maxTokens: 2048 },
+      }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.content || data.summary || null;
+  } catch (e) {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const work = (async function () {
 const delegatedTo = [];
 const coverage = [];
 const missing = [];
-
-if (role || company) {
-  try {
-    prep = await __execute_tool('career-interview-prep', { targetRole: role, company: company });
-    if (prep && prep.success) { delegatedTo.push('career-interview-prep'); coverage.push('interview-prep'); }
-    else { missing.push('interview-prep'); prepError = (prep && prep.error) || 'Tool returned failure'; }
-  } catch (e) { missing.push('interview-prep'); prepError = e instanceof Error ? e.message : String(e); }
-
-  try {
-    advisory = await __execute_tool('career-advisory', { question: 'Generate compensation negotiation points for a ' + (role || 'role') + ' position at ' + (company || 'the company'), targetRole: role, company: company });
-    if (advisory && advisory.success) { delegatedTo.push('career-advisory'); coverage.push('negotiation-advice'); }
-    else { missing.push('negotiation-advice'); advisoryError = (advisory && advisory.error) || 'Tool returned failure'; }
-  } catch (e) { missing.push('negotiation-advice'); advisoryError = e instanceof Error ? e.message : String(e); }
-}
-
-const prepOk = prep && prep.success;
-const advisoryOk = advisory && advisory.success;
-const prepData = prepOk ? (prep.data && typeof prep.data === 'object' ? prep.data : { summary: prep.data }) : null;
-const advisoryData = advisoryOk ? (advisory.data && typeof advisory.data === 'object' ? advisory.data : { summary: advisory.data }) : null;
+const brainBacked = [];
 
 let questions = [];
 let negotiation = null;
 let sourceNote = null;
 
-if (prepData) {
-  questions = prepData.questions || prepData.q_and_a || (prepData.summary ? [prepData.summary] : []);
-}
-
-if (advisoryData) {
-  negotiation = advisoryData.summary || String(advisoryData);
-}
-
-// If delegated tools failed, attempt a direct brain call for company-specific content
-if (!prepOk && (role || company)) {
+if (role || company) {
   const brainPrompt = 'Generate 5-7 interview questions for a ' + (role || 'role') + ' position' + (company ? ' at ' + company : '') + '. Focus on the specific challenges, culture, and role expectations. Format as a plain list.';
-  const brainResult = await callBrain(brainPrompt).catch(() => null);
-  if (brainResult) {
-    questions = brainResult.split('\\n').filter(function (l) { return l.trim().length > 0; });
-    sourceNote = 'Generated via direct brain call (delegated tools unavailable).';
-  }
-}
-
-if (!advisoryOk && (role || company)) {
   const negoPrompt = 'Generate compensation negotiation advice for a ' + (role || 'role') + ' position' + (company ? ' at ' + company : '') + '. Include market rate context, what to negotiate beyond base salary, and key tactics.';
-  const negoResult = await callBrain(negoPrompt).catch(() => null);
-  if (negoResult) {
-    negotiation = negoResult;
-    if (!sourceNote) sourceNote = 'Generated via direct brain call (delegated tools unavailable).';
+
+  // A direct brain answer is plain prose, so the question list is split on
+  // newlines exactly as the previous sequential fallback did; without this the
+  // whole answer renders as one bullet.
+  function brainPrepPayload(t) {
+    if (!t) return null;
+    return { summary: t, questions: t.split('\\n').filter(function (l) { return l.trim().length > 0; }) };
+  }
+  function brainProsePayload(t) {
+    return t ? { summary: t } : null;
+  }
+
+  // The two topics are independent, so they run together; each waits on its own
+  // delegation and only then, if that produced nothing, on its own brain call.
+  // A run costs 2 brain calls when the delegations work and 4 when they do not,
+  // rather than always paying for a fallback whose answer is thrown away.
+  const [prepResult, advisoryResult] = await Promise.all([
+    resolveTopic('career-interview-prep', { targetRole: role, company: company }, brainPrompt, brainPrepPayload),
+    resolveTopic('career-advisory', { question: 'Generate compensation negotiation points for a ' + (role || 'role') + ' position at ' + (company || 'the company'), targetRole: role, company: company }, negoPrompt, brainProsePayload),
+  ]);
+
+  if (prepResult) {
+    if (prepResult.via === 'delegated') delegatedTo.push('career-interview-prep');
+    else brainBacked.push('interview-prep');
+    coverage.push('interview-prep');
+    const d = prepResult.payload;
+    questions = d.questions || d.q_and_a || (delegatedText(d) ? [delegatedText(d)] : []);
+  } else {
+    missing.push('interview-prep');
+  }
+
+  if (advisoryResult) {
+    if (advisoryResult.via === 'delegated') delegatedTo.push('career-advisory');
+    else brainBacked.push('negotiation-advice');
+    coverage.push('negotiation-advice');
+    negotiation = advisoryResult.text;
+  } else {
+    missing.push('negotiation-advice');
+  }
+
+  if (brainBacked.length) {
+    sourceNote = 'Generated via direct brain call (' + brainBacked.join(', ') + ').';
   }
 }
 
-if (!questions.length && !negotiation && !sourceNote) {
-  emit(false, 'not-connected', null, 'Interview prep and negotiation guidance are unavailable; ensure the assistant model (brain) is configured and reachable at BRAIN_URL', [{ id: 'error', title: 'Not Connected', kind: 'text', body: 'Interview preparation requires a configured assistant model. Contact your administrator to verify BRAIN_URL and model availability.' }]);
-  return;
+if (!questions.length && !negotiation) {
+  emit(false, 'not-connected', null, NOT_CONNECTED_ERROR, NOT_CONNECTED_BODY);
+  return null;
 }
 
 const briefing = {
@@ -112,7 +273,27 @@ if (sourceNote) {
   present.push({ id: 'source', title: 'Source', kind: 'text', body: sourceNote });
 }
 
-emit(true, 'ok', briefing, null, present);
+return emit(true, 'ok', briefing, null, present);
+})();
+
+let budgetTimer = null;
+const budget = new Promise(function (resolve) {
+  budgetTimer = setTimeout(function () { resolve('budget-exhausted'); }, SKILL_BUDGET_MS);
+});
+
+const outcome = await Promise.race([work, budget]);
+// Released on both paths so a settled run does not hold the child open until the
+// budget would have fired.
+clearTimeout(budgetTimer);
+
+if (outcome === 'budget-exhausted') {
+  // This is the skill's own deadline expiring, not evidence about the brain. The
+  // previous wording claimed the brain "did not respond" and pointed at
+  // BRAIN_URL and quota, which sent the investigation after a healthy service
+  // that had in fact answered every request. Say what is actually known.
+  emitAndExit(false, 'not-connected', null, 'Interview prep and negotiation guidance did not complete within the ' + Math.round(SKILL_BUDGET_MS / 1000) + 's deadline of this skill. The assistant model (brain) may still be processing the request; retry, and check the Brain activity log for the matching entries', NOT_CONNECTED_BODY);
+}
+return outcome;
 })();`;
 
 const INTERVIEW_COMPENSATION_BATTLECARD_INPUT = {
@@ -135,7 +316,12 @@ const INTERVIEW_COMPENSATION_BATTLECARD = createCodeSkill({
     lowerOrderTools: ['career-interview-prep', 'career-advisory'],
     configSchema: CAREER_WRAPPER_CONFIG_SCHEMA,
     actionLabel: 'Create interview briefing',
-    timeoutMs: 60000,
+    // Must stay strictly inside nginx's 60s default proxy_read_timeout on
+    // /api, with headroom for the teardown that follows the deadline. At 60000
+    // it equalled the proxy budget exactly, so the 504 always won the tie. The
+    // 44000 emit budget above must also stay under it, or the graceful
+    // not-connected flush never runs.
+    timeoutMs: 52000,
   },
   inputSchema: INTERVIEW_COMPENSATION_BATTLECARD_INPUT,
   outputSchema: careerResultSchema('Interview briefing with questions and negotiation guide, derived from inputs'),

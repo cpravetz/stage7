@@ -30,6 +30,46 @@ const HEALING_SYSTEM_PROMPT = `You are a senior engineer debugging a failed code
 const MAX_HEALING_ATTEMPTS = 2;
 const MAX_NESTING_DEPTH = 4;
 
+/**
+ * Normalizes a non-skill callee's payload into the `{ success, data }` envelope
+ * that every skill already reads off `__execute_tool`.
+ *
+ * A skill callee emits its own JSON, so the bridge hands that back verbatim and
+ * `success`/`data` are present. Every OTHER callee type returns its raw payload
+ * instead, and none of them carry a `success` key:
+ *
+ *   - `reasoning` -> `{ summary, _raw, _model, _provider, _tokensUsed }`
+ *   - `native`    -> `{ ...data, durationMs }`, with `success` deliberately
+ *                    stripped by dispatch, or `{ error }` on failure
+ *   - `openapi`   -> `{ status, data }`
+ *   - `mcp`       -> `{ content, isError }`, or `{ error }` on failure
+ *
+ * So a skill that delegated to one of those and checked `result.success` saw
+ * `undefined`, judged the call FAILED, and fell through to a redundant fallback
+ * or reported the callee as offline. That is how four successful brain calls
+ * were logged as a dead brain. The raw fields are spread through untouched, so
+ * callers reading them directly (e.g. `search_web`'s `results`) keep working, and
+ * existing keys are never clobbered.
+ */
+function normalizeNestedPayload(output: unknown): Record<string, unknown> {
+  const raw: Record<string, unknown> = output && typeof output === 'object' && !Array.isArray(output)
+    ? (output as Record<string, unknown>)
+    : {};
+  // Already an envelope (a code skill that emitted one, or a payload that
+  // carries its own success flag): pass it through untouched.
+  if ('success' in raw) return raw;
+  const failed = raw.isError === true || (raw.error !== undefined && raw.error !== null && raw.error !== '');
+  return {
+    ...raw,
+    success: !failed,
+    // Preserve an HTTP status (openapi) rather than overwriting it with a
+    // lifecycle word; only supply a status when the callee did not.
+    status: 'status' in raw ? raw.status : (failed ? 'failed' : 'ok'),
+    data: 'data' in raw ? raw.data : raw,
+    error: 'error' in raw ? raw.error : null,
+  };
+}
+
 export type { FtpExecutionOptions, FtpExecutionResult } from '../executors/FtpExecutor';
 export type { WebhookDispatchOptions, WebhookDispatchResult } from '../executors/WebhookExecutor';
 export type { DatabaseQueryOptions, DatabaseQueryResult } from '../executors/DatabaseExecutor';
@@ -780,7 +820,7 @@ return this.executeOrRequestCredentials(pending.tool, pending.input);
               // leave as-is if not JSON
             }
           }
-          return output || {};
+          return normalizeNestedPayload(output);
         }
         if (result.status === 'failed') {
           return { success: false, error: result.error || 'Nested tool execution failed' };

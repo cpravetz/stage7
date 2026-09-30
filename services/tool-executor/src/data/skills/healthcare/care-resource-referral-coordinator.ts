@@ -303,7 +303,11 @@ const source = `(async () => {
       followUpRequired,
       followUpAt,
       resourceCount: candidates.length,
-      communication: communicationResult && communicationResult.success ? (communicationResult.data || { channel: input.communicationChannel || 'portal', sent: true }) : null,
+      communication: communicationResult && communicationResult.success
+        ? ((communicationResult.response && communicationResult.response.data)
+          || communicationResult.data
+          || { channel: input.communicationChannel || 'portal', sent: true })
+        : null,
       delegatedTo: ['records_scheduling', 'resource_coordination', 'patient_communication'],
       stepResults: { records_scheduling: recordsResult, resource_coordination: resourceResult, patient_communication: communicationResult },
     };

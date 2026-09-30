@@ -15,7 +15,6 @@ export { eventSkills } from './event';
 export { marketingSkills } from './marketing';
 export { supportSkills } from './support';
 export { analyticsSkills } from './analytics';
-export { creativeSkills } from './creative';
 export { financeSkills } from './finance';
 export { healthcareSkills } from './healthcare';
 export { restaurantSkills } from './restaurant';
@@ -42,7 +41,6 @@ import {
   restaurantWorkflow,
   salesWorkflow,
   supportWorkflow,
-  creativeWorkflow,
   sportsWorkflow,
   eventWorkflow,
   executiveWorkflow,
@@ -71,7 +69,6 @@ export {
   restaurantWorkflow,
   salesWorkflow,
   supportWorkflow,
-  creativeWorkflow,
   sportsWorkflow,
   eventWorkflow,
   executiveWorkflow,
@@ -96,7 +93,6 @@ export const allWorkflows = [
   restaurantWorkflow,
   salesWorkflow,
   supportWorkflow,
-  creativeWorkflow,
   sportsWorkflow,
   eventWorkflow,
   executiveWorkflow,

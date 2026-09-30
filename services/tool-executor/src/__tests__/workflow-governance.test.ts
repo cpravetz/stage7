@@ -10,7 +10,6 @@ import { careerSkills, careerWorkflow } from '../data/skills/career';
 import { restaurantSkills, restaurantWorkflow } from '../data/skills/restaurant';
 import { salesSkills, salesWorkflow } from '../data/skills/sales';
 import { supportSkills, supportWorkflow } from '../data/skills/support';
-import { creativeSkills, creativeWorkflow } from '../data/skills/creative';
 import { sportsSkills, sportsWorkflow } from '../data/skills/sports';
 import { eventSkills, eventWorkflow } from '../data/skills/event';
 import { executiveSkills, executiveWorkflow } from '../data/skills/executive';
@@ -45,7 +44,6 @@ describe('Workflow Governance - Sprint 7', () => {
       { name: 'Restaurant', workflow: restaurantWorkflow, skills: restaurantSkills },
       { name: 'Sales', workflow: salesWorkflow, skills: salesSkills },
       { name: 'Support', workflow: supportWorkflow, skills: supportSkills },
-      { name: 'Creative', workflow: creativeWorkflow, skills: creativeSkills },
       { name: 'Sports', workflow: sportsWorkflow, skills: sportsSkills },
       { name: 'Event', workflow: eventWorkflow, skills: eventSkills },
       { name: 'Executive', workflow: executiveWorkflow, skills: executiveSkills },
@@ -58,10 +56,10 @@ describe('Workflow Governance - Sprint 7', () => {
       { name: 'Analytics', workflow: analyticsWorkflow, skills: analyticsSkills },
     ];
 
-    it('covers all 22 assistant workflows', () => {
-      expect(workflowAssistants.length).toBe(22);
+    it('covers all 21 assistant workflows', () => {
+      expect(workflowAssistants.length).toBe(21);
       const names = workflowAssistants.map(a => a.name);
-      expect(new Set(names).size).toBe(22);
+      expect(new Set(names).size).toBe(21);
     });
 
     for (const assistant of workflowAssistants) {
@@ -214,10 +212,6 @@ describe('Workflow Governance - Sprint 7', () => {
       expect(stageNames).toEqual(['intake', 'triage', 'resolution', 'follow-up']);
     });
 
-    it('Creative workflow follows brief → create', () => {
-      const stageNames = creativeWorkflow.stages.map(s => s.name);
-      expect(stageNames).toEqual(['brief', 'create']);
-    });
 
     it('Sports workflow follows research → odds → analysis', () => {
       const stageNames = sportsWorkflow.stages.map(s => s.name);
@@ -270,7 +264,7 @@ describe('Workflow Governance - Sprint 7', () => {
     });
 
     it('all workflow stages have explicit descriptions', () => {
-      const allWorkflows = [ctoWorkflow, educationWorkflow, marketingWorkflow, productWorkflow, contentWorkflow, hrWorkflow, healthcareWorkflow, careerWorkflow, restaurantWorkflow, salesWorkflow, supportWorkflow, creativeWorkflow, sportsWorkflow, eventWorkflow, executiveWorkflow, financeWorkflow, hotelWorkflow, investmentWorkflow, legalWorkflow, songwritingWorkflow, scriptwritingWorkflow, analyticsWorkflow];
+      const allWorkflows = [ctoWorkflow, educationWorkflow, marketingWorkflow, productWorkflow, contentWorkflow, hrWorkflow, healthcareWorkflow, careerWorkflow, restaurantWorkflow, salesWorkflow, supportWorkflow, sportsWorkflow, eventWorkflow, executiveWorkflow, financeWorkflow, hotelWorkflow, investmentWorkflow, legalWorkflow, songwritingWorkflow, scriptwritingWorkflow, analyticsWorkflow];
       for (const workflow of allWorkflows) {
         for (const stage of workflow.stages) {
           expect(stage.description).toBeTruthy();
@@ -279,8 +273,8 @@ describe('Workflow Governance - Sprint 7', () => {
       }
     });
 
-    it('no workflow stage is empty across all 22 assistants', () => {
-      const allWorkflows = [ctoWorkflow, educationWorkflow, marketingWorkflow, productWorkflow, contentWorkflow, hrWorkflow, healthcareWorkflow, careerWorkflow, restaurantWorkflow, salesWorkflow, supportWorkflow, creativeWorkflow, sportsWorkflow, eventWorkflow, executiveWorkflow, financeWorkflow, hotelWorkflow, investmentWorkflow, legalWorkflow, songwritingWorkflow, scriptwritingWorkflow, analyticsWorkflow];
+    it('no workflow stage is empty across all 21 assistants', () => {
+      const allWorkflows = [ctoWorkflow, educationWorkflow, marketingWorkflow, productWorkflow, contentWorkflow, hrWorkflow, healthcareWorkflow, careerWorkflow, restaurantWorkflow, salesWorkflow, supportWorkflow, sportsWorkflow, eventWorkflow, executiveWorkflow, financeWorkflow, hotelWorkflow, investmentWorkflow, legalWorkflow, songwritingWorkflow, scriptwritingWorkflow, analyticsWorkflow];
       for (const workflow of allWorkflows) {
         for (const stage of workflow.stages) {
           expect(stage.skills.length).toBeGreaterThan(0);
@@ -303,7 +297,6 @@ describe('Workflow Governance - Sprint 7', () => {
         { name: 'Restaurant', workflow: restaurantWorkflow, object: 'reservation / table' },
         { name: 'Sales', workflow: salesWorkflow, object: 'lead / opportunity' },
         { name: 'Support', workflow: supportWorkflow, object: 'ticket / customer' },
-        { name: 'Creative', workflow: creativeWorkflow, object: 'creative work' },
         { name: 'Sports', workflow: sportsWorkflow, object: 'game / matchup' },
         { name: 'Event', workflow: eventWorkflow, object: 'event / vendor' },
         { name: 'Executive', workflow: executiveWorkflow, object: 'organization / strategy' },
@@ -315,7 +308,7 @@ describe('Workflow Governance - Sprint 7', () => {
         { name: 'Scriptwriting', workflow: scriptwritingWorkflow, object: 'script' },
         { name: 'Analytics', workflow: analyticsWorkflow, object: 'metric / insight' },
       ];
-      expect(allWorkflows.length).toBe(22);
+      expect(allWorkflows.length).toBe(21);
       for (const { workflow, object } of allWorkflows) {
         for (const stage of workflow.stages) {
           for (const skill of stage.skills) {
@@ -327,7 +320,7 @@ describe('Workflow Governance - Sprint 7', () => {
     });
 
     it('no skill belongs to multiple stages across the same workflow (except Analytics single-skill model)', () => {
-      const allWorkflows = [ctoWorkflow, educationWorkflow, marketingWorkflow, productWorkflow, contentWorkflow, hrWorkflow, healthcareWorkflow, careerWorkflow, restaurantWorkflow, salesWorkflow, supportWorkflow, creativeWorkflow, sportsWorkflow, eventWorkflow, executiveWorkflow, financeWorkflow, hotelWorkflow, investmentWorkflow, legalWorkflow, songwritingWorkflow, scriptwritingWorkflow, analyticsWorkflow];
+      const allWorkflows = [ctoWorkflow, educationWorkflow, marketingWorkflow, productWorkflow, contentWorkflow, hrWorkflow, healthcareWorkflow, careerWorkflow, restaurantWorkflow, salesWorkflow, supportWorkflow, sportsWorkflow, eventWorkflow, executiveWorkflow, financeWorkflow, hotelWorkflow, investmentWorkflow, legalWorkflow, songwritingWorkflow, scriptwritingWorkflow, analyticsWorkflow];
       for (const workflow of allWorkflows) {
         const stageIds: string[] = [];
         for (const stage of workflow.stages) {
@@ -359,7 +352,6 @@ describe('Workflow Governance - Sprint 7', () => {
         { name: 'Restaurant', workflow: restaurantWorkflow },
         { name: 'Sales', workflow: salesWorkflow },
         { name: 'Support', workflow: supportWorkflow },
-        { name: 'Creative', workflow: creativeWorkflow },
         { name: 'Sports', workflow: sportsWorkflow },
         { name: 'Event', workflow: eventWorkflow },
         { name: 'Executive', workflow: executiveWorkflow },
@@ -371,7 +363,7 @@ describe('Workflow Governance - Sprint 7', () => {
         { name: 'Scriptwriting', workflow: scriptwritingWorkflow },
         { name: 'Analytics', workflow: analyticsWorkflow },
       ];
-      expect(allWorkflows.length).toBe(22);
+      expect(allWorkflows.length).toBe(21);
       for (const { workflow } of allWorkflows) {
         for (const stage of workflow.stages) {
           if (!stageToObjects[stage.name]) {
@@ -452,14 +444,14 @@ describe('Workflow Governance - Sprint 7', () => {
       const allWorkflows: WorkflowLike[] = [
         ctoWorkflow, educationWorkflow, marketingWorkflow, productWorkflow, contentWorkflow,
         hrWorkflow, healthcareWorkflow, careerWorkflow, restaurantWorkflow, salesWorkflow,
-        supportWorkflow, creativeWorkflow, sportsWorkflow, eventWorkflow, executiveWorkflow,
+        supportWorkflow, sportsWorkflow, eventWorkflow, executiveWorkflow,
         financeWorkflow, hotelWorkflow, investmentWorkflow, legalWorkflow, songwritingWorkflow,
         scriptwritingWorkflow, analyticsWorkflow,
       ];
       const owners: Record<string, Tool[]> = {
         CTO: ctoSkills, Education: educationSkills, Marketing: marketingSkills, Product: productSkills,
         Content: contentSkills, HR: hrSkills, Healthcare: healthcareSkills, Career: careerSkills,
-        Restaurant: restaurantSkills, Sales: salesSkills, Support: supportSkills, Creative: creativeSkills,
+        Restaurant: restaurantSkills, Sales: salesSkills, Support: supportSkills,
         Sports: sportsSkills, Event: eventSkills, Executive: executiveSkills, Finance: financeSkills,
         Hotel: hotelSkills, Investment: investmentSkills, Legal: legalSkills, Songwriting: songwritingSkills,
         Scriptwriting: scriptwritingSkills, Analytics: analyticsSkills,
@@ -493,7 +485,6 @@ describe('Workflow Governance - Sprint 7', () => {
         { workflow: restaurantWorkflow, expectedObject: 'reservation / table' },
         { workflow: salesWorkflow, expectedObject: 'lead / opportunity' },
         { workflow: supportWorkflow, expectedObject: 'ticket / customer' },
-        { workflow: creativeWorkflow, expectedObject: 'creative work' },
         { workflow: sportsWorkflow, expectedObject: 'game / matchup' },
         { workflow: eventWorkflow, expectedObject: 'event / vendor' },
         { workflow: executiveWorkflow, expectedObject: 'organization / strategy' },
@@ -505,7 +496,7 @@ describe('Workflow Governance - Sprint 7', () => {
         { workflow: scriptwritingWorkflow, expectedObject: 'script' },
         { workflow: analyticsWorkflow, expectedObject: 'metric / insight' },
       ];
-      expect(allWorkflows.length).toBe(22);
+      expect(allWorkflows.length).toBe(21);
       for (const { workflow, expectedObject } of allWorkflows) {
         expect(workflow.productObject).toBe(expectedObject);
       }
@@ -524,7 +515,6 @@ describe('Workflow Governance - Sprint 7', () => {
         restaurant: 'reservation / table',
         sales: 'lead / opportunity',
         support: 'ticket / customer',
-        creative: 'creative work',
         sports: 'game / matchup',
         event: 'event / vendor',
         executive: 'organization / strategy',
@@ -536,7 +526,7 @@ describe('Workflow Governance - Sprint 7', () => {
         scriptwriting: 'script',
         analytics: 'metric / insight',
       };
-      expect(Object.keys(objectMap).length).toBe(22);
+      expect(Object.keys(objectMap).length).toBe(21);
       for (const [key, expectedObject] of Object.entries(objectMap)) {
         const reg = assistantRegistries.find(r => r.assistant.toLowerCase() === key);
         expect(reg).toBeDefined();
@@ -557,7 +547,6 @@ describe('Workflow Governance - Sprint 7', () => {
         restaurant: ['reservation', 'service', 'kitchen', 'billing'],
         sales: ['discovery', 'proposal', 'close'],
         support: ['intake', 'triage', 'resolution', 'follow-up'],
-        creative: ['brief', 'create'],
         sports: ['research', 'odds', 'analysis'],
         event: ['plan', 'vendors', 'day-of'],
         executive: ['review', 'analysis', 'recommendation', 'decision'],
@@ -569,7 +558,7 @@ describe('Workflow Governance - Sprint 7', () => {
         scriptwriting: ['brief', 'draft', 'revise', 'finalize'],
         analytics: ['report', 'analyze', 'query'],
       };
-      expect(Object.keys(flowMap).length).toBe(22);
+      expect(Object.keys(flowMap).length).toBe(21);
       for (const [key, expectedStages] of Object.entries(flowMap)) {
         const reg = assistantRegistries.find(r => r.assistant.toLowerCase() === key);
         expect(reg).toBeDefined();
@@ -591,7 +580,7 @@ describe('Workflow Governance - Sprint 7', () => {
     });
 
     it('Sprint 5 assistants have consistent workflow stage vocabulary', () => {
-      const allWorkflows = [ctoWorkflow, educationWorkflow, marketingWorkflow, productWorkflow, contentWorkflow, hrWorkflow, healthcareWorkflow, careerWorkflow, restaurantWorkflow, salesWorkflow, supportWorkflow, creativeWorkflow, sportsWorkflow, eventWorkflow, executiveWorkflow, financeWorkflow, hotelWorkflow, investmentWorkflow, legalWorkflow, songwritingWorkflow, scriptwritingWorkflow, analyticsWorkflow];
+      const allWorkflows = [ctoWorkflow, educationWorkflow, marketingWorkflow, productWorkflow, contentWorkflow, hrWorkflow, healthcareWorkflow, careerWorkflow, restaurantWorkflow, salesWorkflow, supportWorkflow, sportsWorkflow, eventWorkflow, executiveWorkflow, financeWorkflow, hotelWorkflow, investmentWorkflow, legalWorkflow, songwritingWorkflow, scriptwritingWorkflow, analyticsWorkflow];
       const stageSets = allWorkflows.map(w => new Set(w.stages.map(s => s.name)));
       for (let i = 0; i < stageSets.length; i++) {
         for (let j = i + 1; j < stageSets.length; j++) {
@@ -621,13 +610,13 @@ describe('Workflow Governance - Sprint 7', () => {
 
     const allSkillArrays: Tool[][] = [
       ctoSkills, educationSkills, marketingSkills, productSkills, contentSkills, hrSkills, healthcareSkills,
-      careerSkills, restaurantSkills, salesSkills, supportSkills, creativeSkills, sportsSkills, eventSkills,
+      careerSkills, restaurantSkills, salesSkills, supportSkills, sportsSkills, eventSkills,
       executiveSkills, financeSkills, hotelSkills, investmentSkills, legalSkills, songwritingSkills,
       scriptwritingSkills, analyticsSkills,
     ];
 
-    it('covers all 22 assistant skill arrays', () => {
-      expect(allSkillArrays.length).toBe(22);
+    it('covers all 21 assistant skill arrays', () => {
+      expect(allSkillArrays.length).toBe(21);
     });
 
     for (const skills of allSkillArrays) {
@@ -683,7 +672,7 @@ describe('Workflow Governance - Sprint 7', () => {
 
   describe('Workflow memory and state persistence', () => {
     it('all Sprint 5 workflow objects include a flow declaration', () => {
-      const allWorkflows = [ctoWorkflow, educationWorkflow, marketingWorkflow, productWorkflow, contentWorkflow, hrWorkflow, healthcareWorkflow, careerWorkflow, restaurantWorkflow, salesWorkflow, supportWorkflow, creativeWorkflow, sportsWorkflow, eventWorkflow, executiveWorkflow, financeWorkflow, hotelWorkflow, investmentWorkflow, legalWorkflow, songwritingWorkflow, scriptwritingWorkflow, analyticsWorkflow];
+      const allWorkflows = [ctoWorkflow, educationWorkflow, marketingWorkflow, productWorkflow, contentWorkflow, hrWorkflow, healthcareWorkflow, careerWorkflow, restaurantWorkflow, salesWorkflow, supportWorkflow, sportsWorkflow, eventWorkflow, executiveWorkflow, financeWorkflow, hotelWorkflow, investmentWorkflow, legalWorkflow, songwritingWorkflow, scriptwritingWorkflow, analyticsWorkflow];
       for (const workflow of allWorkflows) {
         expect(workflow.flow).toContain('→');
         expect(workflow.flow.split('→').length).toBeGreaterThanOrEqual(2);
@@ -691,7 +680,7 @@ describe('Workflow Governance - Sprint 7', () => {
     });
 
     it('each workflow stage includes its skills as first-class citizens', () => {
-      const allWorkflows = [ctoWorkflow, educationWorkflow, marketingWorkflow, productWorkflow, contentWorkflow, hrWorkflow, healthcareWorkflow, careerWorkflow, restaurantWorkflow, salesWorkflow, supportWorkflow, creativeWorkflow, sportsWorkflow, eventWorkflow, executiveWorkflow, financeWorkflow, hotelWorkflow, investmentWorkflow, legalWorkflow, songwritingWorkflow, scriptwritingWorkflow, analyticsWorkflow];
+      const allWorkflows = [ctoWorkflow, educationWorkflow, marketingWorkflow, productWorkflow, contentWorkflow, hrWorkflow, healthcareWorkflow, careerWorkflow, restaurantWorkflow, salesWorkflow, supportWorkflow, sportsWorkflow, eventWorkflow, executiveWorkflow, financeWorkflow, hotelWorkflow, investmentWorkflow, legalWorkflow, songwritingWorkflow, scriptwritingWorkflow, analyticsWorkflow];
       for (const workflow of allWorkflows) {
         let totalSkillsInStages = 0;
         for (const stage of workflow.stages) {
@@ -708,7 +697,7 @@ describe('Workflow Governance - Sprint 7', () => {
     });
 
     it('no workflow stage is empty', () => {
-      const allWorkflows = [ctoWorkflow, educationWorkflow, marketingWorkflow, productWorkflow, contentWorkflow, hrWorkflow, healthcareWorkflow, careerWorkflow, restaurantWorkflow, salesWorkflow, supportWorkflow, creativeWorkflow, sportsWorkflow, eventWorkflow, executiveWorkflow, financeWorkflow, hotelWorkflow, investmentWorkflow, legalWorkflow, songwritingWorkflow, scriptwritingWorkflow, analyticsWorkflow];
+      const allWorkflows = [ctoWorkflow, educationWorkflow, marketingWorkflow, productWorkflow, contentWorkflow, hrWorkflow, healthcareWorkflow, careerWorkflow, restaurantWorkflow, salesWorkflow, supportWorkflow, sportsWorkflow, eventWorkflow, executiveWorkflow, financeWorkflow, hotelWorkflow, investmentWorkflow, legalWorkflow, songwritingWorkflow, scriptwritingWorkflow, analyticsWorkflow];
       for (const workflow of allWorkflows) {
         for (const stage of workflow.stages) {
           expect(stage.skills.length).toBeGreaterThan(0);

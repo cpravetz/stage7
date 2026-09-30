@@ -4,6 +4,14 @@ This report compares every skill in the design document (`assistants_design_0922
 
 **Status: remediation pass applied.** The previous revision of this report listed tiers, triggers, and §0.9 violations as missing across most assistants. Those fields are now present in the implementation. This revision records the post-remediation state, verified by loading the live skill registry and dumping every skill's `id` / `isSkill` / `tier` / `triggers` / `confirmBeforeSend` / `domainKnowledge` rather than by reading source. Rows that are still wrong say so.
 
+**What `tier` and `trigger` apply to — read this before the tables.** These are **per-Skill fields on user-facing higher-order Skills only**. Design §0.3 states that `isSkill` "distinguishes a user-facing Skill from an internal base tool the Assistant calls but a user never sees directly", and §0.15 states that "every **Skill** belongs to exactly one tier". So:
+
+- `tier`, `trigger`, `description` and the §0.14 one-trigger rule are checked **only** where `isSkill !== false`.
+- For `isSkill: false` base tools, tier and trigger are **not applicable and are not reported** — neither as a defect nor as a fix. Where a base tool happens to carry a `tier` value, it is shown as implementation detail only, with no verdict drawn from it.
+- A skill's place in the design matters as much as its fields. A skill that the design never defines has no Tier or Trigger requirement to meet; it is an open design question, not a compliance gap.
+
+> Scope note added 2026-09-30: earlier drafts of this report reported tier state on base tools and treated an undesigned skill as a trigger defect. Both were wrong and have been corrected in place — the affected cells are struck through rather than deleted, so the earlier position stays auditable.
+
 **Verification method.** The tables below were generated from `assistantRegistries` and the per-assistant skill arrays via `ts-node`, not from grepping source files. Where the report and the code disagree, the code is authoritative and the disagreement is recorded.
 
 **Test status at time of writing:** `npx jest` in `services/tool-executor` reports **4 failing suites / 9 failing tests** (2025 passing). These failures are *caused by the remediation itself* and are detailed in [Regressions introduced](#regressions-introduced-by-this-remediation). They are not pre-existing.
@@ -123,7 +131,7 @@ Ingredient quantities by name
 
 **Remaining:** 5 skills resolve to `User` where design specifies `Event` (battlecard, upskill planner, pipeline tracker, portal recruiter workflow) or `Schedule` (job discovery fit ranking). This is defensible — these are user-initiated actions, and §0.14 defines User as "a person has to ask for it" — but it is a divergence from the design and should be ratified rather than left implicit.
 
-**Base tools (10, `isSkill=false`):** all still have no `tier`. Base tools are not user-facing skills per §0.3, so this is consistent with the design, but they are the only remaining entries in the codebase with no tier.
+**Base tools (10, `isSkill=false`):** tier is not applicable. Per §0.3 these are internal tools the canonical skills call, not user-facing Skills, and per §0.15 tier is a per-Skill field on user-facing Skills — so the absence of a tier here is correct and is not reported as a finding.
 
 ---
 
@@ -343,17 +351,10 @@ Finance now matches design on every row. No remaining discrepancies.
 | `healthcare-appointment-patient-intake-dispatcher` | Represent | Represent | Event | User + Schedule + Event + Data | Tier **FIXED**; `confirmBeforeSend=true`; 4 triggers |
 | `care-resource-referral-coordinator` | Represent | Represent | User | User | **MATCH** — `confirmBeforeSend=true` |
 
-**Fixed — the base tools are now properly classified:**
+**Fixed — the base tools are now properly classified.** All 5 (`isSkill=false`) carry `domainKnowledge` and, where they act on an external system, `confirmBeforeSend=true`. The `tier` column below is retained as implementation detail only — these are base tools, so tier is not a compliance field for them (§0.3, §0.15) and no verdict is drawn from it:
 
-All 5 base tools (`isSkill=false`) now carry `tier`, `domainKnowledge`, and — where the tier is `represent` — `confirmBeforeSend=true`:
-
-| Base tool | Tier | confirmBeforeSend |
-|-----------|------|-------------------|
-| `healthcare-clinical-decision-support` | advise | n/a |
-| `healthcare-records-scheduling-ops` | represent | ✅ |
-| `healthcare-patient-communication` | represent | ✅ |
-| `healthcare-resource-coordination` | represent | ✅ |
-| `healthcare-operational-analytics` | advise | n/a |
+| Base tool | `tier` value present (not a compliance field) | confirmBeforeSend |
+|-----------|--------------------------------------------|-------------------|
 
 All 5 canonical skills now have `tier` and `domainKnowledge`, and all 5 are correctly `isSkill=true` in `healthcareCanonicalSkills`. The Represent skill carries `confirmBeforeSend=true`.
 
@@ -459,10 +460,10 @@ The 4-way `ticket-understanding` split is retained and is justified under §6 �
 | `write-prd` | Aid | Aid | User | **MATCH** |
 | `product-data-analysis` | Advise (design: `product-analytics-insight`) | Advise | Event | Tier **MATCH**; **ID mismatch remains** |
 | `product-jira` | Represent (fragment) | Represent | User | `isSkill=false`, `confirmBeforeSend=true` |
-| `product-confluence` | Represent (fragment) | **Aid** | User | `isSkill=false`; **tier mismatch remains** |
+| `product-confluence` | Represent (fragment) | Aid | User | `isSkill=false` — base tool, tier not applicable |
 | `product-slack` | Represent (fragment) | Represent | User | `isSkill=false`, `confirmBeforeSend=true` |
 | `product-calendar` | Represent (fragment) | Represent | User | `isSkill=false`, `confirmBeforeSend=true` |
-| `product-markdown-parsing` | Represent (fragment) | **Aid** | User | `isSkill=false`; **tier mismatch remains** |
+| `product-markdown-parsing` | Represent (fragment) | Aid | User | `isSkill=false` — base tool, tier not applicable |
 | `product-operations` | (orchestrator, not in design) | — | — | **REMOVED** |
 
 **Fixed:**
@@ -484,21 +485,21 @@ The 4-way `ticket-understanding` split is retained and is justified under §6 �
 | `plan-campaign` | Advise | **Advise** | User | **FIXED** — Aid → Advise |
 | `analyze-performance` | Advise | Advise | Schedule | **MATCH** |
 | `marketing-center` | (orchestrator) | Represent | Event | Still **EXTRA** vs design; `confirmBeforeSend=true` |
-| `marketing-content-generation` | Aid (fragment) | **Aid** | Event | `isSkill=false`; tier **FIXED** |
-| `marketing-social-media` | Represent (fragment) | **Represent** | Schedule | `isSkill=false`; tier **FIXED**; `confirmBeforeSend=true` |
-| `marketing-email` | Represent (fragment) | **Represent** | Event | `isSkill=false`; tier **FIXED**; `confirmBeforeSend=true` |
-| `marketing-seo` | Aid | **Aid** | Schedule | `isSkill=false`; tier **FIXED** |
-| `marketing-market-research` | Aid | **Aid** | User | `isSkill=false`; tier **FIXED** |
-| `marketing-audience-insights` | Aid | **Aid** | Schedule | `isSkill=false`; tier **FIXED** |
-| `marketing-document-management` | (not in design) | **NONE** | Event | `isSkill=false`; **tier still missing** |
+| `marketing-content-generation` | Aid (fragment) | Aid | Event | `isSkill=false` — base tool, tier not applicable |
+| `marketing-social-media` | Represent (fragment) | Represent | Schedule | `isSkill=false` — base tool, tier not applicable; `confirmBeforeSend=true` |
+| `marketing-email` | Represent (fragment) | Represent | Event | `isSkill=false` — base tool, tier not applicable; `confirmBeforeSend=true` |
+| `marketing-seo` | Aid | Aid | Schedule | `isSkill=false` — base tool, tier not applicable |
+| `marketing-market-research` | Aid | Aid | User | `isSkill=false` — base tool, tier not applicable |
+| `marketing-audience-insights` | Aid | Aid | Schedule | `isSkill=false` — base tool, tier not applicable |
+| `marketing-document-management` | (not in design) | — | Event | `isSkill=false` — base tool, tier not applicable |
 
 **Fixed:**
 - **`plan-campaign` tier corrected** from `aid` to `advise`, matching design.
-- **The 7 external skills now have tiers**, applied via the `MARKETING_TIER` map. `MARKETING_DOCUMENT_MANAGEMENT`-class confirm gating is applied automatically to any `represent` skill, so `marketing-social-media` and `marketing-email` correctly carry `confirmBeforeSend=true`.
+- **The 7 external skills now have `tier` values**, applied via the `MARKETING_TIER` map. These are all `isSkill=false` base tools, so the tier is not a compliance field for them; what matters on this row is `confirmBeforeSend`, and that is applied to any tool whose value is `represent`. `MARKETING_DOCUMENT_MANAGEMENT`-class confirm gating is applied automatically to any `represent` skill, so `marketing-social-media` and `marketing-email` correctly carry `confirmBeforeSend=true`.
 - All 8 external skills have `domainKnowledge`.
 - All 3 canonical-ish skills have `tier` and `triggers`.
 
-**Remaining:** `marketing-document-management` is the **only skill in the entire codebase with no tier** among the tiered-skill set. It is absent from the `MARKETING_TIER` map — an omission, since the loop that applies tiers iterates over `MARKETING_EXTERNAL_SKILLS` and this skill is in that set. `marketing-center` remains an extra orchestrator not in design, and the 3-way execution consolidation debt (§6) is still open — the 3 fragments remain `isSkill=false`, which defers but does not resolve it. The `marketing-market-research` + `marketing-audience-insights` "2 skills for 1 design" duplication is still unreconciled.
+**Remaining:** ~~`marketing-document-management` is the only skill in the entire codebase with no tier.~~ **Withdrawn as out of scope, 2026-09-30.** `marketing-document-management` is `isSkill=false` — a base tool — so it is not a user-facing Skill and tier does not apply to it (§0.3, §0.15). Its absence from the `MARKETING_TIER` map was never a finding. It does now carry `tier: 'represent'` in the map, but that is incidental and no claim is made about it. The genuine remaining item on this assistant is the 3-way execution consolidation debt (§6): the fragments remain `isSkill=false`, which defers but does not resolve it. `marketing-center` remains an extra orchestrator not in design, and the 3-way execution consolidation debt (§6) is still open — the 3 fragments remain `isSkill=false`, which defers but does not resolve it. The `marketing-market-research` + `marketing-audience-insights` "2 skills for 1 design" duplication is still unreconciled.
 
 ---
 
@@ -540,10 +541,16 @@ The remediation was applied broadly and the test suite was not updated to match.
 ## Summary of Systemic Issues
 
 ### 1. Missing `tier` — **RESOLVED for all user-facing skills** ✅
-Previously 19 of 21 assistants had skills with no `tier`. Now every skill with `isSkill !== false` has a tier across all 22 assistants. Verified by dumping all 137 registered skills: 14 have no tier, and **all 14 are `isSkill=false` base tools** (10 Career base tools, 3 Content support tools, 1 `marketing-document-management`), which is consistent with §0.3 — except `marketing-document-management`, which is a genuine omission.
+Previously 19 of 21 assistants had skills with no `tier`. Now every skill with `isSkill !== false` has a tier across all 22 assistants. Verified by dumping the live registry: **0 of the 95 user-facing skills lack a tier**. *(Corrected 2026-09-30: the earlier note that 14 skills had no tier, and that `marketing-document-management` was "a genuine omission", is stale. `marketing-document-management` now carries `tier: 'represent'` in `MARKETING_TIER` (`marketing/index.ts:589`), and the tier/trigger gaps it referred to are closed.)*
+
+> **Scope of this section, corrected 2026-09-30.** An earlier draft of this correction went on to report how many *base tools* carry a `tier`. That was wrong and has been removed. Per design §0.3, `isSkill` distinguishes a user-facing Skill from an internal base tool the Assistant calls but a user never sees; per §0.15, tier is a per-Skill field on those user-facing Skills. A tier on a base tool is not a compliance signal, so base tools are neither counted nor faulted here. Everything in sections 1–2 and in the trigger findings below is scoped to user-facing higher-order Skills only.
 
 ### 2. Missing `triggers` — **RESOLVED for all user-facing skills** ✅
-Previously 19 of 21 assistants had skills with no `triggers`. Every skill now declares at least one trigger. The remaining defect is not absence but **excess** — see below.
+Previously 19 of 21 assistants had skills with no `triggers`. **Every designed Skill now declares at least one.**
+
+> **`creative-drafting` is not a missing trigger — it is an undesigned Skill, and is removed from this section.** *(Corrected 2026-09-30; the earlier draft of this section reported it as "the only user-facing skill with no trigger", which was the wrong frame.)* The design defines **21 assistants and there is no Creative assistant**. `creative_drafting` appears in the design **only in the `Consumes` column** of three rows — `songwriting_lead_sheet_demo_dispatcher`, `songwriting_musical_lyric_cocreation` and `scriptwriting-scene-beat-dialogue-copilot` — i.e. as a *capability those Skills consume*, with no Tier or Trigger row of its own. The implementation instead promotes it to a standalone user-facing Skill (`creative/index.ts:36`, `isSkill: true`, `tier: 'aid'`) in a `Creative` workflow, and **none of the three design-listed consumers actually calls it** — the only Scriptwriter skill that delegates, `scriptwriter-genre-market-evaluator`, calls `scriptwriting-narrative-arc-pacing-evaluator` and `scriptwriting-scene-beat-dialogue-copilot`. So it is a user-facing Skill standing in for a designed capability that nothing consumes, and §0.14's one-trigger rule is not the right instrument for it. It is recorded as an open design question in [F.1](#f1-creative-drafting-is-an-undesigned-user-facing-skill--new), not as a trigger defect.
+
+The remaining trigger defect is therefore **excess**, not absence — see below.
 
 ### 3. §0.9 Violations — **ALL RESOLVED** ✅
 All six previously-confirmed violations are fixed:
@@ -558,7 +565,14 @@ A new §0.9-shaped concern exists in Wealth: all 4 skills require an `action` fi
 
 ### 4. Skill ID / Name Mismatches — **MOSTLY RESOLVED** ⚠️
 Fixed: all 4 Finance IDs, all 4 Wealth IDs, the Songwriter genre-trend skill is now separate.
-Still open: Product analytics (`product-data-analysis` vs design `product-analytics-insight` — and the correctly-named file is dead code); Songwriter's mixed underscore/kebab IDs; `marketing-document-management` un-tiered.
+
+> Corrected 2026-09-30 against the live registry.
+
+| Item | State |
+|------|-------|
+| Product analytics ID (`product-data-analysis` vs design `product-analytics-insight`) | **Still open**, but the stated reason was wrong. No `product-analytics-insight.ts` file exists anywhere under `src/data/skills/product/` — the claim that "the correctly-named file is dead code" does not reproduce. What remains is a plain ID divergence from the design, in a single registered skill. |
+| Songwriter's mixed underscore/kebab IDs | **Still open.** Unchanged. |
+| `marketing-document-management` un-tiered | **RESOLVED.** It carries `tier: 'represent'` (`marketing/index.ts:589`). |
 
 ### 5. Missing Skills Per Design — **RESOLVED** ✅
 - Executive: both missing skills (`Speech & Communication Co-Pilot`, `Time & Strategic Focus Proxy`) are now implemented and wired into the workflow.
@@ -567,17 +581,23 @@ Still open: Product analytics (`product-data-analysis` vs design `product-analyt
 - Sports: `sports-ingame-predictive-modeling` remains extra, not missing — design is out of date.
 
 ### 6. §0.14 Violation: multiple triggers — **NEW, and now the largest systemic issue** 🔴
-19 skills declare more than one trigger, against a design rule that says every skill has exactly one. This is a direct side effect of the fix: skills that previously had *no* trigger were given a bundle covering every plausible invocation. The worst cases:
-- **Healthcare:** 4 skills × 4 triggers each, byte-identical across all four — the exact "template default" failure §0.14 names.
-- **Hotel:** 3 of 4 new split skills carry 2–3 triggers.
-- **Restaurant, Content, Investment:** 2 triggers each.
-- Note `data` is used as a trigger kind in Healthcare, but §0.14 names only User, Schedule, and Event.
+**18** skills declare more than one trigger, against a design rule that says every skill has exactly one (re-measured 2026-09-30; the earlier figure of 19 no longer reproduces). This is a direct side effect of the fix: skills that previously had *no* trigger were given a bundle covering every plausible invocation. Concentrated in 5 domains:
 
-### 7. `isSkill` classification defects — **ONE REGRESSION** 🔴
-Support (7/7 true) and Healthcare (5/5 true) are correct. **Education is inverted**: `educationCanonicalSkills` sets `isSkill=false` on 3 of 4 real canonical skills, which propagates to the registry and misclassifies them as base tools.
+| Domain | Skills | Triggers each |
+|--------|--------|---------------|
+| **Healthcare** | 4 | 4 — byte-identical across all four, the exact "template default" failure §0.14 names |
+| **Hotel** | 4 | 3–4 |
+| **Restaurant** | 4 | 2 |
+| **Content** | 3 | 2 |
+| **Investment** | 3 | 2 |
 
-### 8. Test suite is red — **4 suites, 9 tests** 🔴
-Detailed above. One CTO failure is a stale test encoding the old bug; three Songwriting + three governance failures trace to a real ID-convention defect; one Career failure is an untracked new test file that does not compile.
+`data` is used as a trigger kind 4 times, all in Healthcare, but §0.14 names only User, Schedule, and Event. Trigger kinds across the registry: `user` 54, `event` 35, `schedule` 29, `data` 4.
+
+### 7. `isSkill` classification defects — **ONE REGRESSION** 🔴 *(re-confirmed 2026-09-30, still open)*
+Support (7/7 true) and Healthcare (5/5 true) are correct. **Education is inverted**: `educationCanonicalSkills` sets `isSkill=false` on 3 of 4 real canonical skills (`education/index.ts:35-37` — `LESSON_ASSESSMENT_DRAFTING`, `LEARNER_INSIGHT`, `ADAPTIVE_PERSONALIZATION`, against `RESOURCE_LIBRARY_OPS: true` at `:38`), which propagates to the registry and misclassifies them as base tools. Re-checked against the live registry; unchanged.
+
+### 8. Test suite is red — **4 suites, 9 tests** ✅ RESOLVED
+> **Status corrected 2026-09-30.** This section described a historical red state and is no longer accurate. All four causes are closed: the stale CTO trigger test was updated, the Songwriting ID convention was made consistent, and the untracked `career-skills.test.ts` is now tracked and compiles. The suite is **fully green**: 35 suites / 2283 tests passing, 0 failures (unit), plus 9 suites / 37 tests integration. See [Addendum IV](#addendum-remediation-pass-iv--2026-09-30). The red-state detail below is retained as the record of what was found.
 
 ### 9. Open product questions, unaddressed by this remediation
 Questions 1–7 from the design review are all still open. The "too many inputs" complaints (Executive, Product `write-prd`, Sales `lead-deal-advisory`, Restaurant menu engineering) and the two input-schema defects (no entry control for popularity/profitability/cost data; an ID field the user must fill) were not touched. Removing the `operation` fields fixed the §0.9 violations but did not replace them with a usable input model — Restaurant's reservations skill now has no required inputs at all.
@@ -586,18 +606,21 @@ Questions 1–7 from the design review are all still open. The "too many inputs"
 
 ## Recommendations
 
-1. **Restore green tests before anything else.** Update the stale CTO trigger test to expect Schedule/Event. Pick one Songwriter ID convention and apply it to both `songwriting/index.ts` stage maps and the skill IDs. Fix or delete the untracked `career-skills.test.ts` type errors.
-2. **Fix the Education `isSkill` inversion** at `education/index.ts:34-39` — set all four to `true`, matching `healthcareCanonicalSkills`.
-3. **Reduce every skill to exactly one trigger** per §0.14, starting with Healthcare's 4×4 template. Where a skill genuinely spans invocation modes, split it rather than listing both.
-4. **Add the missing tier on `marketing-document-management`** — one line in the `MARKETING_TIER` map.
-5. **Resolve the duplicate Songwriter genre-trend skill** — `creative/songwriter-genre-trend-evaluator.ts` and `songwriting/songwriter-genre-trend-evaluator.ts` are two different designs under two IDs. Pick one, delete the other.
-6. **Reconcile the Product analytics ID.** Either rename `product-data-analysis` to `product-analytics-insight` and delete the orphan file, or amend the design doc.
+**Status re-checked 2026-09-30 against the live registry.**
+
+1. ~~**Restore green tests before anything else.**~~ — **DONE.** The suite is green: 35 suites / 2283 tests, 0 failures, plus 9 / 37 integration. The stale CTO trigger test was updated, the Songwriter ID convention was made consistent, and `career-skills.test.ts` is tracked and compiles.
+2. **Fix the Education `isSkill` inversion** at `education/index.ts:35-38` — set all four to `true`, matching `healthcareCanonicalSkills`. **STILL OPEN.** Re-confirmed 2026-09-30.
+3. **Reduce every skill to exactly one trigger** per §0.14, starting with Healthcare's 4×4 template. Where a skill genuinely spans invocation modes, split it rather than listing both. **STILL OPEN** — 18 skills, now measured.
+4. ~~**Add the missing tier on `marketing-document-management`**~~ — **DONE.** `tier: 'represent'` is present at `marketing/index.ts:589`.
+5. ~~**Resolve the duplicate Songwriter genre-trend skill**~~ — **DONE, not as described.** There is no `songwriting/songwriter-genre-trend-evaluator.ts`; only `creative/songwriter-genre-trend-evaluator.ts` exists. The duplicate is already gone, so no deletion is outstanding.
+6. **Reconcile the Product analytics ID.** **STILL OPEN, but the stated reason was wrong** — there is no orphan `product-analytics-insight.ts` file to delete. The choice is now simply: rename `product-data-analysis` to `product-analytics-insight`, or amend the design doc.
+6b. **Decide what `creative-drafting` is.** **NEW, 2026-09-30.** Not a trigger defect — see the note in [2. Missing `triggers`](#2-missing-triggers--resolved-for-all-user-facing-skills-). The design has no Creative assistant and lists `creative_drafting` only as a consumed capability that three Songwriter/Scriptwriter Skills do not in fact call. The implementation exposes it as a user-facing Skill. Either (a) give it a home in the design as a Creative assistant, (b) have the three design-listed consumers actually call it and demote it to a base tool (`isSkill: false`), or (c) remove it. The 22-vs-21 assistant roster is otherwise identical, so this is the only undesigned assistant. Related, and much lower stakes: the implementation names three assistants `Songwriting`, `Scriptwriter` and `Investment` where the design says `Songwriter`, `Scriptwriter` and `Wealth`.
 7. **Ratify the tier divergences** where design marked tiers as inferred: CTO war-room (Aid vs Advise), Legal research and matter-document-ops, Sales pipeline-ops, Event vendor/day-of, Product fragments.
 8. **Address the original input-schema questions** (1–7). The §0.9 fixes removed bad fields but did not give these skills usable input models, and Restaurant's reservations skill now has no required inputs at all.
 
 ---
 
-*Report regenerated from the live skill registry, not from source inspection. Test results captured at time of writing: 2025 passing, 9 failing across 4 suites.*
+*Report regenerated from the live skill registry, not from source inspection. Test results at original time of writing: 2025 passing, 9 failing across 4 suites — **superseded; the suite is green** (35 suites / 2283 tests, 0 failures, as of 2026-09-30).*
 
 ---
 
@@ -712,7 +735,7 @@ This addendum is **additive**. It records work completed after [Remediation Pass
 
 **Test status at time of writing:** `npx tsc --noEmit` exits 0. `npx jest` reports **34 suites / 2275 tests passing, 0 failures** — superseding the 33 / 2270 figure first recorded for this addendum, itself superseding the 31 / 2157 figure in Pass II, itself superseding the 4-suite / 9-test red state recorded in [Regressions introduced by this remediation](#regressions-introduced-by-this-remediation).
 
-**Scope note:** parts A–E were re-verified against the working tree before being written down. Where line numbers here differ from those cited in earlier working notes, the working-tree numbers are the ones recorded. Part F records the state of the items this addendum opened: **F.1, F.2 and F.3 are now all closed** — see [F. Open items — all three now closed](#f-open-items--all-three-now-closed). The one item still open is recorded in [H. Open item — transient spawn failures treated as permanent](#h-open-item--transient-spawn-failures-treated-as-permanent) and is **not** claimed as done. A production bug found while verifying F.1 is recorded separately in [G. Production bug fixed — salary parsing always null](#g-production-bug-fixed--salary-parsing-always-null).
+**Scope note:** parts A–E were re-verified against the working tree before being written down. Where line numbers here differ from those cited in earlier working notes, the working-tree numbers are the ones recorded. Part F records the state of the items this addendum opened: **F.1, F.2 and F.3 are now all closed** — see [F. Open items — all three now closed](#f-open-items--all-three-now-closed). The one item still open is recorded in [H. Open item — transient spawn failures treated as permanent](#h-open-item--transient-spawn-failures-are-treated-as-permanent) and is **not** claimed as done. A production bug found while verifying F.1 is recorded separately in [G. Production bug fixed — salary parsing always null](#g-production-bug-found-and-fixed--salary-parsing-always-null).
 
 ---
 
@@ -853,7 +876,7 @@ Both are closed at `career-job-discovery.ts:335-350` (`recordAtsFailure`).
 |---|---------|-------|
 | 1 | **Career ledger tests — executed coverage.** The `ok` path and the total-failure path are now *executed*, not reasoned about. A new `src/__tests__/career-job-discovery-ledger.test.ts` stubs the network with a child-process fetch interceptor installed via `NODE_OPTIONS=--require`, and runs the **unmodified** skill end to end. This closes E.1 from Pass II. | Done |
 | 2 | **A vacuous pass was caught and fixed while writing #1.** The interceptor route table used `https://www.wellfound.com/...`, but the skill requests `wellfound.com` — the `www.` route never matched, so the stub fell through to the real network and the test passed without testing anything. | Fixed |
-| 3 | **`career-skills.test.ts` flake.** The test passing `companies: ['Acme']` makes **real outbound job-board calls** with a 20s timeout and 2 retries, consuming 8.9–13.3s of budget on a good run. Its per-test budget was **hardcoded, overriding the CLI flag**; raised 15s to 30s. 8 consecutive clean runs confirmed. | Mitigated, **not fixed** — see F.1. **Since closed**: F.1 was taken up and all three live-network tests now use a stubbed harness — see [F.1](#f1-career-skillstestts-live-network-dependency--closed). The state cell is left as originally recorded. |
+| 3 | **`career-skills.test.ts` flake.** The test passing `companies: ['Acme']` makes **real outbound job-board calls** with a 20s timeout and 2 retries, consuming 8.9–13.3s of budget on a good run. Its per-test budget was **hardcoded, overriding the CLI flag**; raised 15s to 30s. 8 consecutive clean runs confirmed. | Mitigated, **not fixed** — see F.1. **Since closed**: F.1 was taken up and all three live-network tests now use a stubbed harness — see [F.1](#f1--live-network-dependency-in-tests-closed). The state cell is left as originally recorded. |
 | 4 | **`tool-reference-integrity.test.ts` resolution set** extended to `nativeTools` + `legacyGeneralTools` (**51** delegatable tools) with three added tests. | Done |
 | 5 | **`career-job-discovery.ts` regex escaping bug (production).** `([\s\S]*?)<\/a>` inside a template literal became `([sS]*?)</a>`, whose bare `/` closed the regex early and killed the child process. | Already recorded as Pass II D; carried forward for completeness |
 
@@ -865,7 +888,7 @@ Both are closed at `career-job-discovery.ts:335-350` (`recordAtsFailure`).
 
 ## F. Open items — all three now closed
 
-All three items this addendum opened are now closed. **F.3** was closed before this addendum was first written and its entry is unchanged. **F.1** and **F.2** were taken up afterwards and are recorded below in full. The one item still open is not in this section; it is [H. Open item — transient spawn failures treated as permanent](#h-open-item--transient-spawn-failures-treated-as-permanent).
+All three items this addendum opened are now closed. **F.3** was closed before this addendum was first written and its entry is unchanged. **F.1** and **F.2** were taken up afterwards and are recorded below in full. The one item still open is not in this section; it is [H. Open item — transient spawn failures treated as permanent](#h-open-item--transient-spawn-failures-are-treated-as-permanent).
 
 | # | Item | State |
 |---|------|-------|
@@ -977,3 +1000,283 @@ The consequence runs straight through the executor. `isCodeExecutionError` (`Err
 *Addendum recorded 2026-09-29; F.1, F.2, G and H added 2026-09-30. Verification at time of writing: `npx tsc --noEmit` exit 0; `npx jest` **34 suites / 2275 tests passing, 0 failures**. Parts A–E were re-verified against the working tree — executor flag/reset/set sites, the retained-but-conditioned nested refusal, both newly gated skills, all three confirmed gaps, the two rejected false positives, the six removed tautologies, the absence of `degraded`/`no-page`/`unavailable`/`unverified` from the job-discovery contract, the `research-planning` partial/failed branches, and `career-job-discovery-fit-ranking.ts:46` were each confirmed by direct read, not by report. The vacuous-assertion sweep (`grep -rn "=== true || .*=== false" src/__tests__/` and `grep -rn "=== true || .*=== false || .*=== undefined" src/__tests__/`) returns empty — **no vacuous assertion forms remain in `src/__tests__/`**.*
 
 > **Working-tree state, corrected.** The tree currently holds **24 modified files and 5 untracked test files** (`approved-delegation-regression.test.ts`, `career-job-discovery-ledger.test.ts`, `career-job-discovery-salary.test.ts`, `confirmation-gate.ts`, `fixtures/`). The "22 modified" figure recorded elsewhere in this addendum was an **undercount**. The git stash list is **empty** and the working tree is intact — all work is uncommitted, unstaged modifications.
+
+---
+
+# Addendum: Remediation Pass IV — 2026-09-30
+
+This addendum is **additive**. It records work completed after [Remediation Pass III](#addendum-remediation-pass-iii--2026-09-29) and modifies no prior section. All items in parts A–D are uncommitted, unstaged working-tree modifications under `services/tool-executor/`, plus `.env.example`.
+
+**Test status at time of writing:** `npx tsc --noEmit` exits **0**. `npx jest` reports **34 suites / 2276 tests passing, 0 failures**. Pass III recorded 34 / 2275; the **+1** is the new blanket backslash-free guard in `career-job-discovery-salary.test.ts`, not the isolation work in C — `npx jest` run against a stashed (HEAD) tree returns exactly 34 / 2275, so the delta is attributable rather than assumed.
+
+**Scope note, and what this addendum does *not* claim.** Two production problems were reported here and **only one of them is fixed in this addendum.** Part A (the 504s) is fixed in code. The brain service being down (**E.2**) is **NOT** — it is an operational/provider-key failure and remains **OPEN**. The nginx hardening that would be defence-in-depth against part A is also **NOT** done — see [E.1](#e1-open--nginx-proxy-timeouts-not-changed-infra). Neither is presented as done anywhere in this addendum. Part C records three test-isolation defects, all closed.
+
+---
+
+## A. Production incident — 504 Gateway errors on Interview & Negotiation Prep
+
+**Reported symptom:** failing on **every single run**, not intermittently.
+
+### A.1 Root cause — a deadline collision, not a slow dependency
+
+| Layer | Value at HEAD | Source |
+|-------|---------------|--------|
+| Skill service deadline | `timeoutMs: 60000` | `career-interview-compensation-battlecard-creator.ts:138` |
+| Child kill | `SIGKILL` at exactly `timeoutMs` | `CodeExecutor.ts:247-259` |
+| Client deadline | nginx default `proxy_read_timeout` = **60s** | `frontend-nextgen/nginx.conf:8-12` — `location /api` sets **no** timeout |
+
+**The service deadline exactly equalled the client deadline.** The 500 could therefore never escape the 60s window, which is why the failure was 100% consistent rather than intermittent. An intermittent failure would have implied a race; a deterministic one implied arithmetic. This distinction is what pointed at the timeout values rather than at the network.
+
+`location /ws` already carries `proxy_read_timeout 86400` at `nginx.conf:20`. `location /api` carries nothing, so nginx's 60s default applies.
+
+### A.2 Contributing defects
+
+| # | Defect | Effect |
+|---|--------|--------|
+| 1 | `callBrain()` had **no** `AbortController` at all | A brain that accepted the TCP connection and never responded hung the child until the outer `SIGKILL`. Verified absent at HEAD. |
+| 2 | Four calls ran **strictly sequentially** | Two `__execute_tool` reasoning calls plus two brain fallbacks. Even a **healthy** 20s/call brain needed ~80s against a 60s ceiling. |
+| 3 | Default brain URL was `http://localhost:3000` | Every other caller uses `http://brain:3100` (`ReasoningExecutor.ts:4`). Inside the container, nothing serves that port. |
+| 4 | `BRAIN_URL` absent from `.env.example` | The unset path was invisible to anyone configuring the deployment. |
+
+**Not a regression.** Both files are unmodified relative to the long-standing baseline — `git show HEAD:` on each returns `timeoutMs: 60000` and, for the battlecard, the `localhost:3000` default at line 19. This defect was live before any Pass III work.
+
+The sibling skill `career-interview-practice-mock-interviewer.ts` carried the identical `timeoutMs: 60000` plus two sequential reasoning delegations.
+
+### A.3 Fix applied
+
+| # | Change | Detail |
+|---|--------|--------|
+| 1 | `timeoutMs` 60000 → **40000** on **both** skills | 20s of headroom for the bridge close, fs cleanup and JSON serialisation that follow the deadline |
+| 2 | In-skill `Promise.race` budget | Default **30000ms**, overridable via `CAREER_BATTLECARD_BUDGET_MS` / `CAREER_MOCK_INTERVIEW_BUDGET_MS` |
+| 3 | `callBrain` takes an `AbortController` deadline | Default **10000ms**, `CAREER_BRAIN_FALLBACK_TIMEOUT_MS`; timer cleared in `finally` |
+| 4 | Independent delegations and fallbacks now run under `Promise.all` | Settled in the **original order**, so the result contract is unchanged — see the caveat below |
+| 5 | Unset `BRAIN_URL` **skips the call entirely** | Never dials a port nothing serves |
+| 6 | `BRAIN_URL` added to `.env.example` | With the fallback and budget variables alongside it |
+
+> **The budget is the load-bearing part; lowering `timeoutMs` alone would have been a false fix.** `CodeExecutor` returns the child's captured stdout **only on clean exit** (`proc.on('close')` with `code === 0`, `CodeExecutor.ts:261-270`); its `SIGKILL` path at `:247-259` calls `cleanupAndResolve` with an error and **discards stdout entirely**. A skill still awaiting at 40s would therefore have produced a bare `JavaScript execution timed out after 40000ms` string — **replacing a 504 with an opaque timeout**, which is not a better failure. The `Promise.race` budget exists so the skill reaches a **clean exit** and returns a real `not-connected` result. `emitAndExit` flushes stdout via the write callback before calling `process.exit(0)`, which a bare `process.exit(0)` would not guarantee.
+
+> **On the `Promise.all` change — ordering is preserved deliberately.** The battlecard's two `__execute_tool` calls and two brain fallbacks are mutually independent, so they are started together. They are then **awaited in their original sequence** before the result is assembled, so the emitted ordering of `delegatedTo`, `coverage` and `missing` is unchanged from the sequential form. Only chain depth and worst-case duration change. In the mock interviewer, by contrast, the two delegations are **genuinely dependent** — `career-pipeline-report` supplies the role that `career-interview-prep` consumes — and were correctly left sequential, with a comment in the source saying so.
+
+### A.4 Proof
+
+Verified empirically against a server that **accepts the connection and never responds**: returns a structured `not-connected` in **~3s** with the budget forced low, **clean exit, no SIGKILL**. That is the case A.2 defect 1 made unrepresentable before the fix.
+
+---
+
+## B. Production incident — job search failing, and the error message was itself wrong
+
+**Reported output:** 4 of 5 sources failed with "request failed or timed out".
+
+**Live investigation showed nothing timed out.** The reported message was wrong in a way that mattered more than the failures it described.
+
+| Source | Actual state | Verdict |
+|--------|--------------|---------|
+| Indeed | HTTP **401** | Hard block on datacenter egress |
+| Glassdoor | HTTP **403** | Hard IP/UA block |
+| Monster | HTTP **200**, client-rendered, **zero** job cards in the HTML | DataDome-armed; **not fixable by regex** |
+| Wellfound | `?query=` **ignored**, serves a generic marketing landing page | — |
+| LinkedIn | HTTP **200** with **~60 complete, fully server-rendered listings** | **Discarded entirely by the skill** |
+
+The three ATS JSON APIs (Greenhouse, Ashby, Lever) are healthy, key-free and structured, but were **skipped entirely** in that run because the caller supplied no company names — so the run degraded to the HTML scrapers.
+
+### B.1 Three defects fixed
+
+**1. The failure reason was discarded, then re-invented as "timed out".** `httpGet` returned `{ok: false, status}` but every scraper dropped the status, so `summarizeBoard` could only emit one catch-all. The status is now threaded through every scraper and classified:
+
+| Condition | Reported as |
+|-----------|-------------|
+| 4xx non-404 | `blocked (HTTP 403)` |
+| 5xx | `server error (HTTP 500)` |
+| 404 | `search endpoint returned HTTP 404 — that board URL no longer exists, so no question was ever asked of it` |
+| Transport failure | `network failure` |
+
+**"Timed out" is now used only for genuine timeouts.** 404 is separated deliberately: it is a permanent condition no retry or backoff will clear, and calling it "blocked" would be a false diagnosis.
+
+**2. A 5xx was being misreported as our own network failure.** `httpGet` retried 5xx and, on exhausting retries, fell out of the loop returning a hardcoded `status: 0` — discarding the status the server actually sent. **Every persistent 5xx in the skill blamed our connection for the board's outage.** Fixed by tracking the last observed status across attempts; a genuine transport `throw` still correctly yields `0`.
+
+**3. LinkedIn silently discarded ~60 real listings per page.** The card regex required `data-company-name` and `data-location`, **both absent from LinkedIn's current markup** (the fields moved into descendant elements), while `shellRe` still matched. The skill therefore reported `no-match` for a query with thousands of real results — **precisely the failure the file's own header comment says it exists to prevent.** Extraction now reads the current BEM markup:
+
+| Field | Selector |
+|-------|----------|
+| id | `data-entity-urn` |
+| title | `base-search-card__title` |
+| company | `base-search-card__subtitle` |
+| location | `job-search-card__location` |
+| posted date | `job-search-card__listdate` |
+| URL | `base-card__full-link` |
+
+### B.2 Deliberately NOT done
+
+**No browser User-Agent spoofing, proxy rotation or CAPTCHA solving was added for Indeed/Glassdoor.** They are blocked at the network level and the correct response is to report the block honestly, not to circumvent an access control. Adding circumvention would make the reported result *look* successful while being both wrong and a decision to route around someone else's stated policy.
+
+---
+
+## C. Test-isolation defects
+
+Three test files ran skills that persist to a **shared default store path** (`/tmp/career`, `/tmp/investment`, `/tmp/executive`) without setting the corresponding `*_HOME` env var, so **parallel jest workers contaminated each other**.
+
+This surfaced as an intermittent failure of `career-skills.test.ts › Pipeline & Outcome Tracker › formats dates in human-readable form, not ISO` (`career-skills.test.ts:596`) that **passed in isolation**. All three now use the established pattern — capture the prior value, `mkdtempSync` a unique dir, set in `beforeAll`, restore and remove in `afterAll`:
+
+| File | Env var |
+|------|----------|
+| `career-skills.test.ts` | `CAREER_HOME` |
+| `investment-skills.test.ts` | `INVESTMENT_HOME` |
+| `executive-skills.test.ts` | `EXECUTIVE_HOME` |
+
+`investment-skills.test.ts` additionally needed its `storePath` moved **out of describe-body time into a `beforeAll`**, since it was frozen at `/tmp/investment` during collection — before the module-level `beforeAll` had a chance to set the var.
+
+**Verified by planting sentinel content in the shared paths** and confirming the suites still pass and the shared directories are **not recreated**. That checks isolation is *effective*, not merely *non-failing* — a suite that passed while still writing to `/tmp/career` would have looked identical on the pass/fail signal alone.
+
+---
+
+## D. Recommended but not changed
+
+`BRAIN_REQUEST_TIMEOUT_MS` defaults to **60000** in `ReasoningExecutor.ts:5-7` — **equal to the old skill ceiling**. It is now decoupled by the in-skill budget, so it can be lowered independently (**~20-25s**) in its own review. No change has been made.
+
+---
+
+## E. Open items — nothing here is claimed as done
+
+### E.1 OPEN — nginx proxy timeouts not changed (infra)
+
+**Reported, NOT changed.** Add to `location /api` in `frontend-nextgen/nginx.conf`:
+
+```nginx
+proxy_read_timeout 75s;
+proxy_send_timeout 75s;
+```
+
+matching the treatment `/ws` already gets at `proxy_read_timeout 86400`. This is **defence-in-depth, not the fix** — the 504s are fixed in A. This needs its own review because it changes a shared proxy path serving all of `/api`, not one skill.
+
+### E.2 OPEN — the brain service is itself down (operational)
+
+**Reported, NOT changed.** Until a provider key is restored, **every brain-backed skill degrades to `not-connected`**. The evidence in `services/brain/logs/brain-stage7-brain-1.log`:
+
+| Finding | Detail |
+|---------|--------|
+| `openrouter` 403 | `Key limit exceeded (daily limit)` at line 8 |
+| Models evicted | `Provider key/quota error - removing provider models from router` at line 9 |
+| Backend left | a slow `openwebui` backend (line 10 onward) |
+| No model available | `No model available for the requested task...` at line 12 |
+| Redis | `Redis connection timed out, using in-memory cache` at line 6 |
+| Latency | completions taking **minutes** |
+
+> **The relationship between E.2 and A must not be overstated.** The code fix in A.3 ensures the brain outage surfaces as a **clean, structured `not-connected` result** rather than a 504 — it does **not** make the brain work. With the key still exhausted, these skills fail *honestly and usefully* instead of failing opaquely. That is the whole of the improvement, and it is not the same as a fix.
+
+---
+
+*Addendum recorded 2026-09-30. Verification: `npx tsc --noEmit` exit **0**; `npx jest` **34 suites / 2276 tests passing, 0 failures**, confirmed across **6 consecutive full-suite runs** — the isolation bar stated in C, and it was met. Test counts supersede the 34 / 2275 figure in Pass III.*
+
+*Figures in this addendum were verified by direct read or direct execution, not carried over from the report: both `CodeExecutor` sites (`:247-259` SIGKILL, `:261-270` clean-exit stdout) were read; `ReasoningExecutor.ts:4-7` and `nginx.conf:8-12,20` were read; `git show HEAD:` was used to confirm both skills carried `timeoutMs: 60000` and `localhost:3000` at baseline, so **not a regression**; every brain-log line cited in E.2 was read from the log file; the 6-run figure is the measured result of 6 consecutive `npx jest` invocations; and the sentinel check in C was executed, not described.*
+
+> **Working-tree state.** The tree currently holds **9 modified files** (`.env.example` and 8 under `services/tool-executor/`) and **0 untracked files** — the Pass III untracked test files are now tracked. The git stash list is **empty** and the working tree is intact — all work is uncommitted, unstaged modifications.
+
+---
+
+# Addendum: Remediation Pass V — 2026-09-30
+
+**Continues the same investigation as [Pass IV](#addendum-remediation-pass-iv--2026-09-30), and supersedes part of it.** Pass IV recorded the *504* failure mode of Interview & Negotiation Prep — the 60s service deadline colliding with nginx's 60s `proxy_read_timeout` — and fixed it with `timeoutMs: 40000` and a 30000ms budget. The failure investigated here is **different**: the skill returned a clean `Not Connected` while the Brain log showed **4 completed, 0 errors**. Pass IV's A.3 timeout values are superseded by the measured values in [E](#e-verification) below (`timeoutMs` 52000, budget 44000, fallback 19000, delegation 24000); Pass IV's finding that *a budget is required for a clean exit* stands and is retained. It also carries the status corrections listed in the corrected sections above, and the working-tree note above is superseded by the one at the end of this addendum.
+
+**Test status at time of writing:** `npx tsc --noEmit` exits 0. `npx jest services/tool-executor` reports **35 suites / 2283 tests passing, 0 failures**; `npx jest --testPathPatterns=tests/integration` reports **9 suites / 37 tests passing, 0 failures**. This supersedes the 34 / 2276 figure in Pass IV.
+
+---
+
+## A. The brain was never offline — three independent defects stacked
+
+The reported symptom was a Skill reporting a dead brain. The Brain log showed all four calls `OK`. All three of the following were true at once.
+
+### A.1 A delegation's success was read off a field that does not exist
+
+`__execute_tool` returns **two different shapes**, and the branch is on the callee's `type`, **not** on `isSkill`:
+
+| Callee `type` | What the bridge returned | Carries `success`? |
+|---------------|-------------------------|-------------------|
+| `code` | the callee's own emitted `{ success, status, data, present, error }` | yes |
+| `reasoning` | `{ summary, _raw, _model, _provider, _tokensUsed }` | **no** |
+| `native` | `{ ...data, durationMs }` — `success` is deliberately stripped at `ToolExecutor.ts:1080` — or `{ error }` | **no** |
+| `openapi` | `{ status, data }` | **no** |
+| `mcp` | `{ content, isError }` | **no** |
+
+Every skill in the repo reads `result.success` / `result.data`. `career-interview-compensation-battlecard-creator` delegated to `career-interview-prep` and `career-advisory`, **both `type: 'reasoning'`** (`career-lower-order-tools.ts:6,25`). `prep.success` was therefore `undefined` → falsy → **every successful delegation was recorded as a failure.**
+
+### A.2 The fallback was serialized past the skill's own deadline
+
+The direct-brain fallback started only *after* both delegations settled, so the worst case was `delegated + fallback` — structurally unable to fit the 30s budget. From the reported log: delegations ran 8:10:21→8:10:49 (23s/27s), fallbacks issued 8:10:49 and returned 8:11:05/8:11:08 (16s/19s). The budget fired ~8:10:51, about **2 seconds in**, and `emitAndExit` dropped both in-flight fetches while the brain was still answering.
+
+### A.3 The fallback's abort was shorter than the brain's latency
+
+`BRAIN_FALLBACK_TIMEOUT_MS` defaulted to 10s against 16–19s of real latency. `controller.abort()` tears down only the client socket, so the brain ran to completion and logged a full-duration `OK` while the skill discarded the answer and reported itself offline.
+
+**Why this was misdiagnosed as a service outage:** the budget-expiry message read *"the assistant model (brain) did not respond within 30s (verify BRAIN_URL reachability and model quota)"* — pointing the investigation at a healthy service. The expiry is now reported as what it is, without asserting anything about the brain.
+
+## B. The root fix — one envelope for every callee type
+
+`normalizeNestedPayload()` in `ToolExecutor.ts` wraps non-skill payloads into the `{ success, data }` envelope, deriving `success` from `error` / `isError`. It **spreads the raw fields through and never clobbers an existing key**, so `search_web`'s `results`, `openapi`'s HTTP `status` and pre-existing `data` all keep working. It is called from exactly one place — the nested-bridge response — so no top-level execution result changed.
+
+This closed the defect for **every** non-`code` delegation at once, including the three companions identified by audit: `career-interview-practice-mock-interviewer` and `career-upskill-role-targeted-learning-planner` (both `reasoning`), and `legal-research` + `research-planning` (`search_web`, `native`). No per-skill workaround was needed, so none was added.
+
+## C. A second, distinct misread — `.data` vs `response.data`
+
+`createExternalActionSkill` emits `{ success, system, action, request, response, error }` and has **no top-level `data`**; the platform reply arrives at `response.data`. Three consumers read `.data` alone, so each of those paths was dead:
+
+| Skill | Consequence |
+|-------|-------------|
+| `content-strategy-seo-evaluator` | The connected-analytics guard was permanently false, so the path never ran and every run reported *not connected* |
+| `governed-publishing-cms-dispatcher` | The CMS reply always read as `null`, so a successful publish reported "no response" |
+| `care-resource-referral-coordinator` | A sent patient message was never reported; the placeholder was emitted instead |
+
+All three now read `response.data` first. Note `care-resource-referral-coordinator` already handled both shapes on its resource-coordination read — only the communication read in the emitted summary was wrong.
+
+## D. Deleted as redundant to the design
+
+`product/roadmap-prd-drafting.ts` and `product/document-ingestion.ts` are **deleted**. Neither was referenced by any document under `docs/`, neither was imported or exported by any index, and both were dead code reachable only from their own `dist/*.d.ts`. Their capability is already covered by registered skills:
+
+| Deleted | Covered by |
+|---------|-----------|
+| `roadmap-prd-drafting` | `create-roadmap` + `write-prd` (both registered, `PRODUCT_SKILLS`) |
+| `document-ingestion` | `product-markdown-parsing` (registered, `isSkill: false`) |
+
+`roadmap-prd-drafting` was additionally not valid JavaScript: a top-level `await` and a top-level `return` in a CommonJS child script, a reference to an `input` that was never defined, and an unguarded `parsed.data.entities` that would throw on an unresolvable callee. It could not have run. No registered skill changes — the deletion is inert.
+
+## E. Verification
+
+Every new test was confirmed **non-vacuous** by reverting each fix and observing the failure:
+
+| Reverted | Result |
+|----------|--------|
+| bridge normalization (`normalizeNestedPayload`) | 4 tests fail |
+| `care-resource-referral-coordinator` `response.data` | 1 test fails |
+| `roadmap-prd-drafting` source | 2 tests fail (since deleted) |
+
+Plus an end-to-end reproduction at the reported latencies (23s/27s delegations, 16s/19s brain, driving the real generated skill source through a stubbed brain): **40.05s, success, both topics covered** — inside the 44s emit budget, 12s inside the manifest timeout, 20s inside nginx's 60s `proxy_read_timeout`. The budgets were resized to the measured latencies (delegation 24s, fallback 19s, sum 43s < 44s budget, manifest 52s).
+
+New tests: 5 in `nested-execution.test.ts` (reasoning and native callee envelopes, success and failure, raw-field preservation) and 1 in `healthcare-referral-communication-payload.test.ts`. One test in `career-skills.test.ts` was **replaced**, because it asserted the bug: it required `missing` to contain both topics, which was only true *because* successful delegations were being misread as failures.
+
+## F. Open items, not closed
+
+### F.1 `creative-drafting` is an undesigned user-facing Skill — NEW
+
+Re-checked against the design rather than assumed. The design defines **21 assistants and has no Creative assistant**; `creative_drafting` appears only in the `Consumes` column of `songwriting_lead_sheet_demo_dispatcher`, `songwriting_musical_lyric_cocreation` and `scriptwriting-scene-beat-dialogue-copilot` — a capability, with no Tier or Trigger row. The implementation instead ships it as a standalone user-facing Skill (`creative/index.ts:36`, `isSkill: true`, `tier: 'aid'`) in a `Creative` workflow, **and none of the three design-listed consumers calls it.** It is a user-facing Skill standing in for a designed capability nothing consumes. The 22-vs-21 roster is otherwise identical, so this is the only undesigned assistant. Needs a design decision, not a trigger.
+
+### F.2 `creative-drafting` makes a false claim about using a model — NEW
+
+Found while establishing F.1. The skill's `description` reads *"Runs as reasoning-only on the assistant model using your creative direction."* **No model is called.** There is no `fetch`, no `__execute_tool`, and no reasoning executor anywhere in the skill body — it is a deterministic template engine:
+
+| Path | What it actually produces |
+|------|---------------------------|
+| `lyrics` / `song` | Looks `theme` up in a hardcoded 6-entry vocabulary (love, loss, triumph, journey, rebellion, nostalgia — 8 words each) and substitutes `vocab[0..7]`, `theme`, `genre` and `mood` into **fixed sentence templates** for verse1/verse2/verse3/chorus/bridge/outro/intro. Every output is the same five sentences with different words swapped in. |
+| `script` / `video` / `film` / `podcast` / `presentation` | A fixed 5–6 item list of scene titles. Every scene gets the same three generic beats and a two-line dialogue whose first line is the literal string `[Dialogue placeholder for Scene N — …]`. |
+
+The draft record also persists `source: 'reasoning'` into `$CREATIVE_HOME/drafts.json` (default `/tmp/creative`), so the false claim is **stored as data**, not just described.
+
+This is the same defect class as Pass II §B.1, where five Sports skills computed `dataConnected` from an env var without issuing a request. Design §5 requires real output rendering and §7 lists implementation bugs. The description's other claim — *"full verses, choruses, bridges, scenes, and dialogue — not empty templates"* — is contradicted by the literal "Dialogue placeholder" text on the script path. **Not fixed here**: the remedy is a product decision, either to route drafting through the brain so the description becomes true, or to correct the description and the persisted `source` value to say it is template-based. Recorded, not claimed as done.
+
+### F.3 Six skills delegate without declaring `lowerOrderTools`
+
+Six skills call `__execute_tool` without declaring `lowerOrderTools`, and two of those (`scriptwriter-genre-market-evaluator`, `restaurant-financial-forecast-evaluator`) declare no `lowerOrderTools` manifest at all. No runtime impact today, but nothing enforces the declaration, and the delegate happens to be an `isSkill: true` skill in each case — the opposite of the pattern every other wrapper follows. Left open.
+
+---
+
+*Addendum recorded 2026-09-30. Verification: `npx tsc --noEmit` exit 0; `npx jest services/tool-executor` 35 suites / 2283 tests passing, 0 failures; `npx jest --testPathPatterns=tests/integration` 9 suites / 37 tests passing, 0 failures. `npm run lint` at **21 errors** — unchanged from the pre-existing baseline, with 0 errors in any file changed here. Warnings read 328 against a 332 baseline; the difference is 4 warnings that left with the two deleted files, not new code. Registry figures in this addendum were measured with `scripts/registry-audit-facts.ts`, added so the counts above are reproducible rather than remembered.*
+
+> **Working-tree state.** The tree holds modified files under `services/tool-executor/` and `.env.example`, plus **one added test file** (`healthcare-referral-communication-payload.test.ts`) and **two deletions** (`product/roadmap-prd-drafting.ts`, `product/document-ingestion.ts`). This supersedes the 9-modified / 0-untracked note at the end of Pass III. All work is uncommitted.

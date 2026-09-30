@@ -10,7 +10,6 @@ import { restaurantCanonicalSkills, restaurantSkills } from './restaurant';
 import { salesSkills } from './sales';
 import { supportSkills } from './support';
 import { contentSkills } from './content';
-import { creativeSkills } from './creative';
 import { sportsSkills } from './sports';
 import { eventSkills } from './event';
 import { executiveSkills } from './executive';
@@ -72,7 +71,6 @@ const ASSISTANT_OBJECT_MAP: Record<string, string> = {
   sales: 'lead / opportunity',
   support: 'ticket / customer',
   content: 'content piece',
-  creative: 'creative work',
   sports: 'game / matchup',
   event: 'event / vendor',
   executive: 'organization / strategy',
@@ -97,7 +95,6 @@ const ASSISTANT_FLOW_MAP: Record<string, string> = {
 sales: 'discovery → proposal → close',
   support: 'intake → triage → resolution → follow-up',
   content: 'plan → draft → optimize → publish',
-  creative: 'brief → create',
   sports: 'research → odds → analysis',
   event: 'plan → vendors → day-of',
   executive: 'review → analysis → recommendation → decision',
@@ -148,7 +145,6 @@ export const assistantRegistries: AssistantRegistry[] = [
 buildRegistry(salesSkills, [], 'sales', 'sales', ['discovery', 'proposal', 'close']),
   buildRegistry(supportSkills, [], 'support', 'support', ['intake', 'triage', 'resolution', 'follow-up']),
   buildRegistry(contentSkills, [], 'content', 'content', ['plan', 'draft', 'optimize', 'publish']),
-  buildRegistry(creativeSkills, [], 'creative', 'creative', ['brief', 'create']),
   buildRegistry(sportsSkills, [], 'sports', 'sports', ['research', 'odds', 'analysis']),
   buildRegistry(eventSkills, [], 'event', 'event', ['plan', 'vendors', 'day-of']),
   buildRegistry(executiveSkills, [], 'executive', 'executive', ['review', 'analysis', 'recommendation', 'decision']),

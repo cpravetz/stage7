@@ -8,7 +8,6 @@ import { hrSkills, hrWorkflow } from '../data/skills/hr';
 import { healthcareSkills, healthcareWorkflow } from '../data/skills/healthcare';
 import { analyticsSkills, analyticsWorkflow } from '../data/skills/analytics';
 import { careerSkills } from '../data/skills/career';
-import { creativeSkills } from '../data/skills/creative';
 import { eventSkills } from '../data/skills/event';
 import { executiveSkills } from '../data/skills/executive';
 import { financeSkills } from '../data/skills/finance';
@@ -33,7 +32,6 @@ const allSkillArrays: { name: string; skills: typeof ctoSkills; workflow?: typeo
   { name: 'Healthcare', skills: healthcareSkills, workflow: healthcareWorkflow },
   { name: 'Analytics', skills: analyticsSkills, workflow: analyticsWorkflow },
   { name: 'Career', skills: careerSkills },
-  { name: 'Creative', skills: creativeSkills },
   { name: 'Event', skills: eventSkills },
   { name: 'Executive', skills: executiveSkills },
   { name: 'Finance', skills: financeSkills },

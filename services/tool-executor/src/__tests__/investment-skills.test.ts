@@ -23,6 +23,32 @@ interface SkillResult {
 
 const INVESTMENT_SKILLS: Tool[] = [INVESTMENT_MARKET_DATA, PORTFOLIO_RISK_ADVISORY, RESEARCH_PLANNING, BILL_PAY_REBALANCING];
 
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+
+// Every investment skill resolves its store from process.env.INVESTMENT_HOME
+// (default /tmp/investment) inside the spawned child. Point the whole file at a
+// unique temp dir so concurrent jest workers cannot read or clobber each other's
+// state through the shared default path.
+const priorInvestmentHome = process.env.INVESTMENT_HOME;
+let investmentHome: string;
+
+beforeAll(() => {
+  investmentHome = fs.mkdtempSync(path.join(os.tmpdir(), 'investment-skills-home-'));
+  process.env.INVESTMENT_HOME = investmentHome;
+});
+
+afterAll(() => {
+  if (priorInvestmentHome === undefined) delete process.env.INVESTMENT_HOME;
+  else process.env.INVESTMENT_HOME = priorInvestmentHome;
+  try {
+    fs.rmSync(investmentHome, { recursive: true, force: true });
+  } catch {
+    // best effort
+  }
+});
+
 async function run(
   tool: Tool,
   input: Record<string, unknown>,
@@ -298,9 +324,13 @@ describe('Research & Planning emits presentation blocks', () => {
 });
 
 describe('Bill Pay & Rebalancing stages by default and never silently writes', () => {
-  const fs = require('fs');
-  const path = require('path');
-  const storePath = path.join(process.env.INVESTMENT_HOME || '/tmp/investment', 'bill-pay.json');
+  // Resolved lazily: the module-level beforeAll sets INVESTMENT_HOME at run time,
+  // after this describe body has already been evaluated.
+  let storePath: string;
+
+  beforeAll(() => {
+    storePath = path.join(investmentHome, 'bill-pay.json');
+  });
 
   beforeEach(() => {
     try { fs.unlinkSync(storePath); } catch { /* ignore */ }

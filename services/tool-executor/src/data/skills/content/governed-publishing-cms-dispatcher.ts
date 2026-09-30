@@ -202,6 +202,17 @@ const PUBLISHING_DISPATCH_SOURCE = `(async () => {
     nestedError = error && error.message ? error.message : String(error);
   }
 
+  // PUBLISHING_TOOL is a createExternalActionSkill, which emits
+  // { success, system, action, request, response, error } and has no top-level
+  // data key. The CMS reply arrives at response.data, so reading nested.data
+  // yielded null and the report stated there had been no response even when the
+  // publish had succeeded.
+  const nestedBody = nested
+    ? (nested.response && nested.response.data !== undefined && nested.response.data !== null
+      ? nested.response.data
+      : nested.data)
+    : null;
+
   if (nestedError || !nested || nested.success !== true) {
     const reason = nestedError
       || ((nested && (nested.error || nested.message)) || 'The publishing tool returned no result.');
@@ -229,7 +240,7 @@ const PUBLISHING_DISPATCH_SOURCE = `(async () => {
       data: Object.assign({}, payload, {
         dispatched: false,
         mode: isLive ? 'live' : 'dry-run',
-        result: nested ? (nested.data || null) : null,
+        result: nestedBody,
         connection: { toolAttempted: PUBLISHING_TOOL, connected: false, configured: !isConnectionIssue, error: reason },
       }),
       present: [
@@ -261,7 +272,7 @@ const PUBLISHING_DISPATCH_SOURCE = `(async () => {
   });
   L.push('');
   L.push('Response from ' + PUBLISHING_TOOL);
-  const response = nested.data || null;
+  const response = nestedBody;
   if (response && typeof response === 'object') {
     const text = JSON.stringify(response, null, 2);
     L.push(text.length > 1500 ? text.slice(0, 1500) + NL + '  (truncated)' : text);

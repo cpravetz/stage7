@@ -1,5 +1,8 @@
 import { ToolExecutor } from '../services/ToolExecutor';
-import { Tool } from '../types';
+import { NativeExecutorKey, Tool } from '../types';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
 function makeCodeTool(id: string, name: string, source: string, isSkill = false): Tool {
   return {
@@ -351,5 +354,181 @@ describe('ToolExecutor nested execution via CodeExecutor callback', () => {
     const wrapperParsed = JSON.parse((wrapperExec.output as { output: string }).output);
     expect(wrapperParsed.success).toBe(false);
     expect(wrapperParsed.error).toContain('Nested execution requires confirmation for gated-child-leak');
+  });
+});
+
+/**
+ * A skill callee emits its own JSON, so `__execute_tool` hands back
+ * `{ success, data, ... }`. Every other callee type returns a raw payload that
+ * carries NO `success` key: `reasoning` returns `{ summary, _raw, ... }`, and
+ * `native` has `success` stripped by dispatch before it ever reaches the bridge.
+ *
+ * A skill that checked `result.success` against one of those saw `undefined`,
+ * judged a call that had actually succeeded to be a failure, and either spent a
+ * redundant fallback call or reported the callee as offline. That is how the
+ * Interview & Negotiation Prep skill reported a dead brain while the Brain log
+ * showed all four calls OK. The bridge now normalizes those payloads into the
+ * same envelope, and these tests pin that behaviour for each callee type.
+ */
+describe('ToolExecutor normalizes non-skill callee payloads', () => {
+  const priorBrainUrl = process.env.BRAIN_URL;
+
+  afterEach(() => {
+    if (priorBrainUrl === undefined) delete process.env.BRAIN_URL;
+    else process.env.BRAIN_URL = priorBrainUrl;
+    jest.restoreAllMocks();
+  });
+
+  /** Runs a wrapper that echoes the whole nested result back out. */
+  async function nestedResult(
+    registry: Map<string, Tool>,
+    wrapperSource: string,
+  ): Promise<Record<string, unknown>> {
+    const executor = new ToolExecutor(registry);
+    const wrapper = makeCodeTool('normalize-wrapper', 'Normalize Wrapper', wrapperSource);
+    registry.set(wrapper.id, wrapper);
+    const exec = await executor.execute(wrapper, {});
+    expect(exec.status).toBe('completed');
+    return JSON.parse((exec.output as { output: string }).output).result as Record<string, unknown>;
+  }
+
+  const echo = 'const r = await __execute_tool(TOOL_ID, INPUT); console.log(JSON.stringify({ success: true, result: r }));';
+
+  function makeReasoningTool(id: string): Tool {
+    return {
+      id,
+      name: `Reasoning ${id}`,
+      description: 'A reasoning base tool, like career-interview-prep',
+      type: 'reasoning',
+      manifest: { type: 'reasoning' },
+      reasoningConfig: { promptTemplate: 'Answer {{input}}', maxTokens: 128 },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      isSkill: false,
+    };
+  }
+
+  function makeNativeTool(id: string, executorKey: NativeExecutorKey): Tool {
+    return {
+      id,
+      name: `Native ${id}`,
+      description: 'A native executor tool',
+      type: 'native',
+      manifest: { executor: executorKey, basePath: os.tmpdir() },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      isSkill: false,
+    };
+  }
+
+  it('gives a reasoning callee a success flag and a data envelope', async () => {
+    // The callee runs in-process, so the brain stub is a fetch mock.
+    jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ content: 'Five interview questions for the role.', tokensUsed: 120 }),
+    } as unknown as Response);
+
+    const registry = new Map<string, Tool>();
+    registry.set('prep-tool', makeReasoningTool('prep-tool'));
+
+    const result = await nestedResult(
+      registry,
+      echo.replace('TOOL_ID', '"prep-tool"').replace('INPUT', '{ targetRole: "CPO" }'),
+    );
+
+    // The regression: `success` was undefined, so the caller read a working
+    // brain call as a failure.
+    expect(result.success).toBe(true);
+    expect(result.status).toBe('ok');
+    expect(result.error).toBeNull();
+    expect((result.data as { summary?: string }).summary).toContain('Five interview questions');
+  });
+
+  it('preserves the reasoning callee raw fields at the top level', async () => {
+    jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ content: 'Negotiation advice.', model: 'test-model', tokensUsed: 90 }),
+    } as unknown as Response);
+
+    const registry = new Map<string, Tool>();
+    registry.set('advisory-tool', makeReasoningTool('advisory-tool'));
+
+    const result = await nestedResult(
+      registry,
+      echo.replace('TOOL_ID', '"advisory-tool"').replace('INPUT', '{ targetRole: "CPO" }'),
+    );
+
+    // Callers that read the reasoning payload directly must keep working; the
+    // envelope is added, not substituted.
+    expect((result.data as { _raw?: string })._raw).toBe('Negotiation advice.');
+    expect(result._raw).toBe('Negotiation advice.');
+  });
+
+  it('reports a failed reasoning callee as success: false', async () => {
+    jest.spyOn(global, 'fetch').mockRejectedValue(new Error('brain unreachable'));
+
+    const registry = new Map<string, Tool>();
+    registry.set('prep-tool-down', makeReasoningTool('prep-tool-down'));
+
+    const result = await nestedResult(
+      registry,
+      echo.replace('TOOL_ID', '"prep-tool-down"').replace('INPUT', '{}'),
+    );
+
+    expect(result.success).toBe(false);
+    expect(String(result.error)).toMatch(/brain unreachable|Brain service unavailable/);
+  });
+
+  it('gives a successful native callee a success flag while keeping its raw fields', async () => {
+    // FileStorageExecutor reads its root once, at construction, so the env var
+    // has to be set before the ToolExecutor (and therefore the executor) is built.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nested-native-'));
+    const priorBase = process.env.FILE_STORAGE_BASE_PATH;
+    process.env.FILE_STORAGE_BASE_PATH = dir;
+    fs.writeFileSync(path.join(dir, 'note.txt'), 'delegated content', 'utf-8');
+
+    try {
+      const registry = new Map<string, Tool>();
+      registry.set('files-tool', makeNativeTool('files-tool', 'files'));
+
+      const result = await nestedResult(
+        registry,
+        echo.replace('TOOL_ID', '"files-tool"').replace('INPUT', '{ operation: "read", path: "note.txt" }'),
+      );
+
+      // dispatch strips `success` from a native result before the bridge sees it,
+      // so the caller previously saw `undefined` and judged success to be failure.
+      expect(result.success).toBe(true);
+      expect(result.status).toBe('ok');
+      expect(result.data).toBe('delegated content');
+      expect(typeof result.durationMs).toBe('number');
+    } finally {
+      if (priorBase === undefined) delete process.env.FILE_STORAGE_BASE_PATH;
+      else process.env.FILE_STORAGE_BASE_PATH = priorBase;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('reports a failed native callee as success: false with its error intact', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nested-native-'));
+    const priorBase = process.env.FILE_STORAGE_BASE_PATH;
+    process.env.FILE_STORAGE_BASE_PATH = dir;
+
+    try {
+      const registry = new Map<string, Tool>();
+      registry.set('files-missing', makeNativeTool('files-missing', 'files'));
+
+      const result = await nestedResult(
+        registry,
+        echo.replace('TOOL_ID', '"files-missing"').replace('INPUT', '{ operation: "read", path: "absent.txt" }'),
+      );
+
+      expect(result.success).toBe(false);
+      expect(String(result.error)).toMatch(/File not found/);
+    } finally {
+      if (priorBase === undefined) delete process.env.FILE_STORAGE_BASE_PATH;
+      else process.env.FILE_STORAGE_BASE_PATH = priorBase;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

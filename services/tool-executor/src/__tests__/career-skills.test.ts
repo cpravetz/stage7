@@ -118,6 +118,7 @@ beforeAll(() => {
     throw new Error(`Missing job-board fetch interceptor preload at ${INTERCEPT_PRELOAD}`);
   }
   careerStubHome = fs.mkdtempSync(path.join(os.tmpdir(), 'career-skills-home-'));
+  process.env.CAREER_HOME = careerStubHome;
   const requireFlag = `--require ${INTERCEPT_PRELOAD}`;
   process.env.NODE_OPTIONS = priorNodeOptions ? `${priorNodeOptions} ${requireFlag}` : requireFlag;
 });
@@ -130,6 +131,7 @@ afterAll(async () => {
   }
   restoreEnv('NODE_OPTIONS', priorNodeOptions);
   restoreEnv('CAREER_TEST_FETCH_ROUTES', priorRoutes);
+  restoreEnv('CAREER_HOME', priorCareerHome);
   restoreEnv('CAREER_TEST_FETCH_LOG', priorFetchLog);
   try {
     fs.rmSync(careerStubHome, { recursive: true, force: true });
@@ -337,6 +339,7 @@ const ENGINEER_ROUTES: Route[] = [
 const priorNodeOptions = process.env.NODE_OPTIONS;
 const priorRoutes = process.env.CAREER_TEST_FETCH_ROUTES;
 const priorFetchLog = process.env.CAREER_TEST_FETCH_LOG;
+const priorCareerHome = process.env.CAREER_HOME;
 
 let careerStubHome: string;
 let fetchLogPath: string;
@@ -361,6 +364,32 @@ function requestedUrls(): string[] {
 function restoreEnv(key: string, value: string | undefined): void {
   if (value === undefined) delete process.env[key];
   else process.env[key] = value;
+}
+
+/**
+ * A `type: 'code'` stand-in for a real reasoning base tool, registered under that
+ * tool's id. `__execute_tool` resolves the callee from the registry, so this
+ * makes the delegation path actually execute under test instead of failing to
+ * resolve and silently handing the run to the skill's direct brain fallback.
+ * The summary echoes the input back, so callers can assert the context was
+ * threaded through to the delegate.
+ */
+function codeSkillStandIn(id: string, summary: string): Tool {
+  const source = [
+    'var i = typeof __tool_input !== "undefined" && __tool_input ? __tool_input : {};',
+    `var who = (i.company || "the company") + " (" + (i.targetRole || i.role || "the role") + ")";`,
+    `console.log(JSON.stringify({ success: true, status: "ok", data: { summary: ${JSON.stringify(summary)} + " for " + who }, error: null, present: [] }));`,
+  ].join('\n');
+  return {
+    id,
+    name: id,
+    description: `Stand-in for ${id}`,
+    type: 'code',
+    manifest: { language: 'javascript', entrypoint: 'index.js', sourceCode: source },
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    isSkill: false,
+  };
 }
 
 interface PresentBlock {
@@ -446,12 +475,6 @@ async function runJobDiscovery(
 
 const LOWER_ORDER_TOOLS = [CAREER_PIPELINE_REPORT, CAREER_OUTCOME, CAREER_ADD_TEMPLATE];
 
-beforeEach(() => {
-  try { fs.rmSync('/tmp/career', { recursive: true, force: true }); } catch (e) {}
-});
-afterEach(() => {
-  try { fs.rmSync('/tmp/career', { recursive: true, force: true }); } catch (e) {}
-});
 
 function assertPresentClean(present: PresentBlock[] | undefined, label: string): void {
   expect(present).toBeDefined();
@@ -494,17 +517,70 @@ describe('Career Coach skills emit user-facing output', () => {
       validateOutput(result, tool);
     }, 15000);
 
-    it('reports missing delegated tools correctly', async () => {
-      const { result } = await run(INTERVIEW_COMPENSATION_BATTLECARD, {
-        company: 'StartupXYZ',
-        targetRole: 'Product Manager',
-      });
+    it('does not report a successful delegation as missing', async () => {
+      // Regression: when the delegation succeeded, the skill used to record the
+      // topic as missing anyway, spend a second pair of brain calls on the
+      // direct fallback, run past its own deadline, and report an offline brain
+      // while the Brain log showed every call OK.
+      //
+      // These stand-ins are registered under the real reasoning tool ids so the
+      // DELEGATION is what satisfies this run. Left unregistered they resolve to
+      // "tool not found" and the direct fallback answers instead, which lets
+      // `delegatedTo` come back empty and this test pass while proving nothing.
+      //
+      // Scope: this pins the skill's bookkeeping for a successful delegation
+      // (delegatedTo/coverage/missing/sourceNote). That a reasoning callee
+      // arrives without a `success` key, and the bridge normalization that fixes
+      // it, are pinned in nested-execution.test.ts -- a code-type stand-in
+      // always emits `success`, so it cannot exercise that half. ReasoningExecutor
+      // reads BRAIN_URL once at module load, so the real reasoning tools cannot
+      // be pointed at this file's brain stub either.
+      const { result, tool } = await run(
+        INTERVIEW_COMPENSATION_BATTLECARD,
+        { company: 'StartupXYZ', targetRole: 'Product Manager' },
+        [
+          codeSkillStandIn('career-interview-prep', 'Interview questions and evaluation areas for the role.'),
+          codeSkillStandIn('career-advisory', 'Negotiate base, equity, title and a signing bonus.'),
+        ],
+      );
 
       expect(result.success).toBe(true);
-      expect(result.data!.delegatedTo).toBeDefined();
-      expect(result.data!.coverage).toBeDefined();
-      expect(result.data!.missing).toContain('interview-prep');
-      expect(result.data!.missing).toContain('negotiation-advice');
+      expect(result.status).toBe('ok');
+      // The delegation satisfied both topics, so neither is missing and the
+      // direct brain fallback never had to run.
+      expect(result.data!.delegatedTo).toEqual(['career-interview-prep', 'career-advisory']);
+      expect(result.data!.missing).toEqual([]);
+      expect(result.data!.coverage).toEqual(['interview-prep', 'negotiation-advice']);
+      expect(result.data!.sourceNote).toBeNull();
+      expect(result.data!.negotiation).toContain('signing bonus');
+      assertPresentClean(result.present, INTERVIEW_COMPENSATION_BATTLECARD.id);
+      const body = (result.present as PresentBlock[]).map((b) => b.body).join('\n');
+      expect(body).toContain('StartupXYZ');
+      validateOutput(result, tool);
+    }, 15000);
+
+    it('reports both topics missing, and not-connected, when no source can answer', async () => {
+      // Point BRAIN_URL at a closed port so the direct fallback cannot rescue
+      // the run, and leave the delegated tools unresolvable. The skill must then
+      // say so honestly rather than blaming reachability for a timeout.
+      const priorUrl = process.env.BRAIN_URL;
+      process.env.BRAIN_URL = 'http://127.0.0.1:1';
+      try {
+        const { result, tool } = await run(INTERVIEW_COMPENSATION_BATTLECARD, {
+          company: 'Unreachable Co',
+          targetRole: 'Product Manager',
+        });
+
+        expect(result.success).toBe(false);
+        expect(result.status).toBe('not-connected');
+        expect(result.data).toBeNull();
+        expect(result.error).toMatch(/unavailable/i);
+        assertPresentClean(result.present, INTERVIEW_COMPENSATION_BATTLECARD.id);
+        validateOutput(result, tool);
+      } finally {
+        if (priorUrl === undefined) delete process.env.BRAIN_URL;
+        else process.env.BRAIN_URL = priorUrl;
+      }
     }, 15000);
   });
 

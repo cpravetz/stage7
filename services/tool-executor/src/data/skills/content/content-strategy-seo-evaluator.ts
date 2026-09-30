@@ -49,9 +49,17 @@ const CONTENT_STRATEGY_SOURCE = `(async () => {
         dateRange: input.dateRange,
         dryRun: true,
       });
-      if (result && result.success && result.data) {
+      // content-performance-seo is a createExternalActionSkill, which emits
+      // { success, system, action, request, response, error }. There is no
+      // top-level data key: the analytics payload arrives at response.data.
+      // Reading result.data alone left this guard permanently false, so the
+      // connected analytics path never ran and every run reported "not connected".
+      const analyticsPayload = result
+        ? (result.response && result.response.data ? result.response.data : result.data)
+        : null;
+      if (result && result.success && analyticsPayload) {
         analyticsConnected = true;
-        const payload = result.data;
+        const payload = analyticsPayload;
         const records = Array.isArray(payload.records) ? payload.records
           : (Array.isArray(payload) ? payload : null);
         if (records) analyticsRecords = records;
