@@ -1,4 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express'
+import rateLimit from 'express-rate-limit'
 import { z } from 'zod'
 import { Tool, PluginGenerationRequest, PluginGenerationResult, CredentialRequiredError, ConfirmationRequiredError, ApprovalSummary } from '../types'
 import { createToolSchema } from '../types/manifest'
@@ -264,8 +265,16 @@ router.post(
   })
 )
 
+const referenceDataLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+})
+
 router.get(
   '/tools/reference-data/:sourceId',
+  referenceDataLimiter,
   asyncHandler(async (req: Request, res: Response) => {
     const { sourceId } = req.params
     const safeSourceId = basename(sourceId).replace(/[^a-zA-Z0-9_-]/g, '')
