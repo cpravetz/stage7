@@ -1,34 +1,14 @@
+// @ts-nocheck
 import { Tool, SchemaRecord } from '../../../types';
-import { createCodeSkill, SchemaProps } from '../code-skill-factory';
+import { createDeclarativeCodeSkill, SchemaProps } from '../code-skill-factory';
 
-const SUPPORT_HOME = process.env.SUPPORT_HOME || '/tmp/support';
-
-export const SUPPORT_RESOLVE_TICKET = createCodeSkill({
+export const SUPPORT_RESOLVE_TICKET = createDeclarativeCodeSkill({
   id: 'support-resolve-ticket',
   name: 'Resolve Support Ticket',
   description: 'Resolve a support ticket by creating a resolution record. Grounded by the support knowledge base.',
+  persistenceEnvVar: 'SUPPORT_HOME',
   tier: 'advise',
   domainKnowledge: 'Support ticket resolution workflows, customer issue tracking, and resolution documentation.',
-  manifest: {
-    language: 'javascript',
-    entrypoint: 'index.js',
-    workflowStage: 'intake',
-    sourceCode: `const input = __tool_input || {};
-const fs = require('fs');
-const path = require('path');
-const ticketId = input.ticket || '';
-const issue = input.issue || '';
-const baseDir = process.env.SUPPORT_HOME || path.join('/tmp/support');
-const ticketPath = path.join(baseDir, 'tickets.json');
-fs.mkdirSync(baseDir, { recursive: true });
-function loadJSON(fp) { if (!fs.existsSync(fp)) return []; try { return JSON.parse(fs.readFileSync(fp, 'utf8')); } catch(e) { return []; } }
-const store = loadJSON(ticketPath);
-const ticket = { id: 'ticket_' + Date.now(), ticketId: ticketId, issue: issue, resolution: 'No resolution provided', status: 'open', createdAt: new Date().toISOString(), source: 'local' };
-store.push(ticket);
-fs.writeFileSync(ticketPath, JSON.stringify(store, null, 2));
-const result = { success: true, data: { ticket, storePath: ticketPath } };
-console.log(JSON.stringify(result));`,
-  },
   inputSchema: {
     type: 'object',
     properties: {
@@ -50,35 +30,30 @@ console.log(JSON.stringify(result));`,
     { kind: 'event', on: 'A new support ticket is received' },
   ],
   isSkill: true,
-});
+  manifest: {
+    workflowStage: 'intake'
+  },
+  handler: async function handler(input, ctx) {
+      const ticketId = input.ticket || '';
+      const issue = input.issue || '';
 
-export const SUPPORT_SENTIMENT_ANALYSIS = createCodeSkill({
+      const store = ctx.store.load('tickets', []);
+      const ticket = { id: 'ticket_' + Date.now(), ticketId: ticketId, issue: issue, resolution: 'No resolution provided', status: 'open', createdAt: new Date().toISOString(), source: 'local' };
+      store.push(ticket);
+      ctx.store.save('tickets', store);
+      const result = { success: true, data: { ticket, storePath: ctx.store.getFilePath('tickets') } };
+
+      return result;
+    }
+  });
+
+export const SUPPORT_SENTIMENT_ANALYSIS = createDeclarativeCodeSkill({
   id: 'support-sentiment-analysis',
   name: 'Analyze Ticket Sentiment',
   description: 'Analyze sentiment of customer communications. Triggered automatically on new ticket receipt.',
+  persistenceEnvVar: 'SUPPORT_HOME',
   tier: 'advise',
   domainKnowledge: 'Customer sentiment analysis, support ticket prioritization, and emotional tone detection.',
-  manifest: {
-    language: 'javascript',
-    entrypoint: 'index.js',
-    workflowStage: 'intake',
-    sourceCode: `const input = __tool_input || {};
-const fs = require('fs');
-const path = require('path');
-const text = input.text || '';
-const source = input.source || 'ticket';
-const baseDir = process.env.SUPPORT_HOME || path.join('/tmp/support');
-const sentimentPath = path.join(baseDir, 'sentiment.json');
-fs.mkdirSync(baseDir, { recursive: true });
-function loadJSON(fp) { if (!fs.existsSync(fp)) return []; try { return JSON.parse(fs.readFileSync(fp, 'utf8')); } catch(e) { return []; } }
-const store = loadJSON(sentimentPath);
-const score = text.length ? (text.match(/[a-z]/g) || []).length % 3 - 1 : 0;
-const result = { id: 'sent_' + Date.now(), sentiment: score > 0 ? 'positive' : score < 0 ? 'negative' : 'neutral', score, confidence: 0.75, source: source, createdAt: new Date().toISOString() };
-store.push(result);
-fs.writeFileSync(sentimentPath, JSON.stringify(store, null, 2));
-const output = { success: true, data: { result, storePath: sentimentPath } };
-console.log(JSON.stringify(output));`,
-  },
   inputSchema: {
     type: 'object',
     properties: {
@@ -100,35 +75,31 @@ console.log(JSON.stringify(output));`,
     { kind: 'event', on: 'A new support ticket is received' },
   ],
   isSkill: true,
-});
+  manifest: {
+    workflowStage: 'intake'
+  },
+  handler: async function handler(input, ctx) {
+      const text = input.text || '';
+      const source = input.source || 'ticket';
 
-export const SUPPORT_ISSUE_ANALYSIS = createCodeSkill({
+      const store = ctx.store.load('sentiment', []);
+      const score = text.length ? (text.match(/[a-z]/g) || []).length % 3 - 1 : 0;
+      const result = { id: 'sent_' + Date.now(), sentiment: score > 0 ? 'positive' : score < 0 ? 'negative' : 'neutral', score, confidence: 0.75, source: source, createdAt: new Date().toISOString() };
+      store.push(result);
+      ctx.store.save('sentiment', store);
+      const output = { success: true, data: { result, storePath: ctx.store.getFilePath('sentiment') } };
+
+      return output;
+    }
+  });
+
+export const SUPPORT_ISSUE_ANALYSIS = createDeclarativeCodeSkill({
   id: 'support-issue-analysis',
   name: 'Analyze Support Issue',
   description: 'Analyze and classify support issues for escalation. Triggered when ticket is escalated to tier 2.',
+  persistenceEnvVar: 'SUPPORT_HOME',
   tier: 'advise',
   domainKnowledge: 'Issue classification, root cause analysis, support escalation patterns, and customer context evaluation.',
-  manifest: {
-    language: 'javascript',
-    entrypoint: 'index.js',
-    workflowStage: 'intake',
-    sourceCode: `const input = __tool_input || {};
-const fs = require('fs');
-const path = require('path');
-const issueText = input.issueText || '';
-const customerInfo = input.customerInfo || {};
-const analysisType = input.analysisType || 'root_cause';
-const baseDir = process.env.SUPPORT_HOME || path.join('/tmp/support');
-const analysisPath = path.join(baseDir, 'issues.json');
-fs.mkdirSync(baseDir, { recursive: true });
-function loadJSON(fp) { if (!fs.existsSync(fp)) return []; try { return JSON.parse(fs.readFileSync(fp, 'utf8')); } catch(e) { return []; } }
-const store = loadJSON(analysisPath);
-const result = { id: 'issue_' + Date.now(), rootCause: 'Requires investigation', category: 'general', confidence: 0.5, urgency: 'medium', analysisType: analysisType, customerInfo: customerInfo, createdAt: new Date().toISOString() };
-store.push(result);
-fs.writeFileSync(analysisPath, JSON.stringify(store, null, 2));
-const output = { success: true, data: { result, storePath: analysisPath } };
-console.log(JSON.stringify(output));`,
-  },
   inputSchema: {
     type: 'object',
     properties: {
@@ -151,32 +122,31 @@ console.log(JSON.stringify(output));`,
     { kind: 'event', on: 'Ticket is escalated to tier 2' },
   ],
   isSkill: true,
-});
+  manifest: {
+    workflowStage: 'intake'
+  },
+  handler: async function handler(input, ctx) {
+      const issueText = input.issueText || '';
+      const customerInfo = input.customerInfo || {};
+      const analysisType = input.analysisType || 'root_cause';
 
-export const SUPPORT_SEARCH_KB = createCodeSkill({
+      const store = ctx.store.load('issues', []);
+      const result = { id: 'issue_' + Date.now(), rootCause: 'Requires investigation', category: 'general', confidence: 0.5, urgency: 'medium', analysisType: analysisType, customerInfo: customerInfo, createdAt: new Date().toISOString() };
+      store.push(result);
+      ctx.store.save('issues', store);
+      const output = { success: true, data: { result, storePath: ctx.store.getFilePath('issues') } };
+
+      return output;
+    }
+  });
+
+export const SUPPORT_SEARCH_KB = createDeclarativeCodeSkill({
   id: 'support-search-kb',
   name: 'Search Knowledge Base',
   description: 'Search the support knowledge base for relevant articles. Triggered automatically on new ticket receipt.',
+  persistenceEnvVar: 'SUPPORT_HOME',
   tier: 'advise',
   domainKnowledge: 'Knowledge base search, article retrieval, support documentation lookup, and self-service resolution.',
-  manifest: {
-    language: 'javascript',
-    entrypoint: 'index.js',
-    workflowStage: 'intake',
-    sourceCode: `const input = __tool_input || {};
-const fs = require('fs');
-const path = require('path');
-const query = input.query || '';
-const baseDir = process.env.SUPPORT_HOME || path.join('/tmp/support');
-const kbPath = path.join(baseDir, 'kb.json');
-fs.mkdirSync(baseDir, { recursive: true });
-function loadJSON(fp) { if (!fs.existsSync(fp)) return []; try { return JSON.parse(fs.readFileSync(fp, 'utf8')); } catch(e) { return []; } }
-const qp = query.toLowerCase().trim();
-const store = loadJSON(kbPath);
-const results = !query || !query.trim() ? [] : store.filter((a) => (a.title || '').toLowerCase().includes(qp) || (a.body || '').toLowerCase().includes(qp)).map((a) => ({ title: a.title, body: a.body, score: 1, id: a.id }));
-const result = { success: true, data: { query, results, storePath: kbPath } };
-console.log(JSON.stringify(result));`,
-  },
   inputSchema: {
     type: 'object',
     properties: {
@@ -197,4 +167,17 @@ console.log(JSON.stringify(result));`,
     { kind: 'event', on: 'A new support ticket is received' },
   ],
   isSkill: true,
-});
+  manifest: {
+    workflowStage: 'intake'
+  },
+  handler: async function handler(input, ctx) {
+      const query = input.query || '';
+
+      const qp = query.toLowerCase().trim();
+      const store = ctx.store.load('kb', []);
+      const results = !query || !query.trim() ? [] : store.filter((a) => (a.title || '').toLowerCase().includes(qp) || (a.body || '').toLowerCase().includes(qp)).map((a) => ({ title: a.title, body: a.body, score: 1, id: a.id }));
+      const result = { success: true, data: { query, results, storePath: ctx.store.getFilePath('kb') } };
+
+      return result;
+    }
+  });

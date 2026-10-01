@@ -68,6 +68,16 @@ export const sfGetReferenceValueField = (schema?: SchemaRecord): string => (
   String(schema?.['x-referenceValueField'] || 'id')
 );
 
+/**
+ * An optional narrowing of the fetched set, e.g. `x-referenceFilter: 'type=resume'`.
+ * Passed through to the reference-data endpoint as `?filter=`, so a field can offer
+ * only the slice of a source that matches what it accepts instead of the whole set.
+ */
+export const sfGetReferenceFilter = (schema?: SchemaRecord): string | undefined => {
+  const filter = schema?.['x-referenceFilter'];
+  return filter && typeof filter === 'string' ? filter : undefined;
+};
+
 export interface SfReferenceItem {
   value: string;
   label: string;
@@ -157,8 +167,8 @@ export const sfReferenceItemsFrom = (payload: unknown, valueField = 'id'): SfRef
   return items;
 };
 
-export const sfFetchReferenceItems = async (sourceId: string, valueField = 'id'): Promise<SfReferenceItem[]> => {
-  const cacheKey = sourceId + '::' + valueField;
+export const sfFetchReferenceItems = async (sourceId: string, valueField = 'id', filter?: string): Promise<SfReferenceItem[]> => {
+  const cacheKey = sourceId + '::' + valueField + '::' + (filter || '');
   const cached = sfReferenceCache.get(cacheKey);
   if (cached) return cached;
   const inFlight = sfReferencePending.get(cacheKey);
@@ -166,7 +176,10 @@ export const sfFetchReferenceItems = async (sourceId: string, valueField = 'id')
 
   const request = (async () => {
     try {
-      const response = await fetch(`/api/tool-executor/tools/reference-data/${encodeURIComponent(sourceId)}`);
+      const url = filter
+        ? `/api/tool-executor/tools/reference-data/${encodeURIComponent(sourceId)}?filter=${encodeURIComponent(filter)}`
+        : `/api/tool-executor/tools/reference-data/${encodeURIComponent(sourceId)}`;
+      const response = await fetch(url);
       if (!response.ok) return [];
       const items = sfReferenceItemsFrom(await response.json(), valueField);
       sfReferenceCache.set(cacheKey, items);
@@ -271,6 +284,7 @@ interface SfReferencePickerProps {
 const SfReferencePicker = ({ fieldId, schema, multiple, value, onChange }: SfReferencePickerProps) => {
   const sourceId = sfGetReferenceSource(schema);
   const valueField = sfGetReferenceValueField(schema);
+  const referenceFilter = sfGetReferenceFilter(schema);
   const sourceLabel = sfGetReferenceSourceLabel(schema);
   const [state, setState] = useState<SfReferenceState>(sfEmptyReferenceState);
 
@@ -281,11 +295,11 @@ const SfReferencePicker = ({ fieldId, schema, multiple, value, onChange }: SfRef
       return () => { active = false; };
     }
     setState({ loading: true, items: [] });
-    void sfFetchReferenceItems(sourceId, valueField).then((items) => {
+    void sfFetchReferenceItems(sourceId, valueField, referenceFilter).then((items) => {
       if (active) setState({ loading: false, items });
     });
     return () => { active = false; };
-  }, [sourceId, valueField]);
+  }, [sourceId, valueField, referenceFilter]);
 
   const selected = new Set<string>(multiple
     ? (Array.isArray(value) ? value : []).map((item) => sfFormatTextValue(item))

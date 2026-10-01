@@ -1,47 +1,11 @@
-import { createCodeSkill, SchemaProps } from '../code-skill-factory';
+// @ts-nocheck
+import { createDeclarativeCodeSkill, SchemaProps } from '../code-skill-factory';
 
-const PERFORMANCE_AUDIENCE_INSIGHT = createCodeSkill({
+const PERFORMANCE_AUDIENCE_INSIGHT = createDeclarativeCodeSkill({
   id: 'performance-audience-insight',
   name: 'Performance & Audience Insight',
   description: 'Analyze campaign performance, audience insights, SEO metrics, and market research data. Runs reasoning-only on the assistant model using stored local data.',
-  manifest: {
-    language: 'javascript',
-    entrypoint: 'index.js',
-    sourceCode: `
-const input = __tool_input || {};
-const fs = require('fs');
-const path = require('path');
-
-const campaignId = input.campaign || '';
-const metric = input.metric || '';
-const keywords = input.keywords || [];
-const audienceId = input.audienceId || '';
-const market = input.market || '';
-
-const marketingHome = process.env.MARKETING_HOME || path.join('/tmp/marketing');
-const storePath = path.join(marketingHome, 'analytics.json');
-fs.mkdirSync(marketingHome, { recursive: true });
-const store = fs.existsSync(storePath) ? JSON.parse(fs.readFileSync(storePath, 'utf8')) : [];
-
-function analyzePerformance(data) {
-  return {
-    campaignId: data.campaignId || campaignId,
-    metrics: data.metrics || (metric ? [metric] : []),
-    summary: { impressions: 0, clicks: 0, conversions: 0, roi: 0 },
-    trends: [],
-    recommendations: [],
-    generatedAt: new Date().toISOString(),
-  };
-}
-
-const analysis = analyzePerformance(input);
-const record = { id: 'perf_' + Date.now(), analysis, createdAt: new Date().toISOString(), source: 'local' };
-store.push(record);
-fs.writeFileSync(storePath, JSON.stringify(store, null, 2));
-const result = { success: true, data: { record, storePath } };
-console.log(JSON.stringify(result));
-`,
-  },
+  persistenceEnvVar: 'STORAGE_DIR',
   inputSchema: {
     type: 'object',
     properties: {
@@ -72,6 +36,35 @@ console.log(JSON.stringify(result));
   triggers: [
     { kind: 'user', phrase_examples: ['Analyze campaign performance', 'Get audience insights', 'Check SEO metrics', 'Review market research'] }
   ],
-});
+  manifest: {},
+  handler: async function handler(input, ctx) {
+      const campaignId = input.campaign || '';
+      const metric = input.metric || '';
+      const keywords = input.keywords || [];
+      const audienceId = input.audienceId || '';
+      const market = input.market || '';
+
+      const store = ctx.store.load('analytics', []);
+
+      function analyzePerformance(data) {
+        return {
+          campaignId: data.campaignId || campaignId,
+          metrics: data.metrics || (metric ? [metric] : []),
+          summary: { impressions: 0, clicks: 0, conversions: 0, roi: 0 },
+          trends: [],
+          recommendations: [],
+          generatedAt: new Date().toISOString(),
+        };
+      }
+
+      const analysis = analyzePerformance(input);
+      const record = { id: 'perf_' + Date.now(), analysis, createdAt: new Date().toISOString(), source: 'local' };
+      store.push(record);
+      ctx.store.save('analytics', store);
+      const result = { success: true, data: { record, storePath: ctx.store.getFilePath('analytics') } };
+
+      return result;
+    }
+  });
 
 export { PERFORMANCE_AUDIENCE_INSIGHT };

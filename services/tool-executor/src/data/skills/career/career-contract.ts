@@ -1,21 +1,11 @@
-/**
- * Presentation contract for career skills output.
- *
- * Every career skill must emit `present` — an array of blocks that the generic
- * UI renderer can display. Each block carries `id`, `body`, an optional `title`
- * and `kind`. The renderer never needs to know the domain; the skill renders the
- * body text itself.
- */
+import { PRESENT_SCHEMA, resultSchema } from '../shared/skill-result-contract';
+
 export const CAREER_PRESENT_SCHEMA = {
-  type: 'array',
-  description: 'User-formatted blocks conforming to the generic presentation contract',
+  ...PRESENT_SCHEMA,
   items: {
-    type: 'object',
+    ...PRESENT_SCHEMA.items,
     properties: {
-      id: { type: 'string' },
-      title: { type: 'string' },
-      kind: { type: 'string' },
-      body: { type: 'string' },
+      ...PRESENT_SCHEMA.items.properties,
       links: {
         type: 'array',
         description:
@@ -31,29 +21,8 @@ export const CAREER_PRESENT_SCHEMA = {
         },
       },
     },
-    required: ['id', 'body'],
   },
 };
 
-/**
- * Result schema for career wrapper skills.
- *
- * Nullable fields are declared with a union type but deliberately kept out of
- * `required`: a field that is legitimately null on a failure path is not a
- * contract violation. `success` and `present` are required so a skill that
- * forgets to render is caught rather than silently shown as a JSON dump.
- */
-export const careerResultSchema = (dataDescription: string) => ({
-  type: 'object',
-  properties: {
-    success: { type: 'boolean', description: 'Whether the skill completed the work it claims to have done' },
-    status: {
-      type: ['string', 'null'],
-      description: 'ok, partial, failed, blocked, not-connected, confirmation-required, dry-run, or error',
-    },
-    data: { type: ['object', 'null'], description: dataDescription },
-    error: { type: ['string', 'null'], description: 'Failure message' },
-    present: CAREER_PRESENT_SCHEMA,
-  },
-  required: ['success', 'present'],
-});
+export const careerResultSchema = (dataDescription: string) =>
+  resultSchema(dataDescription, { extraStatuses: ['dry-run', 'error'] });

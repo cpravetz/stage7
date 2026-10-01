@@ -51,6 +51,17 @@ export interface PresentationLink {
   detail?: string;
 }
 
+export type PresentationActionType = 'delete';
+
+export interface PresentationAction {
+  type: PresentationActionType;
+  label: string;
+  target: string; // e.g., 'skill-store'
+  collection: string;
+  key: string;
+  itemId: string;
+}
+
 export interface PresentationBlock {
   /** Stable identifier for the block, e.g. 'report', 'artifact'. Used for keys and tests. */
   id: string;
@@ -69,6 +80,8 @@ export interface PresentationBlock {
    * so none of them is left for the user to go and find.
    */
   links?: PresentationLink[];
+  /** Optional actions (e.g., delete) that can be performed on this block or its items. */
+  actions?: PresentationAction[];
 }
 
 /** The generic envelope a skill or tool result is expected to conform to. */

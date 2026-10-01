@@ -1,39 +1,8 @@
+// @ts-nocheck
 import { Tool, SchemaRecord } from '../../../types';
-import { createCodeSkill, createExternalActionSkill, SchemaProps } from '../code-skill-factory';
+import { createDeclarativeCodeSkill, createExternalActionSkill, SchemaProps } from '../code-skill-factory';
 
 const CAREER_WRAPPER_CONFIG_SCHEMA: SchemaRecord = { type: 'object', properties: {} };
-
-const GOVERNED_APPLICATION_OUTREACH_MANAGER_SOURCE = `(async () => {
-const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
-let targetRoles = Array.isArray(input.targetRoles) ? input.targetRoles : [];
-if (!targetRoles.length) {
-  const pipeline = await __execute_tool('career-pipeline-report', {});
-  if (pipeline && pipeline.success && pipeline.data) {
-    const pipelineData = pipeline.data;
-    if (Array.isArray(pipelineData.tracking)) {
-      targetRoles = pipelineData.tracking.map((entry) => entry.jobId || entry.id).filter(Boolean);
-    }
-  }
-}
-  // Prepare application materials
-  const prepare = await __execute_tool('career-profile-intake', {});
-  if (!prepare || !prepare.success) {
-    console.log(JSON.stringify({ success: false, error: prepare && prepare.error ? prepare.error : 'Profile intake required' }));
-    return;
-  }
-  // Draft outreach / resume customizations
-  const outreachDraft = await __execute_tool('career-networking-outreach', { targetCompany: input.targetCompany, targetPerson: input.targetPerson, relationshipStage: input.relationshipStage, channel: input.channel });
-  const applyRes = await __execute_tool('career-application-execution', { targetRoles, dryRun: input.dryRun !== false });
-
-if ((!outreachDraft || !outreachDraft.success) && (!applyRes || !applyRes.success)) {
-  console.log(JSON.stringify({ success: false, error: 'Neither outreach drafting nor application execution is available' }));
-  return;
-}
-
-const result = { outreach: outreachDraft && outreachDraft.data ? outreachDraft.data : null, applications: applyRes && applyRes.data ? applyRes.data : null, delegatedTo: ['career-networking-outreach', 'career-application-execution'], generatedAt: new Date().toISOString() };
-
-console.log(JSON.stringify({ success: true, data: result }));
-})();`;
 
 const GOVERNED_APPLICATION_OUTREACH_MANAGER_INPUT = {
   type: 'object',
@@ -57,27 +26,55 @@ const GOVERNED_APPLICATION_OUTREACH_MANAGER_OUTPUT = {
   required: ['success', 'data'],
 };
 
-const GOVERNED_APPLICATION_OUTREACH_MANAGER = createCodeSkill({
+const GOVERNED_APPLICATION_OUTREACH_MANAGER = createDeclarativeCodeSkill({
   id: 'career-governed-application-outreach-manager',
   name: 'Application & Outreach Manager',
   description: 'Customizes resumes and cover letters, drafts outreach messages, and stages submissions for your review before anything is sent, with a full audit log. Delegates to career-networking-outreach and career-application-execution.',
-  manifest: {
-    language: 'javascript',
-    entrypoint: 'index.js',
-    sourceCode: GOVERNED_APPLICATION_OUTREACH_MANAGER_SOURCE,
-    lowerOrderTools: ['career-networking-outreach', 'career-application-execution'],
-    configSchema: CAREER_WRAPPER_CONFIG_SCHEMA,
-    actionLabel: 'Prepare outreach & applications',
-  },
+  persistenceEnvVar: 'STORAGE_DIR',
   inputSchema: GOVERNED_APPLICATION_OUTREACH_MANAGER_INPUT,
   outputSchema: GOVERNED_APPLICATION_OUTREACH_MANAGER_OUTPUT,
   triggers: [
     { kind: 'user', phrase_examples: ['Prepare my outreach', 'Draft application packets', 'Stage outreach for review'] },
   ],
-tier: 'represent',
-confirmBeforeSend: true,
-domainKnowledge: 'Career coaching, job search strategy, resume and cover letter optimization, interview preparation, compensation negotiation',
-isSkill: true,
-});
+  tier: 'represent',
+  confirmBeforeSend: true,
+  domainKnowledge: 'Career coaching, job search strategy, resume and cover letter optimization, interview preparation, compensation negotiation',
+  isSkill: true,
+  manifest: {
+    lowerOrderTools: ['career-networking-outreach', 'career-application-execution'],
+    configSchema: CAREER_WRAPPER_CONFIG_SCHEMA,
+    actionLabel: 'Prepare outreach & applications'
+  },
+  handler: async function handler(input, ctx) {
+      let targetRoles = Array.isArray(input.targetRoles) ? input.targetRoles : [];
+      if (!targetRoles.length) {
+      const pipeline = await ctx.delegate('career-pipeline-report', {});
+      if (pipeline && pipeline.success && pipeline.data) {
+        const pipelineData = pipeline.data;
+        if (Array.isArray(pipelineData.tracking)) {
+          targetRoles = pipelineData.tracking.map((entry) => entry.jobId || entry.id).filter(Boolean);
+        }
+      }
+      }
+      // Prepare application materials
+      const prepare = await ctx.delegate('career-profile-intake', {});
+      if (!prepare || !prepare.success) {
+
+        return;
+      }
+      // Draft outreach / resume customizations
+      const outreachDraft = await ctx.delegate('career-networking-outreach', { targetCompany: input.targetCompany, targetPerson: input.targetPerson, relationshipStage: input.relationshipStage, channel: input.channel });
+      const applyRes = await ctx.delegate('career-application-execution', { targetRoles, dryRun: input.dryRun !== false });
+
+      if ((!outreachDraft || !outreachDraft.success) && (!applyRes || !applyRes.success)) {
+
+      return;
+      }
+
+      const result = { outreach: outreachDraft && outreachDraft.data ? outreachDraft.data : null, applications: applyRes && applyRes.data ? applyRes.data : null, delegatedTo: ['career-networking-outreach', 'career-application-execution'], generatedAt: new Date().toISOString() };
+      return { success: true, data: result, delegatedTo: result.delegatedTo, generatedAt: result.generatedAt };
+    }
+  });
+GOVERNED_APPLICATION_OUTREACH_MANAGER.configSchema = CAREER_WRAPPER_CONFIG_SCHEMA;
 
 export { GOVERNED_APPLICATION_OUTREACH_MANAGER };

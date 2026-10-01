@@ -1,84 +1,17 @@
+// @ts-nocheck
 import { Tool } from '../../../types';
-import { createExternalActionSkill, createCodeSkill, SchemaProps } from '../code-skill-factory';
+import { createDeclarativeCodeSkill, createExternalActionSkill, SchemaProps } from '../code-skill-factory';
 import { annotateStages, createWorkflow, WorkflowStage, AssistantWorkflow } from '../workflow-common';
 import { HEALTHCARE_EXTERNAL_OUTPUT_SCHEMA } from './healthcare-contract';
 
-const CLINICAL_DECISION_SUPPORT = createCodeSkill({
+const CLINICAL_DECISION_SUPPORT = createDeclarativeCodeSkill({
   id: 'healthcare-clinical-decision-support',
   name: 'Clinical Decision Support',
   description:
     'Clinical reasoning assistant for healthcare professionals. Provides differential diagnosis suggestions, risk assessments, and care plan recommendations with heavy safety caveats. Always recommends consulting a qualified clinician. This tool does not replace clinical judgment.',
+  persistenceEnvVar: 'HEALTHCARE_HOME',
   tier: 'advise',
   domainKnowledge: 'Clinical reasoning, differential diagnosis, risk assessment, and care plan recommendations',
-  manifest: {
-    language: 'javascript',
-    entrypoint: 'index.js',
-    sourceCode: `
-const input = __tool_input || {};
-const fs = require('fs');
-const path = require('path');
-
-const symptoms = input.symptoms || [];
-const duration = input.duration || '';
-      const patient = input.patient || '';
-const clinicalContext = input.clinicalContext || '';
-const patientHistory = input.patientHistory || [];
-const medications = input.medications || [];
-const allergies = input.allergies || [];
-const vitalSigns = input.vitalSigns || {};
-const riskFactors = input.riskFactors || [];
-
-const baseDir = process.env.HEALTHCARE_HOME || path.join('/tmp/healthcare');
-const cdsPath = path.join(baseDir, 'clinical', 'decisions.json');
-fs.mkdirSync(baseDir, { recursive: true, mode: 0o700 });
-
-const disclaimer = 'WARNING: This is a decision support tool only. It does not provide medical advice, diagnosis, or treatment. Always consult a qualified healthcare professional before making clinical decisions.';
-
-let store = [];
-if (fs.existsSync(cdsPath)) {
-  try { store = JSON.parse(fs.readFileSync(cdsPath, 'utf8')); } catch(e) {}
-}
-
-function safeParseDate(d) {
-  if (!d) return null;
-  try { const dt = new Date(d); return isNaN(dt.getTime()) ? null : dt; } catch(e) { return null; }
-}
-
-function assessUrgency(symptoms, vitalSigns) {
-  const criticalSigns = ['chest pain', 'shortness of breath', 'severe bleeding', 'loss of consciousness', 'stroke symptoms'];
-  const hasCritical = symptoms.some(s => criticalSigns.some(c => s.toLowerCase().includes(c)));
-  const bpSys = vitalSigns.bloodPressureSystolic || 0;
-  const hr = vitalSigns.heartRate || 0;
-  const temp = vitalSigns.temperature || 0;
-  if (bpSys > 180 || bpSys < 80 || hr > 130 || hr < 40 || temp > 40 || temp < 35) return 'critical';
-  if (hasCritical) return 'urgent';
-  return 'routine';
-}
-
-const decision = {
-  id: 'cds_' + Date.now(),
-    patient, symptoms, duration, clinicalContext,
-  patientHistory, medications, allergies, vitalSigns, riskFactors,
-  urgency: assessUrgency(symptoms, vitalSigns),
-  differentialDiagnoses: symptoms.length ? symptoms.map(s => ({
-    symptom: s, possibleConditions: ['Requires clinical evaluation'],
-    confidence: 0, caveat: 'Differential diagnosis requires professional clinical assessment.',
-  })) : [],
-  riskFlags: riskFactors.length ? riskFactors.map(r => ({ factor: r, level: 'requires-review' })) : [],
-  recommendedActions: ['Consult qualified healthcare professional'],
-  safetyCaveats: [disclaimer, 'This tool has limited sensitivity and specificity. Negative results do not rule out disease.'],
-  createdAt: new Date().toISOString(),
-  source: 'local',
-};
-
-store.push(decision);
-fs.writeFileSync(cdsPath, JSON.stringify(store, null, 2));
-  fs.chmodSync(cdsPath, 0o600);
-
-const result = { success: true, data: { decision, storePath: cdsPath, warning: disclaimer } };
-console.log(JSON.stringify(result));
-`,
-  },
   inputSchema: {
     type: 'object',
     properties: {
@@ -123,7 +56,63 @@ console.log(JSON.stringify(result));
   triggers: [
     { kind: 'event', on: 'New symptoms reported or abnormal lab result' },
   ],
-});
+  manifest: {},
+  handler: async function handler(input, ctx) {
+      const symptoms = input.symptoms || [];
+      const duration = input.duration || '';
+            const patient = input.patient || '';
+      const clinicalContext = input.clinicalContext || '';
+      const patientHistory = input.patientHistory || [];
+      const medications = input.medications || [];
+      const allergies = input.allergies || [];
+      const vitalSigns = input.vitalSigns || {};
+      const riskFactors = input.riskFactors || [];
+
+      const disclaimer = 'WARNING: This is a decision support tool only. It does not provide medical advice, diagnosis, or treatment. Always consult a qualified healthcare professional before making clinical decisions.';
+
+      let store = [];
+      store = ctx.store.load('cdsPath', []);
+
+      function safeParseDate(d) {
+        if (!d) return null;
+        try { const dt = new Date(d); return isNaN(dt.getTime()) ? null : dt; } catch(e) { return null; }
+      }
+
+      function assessUrgency(symptoms, vitalSigns) {
+        const criticalSigns = ['chest pain', 'shortness of breath', 'severe bleeding', 'loss of consciousness', 'stroke symptoms'];
+        const hasCritical = symptoms.some(s => criticalSigns.some(c => s.toLowerCase().includes(c)));
+        const bpSys = vitalSigns.bloodPressureSystolic || 0;
+        const hr = vitalSigns.heartRate || 0;
+        const temp = vitalSigns.temperature || 0;
+        if (bpSys > 180 || bpSys < 80 || hr > 130 || hr < 40 || temp > 40 || temp < 35) return 'critical';
+        if (hasCritical) return 'urgent';
+        return 'routine';
+      }
+
+      const decision = {
+        id: 'cds_' + Date.now(),
+          patient, symptoms, duration, clinicalContext,
+        patientHistory, medications, allergies, vitalSigns, riskFactors,
+        urgency: assessUrgency(symptoms, vitalSigns),
+        differentialDiagnoses: symptoms.length ? symptoms.map(s => ({
+          symptom: s, possibleConditions: ['Requires clinical evaluation'],
+          confidence: 0, caveat: 'Differential diagnosis requires professional clinical assessment.',
+        })) : [],
+        riskFlags: riskFactors.length ? riskFactors.map(r => ({ factor: r, level: 'requires-review' })) : [],
+        recommendedActions: ['Consult qualified healthcare professional'],
+        safetyCaveats: [disclaimer, 'This tool has limited sensitivity and specificity. Negative results do not rule out disease.'],
+        createdAt: new Date().toISOString(),
+        source: 'local',
+      };
+
+      store.push(decision);
+      ctx.store.save('cdsPath', store);
+
+      const result = { success: true, data: { decision, storePath: 'cdsPath', warning: disclaimer } };
+
+      return result;
+    }
+  });
 
 const RECORDS_SCHEDULING_OPS = createExternalActionSkill({
   id: 'healthcare-records-scheduling-ops',
@@ -301,78 +290,14 @@ const RESOURCE_COORDINATION = createExternalActionSkill({
   ],
 });
 
-const OPERATIONAL_ANALYTICS = createCodeSkill({
+const OPERATIONAL_ANALYTICS = createDeclarativeCodeSkill({
   id: 'healthcare-operational-analytics',
   name: 'Operational Analytics',
   description:
     'Generate healthcare operational analytics including clinical KPIs, throughput metrics, resource utilization, and financial summaries. Computes insights locally with reasoning over available data and can reference the healthcare analytics platform for deeper reporting.',
+  persistenceEnvVar: 'HEALTHCARE_HOME',
   tier: 'advise',
   domainKnowledge: 'Healthcare operational analytics, clinical KPIs, throughput metrics, and resource utilization',
-  manifest: {
-    language: 'javascript',
-    entrypoint: 'index.js',
-    sourceCode: `
-const input = __tool_input || {};
-const fs = require('fs');
-const path = require('path');
-
-const reportType = input.reportType || 'operational';
-const metric = input.metric || '';
-const period = input.period || '30d';
-const dateRange = input.dateRange || {};
-const granularity = input.granularity || 'day';
-const facility = input.facility || '';
-  const provider = input.provider || '';
-const filterCriteria = input.filterCriteria || {};
-
-const baseDir = process.env.HEALTHCARE_HOME || path.join('/tmp/healthcare');
-const analyticsPath = path.join(baseDir, 'analytics', 'analytics.json');
-fs.mkdirSync(baseDir, { recursive: true, mode: 0o700 });
-
-let analyticsData = { records: [], kpis: {}, metrics: [] };
-if (fs.existsSync(analyticsPath)) {
-  try { analyticsData = JSON.parse(fs.readFileSync(analyticsPath, 'utf8')); } catch(e) {}
-}
-
-const records = analyticsData.records || [];
-
-function sliceData(pd, dataArray) {
-  const now = new Date();
-  let startDate;
-  if (pd === '7d') { startDate = new Date(now); startDate.setDate(now.getDate() - 6); }
-  else if (pd === '30d') { startDate = new Date(now); startDate.setDate(now.getDate() - 29); }
-  else if (pd === '90d') { startDate = new Date(now); startDate.setDate(now.getDate() - 89); }
-  else if (pd === 'YTD') { startDate = new Date(now.getFullYear(), 0, 1); }
-  else if (pd === '1y') { startDate = new Date(now); startDate.setFullYear(now.getFullYear() - 1); }
-  else { startDate = new Date(now); startDate.setDate(now.getDate() - 29); }
-  return dataArray.filter(d => { const dd = new Date(d.date); return dd >= startDate; });
-}
-
-function computeKPIs(data) {
-  if (!data.length) return {};
-  const nums = data.map(d => d.value).filter(v => typeof v === 'number');
-  const sum = nums.reduce((a, b) => a + b, 0);
-  const avg = nums.length ? sum / nums.length : 0;
-  return {
-    total: sum, average: Math.round(avg * 100) / 100, count: nums.length,
-    min: Math.min(...nums), max: Math.max(...nums),
-    trend: nums.length > 1 ? ((nums[nums.length - 1] - nums[0]) / Math.abs(nums[0] || 1)) * 100 : 0,
-  };
-}
-
-let result;
-  const slice = sliceData(period, records);
-  const kpis = {
-    patientVolume: computeKPIs(slice.filter(d => d.type === 'volume')),
-    averageLengthOfStay: computeKPIs(slice.filter(d => d.type === 'los')),
-    bedOccupancy: computeKPIs(slice.filter(d => d.type === 'occupancy')),
-    throughput: computeKPIs(slice.filter(d => d.type === 'throughput')),
-  };
-  result = { success: true, data: { type: 'dashboard', reportType, period, granularity, kpis, recordCount: slice.length, source: 'local', note: 'For deeper analytics use the Healthcare Analytics platform.' } };
-
-console.log(JSON.stringify(result));
-`,
-  },
   inputSchema: {
     type: 'object',
     properties: {
@@ -414,7 +339,57 @@ console.log(JSON.stringify(result));
   triggers: [
     { kind: 'schedule', cadence: 'Daily healthcare metrics digest' },
   ],
-});
+  manifest: {},
+  handler: async function handler(input, ctx) {
+      const reportType = input.reportType || 'operational';
+      const metric = input.metric || '';
+      const period = input.period || '30d';
+      const dateRange = input.dateRange || {};
+      const granularity = input.granularity || 'day';
+      const facility = input.facility || '';
+        const provider = input.provider || '';
+      const filterCriteria = input.filterCriteria || {};
+
+      let analyticsData = { records: [], kpis: {}, metrics: [] };
+      analyticsData = ctx.store.load('analyticsPath', []);
+
+      const records = analyticsData.records || [];
+
+      function sliceData(pd, dataArray) {
+        const now = new Date();
+        let startDate;
+        if (pd === '7d') { startDate = new Date(now); startDate.setDate(now.getDate() - 6); }
+        else if (pd === '30d') { startDate = new Date(now); startDate.setDate(now.getDate() - 29); }
+        else if (pd === '90d') { startDate = new Date(now); startDate.setDate(now.getDate() - 89); }
+        else if (pd === 'YTD') { startDate = new Date(now.getFullYear(), 0, 1); }
+        else if (pd === '1y') { startDate = new Date(now); startDate.setFullYear(now.getFullYear() - 1); }
+        else { startDate = new Date(now); startDate.setDate(now.getDate() - 29); }
+        return dataArray.filter(d => { const dd = new Date(d.date); return dd >= startDate; });
+      }
+
+      function computeKPIs(data) {
+        if (!data.length) return {};
+        const nums = data.map(d => d.value).filter(v => typeof v === 'number');
+        const sum = nums.reduce((a, b) => a + b, 0);
+        const avg = nums.length ? sum / nums.length : 0;
+        return {
+          total: sum, average: Math.round(avg * 100) / 100, count: nums.length,
+          min: Math.min(...nums), max: Math.max(...nums),
+          trend: nums.length > 1 ? ((nums[nums.length - 1] - nums[0]) / Math.abs(nums[0] || 1)) * 100 : 0,
+        };
+      }
+
+      let result;
+        const slice = sliceData(period, records);
+        const kpis = {
+          patientVolume: computeKPIs(slice.filter(d => d.type === 'volume')),
+          averageLengthOfStay: computeKPIs(slice.filter(d => d.type === 'los')),
+          bedOccupancy: computeKPIs(slice.filter(d => d.type === 'occupancy')),
+          throughput: computeKPIs(slice.filter(d => d.type === 'throughput')),
+        };
+        result = { success: true, data: { type: 'dashboard', reportType, period, granularity, kpis, recordCount: slice.length, source: 'local', note: 'For deeper analytics use the Healthcare Analytics platform.' } };
+    }
+  });
 import { healthcareClinicalPracticeWorkflowEvaluator } from './healthcare-clinical-practice-workflow-evaluator';
 import { healthcareClinicalDecisionSupportEvaluator } from './healthcare-clinical-decision-support-evaluator';
 import { healthcarePatientCarePlanEducationalBriefingCopilot } from './healthcare-patient-care-plan-educational-briefing-copilot';

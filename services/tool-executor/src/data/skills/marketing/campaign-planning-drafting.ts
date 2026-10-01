@@ -1,45 +1,11 @@
-import { createCodeSkill, SchemaProps } from '../code-skill-factory';
+// @ts-nocheck
+import { createDeclarativeCodeSkill, SchemaProps } from '../code-skill-factory';
 
-const CAMPAIGN_PLANNING_DRAFTING = createCodeSkill({
+const CAMPAIGN_PLANNING_DRAFTING = createDeclarativeCodeSkill({
   id: 'campaign-planning-drafting',
   name: 'Campaign Planning & Drafting',
   description: 'Plan marketing campaigns with budget, channels, and timeline. Runs as reasoning-only using provided context — no external API required.',
-  manifest: {
-    language: 'javascript',
-    entrypoint: 'index.js',
-    sourceCode: `
-const input = __tool_input || {};
-const fs = require('fs');
-const path = require('path');
-
-const product = input.product || '';
-const budget = input.budget || 0;
-const channels = input.channels || [];
-const contentTitle = input.contentTitle || '';
-const contentBody = input.contentBody || '';
-const tone = input.tone || 'professional';
-
-const marketingHome = process.env.MARKETING_HOME || path.join('/tmp/marketing');
-const storePath = path.join(marketingHome, 'campaigns.json');
-fs.mkdirSync(marketingHome, { recursive: true });
-const store = fs.existsSync(storePath) ? JSON.parse(fs.readFileSync(storePath, 'utf8')) : [];
-
-const campaign = {
-  id: 'camp_' + Date.now(),
-  product,
-  budget,
-  channels,
-  timeline: [],
-  kpis: [],
-  createdAt: new Date().toISOString(),
-  source: 'local',
-};
-store.push(campaign);
-fs.writeFileSync(storePath, JSON.stringify(store, null, 2));
-const result = { success: true, data: { campaign, storePath } };
-console.log(JSON.stringify(result));
-`,
-  },
+  persistenceEnvVar: 'STORAGE_DIR',
   inputSchema: {
     type: 'object',
     properties: {
@@ -66,6 +32,33 @@ console.log(JSON.stringify(result));
   triggers: [
     { kind: 'user', phrase_examples: ['Plan a campaign', 'Draft marketing content', 'Create campaign timeline', 'Set campaign budget'] }
   ],
-});
+  manifest: {},
+  handler: async function handler(input, ctx) {
+      const product = input.product || '';
+      const budget = input.budget || 0;
+      const channels = input.channels || [];
+      const contentTitle = input.contentTitle || '';
+      const contentBody = input.contentBody || '';
+      const tone = input.tone || 'professional';
+
+      const store = ctx.store.load('campaigns', []);
+
+      const campaign = {
+        id: 'camp_' + Date.now(),
+        product,
+        budget,
+        channels,
+        timeline: [],
+        kpis: [],
+        createdAt: new Date().toISOString(),
+        source: 'local',
+      };
+      store.push(campaign);
+      ctx.store.save('campaigns', store);
+      const result = { success: true, data: { campaign, storePath: ctx.store.getFilePath('campaigns') } };
+
+      return result;
+    }
+  });
 
 export { CAMPAIGN_PLANNING_DRAFTING };

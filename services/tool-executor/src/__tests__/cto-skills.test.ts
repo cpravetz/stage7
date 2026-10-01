@@ -39,7 +39,7 @@ describe('ctoSkills', () => {
   it('base tools are self-contained (no __execute_tool)', () => {
     const base = ctoSkills.filter((s) => s.isSkill === false);
     for (const s of base) {
-      expect((s.manifest.sourceCode as string)).not.toContain('__execute_tool(');
+      expect((s.manifest.sourceCode as string)).not.toContain('ctx.delegate(');
     }
   });
 
@@ -65,7 +65,7 @@ describe('ctoSkills', () => {
     ];
     for (const [wrapperId, calleeId] of pairs) {
       const source = getSkill(wrapperId).manifest.sourceCode as string;
-      expect(source).toContain("__execute_tool('" + calleeId + "'");
+      expect(source).toContain("ctx.delegate('" + calleeId + "'");
     }
   });
 
@@ -80,7 +80,7 @@ describe('ctoSkills', () => {
       expect(source).toContain('result.success === false');
       expect(source).toContain('errors.push');
       expect(source).toContain('try {');
-      expect(source).toContain('__execute_tool(');
+      expect(source).toContain('ctx.delegate(');
     }
   });
 
@@ -153,13 +153,13 @@ describe('ctoSkills', () => {
     it('base tools have CTO_HOME in manifest', () => {
       const base = ctoSkills.filter((s) => s.isSkill === false);
       for (const skill of base) {
-        expect(skill.manifest.persistenceEnv).toBe('CTO_HOME');
+        expect(skill.manifest.persistenceEnvVar).toBe('CTO_HOME');
       }
     });
 
     it('canonical tools have CTO_HOME in manifest', () => {
       for (const skill of ctoCanonicalSkills) {
-        expect(skill.manifest.persistenceEnv).toBe('CTO_HOME');
+        expect(skill.manifest.persistenceEnvVar).toBe('CTO_HOME');
       }
     });
   });

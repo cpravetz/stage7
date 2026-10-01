@@ -23,6 +23,8 @@ import { MCPClient, MCPHTTPClient, MCPServerConfig } from '../services/MCPClient
 import { allWorkflows } from '../data/skills';
 import type { AssistantWorkflow } from '../data/skills/workflow-common';
 import { AssistantWorkspaceManager } from './AssistantWorkspaceManager';
+import { TriggerExecutionEngine } from './TriggerExecutionEngine';
+import { SkillTrigger } from '../types';
 import { validateAgainstOutputSchema, parseToolOutputJson } from '../utils/schemaValidator';
 
 const BRAIN_URL = process.env.BRAIN_URL || 'http://brain:3100';
@@ -116,10 +118,127 @@ export class ToolExecutor {
   private handoffRequests = new Map<string, HandoffRequest>();
   private executionContexts = new Map<string, { workspaceId?: string; assistantId?: string; context?: Record<string, unknown> }>();
   private workspaceManager: AssistantWorkspaceManager | null = null;
+  /**
+   * Event-dispatch runtime. Built lazily because the registry is a mutable Map
+   * that the constructor may never receive (tools are registered after boot) —
+   * sharing the Map by reference keeps the engine's view current either way.
+   */
+  private triggerEngine: TriggerExecutionEngine | null = null;
+  /** Payload of the most recent emit per event id, so an engine-driven dispatch has something to pass downstream. */
+  private recentEventPayloads: Map<string, unknown> = new Map();
+  /** Guards against an emit loop: A emits e, B listens to e and re-emits e, A listens to e... */
+  private eventDispatchChain: Set<string> = new Set();
 
   constructor(toolRegistry?: Map<string, Tool>, workspaceManager?: AssistantWorkspaceManager) {
     this.toolRegistry = toolRegistry || null;
     this.workspaceManager = workspaceManager || null;
+    this.getTriggerEngine();
+  }
+
+  private getTriggerEngine(): TriggerExecutionEngine {
+    if (!this.triggerEngine) {
+      // Same Map instance as toolRegistry when present, so tools registered
+      // later are visible without rebuilding the engine.
+      this.triggerEngine = new TriggerExecutionEngine(this.toolRegistry || new Map<string, Tool>());
+      this.triggerEngine.registerConsumer('event', (toolId, trigger) => this.onEventTrigger(toolId, trigger));
+    }
+    return this.triggerEngine;
+  }
+
+  /**
+   * Consumer for `kind: 'event'` triggers. Reached via TriggerExecutionEngine so
+   * the declared trigger metadata (not the raw emit call) decides what runs, and
+   * the engine's validation still applies.
+   */
+  private async onEventTrigger(toolId: string, trigger: SkillTrigger): Promise<void> {
+    const tool = this.toolRegistry?.get(toolId);
+    if (!tool) return;
+    const eventId = trigger.kind === 'event' ? trigger.eventId : undefined;
+    const payload = eventId ? this.recentEventPayloads.get(eventId) : undefined;
+    await this.dispatchEventTrigger(tool, payload);
+  }
+
+  /** The event id a tool announces on completion, if any. */
+  private getEmitEvent(tool: Tool): string | undefined {
+    const fromManifest = (tool.manifest as Record<string, unknown> | undefined)?.emitEvent;
+    if (typeof fromManifest === 'string' && fromManifest) return fromManifest;
+    // Tolerate a top-level field so a hand-authored tool works without nesting it.
+    const fromTool = (tool as unknown as Record<string, unknown>).emitEvent;
+    return typeof fromTool === 'string' && fromTool ? fromTool : undefined;
+  }
+
+  /**
+   * Every tool that subscribes to `eventId` with a machine-readable `eventId` on
+   * its trigger. Skills that declare `kind: 'event'` with only prose `on:` text
+   * are deliberately excluded: there is no way to match prose to an emit.
+   */
+  findDownstreamEventTriggers(eventId: string): Tool[] {
+    if (!this.toolRegistry || !eventId) return [];
+    const downstream: Tool[] = [];
+    for (const tool of this.toolRegistry.values()) {
+      const triggers = tool.triggers || [];
+      const subscribed = triggers.some(
+        (trigger) => trigger.kind === 'event' && trigger.eventId === eventId,
+      );
+      if (subscribed) downstream.push(tool);
+    }
+    return downstream;
+  }
+
+  /**
+   * Run a downstream skill with the upstream result as its input. Resolves
+   * rather than rejects on failure: a downstream skill that breaks must not
+   * fail the upstream one that triggered it.
+   */
+  async dispatchEventTrigger(tool: Tool, upstreamData: unknown, workspaceId?: string): Promise<void> {
+    const emitEvent = this.getEmitEvent(tool);
+    const chainKey = `${tool.id}:${emitEvent || 'no-emit'}`;
+    if (this.eventDispatchChain.has(chainKey)) {
+      logger.warn({ toolId: tool.id }, 'Skipping event dispatch: cycle already in progress');
+      return;
+    }
+
+    this.eventDispatchChain.add(chainKey);
+    try {
+      const result = await this.nestedExecutorCallback()(tool.id, { upstreamData, workspaceId });
+      if (result && result.success === false) {
+        logger.warn(
+          { toolId: tool.id, error: result.error },
+          'Downstream event-triggered skill reported failure',
+        );
+      }
+    } catch (err) {
+      logger.error({ toolId: tool.id, err: err instanceof Error ? err.message : String(err) }, 'Downstream event dispatch threw');
+    } finally {
+      this.eventDispatchChain.delete(chainKey);
+    }
+  }
+
+  /**
+   * Fire every downstream subscriber of this tool's completion event.
+   *
+   * Dispatch is fire-and-forget by design: the upstream result is already
+   * resolved and the caller must not wait on (or inherit failures from) the
+   * chain it just triggered.
+   */
+  private dispatchUpstreamEvents(tool: Tool, output: unknown, workspaceId?: string): void {
+    const emitEvent = this.getEmitEvent(tool);
+    if (!emitEvent) return;
+
+    this.recentEventPayloads.set(emitEvent, output);
+    const downstream = this.findDownstreamEventTriggers(emitEvent);
+    if (downstream.length === 0) {
+      logger.debug({ toolId: tool.id, emitEvent }, 'Skill emitted an event with no downstream subscribers');
+      return;
+    }
+
+    logger.info(
+      { toolId: tool.id, emitEvent, downstream: downstream.map((t) => t.id) },
+      'Dispatching completion event to downstream skills',
+    );
+    for (const target of downstream) {
+      void this.dispatchEventTrigger(target, output, workspaceId);
+    }
   }
 
   private normalizeAssistantId(assistantId?: string): string {
@@ -269,6 +388,11 @@ export class ToolExecutor {
       const { resolved, sources } = await this.resolveCredentials(tool, input);
       const output = await this.dispatch(tool, input, { resolved, sources });
       this.pendingCredentialOverrides.delete(tool.id);
+      // `dispatch` reports failure as `{ error }` rather than throwing, so a
+      // tool that "succeeded" with an error payload must not emit its event.
+      if (!output || output.error === undefined) {
+        this.dispatchUpstreamEvents(tool, output, opts?.workspaceId);
+      }
       const completedAt = new Date();
 
       logger.info({ executionId, toolId: tool.id, status: 'completed' }, 'Tool execution completed');
@@ -363,6 +487,11 @@ export class ToolExecutor {
       const { resolved, sources } = await this.resolveCredentials(tool, input);
       const output = await this.dispatch(tool, input, { resolved, sources });
       this.pendingCredentialOverrides.delete(tool.id);
+      // `dispatch` reports failure as `{ error }` rather than throwing, so a
+      // tool that "succeeded" with an error payload must not emit its event.
+      if (!output || output.error === undefined) {
+        this.dispatchUpstreamEvents(tool, output, opts?.workspaceId);
+      }
       const completedAt = new Date();
 
       logger.info({ executionId, toolId: tool.id, status: 'completed' }, 'Tool execution completed');
@@ -1142,7 +1271,7 @@ let lastError: string | undefined;
 
 while (healingAttempts <= MAX_HEALING_ATTEMPTS) {
   const result = await this.codeExecutor.execute(
-        { language: language as 'javascript' | 'typescript' | 'python', code: codeToRun, input, executorCallback: this.nestedExecutorCallback(), timeoutMs: (manifest && typeof manifest === 'object' && (manifest as Record<string, unknown>).timeoutMs) as number | undefined },
+        { language: language as 'javascript' | 'typescript' | 'python', code: codeToRun, input, executorCallback: this.nestedExecutorCallback(), timeoutMs: (manifest && typeof manifest === 'object' && (manifest as Record<string, unknown>).timeoutMs) as number | undefined, persistenceEnvVar: (manifest && typeof manifest === 'object' ? (manifest as Record<string, unknown>).persistenceEnvVar : undefined) as string | undefined },
         { resolved, sources } as CodeExecutorCredentials,
       );
 
@@ -1547,7 +1676,7 @@ const deployed = await this.pluginGenerator.deploy(generated.tool);
 if (deployed.success) {
 logger.info({ toolId: generated.tool.id, deployPath: deployed.deployPath }, 'Auto-generated plugin deployed');
   const retryResult = await this.codeExecutor.execute(
-        { language: 'javascript', code: (generated.tool.manifest as Record<string, unknown>)?.sourceCode as string || '', input, executorCallback: this.nestedExecutorCallback(), timeoutMs: (generated.tool.manifest as Record<string, unknown>) && (generated.tool.manifest as Record<string, unknown>).timeoutMs as number | undefined },
+        { language: 'javascript', code: (generated.tool.manifest as Record<string, unknown>)?.sourceCode as string || '', input, executorCallback: this.nestedExecutorCallback(), timeoutMs: (generated.tool.manifest as Record<string, unknown>) && (generated.tool.manifest as Record<string, unknown>).timeoutMs as number | undefined, persistenceEnvVar: (generated.tool.manifest as Record<string, unknown>)?.persistenceEnvVar as string | undefined },
         { resolved, sources } as CodeExecutorCredentials,
       );
 if (retryResult.success) {

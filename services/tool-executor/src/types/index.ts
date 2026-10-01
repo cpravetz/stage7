@@ -50,7 +50,7 @@ export type SchemaRecord = Record<string, unknown> & {
 export type SkillTrigger =
   | { kind: 'user'; phrase_examples: string[] }
   | { kind: 'schedule'; cadence: string }
-  | { kind: 'event'; on: string }
+  | { kind: 'event'; on: string; eventId?: string }
   | { kind: 'data'; condition: string };
 
 export type NativeExecutorKey =
@@ -68,6 +68,8 @@ export type NativeExecutorKey =
   | 'api_client';
 
 export interface ToolManifest {
+  /** Event id this tool emits when it completes; downstream skills subscribe via an event trigger. */
+  emitEvent?: string;
   executor?: NativeExecutorKey;
   vendor?: 'jira' | 'confluence' | 'slack' | 'github';
   type?: 'mcp' | 'openapi' | 'code' | 'reasoning' | 'native';

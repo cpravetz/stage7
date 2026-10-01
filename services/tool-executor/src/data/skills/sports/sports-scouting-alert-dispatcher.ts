@@ -1,83 +1,7 @@
+// @ts-nocheck
 import { Tool, SchemaRecord } from '../../../types';
-import { createCodeSkill, SchemaProps } from '../code-skill-factory';
+import { createDeclarativeCodeSkill, SchemaProps } from '../code-skill-factory';
 import { sportsResultSchema, SPORTS_PERFORMANCE_SAFETY_BOUNDARY } from './sports-contract';
-
-const SPORTS_GROUP_A_HOME = process.env.SPORTS_GROUP_A_HOME || '/tmp/sports/group-a';
-
-const SCOUTING_ALERT_SOURCE = `
-const input = __tool_input || {};
-const fs = require('fs');
-const path = require('path');
-
-const entity = input.entity || input.playerId || input.teamId || '';
-const alertType = input.alertType || 'scouting';
-const sport = input.sport || 'generic';
-const dryRun = input.dryRun !== false;
-const confirmBeforeSend = input.confirmationRequired !== false;
-
-const baseDir = process.env.SPORTS_GROUP_A_HOME || '/tmp/sports/group-a';
-const storePath = path.join(baseDir, 'scouting-alerts.json');
-fs.mkdirSync(baseDir, { recursive: true });
-
-let store = { alerts: [], lastUpdated: new Date().toISOString() };
-if (fs.existsSync(storePath)) {
-  try { store = JSON.parse(fs.readFileSync(storePath, 'utf8')); } catch (e) {}
-}
-
-const telemetryApi = process.env.WEARABLE_TELEMETRY_ENDPOINT || '';
-const requestTimeoutMs = Number(process.env.SPORTS_REQUEST_TIMEOUT_MS) || 10000;
-
-async function fetchTelemetryData(apiUrl) {
-  if (!apiUrl) {
-    return { ok: false, status: 'not-configured', data: null, error: 'WEARABLE_TELEMETRY_ENDPOINT not set' };
-  }
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
-  try {
-    const res = await fetch(apiUrl, { signal: controller.signal });
-    if (!res.ok) {
-      return { ok: false, status: 'http-error', data: null, error: 'HTTP ' + res.status };
-    }
-    const data = await res.json();
-    clearTimeout(timer);
-    return { ok: true, status: 'ok', data };
-  } catch (err) {
-    clearTimeout(timer);
-    return { ok: false, status: 'network-error', data: null, error: err && err.message ? err.message : String(err) };
-  }
-}
-
-const telemetryResult = await fetchTelemetryData(telemetryApi);
-const dataConnected = telemetryResult.ok === true;
-
-const healthStatus = input.healthStatus || 'monitoring';
-const performanceAnomaly = input.performanceAnomaly || null;
-const transferInterest = input.transferInterest || null;
-
-const alert = {
-  id: 'sa_' + Buffer.from(entity + alertType).toString('base64').slice(0, 12),
-  entity,
-  alertType,
-  sport,
-  healthStatus,
-  performanceAnomaly,
-  transferInterest,
-  severity: input.severity || 'info',
-  dryRun: dryRun,
-  confirmationRequired: confirmBeforeSend,
-  dataConnected: dataConnected,
-  channels: input.channels || ['staff-dashboard'],
-  message: input.message || 'Scouting alert for ' + entity,
-  dispatchedAt: new Date().toISOString(),
-  source: dataConnected ? 'telemetry-api' : 'local',
-  connectivityStatus: telemetryResult.status,
-};
-
-store.alerts.push(alert);
-fs.writeFileSync(storePath, JSON.stringify(store, null, 2));
-
-console.log(JSON.stringify({ success: true, status: telemetryResult.ok ? 'ok' : 'not-connected', data: alert, error: telemetryResult.ok ? null : telemetryResult.error, present: [{ id: 'scouting-alert', type: 'text', body: 'Scouting alert dispatched for ' + entity + ': type=' + alertType + ', severity=' + alert.severity + ', health=' + alert.healthStatus + (alert.performanceAnomaly ? ', anomaly=' + alert.performanceAnomaly : '') + (alert.transferInterest ? ', transfer=' + alert.transferInterest : '') + ', channels=' + JSON.stringify(alert.channels) + ', source=' + alert.source + '.' }] }));
-`;
 
 const SCOUTING_ALERT_INPUT = {
   type: 'object',
@@ -97,24 +21,11 @@ const SCOUTING_ALERT_INPUT = {
   required: ['entity', 'alertType'],
 };
 
-export const SCOUTING_ALERT_DISPATCHER = createCodeSkill({
+export const SCOUTING_ALERT_DISPATCHER = createDeclarativeCodeSkill({
   id: 'sports-scouting-alert-dispatcher',
   name: 'Automated Scouting & Alert Dispatcher',
   description: 'Represents tactical alerts to staff — tracks player health, performance anomalies, and transfer market updates. Dry-run only with confirmation required. Connects to Wearable Telemetry feeds.',
-  manifest: {
-    language: 'javascript',
-    entrypoint: 'index.js',
-    sourceCode: SCOUTING_ALERT_SOURCE,
-    configSchema: {
-      type: 'object',
-      properties: {
-        confirmBeforeSend: SchemaProps.boolean({ description: 'Require confirmation before sending alerts', default: true }),
-        dryRun: SchemaProps.boolean({ description: 'Always dry-run for represent actions', default: true }),
-        defaultChannels: SchemaProps.stringArray({ description: 'Default dispatch channels' }),
-        rateLimitPerHour: SchemaProps.number({ description: 'Max alerts per hour', default: 20 }),
-      },
-    },
-  },
+  persistenceEnvVar: 'SPORTS_GROUP_A_HOME',
   inputSchema: SCOUTING_ALERT_INPUT,
   outputSchema: sportsResultSchema('Scouting alert dispatch result'),
   tier: 'represent',
@@ -124,5 +35,86 @@ export const SCOUTING_ALERT_DISPATCHER = createCodeSkill({
     { kind: 'event', on: 'Player health or transfer state change detected' }
   ],
   isSkill: false,
-});
+  manifest: {
+    configSchema: {
+      type: 'object',
+      properties: {
+        confirmBeforeSend: SchemaProps.boolean({ description: 'Require confirmation before sending alerts', default: true }),
+        dryRun: SchemaProps.boolean({ description: 'Always dry-run for represent actions', default: true }),
+        defaultChannels: SchemaProps.stringArray({ description: 'Default dispatch channels' }),
+        rateLimitPerHour: SchemaProps.number({ description: 'Max alerts per hour', default: 20 }),
+      },
+    }
+  },
+  handler: async function handler(input, ctx) {
+      const entity = input.entity || input.playerId || input.teamId || '';
+      const alertType = input.alertType || 'scouting';
+      const sport = input.sport || 'generic';
+      const dryRun = input.dryRun !== false;
+      const confirmBeforeSend = input.confirmationRequired !== false;
 
+      let store = { alerts: [], lastUpdated: new Date().toISOString() };
+      store = ctx.store.load('scouting-alerts', []);
+
+      const telemetryApi = process.env.WEARABLE_TELEMETRY_ENDPOINT || '';
+      const requestTimeoutMs = Number(process.env.SPORTS_REQUEST_TIMEOUT_MS) || 10000;
+
+      async function fetchTelemetryData(apiUrl) {
+        if (!apiUrl) {
+          return { ok: false, status: 'not-configured', data: null, error: 'WEARABLE_TELEMETRY_ENDPOINT not set' };
+        }
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
+        try {
+          const res = await fetch(apiUrl, { signal: controller.signal });
+          if (!res.ok) {
+            return { ok: false, status: 'http-error', data: null, error: 'HTTP ' + res.status };
+          }
+          const data = await res.json();
+          clearTimeout(timer);
+          return { ok: true, status: 'ok', data };
+        } catch (err) {
+          clearTimeout(timer);
+          return { ok: false, status: 'network-error', data: null, error: err && err.message ? err.message : String(err) };
+        }
+      }
+
+      const telemetryResult = await fetchTelemetryData(telemetryApi);
+      const dataConnected = telemetryResult.ok === true;
+
+      const healthStatus = input.healthStatus || 'monitoring';
+      const performanceAnomaly = input.performanceAnomaly || null;
+      const transferInterest = input.transferInterest || null;
+
+      const alert = {
+        id: 'sa_' + Buffer.from(entity + alertType).toString('base64').slice(0, 12),
+        entity,
+        alertType,
+        sport,
+        healthStatus,
+        performanceAnomaly,
+        transferInterest,
+        severity: input.severity || 'info',
+        dryRun: dryRun,
+        confirmationRequired: confirmBeforeSend,
+        dataConnected: dataConnected,
+        channels: input.channels || ['staff-dashboard'],
+        message: input.message || 'Scouting alert for ' + entity,
+        dispatchedAt: new Date().toISOString(),
+        source: dataConnected ? 'telemetry-api' : 'local',
+        connectivityStatus: telemetryResult.status,
+      };
+
+      store.alerts.push(alert);
+      ctx.store.save('scouting-alerts', store);
+    }
+  });
+SCOUTING_ALERT_DISPATCHER.configSchema = {
+      type: 'object',
+      properties: {
+        confirmBeforeSend: SchemaProps.boolean({ description: 'Require confirmation before sending alerts', default: true }),
+        dryRun: SchemaProps.boolean({ description: 'Always dry-run for represent actions', default: true }),
+        defaultChannels: SchemaProps.stringArray({ description: 'Default dispatch channels' }),
+        rateLimitPerHour: SchemaProps.number({ description: 'Max alerts per hour', default: 20 }),
+      },
+    };

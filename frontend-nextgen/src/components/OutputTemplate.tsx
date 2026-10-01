@@ -1,5 +1,6 @@
-import React, { type ReactNode } from 'react';
-import type { PresentationBlock, PresentationLink } from '@stage7-nextgen/shared';
+import React, { type ReactNode, useState } from 'react';
+import type { PresentationBlock, PresentationLink, PresentationAction } from '@stage7-nextgen/shared';
+import { deleteResource } from '../utils/api';
 
 const ACRONYMS = new Set([
   'API', 'URL', 'ID', 'JSON', 'HTML', 'SEO', 'CRM', 'HTTP', 'UUID', 'CSV', 'PDF', 'XML', 'RSS', 'SSL', 'TLS',
@@ -229,6 +230,7 @@ const outputRenderPresentationBlocks = (blocks: PresentationBlock[]): ReactNode 
         {block.title ? <strong style={{ display: 'block' }}>{block.title}</strong> : null}
         <div style={{ whiteSpace: 'pre-wrap' }}>{block.body.trim()}</div>
         {outputRenderPresentationLinks(block.links)}
+        {outputRenderPresentationActions(block.actions)}
       </div>
     ))}
   </>
@@ -256,6 +258,69 @@ const outputRenderPresentationLinks = (links?: PresentationLink[]): ReactNode =>
         </li>
       ))}
     </ul>
+  );
+};
+
+// A presentation block may declare actions the user can take on it — currently
+// only `delete`, which removes a specific item from a skill-store array. The
+// button is rendered beside the block's body so a list of templates or
+// artifacts each carries its own Delete affordance. Confirmation + error
+// handling live here; the shared type only carries the declarative payload.
+const outputRenderPresentationActions = (actions?: PresentationAction[]): ReactNode => {
+  if (!Array.isArray(actions) || actions.length === 0) return null;
+  const deletes = actions.filter((a): a is PresentationAction => a.type === 'delete');
+  if (deletes.length === 0) return null;
+  return (
+    <div className="result-actions" style={{ marginTop: '6px' }}>
+      {deletes.map((action, i) => (
+        <PresentationDeleteButton
+          key={`${action.collection}:${action.key}:${action.itemId}-${i}`}
+          action={action}
+        />
+      ))}
+    </div>
+  );
+};
+
+const PresentationDeleteButton: React.FC<{ action: PresentationAction }> = ({ action }) => {
+  const [pending, setPending] = useState(false);
+  const [done, setDone] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const label = action.label || 'Delete';
+  const path = `/api/skill-store/${action.collection}/${action.key}/${action.itemId}`;
+
+  const handleClick = async (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.stopPropagation();
+    if (window.confirm(`Delete "${action.itemId}"?`)) {
+      setPending(true);
+      setError(null);
+      try {
+        await deleteResource(path);
+        setDone(true);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Delete failed');
+      } finally {
+        setPending(false);
+      }
+    }
+  };
+
+  if (done) {
+    return <span className="muted">Deleted</span>;
+  }
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+      <button
+        className="danger small"
+        onClick={handleClick}
+        disabled={pending}
+        title={`Delete ${action.itemId} from ${action.collection}/${action.key}`}
+      >
+        {pending ? 'Deleting…' : label}
+      </button>
+      {error ? <span className="muted" style={{ color: '#ef4444' }}>{error}</span> : null}
+    </span>
   );
 };
 

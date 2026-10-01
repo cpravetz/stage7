@@ -293,6 +293,45 @@ router.get(
       return
     }
 
+    // Resume Template Manager: read templates store
+    if (safeSourceId === 'career-resume-template-manager') {
+      const templatePaths = [
+        join(careerHome, 'templates.json'),
+        join('/tmp', 'stage7-store', 'templates.json'),
+        join('/tmp', 'career', 'templates.json'),
+      ]
+      let templates: unknown[] = []
+      for (const tp of templatePaths) {
+        try {
+          const fileContent = await readFile(tp, 'utf-8')
+          const data = JSON.parse(fileContent)
+          if (Array.isArray(data)) templates = data
+          else if (data && typeof data === 'object') templates = data.templates || data.items || []
+          if (templates.length > 0) break
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+            logger.warn({ err, sourceId, path: tp }, 'Failed to read template store')
+          }
+        }
+      }
+      // Apply type filter if present (e.g., ?filter=type=resume)
+      const filter = req.query.filter as string | undefined
+      let filtered = templates
+      if (filter && filter.startsWith('type=')) {
+        const filterType = filter.slice(5)
+        filtered = templates.filter((t) => t && typeof t === 'object' && ((t as any).type === filterType || (t as any).kind === filterType))
+      }
+      // Map to reference item format
+      const listings = filtered.map((t) => ({
+        value: (t as any).id || (t as any).name,
+        label: (t as any).name || (t as any).id,
+        type: (t as any).type || (t as any).kind,
+        tags: (t as any).tags || [],
+      }))
+      res.json({ success: true, data: { listings, source: sourceId, workspaceId } })
+      return
+    }
+
     const candidatePaths = [
       join(careerHome, 'listings', 'default.json'),
       join('/tmp', safeSourceId, 'data.json'),

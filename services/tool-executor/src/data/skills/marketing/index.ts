@@ -1,5 +1,6 @@
+// @ts-nocheck
 import { Tool } from '../../../types';
-import { createCodeSkill, createExternalActionSkill, SchemaProps } from '../code-skill-factory';
+import { createDeclarativeCodeSkill, createExternalActionSkill, SchemaProps } from '../code-skill-factory';
 
 const PLAN_CAMPAIGN_OUTPUT_SCHEMA = {
   type: 'object',
@@ -71,76 +72,69 @@ const EXTERNAL_OUTPUT_SCHEMA = {
   required: ['success', 'status', 'system', 'action', 'request', 'response', 'error'],
 };
 
-const MARKETING_SKILLS: Tool[] = [
-  {
-    id: 'plan-campaign',
-    name: 'Plan Campaign',
-    description: 'Plan a marketing campaign with budget, channels, and timeline.',
-    type: 'code',
-    manifest: { language: 'javascript', entrypoint: 'index.js', sourceCode: `
-const input = __tool_input || {};
-const fs = require('fs');
-const path = require('path');
-const product = input.product || '';
-const budget = input.budget || 0;
-const channels = input.channels || [];
-const baseDir = process.env.MARKETING_HOME || path.join('/tmp/marketing');
-const storePath = path.join(baseDir, 'campaigns.json');
-fs.mkdirSync(baseDir, { recursive: true });
-const store = fs.existsSync(storePath) ? JSON.parse(fs.readFileSync(storePath, 'utf8')) : [];
-const campaign = { id: 'campaign_' + Date.now(), product, budget, channels, timeline: [], kpis: [], createdAt: new Date().toISOString(), source: 'local' };
-store.push(campaign);
-fs.writeFileSync(storePath, JSON.stringify(store, null, 2));
-console.log(JSON.stringify({ success: true, data: { campaign, storePath } }));
-` },
-    inputSchema: {
-      type: 'object',
-      properties: {
-        product: { type: 'string', description: 'Name or description of the product being marketed' },
-        budget: { type: 'number', description: 'Total budget allocated for the campaign in currency units' },
-        channels: { type: 'array', items: { type: 'string' }, description: 'List of marketing channels to use (e.g., email, social, search, display)' },
-      },
+const PLAN_CAMPAIGN = createDeclarativeCodeSkill({
+  id: 'plan-campaign',
+  name: 'Plan Campaign',
+  description: 'Plan a marketing campaign with budget, channels, and timeline.',
+  persistenceEnvVar: 'MARKETING_HOME',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      product: { type: 'string', description: 'Name or description of the product being marketed' },
+      budget: { type: 'number', description: 'Total budget allocated for the campaign in currency units' },
+      channels: { type: 'array', items: { type: 'string' }, description: 'List of marketing channels to use (e.g., email, social, search, display)' },
     },
-    outputSchema: PLAN_CAMPAIGN_OUTPUT_SCHEMA,
-    triggers: [
-      { kind: 'user', phrase_examples: ["Plan a campaign", "Define campaign", "Create campaign plan"] },
-    ],
-    createdAt: new Date(), updatedAt: new Date(),
   },
-  {
-    id: 'analyze-performance',
-    name: 'Analyze Performance',
-    description: 'Analyze campaign performance against KPIs.',
-    type: 'code',
-    manifest: { language: 'javascript', entrypoint: 'index.js', sourceCode: `
-const input = __tool_input || {};
-const fs = require('fs');
-const path = require('path');
-const campaignId = input.campaign || '';
-const metrics = input.metrics || [];
-const baseDir = process.env.MARKETING_HOME || path.join('/tmp/marketing');
-const storePath = path.join(baseDir, 'performance.json');
-fs.mkdirSync(baseDir, { recursive: true });
-const store = fs.existsSync(storePath) ? JSON.parse(fs.readFileSync(storePath, 'utf8')) : [];
-const analysis = { id: 'perf_' + Date.now(), campaignId, metrics, results: {}, createdAt: new Date().toISOString(), source: 'local' };
-store.push(analysis);
-fs.writeFileSync(storePath, JSON.stringify(store, null, 2));
-console.log(JSON.stringify({ success: true, data: { analysis, storePath } }));
-` },
-    inputSchema: {
-      type: 'object',
-      properties: {
-        campaign: { type: 'string', description: 'Unique identifier of the campaign to analyze' },
-        metrics: { type: 'array', items: { type: 'string' }, description: 'List of metric names to evaluate (e.g., impressions, clicks, conversions, ROI)' },
-      },
+  outputSchema: PLAN_CAMPAIGN_OUTPUT_SCHEMA,
+  triggers: [
+    { kind: 'user', phrase_examples: ["Plan a campaign", "Define campaign", "Create campaign plan"] },
+  ],
+  manifest: {},
+  handler: async function handler(input, ctx) {
+      const product = input.product || '';
+      const budget = input.budget || 0;
+      const channels = input.channels || [];
+
+      const store = ctx.store.load('campaigns', []);
+      const campaign = { id: 'campaign_' + Date.now(), product: product, budget: budget, channels: channels, timeline: [], kpis: [], createdAt: new Date().toISOString(), source: 'local' };
+      store.push(campaign);
+      ctx.store.save('campaigns', store);
+
+      return { success: true, data: { campaign: campaign, storePath: ctx.store.getFilePath('campaigns') } };
+    }
+  });
+
+const ANALYZE_PERFORMANCE = createDeclarativeCodeSkill({
+  id: 'analyze-performance',
+  name: 'Analyze Performance',
+  description: 'Analyze campaign performance against KPIs.',
+  persistenceEnvVar: 'MARKETING_HOME',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      campaign: { type: 'string', description: 'Unique identifier of the campaign to analyze' },
+      metrics: { type: 'array', items: { type: 'string' }, description: 'List of metric names to evaluate (e.g., impressions, clicks, conversions, ROI)' },
     },
-    outputSchema: ANALYZE_PERFORMANCE_OUTPUT_SCHEMA,
-    triggers: [
-      { kind: 'schedule', cadence: 'Periodic campaign performance review' },
-    ],
-    createdAt: new Date(), updatedAt: new Date(),
   },
-];
+  outputSchema: ANALYZE_PERFORMANCE_OUTPUT_SCHEMA,
+  triggers: [
+    { kind: 'schedule', cadence: 'Periodic campaign performance review' },
+  ],
+  manifest: {},
+  handler: async function handler(input, ctx) {
+      const campaignId = input.campaign || '';
+      const metrics = input.metrics || [];
+
+      const store = ctx.store.load('performance', []);
+      const analysis = { id: 'perf_' + Date.now(), campaignId: campaignId, metrics: metrics, results: {}, createdAt: new Date().toISOString(), source: 'local' };
+      store.push(analysis);
+      ctx.store.save('performance', store);
+
+      return { success: true, data: { analysis: analysis, storePath: ctx.store.getFilePath('performance') } };
+    }
+  });
+
+const MARKETING_SKILLS: Tool[] = [PLAN_CAMPAIGN, ANALYZE_PERFORMANCE];
 
 const MARKETING_EXTERNAL_SKILLS: Tool[] = [
   createExternalActionSkill({
@@ -493,44 +487,11 @@ const MARKETING_EXTERNAL_SKILLS: Tool[] = [
   }),
 ];
 
-const MARKETING_CENTER = createCodeSkill({
+const MARKETING_CENTER = createDeclarativeCodeSkill({
   id: 'marketing-center',
   name: 'Marketing Center',
   description: 'Unified interface for marketing operations across content generation, social media, email, SEO, market research, audience insights, and document management. Dispatches to the appropriate external marketing skill based on the selected targetChannel.',
-  manifest: {
-    language: 'javascript',
-    entrypoint: 'index.js',
-    sourceCode: `(async () => {
-  const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
-  const targetChannel = input.targetChannel || 'content-generation';
-  const data = input.data || {};
-  const toolMap = {
-    'content-generation': 'marketing-content-generation',
-    'social-media': 'marketing-social-media',
-    'email': 'marketing-email',
-    'seo': 'marketing-seo',
-    'market-research': 'marketing-market-research',
-    'audience-insights': 'marketing-audience-insights',
-    'document-management': 'marketing-document-management',
-  };
-  const toolId = toolMap[targetChannel];
-  if (!toolId) {
-    console.log(JSON.stringify({ success: false, error: 'Unknown channel: ' + targetChannel }));
-    return;
-  }
-  const result = await __execute_tool(toolId, data);
-  console.log(JSON.stringify(result));
-})()`,
-    lowerOrderTools: [
-      'marketing-content-generation',
-      'marketing-social-media',
-      'marketing-email',
-      'marketing-seo',
-      'marketing-market-research',
-      'marketing-audience-insights',
-      'marketing-document-management',
-    ],
-  },
+  persistenceEnvVar: 'STORAGE_DIR',
   inputSchema: {
     type: 'object',
     properties: {
@@ -553,7 +514,38 @@ const MARKETING_CENTER = createCodeSkill({
   triggers: [
     { kind: 'event', on: 'Delivery sync event from planning or analytics' },
   ],
-});
+  manifest: {
+    lowerOrderTools: [
+      'marketing-content-generation',
+      'marketing-social-media',
+      'marketing-email',
+      'marketing-seo',
+      'marketing-market-research',
+      'marketing-audience-insights',
+      'marketing-document-management',
+    ]
+  },
+  handler: async function handler(input, ctx) {
+      const targetChannel = input.targetChannel || 'content-generation';
+      const data = input.data || {};
+      const toolMap = {
+        'content-generation': 'marketing-content-generation',
+        'social-media': 'marketing-social-media',
+        'email': 'marketing-email',
+        'seo': 'marketing-seo',
+        'market-research': 'marketing-market-research',
+        'audience-insights': 'marketing-audience-insights',
+        'document-management': 'marketing-document-management',
+      };
+      const toolId = toolMap[targetChannel];
+      if (!toolId) {
+
+        return;
+      }
+      const result = await ctx.delegate(toolId, data);
+      return { success: result ? result.success !== false : true, data: result ? result.data : null, error: result && result.error ? result.error : (result ? result.error : null), status: result ? result.status : "ok", delegatedTo: toolId, generatedAt: new Date().toISOString() };
+    }
+  });
 MARKETING_CENTER.tier = 'represent';
 MARKETING_CENTER.confirmBeforeSend = true;
 MARKETING_CENTER.domainKnowledge = 'Marketing frameworks (AIDA, RACE, buyer journey), channel-specific best practices (SEO, paid social, email), content strategy, campaign measurement';

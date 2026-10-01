@@ -1,8 +1,6 @@
 import { Tool } from '../../../types';
 import { createSchemaRecord, SchemaProps } from '../code-skill-factory';
 
-export const HOTEL_HOME = process.env.HOTEL_HOME || '/tmp/hotel';
-
 export const HOTEL_EXTERNAL_OUTPUT_SCHEMA = createSchemaRecord({
   success: SchemaProps.boolean({ description: 'Whether the external operation completed successfully' }),
   status: SchemaProps.select(['dry-run', 'live', 'error'], { description: 'Execution status returned by the connector' }),
@@ -30,7 +28,7 @@ export const HOTEL_EXTERNAL_CONFIG_SCHEMA = createSchemaRecord({
   }),
   hotelHome: SchemaProps.text({
     description: 'Hotel PMS base URL or local hotel service home',
-    default: HOTEL_HOME,
+    default: 'HOTEL_HOME',
   }),
   apiToken: SchemaProps.password({ description: 'Bearer token for the hotel PMS' }),
   provider: SchemaProps.text({ description: 'PMS or channel manager provider, such as opera, mews, cloudbeds, or custom' }),

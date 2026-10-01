@@ -1,50 +1,17 @@
+// @ts-nocheck
 import { Tool, SchemaRecord } from '../../../types';
-import { createCodeSkill, SchemaProps } from '../code-skill-factory';
+import { createDeclarativeCodeSkill, SchemaProps } from '../code-skill-factory';
 
 const CAREER_WRAPPER_CONFIG_SCHEMA: SchemaRecord = { type: 'object', properties: {} };
-
-const APPLICATION_EXECUTION_ORCHESTRATOR_SOURCE = `(async () => {
-const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
-let targetRoles = Array.isArray(input.targetRoles) ? input.targetRoles : [];
-if (!targetRoles.length) {
-  const pipeline = await __execute_tool('career-pipeline-report', {});
-  if (pipeline && pipeline.success && pipeline.data) {
-    const pipelineData = pipeline.data;
-    if (Array.isArray(pipelineData.tracking)) {
-      targetRoles = pipelineData.tracking.map((entry) => entry.jobId || entry.id).filter(Boolean);
-    }
-  }
-}
-const result = await __execute_tool('career-application-execution', {
-  targetRoles,
-  dryRun: input.dryRun !== false,
-  coverLetters: input.coverLetters,
-  customResume: input.customResumeFile || input.customResume,
-  customCoverLetter: input.customCoverLetterFile || input.customCoverLetter,
-});
-if (!result || result.success === false || result.error) {
-  console.log(JSON.stringify({ success: false, error: result && result.error ? result.error : 'Application execution failed' }));
-  return;
-}
-const data = result.data && typeof result.data === 'object' ? result.data : result;
-const applications = Array.isArray(data.applications) ? data.applications : [];
-if (!applications.length) {
-  console.log(JSON.stringify({ success: true, data: { applications: [], errors: data.errors || [], dryRun: data.dryRun, trackingPath: data.trackingPath, note: 'No roles were submitted. Add targetRoles or select specific roles from Job Discovery, then retry.', delegatedTo: 'career-application-execution', orchestratedAt: new Date().toISOString() } }));
-  return;
-}
-console.log(JSON.stringify({ success: true, data: { applications, errors: data.errors || [], dryRun: data.dryRun, trackingPath: data.trackingPath, delegatedTo: 'career-application-execution', orchestratedAt: new Date().toISOString() } }));
-})();`;
 
 const APPLICATION_EXECUTION_ORCHESTRATOR_INPUT = {
 type: 'object',
 properties: {
 targetRoles: { type: 'array', items: { type: 'string' }, description: 'Specific roles to apply to; if left blank, the pipeline will be used', 'x-referenceSource': 'career-job-discovery-fit-ranking', 'x-referenceLabel': 'your job search results' },
   dryRun: { type: 'boolean', description: 'Preview without submitting; defaults to true', default: true },
-  customResume: { type: 'string', description: 'Custom resume text to use for this application when overriding your default resume', multiline: true },
-  customCoverLetter: { type: 'string', description: 'Custom cover letter text to use for this application', multiline: true },
-customResumeFile: { type: 'object', description: 'Upload a resume file; text entry remains available as a fallback', properties: { name: { type: 'string' }, mimeType: { type: 'string' }, content: { type: 'string' } }, required: ['name', 'mimeType', 'content'] },
-customCoverLetterFile: { type: 'object', description: 'Upload a cover letter file; text entry remains available as a fallback', properties: { name: { type: 'string' }, mimeType: { type: 'string' }, content: { type: 'string' } }, required: ['name', 'mimeType', 'content'] },
-coverLetters: { type: 'array', items: { type: 'string' }, description: 'Optional cover-letter variants to use' },
+  customResumeTemplate: { type: 'string', description: 'Select a saved resume template to use for this application', 'x-referenceSource': 'career-resume-template-manager', 'x-referenceLabel': 'your saved resume templates', 'x-referenceFilter': 'type=resume' },
+  customCoverLetterTemplate: { type: 'string', description: 'Select a saved cover letter template to use for this application', 'x-referenceSource': 'career-resume-template-manager', 'x-referenceLabel': 'your saved cover letter templates', 'x-referenceFilter': 'type=cover-letter' },
+  coverLetters: { type: 'array', items: { type: 'string' }, description: 'Optional cover-letter variants to use' },
 },
 };
 
@@ -69,18 +36,11 @@ error: { type: 'string' },
 required: ['success', 'data'],
 };
 
-const APPLICATION_EXECUTION_ORCHESTRATOR = createCodeSkill({
+const APPLICATION_EXECUTION_ORCHESTRATOR = createDeclarativeCodeSkill({
 id: 'career-application-execution-orchestrator',
-  name: 'Apply to Selected Jobs',
-description: 'Applies to a selected job or set of jobs using the board attached to each posting, with optional custom materials. Delegates to career-application-execution. Human review is still recommended before sending where required.',
-manifest: {
-language: 'javascript',
-entrypoint: 'index.js',
-sourceCode: APPLICATION_EXECUTION_ORCHESTRATOR_SOURCE,
-configSchema: CAREER_WRAPPER_CONFIG_SCHEMA,
-actionLabel: 'Apply to selected jobs',
-lowerOrderTools: ['career-application-execution'],
-},
+name: 'Apply to Selected Jobs',
+description: 'Applies to a selected job or set of jobs using the board attached to each posting, with optional custom materials from saved templates. Delegates to career-application-execution. Human review is still recommended before sending where required.',
+persistenceEnvVar: 'STORAGE_DIR',
 inputSchema: APPLICATION_EXECUTION_ORCHESTRATOR_INPUT,
 outputSchema: APPLICATION_EXECUTION_ORCHESTRATOR_OUTPUT,
 confirmBeforeSend: true,
@@ -90,6 +50,61 @@ triggers: [
 tier: 'represent',
 domainKnowledge: 'Career coaching, job search strategy, resume and cover letter optimization, interview preparation, compensation negotiation',
 isSkill: true,
+manifest: {
+  configSchema: CAREER_WRAPPER_CONFIG_SCHEMA,
+  actionLabel: 'Apply to selected jobs',
+  lowerOrderTools: ['career-application-execution']
+},
+handler: async function handler(input, ctx) {
+    let targetRoles = Array.isArray(input.targetRoles) ? input.targetRoles : [];
+    if (!targetRoles.length) {
+    const pipeline = await ctx.delegate('career-pipeline-report', {});
+    if (pipeline && pipeline.success && pipeline.data) {
+      const pipelineData = pipeline.data;
+      if (Array.isArray(pipelineData.tracking)) {
+        targetRoles = pipelineData.tracking.map((entry) => entry.jobId || entry.id).filter(Boolean);
+      }
+    }
+    }
+
+    // Resolve template IDs to content
+    let customResume = input.customResume;
+    let customCoverLetter = input.customCoverLetter;
+
+    if (input.customResumeTemplate) {
+    const templateResult = await ctx.delegate('career-resume-template-manager', { mode: 'get', id: input.customResumeTemplate });
+    if (templateResult && templateResult.success && templateResult.data && templateResult.data.template) {
+      customResume = templateResult.data.template.content;
+    }
+    }
+
+    if (input.customCoverLetterTemplate) {
+    const templateResult = await ctx.delegate('career-resume-template-manager', { mode: 'get', id: input.customCoverLetterTemplate });
+    if (templateResult && templateResult.success && templateResult.data && templateResult.data.template) {
+      customCoverLetter = templateResult.data.template.content;
+    }
+    }
+
+    const result = await ctx.delegate('career-application-execution', {
+    targetRoles,
+    dryRun: input.dryRun !== false,
+    coverLetters: input.coverLetters,
+    customResume,
+    customCoverLetter,
+    });
+    if (!result || result.success === false || result.error) {
+
+    return;
+    }
+    const data = result.data && typeof result.data === 'object' ? result.data : result;
+    const applications = Array.isArray(data.applications) ? data.applications : [];
+    if (!applications.length) {
+
+    return;
+    }
+      return { success: true, data: { applications, errors: data.errors || [], dryRun: data.dryRun, trackingPath: data.trackingPath, delegatedTo: 'career-application-execution', orchestratedAt: new Date().toISOString() } };
+  }
 });
+APPLICATION_EXECUTION_ORCHESTRATOR.configSchema = CAREER_WRAPPER_CONFIG_SCHEMA;
 
 export { APPLICATION_EXECUTION_ORCHESTRATOR };

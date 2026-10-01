@@ -1,17 +1,23 @@
 /**
  * Stage7 Shared JS Runtime for Code Skills.
- * Loaded by spawned Node.js skill processes via require('stage7-runtime').
+ *
+ * Plain CommonJS twin of `stage7-runtime.ts`. CodeExecutor copies THIS file
+ * verbatim into the sandbox as `${sandboxDir}/stage7-runtime.js`; the generated
+ * skill script lives at `${sandboxDir}/main.js`, so it pulls the runtime in
+ * with `require('./stage7-runtime')`.
+ *
+ * It must stay free of ES module syntax and type annotations: Node parses it
+ * directly in CommonJS mode, with no build step in between.
+ *
+ * Globals injected by CodeExecutor into the sandbox:
+ * - __tool_input: the tool's input object
+ * - __execute_tool: callback for delegating to other tools
+ * - process.env.ARTIFACTS_URL: artifacts service URL (optional)
+ * - process.env[persistenceEnvVar] (e.g. HOTEL_HOME, STORAGE_DIR): local persistence dir
  */
 
-import fs from 'fs';
-import path from 'path';
-
-declare const __tool_input: any;
-declare const __execute_tool: any;
-
-export interface RuntimeOptions {
-  persistenceEnvVar?: string;
-}
+const fs = require('fs');
+const path = require('path');
 
 /** Fallback directory for the inter-skill collection store when no env dir is set. */
 const GLOBAL_STORE_DIR = '/tmp/stage7-store';
@@ -22,11 +28,11 @@ const REMOTE_TIMEOUT_MS = 2000;
  * `HOTEL_HOME` -> `hotel`, `LEGAL_HOME` -> `legal`. Used as the Mongo-backed
  * collection name on the artifacts service so each domain gets its own bucket.
  */
-function deriveCollection(persistenceEnvVar: string): string {
+function deriveCollection(persistenceEnvVar) {
   return persistenceEnvVar.replace(/_HOME$/i, '').replace(/^STORAGE_DIR$/i, 'default').toLowerCase() || 'default';
 }
 
-function artifactsUrl(): string {
+function artifactsUrl() {
   return (typeof process !== 'undefined' && process.env && process.env.ARTIFACTS_URL) || '';
 }
 
@@ -35,36 +41,38 @@ function artifactsUrl(): string {
  *
  * Never rejects: persistence is an optimization layered on top of the local
  * file write, so an unreachable artifacts service must not fail the skill. The
- * request is left in flight on purpose — an un-awaited fetch keeps the Node
+ * request is left in flight on purpose - an un-awaited fetch keeps the Node
  * event loop alive, so the spawned skill process waits for it to settle instead
  * of exiting mid-write.
  */
-function remoteCall(method: string, collection: string, key: string, body?: any): Promise<any> {
+function remoteCall(method, collection, key, body) {
   const base = artifactsUrl();
   if (!base) return Promise.resolve(null);
   const url = `${base}/api/skill-store/${encodeURIComponent(collection)}/${encodeURIComponent(key)}`;
   const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
   const timer = controller ? setTimeout(() => controller.abort(), REMOTE_TIMEOUT_MS) : null;
-  return (fetch as any)(url, {
+  return fetch(url, {
     method,
     headers: { 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
     signal: controller ? controller.signal : undefined,
   })
-    .then((res: any) => (res && res.ok ? res.json().catch(() => null) : null))
+    .then((res) => (res && res.ok ? res.json().catch(() => null) : null))
     .catch(() => null)
     .finally(() => {
       if (timer) clearTimeout(timer);
     });
 }
 
-export function createRuntimeContext(opts: RuntimeOptions = {}) {
+function createRuntimeContext(opts) {
+  const options = opts || {};
   const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
-  const persistenceEnvVar = opts.persistenceEnvVar || 'STORAGE_DIR';
+  const persistenceEnvVar = options.persistenceEnvVar || 'STORAGE_DIR';
   const baseDir = (typeof process !== 'undefined' && process.env && process.env[persistenceEnvVar]) || '/tmp/stage7';
   const collection = deriveCollection(persistenceEnvVar);
 
-  function readLocal(key: string, defaultValue: any = []): any {
+  function readLocal(key, defaultValue) {
+    const fallback = defaultValue === undefined ? [] : defaultValue;
     // Check the domain dir first, then the shared collection store, so a value
     // another skill wrote globally is still visible when this domain dir is cold.
     for (const filePath of [path.join(baseDir, `${key}.json`), path.join(GLOBAL_STORE_DIR, `${key}.json`)]) {
@@ -76,10 +84,10 @@ export function createRuntimeContext(opts: RuntimeOptions = {}) {
         // Fall through to the next candidate / the default
       }
     }
-    return defaultValue;
+    return fallback;
   }
 
-  function writeLocal(key: string, data: any): void {
+  function writeLocal(key, data) {
     try {
       // mkdir on the FILE's dirname, not on baseDir: a key carrying a path
       // segment ('listings/default') resolves to a subdirectory that a bare
@@ -102,7 +110,7 @@ export function createRuntimeContext(opts: RuntimeOptions = {}) {
 
   const store = {
     collection,
-    getFilePath(key: string) {
+    getFilePath(key) {
       return path.join(baseDir, `${key}.json`);
     },
     /**
@@ -112,14 +120,14 @@ export function createRuntimeContext(opts: RuntimeOptions = {}) {
      * Promise here would hand every one of them a Promise to iterate. Use
      * `loadAsync` when the caller can await and wants the Mongo copy first.
      */
-    load(key: string, defaultValue: any = []) {
+    load(key, defaultValue) {
       return readLocal(key, defaultValue);
     },
     /**
      * Remote-first read: prefers the Mongo-backed artifacts copy and falls back
      * to the local file when artifacts is unset, unreachable, or missing the key.
      */
-    async loadAsync(key: string, defaultValue: any = []) {
+    async loadAsync(key, defaultValue) {
       const remote = await remoteCall('GET', collection, key);
       if (remote && typeof remote === 'object' && remote.data !== undefined) {
         // Refresh the local mirror so later synchronous loads stay consistent.
@@ -128,7 +136,7 @@ export function createRuntimeContext(opts: RuntimeOptions = {}) {
       }
       return readLocal(key, defaultValue);
     },
-    save(key: string, data: any) {
+    save(key, data) {
       writeLocal(key, data);
       // Mirror to Mongo. Intentionally not awaited: `save` is sync by contract.
       void remoteCall('POST', collection, key, {
@@ -138,7 +146,7 @@ export function createRuntimeContext(opts: RuntimeOptions = {}) {
       });
     },
     /** Remove both the local files and the remote Mongo copy. Best effort. */
-    delete(key: string) {
+    delete(key) {
       for (const filePath of [path.join(baseDir, `${key}.json`), path.join(GLOBAL_STORE_DIR, `${key}.json`)]) {
         try {
           if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
@@ -148,14 +156,14 @@ export function createRuntimeContext(opts: RuntimeOptions = {}) {
       }
       void remoteCall('DELETE', collection, key);
     },
-    /** Remote copy only — does not touch local files. */
+    /** Remote copy only - does not touch local files. */
     async list() {
       const base = artifactsUrl();
       if (!base) return [];
       try {
         const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
         const timer = controller ? setTimeout(() => controller.abort(), REMOTE_TIMEOUT_MS) : null;
-        const res = await (fetch as any)(`${base}/api/skill-store/${encodeURIComponent(collection)}`, {
+        const res = await fetch(`${base}/api/skill-store/${encodeURIComponent(collection)}`, {
           method: 'GET',
           headers: { 'Content-Type': 'application/json' },
           signal: controller ? controller.signal : undefined,
@@ -171,49 +179,54 @@ export function createRuntimeContext(opts: RuntimeOptions = {}) {
   };
 
   const emit = {
-    success(result: any = {}) {
+    success(result) {
+      const res = result || {};
       const output = {
         success: true,
-        data: result.data || null,
-        status: result.status || 'ok',
-        error: result.error || null,
-        present: result.present || [],
-        ...result,
+        data: res.data || null,
+        status: res.status || 'ok',
+        error: res.error || null,
+        present: res.present || [],
+        ...res,
       };
       console.log(JSON.stringify(output));
       return output;
     },
-    failure(error: any, result: any = {}) {
+    failure(error, result) {
+      const res = result || {};
+      const message = typeof error === 'string' ? error : (error && error.message) || String(error);
       const output = {
         success: false,
-        data: result.data || null,
-        status: result.status || 'failed',
-        error: typeof error === 'string' ? error : (error && error.message) || String(error),
-        present: result.present || [
+        data: res.data || null,
+        status: res.status || 'failed',
+        error: message,
+        present: res.present || [
           {
             id: 'error-summary',
             title: 'Error',
             kind: 'text',
-            body: typeof error === 'string' ? error : (error && error.message) || String(error),
+            body: message,
           },
         ],
-        ...result,
+        ...res,
       };
       console.log(JSON.stringify(output));
       return output;
     },
-    notConnected(reason = 'Required endpoint or configuration is missing', details = '') {
+    notConnected(reason, details) {
+      const why = reason === undefined ? 'Required endpoint or configuration is missing' : reason;
+      const extra = details === undefined ? '' : details;
       const output = {
         success: false,
         status: 'not-connected',
         data: null,
-        error: `Not connected: ${reason}`,
+        error: `Not connected: ${why}`,
         present: [
           {
             id: 'not-connected',
             title: 'Connection required',
             kind: 'text',
-            body: details ? `${reason}\n${details}` : reason,
+            body: extra ? `${why}\n${extra}` : why,
           },
         ],
       };
@@ -222,7 +235,7 @@ export function createRuntimeContext(opts: RuntimeOptions = {}) {
     },
   };
 
-  const delegate = async (toolId: string, toolInput: any) => {
+  const delegate = async (toolId, toolInput) => {
     if (typeof __execute_tool === 'function') {
       return await __execute_tool(toolId, toolInput);
     }
@@ -230,15 +243,15 @@ export function createRuntimeContext(opts: RuntimeOptions = {}) {
   };
 
   const render = {
-    text(id: string, title: string, bodyOrLines: string | string[]) {
+    text(id, title, bodyOrLines) {
       const body = Array.isArray(bodyOrLines) ? bodyOrLines.join('\n') : String(bodyOrLines);
       return { id, title, kind: 'text', body };
     },
-    markdown(id: string, title: string, bodyOrLines: string | string[]) {
+    markdown(id, title, bodyOrLines) {
       const body = Array.isArray(bodyOrLines) ? bodyOrLines.join('\n') : String(bodyOrLines);
       return { id, title, kind: 'markdown', body };
     },
-    list(id: string, title: string, items: string[]) {
+    list(id, title, items) {
       const body = items.map((i) => `- ${i}`).join('\n');
       return { id, title, kind: 'text', body };
     },
@@ -255,4 +268,5 @@ export function createRuntimeContext(opts: RuntimeOptions = {}) {
 
 module.exports = {
   context: createRuntimeContext,
+  createRuntimeContext,
 };

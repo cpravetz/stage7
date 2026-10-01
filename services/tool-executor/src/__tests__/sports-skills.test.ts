@@ -49,7 +49,7 @@ describe('sportsSkills', () => {
       const source = skill.manifest.sourceCode as string;
       expect(source).toContain('dataConnected');
       expect(source).toContain('battlecard-archives');
-      expect(source).toContain('group-a');
+      expect(source).toMatch(/SPORTS_GROUP_A_HOME|\/tmp\/sports\/group-a/);
       expect(source).not.toContain('SPORTS_GROUP_B_HOME');
     });
 
@@ -58,7 +58,7 @@ describe('sportsSkills', () => {
       const source = skill.manifest.sourceCode as string;
       expect(source).toContain('dryRun');
       expect(source).toContain('confirmationRequired');
-      expect(source).toContain('group-a');
+      expect(source).toMatch(/SPORTS_GROUP_A_HOME|\/tmp\/sports\/group-a/);
       expect(source).not.toContain('SPORTS_GROUP_B_HOME');
     });
 

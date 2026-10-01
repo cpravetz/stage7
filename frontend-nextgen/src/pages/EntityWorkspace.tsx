@@ -26,7 +26,7 @@ const EntityWorkspace = () => {
   const viewModel = useAssistantViewStore((s) => s.getOrCreate(entityId || ''));
   const setViewModelField = useAssistantViewStore((s) => s.setField);
 
-  const [activeTab, setActiveTab] = useState<'overview' | 'tools' | 'configuration' | 'memory' | 'missions' | 'hitl' | 'artifacts'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'skill settings' | 'configuration' | 'memory' | 'missions' | 'hitl' | 'artifacts'>('overview');
   const [missionInput, setMissionInput] = useState('');
   const [running, setRunning] = useState(false);
   const [missionHistory, setMissionHistory] = useState<Array<{ missionId: string; status: string; timestamp: string; output?: string }>>([]);
@@ -372,7 +372,7 @@ const EntityWorkspace = () => {
     );
   }
 
-  const entityTabs = ['overview', 'tools', 'configuration', 'memory', 'missions', 'hitl', 'artifacts'] as const;
+  const entityTabs = ['overview', 'skill settings', 'configuration', 'memory', 'missions', 'hitl', 'artifacts'] as const;
 
   return (
     <div className="page entity-workspace">
@@ -429,7 +429,7 @@ const EntityWorkspace = () => {
           />
         )}
 
-        {activeTab === 'tools' && (
+        {activeTab === 'skill settings' && (
           <ToolsPanel
             toolBindings={toolBindings}
             availableTools={availableTools}

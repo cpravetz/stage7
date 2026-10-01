@@ -144,19 +144,22 @@ describe('Songwriter Creative — Batch A', () => {
       }
     });
 
-    it('evaluator source persists to lyric-evaluations.json', () => {
+    it('evaluator targets the lyric-evaluations store key', () => {
       const skill = skillsByName['Advise Lyric & Structural Prosody Evaluator'];
-      expect(skill.manifest.sourceCode).toContain('lyric-evaluations.json');
+      expect(skill.manifest.sourceCode).toContain('lyric-evaluations');
+      expect(skill.manifest.persistenceEnvVar).toBe('SONGWRITING_HOME');
     });
 
-    it('co-creation source persists to drafts.json', () => {
+    it('co-creation targets the drafts store key', () => {
       const skill = skillsByName['Aid Musical & Lyric Co-Creation Engine'];
-      expect(skill.manifest.sourceCode).toContain('drafts.json');
+      expect(skill.manifest.sourceCode).toContain('drafts');
+      expect(skill.manifest.persistenceEnvVar).toBe('SONGWRITING_HOME');
     });
 
-    it('dispatcher source persists to lead-sheets.json', () => {
+    it('dispatcher targets the lead-sheets store key', () => {
       const skill = skillsByName['Represent Lead Sheet & Demo Asset Dispatcher'];
-      expect(skill.manifest.sourceCode).toContain('lead-sheets.json');
+      expect(skill.manifest.sourceCode).toContain('lead-sheets');
+      expect(skill.manifest.persistenceEnvVar).toBe('SONGWRITING_HOME');
     });
   });
 
@@ -253,10 +256,10 @@ describe('Songwriter Creative — Batch A', () => {
       expect(cocreation.manifest.entrypoint).toBe('index.js');
     });
 
-    it('dispatcher uses createCodeSkill with withConfirmation wrapper', () => {
+    it('dispatcher is a declarative code skill behind withConfirmation', () => {
       const dispatcher = skillsByName['Represent Lead Sheet & Demo Asset Dispatcher'];
-      expect(dispatcher.manifest.language).toBe('javascript');
-      expect(dispatcher.manifest.entrypoint).toBe('index.js');
+      expect(dispatcher.type).toBe('code');
+      expect(dispatcher.manifest.sourceCode).toBeTruthy();
       expect(dispatcher.confirmBeforeSend).toBe(true);
     });
   });
@@ -317,7 +320,7 @@ describe('Songwriter Creative — Batch A', () => {
       expect(parsed.data.evaluation.averageSyllablesPerLine).toBeGreaterThan(0);
       expect(Array.isArray(parsed.data.evaluation.recommendations)).toBe(true);
       expect(parsed.data.evaluation.source).toBe('local');
-      expect(parsed.data.storePath).toContain('songwriting');
+      expect(parsed.data.storePath).toContain('lyric-evaluations');
     });
 
     it('evaluator detects missing required lyrics and rejects', () => {
@@ -361,7 +364,7 @@ describe('Songwriter Creative — Batch A', () => {
       expect(parsed.data.draft.verseLinesAreDistinct).toBe(true);
       expect(parsed.data.draft.beatSheet).toBeDefined();
       expect(parsed.data.draft.source).toBe('local');
-      expect(parsed.data.storePath).toContain('songwriting');
+      expect(parsed.data.storePath).toContain('drafts');
       const song = (parsed.present || []).find((b: any) => b.id === 'song');
       expect(song).toBeDefined();
       expect(song.body).toContain('--- LYRICS & CHORDS ---');

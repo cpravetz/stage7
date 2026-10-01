@@ -4,6 +4,7 @@ import workflowRoutes from './routes/workflows';
 import workspaceRoutes from './routes/workspaces';
 import watchRoutes from './routes/watches';
 import mcpServerRoutes from './routes/mcpServers';
+import skillStoreRoutes from './routes/skill-store';
 import { Tool } from './types';
 import { toolRegistry, toolStore } from './utils/sharedInstance';
 import { legacyGeneralTools } from './data/generalTools';
@@ -208,6 +209,11 @@ app.use('/api/tool-executor', mcpServerRoutes);
 app.use('/api/tool-executor/workflows', workflowRoutes);
 app.use('/api/tool-executor/workspaces', workspaceRoutes);
 app.use('/api/tool-executor/watches', watchRoutes);
+
+// Skill persistence. Mounted at the root because the runtime in spawned
+// skill processes addresses it as /api/skill-store, not under the
+// tool-executor prefix.
+app.use('/api/skill-store', skillStoreRoutes);
 
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   if (err instanceof ToolNotFoundError) {

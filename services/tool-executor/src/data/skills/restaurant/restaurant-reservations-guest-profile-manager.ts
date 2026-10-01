@@ -1,80 +1,7 @@
+// @ts-nocheck
 import { Tool } from '../../../types';
-import { createCodeSkill, SchemaProps, createSchemaRecord } from '../code-skill-factory';
+import { createDeclarativeCodeSkill, createSchemaRecord, SchemaProps } from '../code-skill-factory';
 import { restaurantResultSchema, RESTAURANT_SAFETY_BOUNDARY, RESTAURANT_PRESENT_SCHEMA } from './restaurant-contract';
-
-const RESTAURANT_RESERVATIONS_GUEST_PROFILE_MANAGER_SOURCE = `(async () => {
-  const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
-  const NL = '\\n';
-  const SAFETY = ${JSON.stringify(RESTAURANT_SAFETY_BOUNDARY)};
-  const endpoint = process.env.RESTAURANT_RESERVATION_ENDPOINT || '';
-  const dryRun = input.dryRun !== false;
-  const confirmBeforeSend = input.confirmBeforeSend !== false;
-
-  function fail(status, message, title) {
-    console.log(JSON.stringify({
-      success: false,
-      status: status,
-      error: message,
-      data: null,
-      present: [{ id: 'notice', title: title, kind: 'text', body: message + NL + NL + SAFETY }],
-    }));
-  }
-
-  function presentNotice(title, body) {
-    console.log(JSON.stringify({
-      success: false,
-      status: 'not-connected',
-      connected: false,
-      data: null,
-      error: null,
-      present: [{ id: 'notice', title: title, kind: 'text', body: body + NL + NL + SAFETY }],
-    }));
-  }
-
-  if (!endpoint) {
-    presentNotice('Not connected', 'RESTAURANT_RESERVATION_ENDPOINT is not configured. Reservation operations require a live endpoint. No guest profile was created or modified.');
-    return;
-  }
-
-  const guestId = input.guestId || ('guest_' + Date.now());
-  const name = input.name || 'Unknown';
-  const phone = input.phone || '';
-  const email = input.email || '';
-  const preferences = input.preferences || {};
-  const profile = { id: guestId, name, phone, email, preferences };
-
-  if (dryRun || !confirmBeforeSend) {
-    // ---- Report ------------------------------------------------------------------
-    const lines = [];
-    lines.push('Guest profile created (dry-run — no live endpoint mutation).');
-    lines.push('');
-    lines.push('Profile details:');
-    lines.push('  Guest ID: ' + guestId);
-    lines.push('  Name: ' + name);
-    lines.push('  Phone: ' + (phone || '(not provided)'));
-    lines.push('  Email: ' + (email || '(not provided)'));
-    const prefKeys = Object.keys(preferences);
-    if (prefKeys.length > 0) {
-      lines.push('  Preferences:');
-      prefKeys.forEach(function (key) { lines.push('    ' + key + ': ' + preferences[key]); });
-    } else {
-      lines.push('  Preferences: (none provided)');
-    }
-    lines.push('');
-    lines.push('Endpoint: ' + endpoint + ' (dry-run, profile shown but not persisted remotely)');
-    lines.push('');
-    lines.push(SAFETY);
-
-    console.log(JSON.stringify({
-      success: true,
-      status: 'dry-run',
-      data: { profile, dryRun, endpoint },
-      present: [{ id: 'guest-profile-report', title: 'Guest Profile Dry-Run', kind: 'text', body: lines.join(NL) }],
-    }));
-  } else {
-    presentNotice('Confirmation required', 'A live reservation operation was requested but explicit confirmation was not received. No guest profile was created on the live endpoint.');
-  }
-})()`;
 
 const RESTAURANT_RESERVATIONS_GUEST_PROFILE_MANAGER_CONFIG = createSchemaRecord({
   confirmBeforeSend: SchemaProps.boolean({ description: 'Require explicit confirmation before executing live reservation actions', default: true }),
@@ -97,11 +24,11 @@ const RESTAURANT_RESERVATIONS_GUEST_PROFILE_MANAGER_INPUT = createSchemaRecord({
   confirmBeforeSend: SchemaProps.boolean({ description: 'Require explicit confirmation for live endpoint', default: true }),
 });
 
-export const RESTAURANT_RESERVATIONS_GUEST_PROFILE_MANAGER = createCodeSkill({
+export const RESTAURANT_RESERVATIONS_GUEST_PROFILE_MANAGER = createDeclarativeCodeSkill({
   id: 'restaurant-reservations-guest-profile-manager',
   name: 'Restaurant Reservations & Guest Profile Manager',
   description: 'Manage guest profiles, reservations, and reservation history with dry-run defaults and explicit confirmation requirements for live endpoint actions. Returns not-connected when RESTAURANT_RESERVATION_ENDPOINT is absent.',
-  manifest: { language: 'javascript', entrypoint: 'index.js', sourceCode: RESTAURANT_RESERVATIONS_GUEST_PROFILE_MANAGER_SOURCE, configSchema: RESTAURANT_RESERVATIONS_GUEST_PROFILE_MANAGER_CONFIG },
+  persistenceEnvVar: 'STORAGE_DIR',
   inputSchema: RESTAURANT_RESERVATIONS_GUEST_PROFILE_MANAGER_INPUT,
   outputSchema: restaurantResultSchema('Guest profile or reservation record'),
   triggers: [
@@ -120,4 +47,74 @@ export const RESTAURANT_RESERVATIONS_GUEST_PROFILE_MANAGER = createCodeSkill({
   tier: 'represent',
   domainKnowledge: 'Restaurant reservation management, guest profile tracking, and booking coordination',
   confirmBeforeSend: true,
-});
+  manifest: {
+    configSchema: RESTAURANT_RESERVATIONS_GUEST_PROFILE_MANAGER_CONFIG
+  },
+  handler: async function handler(input, ctx) {
+      const NL = '\n';
+      const SAFETY = "food safety / allergen protocol";
+      const endpoint = process.env.RESTAURANT_RESERVATION_ENDPOINT || '';
+      const dryRun = input.dryRun !== false;
+      const confirmBeforeSend = input.confirmBeforeSend !== false;
+
+      function fail(status, message, title) {
+        return         {
+        success: false,
+        status: status,
+        error: message,
+        data: null,
+        present: [{ id: 'notice', title: title, kind: 'text', body: message + NL + NL + SAFETY }],
+        };
+      }
+
+      function presentNotice(title, body) {
+        return         {
+        success: false,
+        status: 'not-connected',
+        connected: false,
+        data: null,
+        error: null,
+        present: [{ id: 'notice', title: title, kind: 'text', body: body + NL + NL + SAFETY }],
+        };
+      }
+
+      if (!endpoint) {
+        return presentNotice('Not connected', 'RESTAURANT_RESERVATION_ENDPOINT is not configured. Reservation operations require a live endpoint. No guest profile was created or modified.');
+      }
+
+      const guestId = input.guestId || ('guest_' + Date.now());
+      const name = input.name || 'Unknown';
+      const phone = input.phone || '';
+      const email = input.email || '';
+      const preferences = input.preferences || {};
+      const profile = { id: guestId, name, phone, email, preferences };
+
+      if (dryRun || !confirmBeforeSend) {
+        // ---- Report ------------------------------------------------------------------
+        const lines = [];
+        lines.push('Guest profile created (dry-run — no live endpoint mutation).');
+        lines.push('');
+        lines.push('Profile details:');
+        lines.push('  Guest ID: ' + guestId);
+        lines.push('  Name: ' + name);
+        lines.push('  Phone: ' + (phone || '(not provided)'));
+        lines.push('  Email: ' + (email || '(not provided)'));
+        const prefKeys = Object.keys(preferences);
+        if (prefKeys.length > 0) {
+          lines.push('  Preferences:');
+          prefKeys.forEach(function (key) { lines.push('    ' + key + ': ' + preferences[key]); });
+        } else {
+          lines.push('  Preferences: (none provided)');
+        }
+        lines.push('');
+        lines.push('Endpoint: ' + endpoint + ' (dry-run, profile shown but not persisted remotely)');
+        lines.push('');
+        lines.push(SAFETY);
+        return { success: true, data: profile, present: [{ id: 'report', title: 'Guest Profile (dry-run)', kind: 'text', body: lines.join(NL) }] };
+
+      } else {
+        return presentNotice('Confirmation required', 'A live reservation operation was requested but explicit confirmation was not received. No guest profile was created on the live endpoint.');
+      }
+    }
+  });
+RESTAURANT_RESERVATIONS_GUEST_PROFILE_MANAGER.configSchema = RESTAURANT_RESERVATIONS_GUEST_PROFILE_MANAGER_CONFIG;

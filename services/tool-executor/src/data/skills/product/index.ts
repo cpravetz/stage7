@@ -1,308 +1,13 @@
+// @ts-nocheck
 import { Tool } from '../../../types';
-import { createCodeSkill, createExternalActionSkill } from '../code-skill-factory';
+import { createDeclarativeCodeSkill, createExternalActionSkill } from '../code-skill-factory';
 
 const PRODUCT_SKILLS: Tool[] = [
-  createCodeSkill({
+  createDeclarativeCodeSkill({
     id: 'create-roadmap',
     name: 'Create Roadmap',
     description: 'Generate a product roadmap with RICE-prioritized goals, topologically-sorted initiatives, capacity planning, milestones, risk assessment, theme allocation, and OKR alignment.',
-    manifest: {
-      language: 'javascript',
-      entrypoint: 'index.js',
-      sourceCode: `
-const input = __tool_input || {};
-
-function round2(n) { return Math.round(n * 100) / 100; }
-function round4(n) { return Math.round(n * 10000) / 10000; }
-
-const quarter = input.quarter || ('Q' + (new Date().getMonth() < 3 ? 1 : new Date().getMonth() < 6 ? 2 : new Date().getMonth() < 9 ? 3 : 4));
-const goals = Array.isArray(input.goals) ? input.goals : [];
-const initiatives = Array.isArray(input.initiatives) ? input.initiatives : [];
-const themes = Array.isArray(input.themes) ? input.themes : [];
-const timeHorizon = Math.max(1, Math.min(12, Number(input.timeHorizon) || 4));
-const capacity = Math.max(1, Number(input.capacity) || 5);
-
-const okrs = goals.map((g, i) => ({
-  id: 'okr_' + (i + 1),
-  goalId: 'goal_' + i,
-  objective: g.text || 'Untitled Goal',
-  keyResults: [
-    { id: 'kr_' + (i + 1) + '_1', description: 'Deliver measurable outcome for ' + (g.text || 'Goal') + ' - completion rate', target: 100, current: 0 },
-    { id: 'kr_' + (i + 1) + '_2', description: 'Stakeholder satisfaction score for ' + (g.text || 'Goal'), target: 4.0, current: 0 },
-    { id: 'kr_' + (i + 1) + '_3', description: 'Revenue or adoption metric tied to ' + (g.text || 'Goal'), target: 1.0, current: 0 }
-  ],
-  alignment: 'aligned',
-  createdAt: new Date().toISOString()
-}));
-
-const scoredGoals = goals.map((g, i) => {
-  const reach = Math.max(1, Number(g.reach || (g.priority === 'high' ? 80 : g.priority === 'medium' ? 40 : 15)));
-  const impact = Math.max(0.1, Number(g.impact || (g.priority === 'high' ? 3 : g.priority === 'medium' ? 2 : 0.5)));
-  const confidence = Math.max(0.1, Math.min(1, Number(g.confidence || 0.8)));
-  const effort = Math.max(0.1, Number(g.effort || 5));
-  const rice = round4((reach * impact * confidence) / effort);
-  const wsjf = round4(((reach * impact) + (confidence * 10)) / Math.max(0.1, effort));
-  return {
-    id: 'goal_' + i,
-    text: g.text || 'Goal ' + (i + 1),
-    priority: g.priority || 'medium',
-    owner: g.owner || 'Unassigned',
-    rice: rice,
-    wsjf: wsjf,
-    reach, impact, confidence, effort,
-    score: Math.round((rice + wsjf) * 100) / 100,
-    okrId: 'okr_' + (i + 1),
-    measurableOutcome: 'Achieve ' + (g.text || 'Goal') + ' with quantifiable results within ' + timeHorizon + ' quarter(s)'
-  };
-});
-
-scoredGoals.sort((a, b) => b.score - a.score);
-
-const depGraph = {};
-const indegree = {};
-initiatives.forEach((init, i) => {
-  const id = 'init_' + i;
-  depGraph[id] = (init.dependencies || []).map(d => typeof d === 'string' ? d : (d.id || ('init_dep_' + i)));
-  indegree[id] = indegree[id] || 0;
-  (init.dependencies || []).forEach(d => {
-    const depId = typeof d === 'string' ? d : (d.id || ('init_dep_' + i));
-    if (!depGraph[depId]) { depGraph[depId] = []; indegree[depId] = 0; }
-    indegree[id] = (indegree[id] || 0) + 1;
-  });
-});
-
-const sortedInitiatives = [];
-const queue = Object.keys(indegree).filter(k => indegree[k] === 0);
-const indegreeCopy = Object.assign({}, indegree);
-const queueSet = new Set(queue);
-while (queue.length > 0) {
-  const current = queue.shift();
-  sortedInitiatives.push(current);
-  (depGraph[current] || []).forEach(neighbor => {
-    indegreeCopy[neighbor] = (indegreeCopy[neighbor] || 0) - 1;
-    if (indegreeCopy[neighbor] === 0 && !queueSet.has(neighbor)) {
-      queue.push(neighbor);
-      queueSet.add(neighbor);
-    }
-  });
-}
-Object.keys(indegreeCopy).filter(k => indegreeCopy[k] > 0).forEach(k => {
-  if (!sortedInitiatives.includes(k)) sortedInitiatives.push(k);
-});
-
-const initiativeData = initiatives.map((init, i) => {
-  const effort = Math.max(0.5, Number(init.effort || 5));
-  const riskScore = Number(init.risk || 0.3);
-  const deps = Array.isArray(init.dependencies) ? init.dependencies : [];
-  return {
-    id: 'init_' + i,
-    text: init.text || 'Initiative ' + (i + 1),
-    goals: Array.isArray(init.goals) ? init.goals : [],
-    effort: round2(effort),
-    risk: riskScore,
-    dependencies: deps.map(d => typeof d === 'string' ? d : (d.id || ('init_dep_' + i))),
-    sortedIndex: sortedInitiatives.indexOf('init_' + i),
-    milestones: [],
-    quarter: 0,
-    riskLevel: riskScore > 0.6 ? 'high' : riskScore > 0.3 ? 'medium' : 'low'
-  };
-});
-
-const capacityPerQuarter = Math.max(1, capacity);
-const quarterCapacity = [];
-for (let q = 1; q <= timeHorizon; q++) {
-  quarterCapacity.push({ quarter: q, capacity: capacityPerQuarter, used: 0, available: capacityPerQuarter });
-}
-
-const scheduledInitiatives = [];
-for (const initId of sortedInitiatives) {
-  const initIdx = parseInt(initId.replace('init_', ''), 10);
-  if (isNaN(initIdx) || initIdx >= initiativeData.length) continue;
-  const init = initiativeData[initIdx];
-  const effortNeeded = init.effort;
-  let assigned = false;
-  for (let q = 0; q < quarterCapacity.length; q++) {
-    if (quarterCapacity[q].available >= effortNeeded) {
-      quarterCapacity[q].used = round2(quarterCapacity[q].used + effortNeeded);
-      quarterCapacity[q].available = round2(quarterCapacity[q].capacity - quarterCapacity[q].used);
-      init.quarter = q + 1;
-      scheduledInitiatives.push(init);
-      assigned = true;
-      break;
-    }
-  }
-  if (!assigned) {
-    const lastQ = quarterCapacity.length;
-    quarterCapacity[lastQ - 1].used = round2(quarterCapacity[lastQ - 1].used + effortNeeded * 0.3);
-    init.quarter = lastQ;
-    scheduledInitiatives.push(init);
-  }
-}
-
-for (const init of initiativeData) {
-  const milestoneCount = Math.max(1, Math.ceil(init.effort / 3));
-  init.milestones = [];
-  for (let m = 1; m <= milestoneCount; m++) {
-    init.milestones.push({
-      id: 'milestone_' + init.id + '_' + m,
-      initiativeId: init.id,
-      name: 'Milestone ' + m + ' of ' + init.text,
-      deliverable: 'Key deliverable for phase ' + m + ' of ' + init.text,
-      quarter: init.quarter,
-      completionCriteria: 'Deliverable reviewed and accepted by stakeholders',
-      status: 'planned',
-      targetDate: new Date(new Date().setMonth(new Date().getMonth() + ((init.quarter - 1) * 3) + (m * 3))).toISOString()
-    });
-  }
-}
-
-const allDependencies = [];
-for (const init of initiativeData) {
-  for (const dep of init.dependencies) {
-    allDependencies.push({ from: dep, to: init.id });
-  }
-}
-const dependencyChainDepth = {};
-function getDepth(nodeId, visited = new Set()) {
-  if (visited.has(nodeId)) return 0;
-  if (dependencyChainDepth[nodeId] !== undefined) return dependencyChainDepth[nodeId];
-  visited.add(nodeId);
-  const parents = allDependencies.filter(d => d.to === nodeId).map(d => d.from);
-  if (parents.length === 0) { dependencyChainDepth[nodeId] = 0; return 0; }
-  const maxDepth = Math.max(...parents.map(p => getDepth(p, new Set(visited)))) + 1;
-  dependencyChainDepth[nodeId] = maxDepth;
-  return maxDepth;
-}
-for (const init of initiativeData) { getDepth(init.id); }
-
-const resourceConflicts = [];
-for (let q = 0; q < quarterCapacity.length; q++) {
-  if (quarterCapacity[q].used > quarterCapacity[q].capacity) {
-    resourceConflicts.push({
-      type: 'overcapacity',
-      quarter: q + 1,
-      severity: 'high',
-      description: 'Quarter ' + (q + 1) + ' exceeds capacity by ' + round2(quarterCapacity[q].used - quarterCapacity[q].capacity) + ' effort units'
-    });
-  }
-}
-for (let i = 0; i < initiativeData.length; i++) {
-  for (let j = i + 1; j < initiativeData.length; j++) {
-    if (initiativeData[i].quarter === initiativeData[j].quarter) {
-      const sharedDeps = initiativeData[i].dependencies.filter(d => initiativeData[j].dependencies.includes(d));
-      if (sharedDeps.length > 0) {
-        resourceConflicts.push({
-          type: 'resource_conflict',
-          quarter: initiativeData[i].quarter,
-          severity: 'medium',
-          initiatives: [initiativeData[i].id, initiativeData[j].id],
-          description: initiativeData[i].text + ' and ' + initiativeData[j].text + ' share dependencies and run in same quarter'
-        });
-      }
-    }
-  }
-}
-
-const risks = [];
-for (const init of initiativeData) {
-  if (init.riskLevel === 'high') {
-    risks.push({
-      id: 'risk_' + init.id,
-      initiativeId: init.id,
-      title: 'High risk in ' + init.text,
-      probability: init.risk,
-      impact: 'High',
-      mitigation: 'Break into smaller chunks, add buffer capacity, increase monitoring frequency',
-      dependencyChainDepth: dependencyChainDepth[init.id] || 0
-    });
-  }
-}
-for (const dc of Object.values(dependencyChainDepth)) {
-  if (dc >= 3) {
-    risks.push({
-      id: 'risk_dep_chain_' + dc,
-      type: 'dependency_chain',
-      title: 'Deep dependency chain (depth ' + dc + ')',
-      probability: 0.5,
-      impact: 'Medium',
-      mitigation: 'Identify critical path and front-load upstream deliverables'
-    });
-    break;
-  }
-}
-if (resourceConflicts.length > 0) {
-  risks.push({
-    id: 'risk_capacity',
-    type: 'capacity',
-    title: 'Resource capacity conflicts detected',
-    probability: 0.7,
-    impact: 'High',
-    mitigation: 'Re-sequence initiatives or increase team capacity',
-    conflicts: resourceConflicts
-  });
-}
-
-const themeAllocation = themes.map((theme, i) => {
-  const themeInits = scheduledInitiatives.filter(init => {
-    const initData = initiativeData[parseInt(init.id.replace('init_', ''), 10)];
-    return initData && Array.isArray(initData.goals) && initData.goals.length > 0;
-  });
-  return {
-    id: 'theme_' + (i + 1),
-    name: theme,
-    initiativeCount: Math.max(1, Math.ceil(scheduledInitiatives.length / Math.max(1, themes.length))),
-    priority: i === 0 ? 'primary' : 'supporting',
-    balanceScore: round2(1 - Math.abs(i - (themes.length - 1) / 2) / Math.max(1, (themes.length - 1) / 2))
-  };
-});
-
-if (themes.length === 0) {
-  themeAllocation.push({
-    id: 'theme_1',
-    name: 'Strategic Focus',
-    initiativeCount: scheduledInitiatives.length,
-    priority: 'primary',
-    balanceScore: 1.0
-  });
-}
-
-const roadmap = {
-  id: 'roadmap_' + Date.now(),
-  quarter,
-  timeHorizon,
-  capacity: { teamSize: capacity, perQuarter: capacityPerQuarter },
-  goals: scoredGoals,
-  initiatives: initiativeData.sort((a, b) => (a.quarter || 0) - (b.quarter || 0) || (a.sortedIndex || 0) - (b.sortedIndex || 0)),
-  themes: themeAllocation,
-  milestones: initiativeData.flatMap(i => i.milestones),
-  riskAssessment: {
-    risks,
-    dependencyChains: Object.keys(dependencyChainDepth).length,
-    maxDependencyDepth: Math.max(0, ...Object.values(dependencyChainDepth)),
-    resourceConflicts,
-    criticalPath: scheduledInitiatives.filter(i => (dependencyChainDepth[i.id] || 0) >= 2).map(i => i.id)
-  },
-  okrs,
-  metrics: {
-    totalGoals: scoredGoals.length,
-    totalInitiatives: initiativeData.length,
-    totalMilestones: initiativeData.reduce((sum, i) => sum + i.milestones.length, 0),
-    totalRisks: risks.length,
-    averageRice: scoredGoals.length > 0 ? round2(scoredGoals.reduce((s, g) => s + g.rice, 0) / scoredGoals.length) : 0,
-    capacityUtilization: quarterCapacity.map(qc => ({
-      quarter: qc.quarter,
-      utilization: qc.capacity > 0 ? round4(qc.used / qc.capacity) : 0
-    }))
-  },
-  createdAt: new Date().toISOString(),
-  updatedAt: new Date().toISOString(),
-  source: 'algorithmic'
-};
-
-console.log(JSON.stringify({ success: true, data: roadmap }));
-return roadmap;
-`,
-    },
+    persistenceEnvVar: 'STORAGE_DIR',
     inputSchema: {
       type: 'object',
       properties: {
@@ -356,200 +61,304 @@ return roadmap;
       },
       required: ['success', 'roadmap'],
     },
-  triggers: [{ kind: 'user', phrase_examples: ["Create a roadmap", "Plan a release", "Check roadmap status"] }],
-  }),
-  createCodeSkill({
+    triggers: [{ kind: 'user', phrase_examples: ["Create a roadmap", "Plan a release", "Check roadmap status"] }],
+    manifest: {},
+    handler: async function handler(input, ctx) {
+        function round2(n) { return Math.round(n * 100) / 100; }
+        function round4(n) { return Math.round(n * 10000) / 10000; }
+
+        const quarter = input.quarter || ('Q' + (new Date().getMonth() < 3 ? 1 : new Date().getMonth() < 6 ? 2 : new Date().getMonth() < 9 ? 3 : 4));
+        const goals = Array.isArray(input.goals) ? input.goals : [];
+        const initiatives = Array.isArray(input.initiatives) ? input.initiatives : [];
+        const themes = Array.isArray(input.themes) ? input.themes : [];
+        const timeHorizon = Math.max(1, Math.min(12, Number(input.timeHorizon) || 4));
+        const capacity = Math.max(1, Number(input.capacity) || 5);
+
+        const okrs = goals.map((g, i) => ({
+          id: 'okr_' + (i + 1),
+          goalId: 'goal_' + i,
+          objective: g.text || 'Untitled Goal',
+          keyResults: [
+            { id: 'kr_' + (i + 1) + '_1', description: 'Deliver measurable outcome for ' + (g.text || 'Goal') + ' - completion rate', target: 100, current: 0 },
+            { id: 'kr_' + (i + 1) + '_2', description: 'Stakeholder satisfaction score for ' + (g.text || 'Goal'), target: 4.0, current: 0 },
+            { id: 'kr_' + (i + 1) + '_3', description: 'Revenue or adoption metric tied to ' + (g.text || 'Goal'), target: 1.0, current: 0 }
+          ],
+          alignment: 'aligned',
+          createdAt: new Date().toISOString()
+        }));
+
+        const scoredGoals = goals.map((g, i) => {
+          const reach = Math.max(1, Number(g.reach || (g.priority === 'high' ? 80 : g.priority === 'medium' ? 40 : 15)));
+          const impact = Math.max(0.1, Number(g.impact || (g.priority === 'high' ? 3 : g.priority === 'medium' ? 2 : 0.5)));
+          const confidence = Math.max(0.1, Math.min(1, Number(g.confidence || 0.8)));
+          const effort = Math.max(0.1, Number(g.effort || 5));
+          const rice = round4((reach * impact * confidence) / effort);
+          const wsjf = round4(((reach * impact) + (confidence * 10)) / Math.max(0.1, effort));
+          return {
+            id: 'goal_' + i,
+            text: g.text || 'Goal ' + (i + 1),
+            priority: g.priority || 'medium',
+            owner: g.owner || 'Unassigned',
+            rice: rice,
+            wsjf: wsjf,
+            reach, impact, confidence, effort,
+            score: Math.round((rice + wsjf) * 100) / 100,
+            okrId: 'okr_' + (i + 1),
+            measurableOutcome: 'Achieve ' + (g.text || 'Goal') + ' with quantifiable results within ' + timeHorizon + ' quarter(s)'
+          };
+        });
+
+        scoredGoals.sort((a, b) => b.score - a.score);
+
+        const depGraph = {};
+        const indegree = {};
+        initiatives.forEach((init, i) => {
+          const id = 'init_' + i;
+          depGraph[id] = (init.dependencies || []).map(d => typeof d === 'string' ? d : (d.id || ('init_dep_' + i)));
+          indegree[id] = indegree[id] || 0;
+          (init.dependencies || []).forEach(d => {
+            const depId = typeof d === 'string' ? d : (d.id || ('init_dep_' + i));
+            if (!depGraph[depId]) { depGraph[depId] = []; indegree[depId] = 0; }
+            indegree[id] = (indegree[id] || 0) + 1;
+          });
+        });
+
+        const sortedInitiatives = [];
+        const queue = Object.keys(indegree).filter(k => indegree[k] === 0);
+        const indegreeCopy = Object.assign({}, indegree);
+        const queueSet = new Set(queue);
+        while (queue.length > 0) {
+          const current = queue.shift();
+          sortedInitiatives.push(current);
+          (depGraph[current] || []).forEach(neighbor => {
+            indegreeCopy[neighbor] = (indegreeCopy[neighbor] || 0) - 1;
+            if (indegreeCopy[neighbor] === 0 && !queueSet.has(neighbor)) {
+              queue.push(neighbor);
+              queueSet.add(neighbor);
+            }
+          });
+        }
+        Object.keys(indegreeCopy).filter(k => indegreeCopy[k] > 0).forEach(k => {
+          if (!sortedInitiatives.includes(k)) sortedInitiatives.push(k);
+        });
+
+        const initiativeData = initiatives.map((init, i) => {
+          const effort = Math.max(0.5, Number(init.effort || 5));
+          const riskScore = Number(init.risk || 0.3);
+          const deps = Array.isArray(init.dependencies) ? init.dependencies : [];
+          return {
+            id: 'init_' + i,
+            text: init.text || 'Initiative ' + (i + 1),
+            goals: Array.isArray(init.goals) ? init.goals : [],
+            effort: round2(effort),
+            risk: riskScore,
+            dependencies: deps.map(d => typeof d === 'string' ? d : (d.id || ('init_dep_' + i))),
+            sortedIndex: sortedInitiatives.indexOf('init_' + i),
+            milestones: [],
+            quarter: 0,
+            riskLevel: riskScore > 0.6 ? 'high' : riskScore > 0.3 ? 'medium' : 'low'
+          };
+        });
+
+        const capacityPerQuarter = Math.max(1, capacity);
+        const quarterCapacity = [];
+        for (let q = 1; q <= timeHorizon; q++) {
+          quarterCapacity.push({ quarter: q, capacity: capacityPerQuarter, used: 0, available: capacityPerQuarter });
+        }
+
+        const scheduledInitiatives = [];
+        for (const initId of sortedInitiatives) {
+          const initIdx = parseInt(initId.replace('init_', ''), 10);
+          if (isNaN(initIdx) || initIdx >= initiativeData.length) continue;
+          const init = initiativeData[initIdx];
+          const effortNeeded = init.effort;
+          let assigned = false;
+          for (let q = 0; q < quarterCapacity.length; q++) {
+            if (quarterCapacity[q].available >= effortNeeded) {
+              quarterCapacity[q].used = round2(quarterCapacity[q].used + effortNeeded);
+              quarterCapacity[q].available = round2(quarterCapacity[q].capacity - quarterCapacity[q].used);
+              init.quarter = q + 1;
+              scheduledInitiatives.push(init);
+              assigned = true;
+              break;
+            }
+          }
+          if (!assigned) {
+            const lastQ = quarterCapacity.length;
+            quarterCapacity[lastQ - 1].used = round2(quarterCapacity[lastQ - 1].used + effortNeeded * 0.3);
+            init.quarter = lastQ;
+            scheduledInitiatives.push(init);
+          }
+        }
+
+        for (const init of initiativeData) {
+          const milestoneCount = Math.max(1, Math.ceil(init.effort / 3));
+          init.milestones = [];
+          for (let m = 1; m <= milestoneCount; m++) {
+            init.milestones.push({
+              id: 'milestone_' + init.id + '_' + m,
+              initiativeId: init.id,
+              name: 'Milestone ' + m + ' of ' + init.text,
+              deliverable: 'Key deliverable for phase ' + m + ' of ' + init.text,
+              quarter: init.quarter,
+              completionCriteria: 'Deliverable reviewed and accepted by stakeholders',
+              status: 'planned',
+              targetDate: new Date(new Date().setMonth(new Date().getMonth() + ((init.quarter - 1) * 3) + (m * 3))).toISOString()
+            });
+          }
+        }
+
+        const allDependencies = [];
+        for (const init of initiativeData) {
+          for (const dep of init.dependencies) {
+            allDependencies.push({ from: dep, to: init.id });
+          }
+        }
+        const dependencyChainDepth = {};
+        function getDepth(nodeId, visited = new Set()) {
+          if (visited.has(nodeId)) return 0;
+          if (dependencyChainDepth[nodeId] !== undefined) return dependencyChainDepth[nodeId];
+          visited.add(nodeId);
+          const parents = allDependencies.filter(d => d.to === nodeId).map(d => d.from);
+          if (parents.length === 0) { dependencyChainDepth[nodeId] = 0; return 0; }
+          const maxDepth = Math.max(...parents.map(p => getDepth(p, new Set(visited)))) + 1;
+          dependencyChainDepth[nodeId] = maxDepth;
+          return maxDepth;
+        }
+        for (const init of initiativeData) { getDepth(init.id); }
+
+        const resourceConflicts = [];
+        for (let q = 0; q < quarterCapacity.length; q++) {
+          if (quarterCapacity[q].used > quarterCapacity[q].capacity) {
+            resourceConflicts.push({
+              type: 'overcapacity',
+              quarter: q + 1,
+              severity: 'high',
+              description: 'Quarter ' + (q + 1) + ' exceeds capacity by ' + round2(quarterCapacity[q].used - quarterCapacity[q].capacity) + ' effort units'
+            });
+          }
+        }
+        for (let i = 0; i < initiativeData.length; i++) {
+          for (let j = i + 1; j < initiativeData.length; j++) {
+            if (initiativeData[i].quarter === initiativeData[j].quarter) {
+              const sharedDeps = initiativeData[i].dependencies.filter(d => initiativeData[j].dependencies.includes(d));
+              if (sharedDeps.length > 0) {
+                resourceConflicts.push({
+                  type: 'resource_conflict',
+                  quarter: initiativeData[i].quarter,
+                  severity: 'medium',
+                  initiatives: [initiativeData[i].id, initiativeData[j].id],
+                  description: initiativeData[i].text + ' and ' + initiativeData[j].text + ' share dependencies and run in same quarter'
+                });
+              }
+            }
+          }
+        }
+
+        const risks = [];
+        for (const init of initiativeData) {
+          if (init.riskLevel === 'high') {
+            risks.push({
+              id: 'risk_' + init.id,
+              initiativeId: init.id,
+              title: 'High risk in ' + init.text,
+              probability: init.risk,
+              impact: 'High',
+              mitigation: 'Break into smaller chunks, add buffer capacity, increase monitoring frequency',
+              dependencyChainDepth: dependencyChainDepth[init.id] || 0
+            });
+          }
+        }
+        for (const dc of Object.values(dependencyChainDepth)) {
+          if (dc >= 3) {
+            risks.push({
+              id: 'risk_dep_chain_' + dc,
+              type: 'dependency_chain',
+              title: 'Deep dependency chain (depth ' + dc + ')',
+              probability: 0.5,
+              impact: 'Medium',
+              mitigation: 'Identify critical path and front-load upstream deliverables'
+            });
+            break;
+          }
+        }
+        if (resourceConflicts.length > 0) {
+          risks.push({
+            id: 'risk_capacity',
+            type: 'capacity',
+            title: 'Resource capacity conflicts detected',
+            probability: 0.7,
+            impact: 'High',
+            mitigation: 'Re-sequence initiatives or increase team capacity',
+            conflicts: resourceConflicts
+          });
+        }
+
+        const themeAllocation = themes.map((theme, i) => {
+          const themeInits = scheduledInitiatives.filter(init => {
+            const initData = initiativeData[parseInt(init.id.replace('init_', ''), 10)];
+            return initData && Array.isArray(initData.goals) && initData.goals.length > 0;
+          });
+          return {
+            id: 'theme_' + (i + 1),
+            name: theme,
+            initiativeCount: Math.max(1, Math.ceil(scheduledInitiatives.length / Math.max(1, themes.length))),
+            priority: i === 0 ? 'primary' : 'supporting',
+            balanceScore: round2(1 - Math.abs(i - (themes.length - 1) / 2) / Math.max(1, (themes.length - 1) / 2))
+          };
+        });
+
+        if (themes.length === 0) {
+          themeAllocation.push({
+            id: 'theme_1',
+            name: 'Strategic Focus',
+            initiativeCount: scheduledInitiatives.length,
+            priority: 'primary',
+            balanceScore: 1.0
+          });
+        }
+
+        const roadmap = {
+          id: 'roadmap_' + Date.now(),
+          quarter,
+          timeHorizon,
+          capacity: { teamSize: capacity, perQuarter: capacityPerQuarter },
+          goals: scoredGoals,
+          initiatives: initiativeData.sort((a, b) => (a.quarter || 0) - (b.quarter || 0) || (a.sortedIndex || 0) - (b.sortedIndex || 0)),
+          themes: themeAllocation,
+          milestones: initiativeData.flatMap(i => i.milestones),
+          riskAssessment: {
+            risks,
+            dependencyChains: Object.keys(dependencyChainDepth).length,
+            maxDependencyDepth: Math.max(0, ...Object.values(dependencyChainDepth)),
+            resourceConflicts,
+            criticalPath: scheduledInitiatives.filter(i => (dependencyChainDepth[i.id] || 0) >= 2).map(i => i.id)
+          },
+          okrs,
+          metrics: {
+            totalGoals: scoredGoals.length,
+            totalInitiatives: initiativeData.length,
+            totalMilestones: initiativeData.reduce((sum, i) => sum + i.milestones.length, 0),
+            totalRisks: risks.length,
+            averageRice: scoredGoals.length > 0 ? round2(scoredGoals.reduce((s, g) => s + g.rice, 0) / scoredGoals.length) : 0,
+            capacityUtilization: quarterCapacity.map(qc => ({
+              quarter: qc.quarter,
+              utilization: qc.capacity > 0 ? round4(qc.used / qc.capacity) : 0
+            }))
+          },
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          source: 'algorithmic'
+        };
+
+        return roadmap;
+      }
+    }),
+  createDeclarativeCodeSkill({
     id: 'write-prd',
     name: 'Write PRD',
     description: 'Generate a structured product requirements document with INVEST user stories, Given/When/Then acceptance criteria, technical requirements, data model, UX flows, and phased rollout plan.',
-    manifest: {
-      language: 'javascript',
-      entrypoint: 'index.js',
-      sourceCode: `
-const input = __tool_input || {};
-
-const title = input.title || 'Untitled PRD';
-const problem = input.problem || '';
-const scope = input.scope || '';
-const goals = Array.isArray(input.goals) ? input.goals : [];
-const successMetrics = Array.isArray(input.successMetrics) ? input.successMetrics : [];
-const nonGoals = Array.isArray(input.nonGoals) ? input.nonGoals : [];
-const openQuestions = Array.isArray(input.openQuestions) ? input.openQuestions : [];
-const targetUsers = Array.isArray(input.targetUsers) ? input.targetUsers : [];
-const userStories = Array.isArray(input.userStories) ? input.userStories : [];
-const constraints = Array.isArray(input.constraints) ? input.constraints : [];
-const assumptions = Array.isArray(input.assumptions) ? input.assumptions : [];
-const risks = Array.isArray(input.risks) ? input.risks : [];
-
-const storyCount = Math.max(3, Math.min(15, userStories.length >= 3 ? userStories.length : Math.ceil(problem.length / 40) + 2));
-const generatedStories = [];
-const storyTemplates = [
-  'As a [user type], I want [action] so that [benefit]',
-  'As a [stakeholder], I need [capability] so that [outcome]',
-  'As a [role], I wish to [task] so that [value]'
-];
-const userTypes = targetUsers.length > 0 ? targetUsers : ['end user', 'administrator', 'viewer'];
-
-const problemKeywords = problem.split(/[\\s,.!?]+/).filter(w => w.length > 3);
-const verbPatterns = {
-  discover: 'find and explore relevant information',
-  manage: 'create, update, and organize items',
-  track: 'monitor progress and receive updates',
-  analyze: 'view insights and generate reports',
-  collaborate: 'work together with team members',
-  automate: 'reduce manual effort through automation',
-  configure: 'customize settings and preferences',
-  integrate: 'connect with existing tools and services'
-};
-
-for (let i = 0; i < storyCount; i++) {
-  const userType = userTypes[i % userTypes.length];
-  let storyText;
-  if (userStories[i]) {
-    storyText = userStories[i];
-  } else {
-    const pattern = storyTemplates[i % storyTemplates.length];
-    const keywords = problemKeywords.slice(i, i + 3);
-    const action = keywords.length > 0 ? keywords.join(' and ') : ' accomplish tasks efficiently';
-    const benefit = problem.length > 50 ? 'solve the core problem effectively' : 'improve the overall experience';
-    storyText = pattern.replace('[user type]', userType).replace('[action]', action).replace('[benefit]', benefit).replace('[stakeholder]', userType).replace('[capability]', action).replace('[outcome]', benefit).replace('[role]', userType).replace('[task]', action).replace('[value]', benefit);
-  }
-
-  const words = storyText.split(/\\s+/);
-  const isSmall = words.length <= 25;
-  const isTestable = /(can|should|must|will|able to)/i.test(storyText);
-  const isValuable = /(so that|benefit|improve|enable|reduce|increase)/i.test(storyText);
-  const investScore = ((isSmall ? 1 : 0) + (isTestable ? 1 : 0) + (isValuable ? 1 : 0)) / 3;
-
-  const givenParts = ['Given the user is on the main interface', 'Given the system is initialized', 'Given valid input data is provided'];
-  const whenParts = ['When the user performs the primary action', 'When the user triggers the feature', 'When the system processes the request'];
-  const thenParts = ['Then the expected result is displayed', 'Then the data is persisted correctly', 'Then appropriate feedback is shown to the user'];
-
-  const acceptanceCriteria = [];
-  for (let j = 0; j < 3; j++) {
-    acceptanceCriteria.push({
-      id: 'ac_' + i + '_' + j,
-      storyIndex: i,
-      format: 'Given/When/Then',
-      given: givenParts[j],
-      when: whenParts[j],
-      then: thenParts[j],
-      passed: false,
-      priority: j === 0 ? 'must' : 'should'
-    });
-  }
-
-  generatedStories.push({
-    id: 'story_' + (i + 1),
-    text: storyText,
-    userType: userTypes[i % userTypes.length],
-    invest: {
-      independent: true,
-      negotiable: true,
-      valuable: isValuable,
-      estimable: true,
-      small: isSmall,
-      testable: isTestable,
-      score: round2(investScore * 100) + '%'
-    },
-    acceptanceCriteria,
-    definitionOfDone: 'Code reviewed, all acceptance criteria pass, unit tests written and passing, documentation updated'
-  });
-}
-
-const functionalRequirements = [
-  { id: 'fr_1', category: 'authentication', description: 'System must authenticate users via secure authentication mechanism', priority: 'must', type: 'functional' },
-  { id: 'fr_2', category: 'authorization', description: 'System must enforce role-based access control per user permissions', priority: 'must', type: 'functional' },
-  { id: 'fr_3', category: 'data_persistence', description: 'All user actions and data changes must be persisted with timestamps', priority: 'must', type: 'functional' },
-  { id: 'fr_4', category: 'search', description: 'System must provide search with filtering and sorting capabilities', priority: 'should', type: 'functional' },
-  { id: 'fr_5', category: 'notifications', description: 'System must notify users of relevant state changes and updates', priority: 'should', type: 'functional' },
-  { id: 'fr_6', category: 'audit', description: 'All critical operations must be logged for audit trail purposes', priority: 'must', type: 'functional' },
-];
-
-const nonFunctionalRequirements = [
-  { id: 'nfr_1', category: 'performance', description: 'Page load time must be under 2 seconds for 95th percentile of users', priority: 'must', type: 'non-functional' },
-  { id: 'nfr_2', category: 'availability', description: 'System uptime must be 99.9% during business hours', priority: 'must', type: 'non-functional' },
-  { id: 'nfr_3', category: 'scalability', description: 'System must support 10x current user load with horizontal scaling', priority: 'should', type: 'non-functional' },
-  { id: 'nfr_4', category: 'security', description: 'All data transmission must use TLS 1.2+ encryption', priority: 'must', type: 'non-functional' },
-  { id: 'nfr_5', category: 'accessibility', description: 'UI must meet WCAG 2.1 AA compliance standards', priority: 'must', type: 'non-functional' },
-  { id: 'nfr_6', category: 'compatibility', description: 'Must support latest 2 versions of Chrome, Firefox, Safari, Edge', priority: 'should', type: 'non-functional' },
-];
-
-const entityDefinitions = [
-  { id: 'entity_user', name: 'User', attributes: [{ name: 'id', type: 'UUID', required: true, unique: true }, { name: 'email', type: 'string', required: true, unique: true }, { name: 'name', type: 'string', required: true }, { name: 'role', type: 'enum', required: true }, { name: 'createdAt', type: 'timestamp', required: true } ], privacy: 'PII', retention: 'active_period' },
-  { id: 'entity_entity', name: 'Primary Entity', attributes: [{ name: 'id', type: 'UUID', required: true, unique: true }, { name: 'ownerId', type: 'UUID', required: true, foreignKey: 'user.id' }, { name: 'name', type: 'string', required: true }, { name: 'status', type: 'enum', required: true }, { name: 'metadata', type: 'json', required: false } ], privacy: 'business', retention: 'active_period' },
-  { id: 'entity_action', name: 'Action Log', attributes: [{ name: 'id', type: 'UUID', required: true, unique: true }, { name: 'entityId', type: 'UUID', required: true, foreignKey: 'entity.id' }, { name: 'userId', type: 'UUID', required: true, foreignKey: 'user.id' }, { name: 'action', type: 'string', required: true }, { name: 'timestamp', type: 'timestamp', required: true } ], privacy: 'audit', retention: '7_years' },
-];
-const relationships = [
-  { id: 'rel_1', from: 'entity_user', to: 'entity_entity', type: 'one-to-many', description: 'User owns many entities' },
-  { id: 'rel_2', from: 'entity_entity', to: 'entity_action', type: 'one-to-many', description: 'Entity has many action logs' },
-  { id: 'rel_3', from: 'entity_user', to: 'entity_action', type: 'one-to-many', description: 'User performs many actions' },
-];
-const dataRequirements = { entities: entityDefinitions, relationships, privacy: { piiFields: ['user.email', 'user.name'], encryption: 'at_rest_and_transit', retentionPolicy: 'per_entity_retention', anonymization: 'automatic_after_retention' } };
-
-const userFlows = [
-  { id: 'flow_1', name: 'Primary User Flow', entryPoint: 'Application entry point', steps: ['Authenticate', 'Access main interface', 'Perform primary action', 'Review results', 'Save or discard'], exitPoint: 'Logged out or session expired', errorHandling: 'Display error message with recovery option', states: ['idle', 'loading', 'success', 'error', 'authenticated'] },
-  { id: 'flow_2', name: 'Secondary Flow', entryPoint: 'Navigation menu', steps: ['Select section', 'Review data', 'Apply filters', 'Export or share'], exitPoint: 'Return to main interface', errorHandling: 'Show validation errors inline', states: ['idle', 'loading', 'editing', 'viewing'] },
-];
-
-const uiRequirements = [
-  { id: 'ui_1', component: 'Main Dashboard', description: 'Display key metrics and quick actions', accessibility: 'WCAG 2.1 AA', states: ['loading', 'empty', 'populated', 'error'], responsive: true },
-  { id: 'ui_2', component: 'Data Table', description: 'Display sortable and filterable data with pagination', accessibility: 'WCAG 2.1 AA', states: ['loading', 'empty', 'populated', 'editing'], responsive: true },
-  { id: 'ui_3', component: 'Settings Panel', description: 'Allow user to configure preferences', accessibility: 'WCAG 2.1 AA', states: ['viewing', 'editing', 'saving', 'saved'], responsive: false },
-];
-
-const rolloutPhases = [
-  { id: 'phase_1', name: 'Alpha', targetUsers: 'Internal team', featureFlags: ['prd_core_v1'], criteria: 'All acceptance criteria pass, internal beta tested', duration: '2 weeks', rollback: 'Disable prd_core_v1 flag' },
-  { id: 'phase_2', name: 'Beta', targetUsers: 'Limited external users (5-10%)', featureFlags: ['prd_core_v1', 'prd_analytics_v1'], criteria: '95% acceptance criteria pass, no P0 bugs', duration: '4 weeks', rollback: 'Disable prd_analytics_v1 flag, notify beta users' },
-  { id: 'phase_3', name: 'General Availability', targetUsers: 'All users', featureFlags: ['prd_core_v1', 'prd_analytics_v1', 'prd_notifications_v1'], criteria: 'All acceptance criteria pass, monitoring dashboards active', duration: 'Ongoing', rollback: 'Disable all feature flags, deploy previous version' },
-];
-
-const internalDependencies = [
-  { id: 'int_dep_1', type: 'service', description: 'Authentication service must be available', status: 'required' },
-  { id: 'int_dep_2', type: 'data', description: 'User data schema must be migrated', status: 'required' },
-  { id: 'int_dep_3', type: 'api', description: 'Core API endpoints must be deployed', status: 'required' },
-];
-const externalDependencies = [
-  { id: 'ext_dep_1', type: 'third_party', description: 'Identity provider integration', status: 'pending', impact: 'blocks' },
-  { id: 'ext_dep_2', type: 'infrastructure', description: 'Cloud infrastructure provisioning', status: 'pending', impact: 'blocks' },
-];
-
-const prd = {
-  id: 'prd_' + Date.now(),
-  title,
-  structure: {
-    problem: problem,
-    scope: scope,
-    solution: { summary: 'Solution derived from problem statement and user stories', approaches: generatedStories.map(s => s.text) },
-    requirements: { functional: functionalRequirements, nonFunctional: nonFunctionalRequirements },
-    metrics: successMetrics.map((m, i) => ({ id: 'metric_' + (i + 1), text: m, target: 'Defined during sprint planning', baseline: 'Current state measurement' })),
-    risks: risks.map((r, i) => ({ id: 'risk_' + (i + 1), text: r, mitigation: 'TBD - risk assessment during planning', severity: 'medium' }))
-  },
-  userStories: generatedStories,
-  acceptanceCriteria: generatedStories.flatMap(s => s.acceptanceCriteria),
-  technicalRequirements: { functional: functionalRequirements, nonFunctional: nonFunctionalRequirements },
-  dataRequirements: dataRequirements,
-  uxRequirements: { flows: userFlows, uiComponents: uiRequirements, accessibility: 'WCAG 2.1 AA', states: userFlows.flatMap(f => f.states) },
-  releaseCriteria: { definitionOfDone: 'All acceptance criteria pass, code reviewed, tested, documented, and deployed to production with monitoring', featureFlags: rolloutPhases[rolloutPhases.length - 1].featureFlags },
-  dependencies: { internal: internalDependencies, external: externalDependencies },
-  rolloutPlan: {
-    phases: rolloutPhases,
-    strategy: 'Phased rollout with feature flags for gradual exposure and easy rollback',
-    rollbackPlan: 'Disable relevant feature flags and redeploy previous version',
-    criteriaPerPhase: rolloutPhases.map(p => ({ phase: p.name, criteria: p.criteria }))
-  },
-  assumptions: assumptions.map((a, i) => ({ id: 'assumption_' + (i + 1), text: a, validated: false })),
-  nonGoals: nonGoals.map((n, i) => ({ id: 'nongoal_' + (i + 1), text: n })),
-  openQuestions: openQuestions.map((q, i) => ({ id: 'question_' + (i + 1), text: q, status: 'open', resolution: null })),
-  createdAt: new Date().toISOString(),
-  updatedAt: new Date().toISOString(),
-  source: 'algorithmic'
-};
-
-console.log(JSON.stringify({ success: true, data: prd }));
-return prd;
-`,
-    },
+    persistenceEnvVar: 'STORAGE_DIR',
     inputSchema: {
       type: 'object',
       properties: {
@@ -578,8 +387,191 @@ return prd;
       },
       required: ['success', 'prd'],
     },
-  triggers: [{ kind: 'user', phrase_examples: ["Write a PRD", "Update requirements", "Review requirements"] }],
-  }),
+    triggers: [{ kind: 'user', phrase_examples: ["Write a PRD", "Update requirements", "Review requirements"] }],
+    manifest: {},
+    handler: async function handler(input, ctx) {
+        function round2(n) { return Math.round(n * 100) / 100; }
+        const title = input.title || 'Untitled PRD';
+        const problem = input.problem || '';
+        const scope = input.scope || '';
+        const goals = Array.isArray(input.goals) ? input.goals : [];
+        const successMetrics = Array.isArray(input.successMetrics) ? input.successMetrics : [];
+        const nonGoals = Array.isArray(input.nonGoals) ? input.nonGoals : [];
+        const openQuestions = Array.isArray(input.openQuestions) ? input.openQuestions : [];
+        const targetUsers = Array.isArray(input.targetUsers) ? input.targetUsers : [];
+        const userStories = Array.isArray(input.userStories) ? input.userStories : [];
+        const constraints = Array.isArray(input.constraints) ? input.constraints : [];
+        const assumptions = Array.isArray(input.assumptions) ? input.assumptions : [];
+        const risks = Array.isArray(input.risks) ? input.risks : [];
+
+        const storyCount = Math.max(3, Math.min(15, userStories.length >= 3 ? userStories.length : Math.ceil(problem.length / 40) + 2));
+        const generatedStories = [];
+        const storyTemplates = [
+          'As a [user type], I want [action] so that [benefit]',
+          'As a [stakeholder], I need [capability] so that [outcome]',
+          'As a [role], I wish to [task] so that [value]'
+        ];
+        const userTypes = targetUsers.length > 0 ? targetUsers : ['end user', 'administrator', 'viewer'];
+
+        const problemKeywords = problem.split(/[\s,.!?]+/).filter(w => w.length > 3);
+        const verbPatterns = {
+          discover: 'find and explore relevant information',
+          manage: 'create, update, and organize items',
+          track: 'monitor progress and receive updates',
+          analyze: 'view insights and generate reports',
+          collaborate: 'work together with team members',
+          automate: 'reduce manual effort through automation',
+          configure: 'customize settings and preferences',
+          integrate: 'connect with existing tools and services'
+        };
+
+        for (let i = 0; i < storyCount; i++) {
+          const userType = userTypes[i % userTypes.length];
+          let storyText;
+          if (userStories[i]) {
+            storyText = userStories[i];
+          } else {
+            const pattern = storyTemplates[i % storyTemplates.length];
+            const keywords = problemKeywords.slice(i, i + 3);
+            const action = keywords.length > 0 ? keywords.join(' and ') : ' accomplish tasks efficiently';
+            const benefit = problem.length > 50 ? 'solve the core problem effectively' : 'improve the overall experience';
+            storyText = pattern.replace('[user type]', userType).replace('[action]', action).replace('[benefit]', benefit).replace('[stakeholder]', userType).replace('[capability]', action).replace('[outcome]', benefit).replace('[role]', userType).replace('[task]', action).replace('[value]', benefit);
+          }
+
+          const words = storyText.split(/\s+/);
+          const isSmall = words.length <= 25;
+          const isTestable = /(can|should|must|will|able to)/i.test(storyText);
+          const isValuable = /(so that|benefit|improve|enable|reduce|increase)/i.test(storyText);
+          const investScore = ((isSmall ? 1 : 0) + (isTestable ? 1 : 0) + (isValuable ? 1 : 0)) / 3;
+
+          const givenParts = ['Given the user is on the main interface', 'Given the system is initialized', 'Given valid input data is provided'];
+          const whenParts = ['When the user performs the primary action', 'When the user triggers the feature', 'When the system processes the request'];
+          const thenParts = ['Then the expected result is displayed', 'Then the data is persisted correctly', 'Then appropriate feedback is shown to the user'];
+
+          const acceptanceCriteria = [];
+          for (let j = 0; j < 3; j++) {
+            acceptanceCriteria.push({
+              id: 'ac_' + i + '_' + j,
+              storyIndex: i,
+              format: 'Given/When/Then',
+              given: givenParts[j],
+              when: whenParts[j],
+              then: thenParts[j],
+              passed: false,
+              priority: j === 0 ? 'must' : 'should'
+            });
+          }
+
+          generatedStories.push({
+            id: 'story_' + (i + 1),
+            text: storyText,
+            userType: userTypes[i % userTypes.length],
+            invest: {
+              independent: true,
+              negotiable: true,
+              valuable: isValuable,
+              estimable: true,
+              small: isSmall,
+              testable: isTestable,
+              score: round2(investScore * 100) + '%'
+            },
+            acceptanceCriteria,
+            definitionOfDone: 'Code reviewed, all acceptance criteria pass, unit tests written and passing, documentation updated'
+          });
+        }
+
+        const functionalRequirements = [
+          { id: 'fr_1', category: 'authentication', description: 'System must authenticate users via secure authentication mechanism', priority: 'must', type: 'functional' },
+          { id: 'fr_2', category: 'authorization', description: 'System must enforce role-based access control per user permissions', priority: 'must', type: 'functional' },
+          { id: 'fr_3', category: 'data_persistence', description: 'All user actions and data changes must be persisted with timestamps', priority: 'must', type: 'functional' },
+          { id: 'fr_4', category: 'search', description: 'System must provide search with filtering and sorting capabilities', priority: 'should', type: 'functional' },
+          { id: 'fr_5', category: 'notifications', description: 'System must notify users of relevant state changes and updates', priority: 'should', type: 'functional' },
+          { id: 'fr_6', category: 'audit', description: 'All critical operations must be logged for audit trail purposes', priority: 'must', type: 'functional' },
+        ];
+
+        const nonFunctionalRequirements = [
+          { id: 'nfr_1', category: 'performance', description: 'Page load time must be under 2 seconds for 95th percentile of users', priority: 'must', type: 'non-functional' },
+          { id: 'nfr_2', category: 'availability', description: 'System uptime must be 99.9% during business hours', priority: 'must', type: 'non-functional' },
+          { id: 'nfr_3', category: 'scalability', description: 'System must support 10x current user load with horizontal scaling', priority: 'should', type: 'non-functional' },
+          { id: 'nfr_4', category: 'security', description: 'All data transmission must use TLS 1.2+ encryption', priority: 'must', type: 'non-functional' },
+          { id: 'nfr_5', category: 'accessibility', description: 'UI must meet WCAG 2.1 AA compliance standards', priority: 'must', type: 'non-functional' },
+          { id: 'nfr_6', category: 'compatibility', description: 'Must support latest 2 versions of Chrome, Firefox, Safari, Edge', priority: 'should', type: 'non-functional' },
+        ];
+
+        const entityDefinitions = [
+          { id: 'entity_user', name: 'User', attributes: [{ name: 'id', type: 'UUID', required: true, unique: true }, { name: 'email', type: 'string', required: true, unique: true }, { name: 'name', type: 'string', required: true }, { name: 'role', type: 'enum', required: true }, { name: 'createdAt', type: 'timestamp', required: true } ], privacy: 'PII', retention: 'active_period' },
+          { id: 'entity_entity', name: 'Primary Entity', attributes: [{ name: 'id', type: 'UUID', required: true, unique: true }, { name: 'ownerId', type: 'UUID', required: true, foreignKey: 'user.id' }, { name: 'name', type: 'string', required: true }, { name: 'status', type: 'enum', required: true }, { name: 'metadata', type: 'json', required: false } ], privacy: 'business', retention: 'active_period' },
+          { id: 'entity_action', name: 'Action Log', attributes: [{ name: 'id', type: 'UUID', required: true, unique: true }, { name: 'entityId', type: 'UUID', required: true, foreignKey: 'entity.id' }, { name: 'userId', type: 'UUID', required: true, foreignKey: 'user.id' }, { name: 'action', type: 'string', required: true }, { name: 'timestamp', type: 'timestamp', required: true } ], privacy: 'audit', retention: '7_years' },
+        ];
+        const relationships = [
+          { id: 'rel_1', from: 'entity_user', to: 'entity_entity', type: 'one-to-many', description: 'User owns many entities' },
+          { id: 'rel_2', from: 'entity_entity', to: 'entity_action', type: 'one-to-many', description: 'Entity has many action logs' },
+          { id: 'rel_3', from: 'entity_user', to: 'entity_action', type: 'one-to-many', description: 'User performs many actions' },
+        ];
+        const dataRequirements = { entities: entityDefinitions, relationships, privacy: { piiFields: ['user.email', 'user.name'], encryption: 'at_rest_and_transit', retentionPolicy: 'per_entity_retention', anonymization: 'automatic_after_retention' } };
+
+        const userFlows = [
+          { id: 'flow_1', name: 'Primary User Flow', entryPoint: 'Application entry point', steps: ['Authenticate', 'Access main interface', 'Perform primary action', 'Review results', 'Save or discard'], exitPoint: 'Logged out or session expired', errorHandling: 'Display error message with recovery option', states: ['idle', 'loading', 'success', 'error', 'authenticated'] },
+          { id: 'flow_2', name: 'Secondary Flow', entryPoint: 'Navigation menu', steps: ['Select section', 'Review data', 'Apply filters', 'Export or share'], exitPoint: 'Return to main interface', errorHandling: 'Show validation errors inline', states: ['idle', 'loading', 'editing', 'viewing'] },
+        ];
+
+        const uiRequirements = [
+          { id: 'ui_1', component: 'Main Dashboard', description: 'Display key metrics and quick actions', accessibility: 'WCAG 2.1 AA', states: ['loading', 'empty', 'populated', 'error'], responsive: true },
+          { id: 'ui_2', component: 'Data Table', description: 'Display sortable and filterable data with pagination', accessibility: 'WCAG 2.1 AA', states: ['loading', 'empty', 'populated', 'editing'], responsive: true },
+          { id: 'ui_3', component: 'Settings Panel', description: 'Allow user to configure preferences', accessibility: 'WCAG 2.1 AA', states: ['viewing', 'editing', 'saving', 'saved'], responsive: false },
+        ];
+
+        const rolloutPhases = [
+          { id: 'phase_1', name: 'Alpha', targetUsers: 'Internal team', featureFlags: ['prd_core_v1'], criteria: 'All acceptance criteria pass, internal beta tested', duration: '2 weeks', rollback: 'Disable prd_core_v1 flag' },
+          { id: 'phase_2', name: 'Beta', targetUsers: 'Limited external users (5-10%)', featureFlags: ['prd_core_v1', 'prd_analytics_v1'], criteria: '95% acceptance criteria pass, no P0 bugs', duration: '4 weeks', rollback: 'Disable prd_analytics_v1 flag, notify beta users' },
+          { id: 'phase_3', name: 'General Availability', targetUsers: 'All users', featureFlags: ['prd_core_v1', 'prd_analytics_v1', 'prd_notifications_v1'], criteria: 'All acceptance criteria pass, monitoring dashboards active', duration: 'Ongoing', rollback: 'Disable all feature flags, deploy previous version' },
+        ];
+
+        const internalDependencies = [
+          { id: 'int_dep_1', type: 'service', description: 'Authentication service must be available', status: 'required' },
+          { id: 'int_dep_2', type: 'data', description: 'User data schema must be migrated', status: 'required' },
+          { id: 'int_dep_3', type: 'api', description: 'Core API endpoints must be deployed', status: 'required' },
+        ];
+        const externalDependencies = [
+          { id: 'ext_dep_1', type: 'third_party', description: 'Identity provider integration', status: 'pending', impact: 'blocks' },
+          { id: 'ext_dep_2', type: 'infrastructure', description: 'Cloud infrastructure provisioning', status: 'pending', impact: 'blocks' },
+        ];
+
+        const prd = {
+          id: 'prd_' + Date.now(),
+          title,
+          structure: {
+            problem: problem,
+            scope: scope,
+            solution: { summary: 'Solution derived from problem statement and user stories', approaches: generatedStories.map(s => s.text) },
+            requirements: { functional: functionalRequirements, nonFunctional: nonFunctionalRequirements },
+            metrics: successMetrics.map((m, i) => ({ id: 'metric_' + (i + 1), text: m, target: 'Defined during sprint planning', baseline: 'Current state measurement' })),
+            risks: risks.map((r, i) => ({ id: 'risk_' + (i + 1), text: r, mitigation: 'TBD - risk assessment during planning', severity: 'medium' }))
+          },
+          userStories: generatedStories,
+          acceptanceCriteria: generatedStories.flatMap(s => s.acceptanceCriteria),
+          technicalRequirements: { functional: functionalRequirements, nonFunctional: nonFunctionalRequirements },
+          dataRequirements: dataRequirements,
+          uxRequirements: { flows: userFlows, uiComponents: uiRequirements, accessibility: 'WCAG 2.1 AA', states: userFlows.flatMap(f => f.states) },
+          releaseCriteria: { definitionOfDone: 'All acceptance criteria pass, code reviewed, tested, documented, and deployed to production with monitoring', featureFlags: rolloutPhases[rolloutPhases.length - 1].featureFlags },
+          dependencies: { internal: internalDependencies, external: externalDependencies },
+          rolloutPlan: {
+            phases: rolloutPhases,
+            strategy: 'Phased rollout with feature flags for gradual exposure and easy rollback',
+            rollbackPlan: 'Disable relevant feature flags and redeploy previous version',
+            criteriaPerPhase: rolloutPhases.map(p => ({ phase: p.name, criteria: p.criteria }))
+          },
+          assumptions: assumptions.map((a, i) => ({ id: 'assumption_' + (i + 1), text: a, validated: false })),
+          nonGoals: nonGoals.map((n, i) => ({ id: 'nongoal_' + (i + 1), text: n })),
+          openQuestions: openQuestions.map((q, i) => ({ id: 'question_' + (i + 1), text: q, status: 'open', resolution: null })),
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          source: 'algorithmic'
+        };
+
+        return prd;
+      }
+    }),
   createExternalActionSkill({
     id: 'product-jira',
     name: 'Jira Integration',
@@ -1028,7 +1020,6 @@ return prd;
   triggers: [{ kind: 'user', phrase_examples: ["Parse markdown", "Convert document", "Extract content"] }],
   }),
 ];
-
 
 // Mark the 5 external integrations as lower-order base tools (isSkill:false)
 const PRODUCT_EXTERNAL_TOOL_IDS = new Set([

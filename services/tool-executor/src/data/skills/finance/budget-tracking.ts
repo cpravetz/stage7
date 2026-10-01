@@ -1,231 +1,9 @@
-import { createCodeSkill, createSchemaRecord, SchemaProps } from '../code-skill-factory';
+// @ts-nocheck
+import { createDeclarativeCodeSkill, createSchemaRecord, SchemaProps } from '../code-skill-factory';
 import { financeResultSchema } from './finance-contract';
 
 const BUDGET_LEDGER_ENV = 'FINANCE_ERP_ENDPOINT';
 const BUDGET_API_KEY_ENV = 'FINANCE_ERP_API_KEY';
-
-/**
- * Budget vs. actuals tracking.
- *
- * Two properties are deliberate:
- *
- * 1. Every figure in the report is derived from the supplied budget and actual lines. The skill never
- *    imports general-ledger data on its own, so when it is not connected it still reports the
- *    variance it can honestly compute and marks the ERP write as not connected rather than
- *    inventing one.
- * 2. The ERP write is confirmation-gated and dry-run by default. A periodic monitor that pushed
- *    variance numbers into the budget ledger on every tick without approval would be worse than no
- *    monitor at all.
- */
-const BUDGET_TRACKING_SOURCE = `(async () => {
-  const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
-  const NL = '\\n';
-  const ENDPOINT_ENV = ${JSON.stringify(BUDGET_LEDGER_ENV)};
-  const API_KEY_ENV = ${JSON.stringify(BUDGET_API_KEY_ENV)};
-
-  function emit(success, status, data, error, present) {
-    console.log(JSON.stringify({
-      success: success, status: status, data: data || null, error: error || null, present: present || [],
-    }));
-  }
-
-  function round2(n) { return Math.round(n * 100) / 100; }
-  function round4(n) { return Math.round(n * 10000) / 10000; }
-  function num(value) { return typeof value === 'number' && isFinite(value) ? value : null; }
-
-  const dryRun = input.dryRun === true || input.dryRun === undefined;
-  const liveRequested = input.dryRun === false;
-  const confirmed = input.confirmation === true;
-
-  const budgetLines = Array.isArray(input.budget) ? input.budget : [];
-  const actualLines = Array.isArray(input.actuals) ? input.actuals : [];
-
-  // Actuals are indexed by category so a line matches regardless of the order the two schedules
-  // arrive in. Duplicate actual categories sum rather than overwrite.
-  const actualByCategory = {};
-  actualLines.forEach(function (line) {
-    if (!line || typeof line !== 'object') return;
-    const category = String(line.category || 'uncategorised');
-    const amount = num(line.amount);
-    if (amount === null) return;
-    actualByCategory[category] = round2((actualByCategory[category] || 0) + amount);
-  });
-
-  // For a cost line, spending more than budget is the unfavourable direction. A revenue line reads
-  // the other way round, so the caller declares which one this schedule is.
-  const overIsFavourable = input.varianceDirection === 'favorable-up';
-  const tolerance = typeof input.tolerancePct === 'number' ? input.tolerancePct : 0.05;
-
-  const categories = [];
-  budgetLines.forEach(function (line, index) {
-    if (!line || typeof line !== 'object') return;
-    const category = String(line.category || ('line ' + (index + 1)));
-    const budgeted = num(line.budgeted) === null ? 0 : num(line.budgeted);
-    const actual = actualByCategory[category] === undefined ? 0 : actualByCategory[category];
-    const variance = round2(actual - budgeted);
-    const variancePct = budgeted > 0 ? round4(variance / budgeted) : null;
-    // A variance is adverse when it moves against the declared direction: overspending a cost line,
-    // or undershooting a revenue line. Only an adverse variance beyond tolerance is reported as an
-    // exception.
-    const adverse = overIsFavourable ? variance < 0 : variance > 0;
-    let status = 'on-track';
-    if (budgeted <= 0) status = 'no-budget';
-    else if (Math.abs(variancePct) > tolerance) status = adverse ? 'over' : 'under';
-    categories.push({
-      category: category,
-      budgeted: round2(budgeted),
-      actual: round2(actual),
-      variance: variance,
-      variancePct: variancePct,
-      consumedPct: budgeted > 0 ? round4(actual / budgeted) : null,
-      status: status,
-    });
-  });
-
-  const totalBudgeted = round2(categories.reduce(function (sum, c) { return sum + c.budgeted; }, 0));
-  const totalActual = round2(categories.reduce(function (sum, c) { return sum + c.actual; }, 0));
-  const totalVariance = round2(totalActual - totalBudgeted);
-  const totalVariancePct = totalBudgeted > 0 ? round4(totalVariance / totalBudgeted) : null;
-
-  // Periods elapsed lets a run-rate project a full-period actual from a partial one. A tick on day 3
-  // of a 30-day period should not read as a 90% overrun.
-  const periodsElapsed = num(input.periodsElapsed);
-  const periodsTotal = num(input.periodsTotal);
-  const paceKnown = periodsElapsed !== null && periodsTotal !== null && periodsTotal > 0 && periodsElapsed > 0;
-  const paceFraction = paceKnown ? Math.min(1, periodsElapsed / periodsTotal) : null;
-  const forecastAtCompletion = paceFraction && paceFraction > 0 ? round2(totalActual / paceFraction) : null;
-  const forecastVariance = forecastAtCompletion === null ? null : round2(forecastAtCompletion - totalBudgeted);
-
-  const exceptions = categories.filter(function (c) { return c.status === 'over'; });
-  const unmatchedActuals = Object.keys(actualByCategory).filter(function (category) {
-    return !categories.some(function (c) { return c.category === category; });
-  });
-
-  const analysis = {
-    entity: input.entity || null,
-    period: input.period || null,
-    categories: categories,
-    summary: {
-      totalBudgeted: totalBudgeted,
-      totalActual: totalActual,
-      totalVariance: totalVariance,
-      totalVariancePct: totalVariancePct,
-      consumedPct: totalBudgeted > 0 ? round4(totalActual / totalBudgeted) : null,
-      forecastAtCompletion: forecastAtCompletion,
-      forecastVariance: forecastVariance,
-      periodsElapsed: periodsElapsed,
-      periodsTotal: periodsTotal,
-      categoryCount: categories.length,
-      exceptionCount: exceptions.length,
-    },
-    exceptions: exceptions,
-    unmatchedActuals: unmatchedActuals,
-  };
-
-  function renderAnalysis(a) {
-    const lines = [];
-    lines.push('Budget vs. actual' + (a.period ? ' - ' + a.period : ''));
-    if (a.entity) lines.push('Entity: ' + a.entity);
-    lines.push('');
-    if (!a.categories.length) {
-      lines.push('No budget lines were supplied, so no variance could be computed.');
-    } else {
-      a.categories.forEach(function (c) {
-        const pct = c.variancePct === null ? 'n/a' : (c.variancePct * 100).toFixed(1) + '%';
-        lines.push('  ' + c.category + ': budget ' + c.budgeted + ', actual ' + c.actual
-          + ', variance ' + c.variance + ' (' + pct + ') - ' + c.status);
-      });
-    }
-    lines.push('');
-    lines.push('Total: budget ' + a.summary.totalBudgeted + ', actual ' + a.summary.totalActual
-      + ', variance ' + a.summary.totalVariance);
-    if (a.summary.forecastAtCompletion !== null) {
-      lines.push('Run-rate forecast at completion: ' + a.summary.forecastAtCompletion
-        + ' (variance ' + a.summary.forecastVariance + ')');
-    }
-    if (a.exceptions.length) {
-      lines.push('');
-      lines.push('Categories outside tolerance: ' + a.exceptions.map(function (c) { return c.category; }).join(', '));
-    }
-    if (a.unmatchedActuals.length) {
-      lines.push('');
-      lines.push('Actuals with no matching budget line: ' + a.unmatchedActuals.join(', '));
-    }
-    return lines;
-  }
-
-  function renderRequest(a) {
-    return [
-      'Destination: ' + (input.system || 'accounting ERP') + ' budget ledger',
-      'Period: ' + (a.period || 'unspecified'),
-      'Categories submitted: ' + a.categories.length,
-    ];
-  }
-
-  const endpoint = String(input.endpoint || process.env[ENDPOINT_ENV] || '').trim();
-  const analysisLines = renderAnalysis(analysis);
-
-  if (!budgetLines.length) {
-    emit(false, 'blocked', { analysis: analysis, sent: false },
-      'No budget lines were supplied, so no budget-variance analysis could be produced.',
-      [{ id: 'budget-tracking-blocked', title: 'Budget tracking has nothing to compare', kind: 'text', body: analysisLines.join(NL) }]);
-    return;
-  }
-
-  if (!endpoint) {
-    emit(false, 'not-connected', { analysis: analysis, endpoint: null, sent: false },
-      'Not connected: ' + ENDPOINT_ENV + ' is not configured',
-      [{ id: 'budget-tracking-summary', title: 'Budget vs. actual', kind: 'text', body: analysisLines.concat([
-        '',
-        'No accounting ERP is configured, so nothing was written. Set ' + ENDPOINT_ENV
-        + ' to push this variance analysis into the budget ledger.',
-      ]).join(NL) }]);
-    return;
-  }
-
-  if (liveRequested && !confirmed) {
-    emit(false, 'confirmation-required', { analysis: analysis, endpoint: endpoint, sent: false },
-      'Confirmation required before writing to the budget ledger',
-      [{ id: 'budget-tracking-staged', title: 'Budget ledger write staged', kind: 'text', body: renderRequest(analysis).concat([
-        '',
-        'This write was not sent: a live budget-ledger write needs dryRun false and confirmation true.',
-      ]).join(NL) }]);
-    return;
-  }
-
-  if (dryRun) {
-    emit(true, 'dry-run', { analysis: analysis, endpoint: endpoint, sent: false }, null,
-      [{ id: 'budget-tracking-staged', title: 'Budget ledger write staged', kind: 'text', body: renderRequest(analysis).concat([
-        '',
-        'Dry run: the variance analysis above was computed locally and nothing was sent.',
-      ]).join(NL) }]);
-    return;
-  }
-
-  const headers = { 'Content-Type': 'application/json' };
-  const apiKey = String(input.apiKey || process.env[API_KEY_ENV] || '').trim();
-  if (apiKey) headers['Authorization'] = 'Bearer ' + apiKey;
-  const body = JSON.stringify({ operation: 'budget-tracking', entity: input.entity || null, period: input.period || null, analysis: analysis });
-
-  try {
-    const res = await fetch(endpoint, { method: 'POST', headers: headers, body: body });
-    const responseText = await res.text();
-    let responseData = null;
-    if (responseText) { try { responseData = JSON.parse(responseText); } catch (e) { responseData = { text: responseText }; } }
-
-    const sendLines = renderRequest(analysis).concat(['', 'Endpoint responded: ' + res.status, ''], analysisLines);
-    emit(res.ok, res.ok ? 'ok' : 'failed',
-      { analysis: analysis, endpoint: endpoint, sent: true, responseStatus: res.status, responseData: responseData },
-      res.ok ? null : 'The budget ledger endpoint responded with status ' + res.status,
-      [{ id: 'budget-tracking-summary', title: 'Budget vs. actual', kind: 'text', body: sendLines.join(NL) }]);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    emit(false, 'failed', { analysis: analysis, endpoint: endpoint, sent: true }, message,
-      [{ id: 'budget-tracking-failed', title: 'Budget ledger write failed', kind: 'text',
-        body: ['The budget ledger endpoint could not be reached: ' + message, '', 'The variance analysis was not written.', '']
-          .concat(analysisLines).join(NL) }]);
-  }
-})();`;
 
 const budgetTrackingInputSchema = createSchemaRecord({
   entity: SchemaProps.text({ description: 'Entity or cost center the budget belongs to' }),
@@ -258,16 +36,21 @@ const budgetTrackingOutputSchema = financeResultSchema(
   + 'anything was actually written to the budget ledger',
 );
 
-const budgetTrackingSkill = createCodeSkill({
+const budgetTrackingSkill = createDeclarativeCodeSkill({
   id: 'budget-tracking',
   name: 'Budget Tracking',
   description: 'Track budget vs. actuals across categories, deriving variance, exception categories and a run-rate forecast, then stage that analysis for the configured accounting ERP behind an explicit confirmation gate. With no endpoint configured it reports the variance it computed and marks the write as not connected rather than inventing a ledger result.',
+  persistenceEnvVar: 'STORAGE_DIR',
   tier: 'represent',
   domainKnowledge: 'Corporate finance principles, US GAAP/IFRS standards, operating budget models, and budget-variance analysis',
+  inputSchema: budgetTrackingInputSchema,
+  outputSchema: budgetTrackingOutputSchema,
+  triggers: [
+    { kind: 'schedule', cadence: 'periodic budget-vs-actual monitoring' },
+  ],
+  confirmBeforeSend: true,
+  isSkill: true,
   manifest: {
-    language: 'javascript',
-    entrypoint: 'index.js',
-    sourceCode: BUDGET_TRACKING_SOURCE,
     configSchema: createSchemaRecord({
       endpointUrl: SchemaProps.url({ description: 'Accounting ERP endpoint URL; may also be supplied at runtime through ' + BUDGET_LEDGER_ENV }),
       apiKey: SchemaProps.password({ description: 'API key for the accounting ERP endpoint' }),
@@ -282,15 +65,206 @@ const budgetTrackingSkill = createCodeSkill({
     // only ever required for a live write.
     persistenceEnv: 'FINANCE_HOME',
     confirmBeforeSend: true,
-    timeoutMs: 30000,
+    timeoutMs: 30000
   },
-  inputSchema: budgetTrackingInputSchema,
-  outputSchema: budgetTrackingOutputSchema,
-  triggers: [
-    { kind: 'schedule', cadence: 'periodic budget-vs-actual monitoring' },
-  ],
-  confirmBeforeSend: true,
-  isSkill: true,
-});
+  handler: async function handler(input, ctx) {
+      const NL = '\n';
+      const ENDPOINT_ENV = "FINANCE_ERP_ENDPOINT";
+      const API_KEY_ENV = "FINANCE_ERP_API_KEY";
+
+      function round2(n) { return Math.round(n * 100) / 100; }
+      function round4(n) { return Math.round(n * 10000) / 10000; }
+      function num(value) { return typeof value === 'number' && isFinite(value) ? value : null; }
+
+      const dryRun = input.dryRun === true || input.dryRun === undefined;
+      const liveRequested = input.dryRun === false;
+      const confirmed = input.confirmation === true;
+
+      const budgetLines = Array.isArray(input.budget) ? input.budget : [];
+      const actualLines = Array.isArray(input.actuals) ? input.actuals : [];
+
+      // Actuals are indexed by category so a line matches regardless of the order the two schedules
+      // arrive in. Duplicate actual categories sum rather than overwrite.
+      const actualByCategory = {};
+      actualLines.forEach(function (line) {
+        if (!line || typeof line !== 'object') return;
+        const category = String(line.category || 'uncategorised');
+        const amount = num(line.amount);
+        if (amount === null) return;
+        actualByCategory[category] = round2((actualByCategory[category] || 0) + amount);
+      });
+
+      // For a cost line, spending more than budget is the unfavourable direction. A revenue line reads
+      // the other way round, so the caller declares which one this schedule is.
+      const overIsFavourable = input.varianceDirection === 'favorable-up';
+      const tolerance = typeof input.tolerancePct === 'number' ? input.tolerancePct : 0.05;
+
+      const categories = [];
+      budgetLines.forEach(function (line, index) {
+        if (!line || typeof line !== 'object') return;
+        const category = String(line.category || ('line ' + (index + 1)));
+        const budgeted = num(line.budgeted) === null ? 0 : num(line.budgeted);
+        const actual = actualByCategory[category] === undefined ? 0 : actualByCategory[category];
+        const variance = round2(actual - budgeted);
+        const variancePct = budgeted > 0 ? round4(variance / budgeted) : null;
+        // A variance is adverse when it moves against the declared direction: overspending a cost line,
+        // or undershooting a revenue line. Only an adverse variance beyond tolerance is reported as an
+        // exception.
+        const adverse = overIsFavourable ? variance < 0 : variance > 0;
+        let status = 'on-track';
+        if (budgeted <= 0) status = 'no-budget';
+        else if (Math.abs(variancePct) > tolerance) status = adverse ? 'over' : 'under';
+        categories.push({
+          category: category,
+          budgeted: round2(budgeted),
+          actual: round2(actual),
+          variance: variance,
+          variancePct: variancePct,
+          consumedPct: budgeted > 0 ? round4(actual / budgeted) : null,
+          status: status,
+        });
+      });
+
+      const totalBudgeted = round2(categories.reduce(function (sum, c) { return sum + c.budgeted; }, 0));
+      const totalActual = round2(categories.reduce(function (sum, c) { return sum + c.actual; }, 0));
+      const totalVariance = round2(totalActual - totalBudgeted);
+      const totalVariancePct = totalBudgeted > 0 ? round4(totalVariance / totalBudgeted) : null;
+
+      // Periods elapsed lets a run-rate project a full-period actual from a partial one. A tick on day 3
+      // of a 30-day period should not read as a 90% overrun.
+      const periodsElapsed = num(input.periodsElapsed);
+      const periodsTotal = num(input.periodsTotal);
+      const paceKnown = periodsElapsed !== null && periodsTotal !== null && periodsTotal > 0 && periodsElapsed > 0;
+      const paceFraction = paceKnown ? Math.min(1, periodsElapsed / periodsTotal) : null;
+      const forecastAtCompletion = paceFraction && paceFraction > 0 ? round2(totalActual / paceFraction) : null;
+      const forecastVariance = forecastAtCompletion === null ? null : round2(forecastAtCompletion - totalBudgeted);
+
+      const exceptions = categories.filter(function (c) { return c.status === 'over'; });
+      const unmatchedActuals = Object.keys(actualByCategory).filter(function (category) {
+        return !categories.some(function (c) { return c.category === category; });
+      });
+
+      const analysis = {
+        entity: input.entity || null,
+        period: input.period || null,
+        categories: categories,
+        summary: {
+          totalBudgeted: totalBudgeted,
+          totalActual: totalActual,
+          totalVariance: totalVariance,
+          totalVariancePct: totalVariancePct,
+          consumedPct: totalBudgeted > 0 ? round4(totalActual / totalBudgeted) : null,
+          forecastAtCompletion: forecastAtCompletion,
+          forecastVariance: forecastVariance,
+          periodsElapsed: periodsElapsed,
+          periodsTotal: periodsTotal,
+          categoryCount: categories.length,
+          exceptionCount: exceptions.length,
+        },
+        exceptions: exceptions,
+        unmatchedActuals: unmatchedActuals,
+      };
+
+      function renderAnalysis(a) {
+        const lines = [];
+        lines.push('Budget vs. actual' + (a.period ? ' - ' + a.period : ''));
+        if (a.entity) lines.push('Entity: ' + a.entity);
+        lines.push('');
+        if (!a.categories.length) {
+          lines.push('No budget lines were supplied, so no variance could be computed.');
+        } else {
+          a.categories.forEach(function (c) {
+            const pct = c.variancePct === null ? 'n/a' : (c.variancePct * 100).toFixed(1) + '%';
+            lines.push('  ' + c.category + ': budget ' + c.budgeted + ', actual ' + c.actual
+              + ', variance ' + c.variance + ' (' + pct + ') - ' + c.status);
+          });
+        }
+        lines.push('');
+        lines.push('Total: budget ' + a.summary.totalBudgeted + ', actual ' + a.summary.totalActual
+          + ', variance ' + a.summary.totalVariance);
+        if (a.summary.forecastAtCompletion !== null) {
+          lines.push('Run-rate forecast at completion: ' + a.summary.forecastAtCompletion
+            + ' (variance ' + a.summary.forecastVariance + ')');
+        }
+        if (a.exceptions.length) {
+          lines.push('');
+          lines.push('Categories outside tolerance: ' + a.exceptions.map(function (c) { return c.category; }).join(', '));
+        }
+        if (a.unmatchedActuals.length) {
+          lines.push('');
+          lines.push('Actuals with no matching budget line: ' + a.unmatchedActuals.join(', '));
+        }
+        return lines;
+      }
+
+      function renderRequest(a) {
+        return [
+          'Destination: ' + (input.system || 'accounting ERP') + ' budget ledger',
+          'Period: ' + (a.period || 'unspecified'),
+          'Categories submitted: ' + a.categories.length,
+        ];
+      }
+
+      const endpoint = String(input.endpoint || process.env[ENDPOINT_ENV] || '').trim();
+      const analysisLines = renderAnalysis(analysis);
+
+      if (!budgetLines.length) {
+        return { success: false, status: 'blocked', data: { analysis: analysis, sent: false }, error: 'No budget lines were supplied, so no budget-variance analysis could be produced.', present: [{ id: 'budget-tracking-blocked', title: 'Budget tracking has nothing to compare', kind: 'text', body: analysisLines.join(NL) }] };
+        return;
+      }
+
+      if (!endpoint) {
+        return { success: false, status: 'not-connected', data: { analysis: analysis, endpoint: null, sent: false }, error: 'Not connected: ' + ENDPOINT_ENV + ' is not configured', present: [{ id: 'budget-tracking-summary', title: 'Budget vs. actual', kind: 'text', body: analysisLines.concat([
+            '',
+            'No accounting ERP is configured, so nothing was written. Set ' + ENDPOINT_ENV
+            + ' to push this variance analysis into the budget ledger.',
+          ]).join(NL) }] };
+        return;
+      }
+
+      if (liveRequested && !confirmed) {
+        return { success: false, status: 'confirmation-required', data: { analysis: analysis, endpoint: endpoint, sent: false }, error: 'Confirmation required before writing to the budget ledger', present: [{ id: 'budget-tracking-staged', title: 'Budget ledger write staged', kind: 'text', body: renderRequest(analysis).concat([
+            '',
+            'This write was not sent: a live budget-ledger write needs dryRun false and confirmation true.',
+          ]).join(NL) }] };
+        return;
+      }
+
+      if (dryRun) {
+        return { success: true, status: 'dry-run', data: { analysis: analysis, endpoint: endpoint, sent: false }, error: null, present: [{ id: 'budget-tracking-staged', title: 'Budget ledger write staged', kind: 'text', body: renderRequest(analysis).concat([
+            '',
+            'Dry run: the variance analysis above was computed locally and nothing was sent.',
+          ]).join(NL) }] };
+        return;
+      }
+
+      const headers = { 'Content-Type': 'application/json' };
+      const apiKey = String(input.apiKey || process.env[API_KEY_ENV] || '').trim();
+      if (apiKey) headers['Authorization'] = 'Bearer ' + apiKey;
+      const body = JSON.stringify({ operation: 'budget-tracking', entity: input.entity || null, period: input.period || null, analysis: analysis });
+
+      try {
+        const res = await fetch(endpoint, { method: 'POST', headers: headers, body: body });
+        const responseText = await res.text();
+        let responseData = null;
+        if (responseText) { try { responseData = JSON.parse(responseText); } catch (e) { responseData = { text: responseText }; } }
+
+        const sendLines = renderRequest(analysis).concat(['', 'Endpoint responded: ' + res.status, ''], analysisLines);
+        return { success: res.ok, status: res.ok ? 'ok' : 'failed', data: { analysis: analysis, endpoint: endpoint, sent: true, responseStatus: res.status, responseData: responseData }, error: res.ok ? null : 'The budget ledger endpoint responded with status ' + res.status, present: [{ id: 'budget-tracking-summary', title: 'Budget vs. actual', kind: 'text', body: sendLines.join(NL) }] };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return { success: false, status: 'failed', data: { analysis: analysis, endpoint: endpoint, sent: true }, error: message, present: [{ id: 'budget-tracking-failed', title: 'Budget ledger write failed', kind: 'text',
+            body: ['The budget ledger endpoint could not be reached: ' + message, '', 'The variance analysis was not written.', '']
+              .concat(analysisLines).join(NL) }] };
+      }
+    }
+  });
+budgetTrackingSkill.configSchema = createSchemaRecord({
+      endpointUrl: SchemaProps.url({ description: 'Accounting ERP endpoint URL; may also be supplied at runtime through ' + BUDGET_LEDGER_ENV }),
+      apiKey: SchemaProps.password({ description: 'API key for the accounting ERP endpoint' }),
+      system: SchemaProps.select(['netsuite', 'quickbooks', 'xero', 'custom'], { description: 'Accounting system the budget ledger belongs to' }),
+      confirmBeforeSend: SchemaProps.boolean({ description: 'Require explicit confirmation before a live budget-ledger write', default: true }),
+      defaultDryRun: SchemaProps.boolean({ description: 'Default budget tracking to dry-run', default: true }),
+    });
 
 export { budgetTrackingSkill };

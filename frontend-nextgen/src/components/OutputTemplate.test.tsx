@@ -1,5 +1,6 @@
 import '@testing-library/jest-dom';
 import { render } from '@testing-library/react';
+import { vi } from 'vitest';
 
 import OutputTemplate, { parseExecutionResult } from './OutputTemplate';
 
@@ -89,5 +90,105 @@ describe('parseExecutionResult', () => {
     const parsed = parseExecutionResult({ output: JSON.stringify(posting) }) as Record<string, unknown>;
     const blocks = parsed.present as Array<{ links?: unknown[] }>;
     expect(blocks[0].links).toHaveLength(2);
+  });
+});
+
+
+const deletePosting = {
+  success: true,
+  status: 'ok',
+  present: [
+    {
+      id: 'listings',
+      title: 'Templates (1)',
+      kind: 'text',
+      body: 'One template remains.',
+      actions: [
+        {
+          type: 'delete',
+          label: 'Delete',
+          target: 'skill-store',
+          collection: 'resume',
+          key: 'templates',
+          itemId: 'tpl-1',
+        },
+      ],
+    },
+  ],
+};
+
+describe('OutputTemplate presentation actions', () => {
+  it('renders a Delete button for every delete action declared on a block', () => {
+    const { container } = render(<OutputTemplate outputSchema={undefined} result={deletePosting} />);
+    const buttons = Array.from(container.querySelectorAll('.result-actions button.danger.small'));
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0].textContent).toBe('Delete');
+    expect(buttons[0].getAttribute('title')).toContain('tpl-1');
+  });
+
+  it('does not render actions when a block declares none', () => {
+    const { container } = render(
+      <OutputTemplate
+        outputSchema={undefined}
+        result={{ success: true, present: [{ id: 'summary', body: 'Nothing actionable' }] }}
+      />,
+    );
+    expect(container.querySelector('.result-actions')).toBeNull();
+  });
+
+  it('confirms before deleting and calls DELETE /api/skill-store/...', async () => {
+    const user = await import('@testing-library/user-event').then((m) => m.default.setup());
+    const confirmSpy = vi.fn(() => true);
+    vi.stubGlobal('confirm', confirmSpy);
+    const fetchMock = vi.fn(async (input: any, init?: RequestInit) => {
+      expect(String(input)).toBe('/api/skill-store/resume/templates/tpl-1');
+      expect(init?.method).toBe('DELETE');
+      return { ok: true, status: 200, json: async () => ({ success: true, removed: true }) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { container } = render(<OutputTemplate outputSchema={undefined} result={deletePosting} />);
+    const button = container.querySelector('.result-actions button.danger.small') as HTMLButtonElement;
+    await user.click(button);
+
+    expect(confirmSpy).toHaveBeenCalledWith('Delete "tpl-1"?');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain('Deleted');
+
+    vi.unstubAllGlobals();
+  });
+
+  it('shows an error inline when the delete request fails', async () => {
+    const user = await import('@testing-library/user-event').then((m) => m.default.setup());
+    const confirmSpy = vi.fn(() => true);
+    vi.stubGlobal('confirm', confirmSpy);
+    const fetchMock = vi.fn(async () => ({ ok: false, status: 500, statusText: 'Server Error', json: async () => ({}) }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { container } = render(<OutputTemplate outputSchema={undefined} result={deletePosting} />);
+    const button = container.querySelector('.result-actions button.danger.small') as HTMLButtonElement;
+    await user.click(button);
+
+    expect(container.textContent).toContain('API error: 500 Server Error');
+    expect(container.textContent).not.toContain('Deleted');
+
+    vi.unstubAllGlobals();
+  });
+
+  it('does nothing when the user cancels the confirmation', async () => {
+    const user = await import('@testing-library/user-event').then((m) => m.default.setup());
+    const confirmSpy = vi.fn(() => false);
+    vi.stubGlobal('confirm', confirmSpy);
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { container } = render(<OutputTemplate outputSchema={undefined} result={deletePosting} />);
+    const button = container.querySelector('.result-actions button.danger.small') as HTMLButtonElement;
+    await user.click(button);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(container.textContent).not.toContain('Deleted');
+
+    vi.unstubAllGlobals();
   });
 });

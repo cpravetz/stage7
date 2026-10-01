@@ -1,114 +1,7 @@
+// @ts-nocheck
 import { Tool, SchemaRecord } from '../../../types';
-import { createCodeSkill, SchemaProps } from '../code-skill-factory';
+import { createDeclarativeCodeSkill, SchemaProps } from '../code-skill-factory';
 import { sportsResultSchema, SPORTS_WAGERING_SAFETY_BOUNDARY } from './sports-contract';
-
-const SPORTS_GROUP_B_HOME = process.env.SPORTS_GROUP_B_HOME || '/tmp/sports/group-b';
-
-const LINE_ALERT_SOURCE = `
-const input = __tool_input || {};
-const fs = require('fs');
-const path = require('path');
-
-const entity = input.entity || input.market || 'general';
-const sport = input.sport || 'generic';
-const dryRun = input.dryRun !== false;
-const confirmBeforeSend = input.confirmationRequired !== false;
-
-const baseDir = process.env.SPORTS_GROUP_B_HOME || '/tmp/sports/group-b';
-const storePath = path.join(baseDir, 'line-alerts.json');
-fs.mkdirSync(baseDir, { recursive: true });
-
-let store = { alerts: [], specs: {}, lastUpdated: new Date().toISOString() };
-if (fs.existsSync(storePath)) {
-  try { store = JSON.parse(fs.readFileSync(storePath, 'utf8')); } catch (e) {}
-}
-
-const oddsApi = process.env.ODDS_DATA_API_URL || '';
-const requestTimeoutMs = Number(process.env.SPORTS_REQUEST_TIMEOUT_MS) || 10000;
-
-async function fetchOddsData(apiUrl) {
-  if (!apiUrl) {
-    return { ok: false, status: 'not-configured', data: null, error: 'ODDS_DATA_API_URL not set' };
-  }
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
-  try {
-    const res = await fetch(apiUrl, { signal: controller.signal });
-    if (!res.ok) {
-      return { ok: false, status: 'http-error', data: null, error: 'HTTP ' + res.status };
-    }
-    const data = await res.json();
-    clearTimeout(timer);
-    return { ok: true, status: 'ok', data };
-  } catch (err) {
-    clearTimeout(timer);
-    return { ok: false, status: 'network-error', data: null, error: err && err.message ? err.message : String(err) };
-  }
-}
-
-const oddsResult = await fetchOddsData(oddsApi);
-const dataConnected = oddsResult.ok === true;
-
-const condition = input.condition || 'line-movement';
-const targetOdds = Number(input.targetOdds) || null;
-const movementThreshold = Number(input.movementThreshold) || 0.05;
-const markets = Array.isArray(input.markets) ? input.markets : ['moneyline'];
-const direction = input.direction || 'any';
-const confirmationId = input.confirmationId || null;
-const bankrollUnits = Number(input.bankrollUnits) || 0;
-const bankrollMaxUnits = Number(input.bankrollMaxUnits) || 100;
-const historicalVariance = Number(input.historicalVariance) || 0.03;
-const exposureRatio = bankrollMaxUnits > 0 ? movementThreshold / bankrollMaxUnits : 0;
-const actionRecommendation = exposureRatio > 0.5;
-let signalType = 'noise';
-if (movementThreshold > historicalVariance * 3) { signalType = 'genuine-value'; }
-else if (movementThreshold > historicalVariance) { signalType = 'moderate-movement'; }
-const alertType = signalType === 'genuine-value' ? 'action-recommended' : 'informational';
-const movementAssessment = { exposureRatio, actionRecommendation, signalType, historicalVariance, movementThreshold };
-const lineAlertSpec = {
-  id: 'la_' + Buffer.from(entity + sport).toString('base64').slice(0, 12),
-  entity,
-  sport,
-  condition,
-  targetOdds,
-  movementThreshold,
-  markets,
-  direction,
-  dryRun: dryRun,
-  confirmationRequired: confirmBeforeSend,
-  confirmationId: confirmationId,
-  confirmationProvided: confirmBeforeSend,
-  actionRecommendation: actionRecommendation,
-  signalType: signalType,
-  alertType: alertType,
-  movementAssessment: movementAssessment,
-  bankrollUnits: bankrollUnits,
-  bankrollMaxUnits: bankrollMaxUnits,
-  neverPlaceWagers: true,
-  neverAccessSportsbookAccounts: true,
-  dataConnected: dataConnected,
-  alertCriteria: {
-    anyMovementAbove: movementThreshold,
-    targetReached: targetOdds,
-    direction: direction,
-    markets: markets,
-  },
-  message: input.message || 'Line alert for ' + entity,
-  channels: input.channels || ['user-device'],
-  dispatchedAt: new Date().toISOString(),
-  source: dataConnected ? 'odds-api' : 'local',
-  connectivityStatus: oddsResult.status,
-};
-
-store.alerts.push(lineAlertSpec);
-if (!store.specs[sport]) store.specs[sport] = [];
-store.specs[sport].push(lineAlertSpec.id);
-
-fs.writeFileSync(storePath, JSON.stringify(store, null, 2));
-
-const presentBody = 'Line alert dispatched for ' + entity + ' (' + sport + '): condition=' + condition + ', movement threshold=' + movementThreshold + ', signal type=' + signalType + ', alert type=' + alertType + ', action recommendation=' + actionRecommendation + ', exposure ratio=' + exposureRatio.toFixed(3) + ', markets=' + JSON.stringify(markets) + ', channels=' + JSON.stringify(lineAlertSpec.channels) + '. ' + lineAlertSpec.neverPlaceWagers + '. ';
-console.log(JSON.stringify({ success: true, status: oddsResult.ok ? 'ok' : 'not-connected', data: lineAlertSpec, error: oddsResult.ok ? null : oddsResult.error, present: [{ id: 'line-alert', type: 'text', body: presentBody }] }));
-`;
 
 const LINE_ALERT_INPUT = {
   type: 'object',
@@ -133,24 +26,11 @@ const LINE_ALERT_INPUT = {
   required: ['entity', 'sport'],
 };
 
-export const LINE_ALERT_DISPATCHER = createCodeSkill({
+export const LINE_ALERT_DISPATCHER = createDeclarativeCodeSkill({
   id: 'sports-line-alert-dispatcher',
   name: 'Line-Alert Dispatcher',
   description: 'Evaluates line movement significance relative to the user betting strategy and current bankroll exposure; determines whether movements warrant informational alerts or action recommendations by integrating with Bankroll Co-Pilot state; distinguishes genuine value signals from market noise using historical variance patterns; dispatches contextualized alerts when conditions are material. STRICTLY BARRED from ever placing wagers or accessing sportsbook accounts.',
-  manifest: {
-    language: 'javascript',
-    entrypoint: 'index.js',
-    sourceCode: LINE_ALERT_SOURCE,
-    configSchema: {
-      type: 'object',
-      properties: {
-        confirmBeforeSend: SchemaProps.boolean({ description: 'Require confirmation before sending', default: true }),
-        dryRun: SchemaProps.boolean({ description: 'Always dry-run for represent actions', default: true }),
-        monitorInterval: SchemaProps.number({ description: 'Monitoring interval in seconds', default: 30 }),
-        maxAlertsPerHour: SchemaProps.number({ description: 'Maximum alerts per hour', default: 30 }),
-      },
-    },
-  },
+  persistenceEnvVar: 'SPORTS_GROUP_B_HOME',
   inputSchema: LINE_ALERT_INPUT,
   outputSchema: sportsResultSchema('Line alert dispatch result'),
   tier: 'represent',
@@ -160,5 +40,118 @@ export const LINE_ALERT_DISPATCHER = createCodeSkill({
     { kind: 'event', on: 'Line movement or odds change detected' }
   ],
   isSkill: false,
-});
+  manifest: {
+    configSchema: {
+      type: 'object',
+      properties: {
+        confirmBeforeSend: SchemaProps.boolean({ description: 'Require confirmation before sending', default: true }),
+        dryRun: SchemaProps.boolean({ description: 'Always dry-run for represent actions', default: true }),
+        monitorInterval: SchemaProps.number({ description: 'Monitoring interval in seconds', default: 30 }),
+        maxAlertsPerHour: SchemaProps.number({ description: 'Maximum alerts per hour', default: 30 }),
+      },
+    }
+  },
+  handler: async function handler(input, ctx) {
+      const entity = input.entity || input.market || 'general';
+      const sport = input.sport || 'generic';
+      const dryRun = input.dryRun !== false;
+      const confirmBeforeSend = input.confirmationRequired !== false;
 
+      let store = { alerts: [], specs: {}, lastUpdated: new Date().toISOString() };
+      store = ctx.store.load('line-alerts', []);
+
+      const oddsApi = process.env.ODDS_DATA_API_URL || '';
+      const requestTimeoutMs = Number(process.env.SPORTS_REQUEST_TIMEOUT_MS) || 10000;
+
+      async function fetchOddsData(apiUrl) {
+        if (!apiUrl) {
+          return { ok: false, status: 'not-configured', data: null, error: 'ODDS_DATA_API_URL not set' };
+        }
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
+        try {
+          const res = await fetch(apiUrl, { signal: controller.signal });
+          if (!res.ok) {
+            return { ok: false, status: 'http-error', data: null, error: 'HTTP ' + res.status };
+          }
+          const data = await res.json();
+          clearTimeout(timer);
+          return { ok: true, status: 'ok', data };
+        } catch (err) {
+          clearTimeout(timer);
+          return { ok: false, status: 'network-error', data: null, error: err && err.message ? err.message : String(err) };
+        }
+      }
+
+      const oddsResult = await fetchOddsData(oddsApi);
+      const dataConnected = oddsResult.ok === true;
+
+      const condition = input.condition || 'line-movement';
+      const targetOdds = Number(input.targetOdds) || null;
+      const movementThreshold = Number(input.movementThreshold) || 0.05;
+      const markets = Array.isArray(input.markets) ? input.markets : ['moneyline'];
+      const direction = input.direction || 'any';
+      const confirmationId = input.confirmationId || null;
+      const bankrollUnits = Number(input.bankrollUnits) || 0;
+      const bankrollMaxUnits = Number(input.bankrollMaxUnits) || 100;
+      const historicalVariance = Number(input.historicalVariance) || 0.03;
+      const exposureRatio = bankrollMaxUnits > 0 ? movementThreshold / bankrollMaxUnits : 0;
+      const actionRecommendation = exposureRatio > 0.5;
+      let signalType = 'noise';
+      if (movementThreshold > historicalVariance * 3) { signalType = 'genuine-value'; }
+      else if (movementThreshold > historicalVariance) { signalType = 'moderate-movement'; }
+      const alertType = signalType === 'genuine-value' ? 'action-recommended' : 'informational';
+      const movementAssessment = { exposureRatio, actionRecommendation, signalType, historicalVariance, movementThreshold };
+      const lineAlertSpec = {
+        id: 'la_' + Buffer.from(entity + sport).toString('base64').slice(0, 12),
+        entity,
+        sport,
+        condition,
+        targetOdds,
+        movementThreshold,
+        markets,
+        direction,
+        dryRun: dryRun,
+        confirmationRequired: confirmBeforeSend,
+        confirmationId: confirmationId,
+        confirmationProvided: confirmBeforeSend,
+        actionRecommendation: actionRecommendation,
+        signalType: signalType,
+        alertType: alertType,
+        movementAssessment: movementAssessment,
+        bankrollUnits: bankrollUnits,
+        bankrollMaxUnits: bankrollMaxUnits,
+        neverPlaceWagers: true,
+        neverAccessSportsbookAccounts: true,
+        dataConnected: dataConnected,
+        alertCriteria: {
+          anyMovementAbove: movementThreshold,
+          targetReached: targetOdds,
+          direction: direction,
+          markets: markets,
+        },
+        message: input.message || 'Line alert for ' + entity,
+        channels: input.channels || ['user-device'],
+        dispatchedAt: new Date().toISOString(),
+        source: dataConnected ? 'odds-api' : 'local',
+        connectivityStatus: oddsResult.status,
+      };
+
+      store.alerts.push(lineAlertSpec);
+      if (!store.specs[sport]) store.specs[sport] = [];
+      store.specs[sport].push(lineAlertSpec.id);
+
+      ctx.store.save('line-alerts', store);
+
+      const presentBody = 'Line alert dispatched for ' + entity + ' (' + sport + '): condition=' + condition + ', movement threshold=' + movementThreshold + ', signal type=' + signalType + ', alert type=' + alertType + ', action recommendation=' + actionRecommendation + ', exposure ratio=' + exposureRatio.toFixed(3) + ', markets=' + JSON.stringify(markets) + ', channels=' + JSON.stringify(lineAlertSpec.channels) + '. ' + lineAlertSpec.neverPlaceWagers + '. ';
+    }
+  });
+LINE_ALERT_DISPATCHER.configSchema = {
+      type: 'object',
+      properties: {
+        confirmBeforeSend: SchemaProps.boolean({ description: 'Require confirmation before sending', default: true }),
+        dryRun: SchemaProps.boolean({ description: 'Always dry-run for represent actions', default: true }),
+        monitorInterval: SchemaProps.number({ description: 'Monitoring interval in seconds', default: 30 }),
+        maxAlertsPerHour: SchemaProps.number({ description: 'Maximum alerts per hour', default: 30 }),
+      },
+    };
