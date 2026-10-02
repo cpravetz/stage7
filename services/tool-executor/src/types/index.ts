@@ -71,7 +71,27 @@ export interface ToolManifest {
   /** Event id this tool emits when it completes; downstream skills subscribe via an event trigger. */
   emitEvent?: string;
   executor?: NativeExecutorKey;
-  vendor?: 'jira' | 'confluence' | 'slack' | 'github';
+  /**
+   * The external system this Skill integrates with, when it is a named SaaS
+   * rather than a generic HTTP endpoint.
+   *
+   * This was previously declared but never set by any Skill, so an external
+   * dependency was only discoverable by grepping handler source for a
+   * `process.env` name. Naming the system here is what lets the platform reason
+   * about it: a default source for a public system, and a credential shape for
+   * a private one.
+   */
+  vendor?:
+    | 'jira'
+    | 'confluence'
+    | 'slack'
+    | 'github'
+    | 'workday'
+    | 'sap'
+    | 'salesforce'
+    | 'servicenow'
+    | 'google_workspace'
+    | 'microsoft_365';
   type?: 'mcp' | 'openapi' | 'code' | 'reasoning' | 'native';
   language?: string;
   sourceCode?: string;

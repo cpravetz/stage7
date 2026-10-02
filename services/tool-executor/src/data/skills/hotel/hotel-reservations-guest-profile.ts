@@ -36,10 +36,10 @@ const EXTERNAL_CONFIG_SCHEMA = createSchemaRecord({
 });
 
 const RESERVATIONS_INPUT_SCHEMA = createSchemaRecord({
-  propertyId: SchemaProps.text({ description: 'Hotel property identifier', required: true }),
-  reservationId: SchemaProps.text({ description: 'Reservation identifier' }),
-  guestId: SchemaProps.text({ description: 'Guest profile identifier' }),
-  roomId: SchemaProps.text({ description: 'Room identifier for assignment or status changes' }),
+  propertyId: SchemaProps.reference('hotel-properties', { description: 'Hotel property identifier', required: true }),
+  reservationId: SchemaProps.reference('hotel-reservations', { description: 'Reservation identifier' }),
+  guestId: SchemaProps.reference('hotel-guests', { description: 'Guest profile identifier' }),
+  roomId: SchemaProps.reference('hotel-rooms', { description: 'Room identifier for assignment or status changes' }),
   guestName: SchemaProps.text({ description: 'Guest name for a new reservation or profile' }),
   email: SchemaProps.email({ description: 'Guest email address' }),
   phone: SchemaProps.text({ description: 'Guest phone number' }),
@@ -73,7 +73,7 @@ export const RESERVATIONS_SKILL = createExternalActionSkill({
   description: 'Unified PMS router for reservation lifecycle, room assignment, guest profiles, external bookings, and billing. Mutating requests require confirmation and default to dry-run.',
   system: 'hotel-pms',
   action: 'reservations-guest-profile',
-  endpoint: { envVar: 'HOTEL_HOME', method: 'POST' },
+  endpoint: { configKey: 'hotelHome', method: 'POST' },
   auth: { type: 'bearer', credentialEnvKeyMap: { token: 'HOTEL_API_TOKEN' } },
   credentialSource: { token: { envVar: 'HOTEL_API_TOKEN', configKey: 'hotel.token' } },
   inputSchema: RESERVATIONS_INPUT_SCHEMA,

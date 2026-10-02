@@ -7,7 +7,7 @@ export const TICKET_OPS = createExternalActionSkill({
   description: 'Manage CRM integration, ticket escalation, and customer follow-ups through external services. Confirmation required before sending; dry-run mode is default.',
   system: 'ticket-ops',
   action: 'execute',
-  endpoint: { envVar: 'SUPPORT_OPS_ENDPOINT', method: 'POST' },
+  endpoint: { configKey: 'SUPPORT_OPS_ENDPOINT', method: 'POST' },
   auth: { type: 'api_key', header: 'X-API-Key', credentialEnvKeyMap: { apiKey: 'SUPPORT_OPS_API_KEY' } },
   configSchema: {
     type: 'object',

@@ -38,18 +38,17 @@ export const healthcareClinicalPracticeWorkflowEvaluator = createDeclarativeCode
   tier: 'advise',
   domainKnowledge: 'Healthcare clinic operations, scheduling metrics, workflow efficiency, and billing-delay analysis',
   inputSchema: createSchemaRecord({
-    workflowRows: SchemaProps.objectArray(SchemaProps.object({
-      id: SchemaProps.text({ description: 'Optional workflow row identifier' }),
-      facility: SchemaProps.text({ description: 'Facility or practice identifier' }),
-      scheduled: SchemaProps.integer({ description: 'Scheduled encounters' }),
-      completed: SchemaProps.integer({ description: 'Completed encounters' }),
-      noShows: SchemaProps.integer({ description: 'No-show encounters' }),
-      avgWaitMinutes: SchemaProps.number({ description: 'Average wait time in minutes' }),
-      billingDelayDays: SchemaProps.number({ description: 'Average billing delay in days' }),
-    }), { description: 'Practice workflow records' }),
-    accessWaitThresholdMinutes: SchemaProps.number({ description: 'Wait-time threshold in minutes', default: 30 }),
-    billingDelayThresholdDays: SchemaProps.number({ description: 'Billing-delay threshold in days', default: 7 }),
-  }, { required: ['workflowRows'] }),
+    locationMetrics: SchemaProps.objectArray(SchemaProps.object({
+      facility: SchemaProps.text({ description: 'Which practice or location this row covers' }),
+      scheduled: SchemaProps.integer({ description: 'Appointments booked' }),
+      completed: SchemaProps.integer({ description: 'Appointments seen' }),
+      noShows: SchemaProps.integer({ description: 'Appointments the patient did not attend' }),
+      avgWaitMinutes: SchemaProps.number({ description: 'Average wait time, in minutes' }),
+      billingDelayDays: SchemaProps.number({ description: 'Average delay in billing, in days' }),
+    }), { description: 'Appointment and billing figures for each practice location' }),
+    accessWaitThresholdMinutes: SchemaProps.number({ description: 'Flag a wait longer than this many minutes', default: 30 }),
+    billingDelayThresholdDays: SchemaProps.number({ description: 'Flag a billing delay longer than this many days', default: 7 }),
+  }, { required: ['locationMetrics'] }),
   outputSchema: healthcareResultSchema('Per-location workflow metrics, set summary, bottlenecks, and recommendations'),
   triggers,
   manifest: {
@@ -72,7 +71,7 @@ export const healthcareClinicalPracticeWorkflowEvaluator = createDeclarativeCode
         };
       }
 
-      const rows = Array.isArray(input.workflowRows) ? input.workflowRows : [];
+      const rows = Array.isArray(input.locationMetrics) ? input.locationMetrics : [];
       if (!rows.length) {
         return fail('not-connected', 'Not connected: no workflow records were supplied', 'Input required');
       }

@@ -84,7 +84,7 @@ describe('createExternalActionSkill', () => {
     action: 'test-action',
   }
 
-  it('resolves endpoint from url, then envVar, then input.endpointUrl', () => {
+  it('resolves endpoint from url, then config, then input.endpointUrl', () => {
     const skill = createExternalActionSkill({
       ...baseOptions,
       endpoint: { url: 'https://api.example.com/endpoint', method: 'POST' },
@@ -95,37 +95,40 @@ describe('createExternalActionSkill', () => {
       path: undefined,
       method: 'POST',
     })
-    expect(skill.manifest.endpointEnvVar).toBeUndefined()
+    expect(skill.manifest.endpointConfigKey).toBeUndefined()
     const source = skill.manifest.sourceCode as string
     expect(source).toContain('const endpoint = "https://api.example.com/endpoint"')
-    expect(source).toContain('const endpointEnvVar = null')
+    expect(source).toContain('const endpointConfigKey = null')
   })
 
-  it('uses endpoint.envVar when url/path not provided', () => {
+  it('reads endpoint.configKey from the Skill configuration, never the environment', () => {
     const skill = createExternalActionSkill({
       ...baseOptions,
-      endpoint: { envVar: 'API_ENDPOINT', method: 'POST' },
+      endpoint: { configKey: 'endpointUrl', method: 'POST' },
     })
 
-    expect(skill.manifest.endpointEnvVar).toBe('API_ENDPOINT')
+    expect(skill.manifest.endpointConfigKey).toBe('endpointUrl')
     expect(skill.manifest.endpoint).toBeUndefined()
     const source = skill.manifest.sourceCode as string
     expect(source).toContain('const endpoint = ""')
-    expect(source).toContain('const endpointEnvVar = "API_ENDPOINT"')
-    expect(source).toContain('globalThis.process.env[endpointEnvVar]')
+    expect(source).toContain('const endpointConfigKey = "endpointUrl"')
+    expect(source).toContain('__skill_config[endpointConfigKey]')
+    // Which upstream a Skill calls is an operator setting, not a deployment
+    // fact, so the generated source must not read the process environment.
+    expect(source).not.toContain('process.env')
   })
 
-  it('falls back to input.endpointUrl when no fixed endpoint or envVar', () => {
+  it('falls back to input.endpointUrl when no fixed endpoint or config key', () => {
     const skill = createExternalActionSkill({
       ...baseOptions,
       endpoint: { method: 'POST' },
     })
 
     expect(skill.manifest.endpoint).toBeUndefined()
-    expect(skill.manifest.endpointEnvVar).toBeUndefined()
+    expect(skill.manifest.endpointConfigKey).toBeUndefined()
     const source = skill.manifest.sourceCode as string
     expect(source).toContain('const endpoint = ""')
-    expect(source).toContain('const endpointEnvVar = null')
+    expect(source).toContain('const endpointConfigKey = null')
     expect(source).toContain('input.endpointUrl')
   })
 
@@ -393,7 +396,10 @@ describe('createExternalActionSkill', () => {
       })
 
       const source = skill.manifest.sourceCode as string
-      expect(source).toContain('const controller = new AbortController()')
+      // The controller is declared outside the try so the catch handler can clear
+      // the timer; declaring it inside made every real failure a ReferenceError.
+      expect(source).toContain('let controller = null')
+      expect(source).toContain('controller = new AbortController()')
       expect(source).toContain('setTimeout(() => controller.abort(), 3000)')
       expect(source).toContain('signal: controller.signal,')
       expect(source).toContain('clearTimeout(timeoutId)')

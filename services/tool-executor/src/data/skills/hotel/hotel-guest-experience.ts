@@ -36,10 +36,10 @@ const EXTERNAL_CONFIG_SCHEMA = createSchemaRecord({
 });
 
 const GUEST_EXPERIENCE_INPUT_SCHEMA = createSchemaRecord({
-  propertyId: SchemaProps.text({ description: 'Hotel property identifier', required: true }),
-  guestId: SchemaProps.text({ description: 'Guest identifier' }),
-  reservationId: SchemaProps.text({ description: 'Related reservation identifier' }),
-  requestId: SchemaProps.text({ description: 'Guest-service request identifier' }),
+  propertyId: SchemaProps.reference('hotel-properties', { description: 'Hotel property identifier', required: true }),
+  guestId: SchemaProps.reference('hotel-guests', { description: 'Guest identifier' }),
+  reservationId: SchemaProps.reference('hotel-reservations', { description: 'Related reservation identifier' }),
+  requestId: SchemaProps.reference('hotel-guest-requests', { description: 'Guest-service request identifier' }),
   query: SchemaProps.textarea({ description: 'Concierge question or local-information search query' }),
   category: SchemaProps.select(['dining', 'transport', 'attractions', 'events', 'wellness', 'shopping', 'business', 'emergency'], {
     description: 'Concierge or local-information category',
@@ -54,7 +54,7 @@ const GUEST_EXPERIENCE_INPUT_SCHEMA = createSchemaRecord({
   rating: SchemaProps.number({ description: 'Minimum recommendation rating', minimum: 0, maximum: 5 }),
   tags: SchemaProps.stringArray({ description: 'Recommendation or content tags' }),
   channel: SchemaProps.select(['email', 'sms', 'push', 'portal', 'phone', 'whatsapp'], { description: 'Guest communication channel' }),
-  templateId: SchemaProps.text({ description: 'Communication template identifier' }),
+  templateId: SchemaProps.reference('hotel-communication-templates', { description: 'Communication template identifier' }),
   subject: SchemaProps.text({ description: 'Guest message subject' }),
   message: SchemaProps.textarea({ description: 'Guest-facing message or service response draft' }),
   variables: SchemaProps.object({}, { description: 'Template variables for personalized communication', additionalProperties: true }),
@@ -73,7 +73,7 @@ export const GUEST_EXPERIENCE_SKILL = createExternalActionSkill({
   description: 'Unified PMS router for concierge knowledge, local recommendations, guest services, and guest communications. Mutating requests require confirmation and default to dry-run.',
   system: 'hotel-pms',
   action: 'guest-experience',
-  endpoint: { envVar: 'HOTEL_HOME', method: 'POST' },
+  endpoint: { configKey: 'hotelHome', method: 'POST' },
   auth: { type: 'bearer', credentialEnvKeyMap: { token: 'HOTEL_API_TOKEN' } },
   credentialSource: { token: { envVar: 'HOTEL_API_TOKEN', configKey: 'hotel.token' } },
   inputSchema: GUEST_EXPERIENCE_INPUT_SCHEMA,

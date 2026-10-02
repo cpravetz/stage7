@@ -43,6 +43,8 @@ export const MATCHUP_ODDS_EXPLAINER = createDeclarativeCodeSkill({
     configSchema: {
       type: 'object',
       properties: {
+        oddsEndpoint: SchemaProps.url({ description: 'Odds provider base URL for this Skill' }),
+        requestTimeoutMs: SchemaProps.number({ description: 'Request timeout in milliseconds', default: 10000 }),
         oddsProvider: SchemaProps.select(['oddsdata', 'pinnacle', 'both'], { description: 'Odds data provider', default: 'both' }),
       },
     }
@@ -53,15 +55,17 @@ export const MATCHUP_ODDS_EXPLAINER = createDeclarativeCodeSkill({
       const teamB = input.teamB || 'Team B';
       const sport = input.sport || 'generic';
 
-      let store = { analyses: [], lastUpdated: new Date().toISOString() };
-      store = ctx.store.load('matchup-odds', []);
+      const defaults = { analyses: [], lastUpdated: new Date().toISOString() };
+      // Keep the shape used below; an `[]` fallback made `store.analyses` throw.
+      const loaded = ctx.store.load('matchup-odds', defaults);
+      const store = loaded && typeof loaded === 'object' && !Array.isArray(loaded) ? { ...defaults, ...loaded } : defaults;
 
-      const oddsApi = process.env.ODDS_DATA_API_URL || '';
-      const requestTimeoutMs = Number(process.env.SPORTS_REQUEST_TIMEOUT_MS) || 10000;
+      const oddsApi = String(ctx.config?.oddsEndpoint || '');
+      const requestTimeoutMs = Number(ctx.config?.requestTimeoutMs) || 10000;
 
       async function fetchSportsbookOdds(apiUrl, event) {
         if (!apiUrl) {
-          return { ok: false, status: 'not-configured', data: null, error: 'ODDS_DATA_API_URL not set' };
+          return { ok: false, status: 'not-configured', data: null, error: 'No odds provider configured: set oddsEndpoint in this Skill\'s configuration' };
         }
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
@@ -153,6 +157,34 @@ export const MATCHUP_ODDS_EXPLAINER = createDeclarativeCodeSkill({
 
       store.analyses.push(analysis);
       ctx.store.save('matchup-odds', store);
+
+      // The analysis was computed and persisted but never returned, so the Skill
+      // produced no output at all while appearing to succeed. Report the result,
+      // and say plainly when the numbers came from the fallback rather than the
+      // configured provider, so an operator is never misled about their source.
+      const usedFallback = !oddsResult.ok;
+      const summaryLines = [
+        'Matchup odds: ' + teamA + ' vs ' + teamB,
+        'Odds ' + oddsA + ' / ' + oddsB + (drawOdds ? ' / ' + drawOdds : '') + ' (vig ' + analysis.odds.vigPercent + '%)',
+        'Implied probability: ' + impliedProbA.toFixed(4) + ' vs ' + impliedProbB.toFixed(4),
+        analysis.matchupAssessment.relativeStrength + ' (margin ' + analysis.matchupAssessment.margin + ')',
+      ];
+      if (usedFallback) {
+        summaryLines.push('Odds source: algorithmic fallback - no odds provider configured, so these are the supplied input odds.');
+      } else {
+        summaryLines.push('Odds source: ' + oddsApi);
+      }
+      summaryLines.push(responsiblePlay.entertainmentFraming, responsiblePlay.expectedValueDisclaimer, responsiblePlay.responsibleGamingNote);
+
+      return {
+        success: true,
+        status: 'ok',
+        data: { analysis: analysis, analyses: store.analyses },
+        source: sourceLabel,
+        connectivityStatus: oddsResult.status,
+        error: null,
+        present: [ctx.render.text('matchup-odds', 'Matchup & odds', summaryLines.join('\n'))],
+      };
     }
   });
 MATCHUP_ODDS_EXPLAINER.configSchema = {

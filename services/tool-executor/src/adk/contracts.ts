@@ -220,31 +220,6 @@ export interface CreateToolParameters {
   updatedAt?: Date;
 }
 
-export interface CodeSkillManifest {
-  language: 'javascript' | 'typescript' | 'python';
-  entrypoint: string;
-  sourceCode: string;
-  configSchema?: SchemaRecord;
-  credentialSource?: Record<string, { vaultSecretId?: string; envVar?: string; configKey?: string }>;
-  [key: string]: unknown;
-}
-
-export interface CreateCodeSkillParameters {
-  id: string;
-  name: string;
-  description: string;
-  manifest: Omit<CodeSkillManifest, 'language' | 'entrypoint'> & Partial<Pick<CodeSkillManifest, 'language' | 'entrypoint'>>;
-  inputSchema: SchemaRecord;
-  outputSchema: SchemaRecord;
-  triggers?: SkillTrigger[];
-  confirmBeforeSend?: boolean;
-  tier?: 'advise' | 'aid' | 'represent';
-  domainKnowledge?: string;
-  isSkill?: boolean;
-  createdAt?: Date;
-  updatedAt?: Date;
-}
-
 export interface AssistantPersistencePort<TState> {
   load(id: string): MaybePromise<TState | undefined>;
   save(id: string, state: TState): MaybePromise<void>;

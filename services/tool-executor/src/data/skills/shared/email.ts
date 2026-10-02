@@ -34,7 +34,7 @@ export const emailIntegrationSkill = createExternalActionSkill({
   description: 'Unified email operations via POP3, IMAP, and SMTP. Supports listing, fetching, searching, sending, and managing emails across protocols. Requires configured email server endpoints and credentials.',
   system: 'email',
   action: 'execute',
-  endpoint: { envVar: 'EMAIL_INTEGRATION_ENDPOINT', method: 'POST' },
+  endpoint: { configKey: 'EMAIL_INTEGRATION_ENDPOINT', method: 'POST' },
   auth: {
     type: 'custom',
     credentialEnvKeyMap: {

@@ -6,8 +6,8 @@ import {
 
 const ROOM_STATUS_INPUT_SCHEMA = createSchemaRecord({
   ...HOTEL_PROPERTY_BASE_INPUT,
-  roomId: SchemaProps.text({ description: 'Room identifier' }),
-  roomIds: SchemaProps.stringArray({ description: 'Room identifiers for bulk status changes' }),
+  roomId: SchemaProps.reference('hotel-rooms', { description: 'Room identifier' }),
+  roomIds: SchemaProps.referenceArray('hotel-rooms', { description: 'Room identifiers for bulk status changes' }),
   status: SchemaProps.select(['available', 'occupied', 'reserved', 'cleaning', 'clean', 'inspected', 'out-of-order'], {
     description: 'Target room status; out-of-order removes the room from sale',
   }),

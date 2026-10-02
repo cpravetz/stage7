@@ -12,6 +12,21 @@ export interface CodeExecutionOptions {
   timeoutMs?: number;
   stdin?: string;
   input?: Record<string, unknown>;
+  /**
+   * Resolved Skill configuration (the values declared in the Skill's
+   * configSchema). Injected alongside `input` so a handler can read the settings
+   * it was configured with. Without this, configSchema was only ever a
+   * presence gate: the values were checked for existence and then unreachable
+   * from the handler.
+   */
+  config?: Record<string, unknown>;
+  /**
+   * Credentials the executor's provider already resolved for this run, keyed by
+   * the logical key the Skill declared in `manifest.credentialSource`. Injected so
+   * a handler reads secrets from the credential provider rather than from
+   * process.env.
+   */
+  credentials?: Record<string, string | undefined>;
   // Optional environment variable name that tools use to persist state (e.g. 'CTO_HOME')
   persistenceEnvVar?: string;
   // Optional callback for tool execution bridge
@@ -133,10 +148,16 @@ export class CodeExecutor {
         const code = options.code;
         const wrapped = `const __tool_input = ${JSON.stringify(options.input || {})};
 
+const __skill_config = ${JSON.stringify(options.config || {})}
+
+const __skill_credentials = ${JSON.stringify(options.credentials || {})};
+
 const __credential_sources = ${sourceMapJson};
 
 function __getCredential(logicalKey) {
-  return process.env[logicalKey] || '';
+  // Resolved by the executor's credential provider, not read from the process
+  // environment: a Skill must not depend on env vars for its own settings.
+  return __skill_credentials[logicalKey] || '';
 }
 
 function __getCredentialSource(logicalKey) {
@@ -349,10 +370,14 @@ import urllib.request
 
 __tool_input = ${JSON.stringify(options.input || {})}
 
+__skill_config = ${JSON.stringify(options.config || {})}
+
+__skill_credentials = ${JSON.stringify(options.credentials || {})}
+
 __credential_sources = ${JSON.stringify(sourceMappings)}
 
 def __get_credential(logical_key):
-    return os.environ.get(logical_key, '')
+    return __skill_credentials.get(logical_key, '')
 
 def __get_credential_source(logical_key):
     for s in __credential_sources:

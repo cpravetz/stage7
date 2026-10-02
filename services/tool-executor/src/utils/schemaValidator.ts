@@ -43,7 +43,16 @@ const collectIssues = (value: unknown, schema: Schema, path: string, issues: Sch
   }
 
   if (Array.isArray(schema.enum) && schema.enum.length > 0) {
-    if (!schema.enum.includes(value as never)) {
+    // An enum entry may be a bare value or a { value, label } pair. The pair exists
+    // so a select can show wording a user can act on ("Assess your own
+    // emotional intelligence") while still submitting a stable identifier; only the
+    // value half takes part in validation.
+    const allowed = schema.enum.map((entry) =>
+      entry !== null && typeof entry === 'object' && 'value' in (entry as Record<string, unknown>)
+        ? (entry as { value: unknown }).value
+        : entry,
+    );
+    if (!allowed.includes(value as never)) {
       issues.push({
         path: path || '(root)',
         message: `value ${JSON.stringify(value)} is not one of the declared enum`,

@@ -8,9 +8,26 @@ import path from 'path';
 
 declare const __tool_input: any;
 declare const __execute_tool: any;
+/** Resolved Skill configuration, injected by the executor next to __tool_input. */
+declare const __skill_config: any;
+/**
+ * Resolved credentials, keyed by the logical key the Skill's manifest declares in
+ * `credentialSource`. Injected by the executor so a handler never reads
+ * process.env: secrets arrive through the credential provider (vault, or the
+ * Skill's own configuration), not through the process environment.
+ */
+declare const __skill_credentials: any;
 
 export interface RuntimeOptions {
   persistenceEnvVar?: string;
+  /**
+   * Operator-supplied Skill configuration for this run. Passed explicitly
+   * because this module can be loaded with require(), which gives it a scope of
+   * its own that cannot see the calling script's variables.
+   */
+  config?: Record<string, unknown>;
+  /** Secrets resolved by the executor's credential provider for this run. */
+  credentials?: Record<string, string | undefined>;
 }
 
 /** Fallback directory for the inter-skill collection store when no env dir is set. */
@@ -60,6 +77,33 @@ function remoteCall(method: string, collection: string, key: string, body?: any)
 
 export function createRuntimeContext(opts: RuntimeOptions = {}) {
   const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
+  // Resolved Skill configuration, injected by the executor. configSchema was
+  // previously only a presence gate -- the values were validated for existence
+  // and then unreachable from the handler, so a scheduled Skill could declare a
+  // required selector and never see it. Config is a separate object from input
+  // on purpose: it is operator-supplied, not per-run, and handlers should not
+  // be able to override it by sending the same key as input.
+  // Prefer the values the caller passes in. The globals are only a fallback for
+  // direct in-module use: when this module is loaded with require() it has its own
+  // scope and cannot see the wrapper script's variables, so reading the globals
+  // there would always yield an empty config.
+  const config = opts.config ?? (typeof __skill_config !== 'undefined' && __skill_config ? __skill_config : {});
+  // Secrets for this run, resolved by the executor's credential provider and
+  // scoped to the logical keys the Skill declared. A Skill reads its own key out
+  // of here rather than out of the process environment, which is how secrets can
+  // be rotated and revoked without redeploying.
+  const credentials = opts.credentials
+    ?? (typeof __skill_credentials !== 'undefined' && __skill_credentials ? __skill_credentials : {});
+
+  /**
+   * Resolve one declared credential, or undefined when it is not configured.
+   * Handlers should treat undefined as "not connected" and say so, not guess.
+   */
+  function getCredential(logicalKey: string): string | undefined {
+    const value = credentials[logicalKey];
+    return typeof value === 'string' && value.length > 0 ? value : undefined;
+  }
+
   const persistenceEnvVar = opts.persistenceEnvVar || 'STORAGE_DIR';
   const baseDir = (typeof process !== 'undefined' && process.env && process.env[persistenceEnvVar]) || '/tmp/stage7';
   const collection = deriveCollection(persistenceEnvVar);
@@ -246,6 +290,9 @@ export function createRuntimeContext(opts: RuntimeOptions = {}) {
 
   return {
     input,
+    config,
+    credentials,
+    getCredential,
     store,
     emit,
     delegate,

@@ -49,38 +49,14 @@ const SKILL_SOURCES: Record<string, [string, string]> = {
 /**
  * Bindings that name a skill the tool executor does not define.
  *
- * These are pre-existing: the old catalog carried the same wrong IDs, and
- * nothing checked them, so these assistants have been seeding tool bindings
- * that resolve to nothing. They are listed rather than deleted so the breakage
- * stays visible and each entry is a deliberate decision to resolve.
- *
- * Known shape of each mismatch:
- *   event      - catalog omits the `event-` prefix the folder uses
- *   hotel/hr   - catalog uses conceptual names; folder uses screen/assess/schedule
- *   product    - `product-operations` does not exist; folder has jira/confluence/slack
- *   songwriter  - catalog uses hyphens; folder uses underscores
+ * Empty by design: the last of the pre-existing rot was repaired, so every
+ * binding resolves. This list stays as a zero-length declaration because the two
+ * tests that read it are what stop it silently refilling -- if a binding ever
+ * breaks again, `binds only skill IDs the tool executor actually defines` fails
+ * with the offending IDs, and they get added here deliberately rather than
+ * drifting.
  */
-const KNOWN_UNRESOLVED_BINDINGS: Record<string, string[]> = {
-  event: ['vendor-contract-management', 'day-of-operations'],
-  hotel: [
-    'reservations-guest-profile-manager',
-    'property-operations-manager',
-    'guest-experience-copilot',
-    'revenue-performance-advisory',
-  ],
-  hr: [
-    'hr-workforce-planning-compensation-evaluator',
-    'hr-job-description-interview-kit-copilot',
-    'hr-candidate-screening-scheduling-manager',
-  ],
-  product: ['product-operations'],
-  songwriter: [
-    'songwriting-lyric-prosody-evaluator',
-    'songwriting-musical-lyric-cocreation',
-    'songwriting-lead-sheet-demo-dispatcher',
-    'songwriter-genre-trend-evaluator',
-  ],
-};
+const KNOWN_UNRESOLVED_BINDINGS: Record<string, string[]> = {};
 
 const catalog = loadAssistantCatalog();
 

@@ -441,12 +441,12 @@ The 4-way `ticket-understanding` split is retained and is justified under §6 �
 | Design Skill ID | Impl Skill IDs | Tier (Design) | Tier (Impl) | Trigger (Impl) | Status |
 |-----------------|----------------|---------------|-------------|-----------------|--------|
 | `candidate-screening` | `hr-screen-resume`, `hr-assess-candidate` | Represent | Represent (both) | User, Event | **MATCH** |
-| `recruiting-ops` | `hr-draft-jd-interview-kit`, `hr-trigger-interview-scheduling`, `hr-schedule-interview` | Aid | Aid (first two), Represent (`hr-schedule-interview`) | User, Event, Event | Split per §0.9/§6 |
+| `recruiting-ops` | `hr-draft-jd-interview-kit`, `hr-interview-scheduling-user`, `hr-interview-scheduling-automated` | Aid | Aid (all three) | User, Event, Event | Split per §0.9/§6 |
 | `hiring-analytics-compliance` | `hr-hiring-analytics`, `hr-compliance-check` | Advise | Advise (both) | Schedule, Schedule | **MATCH** |
 
-**Unchanged and still correct.** All 7 skills have `tier`, `triggers`, and `domainKnowledge`. All Represent-tier skills carry `confirmBeforeSend=true`. The 3-way `recruiting-ops` split flagged in the previous report has been carried out: the `operation` field is gone, replaced by three skills with distinct trigger boundaries.
+**Unchanged and still correct.** All 7 skills have `tier`, `triggers`, and `domainKnowledge`. All Represent-tier skills carry `confirmBeforeSend=true`. The 3-way `recruiting-ops` split flagged in the previous report has been carried out: the `operation` field is gone, replaced by three skills with distinct trigger boundaries. The count is still 7, but by a different route: splitting the bundled scheduler briefly took HR to 8, and removing the duplicate `hr-schedule-interview` (see note below) brought it back to 7 — now 2 Represent, 3 Aid, 2 Advise.
 
-**Note:** `hr-schedule-interview` is `represent` while its two siblings in the same design cluster are `aid`. Design does not assign a tier to the split pieces, so this is an implementation judgement that should be ratified.
+**Note:** this cluster previously resolved to four implementation Skills. `hr-schedule-interview` was removed on 2026-10-01: it carried the same `"Candidate passed screening"` Event trigger as `hr-interview-scheduling-automated` and did the same job, so two Skills were claiming one trigger, which §0.14 forbids. It was also never bound to the HR Assistant, so it was unreachable in practice. The one capability it uniquely had — writing a durable local `scheduling` record on success — was folded into the automated half rather than lost. The cluster is now three Skills, all `aid` tier, and the earlier `represent`/`aid` tier discrepancy in this note no longer exists. Design still assigns no tier to the split pieces, so `aid` remains an implementation judgement to be ratified.
 
 ---
 

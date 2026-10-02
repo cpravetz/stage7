@@ -25,7 +25,6 @@ const budgetTrackingInputSchema = createSchemaRecord({
   tolerancePct: SchemaProps.number({ description: 'Absolute variance tolerated before a category is flagged', minimum: 0, maximum: 1, default: 0.05 }),
   system: SchemaProps.select(['netsuite', 'quickbooks', 'xero', 'custom'], { description: 'Accounting system the budget ledger belongs to' }),
   endpoint: SchemaProps.url({ description: 'Budget ledger endpoint override for this call' }),
-  apiKey: SchemaProps.password({ description: 'Optional API key override for the budget ledger endpoint' }),
   dryRun: SchemaProps.boolean({ description: 'Stage the analysis without writing it; defaults to true', default: true }),
   confirmation: SchemaProps.boolean({ description: 'Explicit approval for a live budget-ledger write; required when dryRun is false', default: false }),
 });
@@ -51,18 +50,21 @@ const budgetTrackingSkill = createDeclarativeCodeSkill({
   confirmBeforeSend: true,
   isSkill: true,
   manifest: {
+  credentialSource: {
+    apiKey: { configKey: 'apiKey', required: false, label: "ERP service API key, needed only for a live write (set in this Skill configuration, or a vault secret)" },
+  },
     configSchema: createSchemaRecord({
       endpointUrl: SchemaProps.url({ description: 'Accounting ERP endpoint URL; may also be supplied at runtime through ' + BUDGET_LEDGER_ENV }),
-      apiKey: SchemaProps.password({ description: 'API key for the accounting ERP endpoint' }),
       system: SchemaProps.select(['netsuite', 'quickbooks', 'xero', 'custom'], { description: 'Accounting system the budget ledger belongs to' }),
       confirmBeforeSend: SchemaProps.boolean({ description: 'Require explicit confirmation before a live budget-ledger write', default: true }),
       defaultDryRun: SchemaProps.boolean({ description: 'Default budget tracking to dry-run', default: true }),
     }),
-    endpointEnvVar: BUDGET_LEDGER_ENV,
-    // Deliberately no manifest credentialSource. Declaring one makes the core credential gate demand
-    // the key before the skill runs, which would block the analysis-only path that sends nothing and
-    // reports the variance it can honestly compute instead. The key is read at send time, so it is
-    // only ever required for a live write.
+    endpointConfigKey: 'endpointUrl',
+    // The key is optional (`required: false`): it is only needed for a live external
+
+    // write, so gating on it would block the analysis-only and dry-run paths that
+
+    // report what this Skill can honestly compute without one.
     persistenceEnv: 'FINANCE_HOME',
     confirmBeforeSend: true,
     timeoutMs: 30000
@@ -205,7 +207,7 @@ const budgetTrackingSkill = createDeclarativeCodeSkill({
         ];
       }
 
-      const endpoint = String(input.endpoint || process.env[ENDPOINT_ENV] || '').trim();
+      const endpoint = String(input.endpoint || ctx.config?.endpointUrl || '').trim();
       const analysisLines = renderAnalysis(analysis);
 
       if (!budgetLines.length) {
@@ -239,7 +241,9 @@ const budgetTrackingSkill = createDeclarativeCodeSkill({
       }
 
       const headers = { 'Content-Type': 'application/json' };
-      const apiKey = String(input.apiKey || process.env[API_KEY_ENV] || '').trim();
+            // Secrets arrive through ctx.credentials, resolved from this Skill's
+      // credentialSource, never from the process environment.
+      const apiKey = String((ctx.getCredential ? ctx.getCredential('apiKey') : undefined) || '').trim();
       if (apiKey) headers['Authorization'] = 'Bearer ' + apiKey;
       const body = JSON.stringify({ operation: 'budget-tracking', entity: input.entity || null, period: input.period || null, analysis: analysis });
 
@@ -261,7 +265,6 @@ const budgetTrackingSkill = createDeclarativeCodeSkill({
   });
 budgetTrackingSkill.configSchema = createSchemaRecord({
       endpointUrl: SchemaProps.url({ description: 'Accounting ERP endpoint URL; may also be supplied at runtime through ' + BUDGET_LEDGER_ENV }),
-      apiKey: SchemaProps.password({ description: 'API key for the accounting ERP endpoint' }),
       system: SchemaProps.select(['netsuite', 'quickbooks', 'xero', 'custom'], { description: 'Accounting system the budget ledger belongs to' }),
       confirmBeforeSend: SchemaProps.boolean({ description: 'Require explicit confirmation before a live budget-ledger write', default: true }),
       defaultDryRun: SchemaProps.boolean({ description: 'Default budget tracking to dry-run', default: true }),

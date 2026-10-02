@@ -31,11 +31,11 @@ const EDUCATION_EXTERNAL_OUTPUT_SCHEMA = {
 
 export const RESOURCE_LIBRARY_OPS = createExternalActionSkill({
   id: 'education-resource-library',
-  name: 'Resource Library Ops',
+  name: 'Learning Resource Manager',
   description: 'Search and manage educational resources in a connected repository (LMS, Google Drive, SharePoint, custom). Proxy skill for real repository operations.',
   system: 'education_repository',
   action: 'manage_resources',
-  endpoint: { envVar: 'EDUCATION_RESOURCE_ENDPOINT', method: 'POST' },
+  endpoint: { configKey: 'EDUCATION_RESOURCE_ENDPOINT', method: 'POST' },
   auth: {
     type: 'bearer',
     credentialEnvKeyMap: { token: 'EDUCATION_RESOURCE_ACCESS_TOKEN' },

@@ -6,11 +6,12 @@ import {
 } from '@stage7-nextgen/shared';
 import { logger } from '@stage7-nextgen/shared';
 import { KnowledgeService } from './KnowledgeService';
+import type { AssistantLoader } from './AssistantLoader';
 
 export class AssistantExecutor {
   private toolExecutorUrl: string;
 
-  constructor(private knowledge: KnowledgeService) {
+  constructor(private knowledge: KnowledgeService, private loader?: AssistantLoader) {
     this.toolExecutorUrl = process.env.TOOL_EXECUTOR_URL || 'http://tool-executor:3500';
   }
 
@@ -196,12 +197,37 @@ export class AssistantExecutor {
   }
 
 
+  /**
+   * The settings saved against an assistant's tool binding, if any.
+   *
+   * `config` on the binding is what the Skill settings tab writes; the executor
+   * expects the same values as `externalConfig`, so they are looked up here rather
+   * than at each call site.
+   */
+  private bindingConfig(assistantId: string | undefined, toolName: string): Record<string, unknown> | undefined {
+    if (!assistantId) return undefined;
+    try {
+      const definition = this.loader?.get(assistantId);
+      const binding = definition?.tools?.find((t) => t.name === toolName);
+      const config = (binding as { config?: Record<string, unknown>; externalConfig?: Record<string, unknown> } | undefined)?.config
+        ?? (binding as { externalConfig?: Record<string, unknown> } | undefined)?.externalConfig;
+      return config && Object.keys(config).length > 0 ? config : undefined;
+    } catch (err) {
+      logger.warn({ assistantId, toolName, err }, 'Could not resolve skill settings for tool call');
+      return undefined;
+    }
+  }
+
   async executeToolCall(tool: MCPToolCall, assistantId?: string, workspaceId?: string): Promise<MCPToolResult> {
     logger.info({ toolName: tool.name, arguments: tool.arguments, workspaceId }, 'Tool execution requested');
 
     try {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (assistantId) headers['X-Assistant-Id'] = assistantId;
+      // The Skill's settings are stored against the assistant's tool binding, but
+      // until now nothing sent them, so the executor built the Skill with empty
+      // configuration and every handler read its defaults.
+      const config = this.bindingConfig(assistantId, tool.name);
       const response = await fetch(`${this.toolExecutorUrl}/api/tool-executor/tools/execute`, {
         method: 'POST',
         headers,
@@ -213,6 +239,7 @@ export class AssistantExecutor {
           input: tool.arguments || {},
           workspaceId,
           assistantId,
+          ...(config ? { externalConfig: config } : {}),
         }),
       });
 

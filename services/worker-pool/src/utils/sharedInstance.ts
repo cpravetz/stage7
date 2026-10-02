@@ -7,6 +7,6 @@ import { buildAssistantManifest, parseSTAGE7_ASSISTANTS, validateManifest, filte
 const persistence = new ArtifactsService();
 const knowledgeService = new KnowledgeService(persistence);
 const assistantLoader = new AssistantLoader(persistence);
-const assistantExecutor = new AssistantExecutor(knowledgeService);
+const assistantExecutor = new AssistantExecutor(knowledgeService, assistantLoader);
 
 export { assistantLoader, assistantExecutor, knowledgeService, persistence, buildAssistantManifest, parseSTAGE7_ASSISTANTS, validateManifest, filterCatalogByManifest, type AssistantManifest };

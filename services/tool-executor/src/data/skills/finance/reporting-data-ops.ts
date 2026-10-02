@@ -29,7 +29,6 @@ const reportingDataOpsInputSchema = createSchemaRecord({
   recipients: SchemaProps.stringArray({ description: 'Recipients of the published report' }),
   format: SchemaProps.select(['markdown', 'json', 'csv'], { description: 'Published report format', default: 'markdown' }),
   endpoint: SchemaProps.url({ description: 'Reporting endpoint override for this call' }),
-  apiKey: SchemaProps.password({ description: 'Optional API key override for the reporting endpoint' }),
   dryRun: SchemaProps.boolean({ description: 'Assemble the report without publishing it; defaults to true', default: true }),
   confirmation: SchemaProps.boolean({ description: 'Explicit approval for a live report publish; required when dryRun is false', default: false }),
 });
@@ -54,18 +53,23 @@ const reportingDataOpsSkill = createDeclarativeCodeSkill({
   confirmBeforeSend: true,
   isSkill: true,
   manifest: {
+  credentialSource: {
+    apiKey: { configKey: 'apiKey', required: false, label: "reporting service API key, needed only for a live write (set in this Skill configuration, or a vault secret)" },
+  },
     configSchema: createSchemaRecord({
       endpointUrl: SchemaProps.url({ description: 'Reporting endpoint URL; may also be supplied at runtime through ' + REPORTING_ENDPOINT_ENV }),
-      apiKey: SchemaProps.password({ description: 'API key for the reporting endpoint' }),
       channel: SchemaProps.select(['email', 'portal', 'api', 'file'], { description: 'Default delivery channel for published reports' }),
       system: SchemaProps.select(['netsuite', 'quickbooks', 'xero', 'custom'], { description: 'Reporting store the report is written to' }),
       defaultReportType: SchemaProps.select(['profit-and-loss', 'balance-sheet', 'cash-flow', 'budget-variance', 'management-summary'], { description: 'Default report type for scheduled runs' }),
       confirmBeforeSend: SchemaProps.boolean({ description: 'Require explicit confirmation before publishing a report', default: true }),
       defaultDryRun: SchemaProps.boolean({ description: 'Default reporting to dry-run', default: true }),
     }),
-    endpointEnvVar: REPORTING_ENDPOINT_ENV,
-    // Deliberately no manifest credentialSource. Declaring one makes the core credential gate demand
-    // the key before the skill runs, which would block the local-render path that publishes nothing.
+    endpointConfigKey: 'endpointUrl',
+    // The key is optional (`required: false`): it is only needed for a live external
+
+    // write, so gating on it would block the analysis-only and dry-run paths that
+
+    // report what this Skill can honestly compute without one.
     persistenceEnv: 'FINANCE_HOME',
     confirmBeforeSend: true,
     timeoutMs: 30000
@@ -195,7 +199,7 @@ const reportingDataOpsSkill = createDeclarativeCodeSkill({
         ];
       }
 
-      const endpoint = String(input.endpoint || process.env[ENDPOINT_ENV] || '').trim();
+      const endpoint = String(input.endpoint || ctx.config?.endpointUrl || '').trim();
       const reportLines = renderReport(report);
 
       if (!lines.length) {
@@ -229,7 +233,9 @@ const reportingDataOpsSkill = createDeclarativeCodeSkill({
       }
 
       const headers = { 'Content-Type': 'application/json' };
-      const apiKey = String(input.apiKey || process.env[API_KEY_ENV] || '').trim();
+            // Secrets arrive through ctx.credentials, resolved from this Skill's
+      // credentialSource, never from the process environment.
+      const apiKey = String((ctx.getCredential ? ctx.getCredential('apiKey') : undefined) || '').trim();
       if (apiKey) headers['Authorization'] = 'Bearer ' + apiKey;
       const body = JSON.stringify({ operation: 'reporting-data-ops', report: report, recipients: input.recipients || [], format: input.format || 'markdown' });
 
@@ -251,7 +257,6 @@ const reportingDataOpsSkill = createDeclarativeCodeSkill({
   });
 reportingDataOpsSkill.configSchema = createSchemaRecord({
       endpointUrl: SchemaProps.url({ description: 'Reporting endpoint URL; may also be supplied at runtime through ' + REPORTING_ENDPOINT_ENV }),
-      apiKey: SchemaProps.password({ description: 'API key for the reporting endpoint' }),
       channel: SchemaProps.select(['email', 'portal', 'api', 'file'], { description: 'Default delivery channel for published reports' }),
       system: SchemaProps.select(['netsuite', 'quickbooks', 'xero', 'custom'], { description: 'Reporting store the report is written to' }),
       defaultReportType: SchemaProps.select(['profit-and-loss', 'balance-sheet', 'cash-flow', 'budget-variance', 'management-summary'], { description: 'Default report type for scheduled runs' }),

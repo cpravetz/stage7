@@ -9,8 +9,15 @@ const GENRE_MARKET_CONFIG_SCHEMA = {
   },
 };
 
-export const SCRIPTWRITER_GENRE_MARKET_EVALUATOR = createDeclarativeCodeSkill({
-  id: 'scriptwriting-genre-market-evaluator',
+/**
+ * User half of the genre/market evaluator split. It was schedule-triggered while
+ * requiring a genre and evaluating a script or topic that only a person supplies,
+ * so the cadence promised evaluation of material that had not been written yet.
+ * This half is user-triggered; scriptwriting-market-report-scheduled produces the
+ * recurring per-genre market report instead.
+ */
+export const SCRIPTWRITER_GENRE_MARKET_EVALUATOR_USER = createDeclarativeCodeSkill({
+  id: 'scriptwriting-genre-market-evaluator-user',
   name: 'Scriptwriter Genre & Market Evaluator',
   description: 'Evaluates a script or topic against genre craft conventions by delegating to narrative-arc-pacing-evaluator and scene-beat-dialogue-copilot, scoring structural readiness, and reporting which dependencies answered. Reports not-connected or partial status when a dependency fails instead of silently returning a half-empty evaluation. Does not query external market or chart data and says so in its output.',
   persistenceEnvVar: 'SCRIPTWRITING_HOME',
@@ -56,7 +63,14 @@ export const SCRIPTWRITER_GENRE_MARKET_EVALUATOR = createDeclarativeCodeSkill({
     required: ['success', 'status', 'present'],
   },
   triggers: [
-    { kind: 'schedule', cadence: 'Periodic genre market fit monitoring' },
+    {
+      kind: 'user',
+      phrase_examples: [
+        'Evaluate this script against genre conventions',
+        'Is this story ready for the market?',
+        'Score this outline for genre readiness',
+      ],
+    },
   ],
   tier: 'advise',
   domainKnowledge: 'Scriptwriting genre conventions, structural readiness analysis, audience alignment',
@@ -74,8 +88,16 @@ export const SCRIPTWRITER_GENRE_MARKET_EVALUATOR = createDeclarativeCodeSkill({
       const delegatedTo = ['scriptwriting-narrative-arc-pacing-evaluator', 'scriptwriting-scene-beat-dialogue-copilot'];
 
       if (!topic && !script) {
-
-        return;
+        return {
+          success: false,
+          status: 'error',
+          delegatedTo: delegatedTo,
+          data: null,
+          error: 'Nothing to evaluate: supply a script, a topic, or both.',
+          present: [
+            ctx.render.text('notice', 'Nothing to evaluate', 'Supply a script, a topic, or both. Structural findings need a script; a topic alone yields outline coverage only.'),
+          ],
+        };
       }
 
       // ---- Delegation ---------------------------------------------------------------
@@ -129,8 +151,22 @@ export const SCRIPTWRITER_GENRE_MARKET_EVALUATOR = createDeclarativeCodeSkill({
       const failed = delegations.filter(function (d) { return !d.connected; });
 
       if (!connected.length) {
-
-        return;
+        return {
+          success: false,
+          status: 'not-connected',
+          delegatedTo: delegatedTo,
+          data: { delegations: delegations, unavailableTools: delegatedTo },
+          error: 'Neither ' + delegatedTo.join(' nor ') + ' answered, so no genre evaluation could be produced.',
+          present: [
+            ctx.render.text(
+              'not-connected',
+              'Evaluation unavailable',
+              'This Skill delegates its structural work to ' + delegatedTo.join(' and ') + '. Neither answered: ' +
+                failed.map(function (d) { return d.toolId + ' - ' + d.error; }).join('; ') +
+                '. No evaluation was produced.',
+            ),
+          ],
+        };
       }
 
       // ---- Genre conventions --------------------------------------------------------
@@ -272,6 +308,16 @@ export const SCRIPTWRITER_GENRE_MARKET_EVALUATOR = createDeclarativeCodeSkill({
       evaluation.storePath = ctx.store.getFilePath('genre-market-evaluations');
 
       // The skill owns its report layout; 'present' is the generic block contract.
+      return {
+        success: true,
+        status: status,
+        delegatedTo: delegatedTo,
+        data: { evaluation: evaluation, marketFit: marketFit },
+        error: null,
+        present: [
+          ctx.render.text('report', 'Genre & Market Evaluation', reportLines),
+        ],
+      };
     }
   });
-SCRIPTWRITER_GENRE_MARKET_EVALUATOR.configSchema = GENRE_MARKET_CONFIG_SCHEMA;
+SCRIPTWRITER_GENRE_MARKET_EVALUATOR_USER.configSchema = GENRE_MARKET_CONFIG_SCHEMA;

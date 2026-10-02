@@ -7,11 +7,11 @@ import {
 
 const HOUSEKEEPING_INPUT_SCHEMA = createSchemaRecord({
   ...HOTEL_PROPERTY_BASE_INPUT,
-  roomId: SchemaProps.text({ description: 'Room identifier' }),
-  roomIds: SchemaProps.stringArray({ description: 'Room identifiers for bulk housekeeping rounds' }),
-  staffId: SchemaProps.text({ description: 'Housekeeping attendant identifier' }),
-  staffIds: SchemaProps.stringArray({ description: 'Housekeeping attendants to assign or dispatch' }),
-  taskId: SchemaProps.text({ description: 'Housekeeping task identifier' }),
+  roomId: SchemaProps.reference('hotel-rooms', { description: 'Room identifier' }),
+  roomIds: SchemaProps.referenceArray('hotel-rooms', { description: 'Room identifiers for bulk housekeeping rounds' }),
+  staffId: SchemaProps.reference('hotel-staff', { description: 'Housekeeping attendant identifier' }),
+  staffIds: SchemaProps.referenceArray('hotel-staff', { description: 'Housekeeping attendants to assign or dispatch' }),
+  taskId: SchemaProps.reference('hotel-tasks', { description: 'Housekeeping task identifier' }),
   housekeepingStatus: SchemaProps.select(['dirty', 'clean', 'inspected', 'out-of-service'], {
     description: 'Housekeeping cleanliness state for the room',
   }),

@@ -6,7 +6,7 @@
   "category": "events",
   "tools": [
     "event-planning-budgeting",
-    "vendor-contract-management",
-    "day-of-operations"
+    "event-vendor-contract-management",
+    "event-day-of-operations"
   ]
 }

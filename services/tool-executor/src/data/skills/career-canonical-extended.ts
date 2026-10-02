@@ -29,7 +29,7 @@ name: 'Career Gmail Sync',
 description: 'Internal Gmail connector for career workspace sync. Synchronizes career artifacts via Gmail API. Requires explicit configuration (endpointUrl, apiKey, accountId) and provides honest not-connected fallback when unconfigured.',
 system: 'gmail',
 action: 'career-sync',
-endpoint: { envVar: 'CAREER_GMAIL_ENDPOINT', method: 'POST' },
+endpoint: { configKey: 'CAREER_GMAIL_ENDPOINT', method: 'POST' },
 auth: {
 type: 'api_key',
 header: 'Authorization',

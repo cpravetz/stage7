@@ -123,7 +123,7 @@ const RECORDS_SCHEDULING_OPS = createExternalActionSkill({
   confirmBeforeSend: true,
   system: 'healthcare',
   action: 'records-scheduling',
-  endpoint: { envVar: 'HEALTHCARE_OPS_ENDPOINT', method: 'POST' },
+  endpoint: { configKey: 'HEALTHCARE_OPS_ENDPOINT', method: 'POST' },
   auth: {
     type: 'bearer',
     credentialEnvKeyMap: { token: 'HEALTHCARE_OPS_ACCESS_TOKEN' },
@@ -185,7 +185,7 @@ const PATIENT_COMMUNICATION = createExternalActionSkill({
   confirmBeforeSend: true,
   system: 'healthcare',
   action: 'patient-communication',
-  endpoint: { envVar: 'HEALTHCARE_COMM_ENDPOINT', method: 'POST' },
+  endpoint: { configKey: 'HEALTHCARE_COMM_ENDPOINT', method: 'POST' },
   auth: {
     type: 'api_key',
     header: 'X-API-Key',
@@ -213,13 +213,13 @@ const PATIENT_COMMUNICATION = createExternalActionSkill({
       properties: {
         patient: SchemaProps.text({ description: 'Select patient' }),
       channel: SchemaProps.select(['email', 'sms', 'portal', 'voice', 'fax'], { description: 'Communication channel' }),
-      templateId: SchemaProps.text({ description: 'Message template identifier' }),
+      templateId: SchemaProps.reference('healthcare-message-templates', { description: 'Message template identifier' }),
       subject: SchemaProps.text({ description: 'Message subject' }),
       message: SchemaProps.text({ description: 'Message content' }),
       variables: SchemaProps.object({}, { description: 'Template variables' }),
       scheduledAt: SchemaProps.text({ description: 'Scheduled send time (ISO 8601)' }),
       priority: SchemaProps.select(['routine', 'urgent', 'emergency'], { description: 'Message priority' }),
-      scheduleId: SchemaProps.text({ description: 'Communication schedule identifier' }),
+      scheduleId: SchemaProps.reference('healthcare-communication-schedules', { description: 'Communication schedule identifier' }),
       frequency: SchemaProps.select(['once', 'daily', 'weekly', 'monthly', 'custom'], { description: 'Communication frequency for scheduled messages' }),
       dryRun: SchemaProps.boolean({ description: 'Validate without executing', default: true }),
     },
@@ -241,7 +241,7 @@ const RESOURCE_COORDINATION = createExternalActionSkill({
   confirmBeforeSend: true,
   system: 'healthcare',
   action: 'resource-coordination',
-  endpoint: { envVar: 'HEALTHCARE_RESOURCE_ENDPOINT', method: 'POST' },
+  endpoint: { configKey: 'HEALTHCARE_RESOURCE_ENDPOINT', method: 'POST' },
   auth: {
     type: 'bearer',
     credentialEnvKeyMap: { token: 'HEALTHCARE_RESOURCE_ACCESS_TOKEN' },
@@ -266,7 +266,7 @@ const RESOURCE_COORDINATION = createExternalActionSkill({
     type: 'object',
     properties: {
       resourceType: SchemaProps.select(['bed', 'equipment', 'room', 'staff', 'device', 'supply'], { description: 'Type of resource' }),
-      resourceId: SchemaProps.text({ description: 'Resource identifier' }),
+      resourceId: SchemaProps.reference('healthcare-resources', { description: 'Resource identifier' }),
        facility: SchemaProps.text({ description: 'Facility identifier' }),
        patient: SchemaProps.text({ description: 'Select patient' }),
        quantity: SchemaProps.integer({ description: 'Quantity to allocate' }),

@@ -53,7 +53,7 @@ export const RESTAURANT_RESERVATIONS_GUEST_PROFILE_MANAGER = createDeclarativeCo
   handler: async function handler(input, ctx) {
       const NL = '\n';
       const SAFETY = "food safety / allergen protocol";
-      const endpoint = process.env.RESTAURANT_RESERVATION_ENDPOINT || '';
+      const endpoint = String(ctx.config?.endpointUrl || '');
       const dryRun = input.dryRun !== false;
       const confirmBeforeSend = input.confirmBeforeSend !== false;
 

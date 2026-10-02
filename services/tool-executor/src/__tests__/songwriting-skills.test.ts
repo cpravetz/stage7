@@ -111,14 +111,18 @@ describe('Songwriter Creative — Batch A', () => {
   });
 
   describe('trigger classification', () => {
-    it('Songwriter has exactly two user-triggered skills (design §9)', () => {
+    it('Songwriter has exactly three user-triggered skills (design §9)', () => {
+      // The prosody evaluator joins the co-creation and lead-sheet skills: it
+      // takes the lyrics as its input and blocks without them, so it cannot be
+      // driven by an event the way it was declared.
       const userTriggered = songwritingSkills.filter((s) =>
         (s.triggers || []).some((t) => t.kind === 'user')
       );
-      expect(userTriggered.length).toBe(2);
+      expect(userTriggered.length).toBe(3);
       const userTriggerIds = userTriggered.map((s) => s.id).sort();
       expect(userTriggerIds).toEqual([
         'songwriting_lead_sheet_demo_dispatcher',
+        'songwriting_lyric_prosody_evaluator',
         'songwriting_musical_lyric_cocreation',
       ]);
     });
@@ -176,14 +180,18 @@ describe('Songwriter Creative — Batch A', () => {
       const configProps = (dispatcher.manifest.configSchema as Record<string, unknown>).properties as Record<string, unknown>;
       expect(configProps).toBeDefined();
       expect(configProps.endpointUrl).toBeDefined();
-      expect(configProps.apiKey).toBeDefined();
+      // apiKey is a declared credential, not a config field, so it never renders as
+      // something the user is asked to supply on the Run form.
+      const credentialSource = dispatcher.manifest.credentialSource as Record<string, unknown>;
+      expect(credentialSource?.apiKey).toBeDefined();
+      expect(configProps.apiKey).toBeUndefined();
       expect(configProps.provider).toBeDefined();
       expect(configProps.defaultFormat).toBeDefined();
       expect(configProps.confirmBeforeSend).toBeDefined();
     });
 
-    it('has an endpointEnvVar in the manifest', () => {
-      expect(dispatcher.manifest.endpointEnvVar).toBe('SONGWRITING_DISPATCH_ENDPOINT');
+    it('declares the config field holding its endpoint', () => {
+      expect(dispatcher.manifest.endpointConfigKey).toBe('endpointUrl');
     });
 
     it('source code defaults to dry-run mode', () => {

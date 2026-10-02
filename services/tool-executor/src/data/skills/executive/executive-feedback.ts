@@ -19,7 +19,6 @@ const SAFETY_BOUNDARY = 'Executive advisory only: feedback collection and analys
 
 const FEEDBACK_INPUT = createSchemaRecord({
   focusArea: SchemaProps.select(['feedback-collector', 'feedback-analysis', 'performance-analyzer'], { description: 'Feedback area', required: true }),
-  executiveId: SchemaProps.text({ description: 'Executive identifier' }),
   period: SchemaProps.text({ description: 'Review period' }),
   respondents: SchemaProps.stringArray({ description: 'Respondent identifiers' }),
   dimensions: SchemaProps.stringArray({ description: 'Assessment dimensions' }),
@@ -65,7 +64,6 @@ export const FEEDBACK = createDeclarativeCodeSkill({
       }
 
       const focusArea = input.focusArea || 'feedback-collector';
-      const executiveId = input.executiveId || '';
       let store = ctx.store.load('feedback', []);
 
       let result;
@@ -85,7 +83,6 @@ export const FEEDBACK = createDeclarativeCodeSkill({
             'Feedback Collection Plan',
             '========================',
             '',
-            'Executive: ' + (executiveId || 'unspecified'),
             'Review Period: ' + (period || 'unspecified'),
             'Respondents: ' + (respondents.length ? respondents.join(', ') : 'none specified'),
             'Dimensions: ' + dimensions.join(', '),
@@ -113,7 +110,7 @@ export const FEEDBACK = createDeclarativeCodeSkill({
 
           lines.push('Status: Ready for distribution');
 
-          result = { focusArea: 'feedback-collector', executiveId, respondents, dimensions, questions, period, status: 'ready' };
+          result = { focusArea: 'feedback-collector', respondents, dimensions, questions, period, status: 'ready' };
           present = [{ id: 'plan', title: 'Executive Feedback Collection Plan', kind: 'text', body: lines.join(NL) }];
           break;
         }
@@ -143,7 +140,6 @@ export const FEEDBACK = createDeclarativeCodeSkill({
             'Feedback Analysis',
             '=================',
             '',
-            'Executive: ' + (executiveId || 'unspecified'),
             'Feedback entries analyzed: ' + feedback.length,
             'Themes identified: ' + (themes.length ? themes.length + ' (provided)' : derivedThemes.length + ' (derived)'),
             '',
@@ -171,7 +167,7 @@ export const FEEDBACK = createDeclarativeCodeSkill({
 
           const summary = 'Analyzed ' + feedback.length + ' feedback items. ' + (themes.length ? themes.length + ' themes provided.' : derivedThemes.length + ' themes derived from text.');
 
-          result = { focusArea: 'feedback-analysis', executiveId, feedback, themes: themes.length ? themes : derivedThemes, summary };
+          result = { focusArea: 'feedback-analysis', feedback, themes: themes.length ? themes : derivedThemes, summary };
           present = [{ id: 'analysis', title: 'Executive Feedback Analysis', kind: 'text', body: lines.join(NL) }];
           break;
         }
@@ -190,7 +186,6 @@ export const FEEDBACK = createDeclarativeCodeSkill({
             'Performance Analysis',
             '===================',
             '',
-            'Executive: ' + (executiveId || 'unspecified'),
             'Period: ' + period,
             'Benchmark: ' + (benchmark || 'none specified'),
             'Metrics analyzed: ' + metrics.length,
@@ -216,7 +211,7 @@ export const FEEDBACK = createDeclarativeCodeSkill({
 
           const summary = 'Performance analysis for ' + period + '. ' + metrics.length + ' metrics and ' + kpis.length + ' KPIs identified. Data values required for quantitative results.';
 
-          result = { focusArea: 'performance-analyzer', executiveId, metrics: metrics.map(function(m) { return { name: String(m), value: null, trend: null, target: null }; }), kpis, period, benchmark };
+          result = { focusArea: 'performance-analyzer', metrics: metrics.map(function(m) { return { name: String(m), value: null, trend: null, target: null }; }), kpis, period, benchmark };
           present = [{ id: 'performance', title: 'Executive Performance Analysis', kind: 'text', body: lines.join(NL) }];
           break;
         }

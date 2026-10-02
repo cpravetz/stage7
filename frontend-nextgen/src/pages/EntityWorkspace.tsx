@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useEntityStore, Entity } from '../stores/entityStore';
 import { useFeedStore } from '../stores/feedStore';
-import { useAssistantViewStore } from '../stores/assistantViewStore';
+import { useAssistantViewStore, type TabKey } from '../stores/assistantViewStore';
 import { fetchJSON, postJSON, putJSON } from '../utils/api';
 import { OverviewPanel } from '../panels/OverviewPanel';
 import { ToolsPanel } from '../panels/ToolsPanel';
@@ -25,8 +25,10 @@ const EntityWorkspace = () => {
   // Global view state store
   const viewModel = useAssistantViewStore((s) => s.getOrCreate(entityId || ''));
   const setViewModelField = useAssistantViewStore((s) => s.setField);
+  const activeTab = viewModel.activeTab ?? 'overview';
+  const setActiveTab = (tab: TabKey) => setViewModelField(entityId || '', 'activeTab', tab);
 
-  const [activeTab, setActiveTab] = useState<'overview' | 'skill settings' | 'configuration' | 'memory' | 'missions' | 'hitl' | 'artifacts'>('overview');
+
   const [missionInput, setMissionInput] = useState('');
   const [running, setRunning] = useState(false);
   const [missionHistory, setMissionHistory] = useState<Array<{ missionId: string; status: string; timestamp: string; output?: string }>>([]);

@@ -39,6 +39,8 @@ export const SCOUTING_ALERT_DISPATCHER = createDeclarativeCodeSkill({
     configSchema: {
       type: 'object',
       properties: {
+        wearableEndpoint: SchemaProps.url({ description: 'Wearable telemetry provider base URL' }),
+        requestTimeoutMs: SchemaProps.number({ description: 'Request timeout in milliseconds', default: 10000 }),
         confirmBeforeSend: SchemaProps.boolean({ description: 'Require confirmation before sending alerts', default: true }),
         dryRun: SchemaProps.boolean({ description: 'Always dry-run for represent actions', default: true }),
         defaultChannels: SchemaProps.stringArray({ description: 'Default dispatch channels' }),
@@ -53,15 +55,17 @@ export const SCOUTING_ALERT_DISPATCHER = createDeclarativeCodeSkill({
       const dryRun = input.dryRun !== false;
       const confirmBeforeSend = input.confirmationRequired !== false;
 
-      let store = { alerts: [], lastUpdated: new Date().toISOString() };
-      store = ctx.store.load('scouting-alerts', []);
+      const defaults = { alerts: [], lastUpdated: new Date().toISOString() };
+      // Keep the shape used below; an `[]` fallback made `store.alerts` throw.
+      const loaded = ctx.store.load('scouting-alerts', defaults);
+      const store = loaded && typeof loaded === 'object' && !Array.isArray(loaded) ? { ...defaults, ...loaded } : defaults;
 
-      const telemetryApi = process.env.WEARABLE_TELEMETRY_ENDPOINT || '';
-      const requestTimeoutMs = Number(process.env.SPORTS_REQUEST_TIMEOUT_MS) || 10000;
+      const telemetryApi = String(ctx.config?.wearableEndpoint || '');
+      const requestTimeoutMs = Number(ctx.config?.requestTimeoutMs) || 10000;
 
       async function fetchTelemetryData(apiUrl) {
         if (!apiUrl) {
-          return { ok: false, status: 'not-configured', data: null, error: 'WEARABLE_TELEMETRY_ENDPOINT not set' };
+          return { ok: false, status: 'not-configured', data: null, error: 'No wearable telemetry provider configured: set wearableEndpoint in this Skill\'s configuration' };
         }
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
@@ -107,6 +111,31 @@ export const SCOUTING_ALERT_DISPATCHER = createDeclarativeCodeSkill({
 
       store.alerts.push(alert);
       ctx.store.save('scouting-alerts', store);
+
+      // The alert was built and persisted but never returned, so the Skill
+      // produced no output while appearing to succeed. Report what was recorded,
+      // including when it came from local data rather than the configured
+      // telemetry provider.
+      const summaryLines = [
+        'Scouting alert: ' + alertType + ' for ' + entity,
+        'Severity ' + alert.severity + ' | channels: ' + alert.channels.join(', '),
+        alert.message,
+      ];
+      if (dryRun) summaryLines.push('Dry run: nothing was sent.');
+      else summaryLines.push('Dispatched to: ' + alert.channels.join(', '));
+      if (!dataConnected) {
+        summaryLines.push('Telemetry source: local only - no wearable telemetry provider configured, so no live data was read.');
+      }
+
+      return {
+        success: true,
+        status: 'ok',
+        data: { alert: alert, alerts: store.alerts, storePath: ctx.store.getFilePath('scouting-alerts') },
+        source: alert.source,
+        connectivityStatus: telemetryResult.status,
+        error: null,
+        present: [ctx.render.text('scouting-alert', 'Scouting alert', summaryLines.join('\n'))],
+      };
     }
   });
 SCOUTING_ALERT_DISPATCHER.configSchema = {

@@ -21,7 +21,7 @@ export const SPORTS_WAGERING_SAFETY_BOUNDARY = SPORTS_WAGERING_BOUNDARY;
 export const SPORTS_PRESENT_SCHEMA = PRESENT_SCHEMA;
 
 export const SPORTS_PERFORMANCE_GROUP = ['sports-tactical-roster-evaluator', 'sports-battlecard-creator', 'sports-scouting-alert-dispatcher'];
-export const SPORTS_WAGERING_GROUP = ['sports-matchup-odds-explainer', 'sports-bankroll-co-pilot', 'sports-line-alert-dispatcher', 'sports-ingame-predictive-modeling'];
+export const SPORTS_WAGERING_GROUP = ['sports-matchup-odds-explainer', 'sports-bankroll-co-pilot', 'sports-line-alert-dispatcher', 'sports-predictor-ad-hoc', 'sports-ingame-predictive-modeling-scheduled'];
 
 export function sportsGroupFor(skillId: string): 'performance' | 'wagering' {
   return SPORTS_WAGERING_GROUP.includes(skillId) ? 'wagering' : 'performance';

@@ -19,7 +19,6 @@ const SAFETY_BOUNDARY = 'Executive advisory only: do not commit organizational r
 
 const RISK_SCENARIO_INPUT = createSchemaRecord({
   focusArea: SchemaProps.select(['risk-assessment', 'scenario-modeler'], { description: 'Risk and scenario area', required: true }),
-  executiveId: SchemaProps.text({ description: 'Executive identifier' }),
   domain: SchemaProps.text({ description: 'Risk domain' }),
   timeframe: SchemaProps.text({ description: 'Assessment timeframe' }),
   constraints: SchemaProps.stringArray({ description: 'Constraints' }),
@@ -75,7 +74,6 @@ export const RISK_SCENARIO = createDeclarativeCodeSkill({
       }
 
       const focusArea = input.focusArea || 'risk-assessment';
-      const executiveId = input.executiveId || '';
       let store = ctx.store.load('risk-scenario', []);
       const context = {
         domain: input.domain || '',
@@ -121,7 +119,6 @@ export const RISK_SCENARIO = createDeclarativeCodeSkill({
             'Risk Assessment Summary',
             '=======================',
             '',
-            'Executive: ' + (executiveId || 'unspecified'),
             'Timeframe: ' + (context.timeframe || 'unspecified'),
             'Domains assessed: ' + domains.join(', '),
             'Total risks identified: ' + assessed.length,
@@ -147,7 +144,6 @@ export const RISK_SCENARIO = createDeclarativeCodeSkill({
 
           result = {
             focusArea: 'risk-assessment',
-            executiveId,
             context,
             risks: assessed,
             riskRegister: highPriority,
@@ -183,7 +179,6 @@ export const RISK_SCENARIO = createDeclarativeCodeSkill({
             'Scenario Modeling Summary',
             '=========================',
             '',
-            'Executive: ' + (executiveId || 'unspecified'),
             'Timeframe: ' + (context.timeframe || 'unspecified'),
             'Scenarios modeled: ' + modeled.length,
             '',
@@ -204,7 +199,6 @@ export const RISK_SCENARIO = createDeclarativeCodeSkill({
 
           result = {
             focusArea: 'scenario-modeler',
-            executiveId,
             context,
             scenarios: modeled,
             baseMetrics,

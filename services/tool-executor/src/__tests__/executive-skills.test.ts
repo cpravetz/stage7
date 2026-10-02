@@ -137,7 +137,6 @@ function seedInputFor(id: string): Record<string, unknown> {
   if (id === 'executive-risk-scenario') {
     return {
       focusArea: 'risk-assessment',
-      executiveId: 'exec-1',
       domain: 'Strategic',
       timeframe: 'Q4 2026',
       risks: [
@@ -150,7 +149,6 @@ function seedInputFor(id: string): Record<string, unknown> {
   if (id === 'executive-feedback') {
     return {
       focusArea: 'feedback-analysis',
-      executiveId: 'exec-1',
       feedback: [
         { text: 'Strong strategic vision but needs more team engagement', author: 'peer-1', date: '2026-01-15' },
         { text: 'Excellent communication during crisis', author: 'direct-report-1', date: '2026-01-20' },
@@ -161,7 +159,6 @@ function seedInputFor(id: string): Record<string, unknown> {
   if (id === 'executive-dev-career') {
     return {
       focusArea: 'skill-gap',
-      executiveId: 'exec-1',
       role: 'VP Engineering',
       level: 'Senior',
       currentSkills: ['System Design', 'Team Leadership', 'Cloud Architecture'],
@@ -172,7 +169,6 @@ function seedInputFor(id: string): Record<string, unknown> {
   if (id === 'executive-leadership-advisory') {
     return {
       focusArea: 'decision-framework',
-      executiveId: 'exec-1',
       role: 'VP Engineering',
       decision: 'Whether to build or buy the new analytics platform',
       options: [
@@ -269,7 +265,6 @@ describe('Risk & Scenario Advisory computes real scores', () => {
   it('derives risk scores from likelihood/impact, not random', async () => {
     const { result } = await run(RISK_SCENARIO, {
       focusArea: 'risk-assessment',
-      executiveId: 'exec-1',
       risks: [
         { name: 'Critical risk', likelihood: 'critical', impact: 'critical' },
         { name: 'Low risk', likelihood: 'low', impact: 'low' },
@@ -305,7 +300,6 @@ describe('Risk & Scenario Advisory computes real scores', () => {
   it('models scenarios from supplied assumptions', async () => {
     const { result } = await run(RISK_SCENARIO, {
       focusArea: 'scenario-modeler',
-      executiveId: 'exec-1',
       scenarios: [
         { name: 'Optimistic', assumptions: { growth: 0.2 }, probability: 0.3 },
         { name: 'Pessimistic', assumptions: { growth: -0.1 }, probability: 0.2 },
@@ -336,7 +330,6 @@ describe('Feedback Collection & Analysis derives themes from text', () => {
   it('analyzes feedback and derives themes when not provided', async () => {
     const { result } = await run(FEEDBACK, {
       focusArea: 'feedback-analysis',
-      executiveId: 'exec-1',
       feedback: [
         { text: 'Great leadership and communication skills', author: 'a1', date: '2026-01-01' },
         { text: 'Strong strategic thinking but needs better delegation', author: 'a2', date: '2026-01-02' },
@@ -355,7 +348,6 @@ describe('Feedback Collection & Analysis derives themes from text', () => {
   it('uses provided themes when supplied', async () => {
     const { result } = await run(FEEDBACK, {
       focusArea: 'feedback-analysis',
-      executiveId: 'exec-1',
       feedback: [{ text: 'Good work', author: 'a1', date: '2026-01-01' }],
       themes: ['Leadership', 'Communication'],
     });
@@ -378,7 +370,6 @@ describe('Feedback Collection & Analysis derives themes from text', () => {
   it('creates feedback collection plan with supplied inputs', async () => {
     const { result } = await run(FEEDBACK, {
       focusArea: 'feedback-collector',
-      executiveId: 'exec-1',
       respondents: ['peer-1', 'peer-2', 'report-1'],
       dimensions: ['Leadership', 'Communication'],
       questions: ['How effective is the leader?'],
@@ -397,7 +388,6 @@ describe('Development & Career Planning derives gaps and plans from input', () =
   it('identifies skill gaps from current vs target', async () => {
     const { result } = await run(DEV_CAREER, {
       focusArea: 'skill-gap',
-      executiveId: 'exec-1',
       currentSkills: ['A', 'B'],
       targetSkills: ['A', 'B', 'C', 'D'],
     });
@@ -415,7 +405,6 @@ describe('Development & Career Planning derives gaps and plans from input', () =
   it('reports no gaps when target skills are subset of current', async () => {
     const { result } = await run(DEV_CAREER, {
       focusArea: 'skill-gap',
-      executiveId: 'exec-1',
       currentSkills: ['A', 'B', 'C'],
       targetSkills: ['A', 'B'],
     });
@@ -435,10 +424,11 @@ describe('Development & Career Planning derives gaps and plans from input', () =
   });
 
   it('creates development plan with actions and milestones placeholders', async () => {
+    // `executiveId` and the `skills`/`areas`/`targetRole` synonyms are gone: the
+    // subject is the user, and each idea now has one field.
     const { result } = await run(DEV_CAREER, {
       focusArea: 'development-plan',
-      executiveId: 'exec-1',
-      skills: ['Strategic Planning', 'Public Speaking'],
+      targetSkills: ['Strategic Planning', 'Public Speaking'],
       timeframe: '6 months',
     });
 
@@ -455,7 +445,6 @@ describe('Leadership Advisory structures decisions and assessments', () => {
   it('structures decision framework with options and criteria', async () => {
     const { result } = await run(LEADERSHIP_ADVISORY, {
       focusArea: 'decision-framework',
-      executiveId: 'exec-1',
       decision: 'Expand to Europe',
       options: [
         { label: 'Greenfield', description: 'Build from scratch' },
@@ -478,7 +467,6 @@ describe('Leadership Advisory structures decisions and assessments', () => {
   it('analyzes communication text for metrics', async () => {
     const { result } = await run(LEADERSHIP_ADVISORY, {
       focusArea: 'communication-analyzer',
-      executiveId: 'exec-1',
       text: 'This is a clear message. It has two sentences. The structure is simple.',
       channel: 'email',
       audience: 'team',
@@ -505,7 +493,6 @@ describe('Leadership Advisory structures decisions and assessments', () => {
   it('coaches on message with audience-specific checks', async () => {
     const { result } = await run(LEADERSHIP_ADVISORY, {
       focusArea: 'communication-coach',
-      executiveId: 'exec-1',
       message: 'Team, please review the proposal by Friday. Thanks.',
       channel: 'slack',
       audience: 'engineering team',

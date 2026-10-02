@@ -48,8 +48,11 @@ export const BANKROLL_CO_PILOT = createDeclarativeCodeSkill({
       const sessionId = input.sessionId || input.id || 'default';
       const confidenceLevel = Number(input.confidenceLevel) || 0.95;
 
-      let store = { sessions: {}, rules: {}, lastUpdated: new Date().toISOString() };
-      store = ctx.store.load('bankroll-rules', []);
+      const defaults = { sessions: {}, rules: {}, lastUpdated: new Date().toISOString() };
+      // The loaded value must keep the shape used below. The fallback used to be
+      // `[]`, so on a cold store every `store.sessions`/`.rules` access threw.
+      const loaded = ctx.store.load('bankroll-rules', defaults);
+      const store = loaded && typeof loaded === 'object' && !Array.isArray(loaded) ? { ...defaults, ...loaded } : defaults;
 
       if (!store.sessions[sessionId]) {
         store.sessions[sessionId] = { id: sessionId, wagered: 0, won: 0, lost: 0, sessions: 0, unitsUsed: 0, createdAt: new Date().toISOString() };

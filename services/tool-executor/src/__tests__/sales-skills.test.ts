@@ -126,23 +126,22 @@ describe('Sales Advisor skills emit presentation blocks', () => {
   });
 
   it('pipeline-ops renders clean blocks on a staged dry run with an endpoint configured', async () => {
-    const previous = process.env.SALES_PIPELINE_ENDPOINT;
-    process.env.SALES_PIPELINE_ENDPOINT = 'https://crm.example.invalid/pipeline';
-    try {
-      const { result } = await run(PIPELINE_OPS, {
-        dryRun: true,
-        entity: 'opportunity',
-        entityId: 'OPP-1',
-        data: { stage: 'negotiation' },
-      });
-      expect(result.success).toBe(true);
-      expect(result.status).toBe('dry-run');
-      expect((result.data as Record<string, unknown>).sent).toBe(false);
-      assertPresentClean(result);
-    } finally {
-      if (previous === undefined) delete process.env.SALES_PIPELINE_ENDPOINT;
-      else process.env.SALES_PIPELINE_ENDPOINT = previous;
-    }
+    // The endpoint is Skill configuration, not a deployment env var. Clone rather
+    // than mutate: the Skill objects are module-level singletons.
+    const configured = {
+      ...PIPELINE_OPS,
+      externalConfig: { endpointUrl: 'https://crm.example.invalid/pipeline' },
+    } as unknown as Tool;
+    const { result } = await run(configured, {
+      dryRun: true,
+      entity: 'opportunity',
+      entityId: 'OPP-1',
+      data: { stage: 'negotiation' },
+    });
+    expect(result.success).toBe(true);
+    expect(result.status).toBe('dry-run');
+    expect((result.data as Record<string, unknown>).sent).toBe(false);
+    assertPresentClean(result);
   });
 
   it.each([

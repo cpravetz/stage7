@@ -12,7 +12,6 @@ const SCRIPT_FORMATTING_INPUT = {
     pageSize: SchemaProps.select(['US Letter', 'A4'], { title: 'Page Size', description: 'Page size for the formatted script', order: 6, default: 'US Letter', hint: 'Recorded on the artifact' }),
     submitTo: SchemaProps.stringArray({ title: 'Submit To', description: 'Platforms the script is destined for', order: 7, hint: 'e.g. blacklist, coverage-services, contests' }),
     submissionEndpointUrl: SchemaProps.url({ title: 'Submission Endpoint', description: 'Endpoint that receives the formatted submission', order: 8, hint: 'Required before any platform submission can actually be sent' }),
-    apiKey: SchemaProps.password({ title: 'API Key', description: 'Provider API key for the submission endpoint', order: 9, hint: 'Sent as X-API-Key' }),
     dryRun: SchemaProps.boolean({ title: 'Dry Run', description: 'Stage the submission without sending it', order: 10, default: true, hint: 'When true, no request leaves the system even if an endpoint is configured' }),
     confirmation: SchemaProps.boolean({ title: 'Confirmation', description: 'Explicit approval to submit', order: 11, default: false, hint: 'Required in addition to dryRun false before anything is sent' }),
   },
@@ -51,15 +50,23 @@ export const SCRIPT_FORMATTING_SUBMISSION_MANAGER = createDeclarativeCodeSkill({
   inputSchema: SCRIPT_FORMATTING_INPUT,
   outputSchema: SCRIPT_FORMATTING_OUTPUT,
   triggers: [
-    { kind: 'event', on: 'Script is finalized and approved for formatting' },
+    // User, not Event: `script` is a required input and the handler now returns an
+    // honest "No script was supplied" when it is absent, so with no wired edge to
+    // deliver a script there is nothing but a person who can invoke it.
+    { kind: 'user', phrase_examples: ['Format this script for submission', 'Lay this out as a Fountain screenplay', 'Prepare this draft for a platform'] },
   ],
   tier: 'represent',
   confirmBeforeSend: true,
   domainKnowledge: 'Screenplay formatting standards (Master Scene Heading style), script submission platforms, industry formatting guidelines',
   isSkill: true,
   manifest: {
+    // Declared as a credential, not a plain config field, so the key can come from
+    // the vault via `vault:<id>` and is never echoed back into emitted output.
+    credentialSource: {
+      apiKey: { configKey: 'apiKey', required: false, label: "upstream service API key (set in this Skill configuration, or a vault secret)" },
+    },
     confirmBeforeSend: true,
-    endpointEnvVar: 'SCRIPTWRITING_SUBMISSION_ENDPOINT'
+    endpointConfigKey: 'submissionEndpointUrl'
   },
   handler: async function handler(input, ctx) {
 
@@ -71,7 +78,23 @@ export const SCRIPT_FORMATTING_SUBMISSION_MANAGER = createDeclarativeCodeSkill({
       const sceneHeadingStyle = String(input.sceneHeadingStyle || 'smart');
 
       if (!script.trim()) {
-
+        // This guard used to have an empty body, so a blank script fell straight
+        // through a handler that also had no return statement. The skill then
+        // finished with "Execution completed with no output" instead of saying
+        // why it produced nothing (0.8, 1.1).
+        return {
+          success: false,
+          error: 'No script was supplied to format.',
+          data: null,
+          present: [
+            {
+              id: 'missing-script',
+              title: 'Nothing to format',
+              kind: 'text',
+              body: 'Paste the script text you want formatted into the Script field, then run the Skill again.',
+            },
+          ],
+        };
       }
 
       const WORDS_PER_PAGE = 180;
@@ -269,8 +292,8 @@ export const SCRIPT_FORMATTING_SUBMISSION_MANAGER = createDeclarativeCodeSkill({
       }
 
       // ---- Submission --------------------------------------------------------------
-      const endpoint = String(input.submissionEndpointUrl || process.env.SCRIPTWRITING_SUBMISSION_ENDPOINT || '');
-      const apiKey = String(input.apiKey || process.env.SCRIPTWRITING_SUBMISSION_API_KEY || '');
+      const endpoint = String(input.submissionEndpointUrl || String(ctx.config?.submissionEndpointUrl || ''));
+      const apiKey = String((ctx.getCredential ? ctx.getCredential('apiKey') : undefined) || '');
       const dryRun = input.dryRun !== false;
       const confirmed = input.confirmation === true || input.confirmed === true;
 
@@ -377,5 +400,18 @@ export const SCRIPT_FORMATTING_SUBMISSION_MANAGER = createDeclarativeCodeSkill({
       output.storePath = ctx.store.getFilePath('formatting-submissions');
 
       // The skill owns its report and screenplay layout. 'present' is the generic block contract.
+      const present = [
+        {
+          id: 'formatting-report',
+          title: output.title,
+          kind: 'text',
+          body: reportLines.join('\n'),
+        },
+      ];
+      return {
+        success: true,
+        data: { ...output, present },
+        present,
+      };
     }
   });

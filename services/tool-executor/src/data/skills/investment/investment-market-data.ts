@@ -12,7 +12,6 @@ const marketDataConfigSchema = {
     rateLimitPerSecond: { type: 'number', description: 'Maximum requests per second' },
     timeoutMs: { type: 'number', description: 'Request timeout in milliseconds' },
     endpoint: { type: 'string', format: 'uri', description: 'Market data API base URL (env: INVESTMENT_MARKET_DATA_ENDPOINT)' },
-    apiKey: { type: 'string', format: 'password', sensitive: true, description: 'API key for the market data provider (env: INVESTMENT_MARKET_DATA_API_KEY)' },
   },
 };
 
@@ -53,8 +52,13 @@ const INVESTMENT_MARKET_DATA = createDeclarativeCodeSkill({
   ],
   isSkill: true,
   manifest: {
+    // Declared as a credential, not a plain config field, so the key can come from
+    // the vault via `vault:<id>` and is never echoed back into emitted output.
+    credentialSource: {
+      apiKey: { configKey: 'apiKey', required: false, label: "upstream service API key (set in this Skill configuration, or a vault secret)" },
+    },
     configSchema: marketDataConfigSchema,
-    endpointEnvVar: 'INVESTMENT_MARKET_DATA_ENDPOINT',
+    endpointConfigKey: 'endpoint',
     confirmBeforeSend: true,
     timeoutMs: 15000
   },
@@ -74,7 +78,7 @@ const INVESTMENT_MARKET_DATA = createDeclarativeCodeSkill({
       const dryRun = input.dryRun === true || input.dryRun === undefined;
       const confirmed = input.confirmation === true;
 
-      const endpoint = String(input.endpoint || (process.env.INVESTMENT_MARKET_DATA_ENDPOINT || '')).trim();
+      const endpoint = String(input.endpoint || ctx.config?.endpoint || '').trim();
 
       const requestSummary = {
         system: 'investment-advisor',
@@ -140,7 +144,7 @@ const INVESTMENT_MARKET_DATA = createDeclarativeCodeSkill({
         return;
       }
 
-      var apiKey = String(input.apiKey || (process.env.INVESTMENT_MARKET_DATA_API_KEY || '')).trim();
+      var apiKey = String((ctx.getCredential ? ctx.getCredential('apiKey') : undefined) || '').trim();
 
       var headers = { 'Content-Type': 'application/json' };
       if (apiKey) headers['X-API-Key'] = apiKey;

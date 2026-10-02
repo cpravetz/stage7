@@ -120,7 +120,7 @@ function seedInputFor(id: string): Record<string, unknown> {
   }
   if (id === 'healthcare-clinical-practice-workflow-evaluator') {
     return {
-      workflowRows: [{ facility: 'Main Clinic', scheduled: 100, completed: 80, noShows: 10, avgWaitMinutes: 45, billingDelayDays: 3 }],
+      locationMetrics: [{ facility: 'Main Clinic', scheduled: 100, completed: 80, noShows: 10, avgWaitMinutes: 45, billingDelayDays: 3 }],
     };
   }
   if (id === 'healthcare-patient-care-plan-educational-briefing-copilot') {
@@ -223,7 +223,7 @@ describe('Clinical decision-support evaluator computes real red flags', () => {
 describe('Clinical practice workflow evaluator derives deterministic metrics', () => {
   it('computes utilization and no-show rate from the supplied numbers', async () => {
     const { result } = await run(healthcareClinicalPracticeWorkflowEvaluator, {
-      workflowRows: [{ facility: 'Main Clinic', scheduled: 100, completed: 80, noShows: 10, avgWaitMinutes: 45, billingDelayDays: 3 }],
+      locationMetrics: [{ facility: 'Main Clinic', scheduled: 100, completed: 80, noShows: 10, avgWaitMinutes: 45, billingDelayDays: 3 }],
     });
 
     expect(result.success).toBe(true);
@@ -241,7 +241,7 @@ describe('Clinical practice workflow evaluator derives deterministic metrics', (
 
   it('reports no bottlenecks when thresholds are not exceeded', async () => {
     const { result } = await run(healthcareClinicalPracticeWorkflowEvaluator, {
-      workflowRows: [{ facility: 'Small Clinic', scheduled: 20, completed: 20, noShows: 0, avgWaitMinutes: 10, billingDelayDays: 1 }],
+      locationMetrics: [{ facility: 'Small Clinic', scheduled: 20, completed: 20, noShows: 0, avgWaitMinutes: 10, billingDelayDays: 1 }],
     });
 
     expect(result.success).toBe(true);

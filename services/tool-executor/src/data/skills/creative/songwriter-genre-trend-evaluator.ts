@@ -37,7 +37,7 @@ export const songwriterGenreTrendEvaluator = createExternalActionSkill({
   description: 'Monitor genre and market trends using external music intelligence providers (Spotify, SoundCharts, Billboard, Chartmetric, Musixmatch) to inform songwriting direction and release strategy.',
   system: 'creative_intelligence',
   action: 'analyze_trends',
-  endpoint: { envVar: 'CREATIVE_INTELLIGENCE_ENDPOINT', method: 'POST' },
+  endpoint: { configKey: 'CREATIVE_INTELLIGENCE_ENDPOINT', method: 'POST' },
   auth: {
     type: 'api_key',
     header: 'X-API-Key',

@@ -34,7 +34,7 @@ const MULTI_CHANNEL_PUBLISHING = createExternalActionSkill({
   description: 'Publish, schedule, and manage content across social media, email, and document management systems. Confirmation required before sending; dry-run mode is default.',
   system: 'multi-channel-publishing',
   action: 'execute',
-  endpoint: { envVar: 'MARKETING_PUBLISH_ENDPOINT', method: 'POST' },
+  endpoint: { configKey: 'MARKETING_PUBLISH_ENDPOINT', method: 'POST' },
   auth: { type: 'api_key', header: 'X-API-Key', credentialEnvKeyMap: { apiKey: 'MARKETING_PUBLISH_API_KEY' } },
   configSchema: {
     type: 'object',

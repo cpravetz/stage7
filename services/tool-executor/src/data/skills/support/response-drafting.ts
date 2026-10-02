@@ -1,10 +1,21 @@
 // @ts-nocheck
 import { createDeclarativeCodeSkill, SchemaProps } from '../code-skill-factory';
 
-const RESPONSE_DRAFTING = createDeclarativeCodeSkill({
-  id: 'response-drafting',
+/**
+ * User half of the response-drafting split. It was event-triggered
+ * ("Ticket classification output is available") while requiring customerMessage,
+ * which that event does not supply -- so the trigger promised automation the
+ * input schema could not satisfy. This half is now user-triggered, which is what
+ * the required input actually implied. The notifier half
+ * (response-drafting-notifier) owns the automated path and reads its queued
+ * messages from configured stores. The reply composer is inlined in the handler
+ * rather than imported, because the sandbox only has `stage7-runtime` available
+ * and an imported identifier is an undefined reference there.
+ */
+const RESPONSE_DRAFTING_USER = createDeclarativeCodeSkill({
+  id: 'response-drafting-user',
   name: 'Response Drafting',
-  description: 'Generate contextual support responses using ticket context, knowledge base articles, and response templates.',
+  description: 'Draft a support reply to a customer message you supply, using KB articles and response templates.',
   persistenceEnvVar: 'SUPPORT_HOME',
   tier: 'aid',
   domainKnowledge: 'Customer success metrics (CSAT, NPS, Churn Rate), SLA management, support escalation tiers, ticket triage',
@@ -30,7 +41,14 @@ const RESPONSE_DRAFTING = createDeclarativeCodeSkill({
     required: ['success', 'response'],
   },
   triggers: [
-    { kind: 'event', on: 'Ticket classification output is available' },
+    {
+      kind: 'user',
+      phrase_examples: [
+        'Draft a reply to this customer',
+        'Write a response to this ticket',
+        'Help me respond to this message',
+      ],
+    },
   ],
   isSkill: true,
   manifest: {},
@@ -46,21 +64,49 @@ const RESPONSE_DRAFTING = createDeclarativeCodeSkill({
       kbArticles = (includeKB) ? ctx.store.load('kb', []) : [];
       let templates = [];
       templates = ctx.store.load('templates', []);
-      function draftResponse(tid, msg, t, tpl, incKb, articles) {
-        const tmpl = tpl ? templates.find((x) => (x.name || x.id) === tpl) : null;
-        const kbRefs = incKb ? articles.slice(0, 3).map((a) => a.title || a.id) : [];
-        const prefix = tmpl ? (tmpl.body || tmpl.content || '') : '';
-        const actions = suggestedActions.length ? 'Suggested next steps: ' + suggestedActions.join(', ') + '.' : '';
-        const body = [prefix, msg ? 'Regarding your inquiry: ' + msg : '', actions].filter(Boolean).join(' ');
-        return { response: body, alternatives: [body.replace(/empathetic/gi, 'professional'), body.replace(/empathetic/gi, 'friendly')], confidence: 0.8, suggestedActions, kbReferences: kbRefs, tone: t, template: tpl || null, createdAt: new Date().toISOString(), source: 'local' };
-      }
-      const r = draftResponse(ticketId, customerMessage, tone, template, includeKB, kbArticles);
+      const tmpl = template ? templates.find((x) => (x.name || x.id) === template) : null;
+      const kbRefs = includeKB ? kbArticles.slice(0, 3).map((a) => a.title || a.id) : [];
+      const prefix = tmpl ? (tmpl.body || tmpl.content || '') : '';
+      const actions = suggestedActions.length ? 'Suggested next steps: ' + suggestedActions.join(', ') + '.' : '';
+      const body = [prefix, customerMessage ? 'Regarding your inquiry: ' + customerMessage : '', actions].filter(Boolean).join(' ');
+      const r = {
+        ticketId,
+        response: body,
+        alternatives: [body.replace(/empathetic/gi, 'professional'), body.replace(/empathetic/gi, 'friendly')],
+        confidence: 0.8,
+        suggestedActions,
+        kbReferences: kbRefs,
+        tone,
+        template: template || null,
+        createdAt: new Date().toISOString(),
+        source: 'local',
+      };
       const store = ctx.store.load('responses', []); store.push(r);
       ctx.store.save('responses', store);
-      const result = { success: true, data: { response: r, storePath: ctx.store.getFilePath('responses') } };
+      const result = {
+        success: true,
+        data: { response: r, storePath: ctx.store.getFilePath('responses') },
+        // Without this the Overview panel shows a completed run with nothing in
+        // it: the envelope said success and rendered no block at all.
+        present: [
+          ctx.render.text('report', 'Drafted Response', [
+            'Ticket: ' + (ticketId || '(unspecified)'),
+            'Tone: ' + tone,
+            r.kbReferences.length ? 'KB references: ' + r.kbReferences.join(', ') : 'KB references: none',
+            '',
+            r.response || '(no response body produced)',
+            '',
+            'Alternatives:',
+            '  - ' + (r.alternatives[0] || '(none)'),
+            '  - ' + (r.alternatives[1] || '(none)'),
+            '',
+            'Stored at: ' + ctx.store.getFilePath('responses'),
+          ]),
+        ],
+      };
 
       return result;
     }
   });
 
-export { RESPONSE_DRAFTING };
+export { RESPONSE_DRAFTING_USER };

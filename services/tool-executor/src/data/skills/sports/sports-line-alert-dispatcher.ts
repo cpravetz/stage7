@@ -44,6 +44,8 @@ export const LINE_ALERT_DISPATCHER = createDeclarativeCodeSkill({
     configSchema: {
       type: 'object',
       properties: {
+        oddsEndpoint: SchemaProps.url({ description: 'Odds provider base URL for this Skill' }),
+        requestTimeoutMs: SchemaProps.number({ description: 'Request timeout in milliseconds', default: 10000 }),
         confirmBeforeSend: SchemaProps.boolean({ description: 'Require confirmation before sending', default: true }),
         dryRun: SchemaProps.boolean({ description: 'Always dry-run for represent actions', default: true }),
         monitorInterval: SchemaProps.number({ description: 'Monitoring interval in seconds', default: 30 }),
@@ -57,11 +59,13 @@ export const LINE_ALERT_DISPATCHER = createDeclarativeCodeSkill({
       const dryRun = input.dryRun !== false;
       const confirmBeforeSend = input.confirmationRequired !== false;
 
-      let store = { alerts: [], specs: {}, lastUpdated: new Date().toISOString() };
-      store = ctx.store.load('line-alerts', []);
+      const defaults = { alerts: [], specs: {}, lastUpdated: new Date().toISOString() };
+      // Keep the shape used below; an `[]` fallback made `store.alerts` throw.
+      const loaded = ctx.store.load('line-alerts', defaults);
+      const store = loaded && typeof loaded === 'object' && !Array.isArray(loaded) ? { ...defaults, ...loaded } : defaults;
 
-      const oddsApi = process.env.ODDS_DATA_API_URL || '';
-      const requestTimeoutMs = Number(process.env.SPORTS_REQUEST_TIMEOUT_MS) || 10000;
+      const oddsApi = String(ctx.config?.oddsEndpoint || '');
+      const requestTimeoutMs = Number(ctx.config?.requestTimeoutMs) || 10000;
 
       async function fetchOddsData(apiUrl) {
         if (!apiUrl) {

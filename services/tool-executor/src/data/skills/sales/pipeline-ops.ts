@@ -25,7 +25,6 @@ const pipelineOps = createDeclarativeCodeSkill({
   domainKnowledge: 'Sales pipeline management, CRM operations, and deal tracking',
   inputSchema: createSchemaRecord({
     endpoint: SchemaProps.url({ description: 'Optional pipeline endpoint override for this call' }),
-    apiKey: SchemaProps.password({ description: 'Optional API key override for the pipeline endpoint' }),
     dryRun: SchemaProps.boolean({ description: 'Stage the request without sending it; defaults to true', default: true }),
     confirmation: SchemaProps.boolean({ description: 'Explicit approval for a live pipeline write; required when dryRun is false', default: false }),
     entity: SchemaProps.select(['lead', 'contact', 'account', 'opportunity', 'activity', 'event', 'document'], { description: 'Entity type for the operation' }),
@@ -58,9 +57,11 @@ const pipelineOps = createDeclarativeCodeSkill({
   confirmBeforeSend: true,
   isSkill: true,
   manifest: {
+  credentialSource: {
+    apiKey: { configKey: 'apiKey', required: false, label: "pipeline service API key, needed only for a live write (set in this Skill configuration, or a vault secret)" },
+  },
     configSchema: createSchemaRecord({
       endpointUrl: SchemaProps.url({ description: 'Pipeline endpoint URL; may also be supplied at runtime through ' + PIPELINE_ENDPOINT_ENV }),
-      apiKey: SchemaProps.password({ description: 'API key for the pipeline endpoint' }),
       confirmBeforeSend: SchemaProps.boolean({ description: 'Require explicit confirmation before a live pipeline write', default: true }),
       defaultDryRun: SchemaProps.boolean({ description: 'Default pipeline operations to dry-run', default: true }),
       crmProvider: SchemaProps.select(['salesforce', 'hubspot', 'pipedrive', 'custom'], { description: 'Default CRM provider' }),
@@ -69,11 +70,12 @@ const pipelineOps = createDeclarativeCodeSkill({
       defaultOwnerId: SchemaProps.text({ description: 'Default CRM owner ID for records' }),
       rateLimitPerMinute: SchemaProps.number({ description: 'Rate limit per minute', default: 60 }),
     }),
-    endpointEnvVar: PIPELINE_ENDPOINT_ENV,
-    // Deliberately no manifest credentialSource. A declared credentialSource makes the core
-    // credential gate demand the key before the skill runs, which would block a dry run that
-    // sends nothing and reports "not connected" instead of the staged request. The key is read
-    // from the environment at send time, so it is only ever required for a live write.
+    endpointConfigKey: 'endpointUrl',
+    // The key is optional (`required: false`): it is only needed for a live external
+
+    // write, so gating on it would block the analysis-only and dry-run paths that
+
+    // report what this Skill can honestly compute without one.
     persistenceEnv: 'SALES_HOME',
     confirmBeforeSend: true,
     timeoutMs: 30000,
@@ -85,8 +87,10 @@ const pipelineOps = createDeclarativeCodeSkill({
       const API_KEY_ENV = "SALES_PIPELINE_API_KEY";
       const ENTITY_VERBS = {"lead":"lead","contact":"contact","account":"account","opportunity":"opportunity","activity":"activity","event":"event","document":"document"};
 
-      const endpoint = String(input.endpointUrl || input.endpoint || (process.env[ENDPOINT_ENV] || '')).trim();
-      const apiKey = String(input.apiKey || process.env[API_KEY_ENV] || '').trim();
+      const endpoint = String(input.endpointUrl || input.endpoint || ctx.config?.endpointUrl || '').trim();
+            // Secrets arrive through ctx.credentials, resolved from this Skill's
+      // credentialSource, never from the process environment.
+      const apiKey = String((ctx.getCredential ? ctx.getCredential('apiKey') : undefined) || '').trim();
 
       // Dry run is the default and is checked first, before anything is sent. The shared external
       // action template ignored this flag entirely; honouring it here is the whole safety property.
@@ -343,7 +347,6 @@ const pipelineOps = createDeclarativeCodeSkill({
   });
 pipelineOps.configSchema = createSchemaRecord({
       endpointUrl: SchemaProps.url({ description: 'Pipeline endpoint URL; may also be supplied at runtime through ' + PIPELINE_ENDPOINT_ENV }),
-      apiKey: SchemaProps.password({ description: 'API key for the pipeline endpoint' }),
       confirmBeforeSend: SchemaProps.boolean({ description: 'Require explicit confirmation before a live pipeline write', default: true }),
       defaultDryRun: SchemaProps.boolean({ description: 'Default pipeline operations to dry-run', default: true }),
       crmProvider: SchemaProps.select(['salesforce', 'hubspot', 'pipedrive', 'custom'], { description: 'Default CRM provider' }),

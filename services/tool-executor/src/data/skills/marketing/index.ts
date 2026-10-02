@@ -150,7 +150,7 @@ const MARKETING_EXTERNAL_SKILLS: Tool[] = [
     // (social, email, document-management) all gate their live dispatch, so
     // this one must too.
     confirmBeforeSend: true,
-    endpoint: { envVar: 'MARKETING_CMS_ENDPOINT', method: 'POST' },
+    endpoint: { configKey: 'MARKETING_CMS_ENDPOINT', method: 'POST' },
     auth: {
       type: 'api_key',
       header: 'X-API-Key',
@@ -201,7 +201,7 @@ const MARKETING_EXTERNAL_SKILLS: Tool[] = [
     description: 'Create, schedule, publish, and monitor social posts across configurable social media platforms.',
     system: 'social',
     action: 'publish-social',
-    endpoint: { envVar: 'MARKETING_SOCIAL_ENDPOINT', method: 'POST' },
+    endpoint: { configKey: 'MARKETING_SOCIAL_ENDPOINT', method: 'POST' },
     auth: {
       type: 'bearer',
       credentialEnvKeyMap: { token: 'MARKETING_SOCIAL_ACCESS_TOKEN' },
@@ -257,7 +257,7 @@ const MARKETING_EXTERNAL_SKILLS: Tool[] = [
     // confirmation into this callee (ToolExecutor.nestedExecutorCallback).
     action: 'optimize-seo',
     confirmBeforeSend: true,
-    endpoint: { envVar: 'MARKETING_SEO_ENDPOINT', method: 'POST' },
+    endpoint: { configKey: 'MARKETING_SEO_ENDPOINT', method: 'POST' },
     auth: {
       type: 'api_key',
       header: 'X-API-Key',
@@ -304,7 +304,7 @@ const MARKETING_EXTERNAL_SKILLS: Tool[] = [
     description: 'Search markets, competitors, trends, and customer signals through configurable research providers.',
     system: 'research',
     action: 'market-research',
-    endpoint: { envVar: 'MARKETING_RESEARCH_ENDPOINT', method: 'POST' },
+    endpoint: { configKey: 'MARKETING_RESEARCH_ENDPOINT', method: 'POST' },
     auth: {
       type: 'bearer',
       credentialEnvKeyMap: { accessToken: 'MARKETING_RESEARCH_ACCESS_TOKEN' },
@@ -350,7 +350,7 @@ const MARKETING_EXTERNAL_SKILLS: Tool[] = [
     description: 'Segment audiences and analyze demographics, behavior, preferences, and campaign response signals.',
     system: 'audience-insights',
     action: 'analyze-audience',
-    endpoint: { envVar: 'MARKETING_AUDIENCE_INSIGHTS_ENDPOINT', method: 'POST' },
+    endpoint: { configKey: 'MARKETING_AUDIENCE_INSIGHTS_ENDPOINT', method: 'POST' },
     auth: {
       type: 'api_key',
       header: 'X-API-Key',
@@ -397,7 +397,7 @@ const MARKETING_EXTERNAL_SKILLS: Tool[] = [
     description: 'Draft, schedule, send, and measure marketing email campaigns through a configurable email system.',
     system: 'email',
     action: 'send-email',
-    endpoint: { envVar: 'MARKETING_EMAIL_ENDPOINT', method: 'POST' },
+    endpoint: { configKey: 'MARKETING_EMAIL_ENDPOINT', method: 'POST' },
     auth: {
       type: 'api_key',
       header: 'Authorization',
@@ -448,7 +448,7 @@ const MARKETING_EXTERNAL_SKILLS: Tool[] = [
     description: 'Create, store, retrieve, and organize marketing assets and campaign documents in a configurable document system.',
     system: 'document-management',
     action: 'manage-document',
-    endpoint: { envVar: 'MARKETING_DOCUMENT_ENDPOINT', method: 'POST' },
+    endpoint: { configKey: 'MARKETING_DOCUMENT_ENDPOINT', method: 'POST' },
     auth: {
       type: 'bearer',
       credentialEnvKeyMap: { token: 'MARKETING_DOCUMENT_ACCESS_TOKEN' },
@@ -487,10 +487,16 @@ const MARKETING_EXTERNAL_SKILLS: Tool[] = [
   }),
 ];
 
+/**
+ * Ad-hoc half of the marketing-center decomposition. It was event-triggered
+ * ("Delivery sync event from planning or analytics") while requiring a
+ * targetChannel the sync event does not carry. This half is the user-triggered
+ * dispatcher; marketing-reports-scheduled owns the recurring report path.
+ */
 const MARKETING_CENTER = createDeclarativeCodeSkill({
-  id: 'marketing-center',
-  name: 'Marketing Center',
-  description: 'Unified interface for marketing operations across content generation, social media, email, SEO, market research, audience insights, and document management. Dispatches to the appropriate external marketing skill based on the selected targetChannel.',
+  id: 'marketing-analysis-user',
+  name: 'Marketing Analysis',
+  description: 'Unified interface for ad-hoc marketing operations across content generation, social media, email, SEO, market research, audience insights, and document management. Dispatches to the appropriate external marketing skill based on the selected targetChannel.',
   persistenceEnvVar: 'STORAGE_DIR',
   inputSchema: {
     type: 'object',
@@ -512,7 +518,14 @@ const MARKETING_CENTER = createDeclarativeCodeSkill({
     required: ['success', 'system', 'action'],
   },
   triggers: [
-    { kind: 'event', on: 'Delivery sync event from planning or analytics' },
+    {
+      kind: 'user',
+      phrase_examples: [
+        'Draft this campaign for social',
+        'Run SEO for this page',
+        'Research this market',
+      ],
+    },
   ],
   manifest: {
     lowerOrderTools: [
@@ -539,13 +552,144 @@ const MARKETING_CENTER = createDeclarativeCodeSkill({
       };
       const toolId = toolMap[targetChannel];
       if (!toolId) {
-
-        return;
+        // A bare `return` here emitted no output envelope, so an unknown channel
+        // surfaced as a bare {status, error} with no explanation.
+        return {
+          success: false,
+          status: 'error',
+          system: 'marketing-analysis-user',
+          action: targetChannel,
+          data: null,
+          error: `Unknown targetChannel: ${targetChannel}`,
+          present: [
+            ctx.render.text(
+              'notice',
+              'Unknown channel',
+              `Cannot dispatch "${targetChannel}". Expected one of: ${Object.keys(toolMap).join(', ')}.`,
+            ),
+          ],
+        };
       }
       const result = await ctx.delegate(toolId, data);
-      return { success: result ? result.success !== false : true, data: result ? result.data : null, error: result && result.error ? result.error : (result ? result.error : null), status: result ? result.status : "ok", delegatedTo: toolId, generatedAt: new Date().toISOString() };
+      const ok = Boolean(result) && result.success !== false;
+      return {
+        success: ok,
+        data: result ? result.data : null,
+        error: result?.error ?? (ok ? null : 'The dispatched tool returned no result'),
+        status: result?.status ?? (ok ? 'ok' : 'error'),
+        delegatedTo: toolId,
+        generatedAt: new Date().toISOString(),
+        // Without this, a failed dispatch showed an empty result area.
+        present: [
+          ok
+            ? ctx.render.text('report', 'Marketing Dispatch', ['Dispatched to ' + toolId, '', String(result?.data ?? '(no payload returned)')])
+            : ctx.render.text('not-connected', 'Dispatch failed', toolId + ' did not produce a result: ' + String(result?.error ?? 'unknown error')),
+        ],
+      };
     }
   });
+/**
+ * Scheduled half of the marketing-center decomposition.
+ *
+ * Produces the recurring campaign report over the configured campaigns and
+ * channels. `campaignIds` is a required selector so the report has a bounded
+ * scope rather than reporting on every campaign the account holds.
+ */
+const MARKETING_REPORTS_SCHEDULED = createDeclarativeCodeSkill({
+  id: 'marketing-reports-scheduled',
+  name: 'Marketing Reports',
+  description: 'Scheduled campaign report across the configured campaigns and channels, dispatched to the analytics channel.',
+  persistenceEnvVar: 'STORAGE_DIR',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      runReason: SchemaProps.text({ description: 'Why this run was invoked (schedule, manual)' }),
+    },
+  },
+  outputSchema: {
+    type: 'object',
+    properties: {
+      success: { type: 'boolean' },
+      status: { type: 'string' },
+      data: { type: 'object' },
+      error: { type: 'string' },
+    },
+    required: ['success', 'status'],
+  },
+  configSchema: {
+    type: 'object',
+    properties: {
+      campaignIds: { type: 'array', items: { type: 'string' }, description: 'Campaigns this report covers' },
+      channels: { type: 'array', items: { type: 'string' }, description: 'Channels to report on per campaign' },
+      reportCadence: { type: 'string', description: 'Cron expression or schedule id for this report' },
+    },
+    required: ['campaignIds'],
+    additionalProperties: false,
+  },
+  triggers: [
+    { kind: 'schedule', cadence: 'Weekly campaign report' },
+  ],
+  isSkill: true,
+  tier: 'advise',
+  domainKnowledge: 'Marketing frameworks (AIDA, RACE, buyer journey), channel-specific best practices (SEO, paid social, email), content strategy, campaign measurement',
+  manifest: {
+    lowerOrderTools: ['marketing-market-research', 'marketing-audience-insights'],
+  },
+  handler: async function handler(input, ctx) {
+    const campaignIds = Array.isArray(ctx.config?.campaignIds) ? ctx.config.campaignIds.map(String) : [];
+    const channels = Array.isArray(ctx.config?.channels) ? ctx.config.channels.map(String) : [];
+    const reportCadence = typeof ctx.config?.reportCadence === 'string' ? ctx.config.reportCadence : null;
+    const runReason = typeof input?.runReason === 'string' ? input.runReason : 'schedule';
+
+    if (!campaignIds.length) {
+      return {
+        success: false,
+        status: 'not-configured',
+        error: 'No campaigns configured. Set config.campaignIds before this Skill can run.',
+        present: [ctx.render.text('notice', 'No campaigns configured', 'Set config.campaignIds before the scheduled marketing report can run.')],
+      };
+    }
+
+    const reports: Array<Record<string, unknown>> = [];
+    // A campaign counts as failed when the call throws OR when the callee comes
+    // back having produced nothing. Counting only the throw path let this Skill
+    // report success:true while 0 of 2 campaigns actually reported.
+    const failed: string[] = [];
+    for (const campaignId of campaignIds) {
+      try {
+        const result = await ctx.delegate('marketing-market-research', { campaignId, channels, reportCadence, runReason });
+        const ok = Boolean(result) && result.success !== false;
+        if (!ok) failed.push(campaignId);
+        reports.push({
+          campaignId,
+          success: ok,
+          status: result?.status ?? null,
+          data: result?.data ?? null,
+          error: result?.error ?? 'callee returned no report',
+        });
+      } catch (err) {
+        // Recorded rather than swallowed, so a report that covers nothing cannot
+        // read as a report that found nothing.
+        failed.push(campaignId);
+        reports.push({ campaignId, success: false, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+
+    const succeeded = reports.filter((r) => r.success === true).length;
+    return {
+      // A run that produced no reports at all is not a clean run, whatever the
+      // call path returned.
+      success: failed.length === 0 && succeeded > 0,
+      status: failed.length === 0 ? (succeeded > 0 ? 'ok' : 'empty') : 'partial',
+      data: { campaignIds, channels, reportCadence, runReason, requested: campaignIds.length, succeeded, failed, reports },
+      error: failed.length ? `No report for: ${failed.join(', ')}` : null,
+      present: [
+        ctx.render.text('report', 'Marketing Campaign Report', `${succeeded}/${campaignIds.length} configured campaign(s) reported${failed.length ? `; ${failed.length} failed` : ''}.`),
+      ],
+    };
+  },
+});
+
 MARKETING_CENTER.tier = 'represent';
 MARKETING_CENTER.confirmBeforeSend = true;
 MARKETING_CENTER.domainKnowledge = 'Marketing frameworks (AIDA, RACE, buyer journey), channel-specific best practices (SEO, paid social, email), content strategy, campaign measurement';
@@ -571,7 +715,8 @@ for (const s of MARKETING_EXTERNAL_SKILLS) {
 const MARKETING_TIER: Record<string, 'advise' | 'aid' | 'represent'> = {
   'plan-campaign': 'advise',
   'analyze-performance': 'advise',
-  'marketing-center': 'represent',
+  'marketing-analysis-user': 'represent',
+  'marketing-reports-scheduled': 'advise',
   'marketing-content-generation': 'aid',
   'marketing-social-media': 'represent',
   'marketing-email': 'represent',
@@ -593,7 +738,7 @@ for (const s of [...MARKETING_SKILLS, ...MARKETING_EXTERNAL_SKILLS]) {
   }
 }
 
-MARKETING_SKILLS.push(MARKETING_CENTER);
+MARKETING_SKILLS.push(MARKETING_CENTER, MARKETING_REPORTS_SCHEDULED);
 
 export const marketingSkills = [...MARKETING_SKILLS, ...MARKETING_EXTERNAL_SKILLS];
 
@@ -613,7 +758,8 @@ export interface AssistantWorkflow {
 MARKETING_SKILLS.forEach((s) => {
   if (s.id === 'plan-campaign') s.manifest.workflowStage = 'plan';
   else if (s.id === 'analyze-performance') s.manifest.workflowStage = 'analyze';
-  else if (s.id === 'marketing-center') s.manifest.workflowStage = 'plan';
+  else if (s.id === 'marketing-analysis-user') s.manifest.workflowStage = 'plan';
+  else if (s.id === 'marketing-reports-scheduled') s.manifest.workflowStage = 'plan';
 });
 
 MARKETING_EXTERNAL_SKILLS.forEach((s) => {
@@ -626,8 +772,9 @@ MARKETING_EXTERNAL_SKILLS.forEach((s) => {
   else if (s.id === 'marketing-document-management') s.manifest.workflowStage = 'publish';
 });
 
-export { MARKETING_CENTER };
-export const marketingCenter = MARKETING_CENTER;
+// The former `marketingCenter` alias is gone: it named a Skill id that no
+// longer exists after the Class 4 decomposition, and nothing imported it.
+export { MARKETING_CENTER, MARKETING_REPORTS_SCHEDULED };
 
 export const marketingWorkflow: AssistantWorkflow = {
   assistant: 'Marketing',

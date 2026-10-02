@@ -2,6 +2,7 @@
 import { Tool } from '../../../types';
 import { createDeclarativeCodeSkill, SchemaProps } from '../code-skill-factory';
 import { hrResultSchema, HR_EXTERNAL_OUTPUT_SCHEMA } from './hr-contract';
+import { HR_INTERVIEW_SCHEDULING_AUTOMATED } from './interview-scheduling-automated';
 
 const HR_DOMAIN_KNOWLEDGE =
   'Talent acquisition lifecycles, structured interview methodology, compensation benchmarking, employment law compliance (EEOC)';
@@ -22,11 +23,12 @@ const HR_SCREEN_RESUME = createDeclarativeCodeSkill({
       confirmBeforeSend: SchemaProps.boolean({ description: 'Require explicit confirmation before sending mutating scheduling requests', default: true }),
       dryRun: SchemaProps.boolean({ description: 'Validate without executing; defaults to true', default: true }),
       defaultEndpoint: SchemaProps.url({ description: 'Default screening and scheduling endpoint URL' }),
+  apiKey: SchemaProps.password({ description: 'Applicant tracking system API key' }),
       maxRetryAttempts: SchemaProps.number({ description: 'Retry attempts on scheduling failure', default: 3 }),
       rateLimitPerMinute: SchemaProps.number({ description: 'Rate limit per minute for scheduling API', default: 60 }),
     },
   },
-  endpointEnvVar: 'HR_SCREENING_ENDPOINT',
+  endpointConfigKey: 'defaultEndpoint',
   inputSchema: {
     type: 'object',
     properties: {
@@ -157,7 +159,7 @@ const HR_ASSESS_CANDIDATE = createDeclarativeCodeSkill({
       rateLimitPerMinute: SchemaProps.number({ description: 'Rate limit per minute for scheduling API', default: 60 }),
     },
   },
-  endpointEnvVar: 'HR_SCREENING_ENDPOINT',
+  endpointConfigKey: 'defaultEndpoint',
   inputSchema: {
     type: 'object',
     properties: {
@@ -178,7 +180,9 @@ const HR_ASSESS_CANDIDATE = createDeclarativeCodeSkill({
   domainKnowledge: HR_DOMAIN_KNOWLEDGE,
   workflowStage: 'screening',
   triggers: [
-    { kind: 'event', on: 'New application received' },
+    // User, not Event: assessment needs the resume text and candidate name, and
+    // there is no wired intake that supplies them, so only a person can run it.
+    { kind: 'user', phrase_examples: ['Assess this candidate against the role', 'Score this resume', 'Produce interview assessment scores'] },
   ],
   isSkill: true,
   async handler(input, ctx) {
@@ -272,119 +276,16 @@ const HR_ASSESS_CANDIDATE = createDeclarativeCodeSkill({
 });
 
 // ============================================================================
-// SKILL 3: hr-schedule-interview (Represent)
-// Event trigger: "Candidate passed screening"
-// ============================================================================
-
-const HR_SCHEDULE_INTERVIEW = createDeclarativeCodeSkill({
-  id: 'hr-schedule-interview',
-  name: 'Schedule Interview for Candidate',
-  description: 'Coordinates interview availability and schedules interviews. Requires explicit confirmation for live scheduling. Triggered when candidate passes screening.',
-  persistenceEnvVar: 'HR_HOME',
-  configSchema: {
-    type: 'object',
-    properties: {
-      confirmBeforeSend: SchemaProps.boolean({ description: 'Require explicit confirmation before sending mutating scheduling requests', default: true }),
-      dryRun: SchemaProps.boolean({ description: 'Validate without executing; defaults to true', default: true }),
-      defaultEndpoint: SchemaProps.url({ description: 'Default screening and scheduling endpoint URL' }),
-      maxRetryAttempts: SchemaProps.number({ description: 'Retry attempts on scheduling failure', default: 3 }),
-      rateLimitPerMinute: SchemaProps.number({ description: 'Rate limit per minute for scheduling API', default: 60 }),
-    },
-  },
-  endpointEnvVar: 'HR_SCREENING_ENDPOINT',
-  inputSchema: {
-    type: 'object',
-    properties: {
-      candidateName: SchemaProps.text({ description: 'Candidate full name' }),
-      dryRun: SchemaProps.boolean({ description: 'Validate without executing scheduling; defaults to true', default: true }),
-      confirmation: SchemaProps.boolean({ description: 'Explicit approval for live scheduling dispatch', default: false }),
-    },
-    required: ['candidateName'],
-  },
-  outputSchema: hrResultSchema('Interview schedule record with mode, confirmation status, and persistence path'),
-  tier: 'represent',
-  confirmBeforeSend: true,
-  domainKnowledge: HR_DOMAIN_KNOWLEDGE,
-  workflowStage: 'interview',
-  triggers: [
-    { kind: 'event', on: 'Candidate passed screening' },
-  ],
-  isSkill: true,
-  async handler(input, ctx) {
-    const candidateName = String(input.candidateName || '');
-    const dryRun = input.dryRun !== false;
-    const confirmation = input.confirmation === true;
-    const endpoint = process.env.HR_SCREENING_ENDPOINT || '';
-
-    if (!candidateName) {
-      return {
-  success: false,
-  status: 'error',
-  data: null,
-  error: 'candidateName is required',
-  present: [ctx.render.text('notice', 'Missing input', 'candidateName is required')]
-};
-    }
-
-    if (!endpoint) {
-      return {
-  success: false,
-  status: 'not-connected',
-  data: null,
-  error: 'Not connected: ' + 'HR_SCREENING_ENDPOINT is not configured',
-  present: [ctx.render.text('not-connected', 'Connection required', 'Not connected: ' + 'HR_SCREENING_ENDPOINT is not configured')],
-};
-    }
-
-    if (!dryRun && !confirmation) {
-      return {
-  success: false,
-  status: 'confirmation-required',
-  data: null,
-  error: 'Explicit confirmation required for live scheduling',
-  present: [ctx.render.text('notice', 'Confirmation required', 'Explicit confirmation required for live scheduling')]
-};
-    }
-
-    const schedule = {
-      id: 'sched_' + Date.now(),
-      candidateName,
-      dryRun,
-      confirmed: confirmation,
-      scheduledAt: new Date().toISOString(),
-    };
-
-    const schedStore = ctx.store.load('scheduling', []);
-    schedStore.push(schedule);
-    ctx.store.save('scheduling', schedStore);
-
-    const storePath = ctx.store.getFilePath('scheduling');
-    const lines = [
-      'Interview Scheduling: ' + candidateName,
-      '',
-      'Mode: ' + (dryRun ? 'Dry-run (validation only)' : 'Live scheduling'),
-      'Confirmed: ' + (confirmation ? 'Yes' : 'No'),
-      'Scheduled At: ' + schedule.scheduledAt,
-      'Store Path: ' + storePath,
-      '',
-    ];
-
-    return {
-      success: true,
-      status: dryRun ? 'dry-run' : 'ok',
-      data: { schedule, storePath },
-      error: null,
-      present: [ctx.render.text('report', 'Scheduling Result', lines)],
-    };
-  },
-});
-
-// ============================================================================
-// SKILL 4: hr-draft-jd-interview-kit (Aid)
+// SKILL 3: hr-draft-jd-interview-kit (Aid)
 // User trigger
 // ============================================================================
 
 const HR_DRAFT_JD_INTERVIEW_KIT = createDeclarativeCodeSkill({
+  // Declared as a credential, not a plain config field, so the secret can be
+  // sourced from the vault via `vault:<id>` and is never echoed into output.
+  credentialSource: {
+    apiKey: { configKey: 'apiKey', required: false, label: "upstream service API key (set in this Skill configuration, or a vault secret)" },
+  },
   id: 'hr-draft-jd-interview-kit',
   name: 'Draft Job Description & Interview Kit',
   description: 'Generates structured job descriptions, interview scorecards, role-specific behavioral questions, and rubric guides.',
@@ -400,7 +301,7 @@ const HR_DRAFT_JD_INTERVIEW_KIT = createDeclarativeCodeSkill({
       retryAttempts: SchemaProps.number({ description: 'Retry attempts on failure', default: 3 }),
     },
   },
-  endpointEnvVar: 'HR_RECRUITING_ENDPOINT',
+  endpointConfigKey: 'defaultEndpoint',
   inputSchema: {
     type: 'object',
     properties: {
@@ -424,16 +325,16 @@ const HR_DRAFT_JD_INTERVIEW_KIT = createDeclarativeCodeSkill({
   async handler(input, ctx) {
     const dryRun = input.dryRun !== false;
     const data = input.data || {};
-    const endpoint = process.env.HR_RECRUITING_ENDPOINT || '';
-    const apiKey = process.env.HR_RECRUITING_API_KEY || '';
+    const endpoint = String(ctx.config?.defaultEndpoint || '');
+    const apiKey = (ctx.getCredential ? ctx.getCredential('apiKey') : undefined) || '';
 
     if (!endpoint) {
       return {
   success: false,
   status: 'not-connected',
   data: null,
-  error: 'Not connected: ' + 'HR_RECRUITING_ENDPOINT is not configured',
-  present: [ctx.render.text('not-connected', 'Connection required', 'Not connected: ' + 'HR_RECRUITING_ENDPOINT is not configured')],
+  error: 'Not connected: no applicant tracking system endpoint configured. Set defaultEndpoint in this Skill\'s configuration.',
+  present: [ctx.render.text('not-connected', 'Connection required', 'Not connected: no applicant tracking system endpoint configured. Set defaultEndpoint in this Skill\'s configuration.')],
 };
     }
     if (!apiKey) {
@@ -441,8 +342,8 @@ const HR_DRAFT_JD_INTERVIEW_KIT = createDeclarativeCodeSkill({
   success: false,
   status: 'not-connected',
   data: null,
-  error: 'Not connected: ' + 'HR_RECRUITING_API_KEY is not configured',
-  present: [ctx.render.text('not-connected', 'Connection required', 'Not connected: ' + 'HR_RECRUITING_API_KEY is not configured')],
+  error: 'Not connected: no applicant tracking system API key configured. Set the apiKey credential for this Skill.',
+  present: [ctx.render.text('not-connected', 'Connection required', 'Not connected: no applicant tracking system API key configured. Set the apiKey credential for this Skill.')],
 };
     }
 
@@ -520,14 +421,21 @@ const HR_DRAFT_JD_INTERVIEW_KIT = createDeclarativeCodeSkill({
 });
 
 // ============================================================================
-// SKILL 5: hr-trigger-interview-scheduling (Aid)
-// Event trigger: "Candidate passed screening"
+// SKILL 4: hr-interview-scheduling-user (Aid)
+// User trigger: an operator books an interview by hand. The automated half
+// (interview-scheduling-automated) owns the screening-event path and carries the
+// calendar/round policy as configuration.
 // ============================================================================
 
-const HR_TRIGGER_INTERVIEW_SCHEDULING = createDeclarativeCodeSkill({
-  id: 'hr-trigger-interview-scheduling',
-  name: 'Trigger Interview Scheduling',
-  description: 'Coordinates with ATS, calendar, and email systems to schedule interviews. Triggered when candidate passes screening.',
+const HR_INTERVIEW_SCHEDULING_USER = createDeclarativeCodeSkill({
+  // Declared as a credential, not a plain config field, so the secret can be
+  // sourced from the vault via `vault:<id>` and is never echoed into output.
+  credentialSource: {
+    apiKey: { configKey: 'apiKey', required: false, label: "upstream service API key (set in this Skill configuration, or a vault secret)" },
+  },
+  id: 'hr-interview-scheduling-user',
+  name: 'Interview Scheduling',
+  description: 'Coordinates with ATS, calendar, and email systems to book an interview you are scheduling by hand.',
   persistenceEnvVar: 'HR_HOME',
   configSchema: {
     type: 'object',
@@ -540,7 +448,7 @@ const HR_TRIGGER_INTERVIEW_SCHEDULING = createDeclarativeCodeSkill({
       retryAttempts: SchemaProps.number({ description: 'Retry attempts on failure', default: 3 }),
     },
   },
-  endpointEnvVar: 'HR_RECRUITING_ENDPOINT',
+  endpointConfigKey: 'defaultEndpoint',
   inputSchema: {
     type: 'object',
     properties: {
@@ -558,22 +466,29 @@ const HR_TRIGGER_INTERVIEW_SCHEDULING = createDeclarativeCodeSkill({
   domainKnowledge: HR_DOMAIN_KNOWLEDGE,
   workflowStage: 'interview',
   triggers: [
-    { kind: 'event', on: 'Candidate passed screening' },
+    {
+      kind: 'user',
+      phrase_examples: [
+        'Schedule an interview for this candidate',
+        'Book an onsite for this shortlist',
+        'Set up the next round with this interviewer',
+      ],
+    },
   ],
   isSkill: true,
   async handler(input, ctx) {
     const dryRun = input.dryRun !== false;
     const data = input.data || {};
-    const endpoint = process.env.HR_RECRUITING_ENDPOINT || '';
-    const apiKey = process.env.HR_RECRUITING_API_KEY || '';
+    const endpoint = String(ctx.config?.defaultEndpoint || '');
+    const apiKey = (ctx.getCredential ? ctx.getCredential('apiKey') : undefined) || '';
 
     if (!endpoint) {
       return {
   success: false,
   status: 'not-connected',
   data: null,
-  error: 'Not connected: ' + 'HR_RECRUITING_ENDPOINT is not configured',
-  present: [ctx.render.text('not-connected', 'Connection required', 'Not connected: ' + 'HR_RECRUITING_ENDPOINT is not configured')],
+  error: 'Not connected: no applicant tracking system endpoint configured. Set defaultEndpoint in this Skill\'s configuration.',
+  present: [ctx.render.text('not-connected', 'Connection required', 'Not connected: no applicant tracking system endpoint configured. Set defaultEndpoint in this Skill\'s configuration.')],
 };
     }
     if (!apiKey) {
@@ -581,8 +496,8 @@ const HR_TRIGGER_INTERVIEW_SCHEDULING = createDeclarativeCodeSkill({
   success: false,
   status: 'not-connected',
   data: null,
-  error: 'Not connected: ' + 'HR_RECRUITING_API_KEY is not configured',
-  present: [ctx.render.text('not-connected', 'Connection required', 'Not connected: ' + 'HR_RECRUITING_API_KEY is not configured')],
+  error: 'Not connected: no applicant tracking system API key configured. Set the apiKey credential for this Skill.',
+  present: [ctx.render.text('not-connected', 'Connection required', 'Not connected: no applicant tracking system API key configured. Set the apiKey credential for this Skill.')],
 };
     }
 
@@ -658,7 +573,7 @@ const HR_TRIGGER_INTERVIEW_SCHEDULING = createDeclarativeCodeSkill({
 });
 
 // ============================================================================
-// SKILL 6: hr-hiring-analytics (Advise)
+// SKILL 5: hr-hiring-analytics (Advise)
 // Schedule trigger: "Weekly hiring pipeline report"
 // ============================================================================
 
@@ -753,7 +668,7 @@ const HR_HIRING_ANALYTICS = createDeclarativeCodeSkill({
 });
 
 // ============================================================================
-// SKILL 7: hr-compliance-check (Advise)
+// SKILL 6: hr-compliance-check (Advise)
 // Schedule trigger: "Monthly compliance audit"
 // ============================================================================
 
@@ -851,9 +766,9 @@ const HR_COMPLIANCE_CHECK = createDeclarativeCodeSkill({
 const hrSkills = [
   HR_SCREEN_RESUME,
   HR_ASSESS_CANDIDATE,
-  HR_SCHEDULE_INTERVIEW,
   HR_DRAFT_JD_INTERVIEW_KIT,
-  HR_TRIGGER_INTERVIEW_SCHEDULING,
+  HR_INTERVIEW_SCHEDULING_USER,
+  HR_INTERVIEW_SCHEDULING_AUTOMATED,
   HR_HIRING_ANALYTICS,
   HR_COMPLIANCE_CHECK,
 ];

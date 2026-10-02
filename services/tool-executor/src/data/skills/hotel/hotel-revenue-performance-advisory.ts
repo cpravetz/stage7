@@ -1,7 +1,7 @@
 import { createDeclarativeCodeSkill, createSchemaRecord, SchemaProps } from '../code-skill-factory';
 
 const REVENUE_INPUT_SCHEMA = createSchemaRecord({
-  propertyId: SchemaProps.text({ description: 'Hotel property identifier', required: true }),
+  propertyId: SchemaProps.reference('hotel-properties', { description: 'Hotel property identifier', required: true }),
   dateRange: SchemaProps.object({
     start: SchemaProps.text({ description: 'Analysis range start date or timestamp' }),
     end: SchemaProps.text({ description: 'Analysis range end date or timestamp' }),
@@ -20,20 +20,20 @@ const REVENUE_INPUT_SCHEMA = createSchemaRecord({
     adr: SchemaProps.number({ description: 'Average daily rate for the record', minimum: 0 }),
     channel: SchemaProps.text({ description: 'Booking or sales channel' }),
     department: SchemaProps.text({ description: 'Operating department' }),
-    staffId: SchemaProps.text({ description: 'Staff member associated with the record' }),
+    staffId: SchemaProps.reference('hotel-staff', { description: 'Staff member associated with the record' }),
     tasksCompleted: SchemaProps.integer({ description: 'Tasks completed by the staff member', minimum: 0 }),
     guestSatisfaction: SchemaProps.number({ description: 'Guest satisfaction score', minimum: 0, maximum: 5 }),
   }, {}), { description: 'Supplied PMS, operational, or staff records for grounded analysis' }),
   channels: SchemaProps.stringArray({ description: 'Booking channels to compare' }),
   staffing: SchemaProps.objectArray(SchemaProps.object({
-    staffId: SchemaProps.text({ description: 'Staff member identifier' }),
+    staffId: SchemaProps.reference('hotel-staff', { description: 'Staff member identifier' }),
     department: SchemaProps.text({ description: 'Staff department' }),
     shifts: SchemaProps.integer({ description: 'Completed or scheduled shifts', minimum: 0 }),
     hoursWorked: SchemaProps.number({ description: 'Hours worked', minimum: 0 }),
     tasksCompleted: SchemaProps.integer({ description: 'Completed tasks', minimum: 0 }),
     guestSatisfaction: SchemaProps.number({ description: 'Guest satisfaction score', minimum: 0, maximum: 5 }),
   }, {}), { description: 'Staff performance records' }),
-  staffId: SchemaProps.text({ description: 'Staff member to analyze' }),
+  staffId: SchemaProps.reference('hotel-staff', { description: 'Staff member to analyze' }),
   department: SchemaProps.text({ description: 'Department to filter or analyze' }),
   baselineRevenue: SchemaProps.number({ description: 'Baseline revenue used for variance or forecast calculations', minimum: 0 }),
   growthRate: SchemaProps.number({ description: 'Expected revenue growth rate as a percentage' }),
@@ -63,7 +63,7 @@ export const REVENUE_SKILL = createDeclarativeCodeSkill({
   tier: 'advise',
   domainKnowledge: 'Hotel revenue management, ADR, RevPAR, occupancy analytics, and staff performance',
   triggers: [
-    { kind: 'schedule', cadence: 'Weekly revenue and performance review' },
+    { kind: 'user', phrase_examples: ['Run a revenue performance review', 'Analyse this property\u2019s revenue'] },
   ],
   isSkill: true,
   async handler(input, ctx) {

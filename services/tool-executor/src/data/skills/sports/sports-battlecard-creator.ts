@@ -48,9 +48,19 @@ export const BATTLECARD_CREATOR = createDeclarativeCodeSkill({
   ],
   isSkill: false,
   manifest: {
+    // The provider key is a secret, so it is declared as a credential rather than a
+    // plain config field: the executor resolves it and hands the handler a value via
+    // ctx.credentials. Declare `configKey: 'vault:...'` in configuration to source it
+    // from the vault instead.
+    credentialSource: {
+      statsApiKey: { configKey: 'statsApiKey', required: false, label: "stats provider API key (set in this Skill configuration, or a vault secret)" },
+    },
     configSchema: {
       type: 'object',
       properties: {
+        statsEndpoint: SchemaProps.url({ description: 'Stats provider base URL for this Skill' }),
+        statsApiKey: SchemaProps.text({ description: 'Stats provider API key' }),
+        requestTimeoutMs: SchemaProps.number({ description: 'Request timeout in milliseconds', default: 10000 }),
         dataProvider: SchemaProps.select(['statsperform', 'opta', 'both'], { description: 'Primary data provider', default: 'both' }),
         confirmBeforeSend: SchemaProps.boolean({ description: 'Require confirmation before sending', default: true }),
         dryRun: SchemaProps.boolean({ description: 'Validate without executing', default: true }),
@@ -64,15 +74,19 @@ export const BATTLECARD_CREATOR = createDeclarativeCodeSkill({
       const opponent = input.opponent || input.opponentId || '';
       const sport = input.sport || 'generic';
 
-      let store = { cards: [], lastUpdated: new Date().toISOString() };
-      store = ctx.store.load('battlecard-archives', []);
+      const defaults = { cards: [], lastUpdated: new Date().toISOString() };
+      // Keep the shape used below: a bare `[]` fallback made `store.cards` undefined
+      // on a cold store and threw instead of creating the first card.
+      const loaded = ctx.store.load('battlecard-archives', defaults);
+      const store = loaded && typeof loaded === 'object' && !Array.isArray(loaded) ? { ...defaults, ...loaded } : defaults;
 
-      const statsApi = process.env.SPORTS_PERFORM_API || process.env.OPTA_API_URL || '';
-      const requestTimeoutMs = Number(process.env.SPORTS_REQUEST_TIMEOUT_MS) || 10000;
+      const statsApi = String(ctx.config?.statsEndpoint || '');
+      const statsKey = ctx.getCredential ? ctx.getCredential('statsApiKey') : undefined;
+      const requestTimeoutMs = Number(ctx.config?.requestTimeoutMs) || 10000;
 
       async function fetchStatsData(apiUrl) {
         if (!apiUrl) {
-          return { ok: false, status: 'not-configured', data: null, error: 'SPORTS_PERFORM_API and OPTA_API_URL not set' };
+          return { ok: false, status: 'not-configured', data: null, error: 'No stats provider configured: set statsEndpoint in this Skill\'s configuration' };
         }
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
@@ -126,6 +140,30 @@ export const BATTLECARD_CREATOR = createDeclarativeCodeSkill({
 
       store.cards.push(playbook);
       ctx.store.save('battlecard-archives', store);
+
+      // The battlecard was built and archived but never returned, so the Skill
+      // produced no output at all while appearing to succeed. Report it, and say
+      // when it came from local input rather than the configured stats provider.
+      const summaryLines = [
+        'Battlecard for ' + entity + ' vs ' + opponent,
+        'Situation: ' + situation + ' | formation: ' + playbook.formation,
+        'Offense ' + playbook.offensiveScheme + ' / defense ' + playbook.defensiveScheme,
+        'Key matchups: ' + playbook.keyMatchups.length + ' | situational plays: ' + playbook.situationalPlays.length,
+      ];
+      if (!dataConnected) {
+        summaryLines.push('Stats source: local input only - no stats provider configured (set statsEndpoint in this Skill\'s configuration).');
+      }
+      if (ctx.config?.dryRun === true) summaryLines.push('Dry run: the battlecard was generated and archived, nothing was sent.');
+
+      return {
+        success: true,
+        status: 'ok',
+        data: { playbook: playbook, cards: store.cards, storePath: ctx.store.getFilePath('battlecard-archives') },
+        source: playbook.source,
+        connectivityStatus: statsResult.status,
+        error: null,
+        present: [ctx.render.text('battlecard', 'Battlecard', summaryLines.join('\n'))],
+      };
     }
   });
 BATTLECARD_CREATOR.configSchema = {

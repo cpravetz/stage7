@@ -15,6 +15,12 @@ function getCanonical(id: string): Tool {
 }
 
 describe('hrSkills', () => {
+  // Seven after two consolidations (see docs/skill-class4-split-configs.md):
+  //  - the bundled interview scheduler became a user half and an automated half
+  //  - the older hr-schedule-interview was removed, because it carried the same
+  //    "Candidate passed screening" Event trigger and the same job as the
+  //    automated half. Two Skills claiming one trigger is a §0.14 violation, and
+  //    it was never bound to the Assistant, so it was already unreachable.
   it('exports exactly seven skills', () => {
     expect(hrSkills).toHaveLength(7);
   });
@@ -28,9 +34,9 @@ describe('hrSkills', () => {
     const expectedNames = [
       'Screen Resume for Role Fit',
       'Assess Candidate Skills and Experience',
-      'Schedule Interview for Candidate',
       'Draft Job Description & Interview Kit',
-      'Trigger Interview Scheduling',
+      'Interview Scheduling',
+      'Interview Scheduling (Automated)',
       'Hiring Pipeline Analytics',
       'Compliance Audit Check',
     ];
@@ -45,14 +51,20 @@ describe('hrSkills', () => {
     it('has expected skill id: hr-assess-candidate', () => {
       expect(hrSkills.some((s) => s.id === 'hr-assess-candidate')).toBe(true);
     });
-    it('has expected skill id: hr-schedule-interview', () => {
-      expect(hrSkills.some((s) => s.id === 'hr-schedule-interview')).toBe(true);
+    it('no longer exports the superseded hr-schedule-interview', () => {
+      // It duplicated hr-interview-scheduling-automated: identical Event trigger,
+      // identical job, identical workflow stage. The automated half absorbed the
+      // one thing it uniquely did, writing a local scheduling record.
+      expect(hrSkills.some((s) => s.id === 'hr-schedule-interview')).toBe(false);
     });
     it('has expected skill id: hr-draft-jd-interview-kit', () => {
       expect(hrSkills.some((s) => s.id === 'hr-draft-jd-interview-kit')).toBe(true);
     });
-    it('has expected skill id: hr-trigger-interview-scheduling', () => {
-      expect(hrSkills.some((s) => s.id === 'hr-trigger-interview-scheduling')).toBe(true);
+    it('has expected skill id: hr-interview-scheduling-user', () => {
+      expect(hrSkills.some((s) => s.id === 'hr-interview-scheduling-user')).toBe(true);
+    });
+    it('has expected skill id: hr-interview-scheduling-automated', () => {
+      expect(hrSkills.some((s) => s.id === 'hr-interview-scheduling-automated')).toBe(true);
     });
     it('has expected skill id: hr-hiring-analytics', () => {
       expect(hrSkills.some((s) => s.id === 'hr-hiring-analytics')).toBe(true);
@@ -98,24 +110,37 @@ describe('hrSkills', () => {
       expect(skill.triggers![0].kind).toBe('user');
     });
 
-    it('hr-assess-candidate has event trigger', () => {
+    it('hr-assess-candidate has user trigger', () => {
+      // Assessment requires the resume text and candidate name and there is no
+      // wired intake that supplies them, so a person is the only invoker. It was
+      // event-triggered, which left it unreachable as bound.
       const skill = getSkill('hr-assess-candidate');
-      expect(skill.triggers![0].kind).toBe('event');
+      expect(skill.triggers![0].kind).toBe('user');
     });
 
-    it('hr-schedule-interview has event trigger', () => {
-      const skill = getSkill('hr-schedule-interview');
-      expect(skill.triggers![0].kind).toBe('event');
-    });
 
     it('hr-draft-jd-interview-kit has user trigger', () => {
       const skill = getSkill('hr-draft-jd-interview-kit');
       expect(skill.triggers![0].kind).toBe('user');
     });
 
-    it('hr-trigger-interview-scheduling has event trigger', () => {
-      const skill = getSkill('hr-trigger-interview-scheduling');
+    // The split's point: the booking half is user-triggered, the screening-event
+    // half is the one that stays on the event.
+    it('hr-interview-scheduling-user has user trigger', () => {
+      const skill = getSkill('hr-interview-scheduling-user');
+      expect(skill.triggers![0].kind).toBe('user');
+    });
+
+    it('hr-interview-scheduling-automated has event trigger', () => {
+      const skill = getSkill('hr-interview-scheduling-automated');
       expect(skill.triggers![0].kind).toBe('event');
+    });
+
+    it('hr-interview-scheduling-automated requires a calendarId selector', () => {
+      // Required selector: the pre-split Skill had a configSchema with nothing
+      // required, so it could run against any calendar with no defined scope.
+      const config = getSkill('hr-interview-scheduling-automated').configSchema as { required?: string[] };
+      expect(config.required).toContain('calendarId');
     });
 
     it('hr-hiring-analytics has schedule trigger', () => {
@@ -163,9 +188,9 @@ describe('hrSkills', () => {
       expect((skill.manifest.configSchema as any).properties!.dryRun).toBeDefined();
     });
 
-    it('hr-screen-resume has endpointEnvVar', () => {
+    it('hr-screen-resume declares the config field holding its endpoint', () => {
       const skill = getSkill('hr-screen-resume');
-      expect((skill.manifest as Record<string, unknown>).endpointEnvVar).toBeDefined();
+      expect((skill.manifest as Record<string, unknown>).endpointConfigKey).toBeDefined();
     });
 
     it('hr-screen-resume source has dryRun gate', () => {
@@ -182,16 +207,6 @@ describe('hrSkills', () => {
     it('hr-screen-resume source does not fabricate success', () => {
       const source = getSkill('hr-screen-resume').manifest.sourceCode as string;
       expect(source).not.toMatch(/console\.log\(JSON\.stringify\(\{ success:\s*true\s*\}\)\)/);
-    });
-
-    it('hr-schedule-interview has confirmBeforeSend', () => {
-      const skill = getSkill('hr-schedule-interview');
-      expect(skill.confirmBeforeSend).toBe(true);
-    });
-
-    it('hr-schedule-interview has configSchema', () => {
-      const skill = getSkill('hr-schedule-interview');
-      expect(skill.manifest.configSchema).toBeDefined();
     });
 
     it('hr-hiring-analytics source has not-connected fallback', () => {
@@ -214,9 +229,9 @@ describe('hrSkills', () => {
       const canonicalIds = hrCanonicalSkills.map((s) => s.id).sort();
       expect(canonicalIds).toContain('hr-screen-resume');
       expect(canonicalIds).toContain('hr-assess-candidate');
-      expect(canonicalIds).toContain('hr-schedule-interview');
       expect(canonicalIds).toContain('hr-draft-jd-interview-kit');
-      expect(canonicalIds).toContain('hr-trigger-interview-scheduling');
+      expect(canonicalIds).toContain('hr-interview-scheduling-user');
+      expect(canonicalIds).toContain('hr-interview-scheduling-automated');
       expect(canonicalIds).toContain('hr-hiring-analytics');
       expect(canonicalIds).toContain('hr-compliance-check');
     });
@@ -235,10 +250,10 @@ describe('hrSkills', () => {
       }
     });
 
-    it('Represent canonical skill has endpointEnvVar and confirmBeforeSend', () => {
+    it('Represent canonical skill declares its endpoint config key and confirmBeforeSend', () => {
       const rep = getCanonical('hr-screen-resume');
       const manifest = rep.manifest as Record<string, unknown>;
-      expect(manifest.endpointEnvVar).toBe('HR_SCREENING_ENDPOINT');
+      expect(manifest.endpointConfigKey).toBe('defaultEndpoint');
       expect(rep.confirmBeforeSend).toBe(true);
       expect(rep.manifest.configSchema).toBeDefined();
     });
@@ -260,9 +275,16 @@ describe('hrSkills', () => {
       const source = getSkill('hr-assess-candidate').manifest.sourceCode as string;
       expect(source).toContain('HR_HOME');
     });
-    it('hr-schedule-interview source references HR_HOME', () => {
-      const source = getSkill('hr-schedule-interview').manifest.sourceCode as string;
+    it('hr-interview-scheduling-automated source references HR_HOME', () => {
+      const source = getSkill('hr-interview-scheduling-automated').manifest.sourceCode as string;
       expect(source).toContain('HR_HOME');
+    });
+
+    it('hr-interview-scheduling-automated keeps the local scheduling record', async () => {
+      // This is the one capability hr-schedule-interview uniquely had. Losing it
+      // with the removal would have left no durable local trail of a booking.
+      const source = getSkill('hr-interview-scheduling-automated').manifest.sourceCode as string;
+      expect(source).toContain('ctx.store.save(\'scheduling\'');
     });
     it('hr-hiring-analytics source references HR_HOME', () => {
       const source = getSkill('hr-hiring-analytics').manifest.sourceCode as string;
@@ -272,15 +294,22 @@ describe('hrSkills', () => {
       const source = getSkill('hr-compliance-check').manifest.sourceCode as string;
       expect(source).toContain('HR_HOME');
     });
-    it('hr-draft-jd-interview-kit source references endpoint env var', () => {
-      const skill = getSkill('hr-draft-jd-interview-kit');
+    // These Skills used to reach for a process environment variable for their
+    // endpoint, so an operator setting it in configuration had no effect at all.
+    // They must read configuration and must never touch the environment.
+    it.each([
+      ['hr-draft-jd-interview-kit', 'defaultEndpoint'],
+      ['hr-interview-scheduling-user', 'defaultEndpoint'],
+      ['hr-interview-scheduling-automated', 'endpoint'],
+    ] as const)('%s reads its endpoint from configuration, not the environment', (id, configKey) => {
+      const skill = getSkill(id);
       const source = skill.manifest.sourceCode as string;
-      expect(source).toContain('HR_RECRUITING_ENDPOINT');
-    });
-    it('hr-trigger-interview-scheduling source references endpoint env var', () => {
-      const skill = getSkill('hr-trigger-interview-scheduling');
-      const source = skill.manifest.sourceCode as string;
-      expect(source).toContain('HR_RECRUITING_ENDPOINT');
+      // Match on the config key rather than the exact `ctx.config?.x` text: the
+      // test transpiler lowers optional chaining, so the emitted source depends on
+      // the compiler target rather than on the Skill.
+      expect(source).toContain(configKey);
+      expect(source).toContain('ctx.config');
+      expect(source).not.toContain('process.env');
     });
   });
 
@@ -292,7 +321,7 @@ describe('hrSkills', () => {
 
     it('interview stage has correct skills', () => {
       const interviewSkills = hrSkills.filter((s) => s.manifest.workflowStage === 'interview');
-      expect(interviewSkills.map((s) => s.id).sort()).toEqual(['hr-draft-jd-interview-kit', 'hr-schedule-interview', 'hr-trigger-interview-scheduling'].sort());
+      expect(interviewSkills.map((s) => s.id).sort()).toEqual(['hr-draft-jd-interview-kit', 'hr-interview-scheduling-user', 'hr-interview-scheduling-automated'].sort());
     });
 
     it('decision stage has correct skills', () => {
@@ -302,14 +331,17 @@ describe('hrSkills', () => {
   });
 
   describe('Tier distribution', () => {
+    // Two after removing the Represent-tier hr-schedule-interview.
     it('has two represent skills', () => {
       const represent = hrSkills.filter((s) => s.tier === 'represent');
-      expect(represent.length).toBe(3);
+      expect(represent.length).toBe(2);
     });
 
-    it('has two aid skills', () => {
+    // Unchanged by the removal: hr-schedule-interview was Represent. The count
+    // went from two to three when the interview Skill was split.
+    it('has three aid skills', () => {
       const aid = hrSkills.filter((s) => s.tier === 'aid');
-      expect(aid.length).toBe(2);
+      expect(aid.length).toBe(3);
     });
 
     it('has two advise skills', () => {

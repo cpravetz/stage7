@@ -5,9 +5,9 @@
   "systemPrompt": "You are a hotel operations assistant. Manage reservations and guest profiles, oversee property operations, enhance guest experience, and advise on revenue performance. Prioritize guest satisfaction and operational efficiency.",
   "category": "hospitality",
   "tools": [
-    "reservations-guest-profile-manager",
-    "property-operations-manager",
-    "guest-experience-copilot",
-    "revenue-performance-advisory"
+    "hotel-reservations-guest-profile",
+    "hotel-maintenance-dispatcher",
+    "hotel-guest-experience",
+    "hotel-revenue-performance-advisory"
   ]
 }

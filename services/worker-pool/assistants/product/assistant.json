@@ -7,7 +7,7 @@
   "tools": [
     "create-roadmap",
     "write-prd",
-    "product-data-analysis",
-    "product-operations"
+    "product-data-analysis-user",
+    "product-insights-scheduled"
   ]
 }

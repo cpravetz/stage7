@@ -55,11 +55,28 @@ The contract lives in
 thing a renderer needs to know:
 
 ```ts
+export interface PresentationLink {
+  label: string;       // link text, e.g. "Senior Engineer - Acme"
+  url: string;         // absolute http(s) URL, rendered as an anchor in a new tab
+  detail?: string;     // optional secondary line, e.g. location or salary
+}
+
+export interface PresentationAction {
+  type: 'delete';
+  label: string;
+  target: string;      // e.g. 'skill-store'
+  collection: string;
+  key: string;
+  itemId: string;
+}
+
 export interface PresentationBlock {
   id: string;          // stable identifier, used as a React key and in tests
   title?: string;      // optional heading shown above the block
   body: string;        // pre-formatted plain text, rendered verbatim
   kind?: 'text' | 'markdown' | string;
+  links?: PresentationLink[];     // outbound links rendered under the body
+  actions?: PresentationAction[]; // declarative UI actions, e.g. delete a stored item
 }
 
 export interface PresentableOutput {
@@ -116,6 +133,35 @@ outputSchema: {
           title: { type: 'string', description: 'Optional heading shown above the block' },
           kind: { type: 'string', description: "How to interpret the body. Defaults to 'text'." },
           body: { type: 'string', description: 'Pre-formatted plain text' },
+          links: {
+            type: 'array',
+            description: 'Outbound links, each with label, url, and optional detail',
+            items: {
+              type: 'object',
+              properties: {
+                label: { type: 'string' },
+                url: { type: 'string' },
+                detail: { type: 'string' },
+              },
+              required: ['label', 'url'],
+            },
+          },
+          actions: {
+            type: 'array',
+            description: 'Declarative UI actions (e.g. delete a stored item)',
+            items: {
+              type: 'object',
+              properties: {
+                type: { type: 'string', enum: ['delete'] },
+                collection: { type: 'string' },
+                key: { type: 'string' },
+                itemId: { type: 'string' },
+                label: { type: 'string' },
+                target: { type: 'string' },
+              },
+              required: ['type', 'collection', 'key', 'itemId'],
+            },
+          },
         },
         required: ['id', 'body'],
       },
@@ -127,12 +173,12 @@ outputSchema: {
 
 ### Delegating to other skills
 
-A composite skill calls a lower-order skill with `__execute_tool` inside its source. The callee
+A composite skill delegates to a lower-order skill via `ctx.delegate` inside its handler. The callee
 returns `{ success, error, ... }` on failure rather than throwing, so a composite skill must check
 the result:
 
-```js
-const result = await __execute_tool('some-skill', args);
+```ts
+const result = await ctx.delegate('some-skill', args);
 if (result && result.success) {
   // use result.data
 } else {
@@ -143,6 +189,84 @@ if (result && result.success) {
 Nested execution is bounded by `MAX_NESTING_DEPTH` in
 [../../services/tool-executor/src/services/ToolExecutor.ts](../../services/tool-executor/src/services/ToolExecutor.ts).
 A skill marked `confirmBeforeSend` cannot be nested unless the caller passes `dryRun: true`.
+
+## Creating a code skill
+
+Code skills are created with `createDeclarativeCodeSkill`, which takes a typed `handler` function
+and a `ctx` object at runtime. The factory generates the executable `sourceCode` wrapper and wires
+persistence, delegation, and rendering for you.
+
+```ts
+import { createDeclarativeCodeSkill, SchemaProps, createSchemaRecord } from '../data/skills/code-skill-factory';
+import { salesResultSchema } from './sales-contract';
+
+export const leadDealAdvisory = createDeclarativeCodeSkill({
+  id: 'lead-deal-advisory',
+  name: 'Lead & Deal Advisory',
+  description: 'Score and rank leads against a documented BANT-style rubric.',
+  persistenceEnvVar: 'SALES_HOME',     // runtime resolves the storage directory
+  emitEvent: 'lead-score-updated',      // auto-generates { kind: 'event', eventId: this } trigger
+  inputSchema: createSchemaRecord({
+    leads: SchemaProps.objectArray(
+      SchemaProps.object({ id: SchemaProps.text() }, { description: 'Lead records' }),
+      { description: 'Lead records to score' },
+    ),
+    threshold: SchemaProps.number({ default: 50 }),
+  }),
+  outputSchema: salesResultSchema('Scored and ranked leads'),
+  handler: async function handler(input, ctx) {
+    // Load persisted data via ctx.store (auto-handles env var + file system):
+    const previous = ctx.store.load('scored-leads', []);
+
+    // Delegate to another skill:
+    const research = await ctx.delegate('market-research', { query: input.query });
+
+    // Render a text report:
+    const report = ctx.render.text('report', 'Lead Scores', '...');
+
+    // Persist and return:
+    const scores = rankLeads(input.leads, Number(input.threshold));
+    ctx.store.save('scored-leads', scores);
+
+    return { success: true, status: 'ok', data: { scores }, present: [report] };
+  },
+});
+```
+
+The `ctx` object provides:
+
+| Property    | Type                                | Description                                      |
+|-------------|-------------------------------------|--------------------------------------------------|
+| `ctx.input` | `Record<string, unknown>`           | The validated input object                       |
+| `ctx.store` | `{ load, save, loadAsync, getFilePath, delete, list }` | Key-value JSON store backed by `persistenceEnvVar` |
+| `ctx.delegate` | `(toolId, input) => Promise<any>` | Call another skill or tool; returns `{ success, error, ... }` |
+| `ctx.render` | `{ text, markdown, list }`          | Build presentation blocks for the UI             |
+| `ctx.emit`   | `{ success, failure, notConnected }` | Emit the final result envelope                  |
+
+Options:
+
+| Option              | Type       | Description                                              |
+|---------------------|------------|----------------------------------------------------------|
+| `persistenceEnvVar` | `string`   | Env var (e.g. `SALES_HOME`) the runtime uses for storage |
+| `emitEvent`         | `string`   | Event id emitted on completion; auto-adds an event trigger |
+| `endpointEnvVar`    | `string`   | Env var holding the external API endpoint URL            |
+| `credentialSource`  | `object`   | Maps logical keys to vault/env/config sources            |
+| `confirmBeforeSend` | `boolean`  | Requires user confirmation before the skill runs         |
+| `tier`              | `'advise' \| 'aid' \| 'represent'` | Skill action model tier           |
+| `triggers`          | `SkillTrigger[]`       | User, schedule, event, or data triggers                |
+
+Handler rules that matter at runtime:
+
+- Return a plain result object. The generated wrapper calls `ctx.emit.success(result)` for you;
+  returning `ctx.emit.failure(...)` instead prints a second JSON line and the output becomes
+  unparseable.
+- Use method or named-function form (`async function handler(input, ctx) { ... }`). An
+  `async (input, ctx) => { ... }` arrow is normalised into invalid JavaScript by the factory.
+- If you race `ctx.delegate` against a `setTimeout` budget, keep the timer handle and
+  `clearTimeout` it in `finally`. A pending timer keeps the sandbox node process alive and the run
+  will block for the full budget.
+- Do not use `fs`, `path`, or `console.log` in a handler. Persistence goes through `ctx.store`;
+  results are emitted by returning them.
 
 ## Creating a workflow
 

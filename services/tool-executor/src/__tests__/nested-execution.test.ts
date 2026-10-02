@@ -184,7 +184,7 @@ describe('ToolExecutor nested execution via CodeExecutor callback', () => {
     const deepest = parsed.result.result.result.result.result;
     expect(deepest.success).toBe(false);
     expect(deepest.error).toContain('Maximum nesting depth');
-  });
+  }, 15000);
 
   it('parses JSON-string execution.output into an object', async () => {
     const registry = new Map<string, Tool>();

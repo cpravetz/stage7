@@ -76,6 +76,22 @@ export interface CredentialSourceEntry {
   envVar?: string
   configKey?: string
   vaultSecretId?: string
+  /**
+   * Operator-facing name for this credential, shown when it is missing. Defaults
+   * to the logical key; set it when the bare key would not tell an operator where
+   * the value is supposed to come from.
+   */
+  label?: string
+  /**
+   * Whether the executor refuses to run the Skill when this credential is
+   * missing. Defaults to true.
+   *
+   * Set false for a credential the Skill can genuinely work without, such as one
+   * only needed for a live external write: gating there would block the honest
+   * "not connected" or dry-run path that the Skill exists to report, and would
+   * replace a truthful explanation with a refusal.
+   */
+  required?: boolean
 }
 
 export type CredentialEnvKeyMapValue = string | CredentialSourceEntry
@@ -90,7 +106,12 @@ export interface ExternalActionSkillOptions {
     url?: string
     path?: string
     method?: string
-    envVar?: string
+    /**
+     * Config field holding the base URL. Which upstream a Skill talks to is an
+     * operator setting, not a deployment fact, so it is read from the Skill's
+     * own configuration rather than the process environment.
+     */
+    configKey?: string
   }
   auth?: {
     type?: 'bearer' | 'basic' | 'api_key' | 'custom' | 'none'
@@ -238,14 +259,14 @@ export function createExternalActionSkill(options: ExternalActionSkillOptions): 
   const httpMethod = (endpoint?.method || 'POST').toUpperCase()
   const fixedEndpoint = endpoint?.url || endpoint?.path || ''
   const hasFixedEndpoint = Boolean(fixedEndpoint)
-  const endpointEnvVar = endpoint?.envVar ?? null
+  const endpointConfigKey = endpoint?.configKey ?? null
   const authConfig = buildAuthConfig(auth, auth?.credentialEnvKeyMap)
   const authConfigStr = JSON.stringify(authConfig)
   const resolvedCredentialSource = credentialSource || buildCredentialSource(auth, auth?.credentialEnvKeyMap)
 
   const timeoutMsValue = timeoutMs !== undefined ? timeoutMs : undefined
   const timeoutCode = timeoutMsValue !== undefined
-    ? `const controller = new AbortController(); const timeoutId = setTimeout(() => controller.abort(), ${timeoutMsValue});`
+    ? `controller = new AbortController(); timeoutId = setTimeout(() => controller.abort(), ${timeoutMsValue});`
     : ''
   const fetchSignalProp = timeoutMsValue !== undefined ? 'signal: controller.signal,' : ''
   const clearTimeoutCode = timeoutMsValue !== undefined ? 'clearTimeout(timeoutId);' : ''
@@ -259,15 +280,14 @@ export function createExternalActionSkill(options: ExternalActionSkillOptions): 
   const sourceCode = `(async () => {
     const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
     const endpoint = ${JSON.stringify(fixedEndpoint)};
-    const endpointEnvVar = ${JSON.stringify(endpointEnvVar)};
+    const endpointConfigKey = ${JSON.stringify(endpointConfigKey)};
     let resolvedEndpoint = endpoint;
 
-    if (!resolvedEndpoint && endpointEnvVar) {
-      try {
-        if (typeof globalThis !== 'undefined' && globalThis.process && globalThis.process.env) {
-          resolvedEndpoint = globalThis.process.env[endpointEnvVar] || '';
-        }
-      } catch (e) {}
+    // Endpoint precedence: a fixed URL baked into the Skill, then this Skill's
+    // own configuration, then a per-run override.
+    if (!resolvedEndpoint && endpointConfigKey) {
+      const fromConfig = (typeof __skill_config !== 'undefined' && __skill_config) ? __skill_config[endpointConfigKey] : undefined;
+      if (typeof fromConfig === 'string' && fromConfig) resolvedEndpoint = fromConfig;
     }
     if (!resolvedEndpoint && input.endpointUrl) {
       resolvedEndpoint = input.endpointUrl;
@@ -283,6 +303,12 @@ export function createExternalActionSkill(options: ExternalActionSkillOptions): 
       response: null,
       error: null
     };
+
+    // Declared outside the try so the catch handler can clear the timer. As a
+    // const inside the try it was out of scope there, and referencing it turned
+    // every real external failure into a misleading timeout error.
+    let controller = null;
+    let timeoutId = null;
 
     try {
       let headers = { "Content-Type": "application/json" };
@@ -346,7 +372,7 @@ export function createExternalActionSkill(options: ExternalActionSkillOptions): 
           }
           summaryParts.push('Action: ' + ${JSON.stringify(action)});
           summaryParts.push('System: ' + ${JSON.stringify(system)});
-          const body = summaryParts.join('\n');
+          const body = summaryParts.join('\\n');
           present.push({ id: 'external-summary', title: 'External action result', kind: 'text', body });
           result.present = present;
         } catch (e) {
@@ -361,13 +387,14 @@ export function createExternalActionSkill(options: ExternalActionSkillOptions): 
       result.error = err instanceof Error ? err.message : String(err);
       result.request = { input: input, endpoint: resolvedEndpoint, method: ${JSON.stringify(httpMethod)} };
       result.response = null;
-      console.log(JSON.stringify(result));
         // Attach an error presentation so the UI can render an honest failure
         try {
           result.present = [{ id: 'external-error', title: 'External action failed', kind: 'text', body: result.error || 'External action failed' }];
         } catch (e) {
           // ignore
         }
+        // The sandbox surfaces a Skill's result on stdout, so it has to be
+        // printed here or the executor reports "no output".
         console.log(JSON.stringify(result));
         return result;
     }
@@ -390,8 +417,8 @@ export function createExternalActionSkill(options: ExternalActionSkillOptions): 
     }
   }
 
-  if (endpointEnvVar) {
-    manifest.endpointEnvVar = endpointEnvVar
+  if (endpointConfigKey) {
+    manifest.endpointConfigKey = endpointConfigKey
   }
 
   if (auth && auth.type && auth.type !== 'none') {
@@ -509,6 +536,16 @@ export const SchemaProps = {
   datetime: (options?: Omit<Partial<SchemaProperty>, 'type'>) =>
     createSchemaProperty('string', { format: 'date-time', ...options }),
 
+  // A value that has to be chosen from a source system rather than typed. It
+  // renders as a select populated by that source, and stays empty while the
+  // source is unconnected. Hand-typing an identifier almost always produces a
+  // value the connector cannot resolve, so it is not offered.
+  reference: (sourceId: string, options?: Omit<Partial<SchemaProperty>, 'type' | 'format' | 'x-referenceSource'>) =>
+    createSchemaProperty('string', { format: 'reference', 'x-referenceSource': sourceId, ...options }),
+
+  referenceArray: (sourceId: string, options?: Omit<Partial<SchemaProperty>, 'type' | 'items' | 'format' | 'x-referenceSource'>) =>
+    createSchemaProperty('array', { items: { type: 'string' }, format: 'reference', 'x-referenceSource': sourceId, ...options }),
+
   stringArray: (options?: Omit<Partial<SchemaProperty>, 'type'>) =>
     createSchemaProperty('array', { items: { type: 'string' }, ...options }),
 
@@ -533,12 +570,13 @@ export interface DeclarativeSkillOptions {
    * Operator-supplied configuration, carried onto the manifest verbatim so the
    * executor can resolve credentials and the endpoint before the skill runs.
    * `configSchema` documents it, `credentialSource` maps logical keys onto
-   * vault secrets / env vars / config keys, and `endpointEnvVar` names the
-   * env var holding the external endpoint URL.
+   * vault secrets / env vars / config keys, and `endpointConfigKey` names the
+   * config field holding the external endpoint URL.
    */
   configSchema?: SchemaRecord
   credentialSource?: Record<string, CredentialSourceEntry>
-  endpointEnvVar?: string
+  /** Config field holding the external endpoint URL for this Skill. */
+  endpointConfigKey?: string
   inputSchema: SchemaRecord
   outputSchema: SchemaRecord
   triggers?: SkillTrigger[]
@@ -1105,6 +1143,21 @@ export function stripTypeScript(source: string): string {
   return result + source.slice(cursor)
 }
 
+/**
+ * The label for the Overview Run button.
+ *
+ * A Skill that does not name one gets its own name, so the button always says
+ * what it will do ("Screen Resume for Role Fit") rather than a generic "Run".
+ * An explicit label is always respected, so a Skill can use a shorter imperative
+ * phrase where its name is too long to read on a button.
+ */
+export function resolveActionLabel(skillName: string, explicit?: string): { actionLabel: string } {
+  const trimmed = typeof explicit === 'string' ? explicit.trim() : '';
+  if (trimmed) return { actionLabel: trimmed };
+  const name = typeof skillName === 'string' ? skillName.trim() : '';
+  return { actionLabel: name || 'Run' };
+}
+
 export function createDeclarativeCodeSkill(options: DeclarativeSkillOptions): Tool {
   const persistenceEnvVar = options.persistenceEnvVar || 'STORAGE_DIR'
   let rawFnStr = stripTypeScript(options.handler.toString().trim())
@@ -1132,7 +1185,15 @@ export function createDeclarativeCodeSkill(options: DeclarativeSkillOptions): To
     } catch (e) {
       // Fallback
     }
-    const ctx = stage7Runtime ? stage7Runtime.context({ persistenceEnvVar: ${JSON.stringify(persistenceEnvVar)} }) : (function () {
+    // Config and credentials must be passed in, not read from module-scope
+    // globals: stage7-runtime is loaded with require(), so it has its own scope
+    // and cannot see __skill_config / __skill_credentials declared above. Relying
+    // on the globals silently gave every Skill an empty config and no credentials.
+    const ctx = stage7Runtime ? stage7Runtime.context({
+      persistenceEnvVar: ${JSON.stringify(persistenceEnvVar)},
+      config: typeof __skill_config !== 'undefined' && __skill_config ? __skill_config : {},
+      credentials: typeof __skill_credentials !== 'undefined' && __skill_credentials ? __skill_credentials : {},
+    }) : (function () {
       // Fallback runtime (tests, or a host without the shared module). Mirrors the
       // stage7-runtime context shape so handlers that touch ctx.store / ctx.delegate
       // / ctx.render keep working: store is an in-memory map, delegate rejects, and
@@ -1140,6 +1201,14 @@ export function createDeclarativeCodeSkill(options: DeclarativeSkillOptions): To
       var memory = {};
       return {
         input: typeof __tool_input !== 'undefined' ? __tool_input : {},
+        // Resolved configuration. Mirrors stage7-runtime so handlers that read
+        // ctx.config behave the same whether or not the runtime module loaded.
+        config: typeof __skill_config !== 'undefined' && __skill_config ? __skill_config : {},
+        credentials: typeof __skill_credentials !== 'undefined' && __skill_credentials ? __skill_credentials : {},
+        getCredential: function (logicalKey) {
+          var v = this.credentials[logicalKey];
+          return typeof v === 'string' && v.length > 0 ? v : undefined;
+        },
         store: {
           collection: 'default',
           getFilePath: function (key) { return String(key) + '.json'; },
@@ -1180,6 +1249,11 @@ export function createDeclarativeCodeSkill(options: DeclarativeSkillOptions): To
     if (typeof __tool_input !== 'undefined') {
       ctx.input = __tool_input;
     }
+    // Same for resolved configuration: the runtime is a separate module, so it
+    // cannot see this module-scoped global. Hand it over explicitly.
+    if (typeof __skill_config !== 'undefined' && __skill_config) {
+      ctx.config = __skill_config;
+    }
     // Same scoping problem for __execute_tool: the executor defines it on the
     // wrapper script, the runtime module cannot see it, so a handler calling
     // ctx.delegate would always hit the runtime's "no delegation" rejection.
@@ -1210,12 +1284,19 @@ export function createDeclarativeCodeSkill(options: DeclarativeSkillOptions): To
       ...(options.manifest || {}),
       sourceCode,
       persistenceEnvVar,
+      // The Overview Run button reads manifest.actionLabel and falls back to a
+      // bare "Run", which told the user nothing about what pressing it would do.
+      // Defaulting the label to the Skill's own name means every button is
+      // Skill-specific, without each Skill having to remember to set one -- only
+      // the 16 career Skills did, and the other 59 user-triggered Skills all read
+      // "Run". An explicit actionLabel in options.manifest still wins.
+      ...(resolveActionLabel(options.name, (options.manifest as { actionLabel?: string } | undefined)?.actionLabel)),
       ...(options.emitEvent ? { emitEvent: options.emitEvent } : {}),
       ...(options.workflowStage ? { workflowStage: options.workflowStage } : {}),
       ...(needsConfirmation ? { confirmBeforeSend: true } : {}),
       ...(options.configSchema ? { configSchema: options.configSchema } : {}),
       ...(options.credentialSource ? { credentialSource: options.credentialSource } : {}),
-      ...(options.endpointEnvVar ? { endpointEnvVar: options.endpointEnvVar } : {}),
+      ...(options.endpointConfigKey ? { endpointConfigKey: options.endpointConfigKey } : {}),
     },
     configSchema: options.configSchema,
     inputSchema: options.inputSchema,

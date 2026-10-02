@@ -173,7 +173,7 @@ export function getRetainedOverlapDecisions(): RetainedOverlapDecision[] {
   return [
     {
       decisionId: 'DEC-001',
-      skillIds: ['analytics_business_insight_report', 'analytics-grounded-reporting', 'analytics-warehouse-query', 'healthcare_operational_analytics', 'product-data-analysis', 'marketing-market-research', 'cto-infrastructure-query'],
+      skillIds: ['analytics_business_insight_report', 'analytics-grounded-reporting', 'analytics-warehouse-query', 'healthcare_operational_analytics', 'product-data-analysis-user', 'marketing-market-research', 'cto-infrastructure-query'],
       assistantNames: ['Analytics', 'Healthcare', 'Product', 'Marketing', 'CTO'],
       userOutcome: 'Understand business performance and surface actionable insight from data',
       object: 'Varies: business metrics, patient/operational data, product metrics, market/competitive data, infrastructure metrics',
@@ -217,7 +217,7 @@ export function getRetainedOverlapDecisions(): RetainedOverlapDecision[] {
     },
     {
       decisionId: 'DEC-005',
-      skillIds: ['cto-infrastructure-query', 'analytics-warehouse-query', 'product-data-analysis', 'marketing-market-research', 'healthcare_clinical_decision_support'],
+      skillIds: ['cto-infrastructure-query', 'analytics-warehouse-query', 'product-data-analysis-user', 'marketing-market-research', 'healthcare_clinical_decision_support'],
       assistantNames: ['CTO', 'Analytics', 'Product', 'Marketing', 'Healthcare'],
       userOutcome: 'Retrieve and inspect data without modifying it',
       object: 'Varies: infrastructure status, business metrics, product data, market data, clinical data',

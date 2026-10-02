@@ -58,16 +58,16 @@ const INTERVIEW_COMPENSATION_BATTLECARD = createDeclarativeCodeSkill({
       // direct brain call only if that failed -- so the worst case is the SUM of the
       // two per-topic deadlines below. At the old 30000 budget that sum (43s) could
       // not fit, which is precisely how a healthy brain came to be reported offline.
-      const SKILL_BUDGET_MS = Number(process.env.CAREER_BATTLECARD_BUDGET_MS) > 0
-      ? Number(process.env.CAREER_BATTLECARD_BUDGET_MS)
+      const SKILL_BUDGET_MS = Number(ctx.config?.skillBudgetMs) > 0
+      ? Number(ctx.config?.skillBudgetMs)
       : 44000;
       // Bound on waiting for a delegated tool. The nested call exposes no signal of
       // its own, so this caps how long the skill WAITS for it; the request keeps
       // running in the parent and the child simply stops blocking on it. Sized to the
       // observed 23s delegation latency (a 27s outlier is capped and falls through to
       // the brain call), and to leave room for the fallback inside SKILL_BUDGET_MS.
-      const DELEGATED_TIMEOUT_MS = Number(process.env.CAREER_DELEGATED_TIMEOUT_MS) > 0
-      ? Number(process.env.CAREER_DELEGATED_TIMEOUT_MS)
+      const DELEGATED_TIMEOUT_MS = Number(ctx.config?.delegatedTimeoutMs) > 0
+      ? Number(ctx.config?.delegatedTimeoutMs)
       : 24000;
       // Bound on a single direct brain call, matching the SPORTS_REQUEST_TIMEOUT_MS
       // pattern in sports-battlecard-creator.ts. Without it a brain that accepts the
@@ -78,8 +78,8 @@ const INTERVIEW_COMPENSATION_BATTLECARD = createDeclarativeCodeSkill({
       // down only the client socket, so the brain still ran to completion and logged a
       // full-duration OK while the skill treated the topic as unanswered -- which is
       // what made the Brain log and the skill's verdict disagree.
-      const BRAIN_FALLBACK_TIMEOUT_MS = Number(process.env.CAREER_BRAIN_FALLBACK_TIMEOUT_MS) > 0
-      ? Number(process.env.CAREER_BRAIN_FALLBACK_TIMEOUT_MS)
+      const BRAIN_FALLBACK_TIMEOUT_MS = Number(ctx.config?.brainFallbackTimeoutMs) > 0
+      ? Number(ctx.config?.brainFallbackTimeoutMs)
       : 19000;
 
       let settled = false;
@@ -98,8 +98,8 @@ const INTERVIEW_COMPENSATION_BATTLECARD = createDeclarativeCodeSkill({
       process.stdout.write(out + '\n', function () { process.exit(0); });
       }
 
-      const NOT_CONNECTED_BODY = [{ id: 'error', title: 'Not Connected', kind: 'text', body: 'Interview preparation requires a configured assistant model. Contact your administrator to verify BRAIN_URL and model availability.' }];
-      const NOT_CONNECTED_ERROR = 'Interview prep and negotiation guidance are unavailable; ensure the assistant model (brain) is configured and reachable at BRAIN_URL';
+      const NOT_CONNECTED_BODY = [{ id: 'error', title: 'Not Connected', kind: 'text', body: 'Interview preparation requires a configured assistant model. Contact your administrator to set brainEndpoint in this Skill\'s configuration and verify model availability.' }];
+      const NOT_CONNECTED_ERROR = 'Interview prep and negotiation guidance are unavailable; set brainEndpoint in this Skill configuration and ensure the assistant model is reachable';
 
       // __execute_tool has two return shapes, and conflating them is what made a
       // healthy brain look dead.
@@ -183,7 +183,7 @@ const INTERVIEW_COMPENSATION_BATTLECARD = createDeclarativeCodeSkill({
       }
 
       function brainBaseUrl() {
-      return String(process.env.BRAIN_URL || '').trim();
+      return String(ctx.config?.brainEndpoint || '').trim();
       }
 
       async function callBrain(prompt) {

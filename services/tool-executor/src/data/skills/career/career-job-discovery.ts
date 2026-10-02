@@ -324,12 +324,12 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
     let ENRICH_CONCURRENCY = 6;
     let INTER_REQUEST_DELAY_MS = 0;
 
-    REQUEST_TIMEOUT_MS = numOr(input.requestTimeoutMs != null ? input.requestTimeoutMs : process.env.CAREER_REQUEST_TIMEOUT_MS, REQUEST_TIMEOUT_MS);
-    MAX_RETRIES = Math.max(0, numOr(input.requestRetries != null ? input.requestRetries : process.env.CAREER_REQUEST_RETRIES, MAX_RETRIES));
-    RETRY_BASE_DELAY_MS = Math.max(0, numOr(input.requestRetryBaseMs != null ? input.requestRetryBaseMs : process.env.CAREER_REQUEST_RETRY_BASE_MS, RETRY_BASE_DELAY_MS));
-    RETRY_MAX_DELAY_MS = Math.max(RETRY_BASE_DELAY_MS, numOr(input.requestRetryMaxMs != null ? input.requestRetryMaxMs : process.env.CAREER_REQUEST_RETRY_MAX_MS, RETRY_MAX_DELAY_MS));
-    ENRICH_CONCURRENCY = Math.max(1, numOr(input.perSourceConcurrency != null ? input.perSourceConcurrency : process.env.CAREER_PER_SOURCE_CONCURRENCY, ENRICH_CONCURRENCY));
-    INTER_REQUEST_DELAY_MS = Math.max(0, numOr(input.interRequestDelayMs != null ? input.interRequestDelayMs : process.env.CAREER_INTER_REQUEST_DELAY_MS, INTER_REQUEST_DELAY_MS));
+    REQUEST_TIMEOUT_MS = numOr(input.requestTimeoutMs != null ? input.requestTimeoutMs : ctx.config?.requestTimeoutMs, REQUEST_TIMEOUT_MS);
+    MAX_RETRIES = Math.max(0, numOr(input.requestRetries != null ? input.requestRetries : ctx.config?.requestRetries, MAX_RETRIES));
+    RETRY_BASE_DELAY_MS = Math.max(0, numOr(input.requestRetryBaseMs != null ? input.requestRetryBaseMs : ctx.config?.requestRetryBaseMs, RETRY_BASE_DELAY_MS));
+    RETRY_MAX_DELAY_MS = Math.max(RETRY_BASE_DELAY_MS, numOr(input.requestRetryMaxMs != null ? input.requestRetryMaxMs : ctx.config?.requestRetryMaxMs, RETRY_MAX_DELAY_MS));
+    ENRICH_CONCURRENCY = Math.max(1, numOr(input.perSourceConcurrency != null ? input.perSourceConcurrency : ctx.config?.perSourceConcurrency, ENRICH_CONCURRENCY));
+    INTER_REQUEST_DELAY_MS = Math.max(0, numOr(input.interRequestDelayMs != null ? input.interRequestDelayMs : ctx.config?.interRequestDelayMs, INTER_REQUEST_DELAY_MS));
 
     const RETRYABLE_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 

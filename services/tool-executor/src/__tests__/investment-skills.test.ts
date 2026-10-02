@@ -490,9 +490,7 @@ describe('Bill Pay & Rebalancing stages by default and never silently writes', (
 
 describe('Investment market data stages by default and never silently calls the API', () => {
   it('dry-run with no endpoint reports not-connected', async () => {
-    const previous = process.env.INVESTMENT_MARKET_DATA_ENDPOINT;
-    delete process.env.INVESTMENT_MARKET_DATA_ENDPOINT;
-    try {
+    {
       const { result, output } = await run(INVESTMENT_MARKET_DATA, {
         action: 'quote',
         symbols: ['AAPL', 'MSFT'],
@@ -511,16 +509,17 @@ describe('Investment market data stages by default and never silently calls the 
       expect(body).toMatch(/no request sent/i);
       assertPresentClean(result);
       expect(output?.outputSchemaIssues || []).toEqual([]);
-    } finally {
-      if (previous !== undefined) process.env.INVESTMENT_MARKET_DATA_ENDPOINT = previous;
     }
   });
 
   it('dry-run with endpoint configured shows the staged request without sending', async () => {
-    const previous = process.env.INVESTMENT_MARKET_DATA_ENDPOINT;
-    process.env.INVESTMENT_MARKET_DATA_ENDPOINT = 'https://api.example.invalid/v1/marketdata';
-    try {
-      const { result } = await run(INVESTMENT_MARKET_DATA, {
+    {
+      // The endpoint is Skill configuration, not a deployment env var.
+      const configured = {
+        ...INVESTMENT_MARKET_DATA,
+        externalConfig: { endpoint: 'https://api.example.invalid/v1/marketdata' },
+      } as unknown as Tool;
+      const { result } = await run(configured, {
         action: 'historical',
         symbols: ['TSLA'],
         interval: '1d',
@@ -539,9 +538,6 @@ describe('Investment market data stages by default and never silently calls the 
       expect(body).toContain('2024-01-01');
       expect(body).not.toMatch(/HTTP status|Response received/i);
       assertPresentClean(result);
-    } finally {
-      if (previous !== undefined) process.env.INVESTMENT_MARKET_DATA_ENDPOINT = previous;
-      else delete process.env.INVESTMENT_MARKET_DATA_ENDPOINT;
     }
   });
 
@@ -552,21 +548,15 @@ describe('Investment market data stages by default and never silently calls the 
   });
 
   it('reports not-connected even when confirmation is given (no endpoint)', async () => {
-    const previous = process.env.INVESTMENT_MARKET_DATA_ENDPOINT;
-    delete process.env.INVESTMENT_MARKET_DATA_ENDPOINT;
-    try {
-      const { result } = await run(INVESTMENT_MARKET_DATA, {
-        action: 'quote',
-        symbols: ['AAPL'],
-        dryRun: false,
-        confirmation: true,
-      });
-      expect(result.success).toBe(false);
-      expect(result.status).toBe('not-connected');
-      assertPresentClean(result);
-    } finally {
-      if (previous !== undefined) process.env.INVESTMENT_MARKET_DATA_ENDPOINT = previous;
-    }
+    const { result } = await run(INVESTMENT_MARKET_DATA, {
+      action: 'quote',
+      symbols: ['AAPL'],
+      dryRun: false,
+      confirmation: true,
+    });
+    expect(result.success).toBe(false);
+    expect(result.status).toBe('not-connected');
+    assertPresentClean(result);
   });
 
   it('reports blocked when no action is supplied', async () => {

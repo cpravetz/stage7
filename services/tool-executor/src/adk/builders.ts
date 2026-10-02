@@ -1,7 +1,3 @@
-import {
-  createCodeSkill as createLegacyCodeSkill,
-  type CreateCodeSkillOptions as LegacyCreateCodeSkillOptions,
-} from '../data/skills/code-skill-factory';
 import type { Tool } from '../types';
 import type {
   ApprovalPolicy,
@@ -24,7 +20,6 @@ import type {
   AssistantSkillParameters,
   AssistantWorkflow,
   AssistantWorkflowParameters,
-  CreateCodeSkillParameters,
   CreateToolParameters,
   WorkflowLane,
   WorkflowLaneParameters,
@@ -98,26 +93,6 @@ export function createTool(parameters: CreateToolParameters): Tool {
     createdAt: parameters.createdAt ?? now,
     updatedAt: parameters.updatedAt ?? now,
   };
-  return tool;
-}
-
-export function createCodeSkill(parameters: CreateCodeSkillParameters): Tool {
-  const legacyParameters: LegacyCreateCodeSkillOptions = {
-    id: parameters.id,
-    name: parameters.name,
-    description: parameters.description,
-    manifest: parameters.manifest,
-    inputSchema: parameters.inputSchema,
-    outputSchema: parameters.outputSchema,
-    triggers: parameters.triggers,
-    confirmBeforeSend: parameters.confirmBeforeSend,
-    tier: parameters.tier,
-    domainKnowledge: parameters.domainKnowledge,
-    isSkill: parameters.isSkill,
-  };
-  const tool = createLegacyCodeSkill(legacyParameters);
-  tool.createdAt = parameters.createdAt ?? tool.createdAt;
-  tool.updatedAt = parameters.updatedAt ?? tool.updatedAt;
   return tool;
 }
 

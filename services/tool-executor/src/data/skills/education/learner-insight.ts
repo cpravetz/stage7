@@ -35,7 +35,7 @@ export const LEARNER_INSIGHT = createExternalActionSkill({
   description: 'Analyze learning analytics, learning styles, performance, progress, and motivation from connected LMS/assessment platforms. Hybrid: pulls real data then reasons on it.',
   system: 'education_analytics',
   action: 'analyze_learner',
-  endpoint: { envVar: 'EDUCATION_LMS_ENDPOINT', method: 'POST' },
+  endpoint: { configKey: 'EDUCATION_LMS_ENDPOINT', method: 'POST' },
   auth: {
     type: 'bearer',
     credentialEnvKeyMap: { token: 'EDUCATION_LMS_ACCESS_TOKEN' },

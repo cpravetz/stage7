@@ -37,7 +37,7 @@ export const HOTEL_EXTERNAL_CONFIG_SCHEMA = createSchemaRecord({
 
 /** Task-input fields shared by every property-operations skill. */
 export const HOTEL_PROPERTY_BASE_INPUT = {
-  propertyId: SchemaProps.text({ description: 'Hotel property identifier', required: true }),
+  propertyId: SchemaProps.reference('hotel-properties', { description: 'Hotel property identifier', required: true }),
   dryRun: SchemaProps.boolean({ description: 'Validate the request without sending a live mutation', default: true }),
   confirmation: SchemaProps.boolean({ description: 'Explicit approval for a live mutating request; dryRun does not require approval', default: false }),
 };

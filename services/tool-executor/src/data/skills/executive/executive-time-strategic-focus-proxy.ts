@@ -18,7 +18,6 @@ function withUxMetadata(schema: SchemaRecord): SchemaRecord {
 const SAFETY_BOUNDARY = 'Executive time-strategic focus proxy: calendar management is advisory. Do not block or commit resources without explicit executive authorization.';
 
 const TIME_INPUT = createSchemaRecord({
-  executiveId: SchemaProps.text({ description: 'Executive identifier' }),
   action: SchemaProps.select(['analyze', 'protect-focus', 'resolve-conflict', 'delegate', 'optimize'], { description: 'Strategic focus action to perform', required: true }),
   calendarData: SchemaProps.text({ description: 'Calendar data (JSON string or object)', multiline: true }),
   focusBlocks: SchemaProps.objectArray(SchemaProps.object({
@@ -77,7 +76,6 @@ export const TIME_STRATEGIC_FOCUS_PROXY = createDeclarativeCodeSkill({
       }
 
       const action = input.action || 'analyze';
-      const executiveId = input.executiveId || '';
       let store = ctx.store.load('time-strategic-focus', []);
 
       function parseCalendar(data) {
@@ -110,7 +108,6 @@ export const TIME_STRATEGIC_FOCUS_PROXY = createDeclarativeCodeSkill({
             'Calendar & Focus Analysis',
             '=========================',
             '',
-            'Executive: ' + (executiveId || 'unspecified'),
             'Time range: ' + timeRange,
             'Calendar entries analyzed: ' + calendar.length,
             'Focus blocks declared: ' + focusBlocks.length,
@@ -151,7 +148,7 @@ export const TIME_STRATEGIC_FOCUS_PROXY = createDeclarativeCodeSkill({
           lines.push('');
           lines.push('Note: This analysis is derived from supplied data. Confirm findings before action.');
 
-          result = { action, executiveId, timeRange, calendar, focusBlocks, ctx: { calendarEntries: calendar.length, focusBlockCount: focusBlocks.length } };
+          result = { action, timeRange, calendar, focusBlocks, ctx: { calendarEntries: calendar.length, focusBlockCount: focusBlocks.length } };
           present = [{ id: 'calendar-analysis', title: 'Calendar & Focus Analysis', kind: 'text', body: lines.join(NL) }];
           break;
         }
@@ -168,7 +165,6 @@ export const TIME_STRATEGIC_FOCUS_PROXY = createDeclarativeCodeSkill({
             'Strategic Focus Protection Plan',
             '================================',
             '',
-            'Executive: ' + (executiveId || 'unspecified'),
             'Focus blocks to protect: ' + proposedFocusBlocks.length,
             '',
             'Protection directives:',
@@ -195,7 +191,7 @@ export const TIME_STRATEGIC_FOCUS_PROXY = createDeclarativeCodeSkill({
           lines.push('');
           lines.push('Note: Protection is advisory. Apply to calendar only after executive confirmation.');
 
-          result = { action, executiveId, protectedBlocks: proposedFocusBlocks, chiefOfStaffContact: input.chiefOfStaffContact || '' };
+          result = { action, protectedBlocks: proposedFocusBlocks, chiefOfStaffContact: input.chiefOfStaffContact || '' };
           present = [{ id: 'focus-protection', title: 'Strategic Focus Protection Plan', kind: 'text', body: lines.join(NL) }];
           break;
         }
@@ -214,7 +210,6 @@ export const TIME_STRATEGIC_FOCUS_PROXY = createDeclarativeCodeSkill({
             'Conflict Resolution',
             '===================',
             '',
-            'Executive: ' + (executiveId || 'unspecified'),
             'Conflict ID: ' + (conflictId || 'unspecified'),
             'Meeting ID: ' + (meetingId || 'unspecified'),
             '',
@@ -235,7 +230,7 @@ export const TIME_STRATEGIC_FOCUS_PROXY = createDeclarativeCodeSkill({
           lines.push('');
           lines.push('Note: Conflict resolution is advisory. Calendar changes require explicit executive approval.');
 
-          result = { action, executiveId, conflictId, meetingId, conflictResolutionRules, calendar };
+          result = { action, conflictId, meetingId, conflictResolutionRules, calendar };
           present = [{ id: 'conflict-resolution', title: 'Conflict Resolution', kind: 'text', body: lines.join(NL) }];
           break;
         }
@@ -249,7 +244,6 @@ export const TIME_STRATEGIC_FOCUS_PROXY = createDeclarativeCodeSkill({
             'Meeting Delegation Plan',
             '=======================',
             '',
-            'Executive: ' + (executiveId || 'unspecified'),
             'Chief of staff contact: ' + (input.chiefOfStaffContact || 'not specified'),
             '',
             'Delegation rules:',
@@ -269,7 +263,7 @@ export const TIME_STRATEGIC_FOCUS_PROXY = createDeclarativeCodeSkill({
           lines.push('');
           lines.push('Note: Delegation assignments are advisory. Confirm with executive before re-assigning ownership.');
 
-          result = { action, executiveId, delegationRules, meetingId, chiefOfStaffContact: input.chiefOfStaffContact || '', calendar };
+          result = { action, delegationRules, meetingId, chiefOfStaffContact: input.chiefOfStaffContact || '', calendar };
           present = [{ id: 'delegation-plan', title: 'Meeting Delegation Plan', kind: 'text', body: lines.join(NL) }];
           break;
         }
@@ -284,7 +278,6 @@ export const TIME_STRATEGIC_FOCUS_PROXY = createDeclarativeCodeSkill({
             'Calendar Optimization Plan',
             '==========================',
             '',
-            'Executive: ' + (executiveId || 'unspecified'),
             'Time range: ' + timeRange,
             'Calendar entries: ' + calendar.length,
             'Focus blocks: ' + focusBlocks.length,
@@ -321,7 +314,7 @@ export const TIME_STRATEGIC_FOCUS_PROXY = createDeclarativeCodeSkill({
           lines.push('');
           lines.push('Note: Optimization is advisory. Apply changes only after executive confirmation.');
 
-          result = { action, executiveId, timeRange, calendar, focusBlocks, delegationRules, calendarEntries: calendar.length, focusBlockCount: focusBlocks.length };
+          result = { action, timeRange, calendar, focusBlocks, delegationRules, calendarEntries: calendar.length, focusBlockCount: focusBlocks.length };
           present = [{ id: 'calendar-optimization', title: 'Calendar Optimization Plan', kind: 'text', body: lines.join(NL) }];
           break;
         }

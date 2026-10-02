@@ -394,9 +394,13 @@ async function run(
   tool: Tool,
   input: Record<string, unknown>,
   registryTools: Tool[] = [],
+  config?: Record<string, unknown>,
 ): Promise<{ result: SkillResult; tool: Tool; schemaIssues: ReturnType<typeof validateAgainstOutputSchema> }> {
   const registry = new Map<string, Tool>();
   for (const t of registryTools) registry.set(t.id, t);
+  // The brain endpoint is Skill configuration, not a deployment env var, so the
+  // stub server address is passed in per run rather than through BRAIN_URL.
+  if (config) tool = { ...tool, externalConfig: config } as unknown as Tool;
   registry.set(tool.id, tool);
 
   const executor = new ToolExecutor(registry);
@@ -480,10 +484,12 @@ function validateOutput(result: SkillResult, tool: Tool): void {
 describe('Career Coach skills emit user-facing output', () => {
   describe('Interview and Negotiation Prep', () => {
     it('generates company-specific content when brain is available via direct call', async () => {
-      const { result, tool } = await run(INTERVIEW_COMPENSATION_BATTLECARD, {
-        company: 'Acme Corp',
-        targetRole: 'Senior Engineer',
-      });
+      const { result, tool } = await run(
+        INTERVIEW_COMPENSATION_BATTLECARD,
+        { company: 'Acme Corp', targetRole: 'Senior Engineer' },
+        [],
+        { brainEndpoint: process.env.BRAIN_URL },
+      );
 
       // Brain API is available in test environment, so direct call should succeed
       expect(result.success).toBe(true);
@@ -521,6 +527,7 @@ describe('Career Coach skills emit user-facing output', () => {
           codeSkillStandIn('career-interview-prep', 'Interview questions and evaluation areas for the role.'),
           codeSkillStandIn('career-advisory', 'Negotiate base, equity, title and a signing bonus.'),
         ],
+        { brainEndpoint: process.env.BRAIN_URL },
       );
 
       expect(result.success).toBe(true);
@@ -542,13 +549,14 @@ describe('Career Coach skills emit user-facing output', () => {
       // Point BRAIN_URL at a closed port so the direct fallback cannot rescue
       // the run, and leave the delegated tools unresolvable. The skill must then
       // say so honestly rather than blaming reachability for a timeout.
-      const priorUrl = process.env.BRAIN_URL;
-      process.env.BRAIN_URL = 'http://127.0.0.1:1';
       try {
-        const { result, tool } = await run(INTERVIEW_COMPENSATION_BATTLECARD, {
-          company: 'Unreachable Co',
-          targetRole: 'Product Manager',
-        });
+        const { result, tool } = await run(
+          INTERVIEW_COMPENSATION_BATTLECARD,
+          { company: 'Unreachable Co', targetRole: 'Product Manager' },
+          [],
+          // A closed port, so the direct fallback cannot rescue the run.
+          { brainEndpoint: 'http://127.0.0.1:1' },
+        );
 
         expect(result.success).toBe(false);
         expect(result.status).toBe('not-connected');
@@ -557,8 +565,7 @@ describe('Career Coach skills emit user-facing output', () => {
         assertPresentClean(result.present, INTERVIEW_COMPENSATION_BATTLECARD.id);
         validateOutput(result, tool);
       } finally {
-        if (priorUrl === undefined) delete process.env.BRAIN_URL;
-        else process.env.BRAIN_URL = priorUrl;
+        // no environment to restore
       }
     }, 15000);
   });
@@ -672,6 +679,7 @@ describe('Career Coach skills emit user-facing output', () => {
   describe('Resume & Template Manager', () => {
     it('stores a complete resume and presents it without internal paths', async () => {
       const { result, tool } = await run(RESUME_TEMPLATE_MANAGER, {
+        action: 'save',
         name: 'Jane Doe Resume',
         type: 'resume',
         content: 'Jane Doe\nSenior Software Engineer\nExperience: 5 years at TechCo',
@@ -679,9 +687,9 @@ describe('Career Coach skills emit user-facing output', () => {
 
       expect(result.success).toBe(true);
       assertPresentClean(result.present, RESUME_TEMPLATE_MANAGER.id);
-      const body = (result.present as PresentBlock[]).map((b) => b.body).join('\n');
+      const body = (result.present as PresentBlock[]).map((b) => `${b.title || ''}\n${b.body || ''}`).join('\n');
       expect(body).toContain('Jane Doe Resume');
-      expect(body).toContain('Resume saved');
+      expect(body).toContain('Template Saved');
       const serialized = JSON.stringify(result);
       expect(serialized).not.toContain('templatePath');
       expect(result.data!.template).toBeDefined();
@@ -690,14 +698,13 @@ describe('Career Coach skills emit user-facing output', () => {
       validateOutput(result, tool);
     }, 15000);
 
-    it('reports not-connected with friendly instructions when no content provided', async () => {
-      const { result } = await run(RESUME_TEMPLATE_MANAGER, {});
+    it('reports guidance when save action is invoked without name or content', async () => {
+      const { result } = await run(RESUME_TEMPLATE_MANAGER, { action: 'save' });
 
       expect(result.success).toBe(false);
-      expect(result.status).toBe('not-connected');
+      expect(result.status).toBe('error');
       const body = (result.present as PresentBlock[]).map((b) => b.body).join('\n');
-      expect(body).toContain('Resume & Template Manager');
-      expect(body).toContain('Upload a resume file');
+      expect(body).toContain('provide a document name and content');
     }, 15000);
   });
 });

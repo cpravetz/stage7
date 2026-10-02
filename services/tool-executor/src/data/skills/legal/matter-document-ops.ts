@@ -6,7 +6,7 @@ const MATTER_DOCUMENT_OPS = createExternalActionSkill({
   description: 'Prepare matter, document-tagging, and eDiscovery requests for a configured external endpoint. Without a configured endpoint, the action remains a dry run and makes no live change.',
   system: 'matter-document-ops',
   action: 'ops',
-  endpoint: { envVar: 'MATTER_DOCUMENT_OPS_ENDPOINT', method: 'POST' },
+  endpoint: { configKey: 'MATTER_DOCUMENT_OPS_ENDPOINT', method: 'POST' },
   auth: {
     type: 'bearer',
     credentialEnvKeyMap: { accessToken: 'MATTER_DOCUMENT_OPS_TOKEN' },

@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { Tool } from '../../../types';
-import { createDeclarativeCodeSkill, createExternalActionSkill } from '../code-skill-factory';
+import { createDeclarativeCodeSkill, createExternalActionSkill, SchemaProps } from '../code-skill-factory';
 
 const PRODUCT_SKILLS: Tool[] = [
   createDeclarativeCodeSkill({
@@ -580,7 +580,7 @@ const PRODUCT_SKILLS: Tool[] = [
     action: 'manage_issue',
     endpoint: {
       method: 'POST',
-      envVar: 'JIRA_BASE_URL',
+      configKey: 'baseUrl',
     },
     auth: {
       type: 'basic',
@@ -592,6 +592,7 @@ const PRODUCT_SKILLS: Tool[] = [
     configSchema: {
       type: 'object',
       properties: {
+    endpoint: SchemaProps.url({ description: 'Analytics platform base URL for this Skill' }),
         baseUrl: { type: 'string', description: 'Jira base URL' },
         email: { type: 'string', description: 'Jira user email' },
         apiToken: { type: 'string', description: 'Jira API token' },
@@ -660,7 +661,7 @@ const PRODUCT_SKILLS: Tool[] = [
     confirmBeforeSend: true,
     endpoint: {
       method: 'POST',
-      envVar: 'CONFLUENCE_BASE_URL',
+      configKey: 'baseUrl',
     },
     auth: {
       type: 'basic',
@@ -730,36 +731,39 @@ const PRODUCT_SKILLS: Tool[] = [
   triggers: [{ kind: 'user', phrase_examples: ["Create Confluence page", "Search docs", "Update documentation"] }],
   }),
   createExternalActionSkill({
-    id: 'product-data-analysis',
+    id: 'product-data-analysis-user',
     name: 'Product Data Analysis',
     description: 'Analyze product metrics, adoption, retention, and funnels. Uses configurable analytics or BI endpoints.',
     system: 'product_analytics',
     action: 'analyze_metrics',
     endpoint: {
       method: 'POST',
-      envVar: 'PRODUCT_ANALYTICS_API_URL',
+      configKey: 'baseUrl',
     },
     auth: {
       type: 'bearer',
-      credentialEnvKeyMap: {
-        token: { envVar: 'PRODUCT_ANALYTICS_API_TOKEN' },
-      },
     },
     configSchema: {
       type: 'object',
       properties: {
         baseUrl: { type: 'string', description: 'Analytics service base URL' },
-        apiToken: { type: 'string', description: 'Bearer token for analytics API' },
+        apiToken: { type: 'string', format: 'password', description: 'Bearer token for analytics API (prefer a vault-backed credential source)' },
         dataset: { type: 'string', description: 'Default dataset or table' },
         cohortDefinitions: { type: 'object', description: 'Cohort analysis definitions' },
         retentionModels: { type: 'object', description: 'Retention model configurations' },
         funnelTemplates: { type: 'array', items: { type: 'object' }, description: 'Funnel analysis templates' },
         alertConfigs: { type: 'object', description: 'Alert configuration settings' },
       },
-      required: ['baseUrl', 'apiToken'],
+      // Not required at the schema level: this Skill is user-triggered, and a
+      // hard config gate refused the run before the handler could report which
+      // fields were missing. Left required, an operator with nothing configured
+      // got a bare executor error and no rendered output at all.
+      required: [],
     },
     credentialSource: {
-      token: { envVar: 'PRODUCT_ANALYTICS_API_TOKEN' },
+      // Optional: the Skill's not-connected branch explains what to set, which is
+      // more useful to an operator than a refusal with no output.
+      token: { configKey: 'apiToken', required: false, label: 'analytics API token (set in this Skill configuration, or a vault secret)' },
     },
     inputSchema: {
       type: 'object',
@@ -801,7 +805,110 @@ const PRODUCT_SKILLS: Tool[] = [
       required: ['success', 'status', 'system', 'action', 'request', 'response', 'error'],
     },
     timeoutMs: 60000,
-  triggers: [{ kind: 'event', on: 'A product launch or release event occurs' }],
+  // Was event-triggered on a launch/release event, but it requires a `metric`
+  // the event does not supply. The recurring metrics sweep is now
+  // product-insights-scheduled, which carries its metric list in config.
+  triggers: [{ kind: 'user', phrase_examples: ["Analyze this metric", "Break down activation by plan", "Show me the funnel for this feature"] }],
+  }),
+  createDeclarativeCodeSkill({
+    id: 'product-insights-scheduled',
+    name: 'Product Insights (Scheduled)',
+    description: 'Scheduled metrics sweep over the configured metrics and segments, reporting movement against configured thresholds.',
+    persistenceEnvVar: 'STORAGE_DIR',
+    tier: 'advise',
+    isSkill: true,
+    domainKnowledge: 'Product management frameworks (RICE, WSJF, Jobs-to-be-Done), Agile/Scrum methodologies, user telemetry interpretation',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        runReason: SchemaProps.text({ description: 'Why this run was invoked (schedule, manual)' }),
+      },
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+        status: { type: 'string' },
+        data: { type: 'object' },
+        error: { type: 'string' },
+      },
+      required: ['success', 'status'],
+    },
+    // Required selector. The user half names its own metric per run; the
+    // scheduled half must be told what it watches or it cannot be bounded.
+    configSchema: {
+      type: 'object',
+      properties: {
+        metrics: { type: 'array', items: { type: 'string' }, description: 'Metrics this sweep watches' },
+        segments: { type: 'array', items: { type: 'string' }, description: 'Segments to break each metric down by' },
+        cadence: { type: 'string', description: 'Cron expression or schedule id for this run' },
+        thresholds: { type: 'object', description: 'Alert thresholds keyed by metric name' },
+      },
+      required: ['metrics'],
+      additionalProperties: false,
+    },
+    triggers: [{ kind: 'schedule', cadence: 'Hourly metrics sweep' }],
+    async handler(input, ctx) {
+      // Scope comes from config, not from the caller.
+      const metrics = Array.isArray(ctx.config?.metrics) ? ctx.config.metrics.map(String) : [];
+      const segments = Array.isArray(ctx.config?.segments) ? ctx.config.segments.map(String) : [];
+      const thresholds = (ctx.config?.thresholds ?? {}) as Record<string, unknown>;
+      const cadence = typeof ctx.config?.cadence === 'string' ? ctx.config.cadence : null;
+
+      if (!metrics.length) {
+        return {
+          success: false,
+          status: 'not-configured',
+          error: 'No metrics configured. Set config.metrics before this Skill can run.',
+          present: [ctx.render.text('notice', 'No metrics configured', 'Set config.metrics before the scheduled insights sweep can run.')],
+        };
+      }
+
+      const endpoint = String(ctx.config?.endpoint || '');
+      if (!endpoint) {
+        return {
+          success: false,
+          status: 'not-connected',
+          error: 'Not connected: no analytics platform endpoint configured. Set endpoint in this Skill\'s configuration.',
+          present: [ctx.render.text('not-connected', 'Connection required', 'Not connected: no analytics platform endpoint configured. Set endpoint in this Skill\'s configuration.')],
+        };
+      }
+
+      const results: Array<Record<string, unknown>> = [];
+      const unreachable: string[] = [];
+      for (const metric of metrics) {
+        try {
+          const response = await ctx.delegate('api_client', {
+            path: endpoint,
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: {
+              system: 'product_analytics',
+              action: 'analyze_metrics',
+              data: { metric, segments, thresholds: thresholds[metric] ?? null },
+              cadence,
+            },
+            acceptErrorResponses: true,
+          });
+          results.push({ metric, status: response?.status ?? 0, success: response?.success === true, data: response?.data ?? null });
+        } catch (err) {
+          // One metric failing must not be reported as a clean sweep.
+          unreachable.push(metric);
+          results.push({ metric, error: err instanceof Error ? err.message : String(err) });
+        }
+      }
+
+      const succeeded = results.filter((r) => r.success === true).length;
+      return {
+        success: unreachable.length === 0,
+        status: unreachable.length === 0 ? 'ok' : 'partial',
+        data: { metrics, segments, cadence, requested: metrics.length, succeeded, unreachable, results },
+        error: unreachable.length ? `Could not query: ${unreachable.join(', ')}` : null,
+        present: [
+          ctx.render.text('report', 'Product Insights Sweep', `${succeeded}/${metrics.length} configured metric(s) returned data${unreachable.length ? `; ${unreachable.length} unreachable` : ''}.`),
+        ],
+      };
+    },
   }),
   createExternalActionSkill({
     id: 'product-slack',
@@ -811,7 +918,7 @@ const PRODUCT_SKILLS: Tool[] = [
     action: 'send_message',
     endpoint: {
       method: 'POST',
-      envVar: 'SLACK_BASE_URL',
+      configKey: 'baseUrl',
     },
     auth: {
       type: 'bearer',
@@ -881,7 +988,7 @@ const PRODUCT_SKILLS: Tool[] = [
     action: 'schedule_event',
     endpoint: {
       method: 'POST',
-      envVar: 'CALENDAR_API_URL',
+      configKey: 'baseUrl',
     },
     auth: {
       type: 'bearer',
@@ -955,7 +1062,7 @@ const PRODUCT_SKILLS: Tool[] = [
     action: 'parse_document',
     endpoint: {
       method: 'POST',
-      envVar: 'MARKDOWN_PARSER_API_URL',
+      configKey: 'baseUrl',
     },
     auth: {
       type: 'api_key',
@@ -1035,7 +1142,8 @@ for (const s of PRODUCT_SKILLS) {
 const PRODUCT_TIER: Record<string, 'advise' | 'aid' | 'represent'> = {
   'create-roadmap': 'advise',
   'write-prd': 'aid',
-  'product-data-analysis': 'advise',
+  'product-data-analysis-user': 'advise',
+  'product-insights-scheduled': 'advise',
   'product-jira': 'represent',
   'product-confluence': 'aid',
   'product-slack': 'represent',
@@ -1074,7 +1182,7 @@ export interface AssistantWorkflow {
 PRODUCT_SKILLS.forEach((s) => {
   if (s.id === 'create-roadmap') s.manifest.workflowStage = 'plan';
   else if (s.id === 'write-prd') s.manifest.workflowStage = 'specify';
-  else if (s.id === 'product-data-analysis') s.manifest.workflowStage = 'analyze';
+  else if (s.id === 'product-data-analysis-user' || s.id === 'product-insights-scheduled') s.manifest.workflowStage = 'analyze';
   else s.manifest.workflowStage = 'deliver';
 });
 

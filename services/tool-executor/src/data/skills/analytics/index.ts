@@ -23,7 +23,6 @@ const ANALYTICS_INPUT_SCHEMA = {
     filters: SchemaProps.object({}, { description: 'Metric or warehouse filters', additionalProperties: true }),
     sourceMode: SchemaProps.select(['auto', 'warehouse', 'local'], { description: 'Data source selection; auto tries the warehouse and then the local cache', default: 'auto' }),
     dryRun: SchemaProps.boolean({ description: 'Prepare the query plan without executing a warehouse request', default: false }),
-    apiKey: SchemaProps.password({ description: 'Optional warehouse API key override; never include this in an explanation' }),
   },
   required: [],
 };
@@ -46,7 +45,6 @@ const ANALYTICS_CONFIG_SCHEMA = {
   type: 'object',
   properties: {
     endpointUrl: SchemaProps.url({ description: 'Warehouse or BI query endpoint' }),
-    apiKey: SchemaProps.password({ description: 'Warehouse or BI API key' }),
     provider: SchemaProps.select(['snowflake', 'bigquery', 'redshift', 'postgres', 'mysql', 'clickhouse', 'looker', 'tableau', 'metabase', 'custom'], { description: 'Warehouse or BI provider' }),
     defaultDatabase: SchemaProps.text({ description: 'Default database or schema' }),
     defaultWarehouse: SchemaProps.text({ description: 'Default compute warehouse or service' }),
@@ -70,7 +68,9 @@ const ANALYTICS_SCHEDULED_TREND_MONITOR = createDeclarativeCodeSkill({
   manifest: {
     configSchema: ANALYTICS_CONFIG_SCHEMA,
     credentialSource: {
-      apiKey: { envVar: 'ANALYTICS_WAREHOUSE_API_KEY', configKey: 'analytics.warehouse.apiKey' },
+      // Config/vault only: the Skill declares its own not-connected branch, and
+      // gating on a required credential would make that branch unreachable.
+      apiKey: { configKey: 'analytics.warehouse.apiKey', required: false, label: 'warehouse API key (set analytics.warehouse.apiKey in this Skill configuration, or a vault secret)' },
     },
     timeoutMs: 120000
   },
@@ -83,12 +83,13 @@ const ANALYTICS_SCHEDULED_TREND_MONITOR = createDeclarativeCodeSkill({
       const dryRun = input.dryRun === true;
       const metricsPath = input.metricsPath || '';
       const warehouseConfigPath = input.warehouseConfigPath || '';
-      const endpoint = input.endpointUrl || process.env.ANALYTICS_WAREHOUSE_ENDPOINT || '';
-      const apiKey = input.apiKey || process.env.ANALYTICS_WAREHOUSE_API_KEY || '';
+      const endpoint = input.endpointUrl || String(ctx.config?.endpointUrl || '');
+      const apiKey = (ctx.getCredential ? ctx.getCredential('apiKey') : undefined) || '';
 
       function output(modeValue, sourceValue, warehouseValue, connectorValue, dataValue, errorValue, noteValue) {
-        return {
-          success: modeValue !== 'not-connected' && modeValue !== 'error',
+        const failed = modeValue === 'not-connected' || modeValue === 'error';
+        const envelope = {
+          success: !failed,
           source: sourceValue,
           warehouseConnected: warehouseValue,
           connectorStatus: connectorValue,
@@ -96,6 +97,16 @@ const ANALYTICS_SCHEDULED_TREND_MONITOR = createDeclarativeCodeSkill({
           error: errorValue || null,
           note: noteValue || null,
         };
+        // A failure envelope with nothing to render leaves the operator staring
+        // at a blank panel, so the reason is surfaced as a block too.
+        if (failed && errorValue) {
+          envelope.present = [ctx.render.text(
+            'analytics-error',
+            failed && modeValue === 'not-connected' ? 'Connection required' : 'Analytics error',
+            String(errorValue) + (noteValue ? '\n\n' + String(noteValue) : '')
+          )];
+        }
+        return envelope;
       }
 
       function normalizeRows(value) {
@@ -392,7 +403,9 @@ const ANALYTICS_ADHOC_QUERY_EVALUATOR = createDeclarativeCodeSkill({
   manifest: {
     configSchema: ANALYTICS_CONFIG_SCHEMA,
     credentialSource: {
-      apiKey: { envVar: 'ANALYTICS_WAREHOUSE_API_KEY', configKey: 'analytics.warehouse.apiKey' },
+      // Config/vault only: the Skill declares its own not-connected branch, and
+      // gating on a required credential would make that branch unreachable.
+      apiKey: { configKey: 'analytics.warehouse.apiKey', required: false, label: 'warehouse API key (set analytics.warehouse.apiKey in this Skill configuration, or a vault secret)' },
     },
     timeoutMs: 120000
   },
@@ -405,12 +418,13 @@ const ANALYTICS_ADHOC_QUERY_EVALUATOR = createDeclarativeCodeSkill({
       const dryRun = input.dryRun === true;
       const metricsPath = input.metricsPath || '';
       const warehouseConfigPath = input.warehouseConfigPath || '';
-      const endpoint = input.endpointUrl || process.env.ANALYTICS_WAREHOUSE_ENDPOINT || '';
-      const apiKey = input.apiKey || process.env.ANALYTICS_WAREHOUSE_API_KEY || '';
+      const endpoint = input.endpointUrl || String(ctx.config?.endpointUrl || '');
+      const apiKey = (ctx.getCredential ? ctx.getCredential('apiKey') : undefined) || '';
 
       function output(modeValue, sourceValue, warehouseValue, connectorValue, dataValue, errorValue, noteValue) {
-        return {
-          success: modeValue !== 'not-connected' && modeValue !== 'error',
+        const failed = modeValue === 'not-connected' || modeValue === 'error';
+        const envelope = {
+          success: !failed,
           source: sourceValue,
           warehouseConnected: warehouseValue,
           connectorStatus: connectorValue,
@@ -418,6 +432,16 @@ const ANALYTICS_ADHOC_QUERY_EVALUATOR = createDeclarativeCodeSkill({
           error: errorValue || null,
           note: noteValue || null,
         };
+        // A failure envelope with nothing to render leaves the operator staring
+        // at a blank panel, so the reason is surfaced as a block too.
+        if (failed && errorValue) {
+          envelope.present = [ctx.render.text(
+            'analytics-error',
+            failed && modeValue === 'not-connected' ? 'Connection required' : 'Analytics error',
+            String(errorValue) + (noteValue ? '\n\n' + String(noteValue) : '')
+          )];
+        }
+        return envelope;
       }
 
       function normalizeRows(value) {

@@ -18,20 +18,27 @@ function withUxMetadata(schema: SchemaRecord): SchemaRecord {
 const SAFETY_BOUNDARY = 'Executive advisory only: development and career plans are recommendations; do not commit organizational resources or make binding employment decisions without proper authorization.';
 
 const DEV_CAREER_INPUT = createSchemaRecord({
-  focusArea: SchemaProps.select(['skill-gap', 'development-plan', 'improvement-plan', 'career-planner', 'career-roadmap', 'resource-recommender'], { description: 'Development and career area', required: true }),
-  executiveId: SchemaProps.text({ description: 'Executive identifier' }),
-  role: SchemaProps.text({ description: 'Current role' }),
-  level: SchemaProps.text({ description: 'Seniority level' }),
-  timeframe: SchemaProps.text({ description: 'Planning timeframe' }),
-  currentSkills: SchemaProps.stringArray({ description: 'Current skills' }),
-  targetSkills: SchemaProps.stringArray({ description: 'Target skills' }),
-  interests: SchemaProps.stringArray({ description: 'Career interests' }),
-  constraints: SchemaProps.stringArray({ description: 'Constraints' }),
-  skills: SchemaProps.stringArray({ description: 'Skills to plan for' }),
-  areas: SchemaProps.stringArray({ description: 'Areas to improve' }),
-  targetRoles: SchemaProps.stringArray({ description: 'Target roles' }),
-  targetRole: SchemaProps.text({ description: 'Target role' }),
-  milestones: SchemaProps.stringArray({ description: 'Career milestones' }),
+  // Labelled options: stored values stay stable identifiers, the select shows what
+  // the user actually gets.
+  focusArea: SchemaProps.select([
+    { value: 'skill-gap', label: 'Where are my gaps?' },
+    { value: 'development-plan', label: 'Plan my development' },
+    { value: 'improvement-plan', label: 'Improve specific areas' },
+    { value: 'career-planner', label: 'Plan a career move' },
+    { value: 'career-roadmap', label: 'Build a career roadmap' },
+    { value: 'resource-recommender', label: 'Recommend resources' },
+  ], { description: 'What you want help with', required: true }),
+  role: SchemaProps.text({ description: 'Your current role' }),
+  timeframe: SchemaProps.text({ description: 'Planning timeframe, e.g. next 6 months' }),
+  // One field per idea rather than a synonym for each: `areas`/`skills`/`currentSkills`
+  // all meant "what to work on" and `targetRole`/`targetRoles` the same role twice, so
+  // the form asked the user to fill in the same thing several ways.
+  currentSkills: SchemaProps.stringArray({ description: 'Skills you already have' }),
+  targetSkills: SchemaProps.stringArray({ description: 'Skills you want to build' }),
+  interests: SchemaProps.stringArray({ description: 'Career areas you enjoy' }),
+  constraints: SchemaProps.stringArray({ description: 'Anything limiting your options' }),
+  targetRoles: SchemaProps.stringArray({ description: 'Roles you are aiming for' }),
+  milestones: SchemaProps.stringArray({ description: 'Milestones to hit' }),
 }, { required: ['focusArea'] });
 
 const DEV_CAREER_CONFIG = createSchemaRecord({
@@ -64,11 +71,10 @@ export const DEV_CAREER = createDeclarativeCodeSkill({
       }
 
       const focusArea = input.focusArea || 'skill-gap';
-      const executiveId = input.executiveId || '';
       let store = ctx.store.load('dev-career', []);
       const profile = {
         role: input.role || '',
-        level: input.level || '',
+        level: '',
         currentSkills: Array.isArray(input.currentSkills) ? input.currentSkills : [],
         targetSkills: Array.isArray(input.targetSkills) ? input.targetSkills : [],
         interests: Array.isArray(input.interests) ? input.interests : [],
@@ -92,7 +98,6 @@ export const DEV_CAREER = createDeclarativeCodeSkill({
             'Skill Gap Analysis',
             '==================',
             '',
-            'Executive: ' + (executiveId || 'unspecified'),
             'Current Role: ' + (profile.role || 'unspecified'),
             'Level: ' + (profile.level || 'unspecified'),
             'Timeframe: ' + (profile.timeframe || 'unspecified'),
@@ -116,13 +121,13 @@ export const DEV_CAREER = createDeclarativeCodeSkill({
             current.filter(function(s) { return target.indexOf(s) !== -1; }).forEach(function(s, i) { lines.push('  ' + (i + 1) + '. ' + String(s)); });
           }
 
-          result = { focusArea: 'skill-gap', executiveId, current, target, gaps, context: profile };
+          result = { focusArea: 'skill-gap', current, target, gaps, context: profile };
           present = [{ id: 'gap-analysis', title: 'Executive Skill Gap Analysis', kind: 'text', body: lines.join(NL) }];
           break;
         }
 
         case 'development-plan': {
-          const skills = Array.isArray(input.skills) ? input.skills : (Array.isArray(profile.targetSkills) ? profile.targetSkills : []);
+          const skills = Array.isArray(profile.targetSkills) ? profile.targetSkills : [];
           const timeframe = profile.timeframe || '6 months';
 
           if (!skills.length) {
@@ -133,7 +138,6 @@ export const DEV_CAREER = createDeclarativeCodeSkill({
             'Development Plan',
             '================',
             '',
-            'Executive: ' + (executiveId || 'unspecified'),
             'Role: ' + (profile.role || 'unspecified'),
             'Timeframe: ' + timeframe,
             '',
@@ -151,13 +155,13 @@ export const DEV_CAREER = createDeclarativeCodeSkill({
 
           lines.push('Note: Current levels, specific actions, and milestones must be supplied for a complete plan.');
 
-          result = { focusArea: 'development-plan', executiveId, skills: skills.map(function(s) { return { skill: String(s), currentLevel: 'not assessed', targetLevel: 'proficient', actions: [], milestones: [] }; }), timeframe, context: profile };
+          result = { focusArea: 'development-plan', skills: skills.map(function(s) { return { skill: String(s), currentLevel: 'not assessed', targetLevel: 'proficient', actions: [], milestones: [] }; }), timeframe, context: profile };
           present = [{ id: 'dev-plan', title: 'Executive Development Plan', kind: 'text', body: lines.join(NL) }];
           break;
         }
 
         case 'improvement-plan': {
-          const areas = Array.isArray(input.areas) ? input.areas : (Array.isArray(profile.gaps) ? profile.gaps : []);
+          const areas = Array.isArray(profile.gaps) ? profile.gaps : [];
           const timeframe = profile.timeframe || '3 months';
 
           if (!areas.length) {
@@ -168,7 +172,6 @@ export const DEV_CAREER = createDeclarativeCodeSkill({
             'Improvement Plan',
             '================',
             '',
-            'Executive: ' + (executiveId || 'unspecified'),
             'Role: ' + (profile.role || 'unspecified'),
             'Timeframe: ' + timeframe,
             '',
@@ -186,7 +189,7 @@ export const DEV_CAREER = createDeclarativeCodeSkill({
 
           lines.push('Note: Current state, target state, actions, and metrics must be supplied for a complete plan.');
 
-          result = { focusArea: 'improvement-plan', executiveId, areas: areas.map(function(a) { return { area: String(a), currentState: '', targetState: '', actions: [], metrics: [] }; }), context: profile };
+          result = { focusArea: 'improvement-plan', areas: areas.map(function(a) { return { area: String(a), currentState: '', targetState: '', actions: [], metrics: [] }; }), context: profile };
           present = [{ id: 'improvement-plan', title: 'Executive Improvement Plan', kind: 'text', body: lines.join(NL) }];
           break;
         }
@@ -203,7 +206,6 @@ export const DEV_CAREER = createDeclarativeCodeSkill({
             'Career Plan',
             '===========',
             '',
-            'Executive: ' + (executiveId || 'unspecified'),
             'Current Role: ' + (profile.role || 'unspecified'),
             'Level: ' + (profile.level || 'unspecified'),
             'Timeframe: ' + timeframe,
@@ -225,13 +227,13 @@ export const DEV_CAREER = createDeclarativeCodeSkill({
             lines.push('  No target roles specified');
           }
 
-          result = { focusArea: 'career-planner', executiveId, currentRole: profile.role, targetRoles: targetRoles.map(function(r) { return { role: String(r), feasibility: 'pending', gapAnalysis: null, steps: [] }; }), interests: profile.interests, constraints: profile.constraints, context: profile };
+          result = { focusArea: 'career-planner', currentRole: profile.role, targetRoles: targetRoles.map(function(r) { return { role: String(r), feasibility: 'pending', gapAnalysis: null, steps: [] }; }), interests: profile.interests, constraints: profile.constraints, context: profile };
           present = [{ id: 'career-plan', title: 'Executive Career Plan', kind: 'text', body: lines.join(NL) }];
           break;
         }
 
         case 'career-roadmap': {
-          const targetRole = input.targetRole || '';
+          const targetRole = Array.isArray(profile.targetRoles) && profile.targetRoles.length > 0 ? String(profile.targetRoles[0]) : '';
           const milestones = Array.isArray(input.milestones) ? input.milestones : [];
           const timeframe = profile.timeframe || '1-2 years';
 
@@ -243,7 +245,6 @@ export const DEV_CAREER = createDeclarativeCodeSkill({
             'Career Roadmap',
             '==============',
             '',
-            'Executive: ' + (executiveId || 'unspecified'),
             'Target Role: ' + (targetRole || 'unspecified'),
             'Timeframe: ' + timeframe,
             '',
@@ -266,7 +267,7 @@ export const DEV_CAREER = createDeclarativeCodeSkill({
 
           lines.push('Note: Target dates and dependencies must be supplied for an actionable roadmap.');
 
-          result = { focusArea: 'career-roadmap', executiveId, targetRole, milestones: milestones.map(function(m) { return { name: String(m), targetDate: '', status: 'pending', dependencies: [], completed: false }; }), timeframe, context: profile };
+          result = { focusArea: 'career-roadmap', targetRole, milestones: milestones.map(function(m) { return { name: String(m), targetDate: '', status: 'pending', dependencies: [], completed: false }; }), timeframe, context: profile };
           present = [{ id: 'career-roadmap', title: 'Executive Career Roadmap', kind: 'text', body: lines.join(NL) }];
           break;
         }
@@ -283,7 +284,6 @@ export const DEV_CAREER = createDeclarativeCodeSkill({
             'Resource Recommendations',
             '========================',
             '',
-            'Executive: ' + (executiveId || 'unspecified'),
             'Interests: ' + (interests.length ? interests.join(', ') : 'none specified'),
             'Skill Gaps: ' + (gaps.length ? gaps.join(', ') : 'none identified'),
             '',
@@ -320,7 +320,7 @@ export const DEV_CAREER = createDeclarativeCodeSkill({
 
           lines.push('Note: This tool identifies resource categories. Specific recommendations require external search integration.');
 
-          result = { focusArea: 'resource-recommender', executiveId, interests, gaps, resources: [], categories: ['Books', 'Courses', 'Mentors', 'Communities', 'Events', 'Articles'], context: profile };
+          result = { focusArea: 'resource-recommender', interests, gaps, resources: [], categories: ['Books', 'Courses', 'Mentors', 'Communities', 'Events', 'Articles'], context: profile };
           present = [{ id: 'resources', title: 'Executive Resource Recommendations', kind: 'text', body: lines.join(NL) }];
           break;
         }

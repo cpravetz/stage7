@@ -2,17 +2,26 @@
 import { createDeclarativeCodeSkill, createSchemaRecord, SchemaProps } from '../code-skill-factory';
 import { financeResultSchema } from './finance-contract';
 
-const financeModelingAnalysisInputSchema = createSchemaRecord({
-  revenue: SchemaProps.number({ description: 'Starting annual revenue', minimum: 0 }),
-  costs: SchemaProps.number({ description: 'Starting annual costs', minimum: 0 }),
+// Every figure below describes the same entity and the same model setup on every
+// run, so none of it is per-run user input. Asking the user to retype a discount
+// rate each time the model refreshes is the onus the operator config removes.
+const financeModelingAnalysisConfigSchema = createSchemaRecord({
+  dataSource: SchemaProps.text({
+    description: 'System or file the model figures are read from, such as ledger, erp, or a stored financial snapshot',
+    required: true,
+  }),
+  entity: SchemaProps.text({ description: 'Entity the model describes, such as a business unit or legal entity' }),
+  revenue: SchemaProps.number({ description: 'Starting annual revenue', minimum: 0, default: 0 }),
+  costs: SchemaProps.number({ description: 'Starting annual costs', minimum: 0, default: 0 }),
   periods: SchemaProps.integer({ description: 'Number of projection periods (years)', minimum: 1, maximum: 20, default: 5 }),
   growthRate: SchemaProps.number({ description: 'Annual revenue growth rate (%)', default: 5 }),
   costGrowthRate: SchemaProps.number({ description: 'Annual cost growth rate (%)', default: 3 }),
   taxRate: SchemaProps.number({ description: 'Corporate tax rate (%)', minimum: 0, maximum: 100, default: 21 }),
   discountRate: SchemaProps.number({ description: 'Discount rate for NPV (%)', minimum: 0, maximum: 50, default: 10 }),
-  capexSchedule: SchemaProps.objectArray(SchemaProps.number({ description: 'Capital expenditure per period' }), { description: 'Array of capex per period (optional)', default: [] }),
+  capexSchedule: SchemaProps.objectArray(SchemaProps.number({ description: 'Capital expenditure per period' }), { description: 'Array of capex per period', default: [] }),
   workingCapitalPct: SchemaProps.number({ description: 'Working capital as % of revenue change', minimum: 0, maximum: 50, default: 10 }),
-});
+  cadence: SchemaProps.text({ description: 'How often the model refreshes', default: 'monthly' }),
+}, { required: ['dataSource'] });
 
 const financeModelingAnalysisOutputSchema = financeResultSchema(
   'Model refresh: per-period projections (revenue, costs, margins, EBIT, NOPAT, capex, working capital, free cash flow), '
@@ -27,7 +36,11 @@ const financeModelingAnalysisSkill = createDeclarativeCodeSkill({
   persistenceEnvVar: 'FINANCE_HOME',
   tier: 'advise',
   domainKnowledge: 'Corporate finance principles, US GAAP/IFRS standards, financial modeling, and capital allocation strategies',
-  inputSchema: financeModelingAnalysisInputSchema,
+  configSchema: financeModelingAnalysisConfigSchema,
+  // Present but empty: every figure is operator config, so there is nothing for
+  // the user to fill in per run. The schema object stays so the registry has a
+  // uniform shape for every skill.
+  inputSchema: createSchemaRecord({}),
   outputSchema: financeModelingAnalysisOutputSchema,
   isSkill: true,
   manifest: {},
@@ -35,15 +48,35 @@ const financeModelingAnalysisSkill = createDeclarativeCodeSkill({
       function round2(n) { return Math.round(n * 100) / 100; }
       function round4(n) { return Math.round(n * 10000) / 10000; }
 
-      const revenue = input.revenue || 0;
-      const costs = input.costs || 0;
-      const periods = Math.max(1, Math.min(20, Math.floor(input.periods || 5)));
-      const growthRate = (input.growthRate || 5) / 100;
-      const costGrowthRate = (input.costGrowthRate || 3) / 100;
-      const taxRate = (input.taxRate || 21) / 100;
-      const discountRate = (input.discountRate || 10) / 100;
-      const capexSchedule = Array.isArray(input.capexSchedule) ? input.capexSchedule : [];
-      const workingCapitalPct = (input.workingCapitalPct || 10) / 100;
+      const cfg = ctx.config || {};
+      const dataSource = String(cfg.dataSource || '');
+      const entity = String(cfg.entity || '');
+      const revenue = cfg.revenue || 0;
+      const costs = cfg.costs || 0;
+      const periods = Math.max(1, Math.min(20, Math.floor(cfg.periods || 5)));
+      const growthRate = (cfg.growthRate || 5) / 100;
+      const costGrowthRate = (cfg.costGrowthRate || 3) / 100;
+      const taxRate = (cfg.taxRate || 21) / 100;
+      const discountRate = (cfg.discountRate || 10) / 100;
+      const capexSchedule = Array.isArray(cfg.capexSchedule) ? cfg.capexSchedule : [];
+      const workingCapitalPct = (cfg.workingCapitalPct || 10) / 100;
+
+      // Without a configured data source, or with a source but no figures behind
+      // it, there is nothing to model. Say so plainly: a model built from
+      // defaulted zeroes is arithmetically valid and completely meaningless, and
+      // it reads as a real result.
+      if (!dataSource) {
+        return ctx.emit.notConnected(
+          'No financial data source is configured',
+          'Set dataSource in this Skill\u2019s settings to the ledger, ERP, or snapshot the figures come from.',
+        );
+      }
+      if (!revenue && !costs) {
+        return ctx.emit.notConnected(
+          'The configured data source has no figures to model',
+          'Set revenue or costs in this Skill\u2019s settings, or point dataSource at a source that supplies them.',
+        );
+      }
 
       const projections = [];
       let cumulativeFCF = 0;
@@ -143,25 +176,33 @@ const financeModelingAnalysisSkill = createDeclarativeCodeSkill({
       // Persist model to a local store so UX and follow-up skills can retrieve it.
       let store = { models: [], lastUpdated: new Date().toISOString() };
       try { store = ctx.store.load('models', null) || store; } catch (e) {}
-      const entry = { id: 'fm_' + Buffer.from(String(new Date().getTime())).toString('base64').slice(0, 12), createdAt: new Date().toISOString(), inputs: input, model };
+      const entry = { id: 'fm_' + Buffer.from(String(new Date().getTime())).toString('base64').slice(0, 12), createdAt: new Date().toISOString(), dataSource, entity, config: cfg, model };
       store.models.push(entry);
       try { ctx.store.save('models', store); } catch (e) {}
 
       // Build a human-readable summary derived from the computed model (honest, deterministic)
       const lines = [];
-      lines.push('Financial Model (derived from supplied inputs):');
+      lines.push('Financial Model for ' + (entity || 'configured entity'));
+      lines.push('Data source: ' + dataSource);
       lines.push('NPV: ' + model.summary.npv + ' | IRR: ' + model.summary.irr + ' | Payback (yrs): ' + (model.summary.paybackPeriod || 'N/A'));
       lines.push('Total Revenue (proj): ' + model.summary.totalRevenue + ' | Total FCF (proj): ' + model.summary.totalFCF);
       lines.push('Average gross margin: ' + model.summary.avgGrossMargin + ' | Average EBITDA margin: ' + model.summary.avgEbitdaMargin);
       lines.push('Sensitivity (NPV): base=' + model.sensitivity.base.npv + ', bull=' + model.sensitivity.bull.npv + ', bear=' + model.sensitivity.bear.npv);
-      lines.push('\nNote: All values are computed locally from the provided inputs; this is not third-party market data.');
+      lines.push('\nNote: Projections are computed locally from the configured figures; this is not third-party market data.');
 
-      const present = [{ id: 'finance-modeling-analysis', title: 'Financial Model Summary', kind: 'text', body: lines.join('\n') }];
+            const present = [{ id: 'finance-modeling-analysis', title: 'Financial Model Summary', kind: 'text', body: lines.join('\n') }];
+
+      // Without this the handler computes a model and returns undefined, so the
+      // run reports "no output" and the persisted model is never surfaced.
+      return ctx.emit.success({ present, data: { dataSource, entity, model } });
     }
   });
 
+// Refreshes on a cadence from operator config. There is no per-run decision for
+// the user to make, so a user trigger would only offer them a form to retype the
+// same numbers.
 financeModelingAnalysisSkill.triggers = [
-  { kind: 'schedule', cadence: 'periodic model refresh' },
+  { kind: 'schedule', cadence: 'periodic model refresh from the configured data source' },
 ];
 
 export { financeModelingAnalysisSkill };

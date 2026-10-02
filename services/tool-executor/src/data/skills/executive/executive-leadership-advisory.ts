@@ -16,8 +16,17 @@ function withUxMetadata(schema: SchemaRecord): SchemaRecord {
 }
 
 const LEADERSHIP_INPUT = createSchemaRecord({
-  focusArea: SchemaProps.select(['coaching', 'decision-framework', 'leadership-assessment', 'eq-assessment', 'presence-analyzer', 'communication-analyzer', 'communication-coach'], { description: 'Leadership advisory area', required: true }),
-  executiveId: SchemaProps.text({ description: 'Executive identifier' }),
+  // Labelled options: the stored values stay stable identifiers while the select
+  // shows wording the user can act on. "Eq assessment" told the user nothing.
+  focusArea: SchemaProps.select([
+    { value: 'coaching', label: 'Coaching conversation' },
+    { value: 'decision-framework', label: 'Work through a decision' },
+    { value: 'leadership-assessment', label: 'Assess my leadership' },
+    { value: 'eq-assessment', label: 'Assess my emotional intelligence' },
+    { value: 'presence-analyzer', label: 'How I come across' },
+    { value: 'communication-analyzer', label: 'Analyse something I wrote or said' },
+    { value: 'communication-coach', label: 'Improve a draft message' },
+  ], { description: 'What you want help with', required: true }),
   role: SchemaProps.text({ description: 'Current role' }),
   level: SchemaProps.text({ description: 'Seniority level' }),
   context: SchemaProps.text({ description: 'Additional context' }),
@@ -100,7 +109,6 @@ const leadershipAdvisory = createDeclarativeCodeSkill({
     }
 
     const focusArea = data.focusArea || 'coaching';
-    const executiveId = data.executiveId || '';
     const profile: any = {
       role: data.role || '',
       level: data.level || '',
@@ -125,7 +133,6 @@ const leadershipAdvisory = createDeclarativeCodeSkill({
           'Coaching Plan',
           '=============',
           '',
-          'Executive: ' + (executiveId || 'unspecified'),
           'Role: ' + (profile.role || 'unspecified'),
           'Level: ' + (profile.level || 'unspecified'),
           'Sessions planned: ' + selected.length,
@@ -149,7 +156,6 @@ const leadershipAdvisory = createDeclarativeCodeSkill({
 
         result = {
           focusArea: 'coaching',
-          executiveId: executiveId,
           sessionCount: selected.length,
           topicsSupplied: topics.length,
           sessions: selected.map(function (t: any) {
@@ -170,7 +176,7 @@ const leadershipAdvisory = createDeclarativeCodeSkill({
 
         if (!decision && !options.length) {
           return fail('not-connected', 'Not connected: no decision or options provided for analysis', 'Input required', {
-            data: { focusArea: 'decision-framework', executiveId: executiveId, missing: ['decision', 'options'] },
+            data: { focusArea: 'decision-framework', missing: ['decision', 'options'] },
           });
         }
 
@@ -178,7 +184,6 @@ const leadershipAdvisory = createDeclarativeCodeSkill({
           'Decision Framework Analysis',
           '===========================',
           '',
-          'Executive: ' + (executiveId || 'unspecified'),
           'Decision: ' + (decision || 'unspecified'),
           'Options (' + options.length + '):',
         ];
@@ -217,7 +222,6 @@ const leadershipAdvisory = createDeclarativeCodeSkill({
 
         result = {
           focusArea: 'decision-framework',
-          executiveId: executiveId,
           decision: decision,
           options: options,
           criteria: criteria,
@@ -237,7 +241,6 @@ const leadershipAdvisory = createDeclarativeCodeSkill({
           'Leadership Competency Assessment',
           '================================',
           '',
-          'Executive: ' + (executiveId || 'unspecified'),
           'Role: ' + (profile.role || 'unspecified'),
           'Level: ' + (profile.level || 'unspecified'),
           'Competencies assessed: ' + competencies.length,
@@ -260,7 +263,6 @@ const leadershipAdvisory = createDeclarativeCodeSkill({
 
         result = {
           focusArea: 'leadership-assessment',
-          executiveId: executiveId,
           competencies: competencies.map(function (c: any) {
             return { name: String(c), selfRating: null, targetRating: null, evidence: [] };
           }),
@@ -280,7 +282,6 @@ const leadershipAdvisory = createDeclarativeCodeSkill({
           'Emotional Intelligence Assessment',
           '=================================',
           '',
-          'Executive: ' + (executiveId || 'unspecified'),
           'Role: ' + (profile.role || 'unspecified'),
           'Dimensions assessed: ' + dimensions.length,
           '',
@@ -299,7 +300,6 @@ const leadershipAdvisory = createDeclarativeCodeSkill({
 
         result = {
           focusArea: 'eq-assessment',
-          executiveId: executiveId,
           dimensions: dimensions.map(function (d: any) {
             return { name: String(d), score: null, descriptor: null };
           }),
@@ -316,7 +316,6 @@ const leadershipAdvisory = createDeclarativeCodeSkill({
           'Executive Presence Analysis',
           '===========================',
           '',
-          'Executive: ' + (executiveId || 'unspecified'),
           'Role: ' + (profile.role || 'unspecified'),
           'Sessions analyzed: ' + sessions.length,
           'Presence factors: ' + factors.join(', '),
@@ -350,7 +349,6 @@ const leadershipAdvisory = createDeclarativeCodeSkill({
 
         result = {
           focusArea: 'presence-analyzer',
-          executiveId: executiveId,
           sessionCount: sessions.length,
           sessions: sessions,
           factors: factors,
@@ -366,7 +364,7 @@ const leadershipAdvisory = createDeclarativeCodeSkill({
 
         if (!text.trim()) {
           return fail('not-connected', 'Not connected: no text or transcript provided for communication analysis', 'Input required', {
-            data: { focusArea: 'communication-analyzer', executiveId: executiveId, missing: ['text', 'transcript'] },
+            data: { focusArea: 'communication-analyzer', missing: ['text', 'transcript'] },
           });
         }
 
@@ -380,7 +378,6 @@ const leadershipAdvisory = createDeclarativeCodeSkill({
           'Communication Analysis',
           '======================',
           '',
-          'Executive: ' + (executiveId || 'unspecified'),
           'Channel: ' + (data.channel || 'unspecified'),
           'Audience: ' + (data.audience || 'unspecified'),
           '',
@@ -406,7 +403,6 @@ const leadershipAdvisory = createDeclarativeCodeSkill({
 
         result = {
           focusArea: 'communication-analyzer',
-          executiveId: executiveId,
           channel: data.channel || null,
           audience: data.audience || null,
           text: text,
@@ -433,7 +429,7 @@ const leadershipAdvisory = createDeclarativeCodeSkill({
 
         if (!message.trim()) {
           return fail('not-connected', 'Not connected: no message or draft provided for coaching', 'Input required', {
-            data: { focusArea: 'communication-coach', executiveId: executiveId, missing: ['message', 'draft'] },
+            data: { focusArea: 'communication-coach', missing: ['message', 'draft'] },
           });
         }
 
@@ -444,7 +440,6 @@ const leadershipAdvisory = createDeclarativeCodeSkill({
           'Communication Coaching',
           '======================',
           '',
-          'Executive: ' + (executiveId || 'unspecified'),
           'Channel: ' + channel,
           'Audience: ' + (audience || 'unspecified'),
           'Message length: ' + wordCount + ' words, ' + sentenceCount + ' sentences',
@@ -470,7 +465,6 @@ const leadershipAdvisory = createDeclarativeCodeSkill({
 
         result = {
           focusArea: 'communication-coach',
-          executiveId: executiveId,
           message: message,
           channel: channel,
           audience: audience || null,
@@ -486,7 +480,6 @@ const leadershipAdvisory = createDeclarativeCodeSkill({
         return fail('error', 'Unknown focusArea: ' + focusArea, 'Invalid focusArea', {
           data: {
             focusArea: focusArea,
-            executiveId: executiveId,
             supported: [
               'coaching',
               'decision-framework',

@@ -24,7 +24,6 @@ const triggers = [
 const referralConfig = createSchemaRecord({
   healthcareHome: SchemaProps.text({ description: 'Healthcare workspace path or base URL; defaults to HEALTHCARE_HOME' }),
   endpointUrl: SchemaProps.url({ description: 'Optional referral coordination endpoint URL; the connected resource coordination tool may supply its own endpoint' }),
-  accessToken: SchemaProps.password({ description: 'Bearer access token for an optional referral coordination endpoint' }),
   confirmBeforeSend: SchemaProps.boolean({ description: 'Require explicit confirmation before a live referral or resource mutation', default: true }),
   defaultDryRun: SchemaProps.boolean({ description: 'Default referral coordination to dry-run', default: true }),
   maxResults: SchemaProps.integer({ description: 'Maximum resource candidates to request', minimum: 1, maximum: 50, default: 10 }),
@@ -39,7 +38,7 @@ const careResourceReferralCoordinator = createDeclarativeCodeSkill({
   domainKnowledge: 'Care resource matching, referral coordination, and resource utilization optimization',
   inputSchema: createSchemaRecord({
     patient: SchemaProps.text({ description: 'Minimum-necessary patient identifier' }),
-    referralId: SchemaProps.text({ description: 'Referral identifier for track or status operations' }),
+    referralId: SchemaProps.reference('healthcare-referrals', { description: 'Referral for track or status operations' }),
     clinicalNeeds: SchemaProps.stringArray({ description: 'Clinician-supplied care needs used for resource matching' }),
     insurance: SchemaProps.object({}, { description: 'Minimum-necessary insurance or network information', additionalProperties: true }),
     preferences: SchemaProps.object({}, { description: 'Patient care-resource preferences', additionalProperties: true }),
@@ -51,11 +50,10 @@ const careResourceReferralCoordinator = createDeclarativeCodeSkill({
     confirmation: SchemaProps.boolean({ description: 'Explicit approval for a live referral or resource mutation', default: false }),
     confirmed: SchemaProps.boolean({ description: 'Alternate explicit approval flag for a live referral or resource mutation', default: false }),
     communicationChannel: SchemaProps.select(['email', 'sms', 'portal', 'voice'], { description: 'Patient communication channel for referral notifications', default: 'portal' }),
-    communicationTemplateId: SchemaProps.text({ description: 'Message template identifier for patient referral notifications' }),
+    communicationTemplateId: SchemaProps.reference('healthcare-message-templates', { description: 'Message template for patient referral notifications' }),
     communicationSubject: SchemaProps.text({ description: 'Subject line for patient referral communication' }),
     communicationConfirmation: SchemaProps.boolean({ description: 'Explicit approval for sending patient communication about the referral', default: false }),
     communicationConfirmed: SchemaProps.boolean({ description: 'Alternate explicit approval flag for patient communication', default: false }),
-    accessToken: SchemaProps.password({ description: 'Optional bearer token for an endpoint override' }),
     context: SchemaProps.object({}, { description: 'Additional coordination context that does not replace required clinical inputs', additionalProperties: true }),
   }),
   outputSchema: healthcareResultSchema('Referral record, candidate resources, communication status, step results, and coverage'),
@@ -210,7 +208,7 @@ const careResourceReferralCoordinator = createDeclarativeCodeSkill({
           dryRun,
           confirmation: confirmed,
           endpointUrl: input.endpointUrl || undefined,
-          accessToken: input.accessToken || undefined,
+          accessToken: (ctx.getCredential ? ctx.getCredential('accessToken') : undefined) || undefined,
         });
         if (!resourceResult || resourceResult.success === false) {
           const err = (resourceResult && (resourceResult.error || resourceResult.message)) || 'healthcare resource coordination tool did not return a successful result';

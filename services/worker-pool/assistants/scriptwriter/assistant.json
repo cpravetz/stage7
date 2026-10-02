@@ -7,7 +7,8 @@
   "tools": [
     "scriptwriting-narrative-arc-pacing-evaluator",
     "scriptwriting-scene-beat-dialogue-copilot",
-    "scriptwriting-genre-market-evaluator",
+    "scriptwriting-genre-market-evaluator-user",
+    "scriptwriting-market-report-scheduled",
     "scriptwriting-script-formatting-submission-manager"
   ]
 }

@@ -53,12 +53,10 @@ const leadDealAdvisory = createDeclarativeCodeSkill({
   outputSchema: salesResultSchema('Scored and ranked leads with per-signal rationale, unassessed coverage, and score composition'),
   manifest: {
     configSchema: createSchemaRecord({
-      salesHome: SchemaProps.text({ description: 'Directory used to persist scored leads; defaults to SALES_HOME' }),
       defaultThreshold: SchemaProps.number({ description: 'Default qualification threshold', default: 50 }),
       defaultHotThreshold: SchemaProps.number({ description: 'Default hot-lead threshold', default: 70 }),
     }),
     persistenceEnv: 'SALES_HOME',
-    salesHome: process.env.SALES_HOME || '/tmp/sales',
     confirmBeforeSend: false,
     ui: { view: 'lead-deal-advisory' },
   },

@@ -794,6 +794,79 @@ describe('REST endpoints', () => {
       expect(res.body.toolId).toBe('flat-tool-1');
     });
 
+    it('passes the assistant binding config to the skill as externalConfig', async () => {
+      // The settings tab writes `config` against the assistant's tool binding. Until
+      // the route applied it, the executor built the skill with empty configuration
+      // and every handler silently read its defaults.
+      const skillId = 'config-binding-skill';
+      await request(app).post('/api/tools').send({
+        id: skillId,
+        name: 'Config Binding Skill',
+        description: 'Echoes the config the executor resolved',
+        type: 'code',
+        manifest: {
+          language: 'javascript',
+          entrypoint: 'index.js',
+          sourceCode: `const cfg = typeof __skill_config !== 'undefined' && __skill_config ? __skill_config : {};
+console.log(JSON.stringify({ success: true, data: cfg }));`,
+        },
+        configSchema: {
+          type: 'object',
+          properties: { dataFeed: { type: 'string' } },
+        },
+        isSkill: true,
+      });
+
+      const res = await request(app)
+        .post('/api/tools/execute')
+        .set('X-Assistant-Id', 'assistant-1')
+        .send({
+          name: 'Config Binding Skill',
+          type: 'code',
+          manifest: {},
+          input: {},
+          externalConfig: { dataFeed: 'crm-accounts' },
+        });
+
+      expect(res.status).toBe(200);
+      const output = String(res.body.output?.output ?? res.body.output ?? '');
+      expect(JSON.parse(output).data.dataFeed).toBe('crm-accounts');
+    });
+
+    it('does not let one assistant config leak into another via the shared registry', async () => {
+      const skillId = 'config-isolation-skill';
+      await request(app).post('/api/tools').send({
+        id: skillId,
+        name: 'Config Isolation Skill',
+        description: 'Echoes the config the executor resolved',
+        type: 'code',
+        manifest: {
+          language: 'javascript',
+          entrypoint: 'index.js',
+          sourceCode: `const cfg = typeof __skill_config !== 'undefined' && __skill_config ? __skill_config : {};
+console.log(JSON.stringify({ success: true, data: cfg }));`,
+        },
+        configSchema: { type: 'object', properties: { dataFeed: { type: 'string' } } },
+        isSkill: true,
+      });
+
+      await request(app)
+        .post('/api/tools/execute')
+        .set('X-Assistant-Id', 'assistant-a')
+        .send({ name: 'Config Isolation Skill', type: 'code', manifest: {}, input: {}, externalConfig: { dataFeed: 'feed-a' } });
+
+      // A second assistant with no settings of its own must not inherit feed-a: the
+      // registry holds one shared instance per Skill, so writing onto it directly
+      // would hand one assistant's configuration to every other user of that Skill.
+      const second = await request(app)
+        .post('/api/tools/execute')
+        .set('X-Assistant-Id', 'assistant-b')
+        .send({ name: 'Config Isolation Skill', type: 'code', manifest: {}, input: {} });
+
+      const output = String(second.body.output?.output ?? second.body.output ?? '');
+      expect(JSON.parse(output).data.dataFeed).toBeUndefined();
+    });
+
     it('should reject registered skill by name without assistant context when using flat payload', async () => {
       // First register a skill
       const skillTool = {

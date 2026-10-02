@@ -9,7 +9,8 @@
     "support-sentiment-analysis",
     "support-issue-analysis",
     "support-search-kb",
-    "response-drafting",
+    "response-drafting-user",
+    "response-drafting-notifier",
     "ticket-ops",
     "analytics-planning"
   ]

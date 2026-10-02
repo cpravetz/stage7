@@ -46,7 +46,9 @@ export const NARRATIVE_ARC_PACING_EVALUATOR = createDeclarativeCodeSkill({
   inputSchema: NARRATIVE_ARC_PACING_INPUT,
   outputSchema: NARRATIVE_ARC_PACING_OUTPUT,
   triggers: [
-    { kind: 'event', on: 'Newly drafted scenes available for evaluation' },
+    // User, not Event: the drafted script is the input, and the Skill refuses to
+    // run without it, so nothing else can invoke it.
+    { kind: 'user', phrase_examples: ['Evaluate the pacing of this script', 'Is this act two too slow', 'Recommend structural rewrites'] },
   ],
   tier: 'advise',
   domainKnowledge: 'Narrative structure, pacing analysis, story theory, genre conventions',

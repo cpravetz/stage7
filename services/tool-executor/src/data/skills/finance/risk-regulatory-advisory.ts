@@ -40,14 +40,15 @@ const riskRegulatoryAdvisorySkill = createDeclarativeCodeSkill({
   outputSchema: riskRegulatoryAdvisoryOutputSchema,
   isSkill: true,
   manifest: {
+  // Declared as a credential so the key can come from the vault and is never
+  // read from, or echoed back out of, the process environment.
+  credentialSource: {
+    apiKey: { configKey: 'apiKey', required: false, label: "risk service API key (set in this Skill configuration, or a vault secret)" },
+  },
     configSchema: RISK_REGULATORY_ADVISORY_CONFIG_SCHEMA,
   },
   handler: async function handler(input, ctx) {
       const NL = '\n';
-
-      function env(name: string): string {
-        return (globalThis.process && globalThis.process.env && globalThis.process.env[name]) || '';
-      }
 
       // The store path is reported back to the caller so a persisted assessment can be
       // located, but the store itself is owned by ctx.store, which resolves the
@@ -78,8 +79,10 @@ const riskRegulatoryAdvisorySkill = createDeclarativeCodeSkill({
         }
       }
 
-      const endpointUrl = input.endpointUrl || env('FINANCE_RISK_ENDPOINT') || '';
-      const apiKey = env('FINANCE_API_KEY');
+      // Endpoint from this Skill's configuration; the secret through the
+      // declared credential source. Neither comes from the process environment.
+      const endpointUrl = String(input.endpointUrl || ctx.config?.endpointUrl || '');
+      const apiKey = String((ctx.getCredential ? ctx.getCredential('apiKey') : undefined) || '');
 
       if (!endpointUrl) {
         const present = [{ id: 'not-connected', title: 'Not connected', kind: 'text', body: 'Risk assessment endpoint is not configured. Set FINANCE_RISK_ENDPOINT to enable full risk assessment.' }];

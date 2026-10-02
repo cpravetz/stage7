@@ -1,9 +1,30 @@
 import { createDeclarativeCodeSkill, SchemaProps } from '../code-skill-factory';
 
-const CONTRACT_DOCUMENT_ADVISORY = createDeclarativeCodeSkill({
-  id: 'contract-document-advisory',
+/**
+ * The clause rules live inside the handler body, not in an imported module.
+ *
+ * `createDeclarativeCodeSkill` embeds `handler.toString()` into the generated
+ * source, and the executor runs that text in a sandbox where only
+ * `stage7-runtime` has been copied in. An identifier from a sibling module is
+ * therefore an undefined reference at runtime, which surfaces as
+ * `import_contract_risk_rules is not defined` and a failed envelope. The
+ * scheduled half carries the same copy; `legal/contract-risk-rules.test.ts`
+ * asserts the two stay identical, which is what stops them drifting.
+ */
+const CONTRACT_RULES_IN_HANDLER = true;
+
+/**
+ * User half of the contract-document-advisory split. It reviews the contract the
+ * person supplies right now. The scheduled half (contract-document-advisory-
+ * scheduled) runs the same clause heuristics over the contract stores the
+ * operator configured; the split exists because only this half can review a
+ * contract that has not been ingested yet, and only the other half can run
+ * without a person in the loop.
+ */
+const CONTRACT_DOCUMENT_ADVISORY_USER = createDeclarativeCodeSkill({
+  id: 'contract-document-advisory-user',
   name: 'Contract & Document Advisory',
-  description: 'Advisory tool for contract review, clause drafting, and risk assessment with local document storage.',
+  description: 'Reviews a contract you supply: clause risk assessment and issue list, stored locally for follow-up.',
   persistenceEnvVar: 'LEGAL_HOME',
   inputSchema: {
     type: 'object',
@@ -34,14 +55,21 @@ const CONTRACT_DOCUMENT_ADVISORY = createDeclarativeCodeSkill({
   tier: 'advise',
   domainKnowledge: 'Contract law, commercial negotiation standards, regulatory compliance (GDPR, SOC2, HIPAA), legal/security liability mitigation',
   triggers: [
-    { kind: 'event', on: 'Document or redline received' },
+    {
+      kind: 'user',
+      phrase_examples: [
+        'Review this contract',
+        'Check these clauses for risk',
+        'What are the risky parts of this agreement?',
+      ],
+    },
   ],
   async handler(input, ctx) {
     const contractText = input.contractText || '';
     const contractType = input.contractType || 'general';
     const jurisdiction = input.jurisdiction || 'US';
 
-    const riskRules = [
+    const CONTRACT_RISK_RULES = [
       { type: 'liability', severity: 'high', clause: 'Indemnification', terms: ['indemnif', 'consequential damages', 'unlimited liability'], description: 'Review liability and indemnification language' },
       { type: 'termination', severity: 'medium', clause: 'Termination', terms: ['termination', 'terminate', 'notice period'], description: 'Review termination rights and notice requirements' },
       { type: 'ip', severity: 'medium', clause: 'Intellectual Property', terms: ['intellectual property', 'work product', 'ownership'], description: 'Review intellectual property ownership language' },
@@ -51,11 +79,13 @@ const CONTRACT_DOCUMENT_ADVISORY = createDeclarativeCodeSkill({
       { type: 'force-majeure', severity: 'low', clause: 'Force Majeure', terms: ['force majeure', 'act of god'], description: 'Review force majeure coverage' },
       { type: 'limitation', severity: 'medium', clause: 'Limitation of Liability', terms: ['limitation of liability', 'liability cap', 'damages cap'], description: 'Review liability limits' },
     ];
-
-    const normalizedText = contractText.toLowerCase();
-    const risks = riskRules.filter((r) => r.terms.some((term) => normalizedText.includes(term)));
-    const issues = risks.map((r) => ({ issue: r.description, severity: r.severity, type: r.type, clause: r.clause }));
-    const clauses = risks.map((r) => ({ clause: r.clause, status: 'review', note: r.description + '; manual legal review required' }));
+    const normalizedText = (contractText || '').toLowerCase();
+    const risks = CONTRACT_RISK_RULES.filter(function (r) {
+      return r.terms.some(function (term) { return normalizedText.indexOf(term) !== -1; });
+    });
+    const issues = risks.map(function (r) { return { issue: r.description, severity: r.severity, type: r.type, clause: r.clause }; });
+    const clauses = risks.map(function (r) { return { clause: r.clause, status: 'review', note: r.description + '; manual legal review required' }; });
+    const issueCount = issues.length;
 
     const store = ctx.store.load('advisory');
     const review = {
@@ -77,12 +107,12 @@ const CONTRACT_DOCUMENT_ADVISORY = createDeclarativeCodeSkill({
 
     return {
       success: true,
-      data: { review, issueCount: issues.length },
+      data: { review, issueCount },
       present: [
-        ctx.render.text('report', 'Contract Risk Assessment', `Identified ${issues.length} potential risk clauses in ${contractType} contract (${jurisdiction}).`),
+        ctx.render.text('report', 'Contract Risk Assessment', `Identified ${issueCount} potential risk clauses in ${contractType} contract (${jurisdiction}).`),
       ],
     };
   },
 });
 
-export { CONTRACT_DOCUMENT_ADVISORY };
+export { CONTRACT_DOCUMENT_ADVISORY_USER };

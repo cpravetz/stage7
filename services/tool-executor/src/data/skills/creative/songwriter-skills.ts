@@ -6,7 +6,6 @@ const SONGWRITER_DISPATCH_CONFIG_SCHEMA = {
   type: 'object',
   properties: {
     endpointUrl: SchemaProps.url({ title: 'Endpoint URL', description: 'Lead-sheet, demo-asset, or registration endpoint URL', order: 1, hint: 'Provider endpoint for live dispatch of lead sheets, demo metadata, or registration records' }),
-    apiKey: SchemaProps.password({ title: 'API Key', description: 'API key for the configured asset or registration provider', order: 2, hint: 'Authentication key for the configured provider endpoint' }),
     provider: SchemaProps.select(['custom', 'daw', 'registration-portal'], { title: 'Provider', description: 'Configured asset or registration provider', order: 3, default: 'custom', hint: 'Select the service that will receive dispatched assets' }),
     defaultFormat: SchemaProps.select(['lead-sheet', 'demo-metadata', 'registration'], { title: 'Default Format', description: 'Default dispatch artifact format', order: 4, default: 'lead-sheet', hint: 'Default artifact type when none is specified at dispatch time' }),
     confirmBeforeSend: SchemaProps.boolean({ title: 'Confirm Before Send', description: 'Require explicit confirmation before a live asset dispatch', order: 5, default: true, hint: 'When enabled, live dispatch requires explicit confirmation input' }),
@@ -64,7 +63,8 @@ export const lyricProsodyEvaluator = createDeclarativeCodeSkill({
     required: ['success', 'present'],
   },
   triggers: [
-    { kind: 'event', on: 'Newly co-created lyrics available for prosody analysis' },
+    // User, not Event: the lyrics are the input and the Skill blocks without them.
+    { kind: 'user', phrase_examples: ['Check the prosody of these lyrics', 'Do these lines scan in iambic meter', 'Fix the stress pattern in this verse'] },
   ],
   isSkill: true,
   manifest: {},
@@ -729,7 +729,6 @@ export const leadSheetDemoDispatcher = withConfirmation(createDeclarativeCodeSki
         publishers: SchemaProps.stringArray({ title: 'Publishers', description: 'Publisher names for registration metadata', order: 2, hint: 'List of publisher names for registration' }),
         rightsNote: SchemaProps.text({ title: 'Rights Note', description: 'Rights or ownership note for the staged record', order: 3, hint: 'Any rights or ownership clarification for the record' }),
       }, { title: 'Registration', description: 'Copyright or registration metadata', order: 9, hint: 'Include writer/publisher metadata when staging a registration record' }),
-      apiKey: SchemaProps.password({ title: 'API Key', description: 'Optional provider API key override', order: 10, hint: 'Override the configured API key for this dispatch' }),
       dryRun: SchemaProps.boolean({ title: 'Dry Run', description: 'Stage the artifact without sending it; defaults to true', order: 11, default: true, hint: 'When true, no request leaves the system even if an endpoint is configured' }),
       confirmation: SchemaProps.boolean({ title: 'Confirmation', description: 'Explicit approval for a live dispatch', order: 12, default: false, hint: 'Set to true only when authorizing a live dispatch to the configured endpoint' }),
     },
@@ -770,8 +769,13 @@ export const leadSheetDemoDispatcher = withConfirmation(createDeclarativeCodeSki
   domainKnowledge: 'Songwriting lead sheet formatting, demo metadata preparation, and asset dispatch',
   isSkill: true,
   manifest: {
+    // Declared as a credential, not a plain config field, so the key can come from
+    // the vault via `vault:<id>` and is never echoed back into emitted output.
+    credentialSource: {
+      apiKey: { configKey: 'apiKey', required: false, label: "upstream service API key (set in this Skill configuration, or a vault secret)" },
+    },
     configSchema: SONGWRITER_DISPATCH_CONFIG_SCHEMA,
-    endpointEnvVar: 'SONGWRITING_DISPATCH_ENDPOINT',
+    endpointConfigKey: 'endpointUrl',
     confirmBeforeSend: true
   },
   handler: async function handler(input, ctx) {
@@ -877,8 +881,8 @@ export const leadSheetDemoDispatcher = withConfirmation(createDeclarativeCodeSki
       store.push({ ...artifact, status: 'staged' });
       ctx.store.save('lead-sheets', store);
 
-      const endpoint = String(input.endpointUrl || process.env.SONGWRITING_DISPATCH_ENDPOINT || '');
-      const apiKey = String(input.apiKey || process.env.SONGWRITING_DISPATCH_API_KEY || '');
+      const endpoint = String(input.endpointUrl || String(ctx.config?.endpointUrl || ''));
+      const apiKey = String((ctx.getCredential ? ctx.getCredential('apiKey') : undefined) || '');
       const dryRun = input.dryRun !== false;
       const confirmed = input.confirmation === true || input.confirmed === true;
 

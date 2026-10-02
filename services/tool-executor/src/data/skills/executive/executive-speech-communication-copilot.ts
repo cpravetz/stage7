@@ -24,7 +24,6 @@ const SPEECH_INPUT = createSchemaRecord({
   tone: SchemaProps.select(['executive', 'inspirational', 'authoritative', 'conversational', 'empathetic-authoritative', 'visionary'], { description: 'Communication tone', default: 'executive' }),
   length: SchemaProps.select(['short', 'medium', 'long'], { description: 'Target length', default: 'medium' }),
   format: SchemaProps.select(['speech', 'board-comm', 'stakeholder-message', 'crisis-statement'], { description: 'Communication format', default: 'speech' }),
-  executiveId: SchemaProps.text({ description: 'Executive identifier' }),
   context: SchemaProps.text({ description: 'Additional context, background, or constraints', multiline: true }),
   constraints: SchemaProps.stringArray({ description: 'Legal, compliance, or stylistic constraints' }),
   subject: SchemaProps.text({ description: 'Subject line (for board/stakeholder formats)' }),
@@ -68,7 +67,6 @@ export const SPEECH_COMMUNICATION_COPILOT = createDeclarativeCodeSkill({
       const tone = input.tone || 'executive';
       const length = input.length || 'medium';
       const format = input.format || 'speech';
-      const executiveId = input.executiveId || '';
       const context = input.context || '';
       const constraints = Array.isArray(input.constraints) ? input.constraints : [];
 
@@ -130,7 +128,7 @@ export const SPEECH_COMMUNICATION_COPILOT = createDeclarativeCodeSkill({
           lines.push('');
           lines.push(SAFETY);
 
-          structuredOutput = { format: 'speech', occasion, audience, tone, length, keyMessages, constraints, context, executiveId };
+          structuredOutput = { format: 'speech', occasion, audience, tone, length, keyMessages, constraints, context };
           presentBody = lines.join(NL);
           break;
         }
@@ -172,7 +170,7 @@ export const SPEECH_COMMUNICATION_COPILOT = createDeclarativeCodeSkill({
           lines.push('');
           lines.push(SAFETY);
 
-          structuredOutput = { format: 'board-comm', occasion, audience, tone, keyMessages, constraints, context, executiveId, priority: input.priority };
+          structuredOutput = { format: 'board-comm', occasion, audience, tone, keyMessages, constraints, context, priority: input.priority };
           presentBody = lines.join(NL);
           break;
         }
@@ -215,7 +213,7 @@ export const SPEECH_COMMUNICATION_COPILOT = createDeclarativeCodeSkill({
           lines.push('');
           lines.push(SAFETY);
 
-          structuredOutput = { format: 'stakeholder-message', occasion, audience, channel, tone, keyMessages, constraints, context, executiveId };
+          structuredOutput = { format: 'stakeholder-message', occasion, audience, channel, tone, keyMessages, constraints, context };
           presentBody = lines.join(NL);
           break;
         }
@@ -261,7 +259,7 @@ export const SPEECH_COMMUNICATION_COPILOT = createDeclarativeCodeSkill({
           lines.push('');
           lines.push(SAFETY);
 
-          structuredOutput = { format: 'crisis-statement', occasion, audience, tone, urgency: input.urgency, keyMessages, constraints, context, executiveId };
+          structuredOutput = { format: 'crisis-statement', occasion, audience, tone, urgency: input.urgency, keyMessages, constraints, context };
           presentBody = lines.join(NL);
           break;
         }

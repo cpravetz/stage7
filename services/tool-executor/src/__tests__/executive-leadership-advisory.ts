@@ -6,7 +6,6 @@ const EXECUTIVE_HOME = process.env.EXECUTIVE_HOME || '/tmp/executive';
 const LEADERSHIP_SOURCE = `(async () => {
   const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
   const focusArea = input.focusArea || 'coaching';
-  const executiveId = input.executiveId || '';
   const baseDir = process.env.EXECUTIVE_HOME || '${EXECUTIVE_HOME}';
   const fs = require('fs');
   const path = require('path');
@@ -18,25 +17,25 @@ const LEADERSHIP_SOURCE = `(async () => {
   let result;
   switch (focusArea) {
     case 'coaching':
-      result = { focusArea: 'coaching', executiveId, sessions: [{ topic: 'Self-awareness', agenda: ['Strengths review', 'Reflection goals'] }, { topic: 'Decision-making', agenda: ['Framework practice', 'Past decisions review'] }], ctx };
+      result = { focusArea: 'coaching', sessions: [{ topic: 'Self-awareness', agenda: ['Strengths review', 'Reflection goals'] }, { topic: 'Decision-making', agenda: ['Framework practice', 'Past decisions review'] }], ctx };
       break;
     case 'decision-framework':
-      result = { focusArea: 'decision-framework', executiveId, decision: input.decision || '', options: input.options || [], criteria: input.criteria || [], ctx };
+      result = { focusArea: 'decision-framework', decision: input.decision || '', options: input.options || [], criteria: input.criteria || [], ctx };
       break;
     case 'leadership-assessment':
-      result = { focusArea: 'leadership-assessment', executiveId, competencies: (input.competencies || ['Strategic Thinking', 'Emotional Intelligence', 'Communication']).map(c => ({ name: c, selfRating: null, targetRating: null, evidence: [] })), ctx };
+      result = { focusArea: 'leadership-assessment', competencies: (input.competencies || ['Strategic Thinking', 'Emotional Intelligence', 'Communication']).map(c => ({ name: c, selfRating: null, targetRating: null, evidence: [] })), ctx };
       break;
     case 'eq-assessment':
-      result = { focusArea: 'eq-assessment', executiveId, dimensions: (input.dimensions || ['Self-Awareness', 'Self-Regulation', 'Motivation', 'Empathy', 'Social Skill']).map(d => ({ name: d, score: null, descriptor: '' })), ctx };
+      result = { focusArea: 'eq-assessment', dimensions: (input.dimensions || ['Self-Awareness', 'Self-Regulation', 'Motivation', 'Empathy', 'Social Skill']).map(d => ({ name: d, score: null, descriptor: '' })), ctx };
       break;
     case 'presence-analyzer':
-      result = { focusArea: 'presence-analyzer', executiveId, sessions: input.sessions || [], factors: ['Body Language', 'Vocal Tone', 'Engagement', 'Clarity', 'Authority', 'Authenticity'], ctx };
+      result = { focusArea: 'presence-analyzer', sessions: input.sessions || [], factors: ['Body Language', 'Vocal Tone', 'Engagement', 'Clarity', 'Authority', 'Authenticity'], ctx };
       break;
     case 'communication-analyzer':
-      result = { focusArea: 'communication-analyzer', executiveId, text: input.text || input.transcript || '', dimensions: ['Clarity', 'Conciseness', 'Tone', 'Persuasiveness', 'Structure', 'Empathy'], ctx };
+      result = { focusArea: 'communication-analyzer', text: input.text || input.transcript || '', dimensions: ['Clarity', 'Conciseness', 'Tone', 'Persuasiveness', 'Structure', 'Empathy'], ctx };
       break;
     case 'communication-coach':
-      result = { focusArea: 'communication-coach', executiveId, message: input.message || input.draft || '', channel: input.channel || 'unknown', audience: input.audience || '', suggestions: ['Review clarity', 'Check tone', 'Strengthen opening', 'Verify audience alignment'], ctx };
+      result = { focusArea: 'communication-coach', message: input.message || input.draft || '', channel: input.channel || 'unknown', audience: input.audience || '', suggestions: ['Review clarity', 'Check tone', 'Strengthen opening', 'Verify audience alignment'], ctx };
       break;
     default: throw new Error('Unknown focusArea: ' + focusArea);
   }
@@ -49,8 +48,7 @@ const LEADERSHIP_INPUT = {
   type: 'object',
   properties: {
     focusArea: SchemaProps.select(['coaching', 'decision-framework', 'leadership-assessment', 'eq-assessment', 'presence-analyzer', 'communication-analyzer', 'communication-coach'], { description: 'Leadership advisory area', required: true }),
-    executiveId: SchemaProps.text({ description: 'Executive identifier' }),
-    role: SchemaProps.text({ description: 'Current role' }),
+        role: SchemaProps.text({ description: 'Current role' }),
     level: SchemaProps.text({ description: 'Seniority level' }),
     context: SchemaProps.text({ description: 'Additional context' }),
     strengths: SchemaProps.stringArray({ description: 'Known strengths' }),

@@ -989,13 +989,6 @@ return this.executeOrRequestCredentials(pending.tool, pending.input);
     return ['token', 'accessToken', 'apiKey', 'api_key', 'username', 'password', 'secret', 'clientSecret'].includes(field);
   }
 
-  private configEnvName(field: string): string {
-    return field
-      .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
-      .replace(/[^A-Za-z0-9]+/g, '_')
-      .toUpperCase();
-  }
-
   private getNestedValue(config: Record<string, unknown> | undefined, path: string): unknown {
     return path.split('.').reduce<unknown>((value, key) => {
       if (!value || typeof value !== 'object') return undefined;
@@ -1014,11 +1007,15 @@ return this.executeOrRequestCredentials(pending.tool, pending.input);
 
     if (field === 'baseUrl' || field === 'endpoint' || field === 'endpointUrl') {
       const endpoint = manifest?.endpoint as Record<string, unknown> | undefined;
-      const endpointEnvVar = manifest?.endpointEnvVar;
-      const envEndpoint = typeof endpointEnvVar === 'string' ? process.env[endpointEnvVar] : undefined;
+      // The endpoint config field is named by the Skill, so it is resolved from
+      // configuration rather than guessed from an environment variable name.
+      const endpointConfigKey = manifest?.endpointConfigKey;
+      const configEndpoint = typeof endpointConfigKey === 'string'
+        ? this.getNestedValue(externalConfig, endpointConfigKey)
+        : undefined;
       return this.hasValue(endpoint?.url)
         || this.hasValue(endpoint?.path)
-        || this.hasValue(envEndpoint)
+        || this.hasValue(configEndpoint)
         || this.hasValue(input.endpointUrl)
         || this.hasValue(input.baseUrl);
     }
@@ -1026,26 +1023,36 @@ return this.executeOrRequestCredentials(pending.tool, pending.input);
     if (this.isCredentialField(field)) {
       const credentialSource = manifest?.credentialSource as Record<string, { envVar?: string; configKey?: string; vaultSecretId?: string }> | undefined;
       const source = credentialSource?.[field];
+      // An `envVar` credential source is a deliberate deployment-level binding and
+      // is still honoured; a config field is not backed by a guessed env var name.
       const envValue = source?.envVar ? process.env[source.envVar] : undefined;
       const configValue = source?.configKey ? this.getNestedValue(externalConfig, source.configKey) : undefined;
       return this.hasValue(envValue) || this.hasValue(configValue);
     }
 
-    const envName = this.configEnvName(field);
-    return Boolean(envName && this.hasValue(process.env[envName]));
+    // No environment fallback: a required config field counts as configured only
+    // when it is actually present in input, the Skill's external configuration,
+    // or its manifest config. Deriving an env var name from the field name would
+    // make a field silently satisfiable by an unrelated deployment variable.
+    return false;
   }
 
   private hasEndpoint(tool: Tool, input: Record<string, unknown>): boolean {
     const manifest = tool.manifest as Record<string, unknown> | undefined;
     const endpoint = manifest?.endpoint as Record<string, unknown> | undefined;
-    const endpointEnvVar = manifest?.endpointEnvVar;
-    const envEndpoint = typeof endpointEnvVar === 'string' ? process.env[endpointEnvVar] : undefined;
+    const externalConfig = tool.externalConfig as Record<string, unknown> | undefined;
+    const endpointConfigKey = manifest?.endpointConfigKey;
+    // Which config field holds the endpoint is declared by the Skill, so it is
+    // looked up by name instead of derived from a process environment variable.
+    const configEndpoint = typeof endpointConfigKey === 'string'
+      ? this.getNestedValue(externalConfig, endpointConfigKey)
+      : undefined;
     return this.hasValue(endpoint?.url)
       || this.hasValue(endpoint?.path)
-      || this.hasValue(envEndpoint)
+      || this.hasValue(configEndpoint)
       || this.hasValue(input.endpointUrl)
       || this.hasValue(input.baseUrl)
-      || this.hasValue((tool.externalConfig as Record<string, unknown> | undefined)?.baseUrl);
+      || this.hasValue(externalConfig?.baseUrl);
   }
 
   private validateConfigSchema(tool: Tool, input: Record<string, unknown>, executionId: string): ToolExecution | null {
@@ -1112,14 +1119,22 @@ return discovered;
 
 private async resolveCredentials(tool: Tool, _input: Record<string, unknown>): Promise<{ resolved: Record<string, string | undefined>; sources: NamedCredentialSource[] }> {
 const manifest = tool.manifest as Record<string, unknown> | undefined;
-const credentialSources: Array<{ logicalKey: string; label?: string; source: { vaultSecretId?: string; envVar?: string; configKey?: string } }> = [];
+// A credential declared with `configKey` resolves against the Skill's own
+// configuration, so the provider needs the resolved values.
+const configuredValues = this.resolveSkillConfig(tool, _input);
+const credentialSources: Array<{ logicalKey: string; label?: string; required: boolean; source: { vaultSecretId?: string; envVar?: string; configKey?: string } }> = [];
 
 if (manifest?.credentialSource && typeof manifest.credentialSource === 'object') {
-const cs = manifest.credentialSource as Record<string, { vaultSecretId?: string; envVar?: string; configKey?: string }>;
+const cs = manifest.credentialSource as Record<string, { vaultSecretId?: string; envVar?: string; configKey?: string; label?: string; required?: boolean }>;
 for (const [logicalKey, source] of Object.entries(cs)) {
 if (source && typeof source === 'object') {
-const s = source as { vaultSecretId?: string; envVar?: string; configKey?: string };
-credentialSources.push({ logicalKey, label: logicalKey, source: s });
+const s = source as { vaultSecretId?: string; envVar?: string; configKey?: string; label?: string; required?: boolean };
+// A declared `label` is what the operator sees when a credential is missing, so
+// it should say where the value goes rather than repeating the logical key.
+// `required` defaults to true: declaring a credential has always meant the
+        // Skill cannot run without it, and only Skills that can genuinely degrade
+        // should opt out.
+        credentialSources.push({ logicalKey, label: s.label || logicalKey, required: s.required !== false, source: s });
 }
 }
 }
@@ -1130,13 +1145,13 @@ vaultSecretId: c.source.vaultSecretId,
 envVar: c.source.envVar,
 configKey: c.source.configKey,
 }));
-const resolved = await credentialProvider.resolveAll(namedSources);
+const resolved = await credentialProvider.resolveAll(namedSources, configuredValues);
 
 const overrides = this.pendingCredentialOverrides.get(tool.id) || {};
 const merged = { ...resolved, ...overrides };
 
 const missing = credentialSources
-.filter((c) => !merged[c.logicalKey])
+.filter((c) => c.required && !merged[c.logicalKey])
 .map((c) => ({
 key: c.logicalKey,
 label: c.label || c.logicalKey,
@@ -1157,7 +1172,54 @@ throw new CredentialRequiredError(request);
 return { resolved: merged, sources: namedSources };
 }
 
-private async dispatch(tool: Tool, input: Record<string, unknown>, credentials: { resolved: Record<string, string | undefined>; sources: NamedCredentialSource[] }): Promise<Record<string, unknown>> {
+/**
+   * Resolved Skill configuration, using the same precedence as `isConfigured` so
+   * the gate and the value a handler reads can never disagree.
+   *
+   * configSchema used to be a presence check only: the values were validated for
+   * existence and then dropped, so a scheduled Skill could declare a required
+   * selector (e.g. which genres to monitor) and have no way to read it. That made
+   * configSchema indistinguishable from the "schema demands a value the handler
+   * never reads" defect. Values declared per-run in `input` still win, because
+   * that is how a one-off override has always been expressed.
+   */
+  private resolveSkillConfig(tool: Tool, input: Record<string, unknown>): Record<string, unknown> {
+    const manifest = tool.manifest as Record<string, unknown> | undefined;
+    const sources: Array<Record<string, unknown> | undefined> = [
+      tool.externalConfig as Record<string, unknown> | undefined,
+      manifest?.config as Record<string, unknown> | undefined,
+    ];
+    const config: Record<string, unknown> = {};
+    for (const source of sources) {
+      if (!source || typeof source !== 'object') continue;
+      for (const [key, value] of Object.entries(source)) config[key] = value;
+    }
+    // A declared credentialSource maps a logical config key to a nested path.
+    const credentialSource = manifest?.credentialSource as { [k: string]: { configKey?: string } } | undefined;
+    if (credentialSource && typeof credentialSource === 'object') {
+      for (const spec of Object.values(credentialSource)) {
+        if (!spec?.configKey) continue;
+        const nested = this.getNestedValue(tool.externalConfig as Record<string, unknown> | undefined, spec.configKey);
+        if (nested !== undefined && config[spec.configKey.split('.').pop() as string] === undefined) {
+          config[spec.configKey.split('.').pop() as string] = nested;
+        }
+      }
+    }
+    // Per-run input fills gaps only. A key the operator declared in configSchema
+    // stays operator-owned: input is caller-supplied, so letting it win would let
+    // any API caller replace the selector or endpoint that scoped the job. This
+    // matches the rule the runtime documents for why config is a separate object
+    // from input at all.
+    const declared = new Set(Object.keys((manifest?.configSchema as { properties?: Record<string, unknown> } | undefined)?.properties ?? {}));
+    for (const [key, value] of Object.entries(input)) {
+      if (value === undefined) continue;
+      if (declared.has(key)) continue;
+      config[key] = value;
+    }
+    return config;
+  }
+
+  private async dispatch(tool: Tool, input: Record<string, unknown>, credentials: { resolved: Record<string, string | undefined>; sources: NamedCredentialSource[] }): Promise<Record<string, unknown>> {
 const { resolved, sources } = credentials;
 const name = tool.name.toLowerCase();
 const manifest = tool.manifest as Record<string, unknown> | undefined;
@@ -1271,7 +1333,7 @@ let lastError: string | undefined;
 
 while (healingAttempts <= MAX_HEALING_ATTEMPTS) {
   const result = await this.codeExecutor.execute(
-        { language: language as 'javascript' | 'typescript' | 'python', code: codeToRun, input, executorCallback: this.nestedExecutorCallback(), timeoutMs: (manifest && typeof manifest === 'object' && (manifest as Record<string, unknown>).timeoutMs) as number | undefined, persistenceEnvVar: (manifest && typeof manifest === 'object' ? (manifest as Record<string, unknown>).persistenceEnvVar : undefined) as string | undefined },
+        { language: language as 'javascript' | 'typescript' | 'python', code: codeToRun, input, config: this.resolveSkillConfig(tool, input), credentials: credentials.resolved, executorCallback: this.nestedExecutorCallback(), timeoutMs: (manifest && typeof manifest === 'object' && (manifest as Record<string, unknown>).timeoutMs) as number | undefined, persistenceEnvVar: (manifest && typeof manifest === 'object' ? (manifest as Record<string, unknown>).persistenceEnvVar : undefined) as string | undefined },
         { resolved, sources } as CodeExecutorCredentials,
       );
 

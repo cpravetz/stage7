@@ -68,6 +68,7 @@ async function run(
   input: Record<string, unknown>,
   registryTools: Tool[] = [],
   env: Record<string, string | undefined> = {},
+  config: Record<string, unknown> = {},
 ): Promise<{ result: SkillResult; exec: { status: string; outputSchemaIssues?: ReturnType<typeof validateAgainstOutputSchema> } }> {
   const registry = new Map<string, Tool>();
   for (const t of registryTools) registry.set(t.id, t);
@@ -84,7 +85,10 @@ async function run(
   }
   try {
     const executor = new ToolExecutor(registry);
-    const exec = await executor.execute(tool, input);
+    // Only override the registered tool when a run actually supplies config, so
+    // the default path leaves any existing configuration intact.
+    const target = Object.keys(config).length ? ({ ...tool, externalConfig: config } as Tool) : tool;
+    const exec = await executor.execute(target, input);
     const output = exec.output as { output?: string; outputSchemaIssues?: ReturnType<typeof validateAgainstOutputSchema> } | undefined;
     let result: SkillResult = {};
     if (typeof output?.output === 'string') {
@@ -215,12 +219,14 @@ describe('Restaurant Operations skills emit presentation blocks', () => {
   it.each(CANONICAL_SKILLS_NO_DELEGATING.map((t) => [t.id, t] as const))(
     '%s emits a present block on its success path',
     async (_id, tool) => {
-      const env = tool.id === 'restaurant-reservations-guest-profile-manager'
-        ? { RESTAURANT_RESERVATION_ENDPOINT: 'http://test-endpoint.example.com' }
+      // These connectors read their endpoint from configSchema.endpointUrl,
+      // which is operator config, not an environment variable the run inherits.
+      const config = tool.id === 'restaurant-reservations-guest-profile-manager'
+        ? { endpointUrl: 'http://test-endpoint.example.com' }
         : tool.id === 'restaurant-supply-chain-inventory-reorder-manager'
-        ? { RESTAURANT_SUPPLY_ENDPOINT: 'http://test-supply.example.com' }
+        ? { endpointUrl: 'http://test-supply.example.com' }
         : {};
-      const { result } = await run(tool, seedInputFor(tool.id), [], env);
+      const { result } = await run(tool, seedInputFor(tool.id), [], {}, config);
       expect(result.success).toBe(true);
       assertPresentClean(result);
     },
@@ -267,14 +273,21 @@ describe('Restaurant Operations skills emit presentation blocks', () => {
   });
 });
 
+// The forecast reads its data source and the payloads it forwards to the three
+// downstream skills from operator config, so the tests supply them that way.
+const FORECAST_CONFIG = {
+  dataSource: 'pos://restaurant-1',
+  revenue: 10000,
+  cogs: 3000,
+  laborCost: 4000,
+  netProfit: 3000,
+};
+
 describe('Restaurant financial forecast delegation', () => {
   it('reports failure when lower-order tools are unavailable', async () => {
     const { result } = await run(RESTAURANT_FINANCIAL_FORECAST_EVALUATOR, {
-      revenue: 10000,
-      cogs: 3000,
-      laborCost: 4000,
       forecastHorizon: 6,
-    });
+    }, [], {}, FORECAST_CONFIG);
     expect(result.success).toBe(false);
     assertPresentClean(result);
     const body = result.present!.map((b) => b.body).join('\n');
@@ -288,13 +301,9 @@ describe('Restaurant financial forecast delegation', () => {
       successStub('restaurant-shift-prep-list-copilot', { totals: { shortage: 12 } }),
     ];
     const { result } = await run(RESTAURANT_FINANCIAL_FORECAST_EVALUATOR, {
-      revenue: 10000,
-      cogs: 3000,
-      laborCost: 4000,
-      netProfit: 3000,
       forecastHorizon: 6,
       varianceThreshold: 0.1,
-    }, stubs);
+    }, stubs, {}, FORECAST_CONFIG);
     expect(result.success).toBe(true);
     expect(result.status).toBe('ok');
     const body = result.present!.map((b) => b.body).join('\n');
@@ -308,13 +317,9 @@ describe('Restaurant financial forecast delegation', () => {
       successStub('restaurant-shift-prep-list-copilot', { totals: { shortage: 0 } }),
     ];
     const { result } = await run(RESTAURANT_FINANCIAL_FORECAST_EVALUATOR, {
-      revenue: 10000,
-      cogs: 3000,
-      laborCost: 4000,
-      netProfit: 3000,
       forecastHorizon: 6,
       varianceThreshold: 0.1,
-    }, stubs);
+    }, stubs, {}, FORECAST_CONFIG);
     expect(result.success).toBe(false);
     expect(result.status).toBe('partial');
     assertPresentClean(result);
@@ -332,15 +337,9 @@ describe('Restaurant skills produce deterministic forecast output', () => {
       successStub('restaurant-supply-chain-inventory-reorder-manager', { totalCost: 500, itemsFlagged: 2 }),
       successStub('restaurant-shift-prep-list-copilot', { totals: { shortage: 5 } }),
     ];
-    const input = {
-      revenue: 10000,
-      cogs: 3000,
-      laborCost: 4000,
-      netProfit: 3000,
-      forecastHorizon: 6,
-    };
-    const { result: r1 } = await run(RESTAURANT_FINANCIAL_FORECAST_EVALUATOR, input, stubs);
-    const { result: r2 } = await run(RESTAURANT_FINANCIAL_FORECAST_EVALUATOR, input, stubs);
+    const input = { forecastHorizon: 6 };
+    const { result: r1 } = await run(RESTAURANT_FINANCIAL_FORECAST_EVALUATOR, input, stubs, {}, FORECAST_CONFIG);
+    const { result: r2 } = await run(RESTAURANT_FINANCIAL_FORECAST_EVALUATOR, input, stubs, {}, FORECAST_CONFIG);
     const f1 = (r1.data as any)?.forecast;
     const f2 = (r2.data as any)?.forecast;
     expect(f1).toEqual(f2);

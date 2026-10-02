@@ -5399,7 +5399,7 @@ The source file remains authoritative.
 
 #### `education-adaptive-personalization`
 
-**Name:** Adaptive Personalization Advisory
+**Name:** Personalised Learning Plan
 
 **Persistent config schema:**
 
@@ -5470,7 +5470,7 @@ The source file remains authoritative.
 
 #### `education-resource-library`
 
-**Name:** Resource Library Ops
+**Name:** Learning Resource Manager
 
 **Persistent config schema:**
 

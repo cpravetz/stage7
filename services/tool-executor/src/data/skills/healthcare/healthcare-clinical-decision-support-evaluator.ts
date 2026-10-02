@@ -43,8 +43,6 @@ export const healthcareClinicalDecisionSupportEvaluator = createDeclarativeCodeS
       symptoms: SchemaProps.stringArray({ description: 'Patient-reported symptoms' }),
       history: SchemaProps.stringArray({ description: 'Relevant medical history' }),
     }, { description: 'Patient context for evaluation' }),
-    symptoms: SchemaProps.stringArray({ description: 'Optional top-level symptom list' }),
-    history: SchemaProps.stringArray({ description: 'Optional top-level history list' }),
     guidelines: SchemaProps.objectArray(SchemaProps.object({
       name: SchemaProps.text({ description: 'Guideline or evidence source name' }),
       keywords: SchemaProps.stringArray({ description: 'Symptom keywords covered by the guideline' }),
@@ -75,8 +73,8 @@ export const healthcareClinicalDecisionSupportEvaluator = createDeclarativeCodeS
       }
 
       const patient = input.patient && typeof input.patient === 'object' ? input.patient : {};
-      const symptoms = Array.isArray(patient.symptoms) ? patient.symptoms : (Array.isArray(input.symptoms) ? input.symptoms : []);
-      const history = Array.isArray(patient.history) ? patient.history : (Array.isArray(input.history) ? input.history : []);
+      const symptoms = Array.isArray(patient.symptoms) ? patient.symptoms : [];
+      const history = Array.isArray(patient.history) ? patient.history : [];
       const guidelines = Array.isArray(input.guidelines) ? input.guidelines : [];
 
       if (!symptoms.length || !guidelines.length) {

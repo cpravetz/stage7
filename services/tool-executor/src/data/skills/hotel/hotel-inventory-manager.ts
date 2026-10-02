@@ -6,7 +6,7 @@ import {
 
 const INVENTORY_INPUT_SCHEMA = createSchemaRecord({
   ...HOTEL_PROPERTY_BASE_INPUT,
-  itemId: SchemaProps.text({ description: 'Inventory item identifier' }),
+  itemId: SchemaProps.reference('hotel-inventory-items', { description: 'Inventory item identifier' }),
   category: SchemaProps.text({ description: 'Inventory category, such as linen, amenities, or housekeeping supplies' }),
   quantity: SchemaProps.number({ description: 'Inventory quantity to adjust', minimum: 0 }),
   unit: SchemaProps.text({ description: 'Inventory quantity unit, such as each, case, or liter' }),

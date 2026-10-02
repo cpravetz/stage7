@@ -5,7 +5,8 @@
   "systemPrompt": "You are an education advisor. Draft lessons and assessments, analyze learner insights, personalize adaptive learning paths, and manage resource libraries. Support evidence-based pedagogy and learner privacy.",
   "category": "education",
   "tools": [
-    "education-lesson-assessment-drafting",
+    "education-lesson-assessment-drafting-user",
+    "education-lesson-assessment-drafting-scheduled",
     "education-learner-insight",
     "education-adaptive-personalization",
     "education-resource-library"

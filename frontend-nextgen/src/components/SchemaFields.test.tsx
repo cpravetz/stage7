@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { vi } from 'vitest';
 
 import {
@@ -208,7 +208,7 @@ describe('SchemaFields reference picker rendering', () => {
     };
     const { container } = render(<SchemaFields schema={schema} values={{}} onChange={onChange} />);
     const hint = container.querySelector('.skill-reference-picker__hint');
-    expect(hint?.textContent).toBe('Loading references from Career Job Discovery Fit Ranking...');
+    expect(hint?.textContent).toBe('Loading options from Career Job Discovery Fit Ranking...');
   });
 });
 
@@ -357,14 +357,26 @@ describe('SchemaFields reference picker loads the set another skill produced', (
     expect(onChange).toHaveBeenCalledWith('targetRoles', []);
   });
 
-  it('falls back to manual entry when the reference source has nothing stored', async () => {
+  it('shows an empty select and does not offer manual entry when the source has nothing', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ success: true, data: { listings: [] } }) })));
     sfClearReferenceCache();
-    const { container } = render(<SchemaFields schema={schema} values={{}} onChange={onChange} />);
+    const scalarSchema = {
+      type: 'object',
+      properties: {
+        reservationId: { type: 'string', format: 'reference', 'x-referenceSource': 'hotel-reservations-guest-profile' },
+      },
+    };
+    const { container } = render(<SchemaFields schema={scalarSchema} values={{}} onChange={onChange} />);
     await waitFor(() => {
-      expect(container.querySelector('.skill-reference-picker__hint')?.textContent).toContain('No');
+      expect(container.querySelector('.skill-reference-picker__hint')?.textContent).toContain('Not connected');
     });
-    expect(screen.queryByText('Reference data not yet available.')).toBeInTheDocument();
+    expect(screen.queryByText('No options yet.')).toBeInTheDocument();
+    // No free-text fallback: the identifier has to come from the source system,
+    // and a typed value the back end cannot match is worse than an empty list.
+    expect(screen.queryByPlaceholderText('Or type a value')).not.toBeInTheDocument();
+    const select = container.querySelector('select') as HTMLSelectElement;
+    expect(select.options).toHaveLength(1);
+    expect(select.options[0].textContent).toBe('No options available yet');
   });
 
   it('still renders when the reference source cannot be reached', async () => {
@@ -396,5 +408,48 @@ describe('SchemaFields reference picker loads the set another skill produced', (
     expect(radios[0].getAttribute('type')).toBe('radio');
     (radios[1] as HTMLInputElement).click();
     expect(onChange).toHaveBeenCalledWith('targetRole', 'Senior Engineer, Payments');
+  });
+});
+
+describe('enum option labels', () => {
+  it('shows the declared label and submits the underlying value', () => {
+    const onChange = vi.fn();
+    const schema: SchemaRecord = {
+      type: 'object',
+      properties: {
+        focusArea: {
+          type: 'string',
+          enum: [
+            { value: 'eq-assessment', label: 'Assess my emotional intelligence' },
+            { value: 'coaching', label: 'Coaching conversation' },
+          ],
+        },
+      },
+    };
+    const { container } = render(<SchemaFields schema={schema} values={{}} onChange={onChange} />);
+    const options = Array.from(container.querySelectorAll('option')) as HTMLOptionElement[];
+
+    // The wording is the whole point: "Eq Assessment" is tidier punctuation on a
+    // term the user still does not know.
+    expect(options.map((o) => o.textContent)).toContain('Assess my emotional intelligence');
+    expect(options.map((o) => o.textContent)).not.toContain('eq-assessment');
+
+    // The stored value stays the stable identifier so stored runs keep working.
+    const target = options.find((o) => o.textContent === 'Assess my emotional intelligence')!;
+    expect(target.value).toBe('eq-assessment');
+
+    const select = container.querySelector('select') as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: 'eq-assessment' } });
+    expect(onChange).toHaveBeenCalledWith('focusArea', 'eq-assessment');
+  });
+
+  it('falls back to a tidied identifier when a schema declares no label', () => {
+    const schema: SchemaRecord = {
+      type: 'object',
+      properties: { region: { type: 'string', enum: ['us-east'] } },
+    };
+    const { container } = render(<SchemaFields schema={schema} values={{}} onChange={vi.fn()} />);
+    const options = Array.from(container.querySelectorAll('option')) as HTMLOptionElement[];
+    expect(options.map((o) => o.textContent)).toContain('Us East');
   });
 });

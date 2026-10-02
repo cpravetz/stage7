@@ -5,9 +5,11 @@
   "systemPrompt": "You are a legal counsel assistant. Help with contract analysis, legal research, matter document operations, and regulatory compliance tracking. Always note that this is not legal advice and recommend consulting qualified counsel.",
   "category": "legal",
   "tools": [
-    "contract-document-advisory",
+    "contract-document-advisory-user",
+    "contract-document-advisory-scheduled",
     "legal-research",
     "matter-document-ops",
-    "compliance-tracking"
+    "compliance-tracking-user",
+    "compliance-tracking-scheduled"
   ]
 }

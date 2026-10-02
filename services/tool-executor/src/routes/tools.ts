@@ -136,13 +136,24 @@ router.post(
     // declared skill name resolves to the real implementation (code, manifest,
     // inputSchema) instead of an empty stub.
     const registered = tool.name ? registry.list().find((t) => t.name === tool.name || t.id === tool.name) : undefined;
-    
+
+    // The settings an operator saved against the assistant's tool binding. Without
+    // this the executor built the Skill with empty configuration, so every handler
+    // read its defaults and the Skill settings tab appeared to do nothing.
+    const incomingConfig = (tool.externalConfig ?? (tool as { config?: Record<string, unknown> }).config) as Record<string, unknown> | undefined;
+
     let fullTool: Tool;
     if (registered) {
-      fullTool = registered;
+      // Clone rather than mutating: the registry holds one shared instance per
+      // Skill, so writing the binding's settings onto it would leak one
+      // assistant's configuration into every other assistant using that Skill.
+      fullTool = { ...registered };
       // Preserve isSkill from incoming payload if provided
       if (tool.isSkill !== undefined) {
-        fullTool = { ...fullTool, isSkill: tool.isSkill };
+        fullTool.isSkill = tool.isSkill;
+      }
+      if (incomingConfig && Object.keys(incomingConfig).length > 0) {
+        fullTool.externalConfig = { ...(registered.externalConfig ?? {}), ...incomingConfig };
       }
     } else {
       fullTool = {
@@ -156,6 +167,7 @@ router.post(
         createdAt: new Date(),
         updatedAt: new Date(),
         isSkill: tool.isSkill,
+        externalConfig: incomingConfig,
       };
     }
 

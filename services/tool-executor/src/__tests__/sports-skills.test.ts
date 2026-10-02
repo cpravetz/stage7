@@ -2,8 +2,10 @@ import { sportsSkills } from '../data/skills/sports';
 import { Tool } from '../types';
 
 describe('sportsSkills', () => {
-  it('exports exactly seven skills', () => {
-    expect(sportsSkills).toHaveLength(7);
+  // Eight after splitting the ingame predictor into an ad-hoc user half and a
+  // scoped scheduled half (see docs/skill-class4-split-configs.md).
+  it('exports exactly eight skills', () => {
+    expect(sportsSkills).toHaveLength(8);
   });
 
   it('exports unique skill ids', () => {
@@ -18,11 +20,33 @@ describe('sportsSkills', () => {
     expect(perfGroup).toHaveLength(3);
   });
 
-  it('has Wagering Group — four skills', () => {
+  // Five after the split: both predictor halves belong to the Wagering Group.
+  it('has Wagering Group — five skills', () => {
     const wagerGroup = sportsSkills.filter(s =>
-      ['sports-matchup-odds-explainer', 'sports-bankroll-co-pilot', 'sports-line-alert-dispatcher', 'sports-ingame-predictive-modeling'].includes(s.id)
+      ['sports-matchup-odds-explainer', 'sports-bankroll-co-pilot', 'sports-line-alert-dispatcher', 'sports-predictor-ad-hoc', 'sports-ingame-predictive-modeling-scheduled'].includes(s.id)
     );
-    expect(wagerGroup).toHaveLength(4);
+    expect(wagerGroup).toHaveLength(5);
+  });
+
+  it('splits the ingame predictor into a user half and a scoped scheduled half', () => {
+    const adHoc = sportsSkills.find(s => s.id === 'sports-predictor-ad-hoc')!;
+    const scheduled = sportsSkills.find(s => s.id === 'sports-ingame-predictive-modeling-scheduled')!;
+
+    expect(adHoc.triggers![0].kind).toBe('user');
+    // It was isSkill: false before the split, which kept a working predictor
+    // out of the user's Skill list entirely.
+    expect(adHoc.isSkill).toBe(true);
+    expect(scheduled.triggers![0].kind).toBe('schedule');
+
+    // The scope guard the split exists for: at least one of the three selectors
+    // must be set, so the scheduled half cannot range over every live game.
+    const config = scheduled.configSchema as { anyOf?: Array<{ required: string[] }> };
+    expect(config.anyOf).toBeDefined();
+    const requiredAcross = config.anyOf!.flatMap((clause) => clause.required);
+    expect(requiredAcross).toEqual(expect.arrayContaining(['matchIds', 'teams', 'sports']));
+
+    const source = scheduled.manifest.sourceCode as string;
+    expect(source).toContain('No scope configured');
   });
 
   describe('Performance Group skills', () => {
@@ -118,7 +142,7 @@ describe('sportsSkills', () => {
     });
 
     it('Wagering skills use Group B persistence paths and NOT Group A', () => {
-      const wagerIds = ['sports-matchup-odds-explainer', 'sports-bankroll-co-pilot', 'sports-line-alert-dispatcher', 'sports-ingame-predictive-modeling'];
+      const wagerIds = ['sports-matchup-odds-explainer', 'sports-bankroll-co-pilot', 'sports-line-alert-dispatcher', 'sports-predictor-ad-hoc', 'sports-ingame-predictive-modeling-scheduled'];
       for (const skill of sportsSkills.filter(s => wagerIds.includes(s.id))) {
         const source = skill.manifest.sourceCode as string;
         expect(source).toMatch(/SPORTS_GROUP_B_HOME|\/tmp\/sports\/group-b/);
@@ -159,7 +183,7 @@ describe('sportsSkills', () => {
 
     it('Wagering group tools reference only Group B env/data paths', () => {
       const wager = sportsSkills.filter(s =>
-        ['sports-matchup-odds-explainer', 'sports-bankroll-co-pilot', 'sports-line-alert-dispatcher', 'sports-ingame-predictive-modeling'].includes(s.id)
+        ['sports-matchup-odds-explainer', 'sports-bankroll-co-pilot', 'sports-line-alert-dispatcher', 'sports-predictor-ad-hoc', 'sports-ingame-predictive-modeling-scheduled'].includes(s.id)
       );
       for (const s of wager) {
         const src = (s.manifest.sourceCode || '') as string;

@@ -4,7 +4,7 @@ import { createDeclarativeCodeSkill, SchemaProps } from '../code-skill-factory';
 
 export const ADAPTIVE_PERSONALIZATION = createDeclarativeCodeSkill({
   id: 'education-adaptive-personalization',
-  name: 'Adaptive Personalization Advisory',
+  name: 'Personalised Learning Plan',
   description: 'Recommend instructional adaptations and engagement strategies based on Learner Insight output. Reasoning-only: consumes learner analytics to suggest differentiation, pacing, and interventions.',
   persistenceEnvVar: 'EDUCATION_HOME',
   inputSchema: {
@@ -30,7 +30,9 @@ export const ADAPTIVE_PERSONALIZATION = createDeclarativeCodeSkill({
   isSkill: true,
   domainKnowledge: 'Adaptive learning theory, differentiated instruction, formative assessment, learner analytics',
   triggers: [
-    { kind: 'event', on: 'Learner insight output available for personalization' },
+    // User, not Event: the Skill blocks when the learner is absent, so no wired
+    // learner-insight edge can drive it -- a person has to ask.
+    { kind: 'user', phrase_examples: ['Personalize a learning path for this learner', 'Adapt these materials for a struggling student', 'Build a differentiated lesson plan'] },
   ],
   manifest: {},
   handler: async function handler(input, ctx) {

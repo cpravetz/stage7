@@ -142,13 +142,7 @@ export const OverviewPanel = ({
               const toolRunResult = runResults[tool.name];
               const toolRunning = runningMap[tool.name];
               const userTriggered = isUserTriggered(tool);
-              const shouldShowInputUX = hasInputs && userTriggered;
               const hasOutput = !!toolRunResult;
-
-              // Only show skill if it has user-facing inputs (and is user-triggered), or has output to display
-              if (!shouldShowInputUX && !hasOutput) {
-                return null;
-              }
 
               return (
                 <div key={tool.name} className="card skill-panel">
@@ -156,14 +150,17 @@ export const OverviewPanel = ({
                   <div className="skill-body">
                     {hasSettings && (
                       <div className="skill-settings-summary">
-                        <button className="secondary" onClick={() => useAssistantViewStore.getState().setField(entity.id, 'activeTab', 'tools')}>
+                        {/* Opens the Skill settings tab, which holds this Skill's config
+                            editor. This previously wrote 'tools' to a store field the page
+                            never read, so the button appeared to do nothing. */}
+                        <button className="secondary" onClick={() => useAssistantViewStore.getState().setField(entity.id, 'activeTab', 'skill settings')}>
                           Settings
                         </button>
                       </div>
                     )}
                     <div className="skill-runtime">
-                      {shouldShowInputUX && (
-                        <div>
+                      {userTriggered ? (
+                        <>
                           {hasInputs && (
                             <SchemaFields
                               schema={inputSchema}
@@ -189,20 +186,22 @@ export const OverviewPanel = ({
                             />
                           ) : null}
                           <div className="skill-run-actions">
-                            {userTriggered && (
-                              <button
-                                type="button"
-                                onClick={() => handleRunTool(tool)}
-                                disabled={toolRunning}
-                              >
-                                {toolRunning ? 'Running…' : (typeof skill?.manifest?.actionLabel === 'string' && skill.manifest.actionLabel.trim()) || 'Run'}
-                              </button>
-                            )}
+                            <button
+                              type="button"
+                              onClick={() => handleRunTool(tool)}
+                              disabled={toolRunning}
+                            >
+                              {toolRunning ? 'Running…' : (typeof skill?.manifest?.actionLabel === 'string' && skill.manifest.actionLabel.trim()) || 'Run'}
+                            </button>
                             {tool.name === 'career-job-discovery' && (
                               <WatchControls skillId={tool.name} defaultQuery={String((toolRunInputs && (toolRunInputs as any).query) || '')} />
                             )}
                           </div>
-                        </div>
+                        </>
+                      ) : hasOutput ? null : (
+                        <p className="hint">
+                          This automatic Skill has not been used yet. Output will appear here when it has been used.
+                        </p>
                       )}
                       {hasOutput && (
                         <OutputTemplate outputSchema={outputSchema} result={toolRunResult} />

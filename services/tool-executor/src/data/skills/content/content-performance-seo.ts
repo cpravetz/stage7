@@ -12,7 +12,7 @@ export const CONTENT_PERFORMANCE_SEO = createExternalActionSkill({
   description: 'Analyze content performance across channels, track SEO rankings, and surface audience insights. Combines analytics, trend analysis, audience insights, and SEO into one hybrid skill.',
   system: 'content_intelligence',
   action: 'analyze',
-  endpoint: { envVar: 'CONTENT_INTELLIGENCE_ENDPOINT', method: 'POST' },
+  endpoint: { configKey: 'CONTENT_INTELLIGENCE_ENDPOINT', method: 'POST' },
   auth: {
     type: 'api_key',
     header: 'X-API-Key',

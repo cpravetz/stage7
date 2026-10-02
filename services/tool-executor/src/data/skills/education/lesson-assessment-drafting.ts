@@ -2,10 +2,17 @@
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, SchemaProps } from '../code-skill-factory';
 
-export const LESSON_ASSESSMENT_DRAFTING = createDeclarativeCodeSkill({
-  id: 'education-lesson-assessment-drafting',
+/**
+ * User half of the education-lesson-assessment-drafting split. It was
+ * event-triggered ("A submission is received for grading") while requiring
+ * task/subject/topic, which a grading event does not supply, so the trigger
+ * over-promised. This half is user-triggered; the scheduled half
+ * (education-lesson-assessment-drafting-scheduled) covers configured courses.
+ */
+export const LESSON_ASSESSMENT_DRAFTING_USER = createDeclarativeCodeSkill({
+  id: 'education-lesson-assessment-drafting-user',
   name: 'Lesson & Assessment Drafting',
-  description: 'Draft lesson plans, quizzes, activities, and multimedia-integrated content for teacher review. Runs as reasoning-only on the assistant model using curriculum standards and learner context.',
+  description: 'Drafts lesson plans, quizzes, activities, and multimedia-integrated content for a teacher to review, from the subject and topic you give it.',
   persistenceEnvVar: 'EDUCATION_HOME',
   tier: 'represent',
   isSkill: true,
@@ -41,7 +48,14 @@ export const LESSON_ASSESSMENT_DRAFTING = createDeclarativeCodeSkill({
   },
   confirmBeforeSend: true,
   triggers: [
-    { kind: 'event', on: 'A submission is received for grading' },
+    {
+      kind: 'user',
+      phrase_examples: [
+        'Draft a lesson plan on fractions',
+        'Write a quiz for this unit',
+        'Create a group activity for this topic',
+      ],
+    },
   ],
   manifest: {},
   handler: async function handler(input, ctx) {
@@ -211,12 +225,38 @@ export const LESSON_ASSESSMENT_DRAFTING = createDeclarativeCodeSkill({
           accessibility: ['Closed captions', 'Transcripts', 'Audio descriptions', 'Keyboard navigation'],
         };
       } else {
-
-        return;
+        // A bare `return` here produced no output envelope at all, so an
+        // unrecognised task surfaced as a bare {status, error} with no draft and
+        // no explanation. Fail explicitly instead.
+        return {
+          success: false,
+          status: 'error',
+          data: null,
+          error: `Unsupported task: ${task}. Expected one of lesson-plan, quiz, activity, content, multimedia.`,
+          present: [
+            ctx.render.text('notice', 'Unsupported task', `Cannot draft "${task}". Expected one of: lesson-plan, quiz, activity, content, multimedia.`),
+          ],
+        };
       }
 
       store.push(draft);
       ctx.store.save('drafts', store);
-      return { success: true, data: { draft } };
+      return {
+        success: true,
+        data: { draft },
+        // Without a rendered block the Overview panel shows a finished run with
+        // an empty result area.
+        present: [
+          ctx.render.text('report', 'Drafted ' + task, [
+            'Task: ' + task,
+            'Subject: ' + (subject || '(unspecified)'),
+            'Grade: ' + (grade || '(unspecified)'),
+            'Topic: ' + (topic || '(unspecified)'),
+            '',
+            'Draft stored at: ' + ctx.store.getFilePath('drafts'),
+            'This draft requires teacher review before use.',
+          ]),
+        ],
+      };
     }
   });

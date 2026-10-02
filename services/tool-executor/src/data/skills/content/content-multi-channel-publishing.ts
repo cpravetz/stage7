@@ -13,7 +13,7 @@ export const MULTI_CHANNEL_PUBLISHING = createExternalActionSkill({
   description: 'Publish, schedule, and manage content across blog, social, video, and newsletter channels. One skill with a channel parameter replaces four near-duplicate platform wrappers.',
   system: 'content_publishing',
   action: 'publish',
-  endpoint: { envVar: 'CONTENT_PUBLISHING_ENDPOINT', method: 'POST' },
+  endpoint: { configKey: 'CONTENT_PUBLISHING_ENDPOINT', method: 'POST' },
   auth: {
     type: 'bearer',
     credentialEnvKeyMap: { token: 'CONTENT_PUBLISHING_ACCESS_TOKEN' },

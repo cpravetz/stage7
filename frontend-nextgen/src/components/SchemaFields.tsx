@@ -12,6 +12,25 @@ export const FIELD_LABEL_MAP: Record<string, string> = {
   apiKey: 'API Key',
   dryRun: 'Preview only',
   confirmation: 'Approve & send',
+  approved: 'Approve & send',
+  // Names the user would not use for the field. Kept here so the schema does not
+  // have to carry a display name for every field to read correctly.
+  locationMetrics: 'Practice figures by location',
+  rows: 'Rows',
+  payload: 'Details to send',
+  remediation: 'Change to apply',
+  focusArea: 'What you need help with',
+  executive: 'Person',
+  objective: 'What you want to achieve',
+  objectiveRow: 'Objective',
+  processes: 'Processes',
+  processAreas: 'Process areas',
+  learner: 'Learner',
+  insightData: 'Learner insights',
+  courseContext: 'Course context',
+  targetRole: 'Target role',
+  subject: 'Subject',
+  grade: 'Grade level',
 };
 
 
@@ -252,6 +271,20 @@ export const sfHumanizeKey = (key: string): string => {
   }).join(' ');
 };
 
+/**
+ * Fallback label for an enum option that is a bare identifier.
+ *
+ * Only used when the schema supplies no `{ value, label }` pair. Note that
+ * tidying the punctuation is all this does: `eq-assessment` becomes "Eq
+ * Assessment", which is not an explanation. A skill whose options need real
+ * wording must declare labels in its schema rather than rely on this.
+ */
+export const sfHumanizeEnumValue = (value: unknown): string => {
+  const text = sfFormatTextValue(value);
+  if (!text) return '';
+  return sfHumanizeKey(text);
+};
+
 export interface SchemaFieldsProps {
   schema: SchemaRecord;
   values: Record<string, unknown>;
@@ -306,10 +339,10 @@ const SfReferencePicker = ({ fieldId, schema, multiple, value, onChange }: SfRef
     : (value === undefined || value === null ? [] : [sfFormatTextValue(value)]));
 
   const hint = state.loading
-    ? `Loading ${sourceLabel ? `references from ${sourceLabel}` : 'references'}...`
+    ? `Loading ${sourceLabel ? `options from ${sourceLabel}` : 'options'}...`
     : state.items.length
       ? `${state.items.length} available from ${sourceLabel || sourceId}.`
-      : `No ${sourceLabel || 'reference'} data available yet — run the search that produces it, or type a value below.`;
+      : `Not connected to ${sourceLabel || 'a source system'}. Connect it to choose from a list here.`;
 
   const toggle = (itemValue: string) => {
     if (!multiple) {
@@ -326,7 +359,7 @@ const SfReferencePicker = ({ fieldId, schema, multiple, value, onChange }: SfRef
     <div className="skill-reference-picker__options">
       {state.items.length === 0 ? (
         <span className="skill-reference-picker__empty">
-          {state.loading ? 'Loading...' : 'Reference data not yet available.'}
+          {state.loading ? 'Loading...' : 'No options yet.'}
         </span>
       ) : (
         state.items.map((item) => (
@@ -353,7 +386,9 @@ const SfReferencePicker = ({ fieldId, schema, multiple, value, onChange }: SfRef
   );
 
   if (!multiple) {
-    const arrayValue = Array.isArray(value) ? value : [];
+    // A select with no free-text escape hatch. The value has to come from the
+    // source system, so allowing it to be typed invites an identifier the back end
+    // cannot match; an empty select says plainly that the source is not connected.
     return (
       <div className="skill-reference-picker">
         <div className="skill-reference-picker__hint">{hint}</div>
@@ -363,20 +398,14 @@ const SfReferencePicker = ({ fieldId, schema, multiple, value, onChange }: SfRef
           value={typeof value === 'string' ? value : ''}
           onChange={(e) => onChange(e.target.value)}
         >
-          <option value="">Select an option</option>
+          <option value="">
+            {state.items.length === 0 ? 'No options available yet' : 'Select an option'}
+          </option>
           {state.items.map((item) => (
             <option key={item.value} value={item.value}>{item.label}</option>
           ))}
         </select>
-        <input
-          type="text"
-          className="skill-control"
-          placeholder="Or type a value"
-          value={typeof value === 'string' ? value : ''}
-          onChange={(e) => onChange(e.target.value)}
-        />
         {options}
-        <input type="hidden" value={arrayValue.map((item) => sfFormatTextValue(item)).join(',')} />
       </div>
     );
   }
@@ -438,7 +467,9 @@ export const SchemaFields = ({ schema, values, onChange, namePrefix = 'skill-fie
               <option value="">Select an option</option>
               {(fieldSchema.enum as EnumOption[]).map((option) => {
                 const optionValue = typeof option === 'object' && option !== null ? (option as Record<string, unknown>).value : option;
-                const optionLabel = typeof option === 'object' && option !== null ? (option as Record<string, unknown>).label ?? option : option;
+                const optionLabel = typeof option === 'object' && option !== null
+                  ? (option as Record<string, unknown>).label ?? option
+                  : sfHumanizeEnumValue(option);
                 return <option key={String(optionValue)} value={String(optionValue)}>{String(optionLabel)}</option>;
               })}
             </select>

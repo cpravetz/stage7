@@ -7,11 +7,11 @@ import {
 
 const MAINTENANCE_INPUT_SCHEMA = createSchemaRecord({
   ...HOTEL_PROPERTY_BASE_INPUT,
-  roomId: SchemaProps.text({ description: 'Room identifier' }),
-  taskId: SchemaProps.text({ description: 'Maintenance work-order identifier' }),
-  issueId: SchemaProps.text({ description: 'Reported issue or incident identifier' }),
-  staffId: SchemaProps.text({ description: 'Maintenance technician identifier' }),
-  staffIds: SchemaProps.stringArray({ description: 'Technicians to assign or dispatch' }),
+  roomId: SchemaProps.reference('hotel-rooms', { description: 'Room identifier' }),
+  taskId: SchemaProps.reference('hotel-tasks', { description: 'Maintenance work-order identifier' }),
+  issueId: SchemaProps.reference('hotel-issues', { description: 'Reported issue or incident identifier' }),
+  staffId: SchemaProps.reference('hotel-staff', { description: 'Maintenance technician identifier' }),
+  staffIds: SchemaProps.referenceArray('hotel-staff', { description: 'Technicians to assign or dispatch' }),
   category: SchemaProps.text({ description: 'Maintenance trade or work category, such as hvac, plumbing, or electrical' }),
   severity: SchemaProps.select(['minor', 'moderate', 'major', 'critical'], { description: 'Issue severity' }),
   priority: SchemaProps.select(['low', 'medium', 'high', 'urgent', 'emergency'], {

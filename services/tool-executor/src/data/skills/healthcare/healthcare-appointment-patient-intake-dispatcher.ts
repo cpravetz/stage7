@@ -25,10 +25,7 @@ const triggers = [
 ]
 
 const intakeConfig = createSchemaRecord({
-  healthcareHome: SchemaProps.text({ description: 'Healthcare workspace path or base URL; defaults to HEALTHCARE_HOME' }),
   endpointUrl: SchemaProps.url({ description: 'Healthcare intake endpoint URL; may also be supplied at runtime through HEALTHCARE_INTAKE_ENDPOINT' }),
-  token: SchemaProps.password({ description: 'Bearer token for the intake endpoint' }),
-  accessToken: SchemaProps.password({ description: 'Alternate bearer access token for the intake endpoint' }),
   confirmBeforeSend: SchemaProps.boolean({ description: 'Require explicit confirmation before a live intake request', default: true }),
   defaultDryRun: SchemaProps.boolean({ description: 'Default intake execution to dry-run', default: true }),
 })
@@ -43,15 +40,13 @@ const intake = createDeclarativeCodeSkill({
   confirmBeforeSend: true,
   inputSchema: createSchemaRecord({
     endpoint: SchemaProps.url({ description: 'Optional alternate intake endpoint override' }),
-    token: SchemaProps.password({ description: 'Optional bearer token override for the intake endpoint' }),
-    accessToken: SchemaProps.password({ description: 'Optional alternate access-token override for the intake endpoint' }),
     payload: SchemaProps.object({}, { description: 'Patient intake payload to validate or dispatch' }),
     patient: SchemaProps.text({ description: 'Patient identifier used when payload is omitted' }),
     appointmentType: SchemaProps.text({ description: 'Appointment type used when payload is omitted' }),
     reasonForVisit: SchemaProps.text({ description: 'Reason for visit used when payload is omitted' }),
     requiredDocuments: SchemaProps.stringArray({ description: 'Documents required before the visit' }),
     documents: SchemaProps.stringArray({ description: 'Documents already supplied by the patient' }),
-    pendingIntakeIds: SchemaProps.stringArray({ description: 'Pending intake identifiers used to derive queue position' }),
+    pendingIntakeIds: SchemaProps.referenceArray('healthcare-pending-intakes', { description: 'Pending intakes used to derive queue position' }),
     queuePosition: SchemaProps.integer({ description: 'Optional explicit intake queue position' }),
     route: SchemaProps.text({ description: 'Optional routing destination or queue name' }),
     provider: SchemaProps.text({ description: 'Optional provider identifier for routing' }),
@@ -67,9 +62,15 @@ const intake = createDeclarativeCodeSkill({
   outputSchema: healthcareResultSchema('Intake payload, missing documentation, queue position, route, and response when dispatched'),
   triggers,
   manifest: {
+    // Declared as a credential, not a plain config field, so the secret can be
+    // sourced from the vault via `vault:<id>` and is never echoed into output.
+    credentialSource: {
+      accessToken: { configKey: 'accessToken', required: false, label: "upstream access token (set in this Skill configuration, or a vault secret)" },
+      token: { configKey: 'token', required: false, label: "upstream API token (set in this Skill configuration, or a vault secret)" },
+    },
     configSchema: intakeConfig,
     healthcareHome: 'HEALTHCARE_HOME',
-    endpointEnvVar: 'HEALTHCARE_INTAKE_ENDPOINT',
+    endpointConfigKey: 'endpointUrl',
     confirmBeforeSend: true,
     ui: { view: 'intake-approval' },
     metadata: metadata
@@ -89,15 +90,14 @@ const intake = createDeclarativeCodeSkill({
           status: status,
           connected: opts2.connected,
           endpoint: opts2.endpoint || null,
-          healthcareHome: process.env.HEALTHCARE_HOME || '/tmp/healthcare',
           data: opts2.data || null,
           error: opts2.error || null,
           present: opts2.present || [],
         };
       }
 
-      const endpoint = String(input.endpointUrl || input.endpoint || process.env.HEALTHCARE_INTAKE_ENDPOINT || '');
-      const token = String(input.token || input.accessToken || process.env.HEALTHCARE_INTAKE_TOKEN || process.env.HEALTHCARE_INTAKE_ACCESS_TOKEN || '');
+      const endpoint = String(input.endpointUrl || input.endpoint || String(ctx.config?.endpointUrl || ''));
+      const token = String((ctx.getCredential ? (ctx.getCredential('token') || ctx.getCredential('accessToken')) : undefined) || '');
       const dryRun = input.dryRun === true || input.dryRun === undefined || input.dryRun !== false;
       const liveRequested = input.dryRun === false;
       const confirmationRequired = true;

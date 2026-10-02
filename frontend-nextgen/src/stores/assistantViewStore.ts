@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type TabKey = 'overview' | 'tools' | 'configuration' | 'memory' | 'missions' | 'hitl' | 'artifacts';
+export type TabKey = 'overview' | 'skill settings' | 'configuration' | 'memory' | 'missions' | 'hitl' | 'artifacts';
 
 export type LastRunStatus = 'running' | 'completed' | 'failed' | null;
 

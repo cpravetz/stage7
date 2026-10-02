@@ -29,9 +29,16 @@ const INGAME_PREDICTIVE_INPUT = {
   required: ['event'],
 };
 
-export const INGAME_PREDICTIVE_MODELING = createDeclarativeCodeSkill({
-  id: 'sports-ingame-predictive-modeling',
-  name: 'In-Game Predictive Modeling',
+/**
+ * Ad-hoc half of the sports ingame-modeling split. It was event-triggered
+ * ("Game in progress") and isSkill: false, so it was neither user-runnable nor a
+ * user-facing Skill. This half is the user-triggered one; the scheduled half
+ * (sports-ingame-predictive-modeling-scheduled) watches only the scope its
+ * config declares.
+ */
+export const SPORTS_PREDICTOR_AD_HOC = createDeclarativeCodeSkill({
+  id: 'sports-predictor-ad-hoc',
+  name: 'In-Game Predictor (Ad-hoc)',
   description: 'Predicts win probabilities and key in-game events from live play-by-play data, lineup information, and momentum signals during an active game.',
   persistenceEnvVar: 'SPORTS_GROUP_B_HOME',
   tier: 'advise',
@@ -39,17 +46,28 @@ export const INGAME_PREDICTIVE_MODELING = createDeclarativeCodeSkill({
   inputSchema: INGAME_PREDICTIVE_INPUT,
   outputSchema: sportsResultSchema('In-game prediction result'),
   triggers: [
-    { kind: 'event', on: 'Game in progress' },
+    {
+      kind: 'user',
+      phrase_examples: [
+        'Model this game right now',
+        'What are the live win probabilities?',
+        'Run the in-game predictor on this matchup',
+      ],
+    },
   ],
-  isSkill: false,
+  // Now user-triggered, so it is a user-facing Skill (0.3). It was false before
+  // the split, which kept a usable predictor out of the user's Skill list.
+  isSkill: true,
   manifest: {},
   handler: async function handler(input, ctx) {
       const eventId = input.event || input.gameId || '';
       const sport = input.sport || 'generic';
       const gameStatus = input.gameStatus || 'in-progress';
 
-      let store = { predictions: [], lastUpdated: new Date().toISOString() };
-      store = ctx.store.load('ingame-predictions', []);
+      const defaults = { predictions: [], lastUpdated: new Date().toISOString() };
+      // Keep the shape used below; an `[]` fallback made `store.predictions` throw.
+      const loaded = ctx.store.load('ingame-predictions', defaults);
+      const store = loaded && typeof loaded === 'object' && !Array.isArray(loaded) ? { ...defaults, ...loaded } : defaults;
 
       const playByPlay = Array.isArray(input.playByPlay) ? input.playByPlay : [];
       const lineup = input.lineup || {};

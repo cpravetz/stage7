@@ -1,14 +1,16 @@
 import { Tool } from '../../../types';
-import { LESSON_ASSESSMENT_DRAFTING } from './lesson-assessment-drafting';
+import { LESSON_ASSESSMENT_DRAFTING_USER } from './lesson-assessment-drafting';
+import { LESSON_ASSESSMENT_DRAFTING_SCHEDULED } from './lesson-assessment-drafting-scheduled';
 import { LEARNER_INSIGHT } from './learner-insight';
 import { ADAPTIVE_PERSONALIZATION } from './adaptive-personalization';
 import { RESOURCE_LIBRARY_OPS } from './resource-library-ops';
 import { annotateStages, createWorkflow, AssistantWorkflow } from '../workflow-common';
 
-export const educationSkills = [LESSON_ASSESSMENT_DRAFTING, LEARNER_INSIGHT, ADAPTIVE_PERSONALIZATION, RESOURCE_LIBRARY_OPS];
+export const educationSkills = [LESSON_ASSESSMENT_DRAFTING_USER, LESSON_ASSESSMENT_DRAFTING_SCHEDULED, LEARNER_INSIGHT, ADAPTIVE_PERSONALIZATION, RESOURCE_LIBRARY_OPS];
 
 annotateStages(educationSkills, {
-  'education-lesson-assessment-drafting': 'assess',
+  'education-lesson-assessment-drafting-user': 'assess',
+  'education-lesson-assessment-drafting-scheduled': 'assess',
   'education-learner-insight': 'plan',
   'education-adaptive-personalization': 'plan',
   'education-resource-library': 'support',
@@ -20,7 +22,7 @@ export const educationWorkflow = createWorkflow({
   flow: 'plan → assess → support',
   stages: [
     { name: 'plan', description: 'Learner context and adaptive planning', stageIds: ['education-learner-insight', 'education-adaptive-personalization'] },
-    { name: 'assess', description: 'Lesson, quiz, and activity assessment drafting', stageIds: ['education-lesson-assessment-drafting'] },
+    { name: 'assess', description: 'Lesson, quiz, and activity assessment drafting', stageIds: ['education-lesson-assessment-drafting-user', 'education-lesson-assessment-drafting-scheduled'] },
     { name: 'support', description: 'Resource library and accessibility support', stageIds: ['education-resource-library'] },
   ],
 }, educationSkills);
@@ -32,7 +34,8 @@ export const educationWorkflow = createWorkflow({
 
 // CHANGE 3: HO skill wrappers — wrap existing skills as proper higher-order skills
 export const educationCanonicalSkills: Tool[] = [
-  { ...LESSON_ASSESSMENT_DRAFTING, isSkill: false },
+  { ...LESSON_ASSESSMENT_DRAFTING_USER, isSkill: false },
+  { ...LESSON_ASSESSMENT_DRAFTING_SCHEDULED, isSkill: false },
   { ...LEARNER_INSIGHT, isSkill: false },
   { ...ADAPTIVE_PERSONALIZATION, isSkill: false },
   { ...RESOURCE_LIBRARY_OPS, isSkill: true },

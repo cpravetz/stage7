@@ -33,7 +33,7 @@ const VENDOR_CONTRACT_MANAGEMENT = createExternalActionSkill({
   description: 'Manage vendor database, contracts, and payments for events. Real external integration with vendor management platforms, payment processors, and contract tools.',
   system: 'event_vendor',
   action: 'manage',
-  endpoint: { envVar: 'EVENT_VENDOR_ENDPOINT', method: 'POST' },
+  endpoint: { configKey: 'EVENT_VENDOR_ENDPOINT', method: 'POST' },
   auth: {
     type: 'bearer',
     credentialEnvKeyMap: { token: 'EVENT_VENDOR_ACCESS_TOKEN' },
@@ -57,11 +57,11 @@ const VENDOR_CONTRACT_MANAGEMENT = createExternalActionSkill({
   inputSchema: {
     type: 'object',
     properties: {
-      vendorId: { type: 'string', description: 'Vendor identifier' },
+      vendorId: { type: 'string', format: 'reference', 'x-referenceSource': 'event-vendors', description: 'Vendor' },
       vendorData: { type: 'object', description: 'Vendor info: name, category, contact, services, pricing, insurance, certifications' },
-      contractId: { type: 'string', description: 'Contract identifier' },
+      contractId: { type: 'string', format: 'reference', 'x-referenceSource': 'event-contracts', description: 'Contract' },
       contractData: { type: 'object', description: 'Contract terms: scope, deliverables, timeline, payment schedule, cancellation, liability' },
-      paymentId: { type: 'string', description: 'Payment identifier' },
+      paymentId: { type: 'string', format: 'reference', 'x-referenceSource': 'event-payments', description: 'Payment' },
       paymentData: { type: 'object', description: 'Payment: amount, date, method, invoice reference, purpose' },
       event: { type: 'string', description: 'Event identifier' },
       filters: { type: 'object', description: 'List filters: category, status, event' },

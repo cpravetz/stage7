@@ -41,9 +41,19 @@ export const TACTICAL_ROSTER_EVALUATOR = createDeclarativeCodeSkill({
   ],
   isSkill: false,
   manifest: {
+    // The provider key is a secret, so it is declared as a credential rather than a
+    // plain config field: the executor resolves it and hands the handler a value via
+    // ctx.credentials. Declare `configKey: 'vault:...'` in configuration to source it
+    // from the vault instead.
+    credentialSource: {
+      statsApiKey: { configKey: 'statsApiKey', required: false, label: "stats provider API key (set in this Skill configuration, or a vault secret)" },
+    },
     configSchema: {
       type: 'object',
       properties: {
+        statsEndpoint: SchemaProps.url({ description: 'Stats provider base URL for this Skill' }),
+        statsApiKey: SchemaProps.text({ description: 'Stats provider API key' }),
+        requestTimeoutMs: SchemaProps.number({ description: 'Request timeout in milliseconds', default: 10000 }),
         dataProvider: SchemaProps.select(['statsperform', 'opta', 'both'], { description: 'Sports data API provider', default: 'both' }),
         telemetryEnabled: SchemaProps.boolean({ description: 'Use wearable telemetry feeds', default: true }),
       },
@@ -55,8 +65,10 @@ export const TACTICAL_ROSTER_EVALUATOR = createDeclarativeCodeSkill({
       const sport = input.sport || 'generic';
       const timeframe = input.timeframe || '30d';
 
-      let store = { evaluations: [], lastUpdated: new Date().toISOString() };
-      store = ctx.store.load('tactical-roster-eval', []);
+      const defaults = { evaluations: [], lastUpdated: new Date().toISOString() };
+      // Keep the shape used below; an `[]` fallback made `store.evaluations` throw.
+      const loaded = ctx.store.load('tactical-roster-eval', defaults);
+      const store = loaded && typeof loaded === 'object' && !Array.isArray(loaded) ? { ...defaults, ...loaded } : defaults;
 
       function parseTimeframe(tf) {
         const now = new Date();
@@ -69,8 +81,9 @@ export const TACTICAL_ROSTER_EVALUATOR = createDeclarativeCodeSkill({
 
       const windowStart = parseTimeframe(timeframe);
 
-      const statsApi = process.env.SPORTS_PERFORM_API || process.env.OPTA_API_URL || '';
-      const requestTimeoutMs = Number(process.env.SPORTS_REQUEST_TIMEOUT_MS) || 10000;
+      const statsApi = String(ctx.config?.statsEndpoint || '');
+      const statsKey = ctx.getCredential ? ctx.getCredential('statsApiKey') : undefined;
+      const requestTimeoutMs = Number(ctx.config?.requestTimeoutMs) || 10000;
 
       async function resolvePlayerMetrics(entityId, opponentId) {
         const localPlayer = input.playerMetrics || {};

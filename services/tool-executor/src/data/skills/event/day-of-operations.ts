@@ -33,7 +33,7 @@ const DAY_OF_OPERATIONS = createExternalActionSkill({
   description: 'Execute day-of event operations: seating, check-in, real-time monitoring, and issue response. Real-time proxy to event management platforms.',
   system: 'event_operations',
   action: 'execute',
-  endpoint: { envVar: 'EVENT_OPERATIONS_ENDPOINT', method: 'POST' },
+  endpoint: { configKey: 'EVENT_OPERATIONS_ENDPOINT', method: 'POST' },
   auth: {
     type: 'bearer',
     credentialEnvKeyMap: { token: 'EVENT_OPERATIONS_ACCESS_TOKEN' },
@@ -58,9 +58,9 @@ const DAY_OF_OPERATIONS = createExternalActionSkill({
     type: 'object',
     properties: {
       event: { type: 'string', description: 'Event identifier' },
-      sessionId: { type: 'string', description: 'Session/agenda item identifier' },
-      attendeeId: { type: 'string', description: 'Attendee identifier' },
-      tableId: { type: 'string', description: 'Table identifier' },
+      sessionId: { type: 'string', format: 'reference', 'x-referenceSource': 'event-sessions', description: 'Session/agenda item' },
+      attendeeId: { type: 'string', format: 'reference', 'x-referenceSource': 'event-attendees', description: 'Attendee' },
+      tableId: { type: 'string', format: 'reference', 'x-referenceSource': 'event-tables', description: 'Table' },
       seatData: { type: 'object', description: 'Seating assignment data' },
       checkInData: { type: 'object', description: 'Check-in data: method, timestamp, location' },
       issueData: { type: 'object', description: 'Issue: type, severity, location, description, assignedTo' },

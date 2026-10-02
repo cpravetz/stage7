@@ -11,6 +11,7 @@
     "sports-matchup-odds-explainer",
     "sports-bankroll-co-pilot",
     "sports-line-alert-dispatcher",
-    "sports-ingame-predictive-modeling"
+    "sports-predictor-ad-hoc",
+    "sports-ingame-predictive-modeling-scheduled"
   ]
 }

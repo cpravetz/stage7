@@ -60,7 +60,7 @@ export const RESTAURANT_SUPPLY_CHAIN_INVENTORY_REORDER_MANAGER = createDeclarati
   handler: async function handler(input, ctx) {
       const NL = '\n';
       const SAFETY = "food safety / allergen protocol";
-      const endpoint = process.env.RESTAURANT_SUPPLY_ENDPOINT || '';
+      const endpoint = String(ctx.config?.endpointUrl || '');
       const dryRun = input.dryRun !== false;
       const confirmBeforeSend = input.confirmBeforeSend !== false;
 

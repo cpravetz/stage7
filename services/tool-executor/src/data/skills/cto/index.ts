@@ -50,16 +50,21 @@ const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
   })();`;
 }
 
+// These three evaluators take the thing they analyse as an input (scored systems,
+// billing rows, incident signals) and return "Not connected: no <X> supplied"
+// when it is absent. Nothing but a person can supply that, so their honest
+// trigger is User -- a Schedule or Event trigger left them permanently
+// unreachable as bound.
 const ARCH_DEBT_TRIGGERS = [
-  { kind: 'schedule' as const, cadence: 'Periodic tech-debt monitoring' },
+  { kind: 'user' as const, phrase_examples: ['Evaluate tech debt across our services', 'Rank these systems for modernization', 'Produce a modernization roadmap'] },
 ];
 
 const CLOUD_SPEND_TRIGGERS = [
-  { kind: 'schedule' as const, cadence: 'Periodic spend monitoring' },
+  { kind: 'user' as const, phrase_examples: ['Review our cloud spend', 'Where can we save on infrastructure', 'Recommend rightsizing for these services'] },
 ];
 
 const INCIDENT_WAR_ROOM_TRIGGERS = [
-  { kind: 'event' as const, on: 'Incoming incident signals fired' },
+  { kind: 'user' as const, phrase_examples: ['Correlate these incident signals', 'Build a root cause hypothesis', 'Draft the war room update'] },
 ];
 
 const IAC_REMEDIATION_TRIGGERS = [
@@ -774,9 +779,13 @@ export const ctoSkills: Tool[] = [
     description: 'Dry-run and, after explicit confirmation, apply approved engineering or IaC remediation through a configured endpoint.',
     persistenceEnvVar: 'CTO_HOME',
     inputSchema: createSchemaRecord({
-      payload: SchemaProps.object({}, { description: 'Approved remediation payload' }),
-      dryRun: SchemaProps.boolean({ description: 'Validate without applying; defaults to true', default: true }),
-      confirmation: SchemaProps.boolean({ description: 'Explicit approval for live execution', default: false }),
+      remediation: SchemaProps.object({
+        target: SchemaProps.text({ description: 'What to change, e.g. the resource or file in drift' }),
+        change: SchemaProps.text({ description: 'The approved change to apply' }),
+        justification: SchemaProps.text({ description: 'Why this change is approved' }),
+      }, { description: 'The specific remediation to apply' }),
+      dryRun: SchemaProps.boolean({ description: 'Check the remediation without applying it', default: true }),
+      approved: SchemaProps.boolean({ description: 'Approve applying this remediation for real', default: false }),
     }, { required: [] }),
     outputSchema: createSchemaRecord({
       success: SchemaProps.boolean({ description: 'Whether action completed' }),
@@ -798,32 +807,40 @@ export const ctoSkills: Tool[] = [
       ui: { view: 'remediation-approval' },
       configSchema: createSchemaRecord({
         endpointUrl: SchemaProps.url({ description: 'Configured engineering or IaC remediation endpoint' }),
-        token: SchemaProps.password({ description: 'Bearer token for the remediation endpoint' }),
-      }, { required: ['endpointUrl', 'token'] })
+      }, { required: ['endpointUrl'] }),
+      // The bearer token is a secret, so it is resolved from the vault or from
+      // operator configuration rather than asked for on the Run form.
+      credentialSource: {
+        token: { configKey: 'token', required: false, label: 'remediation endpoint access token (set it in this Skill configuration, or a vault secret)' },
+      }
     },
     handler: async function handler(input, ctx) {
-        const endpointUrl = input.endpointUrl;
+        // The endpoint is operator configuration and the token a declared
+        // credential. Both used to be read from `input`, which is never where they
+        // live, so this Skill could only ever report not-connected.
+        const endpointUrl = ctx.config?.endpointUrl;
         if (!endpointUrl) {
-          const result = { success: false, error: 'not-connected: CTO engineering endpoint is not configured', data: {} };
+          const result = { success: false, error: 'Not connected: set endpointUrl in this Skill\'s configuration.', data: {} };
 
           return result;
         }
+        const token = ctx.getCredential ? ctx.getCredential('token') : undefined;
         const dryRun = input.dryRun !== false;
-        const confirmation = input.confirmation === true;
-        if (!dryRun && !confirmation) {
-          const result = { success: false, error: 'Explicit confirmation is required for live remediation', data: {} };
+        const approved = input.approved === true;
+        if (!dryRun && !approved) {
+          const result = { success: false, error: 'Tick Approved to apply this remediation. Nothing has been changed.', data: {} };
 
           return result;
         }
         try {
-          const response = await fetch(endpointUrl, {
-            method: input.method || 'POST',
-            headers: { 'Content-Type': 'application/json', ...(input.token ? { Authorization: 'Bearer ' + input.token } : {}) },
-            body: JSON.stringify(input.payload || {}),
+          const response = await fetch(String(endpointUrl), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
+            body: JSON.stringify(input.remediation || {}),
           });
           const data = await response.json().catch(async () => ({ text: await response.text() }));
           const result = { success: response.ok, data: { response: { status: response.status, data } }, error: null };
-          const body = 'Endpoint: ' + endpointUrl + '\nMethod: ' + (input.method || 'POST') + '\nDry Run: ' + dryRun + '\nStatus: ' + response.status + '\nResponse: ' + JSON.stringify(data, null, 2);
+          const body = 'Endpoint: ' + endpointUrl + '\nMethod: POST\nDry Run: ' + dryRun + '\nStatus: ' + response.status + '\nResponse: ' + JSON.stringify(data, null, 2);
 
           return result;
         } catch (error) {

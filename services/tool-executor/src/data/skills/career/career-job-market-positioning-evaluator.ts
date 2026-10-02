@@ -45,13 +45,20 @@ const JOB_MARKET_POSITIONING_EVALUATOR = createDeclarativeCodeSkill({
   inputSchema: JOB_MARKET_POSITIONING_EVALUATOR_INPUT,
   outputSchema: JOB_MARKET_POSITIONING_EVALUATOR_OUTPUT,
   triggers: [
-    // user: this is a panel the user opens deliberately, and the "user" trigger
-    // is what marks a tool as user-invocable. Without it the tool was visible
-    // only because of its explicit isSkill:true, which contradicted its own
-    // trigger data and would have broken silently the moment that flag was
-    // reconciled with the trigger-derived value in index.ts.
-    { kind: 'user', phrase_examples: ['How does my resume compare to these roles', 'What salary should I target', 'Review my positioning'] },
-    // schedule: retained so the automatic post-discovery read still happens.
+    // Schedule only. This Skill was also given a `user` trigger so the panel
+    // would appear -- the comment said so outright ("the 'user' trigger is what
+    // marks a tool as user-invocable"). That is the trigger backwards: a User
+    // trigger means a person supplies something, and this Skill has no inputs at
+    // all. It reads the profile from career-profile-intake and the listings from
+    // the store, both upstream. So it rendered a bare Run button with no fields,
+    // no output, and nothing for the user to act on.
+    //
+    // The Schedule trigger is what actually runs it, and it is the only trigger
+    // here that something really does honour: no career Skill emits an event or
+    // declares a `consumes` edge, so an Event trigger would be a second
+    // over-promise. Wiring career-job-discovery's emitEvent to a real Event
+    // trigger is the correct end state, and is left as follow-up rather than
+    // inventing an event nothing fires.
     { kind: 'schedule', cadence: 'After job discovery completes' },
   ],
   tier: 'advise',
@@ -65,8 +72,17 @@ const JOB_MARKET_POSITIONING_EVALUATOR = createDeclarativeCodeSkill({
   handler: async function handler(input, ctx) {
       const profileRes = await ctx.delegate('career-profile-intake', {});
       if (!profileRes || !profileRes.success) {
-
-      return;
+        return {
+          success: false,
+          status: 'blocked',
+          delegatedTo: ['career-profile-intake'],
+          data: { failures: [{ board: 'career-profile-intake', note: profileRes?.error || 'the stored profile could not be read' }], failureCount: 1, complete: false },
+          error: 'Positioning needs a stored profile, and career-profile-intake did not return one: ' + String(profileRes?.error || 'no profile available'),
+          present: [
+            ctx.render.text('notice', 'No profile to position', 'Save a profile first (Resume & Profile Intake), then this Skill can compare it against discovered roles.'),
+          ],
+          generatedAt: new Date().toISOString(),
+        };
       }
       const profile = profileRes.data && profileRes.data.profile ? profileRes.data.profile : profileRes.data || profileRes;
 

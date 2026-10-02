@@ -8,6 +8,14 @@ const FINANCIAL_FORECAST_CONFIG = createSchemaRecord({
   forecastHorizonDays: SchemaProps.number({ description: 'Default forecast horizon in days', default: 12 }),
   varianceThresholdPercent: SchemaProps.number({ description: 'Default variance threshold as a percentage (e.g., 10 = 10%)', default: 10 }),
   highVarianceAlertThreshold: SchemaProps.number({ description: 'Number of high-variance periods before alert', default: 3 }),
+  // These were user inputs, but a forecast runs on the same menu, stock and
+  // supplier data every time. Asking someone to re-enter 15 payload fields to
+  // forward to three downstream skills is onus with no per-run meaning; they
+  // describe the connected data source instead.
+  dataSource: SchemaProps.text({
+    description: 'Restaurant data source the figures come from, such as a POS or accounting system',
+    required: true,
+  }),
 });
 
 const FINANCIAL_FORECAST_INPUT_SCHEMA = createSchemaRecord({
@@ -18,22 +26,9 @@ const FINANCIAL_FORECAST_INPUT_SCHEMA = createSchemaRecord({
   cogs: SchemaProps.number({ description: 'Current cost of goods sold (optional)' }),
   laborCost: SchemaProps.number({ description: 'Current labor cost (optional)' }),
   netProfit: SchemaProps.number({ description: 'Current net profit (optional)' }),
-  menuId: SchemaProps.text({ description: 'Menu identifier for engineering analysis' }),
-  itemIds: SchemaProps.stringArray({ description: 'Menu item identifiers' }),
-  popularity: SchemaProps.object({}, { description: 'Item popularity scores (0-100)' }),
-  profitability: SchemaProps.object({}, { description: 'Item profitability ratios (0-1)' }),
-  inventoryItems: SchemaProps.objectArray(SchemaProps.object({}), { description: 'Inventory items for supply chain analysis' }),
-  reorderPoints: SchemaProps.object({}, { description: 'Reorder point by item name' }),
-  safetyStock: SchemaProps.object({}, { description: 'Safety stock by item name' }),
-  leadTimes: SchemaProps.object({}, { description: 'Lead time in days by item name' }),
-  unitCosts: SchemaProps.object({}, { description: 'Unit cost by item name' }),
   date: SchemaProps.text({ description: 'Forecast date (YYYY-MM-DD)' }),
   timeRange: SchemaProps.text({ description: 'Time range for demand forecast (e.g., 7d, 30d)' }),
   metric: SchemaProps.text({ description: 'Demand metric (covers, revenue, etc.)' }),
-  forecastCovers: SchemaProps.number({ description: 'Forecasted number of covers for prep' }),
-  prepRatios: SchemaProps.object({}, { description: 'Prep quantity ratio per cover by item name' }),
-  currentStock: SchemaProps.object({}, { description: 'Current stock levels by item name' }),
-  shift: SchemaProps.select(['breakfast', 'lunch', 'dinner', 'all'], { description: 'Shift name', default: 'all' }),
   accountIds: SchemaProps.stringArray({ description: 'Account identifiers for variance analysis' }),
   comparisonPeriod: SchemaProps.text({ description: 'Comparison period identifier' }),
 });
@@ -46,8 +41,7 @@ export const RESTAURANT_FINANCIAL_FORECAST_EVALUATOR = createDeclarativeCodeSkil
   inputSchema: FINANCIAL_FORECAST_INPUT_SCHEMA,
   outputSchema: restaurantResultSchema('Forecast result data including P&L, variance, demand projections, delegation coverage, and step results'),
   triggers: [
-    { kind: 'user', phrase_examples: ['Forecast financial performance', 'Analyze P&L variance', 'Predict demand'] },
-    { kind: 'schedule', cadence: 'Periodic financial forecast review' },
+    { kind: 'schedule', cadence: 'Periodic financial forecast review from the configured data source' },
   ],
   isSkill: true,
   tier: 'advise',
@@ -58,6 +52,8 @@ export const RESTAURANT_FINANCIAL_FORECAST_EVALUATOR = createDeclarativeCodeSkil
   },
   handler: async function handler(input, ctx) {
       const NL = '\n';
+      const cfg = ctx.config || {};
+      const dataSource = String(cfg.dataSource || '');
       const SAFETY = "food safety / allergen protocol";
 
       const varianceThreshold = Number(input.varianceThreshold || 0.1);
@@ -116,6 +112,17 @@ export const RESTAURANT_FINANCIAL_FORECAST_EVALUATOR = createDeclarativeCodeSkil
         };
       }
 
+      // Every figure now comes from operator config. With no configured source
+      // the skill has nothing to forecast, and delegating with empty payloads
+      // would report a confident-looking all-zero result.
+      if (!dataSource) {
+        const lines = [];
+        lines.push('No restaurant data source is configured.');
+        lines.push('');
+        lines.push('Set dataSource in this Skill\u2019s settings to the POS or accounting system the figures come from.');
+        return done(false, 'not-connected', lines, null);
+      }
+
       if (!ctx.delegate) {
         const lines = [];
         lines.push('No lower-order tooling is available in this environment.');
@@ -130,9 +137,9 @@ export const RESTAURANT_FINANCIAL_FORECAST_EVALUATOR = createDeclarativeCodeSkil
       try {
         const menuResult = await ctx.delegate('restaurant-menu-engineering-cost-strategist', {
           operation: 'menu-engineering',
-          itemIds: input.itemIds || [],
-          popularity: input.popularity || {},
-          profitability: input.profitability || {},
+          itemIds: cfg.itemIds || [],
+          popularity: cfg.popularity || {},
+          profitability: cfg.profitability || {},
         });
         if (menuResult && menuResult.success === false) {
           stepErrors.menu_engineering = menuResult.error || 'Lower-order tool not configured';
@@ -157,11 +164,11 @@ export const RESTAURANT_FINANCIAL_FORECAST_EVALUATOR = createDeclarativeCodeSkil
       try {
         const supplyResult = await ctx.delegate('restaurant-supply-chain-inventory-reorder-manager', {
           operation: 'inventory-reorder',
-          items: input.inventoryItems || [],
-          reorderPoints: input.reorderPoints || {},
-          safetyStock: input.safetyStock || {},
-          leadTimes: input.leadTimes || {},
-          unitCosts: input.unitCosts || {},
+          items: cfg.inventoryItems || [],
+          reorderPoints: cfg.reorderPoints || {},
+          safetyStock: cfg.safetyStock || {},
+          leadTimes: cfg.leadTimes || {},
+          unitCosts: cfg.unitCosts || {},
           dryRun: true,
         });
         if (supplyResult && supplyResult.success === false) {
@@ -188,10 +195,10 @@ export const RESTAURANT_FINANCIAL_FORECAST_EVALUATOR = createDeclarativeCodeSkil
         const prepResult = await ctx.delegate('restaurant-shift-prep-list-copilot', {
           operation: 'shift-prep',
           date: input.date || new Date().toISOString().split('T')[0],
-          forecastCovers: Number(input.forecastCovers || 0),
-          prepRatios: input.prepRatios || {},
-          currentStock: input.currentStock || {},
-          shift: input.shift || 'all',
+          forecastCovers: Number(cfg.forecastCovers || 0),
+          prepRatios: cfg.prepRatios || {},
+          currentStock: cfg.currentStock || {},
+          shift: cfg.shift || 'all',
         });
         if (prepResult && prepResult.success === false) {
           stepErrors.shift_prep = prepResult.error || 'Lower-order tool not configured';
@@ -247,7 +254,7 @@ export const RESTAURANT_FINANCIAL_FORECAST_EVALUATOR = createDeclarativeCodeSkil
         currentPnL: { revenue, cogs, laborCost, netProfit, primeCost: cogs + laborCost, grossMargin: revenue > 0 ? Math.round((revenue - cogs) / revenue * 10000) / 100 : 0 },
         menuEngineering: { summary: menuSummary, topQuadrant: 'star' },
         supplyChain: { reorderCost: totalReorderCost, itemsFlagged },
-        shiftPrep: { forecastCovers: input.forecastCovers || 0, prepShortage },
+        shiftPrep: { forecastCovers: cfg.forecastCovers || 0, prepShortage },
         forecast,
         varianceAlerts: forecast.filter(f => f.flag === 'high-variance').length,
         delegatedTo,

@@ -135,11 +135,15 @@ describe('ctoSkills', () => {
 
     it('canonical triggers have exactly one trigger of the correct kind', () => {
       const expected: Record<string, string> = {
-        'cto-architecture-tech-debt-evaluator': 'schedule',
-        'cto-cloud-spend-infrastructure-optimizer': 'schedule',
+        // These three take the thing they analyse as an input and return
+        // "Not connected: no <X> supplied" without it, so User is their only
+        // reachable trigger. The two remaining Schedulers and the Event-
+        // triggered remediation keep their triggers.
+        'cto-architecture-tech-debt-evaluator': 'user',
+        'cto-cloud-spend-infrastructure-optimizer': 'user',
+        'cto-incident-war-room-synthesizer': 'user',
         'cto-disaster-recovery-planner': 'schedule',
         'cto-engineering-action-iac-drift-remediation': 'event',
-        'cto-incident-war-room-synthesizer': 'event',
         'cto-team-delivery-health-evaluator': 'schedule',
       };
       for (const skill of ctoCanonicalSkills) {
@@ -175,7 +179,11 @@ describe('ctoSkills', () => {
       expect(skill.manifest.configSchema).toBeDefined();
       expect((skill.manifest.configSchema as any).properties).toBeDefined();
       expect((skill.manifest.configSchema as any).properties!.endpointUrl).toBeDefined();
-      expect((skill.manifest.configSchema as any).properties!.token).toBeDefined();
+      // The token is a secret, so it is a declared credential rather than a plain
+      // config field the Run form would ask the user to type.
+      const credentialSource = (skill.manifest as any).credentialSource as Record<string, unknown>;
+      expect(credentialSource?.token).toBeDefined();
+      expect((skill.manifest.configSchema as any).properties!.token).toBeUndefined();
     });
 
     it('remediation source has dryRun gate', () => {
@@ -183,9 +191,25 @@ describe('ctoSkills', () => {
       expect(source).toContain('dryRun');
     });
 
-    it('remediation source has confirmation gate', () => {
+    it('remediation source has an approval gate', () => {
       const source = getSkill('cto-engineering-action-iac-drift-remediation').manifest.sourceCode as string;
-      expect(source).toContain('confirmation');
+      // `approved` rather than `confirmation`: the two were previously near-synonyms
+      // on the same form, which told the user nothing about which one was required.
+      expect(source).toContain('approved');
+      expect(source).toContain('dryRun');
+    });
+
+    it('remediation reads its endpoint from config, not from run input', () => {
+      const skill = getSkill('cto-engineering-action-iac-drift-remediation');
+      const source = skill.manifest.sourceCode as string;
+      // It used to read input.endpointUrl, which is never where the endpoint lives,
+      // so the Skill could only ever report not-connected.
+      expect(source).toContain('ctx.config');
+      expect(source).toContain('getCredential');
+      const inputs = Object.keys((skill.inputSchema as any).properties ?? {});
+      expect(inputs).not.toContain('endpointUrl');
+      expect(inputs).not.toContain('token');
+      expect(inputs).not.toContain('payload');
     });
 
     it('remediation source has not-connected fallback', () => {

@@ -41,7 +41,9 @@ It is not enough that the Assistant, rather than the user, decides which interna
 
 One consequence of applying this rigorously, surfaced while resolving triggers (§0.14): a few Skills turn out to bundle sub-capabilities whose *natural triggers* genuinely differ, not just their labels — a structural reason to split a Skill, separate from and in addition to the labeling reason above; both are flagged separately in Part B wherever they apply.
 
-**A note on auditing this principle:** a compliance pass against v6 correctly caught `matter-document-ops`, `recruiting-ops`, `analytics_business_insight_report`, and `hotel-property-operations` exposing a required `operation`/`mode` field — but missed three more instances of the identical pattern already present in the same document: `hotel-reservations-guest-profile`, `restaurant-reservations-guest-profile-manager`, and `event-day-of-operations` all list `operation` as an input and were marked compliant. `hotel-reservations-guest-profile` and `hotel-property-operations` sit one row apart in the same table with the same pattern; only one was flagged. This revision closes that gap directly in Part B (§0.9 flags added to all three) as a reminder that a §0.9 sweep needs to check every row against the pattern, not stop once a few clear instances are found.
+**A note on auditing this principle:** a compliance pass against v6 correctly caught `matter-document-ops`, `hr-draft-jd-interview-kit`, `hr-trigger-interview-scheduling`, `analytics-adhoc-query-evaluator`, `analytics-scheduled-trend-monitor`, and `hotel-maintenance-dispatcher` exposing a required `operation`/`mode` field — but missed three more instances of the identical pattern already present in the same document: `hotel-reservations-guest-profile`, `restaurant-reservations-guest-profile-manager`, and `event-day-of-operations` all list `operation` as an input and were marked compliant. `hotel-reservations-guest-profile` and `hotel-maintenance-dispatcher` sit one row apart in the same table with the same pattern; only one was flagged. This revision closes that gap directly in Part B (§0.9 flags added to all three) as a reminder that a §0.9 sweep needs to check every row against the pattern, not stop once a few clear instances are found.
+
+**A second note on auditing this principle, added after a code-vs-doc reconciliation of the Career Assistant:** the pattern does not have to be spelled `operation` or `mode`. `career-resume-template-manager` exposes the same mode switch under the name `action` (`list` / `save` / `get` / `delete`), and every §0.9 sweep run to date had passed it because it was searching for the wrong literal. Sweep for *a verb enum that selects which sub-operation of one Skill runs*, whatever the property is called.
 
 ### 0.10 — Run exists in exactly one place
 There is no Run button anywhere except the UX panel on the **Overview tab** of the Assistant, and even there, only for Skills that are genuinely user-triggerable. It never appears on the Skills tab, the Config tab, or the Bound Skills panel, under any condition, disabled or otherwise. A Scheduled Skill runs on the interval set in its own configuration, with no button involved. An Event/State-triggered Skill runs when the Assistant detects the condition it defines, with no button involved.
@@ -63,6 +65,39 @@ A Skill claiming User, Schedule, and Event triggers simultaneously does not desc
 - **User** — a person has to ask for it, surfaced only as a Run action on the Overview tab (§0.10).
 
 Every Skill in Part B is resolved to exactly one of these. Where a Skill's current implementation bundles genuinely different sub-capabilities such that no single honest answer exists, that is a split candidate (§0.9), not a reason to list more than one trigger.
+
+**Corrected during the trigger-reachability audit (2026-10-01).** Twelve Skills were resolved to Schedule or Event while declaring a *required* input that the handler refuses to run without — returning `"Not connected: no <X> supplied"` — and with no wired edge declared in `manifest.consumes` to deliver that input. With no User trigger, nothing could ever supply it, so those Skills were bound but unreachable: the schema asked for a value that could never arrive, and they cleared the bar in §1 only nominally. They are now **User**-triggered, and their Trigger entries above are marked *(reassigned …)*. The affected ids are:
+
+- `cto-architecture-tech-debt-evaluator`, `cto-cloud-spend-infrastructure-optimizer`, `cto-incident-war-room-synthesizer`
+- `hotel-revenue-performance-advisory`
+- `scriptwriting-narrative-arc-pacing-evaluator`, `songwriting_lyric_prosody_evaluator`
+- `support-resolve-ticket`, `support-sentiment-analysis`, `support-issue-analysis`, `support-search-kb` — **not listed in Part B under these ids.** §11 names a single `support-resolve-ticket` (+ 3 sibling Skills) Skill; the implementation splits that intake capability into four Skills, all user-triggered because a person supplies the ticket, message, issue text or query. Part B §11 needs a corresponding row per split Skill.
+- `education-adaptive-personalization`, `hr-assess-candidate` — likewise **not listed in Part B under these ids**; both user-triggered on the same reasoning.
+
+The test of whether a Skill is Schedule/Event or User is not which one sounds more plausible — it is **who can produce the required input**. A Skill whose inputs arrive from a connected source, a feed another Skill declares in `manifest.consumes`, or its own endpoint may legitimately be automatic. One whose inputs only exist in a person's head or a file they have to paste is User, whatever the name suggests.
+
+**Skills excluded from this discussion.** Base tools — `isSkill: false` Skills with no trigger, no UX panel, and no user-facing inputs — are system utilities invoked by an Assistant or a higher-order Skill, which passes their input inline. Career has ten (§2), CTO has four (§1), Content has several (§8). A base tool having required inputs and no trigger is correct by construction and is never a trigger defect.
+
+### 0.14a — `configSchema` is a scope selector the handler can read, and a recurring Skill must have one
+A Skill that exists to run without a person in the loop gets **what to look at** from its configuration, not from its input schema: a user supplies input once, while a recurring job needs a standing scope the operator fixes in advance. This makes `configSchema` the place a recurring Skill's boundaries live, and it only works if the resolved values actually reach the handler.
+
+**This was not true until 2026-10-01.** `configSchema` was a presence gate only: `ToolExecutor` checked that the declared values existed and then discarded them, so a Skill could declare a required selector and have no way to read it. That is indistinguishable, from the outside, from the §1 "schema demands a value the handler ignores" defect — and it is why the Class 4 automated halves could not ship their selectors. Resolved configuration now reaches handlers as `ctx.config`, resolved by `ToolExecutor.resolveSkillConfig` with the same precedence `isConfigured` uses (`externalConfig`, then `manifest.config`, then declared `credentialSource` config keys, with per-run `input` winning as a one-off override). Config is deliberately a **separate object** from `input`: it is operator-supplied, not per-run, so a caller sending the same key as input cannot silently redefine the scope the operator set — and a selector must never also appear as an `inputSchema` key.
+
+**Consequences, both enforced in CI:**
+
+- Every recurring Skill introduced by a split (`*-scheduled`, `*-notifier`, `*-automated`) must declare at least one required selector, so it cannot be configured wide-open. `sports-ingame-predictive-modeling-scheduled` uses `anyOf: [matchIds | teams | sports]` for the same reason: any one of them bounds the run.
+- A recurring Skill that finds no scope must refuse rather than fall back to "everything". Both halves matter — the schema rejects the config, and the handler re-checks, because config can be edited out of band.
+
+A recurring Skill that cannot read its own scope is worse than no recurring Skill: it looks like coverage. Where a Skill can only count or reconcile rather than evaluate, it must say so in its output (`rulesEvaluated: 0`, `externalDataFetched: false`, `documentProvided`) instead of reporting a clean result it did not produce.
+
+**Implementation constraint this exposed (found by execution, 2026-10-01).** A declarative Skill's handler is serialized with `handler.toString()` and run in a sandbox that contains only `stage7-runtime`. So a handler may **not** reference a name imported from a sibling module: it resolves to an undefined reference and the Skill fails with `import_<module> is not defined`. Shared logic therefore has to live inside the handler body, not in an imported file. Importing a *schema* constant is fine, because those are read when the Skill is defined, outside the handler.
+
+This is invisible to shape and count assertions, which is how two Skills shipped broken while the suite was green. The check that matters is executing the Skill and reading its envelope: `scripts/skill-runtime-probe.ts` runs every split Skill end-to-end and prints what actually came out, and `skillRuntimeExecution.test.ts` asserts the same thing as a guard. Both were added after the failures below, which the count-based suites had passed throughout:
+
+- a handler importing shared clause rules from a sibling module
+- a handler that built a full evaluation and never returned it, so the Skill produced no output at all despite declaring `required: ['success', 'status', 'present']`
+- a handler calling `ctx.emit(...)` as a function, when `emit` is an object of formatters (`success` / `failure` / `notConnected`)
+- a scheduled sweep reporting `success: true` while 0 of 2 campaigns had actually reported, because it only counted thrown errors and ignored a callee that returned without producing anything
 
 ### 0.15 — Tier (Advise / Aid / Represent) is a typed field, every Skill has exactly one, and it drives enforcement
 Every Skill belongs to exactly one tier, and the tier is not decorative — it determines what the platform enforces around that Skill, not just how it's labeled:
@@ -87,7 +122,7 @@ None of this is a flag state to manage. It is the bar a Skill clears before it e
 ## 2. Capability Cluster Model
 Each Assistant has one or more Capability Clusters instead of one linear Workflow. A cluster is a set of Skills that share persistent state and/or a common internal tool they draw on. Cluster membership is determined by shared `Consumes` targets or an explicit producer→consumer edge between two Skills' `Produces`/`Consumes` — not by a plausible human narrative connecting them. Two things are often both true within the same Assistant:
 
-- **Some clusters are genuinely sequential per instance.** The cleanest code-evidenced case: Education's `education_adaptive_personalization` explicitly consumes the output of `education_learner_insight` — a real producer→consumer edge, not an assumption.
+- **Some clusters are genuinely sequential per instance.** The cleanest code-evidenced case: Education's `education-adaptive-personalization` explicitly consumes the output of `education-learner-insight` — a real producer→consumer edge, not an assumption.
 - **Many clusters are not sequential at all.** CTO's architecture/cost-planning work has no dependency on its incident-response work. Executive's four Skills don't feed each other. Restaurant's five domains run in parallel. These stay as separate clusters within one Assistant precisely because nothing wires them together.
 - **Sequential within an instance is not the same as single-stream for the Assistant.** Support's ticket lifecycle (understood → responded to → closed) is genuinely sequential *per ticket* — and many tickets move through that sequence concurrently.
 - **Some clusters have a plausible sequential narrative that remains unverified.** Content and Scriptwriter both plausibly run a real production pipeline (research/trend → draft → format/publish). This was flagged as unverified in the prior revision and remains unverified now — a compliance audit against that revision marked both clusters ✓ MATCH without confirming the actual `Consumes`/`Produces` wiring between each stage. **This is still an open item, not a closed one:** don't treat a plausible narrative as confirmed just because nothing contradicted it. Check the actual wiring in `content/index.ts` and `scriptwriter/index.ts` before relying on the sequential claim for either Assistant.
@@ -112,14 +147,16 @@ JSON encoded inside JSON encoded inside a text block. No user should ever see th
 These were flagged as unfinished consolidation work and remain unresolved. They must not reach general availability as separate user-facing Skills:
 - **Product:** `product-jira`, `product-confluence`, `product-slack`, `product-calendar`, `product-markdown-parsing` — five unconsolidated fragments, no single orchestrator. Needs one higher-order "sync/manage delivery work" Skill built on top of these as internal tool-calls.
 - **Marketing:** `marketing-content-generation`, `marketing-social-media`, `marketing-email` — three fragments of one intended Skill. Consolidate into one "produce and distribute campaign content" Skill.
-- **Analytics:** `analytics-grounded-reporting` and `analytics-warehouse-query` are wrappers around `analytics_business_insight_report` with no distinct value of their own. Deprecate the two wrappers; keep the one real Skill.
-- **HR:** `recruiting-ops` bundles a User-triggered sub-capability (draft a JD) with an Event-triggered one (candidate passed screening, schedule interview) — cannot resolve to one honest trigger as currently scoped (§0.14). Split into two Skills along the trigger boundary: a User-triggered JD/interview-kit builder and an Event-triggered interview scheduler.
-- **Analytics:** `analytics_business_insight_report`'s `mode` spans an ad hoc query (User-triggered) and trend monitoring (Schedule-triggered) — same issue, same fix: split into a User-triggered ad hoc query Skill and a Schedule-triggered trend monitor.
+- **Analytics:** `analytics-grounded-reporting` and `analytics-warehouse-query` are wrappers around `analytics-adhoc-query-evaluator`, `analytics-scheduled-trend-monitor` with no distinct value of their own. Deprecate the two wrappers; keep the one real Skill.
+- **HR — RESOLVED:** the bundled interview Skill was split along the trigger boundary. The User half is `hr-interview-scheduling-user` (an operator books an interview by hand); the Event half is `hr-interview-scheduling-automated`, fired by a candidate passing screening. The automated half now requires a `calendarId` in `configSchema`, which the bundled Skill did not: it declared a `configSchema` with nothing required, so it could run against any calendar with no defined scope. See `docs/skill-class4-split-configs.md`.
+- **Career:** `career-resume-template-manager` bundles four CRUD sub-capabilities behind one exposed `action` enum (`list` / `save` / `get` / `delete`) — §0.9 violation on its face, and its natural triggers genuinely differ (browsing a library is User-triggered; a template being *consumed* by a new application is an Event fired from `career-application-execution-orchestrator`, per the `x-referenceSource` edge). Same fix as the HR and Analytics rows: split along the trigger boundary into a User-triggered template library and an Event-triggered template fetch. Additionally, `career_add_template` is now a dead base tool fully absorbed by this Skill — deprecate it rather than leaving two paths to the same state.
+- **Analytics:** `analytics-adhoc-query-evaluator`, `analytics-scheduled-trend-monitor`'s `mode` spans an ad hoc query (User-triggered) and trend monitoring (Schedule-triggered) — same issue, same fix: split into a User-triggered ad hoc query Skill and a Schedule-triggered trend monitor.
 
 ## 7. Implementation bugs (not design questions, listed for completeness only)
 These have no connection to any design principle, right or wrong — plain engineering misses:
 - The general-tools list on the Skills panel isn't filtering out Skills (`isSkill` already exists as a field and is unused here).
 - Input trimming fires on keystroke instead of submit (also codified as a standing rule at §0.13).
+- Callers of `career-resume-template-manager` pass `{ mode: 'get' }` but the Skill reads `input.action` (`career-application-execution-orchestrator.ts:75,82`, `career-application-execution.ts:57`) — the mode switch was renamed on one side only, so those fetches silently fall through to `list`.
 
 ## 8. Note for anyone auditing this document against the codebase
 Two things, both learned from a prior audit pass: **first**, when a principle names a checkable pattern (§0.9's `operation`/`mode` field, §0.6's "was a default available"), sweep every row in Part B for that exact pattern before concluding the audit — a partial sweep that catches some instances and marks visually identical neighboring rows compliant is worse than not auditing that principle at all, because it reads as verified when it isn't. **Second**, any summary table produced from a row-by-row audit (match counts, gap counts, totals) must be computed by summing the actual per-row verdicts, not typed by hand — recompute the totals from the detail table before publishing them, and if a discrepancy shows up, trust the detail table, not the summary.
@@ -128,7 +165,7 @@ Two things, both learned from a prior audit pass: **first**, when a principle na
 
 # Part B — Assistant Reference
 
-> Cluster groupings are derived from each Skill's `Consumes`/`Produces` as recorded in the current implementation snapshot this document was built from — treat them as a first pass and confirm against source, not as independently re-verified ground truth for every row. **Tier and Description are recorded separately for every Skill in this revision** — for the assistants where the source data previously gave only a tier label with no description (Restaurant, Content, Songwriter, Scriptwriter, Sports, Finance, Wealth, Healthcare, Hotel, Education, Support, HR, Product, Marketing, Analytics), the Description shown below is newly written from the Skill's ID, Inputs, and Consumes/Produces — reasonable, but **derived, not sourced**, and should be checked against the actual implementation or original spec before being treated as authoritative. For the assistants where the source data previously gave a description but no tier (CTO, Career, Executive, Legal, Sales, Event), the Tier shown below is newly inferred from each Skill's action-vs-advisory shape (presence of `confirmBeforeSend`/external write access → Represent; production of a usable draft/artifact → Aid; analysis/recommendation only → Advise) and carries the same caveat.
+> Cluster groupings are derived from each Skill's `Consumes`/`Produces` as recorded in the current implementation snapshot this document was built from — treat them as a first pass and confirm against source, not as independently re-verified ground truth for every row. **Tier and Description are recorded separately for every Skill in this revision** — for the assistants where the source data previously gave only a tier label with no description (Restaurant, Content, Songwriter, Scriptwriter, Sports, Finance, Wealth, Healthcare, Hotel, Education, Support, HR, Product, Marketing, Analytics), the Description shown below is newly written from the Skill's ID, Inputs, and Consumes/Produces — reasonable, but **derived, not sourced**, and should be checked against the actual implementation or original spec before being treated as authoritative. For the assistants where the source data previously gave a description but no tier (CTO, Career, Executive, Legal, Sales, Event), the Tier shown below is newly inferred from each Skill's action-vs-advisory shape (presence of `confirmBeforeSend`/external write access → Represent; production of a usable draft/artifact → Aid; analysis/recommendation only → Advise) and carries the same caveat. **Exception, verified against source:** `career-resume-template-manager`'s Tier, Description, and Inputs are now taken directly from `career-resume-template-manager.ts` (`tier: 'aid'`), not inferred.
 
 ## 1. CTO
 **Capability Clusters:**
@@ -144,9 +181,9 @@ Two things, both learned from a prior audit pass: **first**, when a principle na
 
 | ID | Description | Tier | Trigger | Inputs | Config | Consumes | Produces | Design |
 |---|---|---|---|---|---|---|---|---|
-| cto-architecture-tech-debt-evaluator | Produce prioritized modernization roadmap | Advise *(inferred)* | **Schedule** — periodic tech-debt monitoring | systems: name,reliability(0-5),security,scalability,maintainability,cost; requirements: string[]; context: teamSize,stack,constraints | empty | cto-architecture-advisory | scored systems, roadmap with actions | MATCH |
-| cto-cloud-spend-infrastructure-optimizer | Recommend rightsizing and capacity actions | Advise *(inferred)* | **Schedule** — periodic spend monitoring | billingRows: service,spend,utilization(0-1); context: object | empty | cto-infrastructure-query(cost-optimization) | rightsizing recs, savings estimates | MATCH |
-| cto-incident-war-room-synthesizer | Correlate signals into root-cause hypotheses | Advise *(inferred)* | **Event** — fired by incoming incident signals | signals: source,evidence,hypothesis,confidence(0-1); context: object | empty | cto-incident-disaster-readiness | hypotheses, mitigations, stakeholder update | MATCH |
+| cto-architecture-tech-debt-evaluator | Produce prioritized modernization roadmap | Advise *(inferred)* | **User** — a modernization roadmap is requested; `systems` is supplied by the person **(reassigned from Schedule — see 0.14)** | systems: name,reliability(0-5),security,scalability,maintainability,cost; requirements: string[]; context: teamSize,stack,constraints | empty | cto-architecture-advisory | scored systems, roadmap with actions | MATCH |
+| cto-cloud-spend-infrastructure-optimizer | Recommend rightsizing and capacity actions | Advise *(inferred)* | **User** — a spend review is requested; `billingRows` is supplied by the person **(reassigned from Schedule — see 0.14)** | billingRows: service,spend,utilization(0-1); context: object | empty | cto-infrastructure-query(cost-optimization) | rightsizing recs, savings estimates | MATCH |
+| cto-incident-war-room-synthesizer | Correlate signals into root-cause hypotheses | Advise *(inferred)* | **User** — correlation is requested; `signals` is supplied by the person **(reassigned from Event — see 0.14)** | signals: source,evidence,hypothesis,confidence(0-1); context: object | empty | cto-incident-disaster-readiness | hypotheses, mitigations, stakeholder update | MATCH |
 | cto-engineering-action-iac-drift-remediation | Dry-run and apply IaC remediation after confirmation | Represent *(inferred)* | **Event** — fired by detected infrastructure drift; `confirmation` is an input field, not a separate trigger | payload: object; dryRun(bool,default=true); confirmation(bool,default=false) | endpointUrl(URL,required); token(password,required) — legitimate per §0.6, no universal default exists | direct API | response or confirmation-required error | MATCH |
 | cto-team-delivery-health-evaluator | Evaluate DORA metrics, team capacity, sprint velocity | Advise *(inferred)* | **Schedule** — periodic DORA/velocity monitoring | systems: string[]; period: week/month/quarter | deploymentFreqThreshold(1), leadTimeDays(7), failureRate(0.15), mttrHours(24) | cto-infrastructure-query(team-metrics) | DORA assessment, team capacity, sprint velocity | clustered, not orphaned |
 | cto-disaster-recovery-planner | DR readiness with RTO/RPO targets | Advise *(inferred)* | **Schedule** — periodic DR readiness check | systems: name,rto,rpo,backupVerified,lastTested; context: object | rtoTargetMinutes(60), rpoTargetMinutes(15), failoverAuto(false), includeTeams(true) | cto-incident-disaster-readiness | readiness status, assessments, recommendations | clustered, not orphaned |
@@ -155,7 +192,8 @@ Base tool mapping: `get_cloud_billing_metrics→cto-infrastructure-query`, `quer
 
 ## 2. Career
 **Capability Clusters:**
-- **Positioning & Discovery** — `career-job-market-positioning-evaluator`, `career-job-discovery-fit-ranking`, `career-resume-template-manager`
+- **Positioning & Discovery** — `career-job-market-positioning-evaluator`, `career-job-discovery-fit-ranking`
+- **Template Library** — `career-resume-template-manager`; its own cluster, not folded into Positioning & Discovery: it consumes no base tool and is consumed *from* Application & Outreach instead, as a reference source for template selection (`x-referenceSource`) and a `get` delegation from `career-application-execution-orchestrator`
 - **Interview Prep** — `career-interview-compensation-battlecard-creator`, `career-interview-practice-mock-interviewer`
 - **Application & Outreach** — `career-governed-application-outreach-manager`, `career-application-execution-orchestrator`, `career-portal-recruiter-workflow`
 - **Pipeline Tracking** — `career-pipeline-outcome-tracker` (feeds Positioning & Discovery via outcome data)
@@ -178,10 +216,14 @@ All clusters read/write the same Master Career Profile — the shared state is w
 | career-upskill-role-targeted-learning-planner | Upskilling plans for target roles | Advise *(inferred)* | **Event** — fired by a gap surfaced in pipeline outcome data | gaps[], targetRole, currentSkills | empty | reasoning-based | upskilling plan, resources, micro-tasks | MATCH |
 | career-interview-practice-mock-interviewer | Mock interviews with battlecards | Aid *(inferred)* | **User** — practicing is requested | role, company, battlecard | empty | career_interview_prep | transcript, performance, coaching notes | MATCH |
 | career-pipeline-outcome-tracker | Track applications and outcomes | Aid *(inferred)* | **Event** — fired by an application status change | targetRole, company, status, feedback, offerDetails | empty | career_pipeline_report, career_outcome | pipeline reports, outcome records | MATCH |
-| career-resume-template-manager | Resume templates and variants | Aid *(inferred)* | **User** — template creation is requested | templateName, resumeData, targetRole | empty | career_profile_intake, career_add_template | template records, variant management | EXTRA (not in design) |
+| career-resume-template-manager | Manage, edit, upload, and organize resume and cover letter templates (list/get/save/delete, with mustache-variable auto-extraction) | Aid *(sourced from `tier: 'aid'`)* | **User** — a template is listed, viewed, saved, or deleted on request | action(list/save/get/delete, default=list), typeFilter(all/resume/cover-letter), id, name, type(resume/cover-letter), content, tags[], resumeFile(name, mimeType, content — PDF/DOCX/MD/TXT upload) | empty | none — reads/writes the `templates` store directly (`ctx.store`), no base-tool delegation; it is itself a *reference source* for `career-application-execution-orchestrator` (`x-referenceSource`) | template metadata, single-template detail view, or filtered document list | EXTRA (not in design) — inputs are now action/entity-based, not `templateName/resumeData/targetRole`; **NON-COMPLIANT** — exposes an `action` enum; violates §0.9 |
 | career-portal-recruiter-workflow | Recruiter outreach and portal management | Represent *(inferred)* | **Event** — fired by a recruiter message or portal state change | dryRun, applyAt, targetCompany, targetPerson, relationshipStage, channel, connectedSendTool | empty | career_apply_execute, career_networking_outreach | outreach drafts, portal records | MATCH (design separates portal+outreach; code combines) |
 
 Base Tools (`isSkill=false`, 10): career_profile_intake, career_job_discovery, career_rank, career_apply_execute, career_add_template, career_networking_outreach, career_pipeline_report, career_outcome, career_interview_prep, career_advisory
+
+Two consequences of `career-resume-template-manager` owning the `templates` store directly, recorded here so they aren't rediscovered as new findings later:
+- **`career_add_template` is superseded by it, not still upstream of it.** Nothing delegates to `career_add_template`; the user-facing Skill absorbed its function (create/version a template), while the base tool now writes to a store key named `outPath` (`career-add-template.ts:81`) rather than `templates`. It should be deprecated or repointed — it is not a `Consumes` edge of anything.
+- **A live §0.9 leak at the delegation boundary.** Both `career-application-execution-orchestrator.ts:75,82` and `career-application-execution.ts:57` delegate with `{ mode: 'get', id }`, but the Skill reads `input.action` and defaults it to `list` — so those template lookups resolve to `list`, not `get`. The callers are passing exactly the mode-switch field §0.9 forbids, into a Skill whose parameter was renamed and defaulted; the fetch silently returns the library listing instead of the requested template. This is recorded as a defect, not endorsed.
 
 ## 3. Executive
 **Capability Clusters:** four independent clusters, one Skill each — nothing in the data wires these together:
@@ -206,10 +248,10 @@ Base Tools (`isSkill=false`, 10): career_profile_intake, career_job_discovery, c
 
 ## 4. Legal
 **Capability Clusters:** four independent clusters, no wiring between them:
-- **Intake & Triage** — `contract-document-advisory`
+- **Intake & Triage** — `contract-document-advisory-user` (+ `contract-document-advisory-scheduled`)
 - **Legal Research** — `legal-research`
 - **Document Ops** — `matter-document-ops`
-- **Compliance Tracking** — `compliance-tracking`
+- **Compliance Tracking** — `compliance-tracking-user` (+ `compliance-tracking-scheduled`)
 
 **Domain Knowledge:** Contract law, commercial negotiation standards, regulatory compliance (GDPR, SOC2, HIPAA), legal/security liability mitigation
 **Persistent Data:** Standard Playbook & Clause Library, Organizational Risk & Security Thresholds, Active Matter Directory, Historical Contract Archives
@@ -218,10 +260,12 @@ Base Tools (`isSkill=false`, 10): career_profile_intake, career_job_discovery, c
 
 | ID | Description | Tier | Trigger | Inputs | Config | Consumes | Produces | Design |
 |---|---|---|---|---|---|---|---|---|
-| contract-document-advisory | Intake and triage contracts/matters | Advise *(inferred)* | **Event** — fired when a document/redline is received | contractText, matterInfo, counterParty | empty | reasoning-based | classification, priority, risk flag | PARTIAL (code: intake; design: risk assessment) |
+| contract-document-advisory-user | Review a contract you supply: clause risk assessment and issue list | Advise *(inferred)* | **User** — "review this contract" | contractText, contractType, jurisdiction | empty | reasoning-based | classification, priority, risk flag | SPLIT — the User half. Was Event-triggered on "document or redline received" while requiring contractText that the event does not supply; the trigger over-promised |
+| contract-document-advisory-scheduled | Scheduled clause-risk sweep over configured contract stores | Advise *(inferred)* | **Schedule** — weekly contract risk sweep | runReason (optional; scope comes from config) | **required `contractSources`**, optional `tagFilters`, `cadence` | reasoning-based | risk findings per contract, sources scanned | SPLIT — the automated half. Shares the clause heuristics with the User half via `legal/contract-risk-rules.ts` so the two cannot drift. `contractSources` is required so the sweep cannot be configured wide-open |
 | legal-research | Statute and case search synthesis | Advise *(inferred)* | **User** — a research question is asked | statuteQuery, topic, jurisdiction | empty | reasoning-based | research synthesis, precedent analysis | RESTORED |
 | matter-document-ops | Draft, redline, clause analysis, doc ops | Aid *(inferred)* | **User** — a draft/redline is requested | documentData, operation(draft/redline/clause/finalize) | empty | reasoning-based | documents, redlines, clause comparisons | NON-COMPLIANT — exposes required `operation` field; violates §0.9 |
-| compliance-tracking | Compliance obligations and audit horizons | Advise *(inferred)* | **Schedule** — periodic compliance monitoring | complianceParams, regulatoryFeed[], auditHorizon | empty | reasoning-based | compliance status, risk scorecard | PARTIAL (code: compliance; design: risk) |
+| compliance-tracking-user | Record a compliance check against a regulation and jurisdiction you choose | Advise *(inferred)* | **User** — "check this against GDPR" | regulation, jurisdiction, effectiveDate, documentText (optional) | empty | reasoning-based | compliance status, risk scorecard | SPLIT — the User half. Reports `documentProvided` honestly and asserts no verdict: no rule engine is wired |
+| compliance-tracking-scheduled | Recurring compliance scan across configured sources | Advise *(inferred)* | **Schedule** — monthly compliance audit | runReason (optional; scope comes from config) | **required `sources`**, optional `policySetId`, `scanWindow`, `notifyOn` | reasoning-based | scope reconciliation, controls counted | SPLIT — the automated half. Counts controls rather than evaluating them, and says so; `rulesEvaluated` is 0 until a rule engine lands |
 
 ## 5. Sales
 **Capability Clusters:** three independent clusters — a plausible narrative order exists ("find leads → outreach → close"), but nothing in `Consumes` wires them together, so they stay parallel:
@@ -311,11 +355,11 @@ Trend research plausibly informs creative production but is not shown as wired t
 | songwriter_genre_trend_evaluator | Monitor genre and market trends *(derived)* | Advise | **Schedule** — periodic trend monitoring | genre, market, timeframe, provider | endpointUrl+apiKey+provider(enum) | external intel | trend report | RESTORED |
 | songwriting_lead_sheet_demo_dispatcher | Produce lead sheets and charts on request *(derived)* | Aid | **User** — a lead sheet is requested | format, theme, genre, mood | empty | creative_drafting | lead sheets, charts | EXTRA |
 | songwriting_musical_lyric_cocreation | Co-create lyrics, chord progressions, and beat sheets *(derived)* | Aid | **User** — co-creation is requested | theme, mood, structure, topic, duration | empty | creative_drafting | chord progressions, beat sheets | MATCH |
-| songwriting_lyric_prosody_evaluator | Evaluate lyric meter, rhyme, and stress for structural improvements *(derived)* | Advise | **Event** — fired by newly co-created lyrics | lyrics, meter, rhyme, stress | empty | reasoning-based | structural improvements | MATCH |
+| songwriting_lyric_prosody_evaluator | Evaluate lyric meter, rhyme, and stress for structural improvements *(derived)* | Advise | **User** — prosody is requested; `lyrics` is supplied by the person **(reassigned from Event — see 0.14)** | lyrics, meter, rhyme, stress | empty | reasoning-based | structural improvements | MATCH |
 
 ## 10. Scriptwriter
 **Capability Clusters:** one cluster, plausibly sequential — of every Assistant in this document, the research → theme → outline → characters → draft narrative applies most literally here. **Wiring status: unverified**, same caveat as Content (§2, §8) — check `scriptwriter/index.ts` before relying on the sequential claim.
-- **Script Production** — `scriptwriting-genre-market-evaluator` → `scriptwriting-scene-beat-dialogue-copilot` → `scriptwriting-narrative-arc-pacing-evaluator` → `scriptwriting-script-formatting-submission-manager`
+- **Script Production** — `scriptwriting-genre-market-evaluator-user` (+ `scriptwriting-market-report-scheduled`) → `scriptwriting-scene-beat-dialogue-copilot` → `scriptwriting-narrative-arc-pacing-evaluator` → `scriptwriting-script-formatting-submission-manager`
 
 **Domain Knowledge:** Screenwriting standards (Final Draft/Fountain format), narrative theory (Save the Cat, Hero's Journey), dialogue subtext principles, film/TV pacing
 **Persistent Data:** Screenplay Drafts, Character Bibles, World/Setting Guides, Scene Breakdown Logs
@@ -324,9 +368,10 @@ Trend research plausibly informs creative production but is not shown as wired t
 
 | ID | Description | Tier | Trigger | Inputs | Config | Consumes | Produces | Design |
 |---|---|---|---|---|---|---|---|---|
-| scriptwriting-narrative-arc-pacing-evaluator | Evaluate pacing and structure of drafted scenes *(derived)* | Advise | **Event** — fired by newly drafted scenes; **edge unverified, see above** | scriptText, structure, actConfig | empty | reasoning-based | rewrite recs, pacing assessment | MATCH |
+| scriptwriting-narrative-arc-pacing-evaluator | Evaluate pacing and structure of drafted scenes *(derived)* | Advise | **User** — a pacing review is requested; `script` is supplied by the person **(reassigned from Event — see 0.14)** | scriptText, structure, actConfig | empty | reasoning-based | rewrite recs, pacing assessment | MATCH |
 | scriptwriting-scene-beat-dialogue-copilot | Draft scene beats and dialogue *(derived)* | Aid | **User** — drafting is requested | sceneData, characters, dialogue | empty | creative_drafting | beat sheets, loglines | MATCH |
-| scriptwriting-genre-market-evaluator | Monitor genre and market fit *(derived)* | Advise | **Schedule** — periodic market monitoring | genre, market, format | endpointUrl+apiKey | external intel | genre fit, market comparison | RESTORED |
+| scriptwriting-genre-market-evaluator-user | Evaluate a script or outline against genre craft conventions *(derived)* | Advise | **User** — "is this ready for the market?" | genre, script, topic, targetFormat | endpointUrl+apiKey | external intel | genre fit, structural readiness | SPLIT — the User half. Was Schedule-triggered while requiring a genre and a script that had not been written yet |
+| scriptwriting-market-report-scheduled | Recurring per-genre and per-region market report | Advise | **Schedule** — monthly genre market report | runReason (optional; scope comes from config) | **required `genres`**, optional `regions`, `cadence` | local project records only | per-genre demand tally | SPLIT — the automated half. Builds its report from stored project records and sets `externalDataFetched: false`, because a market report that reads as chart data it does not have is worse than no report |
 | scriptwriting-script-formatting-submission-manager | Format and prepare finished scripts for submission *(derived)* | Represent | **Event** — fired when a script is finalized/approved; **edge unverified, see above** | format, content, submissionTarget | empty | formatting tools | formatted scripts | EXTRA |
 
 ## 11. Sports — dual-group, isolated (DEC-010)
@@ -354,6 +399,8 @@ Trend research plausibly informs creative production but is not shown as wired t
 | sports-matchup-odds-explainer | Explain matchup odds and market analysis *(derived)* | Advise | **Event** — fired by odds becoming available / line movement | oddsData, marketData | empty | reasoning-based | matchup analysis | MATCH (responsible-play required) |
 | sports-bankroll-co-pilot | Check bankroll sizing against user limits *(derived)* | Aid | **Schedule** — periodic bankroll check | bankrollRules, unitLimits, exposure | empty | reasoning-based | sizing analysis | MATCH |
 | sports-line-alert-dispatcher | Dispatch contextualized line-movement alerts *(derived)* | Represent | **Event** — fired by line movement | lineData, bankrollState | empty | reasoning-based | contextualized alerts | MATCH (barred from sportsbook) |
+| sports-predictor-ad-hoc | Produce in-game win probability for a matchup you name | Advise | **User** — "model this game right now" | event, sport, gameStatus, playByPlay | empty | reasoning-based | predictions | SPLIT — the ad-hoc half. Was Event-triggered **and** `isSkill: false`, so it was neither automated nor user-runnable: a working predictor invisible in the user's Skill list. Now user-triggered and `isSkill: true` (§0.3) |
+| sports-ingame-predictive-modeling-scheduled | Report win-probability movement for the configured scope only | Advise | **Schedule** — every 5 min within configured windows | runReason (optional; scope comes from config) | **`anyOf`: `matchIds` \| `teams` \| `sports`**, optional `dateRange`, `cadence` | local live-games store | scoped predictions and deltas | SPLIT — the automated half. The `anyOf` is the scope guard: the original had no config at all, so nothing stopped it ranging over every live game. Refuses to run when no selector resolves, and reports `delta: null` for a game it has not seen before rather than inventing movement |
 
 ## 12. Finance
 **Capability Clusters:** four independent clusters:
@@ -414,7 +461,7 @@ Trend research plausibly informs creative production but is not shown as wired t
 **Capability Clusters:**
 - **Guest Management** — `hotel-guest-experience`, `hotel-reservations-guest-profile`
 - **Revenue Advisory** — `hotel-revenue-performance-advisory`
-- **Property Operations** — `hotel-property-operations`
+- **Property Operations** — `hotel-maintenance-dispatcher`
 
 **Domain Knowledge:** Hotel metrics (ADR, RevPAR, GOPPAR), PMS operations, guest service standards, yield management, hotel maintenance triage
 **Persistent Data:** Property Management System (PMS) Records, Guest Profiles & Preferences, Local Concierge Directory, Maintenance Log, Amenity Inventory
@@ -423,16 +470,19 @@ Trend research plausibly informs creative production but is not shown as wired t
 
 | ID | Description | Tier | Trigger | Inputs | Config | Consumes | Produces | Design |
 |---|---|---|---|---|---|---|---|---|
-| hotel-revenue-performance-advisory | Recommend pricing from ADR/RevPAR performance *(derived)* | Advise | **Schedule** — ongoing revenue monitoring | adr, revpar, occupancy, laborCost | empty | reasoning-based | revenue recs, pricing | MATCH |
+| hotel-revenue-performance-advisory | Recommend pricing from ADR/RevPAR performance *(derived)* | Advise | **User** — a property's revenue is reviewed on request; `propertyId` is supplied by the person **(reassigned from Schedule — see 0.14)** | adr, revpar, occupancy, laborCost | empty | reasoning-based | revenue recs, pricing | MATCH |
 | hotel-guest-experience | Respond to guest service requests *(derived)* | Aid | **Event** — fired by a guest service request | guestProfile, serviceRequests | empty | reasoning-based | concierge KB, responses | MATCH |
-| hotel-reservations-guest-profile | Manage reservations and loyalty profiles *(derived)* | Represent | **Event** — fired by a reservation request | operation, partySize, guestName, status, channel | confirmBeforeSend=true | external API | bookings, loyalty | NON-COMPLIANT — exposes required `operation` field; violates §0.9 (missed by the prior audit despite the identical pattern being caught one row below on `hotel-property-operations`) |
-| hotel-property-operations | Dispatch maintenance and operations orders *(derived)* | Represent | **Event** — fired by a reported maintenance/ops issue | operation, roomStatus, maintenanceTask | confirmBeforeSend | external API | dispatch orders | NON-COMPLIANT — exposes required `operation` field; violates §0.9 |
+| hotel-reservations-guest-profile | Manage reservations and loyalty profiles *(derived)* | Represent | **Event** — fired by a reservation request | operation, partySize, guestName, status, channel | confirmBeforeSend=true | external API | bookings, loyalty | NON-COMPLIANT — exposes required `operation` field; violates §0.9 (missed by the prior audit despite the identical pattern being caught one row below on `hotel-maintenance-dispatcher`) |
+| hotel-maintenance-dispatcher | Dispatch maintenance and operations orders *(derived)* | Represent | **User** — a fault is reported; `entity`/`issue` supplied by the person | entity, roomStatus, maintenanceTask, issue | confirmBeforeSend | external API | dispatch orders | RENAMED — design called this `hotel-maintenance-dispatcher`, which does not exist in code; the maintenance/ops half is implemented here, and `hotel-room-status-manager`, `hotel-housekeeping-manager` and `hotel-inventory-manager` are separate rows below |
+| hotel-room-status-manager | Track room occupancy and housekeeping status | Represent | **User** — room status is updated | roomId, status, notes | confirmBeforeSend | external PMS | room status | NOT IN DESIGN — added to match code |
+| hotel-housekeeping-manager | Assign and schedule housekeeping | Represent | **User** — housekeeping is dispatched or a room is marked clean | roomId, assignee, status | confirmBeforeSend | external PMS | housekeeping rounds | NOT IN DESIGN — added to match code |
+| hotel-inventory-manager | Track hotel inventory and reorder thresholds | Represent | **User** — stock is checked or adjusted | item, quantity, threshold | confirmBeforeSend | external PMS | inventory status | NOT IN DESIGN — added to match code |
 
 ## 16. Education
 **Capability Clusters:**
-- **Learner Insight** — `education_learner_insight` → `education_adaptive_personalization` (real producer/consumer edge: `adaptive_personalization` explicitly consumes `learner-insight`'s output, the cleanest evidenced sequential case in this document). Note: a placeholder config bug on `education_adaptive_personalization` needs fixing before this cluster clears §1.
-- **Assessment** — `education_lesson_assessment_drafting`
-- **Resource Library** — `education_resource_library` (design intended one skill; code has it split into two — reconcile)
+- **Learner Insight** — `education-learner-insight` → `education-adaptive-personalization` (real producer/consumer edge: `adaptive_personalization` explicitly consumes `learner-insight`'s output, the cleanest evidenced sequential case in this document). Note: a placeholder config bug on `education-adaptive-personalization` needs fixing before this cluster clears §1.
+- **Assessment** — `education-lesson-assessment-drafting-user` (+ `education-lesson-assessment-drafting-scheduled`)
+- **Resource Library** — `education-resource-library` (design intended one skill; code has it split into two — reconcile)
 
 **Domain Knowledge:** Pedagogical frameworks (Bloom's Taxonomy, Spaced Repetition), curriculum design, assessment scoring methods, student engagement metrics
 **Persistent Data:** Curriculum Standards & Rubrics, Student Performance History, Knowledge Gap Maps, Course Material Libraries
@@ -441,14 +491,15 @@ Trend research plausibly informs creative production but is not shown as wired t
 
 | ID | Description | Tier | Trigger | Inputs | Config | Consumes | Produces | Design |
 |---|---|---|---|---|---|---|---|---|
-| education_learner_insight | Monitor learner data via LMS integration *(derived)* | Advise | **Schedule** — periodic learner-data monitoring | learnerData, lmsConnection | endpointUrl+apiKey | external LMS API | learner profiles | RESTORED |
-| education_adaptive_personalization | Personalize learning paths from learner insight *(derived)* | Advise | **Event** — fired by `education_learner_insight` output | differentiationParams, pacingRules | placeholder bug | learner-insight | learning paths | RESTORED (bug noted — fix before §1) |
-| education_lesson_assessment_drafting | Grade submissions and draft feedback *(derived)* | Represent | **Event** — fired by a submission received | rubricCriteria, submissions | empty | spaced-repetition | graded results, feedback | MATCH |
-| education_resource_library | Curate learning resources *(derived)* | Aid | **User** — resources are requested | subject, level, accessibility | empty | resource-lib | curated resources | SPLIT (design=1 skill, code=2) |
+| education-learner-insight | Monitor learner data via LMS integration *(derived)* | Advise | **Schedule** — periodic learner-data monitoring | learnerData, lmsConnection | endpointUrl+apiKey | external LMS API | learner profiles | RESTORED |
+| education-adaptive-personalization | Personalize learning paths from learner insight *(derived)* | Advise | **User** — a learner is submitted for personalisation; `learner` is supplied by the person (reassigned from Event per §0.14) | learner, insightData, courseContext, teacherGoals | empty | education-learner-insight | learning paths | SPLIT — trigger reassigned for reachability. The `placeholder bug` this row previously recorded: the handler does read its `learner` input (verified during the trigger audit), but the deeper placeholder concern was not re-examined, so do not read this as that bug being closed |
+| education-lesson-assessment-drafting-user | Draft a lesson, quiz, activity, or content unit from the subject and topic you give it | Represent | **User** — "draft a lesson plan on fractions" | task, subject, topic, grade, duration | empty | spaced-repetition | drafted unit, store path | SPLIT — the User half. Was Event-triggered on "a submission is received for grading" while requiring task/subject/topic that a grading event does not supply. An unrecognised `task` now returns an explicit error instead of a bare `return`, which emitted no output envelope at all |
+| education-lesson-assessment-drafting-scheduled | Find configured courses with no assessment drafted and fill the gap | Represent | **Schedule** — weekly assessment gap sweep | runReason (optional; scope comes from config) | **required `courseId`**, optional `gradeLevels`, `cadence` | local course store | courses swept, gaps filled | SPLIT — the automated half. Every generated draft is flagged `requiresTeacherReview: true`, because a placeholder outline from course metadata is not a teacher-reviewed assessment |
+| education-resource-library | Curate learning resources *(derived)* | Aid | **User** — resources are requested | subject, level, accessibility | empty | resource-lib | curated resources | SPLIT (design=1 skill, code=2) |
 
 ## 17. Support
 **Capability Clusters:**
-- **Ticket Lifecycle** — `ticket-understanding` → `response-drafting` → `ticket-ops`, sequential per ticket, concurrent across tickets — the clearest illustration in this document of "sequential per instance, not single-stream for the Assistant"
+- **Ticket Lifecycle** — `support-resolve-ticket` (+ 3 sibling Skills) → `response-drafting-user` (+ `response-drafting-notifier`) → `ticket-ops`, sequential per ticket, concurrent across tickets — the clearest illustration in this document of "sequential per instance, not single-stream for the Assistant"
 - **Analytics & Planning** — `analytics-planning`
 
 **Domain Knowledge:** Customer success metrics (CSAT, NPS, Churn Rate), SLA management, support escalation tiers, ticket triage
@@ -458,15 +509,19 @@ Trend research plausibly informs creative production but is not shown as wired t
 
 | ID | Description | Tier | Trigger | Inputs | Config | Consumes | Produces | Design |
 |---|---|---|---|---|---|---|---|---|
-| ticket-understanding | Classify tickets and flag account health/churn risk *(derived)* | Advise | **Event** — fired by a new ticket | ticketData, accountHistory | empty | reasoning-based | classification, health, churn flag | PARTIAL |
-| response-drafting | Draft ticket responses from the knowledge base *(derived)* | Aid | **Event** — fired by `ticket-understanding`'s classification | ticketContext, kbArticles | empty | query_knowledge_base | responses, plans | MATCH |
+| support-resolve-ticket | Resolve and summarise a support ticket | Advise | **User** — a ticket is pasted for resolution | ticket, issue | empty | reasoning-based | resolution | SPLIT — design had one `support-resolve-ticket` (+ 3 sibling Skills); code splits it into the four rows below |
+| support-sentiment-analysis | Read customer sentiment from a message | Advise | **User** — a message is submitted for scoring | text, source | empty | reasoning-based | sentiment score | SPLIT (as above) |
+| support-issue-analysis | Group and diagnose issues from an issue description | Advise | **User** — an issue is submitted for analysis | issueText, customerInfo, analysisType | empty | reasoning-based | issue analysis | SPLIT (as above) |
+| support-search-kb | Search the knowledge base for an issue | Advise | **User** — a search is requested | query | empty | resource-lib | knowledge-base hits | SPLIT (as above) |
+| response-drafting-user | Draft a reply to a customer message you supply | Aid | **User** — "draft a reply to this customer" | customerMessage, ticket, tone, template, includeKB | empty | query_knowledge_base | responses, plans | SPLIT — the User half. The trigger was the clearest instance of the §0.14 defect: **Event** on `support-resolve-ticket`'s classification, while *requiring* `customerMessage`, which a classification output does not supply |
+| response-drafting-notifier | Draft replies for queued inbound messages and notify configured channels | Aid | **Schedule** — every 15 minutes | runReason (optional; scope comes from config) | **required `eventTypes`**, optional `targetChannels`, `templateId` | local queue stores | drafted replies, drained/skipped counts | SPLIT — the automated half. Shares the reply composer with the User half via `support/response-drafting-shared.ts`. Counts unparseable queue entries as `skipped` so a queue full of junk cannot report a clean run |
 | ticket-ops | Update ticket status and route escalations *(derived)* | Represent | **Event** — fired by a response/status change | ticketId, status, routingTarget | empty | update_helpdesk_status | status, escalations | MATCH |
 | analytics-planning | Review CSAT and support analytics *(derived)* | Advise | **Schedule** — periodic CSAT/analytics review | metrics, timeRange | empty | calculate_csat_score | analytics reports | RESTORED |
 
 ## 18. HR
 **Capability Clusters:**
-- **Recruiting Pipeline** — `candidate-screening`, `recruiting-ops`
-- **Analytics & Compliance** — `hiring-analytics-compliance`
+- **Recruiting Pipeline** — `hr-screen-resume`, `hr-assess-candidate`, `hr-draft-jd-interview-kit`, `hr-interview-scheduling-user`, `hr-interview-scheduling-automated` (these last two also replace the removed `hr-schedule-interview`)
+- **Analytics & Compliance** — `hr-hiring-analytics`, `hr-compliance-check`
 
 All three are real, implemented, design-matched Skills. The open item is confirming each is not still running stub logic, then exposing them — not building anything from scratch.
 
@@ -477,14 +532,19 @@ All three are real, implemented, design-matched Skills. The open item is confirm
 
 | ID | Description | Tier | Trigger | Inputs | Config | Consumes | Produces | Design |
 |---|---|---|---|---|---|---|---|---|
-| candidate-screening | Screen applications and produce assessment scores *(derived)* | Represent | **Event** — fired by a new application received | resumeText, requirements, candidateName, assessmentData | confirmBeforeSend=true, endpoint, maxRetry | HR_SCREENING_ENDPOINT | screening scores, assessments | MATCH |
-| recruiting-ops | Draft JDs/interview kits and schedule interviews *(derived)* | Aid | **Split candidate** — bundles a User-triggered sub-capability (draft a JD) with an Event-triggered one (candidate passed screening, schedule interview); cannot resolve to one honest trigger as currently scoped | (currently unified under an `operation` field — remove per §0.9 once split) | confirmBeforeSend=true, endpoint, apiKey | HR_RECRUITING_ENDPOINT | JDs, kits, schedules | MATCH — flag for split per §0.9/§6 |
-| hiring-analytics-compliance | Report hiring metrics and compliance checks *(derived)* | Advise | **Schedule** — periodic compliance/analytics monitoring | dateRange, data | HR_HOME | reasoning-based | metrics, reports, checks | MERGED (design: 2 distinct; code: 1 combined) |
+| hr-screen-resume | Screen a resume for role fit | Advise | **User** — a resume is submitted | resumeText, jobRequirements | confirmBeforeSend=true | HR_SCREENING_ENDPOINT | screening scores | SPLIT — design called this `hr-screen-resume`, `hr-assess-candidate`; code implements screening and assessment as two Skills |
+| hr-assess-candidate | Score a candidate against a role | Represent | **User** — a candidate is submitted for assessment | resumeText, candidateName, assessmentData | confirmBeforeSend=true | HR_SCREENING_ENDPOINT | assessments | SPLIT (as above); reassigned from Event per §0.14 |
+| hr-draft-jd-interview-kit | Draft JDs and interview kits | Aid | **User** — a JD or scorecard is requested | role, level, competencies | confirmBeforeSend=true | reasoning-based | JD, interview kit | SPLIT — design called this `hr-draft-jd-interview-kit`, `hr-trigger-interview-scheduling`, which bundled a User-triggered JD builder with an Event-triggered scheduler (§6); the User half is this row |
+| hr-interview-scheduling-user | Book an interview you are scheduling by hand | Aid | **User** — "schedule an interview for this candidate" | data, dryRun, confirmation | confirmBeforeSend=true | HR_RECRUITING_ENDPOINT | scheduled interviews | SPLIT (as above); the User half |
+| hr-interview-scheduling-automated | Schedule interviews for candidates that pass screening, against configured policy | Aid | **Event** — fired by a candidate passing screening | candidate (opaque payload), dryRun, confirmation | confirmBeforeSend=true, **required `calendarId`**, optional `roundTypes`, `timeWindowRules` | HR_RECRUITING_ENDPOINT | scheduled interviews, local `scheduling` record | SPLIT (as above); the Event half. `roundTypes` lives in config rather than input, so a screening event cannot book a round the operator did not enable. The payload is passed through opaquely to keep raw internal IDs out of the user-facing schema. Also absorbs `hr-schedule-interview`, which claimed the same Event trigger for the same job and is the one remaining interview scheduler |
+| ~~hr-schedule-interview~~ | — | — | **Event** — "Candidate passed screening" | candidateName | confirmBeforeSend=true | HR_SCREENING_ENDPOINT | scheduling record | **REMOVED 2026-10-01** — duplicated `hr-interview-scheduling-automated`: same Event trigger, same job, same `interview` stage, and never bound to the HR Assistant, so it was unreachable. Its one unique behaviour, a durable local `scheduling` record written on success, now lives in the automated half. Two Skills cannot both own one trigger (§0.14), so the pair replaces it |
+| hr-compliance-check | Report hiring compliance checks | Advise | **Schedule** — periodic compliance audit | dateRange, data, filters | HR_HOME | reasoning-based | compliance checks | SPLIT — design called this `hr-hiring-analytics`, `hr-compliance-check`, which merged two distinct Skills (§6) |
+| hr-hiring-analytics | Report hiring metrics | Advise | **Schedule** — periodic hiring pipeline report | dateRange, data, filters | HR_HOME | reasoning-based | metrics, reports | SPLIT — see `hr-compliance-check` |
 
 ## 19. Product
 **Capability Clusters:**
 - **Planning** — `create-roadmap`, `write-prd`
-- **Analytics** — `product-analytics-insight`
+- **Analytics** — `product-data-analysis-user` (+ `product-insights-scheduled`)
 - **Delivery Sync — not yet a cluster (open consolidation debt, §6):** `product-jira`, `product-confluence`, `product-slack`, `product-calendar`, `product-markdown-parsing` remain five unconsolidated fragments. Must not reach general availability individually — build one orchestrating Skill on top of them first.
 
 **Domain Knowledge:** Product management frameworks (RICE, WSJF, Jobs-to-be-Done), Agile/Scrum methodologies, user telemetry interpretation
@@ -496,7 +556,8 @@ All three are real, implemented, design-matched Skills. The open item is confirm
 |---|---|---|---|---|---|---|---|---|
 | create-roadmap | Produce a prioritized roadmap *(derived)* | Advise | **User** — a roadmap update is requested | initiatives, strategyDocs | empty | reasoning-based | prioritized roadmap | MATCH |
 | write-prd | Draft PRDs and user stories *(derived)* | Aid | **User** — a PRD is requested for a specific requirement | requirements, userStories | empty | reasoning-based | PRDs, user stories | MATCH |
-| product-analytics-insight | Analyze product metrics around a launch *(derived)* | Advise | **Event** — fired by a launch | metric, data, dates | empty | reasoning-based | analysis results | RESTORED |
+| product-data-analysis-user | Analyze a metric you name, on demand *(derived)* | Advise | **User** — a metric is requested; `metric` is supplied by the person | metric, dimensions, filters, startDate, endDate | baseUrl+apiToken | PRODUCT_ANALYTICS_API_URL | analysis results | SPLIT — the User half. Was Event-triggered on "a product launch or release event" while requiring a `metric` the event does not supply |
+| product-insights-scheduled | Recurring metrics sweep over the configured metrics and segments | Advise | **Schedule** — hourly metrics sweep | runReason (optional; scope comes from config) | **required `metrics`**, optional `segments`, `cadence`, `thresholds` | PRODUCT_ANALYTICS_API_URL | per-metric results | SPLIT — the automated half. Reports `partial` with the unreachable metric names rather than a clean sweep when a query fails |
 | (product-jira, product-confluence, product-slack, product-calendar, product-markdown-parsing) | Represent backlog sync *(fragments, no unified description)* | Represent | — | — | — | — | — | SPLIT across 5 (no single orchestrator) — see §6 |
 
 ## 20. Marketing
@@ -516,6 +577,8 @@ All three are real, implemented, design-matched Skills. The open item is confirm
 | plan-campaign | Produce a campaign plan *(derived)* | Advise | **User** — a campaign plan is requested | campaignName, budget, channels | empty | reasoning-based | campaign plan | MATCH |
 | analyze-performance | Review campaign performance *(derived)* | Advise | **Schedule** — periodic performance monitoring | metrics, channel, dateRange | empty | reasoning-based | performance reports | MATCH |
 | marketing-content-generation | Generate ad copy and content sequences *(derived)* | Aid | **Event** — fired by a content brief | contentType, contentData | confirmBeforeSend | CMS endpoint | ad copy, sequences | SPLIT (1 of 3) — see §6 |
+| marketing-analysis-user | Dispatch an ad-hoc marketing operation to one channel | Represent | **User** — "draft this campaign for social" | targetChannel, data | confirmBeforeSend | marketing-* (7 lower-order tools) | dispatched campaign content | SPLIT + RENAME — was `marketing-center`, Event-triggered on a "delivery sync event" while requiring a `targetChannel` the sync event does not carry. An unknown channel now returns an explicit error instead of a bare `return` that emitted no output envelope |
+| marketing-reports-scheduled | Recurring campaign report across configured campaigns and channels | Advise | **Schedule** — weekly campaign report | runReason (optional; scope comes from config) | **required `campaignIds`**, optional `channels`, `reportCadence` | marketing-market-research (lower-order) | per-campaign report | SPLIT — the automated half of the marketing-center decomposition. Reports `partial` naming the campaigns it could not report on |
 | marketing-social-media | Schedule and post social content *(derived)* | Represent | **Schedule** — posts run on a configured cadence | platform, message, schedule | confirmBeforeSend | social APIs | scheduled posts | SPLIT (1 of 3) — see §6 |
 | marketing-seo | Audit SEO performance *(derived)* | Aid | **Schedule** — periodic SEO audit | url, keywords | empty | SEO API | audit reports | EXTRA |
 | marketing-market-research | Produce market research reports *(derived)* | Aid | **User** — specific research is requested | researchQuery, scope | empty | research API | market reports | RESTORED |
@@ -524,7 +587,7 @@ All three are real, implemented, design-matched Skills. The open item is confirm
 
 ## 21. Analytics
 **Capability Clusters:**
-- **Business Insight Reporting** — `analytics_business_insight_report` only. `analytics-grounded-reporting` and `analytics-warehouse-query` are wrapper duplicates with no distinct value — deprecate, don't cluster them as if they were separate capabilities.
+- **Business Insight Reporting** — `analytics-adhoc-query-evaluator`, `analytics-scheduled-trend-monitor` only. `analytics-grounded-reporting` and `analytics-warehouse-query` are wrapper duplicates with no distinct value — deprecate, don't cluster them as if they were separate capabilities.
 
 **Domain Knowledge:** Business intelligence architectures, SQL/data modeling principles, statistical trend analysis, cross-functional KPI frameworks
 **Persistent Data:** Data Warehouse Schema Mappings, Metric Definitions & KPI Dictionary, Historical Query Cache
@@ -533,9 +596,10 @@ All three are real, implemented, design-matched Skills. The open item is confirm
 
 | ID | Description | Tier | Trigger | Inputs | Config | Consumes | Produces | Design |
 |---|---|---|---|---|---|---|---|---|
-| analytics_business_insight_report | Produce business insight reports and trend monitoring *(derived)* | Advise | **Split candidate** — `mode` spans an ad hoc query (User-triggered) and trend monitoring (Schedule-triggered); cannot resolve to one honest trigger as currently scoped | mode, metric, provider, warehouse | endpointUrl+apiKey+provider(self-wrapping) | self | insights, trends, results | MATCH — flag for split per §0.9/§6 |
-| analytics-grounded-reporting | Pass-through wrapper for grounded reporting *(derived)* | Advise | — | metric, dataset | empty | analytics_business_insight_report | reports | EXTRA wrapper — deprecate, see §6 |
-| analytics-warehouse-query | Pass-through wrapper for warehouse queries *(derived)* | Advise | — | query | empty | analytics_business_insight_report | results | EXTRA wrapper — deprecate, see §6 |
+| analytics-adhoc-query-evaluator | Answer an ad hoc business question on demand | Advise | **User** — a question is asked | metric, question, filters, dateRange | endpointUrl+apiKey+provider | warehouse | insights, results | SPLIT — design called this `analytics-adhoc-query-evaluator`, `analytics-scheduled-trend-monitor`, whose `mode` spanned an ad hoc query (User) and trend monitoring (Schedule) and so could not resolve to one honest trigger (§6); this is the User half |
+| analytics-scheduled-trend-monitor | Monitor chosen metrics on a schedule | Advise | **Schedule** — periodic trend monitoring | metric, dataset, period, query, provider | endpointUrl+apiKey+provider | warehouse | trends | SPLIT (as above); the Schedule half |
+| ~~analytics-grounded-reporting~~ | — | — | — | — | — | — | — | NOT IN CODE — deprecated per §6. The real Skill is `analytics-adhoc-query-evaluator` above |
+| ~~analytics-warehouse-query~~ | — | — | — | — | — | — | — | NOT IN CODE — deprecated per §6 |
 
 ---
 
@@ -557,13 +621,13 @@ All three are real, implemented, design-matched Skills. The open item is confirm
 | Finance | 4 | 4 | `reporting-data-ops` not implemented; descriptions derived, verify; Domain KB delivery TBD |
 | Wealth | 2 | 4 | Descriptions derived, verify; Domain KB delivery TBD |
 | Healthcare | 3 | 5 | Descriptions derived, verify; Domain KB delivery TBD |
-| Hotel | 3 | 4 | Both `hotel-reservations-guest-profile` (newly flagged) and `hotel-property-operations` expose `operation`; descriptions derived, verify; Domain KB delivery TBD |
+| Hotel | 3 | 4 | Both `hotel-reservations-guest-profile` (newly flagged) and `hotel-maintenance-dispatcher` expose `operation`; descriptions derived, verify; Domain KB delivery TBD |
 | Education | 3 | 4 | Placeholder config bug on `adaptive_personalization`; resource-library split reconciliation; descriptions derived, verify; Domain KB delivery TBD |
 | Support | 2 | 4 | Descriptions derived, verify; Domain KB delivery TBD |
-| HR | 2 | 3 | `recruiting-ops` split candidate (§6); descriptions derived, verify; Domain KB delivery TBD |
+| HR | 2 | 5 | interview-scheduling split **resolved** into `hr-interview-scheduling-user` / `hr-interview-scheduling-automated` (§6), which together also replace the duplicate `hr-schedule-interview`; descriptions derived, verify; Domain KB delivery TBD |
 | Product | 2 + 1 unconsolidated | 3 + 5 | 5-way delivery-sync consolidation debt (§6); descriptions derived, verify; Domain KB delivery TBD |
 | Marketing | 3 + 1 unconsolidated | 5 + 3 | 3-way execution consolidation debt (§6); research "2 skills for 1 design"; descriptions derived, verify; Domain KB delivery TBD |
-| Analytics | 1 | 1 + 2 wrappers | `analytics_business_insight_report` split candidate; 2 wrappers to deprecate (§6); descriptions derived, verify; Domain KB delivery TBD |
+| Analytics | 1 | 1 + 2 wrappers | `analytics-adhoc-query-evaluator`, `analytics-scheduled-trend-monitor` split candidate; 2 wrappers to deprecate (§6); descriptions derived, verify; Domain KB delivery TBD |
 
 **Standing requirements that apply across every Assistant, not called out per row:**
 - No Skill is registered until it clears §1 in full — this is not tracked via any flag.

@@ -67,6 +67,25 @@ function remoteCall(method, collection, key, body) {
 function createRuntimeContext(opts) {
   const options = opts || {};
   const input = typeof __tool_input !== 'undefined' ? __tool_input : {};
+  // Prefer the values the caller passes in. The globals are only a fallback for
+  // direct in-module use: this file is pulled in with require(), so it has a
+  // scope of its own and cannot see the calling script's variables. Reading them
+  // here always yielded an empty config, so every Skill silently ran with no
+  // settings and no credentials.
+  const config = options.config
+    || (typeof __skill_config !== 'undefined' && __skill_config ? __skill_config : {});
+  const credentials = options.credentials
+    || (typeof __skill_credentials !== 'undefined' && __skill_credentials ? __skill_credentials : {});
+
+  /**
+   * Resolve one declared credential, or undefined when it is not configured.
+   * Handlers should treat undefined as "not connected" and say so, not guess.
+   */
+  function getCredential(logicalKey) {
+    const value = credentials[logicalKey];
+    return typeof value === 'string' && value.length > 0 ? value : undefined;
+  }
+
   const persistenceEnvVar = options.persistenceEnvVar || 'STORAGE_DIR';
   const baseDir = (typeof process !== 'undefined' && process.env && process.env[persistenceEnvVar]) || '/tmp/stage7';
   const collection = deriveCollection(persistenceEnvVar);
@@ -259,6 +278,9 @@ function createRuntimeContext(opts) {
 
   return {
     input,
+    config,
+    credentials,
+    getCredential,
     store,
     emit,
     delegate,

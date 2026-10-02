@@ -1,3 +1,7 @@
+// These four Support intake Skills take the ticket, message, issue text or query
+// as their input and there is no wired helpdesk connector that supplies it, so a
+// person is the only possible invoker. They were Event-triggered, which left
+// them unreachable as bound (design 0.3/0.14).
 // @ts-nocheck
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, SchemaProps } from '../code-skill-factory';
@@ -27,7 +31,7 @@ export const SUPPORT_RESOLVE_TICKET = createDeclarativeCodeSkill({
     required: ['success'],
   },
   triggers: [
-    { kind: 'event', on: 'A new support ticket is received' },
+    { kind: 'user', phrase_examples: ['Resolve this support ticket', 'Walk me through this ticket', 'Draft the resolution for this issue'] },
   ],
   isSkill: true,
   manifest: {
@@ -72,7 +76,7 @@ export const SUPPORT_SENTIMENT_ANALYSIS = createDeclarativeCodeSkill({
     required: ['success'],
   },
   triggers: [
-    { kind: 'event', on: 'A new support ticket is received' },
+    { kind: 'user', phrase_examples: ['Read the sentiment of this message', 'Is this customer frustrated', 'Score the tone of this ticket'] },
   ],
   isSkill: true,
   manifest: {
@@ -119,7 +123,7 @@ export const SUPPORT_ISSUE_ANALYSIS = createDeclarativeCodeSkill({
     required: ['success'],
   },
   triggers: [
-    { kind: 'event', on: 'Ticket is escalated to tier 2' },
+    { kind: 'user', phrase_examples: ['Analyze this support issue', 'What is causing these tickets', 'Group these tickets by root cause'] },
   ],
   isSkill: true,
   manifest: {
@@ -164,7 +168,7 @@ export const SUPPORT_SEARCH_KB = createDeclarativeCodeSkill({
     required: ['success'],
   },
   triggers: [
-    { kind: 'event', on: 'A new support ticket is received' },
+    { kind: 'user', phrase_examples: ['Search the knowledge base for this', 'What do we do about this issue', 'Find the article that covers this'] },
   ],
   isSkill: true,
   manifest: {
