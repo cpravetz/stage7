@@ -118,20 +118,15 @@ describe('Schema Validation - Full Registry Inventory (Sprint 2)', () => {
       const workflow = group.workflow;
       it(`${group.name}: every skill has a workflowStage annotation`, () => {
         for (const skill of group.skills) {
-          expect((skill.manifest.workflowStage as string) || undefined).toBeTruthy();
+          expect(skill.manifest).not.toHaveProperty('workflowStage');
         }
       });
 
-      it(`${group.name}: workflow stages cover all skills at least once`, () => {
-        const stageSkillIds: string[] = [];
-        for (const stage of workflow.stages) {
-          for (const skill of stage.skills) {
-            stageSkillIds.push(skill.id);
-          }
-        }
-        const allSkillIds = group.skills.map((s) => s.id);
-        for (const id of allSkillIds) {
-          expect(stageSkillIds).toContain(id);
+      it(`${group.name}: workflow exposes every skill exactly once`, () => {
+        const workflowSkillIds = workflow.skills.map((s) => s.id);
+        expect(workflowSkillIds.length).toBe(new Set(workflowSkillIds).size);
+        for (const skill of group.skills) {
+          expect(workflowSkillIds).toContain(skill.id);
         }
       });
     }
@@ -196,13 +191,13 @@ describe('Schema Validation - Full Registry Inventory (Sprint 2)', () => {
       it(`${group.name}: workflow has productObject and flow declaration`, () => {
         expect(workflow.productObject).toBeTruthy();
         expect(workflow.flow).toBeTruthy();
-        expect(workflow.stages.length).toBeGreaterThanOrEqual(2);
+        expect(workflow.skills.length).toBeGreaterThan(0);
       });
 
-      for (const stage of workflow.stages) {
-        it(`${group.name}: stage "${stage.name}" has description and skills`, () => {
-          expect(stage.description).toBeTruthy();
-          expect(stage.skills.length).toBeGreaterThan(0);
+      for (const skill of workflow.skills) {
+        it(`${group.name}: skill "${skill.id}" has a name and description`, () => {
+          expect(skill.name).toBeTruthy();
+          expect(skill.description).toBeTruthy();
         });
       }
     }

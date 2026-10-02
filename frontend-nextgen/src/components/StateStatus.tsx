@@ -32,7 +32,7 @@ export const StateStatus: React.FC<StateStatusProps> = ({ workspaceId, onTransit
   const [history, setHistory] = React.useState<StateTransitionEvent[]>([]);
 
   const load = React.useCallback(() => {
-    fetchJSON<{ workflowState: WorkflowState; currentStage: string }>(`/api/tool-executor/workspaces/${workspaceId}`)
+    fetchJSON<{ workflowState: WorkflowState }>(`/api/tool-executor/workspaces/${workspaceId}`)
       .then((data) => setState(data.workflowState))
       .catch(() => {});
     fetchJSON<{ allowedTransitions: string[] }>(`/api/tool-executor/workspaces/${workspaceId}/allowed-transitions`)

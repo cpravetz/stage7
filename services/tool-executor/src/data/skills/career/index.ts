@@ -10,7 +10,7 @@ import { PIPELINE_OUTCOME_TRACKER } from './career-pipeline-outcome-tracker';
 // Workspace/email sync removed per design; do not export as a skill
 import { RESUME_TEMPLATE_MANAGER } from './career-resume-template-manager';
 import { PORTAL_RECRUITER_WORKFLOW } from './career-portal-recruiter-workflow';
-import { annotateStages, createWorkflow, AssistantWorkflow } from '../workflow-common';
+import { createWorkflow, AssistantWorkflow } from '../workflow-common';
 import { CAREER_INTERVIEW_PREP, CAREER_ADVISORY } from './career-lower-order-tools';
 
 // Lower-order base tools that the wrappers delegate to via __execute_tool.
@@ -78,40 +78,10 @@ export const careerLowerOrderTools: Tool[] = [
 
 export const careerSkills = [...careerCanonicalSkills, ...careerLowerOrderTools];
 
-annotateStages(careerSkills, {
-    'career-job-market-positioning-evaluator': 'profile',
-    'career-interview-compensation-battlecard-creator': 'prep',
-    'career-governed-application-outreach-manager': 'application',
-    'career-job-discovery-fit-ranking': 'fit ranking',
-    'career-application-execution-orchestrator': 'application',
-    'career-upskill-role-targeted-learning-planner': 'prep',
-    'career-interview-practice-mock-interviewer': 'prep',
-    'career-pipeline-outcome-tracker': 'tracking',
-    'career-resume-template-manager': 'profile',
-    'career-portal-recruiter-workflow': 'outcomes',
-    'career-profile-intake': 'profile',
-    'career-job-discovery': 'fit ranking',
-    'career-rank': 'fit ranking',
-    'career-application-execution': 'application',
-    'career-add-template': 'profile',
-    'career-networking-outreach': 'application',
-    'career-pipeline-report': 'tracking',
-    'career-outcome': 'outcomes',
-  });
-
   export const careerWorkflow: AssistantWorkflow = createWorkflow(
     {
       assistant: 'Career',
       productObject: 'candidate / job',
       flow: 'profile → fit ranking → application → prep → tracking → outcomes',
-      stages: [
-        { name: 'profile', description: 'Candidate profile, market positioning, and resume management', stageIds: ['career-job-market-positioning-evaluator', 'career-resume-template-manager', 'career-profile-intake', 'career-add-template'] },
-        { name: 'fit ranking', description: 'Job discovery and fit ranking', stageIds: ['career-job-discovery-fit-ranking', 'career-job-discovery', 'career-rank'] },
-        { name: 'application', description: 'Application outreach and execution', stageIds: ['career-governed-application-outreach-manager', 'career-application-execution-orchestrator', 'career-application-execution', 'career-networking-outreach'] },
-        { name: 'prep', description: 'Interview prep and learning planning', stageIds: ['career-interview-compensation-battlecard-creator', 'career-upskill-role-targeted-learning-planner', 'career-interview-practice-mock-interviewer', 'career-interview-prep', 'career-advisory'] },
-        { name: 'tracking', description: 'Pipeline tracking and monitoring', stageIds: ['career-pipeline-outcome-tracker', 'career-pipeline-report'] },
-        { name: 'outcomes', description: 'Recruiter workflow and outcome management', stageIds: ['career-portal-recruiter-workflow', 'career-outcome'] },
-      ],
-    },
-    careerSkills
-  );
+      skills: careerSkills,
+    });

@@ -1,4 +1,4 @@
-import { WorkflowState, AssistantWorkspace, WorkspaceApprovalEntry, WorkspaceExecutionEntry, WorkspaceRevision, StateTransitionEvent, WorkflowStateContract, RuntimeWorkflow, RuntimeWorkflowAction, RuntimeWorkflowStage } from '../types';
+import { WorkflowState, AssistantWorkspace, WorkspaceApprovalEntry, WorkspaceExecutionEntry, WorkspaceRevision, StateTransitionEvent, WorkflowStateContract, RuntimeWorkflow, RuntimeWorkflowAction } from '../types';
 import { AssistantWorkflow } from '../data/skills/workflow-common';
 import logger from '../utils/logger';
 
@@ -121,12 +121,11 @@ export class AssistantWorkspaceManager {
     this.revisions.set(workspaceId, revs);
   }
 
-  createWorkspace(assistant: string, productObject: string, initialStage?: string): AssistantWorkspace {
+  createWorkspace(assistant: string, productObject: string): AssistantWorkspace {
     const workspace: AssistantWorkspace = {
       workspaceId: `ws_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       assistant,
       productObject,
-      currentStage: initialStage || 'analysis',
       workflowState: 'analysis',
       nextActions: [],
       approvalHistory: [],
@@ -149,7 +148,7 @@ export class AssistantWorkspaceManager {
   createOrResumeWorkspace(
     assistant: string,
     productObject: string,
-    opts?: { workspaceId?: string; context?: Record<string, unknown>; initialStage?: string }
+    opts?: { workspaceId?: string; context?: Record<string, unknown> }
   ): { workspace: AssistantWorkspace; resumed: boolean } {
     if (opts?.workspaceId) {
       const existing = this.getWorkspace(opts.workspaceId);
@@ -163,7 +162,7 @@ export class AssistantWorkspaceManager {
       }
     }
 
-    const ws = this.createWorkspace(assistant, productObject, opts?.initialStage);
+    const ws = this.createWorkspace(assistant, productObject);
     if (opts?.context) {
       (ws as any).context = { ...opts.context };
       this.persist();
@@ -203,17 +202,6 @@ export class AssistantWorkspaceManager {
 
   getWorkspace(workspaceId: string): AssistantWorkspace | undefined {
     return this.workspaces.get(workspaceId);
-  }
-
-  updateStage(workspaceId: string, stage: string): boolean {
-    const ws = this.workspaces.get(workspaceId);
-    if (!ws) return false;
-    const prevStage = ws.currentStage;
-    ws.currentStage = stage;
-    ws.updatedAt = new Date();
-    this.createRevision(workspaceId, 'stage_change', { previousStage: prevStage, newStage: stage });
-    this.persist();
-    return true;
   }
 
   updateWorkflowState(workspaceId: string, state: WorkflowState): boolean {
@@ -398,7 +386,6 @@ export class AssistantWorkspaceManager {
   resetWorkspace(workspaceId: string): boolean {
     const ws = this.workspaces.get(workspaceId);
     if (!ws) return false;
-    ws.currentStage = 'analysis';
     ws.workflowState = 'analysis';
     ws.nextActions = [];
     ws.approvalHistory = [];
@@ -434,7 +421,6 @@ export class AssistantWorkspaceManager {
     assistant?: string;
     productObject?: string;
     workflowState?: WorkflowState;
-    currentStage?: string;
     createdAfter?: Date;
     createdBefore?: Date;
   }): AssistantWorkspace[] {
@@ -442,7 +428,6 @@ export class AssistantWorkspaceManager {
     if (filter.assistant) results = results.filter(ws => ws.assistant === filter.assistant);
     if (filter.productObject) results = results.filter(ws => ws.productObject === filter.productObject);
     if (filter.workflowState) results = results.filter(ws => ws.workflowState === filter.workflowState);
-    if (filter.currentStage) results = results.filter(ws => ws.currentStage === filter.currentStage);
     if (filter.createdAfter) results = results.filter(ws => ws.createdAt >= filter.createdAfter!);
     if (filter.createdBefore) results = results.filter(ws => ws.createdAt <= filter.createdBefore!);
     return results;
@@ -462,37 +447,26 @@ export class AssistantWorkspaceManager {
 
   /**
    * Build a runtime-visible workflow snapshot for a workspace.
-   * Integrates workspace identity, current stage, available/next actions,
-   * workflow state, and next step into a single runtime object.
+   * Integrates workspace identity, the assistant's skills, available/next
+   * actions, workflow state, and next step into a single runtime object.
    */
   buildRuntimeWorkflow(workspaceId: string, workflow: AssistantWorkflow, executionId?: string): RuntimeWorkflow | null {
     const ws = this.getWorkspace(workspaceId);
     if (!ws) return null;
 
-    const stages: RuntimeWorkflowStage[] = workflow.stages.map((stage, idx) => {
-      const isCurrent = stage.name === ws.currentStage;
-      const skills: RuntimeWorkflowAction[] = (stage.skills || []).map((skill) => ({
-        id: skill.id,
-        name: skill.name,
-        description: skill.description,
-        type: skill.type,
-        confirmBeforeSend: skill.confirmBeforeSend,
-        isSkill: skill.isSkill,
-        stage: stage.name,
-        available: true,
-        reason: undefined,
-      }));
-      return {
-        name: stage.name,
-        description: stage.description,
-        status: isCurrent ? 'current' : idx < workflow.stages.findIndex((s) => s.name === ws.currentStage) ? 'completed' : 'pending',
-        skills,
-      };
-    });
+    const skills: RuntimeWorkflowAction[] = workflow.skills.map((skill) => ({
+      id: skill.id,
+      name: skill.name,
+      description: skill.description,
+      type: skill.type,
+      confirmBeforeSend: skill.confirmBeforeSend,
+      isSkill: skill.isSkill,
+      available: true,
+    }));
 
     const allowedTransitions = this.getAllowedTransitions(workspaceId);
-    const nextActions = this.deriveNextActions(workflow, ws.currentStage, ws.workflowState);
-    const nextStep = this.deriveNextStep(workflow, ws.currentStage, ws.workflowState, allowedTransitions);
+    const nextActions = this.deriveNextActions(workflow, ws.workflowState);
+    const nextStep = this.deriveNextStep(workflow, ws.workflowState, allowedTransitions);
 
     return {
       executionId: executionId || `runtime_${ws.workspaceId}`,
@@ -501,8 +475,7 @@ export class AssistantWorkspaceManager {
       assistant: ws.assistant,
       productObject: ws.productObject,
       flow: workflow.flow,
-      currentStage: ws.currentStage,
-      stages,
+      skills,
       workflowState: ws.workflowState,
       nextActions,
       allowedTransitions,
@@ -520,13 +493,10 @@ export class AssistantWorkspaceManager {
     };
   }
 
-  private deriveNextActions(workflow: AssistantWorkflow, currentStage: string, workflowState: WorkflowState): string[] {
-    const stage = workflow.stages.find((s) => s.name === currentStage);
+  private deriveNextActions(workflow: AssistantWorkflow, workflowState: WorkflowState): string[] {
     const actions: string[] = [];
-    if (stage) {
-      for (const skill of stage.skills || []) {
-        actions.push(skill.name);
-      }
+    for (const skill of workflow.skills) {
+      actions.push(skill.name);
     }
     if (workflowState !== 'executed' && workflowState !== 'rejected') {
       actions.push(`transition:${workflowState}`);
@@ -534,16 +504,15 @@ export class AssistantWorkspaceManager {
     return actions;
   }
 
-  private deriveNextStep(workflow: AssistantWorkflow, currentStage: string, workflowState: WorkflowState, allowedTransitions: WorkflowState[]): string | undefined {
+  private deriveNextStep(workflow: AssistantWorkflow, workflowState: WorkflowState, allowedTransitions: WorkflowState[]): string | undefined {
     if (workflowState === 'executed') {
       return `Workflow complete for ${workflow.assistant}. Review results and close out.`;
     }
     if (workflowState === 'rejected') {
       return `Workflow rejected for ${workflow.assistant}. Resume from a prior revision to retry.`;
     }
-    const stage = workflow.stages.find((s) => s.name === currentStage);
-    if (stage && stage.skills && stage.skills.length > 0) {
-      return `Execute one of the available skills in stage '${currentStage}': ${stage.skills.map((s) => s.name).join(', ')}`;
+    if (workflow.skills.length > 0) {
+      return `Choose a skill for ${workflow.assistant}: ${workflow.skills.map((s) => s.name).join(', ')}`;
     }
     if (allowedTransitions.length > 0) {
       return `Advance workflow state from '${workflowState}' to one of: ${allowedTransitions.join(', ')}`;

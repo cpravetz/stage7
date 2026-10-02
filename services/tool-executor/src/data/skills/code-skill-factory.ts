@@ -584,7 +584,6 @@ export interface DeclarativeSkillOptions {
   tier?: 'advise' | 'aid' | 'represent'
   domainKnowledge?: string
   isSkill?: boolean
-  workflowStage?: string
   /**
    * Extra manifest fields carried onto the tool verbatim (e.g. `actionLabel`).
    * Spread first when building the manifest so `sourceCode` and
@@ -1292,7 +1291,6 @@ export function createDeclarativeCodeSkill(options: DeclarativeSkillOptions): To
       // "Run". An explicit actionLabel in options.manifest still wins.
       ...(resolveActionLabel(options.name, (options.manifest as { actionLabel?: string } | undefined)?.actionLabel)),
       ...(options.emitEvent ? { emitEvent: options.emitEvent } : {}),
-      ...(options.workflowStage ? { workflowStage: options.workflowStage } : {}),
       ...(needsConfirmation ? { confirmBeforeSend: true } : {}),
       ...(options.configSchema ? { configSchema: options.configSchema } : {}),
       ...(options.credentialSource ? { credentialSource: options.credentialSource } : {}),

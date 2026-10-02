@@ -67,7 +67,6 @@ const HR_INTERVIEW_SCHEDULING_AUTOMATED = createDeclarativeCodeSkill({
   tier: 'aid',
   confirmBeforeSend: true,
   domainKnowledge: HR_DOMAIN_KNOWLEDGE,
-  workflowStage: 'interview',
   triggers: [
     { kind: 'event', on: 'Candidate passed screening' },
   ],

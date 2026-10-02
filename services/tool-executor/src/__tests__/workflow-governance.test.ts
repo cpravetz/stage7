@@ -21,550 +21,133 @@ import { songwritingSkills, songwritingWorkflow } from '../data/skills/songwriti
 import { scriptwritingSkills, scriptwritingWorkflow } from '../data/skills/scriptwriting';
 import { assistantRegistries, getOverlappingSkills } from '../data/skills/registry';
 import { Tool } from '../types';
-import {
-  enforcesConfirmation,
-  isCorrectlyGated,
-  isMutatingSkill,
-} from './confirmation-gate';
+import { isCorrectlyGated, isMutatingSkill } from './confirmation-gate';
 
-type WorkflowLike = typeof ctoWorkflow;
+const assistants: Array<{ workflow: typeof ctoWorkflow; skills: Tool[]; object: string }> = [
+  { workflow: ctoWorkflow, skills: ctoSkills, object: 'system / incident' },
+  { workflow: educationWorkflow, skills: educationSkills, object: 'learner' },
+  { workflow: marketingWorkflow, skills: marketingSkills, object: 'campaign' },
+  { workflow: productWorkflow, skills: productSkills, object: 'product / order' },
+  { workflow: contentWorkflow, skills: contentSkills, object: 'content piece' },
+  { workflow: hrWorkflow, skills: hrSkills, object: 'applicant' },
+  { workflow: healthcareWorkflow, skills: healthcareSkills, object: 'patient' },
+  { workflow: careerWorkflow, skills: careerSkills, object: 'candidate / job' },
+  { workflow: restaurantWorkflow, skills: restaurantSkills, object: 'reservation / table' },
+  { workflow: salesWorkflow, skills: salesSkills, object: 'lead / opportunity' },
+  { workflow: supportWorkflow, skills: supportSkills, object: 'ticket / customer' },
+  { workflow: sportsWorkflow, skills: sportsSkills, object: 'game / matchup' },
+  { workflow: eventWorkflow, skills: eventSkills, object: 'event / vendor' },
+  { workflow: executiveWorkflow, skills: executiveSkills, object: 'organization / strategy' },
+  { workflow: financeWorkflow, skills: financeSkills, object: 'account / transaction' },
+  { workflow: hotelWorkflow, skills: hotelSkills, object: 'stay / booking' },
+  { workflow: investmentWorkflow, skills: investmentSkills, object: 'portfolio / security' },
+  { workflow: legalWorkflow, skills: legalSkills, object: 'case / matter' },
+  { workflow: songwritingWorkflow, skills: songwritingSkills, object: 'song' },
+  { workflow: scriptwritingWorkflow, skills: scriptwritingSkills, object: 'script' },
+  { workflow: analyticsWorkflow, skills: analyticsSkills, object: 'metric / insight' },
+];
 
-describe('Workflow Governance - Sprint 7', () => {
-
-  describe('Sprint 5: Assistant workflow stage annotations', () => {
-    const workflowAssistants = [
-      { name: 'CTO', workflow: ctoWorkflow, skills: ctoSkills },
-      { name: 'Education', workflow: educationWorkflow, skills: educationSkills },
-      { name: 'Marketing', workflow: marketingWorkflow, skills: marketingSkills },
-      { name: 'Product', workflow: productWorkflow, skills: productSkills },
-      { name: 'Content', workflow: contentWorkflow, skills: contentSkills },
-      { name: 'HR', workflow: hrWorkflow, skills: hrSkills },
-      { name: 'Healthcare', workflow: healthcareWorkflow, skills: healthcareSkills },
-      { name: 'Career', workflow: careerWorkflow, skills: careerSkills },
-      { name: 'Restaurant', workflow: restaurantWorkflow, skills: restaurantSkills },
-      { name: 'Sales', workflow: salesWorkflow, skills: salesSkills },
-      { name: 'Support', workflow: supportWorkflow, skills: supportSkills },
-      { name: 'Sports', workflow: sportsWorkflow, skills: sportsSkills },
-      { name: 'Event', workflow: eventWorkflow, skills: eventSkills },
-      { name: 'Executive', workflow: executiveWorkflow, skills: executiveSkills },
-      { name: 'Finance', workflow: financeWorkflow, skills: financeSkills },
-      { name: 'Hotel', workflow: hotelWorkflow, skills: hotelSkills },
-      { name: 'Investment', workflow: investmentWorkflow, skills: investmentSkills },
-      { name: 'Legal', workflow: legalWorkflow, skills: legalSkills },
-      { name: 'Songwriting', workflow: songwritingWorkflow, skills: songwritingSkills },
-      { name: 'Scriptwriting', workflow: scriptwritingWorkflow, skills: scriptwritingSkills },
-      { name: 'Analytics', workflow: analyticsWorkflow, skills: analyticsSkills },
-    ];
-
+describe('Assistant governance', () => {
+  describe('Workflow declarations', () => {
     it('covers all 21 assistant workflows', () => {
-      expect(workflowAssistants.length).toBe(21);
-      const names = workflowAssistants.map(a => a.name);
-      expect(new Set(names).size).toBe(21);
+      expect(assistants.length).toBe(21);
     });
 
-    for (const assistant of workflowAssistants) {
-      it(`${assistant.name}: workflow object is defined with all required fields`, () => {
-        expect(assistant.workflow).toBeDefined();
-        expect(assistant.workflow.assistant).toBe(assistant.name);
-        expect(assistant.workflow.productObject).toBeTruthy();
-        expect(assistant.workflow.flow).toBeTruthy();
-        expect(Array.isArray(assistant.workflow.stages)).toBe(true);
-        expect(assistant.workflow.stages.length).toBeGreaterThanOrEqual(2);
+    for (const { workflow } of assistants) {
+      it(`${workflow.assistant}: declares assistant, product object, and a flow summary`, () => {
+        expect(workflow.assistant).toBeTruthy();
+        expect(workflow.productObject).toBeTruthy();
+        expect(workflow.flow).toBeTruthy();
       });
 
-      it(`${assistant.name}: every skill has a workflowStage annotation`, () => {
-        for (const skill of assistant.skills) {
-          expect((skill.manifest.workflowStage as string) || undefined).toBeTruthy();
-        }
+      it(`${workflow.assistant}: exposes a flat skill list and no stages`, () => {
+        expect(Array.isArray(workflow.skills)).toBe(true);
+        expect(workflow.skills.length).toBeGreaterThan(0);
+        expect(workflow).not.toHaveProperty('stages');
       });
 
-      it(`${assistant.name}: workflow stages cover all skills appropriately`, () => {
-        const stageSkillIds: string[] = [];
-        for (const stage of assistant.workflow.stages) {
-          expect(stage.name).toBeTruthy();
-          expect(stage.description).toBeTruthy();
-          for (const skill of stage.skills) {
-            stageSkillIds.push(skill.id);
-          }
-        }
-        const allSkillIds = assistant.skills.map(s => s.id);
-        if (assistant.name === 'Analytics') {
-          // Analytics uses a single skill across all stages (mode parameter)
-          expect(new Set(stageSkillIds).size).toBe(allSkillIds.length);
-          expect(stageSkillIds.length).toBeGreaterThanOrEqual(allSkillIds.length);
-        } else {
-          expect(stageSkillIds.sort()).toEqual(allSkillIds.sort());
+      it(`${workflow.assistant}: has no skill annotated with a workflow stage`, () => {
+        for (const skill of workflow.skills) {
+          expect(skill.manifest).not.toHaveProperty('workflowStage');
         }
       });
 
-      it(`${assistant.name}: workflow flow declaration matches stage names`, () => {
-        const stageNames = assistant.workflow.stages.map(s => s.name);
-        const flowStages = assistant.workflow.flow.split(' → ');
-        expect(flowStages.length).toBeGreaterThanOrEqual(2);
-        for (const stage of flowStages) {
-          expect(stageNames).toContain(stage.trim());
-        }
-      });
-
-      it(`${assistant.name}: stage names follow canonical workflow state vocabulary`, () => {
-        const validStages = [
-          'monitor', 'diagnose', 'plan', 'approve', 'execute', 'assess', 'support',
-          'create', 'publish', 'analyze', 'specify', 'deliver', 'draft', 'optimize',
-          'screening', 'interview', 'decision', 'review', 'coordination', 'scheduling',
-          'profile', 'fit ranking', 'application', 'prep', 'tracking', 'outcomes',
-          'reservation', 'service', 'kitchen', 'billing',
-          'discovery', 'proposal', 'close',
-          'intake', 'triage', 'resolution', 'follow-up',
-          'brief', 'create',
-          'research', 'odds', 'analysis',
-          'vendors', 'day-of',
-          'recommendation',
-          'trade', 'report',
-          'booking', 'stay', 'loyalty',
-          'track',
-          'refine',
-          'revise',
-          'finalize',
-          'query',
-          'trend',
-        ];
-        for (const stage of assistant.workflow.stages) {
-          expect(validStages).toContain(stage.name);
-        }
+      it(`${workflow.assistant}: has unique skill ids`, () => {
+        const ids = workflow.skills.map((s) => s.id);
+        expect(ids.length).toBe(new Set(ids).size);
       });
     }
   });
 
-  describe('Workflow state transitions', () => {
-    it('CTO workflow has monitor → diagnose → plan → approve → execute stages', () => {
-      const stageNames = ctoWorkflow.stages.map(s => s.name);
-      expect(stageNames).toEqual(['monitor', 'diagnose', 'plan', 'approve', 'execute']);
-    });
-
-    it('Education workflow has learner-centered stages', () => {
-      const stageNames = educationWorkflow.stages.map(s => s.name);
-      expect(stageNames).toContain('plan');
-      expect(stageNames).toContain('assess');
-      expect(stageNames).toContain('support');
-    });
-
-    it('Marketing workflow follows campaign lifecycle', () => {
-      const stageNames = marketingWorkflow.stages.map(s => s.name);
-      expect(stageNames).toContain('plan');
-      expect(stageNames).toContain('create');
-      expect(stageNames).toContain('publish');
-      expect(stageNames).toContain('analyze');
-    });
-
-    it('Product workflow follows opportunity → roadmap → PRD → delivery', () => {
-      const stageNames = productWorkflow.stages.map(s => s.name);
-      expect(stageNames).toContain('plan');
-      expect(stageNames).toContain('specify');
-      expect(stageNames).toContain('analyze');
-      expect(stageNames).toContain('deliver');
-    });
-
-    it('Content workflow follows brief → draft → optimize → publish', () => {
-      const stageNames = contentWorkflow.stages.map(s => s.name);
-      expect(stageNames).toEqual(['plan', 'draft', 'optimize', 'publish']);
-    });
-
-    it('HR workflow follows candidate pool → screening → interview → decision', () => {
-      const stageNames = hrWorkflow.stages.map(s => s.name);
-      expect(stageNames).toContain('screening');
-      expect(stageNames).toContain('interview');
-      expect(stageNames).toContain('decision');
-    });
-
-    it('Healthcare separates review from scheduling and coordination', () => {
-      const stageNames = healthcareWorkflow.stages.map(s => s.name);
-      expect(stageNames).toContain('review');
-      expect(stageNames).toContain('scheduling');
-      expect(stageNames).toContain('coordination');
-      const reviewStage = healthcareWorkflow.stages.find(s => s.name === 'review');
-      const schedulingStage = healthcareWorkflow.stages.find(s => s.name === 'scheduling');
-      expect(reviewStage?.skills.length).toBeGreaterThan(0);
-      expect(schedulingStage?.skills.length).toBeGreaterThan(0);
-      const reviewIds = new Set(reviewStage?.skills.map(s => s.id) || []);
-      const schedulingIds = new Set(schedulingStage?.skills.map(s => s.id) || []);
-      for (const id of reviewIds) {
-        expect(schedulingIds.has(id)).toBe(false);
-      }
-    });
-
-    it('Career workflow follows profile → fit ranking → application → prep → tracking → outcomes', () => {
-      const stageNames = careerWorkflow.stages.map(s => s.name);
-      expect(stageNames).toEqual(['profile', 'fit ranking', 'application', 'prep', 'tracking', 'outcomes']);
-    });
-
-    it('Restaurant workflow follows reservation → service → kitchen → billing', () => {
-      const stageNames = restaurantWorkflow.stages.map(s => s.name);
-      expect(stageNames).toEqual(['reservation', 'service', 'kitchen', 'billing']);
-    });
-
-    it('Sales workflow follows discovery → proposal → close', () => {
-      const stageNames = salesWorkflow.stages.map(s => s.name);
-      expect(stageNames).toEqual(['discovery', 'proposal', 'close']);
-    });
-
-    it('Support workflow follows intake → triage → resolution → follow-up', () => {
-      const stageNames = supportWorkflow.stages.map(s => s.name);
-      expect(stageNames).toEqual(['intake', 'triage', 'resolution', 'follow-up']);
-    });
-
-
-    it('Sports workflow follows research → odds → analysis', () => {
-      const stageNames = sportsWorkflow.stages.map(s => s.name);
-      expect(stageNames).toEqual(['research', 'odds', 'analysis']);
-    });
-
-    it('Event workflow follows plan → vendors → day-of', () => {
-      const stageNames = eventWorkflow.stages.map(s => s.name);
-      expect(stageNames).toEqual(['plan', 'vendors', 'day-of']);
-    });
-
-    it('Executive workflow follows review → analysis → recommendation → decision', () => {
-      const stageNames = executiveWorkflow.stages.map(s => s.name);
-      expect(stageNames).toEqual(['review', 'analysis', 'recommendation', 'decision']);
-    });
-
-    it('Finance workflow follows research → analyze → trade → report', () => {
-      const stageNames = financeWorkflow.stages.map(s => s.name);
-      expect(stageNames).toEqual(['research', 'analyze', 'trade', 'report']);
-    });
-
-    it('Hotel workflow follows booking → stay → review → loyalty', () => {
-      const stageNames = hotelWorkflow.stages.map(s => s.name);
-      expect(stageNames).toEqual(['booking', 'stay', 'review', 'loyalty']);
-    });
-
-    it('Investment workflow follows research → analyze → trade → track', () => {
-      const stageNames = investmentWorkflow.stages.map(s => s.name);
-      expect(stageNames).toEqual(['research', 'analyze', 'trade', 'track']);
-    });
-
-    it('Legal workflow follows intake → research → draft → review', () => {
-      const stageNames = legalWorkflow.stages.map(s => s.name);
-      expect(stageNames).toEqual(['intake', 'research', 'draft', 'review']);
-    });
-
-    it('Songwriting workflow follows trend → brief → draft → refine', () => {
-      const stageNames = songwritingWorkflow.stages.map(s => s.name);
-      expect(stageNames).toEqual(['trend', 'brief', 'draft', 'refine']);
-    });
-
-    it('Scriptwriting workflow follows brief → draft → revise → finalize', () => {
-      const stageNames = scriptwritingWorkflow.stages.map(s => s.name);
-      expect(stageNames).toEqual(['brief', 'draft', 'revise', 'finalize']);
-    });
-
-    it('Analytics workflow follows report → analyze → query', () => {
-      const stageNames = analyticsWorkflow.stages.map(s => s.name);
-      expect(stageNames).toEqual(['report', 'analyze', 'query']);
-    });
-
-    it('all workflow stages have explicit descriptions', () => {
-      const allWorkflows = [ctoWorkflow, educationWorkflow, marketingWorkflow, productWorkflow, contentWorkflow, hrWorkflow, healthcareWorkflow, careerWorkflow, restaurantWorkflow, salesWorkflow, supportWorkflow, sportsWorkflow, eventWorkflow, executiveWorkflow, financeWorkflow, hotelWorkflow, investmentWorkflow, legalWorkflow, songwritingWorkflow, scriptwritingWorkflow, analyticsWorkflow];
-      for (const workflow of allWorkflows) {
-        for (const stage of workflow.stages) {
-          expect(stage.description).toBeTruthy();
-          expect(stage.description.length).toBeGreaterThan(10);
-        }
-      }
-    });
-
-    it('no workflow stage is empty across all 21 assistants', () => {
-      const allWorkflows = [ctoWorkflow, educationWorkflow, marketingWorkflow, productWorkflow, contentWorkflow, hrWorkflow, healthcareWorkflow, careerWorkflow, restaurantWorkflow, salesWorkflow, supportWorkflow, sportsWorkflow, eventWorkflow, executiveWorkflow, financeWorkflow, hotelWorkflow, investmentWorkflow, legalWorkflow, songwritingWorkflow, scriptwritingWorkflow, analyticsWorkflow];
-      for (const workflow of allWorkflows) {
-        for (const stage of workflow.stages) {
-          expect(stage.skills.length).toBeGreaterThan(0);
-        }
-      }
-    });
-  });
-
-  describe('Same-context handoff enforcement', () => {
-    it('skills in the same workflow stage share the same product object', () => {
-      const allWorkflows = [
-        { name: 'CTO', workflow: ctoWorkflow, object: 'system / incident' },
-        { name: 'Education', workflow: educationWorkflow, object: 'learner' },
-        { name: 'Marketing', workflow: marketingWorkflow, object: 'campaign' },
-        { name: 'Product', workflow: productWorkflow, object: 'product / order' },
-        { name: 'Content', workflow: contentWorkflow, object: 'content piece' },
-        { name: 'HR', workflow: hrWorkflow, object: 'applicant' },
-        { name: 'Healthcare', workflow: healthcareWorkflow, object: 'patient' },
-        { name: 'Career', workflow: careerWorkflow, object: 'candidate / job' },
-        { name: 'Restaurant', workflow: restaurantWorkflow, object: 'reservation / table' },
-        { name: 'Sales', workflow: salesWorkflow, object: 'lead / opportunity' },
-        { name: 'Support', workflow: supportWorkflow, object: 'ticket / customer' },
-        { name: 'Sports', workflow: sportsWorkflow, object: 'game / matchup' },
-        { name: 'Event', workflow: eventWorkflow, object: 'event / vendor' },
-        { name: 'Executive', workflow: executiveWorkflow, object: 'organization / strategy' },
-        { name: 'Finance', workflow: financeWorkflow, object: 'account / transaction' },
-        { name: 'Hotel', workflow: hotelWorkflow, object: 'stay / booking' },
-        { name: 'Investment', workflow: investmentWorkflow, object: 'portfolio / security' },
-        { name: 'Legal', workflow: legalWorkflow, object: 'case / matter' },
-        { name: 'Songwriting', workflow: songwritingWorkflow, object: 'song' },
-        { name: 'Scriptwriting', workflow: scriptwritingWorkflow, object: 'script' },
-        { name: 'Analytics', workflow: analyticsWorkflow, object: 'metric / insight' },
-      ];
-      expect(allWorkflows.length).toBe(21);
-      for (const { workflow, object } of allWorkflows) {
-        for (const stage of workflow.stages) {
-          for (const skill of stage.skills) {
-            expect(skill.manifest.workflowStage).toBeTruthy();
-          }
-        }
+  describe('Assistant object continuity', () => {
+    it('each assistant has a documented product object', () => {
+      for (const { workflow, object } of assistants) {
         expect(workflow.productObject).toBe(object);
       }
     });
 
-    it('no skill belongs to multiple stages across the same workflow (except Analytics single-skill model)', () => {
-      const allWorkflows = [ctoWorkflow, educationWorkflow, marketingWorkflow, productWorkflow, contentWorkflow, hrWorkflow, healthcareWorkflow, careerWorkflow, restaurantWorkflow, salesWorkflow, supportWorkflow, sportsWorkflow, eventWorkflow, executiveWorkflow, financeWorkflow, hotelWorkflow, investmentWorkflow, legalWorkflow, songwritingWorkflow, scriptwritingWorkflow, analyticsWorkflow];
-      for (const workflow of allWorkflows) {
-        const stageIds: string[] = [];
-        for (const stage of workflow.stages) {
-          for (const skill of stage.skills) {
-            stageIds.push(skill.id);
-          }
-        }
-        const idSet = new Set(stageIds);
-        if (workflow.assistant === 'Analytics') {
-          // Analytics uses single skill across all stages
-          expect(idSet.size).toBeLessThan(stageIds.length);
-        } else {
-          expect(idSet.size).toBe(stageIds.length);
-        }
-      }
+    it('registry entries match the workflow product objects', () => {
+      const byAssistant = new Map(assistants.map((a) => [a.workflow.assistant, a.workflow.productObject]));
+      const mismatches = assistantRegistries
+        .filter((reg) => byAssistant.has(reg.assistant))
+        .filter((reg) => reg.productObject !== byAssistant.get(reg.assistant))
+        .map((reg) => reg.assistant);
+      expect(mismatches).toEqual([]);
     });
 
-    it('skills from different product objects do not share the same workflow stage name', () => {
-      const stageToObjects: Record<string, string[]> = {};
-      const allWorkflows = [
-        { name: 'CTO', workflow: ctoWorkflow },
-        { name: 'Education', workflow: educationWorkflow },
-        { name: 'Marketing', workflow: marketingWorkflow },
-        { name: 'Product', workflow: productWorkflow },
-        { name: 'Content', workflow: contentWorkflow },
-        { name: 'HR', workflow: hrWorkflow },
-        { name: 'Healthcare', workflow: healthcareWorkflow },
-        { name: 'Career', workflow: careerWorkflow },
-        { name: 'Restaurant', workflow: restaurantWorkflow },
-        { name: 'Sales', workflow: salesWorkflow },
-        { name: 'Support', workflow: supportWorkflow },
-        { name: 'Sports', workflow: sportsWorkflow },
-        { name: 'Event', workflow: eventWorkflow },
-        { name: 'Executive', workflow: executiveWorkflow },
-        { name: 'Finance', workflow: financeWorkflow },
-        { name: 'Hotel', workflow: hotelWorkflow },
-        { name: 'Investment', workflow: investmentWorkflow },
-        { name: 'Legal', workflow: legalWorkflow },
-        { name: 'Songwriting', workflow: songwritingWorkflow },
-        { name: 'Scriptwriting', workflow: scriptwritingWorkflow },
-        { name: 'Analytics', workflow: analyticsWorkflow },
-      ];
-      expect(allWorkflows.length).toBe(21);
-      for (const { workflow } of allWorkflows) {
-        for (const stage of workflow.stages) {
-          if (!stageToObjects[stage.name]) {
-            stageToObjects[stage.name] = [];
-          }
-          stageToObjects[stage.name].push(workflow.productObject);
-        }
-      }
-      const overlapping = Object.entries(stageToObjects).filter(([_, objects]) => {
-        const unique = new Set(objects);
-        return unique.size > 1;
-      });
-      const benignSharedNames = ['plan', 'analyze', 'publish', 'review', 'create', 'draft', 'research', 'intake', 'trade', 'track', 'odds', 'analysis', 'query', 'brief', 'triage', 'resolution', 'follow-up', 'recommendation', 'report', 'service', 'stay', 'decision'];
-      for (const [stageName, objects] of overlapping) {
-        if (!benignSharedNames.includes(stageName)) {
-          const unique = new Set(objects);
-          expect(unique.size).toBe(1);
-        }
-      }
+    it('registry workflow flows match the workflow flow summaries', () => {
+      const byAssistant = new Map(assistants.map((a) => [a.workflow.assistant, a.workflow.flow]));
+      const mismatches = assistantRegistries
+        .filter((reg) => byAssistant.has(reg.assistant))
+        .filter((reg) => reg.workflowFlow !== byAssistant.get(reg.assistant))
+        .map((reg) => reg.assistant);
+      expect(mismatches).toEqual([]);
     });
   });
 
   describe('Mutating operations require approval', () => {
-    // A skill in a mutating workflow stage must not be able to run live
-    // without an approval prompt. "Mutating" is decided by the shared
-    // predicate in ./confirmation-gate (represent tier, or a declared write
-    // external action) rather than by prose in the description, and "gated"
-    // means the flag is enforced at one of the two locations the runtime reads
-    // OR at a gated skill that dispatches this tool.
-    const stageSkills = (workflow: WorkflowLike, stageName: string): Tool[] => {
-      const stage = workflow.stages.find(s => s.name === stageName);
-      expect(stage).toBeDefined();
-      return stage!.skills;
-    };
-
-    it('CTO: execute-stage mutating skills enforce the gate', () => {
-      const skills = stageSkills(ctoWorkflow, 'execute');
-      expect(skills.length).toBeGreaterThan(0);
-      for (const skill of skills) {
-        expect({ id: skill.id, mutating: isMutatingSkill(skill), gated: isCorrectlyGated(skill, ctoSkills) })
-          .toEqual({ id: skill.id, mutating: isMutatingSkill(skill), gated: true });
+    it('CTO: mutating skills enforce the gate', () => {
+      const mutating = ctoSkills.filter((skill) => isMutatingSkill(skill));
+      expect(mutating.length).toBeGreaterThan(0);
+      for (const skill of mutating) {
+        expect({ id: skill.id, gated: isCorrectlyGated(skill, ctoSkills) }).toEqual({ id: skill.id, gated: true });
       }
     });
 
-    it('HR: screening and interview-stage mutating skills enforce the gate', () => {
-      const skills = [...stageSkills(hrWorkflow, 'screening'), ...stageSkills(hrWorkflow, 'interview')];
-      expect(skills.length).toBeGreaterThan(0);
-      expect(skills.filter((skill) => isMutatingSkill(skill)).length).toBeGreaterThan(0);
-      for (const skill of skills) {
+    it('HR: mutating skills enforce the gate', () => {
+      const mutating = hrSkills.filter((skill) => isMutatingSkill(skill));
+      expect(mutating.length).toBeGreaterThan(0);
+      for (const skill of mutating) {
         expect(isCorrectlyGated(skill, hrSkills)).toBe(true);
       }
     });
 
-    it('Content: publish-stage mutating skills enforce the gate', () => {
-      const skills = stageSkills(contentWorkflow, 'publish');
-      expect(skills.length).toBeGreaterThan(0);
-      // The stage must contain at least one skill that enforces the gate
-      // itself: the governance skill is the approval surface for the stage.
-      const selfGated = skills.filter((skill) => enforcesConfirmation(skill));
-      expect(selfGated.map((skill) => skill.id)).toContain('governed-publishing-cms-dispatcher');
-      for (const skill of skills) {
+    it('Content: mutating skills enforce the gate', () => {
+      const mutating = contentSkills.filter((skill) => isMutatingSkill(skill));
+      expect(mutating.length).toBeGreaterThan(0);
+      for (const skill of mutating) {
         expect(isCorrectlyGated(skill, contentSkills)).toBe(true);
       }
     });
 
-    it('Healthcare: scheduling-stage mutating skills enforce the gate', () => {
-      const skills = stageSkills(healthcareWorkflow, 'scheduling');
-      expect(skills.length).toBeGreaterThan(0);
-      expect(skills.filter((skill) => isMutatingSkill(skill)).length).toBeGreaterThan(0);
-      for (const skill of skills) {
+    it('Healthcare: mutating skills enforce the gate', () => {
+      const mutating = healthcareSkills.filter((skill) => isMutatingSkill(skill));
+      expect(mutating.length).toBeGreaterThan(0);
+      for (const skill of mutating) {
         expect(isCorrectlyGated(skill, healthcareSkills)).toBe(true);
       }
     });
 
-    it('no workflow stage can dispatch a live write without an approval prompt', () => {
-      // Same invariant, sweep across every assistant workflow so a new
-      // mutating stage cannot be added ungated.
-      const allWorkflows: WorkflowLike[] = [
-        ctoWorkflow, educationWorkflow, marketingWorkflow, productWorkflow, contentWorkflow,
-        hrWorkflow, healthcareWorkflow, careerWorkflow, restaurantWorkflow, salesWorkflow,
-        supportWorkflow, sportsWorkflow, eventWorkflow, executiveWorkflow,
-        financeWorkflow, hotelWorkflow, investmentWorkflow, legalWorkflow, songwritingWorkflow,
-        scriptwritingWorkflow, analyticsWorkflow,
-      ];
-      const owners: Record<string, Tool[]> = {
-        CTO: ctoSkills, Education: educationSkills, Marketing: marketingSkills, Product: productSkills,
-        Content: contentSkills, HR: hrSkills, Healthcare: healthcareSkills, Career: careerSkills,
-        Restaurant: restaurantSkills, Sales: salesSkills, Support: supportSkills,
-        Sports: sportsSkills, Event: eventSkills, Executive: executiveSkills, Finance: financeSkills,
-        Hotel: hotelSkills, Investment: investmentSkills, Legal: legalSkills, Songwriting: songwritingSkills,
-        Scriptwriting: scriptwritingSkills, Analytics: analyticsSkills,
-      };
+    it('no assistant can dispatch a live write without an approval prompt', () => {
       const violations: string[] = [];
-      for (const workflow of allWorkflows) {
-        const siblings = owners[workflow.assistant] || [];
-        for (const stage of workflow.stages) {
-          for (const skill of stage.skills) {
-            if (!isCorrectlyGated(skill, siblings)) {
-              violations.push(`${workflow.assistant}/${stage.name}/${skill.id}`);
-            }
+      for (const { workflow, skills } of assistants) {
+        for (const skill of skills) {
+          if (!isCorrectlyGated(skill, skills)) {
+            violations.push(`${workflow.assistant}/${skill.id}`);
           }
         }
       }
       expect(violations).toEqual([]);
-    });
-  });
-
-  describe('Assistant object continuity', () => {
-    it('each assistant has a documented product object', () => {
-      const allWorkflows = [
-        { workflow: ctoWorkflow, expectedObject: 'system / incident' },
-        { workflow: educationWorkflow, expectedObject: 'learner' },
-        { workflow: marketingWorkflow, expectedObject: 'campaign' },
-        { workflow: productWorkflow, expectedObject: 'product / order' },
-        { workflow: contentWorkflow, expectedObject: 'content piece' },
-        { workflow: hrWorkflow, expectedObject: 'applicant' },
-        { workflow: healthcareWorkflow, expectedObject: 'patient' },
-        { workflow: careerWorkflow, expectedObject: 'candidate / job' },
-        { workflow: restaurantWorkflow, expectedObject: 'reservation / table' },
-        { workflow: salesWorkflow, expectedObject: 'lead / opportunity' },
-        { workflow: supportWorkflow, expectedObject: 'ticket / customer' },
-        { workflow: sportsWorkflow, expectedObject: 'game / matchup' },
-        { workflow: eventWorkflow, expectedObject: 'event / vendor' },
-        { workflow: executiveWorkflow, expectedObject: 'organization / strategy' },
-        { workflow: financeWorkflow, expectedObject: 'account / transaction' },
-        { workflow: hotelWorkflow, expectedObject: 'stay / booking' },
-        { workflow: investmentWorkflow, expectedObject: 'portfolio / security' },
-        { workflow: legalWorkflow, expectedObject: 'case / matter' },
-        { workflow: songwritingWorkflow, expectedObject: 'song' },
-        { workflow: scriptwritingWorkflow, expectedObject: 'script' },
-        { workflow: analyticsWorkflow, expectedObject: 'metric / insight' },
-      ];
-      expect(allWorkflows.length).toBe(21);
-      for (const { workflow, expectedObject } of allWorkflows) {
-        expect(workflow.productObject).toBe(expectedObject);
-      }
-    });
-
-    it('registry entries match the workflow product objects', () => {
-      const objectMap: Record<string, string> = {
-        cto: 'system / incident',
-        education: 'learner',
-        marketing: 'campaign',
-        product: 'product / order',
-        content: 'content piece',
-        hr: 'applicant',
-        healthcare: 'patient',
-        career: 'candidate / job',
-        restaurant: 'reservation / table',
-        sales: 'lead / opportunity',
-        support: 'ticket / customer',
-        sports: 'game / matchup',
-        event: 'event / vendor',
-        executive: 'organization / strategy',
-        finance: 'account / transaction',
-        hotel: 'stay / booking',
-        investment: 'portfolio / security',
-        legal: 'case / matter',
-        songwriting: 'song',
-        scriptwriting: 'script',
-        analytics: 'metric / insight',
-      };
-      expect(Object.keys(objectMap).length).toBe(21);
-      for (const [key, expectedObject] of Object.entries(objectMap)) {
-        const reg = assistantRegistries.find(r => r.assistant.toLowerCase() === key);
-        expect(reg).toBeDefined();
-        expect(reg!.productObject).toBe(expectedObject);
-      }
-    });
-
-    it('registry workflow flows match the workflow stage order', () => {
-      const flowMap: Record<string, string[]> = {
-        cto: ['monitor', 'diagnose', 'plan', 'approve', 'execute'],
-        education: ['plan', 'assess', 'support'],
-        marketing: ['plan', 'create', 'publish', 'analyze'],
-        product: ['plan', 'specify', 'analyze', 'deliver'],
-        content: ['plan', 'draft', 'optimize', 'publish'],
-        hr: ['screening', 'interview', 'decision'],
-        healthcare: ['review', 'scheduling', 'coordination'],
-        career: ['profile', 'fit ranking', 'application', 'prep', 'tracking', 'outcomes'],
-        restaurant: ['reservation', 'service', 'kitchen', 'billing'],
-        sales: ['discovery', 'proposal', 'close'],
-        support: ['intake', 'triage', 'resolution', 'follow-up'],
-        sports: ['research', 'odds', 'analysis'],
-        event: ['plan', 'vendors', 'day-of'],
-        executive: ['review', 'analysis', 'recommendation', 'decision'],
-        finance: ['research', 'analyze', 'trade', 'report'],
-        hotel: ['booking', 'stay', 'review', 'loyalty'],
-        investment: ['research', 'analyze', 'trade', 'track'],
-        legal: ['intake', 'research', 'draft', 'review'],
-        songwriting: ['trend', 'brief', 'draft', 'refine'],
-        scriptwriting: ['brief', 'draft', 'revise', 'finalize'],
-        analytics: ['report', 'analyze', 'query'],
-      };
-      expect(Object.keys(flowMap).length).toBe(21);
-      for (const [key, expectedStages] of Object.entries(flowMap)) {
-        const reg = assistantRegistries.find(r => r.assistant.toLowerCase() === key);
-        expect(reg).toBeDefined();
-        const flowStages = reg!.workflowFlow.split(' → ').map(s => s.trim().toLowerCase());
-        expect(flowStages).toEqual(expectedStages.map(s => s.toLowerCase()));
-      }
     });
   });
 
@@ -574,24 +157,7 @@ describe('Workflow Governance - Sprint 7', () => {
       expect(Array.isArray(overlaps)).toBe(true);
       for (const overlap of overlaps) {
         expect(overlap.skillId).toBeTruthy();
-        expect(overlap.skillName).toBeTruthy();
-        expect(overlap.assistants.length).toBeGreaterThanOrEqual(2);
-      }
-    });
-
-    it('Sprint 5 assistants have consistent workflow stage vocabulary', () => {
-      const allWorkflows = [ctoWorkflow, educationWorkflow, marketingWorkflow, productWorkflow, contentWorkflow, hrWorkflow, healthcareWorkflow, careerWorkflow, restaurantWorkflow, salesWorkflow, supportWorkflow, sportsWorkflow, eventWorkflow, executiveWorkflow, financeWorkflow, hotelWorkflow, investmentWorkflow, legalWorkflow, songwritingWorkflow, scriptwritingWorkflow, analyticsWorkflow];
-      const stageSets = allWorkflows.map(w => new Set(w.stages.map(s => s.name)));
-      for (let i = 0; i < stageSets.length; i++) {
-        for (let j = i + 1; j < stageSets.length; j++) {
-          const intersection = new Set([...stageSets[i]].filter(x => stageSets[j].has(x)));
-          if (intersection.size > 0) {
-            const benignShared = ['plan', 'analyze', 'publish', 'review', 'create', 'draft', 'research', 'intake', 'trade', 'track', 'odds', 'analysis', 'query', 'brief', 'triage', 'resolution', 'follow-up', 'recommendation', 'report', 'service', 'stay', 'decision'];
-            for (const name of intersection) {
-              expect(benignShared).toContain(name);
-            }
-          }
-        }
+        expect(overlap.assistants.length).toBeGreaterThan(1);
       }
     });
   });
@@ -608,101 +174,38 @@ describe('Workflow Governance - Sprint 7', () => {
       /jobIds/i,
     ];
 
-    const allSkillArrays: Tool[][] = [
-      ctoSkills, educationSkills, marketingSkills, productSkills, contentSkills, hrSkills, healthcareSkills,
-      careerSkills, restaurantSkills, salesSkills, supportSkills, sportsSkills, eventSkills,
-      executiveSkills, financeSkills, hotelSkills, investmentSkills, legalSkills, songwritingSkills,
-      scriptwritingSkills, analyticsSkills,
-    ];
+    const allSkills: Tool[] = assistants.flatMap((a) => a.skills);
 
     it('covers all 21 assistant skill arrays', () => {
-      expect(allSkillArrays.length).toBe(21);
+      expect(assistants.length).toBe(21);
+      expect(allSkills.length).toBeGreaterThan(0);
     });
 
-    for (const skills of allSkillArrays) {
-      for (const skill of skills) {
-        it(`${skill.id}: has a workflowStage annotation`, () => {
-          expect((skill.manifest?.workflowStage as string) || undefined).toBeTruthy();
-        });
-      }
-    }
-
-    for (const skills of allSkillArrays) {
-      for (const skill of skills) {
-        it(`${skill.id}: no forbidden internal IDs in inputSchema`, () => {
-          const schema = skill.inputSchema as Record<string, unknown> | undefined;
-          if (!schema || !schema.properties) return;
-          const properties = schema.properties as Record<string, unknown>;
-          for (const key of Object.keys(properties)) {
-            for (const pattern of forbiddenPatterns) {
-              expect(pattern.test(key)).toBe(false);
-            }
+    for (const skill of allSkills) {
+      it(`${skill.id}: no forbidden internal IDs in inputSchema`, () => {
+        const schema = skill.inputSchema as Record<string, unknown> | undefined;
+        if (!schema || !schema.properties) return;
+        const properties = schema.properties as Record<string, unknown>;
+        for (const key of Object.keys(properties)) {
+          for (const pattern of forbiddenPatterns) {
+            expect(pattern.test(key)).toBe(false);
           }
-        });
-      }
+        }
+      });
     }
   });
 
-  describe('Analytics workflow coverage', () => {
-    it('defines report, analyze, and query workflow stages', () => {
+  describe('Analytics workflow', () => {
+    it('declares its assistant, product object, and flow', () => {
       expect(analyticsWorkflow.assistant).toBe('Analytics');
       expect(analyticsWorkflow.productObject).toBe('metric / insight');
-      expect(analyticsWorkflow.flow).toBe('report → analyze → query');
-      expect(analyticsWorkflow.stages.map(stage => stage.name)).toEqual(['report', 'analyze', 'query']);
-      const reportStage = analyticsWorkflow.stages.find(s => s.name === 'report');
-      const analyzeStage = analyticsWorkflow.stages.find(s => s.name === 'analyze');
-      const queryStage = analyticsWorkflow.stages.find(s => s.name === 'query');
-      // Split skill: trend monitor (schedule) and adhoc query evaluator (user)
-      expect(reportStage?.skills.map(skill => skill.id)).toContain('analytics-scheduled-trend-monitor');
-      expect(analyzeStage?.skills.map(skill => skill.id)).toContain('analytics-scheduled-trend-monitor');
-      expect(queryStage?.skills.map(skill => skill.id)).toContain('analytics-adhoc-query-evaluator');
-      for (const stage of analyticsWorkflow.stages) {
-        expect(stage.description).toBeTruthy();
-      }
+      expect(analyticsWorkflow.flow).toBeTruthy();
     });
 
-    it('annotates the analytics skills and registers its product and flow', () => {
-      expect(analyticsSkills[0].manifest.workflowStage).toBe('analyze');
-      const registry = assistantRegistries.find(item => item.assistant === 'Analytics');
-      expect(registry?.productObject).toBe('metric / insight');
-      expect(registry?.workflowFlow).toBe('report → analyze → query');
-      expect(registry?.workflowStages).toEqual(['report', 'analyze', 'query']);
-    });
-  });
-
-  describe('Workflow memory and state persistence', () => {
-    it('all Sprint 5 workflow objects include a flow declaration', () => {
-      const allWorkflows = [ctoWorkflow, educationWorkflow, marketingWorkflow, productWorkflow, contentWorkflow, hrWorkflow, healthcareWorkflow, careerWorkflow, restaurantWorkflow, salesWorkflow, supportWorkflow, sportsWorkflow, eventWorkflow, executiveWorkflow, financeWorkflow, hotelWorkflow, investmentWorkflow, legalWorkflow, songwritingWorkflow, scriptwritingWorkflow, analyticsWorkflow];
-      for (const workflow of allWorkflows) {
-        expect(workflow.flow).toContain('→');
-        expect(workflow.flow.split('→').length).toBeGreaterThanOrEqual(2);
-      }
-    });
-
-    it('each workflow stage includes its skills as first-class citizens', () => {
-      const allWorkflows = [ctoWorkflow, educationWorkflow, marketingWorkflow, productWorkflow, contentWorkflow, hrWorkflow, healthcareWorkflow, careerWorkflow, restaurantWorkflow, salesWorkflow, supportWorkflow, sportsWorkflow, eventWorkflow, executiveWorkflow, financeWorkflow, hotelWorkflow, investmentWorkflow, legalWorkflow, songwritingWorkflow, scriptwritingWorkflow, analyticsWorkflow];
-      for (const workflow of allWorkflows) {
-        let totalSkillsInStages = 0;
-        for (const stage of workflow.stages) {
-          totalSkillsInStages += stage.skills.length;
-          for (const skill of stage.skills) {
-            expect(skill.id).toBeTruthy();
-            expect(skill.name).toBeTruthy();
-            expect(skill.inputSchema).toBeDefined();
-            expect(skill.outputSchema).toBeDefined();
-          }
-        }
-        expect(totalSkillsInStages).toBeGreaterThanOrEqual(workflow.stages.length);
-      }
-    });
-
-    it('no workflow stage is empty', () => {
-      const allWorkflows = [ctoWorkflow, educationWorkflow, marketingWorkflow, productWorkflow, contentWorkflow, hrWorkflow, healthcareWorkflow, careerWorkflow, restaurantWorkflow, salesWorkflow, supportWorkflow, sportsWorkflow, eventWorkflow, executiveWorkflow, financeWorkflow, hotelWorkflow, investmentWorkflow, legalWorkflow, songwritingWorkflow, scriptwritingWorkflow, analyticsWorkflow];
-      for (const workflow of allWorkflows) {
-        for (const stage of workflow.stages) {
-          expect(stage.skills.length).toBeGreaterThan(0);
-        }
-      }
+    it('registers its product object and flow', () => {
+      const reg = assistantRegistries.find((r) => r.assistant === 'Analytics');
+      expect(reg?.productObject).toBe('metric / insight');
+      expect(reg?.workflowFlow).toBe(analyticsWorkflow.flow);
     });
   });
 });

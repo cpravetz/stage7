@@ -1,4 +1,5 @@
-import { Tool, ToolExecution, WorkflowState, CredentialRequest, CredentialRequiredError, ConfirmationRequiredError, CrossObjectHandoffError, SchemaRecord, ApprovalSummary, HandoffRequest, ExecutionResult, RuntimeWorkflow, RuntimeWorkflowAction, RuntimeWorkflowStage } from '../types';
+import { createContextPolicy } from '../adk';
+import { Tool, ToolExecution, WorkflowState, CredentialRequest, CredentialRequiredError, ConfirmationRequiredError, CrossObjectHandoffError, SchemaRecord, ApprovalSummary, HandoffRequest, ExecutionResult, RuntimeWorkflow, RuntimeWorkflowAction } from '../types';
 import logger from '../utils/logger';
 import { ErrorHandler, ClassifiedError } from '../utils/ErrorHandler';
 import { EmailExecutor } from '../executors/EmailExecutor';
@@ -31,6 +32,24 @@ const BRAIN_URL = process.env.BRAIN_URL || 'http://brain:3100';
 const HEALING_SYSTEM_PROMPT = `You are a senior engineer debugging a failed code execution. Given the error message, source code, and input that caused the failure, provide a corrected version of the code. Output ONLY a single JSON object with this exact shape: { "sourceCode": "corrected code string", "explanation": "brief explanation of the fix" }`;
 const MAX_HEALING_ATTEMPTS = 2;
 const MAX_NESTING_DEPTH = 4;
+
+/**
+ * Object-continuity keys, expressed as an ADK context policy so the guard and
+ * the policy cannot drift apart.
+ *
+ * The key list is the executor's own deliberately narrow set. The policy's
+ * broader default also contains keys that name an action rather than a product
+ * object, so adopting it wholesale would make unrelated skills look like a
+ * cross-object handoff. Adding a key here widens what counts as the same
+ * object, so treat it as a governance change.
+ */
+const CONTEXT_POLICY = createContextPolicy({
+  objectKeys: [
+    'patient', 'patientId', 'jobId', 'campaign', 'campaignId', 'ticket', 'ticketId',
+    'case', 'matter', 'lead', 'opportunity', 'event', 'eventId',
+  ],
+});
+const CONTEXT_KEYS = CONTEXT_POLICY.objectKeys;
 
 /**
  * Normalizes a non-skill callee's payload into the `{ success, data }` envelope
@@ -258,10 +277,6 @@ export class ToolExecutor {
     ));
   }
 
-  private getWorkflowStage(tool: Tool): string | undefined {
-    const stage = tool.manifest?.workflowStage;
-    return typeof stage === 'string' ? stage : undefined;
-  }
 
   private ensureWorkspace(
     tool: Tool,
@@ -279,7 +294,6 @@ export class ToolExecutor {
         const created = this.workspaceManager.createWorkspace(
           workflow.assistant,
           workflow.productObject,
-          this.getWorkflowStage(tool) || workflow.stages[0]?.name,
         );
         if (opts.context) created.context = { ...opts.context };
         return { workspaceId: created.workspaceId, workflow };
@@ -296,10 +310,7 @@ export class ToolExecutor {
       const created = this.workspaceManager.createOrResumeWorkspace(
         workflow.assistant,
         workflow.productObject,
-        {
-          context: opts.context,
-          initialStage: this.getWorkflowStage(tool) || workflow.stages[0]?.name,
-        },
+        { context: opts.context },
       ).workspace;
       return { workspaceId: created.workspaceId, workflow };
     }
@@ -317,10 +328,6 @@ export class ToolExecutor {
     try {
       const workspace = this.workspaceManager.getWorkspace(opts.workspaceId);
       if (!workspace) return;
-      const stage = this.getWorkflowStage(tool);
-      if (stage && workflow.stages.some((candidate) => candidate.name === stage)) {
-        this.workspaceManager.updateStage(opts.workspaceId, stage);
-      }
       this.workspaceManager.recordExecutionFromResult(opts.workspaceId, {
         executionId: execution.executionId,
         toolId: tool.id,
@@ -787,8 +794,7 @@ return this.executeOrRequestCredentials(pending.tool, pending.input);
   }
 
   private extractContext(input: Record<string, unknown>): string | null {
-    const contextKeys = ['patient', 'patientId', 'jobId', 'campaign', 'campaignId', 'ticket', 'ticketId', 'case', 'matter', 'lead', 'opportunity', 'event', 'eventId'];
-    for (const key of contextKeys) {
+    for (const key of CONTEXT_KEYS) {
       if (input[key] !== undefined && input[key] !== null && input[key] !== '') {
         const val = input[key];
         if (typeof val === 'string') return `${key}:${val}`;
@@ -1780,32 +1786,19 @@ return {
     const workflowState: WorkflowState = execState || 'analysis';
     const execContext = this.executionContexts.get(executionId) || { workspaceId, assistantId, context };
     const effectiveContext = execContext.context || context || {};
-    const currentStage = workflow.stages[0]?.name || workflow.flow.split('→')[0]?.trim() || 'analysis';
-
-    const stages: RuntimeWorkflowStage[] = workflow.stages.map((stage, idx) => {
-      const isCurrent = stage.name === currentStage;
-      const skills: RuntimeWorkflowAction[] = (stage.skills || []).map((skill) => ({
-        id: skill.id,
-        name: skill.name,
-        description: skill.description,
-        type: skill.type,
-        confirmBeforeSend: skill.confirmBeforeSend,
-        isSkill: skill.isSkill,
-        stage: stage.name,
-        available: isCurrent,
-        reason: isCurrent ? undefined : `Not available in stage '${stage.name}' (current: '${currentStage}')`,
-      }));
-      return {
-        name: stage.name,
-        description: stage.description,
-        status: isCurrent ? 'current' : idx < workflow.stages.findIndex((s) => s.name === currentStage) ? 'completed' : 'pending',
-        skills,
-      };
-    });
+    const skills: RuntimeWorkflowAction[] = workflow.skills.map((skill) => ({
+      id: skill.id,
+      name: skill.name,
+      description: skill.description,
+      type: skill.type,
+      confirmBeforeSend: skill.confirmBeforeSend,
+      isSkill: skill.isSkill,
+      available: true,
+    }));
 
     const allowedTransitions = this.stateTransitions[workflowState] || [];
-    const nextActions = this.deriveNextActions(workflow, currentStage, workflowState);
-    const nextStep = this.deriveNextStep(workflow, currentStage, workflowState, allowedTransitions);
+    const nextActions = this.deriveNextActions(workflow, workflowState);
+    const nextStep = this.deriveNextStep(workflow, workflowState, allowedTransitions);
 
     return {
       executionId,
@@ -1814,8 +1807,7 @@ return {
       assistant: workflow.assistant,
       productObject: workflow.productObject,
       flow: workflow.flow,
-      currentStage,
-      stages,
+      skills,
       workflowState,
       nextActions,
       allowedTransitions,
@@ -1829,13 +1821,10 @@ return {
     };
   }
 
-  private deriveNextActions(workflow: AssistantWorkflow, currentStage: string, workflowState: WorkflowState): string[] {
-    const stage = workflow.stages.find((s) => s.name === currentStage);
+  private deriveNextActions(workflow: AssistantWorkflow, workflowState: WorkflowState): string[] {
     const actions: string[] = [];
-    if (stage) {
-      for (const skill of stage.skills || []) {
-        actions.push(skill.name);
-      }
+    for (const skill of workflow.skills) {
+      actions.push(skill.name);
     }
     if (workflowState !== 'executed' && workflowState !== 'rejected') {
       actions.push(`transition:${workflowState}`);
@@ -1843,16 +1832,15 @@ return {
     return actions;
   }
 
-  private deriveNextStep(workflow: AssistantWorkflow, currentStage: string, workflowState: WorkflowState, allowedTransitions: WorkflowState[]): string | undefined {
+  private deriveNextStep(workflow: AssistantWorkflow, workflowState: WorkflowState, allowedTransitions: WorkflowState[]): string | undefined {
     if (workflowState === 'executed') {
       return `Workflow complete for ${workflow.assistant}. Review results and close out.`;
     }
     if (workflowState === 'rejected') {
       return `Workflow rejected for ${workflow.assistant}. Resume from a prior revision to retry.`;
     }
-    const stage = workflow.stages.find((s) => s.name === currentStage);
-    if (stage && stage.skills && stage.skills.length > 0) {
-      return `Execute one of the available skills in stage '${currentStage}': ${stage.skills.map((s) => s.name).join(', ')}`;
+    if (workflow.skills.length > 0) {
+      return `Choose a skill for ${workflow.assistant}: ${workflow.skills.map((s) => s.name).join(', ')}`;
     }
     if (allowedTransitions.length > 0) {
       return `Advance workflow state from '${workflowState}' to one of: ${allowedTransitions.join(', ')}`;

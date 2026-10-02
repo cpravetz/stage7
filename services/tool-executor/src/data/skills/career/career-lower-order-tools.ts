@@ -7,7 +7,7 @@ export const CAREER_INTERVIEW_PREP: Tool = {
   name: 'Career Interview Prep',
   description: 'Generate interview questions and preparation guidance for a target role and company.',
   type: 'reasoning',
-  manifest: { workflowStage: 'prep' },
+  manifest: {},
   reasoningConfig: {
     promptTemplate: 'Prepare interview guidance for company {{input}}. Return focused interview questions, evaluation areas, and preparation advice as plain text.',
     maxTokens: 2048,
@@ -26,7 +26,7 @@ export const CAREER_ADVISORY: Tool = {
   name: 'Career Advisory',
   description: 'Provide career, compensation, and learning-plan guidance from supplied role context.',
   type: 'reasoning',
-  manifest: { workflowStage: 'prep' },
+  manifest: {},
   reasoningConfig: {
     promptTemplate: 'Provide career advisory guidance for this request: {{input}}. Include practical recommendations, assumptions, and next steps as plain text.',
     maxTokens: 2048,

@@ -18,7 +18,7 @@ describe('AssistantWorkspaceManager - In-Memory Workspace Operations', () => {
     expect(ws.assistant).toBe('CTO');
     expect(ws.productObject).toBe('system / incident');
     expect(ws.workflowState).toBe('analysis');
-    expect(ws.currentStage).toBe('analysis');
+    expect(ws).not.toHaveProperty('currentStage');
     expect(ws.approvalHistory).toEqual([]);
     expect(ws.executionHistory).toEqual([]);
   });
@@ -37,18 +37,18 @@ describe('AssistantWorkspaceManager - In-Memory Workspace Operations', () => {
     expect(manager.getWorkspace('non-existent-id')).toBeUndefined();
   });
 
-  it('updates stage and tracks revisions', () => {
+  it('updates next actions and tracks revisions', () => {
     const ws = manager.createWorkspace('CTO', 'system / incident');
-    manager.updateStage(ws.workspaceId, 'diagnose');
+    manager.setNextActions(ws.workspaceId, ['Review system health']);
 
     const updated = manager.getWorkspace(ws.workspaceId);
-    expect(updated!.currentStage).toBe('diagnose');
+    expect(updated!.nextActions).toEqual(['Review system health']);
 
     const revisions = manager.getRevisions(ws.workspaceId);
     expect(revisions.length).toBeGreaterThanOrEqual(2);
     const triggers = revisions.map(r => r.trigger);
     expect(triggers).toContain('create');
-    expect(triggers).toContain('stage_change');
+    expect(triggers).toContain('actions_update');
   });
 
   it('transitions workflow state through valid transitions', () => {
@@ -193,7 +193,6 @@ describe('AssistantWorkspaceManager - In-Memory Workspace Operations', () => {
 
     const resetWs = manager.getWorkspace(wsId)!;
     expect(resetWs.workflowState).toBe('analysis');
-    expect(resetWs.currentStage).toBe('analysis');
     expect(resetWs.nextActions).toEqual([]);
     expect(resetWs.approvalHistory).toEqual([]);
     expect(resetWs.executionHistory).toEqual([]);
@@ -330,7 +329,7 @@ describe('AssistantWorkspaceManager - In-Memory Workspace Operations', () => {
     const wsId = ws.workspaceId;
 
     for (let i = 0; i < 110; i++) {
-      manager.updateStage(wsId, `stage-${i}`);
+      manager.setNextActions(wsId, [`action-${i}`]);
     }
 
     const revisions = manager.getRevisions(wsId);

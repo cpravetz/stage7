@@ -87,7 +87,6 @@ describe('Behavioral Tests - Assistant Workspace Manager', () => {
     expect(ws.workspaceId).toBeTruthy();
     expect(ws.assistant).toBe('CTO');
     expect(ws.productObject).toBe('system / incident');
-    expect(ws.currentStage).toBe('analysis');
     expect(ws.workflowState).toBe('analysis');
     expect(ws.nextActions).toEqual([]);
     expect(ws.approvalHistory).toEqual([]);
@@ -115,12 +114,12 @@ describe('Behavioral Tests - Assistant Workspace Manager', () => {
     expect(updated.workflowState).toBe('approved');
   });
 
-  it('updates stage', () => {
+  it('updates next actions', () => {
     const ws = manager.createWorkspace('CTO', 'system / incident');
-    const result = manager.updateStage(ws.workspaceId, 'approve');
+    const result = manager.setNextActions(ws.workspaceId, ['Approve change']);
     expect(result).toBe(true);
     const updated = manager.getWorkspace(ws.workspaceId)!;
-    expect(updated.currentStage).toBe('approve');
+    expect(updated.nextActions).toEqual(['Approve change']);
   });
 
   it('records approval entry', () => {

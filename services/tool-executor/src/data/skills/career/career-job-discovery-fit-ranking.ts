@@ -27,7 +27,8 @@ locations: { type: 'array', items: { type: 'string' }, description: 'Target loca
 minSalary: { type: 'number', description: 'Minimum target compensation. Defaults to your saved preference.' },
 maxSalary: { type: 'number', description: 'Maximum target compensation. Defaults to your saved preference.' },
 autoApplyThreshold: { type: 'number', description: 'If set, automatically submit an application (via Apply to Jobs) to every ranked job scoring at or above this fit score' },
-dryRun: { type: 'boolean', description: 'Preview auto-applications without submitting; defaults to true', default: true },
+  minRoleScore: { type: 'number', description: 'Hide roles whose title matches none of the searched roles. Defaults to 0.01 when job titles were given, which keeps only roles that matched the search; set to 0 to see everything discovered, including off-target listings.' },
+  dryRun: { type: 'boolean', description: 'Preview auto-applications without submitting; defaults to true', default: true },
 },
 };
 
@@ -40,8 +41,11 @@ data: {
 type: 'object',
 properties: {
 ranked: { type: 'array' },
-total: { type: 'number' },
-rawDiscovered: { type: 'number', description: 'Listings found before profile ranking' },
+  total: { type: 'number' },
+  rawDiscovered: { type: 'number', description: 'Listings found before profile ranking' },
+  offTarget: { type: 'number', description: 'Discovered listings held back because their title matched none of the searched roles, listed in data.droppedOffTarget' },
+  droppedOffTarget: { type: 'array', description: 'The listings held back by the relevance floor, with the role match that excluded them' },
+  roleQueries: { type: 'array', description: 'The role terms every score was measured against' },
 queriesUsed: { type: 'array' },
 companiesSearched: { type: 'array' },
 byBoard: { type: 'array', description: 'Per-source status, so a real empty result is distinguishable from a source that never ran' },
@@ -160,12 +164,25 @@ handler: async function handler(input, ctx) {
     return;
     }
 
-    // Rank discovered listings against the stored profile before storing or returning.
+    // Rank discovered listings against the terms this run actually searched for
+    // before storing or returning. The role terms are passed through so the scorer
+    // grades each listing against "Engineering Manager" rather than against whatever
+    // happened to be saved on the profile, which is what made every result carry the
+    // same rating.
+    //
+    // A listing whose title matches none of the searched roles is not a result for
+    // this search, so it is held back rather than shown with a low score. career-rank
+    // applies that floor by default whenever role terms were supplied; minRoleScore is
+    // passed straight through, so callers can set it to 0 to see the raw discovery
+    // output including off-target listings.
+    const roleFloor = typeof input.minRoleScore === 'number' ? input.minRoleScore : (jobTitles.length ? 0.01 : 0);
     let rankResult = null;
     if (listings.length) {
-    rankResult = await ctx.delegate('career-rank', { items: listings });
+    rankResult = await ctx.delegate('career-rank', { items: listings, jobTitles: jobTitles, minRoleScore: roleFloor });
     }
     const ranked = rankResult && rankResult.success && rankResult.data ? (Array.isArray(rankResult.data.ranked) ? rankResult.data.ranked : []) : [];
+    const droppedOffTarget = rankResult && rankResult.data && Array.isArray(rankResult.data.droppedOffTarget) ? rankResult.data.droppedOffTarget : [];
+    const roleQueries = rankResult && rankResult.data && Array.isArray(rankResult.data.roleQueries) ? rankResult.data.roleQueries : jobTitles;
 
     // Persist the ranked rows back into the shared listings file.
     //
@@ -216,7 +233,11 @@ handler: async function handler(input, ctx) {
     // that retrieved every source it asked for is reported clean, whatever it found: a
     // genuine zero is an answer, not a degradation.
     const partialDiscovery = discoveryStatus === 'partial' || discoveryFailures.length > 0;
-    const runStatus = partialDiscovery ? 'partial' : (discoveryStatus === 'no-match' ? 'no-match' : 'ok');
+    // Discovery answered fine but every listing it returned was off-target for the
+    // roles searched. That is a genuine "nothing matched", not a clean pass that
+    // happened to rank nothing, and it must not be reported as a successful search.
+    const allOffTarget = ranked.length === 0 && droppedOffTarget.length > 0;
+    const runStatus = partialDiscovery ? 'partial' : (allOffTarget || discoveryStatus === 'no-match' ? 'no-match' : 'ok');
     const runError = partialDiscovery
     ? (discoveryError || (discoveryFailures.length + ' of the sources this search consulted could not be retrieved, so this ranking is not a complete answer about the job market: ' + discoveryFailures.map((f) => (f && f.board) || 'unknown source').join(', ') + '.'))
     : null;
@@ -224,7 +245,11 @@ handler: async function handler(input, ctx) {
     ? 'PARTIAL RESULT. The ' + ranked.length + ' ranked role' + (ranked.length === 1 ? '' : 's') + ' below come only from the job sources that answered. ' + runError + ' Roles on the sources that could not be retrieved are missing from this ranking because they were never read, not because they do not exist.'
     : null;
 
-    const baseNote = discoveryData.note || (ranked.length ? null : 'Discovery ran but returned no matching roles. Widen your filters or add more companies.');
+    const baseNote = allOffTarget
+      ? 'None of the ' + droppedOffTarget.length + ' discovered role' + (droppedOffTarget.length === 1 ? '' : 's') + ' matched ' +
+        (roleQueries.length ? '"' + roleQueries.join('", "') + '"' : 'your target roles') +
+        ' by title, so nothing is shown. The job boards answered, but every posting they returned was for a different role. Widen the role terms, or set minRoleScore to 0 to see everything that was discovered.'
+      : (discoveryData.note || (ranked.length ? null : 'Discovery ran but returned no matching roles. Widen your filters or add more companies.'));
     const noteParts = [baseNote, partialNote].filter(Boolean);
     const note = noteParts.length ? noteParts.join(' ') : undefined;
 
@@ -236,7 +261,10 @@ handler: async function handler(input, ctx) {
     summaryLines.push('Ranked roles: ' + ranked.length + ' (from ' + (discoveryData.total || 0) + ' discovered listing' + ((discoveryData.total || 0) === 1 ? '' : 's') + ')');
     if (jobTitles.length) summaryLines.push('Titles searched: ' + jobTitles.join(', '));
     if (companies.length) summaryLines.push('Companies: ' + companies.join(', '));
-    presentBlocks.push({ id: 'summary', title: runStatus === 'partial' ? 'Partial Search Results' : 'Search Results', kind: 'text', body: summaryLines.join('\n') });
+    if (droppedOffTarget.length) {
+    summaryLines.push('Not shown as matches: ' + droppedOffTarget.length + ' role' + (droppedOffTarget.length === 1 ? '' : 's') + ' whose title did not match' + (roleQueries.length ? ' "' + roleQueries.join('", "') + '"' : ' your target roles'));
+    }
+    presentBlocks.push({ id: 'summary', title: runStatus === 'partial' ? 'Partial Search Results' : (runStatus === 'no-match' ? 'No Matching Roles' : 'Search Results'), kind: 'text', body: summaryLines.join('\n') });
 
     // The ranked roles themselves, each linked to its posting. The summary line above says
     // how many roles were ranked; without the roles attached, that count is the whole of what
@@ -292,7 +320,18 @@ handler: async function handler(input, ctx) {
     return {
       success: true,
       status: runStatus,
-      data: { ranked: ranked, total: ranked.length, discoveryData: discoveryData, partialDiscovery: partialDiscovery },
+      data: {
+        ranked: ranked,
+        total: ranked.length,
+        // Carried through so a run that held listings back can be audited instead of
+        // being indistinguishable from a run where those roles were never posted.
+        droppedOffTarget: droppedOffTarget,
+        offTarget: droppedOffTarget.length,
+        roleQueries: roleQueries,
+        roleFloor: roleFloor,
+        discoveryData: discoveryData,
+        partialDiscovery: partialDiscovery,
+      },
       error: runError || null,
       present: presentBlocks,
     };

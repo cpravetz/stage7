@@ -28,14 +28,12 @@ export interface SkillEntry {
   triggers: string[];
   lowerOrderTools: string[];
   confirmBeforeSend: boolean;
-  workflowStage?: string;
 }
 
 export interface AssistantRegistry {
   assistant: string;
   productObject: string;
   workflowFlow: string;
-  workflowStages: string[];
   skills: SkillEntry[];
 }
 
@@ -55,7 +53,6 @@ function classifySkill(skill: Tool): SkillEntry {
     triggers,
     lowerOrderTools,
     confirmBeforeSend: skill.confirmBeforeSend === true || (skill.manifest?.confirmBeforeSend === true),
-    workflowStage: (skill.manifest?.workflowStage as string) || undefined,
   };
 }
 
@@ -107,13 +104,12 @@ sales: 'discovery → proposal → close',
   analytics: 'report → analyze → query',
 };
 
-function buildRegistry(skills: Tool[], canonical: Tool[], objectKey: string, flowKey: string, workflowStages: string[]): AssistantRegistry {
+function buildRegistry(skills: Tool[], canonical: Tool[], objectKey: string, flowKey: string): AssistantRegistry {
   const uniqueSkills = Array.from(new Map([...skills, ...canonical].map((skill) => [skill.id, skill])).values());
   return {
     assistant: '',
     productObject: ASSISTANT_OBJECT_MAP[objectKey] || '',
     workflowFlow: ASSISTANT_FLOW_MAP[flowKey] || '',
-    workflowStages,
     skills: uniqueSkills.map(classifySkill),
   };
 }
@@ -134,27 +130,27 @@ export function detectOverlappingSkills(registries: AssistantRegistry[]): { skil
 }
 
 export const assistantRegistries: AssistantRegistry[] = [
-  buildRegistry(careerSkills, careerCanonicalSkills, 'career', 'career', ['profile', 'fit', 'application', 'prep', 'tracking', 'outcomes']),
-  buildRegistry(ctoSkills, ctoCanonicalSkills, 'cto', 'cto', ['monitor', 'diagnose', 'plan', 'approve', 'execute']),
-  buildRegistry(healthcareSkills, healthcareCanonicalSkills, 'healthcare', 'healthcare', ['review', 'scheduling', 'coordination']),
-  buildRegistry(hrSkills, hrCanonicalSkills, 'hr', 'hr', ['screening', 'interview', 'decision']),
-  buildRegistry(educationSkills, educationCanonicalSkills, 'education', 'education', ['plan', 'assess', 'support']),
-  buildRegistry(marketingSkills, [], 'marketing', 'marketing', ['plan', 'create', 'publish', 'analyze']),
-  buildRegistry(productSkills, [], 'product', 'product', ['plan', 'specify', 'analyze', 'deliver']),
-  buildRegistry(restaurantSkills, restaurantCanonicalSkills, 'restaurant', 'restaurant', ['reservation', 'service', 'kitchen', 'billing']),
-buildRegistry(salesSkills, [], 'sales', 'sales', ['discovery', 'proposal', 'close']),
-  buildRegistry(supportSkills, [], 'support', 'support', ['intake', 'triage', 'resolution', 'follow-up']),
-  buildRegistry(contentSkills, [], 'content', 'content', ['plan', 'draft', 'optimize', 'publish']),
-  buildRegistry(sportsSkills, [], 'sports', 'sports', ['research', 'odds', 'analysis']),
-  buildRegistry(eventSkills, [], 'event', 'event', ['plan', 'vendors', 'day-of']),
-  buildRegistry(executiveSkills, [], 'executive', 'executive', ['review', 'analysis', 'recommendation', 'decision']),
-  buildRegistry(financeSkills, [], 'finance', 'finance', ['research', 'analyze', 'trade', 'report']),
-  buildRegistry(hotelSkills, [], 'hotel', 'hotel', ['booking', 'stay', 'review', 'loyalty']),
-  buildRegistry(investmentSkills, [], 'investment', 'investment', ['research', 'analyze', 'trade', 'track']),
-  buildRegistry(legalSkills, [], 'legal', 'legal', ['intake', 'research', 'draft', 'review']),
-  buildRegistry(songwritingSkills, [], 'songwriting', 'songwriting', ['trend', 'brief', 'draft', 'refine']),
-  buildRegistry(scriptwritingSkills, scriptwritingCanonicalSkills, 'scriptwriting', 'scriptwriting', ['brief', 'draft', 'revise', 'finalize']),
-  buildRegistry(analyticsSkills, [], 'analytics', 'analytics', ['report', 'analyze', 'query']),
+  buildRegistry(careerSkills, careerCanonicalSkills, 'career', 'career'),
+  buildRegistry(ctoSkills, ctoCanonicalSkills, 'cto', 'cto'),
+  buildRegistry(healthcareSkills, healthcareCanonicalSkills, 'healthcare', 'healthcare'),
+  buildRegistry(hrSkills, hrCanonicalSkills, 'hr', 'hr'),
+  buildRegistry(educationSkills, educationCanonicalSkills, 'education', 'education'),
+  buildRegistry(marketingSkills, [], 'marketing', 'marketing'),
+  buildRegistry(productSkills, [], 'product', 'product'),
+  buildRegistry(restaurantSkills, restaurantCanonicalSkills, 'restaurant', 'restaurant'),
+buildRegistry(salesSkills, [], 'sales', 'sales'),
+  buildRegistry(supportSkills, [], 'support', 'support'),
+  buildRegistry(contentSkills, [], 'content', 'content'),
+  buildRegistry(sportsSkills, [], 'sports', 'sports'),
+  buildRegistry(eventSkills, [], 'event', 'event'),
+  buildRegistry(executiveSkills, [], 'executive', 'executive'),
+  buildRegistry(financeSkills, [], 'finance', 'finance'),
+  buildRegistry(hotelSkills, [], 'hotel', 'hotel'),
+  buildRegistry(investmentSkills, [], 'investment', 'investment'),
+  buildRegistry(legalSkills, [], 'legal', 'legal'),
+  buildRegistry(songwritingSkills, [], 'songwriting', 'songwriting'),
+  buildRegistry(scriptwritingSkills, scriptwritingCanonicalSkills, 'scriptwriting', 'scriptwriting'),
+  buildRegistry(analyticsSkills, [], 'analytics', 'analytics'),
 ];
 
 export interface RetainedOverlapDecision {

@@ -45,8 +45,7 @@ export const CONTENT_STRATEGY_SEO_EVALUATOR = createDeclarativeCodeSkill({
   ],
   isSkill: true,
   manifest: {
-    ui: { view: 'content-strategy' },
-    workflowStage: 'optimize'
+    ui: { view: 'content-strategy' }
   },
   handler: async function handler(input, ctx) {
       const NL = '\n';

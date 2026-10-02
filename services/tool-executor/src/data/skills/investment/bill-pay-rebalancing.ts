@@ -36,7 +36,6 @@ const BILL_PAY_REBALANCING = createDeclarativeCodeSkill({
   confirmBeforeSend: true,
   isSkill: true,
   manifest: {
-    workflowStage: 'trade'
   },
   handler: async function handler(input, ctx) {
       const NL = '\n';

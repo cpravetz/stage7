@@ -57,7 +57,6 @@ const CAREER_PROFILE_INTAKE = createDeclarativeCodeSkill({
   ],
   manifest: {
     configSchema: CAREER_BASE_CONFIG_SCHEMA,
-    workflowStage: 'profile',
     actionLabel: 'Save profile'
   },
   handler: async function handler(input, ctx) {

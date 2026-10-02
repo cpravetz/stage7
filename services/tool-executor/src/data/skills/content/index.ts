@@ -1,4 +1,5 @@
 import { Tool } from '../../../types';
+import { createWorkflow, AssistantWorkflow } from '../workflow-common';
 import { CONTENT_DRAFTING_ADAPTATION } from './content-drafting-adaptation';
 import { CONTENT_PERFORMANCE_SEO } from './content-performance-seo';
 import { CONTENT_STRATEGY_SEO_EVALUATOR } from './content-strategy-seo-evaluator';
@@ -31,27 +32,9 @@ const CONTENT_CANONICAL_SKILLS: Tool[] = [
 
 export const contentSkills: Tool[] = [...CONTENT_SUPPORT_TOOLS, ...CONTENT_CANONICAL_SKILLS];
 
-export interface WorkflowStage {
-  name: string;
-  description: string;
-  skills: Tool[];
-}
-
-export interface AssistantWorkflow {
-  assistant: string;
-  productObject: string;
-  flow: string;
-  stages: WorkflowStage[];
-}
-
-export const contentWorkflow: AssistantWorkflow = {
+export const contentWorkflow: AssistantWorkflow = createWorkflow({
   assistant: 'Content',
   productObject: 'content piece',
   flow: 'plan → draft → optimize → publish',
-  stages: [
-    { name: 'plan', description: 'Editorial calendar and brief planning', skills: contentSkills.filter((s) => s.manifest.workflowStage === 'plan') },
-    { name: 'draft', description: 'Content drafting and adaptation', skills: contentSkills.filter((s) => s.manifest.workflowStage === 'draft') },
-    { name: 'optimize', description: 'Performance, SEO, and strategy optimization', skills: contentSkills.filter((s) => s.manifest.workflowStage === 'optimize') },
-    { name: 'publish', description: 'Multi-channel publishing and dispatch', skills: contentSkills.filter((s) => s.manifest.workflowStage === 'publish') },
-  ],
-};
+  skills: contentSkills,
+});

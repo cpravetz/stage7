@@ -16,17 +16,14 @@ import type {
   AssistantPersistencePolicy,
   AssistantPersistencePort,
   AssistantRuntimeState,
-  AssistantSkill,
-  AssistantSkillParameters,
-  AssistantWorkflow,
-  AssistantWorkflowParameters,
   CreateToolParameters,
-  WorkflowLane,
-  WorkflowLaneParameters,
-  WorkflowStage,
-  WorkflowStageParameters,
 } from './contracts';
 
+/**
+ * Input keys that identify the product object an invocation acts on. A skill
+ * that receives any of these is implicitly scoped to that object, which is how
+ * continuity ("do not mix event A with event B") is enforced.
+ */
 const DEFAULT_CONTEXT_KEYS = [
   'patient',
   'patientId',
@@ -50,21 +47,25 @@ const DEFAULT_CONTEXT_KEYS = [
   'productId',
   'entityId',
   'context',
-  'operation',
 ] as const;
+
+/**
+ * Workflow states in which an approval gate applies. These are the states where
+ * work is still advisory and a human can sensibly stop it before it acts.
+ */
 const DEFAULT_APPROVAL_STATES = ['draft', 'recommendation'] as const;
 
 function unique(values: readonly string[]): string[] {
   return Array.from(new Set(values));
 }
 
-function requireText(value: string, field: string): void {
+export function requireText(value: string, field: string): void {
   if (!value.trim()) {
     throw new Error(`${field} is required`);
   }
 }
 
-function assertUnique(values: readonly string[], field: string): void {
+export function assertUnique(values: readonly string[], field: string): void {
   const seen = new Set<string>();
   for (const value of values) {
     if (seen.has(value)) {
@@ -75,8 +76,10 @@ function assertUnique(values: readonly string[], field: string): void {
 }
 
 export function createTool(parameters: CreateToolParameters): Tool {
+  requireText(parameters.id, 'tool id');
+  requireText(parameters.name, 'tool name');
   const now = new Date();
-  const tool: Tool = {
+  return {
     id: parameters.id,
     name: parameters.name,
     description: parameters.description,
@@ -93,91 +96,38 @@ export function createTool(parameters: CreateToolParameters): Tool {
     createdAt: parameters.createdAt ?? now,
     updatedAt: parameters.updatedAt ?? now,
   };
-  return tool;
 }
 
-export function createSkill(parameters: AssistantSkillParameters): AssistantSkill {
-  requireText(parameters.tool.id, 'skill tool id');
-  return {
-    id: parameters.id ?? parameters.tool.id,
-    name: parameters.name ?? parameters.tool.name,
-    description: parameters.description ?? parameters.tool.description,
-    tool: parameters.tool,
-    laneId: parameters.laneId,
-    stageId: parameters.stageId,
-    triggers: parameters.triggers ?? parameters.tool.triggers,
-    metadata: parameters.metadata,
-  };
-}
-
-export function createWorkflowStage(parameters: WorkflowStageParameters): WorkflowStage {
-  requireText(parameters.id, 'stage id');
-  requireText(parameters.name, 'stage name');
-  assertUnique(parameters.skillIds, 'stage skill id');
-  assertUnique(parameters.transitions ?? [], 'stage transition');
-  return {
-    id: parameters.id,
-    name: parameters.name,
-    description: parameters.description,
-    skillIds: [...parameters.skillIds],
-    transitions: [...(parameters.transitions ?? [])],
-    approvalPolicy: parameters.approvalPolicy,
-    metadata: parameters.metadata,
-  };
-}
-
-export function createWorkflowLane(parameters: WorkflowLaneParameters): WorkflowLane {
-  requireText(parameters.id, 'lane id');
-  requireText(parameters.name, 'lane name');
-  assertUnique(parameters.stageIds, 'lane stage id');
-  assertUnique(parameters.modes ?? [], 'lane mode');
-  return {
-    id: parameters.id,
-    name: parameters.name,
-    description: parameters.description,
-    stageIds: [...parameters.stageIds],
-    modes: [...(parameters.modes ?? [])],
-    metadata: parameters.metadata,
-  };
-}
-
-export function createWorkflow(parameters: AssistantWorkflowParameters): AssistantWorkflow {
-  requireText(parameters.assistantId, 'assistant id');
+export function createContext<TData extends Record<string, unknown> = Record<string, unknown>>(
+  parameters: {
+    productObject: string;
+    objectId?: string;
+    data: TData;
+    version?: number;
+  },
+): AssistantContext<TData> {
   requireText(parameters.productObject, 'product object');
-  requireText(parameters.flow, 'workflow flow');
-  assertUnique(parameters.stages.map((stage) => stage.id), 'workflow stage id');
-  assertUnique(parameters.lanes.map((lane) => lane.id), 'workflow lane id');
-
-  const stageIds = new Set(parameters.stages.map((stage) => stage.id));
-  for (const stage of parameters.stages) {
-    for (const transition of stage.transitions) {
-      if (!stageIds.has(transition)) {
-        throw new Error(`Workflow stage ${stage.id} transitions to unknown stage ${transition}`);
-      }
-    }
-  }
-  for (const lane of parameters.lanes) {
-    for (const stageId of lane.stageIds) {
-      if (!stageIds.has(stageId)) {
-        throw new Error(`Workflow lane ${lane.id} references unknown stage ${stageId}`);
-      }
-    }
-  }
-
   return {
-    id: parameters.id ?? `${parameters.assistantId}-workflow`,
-    assistantId: parameters.assistantId,
     productObject: parameters.productObject,
-    flow: parameters.flow,
-    stages: parameters.stages.map((stage) => ({ ...stage })),
-    lanes: parameters.lanes.map((lane) => ({ ...lane })),
+    objectId: parameters.objectId,
+    data: { ...parameters.data },
+    version: parameters.version ?? 1,
   };
 }
 
+/**
+ * Builds the object-continuity policy for an assistant.
+ *
+ * The default validator rejects an input that names a different product object
+ * than the active context, which is what stops one conversation from silently
+ * accumulating results across unrelated objects.
+ */
 export function createContextPolicy<TData extends Record<string, unknown> = Record<string, unknown>>(
   parameters: AssistantContextPolicyInput<TData> = {},
 ): AssistantContextPolicy<TData> {
   const objectKeys = parameters.objectKeys ?? DEFAULT_CONTEXT_KEYS;
+  const allowCrossObjectHandoff = parameters.allowCrossObjectHandoff ?? false;
+
   const extract = parameters.extract ?? ((input: Record<string, unknown>) => {
     const objectId = objectKeys
       .map((key) => input[key])
@@ -186,14 +136,13 @@ export function createContextPolicy<TData extends Record<string, unknown> = Reco
       return undefined;
     }
     const productObject = typeof input.productObject === 'string' ? input.productObject : undefined;
-    const stageId = typeof input.stageId === 'string' ? input.stageId : undefined;
     const data: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(input)) {
-      if (!objectKeys.includes(key as string) && key !== 'productObject' && key !== 'stageId') {
+      if (!objectKeys.includes(key as string) && key !== 'productObject') {
         data[key] = value;
       }
     }
-    return { productObject, objectId, stageId, data: data as Partial<TData> };
+    return { productObject, objectId, data: data as Partial<TData> };
   });
 
   const validate = parameters.validate ?? ((context, input, current) => {
@@ -203,7 +152,7 @@ export function createContextPolicy<TData extends Record<string, unknown> = Reco
     }
     const activeContext = current ?? context;
     if (
-      !parameters.allowCrossObjectHandoff &&
+      !allowCrossObjectHandoff &&
       activeContext.objectId &&
       resolution.objectId &&
       activeContext.objectId !== resolution.objectId
@@ -224,29 +173,15 @@ export function createContextPolicy<TData extends Record<string, unknown> = Reco
     objectKeys: [...objectKeys],
     extract,
     validate,
-    allowCrossObjectHandoff: parameters.allowCrossObjectHandoff ?? false,
+    allowCrossObjectHandoff,
   };
 }
 
-export function createContext<TData extends Record<string, unknown> = Record<string, unknown>>(
-  parameters: {
-    productObject: string;
-    objectId?: string;
-    stageId?: string;
-    data: TData;
-    version?: number;
-  },
-): AssistantContext<TData> {
-  requireText(parameters.productObject, 'product object');
-  return {
-    productObject: parameters.productObject,
-    objectId: parameters.objectId,
-    stageId: parameters.stageId,
-    data: { ...parameters.data },
-    version: parameters.version ?? 1,
-  };
-}
-
+/**
+ * Folds an invocation's input into the active context and validates continuity.
+ * Returns `valid: false` with a human-readable reason when the input would move
+ * the conversation onto a different object.
+ */
 export function resolveContext<TData extends Record<string, unknown> = Record<string, unknown>>(
   policy: AssistantContextPolicy<TData>,
   input: Record<string, unknown>,
@@ -260,7 +195,6 @@ export function resolveContext<TData extends Record<string, unknown> = Record<st
     ? {
         productObject: resolution.productObject ?? current?.productObject ?? '',
         objectId: resolution.objectId ?? current?.objectId,
-        stageId: resolution.stageId ?? current?.stageId,
         data,
         version: (current?.version ?? 0) + 1,
       }
@@ -302,6 +236,13 @@ export function createApprovalPolicy(parameters: ApprovalPolicyInput = {}): Appr
   };
 }
 
+/**
+ * Decides whether an invocation needs human confirmation.
+ *
+ * A dry run never needs approval because it does not act. Outside the policy's
+ * allowed states the gate does not apply, because the work has already been
+ * approved or executed. Otherwise the policy's own requirement decides.
+ */
 export function shouldRequireApproval(policy: ApprovalPolicy, request: ApprovalRequest): boolean {
   if (request.dryRun && policy.dryRunByDefault) {
     return false;
@@ -344,6 +285,10 @@ export function createConfiguration<TValues extends Record<string, unknown> = Re
   };
 }
 
+/**
+ * Merges caller overrides over the assistant defaults and enforces required
+ * keys, so a misconfigured assistant fails loudly before a skill runs.
+ */
 export function resolveConfiguration<TValues extends Record<string, unknown>>(
   configuration: AssistantConfiguration<TValues>,
   overrides: Partial<TValues> = {},
@@ -390,6 +335,12 @@ export function createPersistencePolicy<TState>(
   return { port, namespace, revisionLimit };
 }
 
+/**
+ * Composes an assistant from a flat skill set plus the policies that govern it.
+ * There are no stages or lanes: an assistant is a set of skills bound to an
+ * object, a configuration contract, an object-continuity rule, and an approval
+ * gate.
+ */
 export function createAssistant<TContext extends Record<string, unknown>, TConfiguration extends Record<string, unknown>>(
   parameters: AssistantDefinitionParameters<TContext, TConfiguration>,
 ): AssistantDefinition<TContext, TConfiguration> {
@@ -398,27 +349,10 @@ export function createAssistant<TContext extends Record<string, unknown>, TConfi
   if (parameters.productObjects.length === 0) {
     throw new Error('At least one product object is required');
   }
-  if (parameters.workflow.assistantId !== parameters.identity.id) {
-    throw new Error(`Workflow assistant ${parameters.workflow.assistantId} does not match assistant ${parameters.identity.id}`);
-  }
+  assertUnique(parameters.skills.map((skill) => skill.id), 'assistant skill');
+  assertUnique(parameters.productObjects, 'assistant product object');
 
-  const stageIds = new Set(parameters.workflow.stages.map((stage) => stage.id));
-  const laneIds = new Set(parameters.workflow.lanes.map((lane) => lane.id));
-  const skillIds = new Set<string>();
-  for (const skill of parameters.skills) {
-    if (skillIds.has(skill.id)) {
-      throw new Error(`Duplicate assistant skill: ${skill.id}`);
-    }
-    skillIds.add(skill.id);
-    if (!stageIds.has(skill.stageId)) {
-      throw new Error(`Skill ${skill.id} references unknown stage ${skill.stageId}`);
-    }
-    if (!laneIds.has(skill.laneId)) {
-      throw new Error(`Skill ${skill.id} references unknown lane ${skill.laneId}`);
-    }
-  }
-
-  const skillTools = parameters.skills.map((skill) => skill.tool);
+  const skillTools = [...parameters.skills];
   const tools = unique([...(parameters.tools ?? []), ...skillTools].map((tool) => tool.id)).map((id) => {
     const tool = [...(parameters.tools ?? []), ...skillTools].find((candidate) => candidate.id === id);
     if (!tool) {
@@ -426,6 +360,7 @@ export function createAssistant<TContext extends Record<string, unknown>, TConfi
     }
     return tool;
   });
+
   const persistence = parameters.persistence ?? {};
   const port = persistence.port ?? new InMemoryPersistencePort<AssistantRuntimeState<TContext, TConfiguration>>();
 
@@ -435,7 +370,6 @@ export function createAssistant<TContext extends Record<string, unknown>, TConfi
     description: parameters.identity.description,
     version: parameters.identity.version,
     productObjects: [...parameters.productObjects],
-    workflow: parameters.workflow,
     skills: [...parameters.skills],
     tools,
     configuration: createConfiguration(parameters.configuration),
@@ -452,10 +386,6 @@ export function createAssistant<TContext extends Record<string, unknown>, TConfi
 
 export const composeAssistant = createAssistant;
 export const createAssistantDefinition = createAssistant;
-export const createWorkflowDefinition = createWorkflow;
-export const createStage = createWorkflowStage;
-export const createLane = createWorkflowLane;
-export const createSkillDefinition = createSkill;
 export const createAssistantTool = createTool;
 export const createAssistantContext = createContext;
 export const createAssistantApprovalPolicy = createApprovalPolicy;

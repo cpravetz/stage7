@@ -7,3 +7,7 @@ export const hrResultSchema = (dataDescription: string): SchemaRecord =>
   resultSchema(dataDescription, { extraStatuses: ['error'] }) as SchemaRecord;
 
 export const HR_EXTERNAL_OUTPUT_SCHEMA: SchemaRecord = EXTERNAL_ACTION_OUTPUT_SCHEMA as SchemaRecord;
+
+export const HR_DOMAIN_KNOWLEDGE =
+  'Talent acquisition lifecycles, structured interview methodology, compensation benchmarking, employment law compliance (EEOC)';
+

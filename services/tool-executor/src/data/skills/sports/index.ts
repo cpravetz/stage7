@@ -1,4 +1,4 @@
-import { Tool } from "../../../types";
+
 import { TACTICAL_ROSTER_EVALUATOR } from "./sports-tactical-roster-evaluator";
 import { BATTLECARD_CREATOR } from "./sports-battlecard-creator";
 import { SCOUTING_ALERT_DISPATCHER } from "./sports-scouting-alert-dispatcher";
@@ -7,7 +7,7 @@ import { BANKROLL_CO_PILOT } from "./sports-bankroll-co-pilot";
 import { SPORTS_PREDICTOR_AD_HOC } from "./sports-ingame-predictive-modeling";
 import { SPORTS_INGAME_PREDICTIVE_MODELING_SCHEDULED } from "./sports-ingame-predictive-modeling-scheduled";
 import { LINE_ALERT_DISPATCHER } from "./sports-line-alert-dispatcher";
-import { annotateStages, createWorkflow, AssistantWorkflow } from "../workflow-common";
+import { createWorkflow } from '../workflow-common';
 
 export const sportsSkills = [
   TACTICAL_ROSTER_EVALUATOR,
@@ -20,24 +20,9 @@ export const sportsSkills = [
   SPORTS_INGAME_PREDICTIVE_MODELING_SCHEDULED,
 ];
 
-annotateStages(sportsSkills, {
-  'sports-tactical-roster-evaluator': 'analysis',
-  'sports-battlecard-creator': 'analysis',
-  'sports-scouting-alert-dispatcher': 'research',
-  'sports-matchup-odds-explainer': 'odds',
-  'sports-bankroll-co-pilot': 'odds',
-  'sports-predictor-ad-hoc': 'odds',
-  'sports-ingame-predictive-modeling-scheduled': 'odds',
-  'sports-line-alert-dispatcher': 'research',
-});
-
 export const sportsWorkflow = createWorkflow({
   assistant: 'Sports',
   productObject: 'game / matchup',
   flow: 'research → odds → analysis',
-  stages: [
-    { name: 'research', description: 'Research and scouting', stageIds: ['sports-scouting-alert-dispatcher', 'sports-line-alert-dispatcher'] },
-    { name: 'odds', description: 'Odds analysis and bankroll management', stageIds: ['sports-matchup-odds-explainer', 'sports-bankroll-co-pilot', 'sports-predictor-ad-hoc', 'sports-ingame-predictive-modeling-scheduled'] },
-    { name: 'analysis', description: 'Tactical analysis and battlecard creation', stageIds: ['sports-tactical-roster-evaluator', 'sports-battlecard-creator'] },
-  ],
-}, sportsSkills);
+  skills: sportsSkills,
+});

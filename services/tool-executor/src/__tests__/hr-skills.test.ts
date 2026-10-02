@@ -313,20 +313,23 @@ describe('hrSkills', () => {
     });
   });
 
-  describe('Workflow stages', () => {
-    it('screening stage has correct skills', () => {
-      const screeningSkills = hrSkills.filter((s) => s.manifest.workflowStage === 'screening');
-      expect(screeningSkills.map((s) => s.id).sort()).toEqual(['hr-assess-candidate', 'hr-screen-resume'].sort());
+  describe('Skill inventory', () => {
+    it('exposes the expected HR skills as a flat set', () => {
+      expect(hrSkills.map((s) => s.id).sort()).toEqual([
+        'hr-assess-candidate',
+        'hr-compliance-check',
+        'hr-draft-jd-interview-kit',
+        'hr-hiring-analytics',
+        'hr-interview-scheduling-automated',
+        'hr-interview-scheduling-user',
+        'hr-screen-resume',
+      ].sort());
     });
 
-    it('interview stage has correct skills', () => {
-      const interviewSkills = hrSkills.filter((s) => s.manifest.workflowStage === 'interview');
-      expect(interviewSkills.map((s) => s.id).sort()).toEqual(['hr-draft-jd-interview-kit', 'hr-interview-scheduling-user', 'hr-interview-scheduling-automated'].sort());
-    });
-
-    it('decision stage has correct skills', () => {
-      const decisionSkills = hrSkills.filter((s) => s.manifest.workflowStage === 'decision');
-      expect(decisionSkills.map((s) => s.id).sort()).toEqual(['hr-compliance-check', 'hr-hiring-analytics'].sort());
+    it('does not annotate any skill with a workflow stage', () => {
+      for (const skill of hrSkills) {
+        expect(skill.manifest).not.toHaveProperty('workflowStage');
+      }
     });
   });
 

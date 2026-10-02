@@ -252,16 +252,8 @@ export interface RuntimeWorkflowAction {
   confirmBeforeSend?: boolean;
   tier?: 'advise' | 'aid' | 'represent';
   isSkill?: boolean;
-  stage?: string;
   available: boolean;
   reason?: string;
-}
-
-export interface RuntimeWorkflowStage {
-  name: string;
-  description: string;
-  status: 'current' | 'pending' | 'completed' | 'skipped';
-  skills: RuntimeWorkflowAction[];
 }
 
 export interface RuntimeWorkflow {
@@ -271,8 +263,7 @@ export interface RuntimeWorkflow {
   assistant?: string;
   productObject?: string;
   flow?: string;
-  currentStage: string;
-  stages: RuntimeWorkflowStage[];
+  skills: RuntimeWorkflowAction[];
   workflowState: WorkflowState;
   nextActions: string[];
   allowedTransitions: WorkflowState[];
@@ -290,7 +281,6 @@ export interface CreateOrResumeWorkspaceRequest {
   productObject: string;
   workspaceId?: string;
   context?: Record<string, unknown>;
-  initialStage?: string;
 }
 
 export interface HandoffRequest {
@@ -339,7 +329,6 @@ export interface AssistantWorkspace {
   workspaceId: string;
   assistant: string;
   productObject: string;
-  currentStage: string;
   workflowState: WorkflowState;
   lastResultId?: string;
   nextActions: string[];

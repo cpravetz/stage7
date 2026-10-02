@@ -64,8 +64,7 @@ const RESEARCH_PLANNING = createDeclarativeCodeSkill({
   ],
   isSkill: true,
   manifest: {
-    lowerOrderTools: ['search_web'],
-    workflowStage: 'track'
+    lowerOrderTools: ['search_web']
   },
   handler: async function handler(input, ctx) {
       const NL = '\n';

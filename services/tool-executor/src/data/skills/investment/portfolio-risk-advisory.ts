@@ -43,7 +43,6 @@ const PORTFOLIO_RISK_ADVISORY = createDeclarativeCodeSkill({
   ],
   isSkill: true,
   manifest: {
-    workflowStage: 'analyze'
   },
   handler: async function handler(input, ctx) {
       const NL = '\n';

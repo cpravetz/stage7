@@ -38,8 +38,7 @@ export const GOVERNED_PUBLISHING_CMS_DISPATCHER = createDeclarativeCodeSkill({
   isSkill: true,
   manifest: {
     confirmBeforeSend: true,
-    ui: { view: 'publishing-approval' },
-    workflowStage: 'publish'
+    ui: { view: 'publishing-approval' }
   },
   handler: async function handler(input, ctx) {
       const NL = '\n';

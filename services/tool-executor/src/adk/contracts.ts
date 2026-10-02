@@ -3,8 +3,6 @@ import type { SchemaRecord, SkillTrigger, Tool, WorkflowState } from '../types';
 export type AssistantContextData = Record<string, unknown>;
 export type AssistantConfigurationValues = Record<string, unknown>;
 export type AssistantTool = Tool;
-export type AssistantStage = WorkflowStage;
-export type AssistantLane = WorkflowLane;
 export type MaybePromise<T> = T | Promise<T>;
 
 export interface AssistantIdentity {
@@ -29,7 +27,6 @@ export interface AssistantConfigurationInput<TValues extends AssistantConfigurat
 export interface AssistantContext<TData extends AssistantContextData = AssistantContextData> {
   productObject: string;
   objectId?: string;
-  stageId?: string;
   data: TData;
   version: number;
 }
@@ -37,7 +34,6 @@ export interface AssistantContext<TData extends AssistantContextData = Assistant
 export interface AssistantContextResolution<TData extends AssistantContextData = AssistantContextData> {
   productObject?: string;
   objectId?: string;
-  stageId?: string;
   data?: Partial<TData>;
 }
 
@@ -124,84 +120,6 @@ export interface ApprovalRecord {
   createdAt: Date;
 }
 
-export interface WorkflowStage {
-  id: string;
-  name: string;
-  description: string;
-  skillIds: readonly string[];
-  transitions: readonly string[];
-  approvalPolicy?: ApprovalPolicy;
-  metadata?: Record<string, unknown>;
-}
-
-export interface WorkflowStageParameters {
-  id: string;
-  name: string;
-  description: string;
-  skillIds: readonly string[];
-  transitions?: readonly string[];
-  approvalPolicy?: ApprovalPolicy;
-  metadata?: Record<string, unknown>;
-}
-
-export interface WorkflowLane {
-  id: string;
-  name: string;
-  description: string;
-  stageIds: readonly string[];
-  modes: readonly string[];
-  metadata?: Record<string, unknown>;
-}
-
-export interface WorkflowLaneParameters {
-  id: string;
-  name: string;
-  description: string;
-  stageIds: readonly string[];
-  modes?: readonly string[];
-  metadata?: Record<string, unknown>;
-}
-
-export interface AssistantWorkflow {
-  id: string;
-  assistantId: string;
-  productObject: string;
-  flow: string;
-  stages: readonly WorkflowStage[];
-  lanes: readonly WorkflowLane[];
-}
-
-export interface AssistantWorkflowParameters {
-  id?: string;
-  assistantId: string;
-  productObject: string;
-  flow: string;
-  stages: readonly WorkflowStage[];
-  lanes: readonly WorkflowLane[];
-}
-
-export interface AssistantSkill {
-  id: string;
-  name: string;
-  description: string;
-  tool: Tool;
-  laneId: string;
-  stageId: string;
-  triggers?: SkillTrigger[];
-  metadata?: Record<string, unknown>;
-}
-
-export interface AssistantSkillParameters {
-  id?: string;
-  name?: string;
-  description?: string;
-  tool: Tool;
-  laneId: string;
-  stageId: string;
-  triggers?: SkillTrigger[];
-  metadata?: Record<string, unknown>;
-}
-
 export interface CreateToolParameters {
   id: string;
   name: string;
@@ -237,7 +155,6 @@ export interface AssistantRuntimeState<TContext extends AssistantContextData = A
   assistantId: string;
   context: AssistantContext<TContext>;
   configuration: Readonly<TConfiguration>;
-  currentStageId?: string;
   workflowState: WorkflowState;
   approvals: readonly ApprovalRecord[];
   updatedAt: Date;
@@ -249,8 +166,7 @@ export interface AssistantDefinition<TContext extends AssistantContextData = Ass
   description: string;
   version?: string;
   productObjects: readonly string[];
-  workflow: AssistantWorkflow;
-  skills: readonly AssistantSkill[];
+  skills: readonly Tool[];
   tools: readonly Tool[];
   configuration: AssistantConfiguration<TConfiguration>;
   contextPolicy: AssistantContextPolicy<TContext>;
@@ -262,8 +178,7 @@ export interface AssistantDefinition<TContext extends AssistantContextData = Ass
 export interface AssistantDefinitionParameters<TContext extends AssistantContextData = AssistantContextData, TConfiguration extends AssistantConfigurationValues = AssistantConfigurationValues> {
   identity: AssistantIdentity;
   productObjects: readonly string[];
-  workflow: AssistantWorkflow;
-  skills: readonly AssistantSkill[];
+  skills: readonly Tool[];
   tools?: readonly Tool[];
   configuration?: AssistantConfigurationInput<TConfiguration>;
   contextPolicy?: AssistantContextPolicyInput<TContext>;

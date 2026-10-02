@@ -4,28 +4,16 @@ import { LESSON_ASSESSMENT_DRAFTING_SCHEDULED } from './lesson-assessment-drafti
 import { LEARNER_INSIGHT } from './learner-insight';
 import { ADAPTIVE_PERSONALIZATION } from './adaptive-personalization';
 import { RESOURCE_LIBRARY_OPS } from './resource-library-ops';
-import { annotateStages, createWorkflow, AssistantWorkflow } from '../workflow-common';
+import { createWorkflow } from '../workflow-common';
 
 export const educationSkills = [LESSON_ASSESSMENT_DRAFTING_USER, LESSON_ASSESSMENT_DRAFTING_SCHEDULED, LEARNER_INSIGHT, ADAPTIVE_PERSONALIZATION, RESOURCE_LIBRARY_OPS];
-
-annotateStages(educationSkills, {
-  'education-lesson-assessment-drafting-user': 'assess',
-  'education-lesson-assessment-drafting-scheduled': 'assess',
-  'education-learner-insight': 'plan',
-  'education-adaptive-personalization': 'plan',
-  'education-resource-library': 'support',
-});
 
 export const educationWorkflow = createWorkflow({
   assistant: 'Education',
   productObject: 'learner',
   flow: 'plan → assess → support',
-  stages: [
-    { name: 'plan', description: 'Learner context and adaptive planning', stageIds: ['education-learner-insight', 'education-adaptive-personalization'] },
-    { name: 'assess', description: 'Lesson, quiz, and activity assessment drafting', stageIds: ['education-lesson-assessment-drafting-user', 'education-lesson-assessment-drafting-scheduled'] },
-    { name: 'support', description: 'Resource library and accessibility support', stageIds: ['education-resource-library'] },
-  ],
-}, educationSkills);
+  skills: educationSkills,
+});
 
 // CHANGE 1 verification: LEARNER_INSIGHT uses createExternalActionSkill.
 // The factory at code-skill-factory.ts:290-298 already returns the honest not-connected

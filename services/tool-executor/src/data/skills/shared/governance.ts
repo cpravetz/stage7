@@ -3,7 +3,6 @@ import { Tool } from '../../../types';
 export interface GovernanceOptions {
   confirmBeforeSend?: boolean;
   tier?: 'advise' | 'aid' | 'represent';
-  workflowStage?: string;
 }
 
 /**
@@ -18,7 +17,6 @@ export function withGovernance(skill: Tool, opts: GovernanceOptions = {}): Tool 
   const updatedManifest = {
     ...(skill.manifest || {}),
     ...(needsConfirmation ? { confirmBeforeSend: true } : {}),
-    ...(opts.workflowStage ? { workflowStage: opts.workflowStage } : {}),
   };
 
   return {

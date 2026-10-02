@@ -35,7 +35,6 @@ export const SUPPORT_RESOLVE_TICKET = createDeclarativeCodeSkill({
   ],
   isSkill: true,
   manifest: {
-    workflowStage: 'intake'
   },
   handler: async function handler(input, ctx) {
       const ticketId = input.ticket || '';
@@ -80,7 +79,6 @@ export const SUPPORT_SENTIMENT_ANALYSIS = createDeclarativeCodeSkill({
   ],
   isSkill: true,
   manifest: {
-    workflowStage: 'intake'
   },
   handler: async function handler(input, ctx) {
       const text = input.text || '';
@@ -127,7 +125,6 @@ export const SUPPORT_ISSUE_ANALYSIS = createDeclarativeCodeSkill({
   ],
   isSkill: true,
   manifest: {
-    workflowStage: 'intake'
   },
   handler: async function handler(input, ctx) {
       const issueText = input.issueText || '';
@@ -172,7 +169,6 @@ export const SUPPORT_SEARCH_KB = createDeclarativeCodeSkill({
   ],
   isSkill: true,
   manifest: {
-    workflowStage: 'intake'
   },
   handler: async function handler(input, ctx) {
       const query = input.query || '';

@@ -86,6 +86,6 @@ export const MULTI_CHANNEL_PUBLISHING = createExternalActionSkill({
   // (ToolExecutor.nestedExecutorCallback carrying an approved parent's
   // confirmation into the callee) is what keeps the approved publish path working.
   confirmBeforeSend: true,
-  manifest: { workflowStage: 'publish', confirmBeforeSend: true },
+  manifest: { confirmBeforeSend: true },
   isSkill: false,
 });

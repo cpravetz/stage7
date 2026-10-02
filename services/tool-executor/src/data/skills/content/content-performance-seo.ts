@@ -63,6 +63,5 @@ export const CONTENT_PERFORMANCE_SEO = createExternalActionSkill({
   },
   outputSchema: CONTENT_EXTERNAL_OUTPUT_SCHEMA,
   timeoutMs: 120000,
-  manifest: { workflowStage: 'optimize' },
   isSkill: false,
 });

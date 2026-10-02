@@ -19,7 +19,6 @@ router.get(
       assistant: req.query.assistant as string | undefined,
       productObject: req.query.productObject as string | undefined,
       workflowState: req.query.workflowState as any,
-      currentStage: req.query.currentStage as string | undefined,
     });
     res.json({ workspaces, count: workspaces.length });
   })
@@ -40,7 +39,7 @@ router.get(
 router.post(
   '/',
   asyncHandler(async (req: Request, res: Response) => {
-    const { assistant, productObject, workspaceId, context, initialStage } = req.body || {};
+    const { assistant, productObject, workspaceId, context } = req.body || {};
     if (!assistant || !productObject) {
       throw new ValidationError('assistant and productObject are required');
     }
@@ -48,42 +47,9 @@ router.post(
     const { workspace, resumed } = workspaceManager.createOrResumeWorkspace(assistant, productObject, {
       workspaceId,
       context,
-      initialStage,
     });
 
     res.status(resumed ? 200 : 201).json({ workspace, resumed });
-  })
-);
-
-router.post(
-  '/:id/stage',
-  asyncHandler(async (req: Request, res: Response) => {
-    const { stage } = req.body || {};
-    if (!stage) {
-      throw new ValidationError('stage is required');
-    }
-    const updated = workspaceManager.updateStage(req.params.id, stage);
-    if (!updated) {
-      res.status(404).json({ error: 'Workspace not found' });
-      return;
-    }
-    res.json({ success: true, workspace: workspaceManager.getWorkspace(req.params.id) });
-  })
-);
-
-router.patch(
-  '/:id/stage',
-  asyncHandler(async (req: Request, res: Response) => {
-    const { stage } = req.body || {};
-    if (!stage) {
-      throw new ValidationError('stage is required');
-    }
-    const updated = workspaceManager.updateStage(req.params.id, stage);
-    if (!updated) {
-      res.status(404).json({ error: 'Workspace not found' });
-      return;
-    }
-    res.json({ success: true, workspace: workspaceManager.getWorkspace(req.params.id) });
   })
 );
 

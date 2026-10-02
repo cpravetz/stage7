@@ -66,7 +66,7 @@ router.get(
         assistant: w.assistant,
         productObject: w.productObject,
         flow: w.flow,
-        stages: w.stages.map((s) => ({ name: s.name, description: s.description, skillCount: s.skills.length })),
+        skillCount: w.skills.length,
       })),
       count: workflows.length,
     });

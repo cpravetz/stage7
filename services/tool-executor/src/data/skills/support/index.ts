@@ -4,7 +4,7 @@ import { RESPONSE_DRAFTING_USER } from "./response-drafting";
 import { RESPONSE_DRAFTING_NOTIFIER } from "./response-drafting-notifier";
 import { TICKET_OPS } from "./ticket-ops";
 import { ANALYTICS_PLANNING } from "./analytics-planning";
-import { annotateStages, createWorkflow, AssistantWorkflow } from "../workflow-common";
+import { createWorkflow } from '../workflow-common';
 
 // All 7 Support skills are canonical (isSkill=true). No base tools for Support per design.
 export const supportCanonicalSkills: Tool[] = [
@@ -22,25 +22,9 @@ export const supportLowerOrderTools: Tool[] = [];
 
 export const supportSkills = [...supportCanonicalSkills, ...supportLowerOrderTools];
 
-annotateStages(supportSkills, {
-  'support-resolve-ticket': 'intake',
-  'support-sentiment-analysis': 'intake',
-  'support-issue-analysis': 'intake',
-  'support-search-kb': 'intake',
-  'response-drafting-user': 'triage',
-  'response-drafting-notifier': 'triage',
-  'ticket-ops': 'resolution',
-  'analytics-planning': 'follow-up',
-});
-
 export const supportWorkflow = createWorkflow({
   assistant: 'Support',
   productObject: 'ticket / customer',
   flow: 'intake → triage → resolution → follow-up',
-  stages: [
-    { name: 'intake', description: 'Ticket intake and understanding', stageIds: ['support-resolve-ticket', 'support-sentiment-analysis', 'support-issue-analysis', 'support-search-kb'] },
-    { name: 'triage', description: 'Response drafting and ticket triage', stageIds: ['response-drafting-user', 'response-drafting-notifier'] },
-    { name: 'resolution', description: 'Ticket resolution operations', stageIds: ['ticket-ops'] },
-    { name: 'follow-up', description: 'Analytics and follow-up planning', stageIds: ['analytics-planning'] },
-  ],
-}, supportSkills);
+  skills: supportSkills,
+});

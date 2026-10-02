@@ -52,7 +52,6 @@ export const CONTENT_DRAFTING_ADAPTATION = createDeclarativeCodeSkill({
   outputSchema: CONTENT_DRAFTING_OUTPUT_SCHEMA,
   isSkill: false,
   manifest: {
-    workflowStage: 'draft'
   },
   handler: async function handler(input, ctx) {
       const NL = '\n';

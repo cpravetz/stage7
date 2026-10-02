@@ -45,8 +45,7 @@ export const EDITORIAL_CALENDAR_ARTICLE_COPILOT = createDeclarativeCodeSkill({
   ],
   isSkill: true,
   manifest: {
-    ui: { view: 'editorial-calendar' },
-    workflowStage: 'plan'
+    ui: { view: 'editorial-calendar' }
   },
   handler: async function handler(input, ctx) {
       const NL = '\n';

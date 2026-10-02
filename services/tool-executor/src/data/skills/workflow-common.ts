@@ -1,46 +1,47 @@
 import { Tool } from '../../types';
 
-export interface WorkflowStage {
-  name: string;
-  description: string;
-  skills: Tool[];
-}
-
+/**
+ * An assistant's declared scope.
+ *
+ * There are deliberately no stages and no lanes. A user arrives with a job to
+ * do, not with a position in someone else's lifecycle, so a Skill is offered on
+ * its own merits rather than as a step in an ordered sequence. `flow` is a
+ * human-readable summary of the territory the assistant covers; it is not an
+ * execution order and nothing validates or enforces it as one.
+ */
 export interface AssistantWorkflow {
   assistant: string;
   productObject: string;
   flow: string;
-  stages: WorkflowStage[];
+  skills: Tool[];
 }
 
 export interface AssistantWorkflowConfig {
   assistant: string;
   productObject: string;
   flow: string;
-  stages: Array<{
-    name: string;
-    description: string;
-    stageIds: string[];
-  }>;
+  skills: Tool[];
 }
 
-export function annotateStages(skills: Tool[], stageMap: Record<string, string>): void {
-  for (const skill of skills) {
-    if (stageMap[skill.id]) {
-      skill.manifest.workflowStage = stageMap[skill.id];
-    }
+export function createWorkflow(config: AssistantWorkflowConfig): AssistantWorkflow {
+  if (!config.assistant || !config.assistant.trim()) {
+    throw new Error('workflow assistant is required');
   }
-}
-
-export function createWorkflow(config: AssistantWorkflowConfig, allSkills: Tool[]): AssistantWorkflow {
+  if (!config.productObject || !config.productObject.trim()) {
+    throw new Error(`workflow ${config.assistant} requires a product object`);
+  }
+  const skills = [...config.skills];
+  const seen = new Set<string>();
+  for (const skill of skills) {
+    if (seen.has(skill.id)) {
+      throw new Error(`Duplicate skill in workflow ${config.assistant}: ${skill.id}`);
+    }
+    seen.add(skill.id);
+  }
   return {
     assistant: config.assistant,
     productObject: config.productObject,
-    flow: config.flow,
-    stages: config.stages.map((stage) => ({
-      name: stage.name,
-      description: stage.description,
-      skills: allSkills.filter((s) => stage.stageIds.includes(s.id)),
-    })),
+    flow: config.flow ?? '',
+    skills,
   };
 }

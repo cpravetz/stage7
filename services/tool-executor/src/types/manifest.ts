@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { NativeExecutorKey, SchemaRecord, SkillTrigger } from './index';
 
-// Skills put many custom keys in manifest (workflowStage, lowerOrderTools,
+// Skills put many custom keys in manifest (lowerOrderTools,
 // actionLabel, system, action, configSchema, credentialSource, source,
 // packageName, timeoutMs, ...), so unknown keys must be preserved verbatim.
 export const baseManifestSchema = z.object({}).catchall(z.unknown());

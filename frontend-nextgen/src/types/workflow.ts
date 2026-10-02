@@ -1,18 +1,14 @@
-export interface WorkflowStage {
+export interface WorkflowSkill {
+  id: string;
   name: string;
   description: string;
-  skills: Array<{
-    id: string;
-    name: string;
-    description: string;
-  }>;
 }
 
 export interface AssistantWorkflow {
   assistant: string;
   productObject: string;
   flow: string;
-  stages: WorkflowStage[];
+  skills: WorkflowSkill[];
 }
 
 export type WorkflowState = 'analysis' | 'recommendation' | 'draft' | 'approved' | 'executed' | 'rejected';
@@ -28,7 +24,6 @@ export interface WorkspaceState {
   workspaceId: string;
   assistant: string;
   productObject: string;
-  currentStage: string;
   workflowState: WorkflowState;
   lastResultId?: string;
   nextActions: string[];
@@ -59,7 +54,6 @@ export interface AssistantWorkspace {
   workspaceId: string;
   assistant: string;
   productObject: string;
-  currentStage: string;
   workflowState: WorkflowState;
   lastResultId?: string;
   nextActions: string[];
@@ -78,16 +72,8 @@ export interface RuntimeWorkflowAction {
   type: string;
   confirmBeforeSend?: boolean;
   isSkill?: boolean;
-  stage?: string;
   available: boolean;
   reason?: string;
-}
-
-export interface RuntimeWorkflowStage {
-  name: string;
-  description: string;
-  status: 'current' | 'pending' | 'completed' | 'skipped';
-  skills: RuntimeWorkflowAction[];
 }
 
 export interface RuntimeWorkflow {
@@ -97,8 +83,7 @@ export interface RuntimeWorkflow {
   assistant?: string;
   productObject?: string;
   flow?: string;
-  currentStage: string;
-  stages: RuntimeWorkflowStage[];
+  skills: RuntimeWorkflowAction[];
   workflowState: WorkflowState;
   nextActions: string[];
   allowedTransitions: WorkflowState[];
