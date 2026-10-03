@@ -3,7 +3,7 @@ import { AssistantWorkspaceManager } from '../services/AssistantWorkspaceManager
 import { Tool, WorkflowState } from '../types';
 import { createCodeSkill, createSchemaRecord, SchemaProps } from '../data/skills/code-skill-factory';
 
-function createContextTool(overrides: { id?: string; name?: string; confirmBeforeSend?: boolean } = {}): Tool {
+function createContextTool(overrides: { id?: string; name?: string } = {}): Tool {
   return createCodeSkill({
     id: overrides.id || `ctx-tool-${Math.random().toString(36).substr(2, 9)}`,
     name: overrides.name || 'Context Tool',
@@ -26,7 +26,6 @@ function createContextTool(overrides: { id?: string; name?: string; confirmBefor
       success: SchemaProps.boolean({ description: 'Success' }),
       data: SchemaProps.object({ id: SchemaProps.text({ description: 'Result data' }) }, { description: 'Result data' }),
     }, { required: ['success'] }),
-    confirmBeforeSend: overrides.confirmBeforeSend,
   });
 }
 
@@ -291,11 +290,10 @@ describe('Behavioral Tests - Cross-Context Integration', () => {
   beforeEach(() => {
     executor = new ToolExecutor();
     readTool = createContextTool({ id: 'read-patient', name: 'Read Patient' });
-    writeTool = createContextTool({
-      id: 'write-patient',
-      name: 'Update Patient',
-      confirmBeforeSend: false,
-    });
+    // The Skill has no tier, so it is gated by the strictest reading. These tests
+    // are about cross-object handoff, not approval, so the gate is satisfied the
+    // way a caller would satisfy it -- with `confirmation` -- rather than disabled.
+    writeTool = createContextTool({ id: 'write-patient', name: 'Update Patient' });
   });
 
   it('complete flow: read same object twice', async () => {
@@ -307,14 +305,14 @@ describe('Behavioral Tests - Cross-Context Integration', () => {
 
   it('complete flow: read same object then attempt cross-object write fails', async () => {
     await executor.execute(readTool, { patient: { id: 'patient-1', name: 'John' } });
-    const result = await executor.execute(writeTool, { patient: { id: 'patient-2', name: 'Jane' } });
+    const result = await executor.execute(writeTool, { patient: { id: 'patient-2', name: 'Jane' }, confirmation: true });
     expect(result.status).toBe('failed');
     expect(result.error).toContain('Cross-object handoff');
   });
 
   it('complete flow: read same object then write same object succeeds', async () => {
     await executor.execute(readTool, { patient: { id: 'patient-1', name: 'John' } });
-    const result = await executor.execute(writeTool, { patient: { id: 'patient-1', name: 'John' } });
+    const result = await executor.execute(writeTool, { patient: { id: 'patient-1', name: 'John' }, confirmation: true });
     if (result.error && result.error.includes('Cross-object')) {
       fail('Should not throw CrossObjectHandoffError for same-object write');
     }

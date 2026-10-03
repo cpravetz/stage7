@@ -14,6 +14,7 @@ export const MARKETING_SOCIAL_MEDIA = createExternalActionSkill({
     description: 'Create, schedule, publish, and monitor social posts across configurable social media platforms.',
     system: 'social',
     action: 'publish-social',
+    manifest: { emitEvent: 'marketing.social_post.published' },
     endpoint: { configKey: 'MARKETING_SOCIAL_ENDPOINT', method: 'POST' },
     auth: {
       type: 'bearer',

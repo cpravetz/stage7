@@ -62,5 +62,5 @@ export const INCIDENT_WAR_ROOM_TRIGGERS = [
 ];
 
 export const IAC_REMEDIATION_TRIGGERS = [
-  { kind: 'event' as const, on: 'Detected infrastructure drift fired' },
+  { kind: 'event' as const, on: 'Detected infrastructure drift fired', externalEvent: true, eventId: 'cto.external.infrastructure_drift.detected' },
 ];

@@ -10,7 +10,7 @@ import { PRODUCT_JIRA } from './tools/product-jira';
 import { PRODUCT_MARKDOWN_PARSING } from './tools/product-markdown-parsing';
 import { PRODUCT_SLACK } from './tools/product-slack';
 import { WRITE_PRD } from './skills/write-prd';
-import { DELIVERY_SYNC } from './skills/delivery-sync-orchestrator';
+import { DELIVERY_SYNC } from './skills/product-delivery-sync-orchestrator';
 import { PRODUCT_DOMAIN_KNOWLEDGE } from './product-contract';
 
 const PRODUCT_SKILLS: Tool[] = [

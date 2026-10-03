@@ -41,7 +41,7 @@ export const EDITORIAL_CALENDAR_ARTICLE_COPILOT = createDeclarativeCodeSkill({
   },
   outputSchema: contentResultSchema('Calendar rows, per-topic draft outcomes, and delegation coverage'),
   triggers: [
-    { kind: 'event', on: 'Content Strategy & SEO Evaluator returns a ranked set of topics to schedule' },
+    { kind: 'event', on: 'Content Strategy & SEO Evaluator returns a ranked set of topics to schedule', eventId: 'content.content-strategy-seo-evaluator.completed' },
     { kind: 'user', phrase_examples: ['plan the editorial calendar', 'schedule these topics', 'build content briefs'] },
   ],
   isSkill: true,

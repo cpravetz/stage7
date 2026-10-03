@@ -59,6 +59,7 @@ export const CTO_ENGINEERING_ACTIONS = (() => { const t = createExternalActionSk
   }),
   manifest: {
     persistenceEnvVar: 'CTO_HOME',
+    emitEvent: 'cto.engineering_action.executed',
   },
   tier: 'represent',
   domainKnowledge: 'Engineering system mutation conventions, change management, rollback planning, and confirmation gating',

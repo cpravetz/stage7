@@ -1,7 +1,8 @@
 import { Tool } from '../../types';
 import { createWorkflow, AssistantWorkflow } from '../../adk/workflow-common';
 
-import { lyricProsodyEvaluator, musicalCoCreation, leadSheetDemoDispatcher } from './skills/songwriter-skills';
+import { lyricProsodyEvaluator, musicalCoCreation } from './skills/songwriter-skills';
+import { leadSheetDemoDispatcher } from './skills/songwriting_lead_sheet_demo_dispatcher';
 import { songwriterGenreTrendEvaluator } from './skills/songwriter-genre-trend-evaluator';
 
 export { lyricProsodyEvaluator, musicalCoCreation, leadSheetDemoDispatcher, songwriterGenreTrendEvaluator };

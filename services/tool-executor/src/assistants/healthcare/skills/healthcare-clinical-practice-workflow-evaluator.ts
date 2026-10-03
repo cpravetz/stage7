@@ -21,8 +21,8 @@ const metadata = { domain: 'healthcare', persistenceEnv: 'HEALTHCARE_HOME', HEAL
 const triggers = [
   { kind: 'user' as const, phrase_examples: ['evaluate clinic workflow', 'review this clinical case', 'create a care plan', 'stage intake dispatch'] },
   { kind: 'schedule' as const, cadence: 'daily clinical operations review' },
-  { kind: 'event' as const, on: 'intake submission, appointment change, care-plan request, or guideline update' },
-  { kind: 'event' as const, eventSource: 'healthcare-collection-change', on: 'workflow, evidence, education, or intake data is available for review' },
+  { kind: 'event' as const, on: 'intake submission, appointment change, care-plan request, or guideline update', eventId: 'healthcare.appointment.scheduled' },
+  { kind: 'event' as const, eventSource: 'healthcare-collection-change', on: 'workflow, evidence, education, or intake data is available for review', externalEvent: true, eventId: 'healthcare.external.care_data.updated' },
 ]
 
 const workflowConfig = createSchemaRecord({

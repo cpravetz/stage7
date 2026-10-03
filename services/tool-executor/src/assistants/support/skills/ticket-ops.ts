@@ -59,9 +59,9 @@ export const TICKET_OPS = createExternalActionSkill({
   timeoutMs: 30000,
   tier: 'represent',
   triggers: [
-    { kind: 'event', on: 'Ticket response or status change' },
+    { kind: 'event', on: 'Ticket response or status change', externalEvent: true, eventId: 'support.external.ticket_response.received' },
   ],
   domainKnowledge: 'Customer success metrics (CSAT, NPS, Churn Rate), SLA management, support escalation tiers, ticket triage',
-  manifest: { actionLabel: 'Operate tickets' },
+  manifest: { actionLabel: 'Operate tickets', emitEvent: 'support.ticket.status_changed' },
   isSkill: true,
 });

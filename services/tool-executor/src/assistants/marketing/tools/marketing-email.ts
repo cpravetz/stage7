@@ -5,7 +5,7 @@ import { EXTERNAL_OUTPUT_SCHEMA } from '../marketing-contract';
 
 export const MARKETING_EMAIL = createExternalActionSkill({
     triggers: [
-      { kind: 'event', on: 'Campaign content is ready to send' },
+      { kind: 'event', on: 'Campaign content is ready to send', eventId: 'marketing.campaign_content.published' },
     ],
     id: 'marketing-email',
     tier: 'represent',
@@ -14,6 +14,7 @@ export const MARKETING_EMAIL = createExternalActionSkill({
     description: 'Draft, schedule, send, and measure marketing email campaigns through a configurable email system.',
     system: 'email',
     action: 'send-email',
+    manifest: { emitEvent: 'marketing.email.sent' },
     endpoint: { configKey: 'MARKETING_EMAIL_ENDPOINT', method: 'POST' },
     auth: {
       type: 'api_key',

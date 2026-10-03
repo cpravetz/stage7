@@ -36,9 +36,18 @@ export const HOUSEKEEPING_MANAGER_SKILL = createDeclarativeCodeSkill({
   inputSchema: HOUSEKEEPING_INPUT_SCHEMA,
   outputSchema: HOTEL_EXTERNAL_OUTPUT_SCHEMA,
   tier: 'represent',
+  // Four operations, four outcomes. Declared as the set this Skill is capable of;
+  // the run returns `emittedEvents` naming the one it performed, so a create never
+  // announces a dispatch.
+  emitEvent: [
+    'hotel.housekeeping.task_created',
+    'hotel.housekeeping.task_updated',
+    'hotel.housekeeping.task_assigned',
+    'hotel.housekeeping.work_dispatched',
+  ],
   domainKnowledge: 'Hotel housekeeping operations: room turnover sequencing, attendant assignment, cleanliness states, inspection standards, and staffing workload balance.',
   triggers: [
-    { kind: 'event', on: 'Room status change requiring housekeeping turnover' },
+    { kind: 'event', on: 'Room status change requiring housekeeping turnover', eventId: 'hotel.room_status.updated' },
     { kind: 'schedule', cadence: 'daily' },
     { kind: 'user', phrase_examples: ['Assign a housekeeper to room 204', 'Mark room 301 as cleaned', 'Dispatch the morning housekeeping round'] },
   ],
@@ -75,6 +84,7 @@ export const HOUSEKEEPING_MANAGER_SKILL = createDeclarativeCodeSkill({
       ctx.store.save('housekeeping_tasks', tasks);
       return {
         success: true,
+        emittedEvents: [`hotel.housekeeping.task_${action === 'update' ? 'updated' : action === 'assign' ? 'assigned' : 'created'}`],
         data: { task: newTask, operation: action, totalTasks: tasks.length },
         present: [
           ctx.render.text('housekeeping-update', 'Housekeeping Task Updated', `Task ${newTask.taskId} for Room ${newTask.roomId || 'N/A'} is now ${newTask.status}.`),
@@ -83,6 +93,7 @@ export const HOUSEKEEPING_MANAGER_SKILL = createDeclarativeCodeSkill({
     }
     return {
       success: true,
+      emittedEvents: ['hotel.housekeeping.work_dispatched'],
       data: { tasks, operation: action, totalTasks: tasks.length },
       present: [
         ctx.render.text('housekeeping-list', 'Housekeeping Tasks', `Total active housekeeping tasks: ${tasks.length}`),

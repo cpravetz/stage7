@@ -10,6 +10,9 @@ export const RECORDS_SCHEDULING_OPS = createExternalActionSkill({
   description: 'Manage medical records, apply tags, search records, schedule appointments, and optimize provider schedules through the healthcare records and scheduling system.',
   tier: 'represent',
   domainKnowledge: 'Medical records management, appointment scheduling, and provider schedule optimization',
+  manifest: {
+    emitEvent: 'healthcare.appointment.scheduled',
+  },
   system: 'healthcare',
   action: 'records-scheduling',
   endpoint: { configKey: 'HEALTHCARE_OPS_ENDPOINT', method: 'POST' },
@@ -61,6 +64,6 @@ export const RECORDS_SCHEDULING_OPS = createExternalActionSkill({
   outputSchema: HEALTHCARE_EXTERNAL_OUTPUT_SCHEMA,
   timeoutMs: 60000,
   triggers: [
-    { kind: 'event', on: 'New appointment requested or record update' },
+    { kind: 'event', on: 'New appointment requested or record update', eventId: 'healthcare.patient_intake.dispatched' },
   ],
 });

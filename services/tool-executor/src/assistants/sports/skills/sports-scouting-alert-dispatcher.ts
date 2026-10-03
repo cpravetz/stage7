@@ -30,9 +30,10 @@ export const SCOUTING_ALERT_DISPATCHER = createDeclarativeCodeSkill({
   inputSchema: SCOUTING_ALERT_INPUT,
   outputSchema: sportsResultSchema('Scouting alert dispatch result'),
   tier: 'represent',
+  emitEvent: 'sports.scouting_alert.dispatched',
   domainKnowledge: 'Sports scouting, player health monitoring, transfer market tracking',
   triggers: [
-    { kind: 'event', on: 'Player health or transfer state change detected' }
+    { kind: 'event', on: 'Player health or transfer state change detected', externalEvent: true, eventId: 'sports.external.transfer_news.published' }
   ],
   isSkill: true,
   manifest: {

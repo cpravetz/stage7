@@ -80,6 +80,7 @@ export const GUEST_EXPERIENCE_SKILL = createExternalActionSkill({
 // write to an external system. This one reaches a provider and mutates there,
 // so it is represent and sits behind the approval gate.
   tier: 'represent',
+  emitEvent: 'hotel.guest_experience.updated',
   domainKnowledge: 'Hotel guest services, concierge knowledge, local information, and guest communication',
   triggers: [
     { kind: 'user', phrase_examples: ['Recommend a local restaurant', 'Handle a guest request', 'Draft a guest message'] },

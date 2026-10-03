@@ -37,7 +37,7 @@ export const MATCHUP_ODDS_EXPLAINER = createDeclarativeCodeSkill({
   tier: 'advise',
   domainKnowledge: 'Sports odds analysis, implied probability, line movement, expected value',
   triggers: [
-    { kind: 'event', on: 'Odds become available or line movement detected' },
+    { kind: 'event', on: 'Odds become available or line movement detected', externalEvent: true, eventId: 'sports.external.odds.updated' },
   ],
   isSkill: true,
   manifest: {

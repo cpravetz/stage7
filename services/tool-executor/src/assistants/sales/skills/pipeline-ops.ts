@@ -23,6 +23,7 @@ const pipelineOps = createDeclarativeCodeSkill({
     'Stage or send CRM pipeline operations for a configured sales endpoint. Pass dryRun true to stage the request and see exactly what would be sent; a live write requires dryRun false plus explicit confirmation. With no endpoint configured it reports the staged request and marks itself not connected rather than inventing a result.',
   persistenceEnvVar: 'STORAGE_DIR',
   tier: 'represent',
+  emitEvent: 'sales.pipeline.record_updated',
   domainKnowledge: 'Sales pipeline management, CRM operations, and deal tracking',
   inputSchema: createSchemaRecord({
     endpoint: SchemaProps.url({ description: 'Optional pipeline endpoint override for this call' }),

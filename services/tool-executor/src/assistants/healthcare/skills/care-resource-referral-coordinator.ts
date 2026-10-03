@@ -36,6 +36,7 @@ const careResourceReferralCoordinator = createDeclarativeCodeSkill({
   description: 'Coordinate patient care-resource matching, referral creation, and referral status follow-up by delegating to healthcare records scheduling, resource coordination, and patient communication tools with dry-run and explicit-confirmation gates, reporting delegation coverage honestly.',
   persistenceEnvVar: 'HEALTHCARE_HOME',
   tier: 'represent',
+  emitEvent: 'healthcare.referral.created',
   domainKnowledge: 'Care resource matching, referral coordination, and resource utilization optimization',
   inputSchema: createSchemaRecord({
     patient: SchemaProps.text({ description: 'Minimum-necessary patient identifier' }),

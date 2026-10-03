@@ -76,5 +76,6 @@ export const PRODUCT_CALENDAR = createExternalActionSkill({
       required: ['success', 'status', 'system', 'action', 'request', 'response', 'error'],
     },
     timeoutMs: 30000,
+  manifest: { emitEvent: 'product.calendar_event.scheduled' },
   triggers: [{ kind: 'user', phrase_examples: ["Check calendar", "Schedule review", "Find meeting times"] }],
   });

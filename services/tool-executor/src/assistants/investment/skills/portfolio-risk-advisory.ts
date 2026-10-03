@@ -38,7 +38,7 @@ const PORTFOLIO_RISK_ADVISORY = createDeclarativeCodeSkill({
   inputSchema: portfolioAdvisoryInputSchema,
   outputSchema: investmentResultSchema('Portfolio analysis results including allocation, returns, VaR, and evaluation scores'),
   triggers: [
-    { kind: 'event', on: 'market data update' },
+    { kind: 'event', on: 'market data update', eventId: 'investment.market_data.refreshed' },
     { kind: 'user', phrase_examples: ["Analyze my portfolio", "Optimize allocation", "Assess portfolio risk", "Run stress test", "Evaluate securities", "Check efficient frontier"] }
   ],
   isSkill: true,

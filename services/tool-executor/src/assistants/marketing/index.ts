@@ -2,7 +2,7 @@ import { Tool } from '../../types';
 import { createWorkflow, AssistantWorkflow } from '../../adk/workflow-common';
 
 import { ANALYZE_PERFORMANCE } from './skills/analyze-performance';
-import { MARKETING_CENTER } from './skills/campaign-execution-orchestrator';
+import { MARKETING_CENTER } from './skills/marketing-campaign-execution-orchestrator';
 import { MARKETING_AUDIENCE_INSIGHTS } from './skills/marketing-audience-insights';
 import { MARKETING_CONTENT_GENERATION } from './tools/marketing-content-generation';
 import { MARKETING_DOCUMENT_MANAGEMENT } from './tools/marketing-document-management';

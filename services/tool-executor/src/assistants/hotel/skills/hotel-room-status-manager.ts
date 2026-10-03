@@ -25,9 +25,10 @@ export const ROOM_STATUS_MANAGER_SKILL = createDeclarativeCodeSkill({
   inputSchema: ROOM_STATUS_INPUT_SCHEMA,
   outputSchema: HOTEL_EXTERNAL_OUTPUT_SCHEMA,
   tier: 'represent',
+  emitEvent: 'hotel.room_status.updated',
   domainKnowledge: 'Hotel room status and inventory control: arrival and departure sequencing, housekeeping-state gating of saleable inventory, out-of-order rooms, and room-state audit trails.',
   triggers: [
-    { kind: 'event', on: 'Guest check-in or check-out' },
+    { kind: 'event', on: 'Guest check-in or check-out', eventId: 'hotel.reservations.updated' },
     { kind: 'user', phrase_examples: ['Mark room 405 occupied', 'Set room 118 to available', 'Take room 210 out of order'] },
   ],
   isSkill: true,

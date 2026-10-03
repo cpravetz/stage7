@@ -42,6 +42,7 @@ const budgetTrackingSkill = createDeclarativeCodeSkill({
   description: 'Track budget vs. actuals across categories, deriving variance, exception categories and a run-rate forecast, then stage that analysis for the configured accounting ERP behind an explicit confirmation gate. With no endpoint configured it reports the variance it computed and marks the write as not connected rather than inventing a ledger result.',
   persistenceEnvVar: 'STORAGE_DIR',
   tier: 'represent',
+  emitEvent: 'finance.budget.updated',
   domainKnowledge: 'Corporate finance principles, US GAAP/IFRS standards, operating budget models, and budget-variance analysis',
   inputSchema: budgetTrackingInputSchema,
   outputSchema: budgetTrackingOutputSchema,

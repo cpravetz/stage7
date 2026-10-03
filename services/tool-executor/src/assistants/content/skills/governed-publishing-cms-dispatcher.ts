@@ -10,6 +10,7 @@ export const GOVERNED_PUBLISHING_CMS_DISPATCHER = createDeclarativeCodeSkill({
     'Runs a computed pre-flight over a publishing payload, then either previews it or sends it to the CMS. Pre-flight measures the payload you supplied (title and body length, derived slug, SEO field lengths, tags) against stated SEO conventions, so the governance result is real whether or not a CMS is connected. Sending requires dryRun: false plus confirmation: true; without it nothing is sent and the result says the run stopped at the approval gate. Reports blocked, not-connected, confirmation-required, failed, and published as distinct outcomes.',
   persistenceEnvVar: 'CONTENT_HOME',
   tier: 'represent',
+  emitEvent: 'content.article.published',
   domainKnowledge:
     'Content publishing governance: pre-flight validation of SEO metadata, slug conventions, and taxonomy before dispatch, approval gating, and CMS dispatch outcomes',
   inputSchema: {
@@ -32,7 +33,7 @@ export const GOVERNED_PUBLISHING_CMS_DISPATCHER = createDeclarativeCodeSkill({
   },
   outputSchema: contentResultSchema('Payload measurements, pre-flight checks, and the dispatch outcome'),
   triggers: [
-    { kind: 'event', on: 'A draft is approved and staged for publication' },
+    { kind: 'event', on: 'A draft is approved and staged for publication', externalEvent: true, eventId: 'content.external.draft_approval.recorded' },
     { kind: 'user', phrase_examples: ['stage a CMS publish', 'publish this draft', 'run the publishing pre-flight'] },
   ],
   isSkill: true,

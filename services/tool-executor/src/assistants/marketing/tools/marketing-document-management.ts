@@ -5,7 +5,7 @@ import { EXTERNAL_OUTPUT_SCHEMA } from '../marketing-contract';
 
 export const MARKETING_DOCUMENT_MANAGEMENT = createExternalActionSkill({
     triggers: [
-      { kind: 'event', on: 'Document update received for marketing asset' },
+      { kind: 'event', on: 'Document update received for marketing asset', externalEvent: true, eventId: 'marketing.external.document_update.received' },
     ],
     id: 'marketing-document-management',
     tier: 'represent',
@@ -14,6 +14,7 @@ export const MARKETING_DOCUMENT_MANAGEMENT = createExternalActionSkill({
     description: 'Create, store, retrieve, and organize marketing assets and campaign documents in a configurable document system.',
     system: 'document-management',
     action: 'manage-document',
+    manifest: { emitEvent: 'marketing.campaign_asset.stored' },
     endpoint: { configKey: 'MARKETING_DOCUMENT_ENDPOINT', method: 'POST' },
     auth: {
       type: 'bearer',

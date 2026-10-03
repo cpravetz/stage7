@@ -65,8 +65,10 @@ const DELIVERY_SYNC = createDeclarativeCodeSkill({
     },
     required: ['success', 'status', 'data', 'error', 'present'],
   },
+  // Not subscribed to `product.jira.issue_updated` even though this Skill delegates
+  // to `product-jira`: the delegation already brings this run, so subscribing would
+  // fan out a second sync for one Jira write.
   triggers: [
-    { kind: 'event', on: 'Feature status updated', eventId: 'product.jira.issue_updated' },
     {
       kind: 'user',
       phrase_examples: ['Sync this feature to released', 'Push the status change to Jira and Slack'],

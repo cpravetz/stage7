@@ -80,5 +80,6 @@ export const PRODUCT_JIRA = createExternalActionSkill({
       required: ['success', 'status', 'system', 'action', 'request', 'response', 'error'],
     },
     timeoutMs: 30000,
+  manifest: { emitEvent: 'product.jira.issue_updated' },
   triggers: [{ kind: 'user', phrase_examples: ["Create Jira ticket", "Update ticket", "Search tickets"] }],
   });

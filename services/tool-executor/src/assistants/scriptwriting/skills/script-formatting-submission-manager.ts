@@ -57,6 +57,7 @@ export const SCRIPT_FORMATTING_SUBMISSION_MANAGER = createDeclarativeCodeSkill({
     { kind: 'user', phrase_examples: ['Format this script for submission', 'Lay this out as a Fountain screenplay', 'Prepare this draft for a platform'] },
   ],
   tier: 'represent',
+  emitEvent: 'scriptwriting.script_submission.sent',
   domainKnowledge: 'Screenplay formatting standards (Master Scene Heading style), script submission platforms, industry formatting guidelines',
   isSkill: true,
   manifest: {

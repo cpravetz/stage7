@@ -10,6 +10,9 @@ export const PATIENT_COMMUNICATION = createExternalActionSkill({
   description: 'Send secure patient communications including appointment reminders, test results, care instructions, and manage recurring communication schedules.',
   tier: 'represent',
   domainKnowledge: 'Secure patient communication, appointment reminders, and care instructions',
+  manifest: {
+    emitEvent: 'healthcare.patient_message.sent',
+  },
   system: 'healthcare',
   action: 'patient-communication',
   endpoint: { configKey: 'HEALTHCARE_COMM_ENDPOINT', method: 'POST' },
@@ -54,7 +57,8 @@ export const PATIENT_COMMUNICATION = createExternalActionSkill({
   },
   outputSchema: HEALTHCARE_EXTERNAL_OUTPUT_SCHEMA,
   timeoutMs: 60000,
-  triggers: [
-    { kind: 'event', on: 'Patient message requested' },
-  ],
+  // Reached by `care-resource-referral-coordinator`, which delegates here after
+  // creating a referral. It also announces `healthcare.referral.created`, so
+  // subscribing to that id as well would run this Skill twice per referral.
+  triggers: [],
 });

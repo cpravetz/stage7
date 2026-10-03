@@ -26,6 +26,8 @@ export interface CreateCodeSkillOptions {
   timeoutMs?: number
   /** Record-shape version; defaults to the original shape (1). */
   schemaVersion?: number
+  /** Event id announced when this skill completes. */
+  emitEvent?: string | string[]
 }
 
 export function createCodeSkill(options: CreateCodeSkillOptions): Tool {
@@ -143,6 +145,7 @@ export interface ExternalActionSkillOptions {
   tier?: 'advise' | 'aid' | 'represent'
   domainKnowledge?: string
   isSkill?: boolean
+  emitEvent?: string | string[]
 }
 
 type CredentialEnvKeyMap = NonNullable<ExternalActionSkillOptions['auth']>['credentialEnvKeyMap']
@@ -258,6 +261,7 @@ export function createExternalActionSkill(options: ExternalActionSkillOptions): 
     tier,
     domainKnowledge,
     isSkill,
+    emitEvent,
   } = options
   const triggers = options.triggers
 
@@ -446,6 +450,10 @@ export function createExternalActionSkill(options: ExternalActionSkillOptions): 
     manifest.bodyField = bodyField
   }
 
+  if (emitEvent !== undefined) {
+    manifest.emitEvent = emitEvent
+  }
+
   return createCodeSkill({
     id,
     name,
@@ -482,6 +490,7 @@ export function createExternalActionSkill(options: ExternalActionSkillOptions): 
     tier,
     domainKnowledge,
     isSkill,
+    emitEvent,
   })
 }
 
@@ -572,7 +581,7 @@ export interface DeclarativeSkillOptions {
    * Event id announced when this skill completes. Downstream skills subscribe
    * with a matching `{ kind: 'event', eventId }` trigger.
    */
-  emitEvent?: string
+  emitEvent?: string | string[]
   /**
    * Operator-supplied configuration, carried onto the manifest verbatim so the
    * executor can resolve credentials and the endpoint before the skill runs.
@@ -1305,11 +1314,14 @@ export function createDeclarativeCodeSkill(options: DeclarativeSkillOptions): To
     configSchema: options.configSchema,
     inputSchema: options.inputSchema,
     outputSchema: options.outputSchema,
-    // An emitter advertises its own completion event as a trigger so the event
-    // is visible (and validatable) alongside the triggers it subscribes to.
-    triggers: options.emitEvent
-      ? [...(options.triggers || []), { kind: 'event' as const, on: 'Completion of skill execution', eventId: options.emitEvent }]
-      : options.triggers,
+    // No self-subscription is appended for `emitEvent`. An earlier version added
+    // one so the event would show up in the Overview trigger graph, but a
+    // subscription is also a dispatch edge: the runtime resolves subscribers by
+    // id and does not exclude the emitter, so declaring `emitEvent` made the
+    // Skill re-run itself. For a `represent` Skill that meant one user action
+    // sending the email twice. The event is already visible from the
+    // declaration itself, and `GET /triggers` reports it as an emitted event.
+    triggers: options.triggers,
     tier: options.tier,
     domainKnowledge: options.domainKnowledge,
     isSkill: options.isSkill,

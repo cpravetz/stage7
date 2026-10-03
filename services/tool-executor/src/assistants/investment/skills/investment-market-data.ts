@@ -44,6 +44,7 @@ const INVESTMENT_MARKET_DATA = createDeclarativeCodeSkill({
   outputSchema: investmentResultSchema('Market data request metadata, response, and staging record'),
   timeoutMs: 15000,
   tier: 'represent',
+  emitEvent: 'investment.market_data.refreshed',
   domainKnowledge: 'Market data retrieval, ticker symbols, OHLCV time series, fundamental ratios, options chains, economic calendar events',
   triggers: [
     { kind: 'schedule', cadence: 'daily market data refresh' },

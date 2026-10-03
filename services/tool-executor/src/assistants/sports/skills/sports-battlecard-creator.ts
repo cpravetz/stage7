@@ -45,7 +45,7 @@ export const BATTLECARD_CREATOR = createDeclarativeCodeSkill({
   tier: 'aid',
   domainKnowledge: 'Sports scouting, opposition analysis, situational playbook creation',
   triggers: [
-    { kind: 'event', on: 'Match calendar entering pre-match window' },
+    { kind: 'event', on: 'Match calendar entering pre-match window', externalEvent: true, eventId: 'sports.external.match_calendar.updated' },
   ],
   isSkill: true,
   manifest: {

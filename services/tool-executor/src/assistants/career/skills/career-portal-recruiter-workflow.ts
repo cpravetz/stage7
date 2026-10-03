@@ -43,6 +43,7 @@ const PORTAL_RECRUITER_WORKFLOW = createDeclarativeCodeSkill({
   name: 'Application + Recruiter Outreach',
   description: 'Drafts a recruiter outreach follow-up for a target company after an application is prepared, while keeping the application flow separate. Delegates to career-application-execution and career-networking-outreach when available.',
   persistenceEnvVar: 'STORAGE_DIR',
+  emitEvent: 'career.recruiter_outreach.drafted',
   inputSchema: PORTAL_RECRUITER_WORKFLOW_INPUT,
   outputSchema: PORTAL_RECRUITER_WORKFLOW_OUTPUT,
   triggers: [

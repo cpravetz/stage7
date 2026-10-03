@@ -5,6 +5,8 @@
 
 import fs from 'fs';
 import path from 'path';
+import { STORE_WRITE_LOG } from '../events';
+import type { StoreWrite } from '../events';
 
 declare const __tool_input: any;
 declare const __execute_tool: any;
@@ -41,6 +43,57 @@ const REMOTE_TIMEOUT_MS = 2000;
  */
 function deriveCollection(persistenceEnvVar: string): string {
   return persistenceEnvVar.replace(/_HOME$/i, '').replace(/^STORAGE_DIR$/i, 'default').toLowerCase() || 'default';
+}
+
+/**
+ * Every store write this process made, in order, for the executor to turn into
+ * events once the run is known to have succeeded.
+ *
+ * Module-scoped on purpose: a code Skill runs in its own spawned process, so the
+ * lifetime of this array is exactly the lifetime of one run and it cannot leak
+ * between runs. The executor still discards it on failure — a run that wrote three
+ * records and then threw changed nothing this module can vouch for.
+ */
+const writeLog: StoreWrite[] = [];
+
+/** Whether the key already exists, so a save can be told apart from a create. */
+function existedBefore(filePaths: string[]): boolean {
+  return filePaths.some((filePath) => {
+    try {
+      return fs.existsSync(filePath);
+    } catch {
+      return false;
+    }
+  });
+}
+
+function recordWrite(key: string, existed: boolean): void {
+  writeLog.push({ key, operation: existed ? 'updated' : 'created' });
+  // Also flushed per write rather than only on exit: a Skill that calls
+  // `process.exit()` from inside a handler skips the `exit` handler, and a run that
+  // wrote real data would then be announced as having written none.
+  flushWriteLog();
+}
+
+/**
+ * Write the log to the sidecar the executor reads after the process closes.
+ *
+ * Synchronous on purpose, and safe to call repeatedly: it runs on `exit` (which
+ * permits only sync work) and on the write path (which cannot await without making
+ * `save` async, which ~60 call sites depend on).
+ */
+function flushWriteLog(): void {
+  const dir = process.env.STAGE7_SANDBOX_DIR || '';
+  if (!dir) return;
+  try {
+    fs.writeFileSync(path.join(dir, STORE_WRITE_LOG), JSON.stringify(writeLog), 'utf8');
+  } catch {
+    // Best effort: a missing log costs the run its derived events, never its result.
+  }
+}
+
+if (typeof process !== 'undefined' && typeof process.on === 'function') {
+  process.on('exit', flushWriteLog);
 }
 
 function artifactsUrl(): string {
@@ -173,6 +226,7 @@ export function createRuntimeContext(opts: RuntimeOptions = {}) {
       return readLocal(key, defaultValue);
     },
     save(key: string, data: any) {
+      recordWrite(key, existedBefore([path.join(baseDir, `${key}.json`), path.join(GLOBAL_STORE_DIR, `${key}.json`)]));
       writeLocal(key, data);
       // Mirror to Mongo. Intentionally not awaited: `save` is sync by contract.
       void remoteCall('POST', collection, key, {
@@ -183,6 +237,8 @@ export function createRuntimeContext(opts: RuntimeOptions = {}) {
     },
     /** Remove both the local files and the remote Mongo copy. Best effort. */
     delete(key: string) {
+      writeLog.push({ key, operation: 'deleted' });
+      flushWriteLog();
       for (const filePath of [path.join(baseDir, `${key}.json`), path.join(GLOBAL_STORE_DIR, `${key}.json`)]) {
         try {
           if (fs.existsSync(filePath)) fs.unlinkSync(filePath);

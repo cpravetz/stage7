@@ -5,7 +5,7 @@ import { EXTERNAL_OUTPUT_SCHEMA } from '../marketing-contract';
 
 export const MARKETING_CONTENT_GENERATION = createExternalActionSkill({
     triggers: [
-      { kind: 'event', on: 'Content brief received for campaign asset creation' },
+      { kind: 'event', on: 'Content brief received for campaign asset creation', externalEvent: true, eventId: 'marketing.external.content_brief.received' },
     ],
     id: 'marketing-content-generation',
     // v9: an aid Skill assembles aids and returns a work product; it does not
@@ -17,6 +17,7 @@ export const MARKETING_CONTENT_GENERATION = createExternalActionSkill({
     description: 'Create, revise, schedule, and publish campaign content through a configurable CMS or content platform.',
     system: 'cms',
     action: 'generate-content',
+    manifest: { emitEvent: 'marketing.campaign_content.published' },
     // Writes campaign content into a connected CMS. The sibling channels
     // (social, email, document-management) all gate their live dispatch, so
     // this one must too.

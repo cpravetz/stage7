@@ -1,5 +1,5 @@
 import { Tool } from '../../types';
-import { RESERVATIONS_SKILL } from './skills/reservations-manager';
+import { RESERVATIONS_SKILL } from './skills/hotel-reservations-guest-profile';
 import { HOUSEKEEPING_MANAGER_SKILL } from './skills/hotel-housekeeping-manager';
 import { MAINTENANCE_DISPATCHER_SKILL } from './skills/hotel-maintenance-dispatcher';
 import { ROOM_STATUS_MANAGER_SKILL } from './skills/hotel-room-status-manager';

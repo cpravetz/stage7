@@ -81,5 +81,6 @@ export const PRODUCT_CONFLUENCE = createExternalActionSkill({
       required: ['success', 'status', 'system', 'action', 'request', 'response', 'error'],
     },
     timeoutMs: 30000,
+  manifest: { emitEvent: 'product.confluence.page_updated' },
   triggers: [{ kind: 'user', phrase_examples: ["Create Confluence page", "Search docs", "Update documentation"] }],
   });

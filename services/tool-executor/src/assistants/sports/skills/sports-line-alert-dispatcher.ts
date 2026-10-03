@@ -35,9 +35,10 @@ export const LINE_ALERT_DISPATCHER = createDeclarativeCodeSkill({
   inputSchema: LINE_ALERT_INPUT,
   outputSchema: sportsResultSchema('Line alert dispatch result'),
   tier: 'represent',
+  emitEvent: 'sports.line_alert.dispatched',
   domainKnowledge: 'Sports line movement analysis, market odds monitoring, bankroll exposure',
   triggers: [
-    { kind: 'event', on: 'Line movement or odds change detected' }
+    { kind: 'event', on: 'Line movement or odds change detected', externalEvent: true, eventId: 'sports.external.odds.updated' }
   ],
   isSkill: true,
   manifest: {

@@ -3,10 +3,12 @@ import toolRoutes from './routes/tools';
 import workflowRoutes from './routes/workflows';
 import workspaceRoutes from './routes/workspaces';
 import watchRoutes from './routes/watches';
+import triggerRoutes from './routes/triggers';
+import eventRoutes from './routes/events';
 import mcpServerRoutes from './routes/mcpServers';
 import skillStoreRoutes from './routes/skill-store';
 import { Tool } from './types';
-import { toolRegistry, toolStore } from './utils/sharedInstance';
+import { toolRegistry, toolStore, triggerScheduler } from './utils/sharedInstance';
 import { legacyGeneralTools } from './data/generalTools';
 import { nativeTools } from './data/nativeTools';
 import logger from './utils/logger';
@@ -197,7 +199,15 @@ logger.info({ count: toolRegistry.list().length }, 'Registered default tools');
 }
 
 app.get('/api/tool-executor/health', (_req, res) => {
-  res.json({ status: 'ok', service: 'tool-executor', tools: toolRegistry.list().length });
+  res.json({
+    status: 'ok',
+    service: 'tool-executor',
+    tools: toolRegistry.list().length,
+    scheduler: {
+      running: triggerScheduler.isRunning(),
+      schedules: triggerScheduler.list().schedules.length,
+    },
+  });
 });
 
 app.get('/api/tool-executor/tools', (_req, res) => {
@@ -209,6 +219,8 @@ app.use('/api/tool-executor', mcpServerRoutes);
 app.use('/api/tool-executor/workflows', workflowRoutes);
 app.use('/api/tool-executor/workspaces', workspaceRoutes);
 app.use('/api/tool-executor/watches', watchRoutes);
+app.use('/api/tool-executor/triggers', triggerRoutes);
+app.use('/api/tool-executor/events', eventRoutes);
 
 // Skill persistence. Mounted at the root because the runtime in spawned
 // skill processes addresses it as /api/skill-store, not under the
@@ -232,6 +244,28 @@ if (require.main === module) {
   app.listen(PORT, () => {
     logger.info({ port: PORT, tools: toolRegistry.list().length }, 'Tool Executor service listening');
   });
+
+  // Load persisted adaptations before the first tick, so a "run this every
+  // Monday" created yesterday is honoured on the first interval rather than the
+  // first restart after this one.
+  void triggerScheduler
+    .refresh()
+    .then(() => {
+      triggerScheduler.start();
+      const { schedules, issues } = triggerScheduler.list();
+      logger.info(
+        { schedules: schedules.length, issues: issues.length },
+        'Trigger scheduler ready',
+      );
+    })
+    .catch((err) => {
+      // A scheduler that fails to load its records must not take the service
+      // down; the blueprints it can read from the registry still work.
+      logger.error(
+        { err: err instanceof Error ? err.message : String(err) },
+        'Trigger scheduler failed to start; schedule triggers are inactive',
+      );
+    });
 }
 
 export { legacyGeneralTools } from './data/generalTools';

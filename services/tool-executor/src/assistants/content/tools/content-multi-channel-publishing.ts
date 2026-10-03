@@ -79,6 +79,7 @@ export const MULTI_CHANNEL_PUBLISHING = createExternalActionSkill({
   },
   outputSchema: CONTENT_EXTERNAL_OUTPUT_SCHEMA,
   timeoutMs: 120000,
+  manifest: { emitEvent: 'content.channel_publication.dispatched' },
   // This is a live write and it is directly invocable: `isSkill: false` means
   // routes/tools.ts does not require assistant context to run it, so
   // POST /tools/content-multi-channel-publishing/execute reaches the CMS with

@@ -72,5 +72,6 @@ export const PRODUCT_SLACK = createExternalActionSkill({
       required: ['success', 'status', 'system', 'action', 'request', 'response', 'error'],
     },
     timeoutMs: 15000,
+  manifest: { emitEvent: 'product.slack.message_sent' },
   triggers: [{ kind: 'user', phrase_examples: ["Post to Slack", "Send message", "Check notifications"] }],
   });

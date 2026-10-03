@@ -33,7 +33,7 @@ async function waitFor<T>(read: () => T | undefined, timeoutMs = 20000): Promise
 }
 
 describe('Phase 1b event dispatch wiring', () => {
-  it('factory advertises an emitted event as a trigger on the skill', () => {
+  it('factory records the emitted event without subscribing the skill to it', () => {
     const tool = createDeclarativeCodeSkill({
       id: 'emitter-skill',
       name: 'Emitter Skill',
@@ -46,18 +46,24 @@ describe('Phase 1b event dispatch wiring', () => {
       },
     });
 
-    expect(tool.triggers).toEqual([
-      { kind: 'event', on: 'Completion of skill execution', eventId: 'test-event' },
-    ]);
-    // The trigger is a view of the emit; the executor itself reads the manifest field.
+    // The executor reads the manifest field.
     expect((tool.manifest as Record<string, unknown>).emitEvent).toBe('test-event');
+
+    // And the Skill must not end up subscribed to its own event. It used to: the
+    // factory appended a self-subscription so the edge would show in the Overview
+    // trigger graph, but a subscription is also a dispatch edge, so declaring
+    // `emitEvent` made a Skill re-run itself — for a `represent` Skill, one user
+    // action performed twice. `emit-event-declared` in `src/adk/validate.ts` and
+    // `findDownstreamEventTriggers` in `src/services/ToolExecutor.ts` both guard
+    // this now.
+    expect(tool.triggers ?? []).toEqual([]);
   });
 
-  it('getEmitEvent reads emitEvent from the tool manifest', () => {
+  it('getEmitEventIds reads every emitEvent on the tool manifest', () => {
     const registry = new Map<string, Tool>();
     const executor = new ToolExecutor(registry);
-    const readEmitEvent = (executor as unknown as { getEmitEvent(tool: Tool): string | undefined })
-      .getEmitEvent.bind(executor);
+    const readEmitEvent = (executor as unknown as { getEmitEventIds(tool: Tool, assistantId?: string): string[] })
+      .getEmitEventIds.bind(executor);
 
     const fromManifest = createCodeSkill({
       id: 'manifest-emitter',
@@ -67,7 +73,7 @@ describe('Phase 1b event dispatch wiring', () => {
       inputSchema: textSchema(),
       outputSchema: successSchema(),
     });
-    expect(readEmitEvent(fromManifest)).toBe('manifest-event');
+    expect(readEmitEvent(fromManifest)).toEqual(['manifest-event']);
 
     // A hand-authored tool may carry the field at the top level instead.
     const fromTopLevel = createCodeSkill({
@@ -79,17 +85,21 @@ describe('Phase 1b event dispatch wiring', () => {
       outputSchema: successSchema(),
     });
     (fromTopLevel as unknown as Record<string, unknown>).emitEvent = 'toplevel-event';
-    expect(readEmitEvent(fromTopLevel)).toBe('toplevel-event');
+    expect(readEmitEvent(fromTopLevel)).toEqual(['toplevel-event']);
 
     const silent = createCodeSkill({
       id: 'silent-tool',
       name: 'Silent Tool',
-      description: 'Announces nothing',
+      description: 'Announces nothing in particular',
       manifest: { sourceCode: 'console.log("{}");' },
       inputSchema: textSchema(),
       outputSchema: successSchema(),
     });
-    expect(readEmitEvent(silent)).toBeUndefined();
+    // A Skill that declared nothing still announces its completion, which is what
+    // makes "every Skill that alters data emits an event" true without asking 55
+    // represent Skills to declare an id they have no reason to care about. This
+    // used to return undefined, which meant no run in the repo emitted anything.
+    expect(readEmitEvent(silent, 'event')).toEqual(['event.silent-tool.completed']);
   });
 
   it('findDownstreamEventTriggers returns only subscribers of that event id', () => {

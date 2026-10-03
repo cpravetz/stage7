@@ -482,14 +482,182 @@ triggers: [
 ]
 ```
 
+A `schedule` trigger should carry `cron`. `cadence` is accepted as shorthand, but only where it has
+exactly one interpretation: `hourly`, and intervals like `Every 15 minutes`. Named periods (`daily`,
+`weekly`, `monthly`) do not say *when*, and a qualified cadence (`during configured windows`, `After
+job discovery completes`) is conditional, so `TriggerScheduler` reports those as issues naming the
+cron to write instead of inferring a frequency. That matters: inferring "every 5 minutes" onto a run
+the author meant to hold back fires a Skill nobody asked to run. Most `cadence` declarations in the
+shipped catalogue are prose and are reported this way; authors should prefer `cron`. `npm run
+adk:validate` raises `unschedulable-cadence` at authoring time, and a test asserts the validator and
+the scheduler reject the same declarations, so a rule cannot drift from the runtime.
+
 ### 8.1 Dynamic triggers
 
 Triggers declared in code are part of the immutable blueprint. At runtime an Assistant can adapt a user-triggered Skill into a scheduled or event-triggered one on the user's instruction (for example, "run this competitor search every Monday at 9 AM"). When it does:
 
-* The Assistant **never modifies the folder blueprint**.
-* The stage7 runtime writes a **Dynamic Trigger Record** to instance persistence.
-* The stage7 scheduler/event-monitor evaluates persisted trigger records at runtime, alongside the triggers declared in code.
-* Tier gating is unchanged: a dynamically scheduled `represent` Skill is still gated on every run.
+- The Assistant **never modifies the folder blueprint**.
+- The stage7 runtime writes a **Dynamic Trigger Record** to instance persistence
+  (`TriggerRecordStore`, Mongo-backed with a local mirror).
+- The `TriggerScheduler` evaluates persisted trigger records at runtime, alongside the
+  triggers declared in code, and rebuilds its plan from the tool registry on every tick.
+- Tier gating is unchanged: the scheduler never sends `confirmation`, so a dynamically
+  scheduled `represent` Skill is still gated on every run.
+
+### 8.2 Writing a Skill that can be subscribed to
+
+Every run announces an event, so a Skill is subscribable without extra work: it emits
+`<assistantId>.<your-skillId>.completed`. Two rules make that useful:
+
+- **Declare `emitEvent` when the change is meaningful.** A derived completion event only says "this run
+  finished". If another Skill or an operator should respond to *this specific* change — a contract booked, an
+  invoice paid — declare an id for it. `npm run adk:validate` warns when a Skill that alters data declares
+  none.
+- **Subscribe with `eventId`, not prose.** The runtime matches event ids exactly. An event trigger
+  carrying only `on:` text will never fire, and validation says so with the id it should name.
+
+```ts
+// Emitter: announces a business event, not just "finished".
+createDeclarativeCodeSkill({
+  id: 'vendor-contract-management',
+  name: 'Vendor & Contract Management',
+  description: 'Manages vendor contracts and payments for events.',
+  tier: 'represent',
+  emitEvent: 'vendor.contract.updated',
+  // ...
+});
+
+// Subscriber: names the event it acts on.
+triggers: [{
+  kind: 'event',
+  eventId: 'vendor.contract.updated',
+  mapEventToInput: (p) => ({ contractId: p.data.contractId })
+}]
+```
+
+### 8.3 Failures, aborts, and external producers
+
+A run announces its outcome, not just its completion:
+
+| Outcome | Id |
+|---|---|
+| Completed with a declared change | every declared `emitEvent` the run produced |
+| Completed with no declaration, or nothing changed | `<assistantId>.<skillId>.completed` |
+| Attempted and broke | `<assistantId>.<skillId>.failed` |
+| Never attempted | `<assistantId>.<skillId>.aborted` |
+
+### 8.3.1 A run announces every outcome it produced
+
+`emitEvent` takes one id or a list, and a run announces **one event per outcome**, not one per run:
+
+```ts
+createDeclarativeCodeSkill({
+  id: 'hotel-housekeeping-manager',
+  // Every outcome this Skill is capable of producing.
+  emitEvent: [
+    'hotel.housekeeping.task_created',
+    'hotel.housekeeping.task_updated',
+    'hotel.housekeeping.task_assigned',
+    'hotel.housekeeping.work_dispatched',
+  ],
+  handler: async (input, ctx) => {
+    const action = resolveOperation(input);
+    // ...perform one of the four...
+    return {
+      success: true,
+      // Narrow to what actually happened. Omit the field and every declared id is
+      // announced; return `[]` and the run only reports that it completed.
+      emittedEvents: [`hotel.housekeeping.task_${past(action)}`],
+    };
+  },
+});
+```
+
+A Skill that changes two things and announces one is asserting the other did not happen, which is
+why the single-id shape was wrong rather than merely limiting. All events from one run share an
+`executionId`, so a consumer can see they came from one execution, and a subscriber of two of them is
+run once per execution rather than twice.
+
+A reported id the Skill does not declare is dropped, with a warning. That keeps the event graph
+statically checkable — `unresolvable-event-id` can still prove every subscription has a producer —
+instead of letting a typo in a handler become a real event nothing can reach. For the same reason,
+two Skills must not declare the same id: a delegation and the orchestrator around it would announce
+the same change twice.
+
+### 8.3.2 Dry runs announce nothing that did not happen
+
+A Skill that can stage instead of act reports a dry run by `input.dryRun === true` or by its own
+`status: 'dry-run'`. The runtime then announces **only** the derived `.completed` event, never the
+declared business ids — `finance.report.published` says a board report was published, and a staged
+report is not a published one. Fifteen Skills have a dry-run path and a declared event, and all
+fifteen are covered by this one rule rather than fifteen patches.
+
+Both signals are checked because neither suffices: `reporting-data-ops` defaults `dryRun` to true but
+leaves it undefined on the input, so it announces its own `status: 'dry-run'`.
+
+Note that a code Skill's execution output is an envelope, `{ output: "<handler JSON>", exitCode }`,
+so both this check and `emittedEvents` read the handler's own result rather than the envelope. Reading
+the envelope finds nothing, which is how both silently stopped working on real Skills while passing
+against hand-built fixtures.
+
+`aborted` covers the paths that stop before the Skill runs: `ConfirmationRequiredError`, missing
+credentials, and a failed config schema. `failed` covers a run that went ahead and did not succeed —
+including the case where `dispatch` returns `{ error }` rather than throwing, which is why the emit is
+gated on `output.error === undefined` and not on the reported status.
+
+Outcome ids are derived from the Skill's identity and **never** from its `emitEvent`. A declared id
+names a business outcome, and publishing it for a run that broke would claim the outcome happened.
+
+**Never subscribe to your own event.** A subscription is also a dispatch edge, and the runtime resolves
+subscribers by id; naming your own event makes each run trigger another run of the same Skill. For a
+`represent` Skill that performs the action twice. The factory used to append such a self-subscription
+so the edge would appear in the Overview, and it is gone for this reason. `adk:validate` reports it as
+`self-subscribing-event-trigger` at error severity.
+
+**Do not both delegate and subscribe.** If an orchestrator lists a Skill in `lowerOrderTools` and calls
+it with `ctx.delegate`, do not also subscribe that Skill to the orchestrator's event. Both paths arrive
+on the same run, so a `represent` Skill reached twice allocates resources or sends the message twice.
+`adk:validate` reports the overlap.
+
+**External producers.** When an event originates outside stage7 — a door scanner, an odds feed, an EHR
+webhook — declare a contract rather than a Skill subscription:
+
+```ts
+triggers: [{
+  kind: 'event',
+  on: 'Room status change requiring housekeeping turnover',
+  externalEvent: true,
+  eventId: 'hotel.external.stock_level.changed',
+}]
+```
+
+`externalEvent: true` asserts that something outside this codebase publishes that exact id. Without it
+`adk:validate` reports the id as `unresolvable-event-id`, which is the right default: most ids that
+match nothing are typos, not integrations. Naming the contract turns an edge that could never fire into
+one that is documented, matchable, and checked.
+
+### 8.4 What validation now enforces
+
+Five rules cover the event graph, all checked by `npm run adk:validate`:
+
+| Rule | Severity | Catches |
+|---|---|---|
+| `emit-event-declared` | warning | A `represent` Skill that changes something and announces only "finished" |
+| `matchable-event-trigger` | warning | An event trigger carrying prose instead of an id |
+| `unresolvable-event-id` | warning | A subscription to an id no Skill publishes and no external contract declares |
+| `self-subscribing-event-trigger` | **error** | A Skill subscribed to the event it announces |
+| `declared-emit-event-unreachable` | warning | `emitEvent` in source that never reaches the manifest |
+| `redundant-delegation-subscription` | warning | A Skill both delegated to and subscribed to the same producer |
+
+The last two exist because source-text matching was not enough. `emit-event-declared` now reads the
+**built Skill** rather than the file: the old source lookup was keyed on filename == skill id, so a
+Skill in a differently-named file read as declaring nothing, and a factory can accept `emitEvent`
+without forwarding it into the manifest, leaving a declaration that announces nothing.
+
+`altersData` is likewise tier-based (`represent` and nothing else). It previously also treated "has an
+external `system`" as mutating, which flagged six read-only analyzers — content analytics, learner
+insight, market research, audience insights, product metrics, songwriter trend analysis — as Skills that
+change data. Declaring a business event for a reader would have invented six.
 
 ---
 

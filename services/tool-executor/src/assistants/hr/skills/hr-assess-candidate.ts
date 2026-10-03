@@ -40,6 +40,7 @@ export const HR_ASSESS_CANDIDATE = createDeclarativeCodeSkill({
   outputSchema: hrResultSchema('Assessment record with technical/soft skill match, years of experience, and persistence path'),
   tier: 'represent',
   domainKnowledge: HR_DOMAIN_KNOWLEDGE,
+  manifest: { emitEvent: 'hr.candidate_assessment.recorded' },
   triggers: [
     // User, not Event: assessment needs the resume text and candidate name, and
     // there is no wired intake that supplies them, so only a person can run it.

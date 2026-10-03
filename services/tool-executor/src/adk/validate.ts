@@ -14,6 +14,8 @@ import type { Tool } from '../types';
 import { expectedSubfolder, inspectLayout } from './blueprint';
 import { assertNoGateOptOutConfig, declaresMutatingExternalAction, findManualGateDeclarations, gateOf } from './gates';
 import { validateNativeTriggers } from './triggers';
+import { parseCadence } from './cron';
+import { altersData, completionEventId, declaredEventIds, emittedEventIds, hasDeclaredEvent, outcomeEventId } from './events';
 import { isGovernanceTier } from './types';
 import type { AssistantBlueprint } from './types';
 
@@ -32,6 +34,13 @@ export type RuleId =
   | 'secret-flagging'
   | 'schema-versioned'
   | 'native-triggers'
+  | 'matchable-event-trigger'
+  | 'unresolvable-event-id'
+  | 'self-subscribing-event-trigger'
+  | 'declared-emit-event-unreachable'
+  | 'redundant-delegation-subscription'
+  | 'unschedulable-cadence'
+  | 'emit-event-declared'
   | 'aid-does-not-deliver';
 
 export interface ValidationFinding {
@@ -152,12 +161,75 @@ function isSchemaProperty(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/** Lower-order tools a Skill declares it delegates to. */
+function delegatedTools(skill: Tool): string[] {
+  const lower = (skill.manifest as Record<string, unknown> | undefined)?.lowerOrderTools;
+  return Array.isArray(lower) ? lower.filter((id): id is string => typeof id === 'string') : [];
+}
+
+/**
+ * Every event id a Skill in the catalogue can actually announce.
+ *
+ * An event id is a contract between a producer and a subscriber, and a
+ * subscriber can only be reached if some Skill really publishes that exact id.
+ * Prose cannot be matched at runtime, so an id that nothing produces is an edge
+ * that will never fire — which is exactly how 39 event triggers sat in the
+ * shipped catalogue looking like working integrations.
+ *
+ * The set spans every Assistant, because a producer and its subscriber are
+ * frequently in different ones (marketing reacting to a content approval).
+ */
+export function producibleEventIds(blueprints: Iterable<AssistantBlueprint>): Set<string> {
+  return producibleEventIndex(blueprints).ids;
+}
+
+/**
+ * The same index, plus a map from id to the Skills that announce it.
+ *
+ * An id can have more than one producer across the catalogue, and telling them
+ * apart matters: only the producer that delegates to you duplicates your run.
+ */
+export function producibleEventIndex(blueprints: Iterable<AssistantBlueprint>): {
+  ids: Set<string>;
+  producers: Map<string, Tool[]>;
+} {
+  const ids = new Set<string>();
+  const producers = new Map<string, Tool[]>();
+  const publish = (id: string, tool: Tool): void => {
+    ids.add(id);
+    producers.set(id, [...(producers.get(id) ?? []), tool]);
+  };
+  for (const blueprint of blueprints) {
+    const assistantId = blueprint.manifest.id;
+    for (const skill of [...blueprint.canonicalSkills, ...blueprint.lowerOrderTools]) {
+      for (const id of emittedEventIds(skill, assistantId)) publish(id, skill);
+      publish(completionEventId(assistantId, skill.id), skill);
+      // Failures and aborts are announced too, so they are subscribable.
+      publish(outcomeEventId(assistantId, skill.id, 'failed'), skill);
+      publish(outcomeEventId(assistantId, skill.id, 'aborted'), skill);
+
+      // An external producer is a legitimate origin for an id, but only when
+      // someone declared it to be one.
+      for (const trigger of skill.triggers ?? []) {
+        if (trigger.kind !== 'event') continue;
+        const externalId = trigger.externalEvent ? (trigger.eventId ?? '').trim() : '';
+        if (externalId) publish(externalId, skill);
+      }
+    }
+  }
+  return { ids, producers };
+}
+
 /**
  * Validates one Assistant blueprint against every checklist rule.
  */
 export function validateBlueprint(
   blueprint: AssistantBlueprint,
-  options: { layout?: ReturnType<typeof inspectLayout> } = {},
+  options: {
+    layout?: ReturnType<typeof inspectLayout>;
+    producibleEventIds?: Set<string>;
+    eventProducers?: Map<string, Tool[]>;
+  } = {},
 ): ValidationReport {
   const assistantId = blueprint.manifest.id;
   const findings: ValidationFinding[] = [];
@@ -242,6 +314,122 @@ export function validateBlueprint(
       add('native-triggers', 'error', sourceFile, issue.message);
     }
 
+    for (const trigger of skill.triggers ?? []) {
+      if (trigger.kind === 'event') {
+        // The matcher compares ids exactly, so a prose-only subscription reads as a
+        // working edge in the Overview and never fires. A warning rather than an
+        // error: the prose records an intent worth keeping, and the id it should name
+        // is named here.
+        const eventId = typeof trigger.eventId === 'string' ? trigger.eventId.trim() : '';
+        if (eventId === '') {
+          add(
+            'matchable-event-trigger',
+            'warning',
+            `${sourceFile}.triggers`,
+            `declares an event trigger on "${String(trigger.on ?? trigger.eventSource ?? 'an unnamed event')}" with no eventId, ` +
+              'so nothing will ever fire it: the runtime matches event ids exactly and cannot read prose. ' +
+              'Give this trigger the eventId of the Skill that produces that domain event — a Skill announces its own ' +
+              'completion as "<assistantId>.<its-own-skillId>.completed", or as its declared emitEvent.',
+          );
+        } else if (
+          options.producibleEventIds?.has(eventId) &&
+          options.eventProducers?.get(eventId)?.some(
+            (producer) =>
+              delegatedTools(producer).includes(skill.id) || delegatedTools(skill).includes(producer.id),
+          )
+        ) {
+          // The delegation already runs this Skill, and so does the subscription.
+          // A `represent` Skill reached by both performs its action twice for one
+          // upstream run: allocating resources, sending a message, filing a ticket.
+          add(
+            'redundant-delegation-subscription',
+            'warning',
+            `${sourceFile}.triggers`,
+            `subscribes to "${eventId}", but the Skill that announces it already delegates to this one ` +
+              '(or is delegated to by it), so each run arrives twice over. Keep one path: either the ' +
+              'orchestrator delegates and this Skill does not subscribe, or the reverse.',
+          );
+        } else if (emittedEventIds(skill, assistantId).includes(eventId)) {
+          // A subscription is also a dispatch edge. Naming your own event makes
+          // the runtime re-run you once per emission, which for a `represent`
+          // Skill means performing the action twice.
+          add(
+            'self-subscribing-event-trigger',
+            'error',
+            `${sourceFile}.triggers`,
+            `subscribes to "${eventId}", which is the event this Skill itself announces, so each run would ` +
+              'trigger another run of the same Skill. Subscribe to the id a different Skill declares.',
+          );
+        } else if (options.producibleEventIds && !options.producibleEventIds.has(eventId)) {
+          // Machine-matchable but unreachable: the id looks right, so this is
+          // worse than prose, because it reads as a working integration. Either a
+          // producer has not been given this id yet, or the id is wrong.
+          add(
+            'unresolvable-event-id',
+            'warning',
+            `${sourceFile}.triggers`,
+            `subscribes to "${eventId}" but no Skill announces that id, and the trigger does not declare ` +
+              'externalEvent, so nothing will ever fire it. Point it at the eventId a producer declares ' +
+              '(or at "<assistantId>.<its-own-skillId>.completed"), or set externalEvent: true if a producer ' +
+              'outside stage7 publishes that id.',
+          );
+        }
+        continue;
+      }
+
+      if (trigger.kind !== 'schedule' || trigger.cron) continue;
+
+      // A `cadence` only becomes a live schedule when it has exactly one reading.
+      // The rest is prose the scheduler must refuse rather than guess at, so catch
+      // it here where the author can still fix it.
+      const shorthand = typeof trigger.cadence === 'string' ? trigger.cadence : '';
+      if (!parseCadence(shorthand).valid) {
+        add(
+          'unschedulable-cadence',
+          'warning',
+          `${sourceFile}.triggers`,
+          `declares a schedule trigger on "${shorthand || 'no schedule expression'}" with no cron, ` +
+            'so nothing will ever run it: the cadence does not say when it fires. Named periods (daily, weekly, ' +
+            'monthly) leave the time open and anything qualified ("during configured windows", "when X completes") ' +
+            'is conditional. Declare cron with an exact expression, such as "0 9 * * 1" for Mondays at 09:00.',
+        );
+      }
+    }
+
+    // A Skill that changes something should say so. It does get an event either
+    // way — the runtime derives `<assistant>.<skill>.completed` for every run — but
+    // a declared id is what downstream Skills and operators key off, and a derived
+    // one only says "this run finished".
+    // A declaration is only real if it reaches the manifest the runtime reads.
+    // Reading the built Skill rather than the file text matters twice over: the
+    // source lookup is keyed on filename == skill id, so a Skill whose file is
+    // named differently reads as `''` and was reported as declaring nothing; and
+    // a factory that accepts `emitEvent` without forwarding it into the manifest
+    // produces a declaration that is present in the file and announced by
+    // nothing. Both are silent failures that source-text matching cannot see.
+    const declaresInSource = declaresEmitEvent(source.text);
+    const announcesDeclaredEvent = hasDeclaredEvent(skill);
+
+    if (declaresInSource && !announcesDeclaredEvent) {
+      add(
+        'declared-emit-event-unreachable',
+        'warning',
+        sourceFile,
+        'declares emitEvent in source, but the built Skill does not carry it, so the event is never ' +
+          'announced. Pass emitEvent to the factory in a position it forwards into the manifest.',
+      );
+    }
+
+    if (altersData(skill) && !announcesDeclaredEvent) {
+      add(
+        'emit-event-declared',
+        'warning',
+        sourceFile,
+        `alters data but declares no emitEvent; it emits only the derived "${completionEventId(assistantId, skill.id)}". ` +
+          'Declare emitEvent if another Skill or an operator should react to this specific change.',
+      );
+    }
+
     if (skill.isSkill === true) {
       const label = (skill.manifest as Record<string, unknown> | undefined)?.actionLabel;
       if (typeof label !== 'string' || label.trim() === '') {
@@ -323,6 +511,20 @@ export function validateBlueprint(
 }
 
 const SKILL_SOURCE_EXTENSIONS = ['.ts', '.js'];
+
+/**
+ * Whether a Skill's source declares `emitEvent` itself.
+ *
+ * Read from the source rather than the constructed Skill, for the same reason the
+ * manual-gate check does: the runtime derives an event id when none is declared,
+ * so the object on disk cannot distinguish an author's choice from a derived
+ * default.
+ */
+const DECLARES_EMIT_EVENT = /\bemitEvent\s*:/;
+
+export function declaresEmitEvent(source: string): boolean {
+  return DECLARES_EMIT_EVENT.test(source);
+}
 
 function readSkillSource(root: string, skillId: string): { text: string; file?: string } {
   for (const folder of ['skills', 'tools']) {

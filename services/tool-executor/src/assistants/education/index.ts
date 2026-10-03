@@ -1,9 +1,9 @@
 import { Tool } from '../../types';
-import { LESSON_ASSESSMENT_DRAFTING_USER } from './skills/lesson-assessment-drafting';
-import { LESSON_ASSESSMENT_DRAFTING_SCHEDULED } from './skills/lesson-assessment-drafting-scheduled';
+import { LESSON_ASSESSMENT_DRAFTING_USER } from './skills/education-lesson-assessment-drafting-user';
+import { LESSON_ASSESSMENT_DRAFTING_SCHEDULED } from './skills/education-lesson-assessment-drafting-scheduled';
 import { LEARNER_INSIGHT } from './skills/learner-insight';
 import { ADAPTIVE_PERSONALIZATION } from './skills/adaptive-personalization';
-import { RESOURCE_LIBRARY_OPS } from './skills/resource-library-ops';
+import { RESOURCE_LIBRARY_OPS } from './skills/education-resource-library';
 import { createWorkflow } from '../../adk/workflow-common';
 
 export const educationSkills = [LESSON_ASSESSMENT_DRAFTING_USER, LESSON_ASSESSMENT_DRAFTING_SCHEDULED, LEARNER_INSIGHT, ADAPTIVE_PERSONALIZATION, RESOURCE_LIBRARY_OPS];

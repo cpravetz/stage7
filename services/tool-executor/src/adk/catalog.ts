@@ -14,7 +14,7 @@
 import * as path from 'path';
 import type { Tool } from '../types';
 import { loadBlueprint, inspectLayout } from './blueprint';
-import { validateBlueprint, type ValidationReport } from './validate';
+import { producibleEventIndex, validateBlueprint, type ValidationReport } from './validate';
 import type { AssistantBlueprint, AssistantManifest } from './types';
 
 /** Folder holding every Assistant blueprint, relative to `src/`. */
@@ -129,11 +129,25 @@ export function allCanonicalSkills(catalog: AssistantCatalog): Tool[] {
  */
 export function validateCatalog(catalog: AssistantCatalog): ValidationReport[] {
   const reports: ValidationReport[] = [];
+  // Computed once across every Assistant: a producer and its subscriber are
+  // often in different ones, so a per-Assistant set would flag valid edges.
+  const index = producibleEventIndex(
+    catalog.order.flatMap((id) => {
+      const blueprint = catalog.blueprints.get(id);
+      return blueprint ? [blueprint] : [];
+    }),
+  );
 
   for (const id of catalog.order) {
     const blueprint = catalog.blueprints.get(id);
     if (!blueprint) continue;
-    reports.push(validateBlueprint(blueprint, { layout: inspectLayout(blueprint.root) }));
+    reports.push(
+      validateBlueprint(blueprint, {
+        layout: inspectLayout(blueprint.root),
+        producibleEventIds: index.ids,
+        eventProducers: index.producers,
+      }),
+    );
   }
 
   return reports;

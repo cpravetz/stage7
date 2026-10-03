@@ -58,7 +58,7 @@ export const TIME_STRATEGIC_FOCUS_PROXY = createDeclarativeCodeSkill({
   domainKnowledge: 'Executive calendar management, strategic focus protection, conflict resolution, meeting delegation, time optimization',
   inputSchema: TIME_INPUT,
   outputSchema: executiveResultSchema('Calendar analysis, focus protection plan, conflict resolution, delegation plan, or optimization results derived from supplied inputs'),
-  triggers: [{ kind: 'event', on: 'calendar-conflict' }],
+  triggers: [{ kind: 'event', on: 'calendar-conflict', externalEvent: true, eventId: 'executive.external.calendar.conflict_detected' }],
   isSkill: true,
   manifest: {
     configSchema: TIME_CONFIG,

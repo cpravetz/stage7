@@ -34,6 +34,7 @@ export const CTO_ENGINEERING_ACTION_IAC_DRIFT_REMEDIATION = createDeclarativeCod
     domainKnowledge: 'Infrastructure-as-code drift detection, remediation safety, change review, and rollback guarantees',
     manifest: {
       ui: { view: 'remediation-approval' },
+      emitEvent: 'cto.infrastructure_remediation.applied',
       // Applying a remediation is the write half of this Skill. Holding the
       // engineering actions tool here puts the live write behind the approval
       // panel instead of leaving it reachable on its own.

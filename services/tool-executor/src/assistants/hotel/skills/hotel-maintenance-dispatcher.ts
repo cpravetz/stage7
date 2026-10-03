@@ -38,9 +38,16 @@ export const MAINTENANCE_DISPATCHER_SKILL = createDeclarativeCodeSkill({
   inputSchema: MAINTENANCE_INPUT_SCHEMA,
   outputSchema: HOTEL_EXTERNAL_OUTPUT_SCHEMA,
   tier: 'represent',
+  // Four operations, four outcomes; the run reports which one it performed.
+  emitEvent: [
+    'hotel.maintenance.work_order_created',
+    'hotel.maintenance.work_order_updated',
+    'hotel.maintenance.work_order_assigned',
+    'hotel.maintenance.work_order_dispatched',
+  ],
   domainKnowledge: 'Hotel maintenance operations: work-order lifecycle, trade specialization, severity and priority triage, preventive maintenance scheduling, and guest-impact assessment during repairs.',
   triggers: [
-    { kind: 'event', on: 'Maintenance issue reported for a room or facility area' },
+    { kind: 'event', on: 'Maintenance issue reported for a room or facility area', externalEvent: true, eventId: 'hotel.external.maintenance_issue.reported' },
     { kind: 'user', phrase_examples: ['Report a leaking faucet in room 212', 'Dispatch a technician', 'Escalate the HVAC work order'] },
   ],
   isSkill: true,
@@ -76,6 +83,11 @@ export const MAINTENANCE_DISPATCHER_SKILL = createDeclarativeCodeSkill({
       ctx.store.save('maintenance_work_orders', workOrders);
       return {
         success: true,
+        emittedEvents: [
+          `hotel.maintenance.work_order_${
+            action === 'update' ? 'updated' : action === 'assign' ? 'assigned' : action === 'dispatch' ? 'dispatched' : 'created'
+          }`,
+        ],
         data: { workOrder: order },
         present: [
           ctx.render.text('maintenance-update', 'Maintenance Work Order Processed', `Work Order ${order.taskId} status: ${order.status}`),
@@ -84,6 +96,8 @@ export const MAINTENANCE_DISPATCHER_SKILL = createDeclarativeCodeSkill({
     }
     return {
       success: true,
+      // Listing changed nothing, so no outcome is claimed.
+      emittedEvents: [],
       data: { workOrders },
       present: [
         ctx.render.text('maintenance-list', 'Maintenance Work Orders', `Total work orders: ${workOrders.length}`),

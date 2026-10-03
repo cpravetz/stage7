@@ -53,7 +53,7 @@ export const CLINICAL_DECISION_SUPPORT = createDeclarativeCodeSkill({
     required: ['success'],
   },
   triggers: [
-    { kind: 'event', on: 'New symptoms reported or abnormal lab result' },
+    { kind: 'event', on: 'New symptoms reported or abnormal lab result', externalEvent: true, eventId: 'healthcare.external.lab_result.reported' },
   ],
   manifest: {},
   handler: async function handler(input, ctx) {

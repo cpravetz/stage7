@@ -25,6 +25,7 @@ const BILL_PAY_REBALANCING = createDeclarativeCodeSkill({
   description: 'Tracks upcoming personal obligations, flags unusual bank fees, and stages rebalancing transfers for explicit user approval.',
   persistenceEnvVar: 'INVESTMENT_HOME',
   tier: 'represent',
+  emitEvent: 'investment.rebalancing_transfer.staged',
   domainKnowledge: 'Personal finance obligation tracking, bank fee anomaly detection, and approval-gated rebalancing transfers',
   inputSchema: billPayRebalancingInputSchema,
   outputSchema: investmentResultSchema('Obligation tracking results, fee analysis, and staged transfer records'),

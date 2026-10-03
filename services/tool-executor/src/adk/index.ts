@@ -70,6 +70,40 @@ export {
 } from './triggers';
 
 export {
+  COMPLETION_EVENT_SUFFIX,
+  completionEventId,
+  emittedEventId,
+  emittedEventIds,
+  hasDeclaredEvent,
+  altersData,
+  buildCompletionEvents,
+  declaredEventIds,
+  isDryRun,
+  subscriberMatches,
+  type SkillEvent,
+  type EventKind,
+} from './events';
+
+export {
+  parseCron,
+  isValidCron,
+  type CronSchedule,
+} from './cron';
+
+export {
+  buildScheduledTriggers,
+  dueTriggers,
+  isDue,
+  scheduleStatus,
+  DEFAULT_CATCH_UP_MS,
+  type BlueprintScheduleCandidate,
+  type ScheduledTrigger,
+  type ScheduleIssue,
+  type ScheduleSet,
+  type ScheduleStatus,
+} from './trigger-schedule';
+
+export {
   classifyFailure,
   backoffDelay,
   withDeterministicRetry,
@@ -99,6 +133,7 @@ export {
   scanForEnvVars,
   secretFlaggingFindings,
   referencedByCanonicalSkill,
+  declaresEmitEvent,
   type RuleId,
   type ValidationFinding,
   type ValidationReport,

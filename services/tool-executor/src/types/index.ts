@@ -64,6 +64,19 @@ export type SkillTrigger =
       mapEventToInput?: (payload: any) => Record<string, unknown>;
       on?: string;
       eventId?: string;
+      /**
+       * Marks `eventId` as a contract with a producer outside stage7 — a gate
+       * scanner, an odds feed, an EHR webhook.
+       *
+       * Without this the id has to be produced by some Skill in this repo, and
+       * the validator rejects it as dead. That is the right default, because
+       * most unmatched ids are typos or aspirations. An external producer is a
+       * real and legitimate case, but it is a claim someone has to make
+       * explicitly: naming the contract turns "prose that can never fire" into
+       * "documented, machine-matchable, and checked against the id an external
+       * system will actually publish".
+       */
+      externalEvent?: boolean;
     }
   | { kind: 'data'; condition: string };
 
@@ -82,8 +95,17 @@ export type NativeExecutorKey =
   | 'api_client';
 
 export interface ToolManifest {
-  /** Event id this tool emits when it completes; downstream skills subscribe via an event trigger. */
-  emitEvent?: string;
+  /**
+   * Event id this tool emits when it completes; downstream skills subscribe via
+   * an event trigger.
+   *
+   * A list, because one run often changes more than one thing. A coordinator that
+   * books an appointment *and* sends the confirmation has two outcomes, and
+   * announcing only one leaves the other change with nothing able to react to it.
+   * Announcing the run's full set is not a convenience: a Skill that announces one
+   * of its two outcomes is asserting the other did not happen.
+   */
+  emitEvent?: string | string[];
   executor?: NativeExecutorKey;
   /**
    * The external system this Skill integrates with, when it is a named SaaS

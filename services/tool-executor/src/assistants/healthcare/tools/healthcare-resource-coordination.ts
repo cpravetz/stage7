@@ -10,6 +10,9 @@ export const RESOURCE_COORDINATION = createExternalActionSkill({
   description: 'Coordinate beds, equipment, staff, and rooms across facilities, and match patients to optimal resources based on clinical needs, insurance, and preferences.',
   tier: 'represent',
   domainKnowledge: 'Healthcare resource coordination, bed/equipment/staff management, and patient-resource matching',
+  manifest: {
+    emitEvent: 'healthcare.resource.allocated',
+  },
   system: 'healthcare',
   action: 'resource-coordination',
   endpoint: { configKey: 'HEALTHCARE_RESOURCE_ENDPOINT', method: 'POST' },
@@ -56,7 +59,8 @@ export const RESOURCE_COORDINATION = createExternalActionSkill({
   },
   outputSchema: HEALTHCARE_EXTERNAL_OUTPUT_SCHEMA,
   timeoutMs: 60000,
-  triggers: [
-    { kind: 'event', on: 'Resource request received' },
-  ],
+  // Reached by `care-resource-referral-coordinator`, which delegates here after
+  // creating a referral. It also announces `healthcare.referral.created`, so
+  // subscribing to that id as well would run this Skill twice per referral.
+  triggers: [],
 });

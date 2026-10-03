@@ -5,6 +5,8 @@ import http from 'http';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import { spawn } from 'child_process';
+import { STORE_WRITE_LOG } from '../adk/events';
+import type { StoreWrite } from '../adk/events';
 
 export interface CodeExecutionOptions {
   language: 'javascript' | 'typescript' | 'python';
@@ -39,6 +41,14 @@ export interface CodeExecutionResult {
   error?: string;
   exitCode?: number;
   durationMs?: number;
+  /**
+   * Instance data this run wrote, as reported by the Skill's own `ctx.store`.
+   *
+   * Present only on success: a run that wrote records and then failed changed
+   * something this executor will not vouch for, and the event layer is what decides
+   * whether to announce it.
+   */
+  storeWrites?: StoreWrite[];
 }
 
 export interface CodeExecutorCredentials {
@@ -237,6 +247,7 @@ async function __execute_tool(toolId, input) {
           NODE_ENV: 'production',
           HOME: sandboxDir,
           PATH: process.env.PATH || '/usr/bin:/bin',
+          STAGE7_SANDBOX_DIR: sandboxDir,
         };
 
         if (options.persistenceEnvVar) {
@@ -576,6 +587,14 @@ function cleanupAndResolve(
   result: CodeExecutionResult,
 ): void {
   try {
+    // Read the sidecar before cleanup: it is the only record of what the run wrote,
+    // and it lives in the directory about to be deleted. Read on failure too — the
+    // caller decides whether a failed run's writes are worth announcing, not this
+    // function, and dropping them here would make that decision unrecoverable.
+    const writes = readWriteLog(sandboxDir);
+    if (writes && result.success) {
+      result.storeWrites = writes;
+    }
     if (fs.existsSync(scriptPath)) {
       fs.unlinkSync(scriptPath);
     }
@@ -594,4 +613,27 @@ function cleanupAndResolve(
     // Cleanup is best-effort; still return the execution result.
   }
   resolve(result);
+}
+
+/**
+ * The store writes the Skill process recorded, or undefined if it recorded none.
+ *
+ * Tolerant by design: the sidecar is a best-effort channel, so a missing, truncated
+ * or malformed log yields undefined rather than failing a run that otherwise
+ * succeeded and, more importantly, rather than inventing writes that did not happen.
+ */
+function readWriteLog(sandboxDir: string): StoreWrite[] | undefined {
+  try {
+    const filePath = path.join(sandboxDir, STORE_WRITE_LOG);
+    if (!fs.existsSync(filePath)) return undefined;
+    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    if (!Array.isArray(parsed)) return undefined;
+    const writes = parsed.filter(
+      (entry): entry is StoreWrite =>
+        !!entry && typeof entry.key === 'string' && typeof entry.operation === 'string',
+    );
+    return writes.length > 0 ? writes : undefined;
+  } catch {
+    return undefined;
+  }
 }

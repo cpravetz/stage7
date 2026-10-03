@@ -12,7 +12,7 @@ export const MARKETING_SEO = createExternalActionSkill({
 // write to an external system. This one reaches a provider and mutates there,
 // so it is represent and sits behind the approval gate.
   tier: 'represent',
-    manifest: { actionLabel: 'Optimise search presence' },
+    manifest: { actionLabel: 'Optimise search presence', emitEvent: 'marketing.search_visibility.optimized' },
     isSkill: true,
     name: 'Marketing SEO',
     description: 'Audit, research, optimize, and track search visibility through a configurable SEO system.',

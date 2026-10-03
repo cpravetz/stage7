@@ -74,5 +74,6 @@ export const PRODUCT_MARKDOWN_PARSING = createExternalActionSkill({
       required: ['success', 'status', 'system', 'action', 'request', 'response', 'error'],
     },
     timeoutMs: 20000,
+  manifest: { emitEvent: 'product.document.parsed' },
   triggers: [{ kind: 'user', phrase_examples: ["Parse markdown", "Convert document", "Extract content"] }],
   });

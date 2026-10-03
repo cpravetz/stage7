@@ -45,6 +45,7 @@ const reportingDataOpsSkill = createDeclarativeCodeSkill({
   description: 'Assemble periodic financial reports from ledger lines, deriving section and net totals and cross-checking any stated figure, then stage the report for a configured board-reporting destination behind an explicit confirmation gate. With no destination configured it renders the report from local data and marks the publish as not connected.',
   persistenceEnvVar: 'STORAGE_DIR',
   tier: 'represent',
+  emitEvent: 'finance.report.published',
   domainKnowledge: 'US GAAP/IFRS reporting standards, board reporting templates, and financial statement preparation',
   inputSchema: reportingDataOpsInputSchema,
   outputSchema: reportingDataOpsOutputSchema,

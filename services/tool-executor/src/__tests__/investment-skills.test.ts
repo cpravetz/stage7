@@ -217,7 +217,6 @@ describe('Research & Planning emits presentation blocks', () => {
       { id: 'doc2', title: 'Microsoft Cloud Report', type: 'initiating', provider: 'Goldman', date: '2024-07-10', rating: 'Neutral', summary: 'Azure growth slowing but still profitable.', sector: 'Technology' },
     ];
     const { result, output } = await run(RESEARCH_PLANNING, {
-      query: 'quarterly earnings',
       query: 'apple',
       documents: docs,
     });
@@ -343,7 +342,6 @@ describe('Bill Pay & Rebalancing stages by default and never silently writes', (
     const past = new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000);
     const { result } = await run(BILL_PAY_REBALANCING, {
       dryRun: true,
-      obligations: [{ description: 'Rent', amount: 1000, dueDate: '2024-12-01' }],
       obligations: [
         { description: 'Rent', amount: 1200, dueDate: future.toISOString(), category: 'housing' },
         { description: 'Old bill', amount: 50, dueDate: past.toISOString(), category: 'misc' },
@@ -363,7 +361,6 @@ describe('Bill Pay & Rebalancing stages by default and never silently writes', (
   it('dry-run flag-fees identifies fees above the threshold', async () => {
     const { result } = await run(BILL_PAY_REBALANCING, {
       dryRun: true,
-      fees: [{ description: 'Fee', amount: 50 }], feeThreshold: 25,
       fees: [
         { description: 'Overdraft', amount: 35, date: '2024-01-05', source: 'bank' },
         { description: 'Monthly fee', amount: 10, date: '2024-01-06', source: 'bank' },
@@ -385,7 +382,6 @@ describe('Bill Pay & Rebalancing stages by default and never silently writes', (
   it('dry-run stage-transfer shows the transfer that would be staged', async () => {
     const { result } = await run(BILL_PAY_REBALANCING, {
       dryRun: true,
-      from: 'A', to: 'B', amount: 100,
       from: 'Checking 1234',
       to: 'Vanguard Brokerage',
       amount: 5000,
@@ -420,7 +416,6 @@ describe('Bill Pay & Rebalancing stages by default and never silently writes', (
   it('dry-run rebalance computes drift from supplied holdings and targets', async () => {
     const { result } = await run(BILL_PAY_REBALANCING, {
       dryRun: true,
-      rebalanceThreshold: 0.05,
       from: 'Brokerage',
       holdings: [
         { symbol: 'VTI', value: 60000 },
@@ -493,7 +488,6 @@ describe('Investment market data stages by default and never silently calls the 
   it('dry-run with no endpoint reports not-connected', async () => {
     {
       const { result, output } = await run(INVESTMENT_MARKET_DATA, {
-        symbols: ['AAPL'],
         symbols: ['AAPL', 'MSFT'],
         dryRun: true,
       });
@@ -521,7 +515,6 @@ describe('Investment market data stages by default and never silently calls the 
         externalConfig: { endpoint: 'https://api.example.invalid/v1/marketdata' },
       } as unknown as Tool;
       const { result } = await run(configured, {
-        symbols: ['AAPL'], startDate: '2024-01-01',
         symbols: ['TSLA'],
         interval: '1d',
         startDate: '2024-01-01',

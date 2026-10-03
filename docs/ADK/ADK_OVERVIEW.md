@@ -82,16 +82,28 @@ To prevent UI fragmentation, the ADK enforces a strict boundary using `isSkill`:
 Skills can be invoked through three explicit trigger mechanisms:
 
 1. **User-Triggered:** Invoked manually via an Action Button on the Skill’s Overview UX panel or via a Chat phrase. Inputs may be supplied by the user or automatically pulled from persisted collections.
-2. **Schedule-Triggered:** Executed automatically on a recurring clock interval configured in the Skill settings.
-3. **Event-Triggered:** Fired automatically when a state or data change is detected (e.g., a tool emitting a document update in MongoDB or an external webhook event).
+2. **Schedule-Triggered:** Executed automatically on a cron expression declared in the Skill. The `TriggerScheduler` in the tool-executor checks every schedule once a minute and fires the due ones through the same executor a button press uses.
+3. **Event-Triggered:** Fired automatically when another Skill announces a matching event. Matching is by exact event id.
+
+#### Events
+
+Every successful Skill run announces an event:
+
+* A Skill that declares `emitEvent` announces that id.
+* Otherwise the run announces its derived completion event, `<assistantId>.<skillId>.completed`.
+
+A run that failed, or that stopped for confirmation, announces nothing. Events are recorded durably and read back at `GET /api/tool-executor/events`, so there is an audit trail of what changed rather than only an in-process fan-out.
 
 #### Adaptive Skill Self-Evolution
 
 Assistants can adapt user-triggered Skills into scheduled or event-triggered Skills based on user instructions (e.g., *"Run this competitor search every Monday at 9 AM"*). When an Assistant adapts a Skill:
 
 * The Assistant **does not modify the local folder blueprint code**.
-* The stage7 runtime writes a **Dynamic Trigger Record** to the instance persistence layer.
-* The stage7 scheduler/event-monitor evaluates these persisted trigger contracts dynamically at runtime.
+* The stage7 runtime writes a **Dynamic Trigger Record** to the instance persistence layer (`TriggerRecordStore`).
+* The `TriggerScheduler` evaluates these persisted records alongside the triggers declared in code, and rebuilds its plan from the registry on every tick so a newly deployed Skill schedules itself.
+* Tier gating is unchanged: the scheduler never sends `confirmation`, so a scheduled `represent` Skill is still gated on every run. A recurring trigger is not a standing authorisation.
+
+The schedule is inspectable at `GET /api/tool-executor/triggers`, which lists every cron with its next and last fire and reports any cron that cannot be parsed. A declared cron missing from that listing is a declaration nothing is honouring.
 
 ### 3.3 Tool Scope & Portfolio Management
 
