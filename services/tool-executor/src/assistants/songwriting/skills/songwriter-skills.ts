@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { Tool } from '../../../types';
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
 
@@ -8,17 +9,8 @@ const SONGWRITER_DISPATCH_CONFIG_SCHEMA = {
     endpointUrl: SchemaProps.url({ title: 'Endpoint URL', description: 'Lead-sheet, demo-asset, or registration endpoint URL', order: 1, hint: 'Provider endpoint for live dispatch of lead sheets, demo metadata, or registration records' }),
     provider: SchemaProps.select(['custom', 'daw', 'registration-portal'], { title: 'Provider', description: 'Configured asset or registration provider', order: 3, default: 'custom', hint: 'Select the service that will receive dispatched assets' }),
     defaultFormat: SchemaProps.select(['lead-sheet', 'demo-metadata', 'registration'], { title: 'Default Format', description: 'Default dispatch artifact format', order: 4, default: 'lead-sheet', hint: 'Default artifact type when none is specified at dispatch time' }),
-    confirmBeforeSend: SchemaProps.boolean({ title: 'Confirm Before Send', description: 'Require explicit confirmation before a live asset dispatch', order: 5, default: true, hint: 'When enabled, live dispatch requires explicit confirmation input' }),
   },
 };
-
-function withConfirmation(skill: Tool): Tool {
-  return {
-    ...skill,
-    confirmBeforeSend: true,
-    manifest: { ...skill.manifest, confirmBeforeSend: true },
-  };
-}
 
 export const lyricProsodyEvaluator = createDeclarativeCodeSkill({
   id: 'songwriting_lyric_prosody_evaluator',
@@ -708,7 +700,7 @@ export const musicalCoCreation = createDeclarativeCodeSkill({
     }
   });
 
-export const leadSheetDemoDispatcher = withConfirmation(createDeclarativeCodeSkill({
+export const leadSheetDemoDispatcher = createDeclarativeCodeSkill({
   id: 'songwriting_lead_sheet_demo_dispatcher',
   name: 'Represent Lead Sheet & Demo Asset Dispatcher',
   description: 'Parses final lyrics into sections, aligns the supplied chord symbols to the line they belong on, renders a column-aligned lead sheet, builds demo metadata (key, tempo, duration, section and line counts) or a copyright registration record, stages the artifact locally, and only dispatches to a configured provider after explicit confirmation.',
@@ -765,10 +757,19 @@ export const leadSheetDemoDispatcher = withConfirmation(createDeclarativeCodeSki
   triggers: [
     { kind: 'user', phrase_examples: ['Format this song as a lead sheet', 'Prepare demo metadata'] },
   ],
-  tier: 'aid',
+    // v9: an aid Skill assembles aids and returns a work product; it does not
+    // write to an external system. This one dispatches an asset to a provider,
+    // so it is represent and sits behind the approval gate.
+    tier: 'represent',
   domainKnowledge: 'Songwriting lead sheet formatting, demo metadata preparation, and asset dispatch',
   isSkill: true,
   manifest: {
+    // Declaring the external action is what lets the platform reason about
+    // this Skill: it reaches a provider, so the gate backstop applies even
+    // though the tier alone would leave it open. It also makes the
+    // aid/represent mismatch visible to `adk:validate` instead of hiding it.
+    system: 'songwriting-provider',
+    action: 'dispatch-demo-asset',
     // Declared as a credential, not a plain config field, so the key can come from
     // the vault via `vault:<id>` and is never echoed back into emitted output.
     credentialSource: {
@@ -776,7 +777,6 @@ export const leadSheetDemoDispatcher = withConfirmation(createDeclarativeCodeSki
     },
     configSchema: SONGWRITER_DISPATCH_CONFIG_SCHEMA,
     endpointConfigKey: 'endpointUrl',
-    confirmBeforeSend: true
   },
   handler: async function handler(input, ctx) {
       const title = String(input.title || 'Untitled song');
@@ -940,4 +940,4 @@ export const leadSheetDemoDispatcher = withConfirmation(createDeclarativeCodeSki
 
       return result;
     }
-  }));
+  });

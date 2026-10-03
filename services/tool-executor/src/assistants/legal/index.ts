@@ -5,6 +5,7 @@ import { LEGAL_RESEARCH } from './skills/legal-research';
 import { MATTER_DOCUMENT_OPS } from './skills/document-ops';
 import { COMPLIANCE_TRACKING_USER } from './skills/compliance-tracking';
 import { COMPLIANCE_TRACKING_SCHEDULED } from './skills/compliance-tracking-scheduled';
+import { DRAFT, REDLINE, ANALYZE_CLAUSES, FINALIZE } from './tools/document-production';
 import { createWorkflow } from '../../adk/workflow-common';
 
 export const legalSkills: Tool[] = [
@@ -14,6 +15,10 @@ export const legalSkills: Tool[] = [
   MATTER_DOCUMENT_OPS,
   COMPLIANCE_TRACKING_USER,
   COMPLIANCE_TRACKING_SCHEDULED,
+  DRAFT,
+  REDLINE,
+  ANALYZE_CLAUSES,
+  FINALIZE,
 ];
 
 export const legalWorkflow = createWorkflow({

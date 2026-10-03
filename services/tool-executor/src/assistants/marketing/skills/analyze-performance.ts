@@ -1,9 +1,12 @@
 // @ts-nocheck
+
 import { createDeclarativeCodeSkill } from '../../../adk/code-skill-factory';
 import { ANALYZE_PERFORMANCE_OUTPUT_SCHEMA } from '../marketing-contract';
 
 export const ANALYZE_PERFORMANCE = createDeclarativeCodeSkill({
   id: 'analyze-performance',
+  tier: 'advise',
+  isSkill: true,
   name: 'Analyze Performance',
   description: 'Analyze campaign performance against KPIs.',
   persistenceEnvVar: 'MARKETING_HOME',

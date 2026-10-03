@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
 import { sportsResultSchema, SPORTS_PERFORMANCE_SAFETY_BOUNDARY } from '../sports-contract';
@@ -39,7 +40,7 @@ export const TACTICAL_ROSTER_EVALUATOR = createDeclarativeCodeSkill({
   triggers: [
     { kind: 'event', on: 'Match calendar entering pre-match window' },
   ],
-  isSkill: false,
+  isSkill: true,
   manifest: {
     // The provider key is a secret, so it is declared as a credential rather than a
     // plain config field: the executor resolves it and hands the handler a value via

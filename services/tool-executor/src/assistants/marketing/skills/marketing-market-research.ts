@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { createExternalActionSkill } from '../../../adk/code-skill-factory';
 import { EXTERNAL_OUTPUT_SCHEMA } from '../marketing-contract';
 
@@ -7,6 +8,9 @@ export const MARKETING_MARKET_RESEARCH = createExternalActionSkill({
       { kind: 'user', phrase_examples: ["Research market", "Competitor analysis", "Market survey"] },
     ],
     id: 'marketing-market-research',
+    tier: 'aid',
+    manifest: { actionLabel: 'Research the market' },
+    isSkill: true,
     name: 'Marketing Market Research',
     description: 'Search markets, competitors, trends, and customer signals through configurable research providers.',
     system: 'research',

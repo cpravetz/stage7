@@ -1,0 +1,11 @@
+{
+  "id": "restaurant",
+  "name": "Restaurant Operations & Foodservice Assistant",
+  "description": "Optimizes menu margin engineering, generates shift prep checklists, manages reservations and guest profiles, drafts inventory POs, and projects P&L financial forecasts.",
+  "version": "9.0.0",
+  "domainKnowledgeFiles": [
+    "knowledge/prime-cost-formulas.md",
+    "knowledge/food-safety-guidelines.md",
+    "knowledge/kitchen-prep-standards.md"
+  ]
+}

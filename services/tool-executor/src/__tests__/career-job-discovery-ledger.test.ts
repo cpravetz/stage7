@@ -4,7 +4,7 @@ import * as path from 'path';
 import { ToolExecutor } from '../services/ToolExecutor';
 import { Tool } from '../types';
 import { validateAgainstOutputSchema } from '../utils/schemaValidator';
-import { CAREER_JOB_DISCOVERY } from '../data/skills/career';
+import { CAREER_JOB_DISCOVERY } from '../assistants/career';
 
 /**
  * Covers career-job-discovery's per-board status ledger and its run-level outcome.

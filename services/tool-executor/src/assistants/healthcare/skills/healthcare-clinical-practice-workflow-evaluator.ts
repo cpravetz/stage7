@@ -1,4 +1,5 @@
-// @ts-nocheck -- generated handler body is untyped (implicit any) by design
+// @ts-nocheck
+
 import { SchemaRecord } from '../../../types'
 import { createDeclarativeCodeSkill, SchemaProps, createSchemaRecord } from '../../../adk/code-skill-factory'
 import { healthcareResultSchema } from '../healthcare-contract'
@@ -21,7 +22,7 @@ const triggers = [
   { kind: 'user' as const, phrase_examples: ['evaluate clinic workflow', 'review this clinical case', 'create a care plan', 'stage intake dispatch'] },
   { kind: 'schedule' as const, cadence: 'daily clinical operations review' },
   { kind: 'event' as const, on: 'intake submission, appointment change, care-plan request, or guideline update' },
-  { kind: 'data' as const, condition: 'workflow, evidence, education, or intake data is available for review' },
+  { kind: 'event' as const, eventSource: 'healthcare-collection-change', on: 'workflow, evidence, education, or intake data is available for review' },
 ]
 
 const workflowConfig = createSchemaRecord({
@@ -32,6 +33,7 @@ const workflowConfig = createSchemaRecord({
 
 export const healthcareClinicalPracticeWorkflowEvaluator = createDeclarativeCodeSkill({
   id: 'healthcare-clinical-practice-workflow-evaluator',
+  isSkill: true,
   name: 'Clinical Practice & Workflow Evaluator',
   description: 'Evaluate supplied scheduling, completion, no-show, wait-time, and billing-delay records to identify deterministic operational bottlenecks without making clinical claims.',
   persistenceEnvVar: 'HEALTHCARE_HOME',
@@ -53,6 +55,8 @@ export const healthcareClinicalPracticeWorkflowEvaluator = createDeclarativeCode
   triggers,
   manifest: {
     configSchema: workflowConfig,
+    // Operational analytics is how this Skill measures the workflow it evaluates.
+    lowerOrderTools: ['healthcare-operational-analytics'],
     healthcareHome: 'HEALTHCARE_HOME',
     ui: { view: 'clinical-operations' },
     metadata: metadata

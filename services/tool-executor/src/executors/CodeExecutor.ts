@@ -121,8 +121,8 @@ export class CodeExecutor {
 
     // Copy stage7-runtime into sandboxDir so skills can require('stage7-runtime')
     try {
-      const runtimeJsSrc = path.resolve(__dirname, '../data/skills/shared/stage7-runtime.js');
-      const runtimeTsSrc = path.resolve(__dirname, '../data/skills/shared/stage7-runtime.ts');
+      const runtimeJsSrc = path.resolve(__dirname, '../adk/shared/stage7-runtime.js');
+      const runtimeTsSrc = path.resolve(__dirname, '../adk/shared/stage7-runtime.ts');
       if (fs.existsSync(runtimeJsSrc)) {
         fs.copyFileSync(runtimeJsSrc, `${sandboxDir}/stage7-runtime.js`);
       } else if (fs.existsSync(runtimeTsSrc)) {

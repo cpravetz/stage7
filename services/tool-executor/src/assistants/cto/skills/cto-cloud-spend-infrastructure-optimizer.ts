@@ -1,9 +1,11 @@
 // @ts-nocheck
+
 import { SchemaProps, createDeclarativeCodeSkill, createSchemaRecord } from '../../../adk/code-skill-factory';
 import { CLOUD_SPEND_TRIGGERS } from '../cto-contract';
 
 export const CTO_CLOUD_SPEND_INFRASTRUCTURE_OPTIMIZER = createDeclarativeCodeSkill({
     id: 'cto-cloud-spend-infrastructure-optimizer',
+    isSkill: true,
     name: 'Cloud Spend & Infrastructure Optimizer',
     description: 'Analyze supplied cloud billing and utilization rows to recommend rightsizing and capacity actions.',
     persistenceEnvVar: 'CTO_HOME',

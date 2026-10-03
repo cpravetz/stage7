@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
 import { sportsResultSchema, SPORTS_WAGERING_SAFETY_BOUNDARY } from '../sports-contract';
@@ -33,7 +34,7 @@ export const BANKROLL_CO_PILOT = createDeclarativeCodeSkill({
   triggers: [
     { kind: 'schedule', cadence: 'Pre-bet risk check' },
   ],
-  isSkill: false,
+  isSkill: true,
   manifest: {},
   handler: async function handler(input, ctx) {
       const bankroll = Number(input.bankroll) || 0;

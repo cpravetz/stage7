@@ -1,8 +1,11 @@
 // @ts-nocheck
+
 import { createExternalActionSkill } from '../../../adk/code-skill-factory';
 
 export const PRODUCT_CALENDAR = createExternalActionSkill({
     id: 'product-calendar',
+    tier: 'represent',
+    isSkill: false,
     name: 'Calendar Integration',
     description: 'Schedule product reviews, sync events, and manage calendars. Uses configurable calendar API with endpoint and auth.',
     system: 'calendar',

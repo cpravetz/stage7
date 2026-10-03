@@ -1,12 +1,30 @@
 // @ts-nocheck
+
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
 
 const CAREER_WRAPPER_CONFIG_SCHEMA: SchemaRecord = { type: 'object', properties: {} };
 
+/**
+ * The design names two inputs, `resume` and `market`. Both are declared here as
+ * optional overrides: the scheduled run supplies neither and reads the stored
+ * profile and the stored listings instead, which is why they are not required.
+ * Supplying them is how a person who has not run intake or discovery yet still
+ * gets an answer rather than a bare Run button with nothing to act on.
+ */
 const JOB_MARKET_POSITIONING_EVALUATOR_INPUT = {
   type: 'object',
-  properties: {},
+  properties: {
+    resume: {
+      type: 'string',
+      description: 'Resume text to position, when there is no stored profile yet',
+      multiline: true,
+    },
+    market: {
+      type: 'object',
+      description: 'Job listings to position against, when discovery has not been run yet',
+    },
+  },
 };
 
 const JOB_MARKET_POSITIONING_EVALUATOR_OUTPUT = {
@@ -70,7 +88,12 @@ const JOB_MARKET_POSITIONING_EVALUATOR = createDeclarativeCodeSkill({
     actionLabel: 'Evaluate positioning'
   },
   handler: async function handler(input, ctx) {
-      const profileRes = await ctx.delegate('career-profile-intake', {});
+      // A supplied resume short-circuits the stored-profile lookup: the caller
+      // handed us the document, so reading a different one from the store would
+      // silently position the wrong career.
+      const suppliedResume = String((input && input.resume) || '').trim();
+
+      const profileRes = suppliedResume ? { success: true, data: { resumeText: suppliedResume } } : await ctx.delegate('career-profile-intake', {});
       if (!profileRes || !profileRes.success) {
         return {
           success: false,
@@ -94,7 +117,14 @@ const JOB_MARKET_POSITIONING_EVALUATOR = createDeclarativeCodeSkill({
       // "reuse the stored search" branch below never fired and this skill re-ran a full
       // discovery on every call.
       let listings = [];
+      const suppliedMarket = input && input.market;
+      if (Array.isArray(suppliedMarket)) {
+        listings = suppliedMarket;
+      } else if (suppliedMarket && Array.isArray((suppliedMarket as Record<string, unknown>).listings)) {
+        listings = (suppliedMarket as Record<string, unknown>).listings as unknown[];
+      }
       try {
+        if (listings.length) throw new Error('supplied');
         const parsed = ctx.store.load('listPath', null);
         if (Array.isArray(parsed)) listings = parsed;
         else if (parsed && Array.isArray(parsed.listings)) listings = parsed.listings;

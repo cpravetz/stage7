@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { SchemaProps, createDeclarativeCodeSkill } from '../../../adk/code-skill-factory';
 
 export const PRODUCT_INSIGHTS_SCHEDULED = createDeclarativeCodeSkill({

@@ -1,0 +1,10 @@
+{
+  "id": "finance",
+  "name": "Corporate Finance & FP&A Assistant",
+  "description": "Constructs three-statement financial models, evaluates regulatory accounting risks, monitors budget vs. actuals, and dispatches GL financial reports.",
+  "version": "9.0.0",
+  "domainKnowledgeFiles": [
+    "knowledge/gaap-ifrs-accounting-standards.md",
+    "knowledge/financial-modeling-rules.md"
+  ]
+}

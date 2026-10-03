@@ -71,12 +71,15 @@ const DAY_OF_OPERATIONS = createExternalActionSkill({
   },
   outputSchema: EVENT_EXTERNAL_OUTPUT_SCHEMA,
   timeoutMs: 60000,
-  tier: 'aid',
+  // v9: an aid Skill assembles aids and returns a work product; it does not
+// write to an external system. This one reaches a provider and mutates there,
+// so it is represent and sits behind the approval gate.
+  tier: 'represent',
+manifest: { actionLabel: 'Run day-of operations' },
 isSkill: true,
 });
 
 DAY_OF_OPERATIONS.domainKnowledge = 'Event day-of operations: check-in workflows, seating assignment, real-time attendance monitoring, issue escalation, and run-of-show execution across event management platforms';
-DAY_OF_OPERATIONS.confirmBeforeSend = true;
 DAY_OF_OPERATIONS.triggers = [
   { kind: 'event', on: 'Event day begins' },
 ];

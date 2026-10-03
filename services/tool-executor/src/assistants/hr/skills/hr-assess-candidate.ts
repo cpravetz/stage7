@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { SchemaProps, createDeclarativeCodeSkill } from '../../../adk/code-skill-factory';
 import { HR_DOMAIN_KNOWLEDGE, hrResultSchema } from '../hr-contract';
 
@@ -15,7 +16,6 @@ export const HR_ASSESS_CANDIDATE = createDeclarativeCodeSkill({
   configSchema: {
     type: 'object',
     properties: {
-      confirmBeforeSend: SchemaProps.boolean({ description: 'Require explicit confirmation before sending mutating requests', default: true }),
       dryRun: SchemaProps.boolean({ description: 'Validate without executing; defaults to true', default: true }),
       defaultEndpoint: SchemaProps.url({ description: 'Default screening and scheduling endpoint URL' }),
       maxRetryAttempts: SchemaProps.number({ description: 'Retry attempts on scheduling failure', default: 3 }),
@@ -39,7 +39,6 @@ export const HR_ASSESS_CANDIDATE = createDeclarativeCodeSkill({
   },
   outputSchema: hrResultSchema('Assessment record with technical/soft skill match, years of experience, and persistence path'),
   tier: 'represent',
-  confirmBeforeSend: true,
   domainKnowledge: HR_DOMAIN_KNOWLEDGE,
   triggers: [
     // User, not Event: assessment needs the resume text and candidate name, and

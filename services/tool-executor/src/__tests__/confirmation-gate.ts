@@ -1,4 +1,5 @@
 import { Tool } from '../types';
+import { declaresExternalAction, declaresMutatingExternalAction, effectiveGate } from '../adk/gates';
 
 /**
  * Shared predicate for "this skill mutates external state, so the runtime
@@ -34,30 +35,20 @@ export const READ_ONLY_EXTERNAL_ACTIONS: ReadonlySet<string> = new Set([
   'parse_document',
 ]);
 
-export function declaresExternalAction(skill: Tool): boolean {
-  const system = skill.manifest?.system;
-  const action = skill.manifest?.action;
-  return typeof system === 'string' && system.length > 0
-    && typeof action === 'string' && action.length > 0;
-}
-
-export function isReadOnlyExternalAction(skill: Tool): boolean {
-  if (!declaresExternalAction(skill)) return false;
-  const action = skill.manifest.action as string;
-  return action.startsWith('analyze') || READ_ONLY_EXTERNAL_ACTIONS.has(action);
-}
-
 /** True when the skill can change state the user cares about. */
 export function isMutatingSkill(skill: Tool): boolean {
-  if (skill.tier === 'represent') return true;
-  return declaresExternalAction(skill) && !isReadOnlyExternalAction(skill);
+  return effectiveGate(skill).gated;
 }
+
+export { declaresExternalAction, declaresMutatingExternalAction };
 
 /**
  * The gate is a dual read (src/services/ToolExecutor.ts:514-519): a skill
  * satisfies it if EITHER location is set.
  */
 export function enforcesConfirmation(skill: Tool): boolean {
+  // Derived, so the Tool field is the single source. The manifest read is kept
+  // only for a Skill built by hand outside the factory.
   return skill.confirmBeforeSend === true || skill.manifest?.confirmBeforeSend === true;
 }
 

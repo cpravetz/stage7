@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
 import { careerResultSchema } from '../career-contract';
@@ -12,10 +13,6 @@ const CAREER_WRAPPER_CONFIG_SCHEMA: SchemaRecord = { type: 'object', properties:
 const RESUME_TEMPLATE_MANAGER_INPUT = {
   type: 'object',
   properties: {
-    action: SchemaProps.select(['list', 'save', 'get', 'delete'], {
-      description: 'Action to perform. Defaults to listing templates.',
-      default: 'list',
-    }),
     typeFilter: {
       type: 'string',
       enum: ['all', 'resume', 'cover-letter'],
@@ -56,6 +53,14 @@ const RESUME_TEMPLATE_MANAGER_INPUT = {
       required: ['name', 'mimeType', 'content'],
     },
   },
+  // `get` and `delete` are both driven by `id`, so presence alone cannot tell them
+  // apart. Deletion is therefore opt-in and can never be the default that a bare
+  // `id` falls through to.
+  delete: { type: 'boolean', description: 'Delete the template named by `id` rather than returning it', default: false },
+  // `save` is otherwise selected by exactly the fields it validates, which leaves its
+  // "you gave me nothing" guidance unreachable. This flag is what asks for a save
+  // without yet supplying the document.
+  save: { type: 'boolean', description: 'Save a template; when name and content are both absent, reports what is missing', default: false },
 };
 
 const RESUME_TEMPLATE_MANAGER = createDeclarativeCodeSkill({
@@ -66,6 +71,9 @@ const RESUME_TEMPLATE_MANAGER = createDeclarativeCodeSkill({
   tier: 'aid',
   domainKnowledge: 'Career coaching, job search strategy, resume and cover letter optimization',
   isSkill: true,
+  // Adding a template is the write half of this Skill, so the standalone tool
+  // sits behind it rather than being reachable on its own.
+  manifest: { lowerOrderTools: ['career-add-template'] },
   inputSchema: RESUME_TEMPLATE_MANAGER_INPUT,
   outputSchema: careerResultSchema('Template metadata, detail view, or document list'),
   triggers: [
@@ -80,7 +88,21 @@ const RESUME_TEMPLATE_MANAGER = createDeclarativeCodeSkill({
     },
   ],
   handler: async (input, ctx) => {
-    const action = input.action || 'list';
+    function resolveOperation(input: Record<string, unknown>): string {
+      // v9 §1.1 item 3: no routing enum and no free-text `request` field. The
+      // Skill picks the operation from which declared inputs were supplied.
+      const present = (v: unknown): boolean => v != null && v !== '' && !(Array.isArray(v) && !v.length);
+      const has = (...keys: string[]): boolean => keys.some((k) => present(input[k]));
+      const all = (...keys: string[]): boolean => keys.every((k) => present(input[k]));
+
+      if (has('save') && input.save === true) return 'save';
+      if (has('resumeFile', 'content', 'name', 'tags')) return 'save';
+      if (has('delete') && input.delete === true) return 'delete';
+      if (has('id')) return 'get';
+      if (has('typeFilter')) return 'list';
+      return 'list';
+    }
+    const action = resolveOperation(input as Record<string, unknown>);
     const templates = ctx.store.load('templates', []);
     const normalizedTemplates = Array.isArray(templates) ? templates : [];
 

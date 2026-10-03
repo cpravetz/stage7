@@ -157,7 +157,7 @@ export const SKILL_CLASSIFICATION: Record<string, SkillClassification> = {
   'education-adaptive-personalization': { tier: 'advise', isSkill: true },
   'education-lesson-assessment-drafting-user': { tier: 'represent', isSkill: true },
   'education-lesson-assessment-drafting-scheduled': { tier: 'represent', isSkill: true },
-  'education-resource-library': { tier: 'aid', isSkill: true },
+  'education-resource-library': { tier: 'represent', isSkill: true },
 
   // --- hr -----------------------------------------------------------------
   'hr-screen-resume': { tier: 'advise', isSkill: true },

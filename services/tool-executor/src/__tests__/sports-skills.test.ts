@@ -1,4 +1,4 @@
-import { sportsSkills } from '../data/skills/sports';
+import { sportsSkills } from '../assistants/sports';
 import { Tool } from '../types';
 
 describe('sportsSkills', () => {

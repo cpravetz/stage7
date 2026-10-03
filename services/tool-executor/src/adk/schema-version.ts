@@ -16,6 +16,34 @@
 export const SCHEMA_VERSION_KEY = '_schemaVersion';
 export const UPDATED_AT_KEY = '_updatedAt';
 
+/**
+ * The version a capability declares when it has never changed its record shape.
+ *
+ * A folder is immutable, so there is no migration to coordinate when a Skill
+ * starts writing a new field: the version is per-capability, bumped in the same
+ * commit that changes the shape, and readers use it to decide which adapters to
+ * run. Version 1 therefore means "the original shape", not "unspecified".
+ */
+export const DEFAULT_SCHEMA_VERSION = 1;
+
+/**
+ * The version a capability declares.
+ *
+ * Rejects anything that is not a positive integer rather than coercing it,
+ * because a silently coerced `0` or `1.5` would mark stored records as
+ * up-to-date when they are not.
+ */
+export function resolveSchemaVersion(declared: unknown): number {
+  if (declared === undefined) return DEFAULT_SCHEMA_VERSION;
+  if (typeof declared !== 'number' || !Number.isInteger(declared) || declared < 1) {
+    throw new Error(
+      `schemaVersion must be an integer >= 1, got ${JSON.stringify(declared)}. ` +
+        'Bump it in the same commit that changes the capability\'s persisted record shape.',
+    );
+  }
+  return declared;
+}
+
 export interface HydrationAdapter {
   /** The version this step produces from the one below it. */
   toVersion: number;

@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, SchemaProps, createSchemaRecord } from '../../../adk/code-skill-factory';
 import { salesResultSchema } from '../sales-contract';
@@ -57,7 +58,6 @@ const leadDealAdvisory = createDeclarativeCodeSkill({
       defaultHotThreshold: SchemaProps.number({ description: 'Default hot-lead threshold', default: 70 }),
     }),
     persistenceEnv: 'SALES_HOME',
-    confirmBeforeSend: false,
     ui: { view: 'lead-deal-advisory' },
   },
   triggers: [

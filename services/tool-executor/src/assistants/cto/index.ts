@@ -11,6 +11,7 @@ import { CTO_ENGINEERING_ACTIONS } from './tools/cto-engineering-actions';
 import { CTO_INCIDENT_DISASTER_READINESS } from './tools/cto-incident-disaster-readiness';
 import { CTO_INCIDENT_WAR_ROOM_SYNTHESIZER } from './skills/cto-incident-war-room-synthesizer';
 import { CTO_INFRASTRUCTURE_QUERY } from './tools/cto-infrastructure-query';
+import { CALCULATE_DORA } from './tools/dora-metrics';
 
 export const ctoSkills: Tool[] = [
   CTO_INFRASTRUCTURE_QUERY,
@@ -24,6 +25,7 @@ export const ctoSkills: Tool[] = [
   ctoTeamDeliveryHealthEvaluator,
 
   ctoDisasterRecoveryPlanner,
+  CALCULATE_DORA,
 ];
 
 export const ctoCanonicalSkills = ctoSkills.filter((s) => s.isSkill !== false);

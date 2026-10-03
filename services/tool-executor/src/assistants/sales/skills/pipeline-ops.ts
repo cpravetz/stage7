@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { createDeclarativeCodeSkill, createSchemaRecord, SchemaProps } from '../../../adk/code-skill-factory';
 import { salesResultSchema } from '../sales-contract';
 
@@ -54,15 +55,17 @@ const pipelineOps = createDeclarativeCodeSkill({
   }),
   outputSchema: salesResultSchema('Staged or sent operation, derived totals, and whether anything was actually sent'),
   triggers: [{ kind: 'user', phrase_examples: ['Update my CRM record', 'Send this to the pipeline', 'Stage this deal'] }],
-  confirmBeforeSend: true,
   isSkill: true,
+  // Pipeline records are written to the CRM; the brief is the work that decides
+  // what is worth writing. Both belong to the pipeline, not to loose entry points.
   manifest: {
+    lowerOrderTools: ['sales-crm-sync'],
+    actionLabel: 'Review pipeline',
   credentialSource: {
     apiKey: { configKey: 'apiKey', required: false, label: "pipeline service API key, needed only for a live write (set in this Skill configuration, or a vault secret)" },
   },
     configSchema: createSchemaRecord({
       endpointUrl: SchemaProps.url({ description: 'Pipeline endpoint URL; may also be supplied at runtime through ' + PIPELINE_ENDPOINT_ENV }),
-      confirmBeforeSend: SchemaProps.boolean({ description: 'Require explicit confirmation before a live pipeline write', default: true }),
       defaultDryRun: SchemaProps.boolean({ description: 'Default pipeline operations to dry-run', default: true }),
       crmProvider: SchemaProps.select(['salesforce', 'hubspot', 'pipedrive', 'custom'], { description: 'Default CRM provider' }),
       calendarProvider: SchemaProps.select(['google', 'outlook', 'calendly', 'custom'], { description: 'Default calendar provider' }),
@@ -77,7 +80,6 @@ const pipelineOps = createDeclarativeCodeSkill({
 
     // report what this Skill can honestly compute without one.
     persistenceEnv: 'SALES_HOME',
-    confirmBeforeSend: true,
     timeoutMs: 30000,
     ui: { view: 'pipeline-ops' }
   },
@@ -347,7 +349,6 @@ const pipelineOps = createDeclarativeCodeSkill({
   });
 pipelineOps.configSchema = createSchemaRecord({
       endpointUrl: SchemaProps.url({ description: 'Pipeline endpoint URL; may also be supplied at runtime through ' + PIPELINE_ENDPOINT_ENV }),
-      confirmBeforeSend: SchemaProps.boolean({ description: 'Require explicit confirmation before a live pipeline write', default: true }),
       defaultDryRun: SchemaProps.boolean({ description: 'Default pipeline operations to dry-run', default: true }),
       crmProvider: SchemaProps.select(['salesforce', 'hubspot', 'pipedrive', 'custom'], { description: 'Default CRM provider' }),
       calendarProvider: SchemaProps.select(['google', 'outlook', 'calendly', 'custom'], { description: 'Default calendar provider' }),

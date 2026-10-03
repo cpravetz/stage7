@@ -176,8 +176,6 @@ export const emailIntegrationSkill = createExternalActionSkill({
     { kind: 'user', phrase_examples: ['check my email', 'send an email', 'search emails', 'read latest emails'] },
   ],
   timeoutMs: 60000,
-  confirmBeforeSend: true,
 isSkill: true,
 });
 
-emailIntegrationSkill.confirmBeforeSend = true;

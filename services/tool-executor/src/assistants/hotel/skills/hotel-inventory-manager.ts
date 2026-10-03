@@ -25,7 +25,6 @@ export const INVENTORY_MANAGER_SKILL = createDeclarativeCodeSkill({
   inputSchema: INVENTORY_INPUT_SCHEMA,
   outputSchema: HOTEL_EXTERNAL_OUTPUT_SCHEMA,
   tier: 'represent',
-  confirmBeforeSend: true,
   domainKnowledge: 'Hotel supply chain: par levels and reorder thresholds, linen and amenity consumption rates per occupied room, stock count reconciliation, and vendor lead-time planning.',
   triggers: [
     { kind: 'event', on: 'Inventory item falls below its minimum stock level' },

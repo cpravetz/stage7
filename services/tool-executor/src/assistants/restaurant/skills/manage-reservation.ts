@@ -1,10 +1,9 @@
-// @ts-nocheck
+
 import { Tool } from '../../../types';
 import { createDeclarativeCodeSkill, createSchemaRecord, SchemaProps } from '../../../adk/code-skill-factory';
 import { restaurantResultSchema, RESTAURANT_SAFETY_BOUNDARY, RESTAURANT_PRESENT_SCHEMA } from '../restaurant-contract';
 
 const RESTAURANT_RESERVATIONS_GUEST_PROFILE_MANAGER_CONFIG = createSchemaRecord({
-  confirmBeforeSend: SchemaProps.boolean({ description: 'Require explicit confirmation before executing live reservation actions', default: true }),
   defaultPartySize: SchemaProps.number({ description: 'Default party size for new reservations', default: 2 }),
   endpointUrl: SchemaProps.url({ description: 'Reservation system endpoint URL' }),
 });
@@ -21,7 +20,6 @@ const RESTAURANT_RESERVATIONS_GUEST_PROFILE_MANAGER_INPUT = createSchemaRecord({
   tableId: SchemaProps.text({ description: 'Table assignment' }),
   status: SchemaProps.select(['pending', 'confirmed', 'cancelled', 'no-show'], { description: 'Reservation status' }),
   dryRun: SchemaProps.boolean({ description: 'Run in dry-run mode without executing', default: true }),
-  confirmBeforeSend: SchemaProps.boolean({ description: 'Require explicit confirmation for live endpoint', default: true }),
 });
 
 export const RESTAURANT_RESERVATIONS_GUEST_PROFILE_MANAGER = createDeclarativeCodeSkill({
@@ -46,7 +44,6 @@ export const RESTAURANT_RESERVATIONS_GUEST_PROFILE_MANAGER = createDeclarativeCo
   isSkill: true,
   tier: 'represent',
   domainKnowledge: 'Restaurant reservation management, guest profile tracking, and booking coordination',
-  confirmBeforeSend: true,
   manifest: {
     configSchema: RESTAURANT_RESERVATIONS_GUEST_PROFILE_MANAGER_CONFIG
   },
@@ -57,7 +54,7 @@ export const RESTAURANT_RESERVATIONS_GUEST_PROFILE_MANAGER = createDeclarativeCo
       const dryRun = input.dryRun !== false;
       const confirmBeforeSend = input.confirmBeforeSend !== false;
 
-      function fail(status, message, title) {
+      function fail(status: string, message: string, title: string) {
         return         {
         success: false,
         status: status,
@@ -67,7 +64,7 @@ export const RESTAURANT_RESERVATIONS_GUEST_PROFILE_MANAGER = createDeclarativeCo
         };
       }
 
-      function presentNotice(title, body) {
+      function presentNotice(title: string, body: string) {
         return         {
         success: false,
         status: 'not-connected',

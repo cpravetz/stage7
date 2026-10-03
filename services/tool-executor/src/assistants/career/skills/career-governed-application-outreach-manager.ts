@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, createExternalActionSkill, SchemaProps } from '../../../adk/code-skill-factory';
 
@@ -37,7 +38,6 @@ const GOVERNED_APPLICATION_OUTREACH_MANAGER = createDeclarativeCodeSkill({
     { kind: 'user', phrase_examples: ['Prepare my outreach', 'Draft application packets', 'Stage outreach for review'] },
   ],
   tier: 'represent',
-  confirmBeforeSend: true,
   domainKnowledge: 'Career coaching, job search strategy, resume and cover letter optimization, interview preparation, compensation negotiation',
   isSkill: true,
   manifest: {

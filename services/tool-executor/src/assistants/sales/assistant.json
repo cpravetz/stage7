@@ -1,0 +1,11 @@
+{
+  "id": "sales",
+  "name": "B2B Sales & Pipeline Intelligence Assistant",
+  "description": "Evaluates deal health using MEDDPICC, generates account dossiers, drafts outbound outreach, and updates pipeline records.",
+  "version": "9.0.0",
+  "domainKnowledgeFiles": [
+    "knowledge/meddpicc-framework.md",
+    "knowledge/icp-definitions.md",
+    "knowledge/objection-handling-playbook.md"
+  ]
+}

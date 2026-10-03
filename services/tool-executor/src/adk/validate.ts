@@ -12,7 +12,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { Tool } from '../types';
 import { expectedSubfolder, inspectLayout } from './blueprint';
-import { assertNoGateOptOutConfig, assertNoManualGate, gateOf } from './gates';
+import { assertNoGateOptOutConfig, declaresMutatingExternalAction, findManualGateDeclarations, gateOf } from './gates';
 import { validateNativeTriggers } from './triggers';
 import { isGovernanceTier } from './types';
 import type { AssistantBlueprint } from './types';
@@ -213,7 +213,10 @@ export function validateBlueprint(
       );
     }
 
-    for (const gate of assertNoManualGate(skill as unknown as Record<string, any>, sourceFile)) {
+    // Read from the source, not the constructed Skill: the factory stamps the
+    // derived gate onto every gated Skill, so the object cannot distinguish an
+    // author declaration from a derived field.
+    for (const gate of findManualGateDeclarations(source.text, sourceFile)) {
       add('no-manual-gate', 'error', gate.path, gate.message);
     }
 
@@ -231,7 +234,11 @@ export function validateBlueprint(
       );
     }
 
-    for (const issue of validateNativeTriggers(skill.id, skill.triggers)) {
+    // Only an Overview-panel capability needs an entry point of its own; a
+    // lower-order tool is reached by delegation.
+    for (const issue of validateNativeTriggers(skill.id, skill.triggers, {
+      requiresEntryPoint: skill.isSkill === true,
+    })) {
       add('native-triggers', 'error', sourceFile, issue.message);
     }
 
@@ -247,21 +254,17 @@ export function validateBlueprint(
       }
     }
 
-    if (skill.tier === 'represent' && skill.isSkill !== true) {
-      add(
-        'tier-only-entrypoints',
-        'error',
-        sourceFile,
-        'is a represent-tier tool; a tool that performs external actions must be reachable only through a gated represent higher-order Skill',
-      );
-    }
-
-    if (skill.tier === 'aid' && looksLikeItDelivers(skill)) {
+    // An `aid` Skill hands the user a work product to send. One that declares a
+    // mutating external action has misclassified itself, so this is an error
+    // rather than a hint: the gate is being held shut by the tier backstop, not
+    // by the tier, and the definition needs fixing either way.
+    if (skill.tier === 'aid' && declaresMutatingExternalAction(skill)) {
       add(
         'aid-does-not-deliver',
-        'warning',
+        'error',
         sourceFile,
-        'is an aid Skill that appears to declare outbound delivery; an aid Skill hands the user a work product to send themselves',
+        `is an aid Skill but declares the mutating external action "${String((skill.manifest as Record<string, unknown>).action)}". ` +
+          'Either make it represent, or make it produce a work product instead of writing',
       );
     }
 
@@ -282,13 +285,19 @@ export function validateBlueprint(
     }
 
     if (skill.isSkill === false) {
+      // A lower-order tool must be reachable from a Skill that owns the
+      // conversation, or nothing the user can start ever reaches it. `toolId`
+      // is reported because that is the field to add; `represent` is called out
+      // because a gated tool with no gated parent is a write nothing can approve.
       const reachable = referencedByCanonicalSkill(blueprint, skill.id);
       if (!reachable) {
         add(
           'tier-only-entrypoints',
           'warning',
           sourceFile,
-          'is a lower-order tool that no higher-order Skill in this Assistant references',
+          skill.tier === 'represent'
+            ? `is a represent-tier tool that no higher-order Skill in this Assistant references, so a live write is reachable with no approval above it; add it to that Skill's lowerOrderTools`
+            : 'is a lower-order tool that no higher-order Skill in this Assistant references',
         );
       }
     }

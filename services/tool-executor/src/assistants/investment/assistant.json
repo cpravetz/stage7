@@ -1,0 +1,10 @@
+{
+  "id": "investment",
+  "name": "Wealth Management & Personal Portfolio Assistant",
+  "description": "Refreshes live market data, evaluates portfolio asset allocation drift, automates bill payments/rebalancing, and produces investment research.",
+  "version": "9.0.0",
+  "domainKnowledgeFiles": [
+    "knowledge/modern-portfolio-theory.md",
+    "knowledge/tax-efficient-withdrawal-rules.md"
+  ]
+}

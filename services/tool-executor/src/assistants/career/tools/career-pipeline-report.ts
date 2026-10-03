@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
 
@@ -32,6 +33,8 @@ const CAREER_PIPELINE_REPORT_OUTPUT = {
 
 const CAREER_PIPELINE_REPORT = createDeclarativeCodeSkill({
   id: 'career-pipeline-report',
+  domainKnowledge: 'Application pipeline reporting: status breakdowns, stage conversion, and stale follow-up detection across an active search.',
+  tier: 'advise',
   isSkill: false,
   name: 'Pipeline Report',
   description: 'Aggregates application tracking data into a pipeline summary with status breakdowns and stale follow-up detection.',

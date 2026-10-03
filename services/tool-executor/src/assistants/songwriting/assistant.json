@@ -1,0 +1,14 @@
+{
+  "id": "songwriting",
+  "name": "Songwriting & Musical Composition Assistant",
+  "description": "Monitors music genre trends, co-creates lyrics and chord progressions, evaluates lyric prosody meter, and exports lead sheets.",
+  "version": "9.0.0",
+  "domainKnowledgeFiles": [
+    "knowledge/music-theory-rules.md",
+    "knowledge/prosody-stress-metrics.md",
+    "knowledge/song-structure-guides.md",
+    "knowledge/genre-vocabularies.json",
+    "knowledge/mood-vocabularies.json",
+    "knowledge/rhyme-dictionary.json"
+  ]
+}

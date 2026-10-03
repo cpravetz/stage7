@@ -1,8 +1,11 @@
 // @ts-nocheck
+
 import { createExternalActionSkill } from '../../../adk/code-skill-factory';
 
 export const PRODUCT_MARKDOWN_PARSING = createExternalActionSkill({
     id: 'product-markdown-parsing',
+    tier: 'represent',
+    isSkill: false,
     name: 'Markdown Parsing',
     description: 'Parse product docs and PRDs from markdown into structured data. Uses configurable parsing endpoint or local helper logic.',
     system: 'markdown_parser',

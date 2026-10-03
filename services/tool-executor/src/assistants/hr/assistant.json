@@ -1,0 +1,10 @@
+{
+  "id": "hr",
+  "name": "Human Resources & Talent Acquisition Assistant",
+  "description": "Screens candidate resumes, scores applicant evaluations, drafts JDs/interview kits, manages candidate interview booking, and audits EEOC compliance.",
+  "version": "9.0.0",
+  "domainKnowledgeFiles": [
+    "knowledge/eeoc-compliance-guidelines.md",
+    "knowledge/structured-interview-rubrics.md"
+  ]
+}

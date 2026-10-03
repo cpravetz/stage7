@@ -1,13 +1,22 @@
 // @ts-nocheck
+
 import { SchemaProps, createExternalActionSkill, createSchemaRecord } from '../../../adk/code-skill-factory';
 import { ENG_PROVIDERS } from '../cto-contract';
 
 export const CTO_ENGINEERING_ACTIONS = (() => { const t = createExternalActionSkill({
   id: 'cto-engineering-actions',
+  isSkill: false,
   name: 'Engineering Actions',
   description: 'Mutating actions against external engineering systems (Jira, PagerDuty, GitHub Write). Requires confirmation before execution.',
   system: 'engineering',
   action: 'execute',
+  // A capability that declares a mutating external action has to say how it is
+  // pointed at the system, or the Run form asks for everything per run and the
+  // base URL is never persisted.
+  configSchema: createSchemaRecord({
+    endpointUrl: SchemaProps.url({ description: 'Base URL of the engineering system this Skill acts on' }),
+  }),
+  endpointConfigKey: 'endpointUrl',
   inputSchema: createSchemaRecord({
     provider: SchemaProps.select(ENG_PROVIDERS, {
       description: 'External engineering system to act upon',
@@ -48,17 +57,9 @@ export const CTO_ENGINEERING_ACTIONS = (() => { const t = createExternalActionSk
       body: SchemaProps.text({}),
     }), { description: 'Pre-formatted user-facing output blocks' }),
   }),
-  configSchema: createSchemaRecord({
-    confirmBeforeSend: SchemaProps.boolean({
-      description: 'Require explicit confirmation before sending mutating requests',
-      default: true,
-    }),
-  }),
   manifest: {
-    confirmBeforeSend: true,
     persistenceEnvVar: 'CTO_HOME',
   },
   tier: 'represent',
   domainKnowledge: 'Engineering system mutation conventions, change management, rollback planning, and confirmation gating',
-  confirmBeforeSend: true,
   }); (t as any).isSkill = false; return t; })();

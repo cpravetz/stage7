@@ -1,11 +1,11 @@
 // @ts-nocheck
+
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
 import { investmentResultSchema } from '../investment-contract';
 
 const billPayRebalancingInputSchema = {
   type: 'object',
   properties: {
-    action: SchemaProps.select(['track-obligations', 'flag-fees', 'stage-transfer', 'rebalance', 'calculate-drift'], { description: 'Action to perform' }),
     obligations: SchemaProps.objectArray(SchemaProps.object({ description: SchemaProps.text({ description: 'Obligation description' }), dueDate: SchemaProps.text({ description: 'Due date (ISO 8601)' }), amount: SchemaProps.number({ description: 'Amount due', minimum: 0 }), category: SchemaProps.text({ description: 'Category' }) }, { description: 'Bill or obligation' }), { description: 'List of upcoming obligations' }),
     fees: SchemaProps.objectArray(SchemaProps.object({ description: SchemaProps.text({ description: 'Fee description' }), amount: SchemaProps.number({ description: 'Fee amount', minimum: 0 }), date: SchemaProps.text({ description: 'Fee date' }), source: SchemaProps.text({ description: 'Fee source' }) }, { description: 'Bank fee record' }), { description: 'List of recent fees' }),
     feeThreshold: SchemaProps.number({ description: 'Minimum fee amount to flag', minimum: 0 }),
@@ -17,8 +17,7 @@ const billPayRebalancingInputSchema = {
     holdings: SchemaProps.objectArray(SchemaProps.object({ symbol: SchemaProps.text({ description: 'Asset symbol' }), value: SchemaProps.number({ description: 'Current value', minimum: 0 }) }, { description: 'Holding' }), { description: 'Current portfolio holdings' }),
     targets: SchemaProps.object({}, { description: 'Target allocation percentages by symbol' }),
   },
-  required: ['action'],
-};
+  };
 
 const BILL_PAY_REBALANCING = createDeclarativeCodeSkill({
   id: 'bill-pay-rebalancing',
@@ -33,7 +32,6 @@ const BILL_PAY_REBALANCING = createDeclarativeCodeSkill({
     { kind: 'schedule', cadence: 'daily obligation review' },
     { kind: 'user', phrase_examples: ['Track my bills', 'Review upcoming payments', 'Stage a transfer', 'Check portfolio drift', 'Flag unusual fees'] }
   ],
-  confirmBeforeSend: true,
   isSkill: true,
   manifest: {
   },
@@ -205,7 +203,25 @@ const BILL_PAY_REBALANCING = createDeclarativeCodeSkill({
       }
 
       try {
-        const action = input.action || 'track-obligations';
+        function resolveOperation(input: Record<string, unknown>): string {
+      // v9 §1.1 item 3: no routing enum and no free-text `request` field. The
+      // Skill picks the operation from which declared inputs were supplied.
+      const present = (v: unknown): boolean => v != null && v !== '' && !(Array.isArray(v) && !v.length);
+      const has = (...keys: string[]): boolean => keys.some((k) => present(input[k]));
+      const all = (...keys: string[]): boolean => keys.every((k) => present(input[k]));
+
+      // `from` is the source account the transfers are drawn from, so it is what
+      // separates "work out the drift" from "stage the trades that close it".
+      // Holdings and targets alone report drift; nothing is staged without an
+      // account to stage them from.
+      if (has('obligations')) return 'track-obligations';
+      if (has('fees', 'feeThreshold')) return 'flag-fees';
+      if (all('from', 'to', 'amount')) return 'stage-transfer';
+      if (all('holdings', 'targets', 'from')) return 'rebalance';
+      if (all('holdings', 'targets')) return 'calculate-drift';
+      return 'track-obligations';
+    }
+    const action = resolveOperation(input as Record<string, unknown>);
         let resultData = null;
         let resultError = null;
         let success = true;
@@ -254,7 +270,7 @@ const BILL_PAY_REBALANCING = createDeclarativeCodeSkill({
           id: 'error',
           title: 'Error',
           kind: 'text',
-          body: 'Bill Pay & Rebalancing action "' + (input.action || '(unspecified)') + '" failed: ' + msg
+          body: 'Bill Pay & Rebalancing action "' + (action || '(unspecified)') + '" failed: ' + msg
         }] };
       }
     }

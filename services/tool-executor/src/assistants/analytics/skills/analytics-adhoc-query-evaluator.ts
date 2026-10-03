@@ -1,9 +1,12 @@
 // @ts-nocheck
+
 import { createDeclarativeCodeSkill } from '../../../adk/code-skill-factory';
 import { ANALYTICS_CONFIG_SCHEMA, ANALYTICS_INPUT_SCHEMA, ANALYTICS_OUTPUT_SCHEMA } from '../analytics-contract';
 
 export const ANALYTICS_ADHOC_QUERY_EVALUATOR = createDeclarativeCodeSkill({
   id: 'analytics-adhoc-query-evaluator',
+  tier: 'advise',
+  isSkill: true,
   name: 'Adhoc Query Evaluator',
   description: 'Executes read-only warehouse queries and explains the results. Triggered on demand by the user for ad-hoc analytical exploration.',
   persistenceEnvVar: 'ANALYTICS_HOME',

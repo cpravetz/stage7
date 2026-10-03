@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { SchemaProps, createDeclarativeCodeSkill } from '../../../adk/code-skill-factory';
 
 /**
@@ -46,7 +47,9 @@ export const MARKETING_REPORTS_SCHEDULED = createDeclarativeCodeSkill({
   tier: 'advise',
   domainKnowledge: 'Marketing frameworks (AIDA, RACE, buyer journey), channel-specific best practices (SEO, paid social, email), content strategy, campaign measurement',
   manifest: {
-    lowerOrderTools: ['marketing-market-research', 'marketing-audience-insights'],
+    // v9 promotes research and audience insight to Overview Skills, so they no
+    // longer belong in lowerOrderTools. Delegating to them at runtime is
+    // unaffected: that list declares the panel boundary, not what may be called.
   },
   handler: async function handler(input, ctx) {
     const campaignIds = Array.isArray(ctx.config?.campaignIds) ? ctx.config.campaignIds.map(String) : [];

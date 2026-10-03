@@ -24,9 +24,6 @@ const MAINTENANCE_INPUT_SCHEMA = createSchemaRecord({
   dueTime: SchemaProps.datetime({ description: 'Work-order due time in ISO 8601 format' }),
   scheduledAt: SchemaProps.datetime({ description: 'Scheduled visit time in ISO 8601 format' }),
   estimatedMinutes: SchemaProps.integer({ description: 'Estimated repair duration in minutes', minimum: 1 }),
-  action: SchemaProps.select(['create', 'update', 'assign', 'dispatch', 'complete', 'close', 'resolve', 'escalate'], {
-    description: 'Maintenance action to apply to the work order',
-  }),
   notes: SchemaProps.textarea({ description: 'Repair notes, parts used, or technician handoff instructions' }),
   filters: SchemaProps.object({}, { description: 'Maintenance work-order query filters', additionalProperties: true }),
   data: SchemaProps.object({}, { description: 'Maintenance-specific data', additionalProperties: true }),
@@ -41,7 +38,6 @@ export const MAINTENANCE_DISPATCHER_SKILL = createDeclarativeCodeSkill({
   inputSchema: MAINTENANCE_INPUT_SCHEMA,
   outputSchema: HOTEL_EXTERNAL_OUTPUT_SCHEMA,
   tier: 'represent',
-  confirmBeforeSend: true,
   domainKnowledge: 'Hotel maintenance operations: work-order lifecycle, trade specialization, severity and priority triage, preventive maintenance scheduling, and guest-impact assessment during repairs.',
   triggers: [
     { kind: 'event', on: 'Maintenance issue reported for a room or facility area' },
@@ -50,7 +46,23 @@ export const MAINTENANCE_DISPATCHER_SKILL = createDeclarativeCodeSkill({
   isSkill: true,
   async handler(input, ctx) {
     const workOrders = ctx.store.load('maintenance_work_orders');
-    const action = input.action || 'list';
+    function resolveOperation(input: Record<string, unknown>): string {
+      // v9 §1.1 item 3: no routing enum and no free-text `request` field. The
+      // Skill picks the operation from which declared inputs were actually
+      // supplied, so what runs is always what the caller asked for.
+      const has = (...keys: string[]): boolean => keys.some((k) => {
+        const v = (input as Record<string, unknown>)[k];
+        return v != null && v !== '' && !(Array.isArray(v) && !v.length);
+      });
+
+      if (has('issueId')) return 'update';
+      if (has('staffId')) return 'assign';
+      if (has('scheduledAt', 'staffIds')) return 'dispatch';
+      if (has('category')) return 'create';
+      // Nothing the caller supplied selects anything more specific, so this runs.
+      return 'create';
+    }
+    const action = resolveOperation(input as Record<string, unknown>);
     if (action === 'create' || action === 'update' || action === 'assign' || action === 'dispatch') {
       const order = {
         taskId: input.taskId || `wo_${Date.now()}`,
@@ -77,5 +89,5 @@ export const MAINTENANCE_DISPATCHER_SKILL = createDeclarativeCodeSkill({
         ctx.render.text('maintenance-list', 'Maintenance Work Orders', `Total work orders: ${workOrders.length}`),
       ],
     };
-  },
-});
+      },
+    });

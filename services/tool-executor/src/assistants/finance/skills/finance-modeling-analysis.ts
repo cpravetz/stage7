@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { createDeclarativeCodeSkill, createSchemaRecord, SchemaProps } from '../../../adk/code-skill-factory';
 import { financeResultSchema } from '../finance-contract';
 

@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
 import { sportsResultSchema, SPORTS_PERFORMANCE_SAFETY_BOUNDARY } from '../sports-contract';
@@ -46,7 +47,7 @@ export const BATTLECARD_CREATOR = createDeclarativeCodeSkill({
   triggers: [
     { kind: 'event', on: 'Match calendar entering pre-match window' },
   ],
-  isSkill: false,
+  isSkill: true,
   manifest: {
     // The provider key is a secret, so it is declared as a credential rather than a
     // plain config field: the executor resolves it and hands the handler a value via
@@ -62,7 +63,6 @@ export const BATTLECARD_CREATOR = createDeclarativeCodeSkill({
         statsApiKey: SchemaProps.text({ description: 'Stats provider API key' }),
         requestTimeoutMs: SchemaProps.number({ description: 'Request timeout in milliseconds', default: 10000 }),
         dataProvider: SchemaProps.select(['statsperform', 'opta', 'both'], { description: 'Primary data provider', default: 'both' }),
-        confirmBeforeSend: SchemaProps.boolean({ description: 'Require confirmation before sending', default: true }),
         dryRun: SchemaProps.boolean({ description: 'Validate without executing', default: true }),
         defaultFormation: SchemaProps.text({ description: 'Default formation' }),
         refreshInterval: SchemaProps.number({ description: 'Data refresh interval in minutes', default: 60 }),
@@ -170,7 +170,6 @@ BATTLECARD_CREATOR.configSchema = {
       type: 'object',
       properties: {
         dataProvider: SchemaProps.select(['statsperform', 'opta', 'both'], { description: 'Primary data provider', default: 'both' }),
-        confirmBeforeSend: SchemaProps.boolean({ description: 'Require confirmation before sending', default: true }),
         dryRun: SchemaProps.boolean({ description: 'Validate without executing', default: true }),
         defaultFormation: SchemaProps.text({ description: 'Default formation' }),
         refreshInterval: SchemaProps.number({ description: 'Data refresh interval in minutes', default: 60 }),

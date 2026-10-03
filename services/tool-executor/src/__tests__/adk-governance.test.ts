@@ -13,7 +13,7 @@ import {
   type AssistantContext,
   type AssistantRuntimeState,
 } from '../adk';
-import { eventSkills } from '../data/skills/event';
+import { eventSkills } from '../assistants/event';
 import { allWorkflows } from '../data/skills';
 
 const planningTool = createTool({

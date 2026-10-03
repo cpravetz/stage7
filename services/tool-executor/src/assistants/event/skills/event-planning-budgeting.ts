@@ -2,6 +2,7 @@ import { createDeclarativeCodeSkill, createSchemaRecord, SchemaProps } from '../
 
 const EVENT_PLANNING_BUDGETING = createDeclarativeCodeSkill({
   id: 'event-planning-budgeting',
+  isSkill: true,
   name: 'Event Planning & Budgeting',
   description:
     'Create comprehensive event plans and budgets with timelines, vendor categories, cost estimates, and risk mitigation. Reasoning-only: generates the plan draft for approval before any bookings.',

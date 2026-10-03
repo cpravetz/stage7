@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
 
@@ -43,7 +44,6 @@ description: 'Applies to a selected job or set of jobs using the board attached 
 persistenceEnvVar: 'STORAGE_DIR',
 inputSchema: APPLICATION_EXECUTION_ORCHESTRATOR_INPUT,
 outputSchema: APPLICATION_EXECUTION_ORCHESTRATOR_OUTPUT,
-confirmBeforeSend: true,
 triggers: [
 { kind: 'user', phrase_examples: ['Apply to selected jobs', 'Apply to these jobs', 'Submit applications'] },
 ],

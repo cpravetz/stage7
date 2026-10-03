@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { createDeclarativeCodeSkill, createSchemaRecord, SchemaProps } from '../../../adk/code-skill-factory';
 import { financeResultSchema } from '../finance-contract';
 
@@ -23,7 +24,8 @@ const RISK_REGULATORY_ADVISORY_CONFIG_SCHEMA = {
   type: 'object',
   properties: {
     baseUrl: { type: 'string', format: 'uri', description: 'Base URL for the risk assessment service' },
-    apiKey: { type: 'string', description: 'API key for the risk assessment service' },
+    apiKey: {
+      isSecret: true, type: 'string', description: 'API key for the risk assessment service' },
     provider: { type: 'string', description: 'Provider identifier (e.g., bloomberg, refinitiv, custom)' },
   },
   required: ['baseUrl', 'apiKey', 'provider'],

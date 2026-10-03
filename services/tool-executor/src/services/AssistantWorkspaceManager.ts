@@ -1,5 +1,5 @@
 import { WorkflowState, AssistantWorkspace, WorkspaceApprovalEntry, WorkspaceExecutionEntry, WorkspaceRevision, StateTransitionEvent, WorkflowStateContract, RuntimeWorkflow, RuntimeWorkflowAction } from '../types';
-import { AssistantWorkflow } from '../data/skills/workflow-common';
+import { AssistantWorkflow } from '../adk/workflow-common';
 import logger from '../utils/logger';
 
 // Runtime persistence goes through the MongoDB-backed Artifacts service, not

@@ -1,0 +1,10 @@
+{
+  "id": "marketing",
+  "name": "Growth Marketing & Multi-Channel Campaign Assistant",
+  "description": "Plans multi-channel growth campaigns, performs SEO audits and market research, segments audience personas, and orchestrates social/email executions.",
+  "version": "9.0.0",
+  "domainKnowledgeFiles": [
+    "knowledge/brand-positioning-rules.md",
+    "knowledge/ad-attribution-models.md"
+  ]
+}

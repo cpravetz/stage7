@@ -1,10 +1,10 @@
 // @ts-nocheck
+
 import { createDeclarativeCodeSkill, createSchemaRecord, SchemaProps } from '../../../adk/code-skill-factory';
 import { SchemaRecord } from '../../../types';
 import { investmentResultSchema } from '../investment-contract';
 
 const portfolioAdvisoryInputSchema: SchemaRecord = createSchemaRecord({
-  action: SchemaProps.select(['analyze-portfolio', 'optimize', 'risk-assessment', 'evaluate', 'rebalance', 'factor-exposure', 'scenario-analysis', 'stress-test', 'efficient-frontier', 'risk-budgeting'], { description: 'Action to perform' }),
   holdings: SchemaProps.objectArray(SchemaProps.object({ symbol: SchemaProps.text({ description: 'Asset symbol' }), quantity: SchemaProps.number({ description: 'Holding quantity', minimum: 0 }), value: SchemaProps.number({ description: 'Current holding value', minimum: 0 }), amount: SchemaProps.number({ description: 'Current holding value alias', minimum: 0 }), assetClass: SchemaProps.text({ description: 'Asset class' }), expectedReturn: SchemaProps.number({ description: 'Expected return as a decimal' }) }, { description: 'Portfolio holding' }), { description: 'Portfolio holdings used for analysis' }),
   portfolio: SchemaProps.object({ holdings: SchemaProps.objectArray(SchemaProps.object({ symbol: SchemaProps.text({ description: 'Asset symbol' }), value: SchemaProps.number({ description: 'Current value', minimum: 0 }) }, { description: 'Portfolio holding' }), { description: 'Portfolio holdings' }) }, { description: 'Portfolio object used for risk assessment' }),
   riskTolerance: SchemaProps.select(['Conservative', 'Moderate', 'Aggressive', 'Very Aggressive'], { description: 'Risk tolerance level' }),
@@ -26,7 +26,7 @@ const portfolioAdvisoryInputSchema: SchemaRecord = createSchemaRecord({
   criteria: SchemaProps.object({}, { description: 'Evaluation criteria keyed by symbol' }),
   weights: SchemaProps.object({}, { description: 'Criteria weights keyed by criterion name' }),
   peerGroup: SchemaProps.text({ description: 'Peer group for comparison' })
-}, { required: ['action'] });
+}, {});
 
 const PORTFOLIO_RISK_ADVISORY = createDeclarativeCodeSkill({
   id: 'portfolio-risk-advisory',
@@ -276,7 +276,25 @@ const PORTFOLIO_RISK_ADVISORY = createDeclarativeCodeSkill({
       }
 
       try {
-        const action = input.action;
+        const OPERATIONS = ['analyze-portfolio', 'optimize', 'rebalance', 'efficient-frontier',
+      'risk-budgeting', 'risk-assessment', 'stress-test', 'evaluate', 'factor-exposure', 'scenario-analysis'];
+    function resolveOperation(input: Record<string, unknown>): string {
+      // v9 §1.1 item 3: no routing enum and no free-text `request` field. The
+      // Skill picks the operation from which declared inputs were supplied.
+      const present = (v: unknown): boolean => v != null && v !== '' && !(Array.isArray(v) && !v.length);
+      const has = (...keys: string[]): boolean => keys.some((k) => present(input[k]));
+      const all = (...keys: string[]): boolean => keys.every((k) => present(input[k]));
+
+      if (has('scenarios')) return 'scenario-analysis';
+      if (has('methods', 'confidenceLevel')) return 'risk-assessment';
+      if (has('criteria', 'weights', 'symbols')) return 'evaluate';
+      if (has('views')) return 'efficient-frontier';
+      if (has('objective', 'constraints')) return 'optimize';
+      if (has('riskFreeRate')) return 'risk-budgeting';
+      if (has('holdings', 'portfolio')) return 'analyze-portfolio';
+      return 'analyze-portfolio';
+    }
+    const action = resolveOperation(input as Record<string, unknown>);
         let result;
         switch (action) {
           case 'analyze-portfolio':
@@ -312,7 +330,7 @@ const PORTFOLIO_RISK_ADVISORY = createDeclarativeCodeSkill({
           id: 'error',
           title: 'Error',
           kind: 'text',
-          body: 'Portfolio advisory action "' + (input.action || '(unspecified)') + '" failed: ' + msg
+          body: 'Portfolio advisory action "' + (action || '(unspecified)') + '" failed: ' + msg
         }] };
       }
     }

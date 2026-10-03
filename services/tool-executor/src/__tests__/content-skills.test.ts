@@ -6,7 +6,7 @@ import {
   CONTENT_STRATEGY_SEO_EVALUATOR,
   EDITORIAL_CALENDAR_ARTICLE_COPILOT,
   GOVERNED_PUBLISHING_CMS_DISPATCHER,
-} from '../data/skills/content';
+} from '../assistants/content';
 
 const SOURCE_TEXT = [
   'Seattle has an excellent coffee scene and the city takes it seriously.',

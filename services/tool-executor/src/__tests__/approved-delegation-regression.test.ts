@@ -1,14 +1,18 @@
 import { ToolExecutor } from '../services/ToolExecutor';
 import { Tool } from '../types';
-import { GOVERNED_PUBLISHING_CMS_DISPATCHER, MULTI_CHANNEL_PUBLISHING } from '../data/skills/content';
-import { MARKETING_CENTER, marketingSkills } from '../data/skills/marketing';
+import { GOVERNED_PUBLISHING_CMS_DISPATCHER, MULTI_CHANNEL_PUBLISHING } from '../assistants/content';
+import { MARKETING_CENTER, marketingSkills } from '../assistants/marketing';
 
-const MARKETING_SEO = marketingSkills.find((s) => s.id === 'marketing-seo') as Tool;
+// v9 promotes `marketing-seo` to an Overview Skill, so the gated lower-order
+// transport it used to cover is now `marketing-social-media`, which has the same
+// shape: directly invocable from routes/tools.ts, and reachable from an
+// approved gated parent.
+const MARKETING_SOCIAL = marketingSkills.find((s) => s.id === 'marketing-social-media') as Tool;
 
 /**
  * Regression cover for the fix that let these two transports be gated.
  *
- * Both `content-multi-channel-publishing` and `marketing-seo` are isSkill:false
+ * Both `content-multi-channel-publishing` and `marketing-social-media` are isSkill:false
  * lower-order tools, so routes/tools.ts lets them run directly with no approval
  * in the path. They carry confirmBeforeSend: true because that path is a live
  * write reachable without a dispatcher.
@@ -33,7 +37,7 @@ async function run(tool: Tool, input: Record<string, unknown>, callees: Tool[] =
 describe('Approved delegation still reaches gated lower-order tools', () => {
   it('both directly-invocable transports enforce the gate', () => {
     expect(MULTI_CHANNEL_PUBLISHING.confirmBeforeSend).toBe(true);
-    expect(MARKETING_SEO.confirmBeforeSend).toBe(true);
+    expect(MARKETING_SOCIAL.confirmBeforeSend).toBe(true);
   });
 
   it('an approved publishing dispatcher still reaches the gated publishing transport', async () => {
@@ -64,11 +68,13 @@ describe('Approved delegation still reaches gated lower-order tools', () => {
     )).rejects.toThrow(/confirmation/i);
   });
 
-  it('an approved marketing-center still reaches the gated SEO tool via its toolMap', async () => {
+  it('an approved campaign orchestrator still reaches the gated social transport', async () => {
     const { result } = await run(
       MARKETING_CENTER,
-      { targetChannel: 'seo', data: { url: 'https://example.com' }, confirmation: true },
-      [MARKETING_SEO],
+      // `confirmation` is the harness's approval signal, not a Skill-authored
+      // config property; the orchestrator is represent, so it needs approval.
+      { data: { platform: 'linkedin', message: 'hi' }, confirmation: true },
+      [MARKETING_SOCIAL],
     );
 
     expect(result.success).toBe(false);
@@ -76,11 +82,11 @@ describe('Approved delegation still reaches gated lower-order tools', () => {
     expect(JSON.stringify(result)).not.toMatch(/Nested execution requires confirmation/);
   });
 
-  it('an unapproved marketing-center is still refused at its own gate', async () => {
+  it('an unapproved campaign orchestrator is still refused at its own gate', async () => {
     await expect(run(
       MARKETING_CENTER,
-      { targetChannel: 'seo', data: { url: 'https://example.com' } },
-      [MARKETING_SEO],
+      { data: { platform: 'linkedin', message: 'hi' } },
+      [MARKETING_SOCIAL],
     )).rejects.toThrow(/confirmation/i);
   });
 });

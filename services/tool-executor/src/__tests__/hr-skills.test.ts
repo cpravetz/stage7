@@ -1,5 +1,5 @@
-import { hrSkills } from '../data/skills/hr';
-import { hrCanonicalSkills } from '../data/skills/hr';
+import { hrSkills } from '../assistants/hr';
+import { hrCanonicalSkills } from '../assistants/hr';
 import { Tool } from '../types';
 
 function getSkill(id: string): Tool {
@@ -175,16 +175,29 @@ describe('hrSkills', () => {
   });
 
   describe('Governance tests', () => {
-    it('hr-screen-resume has confirmBeforeSend', () => {
+    // hr-screen-resume reads the upload and scores it; it never writes to an
+    // external system, so v9 classes it `advise` and the gate follows the tier.
+    // There is no author-set switch left to assert.
+    it('hr-screen-resume is gated only because of its tier', () => {
       const skill = getSkill('hr-screen-resume');
-      expect(skill.confirmBeforeSend).toBe(true);
+      expect(skill.tier).toBe('advise');
+      expect(skill.confirmBeforeSend).toBe(false);
+    });
+
+    it('no HR skill lets configuration switch the gate off', () => {
+      for (const skill of hrSkills) {
+        const properties = (skill.configSchema as any)?.properties;
+        if (!properties) continue;
+        expect(properties).not.toHaveProperty('confirmBeforeSend');
+        expect(properties).not.toHaveProperty('skipConfirmation');
+        expect(properties).not.toHaveProperty('autoApprove');
+      }
     });
 
     it('hr-screen-resume has configSchema', () => {
       const skill = getSkill('hr-screen-resume');
       expect(skill.manifest.configSchema).toBeDefined();
       expect((skill.manifest.configSchema as any).properties).toBeDefined();
-      expect((skill.manifest.configSchema as any).properties!.confirmBeforeSend).toBeDefined();
       expect((skill.manifest.configSchema as any).properties!.dryRun).toBeDefined();
     });
 
@@ -250,11 +263,14 @@ describe('hrSkills', () => {
       }
     });
 
-    it('Represent canonical skill declares its endpoint config key and confirmBeforeSend', () => {
-      const rep = getCanonical('hr-screen-resume');
+    it('the represent canonical skill declares its endpoint config key and is gated', () => {
+      const rep = getCanonical('hr-assess-candidate');
       const manifest = rep.manifest as Record<string, unknown>;
-      expect(manifest.endpointConfigKey).toBe('defaultEndpoint');
+      expect(rep.tier).toBe('represent');
+      expect(manifest.endpointConfigKey).toBeDefined();
+      // Derived from the tier by the factory, never declared by the author.
       expect(rep.confirmBeforeSend).toBe(true);
+      expect(manifest).not.toHaveProperty('confirmBeforeSend');
       expect(rep.manifest.configSchema).toBeDefined();
     });
 
@@ -334,22 +350,18 @@ describe('hrSkills', () => {
   });
 
   describe('Tier distribution', () => {
-    // Two after removing the Represent-tier hr-schedule-interview.
-    it('has two represent skills', () => {
-      const represent = hrSkills.filter((s) => s.tier === 'represent');
-      expect(represent.length).toBe(2);
+    // The v9 blueprint distribution: assessment acts for the user, drafting and
+    // scheduling hand the user a work product, and the rest read and advise.
+    it('has one represent skill', () => {
+      expect(hrSkills.filter((s) => s.tier === 'represent').map((s) => s.id)).toEqual(['hr-assess-candidate']);
     });
 
-    // Unchanged by the removal: hr-schedule-interview was Represent. The count
-    // went from two to three when the interview Skill was split.
     it('has three aid skills', () => {
-      const aid = hrSkills.filter((s) => s.tier === 'aid');
-      expect(aid.length).toBe(3);
+      expect(hrSkills.filter((s) => s.tier === 'aid').length).toBe(3);
     });
 
-    it('has two advise skills', () => {
-      const advise = hrSkills.filter((s) => s.tier === 'advise');
-      expect(advise.length).toBe(2);
+    it('has three advise skills', () => {
+      expect(hrSkills.filter((s) => s.tier === 'advise').length).toBe(3);
     });
   });
 });

@@ -67,8 +67,8 @@ const MATTER_DOCUMENT_OPS = createExternalActionSkill({
     required: ['success', 'status', 'system', 'action', 'request', 'response', 'error'],
   },
   timeoutMs: 60000,
+  manifest: { actionLabel: 'Operate matter documents' },
   isSkill: true,
-  confirmBeforeSend: true,
   tier: 'represent',
   domainKnowledge: 'Matter management, document tagging taxonomies, eDiscovery collection and search (EDRM), custodian mapping, and legal hold procedures',
   triggers: [

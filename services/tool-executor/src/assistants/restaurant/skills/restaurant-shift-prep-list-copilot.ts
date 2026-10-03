@@ -1,10 +1,10 @@
 // @ts-nocheck
+
 import { Tool } from '../../../types';
 import { createDeclarativeCodeSkill, createSchemaRecord, SchemaProps } from '../../../adk/code-skill-factory';
 import { restaurantResultSchema, RESTAURANT_SAFETY_BOUNDARY, RESTAURANT_PRESENT_SCHEMA } from '../restaurant-contract';
 
 const RESTAURANT_SHIFT_PREP_LIST_COPILOT_CONFIG = createSchemaRecord({
-  confirmBeforeSend: SchemaProps.boolean({ description: 'Require confirmation before submitting prep orders', default: false }),
   defaultShift: SchemaProps.text({ description: 'Default shift for prep generation', default: 'all' }),
   autoReorderThreshold: SchemaProps.number({ description: 'Auto-reorder when shortage exceeds this value', default: 0 }),
 });
@@ -43,7 +43,6 @@ export const RESTAURANT_SHIFT_PREP_LIST_COPILOT = createDeclarativeCodeSkill({
   isSkill: true,
   tier: 'aid',
   domainKnowledge: 'Restaurant shift planning, prep list generation, and staff allocation based on cover forecasts',
-  confirmBeforeSend: false,
   manifest: {
     configSchema: RESTAURANT_SHIFT_PREP_LIST_COPILOT_CONFIG
   },

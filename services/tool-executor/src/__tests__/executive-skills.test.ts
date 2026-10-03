@@ -1,11 +1,11 @@
 import { ToolExecutor } from '../services/ToolExecutor';
 import { Tool } from '../types';
 import { validateAgainstOutputSchema } from '../utils/schemaValidator';
-import { RISK_SCENARIO } from '../data/skills/executive/executive-risk-scenario';
-import { FEEDBACK } from '../data/skills/executive/executive-feedback';
-import { DEV_CAREER } from '../data/skills/executive/executive-dev-career';
-import { LEADERSHIP_ADVISORY } from '../data/skills/executive/executive-leadership-advisory';
-import { SPEECH_COMMUNICATION_COPILOT } from '../data/skills/executive/executive-speech-communication-copilot';
+import { RISK_SCENARIO } from '../assistants/executive/skills/executive-risk-scenario';
+import { FEEDBACK } from '../assistants/executive/skills/executive-feedback';
+import { DEV_CAREER } from '../assistants/executive/skills/executive-dev-career';
+import { LEADERSHIP_ADVISORY } from '../assistants/executive/skills/executive-leadership-advisory';
+import { SPEECH_COMMUNICATION_COPILOT } from '../assistants/executive/skills/executive-speech-communication-copilot';
 
 interface PresentBlock {
   id: string;

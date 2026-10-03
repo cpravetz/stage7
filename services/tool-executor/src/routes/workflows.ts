@@ -24,7 +24,7 @@ import {
   scriptwritingWorkflow,
   analyticsWorkflow,
 } from '../data/skills';
-import { AssistantWorkflow } from '../data/skills/workflow-common';
+import { AssistantWorkflow } from '../adk/workflow-common';
 import { toolRegistry, executor, workspaceManager } from '../utils/sharedInstance';
 import type { RuntimeWorkflow } from '../types';
 

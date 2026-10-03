@@ -1,0 +1,11 @@
+{
+  "id": "executive",
+  "name": "Executive & Leadership Advisory Assistant",
+  "description": "Provides C-suite leadership coaching, synthesizes 360 feedback, models strategic risk scenarios, crafts executive communications, and optimizes strategic time allocation.",
+  "version": "9.0.0",
+  "domainKnowledgeFiles": [
+    "knowledge/corporate-governance-standards.md",
+    "knowledge/executive-coaching-frameworks.md",
+    "knowledge/board-communication-templates.md"
+  ]
+}

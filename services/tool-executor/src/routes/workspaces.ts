@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import asyncHandler from '../utils/asyncHandler';
 import { ValidationError } from '../utils/errors';
 import { toolRegistry, executor, workspaceManager } from '../utils/sharedInstance';
-import { AssistantWorkflow } from '../data/skills/workflow-common';
+import { AssistantWorkflow } from '../adk/workflow-common';
 import { allWorkflows as workflows } from '../data/skills';
 import type { RuntimeWorkflow } from '../types';
 

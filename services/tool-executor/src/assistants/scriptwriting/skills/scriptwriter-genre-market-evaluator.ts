@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
 
 const GENRE_MARKET_CONFIG_SCHEMA = {

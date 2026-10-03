@@ -1,4 +1,5 @@
-// @ts-nocheck -- generated handler body is untyped (implicit any) by design
+// @ts-nocheck
+
 import { SchemaRecord } from '../../../types'
 import { createDeclarativeCodeSkill, SchemaProps, createSchemaRecord } from '../../../adk/code-skill-factory'
 import { healthcareResultSchema } from '../healthcare-contract'
@@ -21,7 +22,7 @@ const triggers = [
   { kind: 'user' as const, phrase_examples: ['evaluate clinic workflow', 'review this clinical case', 'create a care plan', 'stage intake dispatch'] },
   { kind: 'schedule' as const, cadence: 'daily clinical operations review' },
   { kind: 'event' as const, on: 'intake submission, appointment change, care-plan request, or guideline update' },
-  { kind: 'data' as const, condition: 'workflow, evidence, education, or intake data is available for review' },
+  { kind: 'event' as const, eventSource: 'healthcare-collection-change', on: 'workflow, evidence, education, or intake data is available for review' },
 ]
 
 const carePlanConfig = createSchemaRecord({
@@ -32,6 +33,7 @@ const carePlanConfig = createSchemaRecord({
 
 const healthcarePatientCarePlanEducationalBriefingCopilot = createDeclarativeCodeSkill({
   id: 'healthcare-patient-care-plan-educational-briefing-copilot',
+  isSkill: true,
   name: 'Patient Care Plan & Educational Briefing Co-Pilot',
   description: 'Generate a structured, plain-language care-plan briefing from supplied clinician-authored condition, goals, medications, and education topics without changing treatment.',
   persistenceEnvVar: 'HEALTHCARE_HOME',

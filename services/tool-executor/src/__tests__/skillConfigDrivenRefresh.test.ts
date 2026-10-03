@@ -1,5 +1,5 @@
 import { ToolExecutor } from '../services/ToolExecutor';
-import { financeModelingAnalysisSkill } from '../data/skills/finance/finance-modeling-analysis';
+import { financeModelingAnalysisSkill } from '../assistants/finance/skills/finance-modeling-analysis';
 
 /**
  * A Skill whose inputs are all fixed model setup does not need a form. Every

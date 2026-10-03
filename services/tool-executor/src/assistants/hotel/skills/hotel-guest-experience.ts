@@ -22,10 +22,6 @@ const EXTERNAL_OUTPUT_SCHEMA = createSchemaRecord({
 });
 
 const EXTERNAL_CONFIG_SCHEMA = createSchemaRecord({
-  confirmBeforeSend: SchemaProps.boolean({
-    description: 'Require explicit confirmation before sending a mutating hotel request',
-    default: true,
-  }),
   hotelHome: SchemaProps.text({
     description: 'Hotel PMS base URL or local hotel service home',
     default: 'HOTEL_HOME',
@@ -80,11 +76,14 @@ export const GUEST_EXPERIENCE_SKILL = createExternalActionSkill({
   outputSchema: EXTERNAL_OUTPUT_SCHEMA,
   configSchema: EXTERNAL_CONFIG_SCHEMA,
   timeoutMs: 45000,
-  tier: 'aid',
+  // v9: an aid Skill assembles aids and returns a work product; it does not
+// write to an external system. This one reaches a provider and mutates there,
+// so it is represent and sits behind the approval gate.
+  tier: 'represent',
   domainKnowledge: 'Hotel guest services, concierge knowledge, local information, and guest communication',
   triggers: [
     { kind: 'user', phrase_examples: ['Recommend a local restaurant', 'Handle a guest request', 'Draft a guest message'] },
   ],
-  confirmBeforeSend: true,
+  manifest: { actionLabel: 'Respond to guest request' },
   isSkill: true,
 });

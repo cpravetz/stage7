@@ -1,0 +1,9 @@
+{
+  "id": "legal",
+  "name": "Legal & Compliance Assistant",
+  "description": "Reviews commercial contracts, executes legal research, performs clause risk evaluations, and monitors regulatory compliance.",
+  "version": "9.0.0",
+  "domainKnowledgeFiles": [
+    "knowledge/contract-playbooks.md"
+  ]
+}

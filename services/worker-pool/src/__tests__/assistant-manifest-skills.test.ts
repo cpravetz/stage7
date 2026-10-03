@@ -14,13 +14,13 @@ import { loadAssistantCatalog, listAssistantIds } from '../data/assistantCatalog
  * not have caught that, because the count was unchanged.
  */
 
-const SKILLS_DIR = path.resolve(__dirname, '..', '..', '..', 'tool-executor', 'src', 'data', 'skills');
+const SKILLS_DIR = path.resolve(__dirname, '..', '..', '..', 'tool-executor', 'src', 'assistants');
 
 /**
  * Assistant id -> [tool-executor folder, exported skill array].
  *
- * Folders are not always named after the assistant (`songwriter` lives in
- * `songwriting`), which is exactly why this mapping is explicit.
+ * Folders are named after the assistant (`songwriter` lives in `songwriting`),
+ * which is why this mapping is explicit rather than derived.
  */
 const SKILL_SOURCES: Record<string, [string, string]> = {
   career: ['career', 'careerCanonicalSkills'],

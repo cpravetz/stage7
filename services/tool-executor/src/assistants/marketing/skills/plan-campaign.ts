@@ -1,9 +1,12 @@
 // @ts-nocheck
+
 import { createDeclarativeCodeSkill } from '../../../adk/code-skill-factory';
 import { PLAN_CAMPAIGN_OUTPUT_SCHEMA } from '../marketing-contract';
 
 export const PLAN_CAMPAIGN = createDeclarativeCodeSkill({
   id: 'plan-campaign',
+  tier: 'advise',
+  isSkill: true,
   name: 'Plan Campaign',
   description: 'Plan a marketing campaign with budget, channels, and timeline.',
   persistenceEnvVar: 'MARKETING_HOME',

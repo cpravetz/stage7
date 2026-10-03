@@ -1,4 +1,5 @@
-// @ts-nocheck -- generated handler body is untyped (implicit any) by design
+// @ts-nocheck
+
 import { SchemaRecord } from '../../../types'
 import { createDeclarativeCodeSkill, SchemaProps, createSchemaRecord } from '../../../adk/code-skill-factory'
 import { healthcareResultSchema } from '../healthcare-contract'
@@ -21,7 +22,7 @@ const triggers = [
   { kind: 'user' as const, phrase_examples: ['evaluate clinic workflow', 'review this clinical case', 'create a care plan', 'stage intake dispatch'] },
   { kind: 'schedule' as const, cadence: 'daily clinical operations review' },
   { kind: 'event' as const, on: 'intake submission, appointment change, care-plan request, or guideline update' },
-  { kind: 'data' as const, condition: 'workflow, evidence, education, or intake data is available for review' },
+  { kind: 'event' as const, eventSource: 'healthcare-collection-change', on: 'workflow, evidence, education, or intake data is available for review' },
 ]
 
 const decisionConfig = createSchemaRecord({
@@ -32,6 +33,7 @@ const decisionConfig = createSchemaRecord({
 
 export const healthcareClinicalDecisionSupportEvaluator = createDeclarativeCodeSkill({
   id: 'healthcare-clinical-decision-support-evaluator',
+  isSkill: true,
   name: 'Clinical Decision-Support Evaluator',
   description: 'Synthesize supplied patient symptoms, history, and evidence-based guideline inputs into provider-facing considerations with explicit safety boundaries and no autonomous diagnosis.',
   persistenceEnvVar: 'HEALTHCARE_HOME',

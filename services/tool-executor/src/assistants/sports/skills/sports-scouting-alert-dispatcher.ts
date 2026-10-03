@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
 import { sportsResultSchema, SPORTS_PERFORMANCE_SAFETY_BOUNDARY } from '../sports-contract';
@@ -30,18 +31,16 @@ export const SCOUTING_ALERT_DISPATCHER = createDeclarativeCodeSkill({
   outputSchema: sportsResultSchema('Scouting alert dispatch result'),
   tier: 'represent',
   domainKnowledge: 'Sports scouting, player health monitoring, transfer market tracking',
-  confirmBeforeSend: true,
   triggers: [
     { kind: 'event', on: 'Player health or transfer state change detected' }
   ],
-  isSkill: false,
+  isSkill: true,
   manifest: {
     configSchema: {
       type: 'object',
       properties: {
         wearableEndpoint: SchemaProps.url({ description: 'Wearable telemetry provider base URL' }),
         requestTimeoutMs: SchemaProps.number({ description: 'Request timeout in milliseconds', default: 10000 }),
-        confirmBeforeSend: SchemaProps.boolean({ description: 'Require confirmation before sending alerts', default: true }),
         dryRun: SchemaProps.boolean({ description: 'Always dry-run for represent actions', default: true }),
         defaultChannels: SchemaProps.stringArray({ description: 'Default dispatch channels' }),
         rateLimitPerHour: SchemaProps.number({ description: 'Max alerts per hour', default: 20 }),
@@ -141,7 +140,6 @@ export const SCOUTING_ALERT_DISPATCHER = createDeclarativeCodeSkill({
 SCOUTING_ALERT_DISPATCHER.configSchema = {
       type: 'object',
       properties: {
-        confirmBeforeSend: SchemaProps.boolean({ description: 'Require confirmation before sending alerts', default: true }),
         dryRun: SchemaProps.boolean({ description: 'Always dry-run for represent actions', default: true }),
         defaultChannels: SchemaProps.stringArray({ description: 'Default dispatch channels' }),
         rateLimitPerHour: SchemaProps.number({ description: 'Max alerts per hour', default: 20 }),

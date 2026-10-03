@@ -10,25 +10,18 @@ import { PRODUCT_JIRA } from './tools/product-jira';
 import { PRODUCT_MARKDOWN_PARSING } from './tools/product-markdown-parsing';
 import { PRODUCT_SLACK } from './tools/product-slack';
 import { WRITE_PRD } from './skills/write-prd';
-import { PRODUCT_DOMAIN_KNOWLEDGE, PRODUCT_EXTERNAL_TOOL_IDS, PRODUCT_TIER } from './product-contract';
+import { DELIVERY_SYNC } from './skills/delivery-sync-orchestrator';
+import { PRODUCT_DOMAIN_KNOWLEDGE } from './product-contract';
 
 const PRODUCT_SKILLS: Tool[] = [
+    DELIVERY_SYNC,
     CREATE_ROADMAP,    WRITE_PRD,    PRODUCT_JIRA,    PRODUCT_CONFLUENCE,    PRODUCT_DATA_ANALYSIS_USER,    PRODUCT_INSIGHTS_SCHEDULED,    PRODUCT_SLACK,    PRODUCT_CALENDAR,    PRODUCT_MARKDOWN_PARSING,];
+// Tier and isSkill are declared where each capability is defined. Domain
+// knowledge is descriptive rather than policy, so the shared default is filled in
+// for the capabilities that do not carry their own.
 for (const s of PRODUCT_SKILLS) {
-  if (PRODUCT_EXTERNAL_TOOL_IDS.has(s.id)) {
-    s.isSkill = false;
-  }
-}
-for (const s of PRODUCT_SKILLS) {
-  if (PRODUCT_TIER[s.id]) {
-    (s as Tool).tier = PRODUCT_TIER[s.id];
-  }
-  if (PRODUCT_DOMAIN_KNOWLEDGE) {
+  if (PRODUCT_DOMAIN_KNOWLEDGE && !(s as Tool).domainKnowledge) {
     (s as Tool).domainKnowledge = PRODUCT_DOMAIN_KNOWLEDGE;
-  }
-  // Represent-tier skills require confirmBeforeSend
-  if ((s as Tool).tier === 'represent' && (s as Tool).confirmBeforeSend === undefined) {
-    (s as Tool).confirmBeforeSend = true;
   }
 }
 

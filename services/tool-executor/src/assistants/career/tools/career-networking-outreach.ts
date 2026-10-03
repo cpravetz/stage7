@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
 
@@ -41,6 +42,8 @@ const CAREER_NETWORKING_OUTREACH_OUTPUT = {
 
 const CAREER_NETWORKING_OUTREACH = createDeclarativeCodeSkill({
   id: 'career-networking-outreach',
+  domainKnowledge: 'Recruiter and referral outreach: cold outreach, follow-ups, thank-you notes, and referral asks across email and LinkedIn.',
+  tier: 'represent',
   isSkill: false,
   name: 'Networking Outreach',
   description: 'Drafts recruiter outreach messages for cold outreach, follow-ups, thank-you notes, and referral asks across email and LinkedIn.',

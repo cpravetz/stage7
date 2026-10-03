@@ -1,7 +1,7 @@
 import { ToolExecutor } from '../services/ToolExecutor';
 import { Tool } from '../types';
 import { validateAgainstOutputSchema } from '../utils/schemaValidator';
-import { careResourceReferralCoordinator } from '../data/skills/healthcare/care-resource-referral-coordinator';
+import { careResourceReferralCoordinator } from '../assistants/healthcare/skills/care-resource-referral-coordinator';
 
 /**
  * `care-resource-referral-coordinator` had no test at all, and it mis-read its

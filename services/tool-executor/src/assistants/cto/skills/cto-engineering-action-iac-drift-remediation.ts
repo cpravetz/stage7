@@ -1,9 +1,11 @@
 // @ts-nocheck
+
 import { SchemaProps, createDeclarativeCodeSkill, createSchemaRecord } from '../../../adk/code-skill-factory';
 import { IAC_REMEDIATION_TRIGGERS } from '../cto-contract';
 
 export const CTO_ENGINEERING_ACTION_IAC_DRIFT_REMEDIATION = createDeclarativeCodeSkill({
     id: 'cto-engineering-action-iac-drift-remediation',
+    isSkill: true,
     name: 'Engineering Action & IaC Drift Remediation',
     description: 'Dry-run and, after explicit confirmation, apply approved engineering or IaC remediation through a configured endpoint.',
     persistenceEnvVar: 'CTO_HOME',
@@ -30,10 +32,12 @@ export const CTO_ENGINEERING_ACTION_IAC_DRIFT_REMEDIATION = createDeclarativeCod
     triggers: IAC_REMEDIATION_TRIGGERS,
     tier: 'represent',
     domainKnowledge: 'Infrastructure-as-code drift detection, remediation safety, change review, and rollback guarantees',
-    confirmBeforeSend: true,
     manifest: {
-      confirmBeforeSend: true,
       ui: { view: 'remediation-approval' },
+      // Applying a remediation is the write half of this Skill. Holding the
+      // engineering actions tool here puts the live write behind the approval
+      // panel instead of leaving it reachable on its own.
+      lowerOrderTools: ['cto-engineering-actions'],
       configSchema: createSchemaRecord({
         endpointUrl: SchemaProps.url({ description: 'Configured engineering or IaC remediation endpoint' }),
       }, { required: ['endpointUrl'] }),

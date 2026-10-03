@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, createSchemaRecord, SchemaProps } from '../../../adk/code-skill-factory';
 import { executiveResultSchema } from '../executive-contract';
@@ -18,7 +19,6 @@ function withUxMetadata(schema: SchemaRecord): SchemaRecord {
 const SAFETY_BOUNDARY = 'Executive time-strategic focus proxy: calendar management is advisory. Do not block or commit resources without explicit executive authorization.';
 
 const TIME_INPUT = createSchemaRecord({
-  action: SchemaProps.select(['analyze', 'protect-focus', 'resolve-conflict', 'delegate', 'optimize'], { description: 'Strategic focus action to perform', required: true }),
   calendarData: SchemaProps.text({ description: 'Calendar data (JSON string or object)', multiline: true }),
   focusBlocks: SchemaProps.objectArray(SchemaProps.object({
     title: SchemaProps.text({}),
@@ -40,7 +40,7 @@ const TIME_INPUT = createSchemaRecord({
   meetingId: SchemaProps.text({ description: 'Identifier for a meeting to delegate or resolve' }),
   timeRange: SchemaProps.text({ description: 'Time range for analysis or optimization (e.g. 24 hours, week)' }),
   chiefOfStaffContact: SchemaProps.text({ description: 'Chief of staff contact information for delegation' }),
-}, { required: ['action'] });
+}, {});
 
 const TIME_CONFIG = createSchemaRecord({
   executiveHome: SchemaProps.text({ description: 'Executive workspace path; defaults to EXECUTIVE_HOME' }),
@@ -54,12 +54,11 @@ export const TIME_STRATEGIC_FOCUS_PROXY = createDeclarativeCodeSkill({
   name: 'Time & Strategic Focus Proxy',
   description: 'Manage executive calendar, protect strategic focus time, resolve conflicts, delegate meetings, and optimize the schedule.',
   persistenceEnvVar: 'EXECUTIVE_HOME',
-  tier: 'represent',
+  tier: 'advise',
   domainKnowledge: 'Executive calendar management, strategic focus protection, conflict resolution, meeting delegation, time optimization',
   inputSchema: TIME_INPUT,
   outputSchema: executiveResultSchema('Calendar analysis, focus protection plan, conflict resolution, delegation plan, or optimization results derived from supplied inputs'),
   triggers: [{ kind: 'event', on: 'calendar-conflict' }],
-  confirmBeforeSend: true,
   isSkill: true,
   manifest: {
     configSchema: TIME_CONFIG,
@@ -75,7 +74,24 @@ export const TIME_STRATEGIC_FOCUS_PROXY = createDeclarativeCodeSkill({
         return base;
       }
 
-      const action = input.action || 'analyze';
+      function resolveOperation(input: Record<string, unknown>): string {
+      // v9 §1.1 item 3: no routing enum and no free-text `request` field. The
+      // Skill picks the operation from which declared inputs were actually
+      // supplied, so what runs is always what the caller asked for.
+      const has = (...keys: string[]): boolean => keys.some((k) => {
+        const v = (input as Record<string, unknown>)[k];
+        return v != null && v !== '' && !(Array.isArray(v) && !v.length);
+      });
+
+      if (has('conflictId')) return 'resolve-conflict';
+      if (has('delegationRules')) return 'delegate';
+      if (has('focusBlocks')) return 'protect-focus';
+      if (has('proposedFocusBlocks')) return 'optimize';
+      if (has('calendarData')) return 'analyze';
+      // Nothing the caller supplied selects anything more specific, so this runs.
+      return 'analyze';
+    }
+    const action = resolveOperation(input as Record<string, unknown>);
       let store = ctx.store.load('time-strategic-focus', []);
 
       function parseCalendar(data) {

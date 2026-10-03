@@ -1,0 +1,11 @@
+{
+  "id": "hotel",
+  "name": "Hotel Property & Guest Operations Assistant",
+  "description": "Analyzes RevPAR/ADR yield performance, handles guest requests, manages PMS room bookings/housekeeping, and dispatches property maintenance.",
+  "version": "9.0.0",
+  "domainKnowledgeFiles": [
+    "knowledge/revpar-adr-formulas.md",
+    "knowledge/pms-operations-guide.md",
+    "knowledge/housekeeping-sla-rules.md"
+  ]
+}

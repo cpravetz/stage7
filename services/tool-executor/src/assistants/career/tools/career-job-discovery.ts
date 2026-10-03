@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
 import { careerResultSchema } from '../career-contract';
@@ -141,7 +142,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
       phrase_examples: ['Discover jobs', 'Find matching roles', 'Search for jobs', 'What jobs are open for me'],
     },
   ],
-  tier: 'aid',
+  tier: 'advise',
   domainKnowledge: 'Job board search & discovery operations across ATS systems, public feeds, and aggregator APIs.',
   isSkill: false,
   manifest: {

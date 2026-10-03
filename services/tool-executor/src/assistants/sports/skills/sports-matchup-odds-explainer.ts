@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
 import { sportsResultSchema, SPORTS_WAGERING_SAFETY_BOUNDARY } from '../sports-contract';
@@ -38,7 +39,7 @@ export const MATCHUP_ODDS_EXPLAINER = createDeclarativeCodeSkill({
   triggers: [
     { kind: 'event', on: 'Odds become available or line movement detected' },
   ],
-  isSkill: false,
+  isSkill: true,
   manifest: {
     configSchema: {
       type: 'object',

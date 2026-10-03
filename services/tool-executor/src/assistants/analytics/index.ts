@@ -6,7 +6,7 @@ import { ANALYTICS_SCHEDULED_TREND_MONITOR } from './skills/analytics-scheduled-
 import { ANALYTICS_CONFIG_SCHEMA } from './analytics-contract';
 ANALYTICS_SCHEDULED_TREND_MONITOR.configSchema = ANALYTICS_CONFIG_SCHEMA;
 ANALYTICS_SCHEDULED_TREND_MONITOR.tier = 'advise';
-ANALYTICS_SCHEDULED_TREND_MONITOR.isSkill = false;
+ANALYTICS_SCHEDULED_TREND_MONITOR.isSkill = true;
 ANALYTICS_SCHEDULED_TREND_MONITOR.domainKnowledge = 'Business intelligence architectures, SQL/data modeling principles, statistical trend analysis, cross-functional KPI frameworks';
 ANALYTICS_ADHOC_QUERY_EVALUATOR.configSchema = ANALYTICS_CONFIG_SCHEMA;
 ANALYTICS_ADHOC_QUERY_EVALUATOR.tier = 'advise';

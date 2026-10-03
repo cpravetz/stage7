@@ -1,0 +1,13 @@
+{
+  "id": "cto",
+  "name": "Chief Technology Officer Assistant",
+  "description": "Advises on system architecture, optimizes cloud infrastructure spending, synthesizes war-room incidents, tracks DORA delivery metrics, and executes IaC drift remediation.",
+  "version": "9.0.0",
+  "domainKnowledgeFiles": [
+    "knowledge/distributed-architecture.md",
+    "knowledge/dora-metrics.md",
+    "knowledge/cloud-cost-baselines.md",
+    "knowledge/architecture-patterns.json",
+    "knowledge/tech-stacks.json"
+  ]
+}

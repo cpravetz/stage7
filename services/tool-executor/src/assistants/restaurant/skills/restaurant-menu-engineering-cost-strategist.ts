@@ -1,10 +1,10 @@
 // @ts-nocheck
+
 import { Tool } from '../../../types';
 import { createDeclarativeCodeSkill, createSchemaRecord, SchemaProps } from '../../../adk/code-skill-factory';
 import { restaurantResultSchema, RESTAURANT_SAFETY_BOUNDARY, RESTAURANT_PRESENT_SCHEMA } from '../restaurant-contract';
 
 const RESTAURANT_MENU_ENGINEERING_COST_STRATEGIST_CONFIG = createSchemaRecord({
-  confirmBeforeSend: SchemaProps.boolean({ description: 'Require confirmation before applying menu changes', default: false }),
   defaultTargetMargin: SchemaProps.number({ description: 'Default target margin for pricing', default: 0.7 }),
   lowMenuHighlightThreshold: SchemaProps.number({ description: 'Score threshold below which items are flagged', default: 30 }),
 });
@@ -44,7 +44,6 @@ export const RESTAURANT_MENU_ENGINEERING_COST_STRATEGIST = createDeclarativeCode
   isSkill: true,
   tier: 'advise',
   domainKnowledge: 'Restaurant menu engineering, food cost analysis, pricing optimization, and category mix analysis',
-  confirmBeforeSend: false,
   manifest: {
     configSchema: RESTAURANT_MENU_ENGINEERING_COST_STRATEGIST_CONFIG
   },

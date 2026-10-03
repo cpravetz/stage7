@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { createExternalActionSkill } from '../../../adk/code-skill-factory';
 import { EXTERNAL_OUTPUT_SCHEMA } from '../marketing-contract';
 
@@ -7,6 +8,8 @@ export const MARKETING_EMAIL = createExternalActionSkill({
       { kind: 'event', on: 'Campaign content is ready to send' },
     ],
     id: 'marketing-email',
+    tier: 'represent',
+    isSkill: false,
     name: 'Marketing Email',
     description: 'Draft, schedule, send, and measure marketing email campaigns through a configurable email system.',
     system: 'email',

@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
 
@@ -46,6 +47,8 @@ const CAREER_PROFILE_INTAKE_OUTPUT = {
 
 const CAREER_PROFILE_INTAKE = createDeclarativeCodeSkill({
   id: 'career-profile-intake',
+  domainKnowledge: 'Job-search profile intake: target roles, skills, salary and location preferences, resume text, and the searchable terms every other career capability grades against.',
+  tier: 'advise',
   isSkill: false,
   name: 'Profile Intake',
   description: 'Collects and persists the candidate profile: personal details, target roles, skills, resume text, and job-search preferences. All other career tools read from this profile.',

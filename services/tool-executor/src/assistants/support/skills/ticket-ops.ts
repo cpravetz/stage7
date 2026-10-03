@@ -12,7 +12,6 @@ export const TICKET_OPS = createExternalActionSkill({
   configSchema: {
     type: 'object',
     properties: {
-      confirmBeforeSend: SchemaProps.boolean({ description: 'Require explicit confirmation before sending mutating requests', default: true }),
       dryRun: SchemaProps.boolean({ description: 'Validate without executing; defaults to true', default: true }),
       baseUrl: SchemaProps.text({ description: 'Service base URL' }),
       apiKey: SchemaProps.text({ description: 'API key for authentication' }),
@@ -62,7 +61,7 @@ export const TICKET_OPS = createExternalActionSkill({
   triggers: [
     { kind: 'event', on: 'Ticket response or status change' },
   ],
-  confirmBeforeSend: true,
   domainKnowledge: 'Customer success metrics (CSAT, NPS, Churn Rate), SLA management, support escalation tiers, ticket triage',
+  manifest: { actionLabel: 'Operate tickets' },
   isSkill: true,
 });

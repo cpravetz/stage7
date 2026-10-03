@@ -1,0 +1,11 @@
+{
+  "id": "analytics",
+  "name": "Data Analytics & Business Intelligence Assistant",
+  "description": "Executes grounded SQL data warehouse queries to answer ad-hoc business questions and monitors automated metric trends over time.",
+  "version": "9.0.0",
+  "domainKnowledgeFiles": [
+    "knowledge/warehouse-schema-mappings.md",
+    "knowledge/kpi-dictionary.md",
+    "knowledge/metrics.json"
+  ]
+}

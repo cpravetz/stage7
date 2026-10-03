@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { createExternalActionSkill } from '../../../adk/code-skill-factory';
 import { EXTERNAL_OUTPUT_SCHEMA } from '../marketing-contract';
 
@@ -7,6 +8,9 @@ export const MARKETING_AUDIENCE_INSIGHTS = createExternalActionSkill({
       { kind: 'schedule', cadence: 'Ongoing audience segment monitoring' },
     ],
     id: 'marketing-audience-insights',
+    tier: 'aid',
+    manifest: { actionLabel: 'Review audience insights' },
+    isSkill: true,
     name: 'Marketing Audience Insights',
     description: 'Segment audiences and analyze demographics, behavior, preferences, and campaign response signals.',
     system: 'audience-insights',

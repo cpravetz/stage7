@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { createDeclarativeCodeSkill, createSchemaRecord, SchemaProps } from '../../../adk/code-skill-factory';
 import { financeResultSchema } from '../finance-contract';
 
@@ -50,7 +51,6 @@ const reportingDataOpsSkill = createDeclarativeCodeSkill({
   triggers: [
     { kind: 'schedule', cadence: 'periodic reporting' },
   ],
-  confirmBeforeSend: true,
   isSkill: true,
   manifest: {
   credentialSource: {
@@ -61,7 +61,6 @@ const reportingDataOpsSkill = createDeclarativeCodeSkill({
       channel: SchemaProps.select(['email', 'portal', 'api', 'file'], { description: 'Default delivery channel for published reports' }),
       system: SchemaProps.select(['netsuite', 'quickbooks', 'xero', 'custom'], { description: 'Reporting store the report is written to' }),
       defaultReportType: SchemaProps.select(['profit-and-loss', 'balance-sheet', 'cash-flow', 'budget-variance', 'management-summary'], { description: 'Default report type for scheduled runs' }),
-      confirmBeforeSend: SchemaProps.boolean({ description: 'Require explicit confirmation before publishing a report', default: true }),
       defaultDryRun: SchemaProps.boolean({ description: 'Default reporting to dry-run', default: true }),
     }),
     endpointConfigKey: 'endpointUrl',
@@ -71,7 +70,6 @@ const reportingDataOpsSkill = createDeclarativeCodeSkill({
 
     // report what this Skill can honestly compute without one.
     persistenceEnv: 'FINANCE_HOME',
-    confirmBeforeSend: true,
     timeoutMs: 30000
   },
   handler: async function handler(input, ctx) {
@@ -260,7 +258,6 @@ reportingDataOpsSkill.configSchema = createSchemaRecord({
       channel: SchemaProps.select(['email', 'portal', 'api', 'file'], { description: 'Default delivery channel for published reports' }),
       system: SchemaProps.select(['netsuite', 'quickbooks', 'xero', 'custom'], { description: 'Reporting store the report is written to' }),
       defaultReportType: SchemaProps.select(['profit-and-loss', 'balance-sheet', 'cash-flow', 'budget-variance', 'management-summary'], { description: 'Default report type for scheduled runs' }),
-      confirmBeforeSend: SchemaProps.boolean({ description: 'Require explicit confirmation before publishing a report', default: true }),
       defaultDryRun: SchemaProps.boolean({ description: 'Default reporting to dry-run', default: true }),
     });
 

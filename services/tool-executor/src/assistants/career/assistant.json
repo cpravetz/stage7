@@ -1,0 +1,11 @@
+{
+  "id": "career",
+  "name": "Career & Executive Search Assistant",
+  "description": "Orchestrates job discovery, resume/cover letter template management, ATS optimization, automated portal outreach, interview coaching, and pipeline outcome tracking.",
+  "version": "9.0.0",
+  "domainKnowledgeFiles": [
+    "knowledge/resume-parsing-standards.md",
+    "knowledge/ats-optimization-rules.md",
+    "knowledge/executive-comp-benchmarks.md"
+  ]
+}

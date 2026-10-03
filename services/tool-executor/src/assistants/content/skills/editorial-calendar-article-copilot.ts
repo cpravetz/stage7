@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { createDeclarativeCodeSkill } from '../../../adk/code-skill-factory';
 import { contentResultSchema } from '../content-contract';
 

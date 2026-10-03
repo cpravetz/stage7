@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
 

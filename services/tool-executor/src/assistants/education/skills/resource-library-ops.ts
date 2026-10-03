@@ -75,8 +75,11 @@ export const RESOURCE_LIBRARY_OPS = createExternalActionSkill({
   timeoutMs: 120000,
   // Uploads, tags and curates resources in a connected repository
   // (Drive/SharePoint/LMS). User-triggered, so the live call must be gated.
-  confirmBeforeSend: true,
-  tier: 'aid',
+  // v9: an aid Skill assembles aids and returns a work product; it does not
+// write to an external system. This one reaches a provider and mutates there,
+// so it is represent and sits behind the approval gate.
+  tier: 'represent',
+  manifest: { actionLabel: 'Manage resource library' },
   isSkill: true,
   domainKnowledge: "Pedagogical frameworks (Bloom's Taxonomy, Spaced Repetition), curriculum design, assessment scoring methods, student engagement metrics",
   triggers: [

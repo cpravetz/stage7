@@ -1,8 +1,10 @@
 // @ts-nocheck
+
 import { SchemaProps, createDeclarativeCodeSkill, createSchemaRecord } from '../../../adk/code-skill-factory';
 
 export const CTO_ARCHITECTURE_ADVISORY = (() => { const t = createDeclarativeCodeSkill({
   id: 'cto-architecture-advisory',
+  isSkill: false,
   name: 'Architecture & Tech Stack Advisory',
   description: 'Reasoning-based architectural guidance and tech stack recommendations',
   persistenceEnvVar: 'CTO_HOME',

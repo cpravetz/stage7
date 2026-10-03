@@ -140,7 +140,7 @@ const CASES: Case[] = [
   },
   { id: 'product-data-analysis-user', input: { metric: 'activation' }, expectFailure: /not connected|config/i },
   { id: 'product-insights-scheduled', config: { metrics: ['activation'] }, input: { runReason: 'schedule' }, expectFailure: /not connected|PRODUCT_ANALYTICS_API_URL/i },
-  { id: 'marketing-analysis-user', input: { targetChannel: 'not-a-channel' }, expectFailure: /unknown targetChannel/i },
+  { id: 'marketing-campaign-execution-orchestrator', input: {}, expectFailure: /request|required/i },
   { id: 'marketing-reports-scheduled', config: { campaignIds: ['cmp-1'] }, input: { runReason: 'schedule' }, expectFailure: /no report|not connected|config/i },
 ];
 

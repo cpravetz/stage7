@@ -1,9 +1,11 @@
 // @ts-nocheck
+
 import { SchemaProps, createDeclarativeCodeSkill, createSchemaRecord } from '../../../adk/code-skill-factory';
 import { ARCH_DEBT_TRIGGERS } from '../cto-contract';
 
 export const CTO_ARCHITECTURE_TECH_DEBT_EVALUATOR = createDeclarativeCodeSkill({
     id: 'cto-architecture-tech-debt-evaluator',
+    isSkill: true,
     name: 'Architecture & Tech Debt Evaluator',
     description: 'Evaluate supplied system health scores and produce a prioritized architecture modernization roadmap.',
     persistenceEnvVar: 'CTO_HOME',

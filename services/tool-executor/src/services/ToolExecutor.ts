@@ -22,7 +22,7 @@ import { PluginGenerator } from '../services/PluginGenerator';
 import { ToolDiscovery } from '../services/ToolDiscovery';
 import { MCPClient, MCPHTTPClient, MCPServerConfig } from '../services/MCPClient';
 import { allWorkflows } from '../data/skills';
-import type { AssistantWorkflow } from '../data/skills/workflow-common';
+import type { AssistantWorkflow } from '../adk/workflow-common';
 import { AssistantWorkspaceManager } from './AssistantWorkspaceManager';
 import { TriggerExecutionEngine } from './TriggerExecutionEngine';
 import { SkillTrigger } from '../types';

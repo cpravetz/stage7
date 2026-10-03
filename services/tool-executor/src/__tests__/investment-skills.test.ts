@@ -1,10 +1,10 @@
 import { ToolExecutor } from '../services/ToolExecutor';
 import { Tool } from '../types';
 import { validateAgainstOutputSchema } from '../utils/schemaValidator';
-import { INVESTMENT_MARKET_DATA } from '../data/skills/investment/investment-market-data';
-import { PORTFOLIO_RISK_ADVISORY } from '../data/skills/investment/portfolio-risk-advisory';
-import { RESEARCH_PLANNING } from '../data/skills/investment/research-planning';
-import { BILL_PAY_REBALANCING } from '../data/skills/investment/bill-pay-rebalancing';
+import { INVESTMENT_MARKET_DATA } from '../assistants/investment/skills/investment-market-data';
+import { PORTFOLIO_RISK_ADVISORY } from '../assistants/investment/skills/portfolio-risk-advisory';
+import { RESEARCH_PLANNING } from '../assistants/investment/skills/research-planning';
+import { BILL_PAY_REBALANCING } from '../assistants/investment/skills/bill-pay-rebalancing';
 
 interface PresentBlock {
   id: string;
@@ -115,7 +115,6 @@ describe('Portfolio risk advisory emits presentation blocks', () => {
 
   it('analyze-portfolio reports real allocation computed from supplied holdings', async () => {
     const { result, output } = await run(PORTFOLIO_RISK_ADVISORY, {
-      action: 'analyze-portfolio',
       holdings: [
         { symbol: 'VTI', value: 60000, assetClass: 'US Stock' },
         { symbol: 'VXUS', value: 40000, assetClass: 'Intl Stock' },
@@ -138,7 +137,6 @@ describe('Portfolio risk advisory emits presentation blocks', () => {
 
   it('analyze-portfolio reports when no holdings are supplied', async () => {
     const { result } = await run(PORTFOLIO_RISK_ADVISORY, {
-      action: 'analyze-portfolio',
     });
     expect(result.success).toBe(true);
     const body = bodyOf(result);
@@ -148,7 +146,7 @@ describe('Portfolio risk advisory emits presentation blocks', () => {
 
   it('evaluate computes a weighted score from supplied criteria and ranks results', async () => {
     const { result } = await run(PORTFOLIO_RISK_ADVISORY, {
-      action: 'evaluate',
+      benchmark: 'SPY',
       symbols: ['AAPL', 'MSFT', 'GOOG'],
       criteria: {
         AAPL: { growth: 8, value: 6, momentum: 7 },
@@ -166,7 +164,7 @@ describe('Portfolio risk advisory emits presentation blocks', () => {
 
   it('risk-assessment computes VaR from supplied volatility and portfolio value', async () => {
     const { result } = await run(PORTFOLIO_RISK_ADVISORY, {
-      action: 'risk-assessment',
+      criteria: { risk: 0.6 }, weights: { risk: 0.6 },
       portfolio: {
         holdings: [
           { symbol: 'VTI', value: 60000 },
@@ -185,20 +183,23 @@ describe('Portfolio risk advisory emits presentation blocks', () => {
     assertPresentClean(result);
   });
 
-  it('returns present blocks on the error path (unknown action)', async () => {
-    const { result, output } = await run(PORTFOLIO_RISK_ADVISORY, {
-      action: 'bogus-action',
-    });
-    expect(result.success).toBe(false);
-    expect(result.error).toMatch(/Unknown action/i);
+  it('falls back to the read-only default when nothing selects a specialised operation', async () => {
+    // With no routing enum and no free-text `request`, there is no such thing as
+    // an unknown action: the Skill reads the declared inputs and runs what they
+    // select. Empty input must therefore land on the read-only default rather
+    // than on a mutation or an error.
+    const { result, output } = await run(PORTFOLIO_RISK_ADVISORY, {});
+    expect(result.success).toBe(true);
+    const body = bodyOf(result);
+    expect(body).toMatch(/no positive-value|holdings/i);
     assertPresentClean(result);
     expect(output?.outputSchemaIssues || []).toEqual([]);
   });
 
   it('output satisfies its declared outputSchema on every path', async () => {
     const inputs: Record<string, unknown>[] = [
-      { action: 'analyze-portfolio', holdings: [{ symbol: 'VTI', value: 10000, assetClass: 'Stock' }] },
-      { action: 'bogus-action' },
+      { holdings: [{ symbol: 'VTI', value: 10000, assetClass: 'Stock' }] },
+      {},
       {},
     ];
     for (const input of inputs) {
@@ -216,7 +217,7 @@ describe('Research & Planning emits presentation blocks', () => {
       { id: 'doc2', title: 'Microsoft Cloud Report', type: 'initiating', provider: 'Goldman', date: '2024-07-10', rating: 'Neutral', summary: 'Azure growth slowing but still profitable.', sector: 'Technology' },
     ];
     const { result, output } = await run(RESEARCH_PLANNING, {
-      action: 'search',
+      query: 'quarterly earnings',
       query: 'apple',
       documents: docs,
     });
@@ -234,7 +235,7 @@ describe('Research & Planning emits presentation blocks', () => {
 
   it('get-analyst-estimates reports not-connected rather than fabricating estimates', async () => {
     const { result } = await run(RESEARCH_PLANNING, {
-      action: 'get-analyst-estimates',
+      analystEstimatesSymbol: 'AAPL',
       symbol: 'AAPL',
     });
     expect(result.success).toBe(true);
@@ -250,7 +251,7 @@ describe('Research & Planning emits presentation blocks', () => {
 
   it('get-esg-scores reports not-connected with null scores', async () => {
     const { result } = await run(RESEARCH_PLANNING, {
-      action: 'get-esg-scores',
+      esgScores: { symbol: 'AAPL' },
       symbol: 'TSLA',
     });
     expect(result.success).toBe(true);
@@ -261,7 +262,7 @@ describe('Research & Planning emits presentation blocks', () => {
 
   it('create-plan computes a real projection from supplied profile and assumptions', async () => {
     const { result } = await run(RESEARCH_PLANNING, {
-      action: 'create-plan',
+      strategies: ['tax-aware', 'asset location'],
       clientProfile: {
         age: 45,
         income: 120000,
@@ -288,7 +289,7 @@ describe('Research & Planning emits presentation blocks', () => {
 
   it('create-plan reports when no profile or assumptions are supplied', async () => {
     const { result } = await run(RESEARCH_PLANNING, {
-      action: 'create-plan',
+      strategies: ['tax-aware', 'asset location'],
     });
     expect(result.success).toBe(true);
     const body = bodyOf(result);
@@ -297,12 +298,12 @@ describe('Research & Planning emits presentation blocks', () => {
     assertPresentClean(result);
   });
 
-  it('returns present blocks on the error path (unknown action)', async () => {
-    const { result, output } = await run(RESEARCH_PLANNING, {
-      action: 'bogus-action',
-    });
-    expect(result.success).toBe(false);
-    expect(result.error).toMatch(/Unknown action/i);
+  it('falls back to the read-only default when nothing selects a specialised operation', async () => {
+    // No routing enum and no free-text `request` means there is no unknown action:
+    // the Skill runs what the supplied inputs select, so empty input lands on the
+    // read-only default rather than on an error.
+    const { result, output } = await run(RESEARCH_PLANNING, {});
+    expect(result.success).toBe(true);
     assertPresentClean(result);
     expect(output?.outputSchemaIssues || []).toEqual([]);
   });
@@ -310,10 +311,10 @@ describe('Research & Planning emits presentation blocks', () => {
   it('output satisfies its declared outputSchema on every path', async () => {
     const docs = [{ id: 'd1', title: 'Test', type: 'research', provider: 'p', summary: 's' }];
     const inputs: Record<string, unknown>[] = [
-      { action: 'search', query: 'test', documents: docs },
-      { action: 'get-analyst-estimates', symbol: 'AAPL' },
-      { action: 'create-plan', clientProfile: { age: 45 }, assumptions: { marketReturn: 0.07, inflationRate: 0.02, retirementAge: 65, withdrawalRate: 0.04 } },
-      { action: 'bogus-action' },
+      { query: 'test', documents: docs },
+      { analystEstimatesSymbol: 'AAPL' },
+      { clientProfile: { age: 45 }, strategies: ['tax-aware'] },
+      {},
     ];
     for (const input of inputs) {
       const { result, output } = await run(RESEARCH_PLANNING, input);
@@ -342,7 +343,7 @@ describe('Bill Pay & Rebalancing stages by default and never silently writes', (
     const past = new Date(now.getTime() - 5 * 24 * 60 * 60 * 1000);
     const { result } = await run(BILL_PAY_REBALANCING, {
       dryRun: true,
-      action: 'track-obligations',
+      obligations: [{ description: 'Rent', amount: 1000, dueDate: '2024-12-01' }],
       obligations: [
         { description: 'Rent', amount: 1200, dueDate: future.toISOString(), category: 'housing' },
         { description: 'Old bill', amount: 50, dueDate: past.toISOString(), category: 'misc' },
@@ -362,7 +363,7 @@ describe('Bill Pay & Rebalancing stages by default and never silently writes', (
   it('dry-run flag-fees identifies fees above the threshold', async () => {
     const { result } = await run(BILL_PAY_REBALANCING, {
       dryRun: true,
-      action: 'flag-fees',
+      fees: [{ description: 'Fee', amount: 50 }], feeThreshold: 25,
       fees: [
         { description: 'Overdraft', amount: 35, date: '2024-01-05', source: 'bank' },
         { description: 'Monthly fee', amount: 10, date: '2024-01-06', source: 'bank' },
@@ -384,7 +385,7 @@ describe('Bill Pay & Rebalancing stages by default and never silently writes', (
   it('dry-run stage-transfer shows the transfer that would be staged', async () => {
     const { result } = await run(BILL_PAY_REBALANCING, {
       dryRun: true,
-      action: 'stage-transfer',
+      from: 'A', to: 'B', amount: 100,
       from: 'Checking 1234',
       to: 'Vanguard Brokerage',
       amount: 5000,
@@ -405,9 +406,10 @@ describe('Bill Pay & Rebalancing stages by default and never silently writes', (
   });
 
   it('stage-transfer without required params reports an error', async () => {
+    // from/to/amount select stage-transfer; a non-positive amount is what the guard catches.
     const { result, output } = await run(BILL_PAY_REBALANCING, {
       dryRun: true,
-      action: 'stage-transfer',
+      from: 'A', to: 'B', amount: 0,
     });
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/source account|destination account|amount/i);
@@ -418,7 +420,7 @@ describe('Bill Pay & Rebalancing stages by default and never silently writes', (
   it('dry-run rebalance computes drift from supplied holdings and targets', async () => {
     const { result } = await run(BILL_PAY_REBALANCING, {
       dryRun: true,
-      action: 'rebalance',
+      rebalanceThreshold: 0.05,
       from: 'Brokerage',
       holdings: [
         { symbol: 'VTI', value: 60000 },
@@ -443,7 +445,6 @@ describe('Bill Pay & Rebalancing stages by default and never silently writes', (
   it('dry-run calculate-drift reports max drift without writing', async () => {
     const { result } = await run(BILL_PAY_REBALANCING, {
       dryRun: true,
-      action: 'calculate-drift',
       holdings: [
         { symbol: 'VTI', value: 70000 },
         { symbol: 'VXUS', value: 30000 },
@@ -461,24 +462,24 @@ describe('Bill Pay & Rebalancing stages by default and never silently writes', (
     expect(fs.existsSync(storePath)).toBe(false);
   });
 
-  it('returns present blocks on the error path (unknown action)', async () => {
-    const { result, output } = await run(BILL_PAY_REBALANCING, {
-      dryRun: true,
-      action: 'bogus-action',
-    });
-    expect(result.success).toBe(false);
+  it('falls back to the read-only default when nothing selects a specialised operation', async () => {
+    // No routing enum and no free-text `request` means there is no unknown action:
+    // the Skill runs what the supplied inputs select, so empty input lands on the
+    // read-only default rather than on a mutation or an error.
+    const { result, output } = await run(BILL_PAY_REBALANCING, { dryRun: true });
+    expect(result.success).toBe(true);
     assertPresentClean(result);
     expect(output?.outputSchemaIssues || []).toEqual([]);
   });
 
   it('output satisfies its declared outputSchema on every path', async () => {
     const inputs: Record<string, unknown>[] = [
-      { dryRun: true, action: 'track-obligations', obligations: [{ description: 'Rent', amount: 1000, dueDate: '2024-12-01' }] },
-      { dryRun: true, action: 'flag-fees', fees: [{ description: 'Fee', amount: 50 }], feeThreshold: 25 },
-      { dryRun: true, action: 'calculate-drift', holdings: [{ symbol: 'A', value: 100 }], targets: { A: 0.5 } },
-      { dryRun: true, action: 'stage-transfer', from: 'A', to: 'B', amount: 100 },
-      { dryRun: true, action: 'rebalance', from: 'A', holdings: [{ symbol: 'A', value: 100 }], targets: { A: 0.5 } },
-      { dryRun: true, action: 'bogus' },
+      { dryRun: true, obligations: [{ description: 'Rent', amount: 1000, dueDate: '2024-12-01' }] },
+      { dryRun: true, fees: [{ description: 'Fee', amount: 50 }], feeThreshold: 25 },
+      { dryRun: true, holdings: [{ symbol: 'A', value: 100 }], targets: { A: 0.5 } },
+      { dryRun: true, from: 'A', to: 'B', amount: 100 },
+      { dryRun: true, rebalanceThreshold: 0.05, holdings: [{ symbol: 'A', value: 100 }] },
+      { dryRun: true },
     ];
     for (const input of inputs) {
       const { result, output } = await run(BILL_PAY_REBALANCING, input);
@@ -492,7 +493,7 @@ describe('Investment market data stages by default and never silently calls the 
   it('dry-run with no endpoint reports not-connected', async () => {
     {
       const { result, output } = await run(INVESTMENT_MARKET_DATA, {
-        action: 'quote',
+        symbols: ['AAPL'],
         symbols: ['AAPL', 'MSFT'],
         dryRun: true,
       });
@@ -520,7 +521,7 @@ describe('Investment market data stages by default and never silently calls the 
         externalConfig: { endpoint: 'https://api.example.invalid/v1/marketdata' },
       } as unknown as Tool;
       const { result } = await run(configured, {
-        action: 'historical',
+        symbols: ['AAPL'], startDate: '2024-01-01',
         symbols: ['TSLA'],
         interval: '1d',
         startDate: '2024-01-01',
@@ -543,13 +544,12 @@ describe('Investment market data stages by default and never silently calls the 
 
   it('refuses a live call without explicit confirmation', async () => {
     await expect(
-      run(INVESTMENT_MARKET_DATA, { action: 'quote', symbols: ['AAPL'], dryRun: false }),
+      run(INVESTMENT_MARKET_DATA, { symbols: ['AAPL'], dryRun: false }),
     ).rejects.toThrow(/confirmation/i);
   });
 
   it('reports not-connected even when confirmation is given (no endpoint)', async () => {
     const { result } = await run(INVESTMENT_MARKET_DATA, {
-      action: 'quote',
       symbols: ['AAPL'],
       dryRun: false,
       confirmation: true,
@@ -559,21 +559,23 @@ describe('Investment market data stages by default and never silently calls the 
     assertPresentClean(result);
   });
 
-  it('reports blocked when no action is supplied', async () => {
+  it('selects the quote operation when only symbols are supplied', async () => {
+    // No routing enum and no free-text `request`: the operation is whatever the
+    // declared inputs select, and symbols with no range select the default quote.
     const { result } = await run(INVESTMENT_MARKET_DATA, {
       dryRun: true,
+      symbols: ['AAPL'],
     });
-    expect(result.success).toBe(false);
-    expect(result.status).toBe('blocked');
-    expect(result.error).toMatch(/action/i);
+    expect(result.status).toBe('not-connected');
+    expect(result.error).toMatch(/endpoint/i);
     assertPresentClean(result);
   });
 
   it('output satisfies its declared outputSchema on every path', async () => {
     const inputs: Record<string, unknown>[] = [
       { dryRun: true },
-      { action: 'quote', symbols: ['AAPL'], dryRun: true },
-      { action: 'quote', symbols: ['AAPL'], dryRun: false, confirmation: true },
+      { symbols: ['AAPL'], dryRun: true },
+      { symbols: ['AAPL'], dryRun: false, confirmation: true },
     ];
     for (const input of inputs) {
       const { result, output } = await run(INVESTMENT_MARKET_DATA, input);

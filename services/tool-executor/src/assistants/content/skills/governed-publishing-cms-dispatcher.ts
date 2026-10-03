@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { createDeclarativeCodeSkill } from '../../../adk/code-skill-factory';
 import { contentResultSchema } from '../content-contract';
 
@@ -11,7 +12,6 @@ export const GOVERNED_PUBLISHING_CMS_DISPATCHER = createDeclarativeCodeSkill({
   tier: 'represent',
   domainKnowledge:
     'Content publishing governance: pre-flight validation of SEO metadata, slug conventions, and taxonomy before dispatch, approval gating, and CMS dispatch outcomes',
-  confirmBeforeSend: true,
   inputSchema: {
     type: 'object',
     properties: {
@@ -37,7 +37,6 @@ export const GOVERNED_PUBLISHING_CMS_DISPATCHER = createDeclarativeCodeSkill({
   ],
   isSkill: true,
   manifest: {
-    confirmBeforeSend: true,
     ui: { view: 'publishing-approval' }
   },
   handler: async function handler(input, ctx) {

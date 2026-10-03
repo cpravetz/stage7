@@ -71,12 +71,12 @@ const VENDOR_CONTRACT_MANAGEMENT = createExternalActionSkill({
   },
   outputSchema: EVENT_EXTERNAL_OUTPUT_SCHEMA,
   timeoutMs: 60000,
-  tier: 'aid',
-isSkill: true,
+  tier: 'represent',
+  manifest: { actionLabel: 'Manage vendor contracts' },
+  isSkill: true,
 });
 
 VENDOR_CONTRACT_MANAGEMENT.domainKnowledge = 'Event vendor management: vendor sourcing and categorization, contract negotiation and signing, payment scheduling and tracking, invoice generation, and 1099 tax preparation for event vendors';
-VENDOR_CONTRACT_MANAGEMENT.confirmBeforeSend = true;
 VENDOR_CONTRACT_MANAGEMENT.triggers = [
   { kind: 'event', on: 'Vendor contract request' },
 ];

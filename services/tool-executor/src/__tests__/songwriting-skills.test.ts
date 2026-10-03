@@ -1,6 +1,6 @@
-import { songwritingSkills } from '../data/skills/songwriting';
+import { songwritingSkills } from '../assistants/songwriting';
 import { Tool } from '../types';
-import * as songwritingModule from '../data/skills/songwriting';
+import * as songwritingModule from '../assistants/songwriting';
 import { execSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -50,11 +50,15 @@ describe('Songwriter Creative — Batch A', () => {
       expect(skill.type).toBe('code');
     });
 
-    it('reconciles the Represent higher-order skill', () => {
+    it('reconciles the higher-order dispatcher and its gate', () => {
       expect(skillsByName['Represent Lead Sheet & Demo Asset Dispatcher']).toBeDefined();
       const skill = skillsByName['Represent Lead Sheet & Demo Asset Dispatcher'];
       expect(skill.id).toBe('songwriting_lead_sheet_demo_dispatcher');
       expect(skill.type).toBe('code');
+      // v9 §2: `aid` means the Skill assembles aids and returns a work product
+      // without writing anywhere. This one dispatches an asset to an external
+      // provider, so it is `represent` and the tier itself is the gate.
+      expect(skill.tier).toBe('represent');
       expect(skill.confirmBeforeSend).toBe(true);
     });
   });
@@ -170,9 +174,11 @@ describe('Songwriter Creative — Batch A', () => {
   describe('dry-run and confirmation-gated dispatcher', () => {
     const dispatcher = skillsByName['Represent Lead Sheet & Demo Asset Dispatcher'];
 
-    it('has confirmBeforeSend set at tool and manifest level', () => {
+    it('has its gate derived, never declared on the manifest', () => {
+      // The gate is a property of the tier, so there is nothing for an author to
+      // write on the manifest and nothing for a reviewer to overlook.
       expect(dispatcher.confirmBeforeSend).toBe(true);
-      expect(dispatcher.manifest.confirmBeforeSend).toBe(true);
+      expect(dispatcher.manifest.confirmBeforeSend).toBeUndefined();
     });
 
     it('has a configSchema in the manifest', () => {
@@ -187,7 +193,8 @@ describe('Songwriter Creative — Batch A', () => {
       expect(configProps.apiKey).toBeUndefined();
       expect(configProps.provider).toBeDefined();
       expect(configProps.defaultFormat).toBeDefined();
-      expect(configProps.confirmBeforeSend).toBeDefined();
+      // Configuration may not switch the runtime gate off.
+      expect(configProps.confirmBeforeSend).toBeUndefined();
     });
 
     it('declares the config field holding its endpoint', () => {
@@ -264,7 +271,7 @@ describe('Songwriter Creative — Batch A', () => {
       expect(cocreation.manifest.entrypoint).toBe('index.js');
     });
 
-    it('dispatcher is a declarative code skill behind withConfirmation', () => {
+    it('dispatcher is a declarative code skill whose gate follows its tier', () => {
       const dispatcher = skillsByName['Represent Lead Sheet & Demo Asset Dispatcher'];
       expect(dispatcher.type).toBe('code');
       expect(dispatcher.manifest.sourceCode).toBeTruthy();

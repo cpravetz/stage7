@@ -1,9 +1,11 @@
 // @ts-nocheck
+
 import { SchemaProps, createDeclarativeCodeSkill, createSchemaRecord } from '../../../adk/code-skill-factory';
 import { INCIDENT_WAR_ROOM_TRIGGERS } from '../cto-contract';
 
 export const CTO_INCIDENT_WAR_ROOM_SYNTHESIZER = createDeclarativeCodeSkill({
     id: 'cto-incident-war-room-synthesizer',
+    isSkill: true,
     name: 'Incident War Room Synthesizer',
     description: 'Correlate supplied telemetry, logs, alerts, and deployment signals into hypotheses and mitigation steps.',
     persistenceEnvVar: 'CTO_HOME',
@@ -28,7 +30,7 @@ export const CTO_INCIDENT_WAR_ROOM_SYNTHESIZER = createDeclarativeCodeSkill({
       }), { description: 'Pre-formatted user-facing output blocks' }),
     }),
     triggers: INCIDENT_WAR_ROOM_TRIGGERS,
-    tier: 'aid',
+    tier: 'advise',
     domainKnowledge: 'Incident correlation techniques, signal triage, hypothesis formation, and mitigation sequencing',
     manifest: {
       ui: { view: 'incident-timeline' }

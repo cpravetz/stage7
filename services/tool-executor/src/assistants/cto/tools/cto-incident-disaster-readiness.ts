@@ -1,9 +1,11 @@
 // @ts-nocheck
+
 import { SchemaProps, createDeclarativeCodeSkill, createSchemaRecord } from '../../../adk/code-skill-factory';
 import { DISASTER_PROVIDERS } from '../cto-contract';
 
 export const CTO_INCIDENT_DISASTER_READINESS = (() => { const t = createDeclarativeCodeSkill({
   id: 'cto-incident-disaster-readiness',
+  isSkill: false,
   name: 'Incident & Disaster Readiness',
   description: 'Hybrid skill for disaster recovery operations and incident readiness checks',
   persistenceEnvVar: 'CTO_HOME',
@@ -31,7 +33,7 @@ export const CTO_INCIDENT_DISASTER_READINESS = (() => { const t = createDeclarat
       body: SchemaProps.text({}),
     }), { description: 'Pre-formatted user-facing output blocks' }),
   }),
-  tier: 'aid',
+  tier: 'advise',
   domainKnowledge: 'Incident response runbooks, disaster recovery planning, RTO/RPO targets, and service continuity',
   handler: async function handler(input, ctx) {
     const DISASTER_PROVIDERS = ['disaster-recovery'];

@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
 
@@ -61,6 +62,8 @@ const CAREER_RANK_OUTPUT = {
 
 const CAREER_RANK = createDeclarativeCodeSkill({
   id: 'career-rank',
+  domainKnowledge: 'Job-listing scoring: role match weighted heaviest, then description keywords, salary fit, location and remote preference, and company preference.',
+  tier: 'advise',
   isSkill: false,
   name: 'Rank Opportunities',
   description: 'Scores and ranks job listings against the search terms and the user profile, weighting role match most heavily, then description keywords, salary fit, location/remote and company preference. Returns each listing with the role match that produced its score.',

@@ -1,8 +1,11 @@
 // @ts-nocheck
+
 import { createDeclarativeCodeSkill } from '../../../adk/code-skill-factory';
 
 export const WRITE_PRD = createDeclarativeCodeSkill({
     id: 'write-prd',
+    tier: 'aid',
+    isSkill: true,
     name: 'Write PRD',
     description: 'Generate a structured product requirements document with INVEST user stories, Given/When/Then acceptance criteria, technical requirements, data model, UX flows, and phased rollout plan.',
     persistenceEnvVar: 'STORAGE_DIR',
@@ -35,7 +38,12 @@ export const WRITE_PRD = createDeclarativeCodeSkill({
       required: ['success', 'prd'],
     },
     triggers: [{ kind: 'user', phrase_examples: ["Write a PRD", "Update requirements", "Review requirements"] }],
-    manifest: {},
+    manifest: {
+      // Filing a written PRD is the whole point of this Skill, so the write
+      // happens here, behind the tier, rather than as an orphan tool that a
+      // live caller can reach with nothing above it.
+      lowerOrderTools: ['product-jira', 'product-confluence', 'product-markdown-parsing'],
+    },
     handler: async function handler(input, ctx) {
         function round2(n) { return Math.round(n * 100) / 100; }
         const title = input.title || 'Untitled PRD';

@@ -87,21 +87,17 @@ export function createCatalog(): AssistantCatalog {
 }
 
 export function registerAssistant(catalog: AssistantCatalog, registration: AssistantRegistration): AssistantBlueprint {
+  const root = path.join(__dirname, '..', ASSISTANTS_DIRNAME, registration.id);
   const skills = registration.skills.map(freezeTool);
 
-  const blueprint: AssistantBlueprint = {
-    manifest: {
-      id: registration.id,
-      name: registration.id,
-      description: '',
-      version: '0.0.0',
-      domainKnowledgeFiles: [],
-    },
-    root: path.join(__dirname, '..', ASSISTANTS_DIRNAME, registration.id),
-    knowledgeFiles: [],
-    canonicalSkills: skills.filter((skill) => skill.isSkill === true),
-    lowerOrderTools: skills.filter((skill) => skill.isSkill === false),
-  };
+  // The folder is the blueprint, so the manifest is read from it rather than
+  // assembled here. `skills` is the only thing the catalog contributes, because
+  // the Skill registry lives in the Assistant's own `index.ts`.
+  const { blueprint, issues } = loadBlueprint(root, skills, { expectFolderId: registration.id });
+  if (!blueprint) {
+    const detail = issues.map((issue) => `  ${issue.path}: ${issue.message}`).join('\n');
+    throw new Error(`Assistant "${registration.id}" is not a valid blueprint:\n${detail}`);
+  }
 
   catalog.blueprints.set(registration.id, blueprint);
   if (!catalog.order.includes(registration.id)) catalog.order.push(registration.id);

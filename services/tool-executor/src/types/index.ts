@@ -47,10 +47,24 @@ export type SchemaRecord = Record<string, unknown> & {
   [key: string]: unknown;
 };
 
+/**
+ * How a Skill can be invoked (ADK_DEVELOPER_GUIDE.md §8).
+ *
+ * `cron`/`defaultInput` and `eventSource`/`mapEventToInput` are the documented
+ * field names. `cadence` and `on` are the older spellings the shipped triggers
+ * already use; both are accepted so a blueprint can migrate a trigger at a time,
+ * and the scheduler prefers the documented name when both are present.
+ */
 export type SkillTrigger =
   | { kind: 'user'; phrase_examples: string[] }
-  | { kind: 'schedule'; cadence: string }
-  | { kind: 'event'; on: string; eventId?: string }
+  | { kind: 'schedule'; cron?: string; defaultInput?: Record<string, unknown>; cadence?: string }
+  | {
+      kind: 'event';
+      eventSource?: string;
+      mapEventToInput?: (payload: any) => Record<string, unknown>;
+      on?: string;
+      eventId?: string;
+    }
   | { kind: 'data'; condition: string };
 
 export type NativeExecutorKey =

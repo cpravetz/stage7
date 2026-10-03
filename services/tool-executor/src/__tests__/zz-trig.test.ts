@@ -1,4 +1,4 @@
-import { careerCanonicalSkills } from '../data/skills/career';
+import { careerCanonicalSkills } from '../assistants/career';
 it('triggers', () => {
   for (const s of careerCanonicalSkills) {
     const kinds = (s.triggers || []).map((t: { kind: string }) => t.kind);

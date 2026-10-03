@@ -1,0 +1,11 @@
+{
+  "id": "event",
+  "name": "Event Logistics & Operations Assistant",
+  "description": "Manages event budgeting, spatial seating layouts, vendor contracts, guest check-ins, and day-of operational incident logging.",
+  "version": "9.0.0",
+  "domainKnowledgeFiles": [
+    "knowledge/beo-specifications.md",
+    "knowledge/crowd-safety-standards.md",
+    "knowledge/vendor-contract-clauses.md"
+  ]
+}

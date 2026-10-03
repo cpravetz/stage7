@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { SchemaProps, createDeclarativeCodeSkill } from '../../../adk/code-skill-factory';
 import { HR_DOMAIN_KNOWLEDGE, hrResultSchema } from '../hr-contract';
 
@@ -15,10 +16,9 @@ export const HR_SCREEN_RESUME = createDeclarativeCodeSkill({
   configSchema: {
     type: 'object',
     properties: {
-      confirmBeforeSend: SchemaProps.boolean({ description: 'Require explicit confirmation before sending mutating scheduling requests', default: true }),
       dryRun: SchemaProps.boolean({ description: 'Validate without executing; defaults to true', default: true }),
       defaultEndpoint: SchemaProps.url({ description: 'Default screening and scheduling endpoint URL' }),
-  apiKey: SchemaProps.password({ description: 'Applicant tracking system API key' }),
+      apiKey: { ...SchemaProps.password({ description: 'Applicant tracking system API key' }), isSecret: true },
       maxRetryAttempts: SchemaProps.number({ description: 'Retry attempts on scheduling failure', default: 3 }),
       rateLimitPerMinute: SchemaProps.number({ description: 'Rate limit per minute for scheduling API', default: 60 }),
     },
@@ -36,8 +36,7 @@ export const HR_SCREEN_RESUME = createDeclarativeCodeSkill({
     required: ['resumeText', 'jobRequirements', 'candidateName'],
   },
   outputSchema: hrResultSchema('Screening record with match score, matched keywords, gaps, and persistence path'),
-  tier: 'represent',
-  confirmBeforeSend: true,
+  tier: 'advise',
   domainKnowledge: HR_DOMAIN_KNOWLEDGE,
   triggers: [
     { kind: 'user', phrase_examples: ['Screen this resume for role fit'] },

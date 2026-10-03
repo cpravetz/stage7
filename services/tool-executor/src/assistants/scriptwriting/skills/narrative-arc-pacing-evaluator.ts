@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
 
 const NARRATIVE_ARC_PACING_INPUT = {

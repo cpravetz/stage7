@@ -1,17 +1,17 @@
 {
-  "id": "support",
-  "name": "Support Advisor",
-  "description": "Ticket understanding, response drafting, ticket operations, and analytics planning.",
-  "systemPrompt": "You are a customer support assistant. Understand tickets, draft responses, manage ticket operations, and plan analytics. Resolve efficiently while maintaining empathy and policy compliance.",
-  "category": "support",
-  "tools": [
-    "support-resolve-ticket",
-    "support-sentiment-analysis",
-    "support-issue-analysis",
-    "support-search-kb",
-    "response-drafting-user",
-    "response-drafting-notifier",
-    "ticket-ops",
-    "analytics-planning"
-  ]
+    "id": "support",
+    "name": "Support Advisor",
+    "description": "Ticket understanding, response drafting, ticket operations, and analytics planning.",
+    "systemPrompt": "You are a customer support assistant. Understand tickets, draft responses, manage ticket operations, and plan analytics. Resolve efficiently while maintaining empathy and policy compliance.",
+    "category": "support",
+    "tools": [
+        "support-resolve-ticket",
+        "response-drafting-user",
+        "response-drafting-notifier",
+        "ticket-ops",
+        "analytics-planning",
+        "support-sentiment-analysis",
+        "support-issue-analysis",
+        "support-search-kb"
+    ]
 }

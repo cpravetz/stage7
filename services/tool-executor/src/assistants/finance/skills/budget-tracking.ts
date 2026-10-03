@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { createDeclarativeCodeSkill, createSchemaRecord, SchemaProps } from '../../../adk/code-skill-factory';
 import { financeResultSchema } from '../finance-contract';
 
@@ -47,7 +48,6 @@ const budgetTrackingSkill = createDeclarativeCodeSkill({
   triggers: [
     { kind: 'schedule', cadence: 'periodic budget-vs-actual monitoring' },
   ],
-  confirmBeforeSend: true,
   isSkill: true,
   manifest: {
   credentialSource: {
@@ -56,7 +56,6 @@ const budgetTrackingSkill = createDeclarativeCodeSkill({
     configSchema: createSchemaRecord({
       endpointUrl: SchemaProps.url({ description: 'Accounting ERP endpoint URL; may also be supplied at runtime through ' + BUDGET_LEDGER_ENV }),
       system: SchemaProps.select(['netsuite', 'quickbooks', 'xero', 'custom'], { description: 'Accounting system the budget ledger belongs to' }),
-      confirmBeforeSend: SchemaProps.boolean({ description: 'Require explicit confirmation before a live budget-ledger write', default: true }),
       defaultDryRun: SchemaProps.boolean({ description: 'Default budget tracking to dry-run', default: true }),
     }),
     endpointConfigKey: 'endpointUrl',
@@ -66,7 +65,6 @@ const budgetTrackingSkill = createDeclarativeCodeSkill({
 
     // report what this Skill can honestly compute without one.
     persistenceEnv: 'FINANCE_HOME',
-    confirmBeforeSend: true,
     timeoutMs: 30000
   },
   handler: async function handler(input, ctx) {
@@ -266,7 +264,6 @@ const budgetTrackingSkill = createDeclarativeCodeSkill({
 budgetTrackingSkill.configSchema = createSchemaRecord({
       endpointUrl: SchemaProps.url({ description: 'Accounting ERP endpoint URL; may also be supplied at runtime through ' + BUDGET_LEDGER_ENV }),
       system: SchemaProps.select(['netsuite', 'quickbooks', 'xero', 'custom'], { description: 'Accounting system the budget ledger belongs to' }),
-      confirmBeforeSend: SchemaProps.boolean({ description: 'Require explicit confirmation before a live budget-ledger write', default: true }),
       defaultDryRun: SchemaProps.boolean({ description: 'Default budget tracking to dry-run', default: true }),
     });
 

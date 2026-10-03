@@ -1,9 +1,11 @@
 // @ts-nocheck
+
 import { SchemaProps, createDeclarativeCodeSkill, createSchemaRecord } from '../../../adk/code-skill-factory';
 import { INFRA_PROVIDERS } from '../cto-contract';
 
 export const CTO_INFRASTRUCTURE_QUERY = (() => { const t = createDeclarativeCodeSkill({
   id: 'cto-infrastructure-query',
+  isSkill: false,
   name: 'Infrastructure Query',
   description: 'Read-only queries across infrastructure providers (Datadog, AWS, GCP, Azure, Kubernetes, Service Mesh, Cost Optimization, IaC Monitoring, Database Operations, Team Metrics, GitHub Read)',
   persistenceEnvVar: 'CTO_HOME',

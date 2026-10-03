@@ -8,7 +8,8 @@ import {
   supportSkills,
   legalSkills,
 } from '../data/skills';
-import { lyricProsodyEvaluator } from '../data/skills/creative';
+import { lyricProsodyEvaluator } from '../assistants/songwriting';
+import { SKILL_CLASSIFICATION } from '../adk/classification';
 import { Tool } from '../types';
 import { ToolExecutor } from '../services/ToolExecutor';
 
@@ -80,13 +81,24 @@ describe('Skills that require user-supplied content are user-triggered', () => {
     }
   });
 
-  it.each(MUST_BE_USER_TRIGGERED)('%s is not left classified as a non-skill', (id) => {
-    // isSkill is what keeps a Skill out of the user-facing list. These are all
-    // user-facing, so the flag must be true (explicit) or absent so it resolves
-    // true from the user trigger (0.3).
-    const isSkill = getSkill(id).isSkill;
-    expect(isSkill === undefined || isSkill === true).toBe(true);
-  });
+  it.each(MUST_BE_USER_TRIGGERED.filter((id) => SKILL_CLASSIFICATION[id]?.isSkill !== false))(
+    '%s is not left classified as a non-skill',
+    (id) => {
+      // isSkill is what keeps a capability out of the user-facing list. A
+      // capability the v9 blueprint classifies as a lower-order tool is
+      // deliberately not in that list: it is reached by delegation from the
+      // Skill that owns the conversation, not offered to the user directly.
+      const isSkill = getSkill(id).isSkill;
+      expect(isSkill === undefined || isSkill === true).toBe(true);
+    },
+  );
+
+  it.each(MUST_BE_USER_TRIGGERED.filter((id) => SKILL_CLASSIFICATION[id]?.isSkill === false))(
+    '%s is a lower-order tool, so it is reachable by delegation rather than as a panel',
+    (id) => {
+      expect(getSkill(id).isSkill).toBe(false);
+    },
+  );
 });
 
 describe('Schema does not demand inputs the handler ignores', () => {

@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
 
@@ -48,7 +49,9 @@ export const ctoTeamDeliveryHealthEvaluator = createDeclarativeCodeSkill({
   isSkill: true,
   manifest: {
     configSchema: DORA_CONFIG_SCHEMA,
-    lowerOrderTools: ['cto-infrastructure-query']
+    // Delivery health is scored on the DORA metrics, so computing them is this
+    // Skill's own work rather than a separate entry point.
+    lowerOrderTools: ['cto-infrastructure-query', 'calculate-dora-metrics']
   },
   handler: async function handler(input, ctx) {
       const config = input.config || input.configSchema || {};

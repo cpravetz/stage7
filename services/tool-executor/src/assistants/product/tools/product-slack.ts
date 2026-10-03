@@ -1,8 +1,11 @@
 // @ts-nocheck
+
 import { createExternalActionSkill } from '../../../adk/code-skill-factory';
 
 export const PRODUCT_SLACK = createExternalActionSkill({
     id: 'product-slack',
+    tier: 'represent',
+    isSkill: false,
     name: 'Slack Integration',
     description: 'Send messages, create channels, and interact with Slack. Uses configurable Slack workspace with endpoint and auth.',
     system: 'slack',

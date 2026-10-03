@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
 
 const CONTENT_DRAFTING_OUTPUT_SCHEMA = {
@@ -28,6 +29,8 @@ const CONTENT_DRAFTING_OUTPUT_SCHEMA = {
 
 export const CONTENT_DRAFTING_ADAPTATION = createDeclarativeCodeSkill({
   id: 'content-drafting-adaptation',
+  domainKnowledge: 'Content drafting and adaptation: reformatting and retargeting an existing draft to a channel, length, and audience.',
+  tier: 'aid',
   name: 'Content Drafting & Adaptation',
   description:
     'Produces a computed editorial brief and measures supplied source text. For draft tasks it derives a section plan with word budgets and a keyword placement plan from the supplied parameters. For adapt/repurpose it measures the source (words, sentences, headings, Flesch reading ease, keyword coverage) and returns the concrete transformation steps. It does not write prose: it has no language model behind it and says so in its output.',

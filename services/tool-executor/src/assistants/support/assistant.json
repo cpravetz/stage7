@@ -1,0 +1,10 @@
+{
+  "id": "support",
+  "name": "Customer Support Assistant",
+  "description": "Orchestrates ticket triage, sentiment scoring, knowledge base retrieval, automated draft responses, and customer success analytics.",
+  "version": "9.0.0",
+  "domainKnowledgeFiles": [
+    "knowledge/csat-benchmarks.md",
+    "knowledge/escalation-protocols.md"
+  ]
+}

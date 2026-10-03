@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
 
@@ -6,6 +7,7 @@ const CAREER_WRAPPER_CONFIG_SCHEMA: SchemaRecord = {
   type: 'object',
   properties: {
     boardTokens: {
+      isSecret: true,
       type: 'object',
       description: 'Pin exact ATS board names, e.g. { "greenhouse": ["stripe"], "ashby": ["ashby"], "lever": ["leverdemo"] }. Optional - company names are probed automatically.',
       properties: {

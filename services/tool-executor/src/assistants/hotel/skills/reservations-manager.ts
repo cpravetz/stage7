@@ -22,10 +22,6 @@ const EXTERNAL_OUTPUT_SCHEMA = createSchemaRecord({
 });
 
 const EXTERNAL_CONFIG_SCHEMA = createSchemaRecord({
-  confirmBeforeSend: SchemaProps.boolean({
-    description: 'Require explicit confirmation before sending a mutating hotel request',
-    default: true,
-  }),
   hotelHome: SchemaProps.text({
     description: 'Hotel PMS base URL or local hotel service home',
     default: 'HOTEL_HOME',
@@ -85,6 +81,6 @@ export const RESERVATIONS_SKILL = createExternalActionSkill({
   triggers: [
     { kind: 'user', phrase_examples: ['Manage a reservation', 'Assign a room', 'Update a guest profile', 'Check a folio'] },
   ],
-  confirmBeforeSend: true,
+  manifest: { actionLabel: 'Update guest profile' },
   isSkill: true,
 });

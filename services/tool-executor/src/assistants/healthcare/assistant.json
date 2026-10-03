@@ -1,0 +1,14 @@
+{
+  "id": "healthcare",
+  "name": "Clinical Practice & Care Operations Assistant",
+  "description": "Evaluates practice workflow efficiency, provides evidence-based differential decision support, generates patient care plans, and coordinates EHR intake/referrals.",
+  "version": "9.0.0",
+  "domainKnowledgeFiles": [
+    "knowledge/hipaa-compliance-standards.md",
+    "knowledge/clinical-guidelines-base.md",
+    "knowledge/EHR-integration-specs.md"
+  ],
+  "policies": {
+    "hipaaComplianceEnforced": true
+  }
+}

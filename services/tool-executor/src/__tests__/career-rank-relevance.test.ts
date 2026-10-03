@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { ToolExecutor } from '../services/ToolExecutor';
 import { Tool } from '../types';
-import { CAREER_RANK } from '../data/skills/career';
+import { CAREER_RANK } from '../assistants/career';
 
 /**
  * A job search ranks roles against the terms it searched for.

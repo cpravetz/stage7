@@ -6,7 +6,7 @@ import { PluginGenerator } from '../services/PluginGenerator'
 import { Tool, PluginGenerationRequest, CredentialRequiredError, ConfirmationRequiredError } from '../types'
 import toolsRouter from '../routes/tools'
 import { ToolNotFoundError, ValidationError } from '../utils/errors'
-import { eventSkills } from '../data/skills/event/index'
+import { eventSkills } from '../assistants/event/index'
 
 const app: Application = express()
 app.use(express.json())

@@ -1,14 +1,15 @@
 // @ts-nocheck
+
 import { SchemaProps, createExternalActionSkill } from '../../../adk/code-skill-factory';
 import { HEALTHCARE_EXTERNAL_OUTPUT_SCHEMA } from '../healthcare-contract';
 
 export const PATIENT_COMMUNICATION = createExternalActionSkill({
   id: 'healthcare-patient-communication',
+  isSkill: false,
   name: 'Patient Communication',
   description: 'Send secure patient communications including appointment reminders, test results, care instructions, and manage recurring communication schedules.',
   tier: 'represent',
   domainKnowledge: 'Secure patient communication, appointment reminders, and care instructions',
-  confirmBeforeSend: true,
   system: 'healthcare',
   action: 'patient-communication',
   endpoint: { configKey: 'HEALTHCARE_COMM_ENDPOINT', method: 'POST' },

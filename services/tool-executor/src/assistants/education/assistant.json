@@ -1,0 +1,10 @@
+{
+  "id": "education",
+  "name": "Education & Curriculum Design Assistant",
+  "description": "Monitors learner telemetry, personalizes learning paths using spaced repetition, drafts lesson assessments, and curates educational resource libraries.",
+  "version": "9.0.0",
+  "domainKnowledgeFiles": [
+    "knowledge/blooms-taxonomy-framework.md",
+    "knowledge/spaced-repetition-algorithms.md"
+  ]
+}

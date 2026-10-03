@@ -1,8 +1,11 @@
 // @ts-nocheck
+
 import { SchemaProps, createExternalActionSkill } from '../../../adk/code-skill-factory';
 
 export const PRODUCT_JIRA = createExternalActionSkill({
     id: 'product-jira',
+    tier: 'represent',
+    isSkill: false,
     name: 'Jira Integration',
     description: 'Create, update, and query Jira issues and sprints. Uses configurable Jira instance with endpoint and auth.',
     system: 'jira',

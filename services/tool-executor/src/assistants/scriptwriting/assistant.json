@@ -1,0 +1,13 @@
+{
+  "id": "scriptwriting",
+  "name": "Screenwriting & Narrative Development Assistant",
+  "description": "Evaluates screenplay genre fit, drafts scene beats and subtext dialogue, analyzes narrative pacing, and formats Fountain/Final Draft scripts.",
+  "version": "9.0.0",
+  "domainKnowledgeFiles": [
+    "knowledge/fountain-format-spec.md",
+    "knowledge/narrative-arc-frameworks.md",
+    "knowledge/dialogue-subtext-rules.md",
+    "knowledge/script-templates.json",
+    "knowledge/script-topics.json"
+  ]
+}

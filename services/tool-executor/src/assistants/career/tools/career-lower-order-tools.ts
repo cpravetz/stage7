@@ -4,6 +4,9 @@ const now = () => new Date();
 
 export const CAREER_INTERVIEW_PREP: Tool = {
   id: 'career-interview-prep',
+  domainKnowledge: 'Interview preparation: role- and company-specific question sets, likely follow-ups, and preparation guidance.',
+  tier: 'advise',
+  schemaVersion: 1,
   name: 'Career Interview Prep',
   description: 'Generate interview questions and preparation guidance for a target role and company.',
   type: 'reasoning',
@@ -23,6 +26,9 @@ export const CAREER_INTERVIEW_PREP: Tool = {
 
 export const CAREER_ADVISORY: Tool = {
   id: 'career-advisory',
+  domainKnowledge: 'Career advisory context: role expectations, market positioning, and the trade-offs behind a job-search decision.',
+  tier: 'advise',
+  schemaVersion: 1,
   name: 'Career Advisory',
   description: 'Provide career, compensation, and learning-plan guidance from supplied role context.',
   type: 'reasoning',

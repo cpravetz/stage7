@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
 
@@ -46,7 +47,6 @@ export const LESSON_ASSESSMENT_DRAFTING_USER = createDeclarativeCodeSkill({
     },
     required: ['success'],
   },
-  confirmBeforeSend: true,
   triggers: [
     {
       kind: 'user',

@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { SchemaProps, createDeclarativeCodeSkill } from '../../../adk/code-skill-factory';
 import { HR_DOMAIN_KNOWLEDGE, HR_EXTERNAL_OUTPUT_SCHEMA } from '../hr-contract';
 
@@ -20,7 +21,6 @@ export const HR_DRAFT_JD_INTERVIEW_KIT = createDeclarativeCodeSkill({
   configSchema: {
     type: 'object',
     properties: {
-      confirmBeforeSend: SchemaProps.boolean({ description: 'Require explicit confirmation before sending mutating requests', default: true }),
       dryRun: SchemaProps.boolean({ description: 'Validate without executing; defaults to true', default: true }),
       defaultSource: SchemaProps.text({ description: 'Default sourcing channel for job descriptions' }),
       apiVersion: SchemaProps.text({ description: 'API version for recruiting operations' }),
@@ -42,7 +42,6 @@ export const HR_DRAFT_JD_INTERVIEW_KIT = createDeclarativeCodeSkill({
   },
   outputSchema: HR_EXTERNAL_OUTPUT_SCHEMA,
   tier: 'aid',
-  confirmBeforeSend: true,
   domainKnowledge: HR_DOMAIN_KNOWLEDGE,
   triggers: [
     { kind: 'user', phrase_examples: ['Draft job description', 'Create interview scorecard', 'Generate interview kit'] },

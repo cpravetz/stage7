@@ -1,9 +1,9 @@
 // @ts-nocheck
+
 import { createDeclarativeCodeSkill, createSchemaRecord, SchemaProps } from '../../../adk/code-skill-factory';
 import { investmentResultSchema } from '../investment-contract';
 
 const researchPlanningInputSchema = createSchemaRecord({
-  action: SchemaProps.select(['search', 'get-document', 'get-analyst-estimates', 'get-earnings-calendar', 'get-esg-scores', 'monitor-alerts', 'create-plan', 'update-plan', 'run-projection', 'tax-optimization', 'estate-analysis', 'retirement-readiness', 'goal-tracking', 'scenario-comparison'], { description: 'Action to perform' }),
   query: SchemaProps.text({ description: 'Search query' }),
   symbol: SchemaProps.text({ description: 'Stock symbol' }),
   documentId: SchemaProps.text({ description: 'Document ID to retrieve' }),
@@ -48,7 +48,7 @@ const researchPlanningInputSchema = createSchemaRecord({
   goals: SchemaProps.objectArray(SchemaProps.object({ name: SchemaProps.text({ description: 'Goal name' }), target: SchemaProps.number({ description: 'Goal target value' }), current: SchemaProps.number({ description: 'Current goal value' }), onTrack: SchemaProps.boolean({ description: 'Whether the goal is on track' }) }, { description: 'Goal record supplied by the caller' }), { description: 'Goal records supplied by the caller' }),
   startDate: SchemaProps.text({ description: 'Calendar start date (ISO 8601)' }),
   endDate: SchemaProps.text({ description: 'Calendar end date (ISO 8601)' })
-}, { required: ['action'] });
+}, {});
 
 const RESEARCH_PLANNING = createDeclarativeCodeSkill({
   id: 'research-planning',
@@ -459,7 +459,36 @@ const RESEARCH_PLANNING = createDeclarativeCodeSkill({
       function fmtNum(v: any, d?: any) { return v == null ? 'N/A' : Number(v).toFixed(d || 2); }
 
       try {
-        const action = input.action;
+        function resolveOperation(input: Record<string, unknown>): string {
+      // v9 §1.1 item 3: no routing enum and no free-text `request` field. The
+      // Skill picks the operation from which declared inputs were supplied.
+      //
+      // Two operations read the same inputs and so cannot be told apart this
+      // way: get-analyst-estimates and get-esg-scores are both driven by
+      // `symbol`. The more specific one wins and the other is reached only when
+      // the caller supplies the filter shape only it reads. This is the cost of
+      // having neither a routing enum nor a request field to select with.
+      const present = (v: unknown): boolean => v != null && v !== '' && !(Array.isArray(v) && !v.length);
+      const has = (...keys: string[]): boolean => keys.some((k) => present(input[k]));
+      const all = (...keys: string[]): boolean => keys.every((k) => present(input[k]));
+
+      if (has('documentId')) return 'get-document';
+      if (has('esgScores')) return 'get-esg-scores';
+      if (has('symbol') && has('filters')) return 'get-analyst-estimates';
+      if (has('symbol')) return 'get-analyst-estimates';
+      if (has('strategies')) return has('estimatedSavings') ? 'tax-optimization' : 'create-plan';
+      if (has('planId')) return 'update-plan';
+      if (has('assumptions')) return 'run-projection';
+      if (has('scenarios')) return 'scenario-comparison';
+      if (has('estateTaxExposure')) return 'estate-analysis';
+      if (has('readinessScore', 'gap', 'recommendations')) return 'retirement-readiness';
+      if (has('goals')) return 'goal-tracking';
+      if (has('alerts')) return 'monitor-alerts';
+      if (has('earningsCalendar')) return 'get-earnings-calendar';
+      if (has('query', 'searchType', 'freshness', 'documents')) return 'search';
+      return 'search';
+    }
+    const action = resolveOperation(input as Record<string, unknown>);
         let result: any;
         switch (action) {
           case 'search':
@@ -524,7 +553,7 @@ const RESEARCH_PLANNING = createDeclarativeCodeSkill({
           id: 'error',
           title: 'Error',
           kind: 'text',
-          body: 'Research & Planning action "' + (input.action || '(unspecified)') + '" failed: ' + msg
+          body: 'Research & Planning action "' + (action || '(unspecified)') + '" failed: ' + msg
         }] };
       }
     }

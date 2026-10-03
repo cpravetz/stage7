@@ -53,6 +53,10 @@ const CONTRACT_DOCUMENT_ADVISORY_USER = createDeclarativeCodeSkill({
   },
   isSkill: true,
   tier: 'advise',
+  // Drafting, redlining and finalising a document are this Skill's own work.
+  // Holding the tools here keeps them reachable by delegation rather than as
+  // four separate entry points competing with the Skill that uses them.
+  manifest: { actionLabel: 'Advise on a contract', lowerOrderTools: ['legal-draft', 'legal-redline', 'legal-finalize'] },
   domainKnowledge: 'Contract law, commercial negotiation standards, regulatory compliance (GDPR, SOC2, HIPAA), legal/security liability mitigation',
   triggers: [
     {

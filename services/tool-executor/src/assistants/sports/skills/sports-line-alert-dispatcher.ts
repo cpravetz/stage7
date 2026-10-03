@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
 import { sportsResultSchema, SPORTS_WAGERING_SAFETY_BOUNDARY } from '../sports-contract';
@@ -35,18 +36,16 @@ export const LINE_ALERT_DISPATCHER = createDeclarativeCodeSkill({
   outputSchema: sportsResultSchema('Line alert dispatch result'),
   tier: 'represent',
   domainKnowledge: 'Sports line movement analysis, market odds monitoring, bankroll exposure',
-  confirmBeforeSend: true,
   triggers: [
     { kind: 'event', on: 'Line movement or odds change detected' }
   ],
-  isSkill: false,
+  isSkill: true,
   manifest: {
     configSchema: {
       type: 'object',
       properties: {
         oddsEndpoint: SchemaProps.url({ description: 'Odds provider base URL for this Skill' }),
         requestTimeoutMs: SchemaProps.number({ description: 'Request timeout in milliseconds', default: 10000 }),
-        confirmBeforeSend: SchemaProps.boolean({ description: 'Require confirmation before sending', default: true }),
         dryRun: SchemaProps.boolean({ description: 'Always dry-run for represent actions', default: true }),
         monitorInterval: SchemaProps.number({ description: 'Monitoring interval in seconds', default: 30 }),
         maxAlertsPerHour: SchemaProps.number({ description: 'Maximum alerts per hour', default: 30 }),
@@ -153,7 +152,6 @@ export const LINE_ALERT_DISPATCHER = createDeclarativeCodeSkill({
 LINE_ALERT_DISPATCHER.configSchema = {
       type: 'object',
       properties: {
-        confirmBeforeSend: SchemaProps.boolean({ description: 'Require confirmation before sending', default: true }),
         dryRun: SchemaProps.boolean({ description: 'Always dry-run for represent actions', default: true }),
         monitorInterval: SchemaProps.number({ description: 'Monitoring interval in seconds', default: 30 }),
         maxAlertsPerHour: SchemaProps.number({ description: 'Maximum alerts per hour', default: 30 }),

@@ -1,5 +1,5 @@
 import { ToolRegistry } from '../services/ToolRegistry';
-import { careerSkills, careerCanonicalSkills } from '../data/skills/career';
+import { careerSkills, careerCanonicalSkills } from '../assistants/career';
 
 it('registry surfaces career skills', () => {
   const reg = new ToolRegistry();

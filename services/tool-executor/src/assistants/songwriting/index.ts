@@ -13,10 +13,10 @@ export { lyricProsodyEvaluator, musicalCoCreation, leadSheetDemoDispatcher, song
  * internal step inside another.
  */
 export const songwritingCanonicalSkills: Tool[] = [
-  songwriterGenreTrendEvaluator,
-  leadSheetDemoDispatcher,
-  musicalCoCreation,
   lyricProsodyEvaluator,
+  musicalCoCreation,
+  leadSheetDemoDispatcher,
+  songwriterGenreTrendEvaluator,
 ];
 
 export const songwritingLowerOrderTools: Tool[] = [];

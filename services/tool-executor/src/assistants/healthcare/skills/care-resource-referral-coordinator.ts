@@ -1,4 +1,5 @@
-// @ts-nocheck -- generated handler body is untyped (implicit any) by design
+// @ts-nocheck
+
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, createSchemaRecord, SchemaProps } from '../../../adk/code-skill-factory';
 import { healthcareResultSchema } from '../healthcare-contract';
@@ -24,13 +25,13 @@ const triggers = [
 const referralConfig = createSchemaRecord({
   healthcareHome: SchemaProps.text({ description: 'Healthcare workspace path or base URL; defaults to HEALTHCARE_HOME' }),
   endpointUrl: SchemaProps.url({ description: 'Optional referral coordination endpoint URL; the connected resource coordination tool may supply its own endpoint' }),
-  confirmBeforeSend: SchemaProps.boolean({ description: 'Require explicit confirmation before a live referral or resource mutation', default: true }),
   defaultDryRun: SchemaProps.boolean({ description: 'Default referral coordination to dry-run', default: true }),
   maxResults: SchemaProps.integer({ description: 'Maximum resource candidates to request', minimum: 1, maximum: 50, default: 10 }),
 });
 
 const careResourceReferralCoordinator = createDeclarativeCodeSkill({
   id: 'care-resource-referral-coordinator',
+  isSkill: true,
   name: 'Care Resource & Referral Coordinator',
   description: 'Coordinate patient care-resource matching, referral creation, and referral status follow-up by delegating to healthcare records scheduling, resource coordination, and patient communication tools with dry-run and explicit-confirmation gates, reporting delegation coverage honestly.',
   persistenceEnvVar: 'HEALTHCARE_HOME',
@@ -58,12 +59,10 @@ const careResourceReferralCoordinator = createDeclarativeCodeSkill({
   }),
   outputSchema: healthcareResultSchema('Referral record, candidate resources, communication status, step results, and coverage'),
   triggers,
-  confirmBeforeSend: true,
   manifest: {
     configSchema: referralConfig,
     healthcareHome: 'HEALTHCARE_HOME',
     lowerOrderTools: ['healthcare-records-scheduling-ops', 'healthcare-resource-coordination', 'healthcare-patient-communication'],
-    confirmBeforeSend: true,
     ui: { view: 'care-resource-referral-coordination' },
     metadata: metadata
   },

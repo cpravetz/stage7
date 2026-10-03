@@ -9,6 +9,8 @@ import { CONTENT_EXTERNAL_OUTPUT_SCHEMA } from './content-external-schema';
  */
 export const MULTI_CHANNEL_PUBLISHING = createExternalActionSkill({
   id: 'content-multi-channel-publishing',
+  domainKnowledge: 'Multi-channel publishing: blog, social, video and newsletter distribution, scheduling, and status handling per channel.',
+  tier: 'represent',
   name: 'Multi-Channel Publishing',
   description: 'Publish, schedule, and manage content across blog, social, video, and newsletter channels. One skill with a channel parameter replaces four near-duplicate platform wrappers.',
   system: 'content_publishing',
@@ -85,7 +87,5 @@ export const MULTI_CHANNEL_PUBLISHING = createExternalActionSkill({
   // The gate is enforced here rather than inherited, and approval propagation
   // (ToolExecutor.nestedExecutorCallback carrying an approved parent's
   // confirmation into the callee) is what keeps the approved publish path working.
-  confirmBeforeSend: true,
-  manifest: { confirmBeforeSend: true },
   isSkill: false,
 });

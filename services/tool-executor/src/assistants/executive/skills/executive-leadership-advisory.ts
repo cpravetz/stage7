@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, SchemaProps, createSchemaRecord } from '../../../adk/code-skill-factory';
 import { executiveResultSchema } from '../executive-contract';
@@ -84,7 +85,6 @@ const leadershipAdvisory = createDeclarativeCodeSkill({
   inputSchema: LEADERSHIP_INPUT,
   outputSchema: executiveResultSchema('Leadership advisory results derived from supplied context and inputs'),
   triggers: [{ kind: 'user', phrase_examples: ['Coach me on leadership', 'Help me decide', 'Assess my leadership', 'Analyze communication'] }],
-  confirmBeforeSend: false,
   isSkill: true,
   async handler(input, ctx) {
     const SAFETY =

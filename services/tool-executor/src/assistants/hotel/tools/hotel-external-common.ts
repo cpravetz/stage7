@@ -22,10 +22,6 @@ export const HOTEL_EXTERNAL_OUTPUT_SCHEMA = createSchemaRecord({
 });
 
 export const HOTEL_EXTERNAL_CONFIG_SCHEMA = createSchemaRecord({
-  confirmBeforeSend: SchemaProps.boolean({
-    description: 'Require explicit confirmation before sending a mutating hotel request',
-    default: true,
-  }),
   hotelHome: SchemaProps.text({
     description: 'Hotel PMS base URL or local hotel service home',
     default: 'HOTEL_HOME',
@@ -47,14 +43,3 @@ export const HOTEL_LOCATION_INPUT = SchemaProps.object({
   floor: SchemaProps.text({ description: 'Floor or building area' }),
   roomNumber: SchemaProps.text({ description: 'Room number when applicable' }),
 }, { description: 'Physical location for an operational task' });
-
-export function withConfirmation(skill: Tool): Tool {
-  return {
-    ...skill,
-    confirmBeforeSend: true,
-    manifest: {
-      ...skill.manifest,
-      confirmBeforeSend: true,
-    },
-  };
-}

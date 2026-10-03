@@ -1,4 +1,6 @@
 import { Tool, SchemaRecord, SchemaProperty, SkillTrigger } from '../types'
+import { DEFAULT_SCHEMA_VERSION, resolveSchemaVersion } from './schema-version'
+import { withDerivedGate } from './gates'
 
 export interface CodeSkillManifest {
   language: 'javascript' | 'typescript' | 'python'
@@ -18,11 +20,12 @@ export interface CreateCodeSkillOptions {
   outputSchema: SchemaRecord
   configSchema?: SchemaRecord
   triggers?: SkillTrigger[]
-  confirmBeforeSend?: boolean
   tier?: 'advise' | 'aid' | 'represent'
   domainKnowledge?: string
   isSkill?: boolean
   timeoutMs?: number
+  /** Record-shape version; defaults to the original shape (1). */
+  schemaVersion?: number
 }
 
 export function createCodeSkill(options: CreateCodeSkillOptions): Tool {
@@ -53,7 +56,7 @@ export function createCodeSkill(options: CreateCodeSkillOptions): Tool {
     }
   }
 
-  return {
+  const tool: Tool = {
     id: options.id,
     name: options.name,
     description: options.description,
@@ -65,11 +68,15 @@ export function createCodeSkill(options: CreateCodeSkillOptions): Tool {
     createdAt: now,
     updatedAt: now,
     triggers: options.triggers,
-    confirmBeforeSend: options.confirmBeforeSend,
     tier: options.tier,
     domainKnowledge: options.domainKnowledge,
     isSkill: options.isSkill,
-  }
+    schemaVersion: resolveSchemaVersion(options.schemaVersion),
+  };
+
+  // Derived last, from the finished Skill: the effective gate can depend on the
+  // external action the manifest declares, which is only known once it is built.
+  return withDerivedGate(tool);
 }
 
 export interface CredentialSourceEntry {
@@ -133,7 +140,6 @@ export interface ExternalActionSkillOptions {
   triggers?: SkillTrigger[]
   timeoutMs?: number
   manifest?: Record<string, unknown>
-  confirmBeforeSend?: boolean
   tier?: 'advise' | 'aid' | 'represent'
   domainKnowledge?: string
   isSkill?: boolean
@@ -249,7 +255,6 @@ export function createExternalActionSkill(options: ExternalActionSkillOptions): 
     credentialSource,
     bodyField,
     timeoutMs,
-    confirmBeforeSend,
     tier,
     domainKnowledge,
     isSkill,
@@ -474,7 +479,6 @@ export function createExternalActionSkill(options: ExternalActionSkillOptions): 
       required: ['success', 'system', 'action', 'request', 'response', 'error'],
     } as SchemaRecord),
     triggers,
-    confirmBeforeSend,
     tier,
     domainKnowledge,
     isSkill,
@@ -557,6 +561,9 @@ export const SchemaProps = {
 }
 
 export interface DeclarativeSkillOptions {
+  /** Record-shape version; defaults to the original shape (1). */
+  schemaVersion?: number
+
   id: string
   name: string
   description: string
@@ -580,7 +587,6 @@ export interface DeclarativeSkillOptions {
   inputSchema: SchemaRecord
   outputSchema: SchemaRecord
   triggers?: SkillTrigger[]
-  confirmBeforeSend?: boolean
   tier?: 'advise' | 'aid' | 'represent'
   domainKnowledge?: string
   isSkill?: boolean
@@ -1180,7 +1186,7 @@ export function createDeclarativeCodeSkill(options: DeclarativeSkillOptions): To
   const sourceCode = `(async () => {
     let stage7Runtime;
     try {
-      stage7Runtime = require('../assistants/stage7-runtime');
+      stage7Runtime = require('./stage7-runtime');
     } catch (e) {
       // Fallback
     }
@@ -1273,7 +1279,8 @@ export function createDeclarativeCodeSkill(options: DeclarativeSkillOptions): To
     }
   })();`
 
-  const needsConfirmation = options.tier === 'represent' || options.confirmBeforeSend === true
+  // The gate is the tier, full stop (checklist §4.3). An author cannot raise it
+  // and cannot switch it off, for any trigger kind.
 
   return createCodeSkill({
     id: options.id,
@@ -1291,7 +1298,6 @@ export function createDeclarativeCodeSkill(options: DeclarativeSkillOptions): To
       // "Run". An explicit actionLabel in options.manifest still wins.
       ...(resolveActionLabel(options.name, (options.manifest as { actionLabel?: string } | undefined)?.actionLabel)),
       ...(options.emitEvent ? { emitEvent: options.emitEvent } : {}),
-      ...(needsConfirmation ? { confirmBeforeSend: true } : {}),
       ...(options.configSchema ? { configSchema: options.configSchema } : {}),
       ...(options.credentialSource ? { credentialSource: options.credentialSource } : {}),
       ...(options.endpointConfigKey ? { endpointConfigKey: options.endpointConfigKey } : {}),
@@ -1304,9 +1310,9 @@ export function createDeclarativeCodeSkill(options: DeclarativeSkillOptions): To
     triggers: options.emitEvent
       ? [...(options.triggers || []), { kind: 'event' as const, on: 'Completion of skill execution', eventId: options.emitEvent }]
       : options.triggers,
-    confirmBeforeSend: needsConfirmation ? true : options.confirmBeforeSend,
     tier: options.tier,
     domainKnowledge: options.domainKnowledge,
     isSkill: options.isSkill,
+    schemaVersion: options.schemaVersion,
   })
 }

@@ -1,4 +1,5 @@
-// @ts-nocheck -- generated handler body is untyped (implicit any) by design
+// @ts-nocheck
+
 import { SchemaRecord } from '../../../types'
 import { createDeclarativeCodeSkill, SchemaProps, createSchemaRecord } from '../../../adk/code-skill-factory'
 import { healthcareResultSchema } from '../healthcare-contract'
@@ -21,23 +22,22 @@ const triggers = [
   { kind: 'user' as const, phrase_examples: ['evaluate clinic workflow', 'review this clinical case', 'create a care plan', 'stage intake dispatch'] },
   { kind: 'schedule' as const, cadence: 'daily clinical operations review' },
   { kind: 'event' as const, on: 'intake submission, appointment change, care-plan request, or guideline update' },
-  { kind: 'data' as const, condition: 'workflow, evidence, education, or intake data is available for review' },
+  { kind: 'event' as const, eventSource: 'healthcare-collection-change', on: 'workflow, evidence, education, or intake data is available for review' },
 ]
 
 const intakeConfig = createSchemaRecord({
   endpointUrl: SchemaProps.url({ description: 'Healthcare intake endpoint URL; may also be supplied at runtime through HEALTHCARE_INTAKE_ENDPOINT' }),
-  confirmBeforeSend: SchemaProps.boolean({ description: 'Require explicit confirmation before a live intake request', default: true }),
   defaultDryRun: SchemaProps.boolean({ description: 'Default intake execution to dry-run', default: true }),
 })
 
 const intake = createDeclarativeCodeSkill({
   id: 'healthcare-appointment-patient-intake-dispatcher',
+  isSkill: true,
   name: 'Appointment & Patient Intake Dispatcher',
   description: 'Stage patient intake in dry-run mode by default and dispatch it to a configured healthcare endpoint only after explicit confirmation, with honest disconnected and safety states.',
   persistenceEnvVar: 'HEALTHCARE_HOME',
   tier: 'represent',
   domainKnowledge: 'Patient intake scheduling, appointment management, and healthcare endpoint dispatch coordination',
-  confirmBeforeSend: true,
   inputSchema: createSchemaRecord({
     endpoint: SchemaProps.url({ description: 'Optional alternate intake endpoint override' }),
     payload: SchemaProps.object({}, { description: 'Patient intake payload to validate or dispatch' }),
@@ -71,7 +71,6 @@ const intake = createDeclarativeCodeSkill({
     configSchema: intakeConfig,
     healthcareHome: 'HEALTHCARE_HOME',
     endpointConfigKey: 'endpointUrl',
-    confirmBeforeSend: true,
     ui: { view: 'intake-approval' },
     metadata: metadata
   },

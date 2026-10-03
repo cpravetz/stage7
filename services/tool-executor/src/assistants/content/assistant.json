@@ -1,0 +1,10 @@
+{
+  "id": "content",
+  "name": "Content Strategy & Publishing Assistant",
+  "description": "Evaluates content SEO performance, drafts targeted articles, manages editorial calendars, and dispatches approved content to configured CMS channels.",
+  "version": "9.0.0",
+  "domainKnowledgeFiles": [
+    "knowledge/seo-content-frameworks.md",
+    "knowledge/editorial-style-guide.md"
+  ]
+}

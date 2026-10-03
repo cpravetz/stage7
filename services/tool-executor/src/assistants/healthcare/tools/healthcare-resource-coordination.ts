@@ -1,14 +1,15 @@
 // @ts-nocheck
+
 import { SchemaProps, createExternalActionSkill } from '../../../adk/code-skill-factory';
 import { HEALTHCARE_EXTERNAL_OUTPUT_SCHEMA } from '../healthcare-contract';
 
 export const RESOURCE_COORDINATION = createExternalActionSkill({
   id: 'healthcare-resource-coordination',
+  isSkill: false,
   name: 'Resource Coordination',
   description: 'Coordinate beds, equipment, staff, and rooms across facilities, and match patients to optimal resources based on clinical needs, insurance, and preferences.',
   tier: 'represent',
   domainKnowledge: 'Healthcare resource coordination, bed/equipment/staff management, and patient-resource matching',
-  confirmBeforeSend: true,
   system: 'healthcare',
   action: 'resource-coordination',
   endpoint: { configKey: 'HEALTHCARE_RESOURCE_ENDPOINT', method: 'POST' },

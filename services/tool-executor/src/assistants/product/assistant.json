@@ -1,0 +1,10 @@
+{
+  "id": "product",
+  "name": "Product Management & Delivery Assistant",
+  "description": "Generates strategic product roadmaps, drafts comprehensive PRDs, analyzes user product telemetry, and orchestrates cross-tool delivery synchronization.",
+  "version": "9.0.0",
+  "domainKnowledgeFiles": [
+    "knowledge/rice-wsjf-prioritization.md",
+    "knowledge/prd-writing-standards.md"
+  ]
+}

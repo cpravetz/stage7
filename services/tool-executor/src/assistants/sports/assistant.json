@@ -1,0 +1,13 @@
+{
+  "id": "sports",
+  "name": "Sports Analytics & Tactical Intelligence Assistant",
+  "description": "Provides team tactical evaluation and opponent scouting (Performance Group) alongside wagering odds analysis and bankroll sizing (Wagering Group) under strict data isolation.",
+  "version": "9.0.0",
+  "domainKnowledgeFiles": [
+    "knowledge/xgboost-sports-metrics.md",
+    "knowledge/bankroll-mathematics.md"
+  ],
+  "policies": {
+    "enforceGroupIsolation": true
+  }
+}

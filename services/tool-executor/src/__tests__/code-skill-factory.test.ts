@@ -609,24 +609,50 @@ describe('createExternalActionSkill', () => {
     })
   })
 
-  describe('confirmBeforeSend', () => {
-    it('includes confirmBeforeSend in tool when provided', () => {
-      const skill = createExternalActionSkill({
-        ...baseOptions,
-        endpoint: { url: 'https://api.example.com', method: 'POST' },
-        confirmBeforeSend: true,
-      });
+  describe('the approval gate is derived, never declared', () => {
+    // v9 removes `confirmBeforeSend` from the factory options: the tier *is* the
+    // gate, so two Skills at the same tier cannot disagree about it and no
+    // blueprint can switch it off.
+    const readOnly = { ...baseOptions, action: 'analyze-anything', tier: 'advise' as const };
 
-      expect(skill.confirmBeforeSend).toBe(true);
+    it('gates a represent Skill and leaves the other tiers open', () => {
+      for (const tier of ['advise', 'aid', 'represent'] as const) {
+        const skill = createExternalActionSkill({ ...readOnly, tier });
+        expect(skill.confirmBeforeSend).toBe(tier === 'represent');
+      }
     });
 
-    it('defaults confirmBeforeSend to undefined when not provided', () => {
-      const skill = createExternalActionSkill({
-        ...baseOptions,
-        endpoint: { url: 'https://api.example.com', method: 'POST' },
-      });
+    it('gates a Skill whose declared action writes, whatever the tier says', () => {
+      // A tier cannot be used to wave a real write through the approval prompt.
+      // `adk:validate` reports the mismatch separately so it gets fixed at the
+      // definition site; the gate holds shut in the meantime.
+      for (const tier of ['advise', 'aid', 'represent'] as const) {
+        const skill = createExternalActionSkill({
+          ...baseOptions,
+          action: 'publish-thing',
+          tier,
+        });
+        expect(skill.confirmBeforeSend).toBe(true);
+      }
+    });
 
-      expect(skill.confirmBeforeSend).toBeUndefined();
+    it('does not accept an author-set gate', () => {
+      // @ts-expect-error confirmBeforeSend was removed from the options; an
+      // author who reaches for it must not compile.
+      createExternalActionSkill({ ...baseOptions, confirmBeforeSend: true });
+    });
+
+    it('never writes the gate onto the manifest', () => {
+      const skill = createExternalActionSkill({ ...readOnly, tier: 'represent' });
+      expect(skill.manifest).not.toHaveProperty('confirmBeforeSend');
+    });
+
+    it('reads an undeclared tier as gated rather than as unrestricted', () => {
+      // Unclassifiable is not "ungated": until the tier is fixed, the strict
+      // reading is the safe one.
+      const skill = createExternalActionSkill({ ...baseOptions, action: 'analyze-anything' });
+      expect(skill.tier).toBeUndefined();
+      expect(skill.confirmBeforeSend).toBe(false);
     });
   });
 

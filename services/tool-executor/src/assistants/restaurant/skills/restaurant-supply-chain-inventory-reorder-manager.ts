@@ -1,10 +1,10 @@
 // @ts-nocheck
+
 import { Tool } from '../../../types';
 import { createDeclarativeCodeSkill, createSchemaRecord, SchemaProps } from '../../../adk/code-skill-factory';
 import { restaurantResultSchema, RESTAURANT_SAFETY_BOUNDARY, RESTAURANT_PRESENT_SCHEMA } from '../restaurant-contract';
 
 const RESTAURANT_SUPPLY_CHAIN_INVENTORY_REORDER_MANAGER_CONFIG = createSchemaRecord({
-  confirmBeforeSend: SchemaProps.boolean({ description: 'Require explicit confirmation before placing live reorder orders', default: true }),
   defaultLeadTime: SchemaProps.number({ description: 'Default lead time in days', default: 2 }),
   defaultSafetyStockPct: SchemaProps.number({ description: 'Default safety stock as percentage of reorder point', default: 25 }),
   endpointUrl: SchemaProps.url({ description: 'Supply chain system endpoint URL' }),
@@ -28,7 +28,6 @@ const RESTAURANT_SUPPLY_CHAIN_INVENTORY_REORDER_MANAGER_INPUT = createSchemaReco
   holdingCost: SchemaProps.number({ description: 'Holding cost per unit per year for EOQ', default: 2 }),
   supplierIds: SchemaProps.stringArray({ description: 'Supplier identifiers for status check' }),
   dryRun: SchemaProps.boolean({ description: 'Run in dry-run mode without executing', default: true }),
-  confirmBeforeSend: SchemaProps.boolean({ description: 'Require explicit confirmation for live endpoint', default: true }),
 });
 
 export const RESTAURANT_SUPPLY_CHAIN_INVENTORY_REORDER_MANAGER = createDeclarativeCodeSkill({
@@ -53,7 +52,6 @@ export const RESTAURANT_SUPPLY_CHAIN_INVENTORY_REORDER_MANAGER = createDeclarati
   isSkill: true,
   tier: 'represent',
   domainKnowledge: 'Restaurant supply chain management, inventory reorder points, EOQ calculations, and supplier status tracking',
-  confirmBeforeSend: true,
   manifest: {
     configSchema: RESTAURANT_SUPPLY_CHAIN_INVENTORY_REORDER_MANAGER_CONFIG
   },

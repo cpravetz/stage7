@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { createExternalActionSkill } from '../../../adk/code-skill-factory';
 import { EXTERNAL_OUTPUT_SCHEMA } from '../marketing-contract';
 
@@ -7,6 +8,12 @@ export const MARKETING_SEO = createExternalActionSkill({
       { kind: 'schedule', cadence: 'Periodic SEO audit' },
     ],
     id: 'marketing-seo',
+    // v9: an aid Skill assembles aids and returns a work product; it does not
+// write to an external system. This one reaches a provider and mutates there,
+// so it is represent and sits behind the approval gate.
+  tier: 'represent',
+    manifest: { actionLabel: 'Optimise search presence' },
+    isSkill: true,
     name: 'Marketing SEO',
     description: 'Audit, research, optimize, and track search visibility through a configurable SEO system.',
     system: 'seo',
@@ -19,7 +26,6 @@ export const MARKETING_SEO = createExternalActionSkill({
     // Gating it here is safe: an approved marketing-center propagates its
     // confirmation into this callee (ToolExecutor.nestedExecutorCallback).
     action: 'optimize-seo',
-    confirmBeforeSend: true,
     endpoint: { configKey: 'MARKETING_SEO_ENDPOINT', method: 'POST' },
     auth: {
       type: 'api_key',

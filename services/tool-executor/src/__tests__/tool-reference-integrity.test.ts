@@ -1,25 +1,25 @@
 import { Tool } from '../types';
-import { careerSkills } from '../data/skills/career';
-import { ctoSkills } from '../data/skills/cto';
-import { educationSkills } from '../data/skills/education';
-import { marketingSkills } from '../data/skills/marketing';
-import { productSkills } from '../data/skills/product';
-import { healthcareSkills } from '../data/skills/healthcare';
-import { sportsSkills } from '../data/skills/sports';
-import { supportSkills } from '../data/skills/support';
-import { contentSkills } from '../data/skills/content';
-import { hrSkills } from '../data/skills/hr';
-import { scriptwritingSkills } from '../data/skills/scriptwriting';
-import { songwritingSkills } from '../data/skills/songwriting';
-import { analyticsSkills } from '../data/skills/analytics';
-import { eventSkills } from '../data/skills/event';
-import { executiveSkills } from '../data/skills/executive';
-import { financeSkills } from '../data/skills/finance';
-import { hotelSkills } from '../data/skills/hotel';
-import { investmentSkills } from '../data/skills/investment';
-import { legalSkills } from '../data/skills/legal';
-import { restaurantSkills } from '../data/skills/restaurant';
-import { salesSkills } from '../data/skills/sales';
+import { careerSkills } from '../assistants/career';
+import { ctoSkills } from '../assistants/cto';
+import { educationSkills } from '../assistants/education';
+import { marketingSkills } from '../assistants/marketing';
+import { productSkills } from '../assistants/product';
+import { healthcareSkills } from '../assistants/healthcare';
+import { sportsSkills } from '../assistants/sports';
+import { supportSkills } from '../assistants/support';
+import { contentSkills } from '../assistants/content';
+import { hrSkills } from '../assistants/hr';
+import { scriptwritingSkills } from '../assistants/scriptwriting';
+import { songwritingSkills } from '../assistants/songwriting';
+import { analyticsSkills } from '../assistants/analytics';
+import { eventSkills } from '../assistants/event';
+import { executiveSkills } from '../assistants/executive';
+import { financeSkills } from '../assistants/finance';
+import { hotelSkills } from '../assistants/hotel';
+import { investmentSkills } from '../assistants/investment';
+import { legalSkills } from '../assistants/legal';
+import { restaurantSkills } from '../assistants/restaurant';
+import { salesSkills } from '../assistants/sales';
 import {
   ctoCanonicalSkills,
   healthcareCanonicalSkills,
@@ -30,7 +30,7 @@ import {
 import {
   careerCanonicalExtendedSkills,
   careerCanonicalInternalTools,
-} from '../data/skills/career-canonical-extended';
+} from '../adk/career-canonical-extended';
 import { nativeTools } from '../data/nativeTools';
 import { legacyGeneralTools } from '../data/generalTools';
 import * as fs from 'fs';

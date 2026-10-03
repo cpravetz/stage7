@@ -52,11 +52,23 @@ export interface TriggerIssue {
  * whose only trigger is `data` would appear in the Overview panel and then never
  * fire.
  */
-export function validateNativeTriggers(skillId: string, triggers: SkillTrigger[] | undefined): TriggerIssue[] {
+/** Whether a field carries real content, so `''` does not satisfy a required string. */
+function hasText(value: unknown): boolean {
+  return typeof value === 'string' && value.trim() !== '';
+}
+
+export function validateNativeTriggers(
+  skillId: string,
+  triggers: SkillTrigger[] | undefined,
+  options: { requiresEntryPoint?: boolean } = {},
+): TriggerIssue[] {
   const issues: TriggerIssue[] = [];
   const list = triggers ?? [];
 
-  if (list.length === 0) {
+  // A lower-order tool is reached through `ctx.delegate` from a Skill that does
+  // have an entry point, so requiring one here would demand a second, competing
+  // way to invoke it. Callers that only check reachability leave this false.
+  if (options.requiresEntryPoint !== false && list.length === 0) {
     issues.push({ skillId, message: 'declares no trigger; an unreachable Skill cannot be run' });
     return issues;
   }
@@ -69,13 +81,13 @@ export function validateNativeTriggers(skillId: string, triggers: SkillTrigger[]
         }
         break;
       case 'schedule':
-        if (typeof trigger.cadence !== 'string' || trigger.cadence.trim() === '') {
-          issues.push({ skillId, message: 'schedule trigger needs a cadence' });
+        if (!hasText(trigger.cron) && !hasText(trigger.cadence)) {
+          issues.push({ skillId, message: 'schedule trigger needs a cron expression' });
         }
         break;
       case 'event':
-        if (typeof trigger.on !== 'string' || trigger.on.trim() === '') {
-          issues.push({ skillId, message: 'event trigger needs the event it subscribes to' });
+        if (!hasText(trigger.eventSource) && !hasText(trigger.on)) {
+          issues.push({ skillId, message: 'event trigger needs the eventSource it subscribes to' });
         }
         break;
       case 'data':

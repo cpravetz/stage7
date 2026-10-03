@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
 
@@ -41,6 +42,8 @@ const CAREER_OUTCOME_OUTPUT = {
 
 const CAREER_OUTCOME = createDeclarativeCodeSkill({
   id: 'career-outcome',
+  domainKnowledge: 'Application outcome recording: offer, rejection, interview, screening and no-response states, plus outcome analytics and search-conversion trends.',
+  tier: 'advise',
   isSkill: false,
   name: 'Track Outcomes',
   description: 'Records application outcomes (offer, rejection, interview, screening, no-response) and updates career search stats. Also supports outcome analytics and trend reporting.',

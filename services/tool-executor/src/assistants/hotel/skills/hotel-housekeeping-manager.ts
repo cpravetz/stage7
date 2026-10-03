@@ -22,9 +22,6 @@ const HOUSEKEEPING_INPUT_SCHEMA = createSchemaRecord({
   dueTime: SchemaProps.datetime({ description: 'Housekeeping due time in ISO 8601 format' }),
   scheduledAt: SchemaProps.datetime({ description: 'Scheduled start time in ISO 8601 format' }),
   estimatedMinutes: SchemaProps.integer({ description: 'Estimated task duration in minutes', minimum: 1 }),
-  action: SchemaProps.select(['create', 'update', 'assign', 'dispatch', 'complete'], {
-    description: 'Housekeeping action to apply to the task or room',
-  }),
   notes: SchemaProps.textarea({ description: 'Housekeeping notes or attendant handoff instructions' }),
   filters: SchemaProps.object({}, { description: 'Housekeeping query filters', additionalProperties: true }),
   data: SchemaProps.object({}, { description: 'Housekeeping-specific data', additionalProperties: true }),
@@ -39,7 +36,6 @@ export const HOUSEKEEPING_MANAGER_SKILL = createDeclarativeCodeSkill({
   inputSchema: HOUSEKEEPING_INPUT_SCHEMA,
   outputSchema: HOTEL_EXTERNAL_OUTPUT_SCHEMA,
   tier: 'represent',
-  confirmBeforeSend: true,
   domainKnowledge: 'Hotel housekeeping operations: room turnover sequencing, attendant assignment, cleanliness states, inspection standards, and staffing workload balance.',
   triggers: [
     { kind: 'event', on: 'Room status change requiring housekeeping turnover' },
@@ -49,7 +45,23 @@ export const HOUSEKEEPING_MANAGER_SKILL = createDeclarativeCodeSkill({
   isSkill: true,
   async handler(input, ctx) {
     const tasks = ctx.store.load('housekeeping_tasks');
-    const action = input.action || 'list';
+    function resolveOperation(input: Record<string, unknown>): string {
+      // v9 §1.1 item 3: no routing enum and no free-text `request` field. The
+      // Skill picks the operation from which declared inputs were actually
+      // supplied, so what runs is always what the caller asked for.
+      const has = (...keys: string[]): boolean => keys.some((k) => {
+        const v = (input as Record<string, unknown>)[k];
+        return v != null && v !== '' && !(Array.isArray(v) && !v.length);
+      });
+
+      if (has('taskId')) return 'update';
+      if (has('staffId')) return 'assign';
+      if (has('roomIds')) return 'dispatch';
+      if (has('roomId')) return 'create';
+      // Nothing the caller supplied selects anything more specific, so this runs.
+      return 'create';
+    }
+    const action = resolveOperation(input as Record<string, unknown>);
     if (action === 'create' || action === 'update' || action === 'assign') {
       const newTask = {
         taskId: input.taskId || `task_${Date.now()}`,
@@ -63,7 +75,7 @@ export const HOUSEKEEPING_MANAGER_SKILL = createDeclarativeCodeSkill({
       ctx.store.save('housekeeping_tasks', tasks);
       return {
         success: true,
-        data: { task: newTask, totalTasks: tasks.length },
+        data: { task: newTask, operation: action, totalTasks: tasks.length },
         present: [
           ctx.render.text('housekeeping-update', 'Housekeeping Task Updated', `Task ${newTask.taskId} for Room ${newTask.roomId || 'N/A'} is now ${newTask.status}.`),
         ],
@@ -71,10 +83,10 @@ export const HOUSEKEEPING_MANAGER_SKILL = createDeclarativeCodeSkill({
     }
     return {
       success: true,
-      data: { tasks, totalTasks: tasks.length },
+      data: { tasks, operation: action, totalTasks: tasks.length },
       present: [
         ctx.render.text('housekeeping-list', 'Housekeeping Tasks', `Total active housekeeping tasks: ${tasks.length}`),
       ],
     };
-  },
-});
+      },
+    });

@@ -11,6 +11,7 @@
     "lint:md": "markdownlint --config .markdownlint.json \"**/*.md\"",
     "test": "jest",
     "test:integration": "jest --testPathPatterns=tests/integration",
+    "adk:validate": "ts-node --transpile-only services/tool-executor/src/adk/cli.ts",
     "dev": "ts-node-dev --respawn src/index.ts",
     "lint": "eslint --config eslint.config.js services/tool-executor/src services/worker-pool/src shared-nextgen/src --ext .ts,.js --ignore-pattern '**/dist/**'"
   },

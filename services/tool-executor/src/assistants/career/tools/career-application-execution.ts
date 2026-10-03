@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
 import { careerResultSchema } from '../career-contract';
@@ -24,6 +25,8 @@ const CAREER_APPLY_EXECUTE_INPUT = {
 
 const CAREER_APPLY_EXECUTE = createDeclarativeCodeSkill({
   id: 'career-application-execution',
+  domainKnowledge: 'Application submission mechanics: resume and cover-letter assembly from stored templates, portal form handling, and submission tracking against an ATS.',
+  tier: 'represent',
   name: 'Apply to Jobs',
   description: 'Submits applications to one or more jobs using the stored resume and a generated or selected cover letter. Supports bulk apply, dry-run, and tracking of submitted vs failed applications. Can use saved templates via career-resume-template-manager.',
   persistenceEnvVar: 'CAREER_HOME',

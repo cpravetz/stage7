@@ -1,12 +1,12 @@
 import { ToolExecutor } from '../services/ToolExecutor';
-import { legalSkills } from '../data/skills/legal';
-import { supportSkills } from '../data/skills/support';
-import { educationSkills } from '../data/skills/education';
-import { hrSkills } from '../data/skills/hr';
-import { scriptwritingSkills } from '../data/skills/scriptwriting';
-import { sportsSkills } from '../data/skills/sports';
-import { productSkills } from '../data/skills/product';
-import { marketingSkills } from '../data/skills/marketing';
+import { legalSkills } from '../assistants/legal';
+import { supportSkills } from '../assistants/support';
+import { educationSkills } from '../assistants/education';
+import { hrSkills } from '../assistants/hr';
+import { scriptwritingSkills } from '../assistants/scriptwriting';
+import { sportsSkills } from '../assistants/sports';
+import { productSkills } from '../assistants/product';
+import { marketingSkills } from '../assistants/marketing';
 import { createDeclarativeCodeSkill } from '../data/skills/code-skill-factory';
 import { Tool } from '../types';
 

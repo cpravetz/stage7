@@ -84,5 +84,6 @@ export const songwriterGenreTrendEvaluator = createExternalActionSkill({
   tier: 'advise',
   domainKnowledge: 'Music industry trend analysis, genre evolution tracking, chart performance metrics, streaming data interpretation, audience preference shifts',
   timeoutMs: 120000,
+  manifest: { actionLabel: 'Evaluate genre trends' },
   isSkill: true,
 });

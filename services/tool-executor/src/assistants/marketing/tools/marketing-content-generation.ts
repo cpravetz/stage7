@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { createExternalActionSkill } from '../../../adk/code-skill-factory';
 import { EXTERNAL_OUTPUT_SCHEMA } from '../marketing-contract';
 
@@ -7,6 +8,11 @@ export const MARKETING_CONTENT_GENERATION = createExternalActionSkill({
       { kind: 'event', on: 'Content brief received for campaign asset creation' },
     ],
     id: 'marketing-content-generation',
+    // v9: an aid Skill assembles aids and returns a work product; it does not
+// write to an external system. This one reaches a provider and mutates there,
+// so it is represent and sits behind the approval gate.
+  tier: 'represent',
+    isSkill: false,
     name: 'Marketing Content Generation',
     description: 'Create, revise, schedule, and publish campaign content through a configurable CMS or content platform.',
     system: 'cms',
@@ -14,7 +20,6 @@ export const MARKETING_CONTENT_GENERATION = createExternalActionSkill({
     // Writes campaign content into a connected CMS. The sibling channels
     // (social, email, document-management) all gate their live dispatch, so
     // this one must too.
-    confirmBeforeSend: true,
     endpoint: { configKey: 'MARKETING_CMS_ENDPOINT', method: 'POST' },
     auth: {
       type: 'api_key',

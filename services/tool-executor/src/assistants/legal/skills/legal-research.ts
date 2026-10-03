@@ -38,7 +38,8 @@ const LEGAL_RESEARCH = createDeclarativeCodeSkill({
     required: ['success'],
   },
   isSkill: true,
-  tier: 'aid',
+  tier: 'advise',
+  manifest: { actionLabel: 'Research a legal question', lowerOrderTools: ['legal-analyze-clauses'] },
   domainKnowledge: 'Statutory and case-law research methodology, jurisdictional hierarchy, citation formatting, and precedent analysis',
   triggers: [
     { kind: 'user', phrase_examples: ['Research a legal question', 'Search statutes', 'Search case law'] },

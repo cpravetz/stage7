@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
 
@@ -44,7 +45,6 @@ const PORTAL_RECRUITER_WORKFLOW = createDeclarativeCodeSkill({
   persistenceEnvVar: 'STORAGE_DIR',
   inputSchema: PORTAL_RECRUITER_WORKFLOW_INPUT,
   outputSchema: PORTAL_RECRUITER_WORKFLOW_OUTPUT,
-  confirmBeforeSend: true,
   triggers: [
 { kind: 'user', phrase_examples: ['Submit my applications', 'Draft recruiter outreach', 'Run my portal workflow'] },
 ],

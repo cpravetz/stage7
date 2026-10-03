@@ -1,10 +1,10 @@
 // @ts-nocheck
+
 import { Tool } from '../../../types';
 import { createDeclarativeCodeSkill, createSchemaRecord, SchemaProps } from '../../../adk/code-skill-factory';
 import { restaurantResultSchema, RESTAURANT_SAFETY_BOUNDARY, RESTAURANT_PRESENT_SCHEMA } from '../restaurant-contract';
 
 const FINANCIAL_FORECAST_CONFIG = createSchemaRecord({
-  confirmBeforeSend: SchemaProps.boolean({ description: 'Require confirmation before applying forecast-driven changes', default: false }),
   forecastHorizonDays: SchemaProps.number({ description: 'Default forecast horizon in days', default: 12 }),
   varianceThresholdPercent: SchemaProps.number({ description: 'Default variance threshold as a percentage (e.g., 10 = 10%)', default: 10 }),
   highVarianceAlertThreshold: SchemaProps.number({ description: 'Number of high-variance periods before alert', default: 3 }),
@@ -46,7 +46,6 @@ export const RESTAURANT_FINANCIAL_FORECAST_EVALUATOR = createDeclarativeCodeSkil
   isSkill: true,
   tier: 'advise',
   domainKnowledge: 'Restaurant P&L accounting, variance analysis, demand forecasting, menu engineering economics, and inventory reorder logic',
-  confirmBeforeSend: false,
   manifest: {
     configSchema: FINANCIAL_FORECAST_CONFIG
   },

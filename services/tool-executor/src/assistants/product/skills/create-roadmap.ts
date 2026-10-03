@@ -1,8 +1,11 @@
 // @ts-nocheck
+
 import { createDeclarativeCodeSkill } from '../../../adk/code-skill-factory';
 
 export const CREATE_ROADMAP = createDeclarativeCodeSkill({
     id: 'create-roadmap',
+    tier: 'advise',
+    isSkill: true,
     name: 'Create Roadmap',
     description: 'Generate a product roadmap with RICE-prioritized goals, topologically-sorted initiatives, capacity planning, milestones, risk assessment, theme allocation, and OKR alignment.',
     persistenceEnvVar: 'STORAGE_DIR',
@@ -60,7 +63,10 @@ export const CREATE_ROADMAP = createDeclarativeCodeSkill({
       required: ['success', 'roadmap'],
     },
     triggers: [{ kind: 'user', phrase_examples: ["Create a roadmap", "Plan a release", "Check roadmap status"] }],
-    manifest: {},
+    manifest: {
+      // Publishing the roadmap to the team is the delivery half of this Skill.
+      lowerOrderTools: ['product-slack', 'product-calendar'],
+    },
     handler: async function handler(input, ctx) {
         function round2(n) { return Math.round(n * 100) / 100; }
         function round4(n) { return Math.round(n * 10000) / 10000; }

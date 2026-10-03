@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
 import { salesResultSchema } from '../sales-contract';
 
@@ -68,7 +69,6 @@ const outreachDrafting = createDeclarativeCodeSkill({
   },
   outputSchema: salesResultSchema('Drafted messages with subject variants, skipped templates, and coverage of supplied values'),
   triggers: [{ kind: 'user', phrase_examples: ['Draft an outreach email', 'Write a follow-up', 'Create an email sequence'] }],
-  confirmBeforeSend: false,
   isSkill: true,
   async handler(input, ctx) {
     const NL = '\n';

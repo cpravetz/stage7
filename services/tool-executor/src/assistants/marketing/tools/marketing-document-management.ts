@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { createExternalActionSkill } from '../../../adk/code-skill-factory';
 import { EXTERNAL_OUTPUT_SCHEMA } from '../marketing-contract';
 
@@ -7,6 +8,8 @@ export const MARKETING_DOCUMENT_MANAGEMENT = createExternalActionSkill({
       { kind: 'event', on: 'Document update received for marketing asset' },
     ],
     id: 'marketing-document-management',
+    tier: 'represent',
+    isSkill: false,
     name: 'Marketing Document Management',
     description: 'Create, store, retrieve, and organize marketing assets and campaign documents in a configurable document system.',
     system: 'document-management',

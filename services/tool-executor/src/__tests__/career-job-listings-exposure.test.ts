@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { ToolExecutor } from '../services/ToolExecutor';
 import { Tool } from '../types';
-import { CAREER_JOB_DISCOVERY, CAREER_RANK, JOB_DISCOVERY_FIT_RANKING, CAREER_APPLY_EXECUTE } from '../data/skills/career';
+import { CAREER_JOB_DISCOVERY, CAREER_RANK, JOB_DISCOVERY_FIT_RANKING, CAREER_APPLY_EXECUTE } from '../assistants/career';
 
 /**
  * The postings a job search found must be reachable as postings, not only as a count.

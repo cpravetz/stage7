@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
 
 const SCRIPT_FORMATTING_INPUT = {
@@ -56,7 +57,6 @@ export const SCRIPT_FORMATTING_SUBMISSION_MANAGER = createDeclarativeCodeSkill({
     { kind: 'user', phrase_examples: ['Format this script for submission', 'Lay this out as a Fountain screenplay', 'Prepare this draft for a platform'] },
   ],
   tier: 'represent',
-  confirmBeforeSend: true,
   domainKnowledge: 'Screenplay formatting standards (Master Scene Heading style), script submission platforms, industry formatting guidelines',
   isSkill: true,
   manifest: {
@@ -65,7 +65,6 @@ export const SCRIPT_FORMATTING_SUBMISSION_MANAGER = createDeclarativeCodeSkill({
     credentialSource: {
       apiKey: { configKey: 'apiKey', required: false, label: "upstream service API key (set in this Skill configuration, or a vault secret)" },
     },
-    confirmBeforeSend: true,
     endpointConfigKey: 'submissionEndpointUrl'
   },
   handler: async function handler(input, ctx) {

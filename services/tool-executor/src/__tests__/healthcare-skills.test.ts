@@ -1,11 +1,11 @@
 import { ToolExecutor } from '../services/ToolExecutor';
 import { Tool } from '../types';
 import { validateAgainstOutputSchema } from '../utils/schemaValidator';
-import { healthcareClinicalDecisionSupportEvaluator } from '../data/skills/healthcare/healthcare-clinical-decision-support-evaluator';
-import { healthcareClinicalPracticeWorkflowEvaluator } from '../data/skills/healthcare/healthcare-clinical-practice-workflow-evaluator';
-import { healthcarePatientCarePlanEducationalBriefingCopilot } from '../data/skills/healthcare/healthcare-patient-care-plan-educational-briefing-copilot';
-import { APPOINTMENT_PATIENT_INTAKE_DISPATCHER } from '../data/skills/healthcare/healthcare-appointment-patient-intake-dispatcher';
-import { careResourceReferralCoordinator } from '../data/skills/healthcare/care-resource-referral-coordinator';
+import { healthcareClinicalDecisionSupportEvaluator } from '../assistants/healthcare/skills/healthcare-clinical-decision-support-evaluator';
+import { healthcareClinicalPracticeWorkflowEvaluator } from '../assistants/healthcare/skills/healthcare-clinical-practice-workflow-evaluator';
+import { healthcarePatientCarePlanEducationalBriefingCopilot } from '../assistants/healthcare/skills/healthcare-patient-care-plan-educational-briefing-copilot';
+import { APPOINTMENT_PATIENT_INTAKE_DISPATCHER } from '../assistants/healthcare/skills/healthcare-appointment-patient-intake-dispatcher';
+import { careResourceReferralCoordinator } from '../assistants/healthcare/skills/care-resource-referral-coordinator';
 
 interface PresentBlock {
   id: string;

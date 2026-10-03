@@ -1,14 +1,15 @@
 // @ts-nocheck
+
 import { SchemaProps, createExternalActionSkill } from '../../../adk/code-skill-factory';
 import { HEALTHCARE_EXTERNAL_OUTPUT_SCHEMA } from '../healthcare-contract';
 
 export const RECORDS_SCHEDULING_OPS = createExternalActionSkill({
   id: 'healthcare-records-scheduling-ops',
+  isSkill: false,
   name: 'Records & Scheduling Ops',
   description: 'Manage medical records, apply tags, search records, schedule appointments, and optimize provider schedules through the healthcare records and scheduling system.',
   tier: 'represent',
   domainKnowledge: 'Medical records management, appointment scheduling, and provider schedule optimization',
-  confirmBeforeSend: true,
   system: 'healthcare',
   action: 'records-scheduling',
   endpoint: { configKey: 'HEALTHCARE_OPS_ENDPOINT', method: 'POST' },

@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { Tool, SchemaRecord } from '../../../types';
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
 
@@ -39,6 +40,8 @@ const CAREER_ADD_TEMPLATE_OUTPUT = {
 
 const CAREER_ADD_TEMPLATE = createDeclarativeCodeSkill({
   id: 'career-add-template',
+  domainKnowledge: 'Resume and cover-letter template management: named, versioned, variable-substituted documents reused across applications.',
+  tier: 'aid',
   isSkill: false,
   name: 'Add Template',
   description: 'Register a new resume or cover letter template in the career workspace. Templates are named, versioned, and can be reused across applications with variable substitution.',

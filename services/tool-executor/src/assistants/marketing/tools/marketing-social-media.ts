@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { createExternalActionSkill } from '../../../adk/code-skill-factory';
 import { EXTERNAL_OUTPUT_SCHEMA } from '../marketing-contract';
 
@@ -7,6 +8,8 @@ export const MARKETING_SOCIAL_MEDIA = createExternalActionSkill({
       { kind: 'schedule', cadence: 'Scheduled social content publishing' },
     ],
     id: 'marketing-social-media',
+    tier: 'represent',
+    isSkill: false,
     name: 'Marketing Social Media',
     description: 'Create, schedule, publish, and monitor social posts across configurable social media platforms.',
     system: 'social',

@@ -66,6 +66,61 @@ export function mayDeliverExternally(tier: unknown): boolean {
   return tier === 'represent';
 }
 
+/**
+ * Action ids that only read. Every other declared action is treated as writing.
+ *
+ * The set is deliberately small and each entry is a reviewable claim about a
+ * named capability, because getting it wrong in the permissive direction removes
+ * an approval prompt from a real write. Adding an entry is a product decision.
+ */
+export const READ_ONLY_EXTERNAL_ACTIONS: ReadonlySet<string> = new Set([
+  'market-research',
+  'parse_document',
+  'audit-seo',
+  'search-resources',
+]);
+
+/** Whether a Skill declares a named external action at all. */
+export function declaresExternalAction(tool: Pick<Tool, 'manifest'>): boolean {
+  const manifest = tool.manifest as Record<string, unknown> | undefined;
+  const system = manifest?.system;
+  const action = manifest?.action;
+  return typeof system === 'string' && system !== '' && typeof action === 'string' && action !== '';
+}
+
+/**
+ * Whether a Skill declares an external action that can change remote state.
+ *
+ * `analyze*` is read-only by name, as are the individually reviewed ids in
+ * {@link READ_ONLY_EXTERNAL_ACTIONS}. Everything else — publish, send-*, manage_*,
+ * execute, generate-*, schedule_*, ops — writes, and is assumed to until proven
+ * otherwise, because a missing approval prompt is the failure that matters.
+ */
+export function declaresMutatingExternalAction(tool: Pick<Tool, 'manifest'>): boolean {
+  if (!declaresExternalAction(tool)) return false;
+  const action = (tool.manifest as Record<string, unknown>).action as string;
+  return !action.startsWith('analyze') && !READ_ONLY_EXTERNAL_ACTIONS.has(action);
+}
+
+/**
+ * The effective gate for a Skill, which is not always its tier.
+ *
+ * A `represent` Skill is gated. So is anything that declares a mutating external
+ * action, whatever tier it claims: an `aid` Skill that writes to an external
+ * system has misclassified itself, and the safe reading of that is the strict
+ * one. `adk:validate` reports those separately, so the mismatch gets fixed at
+ * the definition site rather than being normalised away here.
+ */
+export function effectiveGate(tool: Pick<Tool, 'tier' | 'manifest'>): { gated: boolean; reason: 'tier' | 'mutating-action' | 'none' } {
+  if (isGovernanceTier(tool.tier) && TIER_BEHAVIOUR[tool.tier].requiresConfirmation) {
+    return { gated: true, reason: 'tier' };
+  }
+  if (declaresMutatingExternalAction(tool)) {
+    return { gated: true, reason: 'mutating-action' };
+  }
+  return { gated: false, reason: 'none' };
+}
+
 export interface ManualGateFinding {
   path: string;
   message: string;
@@ -103,6 +158,49 @@ export function assertNoManualGate(
 }
 
 /**
+ * Reports a gate written by hand in a capability's source.
+ *
+ * The constructed Skill always carries `confirmBeforeSend`, because the factory
+ * stamps the derived value onto it, so inspecting the Tool cannot tell an author
+ * declaration from a derived field. The source can: a hand-written gate is a
+ * property assignment or a `X.confirmBeforeSend = ...` statement, and nothing
+ * the factory emits looks like that in a definition file.
+ *
+ * Kept alongside {@link assertNoManualGate} rather than replacing it: a caller
+ * holding a plain object with no source still needs the object-level check.
+ */
+export function findManualGateDeclarations(source: string, file: string): ManualGateFinding[] {
+  const findings: ManualGateFinding[] = [];
+  const lines = source.split('\n');
+
+  lines.forEach((line, index) => {
+    const at = `${file}:${index + 1}`;
+
+    // `confirmBeforeSend: ...` in an options or manifest object
+    if (/^\s*confirmBeforeSend\s*:/.test(line)) {
+      findings.push({
+        path: at,
+        message:
+          'declares the approval gate by hand; remove it. The gate is derived from `tier` and from the external action the Skill declares',
+      });
+      return;
+    }
+
+    // `SOME_SKILL.confirmBeforeSend = true` after construction
+    const assigned = /^\s*[A-Za-z_$][\w$.]*\.confirmBeforeSend\s*=/.exec(line);
+    if (assigned) {
+      findings.push({
+        path: at,
+        message:
+          'assigns the approval gate after construction; remove the assignment and set `tier` on the definition instead',
+      });
+    }
+  });
+
+  return findings;
+}
+
+/**
  * Config properties that must never live in `configSchema` because they exist
  * to let a user opt out of a policy gate (checklist §4.3).
  */
@@ -130,6 +228,17 @@ export function gateFieldsFor(tier: GovernanceTier): { confirmBeforeSend: boolea
   return { confirmBeforeSend: TIER_BEHAVIOUR[tier].requiresConfirmation };
 }
 
+/**
+ * The gate fields stamped onto a constructed Skill.
+ *
+ * Tier is the intended answer; a declared mutating external action is the
+ * backstop for a Skill whose tier does not match what its handler does. Taking
+ * the stricter of the two can only ever add an approval prompt, never remove one.
+ */
+export function gateFields(tool: Pick<Tool, 'tier' | 'manifest'>): { confirmBeforeSend: boolean } {
+  return { confirmBeforeSend: effectiveGate(tool).gated };
+}
+
 function isPlain(value: unknown): value is Record<string, any> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -143,21 +252,24 @@ function isPlain(value: unknown): value is Record<string, any> {
  * ungated. Calling it after any tier assignment is what keeps the two in step;
  * it can never loosen the gate, only tighten it to match a stricter tier.
  */
-export function withDerivedGate<T extends Pick<Tool, 'tier'>>(tool: T): T {
-  if (!isGovernanceTier(tool.tier)) return tool;
-  const gate = TIER_BEHAVIOUR[tool.tier];
-  return { ...tool, confirmBeforeSend: gate.requiresConfirmation };
+export function withDerivedGate<T extends Pick<Tool, 'tier' | 'manifest'>>(tool: T): T {
+  return { ...tool, ...gateFields(tool) };
 }
 
 /**
  * Reads the gate off a constructed Skill, preferring the tier as the source of
  * truth and treating the fields as a cached projection of it.
  */
-export function gateOf(tool: Pick<Tool, 'tier' | 'confirmBeforeSend'>): ApprovalGate {
+export function gateOf(tool: Pick<Tool, 'tier' | 'manifest' | 'confirmBeforeSend'>): ApprovalGate {
   if (!isGovernanceTier(tool.tier)) {
     // A Skill with no tier is not "unrestricted"; it is unclassifiable, and the
     // safe reading is the strictest one until it is fixed.
     return { tier: 'represent', ...TIER_BEHAVIOUR.represent };
+  }
+  if (effectiveGate(tool).reason === 'mutating-action') {
+    // The tier says ungated but the Skill declares a write. Report the strict
+    // policy so the caller gates, and let adk:validate flag the mismatch.
+    return { ...TIER_BEHAVIOUR.represent, tier: tool.tier } as ApprovalGate;
   }
   return deriveApproval(tool.tier);
 }

@@ -1,5 +1,5 @@
-import { ctoSkills } from '../data/skills/cto';
-import { ctoCanonicalSkills } from '../data/skills/cto';
+import { ctoSkills } from '../assistants/cto';
+import { ctoCanonicalSkills } from '../assistants/cto';
 import { Tool } from '../types';
 
 function getSkill(id: string): Tool {
@@ -15,8 +15,8 @@ function getCanonical(id: string): Tool {
 }
 
 describe('ctoSkills', () => {
-  it('exports exactly ten CTO domain tools', () => {
-    expect(ctoSkills).toHaveLength(10);
+  it('exports exactly eleven CTO domain tools', () => {
+    expect(ctoSkills).toHaveLength(11);
   });
 
   it('exports unique skill ids', () => {
@@ -24,15 +24,16 @@ describe('ctoSkills', () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it('has four base tools with isSkill:false', () => {
+  it('has five base tools with isSkill:false', () => {
     const base = ctoSkills.filter((s) => s.isSkill === false);
-    expect(base).toHaveLength(4);
+    expect(base).toHaveLength(5);
     const baseIds = base.map((s) => s.id).sort();
     expect(baseIds).toEqual([
       'cto-infrastructure-query',
       'cto-engineering-actions',
       'cto-incident-disaster-readiness',
       'cto-architecture-advisory',
+      'calculate-dora-metrics',
     ].sort());
   });
 
@@ -169,9 +170,14 @@ describe('ctoSkills', () => {
   });
 
   describe('Governance tests', () => {
-    it('Engineering Action & IaC Drift Remediation has confirmBeforeSend in manifest', () => {
+    // Applying infrastructure is an external act, so the gate is mandatory. It
+    // comes from `tier`, which is why the manifest carries no gate field of its
+    // own for anyone to edit.
+    it('Engineering Action & IaC Drift Remediation is gated because it is represent', () => {
       const skill = getSkill('cto-engineering-action-iac-drift-remediation');
-      expect(skill.manifest.confirmBeforeSend).toBe(true);
+      expect(skill.tier).toBe('represent');
+      expect(skill.confirmBeforeSend).toBe(true);
+      expect(skill.manifest).not.toHaveProperty('confirmBeforeSend');
     });
 
     it('Engineering Action & IaC Drift Remediation has configSchema', () => {

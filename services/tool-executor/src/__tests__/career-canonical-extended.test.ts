@@ -1,4 +1,4 @@
-import { careerCanonicalExtendedSkills, careerCanonicalInternalTools, careerGmailSyncTool } from '../data/skills/career-canonical-extended';
+import { careerCanonicalExtendedSkills, careerCanonicalInternalTools, careerGmailSyncTool } from '../adk/career-canonical-extended';
 import { Tool } from '../types';
 
 function getSource(tool: Tool): string {

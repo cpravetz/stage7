@@ -1,8 +1,10 @@
 // @ts-nocheck
+
 import { SchemaProps, createDeclarativeCodeSkill } from '../../../adk/code-skill-factory';
 
 export const CLINICAL_DECISION_SUPPORT = createDeclarativeCodeSkill({
   id: 'healthcare-clinical-decision-support',
+  isSkill: false,
   name: 'Clinical Decision Support',
   description:
     'Clinical reasoning assistant for healthcare professionals. Provides differential diagnosis suggestions, risk assessments, and care plan recommendations with heavy safety caveats. Always recommends consulting a qualified clinician. This tool does not replace clinical judgment.',

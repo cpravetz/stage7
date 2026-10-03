@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { SchemaProps, createDeclarativeCodeSkill } from '../../../adk/code-skill-factory';
 import { HR_DOMAIN_KNOWLEDGE, hrResultSchema } from '../hr-contract';
 

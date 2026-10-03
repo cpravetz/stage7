@@ -12,31 +12,23 @@ import { MARKETING_REPORTS_SCHEDULED } from './skills/marketing-reports-schedule
 import { MARKETING_SEO } from './skills/marketing-seo';
 import { MARKETING_SOCIAL_MEDIA } from './tools/marketing-social-media';
 import { PLAN_CAMPAIGN } from './skills/plan-campaign';
-import { MARKETING_DOMAIN_KNOWLEDGE, MARKETING_EXTERNAL_TOOL_IDS, MARKETING_TIER } from './marketing-contract';
+import { MARKETING_DOMAIN_KNOWLEDGE } from './marketing-contract';
 
 const MARKETING_SKILLS: Tool[] = [PLAN_CAMPAIGN, ANALYZE_PERFORMANCE];
 
 const MARKETING_EXTERNAL_SKILLS: Tool[] = [
     MARKETING_CONTENT_GENERATION,    MARKETING_SOCIAL_MEDIA,    MARKETING_SEO,    MARKETING_MARKET_RESEARCH,    MARKETING_AUDIENCE_INSIGHTS,    MARKETING_EMAIL,    MARKETING_DOCUMENT_MANAGEMENT,];
 
-MARKETING_CENTER.tier = 'represent';
-MARKETING_CENTER.confirmBeforeSend = true;
-MARKETING_CENTER.domainKnowledge = 'Marketing frameworks (AIDA, RACE, buyer journey), channel-specific best practices (SEO, paid social, email), content strategy, campaign measurement';
-MARKETING_CENTER.isSkill = true;
-for (const s of MARKETING_EXTERNAL_SKILLS) {
-  if (MARKETING_EXTERNAL_TOOL_IDS.has(s.id)) {
-    s.isSkill = false;
-  }
+if (!MARKETING_CENTER.domainKnowledge) {
+  MARKETING_CENTER.domainKnowledge = 'Marketing frameworks (AIDA, RACE, buyer journey), channel-specific best practices (SEO, paid social, email), content strategy, campaign measurement';
 }
+// Tier and isSkill are declared where each capability is defined, so they are no
+// longer re-applied from a table here: a second table could disagree with the
+// definition site and the gate would follow whichever ran last. Domain knowledge
+// is descriptive rather than policy, so the shared default is still filled in.
 for (const s of [...MARKETING_SKILLS, ...MARKETING_EXTERNAL_SKILLS]) {
-  if (MARKETING_TIER[s.id]) {
-    (s as Tool).tier = MARKETING_TIER[s.id];
-  }
-  if (MARKETING_DOMAIN_KNOWLEDGE) {
+  if (MARKETING_DOMAIN_KNOWLEDGE && !(s as Tool).domainKnowledge) {
     (s as Tool).domainKnowledge = MARKETING_DOMAIN_KNOWLEDGE;
-  }
-  if ((s as Tool).tier === 'represent' && (s as Tool).confirmBeforeSend === undefined) {
-    (s as Tool).confirmBeforeSend = true;
   }
 }
 

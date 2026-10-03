@@ -1,15 +1,17 @@
 // @ts-nocheck
+
 import { createExternalActionSkill } from '../../../adk/code-skill-factory';
 
 export const PRODUCT_CONFLUENCE = createExternalActionSkill({
     id: 'product-confluence',
+    tier: 'represent',
+    isSkill: false,
     name: 'Confluence Integration',
     description: 'Create and update Confluence pages and spaces. Uses configurable Confluence instance with endpoint and auth.',
     system: 'confluence',
     action: 'manage_page',
     // Creates and updates Confluence pages. Sibling integrations
     // (product-jira, product-slack, product-calendar) all gate their live call.
-    confirmBeforeSend: true,
     endpoint: {
       method: 'POST',
       configKey: 'baseUrl',

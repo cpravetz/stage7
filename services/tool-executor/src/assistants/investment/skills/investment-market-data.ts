@@ -1,4 +1,5 @@
 // @ts-nocheck
+
 import { createDeclarativeCodeSkill, SchemaProps } from '../../../adk/code-skill-factory';
 import { investmentResultSchema } from '../investment-contract';
 
@@ -18,7 +19,6 @@ const marketDataConfigSchema = {
 const marketDataInputSchema = {
   type: 'object',
   properties: {
-    action: SchemaProps.select(['quote', 'historical', 'fundamentals', 'options-chain', 'news', 'economic-calendar', 'search-symbols'], { description: 'Market data action to perform' }),
     symbols: SchemaProps.stringArray({ description: 'Stock symbols to query' }),
     symbol: SchemaProps.text({ description: 'Single stock symbol' }),
     interval: SchemaProps.select(['1m', '5m', '15m', '1h', '1d', '1w', '1mo'], { description: 'Data interval for historical queries' }),
@@ -31,7 +31,7 @@ const marketDataInputSchema = {
     dryRun: SchemaProps.boolean({ description: 'Preview the request without sending it', default: true }),
     confirmation: SchemaProps.boolean({ description: 'Explicit confirmation for a live request' }),
   },
-  required: ['action'],
+  required: ['symbols'],
 };
 
 const INVESTMENT_MARKET_DATA = createDeclarativeCodeSkill({
@@ -42,7 +42,6 @@ const INVESTMENT_MARKET_DATA = createDeclarativeCodeSkill({
   persistenceEnvVar: 'INVESTMENT_HOME',
   inputSchema: marketDataInputSchema,
   outputSchema: investmentResultSchema('Market data request metadata, response, and staging record'),
-  confirmBeforeSend: true,
   timeoutMs: 15000,
   tier: 'represent',
   domainKnowledge: 'Market data retrieval, ticker symbols, OHLCV time series, fundamental ratios, options chains, economic calendar events',
@@ -59,7 +58,6 @@ const INVESTMENT_MARKET_DATA = createDeclarativeCodeSkill({
     },
     configSchema: marketDataConfigSchema,
     endpointConfigKey: 'endpoint',
-    confirmBeforeSend: true,
     timeoutMs: 15000
   },
   handler: async function handler(input, ctx) {
@@ -67,7 +65,15 @@ const INVESTMENT_MARKET_DATA = createDeclarativeCodeSkill({
 
       function arr(v) { return Array.isArray(v) ? v : (v != null ? [v] : []); }
 
-      const action = typeof input.action === 'string' ? input.action.trim() : '';
+      // v9 §1.1 item 3: no routing enum and no free-text `request` field. The
+      // operation is what the caller supplied, not a label they chose.
+      const has = (v: unknown): boolean => v != null && v !== '' && !(Array.isArray(v) && !v.length);
+      const action = has(input.economicCalendar) ? 'economic-calendar'
+        : has(input.news) ? 'news'
+        : has(input.optionsChain) || has(input.optionSymbol) ? 'options-chain'
+        : has(input.fundamentals) ? 'fundamentals'
+        : has(input.startDate) || has(input.interval) ? 'historical'
+        : 'quote';
       const symbols = arr(input.symbols).map(String).filter(function (s) { return s && s.trim(); });
       const symbol = typeof input.symbol === 'string' ? input.symbol.trim() : '';
       const interval = typeof input.interval === 'string' ? input.interval.trim() : '';

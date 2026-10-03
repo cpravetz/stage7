@@ -11,7 +11,7 @@ import {
   CAREER_PIPELINE_REPORT,
   CAREER_OUTCOME,
   CAREER_ADD_TEMPLATE,
-} from '../data/skills/career';
+} from '../assistants/career';
 
 const fs = require('fs');
 const os = require('os');
@@ -679,7 +679,6 @@ describe('Career Coach skills emit user-facing output', () => {
   describe('Resume & Template Manager', () => {
     it('stores a complete resume and presents it without internal paths', async () => {
       const { result, tool } = await run(RESUME_TEMPLATE_MANAGER, {
-        action: 'save',
         name: 'Jane Doe Resume',
         type: 'resume',
         content: 'Jane Doe\nSenior Software Engineer\nExperience: 5 years at TechCo',
@@ -699,7 +698,7 @@ describe('Career Coach skills emit user-facing output', () => {
     }, 15000);
 
     it('reports guidance when save action is invoked without name or content', async () => {
-      const { result } = await run(RESUME_TEMPLATE_MANAGER, { action: 'save' });
+      const { result } = await run(RESUME_TEMPLATE_MANAGER, { save: true });
 
       expect(result.success).toBe(false);
       expect(result.status).toBe('error');

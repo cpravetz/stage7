@@ -8,6 +8,8 @@ import { CONTENT_EXTERNAL_OUTPUT_SCHEMA } from './content-external-schema';
  */
 export const CONTENT_PERFORMANCE_SEO = createExternalActionSkill({
   id: 'content-performance-seo',
+  domainKnowledge: 'Content performance and SEO: engagement analysis across channels, ranking movement, and the audience signals behind both.',
+  tier: 'advise',
   name: 'Content Performance & SEO Insight',
   description: 'Analyze content performance across channels, track SEO rankings, and surface audience insights. Combines analytics, trend analysis, audience insights, and SEO into one hybrid skill.',
   system: 'content_intelligence',

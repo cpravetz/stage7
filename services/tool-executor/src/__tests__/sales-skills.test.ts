@@ -1,9 +1,9 @@
 import { ToolExecutor } from '../services/ToolExecutor';
 import { Tool } from '../types';
 import { validateAgainstOutputSchema } from '../utils/schemaValidator';
-import { LEAD_DEAL_ADVISORY } from '../data/skills/sales/lead-deal-advisory';
-import { OUTREACH_DRAFTING } from '../data/skills/sales/outreach-drafting';
-import { PIPELINE_OPS } from '../data/skills/sales/pipeline-ops';
+import { LEAD_DEAL_ADVISORY } from '../assistants/sales/skills/lead-deal-advisory';
+import { OUTREACH_DRAFTING } from '../assistants/sales/skills/outreach-drafting';
+import { PIPELINE_OPS } from '../assistants/sales/skills/pipeline-ops';
 
 interface PresentBlock {
   id: string;

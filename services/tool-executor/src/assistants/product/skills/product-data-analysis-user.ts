@@ -1,8 +1,12 @@
 // @ts-nocheck
+
 import { createExternalActionSkill } from '../../../adk/code-skill-factory';
 
 export const PRODUCT_DATA_ANALYSIS_USER = createExternalActionSkill({
     id: 'product-data-analysis-user',
+    tier: 'advise',
+    manifest: { actionLabel: 'Analyse product data' },
+    isSkill: true,
     name: 'Product Data Analysis',
     description: 'Analyze product metrics, adoption, retention, and funnels. Uses configurable analytics or BI endpoints.',
     system: 'product_analytics',
