@@ -4,7 +4,7 @@
 
 ## 📚 Documentation Organization
 
-This folder contains system documentation organized by purpose. For **current ADK development**, see [../ADK/](../ADK/).
+This folder contains system documentation organized by purpose. For **current ADK development**, see [ADK/](./ADK/).
 
 ---
 
@@ -13,57 +13,36 @@ This folder contains system documentation organized by purpose. For **current AD
 These documents are actively maintained and reference current system behavior:
 
 ### Core References
-- **[API.md](./CORE_SYSTEMS/API.md)** - PostOffice and system API specifications
-- **[authentication.md](./CORE_SYSTEMS/authentication.md)** - Authentication, JWT tokens, credentials
-- **[message-queue.md](./CORE_SYSTEMS/message-queue.md)** - RabbitMQ and message passing architecture. See also the [RabbitMQ Evaluation Summary](../GEMINI.md) for architectural decision details.
+- **[DEPLOYMENT.md](./DEPLOYMENT.md)** - Production deployment topology and configuration
+- **[USER_GUIDE.md](./USER_GUIDE.md)** - End-user walkthrough of the running system
+- **[../DOCKER_BUILD_GUIDE.md](../DOCKER_BUILD_GUIDE.md)** - Build, launch, and assistant selection
+- **[../env.summary](../env.summary)** - Environment variables each service reads
 
 ### Feature Documentation
-- **[file-upload-documentation.md](./CORE_SYSTEMS/file-upload-documentation.md)** - File upload system
-- **[email_verification_implementation.md](./archive/reference/email_verification_implementation.md)** - Email verification
-- **[github_integration_implementation.md](./archive/reference/github_integration_implementation.md)** - GitHub integration
-- **[BRAIN_SERVICE.md](./CORE_SYSTEMS/BRAIN_SERVICE.md)** - Brain service and LLM coordination
-
-### Integration & Security
-- **[service-discovery-config.md](./archive/reference/service-discovery-config.md)** - Service discovery (Consul)
-- **[security_improvements.md](./CORE_SYSTEMS/security_improvements.md)** - Security hardening
-- **[plugin_config_and_secrets.md](./CORE_SYSTEMS/plugin_config_and_secrets.md)** - Plugin configuration
-
----
-
-## ⚙️ Operational & Enterprise Readiness Guides (New)
-
-These documents provide guidance and roadmaps for critical operational aspects and enterprise readiness.
-
-- **[STAGE7_NEXTGEN_REBUILD_PROPOSAL.md](./STAGE7_NEXTGEN_REBUILD_PROPOSAL.md)** - NextGen architectural rebuild proposal for enterprise scaling, state durability, entity-centric UX, and MCP integration.
+- **[BRAIN_SERVICE notes](../.env.example)** - Provider and cache configuration for the brain service
+- **[SELF_HOSTED_LLM_GUIDE.md](./ACTIVE_REFERENCE/SELF_HOSTED_LLM_GUIDE.md)** - Running LLMs locally
+- **[HYBRID_VALIDATION_SYSTEM.md](./ACTIVE_REFERENCE/HYBRID_VALIDATION_SYSTEM.md)** - Input validation design
 
 ---
 
 ## 🗂️ Deprecated / Superseded
 
-These documents describe architectures or proposals that have been replaced by newer designs.
+The V2 and legacy service documents that once lived in this folder have been removed. Their content
+described containers and services that are not part of the current system (PostOffice,
+CapabilitiesManager, Librarian, Engineer, Mission Control, and the security service).
 
-- **[v2-architecture-overview.md](./v2/v2-architecture-overview.md)** - V2 3-layer architecture (superseded by NextGen)
-- **[QUICK_START.md](./v2/QUICK_START.md)** - V2 quick start guide (superseded by NextGen)
-- **[DEPLOYMENT_GUIDE.md](./v2/DEPLOYMENT_GUIDE.md)** - V2 deployment guidance (superseded by NextGen)
-- **[l2-sdk-api-design.md](./v2/l2-sdk-api-design.md)** - V2 SDK API design (superseded by NextGen)
-- **[plugin-creation-guide.md](./v2/plugin-creation-guide.md)** - V2 plugin creation guide (superseded by NextGen)
-- **[tool-implementation-plan.md](./v2/tool-implementation-plan.md)** - V2 tool implementation planning (superseded by NextGen)
-- **[pm-assistant-tool-plugin-mapping.md](./v2/pm-assistant-tool-plugin-mapping.md)** - V2 PM assistant mappings (superseded by NextGen)
-- **[reusable-assistant-integration-pattern.md](./v2/reusable-assistant-integration-pattern.md)** - V2 reusable integration patterns (superseded by NextGen)
-- **[v2-telemetry-debugging.md](./v2/v2-telemetry-debugging.md)** - V2 telemetry and debugging (superseded by NextGen)
-- **[CTO_ASSISTANT_SERVICE.md](./v2/CTO_ASSISTANT_SERVICE.md)** - V2 CTO assistant service spec (superseded by NextGen)
-
-> **Note**: The V2 architecture has been superseded by the **NextGen** architecture described in [STAGE7_NEXTGEN_REBUILD_PROPOSAL.md](./STAGE7_NEXTGEN_REBUILD_PROPOSAL.md). These documents are retained for historical context only.
+> **Note**: The NextGen architecture is not a proposal. It is the running system described by the
+> root [README](../README.md) and [DOCKER_BUILD_GUIDE.md](../DOCKER_BUILD_GUIDE.md). Design history
+> that predates it is kept in [./archive/](./archive/) for reference only.
 
 ---
 
-## 📈 Strategic & Community Roadmaps (New)
+## 📈 Strategic & Community Roadmaps
 
-These documents outline strategies for market positioning, community growth, and enterprise certifications.
+These documents outline strategies for market positioning, community growth, and enterprise
+certifications.
 
-- **[COMMUNITY_GROWTH_STRATEGY.md](./COMMUNITY_GROWTH_STRATEGY.md)** - Strategy for fostering community and ecosystem growth.
-- **[ENTERPRISE_CERTIFICATION_ROADMAP.md](./ENTERPRISE_CERTIFICATION_ROADMAP.md)** - Roadmap for pursuing enterprise security certifications (SOC 2, ISO 27001).
-- **[MARKET_POSITIONING_STRATEGY.md](./MARKET_POSITIONING_STRATEGY.md)** - Strategic recommendations for market positioning.
+- **[ADK_DEVELOPER_GUIDE.md](./ADK/ADK_DEVELOPER_GUIDE.md)** - Contributor guide for building assistants and skills
 
 ---
 
@@ -98,13 +77,18 @@ See [./archive/](./archive/) for historical design documents and analysis.
 
 Design documentation for specific components. Content here is reference material for architectural understanding:
 
+> **Caveat**: the `*_PLUGIN_DESIGN.md` and `plugin_lifecycles.md` documents in this section predate
+> the current architecture. Their paths and service names (CapabilitiesManager, Librarian, Engineer)
+> refer to containers that no longer exist, and the tools they describe are now skills compiled by
+> the tool-executor. Treat them as design history, not as a map of the current tree. The current
+> model is documented in [ADK/](./ADK/) and in [plugin_lifecycles.md](./ACTIVE_REFERENCE/plugin_lifecycles.md).
+
 - **[EXCEPTION_HANDLING_FRAMEWORK.md](./ACTIVE_REFERENCE/EXCEPTION_HANDLING_FRAMEWORK.md)** - Exception handling patterns
-- **[HYBRID_VALIDATION_SYSTEM.md](./ACTIVE_REFERENCE/HYBRID_VALIDATION_SYSTEM.md)** - Validation system design
-- **[API_CLIENT_PLUGIN_DESIGN.md](./ACTIVE_REFERENCE/API_CLIENT_PLUGIN_DESIGN.md)** - API client plugin architecture
-- **[CODE_EXECUTOR_PLUGIN_DESIGN.md](./ACTIVE_REFERENCE/CODE_EXECUTOR_PLUGIN_DESIGN.md)** - Code execution plugin
-- **[TASK_MANAGER_PLUGIN_DESIGN.md](./ACTIVE_REFERENCE/TASK_MANAGER_PLUGIN_DESIGN.md)** - Task manager plugin
-- **[plugin_lifecycles.md](./ACTIVE_REFERENCE/plugin_lifecycles.md)** - Plugin lifecycle management
-- **[collaboration-services.md](./CORE_SYSTEMS/collaboration-services.md)** - Collaboration service design
+- **[HYBRID_VALIDATION_SYSTEM.md](./ACTIVE_REFERENCE/HYBRID_VALIDATION_SYSTEM.md)** - Input validation design
+- **[API_CLIENT_PLUGIN_DESIGN.md](./ACTIVE_REFERENCE/API_CLIENT_PLUGIN_DESIGN.md)** - API client tool design (historical)
+- **[CODE_EXECUTOR_PLUGIN_DESIGN.md](./ACTIVE_REFERENCE/CODE_EXECUTOR_PLUGIN_DESIGN.md)** - Code execution tool design (historical)
+- **[TASK_MANAGER_PLUGIN_DESIGN.md](./ACTIVE_REFERENCE/TASK_MANAGER_PLUGIN_DESIGN.md)** - Task manager tool design (historical)
+- **[plugin_lifecycles.md](./ACTIVE_REFERENCE/plugin_lifecycles.md)** - Tool lifecycle management (historical)
 
 ---
 
@@ -113,7 +97,6 @@ Design documentation for specific components. Content here is reference material
 - **[SELF_HOSTED_LLM_GUIDE.md](./ACTIVE_REFERENCE/SELF_HOSTED_LLM_GUIDE.md)** - Running LLMs locally
 - **[isolated-vm-migration.md](./archive/reference/isolated-vm-migration.md)** - Isolated VM migration (Stage6 → Stage7)
 - **[llm-enhancements.md](./archive/reference/llm-enhancements.md)** - LLM model improvements
-- **[MODEL_PERFORMANCE_SCORING.md](./CORE_SYSTEMS/MODEL_PERFORMANCE_SCORING.md)** - LLM performance metrics
 - **[Step Architecture.md](./ACTIVE_REFERENCE/Step Architecture.md)** - Step execution architecture
 - **[FRONTEND_MODELS_SERVICES_INTERFACES_GUIDE.md](./archive/reference/FRONTEND_MODELS_SERVICES_INTERFACES_GUIDE.md)** - Frontend architecture
 
@@ -121,7 +104,6 @@ Design documentation for specific components. Content here is reference material
 
 ## 📋 Reference Lists
 
-- **[action_verb_tests.md](./CORE_SYSTEMS/action_verb_tests.md)** - Test vectors for action verbs
 - **[planning_schema.md](./ACTIVE_REFERENCE/planning_schema.md)** - Planning and schema definitions
 
 ---
@@ -150,10 +132,10 @@ Design documentation for specific components. Content here is reference material
 
 ## Navigation
 
-- **For current ADK development**: See [../ADK/INDEX.md](../ADK/INDEX.md)
+- **For current ADK development**: See [ADK/ADK_OVERVIEW.md](./ADK/ADK_OVERVIEW.md)
 - **For historical context**: See [./archive/](./archive/)
 - **For active system docs**: Browse this folder
-- **For deprecated V2 architecture**: See [./v2/](./v2/)
+- **For build and deployment**: See [../DOCKER_BUILD_GUIDE.md](../DOCKER_BUILD_GUIDE.md)
 
 ---
 
