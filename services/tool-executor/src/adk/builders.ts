@@ -1,4 +1,5 @@
 import type { Tool } from '../types';
+import { gateFieldsFor, type GovernanceTier } from './gates';
 import type {
   ApprovalPolicy,
   ApprovalPolicyInput,
@@ -75,10 +76,19 @@ export function assertUnique(values: readonly string[], field: string): void {
   }
 }
 
+/**
+ * Builds a Tool/Skill definition.
+ *
+ * The approval gate is derived from `tier` here rather than accepted as an
+ * input, so a definition assembled by this builder and one assembled by
+ * `createDeclarativeCodeSkill` behave identically at runtime
+ * (ADK_DEVELOPER_GUIDE.md §2.2).
+ */
 export function createTool(parameters: CreateToolParameters): Tool {
   requireText(parameters.id, 'tool id');
   requireText(parameters.name, 'tool name');
   const now = new Date();
+  const gate = parameters.tier ? gateFieldsFor(parameters.tier) : undefined;
   return {
     id: parameters.id,
     name: parameters.name,
@@ -91,7 +101,9 @@ export function createTool(parameters: CreateToolParameters): Tool {
     reasoningConfig: parameters.reasoningConfig,
     externalConfig: parameters.externalConfig,
     triggers: parameters.triggers,
-    confirmBeforeSend: parameters.confirmBeforeSend,
+    schemaVersion: parameters.schemaVersion ?? 1,
+    ...(gate ? { confirmBeforeSend: gate.confirmBeforeSend } : {}),
+    tier: parameters.tier,
     isSkill: parameters.isSkill,
     createdAt: parameters.createdAt ?? now,
     updatedAt: parameters.updatedAt ?? now,

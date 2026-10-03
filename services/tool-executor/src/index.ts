@@ -53,7 +53,7 @@ import {
 import {
   careerCanonicalExtendedSkills,
   careerCanonicalInternalTools,
-} from './data/skills/career-canonical-extended';
+} from './adk/career-canonical-extended';
 
 process.on('unhandledRejection', (reason, promise) => {
   logger.error({ reason: String(reason) }, 'Unhandled Rejection');
@@ -268,5 +268,5 @@ export {
 export {
   careerCanonicalExtendedSkills,
   careerCanonicalInternalTools,
-} from './data/skills/career-canonical-extended';
+} from './adk/career-canonical-extended';
 export default app;

@@ -116,6 +116,19 @@ export interface Tool {
   triggers?: SkillTrigger[];
   reasoningConfig?: Record<string, unknown>;
   externalConfig?: Record<string, unknown>;
+  /**
+   * Version of this Skill's input, config and output schemas.
+   *
+   * Stamped onto records on write and used to select hydration adapters on read,
+   * so a blueprint deployment can be upgraded without a database migration
+   * (ADK_OVERVIEW.md §5).
+   */
+  schemaVersion?: number;
+  /**
+   * Cached projection of `tier`, written by the factory and read by the
+   * executor. Authors do not set it: the gate is derived from the tier and
+   * cannot be declared separately (ADK_DEVELOPER_GUIDE.md §2.2).
+   */
   confirmBeforeSend?: boolean;
   tier?: 'advise' | 'aid' | 'represent';
   domainKnowledge?: string;

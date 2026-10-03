@@ -1,4 +1,5 @@
 import type { SchemaRecord, SkillTrigger, Tool, WorkflowState } from '../types';
+import type { GovernanceTier } from './types';
 
 export type AssistantContextData = Record<string, unknown>;
 export type AssistantConfigurationValues = Record<string, unknown>;
@@ -132,7 +133,10 @@ export interface CreateToolParameters {
   reasoningConfig?: Record<string, unknown>;
   externalConfig?: Record<string, unknown>;
   triggers?: SkillTrigger[];
-  confirmBeforeSend?: boolean;
+  /** Version of the input/config/output schemas; drives write stamping and read hydration. */
+  schemaVersion?: number;
+  /** The single risk tier. It alone determines the approval gate. */
+  tier?: GovernanceTier;
   isSkill?: boolean;
   createdAt?: Date;
   updatedAt?: Date;
