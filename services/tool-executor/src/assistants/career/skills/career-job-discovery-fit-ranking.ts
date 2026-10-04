@@ -30,6 +30,7 @@ minSalary: { type: 'number', description: 'Minimum target compensation. Defaults
 maxSalary: { type: 'number', description: 'Maximum target compensation. Defaults to your saved preference.' },
 autoApplyThreshold: { type: 'number', description: 'If set, automatically submit an application (via Apply to Jobs) to every ranked job scoring at or above this fit score' },
   minRoleScore: { type: 'number', description: 'Hide roles whose title matches none of the searched roles. Defaults to 0.01 when job titles were given, which keeps only roles that matched the search; set to 0 to see everything discovered, including off-target listings.' },
+profileId: { type: 'string', default: 'default', description: 'Profile ID to use for preferences and target roles' },
   dryRun: { type: 'boolean', description: 'Preview auto-applications without submitting; defaults to true', default: true },
 },
 };
@@ -110,8 +111,11 @@ handler: async function handler(input, ctx) {
 
     // Fall back to the stored profile so a plain "run discovery" still searches with the
     // targets, filters and company list the user already saved in Profile Intake.
-    let profile = {};
+    const profileId = input.profileId || 'default';
+    let profile = ctx.store.load('profilePath/' + profileId, {});
+    if (!profile || Object.keys(profile).length === 0) {
     profile = ctx.store.load('profilePath', {});
+    }
     const prefs = profile.preferences || {};
     const companies = (input.companies && input.companies.length) ? input.companies : ((input.targetCompanies && input.targetCompanies.length) ? input.targetCompanies : (prefs.targetCompanies || []));
     const jobTitles = (input.jobTitles && input.jobTitles.length) ? input.jobTitles : ((profile.targetTitles && profile.targetTitles.length) ? profile.targetTitles : (prefs.targetRoles || []));
@@ -180,7 +184,7 @@ handler: async function handler(input, ctx) {
     const roleFloor = typeof input.minRoleScore === 'number' ? input.minRoleScore : (jobTitles.length ? 0.01 : 0);
     let rankResult = null;
     if (listings.length) {
-    rankResult = await ctx.delegate('career-rank', { items: listings, jobTitles: jobTitles, minRoleScore: roleFloor });
+    rankResult = await ctx.delegate('career-rank', { items: listings, jobTitles: jobTitles, minRoleScore: roleFloor, profileId: profileId });
     }
     const ranked = rankResult && rankResult.success && rankResult.data ? (Array.isArray(rankResult.data.ranked) ? rankResult.data.ranked : []) : [];
     const droppedOffTarget = rankResult && rankResult.data && Array.isArray(rankResult.data.droppedOffTarget) ? rankResult.data.droppedOffTarget : [];

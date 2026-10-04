@@ -879,7 +879,9 @@ return this.executeOrRequestCredentials(pending.tool, pending.input);
     const confirmBeforeSend = tool.confirmBeforeSend === true || (tool.manifest?.confirmBeforeSend === true);
     // Every execution re-derives its own gate, so reset the approval marker here
     // rather than letting a previous run's approval leak into this one.
-    this.currentExecutionApproved = false;
+    if (this.nestedExecutionDepth === 0) {
+      this.currentExecutionApproved = false;
+    }
     if (!confirmBeforeSend) {
       this.setWorkflowState(executionId, 'analysis');
       return;

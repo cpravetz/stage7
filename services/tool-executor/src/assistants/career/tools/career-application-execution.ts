@@ -80,7 +80,7 @@ const CAREER_APPLY_EXECUTE = createDeclarativeCodeSkill({
     // written by career-job-discovery. Reading it as a bare array left storedListings as
     // that envelope, so the .find below threw a TypeError on every run that reached it.
     // Accept either shape so an older bare-array file still works.
-    const storedListingsRaw = ctx.store.load('listings/default', []);
+    const storedListingsRaw = ctx.store.load('listPath', []);
     const storedListings = Array.isArray(storedListingsRaw)
       ? storedListingsRaw
       : (storedListingsRaw && Array.isArray(storedListingsRaw.listings) ? storedListingsRaw.listings : []);
@@ -100,11 +100,13 @@ const CAREER_APPLY_EXECUTE = createDeclarativeCodeSkill({
         continue;
       }
       if (dryRun) {
-        applications.push({ identifier: job.id, status: 'dry_run', job: { title: job.title, company: job.company }, appliedAt: new Date().toISOString() });
+        applications.push({ identifier: job.id, title: job.title, company: job.company, status: 'dry_run', job: { title: job.title, company: job.company }, appliedAt: new Date().toISOString() });
         continue;
       }
       applications.push({
         identifier: job.id,
+        title: job.title,
+        company: job.company,
         status: 'submitted',
         job: { title: job.title, company: job.company, location: job.location },
         resumeUsed: customResume ? 'custom' : 'default',
@@ -116,12 +118,26 @@ const CAREER_APPLY_EXECUTE = createDeclarativeCodeSkill({
 
     for (const app of applications) {
       const idx = tracking.findIndex((t) => t.identifier === app.identifier);
-      if (idx >= 0) tracking[idx] = app;
-      else tracking.push(app);
+      if (idx >= 0) {
+        // Only overwrite if the new status is "more final" than the existing one.
+        // Priority: submitted > dry_run > pending/other
+        const existing = tracking[idx];
+        const existingPriority = existing.status === 'submitted' ? 2 : (existing.status === 'dry_run' ? 1 : 0);
+        const newPriority = app.status === 'submitted' ? 2 : (app.status === 'dry_run' ? 1 : 0);
+        if (newPriority >= existingPriority) {
+          tracking[idx] = app;
+        }
+      } else {
+        tracking.push(app);
+      }
     }
-    ctx.store.save('applications/tracking', tracking);
-
     const submitted = applications.filter((a) => a.status === 'submitted').length;
+    // Only persist real submissions: a dry run is a preview and must not seed the
+    // tracking store with entries that look like real applications.
+    if (submitted > 0) {
+      ctx.store.save('applications/tracking', tracking);
+    }
+
     const lines = [
       dryRun ? 'Application Preview (dry run - nothing was submitted)' : 'Applications Submitted',
       '================================================',

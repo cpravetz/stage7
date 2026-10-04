@@ -336,14 +336,41 @@ function stripHtml(html) {
     .trim();
 }
 
+// Epoch magnitude guard. Feeds disagree on the unit: remoteok and jobicy send
+// ISO strings, but arbeitnow sends \`created_at\` as a NUMBER of SECONDS since the
+// epoch. Treating a bare number as milliseconds (which is what the old code did
+// unconditionally) placed every arbeitnow listing in 1970-01-21 — 56 years in the
+// past — which silently broke recency ranking and any "posted recently" filter.
+//
+// 1e11 ms is 1973-03-03, and 1e11 s is the year 5138, so any plausible
+// milliseconds timestamp is far above the threshold while any plausible seconds
+// timestamp is far below it. Values under it are therefore seconds.
+const EPOCH_SECONDS_CEILING = 1e11;
+
+function scaleEpochNumber(value) {
+  return Math.abs(value) < EPOCH_SECONDS_CEILING ? value * 1000 : value;
+}
+
 // NaN-safe date parse. \`Date.parse(s) || undefined\` is wrong twice: it also
 // nulls a valid epoch 0, and Date.parse returns NaN for anything unparseable,
 // which is falsy so it happens to work — but the \`0\` case silently drops a real
 // 1970 timestamp. Check Number.isNaN explicitly.
+//
+// A purely numeric STRING must not reach Date.parse: it reads a bare digit run as
+// a YEAR, so "1791117029" (arbeitnow's created_at, stringified) became 1970-01-21
+// rather than a date. Numbers are scaled to the right unit; all other strings go
+// to Date.parse as before.
 function toEpochMs(value) {
   if (value === null || value === undefined || value === '') return null;
-  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
-  const parsed = Date.parse(value);
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? scaleEpochNumber(value) : null;
+  }
+  const text = String(value).trim();
+  if (/^[+-]?\d+$/.test(text)) {
+    const numeric = Number(text);
+    return Number.isFinite(numeric) ? scaleEpochNumber(numeric) : null;
+  }
+  const parsed = Date.parse(text);
   return Number.isNaN(parsed) ? null : parsed;
 }
 

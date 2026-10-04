@@ -1,4 +1,4 @@
-import { OpenAICompatibleProvider } from '../providers/OpenAICompatibleProvider';
+import { OpenAICompatibleProvider, OpenAICompatibleConfig } from '../providers/OpenAICompatibleProvider';
 
 const mockFetchProvider = jest.fn();
 
@@ -7,7 +7,7 @@ jest.mock('../utils/providerFetch', () => ({
   providerTimeoutMs: 30000,
 }));
 
-function providerWith(payload: unknown, id = 'testprovider') {
+function providerWith(payload: unknown, id = 'testprovider', extra: Partial<OpenAICompatibleConfig> = {}) {
   mockFetchProvider.mockResolvedValue({ ok: true, json: async () => payload });
   return new OpenAICompatibleProvider({
     id,
@@ -16,6 +16,7 @@ function providerWith(payload: unknown, id = 'testprovider') {
     apiKey: 'key',
     defaultModels: [],
     listModelsPath: '/models',
+    ...extra,
   });
 }
 
@@ -168,5 +169,42 @@ describe('OpenAICompatibleProvider.listModels metadata parsing', () => {
       // filters in ModelRouter, which both treat costPer1kTokens === 0 as free.
       expect(models.every((m) => m.costPer1kTokens > 0)).toBe(true);
     });
+  });
+});
+
+describe('OpenAICompatibleProvider excludeModelIds', () => {
+  beforeEach(() => mockFetchProvider.mockReset());
+
+  // The model must never reach the router, rather than being filtered at
+  // routing time, so it can neither be auto-selected nor survive as an
+  // explicit modelId request.
+  it('drops excluded ids from the discovered catalogue', async () => {
+    const models = await providerWith(
+      { data: [{ id: 'apodex/apodex-1.1-mini:free' }, { id: 'openrouter/other:free' }] },
+      'openrouter',
+      { excludeModelIds: ['apodex/apodex-1.1-mini:free'] },
+    ).listModels();
+    expect(models.map((m) => m.id)).toEqual(['openrouter/other:free']);
+  });
+
+  it('drops excluded ids from the declared defaults too', async () => {
+    mockFetchProvider.mockResolvedValue({ ok: false, status: 500, text: async () => 'boom' });
+    const models = await providerWith(null, 'openrouter', {
+      excludeModelIds: ['apodex/apodex-1.1-mini:free'],
+      defaultModels: [
+        { id: 'apodex/apodex-1.1-mini:free', capabilities: ['chat'], maxTokens: 8192, costPer1kTokens: 0 },
+        { id: 'openrouter/other:free', capabilities: ['chat'], maxTokens: 8192, costPer1kTokens: 0 },
+      ],
+    }).listModels();
+    expect(models.map((m) => m.id)).toEqual(['openrouter/other:free']);
+  });
+
+  it('matches ids exactly, without prefix or case leniency', async () => {
+    const models = await providerWith(
+      { data: [{ id: 'apodex/apodex-1.1-mini:free' }, { id: 'apodex/apodex-1.1-mini' }] },
+      'openrouter',
+      { excludeModelIds: ['apodex/apodex-1.1-mini:free'] },
+    ).listModels();
+    expect(models.map((m) => m.id)).toEqual(['apodex/apodex-1.1-mini']);
   });
 });

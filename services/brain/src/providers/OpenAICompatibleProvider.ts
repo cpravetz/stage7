@@ -73,6 +73,11 @@ export interface OpenAICompatibleConfig {
   apiKey?: string;
   defaultModels: Array<{ id: string; capabilities: string[]; maxTokens: number; costPer1kTokens: number }>;
   extraHeaders?: Record<string, string>;
+  // Model ids the provider must never expose through listModels(), so they are
+  // never registered with the router. Use this for catalogue entries that are
+  // advertised but unusable (e.g. free models that leak scratchpad regardless
+  // of the system prompt). Filtering here keeps the router purely declarative.
+  excludeModelIds?: string[];
   listModelsPath?: string;
   chatCompletionsPath?: string;
   completionsPath?: string;
@@ -85,6 +90,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
   private apiBase: string;
   private apiKey?: string;
   private extraHeaders: Record<string, string>;
+  private excludeModelIds: Set<string>;
   private defaultModels: OpenAICompatibleConfig['defaultModels'];
   private listModelsPath?: string;
   private chatCompletionsPath: string;
@@ -97,6 +103,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
     this.apiBase = config.apiBase.replace(/\/+$/, '');
     this.apiKey = config.apiKey;
     this.extraHeaders = config.extraHeaders || {};
+    this.excludeModelIds = new Set(config.excludeModelIds || []);
     this.defaultModels = config.defaultModels;
     this.listModelsPath = config.listModelsPath;
     this.chatCompletionsPath = config.chatCompletionsPath || '/chat/completions';
@@ -125,6 +132,10 @@ export class OpenAICompatibleProvider implements LLMProvider {
     return !!this.apiBase;
   }
 
+  private isExcluded(id: string): boolean {
+    return this.excludeModelIds.has(id);
+  }
+
   async listModels(): Promise<Array<{ id: string; capabilities: string[]; maxTokens: number; costPer1kTokens: number }>> {
     if (this.modelCache) return this.modelCache;
     if (this.listModelsPath) {
@@ -140,7 +151,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
           const arr = Array.isArray(data) ? data : (data.data || []);
           const mapped = arr.map((m: Record<string, unknown>) => {
             const id = m.id || (m as any).name || '';
-            if (!id) return null;
+            if (!id || this.isExcluded(id)) return null;
             const cost = readCostPer1kTokens(m);
             const isEmbedding = id.includes('embed') || (m.architecture as any)?.modality === 'embedding';
             if (isEmbedding) return { id, capabilities: ['embedding'], maxTokens: readContextWindow(m), costPer1kTokens: cost };
@@ -166,8 +177,9 @@ export class OpenAICompatibleProvider implements LLMProvider {
         // fall through to defaults
       }
     }
-    this.modelCache = this.defaultModels;
-    return this.defaultModels;
+    const defaults = this.defaultModels.filter((m) => !this.isExcluded(m.id));
+    this.modelCache = defaults;
+    return defaults;
   }
 
   async complete(req: CompletionRequest): Promise<CompletionResponse> {

@@ -79,7 +79,11 @@ const CAREER_RANK = createDeclarativeCodeSkill({
   },
   handler: async function handler(input, ctx) {
       const items = Array.isArray(input.items) ? input.items : (input.items && input.items.listings ? input.items.listings : []);
-      const profile = ctx.store.load('profilePath', {});
+      const profileId = input.profileId || 'default';
+      let profile = ctx.store.load('profilePath/' + profileId, {});
+      if (!profile || Object.keys(profile).length === 0) {
+        profile = ctx.store.load('profilePath', {});
+      }
       const prefs = profile.preferences || {};
 
       // Role heaviest by a wide margin. The remaining axes are context the candidate
@@ -147,7 +151,9 @@ const CAREER_RANK = createDeclarativeCodeSkill({
         const sa = stem(a);
         const sb = stem(b);
         if (sa === sb) return true;
-        return sa.length >= 3 && sb.length >= 3 && (sa.startsWith(sb) || sb.startsWith(sa));
+        // No prefix matching - it causes false positives like "manager" matching "management"
+        // "engineer" matching "engineering", "product" matching "production"
+        return false;
       }
 
       // Graded rather than binary. The old check was `title.includes(role)`, so a role

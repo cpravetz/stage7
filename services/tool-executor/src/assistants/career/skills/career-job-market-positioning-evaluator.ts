@@ -24,6 +24,7 @@ const JOB_MARKET_POSITIONING_EVALUATOR_INPUT = {
       type: 'object',
       description: 'Job listings to position against, when discovery has not been run yet',
     },
+    profileId: { type: 'string', default: 'default', description: 'Profile ID to use for positioning' },
   },
 };
 
@@ -63,20 +64,6 @@ const JOB_MARKET_POSITIONING_EVALUATOR = createDeclarativeCodeSkill({
   inputSchema: JOB_MARKET_POSITIONING_EVALUATOR_INPUT,
   outputSchema: JOB_MARKET_POSITIONING_EVALUATOR_OUTPUT,
   triggers: [
-    // Schedule only. This Skill was also given a `user` trigger so the panel
-    // would appear -- the comment said so outright ("the 'user' trigger is what
-    // marks a tool as user-invocable"). That is the trigger backwards: a User
-    // trigger means a person supplies something, and this Skill has no inputs at
-    // all. It reads the profile from career-profile-intake and the listings from
-    // the store, both upstream. So it rendered a bare Run button with no fields,
-    // no output, and nothing for the user to act on.
-    //
-    // The Schedule trigger is what actually runs it, and it is the only trigger
-    // here that something really does honour: no career Skill emits an event or
-    // declares a `consumes` edge, so an Event trigger would be a second
-    // over-promise. Wiring career-job-discovery's emitEvent to a real Event
-    // trigger is the correct end state, and is left as follow-up rather than
-    // inventing an event nothing fires.
     { kind: 'schedule', cadence: 'After job discovery completes' },
   ],
   tier: 'advise',
@@ -88,12 +75,9 @@ const JOB_MARKET_POSITIONING_EVALUATOR = createDeclarativeCodeSkill({
     actionLabel: 'Evaluate positioning'
   },
   handler: async function handler(input, ctx) {
-      // A supplied resume short-circuits the stored-profile lookup: the caller
-      // handed us the document, so reading a different one from the store would
-      // silently position the wrong career.
       const suppliedResume = String((input && input.resume) || '').trim();
 
-      const profileRes = suppliedResume ? { success: true, data: { resumeText: suppliedResume } } : await ctx.delegate('career-profile-intake', {});
+      const profileRes = suppliedResume ? { success: true, data: { resumeText: suppliedResume } } : await ctx.delegate('career-profile-intake', { profileId: input.profileId || 'default' });
       if (!profileRes || !profileRes.success) {
         return {
           success: false,
@@ -109,13 +93,6 @@ const JOB_MARKET_POSITIONING_EVALUATOR = createDeclarativeCodeSkill({
       }
       const profile = profileRes.data && profileRes.data.profile ? profileRes.data.profile : profileRes.data || profileRes;
 
-      // Reuse listings already found by the "Job Discovery & Fit Ranking" skill instead of
-      // asking the user to re-enter the same job titles and target compensation here.
-      // Read the listings array out of the stored file. Job discovery writes an OBJECT envelope
-      // carrying { listings, byBoard, failures, ... }, not a bare array. Assigning the parsed
-      // envelope straight to the listings variable made its .length undefined, so the
-      // "reuse the stored search" branch below never fired and this skill re-ran a full
-      // discovery on every call.
       let listings = [];
       const suppliedMarket = input && input.market;
       if (Array.isArray(suppliedMarket)) {
@@ -133,25 +110,14 @@ const JOB_MARKET_POSITIONING_EVALUATOR = createDeclarativeCodeSkill({
       let discovery = null;
       let rank = null;
       if (!listings.length) {
-      // No prior search results yet: derive a starting query from the candidate's own profile.
       const inferredTitles = (profile && profile.targetTitles) || (profile && profile.personal && profile.personal.headline ? [profile.personal.headline] : []) || [];
       discovery = await ctx.delegate('career-job-discovery', { queries: inferredTitles });
       rank = await ctx.delegate('career-rank', { items: (discovery && discovery.data && discovery.data.listings) || (discovery && discovery.data) || [] });
+      } else if (listings.length) {
+      // Rank the stored listings against the profile's target titles
+      rank = await ctx.delegate('career-rank', { items: listings, jobTitles: profile && profile.targetTitles ? profile.targetTitles : [] });
       }
 
-      // Upstream discovery run statuses this skill must carry rather than flatten into "ok":
-      //   ok       - every source answered. A clean pass, reported clean.
-      //   no-match - every source answered and genuinely had no matching roles. A legitimate
-      //              empty, not a failure and not a partial.
-      //   partial  - some sources answered, others could not be retrieved or parsed at all.
-      //   failed   - no source could be retrieved. A total failure.
-      //   blocked  - nothing to search.
-      // A market read built on a partial discovery is a partial read: the boards that could
-      // not be reached are missing from the market signals, not empty, so this skill reports
-      // status 'partial' with a non-null error and the failed sources listed, instead of a
-      // clean 'ok' that would read as a complete view of the market. A discovery that failed
-      // outright is not degraded, it produced no market data at all, and is reported as a
-      // failure of this run rather than as a successful positioning read.
       const discoveryStatus = discovery && typeof discovery.status === 'string' ? discovery.status : null;
       const discoveryError = discovery && discovery.error ? String(discovery.error) : null;
       const discoveryData = discovery && discovery.data && typeof discovery.data === 'object' ? discovery.data : {};
@@ -161,17 +127,17 @@ const JOB_MARKET_POSITIONING_EVALUATOR = createDeclarativeCodeSkill({
       const discoverySignal = discovery ? { status: discoveryStatus || (discovery.success === false ? 'failed' : 'ok'), failures: discoveryFailures, failureCount: discoveryFailures.length, byBoard: discoveryData.byBoard || [] } : null;
 
       function failureLines(list) {
-      return list.map((f) => '  [FAILED] ' + ((f && f.board) || 'unknown source') + ' u2014 ' + ((f && f.note) || 'this source could not be retrieved or read')).join('\n');
+      return list.map((f) => '  [FAILED] ' + ((f && f.board) || 'unknown source') + ' \u2014 ' + ((f && f.note) || 'this source could not be retrieved or read')).join('\n');
       }
       function discoveryBlock(status, error) {
       const lines = [status === 'blocked' ? 'MARKET POSITIONING HAD NO MARKET DATA' : 'MARKET POSITIONING FAILED', status === 'blocked' ? '=============================' : '=======================', '', error];
       if (discoveryFailures.length) lines.push('', 'Sources attempted:', failureLines(discoveryFailures));
-      return { id: 'failure', title: status === 'blocked' ? 'No market data to position against' : 'Market positioning FAILED u2014 no job source could be retrieved', kind: 'text', body: lines.join('\n') };
+      return { id: 'failure', title: status === 'blocked' ? 'No market data to position against' : 'Market positioning FAILED \u2014 no job source could be retrieved', kind: 'text', body: lines.join('\n') };
       }
       function partialBlock(error) {
       return {
         id: 'partial',
-        title: 'PARTIAL MARKET READ u2014 ' + discoveryFailures.length + ' source' + (discoveryFailures.length === 1 ? '' : 's') + ' were never read',
+        title: 'PARTIAL MARKET READ \u2014 ' + discoveryFailures.length + ' source' + (discoveryFailures.length === 1 ? '' : 's') + ' were never read',
         kind: 'text',
         body: [
           'PARTIAL MARKET READ. This positioning is not a complete answer about the job market.',
@@ -190,34 +156,91 @@ const JOB_MARKET_POSITIONING_EVALUATOR = createDeclarativeCodeSkill({
         summary: resumeText ? 'Profile parsed; limited market signals until you run Job Discovery & Fit Ranking.' : 'Profile found but no market data available; run Job Discovery & Fit Ranking first for richer positioning',
         strengths: profile && profile.personal ? Object.keys(profile.personal).filter(k=>!!profile.personal[k]) : [],
       };
-      // Discovery did not answer, so there is no market to position against. That is a
-      // failure of the run, not a clean pass that happened to return nothing: the
-      // profile-only blurb is still returned, but the status and error say why it is thin.
       const status = discoveryStatus === 'blocked' ? 'blocked' : 'failed';
       const error = discoveryError || (status === 'blocked'
         ? 'MARKET POSITIONING BLOCKED. There was nothing to search: no job titles could be derived from the profile, so no job source was consulted and this run produced no market positioning.'
         : 'MARKET POSITIONING FAILED. Job discovery did not answer, so no job source could be read and this run produced no market positioning at all. It did not determine that the market is empty.');
 
-      return;
+      return {
+        success: false,
+        status: status,
+        delegatedTo: ['career-profile-intake', 'career-job-discovery', 'career-rank'],
+        data: {
+          marketSignals: { listingsUsed: 'none', discovery: discoverySignal, discoveryStatus: discoveryStatus || (discovery ? 'ok' : null), rank: null },
+          recommendation: positioning,
+          failures: discoveryFailures,
+          failureCount: discoveryFailures.length,
+          complete: false,
+          note: error,
+          generatedAt: new Date().toISOString(),
+        },
+        error: error,
+        present: [
+          discoveryBlock(status, error),
+        ],
+        generatedAt: new Date().toISOString(),
+      };
       }
 
-      const ranked = listings.length ? listings : ((rank && rank.success && rank.data && rank.data.ranked) || (discovery && discovery.success && discovery.data && discovery.data.listings) || []);
-      // The discovery payload is carried through, but not opaquely: its run status and its
-      // per-source retrieval failures ride with it, so the signal block itself records that
-      // the market read is missing sources rather than looking like a complete one.
+      // Prefer ranked results from the rank delegate; fall back to raw listings
+      const ranked = (rank && rank.success && rank.data && Array.isArray(rank.data.ranked) && rank.data.ranked.length)
+        ? rank.data.ranked
+        : (listings.length ? listings : ((discovery && discovery.success && discovery.data && discovery.data.listings) || []));
       const carriedDiscovery = discovery && discovery.success ? Object.assign({}, discoveryData, { status: discoveryStatus || 'ok', failures: discoveryFailures, failureCount: discoveryFailures.length }) : null;
       const marketSignals = { listingsUsed: listings.length ? 'stored-from-job-discovery' : 'live-lookup', discovery: carriedDiscovery, discoveryStatus: discoveryStatus || (discovery ? 'ok' : null), rank: rank && rank.success ? rank.data : null };
+
+      // Extract profile skills for gap analysis
+      const profileSkills = (profile && Array.isArray(profile.skills)) ? profile.skills.map(function (s) { return String(s).toLowerCase(); }) : [];
+
+      // Broad keyword set covering tech, marketing, product, and general business
+      const SKILL_KEYWORDS = [
+        // Technical
+        'sql', 'python', 'aws', 'gcp', 'azure', 'kubernetes', 'docker', 'react', 'typescript', 'java', 'go', 'rust',
+        // Marketing & Growth
+        'seo', 'sem', 'ppc', 'google ads', 'meta ads', 'facebook ads', 'email marketing', 'klaviyo', 'mailchimp', 'hubspot', 'marketo', 'braze',
+        'content marketing', 'content strategy', 'copywriting', 'social media', 'influencer marketing', 'affiliate marketing',
+        'growth marketing', 'demand generation', 'lead generation', 'conversion rate optimization', 'cro', 'a/b testing',
+        'analytics', 'google analytics', 'ga4', 'mixpanel', 'amplitude', 'tableau', 'looker', 'data analysis',
+        'marketing automation', 'crm', 'salesforce', 'customer journey', 'segmentation', 'personalization',
+        // Product Marketing
+        'product marketing', 'go-to-market', 'gtm', 'positioning', 'messaging', 'competitive intelligence', 'sales enablement',
+        'product launch', 'product adoption', 'user research', 'market research', 'pricing', 'packaging',
+        // General Business
+        'project management', 'agile', 'scrum', 'jira', 'asana', 'budget management', 'strategic planning',
+        'cross-functional', 'stakeholder management', 'presentation', 'communication', 'leadership'
+      ];
+
+      const topRoleSkills = new Set();
+      ranked.slice(0, 5).forEach(function (r) {
+        if (r && Array.isArray(r.skills)) r.skills.forEach(function (s) { topRoleSkills.add(String(s).toLowerCase()); });
+        const tokens = new Set(String((r && r.description) || '').toLowerCase().split(/[^a-z0-9+#]+/));
+        SKILL_KEYWORDS.forEach(function (kw) { if (tokens.has(kw)) topRoleSkills.add(kw); });
+      });
+      const missingSkills = Array.from(topRoleSkills).filter(function (s) { return !!s && !profileSkills.includes(s); });
+      const suggestedProfileEdits = missingSkills.slice(0, 10).map(function (s) { return 'Add "' + s + '" to your skills section'; });
+
       const recommendation = {
       topRoles: ranked.slice(0, 5),
-      targetComp: (ranked[0] && (ranked[0].estimatedCompensation || ranked[0].compensation)) || null,
-      suggestedProfileEdits: []
+      targetComp: (ranked[0] && (ranked[0].estimatedCompensation || ranked[0].compensation || ranked[0].salary)) || null,
+      suggestedProfileEdits: suggestedProfileEdits
       };
 
-      // A partial discovery produced a real but incomplete market read, so the run is
-      // partial. A discovery that failed outright produced no read at all: the rank step is
-      // fed from that same empty answer, so the empty ranking below is a consequence of the
-      // failure and is not a legitimate empty market. That run fails, rather than passing a
-      // market read off as complete when no source was ever read.
+      // Fallback: estimate compensation from role seniority if no salary data
+      if (!recommendation.targetComp && ranked.length > 0) {
+        const title = String(ranked[0].title || '').toLowerCase();
+        let estimate = null;
+        if (title.includes('director') || title.includes('vp') || title.includes('head of')) {
+          estimate = { min: 150000, max: 250000, currency: 'USD', raw: 'Estimated for Director+' };
+        } else if (title.includes('senior') || title.includes('lead') || title.includes('principal')) {
+          estimate = { min: 120000, max: 180000, currency: 'USD', raw: 'Estimated for Senior/Lead' };
+        } else if (title.includes('manager')) {
+          estimate = { min: 90000, max: 140000, currency: 'USD', raw: 'Estimated for Manager' };
+        } else {
+          estimate = { min: 70000, max: 110000, currency: 'USD', raw: 'Estimated for Individual Contributor' };
+        }
+        recommendation.targetComp = estimate;
+      }
+
       const runStatus = discoveryFailed ? 'failed' : (discoveryPartial ? 'partial' : 'ok');
       const runError = runStatus === 'ok'
       ? null
@@ -233,10 +256,32 @@ const JOB_MARKET_POSITIONING_EVALUATOR = createDeclarativeCodeSkill({
       recommendation.topRoles.forEach(function (r, i) {
       positioningLines.push((i + 1) + '. ' + (r && (r.title || r.text)) + (r && r.company ? ' at ' + r.company : '') + (r && r.score != null ? ' (fit ' + r.score + ')' : ''));
       });
+      if (recommendation.suggestedProfileEdits.length) {
+      positioningLines.push('');
+      positioningLines.push('Profile gaps against these roles (' + recommendation.suggestedProfileEdits.length + '):');
+      recommendation.suggestedProfileEdits.forEach(function (edit) { positioningLines.push('  - ' + edit); });
+      }
       const presentBlocks = [];
       if (runStatus === 'failed') presentBlocks.push(discoveryBlock('failed', runError));
       presentBlocks.push({ id: 'positioning', title: 'Market Positioning', kind: 'text', body: positioningLines.join('\n') });
       if (runStatus === 'partial') presentBlocks.push(partialBlock(runError));
+
+      return {
+        success: true,
+        status: runStatus,
+        data: {
+          marketSignals,
+          recommendation,
+          failures: discoveryFailures,
+          failureCount: discoveryFailures.length,
+          complete: runStatus !== 'partial' && runStatus !== 'failed',
+          delegatedTo: ['career-profile-intake', 'career-job-discovery', 'career-rank'],
+          note: runError,
+          generatedAt: new Date().toISOString(),
+        },
+        error: runError,
+        present: presentBlocks,
+      };
     }
   });
 JOB_MARKET_POSITIONING_EVALUATOR.configSchema = CAREER_WRAPPER_CONFIG_SCHEMA;

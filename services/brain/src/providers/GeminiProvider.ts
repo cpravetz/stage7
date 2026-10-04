@@ -7,11 +7,14 @@ export class GeminiProvider implements LLMProvider {
   readonly info: ProviderInfo;
   private apiKey?: string;
   private apiBase = 'https://generativelanguage.googleapis.com';
-  private defaultModels = [
-    { id: 'gemini-2.0-flash-exp', capabilities: ['chat', 'vision', 'code', 'reasoning', 'search'], maxTokens: 1048576, costPer1kTokens: 0 },
-    { id: 'gemini-1.5-pro', capabilities: ['chat', 'vision', 'code', 'reasoning'], maxTokens: 2097152, costPer1kTokens: 1.25 },
-    { id: 'gemini-1.5-flash', capabilities: ['chat', 'vision', 'code'], maxTokens: 1048576, costPer1kTokens: 0.075 },
-  ];
+  // Every model this provider used to advertise is retired upstream:
+  // gemini-2.0-flash answers 404 "no longer available", and the 1.5 ids answer
+  // 404 "not found for API version v1beta". Advertising them kept the router
+  // picking them as free candidates, so requests burned a 404 (and tripped this
+  // provider's breaker) before reaching a working provider.
+  // The provider stays registered for callers pinned to a known-good Gemini id,
+  // but it contributes no models to auto-routing.
+  private defaultModels: Array<{ id: string; capabilities: string[]; maxTokens: number; costPer1kTokens: number }> = [];
 
   constructor() {
     this.apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;

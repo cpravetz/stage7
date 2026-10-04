@@ -46,11 +46,15 @@ export function buildProviderRegistry(): LLMProvider[] {
       listModelsPath: process.env.OPENROUTER_LIST_MODELS_PATH || '/models',
       chatCompletionsPath: process.env.OPENROUTER_CHAT_PATH || '/chat/completions',
       completionsPath: process.env.OPENROUTER_COMPLETIONS_PATH || '/completions',
+      // OpenRouter advertises this model as free, which makes it win the router's
+      // free-only ordering, but it ignores the system prompt and prefixes every
+      // reply with a "Thinking Process:" scratchpad. Never advertise it.
+      excludeModelIds: ['apodex/apodex-1.1-mini:free'],
       defaultModels: [
         { id: 'openai/gpt-4o', capabilities: ['chat', 'vision', 'code', 'reasoning'], maxTokens: 128000, costPer1kTokens: 2.5 },
         { id: 'openai/gpt-4o-mini', capabilities: ['chat', 'vision', 'code', 'reasoning'], maxTokens: 128000, costPer1kTokens: 0.15 },
         { id: 'anthropic/claude-3.5-sonnet', capabilities: ['chat', 'code', 'reasoning', 'creative'], maxTokens: 200000, costPer1kTokens: 3 },
-        { id: 'google/gemini-2.0-flash-exp', capabilities: ['chat', 'code', 'reasoning'], maxTokens: 1048576, costPer1kTokens: 0 },
+        { id: 'google/gemini-1.5-flash', capabilities: ['chat', 'code', 'reasoning'], maxTokens: 1048576, costPer1kTokens: 0 },
         { id: 'deepseek/deepseek-chat', capabilities: ['chat', 'code', 'reasoning'], maxTokens: 64000, costPer1kTokens: 0.14 },
         { id: 'meta-llama/llama-4-maverick', capabilities: ['chat', 'vision', 'code'], maxTokens: 128000, costPer1kTokens: 0.18 },
       ],

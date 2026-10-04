@@ -138,13 +138,51 @@ const INTERVIEW_COMPENSATION_BATTLECARD = createDeclarativeCodeSkill({
 
       // Pulls displayable text out of a delegation payload. A reasoning callee returns
       // { summary, _raw, _model, ... } where summary is the model's answer.
+      //
+      // Cached career-advisory answers can still open with the model's own
+      // "Thinking Process:" trace and close with a self-check about hallucination, so the
+      // text is scrubbed before it can reach a presentation card. DELIVERABLE_ONLY_SYSTEM_PROMPT
+      // in career-lower-order-tools.ts prevents this at the source; this is the backstop for
+      // answers already sitting in the cache.
       function delegatedText(payload) {
       if (!payload) return null;
-      if (typeof payload === 'string') return payload.trim() ? payload : null;
+      if (typeof payload === 'string') return cleanDelegatedText(payload);
       if (typeof payload !== 'object') return null;
-      if (typeof payload.summary === 'string' && payload.summary.trim()) return payload.summary;
-      if (typeof payload._raw === 'string' && payload._raw.trim()) return payload._raw;
+      if (typeof payload.summary === 'string' && payload.summary.trim()) return cleanDelegatedText(payload.summary);
+      if (typeof payload._raw === 'string' && payload._raw.trim()) return cleanDelegatedText(payload._raw);
       return null;
+      }
+
+      // Drops the reasoning trace a cached answer can carry: the leading
+      // "Thinking Process:" block, and a trailing hallucination self-check. Returns null
+      // when nothing displayable is left, so a delegation that was only ever a trace is
+      // treated as unanswered and still falls through to the direct brain call.
+      function cleanDelegatedText(text) {
+      if (!text) return null;
+      let body = text;
+      // Leading trace: the paragraph after the marker is the reasoning, and the
+      // deliverable is whatever follows the first blank line past it. The two markers
+      // are handled in sequence rather than as alternatives, because one cached answer
+      // can carry both an opening trace and a closing self-check.
+      const thinkingIdx = body.indexOf('Thinking Process:');
+      if (thinkingIdx >= 0) {
+      const nextSection = body.indexOf('\n\n', thinkingIdx);
+      // No blank line past the marker means there is no deliverable to keep.
+      if (nextSection < 0) return null;
+      body = body.slice(nextSection + 2);
+      }
+      // Trailing self-check: the model's audit of its own answer is not advice for the
+      // candidate either, so it is cut from whatever survives the leading-trace pass.
+      const selfCheckIdx = body.indexOf('Self-Check:');
+      if (selfCheckIdx >= 0) body = body.slice(0, selfCheckIdx);
+      const hallucinationIdx = body.indexOf('Hallucination');
+      if (hallucinationIdx >= 0 && /hallucinat/i.test(body.slice(hallucinationIdx))) {
+      body = body.slice(0, hallucinationIdx);
+      }
+      body = body.trim();
+      // Null, not '', so a payload that was only ever a trace is treated as unanswered
+      // and still falls through to the direct brain call.
+      return body ? body : null;
       }
 
       // Resolves a topic from its delegated tool, falling back to a direct brain call
@@ -184,7 +222,7 @@ const INTERVIEW_COMPENSATION_BATTLECARD = createDeclarativeCodeSkill({
       }
 
       function brainBaseUrl() {
-      return String(ctx.config?.brainEndpoint || '').trim();
+      return String(ctx.config?.brainEndpoint || process.env.BRAIN_URL || 'http://brain:3100').trim();
       }
 
       async function callBrain(prompt) {
@@ -234,7 +272,8 @@ const INTERVIEW_COMPENSATION_BATTLECARD = createDeclarativeCodeSkill({
       // whole answer renders as one bullet.
       function brainPrepPayload(t) {
         if (!t) return null;
-        return { summary: t, questions: t.split('\n').filter(function (l) { return l.trim().length > 0; }) };
+        const cleaned = cleanDelegatedText(t);
+        return cleaned ? { summary: cleaned, questions: cleaned.split('\n').filter(function (l) { return l.trim().length > 0; }) } : null;
       }
       function brainProsePayload(t) {
         return t ? { summary: t } : null;
@@ -254,7 +293,19 @@ const INTERVIEW_COMPENSATION_BATTLECARD = createDeclarativeCodeSkill({
         else brainBacked.push('interview-prep');
         coverage.push('interview-prep');
         const d = prepResult.payload;
-        questions = d.questions || d.q_and_a || (delegatedText(d) ? [delegatedText(d)] : []);
+        // career-interview-prep returns questions in summary (prose) or questions array
+        if (Array.isArray(d.questions) && d.questions.length) {
+          questions = d.questions.map(cleanDelegatedText).filter(Boolean);
+        } else if (typeof d.summary === 'string' && d.summary.trim()) {
+          // Split prose summary into lines, filter non-empty
+          questions = d.summary.split('\n').map(cleanDelegatedText).filter(Boolean);
+        } else if (typeof d.q_and_a === 'string' && d.q_and_a.trim()) {
+          questions = d.q_and_a.split('\n').map(cleanDelegatedText).filter(Boolean);
+        } else {
+          // Fallback to delegatedText which handles the full payload
+          const text = delegatedText(d);
+          questions = text ? [text] : [];
+        }
       } else {
         missing.push('interview-prep');
       }

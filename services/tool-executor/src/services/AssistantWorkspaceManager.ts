@@ -462,6 +462,7 @@ export class AssistantWorkspaceManager {
       confirmBeforeSend: skill.confirmBeforeSend,
       isSkill: skill.isSkill,
       available: true,
+      actionLabel: skill.actionLabel || skill.manifest?.actionLabel as string | undefined,
     }));
 
     const allowedTransitions = this.getAllowedTransitions(workspaceId);

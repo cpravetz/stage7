@@ -154,6 +154,8 @@ services:
       - .env
     environment:
       - STAGE7_ASSISTANTS=${STAGE7_ASSISTANTS}
+      - BRAIN_FALLBACK_MODEL=google/gemini-1.5-flash
+      - BRAIN_FALLBACK_PROVIDER=openrouter
     depends_on:
       - redis
       - artifacts

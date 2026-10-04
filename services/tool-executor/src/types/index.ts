@@ -303,6 +303,7 @@ export interface RuntimeWorkflowAction {
   isSkill?: boolean;
   available: boolean;
   reason?: string;
+  actionLabel?: string;
 }
 
 export interface RuntimeWorkflow {

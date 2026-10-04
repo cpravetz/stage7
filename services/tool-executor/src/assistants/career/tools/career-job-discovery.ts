@@ -225,7 +225,16 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
     // 1970 timestamp. Check Number.isNaN explicitly.
     function toEpochMs(value) {
       if (value === null || value === undefined || value === '') return null;
-      if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+      if (typeof value === 'number') {
+        if (!Number.isFinite(value)) return null;
+        // Values < 1e11 are epoch seconds (since 1e11 ms ≈ 1973, 1e11 s ≈ 5138).
+        // Arbeitnow and similar feeds use epoch seconds. Scale them to milliseconds.
+        return value < 1e11 ? value * 1000 : value;
+      }
+      if (typeof value === 'string' && /^\d+$/.test(value)) {
+        const num = Number(value);
+        return num < 1e11 ? num * 1000 : num;
+      }
       const parsed = Date.parse(value);
       return Number.isNaN(parsed) ? null : parsed;
     }
@@ -1443,7 +1452,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
             applyUrl: j.url || '',
             source: 'arbeitnow',
             sourceUrl: j.url || 'https://www.arbeitnow.com',
-            postedAt: j.created_at || '',
+            postedAt: toEpochMs(j.created_at),
             employmentType: j.job_types || '',
             department: Array.isArray(j.tags) ? j.tags.join(', ') : (j.tags || ''),
             salary: null,

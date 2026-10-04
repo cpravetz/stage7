@@ -49,7 +49,7 @@ const CAREER_PIPELINE_REPORT = createDeclarativeCodeSkill({
     actionLabel: 'Show pipeline'
   },
   handler: async function handler(input, ctx) {
-      const tracking = ctx.store.load('trackingPath', []);
+      const tracking = ctx.store.load('applications/tracking', []);
 
       const byStatus = {};
       for (const t of tracking) {
@@ -59,9 +59,20 @@ const CAREER_PIPELINE_REPORT = createDeclarativeCodeSkill({
 
       const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
       const staleFollowUps = tracking.filter((t) => {
-      const applied = t.appliedAt ? new Date(t.appliedAt).getTime() : 0;
-      return applied && applied < sevenDaysAgo && (t.status === 'submitted' || t.status === 'dry_run');
+        const applied = t.appliedAt ? new Date(t.appliedAt).getTime() : 0;
+        return applied && applied < sevenDaysAgo && (t.status === 'submitted' || t.status === 'dry_run');
       });
+
+      return {
+        success: true,
+        data: {
+          tracking,
+          byStatus,
+          total: tracking.length,
+          staleFollowUps,
+          generatedAt: new Date().toISOString(),
+        },
+      };
     }
   });
 CAREER_PIPELINE_REPORT.configSchema = CAREER_BASE_CONFIG_SCHEMA;

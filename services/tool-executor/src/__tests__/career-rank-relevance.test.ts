@@ -150,7 +150,18 @@ describe('job fit ranking is graded against the searched role', () => {
   });
 
   it('does not give every listing the same rating', async () => {
-    const out = await rank({ items: LISTINGS, jobTitles: ['Engineering Manager'] });
+    // With stricter prefix matching removed, listings must share role terms to score
+    // above the floor. Add a near-miss listing so the set has more than one score.
+    const items = LISTINGS.concat([{
+      id: 'job-eng-director',
+      title: 'Director of Engineering',
+      company: 'Acme',
+      remote: true,
+      location: 'Remote - EU',
+      applyUrl: 'https://acme.example.com/apply/eng-dir',
+      description: 'Lead the engineering organization.',
+    }]);
+    const out = await rank({ items, jobTitles: ['Engineering Manager'] });
     const scores = new Set((out.data!.ranked || []).map((r) => r.score));
     expect(scores.size).toBeGreaterThan(1);
   });
@@ -161,9 +172,11 @@ describe('job fit ranking is graded against the searched role', () => {
     expect(ranked[0].title).toBe('Engineering Manager, Platform');
     expect(ranked[0].relevance).toBe('on-target');
 
+    // With prefix matching removed, only listings sharing role terms are ranked.
+    // 'Senior .NET Software Engineer' no longer matches 'Engineering Manager'
+    // via prefix, so it is held back as off-target rather than graded adjacent.
     const byId = new Map(ranked.map((r) => [r.id, r]));
-    // A near miss is graded as adjacent, not as a match and not as noise.
-    expect(byId.get('job-dotnet')!.relevance).toBe('adjacent');
+    expect(byId.has('job-dotnet')).toBe(false);
   });
 
   it('holds back postings whose title is a different role entirely', async () => {
@@ -174,8 +187,9 @@ describe('job fit ranking is graded against the searched role', () => {
     expect(keptIds).not.toContain('job-csr');
     expect(keptIds).not.toContain('job-hr');
     expect(keptIds).not.toContain('job-marketing');
-    expect(droppedIds).toEqual(expect.arrayContaining(['job-csr', 'job-hr', 'job-marketing']));
-    expect(out.data!.droppedOffTargetCount).toBe(3);
+    expect(keptIds).not.toContain('job-dotnet');
+    expect(droppedIds).toEqual(expect.arrayContaining(['job-csr', 'job-hr', 'job-marketing', 'job-dotnet']));
+    expect(out.data!.droppedOffTargetCount).toBe(4);
   });
 
   it('returns everything when the caller asks to see off-target postings', async () => {

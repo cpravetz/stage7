@@ -95,6 +95,31 @@ export interface SkillConfig {
 }
 ```
 
+### 2.3 Skill Manifest Properties
+
+The `manifest` object in `SkillConfig` carries static metadata and UX hints. The following properties are recognized:
+
+| Property | Type | Description |
+| --- | --- | --- |
+| `actionLabel` | `string` | **Recommended for all Skills with `isSkill: true`.** The text displayed on the Action Button in the Overview panel. Should be a concise verb phrase describing what the Skill *does* (e.g., "Search & Rank", "Generate upskill plan", "Start mock interview"). |
+| `lowerOrderTools` | `string[]` | Array of tool IDs that this Skill orchestrates. Used for dependency resolution and audit trails. |
+| `emitEvent` | `string` | Event name emitted when the Skill completes successfully. Enables event-driven chaining between Skills. |
+| `configSchema` | `JSONSchemaObject` | (Duplicate of top-level) Configuration schema for the Skill. |
+
+If `actionLabel` is omitted, the factory resolves the button text to the Skill's own `name` rather than a
+generic "Run" (see `resolveActionLabel` in `code-skill-factory.ts`), and `npm run adk:validate` emits an
+`overview-action` warning. Declare it explicitly so the button stays short enough to read.
+
+**Example:**
+
+```typescript
+manifest: {
+  actionLabel: 'Search & Rank',
+  lowerOrderTools: ['career-job-discovery', 'career-rank'],
+  emitEvent: 'career.search.completed'
+}
+```
+
 ---
 
 ## 3. Schemas, Configs, and Secret Flagging

@@ -2,6 +2,19 @@ import { Tool } from '../../../types';
 
 const now = () => new Date();
 
+// Both reasoning Tools below feed their `summary` straight into a user-facing
+// presentation card, so the model must return only the finished deliverable.
+// Without this the raw reasoning trace leaked into the card: a mock-interview
+// session opened with the model's "Thinking Process", and its closing lines were
+// self-checks about hallucination rather than advice for the candidate.
+const DELIVERABLE_ONLY_SYSTEM_PROMPT = [
+  'You are an expert career coach.',
+  'Reply with the finished deliverable only.',
+  'Never include your reasoning, chain of thought, planning notes, scratch work, or self-critique in the reply.',
+  'Do not narrate what you are about to do or how you decided to do it.',
+  'Write directly to the candidate in plain prose, with no meta-commentary about the response itself.',
+].join(' ');
+
 export const CAREER_INTERVIEW_PREP: Tool = {
   id: 'career-interview-prep',
   domainKnowledge: 'Interview preparation: role- and company-specific question sets, likely follow-ups, and preparation guidance.',
@@ -12,7 +25,9 @@ export const CAREER_INTERVIEW_PREP: Tool = {
   type: 'reasoning',
   manifest: {},
   reasoningConfig: {
-    promptTemplate: 'Prepare interview guidance for company {{input}}. Return focused interview questions, evaluation areas, and preparation advice as plain text.',
+    systemPrompt: DELIVERABLE_ONLY_SYSTEM_PROMPT,
+    promptTemplate:
+      'Prepare interview guidance for company {{input}}. Return focused interview questions, evaluation areas, and preparation advice as plain text. Output only that guidance: no preamble, no analysis of the request, and no closing remarks about your own answer.',
     maxTokens: 2048,
     temperature: 0.4,
     optimizeFor: 'accuracy',
@@ -34,7 +49,9 @@ export const CAREER_ADVISORY: Tool = {
   type: 'reasoning',
   manifest: {},
   reasoningConfig: {
-    promptTemplate: 'Provide career advisory guidance for this request: {{input}}. Include practical recommendations, assumptions, and next steps as plain text.',
+    systemPrompt: DELIVERABLE_ONLY_SYSTEM_PROMPT,
+    promptTemplate:
+      'Provide career advisory guidance for this request: {{input}}. Include practical recommendations, assumptions, and next steps as plain text. Output only that guidance: no preamble, no analysis of the request, and no closing remarks about your own answer.',
     maxTokens: 2048,
     temperature: 0.4,
     optimizeFor: 'accuracy',

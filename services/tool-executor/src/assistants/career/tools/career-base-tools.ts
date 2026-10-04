@@ -64,7 +64,8 @@ const CAREER_PROFILE_INTAKE = createDeclarativeCodeSkill({
   },
   handler: async function handler(input, ctx) {
       const profileId = input.profileId || 'default';
-      const existing = ctx.store.load('profilePath', {});
+      const storageKey = 'profilePath/' + profileId;
+      const existing = ctx.store.load(storageKey, {});
       const profile = Object.assign({
       id: profileId,
       personal: { name: '', email: '', phone: '', location: '', headline: '' },
@@ -75,7 +76,7 @@ const CAREER_PROFILE_INTAKE = createDeclarativeCodeSkill({
       jobSearch: { status: 'active', startDate: new Date().toISOString(), applicationsSubmitted: 0, interviewsScheduled: 0, offersReceived: 0, rejectionsReceived: 0 },
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      }, existing);
+      }, existing, { id: profileId }); // Ensure id is always the requested profileId
       if (input.name) profile.personal.name = input.name;
       if (input.email) profile.personal.email = input.email;
       if (input.phone) profile.personal.phone = input.phone;
@@ -89,12 +90,22 @@ const CAREER_PROFILE_INTAKE = createDeclarativeCodeSkill({
       if (input.industries) profile.preferences.industries = input.industries;
       if (input.minSalary) profile.preferences.minSalary = input.minSalary;
       if (input.maxSalary) profile.preferences.maxSalary = input.maxSalary;
-      if (input.locations) profile.locations = input.locations;
+      if (input.locations) profile.preferences.locations = input.locations;
       if (input.excludeCompanies) profile.preferences.excludeCompanies = input.excludeCompanies;
       if (input.keywords) profile.preferences.keywords = input.keywords;
       profile.updatedAt = new Date().toISOString();
-      ctx.store.save('profilePath', profile);
-      return { success: true, data: { profile, profilePath } };
+      ctx.store.save(storageKey, profile);
+      const present = [
+        { id: 'profile', title: 'Profile Saved', kind: 'text', body: 'Profile saved for ' + (profile.personal.name || profileId) + '\n\n' +
+          'Target Roles: ' + (profile.targetTitles.join(', ') || '(none)') + '\n' +
+          'Target Companies: ' + (profile.preferences.targetCompanies.join(', ') || '(none)') + '\n' +
+          'Salary Range: ' + (profile.preferences.minSalary ? '$' + profile.preferences.minSalary.toLocaleString() : 'open') + ' - ' + (profile.preferences.maxSalary ? '$' + profile.preferences.maxSalary.toLocaleString() : 'open') + '\n' +
+          'Locations: ' + (profile.preferences.locations.join(', ') || '(none)') + '\n' +
+          'Skills: ' + (profile.skills.join(', ') || '(none)') + '\n' +
+          'Resume: ' + (profile.resume.rawText ? profile.resume.rawText.length + ' characters' : 'not provided')
+        }
+      ];
+      return { success: true, data: { profile, profilePath: storageKey }, present };
     }
   });
 CAREER_PROFILE_INTAKE.configSchema = CAREER_BASE_CONFIG_SCHEMA;

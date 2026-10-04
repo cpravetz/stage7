@@ -41,7 +41,7 @@ handler: async function handler(input, ctx) {
 
     const present = [];
 
-    let store = ctx.store.load('trackingPath', []);
+    let store = ctx.store.load('applications/tracking', []);
     if (!Array.isArray(store)) store = [];
 
     const pipeline = await ctx.delegate('career-pipeline-report', {});
@@ -70,7 +70,7 @@ handler: async function handler(input, ctx) {
         note: input.feedback || '',
       };
       store.push(entry);
-      ctx.store.save('trackingPath', store);
+      ctx.store.save('applications/tracking', store);
       lines.push('');
       lines.push('Stored new application entry.');
       lines.push('  Role: ' + entry.role);
@@ -88,10 +88,10 @@ handler: async function handler(input, ctx) {
     // targetRole against the job identifier.
     let matchedEntry = null;
     if (input.targetRole) {
-    matchedEntry = tracking.find((entry) => (entry.jobId || entry.id || entry.identifier) === input.targetRole) || null;
+    matchedEntry = tracking.find((entry) => entry.identifier === input.targetRole) || null;
     if (!matchedEntry) {
       // Try matching by title/company as a fallback.
-      matchedEntry = tracking.find((entry) => entry.title === input.targetRole || entry.company === input.company) || null;
+      matchedEntry = tracking.find((entry) => entry.job?.title === input.targetRole || entry.title === input.targetRole || entry.job?.company === input.company || entry.company === input.company) || null;
     }
     }
     if (!input.targetRole) {
@@ -103,7 +103,7 @@ handler: async function handler(input, ctx) {
       lines.push('');
       lines.push('Your current applications:');
       tracking.slice(0, 20).forEach(function (t) {
-        lines.push('  ' + (t.title || t.role || t.jobId || 'Untitled') + ' at ' + (t.company || 'Unknown') + ' — ' + (t.status || 'unknown'));
+        lines.push('  ' + (t.job?.title || t.title || t.role || t.jobId || 'Untitled') + ' at ' + (t.job?.company || t.company || 'Unknown') + ' — ' + (t.status || 'unknown'));
       });
     } else {
       lines.push('');
@@ -133,7 +133,7 @@ handler: async function handler(input, ctx) {
       note: input.feedback || '',
     };
     store.push(entry);
-    ctx.store.save('trackingPath', store);
+    ctx.store.save('applications/tracking', store);
     return { success: true, status: 'ok', data: { pipeline: pipelineData, outcomes: { totalOutcomes: 1 }, role: { jobId: entry.jobId, jobTitle: entry.title, company: entry.company }, staleFollowUps: [], note: 'New application recorded for ' + entry.title, delegatedTo: ['career-pipeline-report'], generatedAt: new Date().toISOString() }, error: null, present: [{ id: 'pipeline', title: 'Pipeline & Outcome Tracker', kind: 'text', body: lines.join(NL) }] };
     return;
     }
@@ -156,16 +156,16 @@ handler: async function handler(input, ctx) {
     lines.push('');
     lines.push('Existing pipeline entries:');
     tracking.slice(0, 20).forEach(function (t) {
-      lines.push('  ' + (t.title || t.role || t.jobId || 'Untitled') + ' at ' + (t.company || 'Unknown') + ' — ' + (t.status || 'unknown'));
+      lines.push('  ' + (t.job?.title || t.title || t.role || t.jobId || 'Untitled') + ' at ' + (t.job?.company || t.company || 'Unknown') + ' — ' + (t.status || 'unknown'));
     });
     return { success: true, status: 'ok', data: { pipeline: pipelineData, outcomes: {}, role: { jobId: matchedEntry ? (matchedEntry.jobId || matchedEntry.id || matchedEntry.identifier) : input.targetRole, jobTitle: matchedEntry ? (matchedEntry.title || matchedEntry.jobTitle || '') : input.targetRole, company: matchedEntry ? (matchedEntry.company || '') : (input.company || '') }, staleFollowUps: pipelineData.staleFollowUps || [], note: 'Pipeline loaded but outcome tracking unavailable', delegatedTo: ['career-pipeline-report'], generatedAt: new Date().toISOString() }, error: null, present: [{ id: 'pipeline', title: 'Pipeline & Outcome Tracker', kind: 'text', body: lines.join(NL) }] };
     return;
     }
     const outcomeData = outcome.data && typeof outcome.data === 'object' ? outcome.data : {};
     const roleInfo = {
-    jobId: matchedEntry.jobId || matchedEntry.id || matchedEntry.identifier || input.targetRole,
-    jobTitle: matchedEntry.title || matchedEntry.jobTitle || (matchedEntry.job && matchedEntry.job.title) || input.targetRole,
-    company: matchedEntry.company || (matchedEntry.job && matchedEntry.job.company) || input.company || '',
+    jobId: matchedEntry.identifier || matchedEntry.jobId || matchedEntry.id || input.targetRole,
+    jobTitle: matchedEntry.job?.title || matchedEntry.title || matchedEntry.jobTitle || (matchedEntry.job && matchedEntry.job.title) || input.targetRole,
+    company: matchedEntry.job?.company || matchedEntry.company || (matchedEntry.job && matchedEntry.job.company) || input.company || '',
     };
     const hasPipelineData = Boolean(pipelineData) && (Number.isFinite(pipelineData.total) || tracking.length || Object.keys(pipelineData.byStatus || {}).length > 0);
     const hasOutcomeData = Number.isFinite(outcomeData.totalOutcomes) || outcomeData.outcome || Array.isArray(outcomeData.outcomes);
@@ -188,7 +188,7 @@ handler: async function handler(input, ctx) {
     tracking.slice(0, 50).forEach(function (t) {
       const appliedDate = t.appliedAt ? new Date(t.appliedAt).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '';
       const sal = t.salary ? ' • ' + t.salary : '';
-      bodyLines.push('  ' + (t.title || t.role || 'Untitled') + ' at ' + (t.company || 'Unknown') + ' — ' + (t.status || 'unknown') + (appliedDate ? ' (' + appliedDate + ')' : ''));
+      bodyLines.push('  ' + (t.job?.title || t.title || t.role || t.jobId || 'Untitled') + ' at ' + (t.job?.company || t.company || 'Unknown') + ' — ' + (t.status || 'unknown') + (appliedDate ? ' (' + appliedDate + ')' : ''));
     });
     bodyLines.push('');
     const byStatus = {};

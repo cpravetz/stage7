@@ -60,17 +60,32 @@ const UPSKILL_ROLE_TARGETED_LEARNING_PLANNER = createDeclarativeCodeSkill({
       const jobPosting = input.jobPosting || '';
       if (!targetRole && !jobPosting) {
 
-      return;
+      return {
+        success: false,
+        status: 'blocked',
+        error: 'Either jobTitle or jobPosting is required',
+        data: { targetRole: '', missingSkills: [], learningPlan: null, delegatedTo: [], generatedAt: new Date().toISOString() },
+      };
       }
       const advisory = await ctx.delegate('career-advisory', { question: 'resume_strength', targetRole, jobDescription: jobPosting || ('Create a targeted upskilling plan for this role: ' + targetRole) });
       if (!advisory || advisory.success === false || advisory.error) {
 
-      return;
+      return {
+        success: false,
+        status: 'not-connected',
+        error: 'career-advisory did not return usable recommendations: ' + String(advisory?.error || 'unknown'),
+        data: { targetRole: targetRole || jobPosting, missingSkills: [], learningPlan: null, delegatedTo: ['career-advisory'], generatedAt: new Date().toISOString() },
+      };
       }
       const advisoryData = advisory.data && typeof advisory.data === 'object' ? advisory.data : advisory;
       if (!advisoryData.summary && !advisoryData.recommendations && !advisoryData.options && !advisoryData.rationale) {
 
-      return;
+      return {
+        success: false,
+        status: 'not-connected',
+        error: 'career-advisory returned no actionable recommendations',
+        data: { targetRole: targetRole || jobPosting, missingSkills: [], learningPlan: null, delegatedTo: ['career-advisory'], generatedAt: new Date().toISOString() },
+      };
       }
       const targetSkills = Array.isArray(input.targetSkills) ? input.targetSkills.map((skill) => String(skill).toLowerCase()) : [];
       const postingText = String(jobPosting || targetRole).toLowerCase();

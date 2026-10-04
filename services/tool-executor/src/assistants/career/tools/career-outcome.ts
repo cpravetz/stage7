@@ -67,7 +67,7 @@ const CAREER_OUTCOME = createDeclarativeCodeSkill({
       const date = input.date || new Date().toISOString();
       const profileId = input.profileId || 'default';
 
-      const tracking = ctx.store.load('trackingPath', []);
+      const tracking = ctx.store.load('applications/tracking', []);
 
       const entry = {
       applicationId,
@@ -83,17 +83,27 @@ const CAREER_OUTCOME = createDeclarativeCodeSkill({
       const idx = tracking.findIndex((t) => t.applicationId === applicationId || t.jobId === applicationId);
       if (idx >= 0) tracking[idx] = Object.assign(tracking[idx], entry);
       else tracking.push(entry);
-      ctx.store.save('trackingPath', tracking);
+      ctx.store.save('applications/tracking', tracking);
 
       // Update profile stats
-      const profile = ctx.store.load('profilePath', null);
+      const profileKey = 'profilePath/' + profileId;
+      let profile = ctx.store.load(profileKey, null);
+      let legacyProfileKey = '';
+      if (!profile || Object.keys(profile).length === 0) {
+        const legacyProfile = ctx.store.load('profilePath', null);
+        if (legacyProfile && Object.keys(legacyProfile).length > 0) {
+          profile = legacyProfile;
+          legacyProfileKey = 'profilePath';
+        }
+      }
       if (profile) {
       profile.jobSearch = profile.jobSearch || {};
       if (status === 'offer') profile.jobSearch.offersReceived = (profile.jobSearch.offersReceived || 0) + 1;
       if (status === 'rejection') profile.jobSearch.rejectionsReceived = (profile.jobSearch.rejectionsReceived || 0) + 1;
       if (status === 'interview' || status === 'screening') profile.jobSearch.interviewsScheduled = (profile.jobSearch.interviewsScheduled || 0) + 1;
       profile.jobSearch.updatedAt = new Date().toISOString();
-      ctx.store.save('profilePath', profile);
+      ctx.store.save(profileKey, profile);
+      if (legacyProfileKey) ctx.store.save(legacyProfileKey, profile);
       }
 
       // Outcome log
@@ -108,7 +118,7 @@ const CAREER_OUTCOME = createDeclarativeCodeSkill({
       noResponse: tracking.filter((t) => t.status === 'no_response').length,
       responseRate: tracking.length ? (tracking.length - tracking.filter((t) => t.status === 'no_response').length) / tracking.length : 0,
       };
-      return { success: true, data: { entry, stats, trackingPath: 'trackingPath', outcomesPath: 'outcomesPath', generatedAt: new Date().toISOString() } };
+      return { success: true, data: { entry, stats, trackingPath: 'applications/tracking', outcomesPath: 'outcomesPath', generatedAt: new Date().toISOString() } };
     }
   });
 CAREER_OUTCOME.configSchema = CAREER_BASE_CONFIG_SCHEMA;

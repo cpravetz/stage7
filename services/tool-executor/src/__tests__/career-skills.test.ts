@@ -8,6 +8,7 @@ import {
   CAREER_JOB_DISCOVERY,
   PIPELINE_OUTCOME_TRACKER,
   RESUME_TEMPLATE_MANAGER,
+  APPLICATION_EXECUTION_ORCHESTRATOR,
   CAREER_PIPELINE_REPORT,
   CAREER_OUTCOME,
   CAREER_ADD_TEMPLATE,
@@ -458,6 +459,39 @@ async function runJobDiscovery(
 
 const LOWER_ORDER_TOOLS = [CAREER_PIPELINE_REPORT, CAREER_OUTCOME, CAREER_ADD_TEMPLATE];
 
+/**
+ * A `type: 'code'` stand-in for the apply delegate. The orchestrator used to
+ * `return` undefined whenever the delegate matched no listing, which the executor
+ * surfaces as "Execution completed with no output" at exit code 0 -- so the only
+ * way to pin that regression is to hand it a delegate that legitimately produces
+ * an empty application set and assert a rendered card comes back.
+ */
+function applyDelegateStandIn(applications: unknown[], errors: unknown[]): Tool {
+  const source = [
+    'console.log(JSON.stringify({',
+    '  success: true,',
+    '  status: "dry-run",',
+    '  data: {',
+    '    applications: ' + JSON.stringify(applications) + ',',
+    '    errors: ' + JSON.stringify(errors) + ',',
+    '    dryRun: true,',
+    '    trackingPath: "applications/tracking.json"',
+    '  }',
+    '}));',
+  ].join('\n');
+  return {
+    id: 'career-application-execution',
+    name: 'career-application-execution',
+    description: 'Stand-in for career-application-execution',
+    type: 'code',
+    manifest: { language: 'javascript', entrypoint: 'index.js', sourceCode: source },
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    isSkill: false,
+  };
+}
+
+
 
 function assertPresentClean(present: PresentBlock[] | undefined, label: string): void {
   expect(present).toBeDefined();
@@ -706,4 +740,74 @@ describe('Career Coach skills emit user-facing output', () => {
       expect(body).toContain('provide a document name and content');
     }, 15000);
   });
+  describe('Apply to Selected Jobs', () => {
+    it('renders a preview card when the delegate matched listings', async () => {
+      const { result, tool } = await run(
+        APPLICATION_EXECUTION_ORCHESTRATOR,
+        { targetRoles: ['listing-1'], dryRun: true },
+        [
+          applyDelegateStandIn(
+            [{ identifier: 'listing-1', status: 'dry_run', job: { title: 'Marketing Manager', company: 'Acme' } }],
+            [],
+          ),
+        ],
+      );
+
+      expect(result.success).toBe(true);
+      expect(result.status).toBe('dry-run');
+      assertPresentClean(result.present, APPLICATION_EXECUTION_ORCHESTRATOR.id);
+      const body = (result.present as PresentBlock[]).map((b) => b.body).join('\n');
+      expect(body).toContain('Marketing Manager');
+      expect(body).toContain('Acme');
+      validateOutput(result, tool);
+    }, 15000);
+
+    it('surfaces the delegate\'s per-role errors instead of emitting nothing', async () => {
+      // Regression: this path used to `return` undefined, so the Skill produced no
+      // output at all and the user could not tell a no-op from a success.
+      const { result, tool } = await run(
+        APPLICATION_EXECUTION_ORCHESTRATOR,
+        { targetRoles: ['Marketing Manager'], dryRun: true },
+        [applyDelegateStandIn([], [{ identifier: 'Marketing Manager', error: 'Job listing not found' }])],
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBeTruthy();
+      assertPresentClean(result.present, APPLICATION_EXECUTION_ORCHESTRATOR.id);
+      const body = (result.present as PresentBlock[]).map((b) => `${b.title || ''}\n${b.body || ''}`).join('\n');
+      expect(body).toContain('Job listing not found');
+      expect(body).toContain('Marketing Manager');
+      validateOutput(result, tool);
+    }, 15000);
+
+    it('reports a failed delegation as an error card', async () => {
+      const failing: Tool = {
+        id: 'career-application-execution',
+        name: 'career-application-execution',
+        description: 'Failing stand-in',
+        type: 'code',
+        manifest: {
+          language: 'javascript',
+          entrypoint: 'index.js',
+          sourceCode: 'console.log(JSON.stringify({ success: false, error: "board unreachable" }));',
+        },
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        isSkill: false,
+      };
+
+      const { result, tool } = await run(
+        APPLICATION_EXECUTION_ORCHESTRATOR,
+        { targetRoles: ['listing-1'], dryRun: true },
+        [failing],
+      );
+
+      expect(result.success).toBe(false);
+      assertPresentClean(result.present, APPLICATION_EXECUTION_ORCHESTRATOR.id);
+      const body = (result.present as PresentBlock[]).map((b) => `${b.title || ''}\n${b.body || ''}`).join('\n');
+      expect(body).toContain('board unreachable');
+      validateOutput(result, tool);
+    }, 15000);
+  });
+
 });
