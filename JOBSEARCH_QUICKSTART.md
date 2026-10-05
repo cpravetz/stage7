@@ -7,14 +7,14 @@ By the end you will have a job search assistant that knows your background, find
 prepares your applications, runs your interview practice, and keeps track of where everything stands.
 
 - **Time needed:** about 20 minutes to set up, plus a few minutes per job
-- **Cost:** free, if you follow the free-model steps in [Step 4](#step-4-connect-a-free-ai-model)
+- **Cost:** free, if you follow the free-model steps in [Step 4](#step-4-connect-an-ai-model)
 - **Works on:** Windows, Mac, and Linux
 
 ## What you need first
 
 - A computer with **Docker Desktop** installed (Windows and Mac) or **Docker Engine** (Linux)
 - About 8 GB of free memory
-- A free account with an AI model provider, or the free Ollama app installed locally
+- A free OpenRouter account, or an account with whichever AI model provider you prefer
 
 Everything else is built in.
 
@@ -23,7 +23,7 @@ Everything else is built in.
 - [Step 1: Install Docker](#step-1-install-docker)
 - [Step 2: Get the Stage7 files](#step-2-get-the-stage7-files)
 - [Step 3: Choose the Career Coach only](#step-3-choose-the-career-coach-only)
-- [Step 4: Connect a free AI model](#step-4-connect-a-free-ai-model)
+- [Step 4: Connect an AI model](#step-4-connect-an-ai-model)
 - [Step 4b: Ready to search](#step-4b-ready-to-search)
 - [Step 5: Run the setup](#step-5-run-the-setup)
 - [Step 6: Open Stage7 and create your account](#step-6-open-stage7-and-create-your-account)
@@ -89,54 +89,130 @@ That single word, `career`, is what loads the Career Coach and nothing else.
 
 Leave every other line alone for now. You will come back to this file in the next step.
 
-## Step 4: Connect a free AI model
+## Step 4: Connect an AI model
 
 The Career Coach uses an AI model to write your answers, draft your messages, and run your mock
-interviews. You need to point it at a model. All of the options below are free.
+interviews. You need to point it at a model. The interview skills are the demanding ones, so pick
+something that can handle a long prompt and answer in about 20 seconds.
 
-### Option A: Run models on your own computer (fully free, no account)
+### Recommended: OpenRouter
 
-This is the best option if you want nothing to leave your machine.
+**Start here.** One account gives you hundreds of models, many of them free, and Stage7 is already
+set up for it. Nothing to install.
+
+1. Create a free account at <https://openrouter.ai>.
+2. Copy your API key from <https://openrouter.ai/keys>.
+3. Open your `.env` file, find the OpenRouter section, and paste your key in:
+
+   ```dotenv
+   OPENROUTER_API_KEY=paste-your-key-here
+   OPENROUTER_URL=https://openrouter.ai/api/v1
+   ```
+
+4. Save the file.
+
+That is the whole setup. Stage7 reads the model list straight from OpenRouter, so every model they
+offer is available to you without any further configuration.
+
+OpenRouter also plays nicely with the free-model setting in
+[Step 7](#step-7-tell-stage7-to-prefer-free-models). OpenRouter counts as an eligible provider
+whatever a given model costs, so a free OpenRouter model is chosen whenever one can do the job.
+
+### Using a different model service
+
+Most model services speak the same API shape, so Stage7 can talk to any of them. You register one by
+adding its name to `CUSTOM_PROVIDERS` and giving it three settings.
+
+**Requesty**, for example:
+
+1. Create an account at <https://requesty.ai> and copy a key from
+   <https://app.requesty.ai/api-keys>. Keys start with `rqstry-sk-`.
+2. Open your `.env` file and add:
+
+   ```dotenv
+   CUSTOM_PROVIDERS=REQUESTY
+   REQUESTY_API_KEY=rqstry-sk-paste-your-key-here
+   REQUESTY_API_NAME=Requesty
+   REQUESTY_API_URL=https://router.requesty.ai/v1
+   ```
+
+3. Save the file and run setup again. The name is yours to choose, as long as it is letters and
+   digits.
+
+| Setting | What it means |
+| --- | --- |
+| `CUSTOM_PROVIDERS` | Comma-separated list of names. One line can register several: `REQUESTY,LLM7` |
+| `<NAME>_API_KEY` | The key from that service. **Required** - a name with no key is skipped |
+| `<NAME>_API_URL` | The service's base address. **Required** - include the version, such as `/v1` |
+| `<NAME>_API_NAME` | The name shown in the interface. Optional; the name from the line above is used |
+| `<NAME>_LIST_MODELS_PATH` | Where the model list lives. Optional; `/models` is assumed |
+
+Stage7 fetches the model list from the service itself, so a custom service brings in every model it
+offers. If the name you choose collides with a built-in provider, your custom one is skipped and a
+warning is logged.
+
+### Also supported out of the box
+
+Fill in the key and Stage7 does the rest. You can set up as many providers from this list as you like,
+and Stage7 will use the best one for the task at hand.
+
+| Provider | What to set in `.env` |
+| --- | --- |
+| **OpenRouter** | `OPENROUTER_API_KEY`, plus `OPENROUTER_URL` if you use a different address |
+| **Anthropic** | `ANTHROPIC_API_KEY` |
+| **Cloudflare** | `CLOUDFLARE_WORKERS_AI_API_TOKEN` and `CLOUDFLARE_WORKERS_AI_ACCOUNT_ID` |
+| **Gemini** | `GEMINI_API_KEY` |
+| **Grok (xAI)** | `GROK_API_KEY` |
+| **Mistral** | `MISTRAL_API_KEY` |
+| **OpenAI** | `OPENAI_API_KEY` |
+| **NVIDIA** | `NVIDIA_API_KEY`. Also comes with a block of free credits |
+| **Hugging Face** | `HUGGINGFACE_API_KEY` |
+| **Open WebUI** | `OPENWEB_URL`, if you run your own Open WebUI |
+| **Ollama** | `OLLAMA_API_BASE`, if you run Ollama locally or on another machine |
+
+Cloudflare is the odd one out: it needs both a token and an account ID before it switches on at all.
+
+NVIDIA keys come from <https://build.nvidia.com>, where you can also browse the models available to
+you. Its endpoint is a metered service once your free credits run out, so if you have OpenRouter set up
+as well, keep **Prefer Free / Self-hosted Models** ticked - that keeps your searches on OpenRouter's
+free models and uses NVIDIA only when you ask for it.
+
+### Two options worth knowing about, but not starting with
+
+**Hugging Face** has a small number of free calls per day. A job search makes a lot of calls in a row,
+so you can hit that limit partway through a session.
+
+**Ollama** keeps the model on your own machine, which means nothing leaves your computer, but it is
+the most involved option. You install Ollama separately, download a model, and give Stage7 an address
+that works from inside a container. If you want it:
 
 1. Download and install **Ollama** from <https://ollama.com/download>.
 2. Open a terminal and run `ollama pull llama3.2` to download a model. You only need to do this once.
-3. In your `.env` file, find the Ollama setting and change it to this value:
-   `OLLAMA_API_BASE=http://host.docker.internal:11434`
+3. In your `.env` file, find the Ollama setting and change it to:
+   `OLLAMA_API_BASE=http://host.docker.internal:11434/v1`
 4. Save the file.
 
-That is it. The model stays on your computer and costs nothing to use.
-
-### Option B: Use a free cloud account (no download, works anywhere)
-
-If you would rather not install anything, pick one of these. Both have free tiers and both work with the
-Career Coach. Create a free account, copy your key, and paste it into `.env`.
-
-**OpenRouter** - one account, many models, generous free tier.
-
-```dotenv
-OPENROUTER_API_KEY=paste-your-key-here
-```
-
-**Hugging Face** - a free token, free open models.
-
-```dotenv
-HUGGINGFACE_API_KEY=paste-your-token-here
-```
+A local model is also slower than a hosted one, which mostly shows up in the practice interview and
+interview preparation skills.
 
 ### Which should I pick?
 
 | If you want... | Use |
 | --- | --- |
-| Nothing sent to the internet, zero cost forever | Option A (Ollama) |
-| No extra software, works immediately | Option B (OpenRouter) |
-
-A practical combination is Ollama as your everyday model, plus one free cloud account as a backup.
+| The shortest path to a working setup | OpenRouter |
+| One account covering many models and providers | OpenRouter, or a custom service such as Requesty |
+| A model you already pay for | Its own provider, or a custom service |
+| Nothing sent to the internet | Ollama, accepting the extra setup and slower replies |
 
 ### Keep it free
 
-If you follow Option A or B and leave all the other provider lines in `.env` empty, you will never be
-charged. Stage7 only uses a provider if you have given it a key, so a blank line means that provider is
-switched off.
+Leave every other provider line in `.env` empty. Stage7 only uses a provider if you have given it a
+key, so a blank line means that provider is switched off. There is no subscription, and nothing is
+billed unless you supply a paid key yourself.
+
+To stay on free models even when a paid provider is set up, turn on
+**Prefer Free / Self-hosted Models** in
+[Step 7](#step-7-tell-stage7-to-prefer-free-models).
 
 ## Step 4b: Ready to search
 
@@ -518,7 +594,7 @@ confirm Docker Desktop is running.
 **A skill says something is "not connected".** This is Stage7 telling you it is missing something it
 needs, not a crash. The most common causes are:
 
-- No AI model is set up. Check [Step 4](#step-4-connect-a-free-ai-model).
+- No AI model is set up. Check [Step 4](#step-4-connect-an-ai-model).
 - Your profile is empty or incomplete. Run Profile Intake.
 - No roles have been found yet. Run Job Discovery & Fit Ranking first.
 

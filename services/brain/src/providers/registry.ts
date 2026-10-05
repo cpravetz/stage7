@@ -117,6 +117,39 @@ export function buildProviderRegistry(): LLMProvider[] {
     }));
   }
 
+  // NVIDIA NIM. OpenAI-compatible, so this reuses OpenAICompatibleProvider rather
+  // than a bespoke class.
+  //
+  // NVIDIA hands every account a block of free API credits, but the endpoint is a
+  // metered paid service once they are spent. Its /models response publishes no
+  // pricing fields at all, so every discovered model would otherwise arrive here
+  // costless and be treated as free by ModelRouter's freeOnly filter -- which is
+  // exactly how a metered provider quietly starts spending money on requests the
+  // user expected a genuinely free model to serve. assumedCostPer1kTokens keeps
+  // unpriced entries off that path. It is a guard against "free", not a quote:
+  // NVIDIA bills per model, and the catalogue carries no rates to be accurate with.
+  const nvidiaKey = process.env.NVIDIA_API_KEY;
+  if (nvidiaKey) {
+    providers.push(new OpenAICompatibleProvider({
+      id: 'nvidia',
+      name: 'NVIDIA',
+      apiBase: process.env.NVIDIA_API_BASE || 'https://integrate.api.nvidia.com/v1',
+      apiKey: nvidiaKey,
+      listModelsPath: process.env.NVIDIA_LIST_MODELS_PATH || '/models',
+      chatCompletionsPath: process.env.NVIDIA_CHAT_PATH || '/chat/completions',
+      completionsPath: process.env.NVIDIA_COMPLETIONS_PATH || '/completions',
+      assumedCostPer1kTokens: 0.6,
+      // Fallback catalogue, used only when /models cannot be reached. Ids here are
+      // namespaced by publisher, matching what the live endpoint returns.
+      defaultModels: [
+        { id: 'meta/llama-3.1-8b-instruct', capabilities: ['chat', 'code'], maxTokens: 128000, costPer1kTokens: 0.15 },
+        { id: 'meta/llama-3.3-70b-instruct', capabilities: ['chat', 'code', 'reasoning'], maxTokens: 128000, costPer1kTokens: 0.6 },
+        { id: 'nvidia/llama-3.1-nemotron-70b-instruct', capabilities: ['chat', 'code', 'reasoning'], maxTokens: 128000, costPer1kTokens: 1.2 },
+        { id: 'nvidia/nemotron-4-340b-instruct', capabilities: ['chat', 'code', 'reasoning'], maxTokens: 128000, costPer1kTokens: 3 },
+      ],
+    }));
+  }
+
   const openwebUrl = process.env.OPENWEB_URL || process.env.OPENWEBUI_URL;
   if (openwebUrl) {
     let openwebBase = openwebUrl.replace(/\/+$/, '');

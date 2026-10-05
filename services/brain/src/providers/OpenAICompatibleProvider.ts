@@ -17,7 +17,11 @@ function toNumber(value: unknown): number | null {
 //                pricing: [{ prompt_tokens_threshold, input_price, output_price }]
 //
 // Both forms are USD per token, so costPer1kTokens is the value x 1000.
-function readCostPer1kTokens(model: Record<string, unknown>): number {
+//
+// Returns null when the catalogue entry carries no pricing, so the caller can tell
+// "unpriced" apart from "genuinely zero". Collapsing the two here is what lets a
+// metered provider masquerade as free.
+function readCostPer1kTokens(model: Record<string, unknown>): number | null {
   const pricing = model.pricing;
   let per1k: number | null = null;
 
@@ -34,9 +38,7 @@ function readCostPer1kTokens(model: Record<string, unknown>): number {
   const flat = toNumber(model.input_price);
   if (flat !== null) per1k = flat * 1000;
 
-  // No pricing metadata at all. 0 means "assume free", matching prior behaviour
-  // for local catalogues such as Ollama, but callers must not read it as a quote.
-  return per1k ?? 0;
+  return per1k;
 }
 
 function readContextWindow(model: Record<string, unknown>): number {
@@ -78,6 +80,11 @@ export interface OpenAICompatibleConfig {
   // advertised but unusable (e.g. free models that leak scratchpad regardless
   // of the system prompt). Filtering here keeps the router purely declarative.
   excludeModelIds?: string[];
+  // Cost attributed to catalogue entries that publish no pricing. Providers whose
+  // endpoint is metered should set this so their models do not read as free to
+  // ModelRouter's freeOnly filter. Omitted, unpriced models keep the historical
+  // 0 = "assume free" behaviour, which is correct for local catalogues.
+  assumedCostPer1kTokens?: number;
   listModelsPath?: string;
   chatCompletionsPath?: string;
   completionsPath?: string;
@@ -92,6 +99,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
   private extraHeaders: Record<string, string>;
   private excludeModelIds: Set<string>;
   private defaultModels: OpenAICompatibleConfig['defaultModels'];
+  private assumedCostPer1kTokens?: number;
   private listModelsPath?: string;
   private chatCompletionsPath: string;
   private completionsPath: string;
@@ -105,6 +113,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
     this.extraHeaders = config.extraHeaders || {};
     this.excludeModelIds = new Set(config.excludeModelIds || []);
     this.defaultModels = config.defaultModels;
+    this.assumedCostPer1kTokens = config.assumedCostPer1kTokens;
     this.listModelsPath = config.listModelsPath;
     this.chatCompletionsPath = config.chatCompletionsPath || '/chat/completions';
     this.completionsPath = config.completionsPath || '/completions';
@@ -152,7 +161,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
           const mapped = arr.map((m: Record<string, unknown>) => {
             const id = m.id || (m as any).name || '';
             if (!id || this.isExcluded(id)) return null;
-            const cost = readCostPer1kTokens(m);
+            const cost = readCostPer1kTokens(m) ?? this.assumedCostPer1kTokens ?? 0;
             const isEmbedding = id.includes('embed') || (m.architecture as any)?.modality === 'embedding';
             if (isEmbedding) return { id, capabilities: ['embedding'], maxTokens: readContextWindow(m), costPer1kTokens: cost };
             const caps = readCapabilities(m, id);

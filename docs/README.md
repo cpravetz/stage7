@@ -19,6 +19,8 @@ These documents are actively maintained and reference current system behavior:
 - **[../env.summary](../env.summary)** - Environment variables each service reads
 
 ### Feature Documentation
+- **[CAREER_COACH_USER_GUIDE.md](./CAREER_COACH_USER_GUIDE.md)** - Setup, config, and skills for Career Coach only
+- **[../JOBSEARCH_QUICKSTART.md](../JOBSEARCH_QUICKSTART.md)** - Shorter Career Coach quickstart
 - **[BRAIN_SERVICE notes](../.env.example)** - Provider and cache configuration for the brain service
 - **[SELF_HOSTED_LLM_GUIDE.md](./ACTIVE_REFERENCE/SELF_HOSTED_LLM_GUIDE.md)** - Running LLMs locally
 - **[HYBRID_VALIDATION_SYSTEM.md](./ACTIVE_REFERENCE/HYBRID_VALIDATION_SYSTEM.md)** - Input validation design
