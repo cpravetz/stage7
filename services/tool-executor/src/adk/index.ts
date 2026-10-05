@@ -1,5 +1,5 @@
 /**
- * Agent Development Kit — public surface.
+ * Assistant Development Kit — public surface.
  *
  * `ADK_OVERVIEW.md` is the architecture; this module is what an Assistant author
  * imports. The split is deliberate: a blueprint file imports from here to build

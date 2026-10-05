@@ -1,6 +1,6 @@
 # ADK User Guide
 
-This guide is for end users who interact with assistants built on the Agent Development Kit (ADK). It
+This guide is for end users who interact with assistants built on the Assistant Development Kit (ADK). It
 covers how to use the system, the assistants that ship with it, how skills behave, and where every API
 lives.
 

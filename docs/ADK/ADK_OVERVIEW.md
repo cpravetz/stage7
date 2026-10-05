@@ -1,8 +1,8 @@
-# Agent Development Kit (ADK) — Overview Architecture Specification
+# Assistant Development Kit (ADK) — Overview Architecture Specification
 
 ## 1. Vision & Architectural Boundary
 
-The Agent Development Kit (ADK) is an application harness built on top of **stage7 core services**. It abstracts and orchestrates stage7's underlying capabilities—LLM routing, code generation and repair, mission-scoped agents, Model Context Protocol (MCP) and custom tools, data persistence, and secrets management—into a structured framework for building enterprise-grade AI Assistants.
+The Assistant Development Kit (ADK) is an application harness built on top of **stage7 core services**. It abstracts and orchestrates stage7's underlying capabilities—LLM routing, code generation and repair, mission-scoped agents, Model Context Protocol (MCP) and custom tools, data persistence, and secrets management—into a structured framework for building enterprise-grade AI Assistants.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐

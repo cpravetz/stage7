@@ -1,6 +1,6 @@
 # Assistant & Skill Design Specifications — v9 (ADK Architecture Standard)
 
-This v9 specification updates all Assistant blueprints to align directly with the Agent Development Kit (ADK) folder layout, JSON manifests, runtime context contracts, and the architecture defined in ADK_OVERVIEW.md (the source of truth).
+This v9 specification updates all Assistant blueprints to align directly with the Assistant Development Kit (ADK) folder layout, JSON manifests, runtime context contracts, and the architecture defined in ADK_OVERVIEW.md (the source of truth).
 
 ---
 

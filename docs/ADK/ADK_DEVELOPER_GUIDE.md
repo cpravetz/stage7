@@ -1,6 +1,6 @@
-# Agent Development Kit (ADK) — Developer's Guide
+# Assistant Development Kit (ADK) — Developer's Guide
 
-This guide details the technical contracts, file structures, TypeScript interfaces, runtime context APIs, and execution signatures required to build Assistants, Skills, and Tools using the Agent Development Kit (ADK). It implements the architecture defined in **ADK_OVERVIEW.md**, which is the source of truth; where the two disagree, the Overview wins.
+This guide details the technical contracts, file structures, TypeScript interfaces, runtime context APIs, and execution signatures required to build Assistants, Skills, and Tools using the Assistant Development Kit (ADK). It implements the architecture defined in **ADK_OVERVIEW.md**, which is the source of truth; where the two disagree, the Overview wins.
 
 > **Status markers.** Items marked **[PROPOSED]** are required by capabilities the Overview promises (LLM execution, RAG, chat interaction, tool orchestration) but are not yet specified there. They are collected in Appendix A for confirmation.
 

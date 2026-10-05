@@ -78,7 +78,7 @@ The platform requires the following infrastructure services:
 
 ## 🚀 Key Features
 
-### Agent Development Kit (ADK)
+### Assistant Development Kit (ADK)
 - **Contract-Driven Composition**: Define Assistant identity, product objects, tools, skills, workflows, lanes, context, approval, configuration, and persistence through typed contracts.
 - **Reusable Builders**: Compose custom Assistants with `createTool`, `createSkill`, `createWorkflow`, `createWorkflowStage`, `createWorkflowLane`, and `createAssistant`.
 - **Workflow Governance**: Validate stage transitions, lane references, object context, configuration, approval requirements, and persistence policies before runtime use.

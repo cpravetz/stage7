@@ -1,4 +1,4 @@
-# Agent Development Kit (ADK) - Current Implementation
+# Assistant Development Kit (ADK) - Current Implementation
 
 This document describes the ADK that is actually implemented in this repository. The active implementation is not the historical microservice-only design described in older docs; it lives in the TypeScript composition layer under the tool executor and is validated by the ADK composition tests.
 
