@@ -1,4 +1,8 @@
-# stage7 - NextGen Enterprise Agent Platform
+# stage7 - Seakaytee's Agent Platform
+
+### Here for the Career Coach Assistant with job search serviecs?
+
+The Career Coach is one of the sample Assistants provided with stage7 and has job search/apply/prep skills. If that is what you are looking for, see the [Job Seach Quckstart](./JOBSEARCH_QUICKSTATRT.md)
 
 ## Overview
 
@@ -8,7 +12,7 @@ The system is composed of independent Node.js services that communicate via REST
 
 ## Key Components
 
-### NextGen Services (Primary)
+### Core Agentic Services (Primary)
 - **Unified API Gateway**: Single entry point for routing requests to backend services with service registry and health checks.
 - **MCP Server Runtime**: Native Model Context Protocol (MCP) server implementation with tool registry, stdio/HTTP transport.
 - **Shared Worker Pool**: Dynamic worker pool for executing assistant tasks with Redis-backed task queue and retry logic.
