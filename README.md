@@ -1,6 +1,6 @@
 # stage7 - Seakaytee's Agent Platform
 
-### Here for the Career Coach Assistant with job search serviecs?
+### Here for the Career Coach Assistant with job search services?
 
 The Career Coach is one of the sample Assistants provided with stage7 and has job search/apply/prep skills. If that is what you are looking for, see the [Job Seach Quckstart](./JOBSEARCH_QUICKSTATRT.md)
 
@@ -18,15 +18,7 @@ The system is composed of independent Node.js services that communicate via REST
 - **Shared Worker Pool**: Dynamic worker pool for executing assistant tasks with Redis-backed task queue and retry logic.
 - **Brain/LLM Layer**: Modern LLM orchestration with structured output sampling (Zod), semantic Redis caching, token-aware context windows, and cost-based model routing.
 - **Temporal.io Workflow Engine**: Durable workflow execution for missions with state persistence, saga patterns, and crash fault-tolerance.
-- **Vault Integration**: AES-256-GCM envelope encryption for secrets management with key rotation support.
-
-### Frontend
-A React application that provides a user interface for interacting with the system.
-   - **Plugins and Tools Panel**: This integrated section in the UI, accessible via the 'Tools' menu in the sidebar, serves as the central hub for managing all types of plugins and external tools. It allows users to discover, configure, and interact with code-based plugins, OpenAPI tools, and MCP tools.
-
-     - **Accessing the Panel**: Click on the 'Tools' option in the main navigation sidebar of the frontend.
-
-     - **Adding a New Plugin/Tool**:
+- **Vault Integration**: AES-256-GCM 
        - **Code Plugins (Python, JavaScript, Container)**:
          1. Navigate to the 'Plugins' tab within the 'Plugins and Tools Panel'.
          2. Click the 'Add New Plugin' button.
