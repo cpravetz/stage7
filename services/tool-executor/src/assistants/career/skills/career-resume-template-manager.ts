@@ -73,7 +73,7 @@ const RESUME_TEMPLATE_MANAGER = createDeclarativeCodeSkill({
   isSkill: true,
   // Adding a template is the write half of this Skill, so the standalone tool
   // sits behind it rather than being reachable on its own.
-  manifest: { actionLabel: 'Manage templates', lowerOrderTools: ['career-add-template'] },
+  manifest: { actionLabel: 'Save new document', lowerOrderTools: ['career-add-template'] },
   inputSchema: RESUME_TEMPLATE_MANAGER_INPUT,
   outputSchema: careerResultSchema('Template metadata, detail view, or document list'),
   triggers: [
@@ -81,6 +81,7 @@ const RESUME_TEMPLATE_MANAGER = createDeclarativeCodeSkill({
       kind: 'user',
       phrase_examples: [
         'Manage templates',
+        'Save resume',
         'List my resume templates',
         'Upload a new resume',
         'View template library',
