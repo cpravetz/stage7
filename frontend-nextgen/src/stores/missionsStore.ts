@@ -99,7 +99,7 @@ const REFRESH_DEBOUNCE = 2000;
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let feedUnsub: (() => void) | null = null;
 let processedCount = 0;
-let lastRefreshByMission = new Map<string, number>();
+const lastRefreshByMission = new Map<string, number>();
 
 function startPolling() {
   if (pollTimer) return;
@@ -411,6 +411,7 @@ export const useMissionsStore = create<MissionsState>((set, get) => ({
       const { [workflowId]: _omit, ...restDetails } = s.details;
       const { [workflowId]: _o2, ...restLoading } = s.detailLoading;
       const { [workflowId]: _o3, ...restError } = s.detailError;
+      void _omit; void _o2; void _o3;
       return {
         details: restDetails,
         detailLoading: restLoading,

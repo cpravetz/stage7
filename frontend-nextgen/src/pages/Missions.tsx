@@ -98,6 +98,18 @@ const Missions = () => {
     await deleteMission(workflowId);
   };
 
+  const getMissionStatusLabel = (status: string) => {
+    switch (status) {
+      case 'running': return 'Running';
+      case 'completed': return 'Completed';
+      case 'failed': return 'Failed';
+      case 'canceled': return 'Canceled';
+      case 'awaiting_review': return 'Needs Review';
+      case 'incomplete': return 'Incomplete';
+      default: return status.charAt(0).toUpperCase() + status.slice(1);
+    }
+  };
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return missions.filter((m) => {
@@ -179,7 +191,7 @@ const Missions = () => {
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               required
-              rows={4}
+               rows={6}
             />
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span className="hint">Cmd/Ctrl+Enter to submit</span>
@@ -200,7 +212,12 @@ const Missions = () => {
             <span style={{ color: '#eab308' }}><strong>{counts.awaiting_review || 0}</strong> needs review</span>
             <span style={{ color: '#a78bfa' }}><strong>{counts.incomplete || 0}</strong> incomplete</span>
             {!pendingApprovalsLoading && pendingApprovals.length > 0 && (() => {
-              const missionIds = new Set(pendingApprovals.map((p) => p.missionId));
+              const missionIds = new Set(
+                pendingApprovals
+                  .filter((p) => missions.some((m) => m.missionId === p.missionId))
+                  .map((p) => p.missionId)
+              );
+              if (missionIds.size === 0) return null;
               return (
                 <span style={{ color: '#ef4444' }}><strong>{missionIds.size}</strong> missions with ⏳ pending approval</span>
               );
@@ -233,7 +250,7 @@ const Missions = () => {
               ))}
             </div>
             <button className="secondary" onClick={fetchMissions} disabled={missionsLoading}>
-              {missionsLoading ? '🔄' : 'Refresh'}
+               {missionsLoading ? 'Refreshing…' : 'Refresh'}
             </button>
           </div>
         </div>
@@ -269,14 +286,14 @@ const Missions = () => {
                              {m.missionId}
                            </Link>
                          </td>
-                        <td><span className={`badge ${m.status}`}>{m.status}</span></td>
-                        <td>{formatTime(m.startedAt || m.timestamp)}</td>
-                        <td>{formatDuration(m)}</td>
-                        <td>
-                          <button className="danger small" onClick={() => handleDelete(m.workflowId)}>
-                            Delete
-                          </button>
-                        </td>
+                         <td><span className={`badge ${m.status}`}>{getMissionStatusLabel(m.status)}</span></td>
+                         <td>{formatTime(m.startedAt || m.timestamp)}</td>
+                         <td>{formatDuration(m)}</td>
+                         <td>
+                           <button className="danger small" onClick={() => handleDelete(m.workflowId)} aria-label={`Delete mission ${m.missionId || m.workflowId}`}>
+                             Delete
+                           </button>
+                         </td>
                       </tr>
                     ))}
                     {filtered.length === 0 && (

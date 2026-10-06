@@ -140,7 +140,7 @@ describe('OutputTemplate presentation actions', () => {
     const user = await import('@testing-library/user-event').then((m) => m.default.setup());
     const confirmSpy = vi.fn(() => true);
     vi.stubGlobal('confirm', confirmSpy);
-    const fetchMock = vi.fn(async (input: any, init?: RequestInit) => {
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       expect(String(input)).toBe('/api/skill-store/resume/templates/tpl-1');
       expect(init?.method).toBe('DELETE');
       return { ok: true, status: 200, json: async () => ({ success: true, removed: true }) };

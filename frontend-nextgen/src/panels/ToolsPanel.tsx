@@ -33,9 +33,9 @@ export const ToolsPanel = ({
   return (
     <div className="grid two-col">
       <div className="card">
-        <h3>Bound Skills</h3>
+        <h3>Bound Tools</h3>
         {toolBindings.length === 0 ? (
-          <p>No skills bound to this assistant.</p>
+          <p>No tools bound to this assistant.</p>
         ) : (
           <ul className="tool-binding-list">
             {toolBindings.map((tool) => {
@@ -85,6 +85,7 @@ export const ToolsPanel = ({
                       className="remove-btn"
                       onClick={() => removeCustomTool(tool.name)}
                       title={`Remove ${getDisplayName(tool)}`}
+                      aria-label={`Remove ${getDisplayName(tool)}`}
                     >
                       &times;
                     </button>

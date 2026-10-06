@@ -10,9 +10,8 @@ import { ConfigurationPanel } from '../panels/ConfigurationPanel';
 import { MemoryPanel } from '../panels/MemoryPanel';
 import { MissionsPanel } from '../panels/MissionsPanel';
 import { HITLPanel } from '../panels/HITLPanel';
-import { ArtifactsPanel } from '../panels/ArtifactsPanel';
 import { LiveFeedPanel } from '../components/LiveFeedPanel';
-import { ToolBinding, HITLApproval, AgentArtifact, ToolCatalogEntry, EntityToolWithManifest } from '../types/workspace';
+import { ToolBinding, HITLApproval, ToolCatalogEntry, EntityToolWithManifest } from '../types/workspace';
 import { getToolInputSchema, getInitialInputValues } from '../utils/workspaceHelpers';
 
 const EntityWorkspace = () => {
@@ -41,7 +40,6 @@ const EntityWorkspace = () => {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [agentArtifacts] = useState<AgentArtifact[]>([]);
 
   const [editingSystemPrompt, setEditingSystemPrompt] = useState('');
   const [knowledgeEntries, setKnowledgeEntries] = useState<Array<{ id: string; title: string; content: string; source?: string }>>([]);
@@ -368,20 +366,20 @@ const EntityWorkspace = () => {
   if (!entity) {
     return (
       <div className="page">
-        <h1>Entity Workspace</h1>
+        <h1>Loading assistant…</h1>
         <div className="loading">Loading entity...</div>
       </div>
     );
   }
 
-  const entityTabs = ['overview', 'skill settings', 'configuration', 'memory', 'missions', 'hitl', 'artifacts'] as const;
+  const entityTabs = ['overview', 'tool-settings', 'configuration', 'memory', 'missions', 'hitl'] as const;
 
   return (
     <div className="page entity-workspace">
       {error && (
         <div className="error-banner">
           <span>{error}</span>
-          <button onClick={() => setError(null)} className="close-btn">&times;</button>
+          <button onClick={() => setError(null)} className="close-btn" aria-label="Dismiss error">&times;</button>
         </div>
       )}
 
@@ -393,7 +391,7 @@ const EntityWorkspace = () => {
           {entity.metadata && typeof (entity.metadata as Record<string, unknown>).category !== 'undefined' && (
             <span className="badge info">{String((entity.metadata as Record<string, unknown>).category)}</span>
           )}
-          <span className="badge persisted">persisted</span>
+          <span className="badge active">Active</span>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <button className="secondary" onClick={() => navigate('/')}>Back to Dashboard</button>
@@ -407,7 +405,7 @@ const EntityWorkspace = () => {
             className={activeTab === tab ? 'tab active' : 'tab'}
             onClick={() => setActiveTab(tab)}
           >
-            {tab === 'hitl' ? 'Human-in-Loop' : tab.charAt(0).toUpperCase() + tab.slice(1)}
+            {tab === 'hitl' ? 'Human Review' : tab === 'tool-settings' ? 'Tool Settings' : tab.charAt(0).toUpperCase() + tab.slice(1)}
           </button>
         ))}
       </div>
@@ -425,13 +423,10 @@ const EntityWorkspace = () => {
             setMissionInput={setMissionInput}
             running={running}
             runMission={runMission}
-            saving={saving}
-            saveError={saveError}
-            saveConfiguration={saveConfiguration}
           />
         )}
 
-        {activeTab === 'skill settings' && (
+        {activeTab === 'tool-settings' && (
           <ToolsPanel
             toolBindings={toolBindings}
             availableTools={availableTools}
@@ -491,12 +486,6 @@ const EntityWorkspace = () => {
             loadingApprovals={loadingApprovals}
             entity={entity}
             handleHITLAction={handleHITLAction}
-          />
-        )}
-
-        {activeTab === 'artifacts' && (
-          <ArtifactsPanel
-            agentArtifacts={agentArtifacts}
           />
         )}
       </div>

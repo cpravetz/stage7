@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 
 interface WatchControlsProps {
   skillId: string;
@@ -26,7 +26,7 @@ const WatchControls = ({ skillId, defaultQuery = '' }: WatchControlsProps) => {
         cadence,
         enabled,
         autoApply: false,
-      } as any;
+      };
 
       const res = await fetch('/api/tool-executor/watches', {
         method: 'POST',
@@ -40,12 +40,12 @@ const WatchControls = ({ skillId, defaultQuery = '' }: WatchControlsProps) => {
       if (runNow) {
         try {
           await fetch(`/api/temporal/watches/${encodeURIComponent(data.id)}/run`, { method: 'POST' });
-        } catch (err) {
+         } catch {
           // best-effort
         }
       }
-    } catch (err: any) {
-      setMessage(err.message || 'Failed to create watch');
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Failed to create watch');
     } finally {
       setCreating(false);
     }

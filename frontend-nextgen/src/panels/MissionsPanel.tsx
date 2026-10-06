@@ -9,6 +9,19 @@ interface MissionsPanelProps {
   missionHistory: MissionHistoryEntry[];
 }
 
+function getMissionStatusLabel(status: string): string {
+  switch (status) {
+    case 'running': return 'Running';
+    case 'completed': return 'Completed';
+    case 'failed': return 'Failed';
+    case 'canceled': return 'Canceled';
+    case 'awaiting_review': return 'Needs Review';
+    case 'incomplete': return 'Incomplete';
+    case 'pending': return 'Pending';
+    default: return status.charAt(0).toUpperCase() + status.slice(1);
+  }
+}
+
 export const MissionsPanel = ({ missionHistory }: MissionsPanelProps) => {
   return (
     <div className="card">
@@ -29,7 +42,7 @@ export const MissionsPanel = ({ missionHistory }: MissionsPanelProps) => {
             {missionHistory.map((m) => (
               <tr key={m.missionId}>
                 <td>{m.missionId}</td>
-                <td><span className={`badge ${m.status}`}>{m.status}</span></td>
+                 <td><span className={`badge ${m.status}`}>{getMissionStatusLabel(m.status)}</span></td>
                 <td>{new Date(m.timestamp).toLocaleString()}</td>
                 <td className="truncate">{m.output || '-'}</td>
               </tr>

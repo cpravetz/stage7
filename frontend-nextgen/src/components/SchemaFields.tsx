@@ -7,10 +7,10 @@ export type EnumOption = string | number | boolean | { value: unknown; label?: u
 export const FIELD_LABEL_MAP: Record<string, string> = {
   operation: 'Action',
   provider: 'Service Provider',
-  endpointUrl: 'Connect Service',
-  baseUrl: 'Connect Service',
+  endpointUrl: 'Service Endpoint',
+  baseUrl: 'Service Endpoint',
   apiKey: 'API Key',
-  dryRun: 'Preview only',
+  dryRun: 'Preview Mode',
   confirmation: 'Approve & send',
   approved: 'Approve & send',
   // Names the user would not use for the field. Kept here so the schema does not

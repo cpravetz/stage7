@@ -16,7 +16,7 @@ export const HITLPanel = ({
 }: HITLPanelProps) => {
   return (
     <div className="card">
-      <h3>Human-in-the-Loop Controls</h3>
+      <h3>Human Review</h3>
       <p className="hint">
         Showing approvals aligned with this assistant (<code>{entity?.id}</code>).
         Mission approval requests are handled on the corresponding Mission Room.
@@ -24,7 +24,7 @@ export const HITLPanel = ({
       {loadingApprovals ? (
         <p>Loading approvals…</p>
       ) : hitlApprovals.length === 0 ? (
-        <p>No pending approvals. HITL gates will appear here when the assistant requests human review.</p>
+        <p>No pending approvals. Review requests will appear here when the assistant asks for approval.</p>
       ) : (
         <ul className="hitl-list">
           {hitlApprovals.map((approval) => (

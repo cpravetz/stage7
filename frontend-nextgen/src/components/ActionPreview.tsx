@@ -22,13 +22,15 @@ export const ActionPreview: React.FC<ActionPreviewProps> = ({ toolId, input }) =
   const [summary, setSummary] = React.useState<PreviewSummary | null>(null);
   const [loading, setLoading] = React.useState(false);
 
+  const inputKey = React.useMemo(() => JSON.stringify(input), [input]);
+
   React.useEffect(() => {
     setLoading(true);
     postJSON<{ summary: PreviewSummary }>(`/api/tool-executor/tools/${encodeURIComponent(toolId)}/preview`, { input })
       .then((data) => setSummary(data.summary))
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [toolId, JSON.stringify(input)]);
+  }, [toolId, inputKey]);
 
   if (loading) return <div style={{ padding: 16 }}>Loading preview…</div>;
   if (!summary) return null;

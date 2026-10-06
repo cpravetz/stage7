@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useFeedStore } from '../stores/feedStore';
 
 interface AgentInfo {
@@ -8,8 +8,11 @@ interface AgentInfo {
   status?: string;
 }
 
-const AgentOutputsPanel: React.FC<{ missionId: string }> = ({ missionId }) => {
-  const events = useFeedStore((s) => s.events);
+interface AgentOutputsPanelProps {
+  missionId: string;
+}
+
+const AgentOutputsPanel = ({ missionId }: AgentOutputsPanelProps) => {  const events = useFeedStore((s) => s.events);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -24,10 +27,10 @@ const AgentOutputsPanel: React.FC<{ missionId: string }> = ({ missionId }) => {
         if (!res.ok) throw new Error(`Failed to load agents: ${res.status}`);
         const data = await res.json();
         if (!mounted) return;
-        setAgents((data || []).map((a: any) => ({ id: a.id, name: a.name || a.id, role: a.role || a.agentRole, status: a.status })));
-      } catch (err: any) {
+        setAgents((data || []).map((a: { id: string; name?: string; role?: string; agentRole?: string; status?: string }) => ({ id: a.id, name: a.name || a.id, role: a.role || a.agentRole, status: a.status })));
+      } catch (err) {
         if (!mounted) return;
-        setError(err?.message || String(err));
+        setError(err instanceof Error ? err.message : String(err));
       } finally {
         if (mounted) setLoading(false);
       }
@@ -37,7 +40,7 @@ const AgentOutputsPanel: React.FC<{ missionId: string }> = ({ missionId }) => {
   }, [missionId]);
 
   const eventsByAgent = useMemo(() => {
-    const map = new Map<string, Array<any>>();
+    const map = new Map<string, Array<{ type: string; source?: string; message: string; timestamp?: number; metadata?: Record<string, unknown> }>>();
     for (const e of events.filter((ev) => ev.missionId === missionId)) {
       const key = (e.metadata?.agentId as string | undefined) || (e.metadata?.agentRole as string | undefined) || e.source || 'unknown';
       if (!map.has(key)) map.set(key, []);
@@ -51,8 +54,8 @@ const AgentOutputsPanel: React.FC<{ missionId: string }> = ({ missionId }) => {
       const res = await fetch(`/api/agent-runtime/missions/${encodeURIComponent(missionId)}/agents`);
       if (!res.ok) return;
       const data = await res.json();
-      setAgents((data || []).map((a: any) => ({ id: a.id, name: a.name || a.id, role: a.role || a.agentRole, status: a.status })));
-    } catch (err) {
+       setAgents((data || []).map((a: { id: string; name?: string; role?: string; agentRole?: string; status?: string }) => ({ id: a.id, name: a.name || a.id, role: a.role || a.agentRole, status: a.status })));
+     } catch {
       // ignore
     }
   };

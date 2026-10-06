@@ -30,7 +30,6 @@ const Assistants = () => {
   const [retryCount, setRetryCount] = useState(0);
   const [showRegisterForm, setShowRegisterForm] = useState(false);
 
-  const [id, setId] = useState('');
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [systemPrompt, setSystemPrompt] = useState('');
@@ -133,7 +132,7 @@ const [editKnowledgeTitle, setEditKnowledgeTitle] = useState('');
     setError(null);
     try {
       const data = await postJSON<Assistant>('/api/workers/assistants', {
-        id: id || `assistant-${Date.now()}`,
+        id: `assistant-${Date.now()}`,
         tenantId: 'tenant-1',
         name,
         description,
@@ -143,14 +142,17 @@ const [editKnowledgeTitle, setEditKnowledgeTitle] = useState('');
         metadata: {},
       });
       setAssistants([...assistants, data]);
-      setId('');
       setName('');
       setDescription('');
       setSystemPrompt('');
       setKnowledge([]);
+      setKnowledgeTitle('');
+      setKnowledgeContent('');
+      setKnowledgeSource('');
       setTransactionGuidance([]);
+      setTransactionInput('');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to register assistant');
+      setError(err instanceof Error ? err.message : 'Failed to create assistant');
     } finally {
       setRegistering(false);
     }
@@ -198,7 +200,7 @@ const [editKnowledgeTitle, setEditKnowledgeTitle] = useState('');
         <h1>Assistants</h1>
         <div className="header-actions">
           <span className="badge-count">{assistants.length} assistants</span>
-          <button onClick={() => setShowRegisterForm(true)} className="secondary">Register a new assistant</button>
+          <button onClick={() => setShowRegisterForm(true)} className="secondary">Create a new assistant</button>
           <button onClick={() => setRetryCount((c) => c + 1)} className="secondary" disabled={loading}>
             {loading ? 'Refreshing...' : 'Refresh'}
           </button>
@@ -208,7 +210,7 @@ const [editKnowledgeTitle, setEditKnowledgeTitle] = useState('');
       {error && (
         <div className="error-banner">
           <span>{error}</span>
-          <button onClick={() => setError(null)} className="close-btn">&times;</button>
+          <button onClick={() => setError(null)} className="close-btn" aria-label="Dismiss error">&times;</button>
         </div>
       )}
 
@@ -216,30 +218,29 @@ const [editKnowledgeTitle, setEditKnowledgeTitle] = useState('');
         {showRegisterForm && (
           <div className="card">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h3>Register Assistant</h3>
+              <h3>Create Assistant</h3>
               <button type="button" className="close-btn" onClick={() => setShowRegisterForm(false)} aria-label="Close registration panel">&times;</button>
             </div>
             <form onSubmit={handleRegister} className="form">
-              <input type="text" placeholder="ID (optional — auto-generated)" value={id} onChange={(e) => setId(e.target.value)} />
               <input type="text" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} required />
-              <textarea placeholder="Description" value={description} onChange={(e) => setDescription(e.target.value)} required rows={2} />
-              <p className="hint">Model is optimized at chat time via the Brain router; no model assignment needed at registration.</p>
-              <textarea placeholder="System Prompt" value={systemPrompt} onChange={(e) => setSystemPrompt(e.target.value)} rows={3} />
+              <textarea placeholder="Description" value={description} onChange={(e) => setDescription(e.target.value)} required rows={3} />
+              <p className="hint">The model is auto-selected at runtime; no model assignment needed at creation.</p>
+              <textarea placeholder="Instructions" value={systemPrompt} onChange={(e) => setSystemPrompt(e.target.value)} rows={6} />
 
               <div className="tool-binding-section">
-                <h4>Knowledge Base</h4>
+                <h4>Knowledge</h4>
                 <div className="input-row">
                   <input type="text" placeholder="Title" value={knowledgeTitle} onChange={(e) => setKnowledgeTitle(e.target.value)} className="flex-grow" />
                   <input type="text" placeholder="Source (optional)" value={knowledgeSource} onChange={(e) => setKnowledgeSource(e.target.value)} className="flex-grow" />
                 </div>
-                <textarea placeholder="Knowledge content" value={knowledgeContent} onChange={(e) => setKnowledgeContent(e.target.value)} rows={2} />
+                <textarea placeholder="Enter the knowledge text…" value={knowledgeContent} onChange={(e) => setKnowledgeContent(e.target.value)} rows={4} />
                 <button type="button" onClick={addKnowledge} className="secondary">Add Knowledge</button>
                 {knowledge.length > 0 && (
                   <ul className="tool-list">
                     {knowledge.map((k, idx) => (
                       <li key={k.id || idx}>
                         <strong>{k.title}</strong>: {k.content.slice(0, 100)}{k.content.length > 100 ? '...' : ''}
-                        <button type="button" onClick={() => removeKnowledge(idx)} className="remove-btn">&times;</button>
+                         <button type="button" onClick={() => removeKnowledge(idx)} className="remove-btn" aria-label="Remove knowledge entry">&times;</button>
                       </li>
                     ))}
                   </ul>
@@ -247,9 +248,9 @@ const [editKnowledgeTitle, setEditKnowledgeTitle] = useState('');
               </div>
 
               <div className="tool-binding-section">
-                <h4>Transaction Guidance</h4>
+                <h4>Behavior Rules</h4>
                 <div className="input-row">
-                  <input type="text" placeholder="Guidance rule (e.g. Always confirm before booking)" value={transactionInput} onChange={(e) => setTransactionInput(e.target.value)} className="flex-grow" />
+                  <input type="text" placeholder="Behavior rule (e.g. Always confirm before booking)" value={transactionInput} onChange={(e) => setTransactionInput(e.target.value)} className="flex-grow" />
                   <button type="button" onClick={addTransactionGuidance}>Add</button>
                 </div>
                 {transactionGuidance.length > 0 && (
@@ -257,14 +258,14 @@ const [editKnowledgeTitle, setEditKnowledgeTitle] = useState('');
                     {transactionGuidance.map((g, idx) => (
                       <li key={idx}>
                         {g}
-                        <button type="button" onClick={() => removeTransactionGuidance(idx)} className="remove-btn">&times;</button>
+                        <button type="button" onClick={() => removeTransactionGuidance(idx)} className="remove-btn" aria-label="Remove behavior rule">&times;</button>
                       </li>
                     ))}
                   </ul>
                 )}
               </div>
 
-              <button type="submit" disabled={registering}>{registering ? 'Registering...' : 'Register'}</button>
+              <button type="submit" disabled={registering}>{registering ? 'Creating…' : 'Create Assistant'}</button>
             </form>
           </div>
         )}
@@ -276,23 +277,23 @@ const [editKnowledgeTitle, setEditKnowledgeTitle] = useState('');
           <h3>Edit Assistant: {editingId}</h3>
           <form onSubmit={handleUpdate} className="form">
             <input type="text" placeholder="Name" value={editForm.name || ''} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} />
-            <textarea placeholder="Description" value={editForm.description || ''} onChange={(e) => setEditForm({ ...editForm, description: e.target.value })} rows={2} />
-            <textarea placeholder="System Prompt" value={editForm.systemPrompt || ''} onChange={(e) => setEditForm({ ...editForm, systemPrompt: e.target.value })} rows={3} />
+            <textarea placeholder="Description" value={editForm.description || ''} onChange={(e) => setEditForm({ ...editForm, description: e.target.value })} rows={3} />
+            <textarea placeholder="Instructions" value={editForm.systemPrompt || ''} onChange={(e) => setEditForm({ ...editForm, systemPrompt: e.target.value })} rows={6} />
 
             <div className="tool-binding-section">
-              <h4>Knowledge Base</h4>
+              <h4>Knowledge</h4>
               <div className="input-row">
                 <input type="text" placeholder="Title" value={editKnowledgeTitle} onChange={(e) => setEditKnowledgeTitle(e.target.value)} className="flex-grow" />
                 <input type="text" placeholder="Source (optional)" value={editKnowledgeSource} onChange={(e) => setEditKnowledgeSource(e.target.value)} className="flex-grow" />
               </div>
-              <textarea placeholder="Knowledge content" value={editKnowledgeContent} onChange={(e) => setEditKnowledgeContent(e.target.value)} rows={2} />
+              <textarea placeholder="Enter the knowledge text…" value={editKnowledgeContent} onChange={(e) => setEditKnowledgeContent(e.target.value)} rows={4} />
               <button type="button" onClick={addEditKnowledge} className="secondary">Add Knowledge</button>
               {(editForm.knowledge || []).length > 0 && (
                 <ul className="tool-list">
                   {(editForm.knowledge || []).map((k, idx) => (
                     <li key={k.id || idx}>
                       <strong>{k.title}</strong>: {k.content.slice(0, 100)}{k.content.length > 100 ? '...' : ''}
-                      <button type="button" onClick={() => removeEditKnowledge(idx)} className="remove-btn">&times;</button>
+                      <button type="button" onClick={() => removeEditKnowledge(idx)} className="remove-btn" aria-label="Remove knowledge entry">&times;</button>
                     </li>
                   ))}
                 </ul>
@@ -300,9 +301,9 @@ const [editKnowledgeTitle, setEditKnowledgeTitle] = useState('');
             </div>
 
             <div className="tool-binding-section">
-              <h4>Transaction Guidance</h4>
+              <h4>Behavior Rules</h4>
               <div className="input-row">
-                <input type="text" placeholder="Guidance rule (e.g. Always confirm before booking)" value={editTransactionInput} onChange={(e) => setEditTransactionInput(e.target.value)} className="flex-grow" />
+                <input type="text" placeholder="Behavior rule (e.g. Always confirm before booking)" value={editTransactionInput} onChange={(e) => setEditTransactionInput(e.target.value)} className="flex-grow" />
                 <button type="button" onClick={addEditTransactionGuidance}>Add</button>
               </div>
               {(editForm.transactionGuidance || []).length > 0 && (
@@ -310,7 +311,7 @@ const [editKnowledgeTitle, setEditKnowledgeTitle] = useState('');
                   {(editForm.transactionGuidance || []).map((g, idx) => (
                     <li key={idx}>
                       {g}
-                      <button type="button" onClick={() => removeEditTransactionGuidance(idx)} className="remove-btn">&times;</button>
+                      <button type="button" onClick={() => removeEditTransactionGuidance(idx)} className="remove-btn" aria-label="Remove behavior rule">&times;</button>
                     </li>
                   ))}
                 </ul>
@@ -329,11 +330,11 @@ const [editKnowledgeTitle, setEditKnowledgeTitle] = useState('');
         <h3>Registered Assistants</h3>
         {loading ? (
           <div className="loading-state">
-            <p>Loading assistants from artifacts...</p>
+            <p>Loading assistants…</p>
           </div>
         ) : assistants.length === 0 ? (
           <div className="empty-state">
-            <p>No assistants registered. Use the form above to register one, or wait for the catalog to seed on first startup.</p>
+            <p>No assistants registered. Use the form above to create one, or wait for the catalog to seed on first startup.</p>
           </div>
         ) : (
           <table className="data-table">
@@ -341,7 +342,7 @@ const [editKnowledgeTitle, setEditKnowledgeTitle] = useState('');
               <tr>
                 <th>Name</th>
                 <th>Description</th>
-                <th>Skills</th>
+                <th>Tools</th>
                 <th>Status</th>
                 <th>Actions</th>
               </tr>
@@ -352,7 +353,7 @@ const [editKnowledgeTitle, setEditKnowledgeTitle] = useState('');
                   <td><Link to={`/entity/${a.id}`}>{a.name}</Link></td>
                   <td className="truncate">{a.description}</td>
                   <td>{a.tools?.length || 0}</td>
-                  <td><span className="badge active">persisted</span></td>
+                  <td><span className="badge active">Active</span></td>
                   <td className="actions-cell">
                     <Link to={`/entity/${a.id}`} className="link-button">Open</Link>
                     <button onClick={() => handleEdit(a)} className="link-button">Edit</button>

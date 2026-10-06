@@ -52,29 +52,29 @@ export const ConfigurationPanel = ({
     <div>
       <div className="grid two-col">
         <div className="card">
-          <h3>System Prompt</h3>
+          <h3>Instructions</h3>
           <p className="hint">
-            Edit the base system prompt for this assistant. Domain-specific knowledge
-            and transaction guidance are appended at execution time.
+            Edit the base instructions for this assistant. Domain-specific knowledge
+            and behavior rules are appended at execution time.
           </p>
           <textarea
-            placeholder="System prompt"
+            placeholder="Instructions"
             value={editingSystemPrompt}
             onChange={(e) => setEditingSystemPrompt(e.target.value)}
-            rows={8}
+            rows={10}
           />
         </div>
 
         <div className="card">
-          <h3>Transaction Guidance</h3>
+          <h3>Behavior Rules</h3>
           <p className="hint">
-            Rules that are injected into the system prompt at execution time to guide
-            transaction-level behavior (e.g. "always confirm before booking").
+            Rules that are injected into the instructions at execution time to guide
+            behavior during interactions (e.g. "always confirm before booking").
           </p>
           <div className="input-row">
             <input
               type="text"
-              placeholder="Guidance rule"
+              placeholder="Behavior rule"
               value={transactionInput}
               onChange={(e) => setTransactionInput(e.target.value)}
               className="flex-grow"
@@ -88,21 +88,21 @@ export const ConfigurationPanel = ({
               {transactionGuidanceEntries.map((g, idx) => (
                 <li key={idx}>
                   {g}
-                  <button type="button" onClick={() => removeTransactionGuidance(idx)} className="remove-btn">
+                  <button type="button" onClick={() => removeTransactionGuidance(idx)} className="remove-btn" aria-label="Remove behavior rule">
                     &times;
                   </button>
                 </li>
               ))}
             </ul>
           ) : (
-            <p className="muted">No transaction guidance rules.</p>
+            <p className="muted">No behavior rules.</p>
           )}
         </div>
       </div>
 
       <div className="grid two-col">
         <div className="card">
-          <h3>Knowledge Base</h3>
+          <h3>Knowledge</h3>
           <p className="hint">
             Add domain-specific knowledge that will be injected into the assistant's
             context at execution time.
@@ -124,10 +124,10 @@ export const ConfigurationPanel = ({
             />
           </div>
           <textarea
-            placeholder="Knowledge content"
+            placeholder="Enter the knowledge text…"
             value={knowledgeContent}
             onChange={(e) => setKnowledgeContent(e.target.value)}
-            rows={3}
+            rows={5}
           />
           <button type="button" onClick={addKnowledgeEntry} className="secondary">
             Add Knowledge
@@ -141,7 +141,7 @@ export const ConfigurationPanel = ({
                     <p>{k.content.slice(0, 120)}{k.content.length > 120 ? '…' : ''}</p>
                     {k.source && <p className="muted">Source: {k.source}</p>}
                   </div>
-                  <button type="button" onClick={() => removeKnowledgeEntry(idx)} className="remove-btn">
+                  <button type="button" onClick={() => removeKnowledgeEntry(idx)} className="remove-btn" aria-label="Remove knowledge entry">
                     &times;
                   </button>
                 </li>
@@ -167,7 +167,7 @@ export const ConfigurationPanel = ({
                   <div key={k} className="input-row">
                     <label style={{ width: 160 }}>{CONFIG_LABEL_MAP[k] || humanizeKey(k)}</label>
                     <input type="text" value={String(v ?? '')} onChange={(e) => setMetadataConfig((prev) => ({ ...prev, [k]: e.target.value }))} />
-                    <button className="remove-btn" onClick={() => { const n = { ...metadataConfig }; delete n[k]; setMetadataConfig(n); }}>&times;</button>
+                     <button className="remove-btn" onClick={() => { const n = { ...metadataConfig }; delete n[k]; setMetadataConfig(n); }} aria-label="Remove metadata entry">&times;</button>
                   </div>
                 ))}
               </div>
@@ -189,9 +189,9 @@ export const ConfigurationPanel = ({
             />
           </div>
           <div className="button-row" style={{ marginTop: 12, justifyContent: 'flex-end' }}>
-            <button onClick={saveConfiguration} disabled={saving}>
-              {saving ? 'Saving…' : 'Save Configuration'}
-            </button>
+             <button onClick={saveConfiguration} disabled={saving}>
+               {saving ? 'Saving…' : 'Save Changes'}
+             </button>
           </div>
           {saveError && <div className="error-banner">{saveError}</div>}
         </div>

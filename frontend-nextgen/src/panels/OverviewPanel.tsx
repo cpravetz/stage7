@@ -18,9 +18,6 @@ interface OverviewPanelProps {
   setMissionInput: (value: string) => void;
   running: boolean;
   runMission: () => void;
-  saving: boolean;
-  saveError: string | null;
-  saveConfiguration: () => void;
 }
 
 export const OverviewPanel = ({
@@ -34,9 +31,6 @@ export const OverviewPanel = ({
   setMissionInput,
   running,
   runMission,
-  saving,
-  saveError,
-  saveConfiguration,
 }: OverviewPanelProps) => {
   const enabledTools = toolBindings.filter((t) => t.enabled);
 
@@ -95,13 +89,13 @@ export const OverviewPanel = ({
   return (
     <div className="grid two-col">
       <div className="card">
-        <h3>Persona</h3>
+        <h3>About</h3>
         <p>{entity.description}</p>
         <div className="meta-grid">
-          <div><strong>Skills Bound:</strong> {enabledTools.length}</div>
+          <div><strong>Tools Bound:</strong> {enabledTools.length}</div>
           <div><strong>Knowledge Entries:</strong> {knowledgeEntries.length}</div>
-          <div><strong>Guidance Rules:</strong> {transactionGuidanceEntries.length}</div>
-          <div><strong>Memory Keys:</strong> {Object.keys(memoryContext).length}</div>
+          <div><strong>Behavior Rules:</strong> {transactionGuidanceEntries.length}</div>
+          <div><strong>Memory Entries:</strong> {Object.keys(memoryContext).length}</div>
         </div>
       </div>
 
@@ -112,23 +106,22 @@ export const OverviewPanel = ({
             placeholder="Run a mission with this entity..."
             value={missionInput}
             onChange={(e) => setMissionInput(e.target.value)}
-            rows={3}
+            rows={4}
           />
           <button onClick={runMission} disabled={running || !missionInput.trim()}>
             {running ? 'Running...' : 'Run Mission'}
           </button>
           <p className="hint">
-            Mission will use {enabledTools.length} bound tools
-            · {knowledgeEntries.length} knowledge entries · {transactionGuidanceEntries.length} guidance rules
+          Mission will use {enabledTools.length} bound tools
+             · {knowledgeEntries.length} knowledge entries · {transactionGuidanceEntries.length} behavior rules
           </p>
-          {saveError && <div className="error-banner">{saveError}</div>}
         </div>
       </div>
 
       <div className="card" style={{ gridColumn: '1 / -1' }}>
-        <h3>Skills</h3>
+        <h3>Tools</h3>
         {enabledTools.length === 0 ? (
-          <p>No skills bound to this assistant.</p>
+          <p>No tools bound to this assistant.</p>
         ) : (
           enabledTools
             .map((tool) => {
@@ -146,18 +139,17 @@ export const OverviewPanel = ({
 
               return (
                 <div key={tool.name} className="card skill-panel">
-                  <h4>{getDisplayName(tool)}</h4>
-                  <div className="skill-body">
-                    {hasSettings && (
-                      <div className="skill-settings-summary">
-                        {/* Opens the Skill settings tab, which holds this Skill's config
-                            editor. This previously wrote 'tools' to a store field the page
-                            never read, so the button appeared to do nothing. */}
-                        <button className="secondary" onClick={() => useAssistantViewStore.getState().setField(entity.id, 'activeTab', 'skill settings')}>
-                          Settings
-                        </button>
-                      </div>
-                    )}
+                   <h4>{getDisplayName(tool)}</h4>
+                   <div className="skill-body">
+                     {hasSettings && (
+                       <div className="skill-settings-summary">
+                         {/* Opens the Tool Settings tab, which holds this tool's config
+                             editor. */}
+                         <button className="secondary" onClick={() => useAssistantViewStore.getState().setField(entity.id, 'activeTab', 'tool-settings')}>
+                           Settings
+                         </button>
+                       </div>
+                     )}
                     <div className="skill-runtime">
                       {userTriggered ? (
                         <>
@@ -194,13 +186,13 @@ export const OverviewPanel = ({
                               {toolRunning ? 'Running…' : (typeof skill?.manifest?.actionLabel === 'string' && skill.manifest.actionLabel.trim()) || 'Run'}
                             </button>
                             {tool.name === 'career-job-discovery' && (
-                              <WatchControls skillId={tool.name} defaultQuery={String((toolRunInputs && (toolRunInputs as any).query) || '')} />
+                              <WatchControls skillId={tool.name} defaultQuery={String((toolRunInputs && (toolRunInputs as Record<string, unknown>).query) || '')} />
                             )}
                           </div>
                         </>
                       ) : hasOutput ? null : (
                         <p className="hint">
-                          This automatic Skill has not been used yet. Output will appear here when it has been used.
+                          This automatic tool has not been used yet. Output will appear here when it has been used.
                         </p>
                       )}
                       {hasOutput && (

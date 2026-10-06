@@ -90,12 +90,9 @@ const Dashboard = () => {
     (s) => s.status === 'unhealthy' || s.status === 'unknown'
   ).length;
 
-  const runningMissions = missions.filter((m) => m.status === 'running').length;
+   const runningMissions = missions.filter((m) => m.status === 'running').length;
   const completedMissions = missions.filter((m) => m.status === 'completed').length;
   const failedMissions = missions.filter((m) => m.status === 'failed').length;
-
-  // derive active agent count from running missions (agents are ephemeral per mission)
-  const activeAgents = runningMissions;
 
   const getStatusLabel = (status: string) => {
     switch (status) {
@@ -107,6 +104,25 @@ const Dashboard = () => {
         return 'Offline';
       default:
         return 'No Data';
+    }
+  };
+
+  const getMissionStatusLabel = (status: string) => {
+    switch (status) {
+      case 'running':
+        return 'Running';
+      case 'completed':
+        return 'Completed';
+      case 'failed':
+        return 'Failed';
+      case 'canceled':
+        return 'Canceled';
+      case 'awaiting_review':
+        return 'Needs Review';
+      case 'incomplete':
+        return 'Incomplete';
+      default:
+        return status.charAt(0).toUpperCase() + status.slice(1);
     }
   };
 
@@ -168,19 +184,11 @@ const Dashboard = () => {
           </div>
         </div>
         <div className="card" style={{ textAlign: 'center' }}>
-          <div className="metric" style={{ color: '#38bdf8' }}>
-            {activeAgents}
-          </div>
-          <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>
-            Agents Active
-          </div>
-        </div>
-        <div className="card" style={{ textAlign: 'center' }}>
           <div
             className="metric"
             style={{ color: feedConnected ? '#22c55e' : '#ef4444' }}
           >
-            {feedConnected ? 'Live' : 'Disconnected'}
+            {feedConnected ? 'Live' : 'Offline'}
           </div>
           <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: '4px' }}>
             Event Feed
@@ -254,18 +262,22 @@ const Dashboard = () => {
                           {m.missionId}
                         </Link>
                       </td>
-                      <td>
-                        <span className={`badge ${m.status}`}>{m.status}</span>
-                      </td>
+                       <td>
+                         <span className={`badge ${m.status}`}>{getMissionStatusLabel(m.status)}</span>
+                       </td>
                       <td>{formatStarted(m)}</td>
                       <td>{formatDuration(m)}</td>
                       <td>
-                        <button
-                          className="danger small"
-                          onClick={() => deleteMission(m.workflowId)}
-                        >
-                          Delete
-                        </button>
+                         <button
+                           className="danger small"
+                           onClick={() => {
+                             if (!confirm(`Delete mission ${m.missionId || m.workflowId}?`)) return;
+                             deleteMission(m.workflowId);
+                           }}
+                           aria-label={`Delete mission ${m.missionId || m.workflowId}`}
+                         >
+                           Delete
+                         </button>
                       </td>
                     </tr>
                   ))}
@@ -282,37 +294,9 @@ const Dashboard = () => {
             <Link to="/missions" className="link-button">
               View All Missions
             </Link>
-          </div>
-        </div>
-
-        <div className="card">
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              marginBottom: '12px',
-            }}
-          >
-            <h3 style={{ margin: 0 }}>Agent Status</h3>
-          </div>
-          <div
-            style={{
-              display: 'flex',
-              gap: '16px',
-              marginBottom: '12px',
-              fontSize: '13px',
-            }}
-          >
-            <span style={{ color: '#22c55e' }}>
-              <strong>{activeAgents}</strong> Active (derived from running missions)
-            </span>
-          </div>
-          <p style={{ fontSize: '12px', color: '#94a3b8' }}>
-            Agents are mission-scoped and ephemeral. See Mission Room for agent details.
-          </p>
-        </div>
-      </div>
+           </div>
+         </div>
+       </div>
 
       <div className="card" style={{ marginBottom: '1.5rem' }}>
         <div
@@ -330,7 +314,7 @@ const Dashboard = () => {
                 feedConnected ? 'online' : 'offline'
               }`}
             ></span>
-            {feedConnected ? 'Live' : 'Disconnected'}
+            {feedConnected ? 'Live' : 'Offline'}
           </span>
         </div>
         {feedConnected ? (

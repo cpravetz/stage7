@@ -4,8 +4,8 @@ import { useAuthStore } from '../stores/authStore';
 import stage7Logo from '../assets/stage7_logo.svg';
 
 const Login = () => {
-  const [email, setEmail] = useState('admin@example.com');
-  const [password, setPassword] = useState('password');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const login = useAuthStore((s) => s.login);

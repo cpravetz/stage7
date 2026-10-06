@@ -25,6 +25,28 @@ interface MissionArtifact {
   type?: string;
   content?: string;
   data?: Record<string, unknown>;
+  url?: string;
+}
+
+function getMissionStatusLabel(status: string): string {
+  switch (status) {
+    case 'running': return 'Running';
+    case 'completed': return 'Completed';
+    case 'failed': return 'Failed';
+    case 'canceled': return 'Canceled';
+    case 'awaiting_review': return 'Needs Review';
+    case 'incomplete': return 'Incomplete';
+    case 'pending': return 'Pending';
+    default: return status.charAt(0).toUpperCase() + status.slice(1);
+  }
+}
+
+function truncateJSON(obj: Record<string, unknown>, max = 60): string {
+  let str = JSON.stringify(obj);
+  if (str.length > max) {
+    str = str.slice(0, max) + '…';
+  }
+  return str;
 }
 
 const Persistence = () => {
@@ -195,7 +217,7 @@ const Persistence = () => {
                           <strong>{m.missionId}</strong>
                         </Link>
                         <span className={`badge ${m.status}`} style={{ marginLeft: 8 }}>
-                          {m.status}
+                          {getMissionStatusLabel(m.status)}
                         </span>
                         <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
                           {m.prompt ? m.prompt.slice(0, 120) + (m.prompt.length > 120 ? '…' : '') : '—'}
@@ -229,24 +251,24 @@ const Persistence = () => {
                                         </pre>
                                       )}
                                       <div style={{ display: 'flex', gap: 8 }}>
-                                        {(a.content || (a as any).url) && (
+                                        {a.content || a.url ? (
                                           <>
+                                          <button
+                                                onClick={() => {
+                                                  if (a.url) {
+                                                    window.open(a.url, '_blank');
+                                                  } else {
+                                                    const blob = new Blob([a.content || ''], { type: 'text/plain' });
+                                                    const url = URL.createObjectURL(blob);
+                                                    window.open(url, '_blank');
+                                                  }
+                                                }}
+                                              >Open in new tab</button>
                                             <button
                                               onClick={() => {
-                                                if ((a as any).url) {
-                                                  window.open((a as any).url, '_blank');
-                                                } else {
-                                                  const blob = new Blob([a.content || ''], { type: 'text/plain' });
-                                                  const url = URL.createObjectURL(blob);
-                                                  window.open(url, '_blank');
-                                                }
-                                              }}
-                                            >Open</button>
-                                            <button
-                                              onClick={() => {
-                                                if ((a as any).url) {
+                                                if (a.url) {
                                                   const aEl = document.createElement('a');
-                                                  aEl.href = (a as any).url;
+                                                  aEl.href = a.url;
                                                   aEl.target = '_blank';
                                                   document.body.appendChild(aEl);
                                                   aEl.click();
@@ -263,9 +285,9 @@ const Persistence = () => {
                                                   URL.revokeObjectURL(url);
                                                 }
                                               }}
-                                            >Download</button>
-                                          </>
-                                        )}
+                                            >Download file</button>
+                                        </>
+                                      ) : null}
                                       </div>
                                     </div>
                           </li>
@@ -346,15 +368,15 @@ const Persistence = () => {
                         <tr key={d.id}>
                           <td className="truncate">{d.id}</td>
                           <td>{d.collection}</td>
-                          <td>
-                            <pre className="inline-code">
-                              {JSON.stringify(d.data).slice(0, 60)}
-                            </pre>
-                          </td>
-                          <td>
-                            <button className="danger small" onClick={() => handleDelete(d.id)}>
-                              Delete
-                            </button>
+                           <td>
+                             <pre className="inline-code">
+                               {truncateJSON(d.data)}
+                             </pre>
+                           </td>
+                           <td>
+                             <button className="danger small" onClick={() => handleDelete(d.id)} aria-label={`Delete document ${d.id}`}>
+                               Delete
+                             </button>
                           </td>
                         </tr>
                       ))}

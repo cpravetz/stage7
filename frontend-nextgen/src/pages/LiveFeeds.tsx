@@ -26,7 +26,7 @@ const LiveFeeds = () => {
         <h1>Live Feeds</h1>
         <div className="feed-actions">
           <span className={`connection-status ${connected ? 'online' : 'offline'}`}>
-            {connected ? 'Connected' : 'Disconnected'}
+            {connected ? 'Live' : 'Offline'}
           </span>
           <button onClick={clear}>Clear</button>
         </div>

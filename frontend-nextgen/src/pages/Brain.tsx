@@ -159,14 +159,14 @@ const Brain = () => {
       <h1>Brain / LLM Layer</h1>
       <div className="grid two-col">
         <div className="card">
-          <h3>Completion</h3>
+          <h3>Test Prompt</h3>
           <form onSubmit={handleComplete} className="form">
             <textarea
-              placeholder="Prompt"
+              placeholder="Enter a prompt to test"
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               required
-              rows={4}
+              rows={6}
             />
             <select value={model} onChange={(e) => setModel(e.target.value)}>
               <option value="">Auto-select (system optimized)</option>
@@ -177,18 +177,17 @@ const Brain = () => {
               ))}
             </select>
             <p className="hint">
-              The system auto-selects the best model based on task intent. Select
-              a model above to override.
+              Auto-select picks the best model for the task. Select a model above to override.
             </p>
             <button type="submit" disabled={loading}>
-              {loading ? 'Running...' : 'Complete'}
+              {loading ? 'Testing…' : 'Test Prompt'}
             </button>
           </form>
           {result && <pre className="result">{result}</pre>}
         </div>
 
         <div className="card">
-          <h3>Cache Stats</h3>
+          <h3>Response Cache</h3>
           {cacheStats ? (
             <div className="meta-grid">
               <div>
@@ -201,11 +200,11 @@ const Brain = () => {
           ) : (
             <p>No cache stats available.</p>
           )}
-          <h3 style={{ marginTop: '16px' }}>Circuit Breakers</h3>
+          <h3 style={{ marginTop: '16px' }}>Provider Failures</h3>
           <p className="muted" style={{ fontSize: '12px', marginBottom: '12px' }}>
-            Provider-level fatal failures (401/403/auth/quota). Trips a breaker only on
-            configuration or quota errors; the failure count resets on any successful
-            call. Distinct from the attempt-error count in the Activity Log below.
+            Provider-level fatal errors (401/403/auth/quota). A breaker trips only on
+            configuration or quota errors and resets on any successful call.
+            This is separate from the attempt-error count in the Activity Log below.
           </p>
           {circuitBreakers.length > 0 ? (
             <table className="data-table">
@@ -224,13 +223,13 @@ const Brain = () => {
                       <span
                         className={`badge ${
                           cb.state === 'closed'
-                            ? 'running'
+                            ? 'completed'
                             : cb.state === 'open'
                               ? 'failed'
-                              : 'idle'
+                              : 'pending'
                         }`}
                       >
-                        {cb.state === 'closed' ? 'up' : cb.state === 'open' ? 'down' : cb.state}
+                        {cb.state === 'closed' ? 'Closed' : cb.state === 'open' ? 'Open' : cb.state === 'half' ? 'Half-Open' : cb.state}
                       </span>
                     </td>
                     <td>{cb.failures}</td>
@@ -239,7 +238,7 @@ const Brain = () => {
               </tbody>
             </table>
           ) : (
-            <p>No circuit breaker data.</p>
+            <p>No provider failure data.</p>
           )}
           {trippedBreakers > 0 && (
             <p className="muted" style={{ fontSize: '12px', marginTop: '8px' }}>
@@ -260,7 +259,7 @@ const Brain = () => {
           }}
         >
           <h3 style={{ margin: 0 }}>
-            Brain Activity Log
+            Activity Log
             <span className="muted" style={{ fontSize: '13px', marginLeft: '8px' }}>
               ({completionCount} completed, {cacheHitCount} cached, {errorCount} errors)
             </span>
@@ -270,21 +269,21 @@ const Brain = () => {
               className={`connection-status ${
                 useFeedStore.getState().connected ? 'online' : 'offline'
               }`}
+              style={{ fontSize: '12px' }}
             >
-            </span>
+              {useFeedStore.getState().connected ? 'Live' : 'Offline'}
+              </span>
             <button className="secondary" onClick={loadServiceLogs} disabled={serviceLogsLoading}>
-              {serviceLogsLoading ? '...' : 'Refresh'}
+              {serviceLogsLoading ? 'Refreshing…' : 'Refresh'}
             </button>
           </div>
         </div>
         <p className="muted" style={{ fontSize: '12px', marginBottom: '12px' }}>
-          Real-time brain errors arrive over WebSocket. Service logs are fetched
-          periodically as a historical fallback. Note: these attempt-error counts are
-          distinct from the Circuit Breaker panel above, which only tracks
-          provider-level fatal failures (401/403/auth/quota).
+          Real-time errors arrive over the WebSocket feed. Service logs are fetched
+          periodically as a historical record.
         </p>
         {combinedLogs.length === 0 ? (
-          <div className="empty-state">No brain activity logged yet.</div>
+          <div className="empty-state">No activity logged yet.</div>
         ) : (
           <div className="table-container">
             <table className="data-table">

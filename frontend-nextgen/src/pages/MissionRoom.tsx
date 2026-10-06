@@ -56,6 +56,19 @@ const STATUS_BADGE: Record<string, string> = {
   incomplete: 'incomplete',
 };
 
+function getMissionStatusLabel(status: string): string {
+  switch (status) {
+    case 'running': return 'Running';
+    case 'completed': return 'Completed';
+    case 'failed': return 'Failed';
+    case 'canceled': return 'Canceled';
+    case 'awaiting_review': return 'Needs Review';
+    case 'incomplete': return 'Incomplete';
+    case 'paused': return 'Paused';
+    default: return status.charAt(0).toUpperCase() + status.slice(1);
+  }
+}
+
 function iconForType(type: string): string {
   if (type.startsWith('task_')) return type === 'task_failed' ? '❌' : '✅';
   if (type.startsWith('phase_')) return '📦';
@@ -408,34 +421,44 @@ const MissionRoom = () => {
             <code>{workflowId}</code>
           </p>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={async () => {
-              try {
-                await postJSON(`/api/temporal/missions/${encodeURIComponent(workflowId)}/start`, {});
-                refreshDetail(workflowId);
-              } catch (e) {
-                // ignore — refresh will show errors
-              }
-            }}>Start</button>
-            <button onClick={async () => {
-              try {
-                await postJSON(`/api/temporal/missions/${encodeURIComponent(workflowId)}/pause`, {});
-                refreshDetail(workflowId);
-              } catch (e) {}
-            }}>Pause</button>
-            <button className="danger" onClick={async () => {
-              if (!confirm('Stop mission? This will terminate running branches.')) return;
-              try {
-                await postJSON(`/api/temporal/missions/${encodeURIComponent(workflowId)}/stop`, {});
-                refreshDetail(workflowId);
-              } catch (e) {}
-            }}>Stop</button>
-          </div>
-          <span className={`badge ${badge}`}>{status}</span>
-          <span className={`connection-status ${connected ? 'online' : 'offline'}`}>
-            {connected ? 'Live' : 'Disconnected'}
-          </span>
+         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+           <div style={{ display: 'flex', gap: 8 }}>
+               {status !== 'running' && status !== 'completed' && status !== 'failed' && status !== 'canceled' && (
+                <button onClick={async () => {
+                  try {
+                    await postJSON(`/api/temporal/missions/${encodeURIComponent(workflowId)}/start`, {});
+                    refreshDetail(workflowId);
+                  } catch {
+                    // ignore — refresh will show errors
+                  }
+                }}>Start</button>
+              )}
+              {status === 'running' && (
+                <button onClick={async () => {
+                  try {
+                    await postJSON(`/api/temporal/missions/${encodeURIComponent(workflowId)}/pause`, {});
+                    refreshDetail(workflowId);
+                  } catch {
+                    // ignore — refresh will show errors
+                  }
+                }}>Pause</button>
+              )}
+              {status === 'running' && (
+                <button className="danger" onClick={async () => {
+                  if (!confirm('Stop mission? This will terminate running branches.')) return;
+                  try {
+                    await postJSON(`/api/temporal/missions/${encodeURIComponent(workflowId)}/stop`, {});
+                    refreshDetail(workflowId);
+                  } catch {
+                    // ignore — refresh will show errors
+                  }
+                }}>Stop</button>
+              )}
+           </div>
+           <span className={`badge ${badge}`}>{getMissionStatusLabel(status)}</span>
+            <span className={`connection-status ${connected ? 'online' : 'offline'}`}>
+              {connected ? 'Live' : 'Offline'}
+            </span>
         </div>
       </div>
 
@@ -594,11 +617,18 @@ const MissionRoom = () => {
                         </span>
                       </div>
                       <div>{evt.message}</div>
-                      {evt.metadata && (
-                        <div className="muted" style={{ fontSize: '11px', marginTop: '4px' }}>
-                          {JSON.stringify(evt.metadata)}
-                        </div>
-                      )}
+                       {evt.metadata && Object.keys(evt.metadata).length > 0 && (
+                         <div className="muted" style={{ fontSize: '11px', marginTop: '4px' }}>
+                           {Object.entries(evt.metadata)
+                             .filter(([k, v]) => v !== null && v !== undefined && !k.startsWith('_'))
+                             .map(([k, v]) => {
+                               const label = k.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ');
+                               const val = typeof v === 'string' ? v : JSON.stringify(v);
+                               const displayVal = val.length > 80 ? `${val.slice(0, 79)}…` : val;
+                               return <span key={k} style={{ marginRight: '12px' }}>{label}: {displayVal}</span>;
+                             })}
+                         </div>
+                       )}
                     </div>
                   </li>
                 ))}
@@ -728,6 +758,7 @@ const MissionRoom = () => {
             missionId={missionId}
             plan={plan ?? null}
             phaseOutputs={phaseOutputs}
+            onRefresh={() => refreshDetail(workflowId)}
           />
         </div>
       )}
@@ -866,9 +897,10 @@ interface ArtifactsViewProps {
   missionId: string;
   plan: Plan | null;
   phaseOutputs: PhaseOutput[];
+  onRefresh: () => void;
 }
 
-const ArtifactsView = ({ missionId, plan, phaseOutputs }: ArtifactsViewProps) => {
+const ArtifactsView = ({ missionId, plan, phaseOutputs, onRefresh }: ArtifactsViewProps) => {
   const items: Array<{
     id: string;
     name: string;
@@ -876,6 +908,7 @@ const ArtifactsView = ({ missionId, plan, phaseOutputs }: ArtifactsViewProps) =>
     taskId?: string;
     kind: 'expected' | 'produced';
     text?: string;
+    url?: string;
   }> = [];
 
   if (plan) {
@@ -910,6 +943,7 @@ const ArtifactsView = ({ missionId, plan, phaseOutputs }: ArtifactsViewProps) =>
               taskId: task.id,
               kind: 'produced',
               text: typeof obj.content === 'string' ? obj.content : undefined,
+              url: typeof obj.url === 'string' ? obj.url : undefined,
             });
           }
         }
@@ -928,18 +962,19 @@ const ArtifactsView = ({ missionId, plan, phaseOutputs }: ArtifactsViewProps) =>
             taskId: task.taskId,
             kind: 'produced',
           });
-        } else if (a && typeof a === 'object') {
-          const obj = a as Record<string, unknown>;
-          items.push({
-            id: `produced-${phase.phaseId}-${task.taskId}-${String(
-              obj.id || obj.name || JSON.stringify(a)
-            )}`,
-            name: String(obj.name || obj.id || 'artifact'),
-            phaseId: phase.phaseId,
-            taskId: task.taskId,
-            kind: 'produced',
-            text: typeof obj.content === 'string' ? obj.content : undefined,
-          });
+          } else if (a && typeof a === 'object') {
+            const obj = a as Record<string, unknown>;
+            items.push({
+              id: `produced-${phase.phaseId}-${task.taskId}-${String(
+                obj.id || obj.name || JSON.stringify(a)
+              )}`,
+              name: String(obj.name || obj.id || 'artifact'),
+              phaseId: phase.phaseId,
+              taskId: task.taskId,
+              kind: 'produced',
+              text: typeof obj.content === 'string' ? obj.content : undefined,
+              url: typeof obj.url === 'string' ? obj.url : undefined,
+            });
         }
       }
     }
@@ -966,18 +1001,18 @@ const ArtifactsView = ({ missionId, plan, phaseOutputs }: ArtifactsViewProps) =>
               <pre className="code-block">{a.text}</pre>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button onClick={() => {
-                  if ((a as any).url) {
-                    window.open((a as any).url, '_blank');
+                  if (a.url) {
+                    window.open(a.url, '_blank');
                   } else {
                     const blob = new Blob([a.text || ''], { type: 'text/plain' });
                     const url = URL.createObjectURL(blob);
                     window.open(url, '_blank');
                   }
-                }}>Open</button>
+                }}>Open in new tab</button>
                 <button onClick={() => {
-                  if ((a as any).url) {
+                  if (a.url) {
                     const aEl = document.createElement('a');
-                    aEl.href = (a as any).url;
+                    aEl.href = a.url;
                     aEl.target = '_blank';
                     document.body.appendChild(aEl);
                     aEl.click();
@@ -993,22 +1028,22 @@ const ArtifactsView = ({ missionId, plan, phaseOutputs }: ArtifactsViewProps) =>
                     aEl.remove();
                     URL.revokeObjectURL(url);
                   }
-                }}>Download</button>
+                }}>Download file</button>
                 <label style={{ fontSize: 13 }}>
                   Upload replacement: <input type="file" onChange={async (e) => {
                     const file = e.target.files?.[0];
                     if (!file) return;
                     const text = await file.text();
                     try {
-                      await postJSON(`/api/artifacts/missions/${encodeURIComponent(missionId)}/artifacts`, {
-                        name: file.name,
-                        content: text,
-                        type: file.type || 'text/plain',
-                        phaseId: a.phaseId,
-                        taskId: a.taskId,
-                      });
-                      // simple reload of page data by reloading mission detail
-                      window.location.reload();
+                        await postJSON(`/api/artifacts/missions/${encodeURIComponent(missionId)}/artifacts`, {
+                          name: file.name,
+                          content: text,
+                          type: file.type || 'text/plain',
+                          phaseId: a.phaseId,
+                          taskId: a.taskId,
+                        });
+                        // refresh mission detail to show new artifact
+                        onRefresh();
                     } catch (err) {
                       window.alert(err instanceof Error ? err.message : 'Upload failed');
                     }

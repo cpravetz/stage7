@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { fetchJSON, postJSON, putJSON } from '../utils/api';
+import { SchemaFields } from '../components/SchemaFields';
+import OutputTemplate from '../components/OutputTemplate';
+import { getInitialInputValues } from '../utils/workspaceHelpers';
 
 type JsonSchema = {
   type?: string;
@@ -16,6 +19,7 @@ type Tool = {
   manifest?: Record<string, unknown>;
   inputSchema?: JsonSchema;
   outputSchema?: JsonSchema;
+  isSkill?: boolean;
   createdAt?: string;
   updatedAt?: string;
 };
@@ -27,13 +31,14 @@ type ExecutionResult = {
   [key: string]: unknown;
 };
 
-const DEFAULT_SCHEMA: JsonSchema = { type: 'object', properties: {} };
-
-const truncate = (value: unknown, max = 60): string => {
-  const str = typeof value === 'string' ? value : JSON.stringify(value ?? {});
-  if (!str) return '';
-  return str.length > max ? `${str.slice(0, max - 1)}…` : str;
+type AssistantWithTools = {
+  id: string;
+  name: string;
+  tools: Array<{ name: string; description?: string; inputSchema?: unknown }>;
+  [key: string]: unknown;
 };
+
+const DEFAULT_SCHEMA: JsonSchema = { type: 'object', properties: {} };
 
 const safeParseJson = (text: string): { ok: true; value: JsonSchema } | { ok: false; error: string } => {
   if (!text.trim()) return { ok: true, value: { ...DEFAULT_SCHEMA } };
@@ -50,12 +55,11 @@ const safeParseJson = (text: string): { ok: true; value: JsonSchema } | { ok: fa
 
 const Tools = () => {
   const [tools, setTools] = useState<Tool[]>([]);
-  const [assistants, setAssistants] = useState<Array<{ id: string; name: string; tools?: any[] }>>([]);
+  const [assistants, setAssistants] = useState<AssistantWithTools[]>([]);
   const [assignSelection, setAssignSelection] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [id, setId] = useState('');
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [type, setType] = useState<'code' | 'openapi' | 'mcp' | 'native'>('code');
@@ -67,7 +71,7 @@ const Tools = () => {
   const [selectedTool, setSelectedTool] = useState<Tool | null>(null);
 
   const [executingTool, setExecutingTool] = useState<Tool | null>(null);
-  const [executeInputText, setExecuteInputText] = useState('{}');
+  const [executeInputValues, setExecuteInputValues] = useState<Record<string, unknown>>({});
   const [executing, setExecuting] = useState(false);
   const [executeResult, setExecuteResult] = useState<ExecutionResult | null>(null);
   const [executeError, setExecuteError] = useState<string | null>(null);
@@ -78,7 +82,7 @@ const Tools = () => {
     try {
       const data = await fetchJSON<{ tools: Tool[] }>('/api/tool-executor/tools');
       // Filter out skill definitions — the tool-executor registers both general tools and skill definitions.
-      const general = (data.tools || []).filter((t: any) => !t.isSkill);
+      const general = (data.tools || []).filter((t) => !t.isSkill);
       setTools(general);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load tools');
@@ -92,7 +96,7 @@ const Tools = () => {
     loadTools();
     const loadAssistants = async () => {
       try {
-        const data = await fetchJSON<{ assistants: Array<{ id: string; name: string; tools?: any[] }> }>('/api/workers/assistants');
+        const data = await fetchJSON<{ assistants: AssistantWithTools[] }>('/api/workers/assistants');
         setAssistants(data.assistants || []);
       } catch {
         setAssistants([]);
@@ -100,6 +104,12 @@ const Tools = () => {
     };
     loadAssistants();
   }, []);
+
+  useEffect(() => {
+    if (executingTool) {
+      setExecuteInputValues(getInitialInputValues(executingTool.inputSchema || { type: 'object', properties: {} }));
+    }
+  }, [executingTool]);
 
   const inputSchemaParse = useMemo(() => safeParseJson(inputSchemaText), [inputSchemaText]);
   const outputSchemaParse = useMemo(() => safeParseJson(outputSchemaText), [outputSchemaText]);
@@ -120,7 +130,7 @@ const Tools = () => {
     setRegistering(true);
     try {
       const payload = {
-        id: id || `tool-${Date.now()}`,
+        id: `tool-${Date.now()}`,
         name,
         description,
         type,
@@ -129,7 +139,6 @@ const Tools = () => {
         outputSchema: outputSchemaParse.value,
       };
       await postJSON('/api/tool-executor/tools', payload);
-      setId('');
       setName('');
       setDescription('');
       setType('code');
@@ -137,7 +146,7 @@ const Tools = () => {
       setOutputSchemaText(JSON.stringify(DEFAULT_SCHEMA, null, 2));
       await loadTools();
     } catch (err) {
-      setRegisterError(err instanceof Error ? err.message : 'Failed to register tool');
+      setRegisterError(err instanceof Error ? err.message : 'Failed to create tool');
     } finally {
       setRegistering(false);
     }
@@ -145,6 +154,7 @@ const Tools = () => {
 
   const closeExecute = () => {
     setExecutingTool(null);
+    setExecuteInputValues({});
     setExecuteResult(null);
     setExecuteError(null);
     setExecuting(false);
@@ -152,13 +162,6 @@ const Tools = () => {
 
   const handleExecute = async () => {
     if (!executingTool) return;
-    let parsed: unknown;
-    try {
-      parsed = executeInputText.trim() ? JSON.parse(executeInputText) : {};
-    } catch (err) {
-      setExecuteError(`Invalid JSON input: ${err instanceof Error ? err.message : 'parse error'}`);
-      return;
-    }
 
     setExecuting(true);
     setExecuteError(null);
@@ -166,42 +169,13 @@ const Tools = () => {
     try {
       const result = await postJSON<ExecutionResult>(
         `/api/tool-executor/tools/${executingTool.id}/execute`,
-        { input: parsed }
+        { input: executeInputValues }
       );
       setExecuteResult(result);
     } catch (err) {
       setExecuteError(err instanceof Error ? err.message : 'Execution failed');
     } finally {
       setExecuting(false);
-    }
-  };
-
-  const inputFields = useMemo(() => {
-    if (!executingTool) return [] as Array<[string, JsonSchema]>;
-    const props = executingTool.inputSchema?.properties || {};
-    return Object.entries(props);
-  }, [executingTool]);
-
-  const fillFieldValue = (schema: JsonSchema): string => {
-    if (schema.type === 'string') return JSON.stringify('');
-    if (schema.type === 'number' || schema.type === 'integer') return JSON.stringify(0);
-    if (schema.type === 'boolean') return JSON.stringify(false);
-    if (schema.type === 'array') return JSON.stringify([]);
-    return JSON.stringify({});
-  };
-
-  const insertFieldIntoInput = (key: string, schema: JsonSchema) => {
-    try {
-      const current = executeInputText.trim() ? JSON.parse(executeInputText) : {};
-      if (typeof current !== 'object' || current === null || Array.isArray(current)) {
-        setExecuteError('Input must be a JSON object');
-        return;
-      }
-      current[key] = JSON.parse(fillFieldValue(schema));
-      setExecuteInputText(JSON.stringify(current, null, 2));
-      setExecuteError(null);
-    } catch (err) {
-      setExecuteError(`Cannot parse input: ${err instanceof Error ? err.message : 'parse error'}`);
     }
   };
 
@@ -212,11 +186,10 @@ const Tools = () => {
 
       <div className="grid two-col">
         <div className="card">
-          <h3>Register Tool</h3>
+          <h3>Create Tool</h3>
           <form onSubmit={handleRegister} className="form">
-            <input type="text" placeholder="ID (optional, auto-generated if blank)" value={id} onChange={(e) => setId(e.target.value)} />
             <input type="text" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} required />
-            <input type="text" placeholder="Description" value={description} onChange={(e) => setDescription(e.target.value)} required />
+            <textarea placeholder="Description" value={description} onChange={(e) => setDescription(e.target.value)} required rows={2} />
             <select value={type} onChange={(e) => setType(e.target.value as Tool['type'])}>
               <option value="code">Code</option>
               <option value="openapi">OpenAPI</option>
@@ -251,14 +224,14 @@ const Tools = () => {
             {registerError && <div className="error-banner">{registerError}</div>}
 
             <button type="submit" disabled={registering || !inputSchemaParse.ok || !outputSchemaParse.ok}>
-              {registering ? 'Registering...' : 'Register'}
+              {registering ? 'Creating…' : 'Create Tool'}
             </button>
           </form>
         </div>
 
         <div className="card">
           <h3>Registered Tools</h3>
-          {loading ? <p>Loading tools...</p> : (
+          {loading ? <p>Loading tools…</p> : (
             <div className="table-container">
               <table className="data-table">
                 <thead>
@@ -267,15 +240,13 @@ const Tools = () => {
                     <th>Name</th>
                     <th>Type</th>
                     <th>Description</th>
-                    <th>Input</th>
-                    <th>Output</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {tools.map((t) => (
                     <tr key={t.id}>
-                      <td className="mono">{t.id}</td>
+                      <td className="mono truncate">{t.id}</td>
                       <td>
                         <button className="link-button" onClick={() => setSelectedTool(t)}>
                           {t.name}
@@ -283,12 +254,6 @@ const Tools = () => {
                       </td>
                       <td><span className={`badge badge-${t.type}`}>{t.type}</span></td>
                       <td className="truncate" title={t.description}>{t.description}</td>
-                      <td className="mono truncate" title={JSON.stringify(t.inputSchema ?? {})}>
-                        {truncate(t.inputSchema ?? {})}
-                      </td>
-                      <td className="mono truncate" title={JSON.stringify(t.outputSchema ?? {})}>
-                        {truncate(t.outputSchema ?? {})}
-                      </td>
                       <td>
                         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                           <select
@@ -303,45 +268,44 @@ const Tools = () => {
                           <button
                             onClick={async () => {
                               const assistantId = assignSelection[t.id];
-                              if (!assistantId) return alert('Select an assistant to bind to');
+                              if (!assistantId) return alert('Select an assistant to assign to');
                               try {
-                                const full = await fetchJSON<any>(`/api/workers/assistants/${encodeURIComponent(assistantId)}`);
-                                full.tools = full.tools || [];
-                                const exists = full.tools.find((et: any) => et.name === t.id || et.name === t.name);
-                                if (exists) return alert('Assistant already has this tool bound');
+                const full = await fetchJSON<AssistantWithTools>(`/api/workers/assistants/${encodeURIComponent(assistantId)}`);
+                full.tools = full.tools || [];
+                const exists = full.tools.find((et) => et.name === t.id || et.name === t.name);
+                                if (exists) return alert('Assistant already has this tool');
                                 full.tools.push({ name: t.id, description: t.description, inputSchema: t.inputSchema || { type: 'object', properties: {} } });
                                 await putJSON(`/api/workers/assistants/${encodeURIComponent(assistantId)}`, full);
-                                alert('Tool bound to assistant');
-                                // refresh assistants list
-                                const data = await fetchJSON<{ assistants: Array<{ id: string; name: string; tools?: any[] }> }>('/api/workers/assistants');
+                                alert('Tool assigned to assistant');
+                                const data = await fetchJSON<{ assistants: AssistantWithTools[] }>('/api/workers/assistants');
                                 setAssistants(data.assistants || []);
                               } catch (err) {
-                                alert(err instanceof Error ? err.message : 'Bind failed');
+                                alert(err instanceof Error ? err.message : 'Assignment failed');
                               }
                             }}
-                          >Bind</button>
+                          >Assign</button>
                           <button
                             onClick={async () => {
                               const assistantId = assignSelection[t.id];
-                              if (!assistantId) return alert('Select an assistant to unbind from');
+                              if (!assistantId) return alert('Select an assistant to remove from');
                               try {
-                                const full = await fetchJSON<any>(`/api/workers/assistants/${encodeURIComponent(assistantId)}`);
-                                full.tools = (full.tools || []).filter((et: any) => et.name !== t.id && et.name !== t.name);
+                const full = await fetchJSON<AssistantWithTools>(`/api/workers/assistants/${encodeURIComponent(assistantId)}`);
+                full.tools = (full.tools || []).filter((et) => et.name !== t.id && et.name !== t.name);
                                 await putJSON(`/api/workers/assistants/${encodeURIComponent(assistantId)}`, full);
-                                alert('Tool unbound from assistant');
-                                const data = await fetchJSON<{ assistants: Array<{ id: string; name: string; tools?: any[] }> }>('/api/workers/assistants');
+                                alert('Tool removed from assistant');
+                                const data = await fetchJSON<{ assistants: AssistantWithTools[] }>('/api/workers/assistants');
                                 setAssistants(data.assistants || []);
                               } catch (err) {
-                                alert(err instanceof Error ? err.message : 'Unbind failed');
+                                alert(err instanceof Error ? err.message : 'Remove failed');
                               }
                             }}
-                          >Unbind</button>
+                          >Remove</button>
                         </div>
                       </td>
                     </tr>
                   ))}
                   {tools.length === 0 && (
-                    <tr><td colSpan={7}>No tools registered</td></tr>
+                    <tr><td colSpan={5}>No tools registered</td></tr>
                   )}
                 </tbody>
               </table>
@@ -354,7 +318,7 @@ const Tools = () => {
         <div className="card tool-detail-panel">
           <div className="panel-header">
             <h3>{selectedTool.name} <span className={`badge badge-${selectedTool.type}`}>{selectedTool.type}</span></h3>
-            <button onClick={() => setSelectedTool(null)}>Close</button>
+            <button onClick={() => setSelectedTool(null)} aria-label="Close tool details">Close</button>
           </div>
           <p className="muted">{selectedTool.description || '(no description)'}</p>
           <dl className="kv">
@@ -376,46 +340,21 @@ const Tools = () => {
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div className="panel-header">
               <h3>Execute: {executingTool.name}</h3>
-              <button onClick={closeExecute}>Close</button>
+              <button onClick={closeExecute} aria-label="Close">Close</button>
             </div>
             <p className="muted">{executingTool.description}</p>
 
-            {inputFields.length > 0 && (
-              <div className="card-inner">
-                <h4>Input Fields</h4>
-                <table className="data-table compact">
-                  <thead><tr><th>Name</th><th>Type</th><th>Required</th><th></th></tr></thead>
-                  <tbody>
-                    {inputFields.map(([key, schema]) => (
-                      <tr key={key}>
-                        <td className="mono">{key}</td>
-                        <td>{(schema.type as string) || 'object'}</td>
-                        <td>{executingTool.inputSchema?.required?.includes(key) ? 'yes' : 'no'}</td>
-                        <td>
-                          <button type="button" onClick={() => insertFieldIntoInput(key, schema)}>
-                            Insert
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
-            <label className="field-label">
-              Input (JSON)
-              <textarea
-                rows={8}
-                value={executeInputText}
-                onChange={(e) => setExecuteInputText(e.target.value)}
-                spellCheck={false}
-              />
-            </label>
+            <SchemaFields
+              schema={executingTool.inputSchema || { type: 'object', properties: {} }}
+              values={executeInputValues}
+              onChange={(key, value) => {
+                setExecuteInputValues((prev) => ({ ...prev, [key]: value }));
+              }}
+            />
 
             <div className="actions">
               <button onClick={handleExecute} disabled={executing}>
-                {executing ? 'Executing...' : (typeof executingTool?.manifest?.actionLabel === 'string' && executingTool.manifest.actionLabel.trim()) || 'Run'}
+                {executing ? 'Executing…' : (typeof executingTool?.manifest?.actionLabel === 'string' && executingTool.manifest.actionLabel.trim()) || 'Run'}
               </button>
               <button onClick={closeExecute} disabled={executing}>Cancel</button>
             </div>
@@ -424,15 +363,8 @@ const Tools = () => {
 
             {executeResult && (
               <div className="card-inner">
-                <h4>
-                  Result
-                  {executeResult.status && (
-                    <span className={`badge badge-${executeResult.status === 'failed' ? 'failed' : 'success'}`}>
-                      {executeResult.status}
-                    </span>
-                  )}
-                </h4>
-                <pre className="code-block">{JSON.stringify(executeResult, null, 2)}</pre>
+                <h4>Result</h4>
+                <OutputTemplate outputSchema={executingTool.outputSchema} result={executeResult.output ?? executeResult} />
               </div>
             )}
           </div>

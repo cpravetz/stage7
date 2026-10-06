@@ -16,7 +16,6 @@ const Vault = () => {
   const [secrets, setSecrets] = useState<Secret[]>([]);
   const [name, setName] = useState('');
   const [plaintext, setPlaintext] = useState('');
-  const [tenantId, setTenantId] = useState('');
   const [loading, setLoading] = useState(false);
   const [revealedSecret, setRevealedSecret] = useState<{ id: string; plaintext: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -25,7 +24,7 @@ const Vault = () => {
     try {
       const data = await fetchJSON<{ secrets: Secret[] }>('/api/vault/secrets');
       setSecrets(data.secrets);
-    } catch (err) {
+     } catch {
       setError('Failed to load secrets');
     }
   };
@@ -39,12 +38,11 @@ const Vault = () => {
     setLoading(true);
     setError(null);
     try {
-      await postJSON('/api/vault/secrets', { name, plaintext, tenantId });
+      await postJSON('/api/vault/secrets', { name, plaintext });
       setName('');
       setPlaintext('');
-      setTenantId('');
       await loadSecrets();
-    } catch (err) {
+     } catch {
       setError('Failed to create secret');
     } finally {
       setLoading(false);
@@ -55,19 +53,20 @@ const Vault = () => {
     try {
       const data = await fetchJSON<DecryptedSecret>(`/api/vault/secrets/${id}/decrypt`);
       setRevealedSecret({ id, plaintext: data.plaintext });
-    } catch (err) {
+    } catch {
       setError('Failed to decrypt secret');
     }
   };
 
   const handleDelete = async (id: string) => {
+    if (!confirm('Delete this secret? This cannot be undone.')) return;
     try {
       await deleteResource(`/api/vault/secrets/${id}`);
       if (revealedSecret?.id === id) {
         setRevealedSecret(null);
       }
       await loadSecrets();
-    } catch (err) {
+    } catch {
       setError('Failed to delete secret');
     }
   };
@@ -75,10 +74,9 @@ const Vault = () => {
   return (
     <div className="page">
       <h1>Vault / Secrets Management</h1>
-      <p style={{ marginBottom: '1rem', color: '#666' }}>
-        The Vault provides secure secrets management using AES-256-GCM envelope encryption.
-        Create, store, and manage secrets used by agents, assistants, and tools.
-        Secrets are encrypted at rest and can only be revealed on demand.
+      <p className="hint">
+        Secrets are encrypted at rest using AES-256-GCM envelope encryption and can only
+        be shown on demand.
       </p>
 
       {error && <div className="error-banner">{error}</div>}
@@ -94,30 +92,23 @@ const Vault = () => {
               onChange={(e) => setName(e.target.value)}
               required
             />
-            <input
-              type="text"
-              placeholder="Tenant ID"
-              value={tenantId}
-              onChange={(e) => setTenantId(e.target.value)}
-              required
-            />
             <textarea
               placeholder="Secret value"
               value={plaintext}
               onChange={(e) => setPlaintext(e.target.value)}
               required
-              rows={3}
+              rows={8}
             />
             <button type="submit" disabled={loading}>
-              {loading ? 'Creating...' : 'Create Secret'}
+              {loading ? 'Creating…' : 'Create Secret'}
             </button>
           </form>
         </div>
 
         <div className="card">
-          <h3>Registered Secrets</h3>
+          <h3>Stored Secrets</h3>
           {secrets.length === 0 ? (
-            <p style={{ color: '#999' }}>No secrets stored</p>
+            <p className="muted">No secrets stored</p>
           ) : (
             <ul className="secret-list">
               {secrets.map((secret) => (
@@ -130,7 +121,7 @@ const Vault = () => {
                   </div>
                   <div className="secret-actions">
                     <button onClick={() => handleReveal(secret.id)} className="btn-reveal">
-                      Reveal
+                      Show Value
                     </button>
                     <button onClick={() => handleDelete(secret.id)} className="btn-delete">
                       Delete
