@@ -7,6 +7,7 @@ export interface MissionRow {
   status: string;
   missionId: string;
   prompt?: string;
+  assistantId?: string;
   startedAt?: string;
   completedAt?: string;
   timestamp?: number;

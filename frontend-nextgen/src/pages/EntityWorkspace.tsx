@@ -1,7 +1,8 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useEntityStore, Entity } from '../stores/entityStore';
 import { useFeedStore } from '../stores/feedStore';
+import { useMissionsStore } from '../stores/missionsStore';
 import { useAssistantViewStore, type TabKey } from '../stores/assistantViewStore';
 import { fetchJSON, postJSON, putJSON } from '../utils/api';
 import { OverviewPanel } from '../panels/OverviewPanel';
@@ -30,7 +31,10 @@ const EntityWorkspace = () => {
 
   const [missionInput, setMissionInput] = useState('');
   const [running, setRunning] = useState(false);
-  const [missionHistory, setMissionHistory] = useState<Array<{ missionId: string; status: string; timestamp: string; output?: string }>>([]);
+  const [optimisticMissions, setOptimisticMissions] = useState<Array<{ missionId: string; status: string; timestamp: string; output?: string }>>([]);
+  const missions = useMissionsStore((s) => s.missions);
+  const missionsLoaded = useMissionsStore((s) => s.missionsLoaded);
+  const fetchMissions = useMissionsStore((s) => s.fetchMissions);
   const [toolBindings, setToolBindings] = useState<ToolBinding[]>([]);
   const [availableSkills, setAvailableSkills] = useState<Array<{ id: string; name: string; description: string; inputSchema?: Record<string, unknown>; configSchema?: Record<string, unknown>; manifest?: Record<string, unknown> }>>([]);
   const [availableTools, setAvailableTools] = useState<Array<{ id: string; name: string; description: string }>>([]);
@@ -90,13 +94,46 @@ const EntityWorkspace = () => {
         })
       );
       setMemoryContext(selectedEntity.memory || { context: {}, notes: 'No memory persisted yet.' });
-      setMissionHistory(selectedEntity.missionHistory || []);
       setEditingSystemPrompt(selectedEntity.systemPrompt || '');
       setKnowledgeEntries(selectedEntity.knowledge || []);
       setTransactionGuidanceEntries(selectedEntity.transactionGuidance || []);
       setMetadataConfig(selectedEntity.metadata || {});
     }
-  }, [selectedEntity]);
+  }, []);
+
+  // Hydrate the mission list so missions started via this assistant (or any other
+  // source) are reflected in the assistant's Missions tab, not just in the global
+  // Mission UI. The global store is the source of truth; optimisticMissions only
+  // covers the instant after "Run Mission" before the next poll.
+  useEffect(() => {
+    if (!missionsLoaded) {
+      void fetchMissions();
+    }
+  }, [missionsLoaded, fetchMissions]);
+
+  // Clear locally-tracked missions when navigating to a different assistant.
+  useEffect(() => {
+    setOptimisticMissions([]);
+  }, [entityId]);
+
+  const missionHistory = useMemo(() => {
+    if (!entity) return optimisticMissions;
+    const fromGlobal = (missions || [])
+      .filter((m) => m.assistantId === entity.id)
+      .map(
+        (m): { missionId: string; status: string; timestamp: string; output?: string } => ({
+          missionId: m.missionId,
+          status: m.status,
+          timestamp:
+            m.startedAt || (m.timestamp ? new Date(m.timestamp).toISOString() : new Date().toISOString()),
+        }),
+      );
+    const seen = new Set(fromGlobal.map((m) => m.missionId));
+    const extra = optimisticMissions.filter((m) => !seen.has(m.missionId));
+    return [...fromGlobal, ...extra].sort((a, b) =>
+      String(b.timestamp).localeCompare(String(a.timestamp)),
+    );
+  }, [entity, missions, optimisticMissions]);
 
   useEffect(() => {
     fetchJSON<{ tools: ToolCatalogEntry[] }>('/api/tool-executor/tools')
@@ -197,10 +234,11 @@ const EntityWorkspace = () => {
           transactionGuidance: transactionGuidanceEntries,
         },
       });
-      setMissionHistory((prev) => [
+      setOptimisticMissions((prev) => [
         { missionId, status: data.status || 'running', timestamp: new Date().toISOString(), output: data.output },
         ...prev,
       ]);
+      void fetchMissions();
       setMissionInput('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Mission failed');

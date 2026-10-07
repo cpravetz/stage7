@@ -339,6 +339,15 @@ const MissionRoom = () => {
     return null;
   }, [missionEvents]);
 
+  const pendingPhase = useMemo(
+    () => plan?.phases.find((p) => p.id === pendingApproval?.phaseId),
+    [plan, pendingApproval?.phaseId],
+  );
+  const pendingPhaseOutput = useMemo(
+    () => phaseOutputs.find((p) => p.phaseId === pendingApproval?.phaseId),
+    [phaseOutputs, pendingApproval?.phaseId],
+  );
+
   const [approvalActionError, setApprovalActionError] = useState<string | null>(null);
   const handleApprove = async () => {
     if (!pendingApproval) return;
@@ -478,6 +487,47 @@ const MissionRoom = () => {
             <button className="danger" onClick={handleReject}>Reject phase</button>
           </div>
           {approvalActionError && <span className="muted">{approvalActionError}</span>}
+          {pendingPhase && (
+            <details open style={{ marginTop: 8 }}>
+              <summary style={{ cursor: 'pointer', color: '#38bdf8', fontSize: '13px' }}>
+                Plan summary &amp; pending phase
+              </summary>
+              {plan?.summary && (
+                <p className="muted" style={{ marginTop: 6, fontSize: '13px' }}>{plan.summary}</p>
+              )}
+              <div style={{ marginTop: 6, fontSize: '13px' }}>
+                <strong>{pendingPhase.name}</strong>
+                {pendingPhase.goal && <span className="muted"> — {pendingPhase.goal}</span>}
+                {pendingPhase.requiresApproval && <span className="badge">requires approval</span>}
+              </div>
+              <ul style={{ listStyle: 'none', padding: 0, margin: '6px 0', fontSize: '13px' }}>
+                {(pendingPhase.tasks || []).map((task) => (
+                  <li key={task.id} style={{ padding: '2px 0' }}>
+                    <span className="muted">• {task.title}</span>
+                    {task.agentRole && <span className="muted"> ({task.agentRole})</span>}
+                  </li>
+                ))}
+              </ul>
+              {pendingPhaseOutput &&
+                (pendingPhaseOutput.tasks || []).some(
+                  (t) => (t.artifacts || []).length > 0,
+                ) && (
+                  <div style={{ marginTop: 6, fontSize: '12px' }}>
+                    <strong>Artifacts produced this phase:</strong>
+                    <ul style={{ listStyle: 'none', padding: 0, margin: '4px 0' }}>
+                      {(pendingPhaseOutput.tasks || [])
+                        .flatMap((t) => t.artifacts || [])
+                        .slice(0, 6)
+                        .map((a, i) => (
+                          <li key={i} className="muted">
+                            {typeof a === 'string' ? a : (a as { name?: string })?.name || JSON.stringify(a)}
+                          </li>
+                        ))}
+                    </ul>
+                  </div>
+                )}
+            </details>
+          )}
         </div>
       )}
 

@@ -47,8 +47,9 @@ const MAX_LOG_ENTRIES = 200;
 
 function providerAttemptTimeoutMs(): number {
   const configured = Number(process.env.BRAIN_PROVIDER_ATTEMPT_TIMEOUT_MS);
-  // Some providers (local or self-hosted) can take longer; default to 30s.
-  return Number.isFinite(configured) && configured > 0 ? configured : 30000;
+  // 15s default: keeps two retries (30s) within the upstream 60s request
+  // ceiling, leaving room for fallback to alternate models/providers.
+  return Number.isFinite(configured) && configured > 0 ? configured : 15000;
 }
 
 async function withProviderTimeout<T>(operation: Promise<T>): Promise<T> {
@@ -151,9 +152,15 @@ export class BrainService {
   }
 
   async complete(prompt: string, options: CompletionOptions = {}): Promise<CompletionResult> {
-    const startTime = Date.now();
+     const startTime = Date.now();
+    const attemptTimeout = providerAttemptTimeoutMs();
+    const maxRetries = 2;
     const configuredDeadline = Number(process.env.BRAIN_COMPLETION_DEADLINE_MS);
-    const completionDeadline = startTime + (Number.isFinite(configuredDeadline) && configuredDeadline > 0 ? configuredDeadline : 45000);
+    // Default deadline derived from the per-attempt timeout: enough for at least
+    // one candidate (2 retries) plus margin for a second candidate, while staying
+    // under the upstream BRAIN_REQUEST_TIMEOUT_MS (60s) that the caller enforces.
+    const defaultDeadline = attemptTimeout * (maxRetries + 1) + 20000;
+    const completionDeadline = startTime + (Number.isFinite(configuredDeadline) && configuredDeadline > 0 ? configuredDeadline : Math.min(defaultDeadline, 55000));
     const modelIdOpt = options.model || 'auto';
     const providerOpt = options.provider || 'any';
     const promptPreview = prompt.slice(0, 120);
@@ -231,7 +238,7 @@ export class BrainService {
     }
 
     let lastErr: unknown = null;
-    const maxRetriesPerProvider = 2;
+     const maxRetriesPerProvider = maxRetries;
 
     const messagesBase: CompletionRequest['messages'] = [];
     if (options.systemPrompt) messagesBase.push({ role: 'system', content: options.systemPrompt });
@@ -239,6 +246,8 @@ export class BrainService {
 
     for (const candidate of candidates) {
       if (Date.now() >= completionDeadline) break;
+      // Skip if there isn't enough time left to attempt this candidate at all.
+      if (Date.now() + attemptTimeout > completionDeadline) break;
       const provider = this.providers.find((p) => p.id === candidate.provider);
       if (!provider) {
         logger.warn({ candidate }, 'Skipping candidate: provider not registered');
@@ -261,6 +270,9 @@ export class BrainService {
 
       for (let attempt = 0; attempt < maxRetriesPerProvider; attempt++) {
         if (Date.now() >= completionDeadline) break;
+        // Skip if there isn't enough time left to even start this attempt
+        // (each attempt may take up to providerAttemptTimeoutMs).
+        if (Date.now() + attemptTimeout > completionDeadline) break;
         try {
           const response: CompletionResponse = await withProviderTimeout(
             breaker.execute(async () => provider.complete(req)),
@@ -337,6 +349,23 @@ export class BrainService {
           // (which may be on the same provider or a different one) rather than retrying
           // the same model, since retrying would just hit the same rate limit.
           const isRateLimit = /\b(429)\b/.test(errMsg) || /rate ?limit|too many requests|throttl/i.test(errMsg);
+          // Timeout: the provider took longer than the per-attempt ceiling.
+          // Retrying the same model almost always re-hits the same timeout, so
+          // skip to the next candidate immediately instead of wasting time.
+          const isTimeout = /timed out after \d+ms/i.test(errMsg);
+          if (isTimeout) {
+            logger.warn({ provider: provider.id, model: candidate.id, err: errMsg }, 'Provider timed out - trying next candidate');
+            this.addLog({
+              type: 'error',
+              model: candidate.id,
+              provider: provider.id,
+              promptPreview,
+              success: false,
+              durationMs: Date.now() - startTime,
+              error: errMsg,
+            });
+            break;
+          }
           if (isProviderFatal) {
             // provider-level fatal: mark provider unavailable by tripping its circuit-breaker
             logger.error({ provider: provider.id, err: errMsg }, 'Provider configuration or quota error - tripping provider circuit-breaker (models retained)');
@@ -423,6 +452,9 @@ export class BrainService {
 
     // As a last-resort, attempt one direct call to any free chat-capable model
     try {
+      if (Date.now() >= completionDeadline) {
+        logger.warn({ task: promptPreview }, 'Skipping last-resort fallback: completion deadline exceeded');
+      } else {
       const fallbackModels = this.router.listModels().filter((m) => (m.costPer1kTokens === 0 || ['openrouter', 'openwebui', 'local', 'huggingface'].includes(m.provider)) && (m.capabilities.includes('chat') || m.capabilities.includes('creative')));
       if (fallbackModels.length > 0) {
         const candidate = fallbackModels[0];
@@ -447,6 +479,7 @@ export class BrainService {
           await this.cache.set(cacheKey, result);
           return result;
         }
+      }
       }
     } catch (e) {
       logger.warn({ err: e instanceof Error ? e.message : String(e) }, 'Fallback direct model attempt failed');

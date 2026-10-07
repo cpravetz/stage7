@@ -12,6 +12,17 @@ interface AgentOutputsPanelProps {
   missionId: string;
 }
 
+type AgentLike = { id: string; name?: string; role?: string; agentRole?: string; status?: string };
+
+function extractAgents(data: unknown): AgentLike[] {
+  if (Array.isArray(data)) return data as AgentLike[];
+  if (data && typeof data === 'object') {
+    const maybe = (data as { agents?: unknown }).agents;
+    if (Array.isArray(maybe)) return maybe as AgentLike[];
+  }
+  return [];
+}
+
 const AgentOutputsPanel = ({ missionId }: AgentOutputsPanelProps) => {  const events = useFeedStore((s) => s.events);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [loading, setLoading] = useState(false);
@@ -27,7 +38,7 @@ const AgentOutputsPanel = ({ missionId }: AgentOutputsPanelProps) => {  const ev
         if (!res.ok) throw new Error(`Failed to load agents: ${res.status}`);
         const data = await res.json();
         if (!mounted) return;
-        setAgents((data || []).map((a: { id: string; name?: string; role?: string; agentRole?: string; status?: string }) => ({ id: a.id, name: a.name || a.id, role: a.role || a.agentRole, status: a.status })));
+        setAgents(extractAgents(data).map((a: { id: string; name?: string; role?: string; agentRole?: string; status?: string }) => ({ id: a.id, name: a.name || a.id, role: a.role || a.agentRole, status: a.status })));
       } catch (err) {
         if (!mounted) return;
         setError(err instanceof Error ? err.message : String(err));
@@ -54,7 +65,7 @@ const AgentOutputsPanel = ({ missionId }: AgentOutputsPanelProps) => {  const ev
       const res = await fetch(`/api/agent-runtime/missions/${encodeURIComponent(missionId)}/agents`);
       if (!res.ok) return;
       const data = await res.json();
-       setAgents((data || []).map((a: { id: string; name?: string; role?: string; agentRole?: string; status?: string }) => ({ id: a.id, name: a.name || a.id, role: a.role || a.agentRole, status: a.status })));
+       setAgents(extractAgents(data).map((a: { id: string; name?: string; role?: string; agentRole?: string; status?: string }) => ({ id: a.id, name: a.name || a.id, role: a.role || a.agentRole, status: a.status })));
      } catch {
       // ignore
     }

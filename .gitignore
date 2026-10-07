@@ -147,3 +147,7 @@ shared/keys/**
 # Allow public keys to be committed
 !*public*.pem
 !*public*.key
+
+#xerj
+xerj-data/**
+.mcp.json
