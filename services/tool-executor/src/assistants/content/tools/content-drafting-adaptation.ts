@@ -133,7 +133,7 @@ export const CONTENT_DRAFTING_ADAPTATION = createDeclarativeCodeSkill({
         };
       };
 
-      const escapeRegExp = (value) => String(value).replace(/[.*+?^$()|[\]{}]/g, '\\$&');
+      const escapeRegExp = (value) => String(value).replace(/[.*+?^${}()|[\]\\\/]/g, '\\$&');
 
       const keywordReport = (text, words) => {
         const haystack = ' ' + String(text || '').toLowerCase().replace(/[^a-z0-9'\s]+/g, ' ') + ' ';

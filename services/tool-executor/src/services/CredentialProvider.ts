@@ -83,8 +83,32 @@ export class CredentialProvider {
 
   private async fromVault(secretId: string): Promise<string | undefined> {
     const vaultUrl = process.env.VAULT_URL || 'http://vault:4000';
+    let base: URL;
     try {
-      const res = await fetch(`${vaultUrl}/secrets/${secretId}/decrypt`, {
+      base = new URL(vaultUrl);
+    } catch {
+      logger.warn({ vaultUrl }, 'Invalid VAULT_URL configured');
+      return undefined;
+    }
+    if (base.protocol !== 'http:' && base.protocol !== 'https:') {
+      logger.warn({ vaultUrl }, 'VAULT_URL must use http or https');
+      return undefined;
+    }
+    if (base.username || base.password) {
+      logger.warn({ vaultUrl }, 'VAULT_URL must not embed credentials');
+      return undefined;
+    }
+    if (!/^[a-zA-Z0-9._-]+$/.test(secretId)) {
+      logger.warn({ secretId }, 'Invalid secretId format');
+      return undefined;
+    }
+    const target = new URL(`/secrets/${encodeURIComponent(secretId)}/decrypt`, base);
+    if (target.origin !== base.origin) {
+      logger.warn({ secretId }, 'Vault URL origin escape attempt');
+      return undefined;
+    }
+    try {
+      const res = await fetch(target.toString(), {
         method: 'GET',
         headers: {
           'X-Tenant-Id': 'system',

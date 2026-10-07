@@ -52,10 +52,19 @@ const requestUrl = (input: unknown): string => {
   return String(input);
 };
 
+function matchHostname(url: string, expectedHostname: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.hostname === expectedHostname || parsed.hostname.endsWith('.' + expectedHostname);
+  } catch {
+    return false;
+  }
+}
+
 function defaultFetchImpl(input: unknown): Response {
   const url = requestUrl(input);
-  if (url.includes('geocoding-api.open-meteo.com')) return jsonResponse(GEOCODE_BODY);
-  if (url.includes('api.open-meteo.com')) return jsonResponse(FORECAST_BODY);
+  if (matchHostname(url, 'geocoding-api.open-meteo.com')) return jsonResponse(GEOCODE_BODY);
+  if (matchHostname(url, 'api.open-meteo.com')) return jsonResponse(FORECAST_BODY);
   return jsonResponse(SEARCH_BODY);
 }
 

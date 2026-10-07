@@ -57,9 +57,16 @@ export interface CodeExecutorCredentials {
 }
 
 export class CodeExecutor {
+  private static readonly MAX_TIMEOUT_MS = 300000; // 5 minutes max
+  private static readonly DEFAULT_TIMEOUT_MS = 30000;
+  private static readonly MAX_OUTPUT_BYTES = 10 * 1024 * 1024; // 10 MB max output
+
   async execute(options: CodeExecutionOptions, credentials?: CodeExecutorCredentials | Record<string, string | undefined>): Promise<CodeExecutionResult> {
     const startTime = Date.now();
-    const timeoutMs = options.timeoutMs || 30000;
+    const timeoutMs = Math.min(
+      options.timeoutMs ?? CodeExecutor.DEFAULT_TIMEOUT_MS,
+      CodeExecutor.MAX_TIMEOUT_MS
+    );
 
     const resolvedCreds: Record<string, string | undefined> =
       (credentials as CodeExecutorCredentials)?.resolved ??
@@ -281,13 +288,29 @@ async function __execute_tool(toolId, input) {
 
         let stdout = '';
         let stderr = '';
+        let stdoutBytes = 0;
+        let stderrBytes = 0;
 
         proc.stdout?.on('data', (data) => {
-          stdout += data.toString();
+          const chunk = data.toString();
+          const chunkBytes = Buffer.byteLength(chunk, 'utf8');
+          if (stdoutBytes + chunkBytes > CodeExecutor.MAX_OUTPUT_BYTES) {
+            proc.kill('SIGKILL');
+            return;
+          }
+          stdout += chunk;
+          stdoutBytes += chunkBytes;
         });
 
         proc.stderr?.on('data', (data) => {
-          stderr += data.toString();
+          const chunk = data.toString();
+          const chunkBytes = Buffer.byteLength(chunk, 'utf8');
+          if (stderrBytes + chunkBytes > CodeExecutor.MAX_OUTPUT_BYTES) {
+            proc.kill('SIGKILL');
+            return;
+          }
+          stderr += chunk;
+          stderrBytes += chunkBytes;
         });
 
         const timeoutHandle = setTimeout(() => {
@@ -508,13 +531,29 @@ async def __execute_tool(tool_id, input):
 
         let stdout = '';
         let stderr = '';
+        let stdoutBytes = 0;
+        let stderrBytes = 0;
 
         proc.stdout?.on('data', (data) => {
-          stdout += data.toString();
+          const chunk = data.toString();
+          const chunkBytes = Buffer.byteLength(chunk, 'utf8');
+          if (stdoutBytes + chunkBytes > CodeExecutor.MAX_OUTPUT_BYTES) {
+            proc.kill('SIGKILL');
+            return;
+          }
+          stdout += chunk;
+          stdoutBytes += chunkBytes;
         });
 
         proc.stderr?.on('data', (data) => {
-          stderr += data.toString();
+          const chunk = data.toString();
+          const chunkBytes = Buffer.byteLength(chunk, 'utf8');
+          if (stderrBytes + chunkBytes > CodeExecutor.MAX_OUTPUT_BYTES) {
+            proc.kill('SIGKILL');
+            return;
+          }
+          stderr += chunk;
+          stderrBytes += chunkBytes;
         });
 
         const timeoutHandle = setTimeout(() => {

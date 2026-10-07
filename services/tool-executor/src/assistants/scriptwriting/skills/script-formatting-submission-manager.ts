@@ -221,7 +221,7 @@ export const SCRIPT_FORMATTING_SUBMISSION_MANAGER = createDeclarativeCodeSkill({
           if (el.type === 'slug') {
             out.push(el.text.toUpperCase());
           } else if (el.type === 'transition') {
-            out.push('> ' + el.text.replace(/:$/, ':'));
+            out.push('> ' + el.text.replace(/:+$/, ':'));
           } else if (el.type === 'dialogue') {
             if (previous && previous !== 'action') out.push('');
             out.push(el.character);

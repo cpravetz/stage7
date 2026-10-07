@@ -242,6 +242,10 @@ function paramValue(name: string | undefined): string | undefined {
 
 function formatAttendee(attendee: CalendarAttendee): string {
   const email = attendee.email.trim();
+  // Limit length to prevent ReDoS on crafted input
+  if (email.length > 320) {
+    throw new CalendarError(`Invalid attendee email address: too long`);
+  }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     throw new CalendarError(`Invalid attendee email address: '${attendee.email}'`);
   }

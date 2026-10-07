@@ -3,7 +3,30 @@ import { TemporalClient } from '../client/TemporalClient';
 import { WorkflowInput } from '../types/workflow';
 import { asyncHandler, NextGenError } from '@stage7-nextgen/shared';
 
+function validateServiceUrl(url: string | undefined): URL | null {
+  if (!url) return null;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    if (parsed.username || parsed.password) return null;
+    const hostname = parsed.hostname.toLowerCase();
+    if (hostname === 'localhost' || hostname.endsWith('.localhost') || hostname.endsWith('.local') || hostname.endsWith('.internal')) return null;
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(hostname)) {
+      const parts = hostname.split('.').map(Number);
+      if (parts.some((p) => p > 255)) return null;
+      if (parts[0] === 10 || parts[0] === 127 || parts[0] === 0) return null;
+      if (parts[0] === 192 && parts[1] === 168) return null;
+      if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return null;
+      if (parts[0] === 169 && parts[1] === 254) return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
 const client = new TemporalClient();
+const artifactsBase = validateServiceUrl(process.env.ARTIFACTS_URL);
 
 const router: Router = Router();
 
@@ -82,8 +105,8 @@ router.post(
     const missionId = workflowId.startsWith('mission-') ? workflowId.slice(8) : workflowId;
     // Mark mission as running in persistence so UI reflects state.
     try {
-      if (process.env.ARTIFACTS_URL) {
-        await fetch(`${process.env.ARTIFACTS_URL}/api/artifacts/missions/${missionId}`, {
+      if (artifactsBase) {
+        await fetch(`${artifactsBase.origin}/api/artifacts/missions/${missionId}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ status: 'running', updatedAt: Date.now() }),
@@ -102,11 +125,13 @@ router.post(
     const workflowId = req.params.workflowId as string;
     const missionId = workflowId.startsWith('mission-') ? workflowId.slice(8) : workflowId;
     try {
-      await fetch(`${process.env.ARTIFACTS_URL}/api/artifacts/missions/${missionId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'paused', updatedAt: Date.now() }),
-      });
+      if (artifactsBase) {
+        await fetch(`${artifactsBase.origin}/api/artifacts/missions/${missionId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'paused', updatedAt: Date.now() }),
+        });
+      }
     } catch (err) {
       // ignore
     }

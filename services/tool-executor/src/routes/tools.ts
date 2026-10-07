@@ -331,7 +331,11 @@ router.get(
       let filtered = templates
       if (filter && filter.startsWith('type=')) {
         const filterType = filter.slice(5)
-        filtered = templates.filter((t) => t && typeof t === 'object' && ((t as any).type === filterType || (t as any).kind === filterType))
+        if (!/^[a-zA-Z0-9_-]+$/.test(filterType)) {
+          logger.warn({ filterType }, 'Invalid filter type')
+        } else {
+          filtered = templates.filter((t) => t && typeof t === 'object' && ((t as any).type === filterType || (t as any).kind === filterType))
+        }
       }
       // Map to reference item format
       const listings = filtered.map((t) => ({

@@ -15,6 +15,7 @@
  */
 
 import { Router, Response } from 'express';
+import rateLimit from 'express-rate-limit';
 import fs from 'fs';
 import path from 'path';
 import logger from '../utils/logger';
@@ -25,6 +26,23 @@ const ARTIFACTS_URL = process.env.ARTIFACTS_URL || '';
 const LOCAL_STORE_DIR = process.env.SKILL_STORE_DIR || '/tmp/stage7-store';
 const REMOTE_TIMEOUT_MS = Number(process.env.SKILL_STORE_TIMEOUT_MS) || 3000;
 
+// Rate limiting for skill-store API
+const skillStoreLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 100, // limit each IP to 100 requests per windowMs
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: 'Too many requests, please try again later' },
+});
+
+const skillStoreWriteLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 30, // stricter limit for write operations
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: 'Too many write requests, please try again later' },
+});
+
 /** Collection and key come straight off the URL, so they must be path-safe. */
 const SAFE_NAME = /^[A-Za-z0-9._-]{1,128}$/;
 
@@ -33,6 +51,13 @@ function isValidName(value: unknown): value is string {
 }
 
 function localPath(collection: string, key?: string): string {
+  // Additional defense-in-depth: ensure inputs are path-safe
+  if (!SAFE_NAME.test(collection) || collection.startsWith('.')) {
+    throw new Error('Invalid collection name');
+  }
+  if (key && (!SAFE_NAME.test(key) || key.startsWith('.'))) {
+    throw new Error('Invalid key name');
+  }
   return path.join(LOCAL_STORE_DIR, collection, key ? `${key}.json` : '');
 }
 
@@ -41,6 +66,13 @@ function localPath(collection: string, key?: string): string {
  * traversal via a crafted `collection`/`key` even if the regex ever loosens.
  */
 function resolveLocal(collection: string, key?: string): string | null {
+  // Additional defense-in-depth: ensure inputs are path-safe
+  if (!SAFE_NAME.test(collection) || collection.startsWith('.')) {
+    return null;
+  }
+  if (key && (!SAFE_NAME.test(key) || key.startsWith('.'))) {
+    return null;
+  }
   const target = localPath(collection, key);
   const resolved = path.resolve(target);
   const root = path.resolve(LOCAL_STORE_DIR);
@@ -136,7 +168,7 @@ async function saveRecord(collection: string, key: string, record: Record<string
   }
 }
 
-router.post('/:collection/:key', async (req, res) => {
+router.post('/:collection/:key', skillStoreWriteLimiter, async (req, res) => {
   const collection = requireName(req.params.collection, 'collection', res);
   if (!collection) return;
   const key = requireName(req.params.key, 'key', res);
@@ -172,7 +204,7 @@ router.post('/:collection/:key', async (req, res) => {
   res.status(201).json({ success: true, persisted: remote !== null, ...record });
 });
 
-router.get('/:collection/:key', async (req, res) => {
+router.get('/:collection/:key', skillStoreLimiter, async (req, res) => {
   const collection = requireName(req.params.collection, 'collection', res);
   if (!collection) return;
   const key = requireName(req.params.key, 'key', res);
@@ -195,7 +227,7 @@ router.get('/:collection/:key', async (req, res) => {
 // matched by this handler. Express' default `:key` pattern stops at a `/`, so the
 // two-segment route would not match anyway, but the explicit order keeps intent
 // unambiguous if a wildcard is ever added at mount time.
-router.delete('/:collection/:key/:itemId', async (req, res) => {
+router.delete('/:collection/:key/:itemId', skillStoreWriteLimiter, async (req, res) => {
   const collection = requireName(req.params.collection, 'collection', res);
   if (!collection) return;
   const key = requireName(req.params.key, 'key', res);
@@ -229,7 +261,7 @@ router.delete('/:collection/:key/:itemId', async (req, res) => {
   res.json({ success: true, removed, collection, key, itemId, remaining: remaining.length });
 });
 
-router.delete('/:collection/:key', async (req, res) => {
+router.delete('/:collection/:key', skillStoreWriteLimiter, async (req, res) => {
   const collection = requireName(req.params.collection, 'collection', res);
   if (!collection) return;
   const key = requireName(req.params.key, 'key', res);
@@ -255,7 +287,7 @@ router.delete('/:collection/:key', async (req, res) => {
   res.json({ success: true, removedLocal });
 });
 
-router.get('/:collection', async (req, res) => {
+router.get('/:collection', skillStoreLimiter, async (req, res) => {
   const collection = requireName(req.params.collection, 'collection', res);
   if (!collection) return;
 

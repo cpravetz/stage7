@@ -196,31 +196,63 @@ export class ApiClientExecutor {
 
     logger.info({ method, path: target.pathname + target.search, auth: authMode, timeoutMs }, 'API client request started');
 
-    let response: Response;
+    let response: Response | null = null;
     try {
-      response = await fetch(target.toString(), {
-        method,
-        headers: requestHeaders,
-        body: payload,
-        redirect: 'follow',
-        signal: AbortSignal.timeout(timeoutMs),
-      });
+      // Manual redirect handling to prevent SSRF via redirect
+      let currentUrl = target.toString();
+      const maxRedirects = 5;
+      for (let redirectCount = 0; redirectCount <= maxRedirects; redirectCount++) {
+        response = await fetch(currentUrl, {
+          method,
+          headers: requestHeaders,
+          body: payload,
+          redirect: 'manual',
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+
+        if (response.status >= 300 && response.status < 400) {
+          const location = response.headers.get('location');
+          if (!location || redirectCount >= maxRedirects) {
+            break;
+          }
+          let nextUrl: URL;
+          try {
+            nextUrl = new URL(location, currentUrl);
+          } catch {
+            break;
+          }
+          // SSRF guard: redirect must stay on the same origin
+          if (nextUrl.origin !== base.origin) {
+            logger.warn({ from: currentUrl, to: nextUrl.toString() }, 'API client redirect rejected: origin escape attempt');
+            return {
+              success: false,
+              error: `Redirect to different origin '${nextUrl.origin}' not allowed`,
+              durationMs: Date.now() - startTime,
+            };
+          }
+          currentUrl = nextUrl.toString();
+          continue;
+        }
+        break;
+      }
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       logger.error({ method, path: target.pathname, error }, 'API client request failed');
       return { success: false, error: `Request failed: ${error}`, durationMs: Date.now() - startTime };
     }
 
+    // response is guaranteed to be set here because the catch block returns early
+    const res = response!;
     const durationMs = Date.now() - startTime;
-    const responseHeaders = headersToRecord(response.headers);
+    const responseHeaders = headersToRecord(res.headers);
     const contentType = responseHeaders['content-type'] || '';
 
     let data: unknown;
     let bodySnippet: string | undefined;
-    if (method === 'HEAD' || response.status === 204) {
+    if (method === 'HEAD' || res.status === 204) {
       data = null;
     } else {
-      const text = await response.text().catch(() => '');
+      const text = await res.text().catch(() => '');
       bodySnippet = text.slice(0, MAX_BODY_SNIPPET);
       if (text === '') {
         data = null;
@@ -235,24 +267,24 @@ export class ApiClientExecutor {
       }
     }
 
-    if (response.ok) {
-      logger.info({ method, path: target.pathname, status: response.status, durationMs }, 'API client request completed');
-      return { success: true, status: response.status, data, headers: responseHeaders, durationMs };
+    if (res.ok) {
+      logger.info({ method, path: target.pathname, status: res.status, durationMs }, 'API client request completed');
+      return { success: true, status: res.status, data, headers: responseHeaders, durationMs };
     }
 
     if (options.acceptErrorResponses) {
-      logger.warn({ method, path: target.pathname, status: response.status }, 'API client returned an error status (accepted)');
-      return { success: true, status: response.status, data, headers: responseHeaders, durationMs };
+      logger.warn({ method, path: target.pathname, status: res.status }, 'API client returned an error status (accepted)');
+      return { success: true, status: res.status, data, headers: responseHeaders, durationMs };
     }
 
-    logger.warn({ method, path: target.pathname, status: response.status }, 'API client returned an error status');
+    logger.warn({ method, path: target.pathname, status: res.status }, 'API client returned an error status');
     return {
       success: false,
-      status: response.status,
+      status: res.status,
       data,
       headers: responseHeaders,
       durationMs,
-      error: `HTTP ${response.status} ${response.statusText || ''}`.trim() + (bodySnippet ? `: ${bodySnippet}` : ''),
+      error: `HTTP ${res.status} ${res.statusText || ''}`.trim() + (bodySnippet ? `: ${bodySnippet}` : ''),
     };
   }
 }

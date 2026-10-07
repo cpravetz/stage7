@@ -1,4 +1,4 @@
-import nodemailer from 'nodemailer';
+import nodemailer, { Transporter } from 'nodemailer';
 import { logger } from '@stage7-nextgen/shared';
 import { ToolCredentials, CredentialProvider } from '../services/CredentialProvider';
 
@@ -17,7 +17,7 @@ export interface EmailOptions {
 
 export class EmailExecutor {
   private credentialProvider = CredentialProvider;
-  private transporter: nodemailer.Transporter | null = null;
+  private transporter: Transporter | null = null;
 
   async execute(options: EmailOptions, credentials: ToolCredentials): Promise<{ success: boolean; messageId?: string; error?: string }> {
     const smtpHost = credentials.smtp_host || process.env.SMTP_HOST;

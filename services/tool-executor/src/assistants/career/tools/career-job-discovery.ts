@@ -213,9 +213,9 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
         String(html)
           .replace(/<script[\s\S]*?<\/script>/gi, ' ')
           .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-          .replace(/<[^>]+>/g, ' ')
+          .replace(/<[^>]*>/g, ' ')
       )
-        .replace(/[\s ]+/g, ' ')
+        .replace(/[\s\u00A0]+/g, ' ')
         .trim();
     }
 

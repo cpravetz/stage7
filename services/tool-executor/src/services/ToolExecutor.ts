@@ -1596,6 +1596,32 @@ const urlTemplate = manifest.urlTemplate as string;
 const method = ((manifest?.method as string) || 'GET').toUpperCase();
 const url = urlTemplate.replace(/\{(\w+)\}/g, (_, key) => encodeURIComponent((input[key] as string) || key));
 
+// SSRF guard: validate the resolved URL
+let targetUrl: URL;
+try {
+  targetUrl = new URL(url);
+} catch {
+  return { error: `Invalid URL template: ${urlTemplate}` };
+}
+if (targetUrl.protocol !== 'http:' && targetUrl.protocol !== 'https:') {
+  return { error: `URL must use http or https, got ${targetUrl.protocol}` };
+}
+if (targetUrl.username || targetUrl.password) {
+  return { error: 'URL must not embed credentials' };
+}
+const hostname = targetUrl.hostname.toLowerCase();
+if (hostname === 'localhost' || hostname.endsWith('.localhost') || hostname.endsWith('.local') || hostname.endsWith('.internal')) {
+  return { error: 'Requests to localhost/internal hosts are not allowed' };
+}
+if (/^\d{1,3}(\.\d{1,3}){3}$/.test(hostname)) {
+  const parts = hostname.split('.').map(Number);
+  if (parts.some((p) => p > 255)) return { error: 'Invalid IP address' };
+  if (parts[0] === 10 || parts[0] === 127 || parts[0] === 0) return { error: 'Requests to private IP ranges are not allowed' };
+  if (parts[0] === 192 && parts[1] === 168) return { error: 'Requests to private IP ranges are not allowed' };
+  if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return { error: 'Requests to private IP ranges are not allowed' };
+  if (parts[0] === 169 && parts[1] === 254) return { error: 'Requests to link-local addresses are not allowed' };
+}
+
 const fetchOptions: RequestInit = {
 method,
 headers: {
@@ -1613,124 +1639,88 @@ fetchOptions.body = JSON.stringify(input.body);
 let response: Response | null = null;
 let data: any;
 try {
-response = await fetch(url, fetchOptions);
-} catch (err) {
-const errMsg = err instanceof Error ? err.message : String(err);
-logger.warn({ url, err: errMsg }, 'Initial fetch failed for openapi tool; attempting localhost/127.0.0.1 fallback');
-if (url.includes('localhost')) {
-const alt = url.replace('localhost', '127.0.0.1');
-try {
-response = await fetch(alt, fetchOptions);
-logger.info({ url, alt }, 'Fetch succeeded with 127.0.0.1 fallback');
-} catch (err2) {
-const err2Msg = err2 instanceof Error ? err2.message : String(err2);
-logger.warn({ url: alt, err: err2Msg }, '127.0.0.1 fallback failed, will try service env overrides');
-}
-}
+// Manual redirect handling to prevent SSRF via redirect
+let currentUrl = url;
+const maxRedirects = 5;
+for (let redirectCount = 0; redirectCount <= maxRedirects; redirectCount++) {
+  response = await fetch(currentUrl, {
+    ...fetchOptions,
+    redirect: 'manual',
+  });
 
-const svcEnvCandidates = [process.env.ARTIFACTS_URL, process.env.PERSISTENCE_URL, process.env.BRAIN_URL, process.env.WORKER_POOL_URL, process.env.AGENT_RUNTIME_URL];
-const triedAlts: string[] = [];
-if (!response) {
-for (const base of svcEnvCandidates) {
-if (!base) continue;
-try {
-const original = new URL(url);
-const baseUrl = new URL(base);
-const alt = `${baseUrl.origin}${original.pathname}${original.search}`;
-triedAlts.push(alt);
-try {
-response = await fetch(alt, fetchOptions);
-if (response && response.ok) {
-logger.info({ url, alt }, 'Fetch succeeded with service env override fallback');
-break;
-}
-} catch (err3) {
-logger.warn({ alt, err: err3 instanceof Error ? err3.message : String(err3) }, 'Service env override fetch failed');
-}
-} catch (e) {
-// ignore invalid URL constructions
-}
-}
-}
-
-if (!response) {
-try {
-const pyHeaders = JSON.stringify(fetchOptions.headers || {});
-const pyBody = fetchOptions.body ? JSON.stringify(JSON.parse(fetchOptions.body as string)) : null;
-const pyCode = `import sys, json, urllib.request\n\nurl = ${JSON.stringify(url)}\nheaders = json.loads('''${pyHeaders}''')\nmethod = ${JSON.stringify(method)}\nbody = ${JSON.stringify(pyBody)}\n\nif body is not None and isinstance(body, str):\ndata = body.encode('utf-8')\nelse:\ndata = None\nreq = urllib.request.Request(url, data=data, headers=headers, method=method)\ntry:\nwith urllib.request.urlopen(req, timeout=10) as resp:\nstatus = resp.getcode()\ndata = resp.read().decode('utf-8')\nprint(json.dumps({'status': status, 'data': data}))\nexcept Exception as e:\nprint(json.dumps({'error': str(e)}))\nsys.exit(1)\n`;
-const execResult = await this.codeExecutor.execute({ language: 'python', code: pyCode }, {} as any);
-if (execResult.success && execResult.output) {
-try {
-const parsed = JSON.parse(execResult.output);
-if (parsed && parsed.status) {
-return { status: parsed.status, data: parsed.data } as any;
-}
-} catch {
-// fall through to throwing
-}
-}
-} catch (pyErr) {
-logger.warn({ err: pyErr instanceof Error ? pyErr.message : String(pyErr) }, 'Python code-wrapper fallback failed');
-}
-
-const triedMsg = triedAlts.length > 0 ? `; tried overrides: ${triedAlts.join(',')}` : '';
-const wrappedError = new Error(`Fetch to ${url} failed: ${errMsg}${triedMsg}`) as Error & { cause?: unknown };
-wrappedError.cause = err;
-throw wrappedError;
-}
-}
-
-if (response && !response.ok && url.includes('localhost')) {
-try {
-const alt = url.includes('localhost') ? url.replace('localhost', '127.0.0.1') : url;
-logger.info({ url, alt, status: response.status }, 'Non-OK response; retrying with alternate localhost host');
-const retryRes = await fetch(alt, fetchOptions);
-if (retryRes.ok) {
-response = retryRes;
-} else {
-// keep original response
+  if (response.status >= 300 && response.status < 400) {
+    const location = response.headers.get('location');
+    if (!location || redirectCount >= maxRedirects) {
+      break;
+    }
+    let nextUrl: URL;
+    try {
+      nextUrl = new URL(location, currentUrl);
+    } catch {
+      break;
+    }
+    // SSRF guard: redirect must not go to private/internal addresses
+    const nextHostname = nextUrl.hostname.toLowerCase();
+    if (nextHostname === 'localhost' || nextHostname.endsWith('.localhost') || nextHostname.endsWith('.local') || nextHostname.endsWith('.internal')) {
+      logger.warn({ from: currentUrl, to: nextUrl.toString() }, 'OpenAPI redirect rejected: localhost/internal host');
+      return { error: 'Redirect to localhost/internal host not allowed' };
+    }
+    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(nextHostname)) {
+      const parts = nextHostname.split('.').map(Number);
+      if (parts[0] === 10 || parts[0] === 127 || parts[0] === 0 || (parts[0] === 192 && parts[1] === 168) || (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) || (parts[0] === 169 && parts[1] === 254)) {
+        logger.warn({ from: currentUrl, to: nextUrl.toString() }, 'OpenAPI redirect rejected: private IP range');
+        return { error: 'Redirect to private IP range not allowed' };
+      }
+    }
+    currentUrl = nextUrl.toString();
+    continue;
+  }
+  break;
 }
 } catch (err) {
-// ignore retry error and proceed to parse original response
-}
-}
+      const errMsg = err instanceof Error ? err.message : String(err);
+      logger.error({ url, err: errMsg }, 'OpenAPI fetch failed');
+      return { error: `Request failed: ${errMsg}` };
+    }
 
-try {
-if (!response) {
-data = { text: '' };
-} else if ((response as any).bodyUsed) {
-try {
-const txt = await (response as any).text();
-try {
-data = JSON.parse(txt);
-} catch {
-data = { text: txt };
-}
-} catch {
-data = { text: '' };
-}
-} else {
-try {
-data = await response.json();
-} catch (jsonErr) {
-try {
-const txt = await response.text();
-try {
-data = JSON.parse(txt);
-} catch {
-data = { text: txt };
-}
-} catch {
-data = { text: '' };
-}
-}
-}
-} catch {
-data = { text: await (response ? response.text() : Promise.resolve('')) };
-}
-return { status: response ? response.status : 0, data };
-}
-case 'mcp': {
+    try {
+      if (!response) {
+        data = { text: '' };
+      } else if ((response as any).bodyUsed) {
+        try {
+          const txt = await (response as any).text();
+          try {
+            data = JSON.parse(txt);
+          } catch {
+            data = { text: txt };
+          }
+        } catch {
+          data = { text: '' };
+        }
+      } else {
+        try {
+          data = await response.json();
+        } catch (jsonErr) {
+          try {
+            const txt = await response.text();
+            try {
+              data = JSON.parse(txt);
+            } catch {
+              data = { text: txt };
+            }
+          } catch {
+            data = { text: '' };
+          }
+        }
+      }
+      return { status: response ? response.status : 0, data };
+    } catch {
+      data = { text: await (response ? response.text() : Promise.resolve('')) };
+      return { status: response ? response.status : 0, data };
+    }
+  }
+
+  case 'mcp': {
 if (!manifest?.server) break;
 const serverId = manifest.server as string;
 const client = this.mcpClients.get(serverId);
