@@ -100,7 +100,7 @@ export class WorkerAgent {
     return { output, artifacts, tokensUsed: data.tokensUsed || 0 };
   }
 
-  private async executeViaBrain(task: Task, phase: Phase, plan: Plan, missionId: string): Promise<WorkerResult> {
+private async executeViaBrain(task: Task, phase: Phase, plan: Plan, missionId: string): Promise<WorkerResult> {
     const agentPrompt = this.agentDefinition?.systemPrompt || task.systemPrompt;
     const systemPrompt = `${agentPrompt}\n\nYou are executing task "${task.title}" as part of phase "${phase.name}" of a larger plan: ${plan.summary}.\n\nProduce concrete, actionable output. If the task expects artifacts (${task.expectedArtifacts.join(', ')}), format each as a clearly labeled markdown section (## ArtifactName) or JSON block. Be specific and thorough.`;
 
@@ -152,6 +152,14 @@ export class WorkerAgent {
               logger.warn(
                 { task: task.title, phase: phase.name, attempt: attempt.label, status: res.status },
                 'Brain call rate-limited - trying next attempt',
+              );
+              break;
+            }
+            // Timeout from BrainService: it already tries next candidate internally, so don't retry this attempt
+            if (/timed out after \d+ms/i.test(text)) {
+              logger.warn(
+                { task: task.title, phase: phase.name, attempt: attempt.label, status: res.status },
+                'Brain call timed out - trying next attempt',
               );
               break;
             }
@@ -225,16 +233,24 @@ export class WorkerAgent {
               error: err.message,
             },
           });
-// Rate-limit (429): retrying the same model/provider would just hit the same
-            // limit, so move to the next attempt (which may target a different
-            // model and/or provider) immediately.
-            if (err.message && (/\b(429)\b/.test(err.message) || /rate ?limit|too many requests|throttl/i.test(err.message))) {
-              logger.warn(
-                { task: task.title, phase: phase.name, attempt: attempt.label, err: err.message },
-                'Brain call rate-limited - trying next attempt',
-              );
-              break;
-            }
+          // Rate-limit (429): retrying the same model/provider would just hit the same
+          // limit, so move to the next attempt (which may target a different
+          // model and/or provider) immediately.
+          if (err.message && (/\b(429)\b/.test(err.message) || /rate ?limit|too many requests|throttl/i.test(err.message))) {
+            logger.warn(
+              { task: task.title, phase: phase.name, attempt: attempt.label, err: err.message },
+              'Brain call rate-limited - trying next attempt',
+            );
+            break;
+          }
+          // Timeout from BrainService: it already tries next candidate internally, so don't retry this attempt
+          if (err.message && /timed out after \d+ms/i.test(err.message)) {
+            logger.warn(
+              { task: task.title, phase: phase.name, attempt: attempt.label, err: err.message },
+              'Brain call timed out - trying next attempt',
+            );
+            break;
+          }
           logger.warn(
             { task: task.title, phase: phase.name, attempt: attempt.label, retry, err: err.message },
             'Brain call error, will retry',

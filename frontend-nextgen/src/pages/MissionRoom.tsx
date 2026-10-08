@@ -116,7 +116,7 @@ const TIMELINE_EVENT_TYPES = new Set([
 
 const MissionRoom = () => {
   const { workflowId = '' } = useParams<{ workflowId: string }>();
-  const missionId = useMemo(() => workflowId.replace(/^mission-/, ''), [workflowId]);
+  const missionId = useMemo(() => workflowId.replace(/^mission-mission-/, 'mission-').replace(/^mission-/, ''), [workflowId]);
 
   const events = useFeedStore((s) => s.events);
   const connected = useFeedStore((s) => s.connected);
@@ -192,7 +192,6 @@ const MissionRoom = () => {
         missionId,
       });
     }
-    let cursor = startedAt + 3;
     let phases: PhaseOutput[] = detail?.output?.outputs?.phases || [];
     if (phases.length === 0 && plan?.phases) {
       phases = plan.phases.map((p) => ({
@@ -207,56 +206,62 @@ const MissionRoom = () => {
         tasks: p.tasks.map((t) => ({ taskId: t.id, status: 'planned' })),
       }));
     }
+    // Use actual timestamps from phase outputs if available, otherwise derive sequentially
     for (const phase of phases) {
+      const phaseStartedAt = (phase as any).startedAt ? new Date((phase as any).startedAt).getTime() : startedAt;
+      const phaseCompletedAt = (phase as any).completedAt ? new Date((phase as any).completedAt).getTime() : phaseStartedAt + 1000;
+      
       fromOutput.push({
         id: `derived-phase-started-${phase.phaseId}`,
         type: 'phase_started',
         source: 'orchestrator',
         message: `Phase started: ${phase.name || phase.phaseId}`,
-        timestamp: cursor,
+        timestamp: phaseStartedAt,
         missionId,
         metadata: { phaseId: phase.phaseId, phaseName: phase.name },
       });
-      cursor += 1;
+      let taskCursor = phaseStartedAt + 1;
       for (const task of phase.tasks || []) {
+        const taskCompletedAt = (task as any).completedAt ? new Date((task as any).completedAt).getTime() : taskCursor;
         fromOutput.push({
           id: `derived-task-${phase.phaseId}-${task.taskId}`,
           type: task.status === 'failed' ? 'task_failed' : 'task_completed',
           source: 'orchestrator',
           message: `${task.status === 'failed' ? 'Task failed' : 'Task completed'}: ${task.taskId}`,
-          timestamp: cursor,
+          timestamp: taskCompletedAt,
           missionId,
           metadata: { phaseId: phase.phaseId, taskId: task.taskId, output: task.output },
         });
-        cursor += 1;
+        taskCursor = taskCompletedAt + 1;
       }
       fromOutput.push({
         id: `derived-phase-completed-${phase.phaseId}`,
         type: 'phase_completed',
         source: 'orchestrator',
         message: `Phase completed: ${phase.name || phase.phaseId}`,
-        timestamp: cursor,
+        timestamp: phaseCompletedAt,
         missionId,
         metadata: { phaseId: phase.phaseId, phaseName: phase.name },
       });
-      cursor += 1;
     }
     if (detail?.status === 'completed') {
+      const completedAt = detail?.completedAt ? new Date(detail.completedAt).getTime() : startedAt + 1000;
       fromOutput.push({
-        id: `derived-mission-completed-${cursor}`,
+        id: `derived-mission-completed-${completedAt}`,
         type: 'mission_completed',
         source: 'orchestrator',
         message: 'Mission completed',
-        timestamp: cursor,
+        timestamp: completedAt,
         missionId,
       });
     } else if (detail?.status === 'failed' || detail?.status === 'canceled') {
+      const failedAt = detail?.completedAt ? new Date(detail.completedAt).getTime() : startedAt + 1000;
       fromOutput.push({
-        id: `derived-mission-failed-${cursor}`,
+        id: `derived-mission-failed-${failedAt}`,
         type: 'mission_failed',
         source: 'orchestrator',
         message: `Mission ${detail.status}: ${detail.error || ''}`.trim(),
-        timestamp: cursor,
+        timestamp: failedAt,
         missionId,
         metadata: { error: detail.error },
       });
@@ -1012,19 +1017,19 @@ const ArtifactsView = ({ missionId, plan, phaseOutputs, onRefresh }: ArtifactsVi
             taskId: task.taskId,
             kind: 'produced',
           });
-          } else if (a && typeof a === 'object') {
-            const obj = a as Record<string, unknown>;
-            items.push({
-              id: `produced-${phase.phaseId}-${task.taskId}-${String(
-                obj.id || obj.name || JSON.stringify(a)
-              )}`,
-              name: String(obj.name || obj.id || 'artifact'),
-              phaseId: phase.phaseId,
-              taskId: task.taskId,
-              kind: 'produced',
-              text: typeof obj.content === 'string' ? obj.content : undefined,
-              url: typeof obj.url === 'string' ? obj.url : undefined,
-            });
+        } else if (a && typeof a === 'object') {
+          const obj = a as Record<string, unknown>;
+          items.push({
+            id: `produced-${phase.phaseId}-${task.taskId}-${String(
+              obj.id || obj.name || JSON.stringify(a)
+            )}`,
+            name: String(obj.name || obj.id || 'artifact'),
+            phaseId: phase.phaseId,
+            taskId: task.taskId,
+            kind: 'produced',
+            text: typeof obj.content === 'string' ? obj.content : undefined,
+            url: typeof obj.url === 'string' ? obj.url : undefined,
+          });
         }
       }
     }
@@ -1034,51 +1039,55 @@ const ArtifactsView = ({ missionId, plan, phaseOutputs, onRefresh }: ArtifactsVi
     return <div className="empty-state">No artifacts produced or expected for this mission.</div>;
   }
 
+  const handleOpenArtifact = (artifact: typeof items[0]) => {
+    if (artifact.url) {
+      window.open(artifact.url, '_blank');
+    } else if (artifact.text) {
+      const blob = new Blob([artifact.text], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank');
+    }
+  };
+
+  const handleDownloadArtifact = (artifact: typeof items[0]) => {
+    if (artifact.url) {
+      const aEl = document.createElement('a');
+      aEl.href = artifact.url;
+      aEl.target = '_blank';
+      document.body.appendChild(aEl);
+      aEl.click();
+      aEl.remove();
+    } else if (artifact.text) {
+      const blob = new Blob([artifact.text], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const aEl = document.createElement('a');
+      aEl.href = url;
+      aEl.download = (artifact.name || 'artifact') + '.txt';
+      document.body.appendChild(aEl);
+      aEl.click();
+      aEl.remove();
+      URL.revokeObjectURL(url);
+    }
+  };
+
   return (
     <ul className="artifact-list">
       {items.map((a) => (
         <li key={a.id} className={`artifact-item ${a.kind}`}>
-          <div className="artifact-header">
+          <div className="artifact-header" style={{ cursor: a.text || a.url ? 'pointer' : 'default' }} onClick={() => handleOpenArtifact(a)}>
             <strong>{a.name}</strong>
             <span className={`badge ${a.kind}`}>
               {a.kind === 'expected' ? 'Expected' : 'Produced'}
             </span>
-            {a.phaseId && <span className="muted">phase: {a.phaseId}</span>}
-            {a.taskId && <span className="muted">task: {a.taskId}</span>}
+            {a.phaseId && <span className="muted" title={a.phaseId}>phase: {a.phaseId.slice(-8)}</span>}
+            {a.taskId && <span className="muted" title={a.taskId}>task: {a.taskId.slice(-8)}</span>}
           </div>
           {a.text && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <pre className="code-block">{a.text}</pre>
               <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={() => {
-                  if (a.url) {
-                    window.open(a.url, '_blank');
-                  } else {
-                    const blob = new Blob([a.text || ''], { type: 'text/plain' });
-                    const url = URL.createObjectURL(blob);
-                    window.open(url, '_blank');
-                  }
-                }}>Open in new tab</button>
-                <button onClick={() => {
-                  if (a.url) {
-                    const aEl = document.createElement('a');
-                    aEl.href = a.url;
-                    aEl.target = '_blank';
-                    document.body.appendChild(aEl);
-                    aEl.click();
-                    aEl.remove();
-                  } else {
-                    const blob = new Blob([a.text || ''], { type: 'text/plain' });
-                    const url = URL.createObjectURL(blob);
-                    const aEl = document.createElement('a');
-                    aEl.href = url;
-                    aEl.download = (a.name || 'artifact') + '.txt';
-                    document.body.appendChild(aEl);
-                    aEl.click();
-                    aEl.remove();
-                    URL.revokeObjectURL(url);
-                  }
-                }}>Download file</button>
+                <button onClick={(e) => { e.stopPropagation(); handleOpenArtifact(a); }}>Open in new tab</button>
+                <button onClick={(e) => { e.stopPropagation(); handleDownloadArtifact(a); }}>Download file</button>
                 <label style={{ fontSize: 13 }}>
                   Upload replacement: <input type="file" onChange={async (e) => {
                     const file = e.target.files?.[0];
@@ -1092,13 +1101,36 @@ const ArtifactsView = ({ missionId, plan, phaseOutputs, onRefresh }: ArtifactsVi
                           phaseId: a.phaseId,
                           taskId: a.taskId,
                         });
-                        // refresh mission detail to show new artifact
                         onRefresh();
                     } catch (err) {
                       window.alert(err instanceof Error ? err.message : 'Upload failed');
                     }
                   }} /></label>
               </div>
+            </div>
+          )}
+          {(!a.text || a.url) && (
+            <div style={{ display: 'flex', gap: 8, marginTop: 8, paddingTop: 8, borderTop: '1px solid #eee' }}>
+              {(a.text || a.url) && <button onClick={(e) => { e.stopPropagation(); handleOpenArtifact(a); }}>Open in new tab</button>}
+              {(a.text || a.url) && <button onClick={(e) => { e.stopPropagation(); handleDownloadArtifact(a); }}>Download file</button>}
+              <label style={{ fontSize: 13 }}>
+                Upload replacement: <input type="file" onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  const text = await file.text();
+                  try {
+                      await postJSON(`/api/artifacts/missions/${encodeURIComponent(missionId)}/artifacts`, {
+                        name: file.name,
+                        content: text,
+                        type: file.type || 'text/plain',
+                        phaseId: a.phaseId,
+                        taskId: a.taskId,
+                      });
+                      onRefresh();
+                  } catch (err) {
+                    window.alert(err instanceof Error ? err.message : 'Upload failed');
+                  }
+                }} /></label>
             </div>
           )}
         </li>

@@ -79,12 +79,14 @@ export function normalize(raw: unknown): FeedEvent | null {
 
   let source = (r.source as string) || 'mission';
   if (!r.source) {
-    if (missionId) source = `mission:${missionId}`;
-    else if ((data.agentRole as string) || (data.assistantId as string)) {
+    // For task/agent events, prioritize agentRole as the source for proper grouping
+    if ((data.agentRole as string) || (data.assistantId as string)) {
       source = (data.agentRole as string) || (data.assistantId as string);
-      } else if (type.startsWith('mission_') || type.startsWith('phase_') || type.startsWith('task_') || type.startsWith('planner_') || type.startsWith('plan_') || type === 'brain_error') {
-        source = 'orchestrator';
-      }
+    } else if (missionId) {
+      source = `mission:${missionId}`;
+    } else if (type.startsWith('mission_') || type.startsWith('phase_') || type.startsWith('task_') || type.startsWith('planner_') || type.startsWith('plan_') || type === 'brain_error') {
+      source = 'orchestrator';
+    }
   }
 
   let message = (r.message as string) || '';

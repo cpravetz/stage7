@@ -23,7 +23,26 @@ function extractAgents(data: unknown): AgentLike[] {
   return [];
 }
 
-const AgentOutputsPanel = ({ missionId }: AgentOutputsPanelProps) => {  const events = useFeedStore((s) => s.events);
+function extractAgentsFromEvents(events: Array<{ missionId?: string; source?: string; metadata?: Record<string, unknown> }>, missionId: string): AgentInfo[] {
+  const agentMap = new Map<string, AgentInfo>();
+  for (const e of events.filter(ev => ev.missionId === missionId)) {
+    const agentId = (e.metadata?.agentId as string | undefined) || (e.metadata?.agentRole as string | undefined) || e.source;
+    if (agentId && agentId !== 'orchestrator' && agentId !== 'mission' && !agentId.startsWith('mission:')) {
+      if (!agentMap.has(agentId)) {
+        agentMap.set(agentId, {
+          id: agentId,
+          name: (e.metadata?.agentName as string) || agentId,
+          role: (e.metadata?.agentRole as string) || (e.metadata?.assistantId as string) || undefined,
+          status: 'completed',
+        });
+      }
+    }
+  }
+  return Array.from(agentMap.values());
+}
+
+const AgentOutputsPanel = ({ missionId }: AgentOutputsPanelProps) => {
+  const events = useFeedStore((s) => s.events);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -38,9 +57,19 @@ const AgentOutputsPanel = ({ missionId }: AgentOutputsPanelProps) => {  const ev
         if (!res.ok) throw new Error(`Failed to load agents: ${res.status}`);
         const data = await res.json();
         if (!mounted) return;
-        setAgents(extractAgents(data).map((a: { id: string; name?: string; role?: string; agentRole?: string; status?: string }) => ({ id: a.id, name: a.name || a.id, role: a.role || a.agentRole, status: a.status })));
+        const apiAgents = extractAgents(data).map((a: { id: string; name?: string; role?: string; agentRole?: string; status?: string }) => ({ id: a.id, name: a.name || a.id, role: a.role || a.agentRole, status: a.status }));
+        // Also extract agents from feed events as fallback
+        const eventAgents = extractAgentsFromEvents(events, missionId);
+        // Merge agents, preferring API agents
+        const merged = new Map<string, AgentInfo>();
+        for (const a of apiAgents) merged.set(a.id, a);
+        for (const a of eventAgents) if (!merged.has(a.id)) merged.set(a.id, a);
+        setAgents(Array.from(merged.values()));
       } catch (err) {
         if (!mounted) return;
+        // Fallback to event-derived agents
+        const eventAgents = extractAgentsFromEvents(events, missionId);
+        setAgents(eventAgents);
         setError(err instanceof Error ? err.message : String(err));
       } finally {
         if (mounted) setLoading(false);
@@ -48,7 +77,7 @@ const AgentOutputsPanel = ({ missionId }: AgentOutputsPanelProps) => {  const ev
     };
     load();
     return () => { mounted = false; };
-  }, [missionId]);
+  }, [missionId, events]);
 
   const eventsByAgent = useMemo(() => {
     const map = new Map<string, Array<{ type: string; source?: string; message: string; timestamp?: number; metadata?: Record<string, unknown> }>>();
@@ -65,19 +94,24 @@ const AgentOutputsPanel = ({ missionId }: AgentOutputsPanelProps) => {  const ev
       const res = await fetch(`/api/agent-runtime/missions/${encodeURIComponent(missionId)}/agents`);
       if (!res.ok) return;
       const data = await res.json();
-       setAgents(extractAgents(data).map((a: { id: string; name?: string; role?: string; agentRole?: string; status?: string }) => ({ id: a.id, name: a.name || a.id, role: a.role || a.agentRole, status: a.status })));
+       const apiAgents = extractAgents(data).map((a: { id: string; name?: string; role?: string; agentRole?: string; status?: string }) => ({ id: a.id, name: a.name || a.id, role: a.role || a.agentRole, status: a.status }));
+       const eventAgents = extractAgentsFromEvents(events, missionId);
+       const merged = new Map<string, AgentInfo>();
+       for (const a of apiAgents) merged.set(a.id, a);
+       for (const a of eventAgents) if (!merged.has(a.id)) merged.set(a.id, a);
+       setAgents(Array.from(merged.values()));
      } catch {
       // ignore
     }
   };
 
-  if (loading) return <div className="agent-outputs-panel">Loading agents...</div>;
-  if (error) return <div className="agent-outputs-panel error">{error}</div>;
+  if (loading && agents.length === 0) return <div className="agent-outputs-panel">Loading agents...</div>;
+  if (error && agents.length === 0) return <div className="agent-outputs-panel error">{error}</div>;
 
   return (
     <div className="agent-outputs-panel">
       <h4 style={{ margin: '6px 0' }}>Agents</h4>
-      {agents.length === 0 && <div className="muted">No agents for this mission.</div>}
+      {agents.length === 0 && <div className="muted">No agents recorded for this mission.</div>}
       <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
         {agents.map((a) => (
           <li key={a.id} style={{ borderBottom: '1px solid #eee', padding: '6px 0' }}>

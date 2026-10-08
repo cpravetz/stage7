@@ -1,7 +1,7 @@
 import { createContextPolicy } from '../adk';
-import { Tool, ToolExecution, WorkflowState, CredentialRequest, CredentialRequiredError, ConfirmationRequiredError, CrossObjectHandoffError, SchemaRecord, ApprovalSummary, HandoffRequest, ExecutionResult, RuntimeWorkflow, RuntimeWorkflowAction } from '../types';
+import { Tool, ToolExecution, WorkflowState, CredentialRequest, CredentialRequiredError, ConfirmationRequiredError, CrossObjectHandoffError, SchemaRecord, ApprovalSummary, HandoffRequest, RuntimeWorkflow, RuntimeWorkflowAction } from '../types';
 import logger from '../utils/logger';
-import { ErrorHandler, ClassifiedError } from '../utils/ErrorHandler';
+import { ErrorHandler } from '../utils/ErrorHandler';
 import { EmailExecutor } from '../executors/EmailExecutor';
 import { SearchExecutor } from '../executors/SearchExecutor';
 import { CodeExecutor, CodeExecutorCredentials } from '../executors/CodeExecutor';
@@ -14,9 +14,9 @@ import { credentialProvider, NamedCredentialSource } from '../services/Credentia
 import { ReasoningExecutor } from '../executors/ReasoningExecutor';
 import { WeatherExecutor, WeatherOptions } from '../executors/WeatherExecutor';
 import { MathExecutor, MathOptions } from '../executors/MathExecutor';
-import { ApiClientExecutor, ApiClientOptions } from '../executors/ApiClientExecutor';
-import { DataAnalysisExecutor, DataAnalysisOptions } from '../executors/DataAnalysisExecutor';
-import { CalendarExecutor, CalendarOptions } from '../executors/CalendarExecutor';
+import { ApiClientExecutor } from '../executors/ApiClientExecutor';
+import { DataAnalysisExecutor } from '../executors/DataAnalysisExecutor';
+import { CalendarExecutor } from '../executors/CalendarExecutor';
 import { NativeExecutorKey } from '../types';
 import { PluginGenerator } from '../services/PluginGenerator';
 import { ToolDiscovery } from '../services/ToolDiscovery';

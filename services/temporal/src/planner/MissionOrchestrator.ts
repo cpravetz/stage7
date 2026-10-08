@@ -3,8 +3,8 @@ import { logger } from '@stage7-nextgen/shared';
 import { MissionPlanner } from './MissionPlanner';
 import { WorkerAgent } from './WorkerAgent';
 
-const TASK_MAX_RETRIES = 3;
-const TASK_RETRY_BACKOFF_BASE_MS = 2000;
+const TASK_MAX_RETRIES = 2;
+const TASK_RETRY_BACKOFF_BASE_MS = 5000;
 
 export interface MissionContext {
   missionId: string;
