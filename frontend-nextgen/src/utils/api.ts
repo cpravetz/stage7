@@ -17,7 +17,11 @@ export async function fetchJSON<T>(path: string, init?: RequestInit): Promise<T>
   // Default to no-cache so the UI always sees the latest assistant and tool
   // registry state. Browsers sometimes return 304s from a stale cache which
   // causes the workspace to render inconsistent bindings across refreshes.
-  const defaultInit: RequestInit = { cache: 'no-cache' };
+  // Use no-store to avoid conditional GET/304 responses for dynamic assistant/tool
+  // registry endpoints. This prevents the client from receiving 304 Not Modified
+  // and misinterpreting it as an error which previously emptied the skill list
+  // and caused a save that persisted an empty tools array.
+  const defaultInit: RequestInit = { cache: 'no-store' };
   const response = await fetch(`${API_BASE}${path}`, { ...defaultInit, ...(init || {}) });
   if (!response.ok) {
     throw new Error(`API error: ${response.status} ${response.statusText}`);

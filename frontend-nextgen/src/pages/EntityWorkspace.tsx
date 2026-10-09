@@ -293,28 +293,54 @@ const EntityWorkspace = () => {
     setTransactionGuidanceEntries((prev) => prev.filter((_, i) => i !== idx));
   };
 
+  // Manual save (explicit user action) should force persistence even if the
+  // client currently has no discovered skills. Autosave/scheduled saves must be
+  // more conservative to avoid overwriting a valid persisted tool list when the
+  // tool registry failed to load (e.g., due to 304/cache issues).
   const saveConfiguration = async () => {
-    return saveConfigurationWithBindings();
+    return saveConfigurationWithBindings(undefined, { force: true });
   };
 
-  const saveConfigurationWithBindings = async (bindings?: ToolBinding[]) => {
+  const saveConfigurationWithBindings = async (bindings?: ToolBinding[], options?: { force?: boolean }) => {
     if (!entity) return;
     const tbs = bindings || toolBindings;
     setSaving(true);
     setSaveError(null);
+
+    // If the client couldn't discover any skills (availableSkills empty) and
+    // this is not a forced/manual save, skip the autosave to avoid persisting an
+    // empty tools array that would overwrite a correct persisted state.
+    if (!options?.force && availableSkills.length === 0) {
+      setSaveError('Autosave skipped: no skills discovered (transient tool registry failure)');
+      setSaving(false);
+      return;
+    }
+
     try {
+      const computedTools = tbs.filter((t) => t.enabled).map((t) => ({
+        name: t.name,
+        displayName: t.displayName,
+        description: t.description,
+        inputSchema: t.inputSchema || { type: 'object', properties: {} },
+        config: t.config || {},
+        configSchema: t.configSchema,
+      }));
+
+      // If computedTools is empty but the persisted assistant already has tools
+      // (and this is not a forced/manual save), do not overwrite the persisted
+      // tools list with an empty one. This prevents the autosave corruption
+      // observed in production.
+      if (!options?.force && computedTools.length === 0 && Array.isArray(entity.tools) && entity.tools.length > 0) {
+        setSaveError('Autosave skipped: would overwrite existing persisted tools with an empty list');
+        setSaving(false);
+        return;
+      }
+
       const updates = {
         systemPrompt: editingSystemPrompt,
         knowledge: knowledgeEntries,
         transactionGuidance: transactionGuidanceEntries,
-        tools: tbs.filter((t) => t.enabled).map((t) => ({
-          name: t.name,
-          displayName: t.displayName,
-          description: t.description,
-          inputSchema: t.inputSchema || { type: 'object', properties: {} },
-          config: t.config || {},
-          configSchema: t.configSchema,
-        })),
+        tools: computedTools,
         metadata: metadataConfig,
       };
       await putJSON(`/api/workers/assistants/${encodeURIComponent(entity.id)}`, updates);
@@ -334,7 +360,8 @@ const EntityWorkspace = () => {
       clearTimeout(saveTimerRef.current);
     }
     saveTimerRef.current = window.setTimeout(() => {
-      saveConfigurationWithBindings(bindings).catch(() => {});
+      // Autosave should be conservative; do not force.
+      saveConfigurationWithBindings(bindings, { force: false }).catch(() => {});
       saveTimerRef.current = null;
     }, 700) as unknown as number;
   };
