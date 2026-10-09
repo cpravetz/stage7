@@ -92,7 +92,7 @@ export const OverviewPanel = ({
         <h3>About</h3>
         <p>{entity.description}</p>
         <div className="meta-grid">
-          <div><strong>Tools Bound:</strong> {enabledTools.length}</div>
+          <div><strong>Skills Bound:</strong> {enabledTools.length}</div>
           <div><strong>Knowledge Entries:</strong> {knowledgeEntries.length}</div>
           <div><strong>Behavior Rules:</strong> {transactionGuidanceEntries.length}</div>
           <div><strong>Memory Entries:</strong> {Object.keys(memoryContext).length}</div>
@@ -112,16 +112,16 @@ export const OverviewPanel = ({
             {running ? 'Running...' : 'Run Mission'}
           </button>
           <p className="hint">
-          Mission will use {enabledTools.length} bound tools
+          Mission will use {enabledTools.length} bound skills
              · {knowledgeEntries.length} knowledge entries · {transactionGuidanceEntries.length} behavior rules
           </p>
         </div>
       </div>
 
       <div className="card" style={{ gridColumn: '1 / -1' }}>
-        <h3>Tools</h3>
+        <h3>Skills</h3>
         {enabledTools.length === 0 ? (
-          <p>No tools bound to this assistant.</p>
+          <p>No skills bound to this assistant.</p>
         ) : (
           enabledTools
             .map((tool) => {
@@ -143,7 +143,7 @@ export const OverviewPanel = ({
                    <div className="skill-body">
                      {hasSettings && (
                        <div className="skill-settings-summary">
-                         {/* Opens the Tool Settings tab, which holds this tool's config
+                         {/* Opens the Skill Settings tab, which holds this skill's config
                              editor. */}
                          <button className="secondary" onClick={() => useAssistantViewStore.getState().setField(entity.id, 'activeTab', 'tool-settings')}>
                            Settings

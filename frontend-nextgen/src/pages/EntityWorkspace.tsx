@@ -443,7 +443,7 @@ const EntityWorkspace = () => {
             className={activeTab === tab ? 'tab active' : 'tab'}
             onClick={() => setActiveTab(tab)}
           >
-            {tab === 'hitl' ? 'Human Review' : tab === 'tool-settings' ? 'Tool Settings' : tab.charAt(0).toUpperCase() + tab.slice(1)}
+            {tab === 'hitl' ? 'Human Review' : tab === 'tool-settings' ? 'Skill Settings' : tab.charAt(0).toUpperCase() + tab.slice(1)}
           </button>
         ))}
       </div>
