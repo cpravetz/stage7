@@ -87,10 +87,42 @@ async function initializeAssistants(): Promise<void> {
 
     logger.info({ count: assistantLoader.list().length }, 'Assistant catalog seeded');
   } else {
-    logger.info({ count: existing.length }, 'Assistants already persisted, registering tools');
+    logger.info({ count: existing.length }, 'Assistants already persisted, registering tools and reconciling catalog');
+
+    // Register tools from persisted assistants (what's already stored)
     for (const assistant of existing) {
       if (assistant.tools && assistant.tools.length > 0) {
         registerAssistantTools(assistant.tools);
+      }
+    }
+
+    // Reconcile the on-disk catalog with persisted assistants. This repairs
+    // cases where an assistant was previously persisted without its canonical
+    // tool bindings (for example after a manual migration or bad earlier run).
+    // Only repair when the persisted assistant has no tools so we avoid
+    // overwriting deliberate admin edits.
+    for (const assistantDef of catalog) {
+      const stored = assistantLoader.get(assistantDef.id);
+      if (!stored) {
+        // New assistant folder appeared since the last run; register it now.
+        const saved = await assistantLoader.register(assistantDef);
+        if (saved.tools && saved.tools.length > 0) {
+          registerAssistantTools(saved.tools);
+        }
+        continue;
+      }
+
+      // Restore missing tool bindings when the persisted assistant has none.
+      if ((!stored.tools || stored.tools.length === 0) && assistantDef.tools && assistantDef.tools.length > 0) {
+        const updates: Partial<AssistantDefinition> = {
+          tools: assistantDef.tools,
+          // Keep other stored metadata unless absent; only inject canonical tools.
+        };
+        const updated = await assistantLoader.update(assistantDef.id, updates);
+        if (updated && updated.tools && updated.tools.length > 0) {
+          registerAssistantTools(updated.tools);
+        }
+        logger.info({ assistantId: assistantDef.id }, 'Repaired assistant tools from on-disk catalog');
       }
     }
   }

@@ -392,6 +392,7 @@ export class TemporalClient {
             error: data.error,
             startedAt: data.startedAt ? new Date(data.startedAt).getTime() : Date.now(),
             completedAt: data.completedAt ? new Date(data.completedAt).getTime() : undefined,
+            input: data.input,
           } as WorkflowResult;
         }
       }
@@ -521,13 +522,23 @@ export class TemporalClient {
    * Broadcasts a mission event to WebSocket clients subscribed to the mission via the gateway.
    */
   async broadcastMissionUpdate(event: Record<string, unknown>): Promise<void> {
+    // Persist event to artifacts service
+    const missionId = event.missionId as string | undefined;
+    if (missionId) {
+      await this.appendMissionEvent(missionId, {
+        type: event.type as string,
+        timestamp: (event.timestamp as number) || Date.now(),
+        data: event.data as Record<string, unknown> || {},
+      });
+    }
+
+    // Broadcast to WebSocket clients via gateway
     const gatewayUrl = process.env.GATEWAY_URL;
     if (!gatewayUrl) {
       logger.debug('GATEWAY_URL not set, skipping broadcast');
       return;
     }
 
-    const missionId = event.missionId as string | undefined;
     let endpoint = `${gatewayUrl}/api/gateway/broadcast`;
 
     if (missionId) {

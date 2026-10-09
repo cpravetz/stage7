@@ -173,6 +173,19 @@ const MissionRoom = () => {
       timestamp: startedAt,
       missionId,
     });
+    
+    // Show original user prompt if available
+    const originalPrompt = detail?.input?.prompt;
+    if (originalPrompt) {
+      fromOutput.push({
+        id: `derived-user-prompt-${startedAt}`,
+        type: 'user',
+        source: 'user',
+        message: originalPrompt,
+        timestamp: startedAt,
+        missionId,
+      });
+    }
     if (plan) {
       fromOutput.push({
         id: `derived-planner-started-${startedAt + 1}`,
@@ -537,6 +550,16 @@ const MissionRoom = () => {
       )}
 
       <div className="mission-summary">
+        {detail?.input?.prompt && (
+          <details style={{ marginRight: 16 }}>
+            <summary style={{ cursor: 'pointer', color: '#38bdf8', fontWeight: 500 }}>
+              Mission Brief
+            </summary>
+            <p className="muted" style={{ marginTop: 6, fontSize: '13px', maxWidth: 600 }}>
+              {detail.input.prompt}
+            </p>
+          </details>
+        )}
         {wallClockLabel && (
           <span>
             <strong>Duration:</strong> {wallClockLabel}

@@ -40,9 +40,27 @@ export class AssistantLoader {
 
   async loadFromPersistence(): Promise<number> {
     const stored = await this.persistence.listAssistants();
+
+    // Detect persisted assistants that lack tool bindings. This should not
+    // happen under normal operation because assistant catalog seeding writes
+    // canonical tool lists on first registration. If such records are found,
+    // emit a diagnostic log with timestamps to help track how they were created.
+    const problematic: Array<{ id: string; createdAt?: Date; updatedAt?: Date; tools?: any }> = [];
+
     for (const assistant of stored) {
       this.assistants.set(assistant.id, assistant);
+      if (!assistant.tools || assistant.tools.length === 0) {
+        problematic.push({ id: assistant.id, createdAt: assistant.createdAt, updatedAt: assistant.updatedAt, tools: assistant.tools });
+      }
     }
+
+    if (problematic.length > 0) {
+      logger.warn({ count: problematic.length, assistants: problematic }, 'Found persisted assistant(s) with missing or empty tool bindings');
+      // Also provide a higher-visibility info log that operators can search for
+      // in deployments that aggregate logs separately from warnings.
+      logger.info({ assistants: problematic.map((p) => ({ id: p.id, createdAt: p.createdAt, updatedAt: p.updatedAt })) }, 'Persisted assistants missing tools (investigate how these records were created)');
+    }
+
     const runtimes = await this.persistence.listAssistantRuntimes();
     for (const rt of runtimes) {
       this.runtimes.set(rt.assistantId, rt);
@@ -55,6 +73,27 @@ export class AssistantLoader {
     // Ensure no `model` is persisted with assistant definitions
     const defToSave = { ...(definition as any) } as any;
     if (defToSave.model) delete defToSave.model;
+
+    // Defensive fix: if an assistant is being registered with no tools (empty
+    // or missing), inject the canonical tools from the on-disk manifest if
+    // available. This prevents accidental persistence of assistants without
+    // their canonical skill bindings (observed as an operational failure).
+    // Do not overwrite non-empty user-provided tools.
+    if ((!defToSave.tools || defToSave.tools.length === 0)) {
+      try {
+        const catalog = this.getManifestCatalog();
+        const canonical = catalog.find((a) => a.id === defToSave.id);
+        if (canonical && Array.isArray(canonical.tools) && canonical.tools.length > 0) {
+          defToSave.tools = canonical.tools;
+          logger.info({ assistantId: defToSave.id }, 'Injected canonical tools into assistant before persisting (defensive)');
+        }
+      } catch (err) {
+        // Non-fatal: if manifest cannot be read for any reason, continue with
+        // the given definition and let the earlier diagnostic logs catch it.
+        logger.warn({ err, assistantId: defToSave.id }, 'Failed to inject canonical tools while persisting assistant');
+      }
+    }
+
     const saved = await this.persistence.saveAssistant(defToSave as AssistantDefinition);
     this.assistants.set(saved.id, saved);
     logger.info({ assistantId: saved.id }, 'Assistant registered and persisted');

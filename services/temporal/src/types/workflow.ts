@@ -14,6 +14,7 @@ export interface WorkflowResult {
   error?: string;
   startedAt: number;
   completedAt?: number;
+  input?: WorkflowInput;
 }
 
 export interface WorkflowState {

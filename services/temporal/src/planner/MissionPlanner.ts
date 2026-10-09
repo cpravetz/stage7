@@ -88,12 +88,12 @@ function buildFallbackPlan(prompt: string): Plan {
 export class MissionPlanner {
   constructor(private brainUrl: string, private apiKey?: string) {}
 
-  async generatePlan(prompt: string, context?: Record<string, unknown>): Promise<Plan> {
+  async generatePlan(prompt: string, context?: Record<string, unknown>, missionId?: string): Promise<Plan> {
     const errors: string[] = [];
     const attempts = [
-      { label: 'auto', body: { prompt: `GOAL: ${prompt}\n\nCONTEXT: ${JSON.stringify(context || {})}`, systemPrompt: PLANNER_SYSTEM_PROMPT, maxTokens: 4096, temperature: 0.3 } },
-      { label: 'openwebui', body: { prompt: `GOAL: ${prompt}\n\nCONTEXT: ${JSON.stringify(context || {})}`, systemPrompt: PLANNER_SYSTEM_PROMPT, maxTokens: 4096, temperature: 0.3, provider: 'openwebui' } },
-      { label: 'openrouter-fresh', body: { prompt: `GOAL: ${prompt}\n\nCONTEXT: ${JSON.stringify(context || {})}`, systemPrompt: PLANNER_SYSTEM_PROMPT, maxTokens: 4096, temperature: 0.3, provider: 'openrouter' } },
+      { label: 'auto', body: { prompt: `GOAL: ${prompt}\n\nCONTEXT: ${JSON.stringify(context || {})}`, systemPrompt: PLANNER_SYSTEM_PROMPT, maxTokens: 4096, temperature: 0.3, missionId } },
+      { label: 'openwebui', body: { prompt: `GOAL: ${prompt}\n\nCONTEXT: ${JSON.stringify(context || {})}`, systemPrompt: PLANNER_SYSTEM_PROMPT, maxTokens: 4096, temperature: 0.3, provider: 'openwebui', missionId } },
+      { label: 'openrouter-fresh', body: { prompt: `GOAL: ${prompt}\n\nCONTEXT: ${JSON.stringify(context || {})}`, systemPrompt: PLANNER_SYSTEM_PROMPT, maxTokens: 4096, temperature: 0.3, provider: 'openrouter', missionId } },
     ];
     let lastError: Error | null = null;
     const ATTEMPT_TIMEOUT_MS = 10000;

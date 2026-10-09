@@ -23,6 +23,12 @@ export interface MissionDetail {
   error?: string;
   startedAt?: number | string;
   completedAt?: number | string;
+  input?: {
+    prompt?: string;
+    missionId?: string;
+    tenantId?: string;
+    assistantId?: string;
+  };
 }
 
 export interface MissionPhaseOutput {

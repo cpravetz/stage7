@@ -3,8 +3,8 @@ import { logger } from '@stage7-nextgen/shared';
 import { MissionPlanner } from './MissionPlanner';
 import { WorkerAgent } from './WorkerAgent';
 
-const TASK_MAX_RETRIES = 2;
-const TASK_RETRY_BACKOFF_BASE_MS = 5000;
+const TASK_MAX_RETRIES = 5;
+const TASK_RETRY_BACKOFF_BASE_MS = 10000;
 
 export interface MissionContext {
   missionId: string;
@@ -37,7 +37,7 @@ export class MissionOrchestrator {
   async run(ctx: MissionContext): Promise<{ plan: Plan; outputs: any; compensations: Array<{ phaseId: string; action: string }> }> {
     const compensations: Array<{ phaseId: string; action: string }> = [];
     await ctx.broadcast({ type: 'planner_started', missionId: ctx.missionId, timestamp: Date.now(), data: { prompt: ctx.prompt } });
-    const plan = await this.planner.generatePlan(ctx.prompt, ctx.metadata);
+    const plan = await this.planner.generatePlan(ctx.prompt, ctx.metadata, ctx.missionId);
     await ctx.broadcast({ type: 'plan_generated', missionId: ctx.missionId, timestamp: Date.now(), data: { plan } });
     try {
       await this.persistPlan(ctx, plan);
@@ -380,6 +380,7 @@ export class MissionOrchestrator {
             'You are an objective mission evaluator. Determine whether the produced artifacts fully satisfy the stated mission goal. Answer with only "yes" or "no".',
           maxTokens: 256,
           temperature: 0,
+          missionId: ctx.missionId,
         }),
       });
 

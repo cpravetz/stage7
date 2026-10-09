@@ -47,9 +47,9 @@ const MAX_LOG_ENTRIES = 200;
 
 function providerAttemptTimeoutMs(): number {
   const configured = Number(process.env.BRAIN_PROVIDER_ATTEMPT_TIMEOUT_MS);
-  // 15s default: keeps two retries (30s) within the upstream 60s request
-  // ceiling, leaving room for fallback to alternate models/providers.
-  return Number.isFinite(configured) && configured > 0 ? configured : 15000;
+  // 60s default: gives slow models (especially local/quantized) a real chance.
+  // The upstream BRAIN_REQUEST_TIMEOUT_MS (60s) that callers enforce is a separate ceiling.
+  return Number.isFinite(configured) && configured > 0 ? configured : 60000;
 }
 
 async function withProviderTimeout<T>(operation: Promise<T>): Promise<T> {
@@ -151,16 +151,19 @@ export class BrainService {
     this.recentSuccesses.set(`${provider}:${model}`, Date.now());
   }
 
-  async complete(prompt: string, options: CompletionOptions = {}): Promise<CompletionResult> {
+async complete(prompt: string, options: CompletionOptions = {}): Promise<CompletionResult> {
      const startTime = Date.now();
-    const attemptTimeout = providerAttemptTimeoutMs();
-    const maxRetries = 2;
-    const configuredDeadline = Number(process.env.BRAIN_COMPLETION_DEADLINE_MS);
-    // Default deadline derived from the per-attempt timeout: enough for at least
-    // one candidate (2 retries) plus margin for a second candidate, while staying
-    // under the upstream BRAIN_REQUEST_TIMEOUT_MS (60s) that the caller enforces.
-    const defaultDeadline = attemptTimeout * (maxRetries + 1) + 20000;
-    const completionDeadline = startTime + (Number.isFinite(configuredDeadline) && configuredDeadline > 0 ? configuredDeadline : Math.min(defaultDeadline, 55000));
+     const attemptTimeout = providerAttemptTimeoutMs();
+     const maxRetries = 2;
+     const configuredDeadline = Number(process.env.BRAIN_COMPLETION_DEADLINE_MS);
+     // Default deadline: allow enough time to try MANY candidates (each up to attemptTimeout)
+     // With 60s per attempt, we need ~120s+ to try multiple models across providers.
+     // But we're bounded by the upstream BRAIN_REQUEST_TIMEOUT_MS (60s) from callers.
+     // So use a default that fits within 60s while allowing several attempts.
+     const defaultDeadline = attemptTimeout * (maxRetries + 1) + 30000;
+     // Allow override via env for non-Temporal callers (e.g., direct execution in worker)
+     // Upstream callers may enforce their own timeout (e.g., BRAIN_REQUEST_TIMEOUT_MS=60000)
+     const completionDeadline = startTime + (Number.isFinite(configuredDeadline) && configuredDeadline > 0 ? configuredDeadline : Math.min(defaultDeadline, 120000));
     const modelIdOpt = options.model || 'auto';
     const providerOpt = options.provider || 'any';
     const promptPreview = prompt.slice(0, 120);

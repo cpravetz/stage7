@@ -106,162 +106,114 @@ private async executeViaBrain(task: Task, phase: Phase, plan: Plan, missionId: s
 
     const userPrompt = `Task: ${task.title}\n\nDescription: ${task.description}\n\nExpected artifacts: ${task.expectedArtifacts.join(', ')}\n\nProduce the output now.`;
 
-    const attempts = [
-      { label: 'auto', body: { prompt: userPrompt, systemPrompt, maxTokens: 4096, temperature: 0.4 } },
-      { label: 'openwebui', body: { prompt: userPrompt, systemPrompt, maxTokens: 4096, temperature: 0.4, provider: 'openwebui' } },
-    ];
-
-    const MAX_RETRIES_PER_ATTEMPT = 3;
-    const BACKOFF_BASE_MS = 1000;
+    // Let BrainService handle ALL candidate models/providers internally.
+    // We just call it and retry the whole call a few times if it fails completely.
+    const MAX_BRAIN_CALL_RETRIES = 3;
+    const BACKOFF_BASE_MS = 5000;
 
     let lastContent = '';
-    const errors: string[] = [];
-    for (const attempt of attempts) {
-      for (let retry = 0; retry < MAX_RETRIES_PER_ATTEMPT; retry++) {
-        if (retry > 0) {
-          const delay = BACKOFF_BASE_MS * Math.pow(2, retry - 1);
-          await sleep(delay);
-          logger.warn(
-            { task: task.title, phase: phase.name, attempt: attempt.label, retry, delay },
-            'Retrying brain call after backoff',
-          );
-        }
-        try {
-          const res = await fetch(`${this.brainUrl}/api/brain/complete`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(attempt.body),
-          });
-          if (!res.ok) {
-            const text = await res.text();
-            const errMsg = `[${attempt.label}] ${res.status}: ${text.slice(0, 200)}`;
-            errors.push(errMsg);
-            await this.broadcastBrainError?.({
-              type: 'brain_error',
-              timestamp: Date.now(),
-              data: {
-                missionId,
-                provider: (attempt.body as Record<string, unknown>).provider as string || attempt.label,
-                error: `${res.status}: ${text.slice(0, 200)}`,
-              },
-            });
-            // Rate-limit (429) or throttling: retrying the same model/provider would just hit
-            // the same limit, so move to the next attempt (which may target a different
-            // model and/or provider) immediately.
-            if (res.status === 429 || /rate ?limit|too many requests|throttl/i.test(text)) {
-              logger.warn(
-                { task: task.title, phase: phase.name, attempt: attempt.label, status: res.status },
-                'Brain call rate-limited - trying next attempt',
-              );
-              break;
-            }
-            // Timeout from BrainService: it already tries next candidate internally, so don't retry this attempt
-            if (/timed out after \d+ms/i.test(text)) {
-              logger.warn(
-                { task: task.title, phase: phase.name, attempt: attempt.label, status: res.status },
-                'Brain call timed out - trying next attempt',
-              );
-              break;
-            }
-            if (retry === MAX_RETRIES_PER_ATTEMPT - 1) {
-              logger.warn(
-                { task: task.title, phase: phase.name, attempt: attempt.label, status: res.status },
-                'Brain call failed after retries, trying next provider',
-              );
-            }
-            continue;
-          }
-          const data = await res.json() as { content: string; tokensUsed?: number };
-            lastContent = data.content;
-
-            // If the LLM returned a structured error payload (e.g. { error: { type: 'llm_call_failed', message: '...' } })
-            // or explicit refusal / policy text, treat it as a failure so the orchestrator retries or falls back.
-            try {
-              const jsonMatch = (data.content || '').match(/\{[\s\S]*\}/);
-              if (jsonMatch) {
-                const parsed = JSON.parse(jsonMatch[0]);
-                if (parsed?.error && (parsed.error.type === 'llm_call_failed' || parsed.error.message)) {
-                  const errMsg = typeof parsed.error.message === 'string' ? parsed.error.message : JSON.stringify(parsed.error);
-                  throw new Error(`LLM reported error: ${errMsg}`);
-                }
-              }
-            } catch (e) {
-              // If the parsed JSON indicated an error we rethrow; otherwise continue
-              if (e instanceof Error) throw e;
-            }
-
-            const lowered = (data.content || '').toLowerCase();
-            if (lowered.includes('operation not allowed') || lowered.includes('model refused') || lowered.includes('refusal') || lowered.includes('not permitted')) {
-              throw new Error(`LLM refusal or policy block: ${data.content.slice(0, 200)}`);
-            }
-
-            // Self-correction: if the output produced none of the expected artifacts,
-            // reflect on the gaps and refine once before returning.
-            const artifacts = this.extractArtifacts(data.content, task.expectedArtifacts);
-            const missing = (task.expectedArtifacts || []).filter(
-              (e) => !artifacts.some((a) => artifactNameMatches(a.name, e)),
-            );
-            if (missing.length > 0) {
-              const refined = await this.refine(task, phase, plan, systemPrompt, data.content, missing);
-              if (refined) {
-                return {
-                  output: refined,
-                  artifacts: this.extractArtifacts(refined, task.expectedArtifacts || []),
-                  tokensUsed: data.tokensUsed || 0,
-                };
-              }
-            }
-
-            logger.info(
-              { task: task.title, phase: phase.name, provider: attempt.label, tokensUsed: data.tokensUsed || 0 },
-              'Worker task completed',
-            );
-            return {
-              output: data.content,
-              artifacts,
-              tokensUsed: data.tokensUsed || 0,
-            };
-        } catch (err: any) {
-          const errMsg = `[${attempt.label}] ${err.message}`;
-          errors.push(errMsg);
+    for (let attempt = 0; attempt < MAX_BRAIN_CALL_RETRIES; attempt++) {
+      if (attempt > 0) {
+        const delay = BACKOFF_BASE_MS * Math.pow(2, attempt - 1);
+        await sleep(delay);
+        logger.warn(
+          { task: task.title, phase: phase.name, attempt, delay },
+          'Retrying Brain call after backoff',
+        );
+      }
+      try {
+        const res = await fetch(`${this.brainUrl}/api/brain/complete`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt: userPrompt, systemPrompt, maxTokens: 4096, temperature: 0.4, missionId }),
+        });
+        if (!res.ok) {
+          const text = await res.text();
+          const errMsg = `Brain call failed (${res.status}): ${text.slice(0, 200)}`;
           await this.broadcastBrainError?.({
             type: 'brain_error',
             timestamp: Date.now(),
-            data: {
-              missionId,
-              provider: (attempt.body as Record<string, unknown>).provider as string || attempt.label,
-              error: err.message,
-            },
+            data: { missionId, error: `${res.status}: ${text.slice(0, 200)}` },
           });
-          // Rate-limit (429): retrying the same model/provider would just hit the same
-          // limit, so move to the next attempt (which may target a different
-          // model and/or provider) immediately.
-          if (err.message && (/\b(429)\b/.test(err.message) || /rate ?limit|too many requests|throttl/i.test(err.message))) {
+          // If rate-limited, retry the whole Brain call (it may try different providers)
+          if (res.status === 429 || /rate ?limit|too many requests|throttl/i.test(text)) {
             logger.warn(
-              { task: task.title, phase: phase.name, attempt: attempt.label, err: err.message },
-              'Brain call rate-limited - trying next attempt',
+              { task: task.title, phase: phase.name, status: res.status },
+              'Brain call rate-limited - will retry',
             );
-            break;
-          }
-          // Timeout from BrainService: it already tries next candidate internally, so don't retry this attempt
-          if (err.message && /timed out after \d+ms/i.test(err.message)) {
-            logger.warn(
-              { task: task.title, phase: phase.name, attempt: attempt.label, err: err.message },
-              'Brain call timed out - trying next attempt',
-            );
-            break;
-          }
-          logger.warn(
-            { task: task.title, phase: phase.name, attempt: attempt.label, retry, err: err.message },
-            'Brain call error, will retry',
-          );
-          if (retry < MAX_RETRIES_PER_ATTEMPT - 1) {
             continue;
           }
+          if (attempt === MAX_BRAIN_CALL_RETRIES - 1) {
+            logger.error(
+              { task: task.title, phase: phase.name, status: res.status },
+              'Brain call failed after all retries',
+            );
+          }
+          continue;
+        }
+        const data = await res.json() as { content: string; tokensUsed?: number };
+        lastContent = data.content;
+
+        // If the LLM returned a structured error payload, treat it as failure
+        try {
+          const jsonMatch = (data.content || '').match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            const parsed = JSON.parse(jsonMatch[0]);
+            if (parsed?.error && (parsed.error.type === 'llm_call_failed' || parsed.error.message)) {
+              const errMsg = typeof parsed.error.message === 'string' ? parsed.error.message : JSON.stringify(parsed.error);
+              throw new Error(`LLM reported error: ${errMsg}`);
+            }
+          }
+        } catch (e) {
+          if (e instanceof Error) throw e;
+        }
+
+        const lowered = (data.content || '').toLowerCase();
+        if (lowered.includes('operation not allowed') || lowered.includes('model refused') || lowered.includes('refusal') || lowered.includes('not permitted')) {
+          throw new Error(`LLM refusal or policy block: ${data.content.slice(0, 200)}`);
+        }
+
+        // Self-correction: if output produced none of the expected artifacts, reflect and refine once
+        const artifacts = this.extractArtifacts(data.content, task.expectedArtifacts);
+        const missing = (task.expectedArtifacts || []).filter(
+          (e) => !artifacts.some((a) => artifactNameMatches(a.name, e)),
+        );
+        if (missing.length > 0) {
+          const refined = await this.refine(task, phase, plan, systemPrompt, data.content, missing, missionId);
+          if (refined) {
+            return {
+              output: refined,
+              artifacts: this.extractArtifacts(refined, task.expectedArtifacts || []),
+              tokensUsed: data.tokensUsed || 0,
+            };
+          }
+        }
+
+        logger.info(
+          { task: task.title, phase: phase.name, tokensUsed: data.tokensUsed || 0 },
+          'Worker task completed',
+        );
+        return {
+          output: data.content,
+          artifacts,
+          tokensUsed: data.tokensUsed || 0,
+        };
+      } catch (err: any) {
+        await this.broadcastBrainError?.({
+          type: 'brain_error',
+          timestamp: Date.now(),
+          data: { missionId, error: err.message },
+        });
+        logger.warn(
+          { task: task.title, phase: phase.name, attempt, err: err.message },
+          'Brain call error, will retry',
+        );
+        if (attempt < MAX_BRAIN_CALL_RETRIES - 1) {
+          continue;
         }
       }
     }
-    const finalError = `Worker failed after all attempts: ${errors.join('; ')}. Last content: ${lastContent.slice(0, 200)}`;
+    const finalError = `Worker failed after ${MAX_BRAIN_CALL_RETRIES} Brain call attempts. Last content: ${lastContent.slice(0, 200)}`;
 
     // Fallback 1: if a worker-pool is available, attempt to register a temporary assistant and execute there
     if (this.workerPoolUrl) {
@@ -360,6 +312,7 @@ private async executeViaBrain(task: Task, phase: Phase, plan: Plan, missionId: s
     systemPrompt: string,
     priorOutput: string,
     missing: string[],
+    missionId: string,
   ): Promise<string | undefined> {
     try {
       const prompt =
@@ -375,7 +328,7 @@ private async executeViaBrain(task: Task, phase: Phase, plan: Plan, missionId: s
       const res = await fetch(`${this.brainUrl}/api/brain/complete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt, systemPrompt, maxTokens: 4096, temperature: 0.4 }),
+        body: JSON.stringify({ prompt, systemPrompt, maxTokens: 4096, temperature: 0.4, missionId }),
       });
       if (!res.ok) return undefined;
       const data = await res.json() as { content: string };

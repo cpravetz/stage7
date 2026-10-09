@@ -14,7 +14,11 @@ import type {
 const API_BASE = '';
 
 export async function fetchJSON<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, init);
+  // Default to no-cache so the UI always sees the latest assistant and tool
+  // registry state. Browsers sometimes return 304s from a stale cache which
+  // causes the workspace to render inconsistent bindings across refreshes.
+  const defaultInit: RequestInit = { cache: 'no-cache' };
+  const response = await fetch(`${API_BASE}${path}`, { ...defaultInit, ...(init || {}) });
   if (!response.ok) {
     throw new Error(`API error: ${response.status} ${response.statusText}`);
   }

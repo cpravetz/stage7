@@ -26,25 +26,36 @@ export const isEntityWorkflow = (workflow: AssistantWorkflow, entity: Entity): b
 
 export const getToolDisplayName = (tool: ToolBinding, availableSkills?: Array<{ id: string; name: string; description: string }>): string => {
   const skills = availableSkills || [];
-  const skill = skills.find((s) => s.id === tool.name || s.name === tool.name);
+  // Prefer exact id match first, then fall back to matching by skill display
+  // name. Matching by display name can produce false positives when multiple
+  // skills have similar human labels, so avoid it when an id match exists.
+  const skillById = skills.find((s) => s.id === tool.name);
+  const skillByName = skills.find((s) => s.name === tool.name);
+  const skill = skillById || skillByName;
   return tool.displayName || skill?.name || humanizeKey(tool.name);
 };
 
 export const getToolDescription = (tool: ToolBinding, availableSkills?: Array<{ id: string; name: string; description: string }>): string => {
   const skills = availableSkills || [];
-  const skill = skills.find((s) => s.id === tool.name || s.name === tool.name);
+  const skillById = skills.find((s) => s.id === tool.name);
+  const skillByName = skills.find((s) => s.name === tool.name);
+  const skill = skillById || skillByName;
   return tool.description || skill?.description || '';
 };
 
 export const getToolConfigSchema = (tool: ToolBinding, availableSkills?: Array<{ id: string; name: string; description: string; configSchema?: Record<string, unknown> }>): SchemaRecord | undefined => {
   const skills = availableSkills || [];
-  const skill = skills.find((s) => s.id === tool.name || s.name === tool.name);
+  const skillById = skills.find((s) => s.id === tool.name);
+  const skillByName = skills.find((s) => s.name === tool.name);
+  const skill = skillById || skillByName;
   return tool.configSchema || skill?.configSchema;
 };
 
 export const getToolInputSchema = (tool: ToolBinding, availableSkills?: Array<{ id: string; name: string; description: string; inputSchema?: Record<string, unknown> }>): SchemaRecord => {
   const skills = availableSkills || [];
-  const skill = skills.find((s) => s.id === tool.name || s.name === tool.name);
+  const skillById = skills.find((s) => s.id === tool.name);
+  const skillByName = skills.find((s) => s.name === tool.name);
+  const skill = skillById || skillByName;
   const toolSchema = tool.inputSchema && Object.keys(getSchemaProperties(tool.inputSchema)).length > 0 ? tool.inputSchema : undefined;
   const schema = toolSchema || skill?.inputSchema || { type: 'object', properties: {} };
   return Object.keys(getSchemaProperties(schema)).length > 0 ? schema : { type: 'object', properties: {} };
