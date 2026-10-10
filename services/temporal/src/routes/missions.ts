@@ -55,6 +55,56 @@ router.post(
 );
 
 router.post(
+  '/missions/:workflowId/retry',
+  asyncHandler(async (req: Request, res: Response) => {
+    const workflowId = req.params.workflowId as string;
+    const { retryPrompt, userGuidance } = req.body as { retryPrompt?: string; userGuidance?: string };
+
+    const original = await client.getMissionResult(workflowId);
+    if (!original) {
+      throw NextGenError.notFound('Mission not found');
+    }
+    if (original.status !== 'failed' && original.status !== 'incomplete' && original.status !== 'canceled') {
+      throw NextGenError.badRequest(`Cannot retry mission with status: ${original.status}`);
+    }
+
+    const originalPrompt = original.input?.prompt || '';
+    const guidance = retryPrompt || userGuidance || '';
+    
+    const enhancedPrompt = guidance
+      ? `${originalPrompt}\n\n--- RETRY GUIDANCE ---\n${guidance}\n--- END RETRY GUIDANCE ---`
+      : originalPrompt;
+
+    const retryCount = (original.input?.metadata?.retryCount as number) || 0;
+    const newMissionId = `${original.missionId}-retry-${retryCount + 1}-${Date.now()}`;
+
+    const input: WorkflowInput = {
+      missionId: newMissionId,
+      tenantId: original.input?.tenantId || '',
+      assistantId: original.input?.assistantId || '',
+      prompt: enhancedPrompt,
+      contextChunks: original.input?.contextChunks,
+      metadata: {
+        ...original.input?.metadata,
+        retryCount: retryCount + 1,
+        retriedFrom: workflowId,
+        retriedAt: Date.now(),
+        retryGuidance: guidance,
+      },
+    };
+
+    const newWorkflowId = await client.startMission(input);
+
+    res.status(202).json({ 
+      workflowId: newWorkflowId, 
+      status: 'started',
+      retriedFrom: workflowId,
+      retryCount: retryCount + 1,
+    });
+  }),
+);
+
+router.post(
   '/watches/:watchId/run',
   asyncHandler(async (req: Request, res: Response) => {
     const watchId = req.params.watchId as string

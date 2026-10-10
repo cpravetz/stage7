@@ -165,14 +165,14 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
      // Upstream callers may enforce their own timeout (e.g., BRAIN_REQUEST_TIMEOUT_MS=60000)
      const completionDeadline = startTime + (Number.isFinite(configuredDeadline) && configuredDeadline > 0 ? configuredDeadline : Math.min(defaultDeadline, 120000));
     const modelIdOpt = options.model || 'auto';
-    const providerOpt = options.provider || 'any';
+    const providerOpt = options.provider || '';
     const promptPreview = prompt.slice(0, 120);
 
     const promptHash = crypto.createHash('sha256').update(prompt).digest('hex').slice(0, 16);
     const systemHash = options.systemPrompt
       ? crypto.createHash('sha256').update(options.systemPrompt).digest('hex').slice(0, 8)
       : 'none';
-    const cacheKey = `brain:complete:${modelIdOpt}:${providerOpt}:${promptHash}:${systemHash}`;
+    const cacheKey = `brain:complete:${modelIdOpt}:${providerOpt || ""}:${promptHash}:${systemHash}`;
 
     const cached = await this.cache.get(cacheKey);
     if (cached) {
@@ -219,7 +219,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
 
     if (!candidates || candidates.length === 0) {
       // As a last-resort fallback, allow any free chat-capable model from free providers.
-      const fallback = this.router.listModels().filter((m) => (m.costPer1kTokens === 0 || ['openrouter', 'openwebui', 'local', 'huggingface'].includes(m.provider)) && (m.capabilities.includes('chat') || m.capabilities.includes('creative')));
+      const fallback = this.router.listModels().filter((m) => (m.costPer1kTokens === 0) && (m.capabilities.includes('chat') || m.capabilities.includes('creative')));
       if (fallback.length > 0) {
         logger.warn({ task: prompt.slice(0, 80), fallbackCount: fallback.length }, 'Using fallback free chat-capable models');
         candidates = fallback;
@@ -231,7 +231,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
       this.addLog({
         type: 'error',
         model: options.model || 'auto',
-        provider: options.provider || 'any',
+        provider: options.provider || '',
         promptPreview,
         success: false,
         durationMs: Date.now() - startTime,
@@ -458,7 +458,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
       if (Date.now() >= completionDeadline) {
         logger.warn({ task: promptPreview }, 'Skipping last-resort fallback: completion deadline exceeded');
       } else {
-      const fallbackModels = this.router.listModels().filter((m) => (m.costPer1kTokens === 0 || ['openrouter', 'openwebui', 'local', 'huggingface'].includes(m.provider)) && (m.capabilities.includes('chat') || m.capabilities.includes('creative')));
+      const fallbackModels = this.router.listModels().filter((m) => (m.costPer1kTokens === 0) && (m.capabilities.includes('chat') || m.capabilities.includes('creative')));
       if (fallbackModels.length > 0) {
         const candidate = fallbackModels[0];
         const provider = this.providers.find((p) => p.id === candidate.provider);
@@ -491,7 +491,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
     this.addLog({
       type: 'error',
       model: options.model || 'auto',
-      provider: options.provider || 'any',
+      provider: options.provider || '',
       promptPreview,
       success: false,
       durationMs: Date.now() - startTime,

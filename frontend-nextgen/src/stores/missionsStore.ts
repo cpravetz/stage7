@@ -11,6 +11,9 @@ export interface MissionRow {
   startedAt?: string;
   completedAt?: string;
   timestamp?: number;
+  retriedFrom?: string;
+  retryCount?: number;
+  retryGuidance?: string;
 }
 
 export interface MissionDetail {
@@ -28,6 +31,7 @@ export interface MissionDetail {
     missionId?: string;
     tenantId?: string;
     assistantId?: string;
+    metadata?: Record<string, unknown>;
   };
 }
 
@@ -70,6 +74,7 @@ interface MissionsState {
   refreshDetail: (workflowId: string) => Promise<void>;
   fetchPendingApprovals: () => Promise<void>;
   deleteMission: (workflowId: string) => Promise<void>;
+  retryMission: (workflowId: string, retryPrompt?: string) => Promise<{ workflowId: string; status: string; retriedFrom: string; retryCount: number }>;
   addMission: (mission: MissionRow) => void;
   updateMissionStatus: (identifier: string, status: string, extra?: Partial<MissionRow>) => void;
   clearDetail: (workflowId: string) => void;
@@ -386,6 +391,18 @@ export const useMissionsStore = create<MissionsState>((set, get) => ({
         missionsError:
           err instanceof Error ? err.message : 'Failed to delete mission',
       });
+    }
+  },
+
+  retryMission: async (workflowId: string, retryPrompt?: string) => {
+    try {
+      const res = await fetchJSON<{ workflowId: string; status: string; retriedFrom: string; retryCount: number }>(
+        `/api/temporal/missions/${encodeURIComponent(workflowId)}/retry`,
+        { method: 'POST', body: JSON.stringify({ retryPrompt }) }
+      );
+      return res;
+    } catch (err) {
+      throw err instanceof Error ? err : new Error('Failed to retry mission');
     }
   },
 

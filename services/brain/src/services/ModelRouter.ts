@@ -8,13 +8,7 @@ export interface ModelDefinition {
   capabilities: string[];
 }
 
-const FREE_PROVIDER_PRIORITY: Record<string, number> = {
-  openrouter: 0,
-  openwebui: 1,
-  ollama: 2,
-  huggingface: 3,
-  local: 4,
-};
+const FREE_PROVIDER_PRIORITY: Record<string, number> = {} as Record<string, number>;
 
 function providerPriority(provider: string): number {
   return FREE_PROVIDER_PRIORITY[provider] ?? 10;
@@ -43,12 +37,17 @@ function inferCapabilities(task: string): string[] {
   for (const [cap, keywords] of Object.entries(CAPABILITY_KEYWORDS)) {
     if (keywords.some((kw) => lower.includes(kw))) {
       matched.add(cap);
-        // treat creative tasks as chat-capable as well (broad fallback)
-        if (cap === 'creative') matched.add('chat');
+      if (cap === 'creative') matched.add('chat');
     }
   }
   if (matched.size === 0) matched.add('chat');
   return Array.from(matched);
+}
+
+function getExcludedModelIds(): Set<string> {
+  const raw = process.env.BRAIN_EXCLUDE_MODELS;
+  if (!raw) return new Set();
+  return new Set(raw.split(/\s*,\s*/).filter(Boolean));
 }
 
 export class ModelRouter {
@@ -77,48 +76,51 @@ export class ModelRouter {
   }
 
   route(options: { task: string; modelId?: string; maxTokens?: number; budget?: number; provider?: string; freeOnly?: boolean }): ModelDefinition {
+    const excluded = getExcludedModelIds();
+    const isExcluded = (id: string) => excluded.has(id);
+    const requiredCaps = inferCapabilities(options.task);
     if (options.modelId) {
       const m = this.models.get(options.modelId);
-      if (m) return m;
+      if (m) {
+        if (isExcluded(m.id)) throw new Error(`Model '${m.id}' is excluded by BRAIN_EXCLUDE_MODELS`);
+        return m;
+      }
       throw new Error(`Model '${options.modelId}' not found. Available models: ${Array.from(this.models.keys()).join(', ') || 'none'}`);
     }
-    const requiredCaps = inferCapabilities(options.task);
-
     if (options.provider) {
       const same = Array.from(this.models.values()).find((m) => {
         if (m.provider !== options.provider) return false;
+        if (isExcluded(m.id)) return false;
         return requiredCaps.every((cap) => m.capabilities.includes(cap));
       });
       if (same) return same;
     }
     const providers = options.provider ? new Set([options.provider]) : null;
-
     let candidates = Array.from(this.models.values()).filter((m) => {
       if (providers && !providers.has(m.provider)) return false;
       if (options.maxTokens && m.maxTokens < options.maxTokens) return false;
       if (options.budget !== undefined && m.costPer1kTokens > options.budget) return false;
       if (options.freeOnly) {
-        if (!(m.costPer1kTokens === 0 || ['openrouter', 'openwebui', 'local', 'huggingface'].includes(m.provider))) return false;
+        if (!(m.costPer1kTokens === 0)) return false;
       }
+      if (isExcluded(m.id)) return false;
       return requiredCaps.every((cap) => m.capabilities.includes(cap));
     });
-
     if (candidates.length === 0) {
       candidates = Array.from(this.models.values()).filter((m) => {
         if (providers && !providers.has(m.provider)) return false;
         if (options.maxTokens && m.maxTokens < options.maxTokens) return false;
         if (options.budget !== undefined && m.costPer1kTokens > options.budget) return false;
         if (options.freeOnly) {
-          if (!(m.costPer1kTokens === 0 || ['openrouter', 'openwebui', 'local', 'huggingface'].includes(m.provider))) return false;
+          if (!(m.costPer1kTokens === 0)) return false;
         }
+        if (isExcluded(m.id)) return false;
         return requiredCaps.length === 0 || requiredCaps.some((cap) => m.capabilities.includes(cap));
       });
     }
-
     if (candidates.length === 0) {
       throw new Error('No model available for the requested task. Ensure at least one LLM provider is configured with a valid API key (OPENAI_API_KEY, OPENROUTER_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, MISTRAL_API_KEY, GROK_API_KEY, HUGGINGFACE_API_KEY, NVIDIA_API_KEY, or OPENWEB_URL).');
     }
-
     candidates.sort((a, b) => {
       const costDiff = a.costPer1kTokens - b.costPer1kTokens;
       if (costDiff !== 0) return costDiff;
@@ -136,41 +138,40 @@ export class ModelRouter {
     return candidates[0];
   }
 
-  // Return an ordered list of candidate models for the given routing options.
   getCandidates(options: { task: string; modelId?: string; maxTokens?: number; budget?: number; provider?: string; freeOnly?: boolean }): ModelDefinition[] {
+    const excluded = getExcludedModelIds();
+    const isExcluded = (id: string) => excluded.has(id);
     if (options.modelId) {
       const m = this.models.get(options.modelId);
+      if (m && isExcluded(m.id)) return [];
       return m ? [m] : [];
     }
     const requiredCaps = inferCapabilities(options.task);
-
     const providers = options.provider ? new Set([options.provider]) : null;
-
     let candidates = Array.from(this.models.values()).filter((m) => {
       if (providers && !providers.has(m.provider)) return false;
       if (options.maxTokens && m.maxTokens < options.maxTokens) return false;
       if (options.budget !== undefined && m.costPer1kTokens > options.budget) return false;
       if (options.freeOnly) {
-        if (!(m.costPer1kTokens === 0 || ['openrouter', 'openwebui', 'local', 'huggingface'].includes(m.provider))) return false;
+        if (!(m.costPer1kTokens === 0)) return false;
       }
+      if (isExcluded(m.id)) return false;
       return requiredCaps.every((cap) => m.capabilities.includes(cap));
     });
-
     if (candidates.length === 0) {
       candidates = Array.from(this.models.values()).filter((m) => {
         if (providers && !providers.has(m.provider)) return false;
         if (options.maxTokens && m.maxTokens < options.maxTokens) return false;
         if (options.budget !== undefined && m.costPer1kTokens > options.budget) return false;
         if (options.freeOnly) {
-          if (!(m.costPer1kTokens === 0 || ['openrouter', 'openwebui', 'local', 'huggingface'].includes(m.provider))) return false;
+          if (!(m.costPer1kTokens === 0)) return false;
         }
+        if (isExcluded(m.id)) return false;
         return requiredCaps.length === 0 || requiredCaps.some((cap) => m.capabilities.includes(cap));
       });
     }
-
     const generalCandidates = candidates.filter((candidate) => modelSpecializationPenalty(candidate, options.task) === 0);
     if (generalCandidates.length > 0) candidates = generalCandidates;
-
     candidates.sort((a, b) => {
       const costDiff = a.costPer1kTokens - b.costPer1kTokens;
       if (costDiff !== 0) return costDiff;
@@ -185,7 +186,6 @@ export class ModelRouter {
       if (bMatch !== aMatch) return bMatch - aMatch;
       return a.id.localeCompare(b.id);
     });
-
     return candidates;
   }
 }
