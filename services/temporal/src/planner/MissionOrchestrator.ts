@@ -1,10 +1,90 @@
-import { Plan, Phase, Task, AssistantDefinition } from '@stage7-nextgen/shared';
+import { Plan, Phase, Task } from '@stage7-nextgen/shared';
 import { logger } from '@stage7-nextgen/shared';
-import { MissionPlanner } from './MissionPlanner';
-import { WorkerAgent } from './WorkerAgent';
+import { MissionAgentRuntime, MissionAgentConfig, TaskExecutionResult } from '../agent/MissionAgentRuntime';
 
-const TASK_MAX_RETRIES = 5;
-const TASK_RETRY_BACKOFF_BASE_MS = 10000;
+const PLANNER_SYSTEM_PROMPT = `You are a mission planner for an AI agent platform. Given a user's goal, you produce a structured plan with phases, tasks, and the agent roles needed to execute them.
+
+Your job is to:
+1. Understand the goal.
+2. Decide if you need clarification. If the goal is ambiguous, set requiresClarification=true and ask 2-4 focused questions. Otherwise set requiresClarification=false.
+3. Decompose the goal into 3-7 phases. Each phase has a clear deliverable.
+4. For each phase, break it into specific tasks (1-5 per phase). Each task has a single agent role, a clear description, and expected artifacts.
+5. For each task, write a systemPrompt for the agent that will execute it.
+6. Mark requiresApproval=true on phases that produce something the user should review before continuing.
+
+Agent roles should be chosen based on the actual goal — e.g. "researcher" for research tasks, "coder" for software tasks, "writer" for content, "analyst" for data tasks, "planner" for strategy, "reviewer" for quality checks, "judge" for evaluation, "artist" for creative, "curator" for selection, or any persona appropriate to the task. Do not default to business/startup roles unless the goal is explicitly about business.
+
+Output a single JSON object matching the schema. Do not include any prose outside the JSON.`;
+
+function buildFallbackPlan(prompt: string): Plan {
+  const trimmed = prompt.trim();
+  return {
+    summary: `Plan for: ${trimmed.slice(0, 100)}`,
+    estimatedDuration: '1-2 days',
+    estimatedCost: 'TBD',
+    requiresClarification: false,
+    clarificationQuestions: [],
+    phases: [
+      {
+        id: 'phase-1',
+        name: 'Planning',
+        goal: `Break down and plan the execution of: ${trimmed.slice(0, 80)}`,
+        tasks: [
+          {
+            id: 'task-1-1',
+            title: 'Analyze goal and create execution plan',
+            description: `Analyze the goal and create a concrete, step-by-step execution plan for: ${trimmed}`,
+            agentRole: 'planner',
+            systemPrompt: 'You are a planning agent. Analyze the goal and create a concrete, step-by-step execution plan. Be thorough and consider edge cases.',
+            expectedArtifacts: ['plan.md'],
+            status: 'pending',
+            artifacts: [],
+          },
+        ],
+        requiresApproval: true,
+        status: 'pending',
+      },
+      {
+        id: 'phase-2',
+        name: 'Execution',
+        goal: `Execute the plan to accomplish: ${trimmed.slice(0, 80)}`,
+        tasks: [
+          {
+            id: 'task-2-1',
+            title: 'Execute the plan',
+            description: `Execute the previously created plan to accomplish: ${trimmed}`,
+            agentRole: 'worker',
+            systemPrompt: 'You are an execution agent. Execute the plan thoroughly and produce the required artifacts. If you need tools, use the available tool execution interface.',
+            expectedArtifacts: ['output.md'],
+            status: 'pending',
+            artifacts: [],
+          },
+        ],
+        requiresApproval: false,
+        status: 'pending',
+      },
+      {
+        id: 'phase-3',
+        name: 'Review',
+        goal: 'Review output quality and completeness',
+        tasks: [
+          {
+            id: 'task-3-1',
+            title: 'Review and refine output',
+            description: 'Review the execution output for completeness, accuracy, and quality. Refine or request follow-up tasks if needed.',
+            agentRole: 'reviewer',
+            systemPrompt: 'You are a reviewer agent. Evaluate outputs for completeness, accuracy, and quality. Identify gaps and suggest improvements.',
+            expectedArtifacts: ['review.md'],
+            status: 'pending',
+            artifacts: [],
+          },
+        ],
+        requiresApproval: true,
+        status: 'pending',
+      },
+    ],
+  };
+}
 
 export interface MissionContext {
   missionId: string;
@@ -23,22 +103,53 @@ export interface MissionContext {
 }
 
 export class MissionOrchestrator {
-  private planner: MissionPlanner;
-  private worker: WorkerAgent;
-  private agentRuntimeUrl: string | undefined;
+  private agentRuntime: MissionAgentRuntime | null = null;
+  private brainUrl: string;
 
   constructor() {
-    const brainUrl = process.env.BRAIN_URL || 'http://brain:3100';
-    this.agentRuntimeUrl = process.env.AGENT_RUNTIME_URL || undefined;
-    this.planner = new MissionPlanner(brainUrl);
-    this.worker = new WorkerAgent({ brainUrl, agentRuntimeUrl: this.agentRuntimeUrl });
+    this.brainUrl = process.env.BRAIN_URL || 'http://brain:3100';
   }
 
   async run(ctx: MissionContext): Promise<{ plan: Plan; outputs: any; compensations: Array<{ phaseId: string; action: string }> }> {
     const compensations: Array<{ phaseId: string; action: string }> = [];
-    await ctx.broadcast({ type: 'planner_started', missionId: ctx.missionId, timestamp: Date.now(), data: { prompt: ctx.prompt } });
-    const plan = await this.planner.generatePlan(ctx.prompt, ctx.metadata, ctx.missionId);
-    await ctx.broadcast({ type: 'plan_generated', missionId: ctx.missionId, timestamp: Date.now(), data: { plan } });
+    const plannerAgentId = `agent-${ctx.missionId}-planner`;
+
+    this.agentRuntime = new MissionAgentRuntime({
+      missionId: ctx.missionId,
+      tenantId: ctx.tenantId || 'tenant-1',
+      assistantId: ctx.assistantId,
+      workerPoolUrl: ctx.workerPoolUrl,
+      agentRuntimeUrl: ctx.agentRuntimeUrl,
+      broadcast: ctx.broadcastAll,
+    });
+
+    await ctx.broadcast({
+      type: 'planner_started',
+      missionId: ctx.missionId,
+      timestamp: Date.now(),
+      data: {
+        prompt: ctx.prompt,
+        agentId: plannerAgentId,
+        agentName: 'Mission Planner',
+        agentRole: 'planner',
+        status: 'planning',
+      },
+    });
+
+    const plan = await this.generatePlan(ctx);
+    await ctx.broadcast({
+      type: 'plan_generated',
+      missionId: ctx.missionId,
+      timestamp: Date.now(),
+      data: {
+        plan,
+        agentId: plannerAgentId,
+        agentName: 'Mission Planner',
+        agentRole: 'planner',
+        status: 'completed',
+      },
+    });
+
     try {
       await this.persistPlan(ctx, plan);
     } catch (err) {
@@ -64,88 +175,68 @@ export class MissionOrchestrator {
       const phaseOutput: any = { phaseId: phase.id, name: phase.name, tasks: [] };
 
       for (const task of phase.tasks) {
-        await ctx.broadcast({ type: 'task_started', missionId: ctx.missionId, timestamp: Date.now(), data: { phaseId: phase.id, taskId: task.id, taskTitle: task.title, agentRole: task.agentRole } });
+        await ctx.broadcast({
+          type: 'task_started',
+          missionId: ctx.missionId,
+          timestamp: Date.now(),
+          data: {
+            phaseId: phase.id,
+            taskId: task.id,
+            taskTitle: task.title,
+            agentId: `agent-${ctx.missionId}-${task.agentRole.toLowerCase()}`,
+            agentName: `${task.agentRole} Agent`,
+            agentRole: task.agentRole,
+          },
+        });
         await this.updateTask(ctx, phase.id, task.id, { status: 'in_progress', startedAt: Date.now() });
 
-        let taskSucceeded = false;
-        const taskErrors: string[] = [];
-        for (let attempt = 1; attempt <= TASK_MAX_RETRIES; attempt++) {
-          if (attempt > 1) {
-            const delay = TASK_RETRY_BACKOFF_BASE_MS * Math.pow(2, attempt - 2);
-            logger.warn(
-              { task: task.title, phase: phase.name, attempt, delay },
-              'Retrying failed task after backoff',
-            );
-            await new Promise((resolve) => setTimeout(resolve, delay));
-          }
-
-          try {
-            const useSystemAssistant = !ctx.assistantId && !!ctx.workerPoolUrl;
-            const agentDef = await this.ensureAgentForRole(
-              ctx.missionId,
-              task.agentRole,
-              task.systemPrompt,
-              useSystemAssistant ? ctx.workerPoolUrl : undefined,
-            );
-            const worker = new WorkerAgent({
-              brainUrl: process.env.BRAIN_URL || 'http://brain:3100',
-              agentRuntimeUrl: this.agentRuntimeUrl,
-              workerPoolUrl: ctx.workerPoolUrl,
-              assistantId: ctx.assistantId || agentDef?.assistantId,
-              agentDefinition: agentDef,
-              broadcastBrainError: ctx.broadcastAll
-                ? async (event) => ctx.broadcastAll(event)
-                : undefined,
-            });
-            const result = await worker.executeTask(task, phase, plan, ctx.missionId);
-            await this.updateTask(ctx, phase.id, task.id, {
-              status: 'completed',
-              completedAt: Date.now(),
-              output: result.output,
-              artifacts: result.artifacts,
-            });
-            await ctx.broadcast({
-              type: 'task_completed',
-              missionId: ctx.missionId,
-              timestamp: Date.now(),
-              data: { phaseId: phase.id, taskId: task.id, artifacts: result.artifacts, tokensUsed: result.tokensUsed },
-            });
-            phaseOutput.tasks.push({ taskId: task.id, status: 'completed', artifacts: result.artifacts });
-            compensations.push({ phaseId: phase.id, action: `revert-phase-${phase.id}` });
-            taskSucceeded = true;
-            break;
-          } catch (err: any) {
-            taskErrors.push(`Attempt ${attempt}: ${err.message}`);
-            logger.warn(
-              { task: task.title, phase: phase.name, attempt, error: err.message },
-              'Task attempt failed',
-            );
-            if (attempt < TASK_MAX_RETRIES) {
-              await ctx.broadcast({
-                type: 'log',
-                missionId: ctx.missionId,
-                timestamp: Date.now(),
-                data: { phaseId: phase.id, taskId: task.id, message: `Task retrying... (attempt ${attempt} failed)` },
-              });
-            }
-          }
-        }
-
-        if (!taskSucceeded) {
-          const combinedError = taskErrors.join('; ');
-          await this.updateTask(ctx, phase.id, task.id, {
-            status: 'failed',
-            completedAt: Date.now(),
-            output: `Error: ${combinedError}`,
-          });
+        let result: TaskExecutionResult;
+        try {
+          const agentId = await this.agentRuntime.getOrCreateWorkerAgent(task.agentRole, task.systemPrompt);
+          result = await this.agentRuntime.executeTask(agentId, task, phase, plan);
+        } catch (err) {
+          const error = err instanceof Error ? err.message : String(err);
+          await this.updateTask(ctx, phase.id, task.id, { status: 'failed', completedAt: Date.now(), output: error });
           await ctx.broadcast({
             type: 'task_failed',
             missionId: ctx.missionId,
             timestamp: Date.now(),
-            data: { phaseId: phase.id, taskId: task.id, error: combinedError },
+            data: {
+              phaseId: phase.id,
+              taskId: task.id,
+              taskTitle: task.title,
+              agentId: `agent-${ctx.missionId}-${task.agentRole.toLowerCase()}`,
+              agentName: `${task.agentRole} Agent`,
+              agentRole: task.agentRole,
+              error,
+            },
           });
-          throw new Error(`Task "${task.title}" failed after ${TASK_MAX_RETRIES} attempts: ${combinedError}`);
+          throw err;
         }
+
+        await this.updateTask(ctx, phase.id, task.id, {
+          status: 'completed',
+          completedAt: Date.now(),
+          output: result.output,
+          artifacts: result.artifacts,
+        });
+        await ctx.broadcast({
+          type: 'task_completed',
+          missionId: ctx.missionId,
+          timestamp: Date.now(),
+          data: {
+            phaseId: phase.id,
+            taskId: task.id,
+            taskTitle: task.title,
+            agentId: `agent-${ctx.missionId}-${task.agentRole.toLowerCase()}`,
+            agentName: `${task.agentRole} Agent`,
+            agentRole: task.agentRole,
+            artifacts: result.artifacts,
+            tokensUsed: result.tokensUsed,
+          },
+        });
+        phaseOutput.tasks.push({ taskId: task.id, status: 'completed', artifacts: result.artifacts });
+        compensations.push({ phaseId: phase.id, action: `revert-phase-${phase.id}` });
       }
 
       await this.updatePhase(ctx, phase.id, { status: 'awaiting_approval' });
@@ -193,104 +284,51 @@ export class MissionOrchestrator {
     return { plan, outputs, compensations };
   }
 
-  async ensureAgentForRole(
-    missionId: string,
-    agentRole: string,
-    systemPrompt: string,
-    workerPoolUrl?: string,
-  ): Promise<{
-    id: string;
-    name: string;
-    systemPrompt: string;
-    tools: string[];
-    assistantId?: string;
-    workerPoolUrl?: string;
-  } | undefined> {
-    let definition: { id: string; name: string; systemPrompt: string; tools: string[] } = {
-      id: `worker-${agentRole}`,
-      name: agentRole,
-      systemPrompt,
-      tools: [],
+  private async generatePlan(ctx: MissionContext): Promise<Plan> {
+    const brainUrl = ctx.brainUrl || this.brainUrl;
+    const fallback = (reason: string): Plan => {
+      logger.warn({ missionId: ctx.missionId, reason }, 'Planner could not produce a valid plan; using fallback plan');
+      return buildFallbackPlan(ctx.prompt);
     };
 
-    if (this.agentRuntimeUrl) {
-      const agentId = `agent-${missionId}-${agentRole}`;
+    try {
+      const res = await fetch(`${brainUrl}/api/brain/complete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: `GOAL: ${ctx.prompt}\n\nCONTEXT: ${JSON.stringify(ctx.metadata || {})}`,
+          systemPrompt: PLANNER_SYSTEM_PROMPT,
+          maxTokens: 4096,
+          temperature: 0.3,
+          missionId: ctx.missionId,
+        }),
+      });
+      const raw = await res.text();
+      if (!res.ok) return fallback(`Brain returned ${res.status}: ${raw.slice(0, 200)}`);
+
+      let data: { content?: string };
       try {
-        const res = await fetch(`${this.agentRuntimeUrl}/api/agent-runtime/missions/${encodeURIComponent(missionId)}/agents/${encodeURIComponent(agentId)}`);
-        if (res.ok) {
-          const data = await res.json() as { agent: { id: string; name: string; systemPrompt: string; tools: string[] } };
-          definition = {
-            id: data.agent.id,
-            name: data.agent.name,
-            systemPrompt: data.agent.systemPrompt || systemPrompt,
-            tools: data.agent.tools || [],
-          };
-        } else {
-          const res2 = await fetch(`${this.agentRuntimeUrl}/api/agent-runtime/missions/${encodeURIComponent(missionId)}/agents`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              id: agentId,
-              tenantId: 'tenant-1',
-              name: `${agentRole} agent`,
-              description: `Dynamic agent for role: ${agentRole}`,
-              type: agentRole,
-              systemPrompt,
-              tools: [],
-              metadata: { missionId, agentRole },
-              createdAt: new Date(),
-              updatedAt: new Date(),
-            }),
-          });
-          if (res2.ok) {
-            const data2 = await res2.json() as { id: string; name: string; systemPrompt: string; tools: string[] };
-            definition = { id: data2.id, name: data2.name, systemPrompt: data2.systemPrompt || systemPrompt, tools: data2.tools || [] };
-          }
-        }
+        data = JSON.parse(raw) as { content?: string };
       } catch {
-        // ignore runtime-agent registration errors; fall back to brain-direct identity
+        data = { content: raw };
       }
-    }
+      const content = data.content || '';
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) return fallback('Brain response did not contain a JSON plan');
 
-    let assistantId: string | undefined;
-    if (workerPoolUrl) {
-      const asstId = `assistant-${missionId}-${agentRole}`;
       try {
-        const getRes = await fetch(`${workerPoolUrl}/api/workers/assistants/${encodeURIComponent(asstId)}`);
-        if (getRes.ok) {
-          const data = await getRes.json() as { assistant: AssistantDefinition };
-          assistantId = data.assistant.id;
-        } else {
-          const postRes = await fetch(`${workerPoolUrl}/api/workers/assistants`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              id: asstId,
-              tenantId: 'tenant-1',
-              name: `${agentRole} agent`,
-              description: `System agent for role "${agentRole}" in mission ${missionId}`,
-              type: 'agent',
-              model: 'openai/gpt-4o-mini',
-              systemPrompt,
-              tools: [],
-              knowledge: [],
-              transactionGuidance: [],
-              metadata: { missionId, agentRole },
-              createdAt: new Date(),
-              updatedAt: new Date(),
-            } as AssistantDefinition),
-          });
-          if (postRes.ok) {
-            const data2 = await postRes.json() as AssistantDefinition;
-            assistantId = data2.id;
-          }
-        }
+        const parsed = JSON.parse(jsonMatch[0]);
+        const { PlanSchema } = await import('@stage7-nextgen/shared');
+        const validated = PlanSchema.parse(parsed);
+        logger.info({ missionGoal: ctx.prompt.slice(0, 50), phases: validated.phases.length }, 'Plan generated');
+        return validated;
       } catch (err) {
-        logger.warn({ missionId, agentRole, err: err instanceof Error ? err.message : String(err) }, 'Failed to bind system agent to worker-pool assistant; falling back to brain-direct');
+        return fallback(`Brain response did not match the plan schema: ${err instanceof Error ? err.message : String(err)}`);
       }
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      return fallback(reason);
     }
-
-    return { ...definition, assistantId, workerPoolUrl };
   }
 
   private async persistPlan(ctx: MissionContext, plan: Plan): Promise<void> {

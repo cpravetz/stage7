@@ -1,4 +1,4 @@
-const DEFAULT_PROVIDER_TIMEOUT_MS = 10000;
+const DEFAULT_PROVIDER_TIMEOUT_MS = 300000;
 
 export function providerTimeoutMs(): number {
   const configured = Number(process.env.BRAIN_PROVIDER_TIMEOUT_MS);

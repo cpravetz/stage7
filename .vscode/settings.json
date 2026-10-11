@@ -25,7 +25,8 @@
         "docker build": true,
         "New-Item": true,
         "Out-Null": true,
-        "Copy-Item": true
+        "Copy-Item": true,
+        "npm run build": true
     },
     "terminal.integrated.shellIntegration.environmentReporting": true
 }

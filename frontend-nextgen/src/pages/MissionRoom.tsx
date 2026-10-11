@@ -127,6 +127,7 @@ const MissionRoom = () => {
   const detailError = useMissionsStore((s) => s.detailError[workflowId]);
   const fetchMissionDetail = useMissionsStore((s) => s.fetchMissionDetail);
   const refreshDetail = useMissionsStore((s) => s.refreshDetail);
+  const retryMission = useMissionsStore((s) => s.retryMission);
 
   const [tab, setTab] = useState<Tab>('conversation');
   const [input, setInput] = useState('');
@@ -134,6 +135,9 @@ const MissionRoom = () => {
   const [sendError, setSendError] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
   const transcriptRef = useRef<HTMLDivElement>(null);
+  const [retryGuidance, setRetryGuidance] = useState('');
+  const [showRetryDialog, setShowRetryDialog] = useState(false);
+  const [retrying, setRetrying] = useState(false);
 
   useEffect(() => {
     ensureConnected();
@@ -152,9 +156,16 @@ const MissionRoom = () => {
   }, [detail?.status]);
 
   const plan = useMemo(() => {
-    const p = (detail?.output?.plan as Plan | undefined) ?? null;
-    return p;
-  }, [detail?.output?.plan]);
+    const persistedPlan = (detail?.output?.plan as Plan | undefined) ?? null;
+    if (persistedPlan) return persistedPlan;
+    const livePlanEvent = events.find(
+      (event) => event.missionId === missionId && event.type === 'plan_generated'
+    );
+    const livePlan = livePlanEvent?.metadata?.plan;
+    return livePlan && typeof livePlan === 'object' && Array.isArray((livePlan as Plan).phases)
+      ? livePlan as Plan
+      : null;
+  }, [detail?.output?.plan, events, missionId]);
 
   const phaseOutputs: PhaseOutput[] = useMemo(() => {
     return detail?.output?.outputs?.phases || [];
@@ -173,6 +184,12 @@ const MissionRoom = () => {
       timestamp: startedAt,
       missionId,
     });
+    const hasLivePlannerStarted = events.some(
+      (event) => event.missionId === missionId && event.type === 'planner_started'
+    );
+    const hasLivePlanGenerated = events.some(
+      (event) => event.missionId === missionId && event.type === 'plan_generated'
+    );
     
     // Show original user prompt if available
     const originalPrompt = detail?.input?.prompt;
@@ -187,22 +204,41 @@ const MissionRoom = () => {
       });
     }
     if (plan) {
+      if (!hasLivePlannerStarted) {
+        fromOutput.push({
+          id: `derived-planner-started-${startedAt + 1}`,
+          type: 'planner_started',
+          source: 'orchestrator',
+          message: `Planning: ${plan.summary || 'mission plan'}`,
+          timestamp: startedAt + 1,
+          missionId,
+          metadata: { agentId: `agent-${missionId}-planner`, agentName: 'Mission Planner', agentRole: 'planner' },
+        });
+      }
+      if (!hasLivePlanGenerated) {
+        fromOutput.push({
+          id: `derived-plan-generated-${startedAt + 2}`,
+          type: 'plan_generated',
+          source: 'orchestrator',
+          message: `Plan generated (${plan.phases.length} phases)`,
+          timestamp: startedAt + 2,
+          missionId,
+        });
+      }
+    } else if (detail?.status === 'running' && !hasLivePlannerStarted) {
       fromOutput.push({
         id: `derived-planner-started-${startedAt + 1}`,
         type: 'planner_started',
         source: 'orchestrator',
-        message: `Planning: ${plan.summary || 'mission plan'}`,
+        message: 'The planning agent is developing a plan for this mission.',
         timestamp: startedAt + 1,
         missionId,
-        metadata: { phases: plan.phases.length },
-      });
-      fromOutput.push({
-        id: `derived-plan-generated-${startedAt + 2}`,
-        type: 'plan_generated',
-        source: 'orchestrator',
-        message: `Plan generated (${plan.phases.length} phases)`,
-        timestamp: startedAt + 2,
-        missionId,
+        metadata: {
+          agentId: `agent-${missionId}-planner`,
+          agentName: 'Mission Planner',
+          agentRole: 'planner',
+          status: 'planning',
+        },
       });
     }
     let phases: PhaseOutput[] = detail?.output?.outputs?.phases || [];
@@ -394,6 +430,21 @@ const MissionRoom = () => {
     }
   };
 
+  const handleRetry = async () => {
+    setRetrying(true);
+    setSendError(null);
+    try {
+      const result = await retryMission(workflowId, retryGuidance);
+      window.location.href = `/missions/${encodeURIComponent(result.workflowId)}`;
+    } catch (err) {
+      setSendError(err instanceof Error ? err.message : 'Retry failed');
+    } finally {
+      setRetrying(false);
+      setShowRetryDialog(false);
+      setRetryGuidance('');
+    }
+  };
+
   useEffect(() => {
     transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight });
   }, [transcript.length]);
@@ -448,48 +499,80 @@ const MissionRoom = () => {
             <code>{workflowId}</code>
           </p>
         </div>
-         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-           <div style={{ display: 'flex', gap: 8 }}>
-               {status !== 'running' && status !== 'completed' && status !== 'failed' && status !== 'canceled' && (
-                <button onClick={async () => {
-                  try {
-                    await postJSON(`/api/temporal/missions/${encodeURIComponent(workflowId)}/start`, {});
-                    refreshDetail(workflowId);
-                  } catch {
-                    // ignore — refresh will show errors
-                  }
-                }}>Start</button>
-              )}
-              {status === 'running' && (
-                <button onClick={async () => {
-                  try {
-                    await postJSON(`/api/temporal/missions/${encodeURIComponent(workflowId)}/pause`, {});
-                    refreshDetail(workflowId);
-                  } catch {
-                    // ignore — refresh will show errors
-                  }
-                }}>Pause</button>
-              )}
-              {status === 'running' && (
-                <button className="danger" onClick={async () => {
-                  if (!confirm('Stop mission? This will terminate running branches.')) return;
-                  try {
-                    await postJSON(`/api/temporal/missions/${encodeURIComponent(workflowId)}/stop`, {});
-                    refreshDetail(workflowId);
-                  } catch {
-                    // ignore — refresh will show errors
-                  }
-                }}>Stop</button>
-              )}
-           </div>
-           <span className={`badge ${badge}`}>{getMissionStatusLabel(status)}</span>
-            <span className={`connection-status ${connected ? 'online' : 'offline'}`}>
-              {connected ? 'Live' : 'Offline'}
-            </span>
+<div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ display: 'flex', gap: 8 }}>
+                {status !== 'running' && status !== 'completed' && status !== 'failed' && status !== 'canceled' && (
+                 <button onClick={async () => {
+                   try {
+                     await postJSON(`/api/temporal/missions/${encodeURIComponent(workflowId)}/start`, {});
+                     refreshDetail(workflowId);
+                   } catch {
+                     // ignore — refresh will show errors
+                   }
+                 }}>Start</button>
+               )}
+               {status === 'running' && (
+                 <button onClick={async () => {
+                   try {
+                     await postJSON(`/api/temporal/missions/${encodeURIComponent(workflowId)}/pause`, {});
+                     refreshDetail(workflowId);
+                   } catch {
+                     // ignore — refresh will show errors
+                   }
+                 }}>Pause</button>
+               )}
+               {status === 'running' && (
+                 <button className="danger" onClick={async () => {
+                   if (!confirm('Stop mission? This will terminate running branches.')) return;
+                   try {
+                     await postJSON(`/api/temporal/missions/${encodeURIComponent(workflowId)}/stop`, {});
+                     refreshDetail(workflowId);
+                   } catch {
+                     // ignore — refresh will show errors
+                   }
+                 }}>Stop</button>
+               )}
+               {(status === 'failed' || status === 'incomplete' || status === 'canceled') && (
+                 <button onClick={() => setShowRetryDialog(true)} disabled={retrying}>
+                   {retrying ? 'Retrying...' : 'Retry'}
+                 </button>
+               )}
+            </div>
+            <span className={`badge ${badge}`}>{getMissionStatusLabel(status)}</span>
+             <span className={`connection-status ${connected ? 'online' : 'offline'}`}>
+               {connected ? 'Live' : 'Offline'}
+             </span>
         </div>
       </div>
 
       {detailError && <div className="error-banner">{detailError}</div>}
+
+      {showRetryDialog && (
+        <div className="error-banner" style={{ background: 'rgba(56,189,248,0.15)' }}>
+          <div>
+            <strong style={{ color: '#38bdf8' }}>Retry Mission</strong>
+            <p className="muted" style={{ margin: '4px 0' }}>
+              Provide guidance to help the agents succeed on retry. This will create a new mission with your guidance appended to the original prompt.
+            </p>
+          </div>
+          <textarea
+            placeholder="e.g., 'Focus on the API integration tests, skip the UI components' or 'Use the v2 API endpoints instead of v1'"
+            value={retryGuidance}
+            onChange={(e) => setRetryGuidance(e.target.value)}
+            rows={3}
+            style={{ width: '100%', marginTop: 8, marginBottom: 8 }}
+          />
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={handleRetry} disabled={retrying}>
+              {retrying ? 'Retrying...' : 'Retry Mission'}
+            </button>
+            <button className="secondary" onClick={() => { setShowRetryDialog(false); setRetryGuidance(''); }}>
+              Cancel
+            </button>
+          </div>
+          {sendError && <span className="muted" style={{ color: '#ef4444', marginTop: 8 }}>{sendError}</span>}
+        </div>
+      )}
 
       {pendingApproval && (
         <div
@@ -643,9 +726,6 @@ const MissionRoom = () => {
             )}
               </div>
             </div>
-            <div style={{ width: 300 }}>
-              <AgentOutputsPanel missionId={missionId} />
-            </div>
           </div>
           <div className="composer">
             {sendError && <div className="error-banner">{sendError}</div>}
@@ -711,10 +791,7 @@ const MissionRoom = () => {
                   </li>
                 ))}
               </ul>
-            )}
-          </div>
-          <div style={{ width: 300 }}>
-            <AgentOutputsPanel missionId={missionId} />
+)}
           </div>
         </div>
       )}
@@ -723,7 +800,14 @@ const MissionRoom = () => {
         <div className="card">
           <h3>Plan</h3>
           {!plan ? (
-            <div className="empty-state">No plan recorded for this mission.</div>
+            <div className="empty-state">
+              {detail?.status === 'running' || (
+                !['failed', 'completed', 'incomplete', 'canceled'].includes(detail?.status || '') &&
+                missionEvents.some((event) => event.type === 'planner_started')
+              )
+                ? 'The planning agent is developing a plan for this mission. This can take a little while while providers respond.'
+                : 'No plan recorded for this mission.'}
+            </div>
           ) : (
             <div className="plan-view">
               {plan.summary && (
@@ -747,19 +831,32 @@ const MissionRoom = () => {
               <ol className="plan-phases">
                 {plan.phases.map((phase) => {
                   const output = phaseOutputs.find((p) => p.phaseId === phase.id);
-                  return (
-                    <li
-                      key={phase.id}
-                      className={`plan-phase ${output?.status || ''}`}
-                    >
+                const phaseEvents = missionEvents.filter(
+                  (event) => event.metadata?.phaseId === phase.id &&
+                    ['phase_started', 'phase_completed', 'phase_approved', 'phase_rejected'].includes(event.type)
+                );
+                const latestPhaseEvent = phaseEvents[phaseEvents.length - 1];
+                const livePhaseStatus = latestPhaseEvent
+                  ? latestPhaseEvent.type === 'phase_started'
+                    ? 'in_progress'
+                    : latestPhaseEvent.type === 'phase_completed'
+                      ? phase.requiresApproval ? 'awaiting_approval' : 'completed'
+                      : latestPhaseEvent.type === 'phase_approved' ? 'approved' : 'rejected'
+                  : undefined;
+                const phaseStatus = output?.status || livePhaseStatus;
+                return (
+                  <li
+                    key={phase.id}
+                    className={`plan-phase ${phaseStatus || ''}`}
+                  >
                       <div className="plan-phase-header">
                         <strong>{phase.name}</strong>
                         {phase.requiresApproval && (
                           <span className="badge">requires approval</span>
                         )}
-                        {output?.status && (
-                          <span className={`badge ${output.status}`}>
-                            {output.status}
+                        {phaseStatus && (
+                          <span className={`badge ${phaseStatus}`}>
+                            {phaseStatus}
                           </span>
                         )}
                       </div>
@@ -769,10 +866,21 @@ const MissionRoom = () => {
                           const taskOutput = output?.tasks?.find(
                             (t) => t.taskId === task.id
                           );
+                          const taskEvents = missionEvents.filter(
+                            (event) => event.metadata?.taskId === task.id &&
+                              ['task_started', 'task_completed', 'task_failed'].includes(event.type)
+                          );
+                          const latestTaskEvent = taskEvents[taskEvents.length - 1];
+                          const liveTaskStatus = latestTaskEvent
+                            ? latestTaskEvent.type === 'task_started'
+                              ? 'in_progress'
+                              : latestTaskEvent.type === 'task_failed' ? 'failed' : 'completed'
+                            : undefined;
+                          const taskStatus = taskOutput?.status || liveTaskStatus;
                           return (
                             <li
                               key={task.id}
-                              className={`plan-task ${taskOutput?.status || ''}`}
+                              className={`plan-task ${taskStatus || ''}`}
                             >
                               <div>
                                 <strong>{task.title}</strong>
@@ -784,9 +892,9 @@ const MissionRoom = () => {
                                 {task.agentRole && (
                                   <span className="badge">🤖 {task.agentRole}</span>
                                 )}
-                                {taskOutput?.status && (
-                                  <span className={`badge ${taskOutput.status}`}>
-                                    {taskOutput.status}
+                                {taskStatus && (
+                                  <span className={`badge ${taskStatus}`}>
+                                    {taskStatus}
                                   </span>
                                 )}
                                 {taskOutput?.artifacts &&
@@ -847,7 +955,12 @@ const MissionRoom = () => {
           <p className="muted" style={{ fontSize: '12px', marginBottom: '12px' }}>
             Ephemeral mission agents and their recent outputs.
           </p>
-          <AgentOutputsPanel missionId={missionId} />
+          <AgentOutputsPanel
+            missionId={missionId}
+            missionStatus={detail?.status}
+            plan={plan}
+            phaseOutputs={phaseOutputs}
+          />
         </div>
       )}
     </div>

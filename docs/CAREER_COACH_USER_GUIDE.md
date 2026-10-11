@@ -293,18 +293,17 @@ the public remote-job feeds it reads are open APIs, so job searching works with 
 
 ### Environment variables that look like they matter but do not
 
-Your `.env.example` file contains four lines that begin with `CAREER_` and suggest they tune the
-interview skills:
+Your `.env.example` file previously contained `CAREER_` timing settings that suggested they tuned
+the interview skills:
 
 ```dotenv
 CAREER_DELEGATED_TIMEOUT_MS=24000
-CAREER_BRAIN_FALLBACK_TIMEOUT_MS=19000
 CAREER_BATTLECARD_BUDGET_MS=44000
 CAREER_MOCK_INTERVIEW_BUDGET_MS=30000
 ```
 
-**None of these are read by any code.** They are documentation of values that were once proposed. If
-you change them, nothing happens, and if you delete them, nothing breaks.
+These legacy example variables are not read by the skill runtime. Skill-level operation budgets are
+separate from Brain provider timeouts; direct Brain calls use the timeout policy configured by Brain.
 
 The same applies to `CAREER_REQUEST_TIMEOUT_MS`, `CAREER_REQUEST_RETRIES`, `CAREER_PER_SOURCE_CONCURRENCY`,
 and `CAREER_INTER_REQUEST_DELAY_MS`.
@@ -377,13 +376,13 @@ career skills do.
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| `skillBudgetMs` | `44000` | Total time the skill may take before it returns partial guidance |
+| `skillBudgetMs` | `930000` | Overall operation budget, including one delegated wait and Brain's completion deadline |
 | `delegatedTimeoutMs` | `24000` | How long it waits for the delegated prep call |
-| `brainFallbackTimeoutMs` | `19000` | How long it waits for its direct model call |
 | `brainEndpoint` | `BRAIN_URL` | Override the model service address for this skill only |
 
-Leave these alone unless interview prep is timing out. If you do raise `skillBudgetMs`, keep it well
-under 60000, because the web proxy in front of Stage7 cuts off requests at 60 seconds.
+The skill does not impose a separate timeout on its direct Brain request. Brain owns provider and
+completion deadlines; the skill's overall operation budget and manifest allow the expected long call
+to finish, with the reverse proxy configured to wait slightly longer.
 
 ### Pinning specific company job boards
 

@@ -119,6 +119,14 @@ router.post('/missions/:missionId/agents/:id/tasks/:taskId/complete', asyncHandl
   res.json(task)
 }))
 
+router.post('/missions/:missionId/agents/:id/tasks/:taskId/fail', asyncHandler(async (req: Request, res: Response) => {
+  const { error } = req.body as { error: string }
+  if (!error) throw new BadRequestError('error is required')
+  const task = runtime.failTask(req.params.taskId as string, error)
+  if (!task) throw new NotFoundError('Task')
+  res.json(task)
+}))
+
 // Collaborations scoped to missions as well
 router.post('/missions/:missionId/collaborations', asyncHandler((req: Request, res: Response) => {
   const participants = req.body as { participants: string[] }

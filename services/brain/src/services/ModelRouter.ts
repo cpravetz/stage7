@@ -44,6 +44,25 @@ function inferCapabilities(task: string): string[] {
   return Array.from(matched);
 }
 
+function getOptimizeForPriority(model: ModelDefinition, optimizeFor: string): number {
+  switch (optimizeFor) {
+    case 'speed':
+      // Prefer smaller/faster models (lower maxTokens as proxy for speed)
+      return model.maxTokens;
+    case 'accuracy':
+      // Prefer models with reasoning capability
+      return model.capabilities.includes('reasoning') ? 0 : 1;
+    case 'creativity':
+      // Prefer models with creative capability
+      return model.capabilities.includes('creative') ? 0 : 1;
+    case 'cost':
+    case 'balanced':
+    default:
+      // Cost is handled separately as primary sort key
+      return 0;
+  }
+}
+
 function getExcludedModelIds(): Set<string> {
   const raw = process.env.BRAIN_EXCLUDE_MODELS;
   if (!raw) return new Set();
@@ -75,7 +94,7 @@ export class ModelRouter {
     return this.models.get(id);
   }
 
-  route(options: { task: string; modelId?: string; maxTokens?: number; budget?: number; provider?: string; freeOnly?: boolean }): ModelDefinition {
+  route(options: { task: string; modelId?: string; maxTokens?: number; budget?: number; provider?: string; freeOnly?: boolean; optimizeFor?: 'cost' | 'speed' | 'accuracy' | 'creativity' | 'balanced' }): ModelDefinition {
     const excluded = getExcludedModelIds();
     const isExcluded = (id: string) => excluded.has(id);
     const requiredCaps = inferCapabilities(options.task);
@@ -122,8 +141,19 @@ export class ModelRouter {
       throw new Error('No model available for the requested task. Ensure at least one LLM provider is configured with a valid API key (OPENAI_API_KEY, OPENROUTER_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, MISTRAL_API_KEY, GROK_API_KEY, HUGGINGFACE_API_KEY, NVIDIA_API_KEY, or OPENWEB_URL).');
     }
     candidates.sort((a, b) => {
+      const optimizeFor = options.optimizeFor || 'balanced';
+      
+      // Primary sort: optimizeFor dimension
+      if (optimizeFor !== 'balanced' && optimizeFor !== 'cost') {
+        const aPriority = getOptimizeForPriority(a, optimizeFor);
+        const bPriority = getOptimizeForPriority(b, optimizeFor);
+        if (aPriority !== bPriority) return aPriority - bPriority;
+      }
+      
+      // Secondary sort: cost (always considered)
       const costDiff = a.costPer1kTokens - b.costPer1kTokens;
       if (costDiff !== 0) return costDiff;
+      
       const specializationDiff = modelSpecializationPenalty(a, options.task) - modelSpecializationPenalty(b, options.task);
       if (specializationDiff !== 0) return specializationDiff;
       if (options.freeOnly || (a.costPer1kTokens === 0 && b.costPer1kTokens === 0)) {
@@ -138,7 +168,7 @@ export class ModelRouter {
     return candidates[0];
   }
 
-  getCandidates(options: { task: string; modelId?: string; maxTokens?: number; budget?: number; provider?: string; freeOnly?: boolean }): ModelDefinition[] {
+  getCandidates(options: { task: string; modelId?: string; maxTokens?: number; budget?: number; provider?: string; freeOnly?: boolean; optimizeFor?: 'cost' | 'speed' | 'accuracy' | 'creativity' | 'balanced' }): ModelDefinition[] {
     const excluded = getExcludedModelIds();
     const isExcluded = (id: string) => excluded.has(id);
     if (options.modelId) {
@@ -173,8 +203,19 @@ export class ModelRouter {
     const generalCandidates = candidates.filter((candidate) => modelSpecializationPenalty(candidate, options.task) === 0);
     if (generalCandidates.length > 0) candidates = generalCandidates;
     candidates.sort((a, b) => {
+      const optimizeFor = options.optimizeFor || 'balanced';
+      
+      // Primary sort: optimizeFor dimension
+      if (optimizeFor !== 'balanced' && optimizeFor !== 'cost') {
+        const aPriority = getOptimizeForPriority(a, optimizeFor);
+        const bPriority = getOptimizeForPriority(b, optimizeFor);
+        if (aPriority !== bPriority) return aPriority - bPriority;
+      }
+      
+      // Secondary sort: cost (always considered)
       const costDiff = a.costPer1kTokens - b.costPer1kTokens;
       if (costDiff !== 0) return costDiff;
+      
       const specializationDiff = modelSpecializationPenalty(a, options.task) - modelSpecializationPenalty(b, options.task);
       if (specializationDiff !== 0) return specializationDiff;
       if (options.freeOnly || (a.costPer1kTokens === 0 && b.costPer1kTokens === 0)) {

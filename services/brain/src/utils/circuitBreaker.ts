@@ -14,7 +14,8 @@ export class CircuitBreaker {
   async execute<T>(fn: () => Promise<T>): Promise<T> {
     if (this.state === 'open') {
       if (Date.now() < this.nextAttempt) {
-        throw new Error(`Circuit breaker open for ${this.cooldownMs}ms`);
+        const retryInSeconds = Math.max(1, Math.ceil((this.nextAttempt - Date.now()) / 1000));
+        throw new Error(`Provider temporarily unavailable after repeated failures. Retry in about ${retryInSeconds} seconds.`);
       }
       this.state = 'half-open';
     }
@@ -38,6 +39,10 @@ export class CircuitBreaker {
 
   getFailureCount(): number {
     return this.failureCount;
+  }
+
+  getRemainingCooldownMs(): number {
+    return this.state === 'open' ? Math.max(0, this.nextAttempt - Date.now()) : 0;
   }
 
   // Force the circuit into open state for the cooldown period.

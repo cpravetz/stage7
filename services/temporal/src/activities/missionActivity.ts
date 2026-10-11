@@ -86,7 +86,7 @@ export async function runMissionActivity(input: {
     return { approved: false, reason: 'Approval timeout' };
   };
 
-  const orchestrator = new MissionOrchestrator();
+const orchestrator = new MissionOrchestrator();
   const result = await orchestrator.run({
     missionId: input.missionId,
     prompt: input.prompt,
@@ -97,10 +97,11 @@ export async function runMissionActivity(input: {
      persistenceUrl: process.env.ARTIFACTS_URL || 'http://artifacts:4200',
      gatewayUrl: process.env.GATEWAY_URL || 'http://gateway:3000',
      workerPoolUrl: process.env.WORKER_POOL_URL || 'http://worker-pool:3200',
+     agentRuntimeUrl: process.env.AGENT_RUNTIME_URL,
      broadcast,
      broadcastAll,
      waitForApproval,
-  });
+   });
 
   logger.info({ missionId: input.missionId, phases: result.plan.phases.length }, 'Mission activity completed');
   return result;

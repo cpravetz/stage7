@@ -15,6 +15,8 @@ class MockProvider implements LLMProvider {
   readonly name = 'Mock Provider';
   readonly info: ProviderInfo = mockProviderInfo;
   lastRequest: CompletionRequest | null = null;
+  failure: Error | null = null;
+  calls = 0;
   response: CompletionResponse = {
     content: 'mocked response',
     model: 'mock-model',
@@ -29,7 +31,9 @@ class MockProvider implements LLMProvider {
     ];
   }
   async complete(req: CompletionRequest): Promise<CompletionResponse> {
+    this.calls += 1;
     this.lastRequest = req;
+    if (this.failure) throw this.failure;
     return this.response;
   }
 }
@@ -46,6 +50,8 @@ describe('BrainService', () => {
 
   beforeEach(async () => {
     mockProviderInstance.lastRequest = null;
+    mockProviderInstance.failure = null;
+    mockProviderInstance.calls = 0;
     mockProviderInstance.response = {
       content: 'mocked response',
       model: 'mock-model',
@@ -69,6 +75,35 @@ describe('BrainService', () => {
     expect(result.provider).toBe('mock');
     expect(result.cached).toBe(false);
     expect(result.tokensUsed).toBe(10);
+  });
+
+  it('logs only completed provider calls with their resolved model and provider', async () => {
+    await brain.complete('logging must use resolved provider metadata');
+
+    const completionLogs = brain.getLogs().filter((entry) => entry.type === 'completion');
+    expect(completionLogs).toHaveLength(1);
+    expect(completionLogs[0]).toMatchObject({
+      model: 'mock-model',
+      provider: 'mock',
+      success: true,
+      durationMs: expect.any(Number),
+    });
+    expect(completionLogs.some((entry) => entry.model === 'auto')).toBe(false);
+  });
+
+  it('does not retry a provider after credit exhaustion and records the cause once', async () => {
+    mockProviderInstance.failure = new Error(
+      '402 {"error":"You have no remaining credits for this provider"}',
+    );
+
+    await expect(brain.complete('credit exhaustion should stop provider retries')).rejects.toThrow(
+      'no remaining credits',
+    );
+
+    expect(mockProviderInstance.calls).toBe(1);
+    const errors = brain.getLogs().filter((entry) => entry.type === 'error');
+    expect(errors).toHaveLength(1);
+    expect(errors[0].error).toContain('no remaining credits');
   });
 
   it('should pass systemPrompt to the provider when provided', async () => {

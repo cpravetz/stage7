@@ -32,36 +32,21 @@ const INTERVIEW_COMPENSATION_BATTLECARD = createDeclarativeCodeSkill({
     lowerOrderTools: ['career-interview-prep', 'career-advisory'],
     configSchema: CAREER_WRAPPER_CONFIG_SCHEMA,
     actionLabel: 'Create interview briefing',
-    // Must stay strictly inside nginx's 60s default proxy_read_timeout on
-    // /api, with headroom for the teardown that follows the deadline. At 60000
-    // it equalled the proxy budget exactly, so the 504 always won the tie. The
-    // 44000 emit budget above must also stay under it, or the graceful
-    // not-connected flush never runs.
-    timeoutMs: 52000
+    // Brain may use its full 15-minute completion budget; allow additional time
+    // for this skill to finish and for CodeExecutor to collect its result.
+    timeoutMs: 960000
   },
   handler: async function handler(input, ctx) {
       const role = input.targetRole || '';
       const company = input.company || '';
       const NL = '\n';
 
-      // Deadline budget. nginx proxies /api with the default proxy_read_timeout of
-      // 60s, so this skill must always answer inside that window. The manifest
-      // timeoutMs below is 52000, and the bridge close, fs cleanup and JSON
-      // serialisation that follow the deadline consume the rest.
-      //
-      // The budget is what actually guarantees the emit. CodeExecutor only returns the
-      // child's captured stdout when the child exits cleanly (proc 'close' with code 0);
-      // its SIGKILL path discards stdout entirely. So a script still awaiting at 52s
-      // yields a bare timeout error, not a result. On expiry this flushes a
-      // not-connected result and exits 0.
-      //
-      // 44000, raised from 30000. A run is sequential per topic -- delegation, then a
-      // direct brain call only if that failed -- so the worst case is the SUM of the
-      // two per-topic deadlines below. At the old 30000 budget that sum (43s) could
-      // not fit, which is precisely how a healthy brain came to be reported offline.
+      // This bounds the full skill operation, not an individual Brain request.
+      // Brain owns the provider timeout; the operation budget leaves room for a
+      // delegated-tool wait followed by Brain's 15-minute completion deadline.
       const SKILL_BUDGET_MS = Number(ctx.config?.skillBudgetMs) > 0
       ? Number(ctx.config?.skillBudgetMs)
-      : 44000;
+      : 930000;
       // Bound on waiting for a delegated tool. The nested call exposes no signal of
       // its own, so this caps how long the skill WAITS for it; the request keeps
       // running in the parent and the child simply stops blocking on it. Sized to the
@@ -70,19 +55,6 @@ const INTERVIEW_COMPENSATION_BATTLECARD = createDeclarativeCodeSkill({
       const DELEGATED_TIMEOUT_MS = Number(ctx.config?.delegatedTimeoutMs) > 0
       ? Number(ctx.config?.delegatedTimeoutMs)
       : 24000;
-      // Bound on a single direct brain call, matching the SPORTS_REQUEST_TIMEOUT_MS
-      // pattern in sports-battlecard-creator.ts. Without it a brain that accepts the
-      // connection and never responds hangs the skill until the outer SIGKILL.
-      //
-      // 19000, not 10000: observed brain latency for these two prompts is 16-19s, so a
-      // 10s abort discarded answers the brain had already produced. Aborting tears
-      // down only the client socket, so the brain still ran to completion and logged a
-      // full-duration OK while the skill treated the topic as unanswered -- which is
-      // what made the Brain log and the skill's verdict disagree.
-      const BRAIN_FALLBACK_TIMEOUT_MS = Number(ctx.config?.brainFallbackTimeoutMs) > 0
-      ? Number(ctx.config?.brainFallbackTimeoutMs)
-      : 19000;
-
       let settled = false;
 
       function payload(success, status, data, error, present) {
@@ -230,13 +202,10 @@ const INTERVIEW_COMPENSATION_BATTLECARD = createDeclarativeCodeSkill({
       // caller falls straight through to the not-connected emit.
       const base = brainBaseUrl();
       if (!base) return null;
-      const controller = new AbortController();
-      const timer = setTimeout(function () { controller.abort(); }, BRAIN_FALLBACK_TIMEOUT_MS);
       try {
         const res = await fetch(base + '/api/brain/complete', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          signal: controller.signal,
           body: JSON.stringify({
             systemPrompt: 'You are a career coach. Provide concise, practical guidance.',
             prompt: prompt,
@@ -248,8 +217,6 @@ const INTERVIEW_COMPENSATION_BATTLECARD = createDeclarativeCodeSkill({
         return data.content || data.summary || null;
       } catch (e) {
         return null;
-      } finally {
-        clearTimeout(timer);
       }
       }
 

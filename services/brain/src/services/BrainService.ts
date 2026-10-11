@@ -19,6 +19,7 @@ export interface CompletionOptions {
   systemPrompt?: string;
   temperature?: number;
   missionId?: string;
+  optimizeFor?: 'cost' | 'speed' | 'accuracy' | 'creativity' | 'balanced';
 }
 
 export interface CompletionResult {
@@ -41,15 +42,29 @@ export interface BrainLogEntry {
   tokensUsed?: number;
   estimatedCost?: number;
   modelIssue?: boolean;
+  optimizeFor?: 'cost' | 'speed' | 'accuracy' | 'creativity' | 'balanced';
+}
+
+export interface ModelPerformanceMetrics {
+  model: string;
+  provider: string;
+  totalRequests: number;
+  successfulRequests: number;
+  failedRequests: number;
+  totalLatencyMs: number;
+  totalTokensUsed: number;
+  totalCost: number;
+  avgLatencyMs: number;
+  successRate: number;
+  avgCostPerRequest: number;
+  lastUpdated: number;
 }
 
 const MAX_LOG_ENTRIES = 200;
 
 function providerAttemptTimeoutMs(): number {
   const configured = Number(process.env.BRAIN_PROVIDER_ATTEMPT_TIMEOUT_MS);
-  // 60s default: gives slow models (especially local/quantized) a real chance.
-  // The upstream BRAIN_REQUEST_TIMEOUT_MS (60s) that callers enforce is a separate ceiling.
-  return Number.isFinite(configured) && configured > 0 ? configured : 60000;
+  return Number.isFinite(configured) && configured > 0 ? configured : 310000;
 }
 
 async function withProviderTimeout<T>(operation: Promise<T>): Promise<T> {
@@ -77,6 +92,11 @@ export class BrainService {
   // Track recently successful model+provider combinations to prioritize them
   private recentSuccesses: Map<string, number> = new Map();
   private readonly RECENT_SUCCESS_TTL_MS = 300000; // 5 minutes
+
+  // Performance tracking - persisted to artifacts service
+  private performanceMetricsCache: Map<string, ModelPerformanceMetrics> | null = null;
+  private performanceCacheFetchedAt: number = 0;
+  private readonly PERFORMANCE_CACHE_TTL_MS = 30000; // 30 seconds
 
   constructor() {
     this.providers = buildProviderRegistry();
@@ -156,19 +176,13 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
      const attemptTimeout = providerAttemptTimeoutMs();
      const maxRetries = 2;
      const configuredDeadline = Number(process.env.BRAIN_COMPLETION_DEADLINE_MS);
-     // Default deadline: allow enough time to try MANY candidates (each up to attemptTimeout)
-     // With 60s per attempt, we need ~120s+ to try multiple models across providers.
-     // But we're bounded by the upstream BRAIN_REQUEST_TIMEOUT_MS (60s) from callers.
-     // So use a default that fits within 60s while allowing several attempts.
-     const defaultDeadline = attemptTimeout * (maxRetries + 1) + 30000;
-     // Allow override via env for non-Temporal callers (e.g., direct execution in worker)
-     // Upstream callers may enforce their own timeout (e.g., BRAIN_REQUEST_TIMEOUT_MS=60000)
-     const completionDeadline = startTime + (Number.isFinite(configuredDeadline) && configuredDeadline > 0 ? configuredDeadline : Math.min(defaultDeadline, 120000));
-    const modelIdOpt = options.model || 'auto';
-    const providerOpt = options.provider || '';
-    const promptPreview = prompt.slice(0, 120);
+     const defaultDeadline = Math.max(attemptTimeout, Math.min(attemptTimeout * 3, 900000));
+     const completionDeadline = startTime + (Number.isFinite(configuredDeadline) && configuredDeadline > 0 ? configuredDeadline : defaultDeadline);
+     const modelIdOpt = options.model || 'auto';
+     const providerOpt = options.provider || '';
+     const promptPreview = prompt.slice(0, 120);
 
-    const promptHash = crypto.createHash('sha256').update(prompt).digest('hex').slice(0, 16);
+     const promptHash = crypto.createHash('sha256').update(prompt).digest('hex').slice(0, 16);
     const systemHash = options.systemPrompt
       ? crypto.createHash('sha256').update(options.systemPrompt).digest('hex').slice(0, 8)
       : 'none';
@@ -177,15 +191,16 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
     const cached = await this.cache.get(cacheKey);
     if (cached) {
       logger.info({ cacheKey }, 'Cache hit');
+      const cachedResult = cached as CompletionResult;
       this.addLog({
         type: 'cache_hit',
-        model: modelIdOpt,
-        provider: providerOpt,
+        model: cachedResult.model || modelIdOpt,
+        provider: cachedResult.provider || providerOpt,
         promptPreview,
         success: true,
         durationMs: Date.now() - startTime,
       });
-      return { ...(cached as CompletionResult), cached: true };
+      return { ...cachedResult, cached: true };
     }
 
     // Optionally consult llm-config for runtime preference to prefer free models
@@ -199,6 +214,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
       maxTokens: options.maxTokens ?? 1024,
       budget: options.budget,
       freeOnly: settings?.freeModelsOnly,
+      optimizeFor: options.optimizeFor,
     });
 
     // Reorder candidates to prioritize recently successful models
@@ -214,6 +230,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
         maxTokens: options.maxTokens ?? 1024,
         budget: options.budget,
         freeOnly: false,
+        optimizeFor: options.optimizeFor,
       });
     }
 
@@ -230,8 +247,8 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
       const errMsg = 'No model available for the requested task. Ensure at least one LLM provider is configured with a valid API key.';
       this.addLog({
         type: 'error',
-        model: options.model || 'auto',
-        provider: options.provider || '',
+        model: options.model,
+        provider: options.provider,
         promptPreview,
         success: false,
         durationMs: Date.now() - startTime,
@@ -241,6 +258,10 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
     }
 
     let lastErr: unknown = null;
+    let lastCandidate: { id: string; provider: string } | null = null;
+    const reportedOpenCircuits = new Set<string>();
+    const unavailableProviders = new Set<string>();
+    let lastFailureWasLogged = false;
      const maxRetriesPerProvider = maxRetries;
 
     const messagesBase: CompletionRequest['messages'] = [];
@@ -260,6 +281,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
         logger.warn({ provider: provider.id }, 'Skipping candidate: provider not available');
         continue;
       }
+      if (unavailableProviders.has(provider.id)) continue;
 
       const req: CompletionRequest = {
         model: candidate.id,
@@ -269,7 +291,28 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
       };
 
       logger.info({ provider: provider.id, model: candidate.id }, 'Dispatching completion (candidate)');
+      lastCandidate = { id: candidate.id, provider: provider.id };
       const breaker = this.circuitBreakers.get(provider.id) || new CircuitBreaker(Number(process.env.BRAIN_CIRCUIT_THRESHOLD) || 8, Number(process.env.BRAIN_CIRCUIT_COOLDOWN_MS) || 60000);
+      if (breaker.getState() === 'open') {
+        const circuitError = new Error(
+          `Provider temporarily unavailable after repeated failures. Retry in about ${Math.max(1, Math.ceil(breaker.getRemainingCooldownMs() / 1000))} seconds.`,
+        );
+        lastErr = circuitError;
+        if (!reportedOpenCircuits.has(provider.id)) {
+          this.addLog({
+            type: 'error',
+            model: candidate.id,
+            provider: provider.id,
+            promptPreview,
+            success: false,
+            durationMs: Date.now() - startTime,
+            error: circuitError.message,
+          });
+          reportedOpenCircuits.add(provider.id);
+          lastFailureWasLogged = true;
+        }
+        continue;
+      }
 
       for (let attempt = 0; attempt < maxRetriesPerProvider; attempt++) {
         if (Date.now() >= completionDeadline) break;
@@ -308,6 +351,9 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
           // Record this provider/model as recently successful for prioritization
           this.recordSuccess(result.provider, result.model);
 
+          // Record performance metrics
+          await this.recordPerformanceMetrics(result.model, result.provider, Date.now() - startTime, response.tokensUsed, estimatedCost, true);
+
           await this.cache.set(cacheKey, result);
 
           // if missionId provided, append a cost_estimate event to artifacts persistence
@@ -337,6 +383,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
           return result;
         }         catch (err) {
           lastErr = err;
+          lastFailureWasLogged = false;
           const errMsg = err instanceof Error ? err.message : String(err);
           logger.warn({ provider: provider.id, model: candidate.id, attempt, err: errMsg }, 'Candidate attempt failed');
 
@@ -346,8 +393,8 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
           const isModelSpecific = /is not found for API version|model .* does not exist|model .* not found/i.test(errMsg)
             || /\b(404)\b/.test(errMsg);
           // classify error: provider-key / quota issues vs transient vs rate-limit
-          const isProviderFatal = /key limit exceeded|limit exceeded|quota exceeded|invalid api key|incorrect api key|credit balance is too low|authentication|unauthorized/i.test(errMsg)
-            || /\b(401|403)\b/.test(errMsg);
+          const isProviderFatal = /key limit exceeded|quota exceeded|no remaining credits|insufficient credits|credit balance is too low|credits? exhausted|payment required|invalid api key|incorrect api key|authentication|unauthorized/i.test(errMsg)
+            || /\b(401|402|403)\b/.test(errMsg);
           // 429 / rate-limit / too-many-requests: move to the next candidate model
           // (which may be on the same provider or a different one) rather than retrying
           // the same model, since retrying would just hit the same rate limit.
@@ -370,17 +417,11 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
             break;
           }
           if (isProviderFatal) {
-            // provider-level fatal: mark provider unavailable by tripping its circuit-breaker
-            logger.error({ provider: provider.id, err: errMsg }, 'Provider configuration or quota error - tripping provider circuit-breaker (models retained)');
+            unavailableProviders.add(provider.id);
+            logger.error({ provider: provider.id, model: candidate.id, err: errMsg }, 'Provider configuration, credit, or quota error; skipping further attempts for this provider');
             try {
               const cb = this.circuitBreakers.get(provider.id);
-              if (cb && typeof (cb as any).trip === 'function') {
-                (cb as any).trip();
-              } else if (cb) {
-                // best-effort fallback: set open state via any
-                (cb as any).state = 'open';
-                (cb as any).nextAttempt = Date.now() + 30000;
-              }
+              cb?.trip();
             } catch (e) {
               logger.warn({ e }, 'Failed to trip circuit-breaker for provider');
             }
@@ -394,7 +435,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
               error: errMsg,
               modelIssue: false,
             });
-            // break out to next candidate
+            lastFailureWasLogged = true;
             break;
           }
           if (isModelSpecific) {
@@ -411,6 +452,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
               error: errMsg,
               modelIssue: true,
             });
+            lastFailureWasLogged = true;
             break;
           }
           if (isRateLimit) {
@@ -426,6 +468,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
               durationMs: Date.now() - startTime,
               error: errMsg,
             });
+            lastFailureWasLogged = true;
             break;
           }
 
@@ -446,6 +489,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
             durationMs: Date.now() - startTime,
             error: errMsg,
           });
+          lastFailureWasLogged = true;
           break;
         }
       }
@@ -453,50 +497,25 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
 
     const finalErrMsg = lastErr instanceof Error ? lastErr.message : String(lastErr || 'All providers failed');
 
-    // As a last-resort, attempt one direct call to any free chat-capable model
-    try {
-      if (Date.now() >= completionDeadline) {
-        logger.warn({ task: promptPreview }, 'Skipping last-resort fallback: completion deadline exceeded');
-      } else {
-      const fallbackModels = this.router.listModels().filter((m) => (m.costPer1kTokens === 0) && (m.capabilities.includes('chat') || m.capabilities.includes('creative')));
-      if (fallbackModels.length > 0) {
-        const candidate = fallbackModels[0];
-        const provider = this.providers.find((p) => p.id === candidate.provider);
-        if (provider && provider.isAvailable()) {
-          logger.info({ model: candidate.id, provider: provider.id }, 'Attempting last-resort direct completion with fallback model');
-          const req = {
-            model: candidate.id,
-            messages: messagesBase,
-            maxTokens: options.maxTokens ?? 1024,
-            temperature: options.temperature,
-          } as any;
-          const resp = await provider.complete(req as any);
-          const result: CompletionResult = {
-            content: resp.content,
-            model: resp.model || candidate.id,
-            provider: resp.provider || provider.id,
-            cached: false,
-            tokensUsed: resp.tokensUsed,
-          };
-          this.addLog({ type: 'completion', model: result.model, provider: result.provider, promptPreview, success: true, durationMs: Date.now() - startTime, tokensUsed: resp.tokensUsed });
-          await this.cache.set(cacheKey, result);
-          return result;
-        }
-      }
-      }
-    } catch (e) {
-      logger.warn({ err: e instanceof Error ? e.message : String(e) }, 'Fallback direct model attempt failed');
+    const finalModel = lastCandidate?.id || options.model;
+    const finalProvider = lastCandidate?.provider || options.provider;
+
+    // Record performance metrics for final failure
+    if (finalModel && finalProvider) {
+      await this.recordPerformanceMetrics(finalModel, finalProvider, Date.now() - startTime, undefined, undefined, false);
     }
 
-    this.addLog({
-      type: 'error',
-      model: options.model || 'auto',
-      provider: options.provider || '',
-      promptPreview,
-      success: false,
-      durationMs: Date.now() - startTime,
-      error: finalErrMsg,
-    });
+    if (!lastFailureWasLogged) {
+      this.addLog({
+        type: 'error',
+        model: finalModel,
+        provider: finalProvider,
+        promptPreview,
+        success: false,
+        durationMs: Date.now() - startTime,
+        error: finalErrMsg,
+      });
+    }
     throw new Error(finalErrMsg);
   }
 
@@ -526,6 +545,125 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
     if (this.brainLog.length > MAX_LOG_ENTRIES) {
       this.brainLog = this.brainLog.slice(0, MAX_LOG_ENTRIES);
     }
+  }
+
+  private getArtifactsUrl(): string {
+    return process.env.ARTIFACTS_URL || process.env.PERSISTENCE_URL || 'http://artifacts:4200';
+  }
+
+  private async loadPerformanceMetrics(): Promise<Map<string, ModelPerformanceMetrics>> {
+    const now = Date.now();
+    if (this.performanceMetricsCache && now - this.performanceCacheFetchedAt < this.PERFORMANCE_CACHE_TTL_MS) {
+      return this.performanceMetricsCache;
+    }
+    try {
+      const persistenceUrl = this.getArtifactsUrl();
+      const res = await fetch(`${persistenceUrl}/api/artifacts/documents/model-performance-metrics`, { method: 'GET' });
+      if (!res.ok) {
+        this.performanceMetricsCache = new Map();
+        this.performanceCacheFetchedAt = now;
+        return this.performanceMetricsCache;
+      }
+      const doc = await res.json() as { data?: Record<string, unknown> };
+      const metricsMap = new Map<string, ModelPerformanceMetrics>();
+      if (doc.data && typeof doc.data === 'object') {
+        for (const [key, value] of Object.entries(doc.data)) {
+          metricsMap.set(key, value as ModelPerformanceMetrics);
+        }
+      }
+      this.performanceMetricsCache = metricsMap;
+      this.performanceCacheFetchedAt = now;
+      return metricsMap;
+    } catch (err) {
+      logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Failed to load performance metrics from artifacts');
+      this.performanceMetricsCache = new Map();
+      this.performanceCacheFetchedAt = now;
+      return this.performanceMetricsCache;
+    }
+  }
+
+  private async savePerformanceMetrics(metrics: Map<string, ModelPerformanceMetrics>): Promise<void> {
+    try {
+      const persistenceUrl = this.getArtifactsUrl();
+      const data: Record<string, ModelPerformanceMetrics> = {};
+      for (const [key, value] of metrics.entries()) {
+        data[key] = value;
+      }
+      await fetch(`${persistenceUrl}/api/artifacts/documents/model-performance-metrics`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data }),
+      });
+    } catch (err) {
+      logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Failed to save performance metrics to artifacts');
+    }
+  }
+
+  private async recordPerformanceMetrics(model: string, provider: string, latencyMs: number, tokensUsed: number | undefined, cost: number | undefined, success: boolean) {
+    const key = `${provider}:${model}`;
+    const now = Date.now();
+    const metricsMap = await this.loadPerformanceMetrics();
+    let metrics = metricsMap.get(key);
+    
+    if (!metrics) {
+      metrics = {
+        model,
+        provider,
+        totalRequests: 0,
+        successfulRequests: 0,
+        failedRequests: 0,
+        totalLatencyMs: 0,
+        totalTokensUsed: 0,
+        totalCost: 0,
+        avgLatencyMs: 0,
+        successRate: 0,
+        avgCostPerRequest: 0,
+        lastUpdated: now,
+      };
+      metricsMap.set(key, metrics);
+    }
+    
+    metrics.totalRequests++;
+    metrics.totalLatencyMs += latencyMs;
+    metrics.avgLatencyMs = metrics.totalLatencyMs / metrics.totalRequests;
+    
+    if (tokensUsed) {
+      metrics.totalTokensUsed += tokensUsed;
+    }
+    if (cost) {
+      metrics.totalCost += cost;
+      metrics.avgCostPerRequest = metrics.totalCost / metrics.totalRequests;
+    }
+    
+    if (success) {
+      metrics.successfulRequests++;
+    } else {
+      metrics.failedRequests++;
+    }
+    metrics.successRate = metrics.successfulRequests / metrics.totalRequests;
+    metrics.lastUpdated = now;
+    
+    await this.savePerformanceMetrics(metricsMap);
+    // Update local cache
+    this.performanceMetricsCache = metricsMap;
+  }
+
+  async getPerformanceMetrics(): Promise<ModelPerformanceMetrics[]> {
+    const metricsMap = await this.loadPerformanceMetrics();
+    return Array.from(metricsMap.values())
+      .sort((a, b) => b.totalRequests - a.totalRequests);
+  }
+
+  async getPerformanceMetricsForModel(model: string, provider: string): Promise<ModelPerformanceMetrics | undefined> {
+    const metricsMap = await this.loadPerformanceMetrics();
+    return metricsMap.get(`${provider}:${model}`);
+  }
+
+  async clearPerformanceMetrics(): Promise<void> {
+    const emptyMap = new Map<string, ModelPerformanceMetrics>();
+    await this.savePerformanceMetrics(emptyMap);
+    this.performanceMetricsCache = emptyMap;
+    this.performanceCacheFetchedAt = 0;
   }
 
   validateStructuredOutput<T>(schema: z.ZodSchema, data: unknown): T {

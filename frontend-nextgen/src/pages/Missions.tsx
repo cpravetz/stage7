@@ -34,6 +34,7 @@ const Missions = () => {
   const fetchPendingApprovals = useMissionsStore((s) => s.fetchPendingApprovals);
   const addMission = useMissionsStore((s) => s.addMission);
   const deleteMission = useMissionsStore((s) => s.deleteMission);
+  const updateMissionStatus = useMissionsStore((s) => s.updateMissionStatus);
 
   const [showCreate, setShowCreate] = useState(false);
   const [missionId, setMissionId] = useState('');
@@ -96,6 +97,16 @@ const Missions = () => {
   const handleDelete = async (workflowId: string) => {
     if (!window.confirm(`Delete mission ${workflowId}?`)) return;
     await deleteMission(workflowId);
+  };
+
+  const handleMissionAction = async (workflowId: string, action: 'start' | 'pause' | 'stop') => {
+    try {
+      await postJSON(`/api/temporal/missions/${encodeURIComponent(workflowId)}/${action}`, {});
+      updateMissionStatus(workflowId, action === 'start' ? 'running' : action === 'pause' ? 'paused' : 'canceled');
+    } catch (err) {
+      console.error(`Failed to ${action} mission:`, err);
+      alert(`Failed to ${action} mission: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    }
   };
 
   const getMissionStatusLabel = (status: string) => {
@@ -264,7 +275,7 @@ const Missions = () => {
                   <th>Status</th>
                   <th>Started</th>
                   <th>Duration</th>
-                  <th></th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -276,25 +287,47 @@ const Missions = () => {
                   </tr>
                 ) : (
                   <>
-                     {filtered.map((m) => (
-                       <tr key={m.workflowId} style={(m.status === 'awaiting_review' || pendingApprovals.some((p) => p.missionId === m.missionId)) ? { backgroundColor: '#fefce8', borderLeft: '3px solid #f59e0b' } : undefined}>
-                         <td className="truncate">
-                           <Link to={`/missions/${encodeURIComponent(m.workflowId)}`}>
-                             {(m.status === 'awaiting_review' || pendingApprovals.some((p) => p.missionId === m.missionId)) && (
-                               <span style={{ marginRight: '6px' }} title="Needs attention">🔔</span>
-                             )}
-                             {m.missionId}
-                           </Link>
-                         </td>
-                         <td><span className={`badge ${m.status}`}>{getMissionStatusLabel(m.status)}</span></td>
-                         <td>{formatTime(m.startedAt || m.timestamp)}</td>
-                         <td>{formatDuration(m)}</td>
-                         <td>
-                           <button className="danger small" onClick={() => handleDelete(m.workflowId)} aria-label={`Delete mission ${m.missionId || m.workflowId}`}>
-                             Delete
-                           </button>
-                         </td>
-                      </tr>
+{filtered.map((m) => (
+                        <tr key={m.workflowId} style={(m.status === 'awaiting_review' || pendingApprovals.some((p) => p.missionId === m.missionId)) ? { backgroundColor: '#fefce8', borderLeft: '3px solid #f59e0b' } : undefined}>
+                          <td className="truncate">
+                            <Link to={`/missions/${encodeURIComponent(m.workflowId)}`}>
+                              {(m.status === 'awaiting_review' || pendingApprovals.some((p) => p.missionId === m.missionId)) && (
+                                <span style={{ marginRight: '6px' }} title="Needs attention">🔔</span>
+                              )}
+                              {m.missionId}
+                            </Link>
+                          </td>
+                          <td><span className={`badge ${m.status}`}>{getMissionStatusLabel(m.status)}</span></td>
+                          <td>{formatTime(m.startedAt || m.timestamp)}</td>
+                          <td>{formatDuration(m)}</td>
+                          <td>
+                            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                              {m.status !== 'running' && m.status !== 'completed' && m.status !== 'failed' && m.status !== 'canceled' && (
+                                <button className="small" onClick={() => handleMissionAction(m.workflowId, 'start')} title="Start mission">
+                                  Start
+                                </button>
+                              )}
+                              {m.status === 'running' && (
+                                <button className="small" onClick={() => handleMissionAction(m.workflowId, 'pause')} title="Pause mission">
+                                  Pause
+                                </button>
+                              )}
+                              {m.status === 'running' && (
+                                <button className="danger small" onClick={() => handleMissionAction(m.workflowId, 'stop')} title="Stop mission">
+                                  Stop
+                                </button>
+                              )}
+                              {(m.status === 'failed' || m.status === 'incomplete' || m.status === 'canceled') && (
+                                <button className="secondary small" onClick={() => window.location.href = `/missions/${encodeURIComponent(m.workflowId)}`} title="Retry mission with guidance">
+                                  Retry
+                                </button>
+                              )}
+                              <button className="danger small" onClick={() => handleDelete(m.workflowId)} aria-label={`Delete mission ${m.missionId || m.workflowId}`}>
+                                Delete
+                              </button>
+                            </div>
+                          </td>
+                       </tr>
                     ))}
                     {filtered.length === 0 && (
                       <tr>
