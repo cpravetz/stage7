@@ -4,6 +4,7 @@ import { watchWorkflow } from '../workflows/watchWorkflow';
 import { watchOrchestrator } from '../workflows/watchOrchestrator';
 import { runWatchActivity } from '../activities/watchActivity';
 import { fetchWatchActivity } from '../activities/watchActivity';
+import { runMissionDirect } from '../activities/missionActivity';
 import { runWatchLoop } from '../workflows/watchLoop';
 import { WorkflowInput, WorkflowResult } from '../types/workflow';
 import { logger } from '@stage7-nextgen/shared';
@@ -11,12 +12,13 @@ import { logger } from '@stage7-nextgen/shared';
 const TEMPORAL_TIMEOUT_MS = parseInt(process.env.TEMPORAL_OP_TIMEOUT_MS || '5000', 10);
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout>;
   return Promise.race([
     promise,
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error(`Operation timed out after ${ms}ms`)), ms),
-    ),
-  ]);
+    new Promise<never>((_, reject) => {
+      timeout = setTimeout(() => reject(new Error(`Operation timed out after ${ms}ms`)), ms);
+    }),
+  ]).finally(() => clearTimeout(timeout));
 }
 
 /**
@@ -32,6 +34,16 @@ function isAlreadyStarted(err: unknown): boolean {
   const name = (err as { name?: string } | null)?.name;
   const message = (err as { message?: string } | null)?.message || '';
   return name === 'WorkflowExecutionAlreadyStartedError' || /already started/i.test(message);
+}
+
+function missionStatus(result: unknown): WorkflowResult['status'] {
+  const outputs = result && typeof result === 'object'
+    ? (result as { outputs?: { status?: string } }).outputs
+    : undefined;
+  if (outputs?.status === 'awaiting_clarification' || outputs?.status === 'rejected_at_phase') {
+    return 'awaiting_review';
+  }
+  return outputs?.status === 'incomplete' ? 'incomplete' : 'completed';
 }
 
 interface SingleWatchOutcome {
@@ -209,13 +221,27 @@ export class TemporalClient {
         // Return immediately — Temporal handles async execution.
         return workflowId;
       } catch (err) {
-        logger.warn({ err: (err as Error).message }, 'Temporal workflow start failed, falling back to direct execution');
+        if (isAlreadyStarted(err)) {
+          return workflowId;
+        }
+        logger.error(
+          { err: err instanceof Error ? err.message : String(err), workflowId },
+          'Temporal workflow start outcome is ambiguous; refusing direct fallback to avoid duplicate mission execution',
+        );
+        throw err;
       }
     }
 
     // Fallback: execute workflow asynchronously without Temporal.
     const startTime = Date.now();
-    missionWorkflow(input)
+    runMissionDirect(input)
+      .then((output) => ({
+        missionId: input.missionId,
+        status: missionStatus(output),
+        output,
+        startedAt: startTime,
+        completedAt: Date.now(),
+      } satisfies WorkflowResult))
       .then(async (result) => {
         await this.persistFinalState(input, result, startTime);
         await this.broadcastMissionUpdate({

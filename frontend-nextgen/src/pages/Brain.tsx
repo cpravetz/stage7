@@ -19,11 +19,7 @@ const LOGS_POLL_INTERVAL = 30000;
 
 const Brain = () => {
   const [prompt, setPrompt] = useState('');
-  const [model, setModel] = useState('');
   const [result, setResult] = useState<string | null>(null);
-  const [models, setModels] = useState<
-    Array<{ id: string; name: string; provider: string }>
-  >([]);
   const [cacheStats, setCacheStats] = useState<{ hits: number; misses: number } | null>(null);
   const [circuitBreakers, setCircuitBreakers] = useState<
     Array<{ provider: string; state: string; failures: number }>
@@ -38,23 +34,6 @@ const Brain = () => {
     () => feedEvents.filter((e) => e.type === 'brain_error'),
     [feedEvents]
   );
-
-  const loadModels = () => {
-    fetchJSON<{ models: Array<{ id: string; provider: string }> }>('/api/brain/models')
-      .then((data) => {
-        const raw = data.models || [];
-        const filtered = raw.filter((m) => !m.id.startsWith('~'));
-        const list = filtered.map((m) => {
-          const provider =
-            m.provider === 'openrouter' || m.provider === 'openwebui'
-              ? m.provider
-              : (m.id.split('/')[0] || m.provider || 'unknown');
-          return { id: m.id, name: m.id, provider };
-        });
-        setModels(list);
-      })
-      .catch(() => {});
-  };
 
   const loadStats = () => {
     fetchJSON<{ hits: number; misses: number }>('/api/brain/cache/stats')
@@ -74,7 +53,6 @@ const Brain = () => {
   };
 
   useEffect(() => {
-    loadModels();
     loadStats();
     loadServiceLogs();
     const interval = setInterval(() => {
@@ -91,10 +69,7 @@ const Brain = () => {
     try {
       const data = await postJSON<{ content: string; model: string; cached: boolean }>(
         '/api/brain/complete',
-        {
-          prompt,
-          options: model ? { model } : {},
-        }
+        { prompt }
       );
       setResult(data.content || '');
       loadServiceLogs();
@@ -168,16 +143,8 @@ const Brain = () => {
               required
               rows={6}
             />
-            <select value={model} onChange={(e) => setModel(e.target.value)}>
-              <option value="">Auto-select (system optimized)</option>
-              {models.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.name} ({m.provider})
-                </option>
-              ))}
-            </select>
             <p className="hint">
-              Auto-select picks the best model for the task. Select a model above to override.
+              Brain selects the model and provider based on the task and current provider availability.
             </p>
             <button type="submit" disabled={loading}>
               {loading ? 'Testing…' : 'Test Prompt'}

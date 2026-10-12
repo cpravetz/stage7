@@ -186,7 +186,7 @@ export class MongoStore {
 
   async saveMissionState(state: MissionState): Promise<void> {
     const doc = { ...state, _id: state.missionId } as any;
-    await this.missions.replaceOne({ missionId: state.missionId } as any, doc, { upsert: true });
+    await this.missions.replaceOne({ _id: state.missionId } as any, doc, { upsert: true });
     logger.debug({ missionId: state.missionId, status: state.status }, 'Mission state saved');
   }
 
@@ -214,9 +214,9 @@ export class MongoStore {
     await this.missionEvents.deleteMany({ missionId } as any);
   }
 
-  async listPendingApprovals(): Promise<Array<{ missionId: string; phaseId: string; phaseName: string; question: string; assistantId?: string }>> {
+  async listPendingApprovals(): Promise<Array<{ missionId: string; phaseId: string; phaseName: string; question: string; assistantId?: string; tasks?: Array<{ id: string; title: string; status: string; artifacts?: any[] }> }>> {
     const docs = await this.missionPlans.find({}).toArray();
-    const result: Array<{ missionId: string; phaseId: string; phaseName: string; question: string; assistantId?: string }> = [];
+    const result: Array<{ missionId: string; phaseId: string; phaseName: string; question: string; assistantId?: string; tasks?: Array<{ id: string; title: string; status: string; artifacts?: any[] }> }> = [];
     for (const doc of docs) {
       const phases = (doc.plan && Array.isArray(doc.plan.phases)) ? doc.plan.phases : [];
       const mission = await this.missions.findOne({ missionId: doc.missionId });
@@ -229,6 +229,12 @@ export class MongoStore {
             phaseName: phase.name || phase.id,
             question: phase.approvalQuestion || '',
             assistantId,
+            tasks: phase.tasks?.map((t: any) => ({
+              id: t.id,
+              title: t.title,
+              status: t.status,
+              artifacts: t.artifacts,
+            })) || [],
           });
         }
       }
@@ -238,7 +244,7 @@ export class MongoStore {
 
   async saveAgentState(state: AgentState): Promise<void> {
     const doc = { ...state, _id: state.agentId } as any;
-    await this.agents.replaceOne({ agentId: state.agentId } as any, doc, { upsert: true });
+    await this.agents.replaceOne({ _id: state.agentId } as any, doc, { upsert: true });
     logger.debug({ agentId: state.agentId }, 'Agent state saved');
   }
 
@@ -382,7 +388,7 @@ export class MongoStore {
 
   async updateMissionTask(missionId: string, taskId: string, update: any): Promise<any> {
     const existing = await this.missionTasks.findOne({ missionId, taskId });
-    const merged = { ...(existing || { id: taskId, missionId }), ...update, id: taskId, missionId, updatedAt: Date.now() };
+    const merged = { ...(existing || { id: taskId, taskId, missionId }), ...update, id: taskId, taskId, missionId, updatedAt: Date.now() };
     await this.missionTasks.replaceOne({ missionId, taskId }, merged, { upsert: true });
 
     const planResult = await this.missionPlans.findOne({ missionId });

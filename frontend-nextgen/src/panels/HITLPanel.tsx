@@ -4,6 +4,7 @@ import { HITLApproval } from '../types/workspace';
 interface HITLPanelProps {
   hitlApprovals: HITLApproval[];
   loadingApprovals: boolean;
+  actionError?: string | null;
   entity: { id: string } | null;
   handleHITLAction: (approvalId: string, action: 'approved' | 'rejected') => void;
 }
@@ -11,6 +12,7 @@ interface HITLPanelProps {
 export const HITLPanel = ({
   hitlApprovals,
   loadingApprovals,
+  actionError,
   entity,
   handleHITLAction,
 }: HITLPanelProps) => {
@@ -21,6 +23,7 @@ export const HITLPanel = ({
         Showing approvals aligned with this assistant (<code>{entity?.id}</code>).
         Mission approval requests are handled on the corresponding Mission Room.
       </p>
+      {actionError && <div className="error-banner">{actionError}</div>}
       {loadingApprovals ? (
         <p>Loading approvals…</p>
       ) : hitlApprovals.length === 0 ? (

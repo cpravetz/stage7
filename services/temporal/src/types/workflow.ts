@@ -1,3 +1,5 @@
+import { Plan } from '@stage7-nextgen/shared';
+
 export interface WorkflowInput {
   missionId: string;
   tenantId: string;
@@ -5,6 +7,24 @@ export interface WorkflowInput {
   prompt: string;
   contextChunks?: Array<{ content: string; tokens: number; priority: number }>;
   metadata?: Record<string, unknown>;
+  // Resume support: skip already-completed phases/tasks
+  resumeFromPhaseId?: string;
+  resumeFromTaskId?: string;
+  completedPhases?: string[];
+  completedTasks?: MissionTaskCheckpoint[];
+  retryGuidance?: string;
+}
+
+export interface MissionTaskCheckpoint {
+  phaseId: string;
+  taskId: string;
+}
+
+export interface MissionActivityCheckpoint {
+  version: 1;
+  plan?: Plan;
+  completedTasks?: MissionTaskCheckpoint[];
+  completedPhases?: string[];
 }
 
 export interface WorkflowResult {

@@ -50,7 +50,7 @@ beforeAll(() => {
             inputs: {},
             outputs: {},
           }),
-          model: body.options?.model || 'gpt-4o-mini',
+          model: 'brain-selected-model',
           provider: 'openrouter',
           tokensUsed: 100,
         }),

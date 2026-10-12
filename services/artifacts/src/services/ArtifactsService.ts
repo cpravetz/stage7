@@ -120,10 +120,12 @@ export class ArtifactsService {
   }
 
   async saveMissionState(state: MissionState): Promise<void> {
-    this.store.saveMissionState(state);
+    await this.readyPromise;
+    await this.store.saveMissionState(state);
   }
 
   async getMissionState(missionId: string): Promise<MissionState | undefined> {
+    await this.readyPromise;
     return this.store.getMissionState(missionId);
   }
 
@@ -136,10 +138,12 @@ export class ArtifactsService {
   }
 
   async saveAgentState(state: AgentState): Promise<void> {
-    this.store.saveAgentState(state);
+    await this.readyPromise;
+    await this.store.saveAgentState(state);
   }
 
   async getAgentState(agentId: string): Promise<AgentState | undefined> {
+    await this.readyPromise;
     return this.store.getAgentState(agentId);
   }
 

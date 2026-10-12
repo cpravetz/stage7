@@ -1,4 +1,4 @@
-import { ModelRouter, ModelDefinition } from './ModelRouter';
+import { ModelRouter, ModelDefinition, ProviderHealth } from './ModelRouter';
 import { SemanticCache } from './SemanticCache';
 import { ContextManager } from './ContextManager';
 import { ContextChunk } from '../types/context';
@@ -11,8 +11,6 @@ import { CircuitBreaker } from '../utils/circuitBreaker';
 import * as crypto from 'crypto';
 
 export interface CompletionOptions {
-  model?: string;
-  provider?: string;
   schema?: z.ZodSchema;
   maxTokens?: number;
   budget?: number;
@@ -61,6 +59,8 @@ export interface ModelPerformanceMetrics {
 }
 
 const MAX_LOG_ENTRIES = 200;
+const BRAIN_LOG_DOC_ID = 'brain-log-history';
+const PERFORMANCE_METRICS_DOC_ID = 'model-performance-metrics';
 
 function providerAttemptTimeoutMs(): number {
   const configured = Number(process.env.BRAIN_PROVIDER_ATTEMPT_TIMEOUT_MS);
@@ -97,6 +97,18 @@ export class BrainService {
   private performanceMetricsCache: Map<string, ModelPerformanceMetrics> | null = null;
   private performanceCacheFetchedAt: number = 0;
   private readonly PERFORMANCE_CACHE_TTL_MS = 30000; // 30 seconds
+
+  private initialized = false;
+
+  async initialize() {
+    if (this.initialized) return;
+    this.initialized = true;
+    await Promise.all([
+      this.loadPerformanceMetrics(),
+      this.loadBrainLog(),
+    ]);
+    logger.info('Brain initialized with persisted history and metrics');
+  }
 
   constructor() {
     this.providers = buildProviderRegistry();
@@ -171,6 +183,18 @@ export class BrainService {
     this.recentSuccesses.set(`${provider}:${model}`, Date.now());
   }
 
+  private updateProviderHealth(provider: string, success: boolean) {
+    const breaker = this.circuitBreakers.get(provider);
+    const state = breaker?.getState() ?? 'closed';
+    const failureCount = breaker?.getFailureCount() ?? 0;
+    this.router.updateProviderHealth({
+      provider,
+      circuitState: state,
+      failureCount,
+      recentSuccess: success,
+    });
+  }
+
 async complete(prompt: string, options: CompletionOptions = {}): Promise<CompletionResult> {
      const startTime = Date.now();
      const attemptTimeout = providerAttemptTimeoutMs();
@@ -178,15 +202,13 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
      const configuredDeadline = Number(process.env.BRAIN_COMPLETION_DEADLINE_MS);
      const defaultDeadline = Math.max(attemptTimeout, Math.min(attemptTimeout * 3, 900000));
      const completionDeadline = startTime + (Number.isFinite(configuredDeadline) && configuredDeadline > 0 ? configuredDeadline : defaultDeadline);
-     const modelIdOpt = options.model || 'auto';
-     const providerOpt = options.provider || '';
      const promptPreview = prompt.slice(0, 120);
 
      const promptHash = crypto.createHash('sha256').update(prompt).digest('hex').slice(0, 16);
     const systemHash = options.systemPrompt
       ? crypto.createHash('sha256').update(options.systemPrompt).digest('hex').slice(0, 8)
       : 'none';
-    const cacheKey = `brain:complete:${modelIdOpt}:${providerOpt || ""}:${promptHash}:${systemHash}`;
+    const cacheKey = `brain:complete:auto:${promptHash}:${systemHash}`;
 
     const cached = await this.cache.get(cacheKey);
     if (cached) {
@@ -194,8 +216,8 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
       const cachedResult = cached as CompletionResult;
       this.addLog({
         type: 'cache_hit',
-        model: cachedResult.model || modelIdOpt,
-        provider: cachedResult.provider || providerOpt,
+        model: cachedResult.model,
+        provider: cachedResult.provider,
         promptPreview,
         success: true,
         durationMs: Date.now() - startTime,
@@ -207,31 +229,34 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
     const settings = await this.loadLlmSettings();
 
     // Build ordered candidate list and try providers/models until one succeeds.
-    let candidates = this.router.getCandidates({
+    const routingOptions = {
       task: prompt,
-      modelId: options.model,
-      provider: options.provider,
       maxTokens: options.maxTokens ?? 1024,
       budget: options.budget,
       freeOnly: settings?.freeModelsOnly,
       optimizeFor: options.optimizeFor,
-    });
+    };
+    let candidates = this.router.getCandidates(routingOptions);
 
     // Reorder candidates to prioritize recently successful models
-    candidates = this.prioritizeRecentSuccesses(candidates);
+    const candidatesById = new Map(candidates.map((candidate) => [candidate.model.id, candidate]));
+    candidates = this.prioritizeRecentSuccesses(candidates.map((candidate) => candidate.model))
+      .flatMap((model) => {
+        const candidate = candidatesById.get(model.id);
+        return candidate ? [candidate] : [];
+      });
 
     // If no candidates found and we were preferring free models, retry without that constraint.
     if ((!candidates || candidates.length === 0) && settings?.freeModelsOnly) {
       logger.warn({ task: prompt.slice(0, 80) }, 'No free-model candidates found; retrying with paid models allowed');
-      candidates = this.router.getCandidates({
+      const newCandidates = this.router.getCandidates({
         task: prompt,
-        modelId: options.model,
-        provider: options.provider,
         maxTokens: options.maxTokens ?? 1024,
         budget: options.budget,
         freeOnly: false,
         optimizeFor: options.optimizeFor,
       });
+      candidates = newCandidates;
     }
 
     if (!candidates || candidates.length === 0) {
@@ -239,7 +264,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
       const fallback = this.router.listModels().filter((m) => (m.costPer1kTokens === 0) && (m.capabilities.includes('chat') || m.capabilities.includes('creative')));
       if (fallback.length > 0) {
         logger.warn({ task: prompt.slice(0, 80), fallbackCount: fallback.length }, 'Using fallback free chat-capable models');
-        candidates = fallback;
+        candidates = fallback.map(m => ({ model: m, score: 0 }));
       }
     }
 
@@ -247,8 +272,6 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
       const errMsg = 'No model available for the requested task. Ensure at least one LLM provider is configured with a valid API key.';
       this.addLog({
         type: 'error',
-        model: options.model,
-        provider: options.provider,
         promptPreview,
         success: false,
         durationMs: Date.now() - startTime,
@@ -272,7 +295,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
       if (Date.now() >= completionDeadline) break;
       // Skip if there isn't enough time left to attempt this candidate at all.
       if (Date.now() + attemptTimeout > completionDeadline) break;
-      const provider = this.providers.find((p) => p.id === candidate.provider);
+      const provider = this.providers.find((p) => p.id === candidate.model.provider);
       if (!provider) {
         logger.warn({ candidate }, 'Skipping candidate: provider not registered');
         continue;
@@ -284,14 +307,14 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
       if (unavailableProviders.has(provider.id)) continue;
 
       const req: CompletionRequest = {
-        model: candidate.id,
+        model: candidate.model.id,
         messages: messagesBase,
         maxTokens: options.maxTokens ?? 1024,
         temperature: options.temperature,
       };
 
-      logger.info({ provider: provider.id, model: candidate.id }, 'Dispatching completion (candidate)');
-      lastCandidate = { id: candidate.id, provider: provider.id };
+      logger.info({ provider: provider.id, model: candidate.model.id }, 'Dispatching completion (candidate)');
+      lastCandidate = { id: candidate.model.id, provider: provider.id };
       const breaker = this.circuitBreakers.get(provider.id) || new CircuitBreaker(Number(process.env.BRAIN_CIRCUIT_THRESHOLD) || 8, Number(process.env.BRAIN_CIRCUIT_COOLDOWN_MS) || 60000);
       if (breaker.getState() === 'open') {
         const circuitError = new Error(
@@ -301,7 +324,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
         if (!reportedOpenCircuits.has(provider.id)) {
           this.addLog({
             type: 'error',
-            model: candidate.id,
+            model: candidate.model.id,
             provider: provider.id,
             promptPreview,
             success: false,
@@ -326,15 +349,15 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
 
           const result: CompletionResult = {
             content: response.content,
-            model: response.model || candidate.id,
+            model: response.model || candidate.model.id,
             provider: response.provider || provider.id,
             cached: false,
             tokensUsed: response.tokensUsed,
           };
 
           // estimate cost based on model's costPer1kTokens
-          const estimatedCost = typeof response.tokensUsed === 'number' && typeof candidate.costPer1kTokens === 'number'
-            ? (response.tokensUsed / 1000) * candidate.costPer1kTokens
+          const estimatedCost = typeof response.tokensUsed === 'number' && typeof candidate.model.costPer1kTokens === 'number'
+            ? (response.tokensUsed / 1000) * candidate.model.costPer1kTokens
             : undefined;
 
           this.addLog({
@@ -350,6 +373,9 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
 
           // Record this provider/model as recently successful for prioritization
           this.recordSuccess(result.provider, result.model);
+
+          // Update provider health in router
+          this.updateProviderHealth(result.provider, true);
 
           // Record performance metrics
           await this.recordPerformanceMetrics(result.model, result.provider, Date.now() - startTime, response.tokensUsed, estimatedCost, true);
@@ -385,7 +411,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
           lastErr = err;
           lastFailureWasLogged = false;
           const errMsg = err instanceof Error ? err.message : String(err);
-          logger.warn({ provider: provider.id, model: candidate.id, attempt, err: errMsg }, 'Candidate attempt failed');
+          logger.warn({ provider: provider.id, model: candidate.model.id, attempt, err: errMsg }, 'Candidate attempt failed');
 
           // Model-specific errors: the specific model is invalid or misconfigured,
           // but other models on this provider may still work. Do NOT trip the
@@ -393,7 +419,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
           const isModelSpecific = /is not found for API version|model .* does not exist|model .* not found/i.test(errMsg)
             || /\b(404)\b/.test(errMsg);
           // classify error: provider-key / quota issues vs transient vs rate-limit
-          const isProviderFatal = /key limit exceeded|quota exceeded|no remaining credits|insufficient credits|credit balance is too low|credits? exhausted|payment required|invalid api key|incorrect api key|authentication|unauthorized/i.test(errMsg)
+          const isProviderFatal = /key limit exceeded|quota exceeded|no remaining credits|insufficient credits|credit balance is too low|credits? exhausted|payment required|invalid api key|incorrect api key|authentication|unauthorized|no route for that uri|object identifier is invalid|invalid account|invalid endpoint|unauthorized account/i.test(errMsg)
             || /\b(401|402|403)\b/.test(errMsg);
           // 429 / rate-limit / too-many-requests: move to the next candidate model
           // (which may be on the same provider or a different one) rather than retrying
@@ -404,21 +430,22 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
           // skip to the next candidate immediately instead of wasting time.
           const isTimeout = /timed out after \d+ms/i.test(errMsg);
           if (isTimeout) {
-            logger.warn({ provider: provider.id, model: candidate.id, err: errMsg }, 'Provider timed out - trying next candidate');
+            logger.warn({ provider: provider.id, model: candidate.model.id, err: errMsg }, 'Provider timed out - trying next candidate');
             this.addLog({
               type: 'error',
-              model: candidate.id,
+              model: candidate.model.id,
               provider: provider.id,
               promptPreview,
               success: false,
               durationMs: Date.now() - startTime,
               error: errMsg,
             });
+            this.updateProviderHealth(provider.id, false);
             break;
           }
           if (isProviderFatal) {
             unavailableProviders.add(provider.id);
-            logger.error({ provider: provider.id, model: candidate.id, err: errMsg }, 'Provider configuration, credit, or quota error; skipping further attempts for this provider');
+            logger.error({ provider: provider.id, model: candidate.model.id, err: errMsg }, 'Provider configuration, credit, or quota error; skipping further attempts for this provider');
             try {
               const cb = this.circuitBreakers.get(provider.id);
               cb?.trip();
@@ -427,7 +454,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
             }
             this.addLog({
               type: 'error',
-              model: candidate.id,
+              model: candidate.model.id,
               provider: provider.id,
               promptPreview,
               success: false,
@@ -435,16 +462,17 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
               error: errMsg,
               modelIssue: false,
             });
+            this.updateProviderHealth(provider.id, false);
             lastFailureWasLogged = true;
             break;
           }
           if (isModelSpecific) {
             // Model-specific error (e.g. 404 for a specific model). Skip this model
             // but keep the provider active so other models on this provider can still be tried.
-            logger.warn({ provider: provider.id, model: candidate.id, err: errMsg }, 'Model-specific error - skipping to next candidate');
+            logger.warn({ provider: provider.id, model: candidate.model.id, err: errMsg }, 'Model-specific error - skipping to next candidate');
             this.addLog({
               type: 'error',
-              model: candidate.id,
+              model: candidate.model.id,
               provider: provider.id,
               promptPreview,
               success: false,
@@ -452,22 +480,24 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
               error: errMsg,
               modelIssue: true,
             });
+            this.updateProviderHealth(provider.id, false);
             lastFailureWasLogged = true;
             break;
           }
           if (isRateLimit) {
             // Rate-limited: do NOT retry the same model (backoff would just hit the
             // same limit). Move to the next candidate model immediately.
-            logger.warn({ provider: provider.id, model: candidate.id, err: errMsg }, 'Model rate-limited - trying next candidate');
+            logger.warn({ provider: provider.id, model: candidate.model.id, err: errMsg }, 'Model rate-limited - trying next candidate');
             this.addLog({
               type: 'error',
-              model: candidate.id,
+              model: candidate.model.id,
               provider: provider.id,
               promptPreview,
               success: false,
               durationMs: Date.now() - startTime,
               error: errMsg,
             });
+            this.updateProviderHealth(provider.id, false);
             lastFailureWasLogged = true;
             break;
           }
@@ -482,7 +512,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
           // exhausted attempts for this candidate; log and try next candidate
           this.addLog({
             type: 'error',
-            model: candidate.id,
+            model: candidate.model.id,
             provider: provider.id,
             promptPreview,
             success: false,
@@ -497,8 +527,8 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
 
     const finalErrMsg = lastErr instanceof Error ? lastErr.message : String(lastErr || 'All providers failed');
 
-    const finalModel = lastCandidate?.id || options.model;
-    const finalProvider = lastCandidate?.provider || options.provider;
+    const finalModel = lastCandidate?.id;
+    const finalProvider = lastCandidate?.provider;
 
     // Record performance metrics for final failure
     if (finalModel && finalProvider) {
@@ -545,6 +575,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
     if (this.brainLog.length > MAX_LOG_ENTRIES) {
       this.brainLog = this.brainLog.slice(0, MAX_LOG_ENTRIES);
     }
+    this.saveBrainLog().catch((e) => logger.warn({ err: e instanceof Error ? e.message : String(e) }, 'Failed to persist brain log'));
   }
 
   private getArtifactsUrl(): string {
@@ -582,7 +613,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
     }
   }
 
-  private async savePerformanceMetrics(metrics: Map<string, ModelPerformanceMetrics>): Promise<void> {
+private async savePerformanceMetrics(metrics: Map<string, ModelPerformanceMetrics>): Promise<void> {
     try {
       const persistenceUrl = this.getArtifactsUrl();
       const data: Record<string, ModelPerformanceMetrics> = {};
@@ -596,6 +627,33 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
       });
     } catch (err) {
       logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Failed to save performance metrics to artifacts');
+    }
+  }
+
+  private async loadBrainLog(): Promise<void> {
+    try {
+      const persistenceUrl = this.getArtifactsUrl();
+      const res = await fetch(`${persistenceUrl}/api/artifacts/documents/${BRAIN_LOG_DOC_ID}`, { method: 'GET' });
+      if (!res.ok) return;
+      const doc = await res.json() as { data?: { entries?: BrainLogEntry[] } };
+      if (doc.data && Array.isArray(doc.data.entries)) {
+        this.brainLog = doc.data.entries.slice(0, MAX_LOG_ENTRIES);
+      }
+    } catch (err) {
+      logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Failed to load brain log from artifacts');
+    }
+  }
+
+  private async saveBrainLog(): Promise<void> {
+    try {
+      const persistenceUrl = this.getArtifactsUrl();
+      await fetch(`${persistenceUrl}/api/artifacts/documents/${BRAIN_LOG_DOC_ID}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ data: { entries: this.brainLog } }),
+      });
+    } catch (err) {
+      logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Failed to save brain log to artifacts');
     }
   }
 

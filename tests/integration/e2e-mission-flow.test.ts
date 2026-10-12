@@ -242,7 +242,6 @@ describe('Integration: End-to-End Mission Flow', () => {
       .send({
         id: 'e2e-assistant',
         name: 'E2E Assistant',
-        model: 'gpt-4',
         systemPrompt: 'You are an end-to-end test assistant.',
         tools: [],
         metadata: {},
@@ -261,7 +260,6 @@ describe('Integration: End-to-End Mission Flow', () => {
         description: 'End-to-end agent',
         type: 'worker',
         systemPrompt: 'You execute missions.',
-        model: 'gpt-4',
         tools: [],
         metadata: {},
         createdAt: new Date(),

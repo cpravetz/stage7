@@ -15,7 +15,7 @@ beforeAll(() => {
         status: 200,
         json: async () => ({
           content: `[Brain says] ${body.prompt}`,
-          model: body.options?.model || 'gpt-4o-mini',
+          model: 'brain-selected-model',
           provider: 'openrouter',
           tokensUsed: 42,
         }),
@@ -299,7 +299,7 @@ describe('AssistantExecutor', () => {
             status: 200,
             json: async () => ({
               content: `[Brain says] ${body.systemPrompt}\nUser: ${body.prompt}`,
-              model: body.options?.model || 'gpt-4o-mini',
+              model: 'brain-selected-model',
               provider: 'openrouter',
               tokensUsed: 42,
             }),

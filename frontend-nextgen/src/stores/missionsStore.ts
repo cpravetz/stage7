@@ -19,6 +19,8 @@ export interface MissionRow {
 export interface MissionDetail {
   missionId: string;
   status: string;
+  artifacts?: unknown[];
+  artifactLoadError?: string;
   output?: {
     plan?: unknown;
     outputs?: { phases?: MissionPhaseOutput[]; status?: string; phaseId?: string; reason?: string };
@@ -53,6 +55,12 @@ export interface PendingApproval {
   question: string;
   phaseName?: string;
   assistantId?: string;
+  tasks?: Array<{
+    id: string;
+    title: string;
+    status: string;
+    artifacts?: any[];
+  }>;
 }
 
 interface MissionsState {
@@ -179,7 +187,7 @@ function processFeedEvents(newEvents: FeedEvent[]) {
   const now = Date.now();
 
   for (const evt of newEvents) {
-    if (!LIFECYCLE_EVENTS.has(evt.type as string)) continue;
+    if (!LIFECYCLE_EVENTS.has(evt.type as string) && evt.type !== 'approval_requested') continue;
     const eventMissionId = evt.missionId;
     if (!eventMissionId) continue;
 
@@ -187,7 +195,7 @@ function processFeedEvents(newEvents: FeedEvent[]) {
     if (!detailKey) continue;
 
     const lastRefresh = lastRefreshByMission.get(detailKey) || 0;
-    if (now - lastRefresh < REFRESH_DEBOUNCE) continue;
+    if (evt.type !== 'approval_requested' && now - lastRefresh < REFRESH_DEBOUNCE) continue;
     lastRefreshByMission.set(detailKey, now);
 
     const loading = store.detailLoading[detailKey];
@@ -221,6 +229,8 @@ function subscribeToFeed() {
 
 async function loadSupplementary(workflowId: string, data: MissionDetail): Promise<MissionDetail> {
   const missionId = data.missionId || workflowId.replace(/^mission-/, '');
+  let enriched = data;
+
   try {
     const evtRes = await fetchJSON<{ events: unknown[] }>(
       `/api/artifacts/missions/${encodeURIComponent(missionId)}/events`
@@ -230,27 +240,44 @@ async function loadSupplementary(workflowId: string, data: MissionDetail): Promi
       .map((e) => normalize(e))
       .filter((e): e is FeedEvent => e !== null);
     useFeedStore.getState().addEvents(normalized);
+  } catch {
+    // Events are supplementary; the mission detail remains usable if they are unavailable.
+  }
 
-    try {
-      const plan = await fetchJSON<unknown>(
-        `/api/artifacts/missions/${encodeURIComponent(missionId)}/plan`
-      );
-      if (plan) {
-        return {
-          ...data,
-          output: {
-            ...(data.output || {}),
-            plan,
-          },
-        };
-      }
-    } catch {
-      // best-effort: plan not available is acceptable
+  try {
+    const plan = await fetchJSON<unknown>(
+      `/api/artifacts/missions/${encodeURIComponent(missionId)}/plan`
+    );
+    if (plan) {
+      enriched = {
+        ...enriched,
+        output: {
+          ...(enriched.output || {}),
+          plan,
+        },
+      };
     }
   } catch {
-    // best-effort: events and plan are supplementary
+    // A plan may not have been generated yet.
   }
-  return data;
+
+  try {
+    const result = await fetchJSON<{ artifacts: unknown[] }>(
+      `/api/artifacts/missions/${encodeURIComponent(missionId)}/artifacts`
+    );
+    enriched = {
+      ...enriched,
+      artifacts: result.artifacts || [],
+      artifactLoadError: undefined,
+    };
+  } catch (err) {
+    enriched = {
+      ...enriched,
+      artifactLoadError: err instanceof Error ? err.message : 'Failed to load mission artifacts',
+    };
+  }
+
+  return enriched;
 }
 
 export const useMissionsStore = create<MissionsState>((set, get) => ({

@@ -74,7 +74,7 @@ beforeAll(async () => {
       };
 
       if (req.method === 'POST' && (req.url || '').split('?')[0] === '/api/brain/complete') {
-        let request: { prompt?: string; options?: { model?: string } } = {};
+        let request: { prompt?: string; options?: { maxTokens?: number } } = {};
         try {
           request = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
         } catch (e) {
@@ -83,7 +83,7 @@ beforeAll(async () => {
         }
         respond(200, {
           content: brainContentFor(request.prompt || ''),
-          model: (request.options && request.options.model) || 'gpt-4o-mini',
+          model: 'brain-selected-model',
           provider: 'openrouter',
           tokensUsed: 100,
         });

@@ -39,9 +39,10 @@ class MockProvider implements LLMProvider {
 }
 
 const mockProviderInstance = new MockProvider();
+const mockProviderInstances: LLMProvider[] = [mockProviderInstance];
 
 jest.mock('../providers/registry', () => ({
-  buildProviderRegistry: () => [mockProviderInstance],
+  buildProviderRegistry: () => mockProviderInstances,
 }));
 
 describe('BrainService', () => {
@@ -49,6 +50,7 @@ describe('BrainService', () => {
   let cache: SemanticCache;
 
   beforeEach(async () => {
+    mockProviderInstances.splice(0, mockProviderInstances.length, mockProviderInstance);
     mockProviderInstance.lastRequest = null;
     mockProviderInstance.failure = null;
     mockProviderInstance.calls = 0;
@@ -59,8 +61,6 @@ describe('BrainService', () => {
       tokensUsed: 10,
     };
     cache = SemanticCache.getInstance();
-    await cache.invalidate('brain:complete:mock-model:mock:default');
-    await cache.invalidate('brain:complete:auto:any:*');
     brain = new BrainService();
   });
 
@@ -106,6 +106,50 @@ describe('BrainService', () => {
     expect(errors[0].error).toContain('no remaining credits');
   });
 
+  it('tries another provider after the selected provider runs out of credits', async () => {
+    mockProviderInstance.failure = new Error(
+      '402 {"error":"Your organization has no remaining credits"}',
+    );
+    const fallbackProvider = {
+      id: 'backup',
+      name: 'Backup Provider',
+      info: {
+        id: 'backup',
+        name: 'Backup Provider',
+        apiBase: 'http://backup',
+        hasApiKey: true,
+        openAICompatible: true,
+      },
+      isAvailable: () => true,
+      listModels: async () => [{
+        id: 'backup-chat-model',
+        capabilities: ['chat', 'reasoning'],
+        maxTokens: 128000,
+        costPer1kTokens: 0.2,
+      }],
+      complete: jest.fn(async () => ({
+        content: 'completed through backup',
+        model: 'backup-chat-model',
+        provider: 'backup',
+        tokensUsed: 12,
+      })),
+    } satisfies LLMProvider;
+    mockProviderInstances.push(fallbackProvider);
+    brain = new BrainService();
+
+    const result = await brain.complete(
+      'Try another provider after the preferred model runs out of credits',
+    );
+
+    expect(result).toMatchObject({
+      content: 'completed through backup',
+      model: 'backup-chat-model',
+      provider: 'backup',
+    });
+    expect(mockProviderInstance.calls).toBe(1);
+    expect(fallbackProvider.complete).toHaveBeenCalledTimes(1);
+  });
+
   it('should pass systemPrompt to the provider when provided', async () => {
     await brain.complete('hi', { systemPrompt: 'you are a cat' });
     expect(mockProviderInstance.lastRequest).not.toBeNull();
@@ -124,17 +168,8 @@ describe('BrainService', () => {
   });
 
   it('should pick the cheapest model that matches required capabilities', async () => {
-    const result = await brain.complete('Help me write some code', { model: undefined });
+    const result = await brain.complete('Help me write some code');
     expect(result.model).toBe('mock-model');
-  });
-
-  it('should respect explicit model selection when it exists', async () => {
-    const result = await brain.complete('hi', { model: 'mock-model' });
-    expect(result.model).toBe('mock-model');
-  });
-
-  it('should throw when no provider is available for a model', async () => {
-    await expect(brain.complete('hi', { model: 'does-not-exist' })).rejects.toThrow();
   });
 
   it('should list providers', () => {

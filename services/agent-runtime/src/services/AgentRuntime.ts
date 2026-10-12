@@ -6,7 +6,52 @@ import {
   AgentTask,
   AgentCollaboration,
   AgentSpecialization,
+  DEFAULT_AGENT_EXECUTION_POLICY,
+  AgentExecutionPolicy,
 } from '../types'
+import { AgentExecutor, AgentDelegateRequest } from './AgentExecutor'
+
+const MAX_AGENTS_PER_MISSION = 16
+
+function readExecutionPolicy(value: unknown): AgentExecutionPolicy | undefined {
+  if (value === undefined) return undefined
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Agent execution policy must be an object')
+  }
+  const policy = {
+    ...DEFAULT_AGENT_EXECUTION_POLICY,
+    ...(value as Record<string, unknown>),
+  }
+  const keys: Array<keyof AgentExecutionPolicy> = [
+    'maxBrainCalls',
+    'maxActions',
+    'maxCompletionTokens',
+    'maxCompletionTokensPerCall',
+    'maxDelegations',
+  ]
+  for (const key of keys) {
+    const maximum = key === 'maxCompletionTokensPerCall' ? 4096 : DEFAULT_AGENT_EXECUTION_POLICY[key]
+    const minimum = key === 'maxActions' || key === 'maxDelegations' ? 0 : 1
+    if (
+      typeof policy[key] !== 'number'
+      || !Number.isInteger(policy[key])
+      || policy[key] < minimum
+      || policy[key] > maximum
+    ) {
+      throw new Error(`Agent execution policy ${key} must be an integer`)
+    }
+  }
+  if (policy.maxCompletionTokensPerCall > policy.maxCompletionTokens) {
+    throw new Error('Agent execution policy maxCompletionTokensPerCall cannot exceed maxCompletionTokens')
+  }
+  return {
+    maxBrainCalls: policy.maxBrainCalls as number,
+    maxActions: policy.maxActions as number,
+    maxCompletionTokens: policy.maxCompletionTokens as number,
+    maxCompletionTokensPerCall: policy.maxCompletionTokensPerCall as number,
+    maxDelegations: policy.maxDelegations as number,
+  }
+}
 
 export class AgentRuntime {
   private agents: Map<string, AgentDefinition> = new Map()
@@ -16,6 +61,11 @@ export class AgentRuntime {
   private tasks: Map<string, AgentTask> = new Map()
   private collaborations: Map<string, AgentCollaboration> = new Map()
   private specializations: Map<string, AgentSpecialization[]> = new Map()
+  private executor: AgentExecutor
+
+  constructor(executor: AgentExecutor = new AgentExecutor()) {
+    this.executor = executor
+  }
 
   registerAgent(definition: AgentDefinition): void {
     this.agents.set(definition.id, definition)
@@ -88,6 +138,13 @@ export class AgentRuntime {
     return state
   }
 
+  restoreAgentState(state: AgentState): void {
+    if (!this.agents.has(state.agentId)) {
+      throw new Error(`Agent ${state.agentId} must be registered before restoring its state`)
+    }
+    this.states.set(state.agentId, state)
+  }
+
   stopAgent(agentId: string): void {
     const state = this.states.get(agentId)
     if (state) {
@@ -102,15 +159,178 @@ export class AgentRuntime {
     return this.states.get(agentId)
   }
 
-  submitTask(agentId: string, task: Omit<AgentTask, 'taskId' | 'createdAt'>): AgentTask {
+  submitTask(
+    agentId: string,
+    task: Omit<AgentTask, 'agentId' | 'taskId' | 'createdAt'> & { taskId?: string },
+  ): AgentTask {
+    if (!this.agents.has(agentId)) {
+      throw new Error(`Agent ${agentId} not found`)
+    }
     const fullTask: AgentTask = {
       ...task,
-      taskId: uuidv4(),
+      agentId,
+      taskId: task.taskId || uuidv4(),
       createdAt: new Date().toISOString(),
+    }
+    const existing = this.tasks.get(fullTask.taskId)
+    if (existing) {
+      if (existing.agentId !== agentId) {
+        throw new Error(`Task ${fullTask.taskId} is already assigned to another agent`)
+      }
+      return existing
     }
     this.tasks.set(fullTask.taskId, fullTask)
     logger.info({ agentId, taskId: fullTask.taskId }, 'Task submitted')
     return fullTask
+  }
+
+  getTask(taskId: string): AgentTask | undefined {
+    return this.tasks.get(taskId)
+  }
+
+  restoreTask(task: AgentTask): void {
+    if (!this.agents.has(task.agentId)) {
+      throw new Error(`Agent ${task.agentId} must be registered before restoring task ${task.taskId}`)
+    }
+    this.tasks.set(task.taskId, task)
+  }
+
+  async executeTask(agentId: string, taskId: string, delegationDepth = 0): Promise<AgentTask> {
+    const agent = this.agents.get(agentId)
+    if (!agent) throw new Error(`Agent ${agentId} not found`)
+    const task = this.tasks.get(taskId)
+    if (!task || task.agentId !== agentId) throw new Error(`Task ${taskId} not found for agent ${agentId}`)
+    if (task.status === 'completed') return task
+    if (task.status === 'running') throw new Error(`Task ${taskId} is already running`)
+
+    const state = this.states.get(agentId)
+    if (!state) throw new Error(`Agent ${agentId} has not been started`)
+    task.status = 'running'
+    state.status = 'running'
+    state.context = { ...state.context, currentTaskId: taskId }
+
+    try {
+      const input = task.input && typeof task.input === 'object' && !Array.isArray(task.input)
+        ? task.input as Record<string, unknown>
+        : {}
+      const taskContext = input.context && typeof input.context === 'object' && !Array.isArray(input.context)
+        ? input.context as Record<string, unknown>
+        : {}
+      const executionPolicy = readExecutionPolicy(taskContext.executionPolicy)
+      const missionId = state.missionId
+      const result = await this.executor.execute(agent, task, {
+        missionId,
+        delegationDepth,
+        ...(executionPolicy ? { executionPolicy } : {}),
+        delegate: (request) => this.delegateTask(agent, task, request, delegationDepth + 1),
+      })
+
+      task.status = 'completed'
+      task.completedAt = new Date().toISOString()
+      task.result = result
+      this.tasks.set(taskId, task)
+      const receipts = state.context.taskReceipts && typeof state.context.taskReceipts === 'object'
+        ? state.context.taskReceipts as Record<string, unknown>
+        : {}
+      state.context = {
+        ...state.context,
+        taskReceipts: {
+          ...receipts,
+          [taskId]: { status: 'completed', result, completedAt: task.completedAt },
+        },
+        activeTaskId: undefined,
+        currentTaskId: undefined,
+        lastCompletedTaskId: taskId,
+        lastTaskResult: result,
+      }
+      state.status = 'waiting'
+      this.states.set(agentId, state)
+      logger.info({ agentId, taskId, toolCalls: result.toolCalls }, 'Agent task completed')
+      return task
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      task.status = 'failed'
+      task.error = message
+      task.completedAt = new Date().toISOString()
+      this.tasks.set(taskId, task)
+      state.status = 'failed'
+      const receipts = state.context.taskReceipts && typeof state.context.taskReceipts === 'object'
+        ? state.context.taskReceipts as Record<string, unknown>
+        : {}
+      state.context = {
+        ...state.context,
+        taskReceipts: {
+          ...receipts,
+          [taskId]: { status: 'failed', error: message, completedAt: task.completedAt },
+        },
+        activeTaskId: undefined,
+        currentTaskId: undefined,
+        lastFailedTaskId: taskId,
+        lastError: message,
+      }
+      this.states.set(agentId, state)
+      logger.error({ agentId, taskId, error: message }, 'Agent task failed')
+      throw error
+    }
+  }
+
+  private async delegateTask(
+    parent: AgentDefinition,
+    parentTask: AgentTask,
+    request: AgentDelegateRequest,
+    delegationDepth: number,
+  ): Promise<unknown> {
+    if (delegationDepth > this.executor.maxDelegationDepth) {
+      throw new Error(`Maximum delegation depth of ${this.executor.maxDelegationDepth} exceeded`)
+    }
+    const parentState = this.states.get(parent.id)
+    if (!parentState) throw new Error(`Parent agent ${parent.id} has no active mission state`)
+    const missionAgents = this.missionAgents.get(parentState.missionId)
+    if ((missionAgents?.size || 0) >= MAX_AGENTS_PER_MISSION) {
+      throw new Error(`Mission agent limit of ${MAX_AGENTS_PER_MISSION} reached`)
+    }
+
+    const role = request.role?.trim() || 'delegate'
+    const agentId = `agent-${uuidv4()}`
+    const now = new Date().toISOString()
+    const child: AgentDefinition = {
+      ...parent,
+      id: agentId,
+      name: `${role} agent`,
+      description: `Mission-scoped delegate for ${parentTask.taskId}: ${request.goal}`,
+      type: role,
+      systemPrompt: request.systemPrompt || `You are a ${role} agent. Complete the delegated goal and report your findings.`,
+      tools: [],
+      metadata: { ...parent.metadata, missionId: parentState.missionId, parentAgentId: parent.id },
+      createdAt: now,
+      updatedAt: now,
+    }
+    this.registerAgentForMission(parentState.missionId, child)
+    this.startAgent(agentId, parentState.missionId)
+
+    const parentInput = parentTask.input && typeof parentTask.input === 'object' && !Array.isArray(parentTask.input)
+      ? parentTask.input as Record<string, unknown>
+      : {}
+    const parentContext = parentInput.context && typeof parentInput.context === 'object' && !Array.isArray(parentInput.context)
+      ? parentInput.context as Record<string, unknown>
+      : {}
+    const executionPolicy = readExecutionPolicy(parentContext.executionPolicy)
+    const childTask = this.submitTask(agentId, {
+      type: 'delegated',
+      input: {
+        prompt: request.goal,
+        context: {
+          missionId: parentState.missionId,
+          parentAgentId: parent.id,
+          parentTaskId: parentTask.taskId,
+          ...(executionPolicy ? { executionPolicy } : {}),
+        },
+      },
+      priority: parentTask.priority,
+      status: 'pending',
+    })
+    const completed = await this.executeTask(agentId, childTask.taskId, delegationDepth)
+    return completed.result
   }
 
   completeTask(taskId: string, result?: any): AgentTask | undefined {

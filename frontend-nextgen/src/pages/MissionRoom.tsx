@@ -4,6 +4,7 @@ import { useFeedStore, FeedEvent } from '../stores/feedStore';
 import AgentOutputsPanel from '../components/AgentOutputsPanel';
 import { useMissionsStore } from '../stores/missionsStore';
 import { postJSON } from '../utils/api';
+import { missionIdFromWorkflowId } from '../utils/missionId';
 
 interface Plan {
   summary?: string;
@@ -11,6 +12,7 @@ interface Plan {
   estimatedCost?: string;
   requiresClarification?: boolean;
   clarificationQuestions?: string[];
+  artifacts?: unknown[];
   phases: PlanPhase[];
 }
 
@@ -19,6 +21,7 @@ interface PlanPhase {
   name: string;
   goal?: string;
   requiresApproval?: boolean;
+  artifacts?: unknown[];
   tasks: PlanTask[];
 }
 
@@ -27,6 +30,7 @@ interface PlanTask {
   title: string;
   description?: string;
   agentRole?: string;
+  status?: string;
   expectedArtifacts?: string[];
   artifacts?: unknown[];
 }
@@ -85,6 +89,132 @@ function iconForType(type: string): string {
   return '📋';
 }
 
+interface MissionArtifactItem {
+  id: string;
+  name: string;
+  phaseId?: string;
+  taskId?: string;
+  kind: 'expected' | 'produced';
+  text?: string;
+  url?: string;
+}
+
+function toMissionArtifactItem(
+  value: unknown,
+  kind: MissionArtifactItem['kind'],
+  phaseId?: string,
+  taskId?: string,
+): MissionArtifactItem | null {
+  if (typeof value === 'string') {
+    return {
+      id: `${kind}-${phaseId || ''}-${taskId || ''}-${value}`,
+      name: value,
+      phaseId,
+      taskId,
+      kind,
+    };
+  }
+  if (!value || typeof value !== 'object') return null;
+
+  const artifact = value as Record<string, unknown>;
+  const name = typeof artifact.name === 'string'
+    ? artifact.name
+    : typeof artifact.id === 'string'
+      ? artifact.id
+      : 'artifact';
+  const rawContent = artifact.content ?? artifact.text ?? artifact.body;
+  const text = typeof rawContent === 'string'
+    ? rawContent
+    : rawContent === undefined
+      ? undefined
+      : JSON.stringify(rawContent);
+  return {
+    id: typeof artifact.id === 'string'
+      ? artifact.id
+      : `${kind}-${phaseId || ''}-${taskId || ''}-${name}`,
+    name,
+    phaseId: typeof artifact.phaseId === 'string' ? artifact.phaseId : phaseId,
+    taskId: typeof artifact.taskId === 'string' ? artifact.taskId : taskId,
+    kind,
+    text,
+    url: typeof artifact.url === 'string' ? artifact.url : undefined,
+  };
+}
+
+function buildMissionArtifactItems(
+  plan: Plan | null,
+  phaseOutputs: PhaseOutput[],
+  events: FeedEvent[],
+  storedArtifacts: unknown[] = [],
+): MissionArtifactItem[] {
+  const items = new Map<string, MissionArtifactItem>();
+  const add = (value: unknown, kind: MissionArtifactItem['kind'], phaseId?: string, taskId?: string) => {
+    const item = toMissionArtifactItem(value, kind, phaseId, taskId);
+    if (!item) return;
+    const key = `${item.kind}|${item.phaseId || ''}|${item.taskId || ''}|${item.name.toLowerCase()}`;
+    const existing = items.get(key);
+    if (!existing || ((!existing.text && !existing.url) && (item.text || item.url))) {
+      items.set(key, item);
+    }
+  };
+
+  for (const artifact of plan?.artifacts || []) add(artifact, 'produced');
+  for (const phase of plan?.phases || []) {
+    for (const artifact of phase.artifacts || []) add(artifact, 'produced', phase.id);
+    for (const task of phase.tasks || []) {
+      for (const expected of task.expectedArtifacts || []) add(expected, 'expected', phase.id, task.id);
+      for (const artifact of task.artifacts || []) add(artifact, 'produced', phase.id, task.id);
+    }
+  }
+  for (const artifact of storedArtifacts) {
+    const item = toMissionArtifactItem(artifact, 'produced');
+    if (item) add(artifact, 'produced', item.phaseId, item.taskId);
+  }
+  for (const phase of phaseOutputs) {
+    for (const task of phase.tasks || []) {
+      for (const artifact of task.artifacts || []) add(artifact, 'produced', phase.phaseId, task.taskId);
+    }
+  }
+  for (const event of events) {
+    if (event.type !== 'task_completed') continue;
+    const rawArtifacts = event.metadata?.artifacts;
+    if (!Array.isArray(rawArtifacts)) continue;
+    for (const artifact of rawArtifacts) {
+      add(
+        artifact,
+        'produced',
+        typeof event.metadata?.phaseId === 'string' ? event.metadata.phaseId : undefined,
+        typeof event.metadata?.taskId === 'string' ? event.metadata.taskId : undefined,
+      );
+    }
+  }
+
+  return Array.from(items.values());
+}
+
+function getTaskStatus(
+  task: PlanTask,
+  phaseId: string,
+  phaseOutputs: PhaseOutput[],
+  events: FeedEvent[],
+): string | undefined {
+  const taskEvents = events
+    .filter((event) => event.metadata?.phaseId === phaseId
+      && event.metadata?.taskId === task.id
+      && ['task_started', 'task_completed', 'task_failed'].includes(event.type))
+    .sort((left, right) => left.timestamp - right.timestamp);
+  const latestTaskEvent = taskEvents[taskEvents.length - 1];
+  if (latestTaskEvent) {
+    return latestTaskEvent.type === 'task_started'
+      ? 'in_progress'
+      : latestTaskEvent.type === 'task_failed' ? 'failed' : 'completed';
+  }
+  const outputStatus = phaseOutputs
+    .find((phase) => phase.phaseId === phaseId)
+    ?.tasks?.find((outputTask) => outputTask.taskId === task.id)?.status;
+  return task.status || outputStatus;
+}
+
 const CONVERSATION_EVENT_TYPES = new Set([
   'user',
   'user_message',
@@ -116,7 +246,7 @@ const TIMELINE_EVENT_TYPES = new Set([
 
 const MissionRoom = () => {
   const { workflowId = '' } = useParams<{ workflowId: string }>();
-  const missionId = useMemo(() => workflowId.replace(/^mission-mission-/, 'mission-').replace(/^mission-/, ''), [workflowId]);
+  const missionId = useMemo(() => missionIdFromWorkflowId(workflowId), [workflowId]);
 
   const events = useFeedStore((s) => s.events);
   const connected = useFeedStore((s) => s.connected);
@@ -362,6 +492,11 @@ const MissionRoom = () => {
     [missionEvents]
   );
 
+  const artifactItems = useMemo(
+    () => buildMissionArtifactItems(plan, phaseOutputs, missionEvents, detail?.artifacts),
+    [plan, phaseOutputs, missionEvents, detail?.artifacts],
+  );
+
   const transcript = useMemo(
     () => buildTranscript(conversationEvents),
     [conversationEvents]
@@ -397,14 +532,36 @@ const MissionRoom = () => {
     () => plan?.phases.find((p) => p.id === pendingApproval?.phaseId),
     [plan, pendingApproval?.phaseId],
   );
-  const pendingPhaseOutput = useMemo(
-    () => phaseOutputs.find((p) => p.phaseId === pendingApproval?.phaseId),
-    [phaseOutputs, pendingApproval?.phaseId],
-  );
+  const pendingPhaseApprovalState = useMemo(() => {
+    if (!pendingApproval || !pendingPhase || pendingPhase.tasks.length === 0) {
+      return { ready: false, incompleteTasks: 0, missingArtifacts: 0 };
+    }
+    let incompleteTasks = 0;
+    let missingArtifacts = 0;
+    for (const task of pendingPhase.tasks) {
+      if (getTaskStatus(task, pendingPhase.id, phaseOutputs, missionEvents) !== 'completed') {
+        incompleteTasks += 1;
+      }
+      const expectedArtifacts = task.expectedArtifacts || [];
+      const hasProducedArtifact = artifactItems.some((artifact) =>
+        artifact.kind === 'produced'
+        && artifact.phaseId === pendingPhase.id
+        && artifact.taskId === task.id
+      );
+      if (expectedArtifacts.length > 0 && !hasProducedArtifact) {
+        missingArtifacts += 1;
+      }
+    }
+    return {
+      ready: incompleteTasks === 0 && missingArtifacts === 0,
+      incompleteTasks,
+      missingArtifacts,
+    };
+  }, [pendingApproval, pendingPhase, phaseOutputs, missionEvents, artifactItems]);
 
   const [approvalActionError, setApprovalActionError] = useState<string | null>(null);
   const handleApprove = async () => {
-    if (!pendingApproval) return;
+    if (!pendingApproval || !pendingPhaseApprovalState.ready) return;
     setApprovalActionError(null);
     try {
       await postJSON(
@@ -469,14 +626,7 @@ const MissionRoom = () => {
 
   const status = detail?.status || 'unknown';
   const badge = STATUS_BADGE[status] || status;
-  const taskArtifactCount = phaseOutputs.reduce(
-    (sum, p) => sum + (p.tasks || []).reduce((s, t) => s + (t.artifacts?.length || 0), 0),
-    0,
-  );
-  const expectedArtifactCount = plan?.phases.reduce(
-    (sum, ph) => sum + ph.tasks.reduce((s, t) => s + (t.expectedArtifacts?.length || 0) + (t.artifacts?.length || 0), 0),
-    0,
-  ) || 0;
+  const artifactCount = artifactItems.length;
   const startedAtMs = detail?.startedAt ? new Date(detail.startedAt).getTime() : undefined;
   const completedAtMs = detail?.completedAt ? new Date(detail.completedAt).getTime() : undefined;
   const wallClockMs =
@@ -584,14 +734,28 @@ const MissionRoom = () => {
             {pendingApproval.question}
           </div>
           <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
-            <button onClick={handleApprove}>Approve phase</button>
+            <button onClick={handleApprove} disabled={!pendingPhaseApprovalState.ready}>
+              Approve phase
+            </button>
             <button className="danger" onClick={handleReject}>Reject phase</button>
+            <button className="secondary" onClick={() => setTab('plan')}>Open full plan</button>
           </div>
+          {!pendingPhaseApprovalState.ready && (
+            <div className="muted" style={{ marginTop: 6, fontSize: '12px' }}>
+              {pendingPhaseApprovalState.incompleteTasks > 0
+                ? `${pendingPhaseApprovalState.incompleteTasks} task(s) are not yet recorded as complete. `
+                : ''}
+              {pendingPhaseApprovalState.missingArtifacts > 0
+                ? `${pendingPhaseApprovalState.missingArtifacts} task(s) still have expected deliverables that have not been published.`
+                : ''}
+              {!pendingPhase && 'The phase plan is not available yet.'}
+            </div>
+          )}
           {approvalActionError && <span className="muted">{approvalActionError}</span>}
           {pendingPhase && (
             <details open style={{ marginTop: 8 }}>
               <summary style={{ cursor: 'pointer', color: '#38bdf8', fontSize: '13px' }}>
-                Plan summary &amp; pending phase
+                Review plan and phase deliverables
               </summary>
               {plan?.summary && (
                 <p className="muted" style={{ marginTop: 6, fontSize: '13px' }}>{plan.summary}</p>
@@ -602,31 +766,53 @@ const MissionRoom = () => {
                 {pendingPhase.requiresApproval && <span className="badge">requires approval</span>}
               </div>
               <ul style={{ listStyle: 'none', padding: 0, margin: '6px 0', fontSize: '13px' }}>
-                {(pendingPhase.tasks || []).map((task) => (
-                  <li key={task.id} style={{ padding: '2px 0' }}>
-                    <span className="muted">• {task.title}</span>
-                    {task.agentRole && <span className="muted"> ({task.agentRole})</span>}
-                  </li>
-                ))}
+                {pendingPhase.tasks.map((task) => {
+                  const taskStatus = getTaskStatus(task, pendingPhase.id, phaseOutputs, missionEvents);
+                  const expected = task.expectedArtifacts || [];
+                  const produced = artifactItems.filter((artifact) =>
+                    artifact.kind === 'produced'
+                    && artifact.phaseId === pendingPhase.id
+                    && artifact.taskId === task.id
+                  );
+                  return (
+                    <li key={task.id} style={{ padding: '8px 0', borderTop: '1px solid rgba(148,163,184,0.2)' }}>
+                      <div>
+                        <strong>{task.title}</strong>
+                        {task.agentRole && <span className="badge">🤖 {task.agentRole}</span>}
+                        {taskStatus && <span className={`badge ${taskStatus}`}>{taskStatus}</span>}
+                      </div>
+                      {task.description && <p className="muted" style={{ margin: '4px 0' }}>{task.description}</p>}
+                      {expected.length > 0 && (
+                        <div className="muted" style={{ fontSize: '12px', marginTop: 4 }}>
+                          Expected deliverables: {expected.join(', ')}
+                        </div>
+                      )}
+                      {produced.length > 0 ? (
+                        <ul style={{ listStyle: 'none', padding: 0, margin: '6px 0' }}>
+                          {produced.map((artifact) => (
+                            <li key={artifact.id} style={{ marginBottom: 6, padding: 6, background: 'rgba(255,255,255,0.03)', borderRadius: 4 }}>
+                              <strong style={{ color: '#38bdf8', fontSize: '12px' }}>{artifact.name}</strong>
+                              {artifact.text && (
+                                <details style={{ marginTop: 4 }}>
+                                  <summary style={{ cursor: 'pointer', fontSize: '11px', color: '#94a3b8' }}>View produced content</summary>
+                                  <pre style={{ marginTop: 4, padding: 8, background: 'rgba(0,0,0,0.3)', borderRadius: 4, fontSize: '10px', overflow: 'auto', maxHeight: 240, whiteSpace: 'pre-wrap' }}>
+                                    {artifact.text}
+                                  </pre>
+                                </details>
+                              )}
+                              {artifact.url && <a href={artifact.url} target="_blank" rel="noreferrer">Open artifact</a>}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : expected.length > 0 ? (
+                        <div className="muted" style={{ color: '#f59e0b', fontSize: '12px', marginTop: 4 }}>
+                          No produced artifact is recorded for this task yet.
+                        </div>
+                      ) : null}
+                    </li>
+                  );
+                })}
               </ul>
-              {pendingPhaseOutput &&
-                (pendingPhaseOutput.tasks || []).some(
-                  (t) => (t.artifacts || []).length > 0,
-                ) && (
-                  <div style={{ marginTop: 6, fontSize: '12px' }}>
-                    <strong>Artifacts produced this phase:</strong>
-                    <ul style={{ listStyle: 'none', padding: 0, margin: '4px 0' }}>
-                      {(pendingPhaseOutput.tasks || [])
-                        .flatMap((t) => t.artifacts || [])
-                        .slice(0, 6)
-                        .map((a, i) => (
-                          <li key={i} className="muted">
-                            {typeof a === 'string' ? a : (a as { name?: string })?.name || JSON.stringify(a)}
-                          </li>
-                        ))}
-                    </ul>
-                  </div>
-                )}
             </details>
           )}
         </div>
@@ -654,9 +840,9 @@ const MissionRoom = () => {
             <strong>Estimated Cost:</strong> ${totalEstimatedCost.toFixed(4)}
           </span>
         )}
-        {(taskArtifactCount + expectedArtifactCount) > 0 && (
+        {artifactCount > 0 && (
           <span>
-            <strong>Artifacts:</strong> {taskArtifactCount + expectedArtifactCount}
+            <strong>Artifacts:</strong> {artifactCount}
           </span>
         )}
         <span><strong>Events:</strong> {missionEvents.length}</span>
@@ -670,8 +856,8 @@ const MissionRoom = () => {
             onClick={() => setTab(t)}
           >
             {t.charAt(0).toUpperCase() + t.slice(1)}
-            {t === 'artifacts' && (taskArtifactCount + expectedArtifactCount) > 0
-              ? ` (${taskArtifactCount + expectedArtifactCount})`
+            {t === 'artifacts' && artifactCount > 0
+              ? ` (${artifactCount})`
               : ''}
             {t === 'plan' && plan?.phases.length
               ? ` (${plan.phases.length})`
@@ -712,9 +898,14 @@ const MissionRoom = () => {
                       <div key={idx} className={`turn-line ${line.kind}`}>
                         <span className="turn-icon">{iconForType(line.type)}</span>
                         <span>{line.text}</span>
-                        {line.approval && (
+                        {line.approval && pendingApproval?.phaseId === line.approval.phaseId && (
                           <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
-                            <button onClick={handleApprove}>Approve</button>
+                            <button
+                              onClick={handleApprove}
+                              disabled={!pendingPhaseApprovalState.ready || pendingApproval?.phaseId !== line.approval.phaseId}
+                            >
+                              Approve
+                            </button>
                             <button className="danger" onClick={handleReject}>Reject</button>
                           </div>
                         )}
@@ -863,20 +1054,12 @@ const MissionRoom = () => {
                       {phase.goal && <p className="muted">{phase.goal}</p>}
                       <ul className="plan-tasks">
                         {phase.tasks.map((task) => {
-                          const taskOutput = output?.tasks?.find(
-                            (t) => t.taskId === task.id
+                          const taskStatus = getTaskStatus(task, phase.id, phaseOutputs, missionEvents);
+                          const taskArtifacts = artifactItems.filter((artifact) =>
+                            artifact.kind === 'produced'
+                            && artifact.phaseId === phase.id
+                            && artifact.taskId === task.id
                           );
-                          const taskEvents = missionEvents.filter(
-                            (event) => event.metadata?.taskId === task.id &&
-                              ['task_started', 'task_completed', 'task_failed'].includes(event.type)
-                          );
-                          const latestTaskEvent = taskEvents[taskEvents.length - 1];
-                          const liveTaskStatus = latestTaskEvent
-                            ? latestTaskEvent.type === 'task_started'
-                              ? 'in_progress'
-                              : latestTaskEvent.type === 'task_failed' ? 'failed' : 'completed'
-                            : undefined;
-                          const taskStatus = taskOutput?.status || liveTaskStatus;
                           return (
                             <li
                               key={task.id}
@@ -897,13 +1080,22 @@ const MissionRoom = () => {
                                     {taskStatus}
                                   </span>
                                 )}
-                                {taskOutput?.artifacts &&
-                                  taskOutput.artifacts.length > 0 && (
-                                    <span className="badge">
-                                      📎 {taskOutput.artifacts.length}
-                                    </span>
-                                  )}
+                                {taskArtifacts.length > 0 && <span className="badge">📎 {taskArtifacts.length}</span>}
                               </div>
+                              {(task.expectedArtifacts?.length || taskArtifacts.length > 0) && (
+                                <div style={{ marginTop: 4 }}>
+                                  {task.expectedArtifacts?.map((artifact) => (
+                                    <span key={`expected-${artifact}`} className="badge expected">
+                                      Expected: {artifact}
+                                    </span>
+                                  ))}
+                                  {taskArtifacts.map((artifact) => (
+                                    <span key={artifact.id} className="badge produced">
+                                      Produced: {artifact.name}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
                             </li>
                           );
                         })}
@@ -944,6 +1136,9 @@ const MissionRoom = () => {
             missionId={missionId}
             plan={plan ?? null}
             phaseOutputs={phaseOutputs}
+            events={missionEvents}
+            storedArtifacts={detail?.artifacts || []}
+            loadError={detail?.artifactLoadError}
             onRefresh={() => refreshDetail(workflowId)}
           />
         </div>
@@ -1088,91 +1283,22 @@ interface ArtifactsViewProps {
   missionId: string;
   plan: Plan | null;
   phaseOutputs: PhaseOutput[];
+  events: FeedEvent[];
+  storedArtifacts: unknown[];
+  loadError?: string;
   onRefresh: () => void;
 }
 
-const ArtifactsView = ({ missionId, plan, phaseOutputs, onRefresh }: ArtifactsViewProps) => {
-  const items: Array<{
-    id: string;
-    name: string;
-    phaseId?: string;
-    taskId?: string;
-    kind: 'expected' | 'produced';
-    text?: string;
-    url?: string;
-  }> = [];
-
-  if (plan) {
-    for (const phase of plan.phases) {
-      for (const task of phase.tasks) {
-        for (const expected of task.expectedArtifacts || []) {
-          items.push({
-            id: `expected-${phase.id}-${task.id}-${expected}`,
-            name: expected,
-            phaseId: phase.id,
-            taskId: task.id,
-            kind: 'expected',
-          });
-        }
-        for (const a of task.artifacts || []) {
-          if (typeof a === 'string') {
-            items.push({
-              id: `plan-artifact-${phase.id}-${task.id}-${a}`,
-              name: a,
-              phaseId: phase.id,
-              taskId: task.id,
-              kind: 'produced',
-            });
-          } else if (a && typeof a === 'object') {
-            const obj = a as Record<string, unknown>;
-            items.push({
-              id: `plan-artifact-${phase.id}-${task.id}-${String(
-                obj.id || obj.name || JSON.stringify(a)
-              )}`,
-              name: String(obj.name || obj.id || 'artifact'),
-              phaseId: phase.id,
-              taskId: task.id,
-              kind: 'produced',
-              text: typeof obj.content === 'string' ? obj.content : undefined,
-              url: typeof obj.url === 'string' ? obj.url : undefined,
-            });
-          }
-        }
-      }
-    }
-  }
-
-  for (const phase of phaseOutputs) {
-    for (const task of phase.tasks || []) {
-      for (const a of task.artifacts || []) {
-        if (typeof a === 'string') {
-          items.push({
-            id: `produced-${phase.phaseId}-${task.taskId}-${a}`,
-            name: a,
-            phaseId: phase.phaseId,
-            taskId: task.taskId,
-            kind: 'produced',
-          });
-        } else if (a && typeof a === 'object') {
-          const obj = a as Record<string, unknown>;
-          items.push({
-            id: `produced-${phase.phaseId}-${task.taskId}-${String(
-              obj.id || obj.name || JSON.stringify(a)
-            )}`,
-            name: String(obj.name || obj.id || 'artifact'),
-            phaseId: phase.phaseId,
-            taskId: task.taskId,
-            kind: 'produced',
-            text: typeof obj.content === 'string' ? obj.content : undefined,
-            url: typeof obj.url === 'string' ? obj.url : undefined,
-          });
-        }
-      }
-    }
-  }
+const ArtifactsView = ({ missionId, plan, phaseOutputs, events, storedArtifacts, loadError, onRefresh }: ArtifactsViewProps) => {
+  const items = buildMissionArtifactItems(plan, phaseOutputs, events, storedArtifacts);
 
   if (items.length === 0) {
-    return <div className="empty-state">No artifacts produced or expected for this mission.</div>;
+    return (
+      <>
+        {loadError && <div className="error-banner">Could not load persisted artifacts: {loadError}</div>}
+        <div className="empty-state">No artifacts produced or expected for this mission.</div>
+      </>
+    );
   }
 
   const handleOpenArtifact = (artifact: typeof items[0]) => {
@@ -1207,17 +1333,19 @@ const ArtifactsView = ({ missionId, plan, phaseOutputs, onRefresh }: ArtifactsVi
   };
 
   return (
-    <ul className="artifact-list">
-      {items.map((a) => (
-        <li key={a.id} className={`artifact-item ${a.kind}`}>
-          <div className="artifact-header" style={{ cursor: a.text || a.url ? 'pointer' : 'default' }} onClick={() => handleOpenArtifact(a)}>
-            <strong>{a.name}</strong>
-            <span className={`badge ${a.kind}`}>
-              {a.kind === 'expected' ? 'Expected' : 'Produced'}
-            </span>
-            {a.phaseId && <span className="muted" title={a.phaseId}>phase: {a.phaseId.slice(-8)}</span>}
-            {a.taskId && <span className="muted" title={a.taskId}>task: {a.taskId.slice(-8)}</span>}
-          </div>
+    <>
+      {loadError && <div className="error-banner">Could not load persisted artifacts: {loadError}</div>}
+      <ul className="artifact-list">
+        {items.map((a) => (
+          <li key={a.id} className={`artifact-item ${a.kind}`}>
+            <div className="artifact-header" style={{ cursor: a.text || a.url ? 'pointer' : 'default' }} onClick={() => handleOpenArtifact(a)}>
+              <strong>{a.name}</strong>
+              <span className={`badge ${a.kind}`}>
+                {a.kind === 'expected' ? 'Expected' : 'Produced'}
+              </span>
+              {a.phaseId && <span className="muted" title={a.phaseId}>phase: {a.phaseId.slice(-8)}</span>}
+              {a.taskId && <span className="muted" title={a.taskId}>task: {a.taskId.slice(-8)}</span>}
+            </div>
           {a.text && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <pre className="code-block">{a.text}</pre>
@@ -1269,9 +1397,10 @@ const ArtifactsView = ({ missionId, plan, phaseOutputs, onRefresh }: ArtifactsVi
                 }} /></label>
             </div>
           )}
-        </li>
-      ))}
-    </ul>
+          </li>
+        ))}
+      </ul>
+    </>
   );
 };
 

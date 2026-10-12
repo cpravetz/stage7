@@ -8,6 +8,13 @@ export interface ModelDefinition {
   capabilities: string[];
 }
 
+export interface ProviderHealth {
+  provider: string;
+  circuitState: 'closed' | 'open' | 'half-open';
+  failureCount: number;
+  recentSuccess: boolean;
+}
+
 const FREE_PROVIDER_PRIORITY: Record<string, number> = {} as Record<string, number>;
 
 function providerPriority(provider: string): number {
@@ -47,18 +54,14 @@ function inferCapabilities(task: string): string[] {
 function getOptimizeForPriority(model: ModelDefinition, optimizeFor: string): number {
   switch (optimizeFor) {
     case 'speed':
-      // Prefer smaller/faster models (lower maxTokens as proxy for speed)
       return model.maxTokens;
     case 'accuracy':
-      // Prefer models with reasoning capability
       return model.capabilities.includes('reasoning') ? 0 : 1;
     case 'creativity':
-      // Prefer models with creative capability
       return model.capabilities.includes('creative') ? 0 : 1;
     case 'cost':
     case 'balanced':
     default:
-      // Cost is handled separately as primary sort key
       return 0;
   }
 }
@@ -69,8 +72,14 @@ function getExcludedModelIds(): Set<string> {
   return new Set(raw.split(/\s*,\s*/).filter(Boolean));
 }
 
+interface ScoredModel {
+  model: ModelDefinition;
+  score: number;
+}
+
 export class ModelRouter {
   private models = new Map<string, ModelDefinition>();
+  private providerHealth = new Map<string, ProviderHealth>();
 
   registerModel(model: ModelDefinition) {
     this.models.set(model.id, model);
@@ -94,92 +103,24 @@ export class ModelRouter {
     return this.models.get(id);
   }
 
-  route(options: { task: string; modelId?: string; maxTokens?: number; budget?: number; provider?: string; freeOnly?: boolean; optimizeFor?: 'cost' | 'speed' | 'accuracy' | 'creativity' | 'balanced' }): ModelDefinition {
-    const excluded = getExcludedModelIds();
-    const isExcluded = (id: string) => excluded.has(id);
-    const requiredCaps = inferCapabilities(options.task);
-    if (options.modelId) {
-      const m = this.models.get(options.modelId);
-      if (m) {
-        if (isExcluded(m.id)) throw new Error(`Model '${m.id}' is excluded by BRAIN_EXCLUDE_MODELS`);
-        return m;
-      }
-      throw new Error(`Model '${options.modelId}' not found. Available models: ${Array.from(this.models.keys()).join(', ') || 'none'}`);
-    }
-    if (options.provider) {
-      const same = Array.from(this.models.values()).find((m) => {
-        if (m.provider !== options.provider) return false;
-        if (isExcluded(m.id)) return false;
-        return requiredCaps.every((cap) => m.capabilities.includes(cap));
-      });
-      if (same) return same;
-    }
-    const providers = options.provider ? new Set([options.provider]) : null;
-    let candidates = Array.from(this.models.values()).filter((m) => {
-      if (providers && !providers.has(m.provider)) return false;
-      if (options.maxTokens && m.maxTokens < options.maxTokens) return false;
-      if (options.budget !== undefined && m.costPer1kTokens > options.budget) return false;
-      if (options.freeOnly) {
-        if (!(m.costPer1kTokens === 0)) return false;
-      }
-      if (isExcluded(m.id)) return false;
-      return requiredCaps.every((cap) => m.capabilities.includes(cap));
-    });
-    if (candidates.length === 0) {
-      candidates = Array.from(this.models.values()).filter((m) => {
-        if (providers && !providers.has(m.provider)) return false;
-        if (options.maxTokens && m.maxTokens < options.maxTokens) return false;
-        if (options.budget !== undefined && m.costPer1kTokens > options.budget) return false;
-        if (options.freeOnly) {
-          if (!(m.costPer1kTokens === 0)) return false;
-        }
-        if (isExcluded(m.id)) return false;
-        return requiredCaps.length === 0 || requiredCaps.some((cap) => m.capabilities.includes(cap));
-      });
-    }
+  updateProviderHealth(health: ProviderHealth) {
+    this.providerHealth.set(health.provider, health);
+  }
+
+  route(options: { task: string; maxTokens?: number; budget?: number; freeOnly?: boolean; optimizeFor?: 'cost' | 'speed' | 'accuracy' | 'creativity' | 'balanced' }): ModelDefinition {
+    const candidates = this.getCandidates(options);
     if (candidates.length === 0) {
       throw new Error('No model available for the requested task. Ensure at least one LLM provider is configured with a valid API key (OPENAI_API_KEY, OPENROUTER_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, MISTRAL_API_KEY, GROK_API_KEY, HUGGINGFACE_API_KEY, NVIDIA_API_KEY, or OPENWEB_URL).');
     }
-    candidates.sort((a, b) => {
-      const optimizeFor = options.optimizeFor || 'balanced';
-      
-      // Primary sort: optimizeFor dimension
-      if (optimizeFor !== 'balanced' && optimizeFor !== 'cost') {
-        const aPriority = getOptimizeForPriority(a, optimizeFor);
-        const bPriority = getOptimizeForPriority(b, optimizeFor);
-        if (aPriority !== bPriority) return aPriority - bPriority;
-      }
-      
-      // Secondary sort: cost (always considered)
-      const costDiff = a.costPer1kTokens - b.costPer1kTokens;
-      if (costDiff !== 0) return costDiff;
-      
-      const specializationDiff = modelSpecializationPenalty(a, options.task) - modelSpecializationPenalty(b, options.task);
-      if (specializationDiff !== 0) return specializationDiff;
-      if (options.freeOnly || (a.costPer1kTokens === 0 && b.costPer1kTokens === 0)) {
-        const providerDiff = providerPriority(a.provider) - providerPriority(b.provider);
-        if (providerDiff !== 0) return providerDiff;
-      }
-      const aMatch = requiredCaps.filter((cap) => a.capabilities.includes(cap)).length;
-      const bMatch = requiredCaps.filter((cap) => b.capabilities.includes(cap)).length;
-      if (bMatch !== aMatch) return bMatch - aMatch;
-      return a.id.localeCompare(b.id);
-    });
-    return candidates[0];
+    return candidates[0].model;
   }
 
-  getCandidates(options: { task: string; modelId?: string; maxTokens?: number; budget?: number; provider?: string; freeOnly?: boolean; optimizeFor?: 'cost' | 'speed' | 'accuracy' | 'creativity' | 'balanced' }): ModelDefinition[] {
+  getCandidates(options: { task: string; maxTokens?: number; budget?: number; freeOnly?: boolean; optimizeFor?: 'cost' | 'speed' | 'accuracy' | 'creativity' | 'balanced' }): ScoredModel[] {
     const excluded = getExcludedModelIds();
     const isExcluded = (id: string) => excluded.has(id);
-    if (options.modelId) {
-      const m = this.models.get(options.modelId);
-      if (m && isExcluded(m.id)) return [];
-      return m ? [m] : [];
-    }
     const requiredCaps = inferCapabilities(options.task);
-    const providers = options.provider ? new Set([options.provider]) : null;
+
     let candidates = Array.from(this.models.values()).filter((m) => {
-      if (providers && !providers.has(m.provider)) return false;
       if (options.maxTokens && m.maxTokens < options.maxTokens) return false;
       if (options.budget !== undefined && m.costPer1kTokens > options.budget) return false;
       if (options.freeOnly) {
@@ -188,9 +129,9 @@ export class ModelRouter {
       if (isExcluded(m.id)) return false;
       return requiredCaps.every((cap) => m.capabilities.includes(cap));
     });
+
     if (candidates.length === 0) {
       candidates = Array.from(this.models.values()).filter((m) => {
-        if (providers && !providers.has(m.provider)) return false;
         if (options.maxTokens && m.maxTokens < options.maxTokens) return false;
         if (options.budget !== undefined && m.costPer1kTokens > options.budget) return false;
         if (options.freeOnly) {
@@ -200,33 +141,73 @@ export class ModelRouter {
         return requiredCaps.length === 0 || requiredCaps.some((cap) => m.capabilities.includes(cap));
       });
     }
+
     const generalCandidates = candidates.filter((candidate) => modelSpecializationPenalty(candidate, options.task) === 0);
     if (generalCandidates.length > 0) candidates = generalCandidates;
-    candidates.sort((a, b) => {
-      const optimizeFor = options.optimizeFor || 'balanced';
-      
-      // Primary sort: optimizeFor dimension
-      if (optimizeFor !== 'balanced' && optimizeFor !== 'cost') {
-        const aPriority = getOptimizeForPriority(a, optimizeFor);
-        const bPriority = getOptimizeForPriority(b, optimizeFor);
-        if (aPriority !== bPriority) return aPriority - bPriority;
+
+    const scored: ScoredModel[] = candidates.map((model) => ({
+      model,
+      score: this.scoreModel(model, options, requiredCaps),
+    }));
+
+    scored.sort((a, b) => b.score - a.score);
+    return scored;
+  }
+
+  private scoreModel(model: ModelDefinition, options: { task: string; optimizeFor?: string; freeOnly?: boolean }, requiredCaps: string[]): number {
+    const optimizeFor = options.optimizeFor || 'balanced';
+    let score = 0;
+
+    // Capability match: +10 per required capability the model has
+    const matchedCaps = requiredCaps.filter((cap) => model.capabilities.includes(cap)).length;
+    score += matchedCaps * 10;
+
+    // Cost efficiency: inverse cost (free models get max bonus)
+    if (model.costPer1kTokens === 0) {
+      score += 50;
+    } else if (model.costPer1kTokens < 0.1) {
+      score += 30;
+    } else if (model.costPer1kTokens < 1) {
+      score += 20;
+    } else if (model.costPer1kTokens < 5) {
+      score += 10;
+    }
+
+    // Specialization bonus/penalty
+    const specPenalty = modelSpecializationPenalty(model, options.task);
+    score -= specPenalty * 5;
+
+    // OptimizeFor preference
+    const optPriority = getOptimizeForPriority(model, optimizeFor);
+    if (optimizeFor === 'speed') {
+      // Lower maxTokens = faster (rough proxy)
+      score += Math.max(0, 100 - model.maxTokens / 1000);
+    } else if (optimizeFor === 'accuracy') {
+      if (model.capabilities.includes('reasoning')) score += 15;
+    } else if (optimizeFor === 'creativity') {
+      if (model.capabilities.includes('creative')) score += 15;
+    } else if (optimizeFor === 'cost' || optimizeFor === 'balanced') {
+      // Cost already factored above
+    }
+
+    // Provider health
+    const health = this.providerHealth.get(model.provider);
+    if (health) {
+      if (health.circuitState === 'open') {
+        score -= 1000; // Effectively exclude
+      } else if (health.circuitState === 'half-open') {
+        score -= 50;
+      } else if (health.failureCount > 0) {
+        score -= health.failureCount * 5;
       }
-      
-      // Secondary sort: cost (always considered)
-      const costDiff = a.costPer1kTokens - b.costPer1kTokens;
-      if (costDiff !== 0) return costDiff;
-      
-      const specializationDiff = modelSpecializationPenalty(a, options.task) - modelSpecializationPenalty(b, options.task);
-      if (specializationDiff !== 0) return specializationDiff;
-      if (options.freeOnly || (a.costPer1kTokens === 0 && b.costPer1kTokens === 0)) {
-        const providerDiff = providerPriority(a.provider) - providerPriority(b.provider);
-        if (providerDiff !== 0) return providerDiff;
+      if (health.recentSuccess) {
+        score += 20;
       }
-      const aMatch = requiredCaps.filter((cap) => a.capabilities.includes(cap)).length;
-      const bMatch = requiredCaps.filter((cap) => b.capabilities.includes(cap)).length;
-      if (bMatch !== aMatch) return bMatch - aMatch;
-      return a.id.localeCompare(b.id);
-    });
-    return candidates;
+    }
+
+    // Deterministic tiebreaker
+    score += 1 / (1 + model.id.length);
+
+    return score;
   }
 }

@@ -4,10 +4,10 @@ import { logger } from '@stage7-nextgen/shared'
 const ARTIFACTS_URL = process.env.ARTIFACTS_URL || ''
 const POLL_MS = Number(process.env.WATCH_SCHEDULER_POLL_MS || '60000')
 
-export function startWatchScheduler(client: TemporalClient) {
+export function startWatchScheduler(client: TemporalClient): () => void {
   if (!ARTIFACTS_URL) {
     logger.info('ARTIFACTS_URL not set, watch scheduler disabled')
-    return
+    return () => {}
   }
 
   let running = true
@@ -56,4 +56,8 @@ export function startWatchScheduler(client: TemporalClient) {
   })
 
   logger.info({ pollMs: POLL_MS }, 'Watch scheduler started')
+  return () => {
+    running = false
+    clearInterval(handle)
+  }
 }

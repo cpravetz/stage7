@@ -1,5 +1,21 @@
 export type AgentId = string
 
+export interface AgentExecutionPolicy {
+  maxBrainCalls: number
+  maxActions: number
+  maxCompletionTokens: number
+  maxCompletionTokensPerCall: number
+  maxDelegations: number
+}
+
+export const DEFAULT_AGENT_EXECUTION_POLICY: AgentExecutionPolicy = {
+  maxBrainCalls: 8,
+  maxActions: 6,
+  maxCompletionTokens: 16_384,
+  maxCompletionTokensPerCall: 2_048,
+  maxDelegations: 2,
+}
+
 export interface AgentDefinition {
   id: string
   tenantId: string
@@ -7,7 +23,6 @@ export interface AgentDefinition {
   description: string
   type: string
   systemPrompt: string
-  model?: string
   tools: string[]
   metadata: Record<string, unknown>
   createdAt: string

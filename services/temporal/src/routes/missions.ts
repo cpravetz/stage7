@@ -1,7 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { TemporalClient } from '../client/TemporalClient';
-import { WorkflowInput } from '../types/workflow';
+import { WorkflowInput, MissionTaskCheckpoint } from '../types/workflow';
 import { asyncHandler, NextGenError } from '@stage7-nextgen/shared';
+import { logger } from '@stage7-nextgen/shared';
 
 function validateServiceUrl(url: string | undefined): URL | null {
   if (!url) return null;
@@ -75,11 +76,50 @@ router.post(
       ? `${originalPrompt}\n\n--- RETRY GUIDANCE ---\n${guidance}\n--- END RETRY GUIDANCE ---`
       : originalPrompt;
 
+    // Fetch mission plan from artifacts to get completed phases/tasks
+    const missionId = original.missionId;
+    let completedPhases: string[] = [];
+    let completedTasks: MissionTaskCheckpoint[] = [];
+    let resumeFromPhaseId: string | undefined;
+    let resumeFromTaskId: string | undefined;
+
+    if (artifactsBase) {
+      try {
+        // Get mission plan which contains phases and tasks with their statuses
+        const planRes = await fetch(`${artifactsBase.origin}/api/artifacts/missions/${missionId}/plan`);
+        if (planRes.ok) {
+          const planData = await planRes.json() as { plan?: { phases?: Array<{ id: string; status?: string; tasks?: Array<{ id: string; status?: string }> }> } };
+          if (planData.plan?.phases) {
+            for (const phase of planData.plan.phases) {
+              if (phase.status === 'completed') {
+                completedPhases.push(phase.id);
+              }
+              if (phase.tasks) {
+                for (const task of phase.tasks) {
+                  if (task.status === 'completed') {
+                    completedTasks.push({ phaseId: phase.id, taskId: task.id });
+                  } else if (!resumeFromPhaseId && !resumeFromTaskId) {
+                    // First incomplete task - resume from here
+                    resumeFromPhaseId = phase.id;
+                    resumeFromTaskId = task.id;
+                  }
+                }
+              } else if (!resumeFromPhaseId && phase.status !== 'completed') {
+                // Phase without tasks or incomplete phase
+                resumeFromPhaseId = phase.id;
+              }
+            }
+          }
+        }
+      } catch (err) {
+        logger.warn({ err: err instanceof Error ? err.message : String(err), missionId }, 'Failed to fetch mission plan for retry');
+      }
+    }
+
     const retryCount = (original.input?.metadata?.retryCount as number) || 0;
-    const newMissionId = `${original.missionId}-retry-${retryCount + 1}-${Date.now()}`;
 
     const input: WorkflowInput = {
-      missionId: newMissionId,
+      missionId: missionId, // Keep the same mission ID
       tenantId: original.input?.tenantId || '',
       assistantId: original.input?.assistantId || '',
       prompt: enhancedPrompt,
@@ -91,6 +131,10 @@ router.post(
         retriedAt: Date.now(),
         retryGuidance: guidance,
       },
+      completedPhases,
+      completedTasks,
+      resumeFromPhaseId,
+      resumeFromTaskId,
     };
 
     const newWorkflowId = await client.startMission(input);
@@ -98,8 +142,13 @@ router.post(
     res.status(202).json({ 
       workflowId: newWorkflowId, 
       status: 'started',
+      missionId,
       retriedFrom: workflowId,
       retryCount: retryCount + 1,
+      resumeFromPhaseId,
+      resumeFromTaskId,
+      completedPhasesCount: completedPhases.length,
+      completedTasksCount: completedTasks.length,
     });
   }),
 );

@@ -10,7 +10,6 @@ export const CTO_ARCHITECTURE_ADVISORY = (() => { const t = createDeclarativeCod
   persistenceEnvVar: 'CTO_HOME',
   manifest: {
     reasoningConfig: {
-      model: 'gpt-4',
       temperature: 0.3,
       maxTokens: 4000,
     },

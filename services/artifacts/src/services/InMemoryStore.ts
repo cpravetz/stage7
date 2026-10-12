@@ -274,8 +274,8 @@ export class InMemoryStore {
     return Promise.resolve(this.missionPhases.get(missionId)?.get(phaseId));
   }
 
-  async listPendingApprovals(): Promise<Array<{ missionId: string; phaseId: string; phaseName: string; question: string; assistantId?: string }>> {
-    const result: Array<{ missionId: string; phaseId: string; phaseName: string; question: string; assistantId?: string }> = [];
+  async listPendingApprovals(): Promise<Array<{ missionId: string; phaseId: string; phaseName: string; question: string; assistantId?: string; tasks?: Array<{ id: string; title: string; status: string; artifacts?: any[] }> }>> {
+    const result: Array<{ missionId: string; phaseId: string; phaseName: string; question: string; assistantId?: string; tasks?: Array<{ id: string; title: string; status: string; artifacts?: any[] }> }> = [];
     for (const [missionId, phases] of this.missionPhases) {
       const missionState = this.missions.get(missionId);
       const assistantId = missionState?.assistantId;
@@ -287,6 +287,12 @@ export class InMemoryStore {
             phaseName: (phase.name as string) || phaseId,
             question: (phase.approvalQuestion as string) || '',
             assistantId,
+            tasks: phase.tasks?.map((t: any) => ({
+              id: t.id,
+              title: t.title,
+              status: t.status,
+              artifacts: t.artifacts,
+            })) || [],
           });
         }
       }
@@ -297,7 +303,7 @@ export class InMemoryStore {
     let tasks = this.missionTasks.get(missionId);
     if (!tasks) { tasks = new Map(); this.missionTasks.set(missionId, tasks); }
     const existing = tasks.get(taskId) || { id: taskId, missionId };
-    const merged = { ...existing, ...update, id: taskId, missionId, updatedAt: Date.now() };
+    const merged = { ...existing, ...update, id: taskId, taskId, missionId, updatedAt: Date.now() };
     tasks.set(taskId, merged);
 
     const plan = this.missionPlans.get(missionId);

@@ -5,8 +5,15 @@ import {
   AgentTask,
   AgentCollaboration,
   AgentSpecialization,
+  AgentExecutionPolicy,
 } from '@stage7-nextgen/shared';
 import { Plan, Phase, Task } from '@stage7-nextgen/shared';
+import {
+  PlannerCompletionRequest,
+  PLANNER_EXECUTION_POLICY,
+  PLANNER_SYSTEM_PROMPT,
+  generateValidPlan,
+} from '../planner/MissionPlanner';
 
 function getAgentRuntimeUrl(): string {
   return process.env.AGENT_RUNTIME_URL || 'http://agent-runtime:3400';
@@ -15,8 +22,6 @@ function getAgentRuntimeUrl(): string {
 export interface MissionAgentConfig {
   missionId: string;
   tenantId: string;
-  assistantId?: string;
-  workerPoolUrl?: string;
   broadcast?: (event: any) => Promise<void>;
   agentRuntimeUrl?: string;
 }
@@ -27,11 +32,27 @@ export interface TaskExecutionResult {
   tokensUsed: number;
 }
 
+export interface PromptTaskRequest {
+  taskId: string;
+  type: string;
+  prompt: string;
+  phaseId?: string;
+  expectedArtifacts?: string[];
+  context?: Record<string, unknown>;
+  requireCompletedReceipt?: boolean;
+  executionPolicy?: AgentExecutionPolicy;
+}
+
+class MissionAgentRuntimeApiError extends Error {
+  constructor(path: string, readonly status: number, details: string) {
+    super(`Agent Runtime API ${path} failed (${status}): ${details.slice(0, 200)}`);
+    this.name = 'MissionAgentRuntimeApiError';
+  }
+}
+
 export class MissionAgentRuntime {
   private missionId: string;
   private tenantId: string;
-  private workerPoolUrl: string | undefined;
-  private assistantId: string | undefined;
   private agentRuntimeUrl: string;
   private broadcast: MissionAgentConfig['broadcast'];
   private agentCache: Map<string, string> = new Map(); // agentRole -> agentId
@@ -40,8 +61,6 @@ export class MissionAgentRuntime {
   constructor(config: MissionAgentConfig) {
     this.missionId = config.missionId;
     this.tenantId = config.tenantId;
-    this.workerPoolUrl = config.workerPoolUrl;
-    this.assistantId = config.assistantId;
     this.agentRuntimeUrl = config.agentRuntimeUrl || getAgentRuntimeUrl();
     this.broadcast = config.broadcast || (async () => {});
   }
@@ -53,13 +72,28 @@ export class MissionAgentRuntime {
     });
     if (!res.ok) {
       const text = await res.text();
-      throw new Error(`Agent Runtime API ${path} failed (${res.status}): ${text.slice(0, 200)}`);
+      throw new MissionAgentRuntimeApiError(path, res.status, text);
     }
     return res.json() as Promise<T>;
   }
 
   async registerPlannerAgent(systemPrompt: string): Promise<string> {
     const agentId = `agent-${this.missionId}-planner`;
+    if (this.agentCache.has('planner')) return this.agentCache.get('planner')!;
+
+    try {
+      const existing = await this.api<AgentDefinition>(`/missions/${this.missionId}/agents/${agentId}`);
+      if (existing.id) {
+        await this.api(`/missions/${this.missionId}/agents/${agentId}/start`, { method: 'POST' });
+        this.agentCache.set('planner', agentId);
+        return agentId;
+      }
+    } catch (error) {
+      if (!(error instanceof MissionAgentRuntimeApiError) || error.status !== 404) {
+        throw error;
+      }
+    }
+
     const definition: AgentDefinition = {
       id: agentId,
       tenantId: this.tenantId,
@@ -67,7 +101,6 @@ export class MissionAgentRuntime {
       description: `Planner agent for mission ${this.missionId}`,
       type: 'planner',
       systemPrompt,
-      model: 'openai/gpt-4o-mini',
       tools: [],
       metadata: { missionId: this.missionId, agentRole: 'planner' },
       createdAt: new Date().toISOString(),
@@ -79,7 +112,22 @@ export class MissionAgentRuntime {
     return agentId;
   }
 
-  async getOrCreateWorkerAgent(agentRole: string, systemPrompt: string): Promise<string> {
+  async generatePlan(prompt: string, context?: Record<string, unknown>): Promise<Plan> {
+    const agentId = await this.registerPlannerAgent(PLANNER_SYSTEM_PROMPT);
+    return generateValidPlan(prompt, context, this.missionId, async (request: PlannerCompletionRequest) => {
+      const result = await this.executePromptTask(agentId, {
+        taskId: `${this.missionId}:planner:attempt-${request.attempt}`,
+        type: 'planning',
+        prompt: request.prompt,
+        phaseId: 'planning',
+        context: { plannerAttempt: request.attempt },
+        executionPolicy: PLANNER_EXECUTION_POLICY,
+      });
+      return result.output;
+    });
+  }
+
+  async getOrCreateAgent(agentRole: string, systemPrompt: string): Promise<string> {
     const cacheKey = agentRole.toLowerCase();
     if (this.agentCache.has(cacheKey)) {
       return this.agentCache.get(cacheKey)!;
@@ -87,15 +135,18 @@ export class MissionAgentRuntime {
 
     const agentId = `agent-${this.missionId}-${cacheKey}`;
     try {
-      const existing = await this.api<{ agent: AgentDefinition }>(
+      const existing = await this.api<AgentDefinition>(
         `/missions/${this.missionId}/agents/${agentId}`
       );
-      if (existing.agent) {
+      if (existing.id) {
+        await this.api(`/missions/${this.missionId}/agents/${agentId}/start`, { method: 'POST' });
         this.agentCache.set(cacheKey, agentId);
         return agentId;
       }
-    } catch {
-      // Not found, create new
+    } catch (error) {
+      if (!(error instanceof MissionAgentRuntimeApiError) || error.status !== 404) {
+        throw error;
+      }
     }
 
     const definition: AgentDefinition = {
@@ -105,7 +156,6 @@ export class MissionAgentRuntime {
       description: `Dynamic agent for role: ${agentRole} in mission ${this.missionId}`,
       type: agentRole,
       systemPrompt,
-      model: 'openai/gpt-4o-mini',
       tools: [],
       metadata: { missionId: this.missionId, agentRole },
       createdAt: new Date().toISOString(),
@@ -122,23 +172,39 @@ export class MissionAgentRuntime {
     agentId: string,
     task: Task,
     phase: Phase,
-    plan: Plan
+    plan: Plan,
+    requireCompletedReceipt = false,
+    executionPolicy?: AgentExecutionPolicy,
   ): Promise<TaskExecutionResult> {
     const taskPrompt = this.buildTaskPrompt(task, phase, plan);
-
-    // Register task in agent-runtime for tracking
-    const taskData = {
+    return this.executePromptTask(agentId, {
+      taskId: `${this.missionId}:${phase.id}:${task.id}`,
       type: task.agentRole,
+      prompt: taskPrompt,
+      phaseId: phase.id,
+      expectedArtifacts: task.expectedArtifacts,
+      requireCompletedReceipt,
+      executionPolicy,
+    });
+  }
+
+  async executePromptTask(agentId: string, request: PromptTaskRequest): Promise<TaskExecutionResult> {
+    const taskData = {
+      taskId: request.taskId,
+      type: request.type,
       input: {
-        prompt: taskPrompt,
+        prompt: request.prompt,
         context: {
+          ...request.context,
           missionId: this.missionId,
-          phaseId: phase.id,
-          taskId: task.id,
-          expectedArtifacts: task.expectedArtifacts,
+          ...(request.phaseId ? { phaseId: request.phaseId } : {}),
+          taskId: request.taskId,
+          expectedArtifacts: request.expectedArtifacts || [],
+          ...(request.executionPolicy ? { executionPolicy: request.executionPolicy } : {}),
         },
       },
       priority: 1,
+      status: 'pending',
     };
 
     const submitted = await this.api<AgentTask>(
@@ -146,58 +212,23 @@ export class MissionAgentRuntime {
       { method: 'POST', body: JSON.stringify(taskData) }
     );
 
-    // Track which agent this task belongs to for completion reporting
-    this.taskAgentMap.set(submitted.taskId, agentId);
-
-    // Actually execute the task via worker-pool assistant if available
-    if (this.assistantId && this.workerPoolUrl) {
-      return this.executeViaAssistant(task, phase, plan, taskPrompt, submitted.taskId);
-    }
-
-    // Otherwise wait for agent-runtime to complete it (external executor)
-    return this.waitForTaskCompletion(submitted.taskId);
-  }
-
-  private async executeViaAssistant(
-    task: Task,
-    phase: Phase,
-    plan: Plan,
-    taskPrompt: string,
-    taskId: string
-  ): Promise<TaskExecutionResult> {
-    const res = await fetch(
-      `${this.workerPoolUrl}/api/workers/assistants/${encodeURIComponent(this.assistantId!)}/execute`,
+    const completed = await this.api<AgentTask>(
+      `/missions/${this.missionId}/agents/${agentId}/tasks/${submitted.taskId}/execute`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: taskPrompt,
-          context: { missionId: this.missionId, phaseId: phase.id, taskId: task.id },
-        }),
+        body: JSON.stringify({ requireCompletedReceipt: request.requireCompletedReceipt || false }),
       },
     );
-
-    if (!res.ok) {
-      const text = await res.text();
-      await this.markTaskFailed(taskId, `Assistant executor failed (${res.status}): ${text.slice(0, 200)}`);
-      throw new Error(`Assistant executor failed (${res.status}): ${text.slice(0, 200)}`);
+    if (completed.status !== 'completed') {
+      throw new Error(completed.error || `Agent task ${submitted.taskId} returned status '${completed.status}'`);
     }
-
-    const data = await res.json() as { success: boolean; output?: string; error?: string; tokensUsed?: number };
-    if (!data.success) {
-      await this.markTaskFailed(taskId, data.error || 'Assistant executor returned a failure result');
-      throw new Error(data.error || 'Assistant executor returned a failure result');
-    }
-
-    const output = data.output || '';
-    const artifacts = this.extractArtifacts(output, task.expectedArtifacts || []);
-    await this.markTaskCompleted(taskId, { output, artifacts, tokensUsed: data.tokensUsed || 0 });
-
-    logger.info(
-      { task: task.title, phase: phase.name, assistantId: this.assistantId, tokensUsed: data.tokensUsed || 0 },
-      'Worker task completed via assistant',
-    );
-    return { output, artifacts, tokensUsed: data.tokensUsed || 0 };
+    const result = completed.result as Partial<TaskExecutionResult> | undefined;
+    const output = typeof result?.output === 'string' ? result.output : '';
+    const artifacts = Array.isArray(result?.artifacts)
+      ? result.artifacts
+      : this.extractArtifacts(output, request.expectedArtifacts || []);
+    const tokensUsed = typeof result?.tokensUsed === 'number' ? result.tokensUsed : 0;
+    return { output, artifacts, tokensUsed };
   }
 
   private async markTaskCompleted(taskId: string, result: any): Promise<void> {
@@ -308,8 +339,9 @@ export class MissionAgentRuntime {
   async getAgentState(agentId: string): Promise<AgentState | undefined> {
     try {
       return await this.api<AgentState>(`/missions/${this.missionId}/agents/${agentId}/state`);
-    } catch {
-      return undefined;
+    } catch (error) {
+      if (error instanceof MissionAgentRuntimeApiError && error.status === 404) return undefined;
+      throw error;
     }
   }
 

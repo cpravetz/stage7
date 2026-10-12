@@ -1,114 +1,45 @@
-import { Plan, Phase, Task } from '@stage7-nextgen/shared';
+import {
+  DEFAULT_AGENT_EXECUTION_POLICY,
+  AgentExecutionPolicy,
+  Plan,
+  Phase,
+  Task,
+} from '@stage7-nextgen/shared';
 import { logger } from '@stage7-nextgen/shared';
-import { MissionAgentRuntime, MissionAgentConfig, TaskExecutionResult } from '../agent/MissionAgentRuntime';
+import { MissionAgentRuntime, TaskExecutionResult } from '../agent/MissionAgentRuntime';
+import { MissionActivityCheckpoint, MissionTaskCheckpoint } from '../types/workflow';
 
-const PLANNER_SYSTEM_PROMPT = `You are a mission planner for an AI agent platform. Given a user's goal, you produce a structured plan with phases, tasks, and the agent roles needed to execute them.
-
-Your job is to:
-1. Understand the goal.
-2. Decide if you need clarification. If the goal is ambiguous, set requiresClarification=true and ask 2-4 focused questions. Otherwise set requiresClarification=false.
-3. Decompose the goal into 3-7 phases. Each phase has a clear deliverable.
-4. For each phase, break it into specific tasks (1-5 per phase). Each task has a single agent role, a clear description, and expected artifacts.
-5. For each task, write a systemPrompt for the agent that will execute it.
-6. Mark requiresApproval=true on phases that produce something the user should review before continuing.
-
-Agent roles should be chosen based on the actual goal — e.g. "researcher" for research tasks, "coder" for software tasks, "writer" for content, "analyst" for data tasks, "planner" for strategy, "reviewer" for quality checks, "judge" for evaluation, "artist" for creative, "curator" for selection, or any persona appropriate to the task. Do not default to business/startup roles unless the goal is explicitly about business.
-
-Output a single JSON object matching the schema. Do not include any prose outside the JSON.`;
-
-function buildFallbackPlan(prompt: string): Plan {
-  const trimmed = prompt.trim();
-  return {
-    summary: `Plan for: ${trimmed.slice(0, 100)}`,
-    estimatedDuration: '1-2 days',
-    estimatedCost: 'TBD',
-    requiresClarification: false,
-    clarificationQuestions: [],
-    phases: [
-      {
-        id: 'phase-1',
-        name: 'Planning',
-        goal: `Break down and plan the execution of: ${trimmed.slice(0, 80)}`,
-        tasks: [
-          {
-            id: 'task-1-1',
-            title: 'Analyze goal and create execution plan',
-            description: `Analyze the goal and create a concrete, step-by-step execution plan for: ${trimmed}`,
-            agentRole: 'planner',
-            systemPrompt: 'You are a planning agent. Analyze the goal and create a concrete, step-by-step execution plan. Be thorough and consider edge cases.',
-            expectedArtifacts: ['plan.md'],
-            status: 'pending',
-            artifacts: [],
-          },
-        ],
-        requiresApproval: true,
-        status: 'pending',
-      },
-      {
-        id: 'phase-2',
-        name: 'Execution',
-        goal: `Execute the plan to accomplish: ${trimmed.slice(0, 80)}`,
-        tasks: [
-          {
-            id: 'task-2-1',
-            title: 'Execute the plan',
-            description: `Execute the previously created plan to accomplish: ${trimmed}`,
-            agentRole: 'worker',
-            systemPrompt: 'You are an execution agent. Execute the plan thoroughly and produce the required artifacts. If you need tools, use the available tool execution interface.',
-            expectedArtifacts: ['output.md'],
-            status: 'pending',
-            artifacts: [],
-          },
-        ],
-        requiresApproval: false,
-        status: 'pending',
-      },
-      {
-        id: 'phase-3',
-        name: 'Review',
-        goal: 'Review output quality and completeness',
-        tasks: [
-          {
-            id: 'task-3-1',
-            title: 'Review and refine output',
-            description: 'Review the execution output for completeness, accuracy, and quality. Refine or request follow-up tasks if needed.',
-            agentRole: 'reviewer',
-            systemPrompt: 'You are a reviewer agent. Evaluate outputs for completeness, accuracy, and quality. Identify gaps and suggest improvements.',
-            expectedArtifacts: ['review.md'],
-            status: 'pending',
-            artifacts: [],
-          },
-        ],
-        requiresApproval: true,
-        status: 'pending',
-      },
-    ],
-  };
-}
+const MISSION_REVIEWER_SYSTEM_PROMPT =
+  'You are an objective mission evaluator. Determine whether the produced artifacts fully satisfy the stated mission goal. Answer with only "yes" or "no".';
+const MISSION_REVIEWER_EXECUTION_POLICY: AgentExecutionPolicy = {
+  ...DEFAULT_AGENT_EXECUTION_POLICY,
+  maxBrainCalls: 1,
+  maxActions: 0,
+  maxCompletionTokens: 256,
+  maxCompletionTokensPerCall: 256,
+  maxDelegations: 0,
+};
 
 export interface MissionContext {
   missionId: string;
   prompt: string;
   tenantId?: string;
-  assistantId?: string;
   metadata?: Record<string, unknown>;
-  brainUrl: string;
-  workerPoolUrl?: string;
   agentRuntimeUrl?: string;
   persistenceUrl: string;
   gatewayUrl: string;
   broadcast: (event: { type: string; missionId: string; timestamp: number; data?: any }) => Promise<void>;
   broadcastAll: (event: { type: string; timestamp: number; data?: any }) => Promise<void>;
   waitForApproval: (phaseId: string, question: string) => Promise<{ approved: boolean; reason?: string }>;
+  resumePlan?: Plan;
+  resumeCheckpoint?: MissionActivityCheckpoint;
+  executionPolicy?: AgentExecutionPolicy;
+  onCheckpoint?: (checkpoint: MissionActivityCheckpoint) => void;
+  heartbeat?: () => void;
 }
 
 export class MissionOrchestrator {
   private agentRuntime: MissionAgentRuntime | null = null;
-  private brainUrl: string;
-
-  constructor() {
-    this.brainUrl = process.env.BRAIN_URL || 'http://brain:3100';
-  }
 
   async run(ctx: MissionContext): Promise<{ plan: Plan; outputs: any; compensations: Array<{ phaseId: string; action: string }> }> {
     const compensations: Array<{ phaseId: string; action: string }> = [];
@@ -117,8 +48,6 @@ export class MissionOrchestrator {
     this.agentRuntime = new MissionAgentRuntime({
       missionId: ctx.missionId,
       tenantId: ctx.tenantId || 'tenant-1',
-      assistantId: ctx.assistantId,
-      workerPoolUrl: ctx.workerPoolUrl,
       agentRuntimeUrl: ctx.agentRuntimeUrl,
       broadcast: ctx.broadcastAll,
     });
@@ -136,7 +65,21 @@ export class MissionOrchestrator {
       },
     });
 
-    const plan = await this.generatePlan(ctx);
+    const plan = ctx.resumePlan || ctx.resumeCheckpoint?.plan || await this.generatePlan(ctx);
+    const completedTasks = new Map<string, MissionTaskCheckpoint>(
+      (ctx.resumeCheckpoint?.completedTasks || []).map((checkpoint) => [
+        JSON.stringify([checkpoint.phaseId, checkpoint.taskId]),
+        checkpoint,
+      ]),
+    );
+    const completedPhases = new Set(ctx.resumeCheckpoint?.completedPhases || []);
+    const saveCheckpoint = () => ctx.onCheckpoint?.({
+      version: 1,
+      plan,
+      completedTasks: [...completedTasks.values()],
+      completedPhases: [...completedPhases],
+    });
+    saveCheckpoint();
     await ctx.broadcast({
       type: 'plan_generated',
       missionId: ctx.missionId,
@@ -169,36 +112,26 @@ export class MissionOrchestrator {
 
     const outputs: any = { phases: [] };
     for (const phase of plan.phases) {
-      await ctx.broadcast({ type: 'phase_started', missionId: ctx.missionId, timestamp: Date.now(), data: { phaseId: phase.id, phaseName: phase.name } });
-      await this.updatePhase(ctx, phase.id, { status: 'in_progress' });
+      const phaseIsComplete = completedPhases.has(phase.id);
+      if (phaseIsComplete && phase.tasks.some((task) =>
+        !completedTasks.has(JSON.stringify([phase.id, task.id])),
+      )) {
+        throw new Error(`Checkpoint marks phase ${phase.id} complete but omits a task result`);
+      }
+      if (!phaseIsComplete) {
+        await ctx.broadcast({ type: 'phase_started', missionId: ctx.missionId, timestamp: Date.now(), data: { phaseId: phase.id, phaseName: phase.name } });
+        await this.updatePhase(ctx, phase.id, { status: 'in_progress' });
+      }
 
       const phaseOutput: any = { phaseId: phase.id, name: phase.name, tasks: [] };
 
       for (const task of phase.tasks) {
-        await ctx.broadcast({
-          type: 'task_started',
-          missionId: ctx.missionId,
-          timestamp: Date.now(),
-          data: {
-            phaseId: phase.id,
-            taskId: task.id,
-            taskTitle: task.title,
-            agentId: `agent-${ctx.missionId}-${task.agentRole.toLowerCase()}`,
-            agentName: `${task.agentRole} Agent`,
-            agentRole: task.agentRole,
-          },
-        });
-        await this.updateTask(ctx, phase.id, task.id, { status: 'in_progress', startedAt: Date.now() });
-
-        let result: TaskExecutionResult;
-        try {
-          const agentId = await this.agentRuntime.getOrCreateWorkerAgent(task.agentRole, task.systemPrompt);
-          result = await this.agentRuntime.executeTask(agentId, task, phase, plan);
-        } catch (err) {
-          const error = err instanceof Error ? err.message : String(err);
-          await this.updateTask(ctx, phase.id, task.id, { status: 'failed', completedAt: Date.now(), output: error });
+        ctx.heartbeat?.();
+        const taskKey = JSON.stringify([phase.id, task.id]);
+        const savedTask = completedTasks.get(taskKey);
+        if (!savedTask) {
           await ctx.broadcast({
-            type: 'task_failed',
+            type: 'task_started',
             missionId: ctx.missionId,
             timestamp: Date.now(),
             data: {
@@ -208,10 +141,48 @@ export class MissionOrchestrator {
               agentId: `agent-${ctx.missionId}-${task.agentRole.toLowerCase()}`,
               agentName: `${task.agentRole} Agent`,
               agentRole: task.agentRole,
-              error,
             },
           });
+          await this.updateTask(ctx, phase.id, task.id, { status: 'in_progress', startedAt: Date.now() });
+
+        }
+
+        let result: TaskExecutionResult;
+        try {
+          const agentId = await this.agentRuntime.getOrCreateAgent(task.agentRole, task.systemPrompt);
+          result = await this.agentRuntime.executeTask(
+            agentId,
+            task,
+            phase,
+            plan,
+            !!savedTask,
+            ctx.executionPolicy || DEFAULT_AGENT_EXECUTION_POLICY,
+          );
+        } catch (err) {
+          if (!savedTask) {
+            const error = err instanceof Error ? err.message : String(err);
+            await this.updateTask(ctx, phase.id, task.id, { status: 'failed', completedAt: Date.now(), output: error });
+            await ctx.broadcast({
+              type: 'task_failed',
+              missionId: ctx.missionId,
+              timestamp: Date.now(),
+              data: {
+                phaseId: phase.id,
+                taskId: task.id,
+                taskTitle: task.title,
+                agentId: `agent-${ctx.missionId}-${task.agentRole.toLowerCase()}`,
+                agentName: `${task.agentRole} Agent`,
+                agentRole: task.agentRole,
+                error,
+              },
+            });
+          }
           throw err;
+        }
+
+        if (!savedTask) {
+          completedTasks.set(taskKey, { phaseId: phase.id, taskId: task.id });
+          saveCheckpoint();
         }
 
         await this.updateTask(ctx, phase.id, task.id, {
@@ -220,27 +191,37 @@ export class MissionOrchestrator {
           output: result.output,
           artifacts: result.artifacts,
         });
-        await ctx.broadcast({
-          type: 'task_completed',
-          missionId: ctx.missionId,
-          timestamp: Date.now(),
-          data: {
-            phaseId: phase.id,
-            taskId: task.id,
-            taskTitle: task.title,
-            agentId: `agent-${ctx.missionId}-${task.agentRole.toLowerCase()}`,
-            agentName: `${task.agentRole} Agent`,
-            agentRole: task.agentRole,
-            artifacts: result.artifacts,
-            tokensUsed: result.tokensUsed,
-          },
-        });
+        if (!savedTask) {
+          await ctx.broadcast({
+            type: 'task_completed',
+            missionId: ctx.missionId,
+            timestamp: Date.now(),
+            data: {
+              phaseId: phase.id,
+              taskId: task.id,
+              taskTitle: task.title,
+              agentId: `agent-${ctx.missionId}-${task.agentRole.toLowerCase()}`,
+              agentName: `${task.agentRole} Agent`,
+              agentRole: task.agentRole,
+              artifacts: result.artifacts,
+              tokensUsed: result.tokensUsed,
+            },
+          });
+        }
         phaseOutput.tasks.push({ taskId: task.id, status: 'completed', artifacts: result.artifacts });
         compensations.push({ phaseId: phase.id, action: `revert-phase-${phase.id}` });
+        ctx.heartbeat?.();
       }
 
-      await this.updatePhase(ctx, phase.id, { status: 'awaiting_approval' });
-      await ctx.broadcast({ type: 'phase_completed', missionId: ctx.missionId, timestamp: Date.now(), data: { phaseId: phase.id, phaseName: phase.name, artifacts: phaseOutput.tasks.flatMap((t: any) => t.artifacts) } });
+      if (!phaseIsComplete) {
+        await this.updatePhase(ctx, phase.id, { status: 'awaiting_approval' });
+        await ctx.broadcast({ type: 'phase_completed', missionId: ctx.missionId, timestamp: Date.now(), data: { phaseId: phase.id, phaseName: phase.name, artifacts: phaseOutput.tasks.flatMap((t: any) => t.artifacts) } });
+      }
+
+      if (phaseIsComplete) {
+        outputs.phases.push(phaseOutput);
+        continue;
+      }
 
       if (phase.requiresApproval) {
         const question = phase.approvalQuestion || `Phase "${phase.name}" complete. Approve to continue?`;
@@ -265,6 +246,8 @@ export class MissionOrchestrator {
         await this.updatePhase(ctx, phase.id, { status: 'completed' });
       }
 
+      completedPhases.add(phase.id);
+      saveCheckpoint();
       outputs.phases.push(phaseOutput);
     }
 
@@ -285,50 +268,10 @@ export class MissionOrchestrator {
   }
 
   private async generatePlan(ctx: MissionContext): Promise<Plan> {
-    const brainUrl = ctx.brainUrl || this.brainUrl;
-    const fallback = (reason: string): Plan => {
-      logger.warn({ missionId: ctx.missionId, reason }, 'Planner could not produce a valid plan; using fallback plan');
-      return buildFallbackPlan(ctx.prompt);
-    };
-
-    try {
-      const res = await fetch(`${brainUrl}/api/brain/complete`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: `GOAL: ${ctx.prompt}\n\nCONTEXT: ${JSON.stringify(ctx.metadata || {})}`,
-          systemPrompt: PLANNER_SYSTEM_PROMPT,
-          maxTokens: 4096,
-          temperature: 0.3,
-          missionId: ctx.missionId,
-        }),
-      });
-      const raw = await res.text();
-      if (!res.ok) return fallback(`Brain returned ${res.status}: ${raw.slice(0, 200)}`);
-
-      let data: { content?: string };
-      try {
-        data = JSON.parse(raw) as { content?: string };
-      } catch {
-        data = { content: raw };
-      }
-      const content = data.content || '';
-      const jsonMatch = content.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) return fallback('Brain response did not contain a JSON plan');
-
-      try {
-        const parsed = JSON.parse(jsonMatch[0]);
-        const { PlanSchema } = await import('@stage7-nextgen/shared');
-        const validated = PlanSchema.parse(parsed);
-        logger.info({ missionGoal: ctx.prompt.slice(0, 50), phases: validated.phases.length }, 'Plan generated');
-        return validated;
-      } catch (err) {
-        return fallback(`Brain response did not match the plan schema: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
-      return fallback(reason);
+    if (!this.agentRuntime) {
+      throw new Error(`Mission Agent Runtime is not initialized for mission ${ctx.missionId}`);
     }
+    return this.agentRuntime.generatePlan(ctx.prompt, ctx.metadata);
   }
 
   private async persistPlan(ctx: MissionContext, plan: Plan): Promise<void> {
@@ -351,7 +294,7 @@ export class MissionOrchestrator {
   }
 
   private async updatePhase(ctx: MissionContext, phaseId: string, update: Partial<Phase>): Promise<void> {
-    const url = `${ctx.persistenceUrl}/api/artifacts/missions/${ctx.missionId}/phases/${phaseId}`;
+    const url = `${ctx.persistenceUrl}/api/artifacts/missions/${encodeURIComponent(ctx.missionId)}/phases/${encodeURIComponent(phaseId)}`;
     const body = JSON.stringify(update);
     try {
       logger.debug({ missionId: ctx.missionId, phaseId, url, bodyLength: body.length }, 'Updating phase in artifacts service');
@@ -362,15 +305,16 @@ export class MissionOrchestrator {
       });
       const text = await res.text();
       if (!res.ok) {
-        logger.warn({ missionId: ctx.missionId, phaseId, status: res.status, responseText: text }, 'Failed updating phase');
+        throw new Error(`Phase persistence failed (${res.status}): ${text.slice(0, 500)}`);
       }
     } catch (err) {
-      logger.warn({ missionId: ctx.missionId, phaseId, err: err instanceof Error ? err.message : String(err) }, 'Error updating phase');
+      logger.error({ missionId: ctx.missionId, phaseId, err: err instanceof Error ? err.message : String(err) }, 'Error updating phase');
+      throw err;
     }
   }
 
   private async updateTask(ctx: MissionContext, phaseId: string, taskId: string, update: Partial<Task>): Promise<void> {
-    const url = `${ctx.persistenceUrl}/api/artifacts/missions/${ctx.missionId}/tasks/${taskId}`;
+    const url = `${ctx.persistenceUrl}/api/artifacts/missions/${encodeURIComponent(ctx.missionId)}/tasks/${encodeURIComponent(taskId)}`;
     const body = JSON.stringify({ ...update, phaseId });
     try {
       logger.debug({ missionId: ctx.missionId, phaseId, taskId, url, bodyLength: body.length }, 'Updating task in artifacts service');
@@ -381,15 +325,16 @@ export class MissionOrchestrator {
       });
       const text = await res.text();
       if (!res.ok) {
-        logger.warn({ missionId: ctx.missionId, phaseId, taskId, status: res.status, responseText: text }, 'Failed updating task');
+        throw new Error(`Task persistence failed (${res.status}): ${text.slice(0, 500)}`);
       }
     } catch (err) {
-      logger.warn({ missionId: ctx.missionId, phaseId, taskId, err: err instanceof Error ? err.message : String(err) }, 'Error updating task');
+      logger.error({ missionId: ctx.missionId, phaseId, taskId, err: err instanceof Error ? err.message : String(err) }, 'Error updating task');
+      throw err;
     }
   }
 
-  private async evaluateMissionCompletion(
-    ctx: MissionContext,
+  async evaluateMissionCompletion(
+    ctx: Pick<MissionContext, 'missionId' | 'prompt' | 'tenantId' | 'agentRuntimeUrl'>,
     plan: Plan,
     outputs: { phases?: Array<{ tasks?: Array<{ artifacts?: unknown[]; output?: string }> }> },
   ): Promise<boolean> {
@@ -400,42 +345,32 @@ export class MissionOrchestrator {
       ? artifacts.map((a) => `- ${typeof a === 'string' ? a : JSON.stringify(a)}`).join('\n')
       : '(none)';
 
-    try {
-      const prompt = [
+    const agentRuntime = this.agentRuntime || new MissionAgentRuntime({
+      missionId: ctx.missionId,
+      tenantId: ctx.tenantId || 'tenant-1',
+      agentRuntimeUrl: ctx.agentRuntimeUrl,
+    });
+    const reviewerAgentId = await agentRuntime.getOrCreateAgent(
+      'mission-evaluator',
+      MISSION_REVIEWER_SYSTEM_PROMPT,
+    );
+    const review = await agentRuntime.executePromptTask(reviewerAgentId, {
+      taskId: `${ctx.missionId}:review:completion`,
+      type: 'review',
+      prompt: [
         `Mission goal: ${ctx.prompt}`,
         `Plan summary: ${plan.summary || ''}`,
         'Produced artifacts:',
         artifactSummary,
-        'Did the produced artifacts fully satisfy the mission goal? Answer only "yes" or "no".',
-      ].join('\n');
-
-      const res = await fetch(`${ctx.brainUrl}/api/brain/complete`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt,
-          systemPrompt:
-            'You are an objective mission evaluator. Determine whether the produced artifacts fully satisfy the stated mission goal. Answer with only "yes" or "no".',
-          maxTokens: 256,
-          temperature: 0,
-          missionId: ctx.missionId,
-        }),
-      });
-
-      if (!res.ok) {
-        logger.warn({ missionId: ctx.missionId, status: res.status }, 'Mission evaluation brain call failed; inferring from artifact presence');
-        return artifacts.length > 0;
-      }
-
-      const data = await res.json() as { content?: string };
-      const answer = (data.content || '').trim().slice(0, 3).toLowerCase();
-      return answer.startsWith('y');
-    } catch (err) {
-      logger.warn(
-        { missionId: ctx.missionId, err: err instanceof Error ? err.message : String(err) },
-        'Mission evaluation failed; inferring from artifact presence',
-      );
-      return artifacts.length > 0;
+        'Do these artifacts fully satisfy the mission goal? Answer exactly "yes" or "no".',
+      ].join('\n'),
+      phaseId: 'mission-review',
+      executionPolicy: MISSION_REVIEWER_EXECUTION_POLICY,
+    });
+    const answer = review.output.trim().toLowerCase();
+    if (answer !== 'yes' && answer !== 'no') {
+      throw new Error(`Mission evaluator returned an invalid decision: ${review.output.slice(0, 200)}`);
     }
+    return answer === 'yes';
   }
 }

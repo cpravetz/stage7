@@ -40,6 +40,7 @@ const EntityWorkspace = () => {
   const [availableTools, setAvailableTools] = useState<Array<{ id: string; name: string; description: string }>>([]);
   const [hitlApprovals, setHitlApprovals] = useState<HITLApproval[]>([]);
   const [loadingApprovals, setLoadingApprovals] = useState(false);
+  const [hitlActionError, setHitlActionError] = useState<string | null>(null);
   const [memoryContext, setMemoryContext] = useState<Record<string, unknown>>({});
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -369,6 +370,7 @@ const EntityWorkspace = () => {
   const handleHITLAction = async (approvalId: string, action: 'approved' | 'rejected') => {
     const approval = hitlApprovals.find((a) => a.id === approvalId);
     if (!approval) return;
+    setHitlActionError(null);
     try {
       if (action === 'approved') {
         await postJSON(`/api/artifacts/missions/${encodeURIComponent(approval.missionId)}/phases/${encodeURIComponent(approval.phaseId)}/approve`, {
@@ -383,6 +385,7 @@ const EntityWorkspace = () => {
       setHitlApprovals((prev) => prev.filter((a) => a.id !== approvalId));
     } catch (err) {
       console.error('Approval action failed', err);
+      setHitlActionError(err instanceof Error ? err.message : 'Approval action failed');
     }
   };
 
@@ -549,6 +552,7 @@ const EntityWorkspace = () => {
           <HITLPanel
             hitlApprovals={hitlApprovals}
             loadingApprovals={loadingApprovals}
+            actionError={hitlActionError}
             entity={entity}
             handleHITLAction={handleHITLAction}
           />

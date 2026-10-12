@@ -6,8 +6,6 @@ const BRAIN_URL = process.env.BRAIN_URL || 'http://brain:3100';
 export interface ReasoningConfig {
   systemPrompt?: string;
   promptTemplate?: string;
-  model?: string;
-  provider?: string;
   temperature?: number;
   maxTokens?: number;
   outputFormat?: 'json' | 'text';
@@ -42,8 +40,6 @@ export class ReasoningExecutor {
     const config = (tool.reasoningConfig as ReasoningConfig) || {};
     const systemPrompt = config.systemPrompt || 'You are a helpful AI assistant.';
     const promptTemplate = config.promptTemplate || 'Tool: {{toolName}}\nDescription: {{toolDescription}}\nInput: {{input}}\n\nProvide a response.';
-    const model = config.model;
-    const provider = config.provider;
     const temperature = config.temperature ?? 0.7;
     const maxTokens = config.maxTokens ?? 2048;
     const outputFormat = config.outputFormat;
@@ -61,8 +57,6 @@ export class ReasoningExecutor {
       systemPrompt,
       options: { temperature, maxTokens },
     };
-    if (model) payload.model = model;
-    if (provider) payload.provider = provider;
     if (optimizeFor !== 'balanced') {
       (payload.options as Record<string, unknown>).optimizeFor = optimizeFor;
     }
@@ -79,7 +73,7 @@ export class ReasoningExecutor {
       logger.error({ toolId: tool.id, status: response.status, error: error.message }, 'Brain service returned an error');
       throw error;
     }
-    logger.info({ toolId: tool.id, model, provider }, 'Brain succeeded');
+    logger.info({ toolId: tool.id }, 'Brain succeeded');
 
     const data = await response.json() as { content: string; model?: string; provider?: string; tokensUsed?: number };
     const content = data.content || '';

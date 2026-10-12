@@ -200,8 +200,10 @@ assistant. It receives the same runtime value.
 There is no `base` service and no `Dockerfile.base` in the build path. `Dockerfile.base` still
 exists in the repository root, but nothing references it, and it is not part of any build.
 
-Every service image is an independent build from `node:22-alpine` that runs its own
-`npm install --legacy-peer-deps` over the workspace root. That has two practical consequences:
+Every service image is an independent build that runs its own `npm install --legacy-peer-deps`
+over the workspace root. Most use `node:22-alpine`; Temporal intentionally uses
+`node:22-bookworm-slim` because the Temporal Core native bridge requires glibc, which Alpine does
+not provide. That has two practical consequences:
 
 - `docker compose build --no-cache` is slow, because there is no shared dependency layer to reuse.
   It is the right choice for a first run or after changing a dependency, and the wrong choice for

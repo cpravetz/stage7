@@ -22,7 +22,6 @@ describe('AgentRuntime', () => {
     description: 'A test agent',
     type: 'assistant',
     systemPrompt: 'You are helpful',
-    model: 'gpt-4',
     tools: ['bash'],
     metadata: {},
     createdAt: new Date().toISOString(),
@@ -106,7 +105,7 @@ describe('REST endpoints', () => {
         description: 'REST test',
         type: 'assistant',
         systemPrompt: '',
-        model: 'gpt-4',
+
         tools: [],
         metadata: {},
         createdAt: new Date().toISOString(),
@@ -132,7 +131,7 @@ describe('REST endpoints', () => {
         description: 'REST test 2',
         type: 'assistant',
         systemPrompt: '',
-        model: 'gpt-4',
+
         tools: [],
         metadata: {},
         createdAt: new Date().toISOString(),

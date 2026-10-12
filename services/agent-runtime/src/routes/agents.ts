@@ -95,8 +95,8 @@ router.post('/missions/:missionId/agents/:id/start', asyncHandler(async (req: Re
   res.status(201).json(state)
 }))
 
-router.post('/missions/:missionId/agents/:id/stop', asyncHandler((req: Request, res: Response) => {
-  runtime.stopAgent(req.params.id as string)
+router.post('/missions/:missionId/agents/:id/stop', asyncHandler(async (req: Request, res: Response) => {
+  await runtime.stopAgent(req.params.id as string)
   res.status(204).send()
 }))
 
@@ -107,9 +107,19 @@ router.get('/missions/:missionId/agents/:id/state', asyncHandler((req: Request, 
 }))
 
 router.post('/missions/:missionId/agents/:id/tasks', asyncHandler(async (req: Request, res: Response) => {
-  const taskData = req.body as Omit<AgentTask, 'taskId' | 'createdAt'>
+  const taskData = req.body as Omit<AgentTask, 'agentId' | 'taskId' | 'createdAt'> & { taskId?: string }
   const task = await runtime.submitTask(req.params.id as string, taskData)
   res.status(201).json(task)
+}))
+
+router.post('/missions/:missionId/agents/:id/tasks/:taskId/execute', asyncHandler(async (req: Request, res: Response) => {
+  const { missionId, id, taskId } = req.params as { missionId: string; id: string; taskId: string }
+  const state = runtime.getAgentState(id)
+  if (!state || state.missionId !== missionId) throw new NotFoundError('Mission agent')
+  const task = runtime.getTask(taskId)
+  if (!task || task.agentId !== id) throw new NotFoundError('Agent task')
+  const requireCompletedReceipt = req.body.requireCompletedReceipt === true
+  res.json(await runtime.executeTask(id, taskId, requireCompletedReceipt))
 }))
 
 router.post('/missions/:missionId/agents/:id/tasks/:taskId/complete', asyncHandler(async (req: Request, res: Response) => {

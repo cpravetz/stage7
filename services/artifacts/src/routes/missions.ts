@@ -148,14 +148,32 @@ router.get('/:missionId/artifacts', asyncHandler(async (req, res) => {
         artifacts.push({ id: artifact, name: artifact });
       }
     }
-    const phases = (plan as { phases?: Array<{ id: string; tasks?: Array<{ artifacts?: unknown[] }> }> }).phases || [];
+    const phases = (plan as { phases?: Array<{ id: string; artifacts?: unknown[]; tasks?: Array<{ id: string; artifacts?: unknown[] }> }> }).phases || [];
     for (const phase of phases) {
+      for (const artifact of phase.artifacts || []) {
+        if (artifact && typeof artifact === 'object') {
+          artifacts.push({ phaseId: phase.id, ...(artifact as Record<string, unknown>) });
+        } else if (typeof artifact === 'string') {
+          artifacts.push({ id: artifact, name: artifact, phaseId: phase.id });
+        }
+      }
       for (const task of phase.tasks || []) {
         for (const artifact of task.artifacts || []) {
           if (artifact && typeof artifact === 'object') {
-            artifacts.push({ phaseId: phase.id, ...(artifact as Record<string, unknown>) });
+            artifacts.push({ phaseId: phase.id, taskId: task.id, ...(artifact as Record<string, unknown>) });
           } else if (typeof artifact === 'string') {
-            artifacts.push({ id: artifact, name: artifact, phaseId: phase.id });
+            artifacts.push({ id: artifact, name: artifact, phaseId: phase.id, taskId: task.id });
+          }
+        }
+
+        if (!task.artifacts?.length) {
+          const storedTask = await service.getMissionTask(missionId, task.id);
+          for (const artifact of storedTask?.artifacts || []) {
+            if (artifact && typeof artifact === 'object') {
+              artifacts.push({ phaseId: phase.id, taskId: task.id, ...(artifact as Record<string, unknown>) });
+            } else if (typeof artifact === 'string') {
+              artifacts.push({ id: artifact, name: artifact, phaseId: phase.id, taskId: task.id });
+            }
           }
         }
       }
@@ -190,11 +208,27 @@ router.get('/:missionId/artifacts/:artifactId', asyncHandler(async (req, res) =>
   if (plan) {
     const phases = (plan as any).phases || [];
     for (const phase of phases) {
+      for (const artifact of phase.artifacts || []) {
+        if (artifact && typeof artifact === 'object' && String((artifact as any).id) === artifactId) {
+          found = { phaseId: phase.id, ...(artifact as Record<string, unknown>) };
+          break;
+        }
+      }
+      if (found) break;
       for (const task of phase.tasks || []) {
         for (const artifact of task.artifacts || []) {
           if (artifact && typeof artifact === 'object' && String((artifact as any).id) === artifactId) {
-            found = { phaseId: phase.id, ...(artifact as Record<string, unknown>) };
+            found = { phaseId: phase.id, taskId: task.id, ...(artifact as Record<string, unknown>) };
             break;
+          }
+        }
+        if (!found) {
+          const storedTask = await service.getMissionTask(missionId, task.id);
+          for (const artifact of storedTask?.artifacts || []) {
+            if (artifact && typeof artifact === 'object' && String((artifact as any).id) === artifactId) {
+              found = { phaseId: phase.id, taskId: task.id, ...(artifact as Record<string, unknown>) };
+              break;
+            }
           }
         }
         if (found) break;
@@ -365,16 +399,57 @@ router.post('/:missionId/events', asyncHandler(async (req, res) => {
 }));
 
 router.post('/:missionId/phases/:phaseId/approve', asyncHandler(async (req, res) => {
+  const missionId = req.params.missionId as string;
+  const phaseId = req.params.phaseId as string;
   const { approvedBy } = req.body as { approvedBy?: string };
-  const phase = await service.updateMissionPhase(req.params.missionId as string, req.params.phaseId as string, {
+  const plan = await service.getMissionPlan(missionId);
+  const planPhase = (plan as { phases?: Array<Record<string, any>> } | undefined)?.phases
+    ?.find((candidate) => candidate.id === phaseId);
+  if (!planPhase) throw NextGenError.notFound('Phase plan not found');
+
+  const persistedPhase = await service.getMissionPhase(missionId, phaseId);
+  if ((persistedPhase?.status || planPhase.status) !== 'awaiting_approval') {
+    throw new NextGenError('Phase is not awaiting approval', 409, { phaseId });
+  }
+
+  const tasks = Array.isArray(planPhase.tasks) ? planPhase.tasks : [];
+  if (tasks.length === 0) {
+    throw new NextGenError('Cannot approve a phase without completed tasks', 409, { phaseId });
+  }
+  const incompleteTasks: string[] = [];
+  const missingArtifactTasks: string[] = [];
+  for (const task of tasks) {
+    const taskId = typeof task.id === 'string' ? task.id : '';
+    if (!taskId) throw NextGenError.badRequest('Phase contains a task without an id', { phaseId });
+    const persistedTask = await service.getMissionTask(missionId, taskId);
+    if ((persistedTask?.status || task.status) !== 'completed') {
+      incompleteTasks.push(taskId);
+    }
+    const expectedArtifacts = Array.isArray(task.expectedArtifacts) ? task.expectedArtifacts : [];
+    const persistedArtifacts = Array.isArray(persistedTask?.artifacts) && persistedTask.artifacts.length > 0
+      ? persistedTask.artifacts
+      : Array.isArray(task.artifacts) ? task.artifacts : [];
+    if (expectedArtifacts.length > 0 && persistedArtifacts.length === 0) {
+      missingArtifactTasks.push(taskId);
+    }
+  }
+  if (incompleteTasks.length > 0 || missingArtifactTasks.length > 0) {
+    throw new NextGenError(
+      'Cannot approve phase until all tasks are complete and expected deliverables are published',
+      409,
+      { phaseId, incompleteTasks, missingArtifactTasks },
+    );
+  }
+
+  const phase = await service.updateMissionPhase(missionId, phaseId, {
     status: 'approved',
     approvedAt: Date.now(),
     approvedBy: approvedBy || 'user',
   });
-  await service.appendMissionEvent(req.params.missionId as string, {
+  await service.appendMissionEvent(missionId, {
     type: 'phase_approved',
     timestamp: Date.now(),
-    data: { phaseId: req.params.phaseId, approvedBy: approvedBy || 'user' },
+    data: { phaseId, approvedBy: approvedBy || 'user' },
   });
   res.json(phase);
 }));

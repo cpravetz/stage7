@@ -1,127 +1,175 @@
-import { Plan, PlanSchema } from '@stage7-nextgen/shared';
+import {
+  AgentExecutionPolicy,
+  DEFAULT_AGENT_EXECUTION_POLICY,
+  Plan,
+  PlanSchema,
+} from '@stage7-nextgen/shared';
 import { logger } from '@stage7-nextgen/shared';
 
-const PLANNER_SYSTEM_PROMPT = `You are a mission planner for an AI agent platform. Given a user's goal, you produce a structured plan with phases, tasks, and the agent roles needed to execute them.
+const MAX_PLAN_ATTEMPTS = 6;
+const MAX_PRIOR_RESPONSE_CHARS = 12_000;
 
-Your job is to:
-1. Understand the goal.
-2. Decide if you need clarification. If the goal is ambiguous, set requiresClarification=true and ask 2-4 focused questions. Otherwise set requiresClarification=false.
-3. Decompose the goal into 3-7 phases. Each phase has a clear deliverable.
-4. For each phase, break it into specific tasks (1-5 per phase). Each task has a single agent role, a clear description, and expected artifacts.
-5. For each task, write a systemPrompt for the agent that will execute it.
-6. Mark requiresApproval=true on phases that produce something the user should review before continuing.
+export const PLANNER_SYSTEM_PROMPT = `You are a mission planner for an AI agent platform. Given a user's goal, produce a complete structured plan tailored to that goal.
 
-Agent roles should be chosen based on the actual goal — e.g. "researcher" for research tasks, "coder" for software tasks, "writer" for content, "analyst" for data tasks, "planner" for strategy, "reviewer" for quality checks. Do not default to business/startup roles unless the goal is explicitly about business.
+Requirements:
+1. If the goal is ambiguous, set requiresClarification=true and ask 2-4 focused questions. Otherwise set requiresClarification=false and clarificationQuestions=[].
+2. For a goal that does not need clarification, create 3-7 phases with clear deliverables. Each phase must contain 1-5 specific tasks.
+3. Each phase must include id, name, goal, tasks, requiresApproval, and status. Use "pending" for the initial status.
+4. Each task must include id, title, description, agentRole, systemPrompt, expectedArtifacts, status, and artifacts. Use "pending" for the initial status and [] when there are no artifacts yet.
+5. Give every phase a unique, stable id. Task ids must be globally unique across the entire plan, not merely unique within each phase. Use ids such as "phase-2-task-1"; never reuse "task-1" in another phase. Select agent roles based on the actual work.
+6. Mark requiresApproval=true only where a human decision is needed before work continues.
 
-Output a single JSON object matching the schema. Do not include any prose outside the JSON.`;
+Return one complete JSON object matching this structure:
+{"summary":"...","estimatedDuration":"...","estimatedCost":"...","requiresClarification":false,"clarificationQuestions":[],"phases":[{"id":"phase-1","name":"...","goal":"...","requiresApproval":false,"status":"pending","tasks":[{"id":"phase-1-task-1","title":"...","description":"...","agentRole":"...","systemPrompt":"...","expectedArtifacts":[],"status":"pending","artifacts":[]}]}]}
+Do not include prose, markdown fences, or any text outside the JSON object.`;
 
-function buildFallbackPlan(prompt: string): Plan {
-  const trimmed = prompt.trim();
-  return {
-    summary: `Plan for: ${trimmed.slice(0, 100)}`,
-    estimatedDuration: '1-2 days',
-    estimatedCost: 'TBD',
-    requiresClarification: false,
-    clarificationQuestions: [],
-    phases: [
-      {
-        id: 'phase-1',
-        name: 'Planning',
-        goal: `Break down and plan the execution of: ${trimmed.slice(0, 80)}`,
-        tasks: [
-          {
-            id: 'task-1-1',
-            title: 'Analyze goal and create execution plan',
-            description: `Analyze the goal and create a concrete, step-by-step execution plan for: ${trimmed}`,
-            agentRole: 'planner',
-            systemPrompt: 'You are a planning agent. Analyze the goal and create a concrete, step-by-step execution plan. Be thorough and consider edge cases.',
-            expectedArtifacts: ['plan.md'],
-            status: 'pending',
-            artifacts: [],
-          },
-        ],
-        requiresApproval: true,
-        status: 'pending',
-      },
-      {
-        id: 'phase-2',
-        name: 'Execution',
-        goal: `Execute the plan to accomplish: ${trimmed.slice(0, 80)}`,
-        tasks: [
-          {
-            id: 'task-2-1',
-            title: 'Execute the plan',
-            description: `Execute the previously created plan to accomplish: ${trimmed}`,
-            agentRole: 'worker',
-            systemPrompt: 'You are an execution agent. Execute the plan thoroughly and produce the required artifacts. If you need tools, use the available tool execution interface.',
-            expectedArtifacts: ['output.md'],
-            status: 'pending',
-            artifacts: [],
-          },
-        ],
-        requiresApproval: false,
-        status: 'pending',
-      },
-      {
-        id: 'phase-3',
-        name: 'Review',
-        goal: 'Review output quality and completeness',
-        tasks: [
-          {
-            id: 'task-3-1',
-            title: 'Review and refine output',
-            description: 'Review the execution output for completeness, accuracy, and quality. Refine or request follow-up tasks if needed.',
-            agentRole: 'reviewer',
-            systemPrompt: 'You are a reviewer agent. Evaluate outputs for completeness, accuracy, and quality. Identify gaps and suggest improvements.',
-            expectedArtifacts: ['review.md'],
-            status: 'pending',
-            artifacts: [],
-          },
-        ],
-        requiresApproval: true,
-        status: 'pending',
-      },
-    ],
-  };
+export const PLANNER_EXECUTION_POLICY: AgentExecutionPolicy = {
+  ...DEFAULT_AGENT_EXECUTION_POLICY,
+  maxBrainCalls: 1,
+  maxActions: 0,
+  maxCompletionTokens: 4_096,
+  maxCompletionTokensPerCall: 4_096,
+  maxDelegations: 0,
+};
+
+export interface PlannerCompletionRequest {
+  prompt: string;
+  systemPrompt: string;
+  maxTokens: number;
+  temperature: number;
+  missionId?: string;
+  attempt: number;
+}
+
+export type PlannerCompletion = (request: PlannerCompletionRequest) => Promise<string>;
+
+function parsePlanJson(content: string): unknown {
+  const trimmed = content.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+  try {
+    return JSON.parse(trimmed);
+  } catch (directError) {
+    const start = trimmed.indexOf('{');
+    const end = trimmed.lastIndexOf('}');
+    if (start < 0 || end <= start) {
+      throw new Error(`Planner response did not contain a JSON plan: ${directError instanceof Error ? directError.message : String(directError)}`);
+    }
+    try {
+      return JSON.parse(trimmed.slice(start, end + 1));
+    } catch (error) {
+      throw new Error(`Planner response did not contain valid plan JSON: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+}
+
+function planStandardIssues(plan: Plan): string[] {
+  const issues: string[] = [];
+  if (plan.requiresClarification) {
+    if (plan.clarificationQuestions.length < 2 || plan.clarificationQuestions.length > 4) {
+      issues.push('clarificationQuestions must contain 2-4 focused questions when requiresClarification is true');
+    }
+    return issues;
+  }
+
+  if (plan.phases.length < 3 || plan.phases.length > 7) {
+    issues.push(`phases must contain 3-7 phases; received ${plan.phases.length}`);
+  }
+
+  const phaseIds = new Set<string>();
+  const taskIds = new Map<string, string>();
+  for (const [phaseIndex, phase] of plan.phases.entries()) {
+    if (phaseIds.has(phase.id)) issues.push(`phases[${phaseIndex}].id duplicates "${phase.id}"`);
+    phaseIds.add(phase.id);
+    if (phase.tasks.length < 1 || phase.tasks.length > 5) {
+      issues.push(`phases[${phaseIndex}].tasks must contain 1-5 tasks; received ${phase.tasks.length}`);
+    }
+    for (const [taskIndex, task] of phase.tasks.entries()) {
+      const taskPath = `phases[${phaseIndex}].tasks[${taskIndex}].id`;
+      const firstTaskPath = taskIds.get(task.id);
+      if (firstTaskPath) {
+        issues.push(
+          `${taskPath} duplicates "${task.id}" from ${firstTaskPath}; task ids must be globally unique across all phases`,
+        );
+      } else {
+        taskIds.set(task.id, taskPath);
+      }
+    }
+  }
+  return issues;
+}
+
+function formatSchemaIssues(issues: Array<{ path: PropertyKey[]; message: string }>): string[] {
+  return issues.map((issue) => `${issue.path.length ? issue.path.join('.') : '<root>'}: ${issue.message}`);
+}
+
+export async function generateValidPlan(
+  prompt: string,
+  context: Record<string, unknown> | undefined,
+  missionId: string | undefined,
+  complete: PlannerCompletion,
+): Promise<Plan> {
+  let lastError = '';
+  let previousResponse = '';
+
+  for (let attempt = 1; attempt <= MAX_PLAN_ATTEMPTS; attempt++) {
+    const repairPrompt = attempt === 1
+      ? ''
+      : [
+        '',
+        `Your previous plan was rejected (attempt ${attempt - 1} of ${MAX_PLAN_ATTEMPTS}). Fix every listed issue and return a complete replacement plan.`,
+        'Validation issues:',
+        lastError,
+        'Do not reuse task IDs across phases. When an ID is duplicated, assign each affected task a distinct stable ID that includes its phase number, such as "phase-3-task-1". Preserve all otherwise-valid plan content and do not omit tasks.',
+        'Previous response (possibly truncated):',
+        previousResponse.slice(0, MAX_PRIOR_RESPONSE_CHARS),
+      ].join('\n');
+
+    let content: string;
+    try {
+      content = await complete({
+        prompt: `GOAL: ${prompt}\n\nCONTEXT: ${JSON.stringify(context || {})}${repairPrompt}`,
+        systemPrompt: PLANNER_SYSTEM_PROMPT,
+        maxTokens: PLANNER_EXECUTION_POLICY.maxCompletionTokensPerCall,
+        temperature: 0.3,
+        missionId,
+        attempt,
+      });
+    } catch (error) {
+      lastError = `Planner Agent request failed: ${error instanceof Error ? error.message : String(error)}`;
+      logger.warn({ missionId, attempt, maxAttempts: MAX_PLAN_ATTEMPTS, reason: lastError }, 'Planner request failed; retrying');
+      continue;
+    }
+    previousResponse = content;
+
+    try {
+      const parsed = PlanSchema.safeParse(parsePlanJson(content));
+      if (!parsed.success) {
+        lastError = formatSchemaIssues(parsed.error.issues).join('\n');
+        throw new Error(lastError);
+      }
+      const standardsIssues = planStandardIssues(parsed.data);
+      if (standardsIssues.length) {
+        lastError = standardsIssues.join('\n');
+        throw new Error(lastError);
+      }
+
+      logger.info({ missionId, missionGoal: prompt.slice(0, 50), phases: parsed.data.phases.length, attempt }, 'Plan generated');
+      return parsed.data;
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+      logger.warn(
+        { missionId, attempt, maxAttempts: MAX_PLAN_ATTEMPTS, reason: lastError },
+        'Planner response rejected; requesting a corrected plan',
+      );
+    }
+  }
+
+  throw new Error(`Unable to generate a valid mission plan after ${MAX_PLAN_ATTEMPTS} attempts: ${lastError}`);
 }
 
 export class MissionPlanner {
-  constructor(private brainUrl: string, private apiKey?: string) {}
+  constructor(private readonly complete: PlannerCompletion) {}
 
   async generatePlan(prompt: string, context?: Record<string, unknown>, missionId?: string): Promise<Plan> {
-    try {
-      const res = await fetch(`${this.brainUrl}/api/brain/complete`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: `GOAL: ${prompt}\n\nCONTEXT: ${JSON.stringify(context || {})}`,
-          systemPrompt: PLANNER_SYSTEM_PROMPT,
-          maxTokens: 4096,
-          temperature: 0.3,
-          missionId,
-        }),
-      });
-      const raw = await res.text();
-      if (!res.ok) throw new Error(`Brain returned ${res.status}: ${raw.slice(0, 500)}`);
-
-      let data: { content?: string };
-      try {
-        data = JSON.parse(raw) as { content?: string };
-      } catch {
-        data = { content: raw };
-      }
-      const jsonMatch = (data.content || '').match(/\{[\s\S]*\}/);
-      if (!jsonMatch) throw new Error('Brain response did not contain a JSON plan');
-
-      const validated = PlanSchema.parse(JSON.parse(jsonMatch[0]));
-      logger.info({ missionGoal: prompt.slice(0, 50), phases: validated.phases.length }, 'Plan generated');
-      return validated;
-    } catch (err) {
-      logger.warn(
-        { missionId, err: err instanceof Error ? err.message : String(err) },
-        'Planner request failed; using fallback plan',
-      );
-      return buildFallbackPlan(prompt);
-    }
+    return generateValidPlan(prompt, context, missionId, this.complete);
   }
 }
