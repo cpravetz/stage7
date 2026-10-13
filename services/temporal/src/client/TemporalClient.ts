@@ -10,10 +10,25 @@ import { runWatchLoop } from '../workflows/watchLoop';
 import { logger, Plan, PlanSchema } from '@stage7-nextgen/shared';
 import { MissionActivityCheckpoint, WorkflowInput, WorkflowResult } from '../types/workflow';
 import { getMissionResumeProgress } from '../recovery/missionProgress';
+import { MissionTerminationRequestedError } from '../types/missionControl';
 
 const TEMPORAL_TIMEOUT_MS = parseInt(process.env.TEMPORAL_OP_TIMEOUT_MS || '5000', 10);
 const DIRECT_RECOVERY_LEASE_DURATION_MS = 90_000;
 const DIRECT_RECOVERY_LEASE_RENEWAL_MS = 30_000;
+const DIRECT_MISSION_CONTROL_POLL_MS = 250;
+
+interface PersistedMissionControlRecord {
+  missionId?: string;
+  status?: string;
+  controlState?: 'running' | 'pause_requested' | 'paused' | 'terminate_requested' | 'terminated';
+  input?: WorkflowInput;
+}
+
+function visibleMissionStatus(record: PersistedMissionControlRecord): string {
+  if (record.controlState === 'pause_requested') return 'pausing';
+  if (record.controlState === 'terminate_requested') return 'canceling';
+  return record.status || 'unknown';
+}
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   let timeout: ReturnType<typeof setTimeout>;
@@ -155,6 +170,7 @@ export class TemporalClient {
       tenantId: input.tenantId || '',
       assistantId: input.assistantId || '',
       status: 'running',
+      controlState: 'running',
       currentStep: 0,
       totalSteps: 1,
       history: [{ step: 0, status: 'running' as const, startedAt: Date.now() }],
@@ -174,18 +190,20 @@ export class TemporalClient {
     result: WorkflowResult,
     startTime: number,
   ): Promise<void> {
-    const historyStatus: 'pending' | 'running' | 'completed' | 'failed' | 'awaiting_review' | 'incomplete' =
+    const historyStatus: 'pending' | 'running' | 'completed' | 'failed' | 'canceled' | 'awaiting_review' | 'incomplete' =
       result.status === 'completed'
         ? 'completed'
         : result.status === 'failed'
           ? 'failed'
+          : result.status === 'canceled'
+            ? 'canceled'
           : result.status === 'awaiting_review'
             ? 'awaiting_review'
             : 'incomplete';
 
     const history: Array<{
       step: number;
-      status: 'pending' | 'running' | 'completed' | 'failed' | 'awaiting_review' | 'incomplete';
+      status: 'pending' | 'running' | 'completed' | 'failed' | 'canceled' | 'awaiting_review' | 'incomplete';
       startedAt?: number;
       completedAt?: number;
       result?: unknown;
@@ -197,7 +215,7 @@ export class TemporalClient {
         startedAt: result.startedAt,
         completedAt: result.completedAt,
         ...(result.status === 'completed' ? { result: result.output } : {}),
-        ...(result.status === 'failed' ? { error: result.error } : {}),
+          ...(result.status === 'failed' || result.status === 'canceled' ? { error: result.error } : {}),
       },
     ];
 
@@ -206,6 +224,7 @@ export class TemporalClient {
       tenantId: input.tenantId || '',
       assistantId: input.assistantId || '',
       status: result.status,
+      controlState: result.status === 'canceled' ? 'terminated' : 'running',
       currentStep: 1,
       totalSteps: 1,
       history,
@@ -223,11 +242,12 @@ export class TemporalClient {
     input: WorkflowInput,
     resumeCheckpoint?: MissionActivityCheckpoint,
     recoveryLeaseAlreadyClaimed = false,
+    resumePausedOccurrence = false,
   ): Promise<string> {
     const workflowId = `mission-${input.missionId}`;
     logger.info({ missionId: input.missionId, assistantId: input.assistantId }, 'Starting mission');
 
-    if (!this.client && input.metadata?.scheduled === true) {
+    if (!this.client && input.metadata?.scheduled === true && !resumePausedOccurrence) {
       if (await this.isPersistedScheduledOccurrence(input)) {
         logger.info({ missionId: input.missionId }, 'Scheduled mission occurrence already exists; not starting a duplicate');
         return workflowId;
@@ -297,7 +317,8 @@ export class TemporalClient {
 
       // Direct mode resumes from Artifacts state without requiring a Temporal Server.
       const startTime = Date.now();
-      runMissionDirect(input, resumeCheckpoint)
+      const controlCheckpoint = () => this.awaitDirectMissionControl(input.missionId);
+      runMissionDirect(input, resumeCheckpoint, controlCheckpoint)
         .then((output) => ({
           missionId: input.missionId,
           status: missionStatus(output),
@@ -306,6 +327,7 @@ export class TemporalClient {
           completedAt: Date.now(),
         } satisfies WorkflowResult))
         .then(async (result) => {
+          await controlCheckpoint();
           await this.persistFinalState(input, result, startTime);
           await this.broadcastMissionUpdate({
             type: 'mission_completed',
@@ -317,6 +339,41 @@ export class TemporalClient {
           });
         })
         .catch(async (err: unknown) => {
+          if (err instanceof MissionTerminationRequestedError) {
+            const error = err.message;
+            logger.info({ missionId: input.missionId }, 'Mission stopped at a task checkpoint');
+            await this.persistMissionState({
+              missionId: input.missionId,
+              tenantId: input.tenantId || '',
+              assistantId: input.assistantId || '',
+              status: 'canceled',
+              controlState: 'terminated',
+              currentStep: 1,
+              totalSteps: 1,
+              history: [{
+                step: 0,
+                status: 'canceled' as const,
+                startedAt: startTime,
+                completedAt: Date.now(),
+                error,
+              }],
+              input,
+              error,
+              startedAt: startTime,
+              completedAt: Date.now(),
+              createdAt: startTime,
+              updatedAt: Date.now(),
+            });
+            await this.broadcastMissionUpdate({
+              type: 'mission_canceled',
+              missionId: input.missionId,
+              workflowId,
+              status: 'canceled',
+              error,
+              timestamp: Date.now(),
+            });
+            return;
+          }
           const error = err instanceof Error ? err.message : String(err);
           logger.error({ missionId: input.missionId, error }, 'Mission workflow failed');
           await this.persistMissionState({
@@ -324,6 +381,7 @@ export class TemporalClient {
             tenantId: input.tenantId || '',
             assistantId: input.assistantId || '',
             status: 'failed',
+            controlState: 'running',
             currentStep: 0,
             totalSteps: 1,
             history: [{ step: 0, status: 'failed' as const, startedAt: startTime, completedAt: Date.now(), error }],
@@ -358,6 +416,109 @@ export class TemporalClient {
       }
       throw error;
     }
+  }
+
+  async pauseMission(workflowId: string): Promise<'pausing' | 'paused'> {
+    if (this.client) {
+      throw new Error('Cooperative pause is only available with TEMPORAL_BACKEND=direct');
+    }
+    const missionId = workflowId.startsWith('mission-') ? workflowId.slice(8) : workflowId;
+    const record = await this.getPersistedMissionControlRecord(missionId);
+    if (!record) throw new Error(`Mission ${missionId} was not found`);
+    if (record.status === 'paused' || record.controlState === 'paused') return 'paused';
+    if (record.status !== 'running') {
+      throw new Error(`Cannot pause mission ${missionId} while it is ${record.status || 'unknown'}`);
+    }
+    if (record.controlState === 'terminate_requested' || record.controlState === 'terminated') {
+      throw new Error(`Cannot pause mission ${missionId} while termination is pending`);
+    }
+    if (record.controlState !== 'pause_requested') {
+      await this.updatePersistedMissionControl(missionId, 'running', 'pause_requested');
+    }
+    return 'pausing';
+  }
+
+  async resumeMission(workflowId: string): Promise<'running' | 'resuming'> {
+    if (this.client) {
+      throw new Error('Cooperative resume is only available with TEMPORAL_BACKEND=direct');
+    }
+    const missionId = workflowId.startsWith('mission-') ? workflowId.slice(8) : workflowId;
+    const record = await this.getPersistedMissionControlRecord(missionId);
+    if (!record) throw new Error(`Mission ${missionId} was not found`);
+    if (record.controlState === 'terminate_requested' || record.controlState === 'terminated') {
+      throw new Error(`Cannot resume mission ${missionId} while termination is pending`);
+    }
+    if (record.status === 'running' && record.controlState !== 'pause_requested' && record.controlState !== 'paused') {
+      return 'running';
+    }
+    if (
+      record.status !== 'pending'
+      &&
+      record.status !== 'paused'
+      && record.controlState !== 'pause_requested'
+      && record.controlState !== 'paused'
+    ) {
+      throw new Error(`Cannot resume mission ${missionId} while it is ${record.status || 'unknown'}`);
+    }
+
+    if (this.directMissionRuns.has(missionId)) {
+      await this.updatePersistedMissionControl(missionId, 'running', 'running');
+      return 'running';
+    }
+
+    const input = record.input;
+    if (
+      !input
+      || typeof input !== 'object'
+      || input.missionId !== missionId
+      || typeof input.prompt !== 'string'
+    ) {
+      throw new Error(`Cannot resume mission ${missionId}: persisted workflow input is invalid`);
+    }
+    const checkpoint = record.status === 'pending'
+      ? undefined
+      : await this.loadPersistedCheckpoint(missionId);
+    const leaseClaimed = await this.claimDirectRecoveryLease(missionId);
+    if (leaseClaimed === false) {
+      throw new Error(`Cannot resume mission ${missionId}: another process still owns its execution lease`);
+    }
+    try {
+      await this.updatePersistedMissionControl(missionId, 'running', 'running');
+    } catch (error) {
+      if (leaseClaimed) await this.releaseDirectRecoveryLease(missionId);
+      throw error;
+    }
+    await this.startMission(input, checkpoint, leaseClaimed === true, true);
+    return 'resuming';
+  }
+
+  async terminateMission(workflowId: string): Promise<'stopping' | 'canceled' | 'already_finished'> {
+    if (this.client) {
+      const handle = this.client.workflow.getHandle(workflowId);
+      await withTimeout(handle.terminate('Mission terminated by user'), TEMPORAL_TIMEOUT_MS);
+      return 'canceled';
+    }
+
+    const missionId = workflowId.startsWith('mission-') ? workflowId.slice(8) : workflowId;
+    const record = await this.getPersistedMissionControlRecord(missionId);
+    if (!record) throw new Error(`Mission ${missionId} was not found`);
+    if (record.status === 'canceled' || record.controlState === 'terminated') return 'canceled';
+    if (record.status !== 'running' && record.status !== 'paused') return 'already_finished';
+    if (record.status === 'paused' || record.controlState === 'paused') {
+      await this.updatePersistedMissionControl(missionId, 'canceled', 'terminated');
+      await this.broadcastMissionUpdate({
+        type: 'mission_canceled',
+        missionId,
+        workflowId: `mission-${missionId}`,
+        status: 'canceled',
+        timestamp: Date.now(),
+      });
+      return 'canceled';
+    }
+    if (record.controlState !== 'terminate_requested') {
+      await this.updatePersistedMissionControl(missionId, 'running', 'terminate_requested');
+    }
+    return 'stopping';
   }
 
   private async isPersistedScheduledOccurrence(input: WorkflowInput): Promise<boolean> {
@@ -497,6 +658,49 @@ export class TemporalClient {
       const mission = value as { missionId?: unknown; status?: unknown; input?: unknown };
       if (mission.status !== 'running') continue;
       if (typeof mission.missionId === 'string' && this.directMissionRuns.has(mission.missionId)) continue;
+      const controlState = (mission as { controlState?: unknown }).controlState;
+      if (
+        (controlState === 'pause_requested' || controlState === 'terminate_requested')
+        && typeof mission.missionId === 'string'
+      ) {
+        let leaseClaimed = false;
+        try {
+          leaseClaimed = await this.claimDirectRecoveryLease(mission.missionId) === true;
+          if (!leaseClaimed) {
+            logger.info(
+              { missionId: mission.missionId },
+              'Skipping mission control recovery; another process owns the mission lease',
+            );
+            continue;
+          }
+          const terminating = controlState === 'terminate_requested';
+          const status = terminating ? 'canceled' : 'paused';
+          await this.updatePersistedMissionControl(
+            mission.missionId,
+            status,
+            terminating ? 'terminated' : 'paused',
+          );
+          await this.broadcastMissionUpdate({
+            type: terminating ? 'mission_canceled' : 'mission_paused',
+            missionId: mission.missionId,
+            workflowId: `mission-${mission.missionId}`,
+            status,
+            timestamp: Date.now(),
+          });
+          recovered++;
+        } catch (error) {
+          logger.error({
+            missionId: mission.missionId,
+            error: error instanceof Error ? error.message : String(error),
+          }, 'Could not recover mission control state');
+        } finally {
+          if (leaseClaimed) await this.releaseDirectRecoveryLease(mission.missionId);
+        }
+        continue;
+      }
+      if (controlState === 'paused') {
+        continue;
+      }
 
       try {
         const input = mission.input as WorkflowInput | undefined;
@@ -710,7 +914,7 @@ export class TemporalClient {
           const data: any = await response.json();
           return {
             missionId: data.missionId || missionKey,
-            status: data.status || 'completed',
+            status: visibleMissionStatus(data),
             output: data.output,
             error: data.error,
             startedAt: data.startedAt ? new Date(data.startedAt).getTime() : Date.now(),
@@ -761,7 +965,7 @@ export class TemporalClient {
           for (const doc of docs) {
             const missionId = doc.missionId || doc.id || '';
             const workflowId = `mission-${missionId}`;
-            const status = doc.status || 'unknown';
+            const status = visibleMissionStatus(doc);
             results.push({
               workflowId,
               status,
@@ -781,30 +985,91 @@ export class TemporalClient {
     return results;
   }
 
-  async terminateMission(workflowId: string): Promise<void> {
-    if (this.client) {
-      try {
-        const handle = this.client.workflow.getHandle(workflowId);
-        await withTimeout(handle.terminate('Mission terminated by user'), TEMPORAL_TIMEOUT_MS);
-      } catch (err) {
-        logger.warn({ err: (err as Error).message }, 'Failed to terminate workflow');
-      }
+  private async getPersistedMissionControlRecord(missionId: string): Promise<PersistedMissionControlRecord | null> {
+    const persistenceUrl = process.env.ARTIFACTS_URL;
+    if (!persistenceUrl) {
+      throw new Error('Mission controls require ARTIFACTS_URL');
+    }
+    const response = await fetch(`${persistenceUrl}/api/artifacts/missions/${encodeURIComponent(missionId)}`);
+    if (response.status === 404) return null;
+    if (!response.ok) {
+      throw new Error(`Could not load mission control state (${response.status})`);
+    }
+    const record = await response.json() as unknown;
+    if (!record || typeof record !== 'object') {
+      throw new Error('Artifacts returned an invalid mission control record');
+    }
+    return record as PersistedMissionControlRecord;
+  }
+
+  private async updatePersistedMissionControl(
+    missionId: string,
+    status: string,
+    controlState: NonNullable<PersistedMissionControlRecord['controlState']>,
+  ): Promise<void> {
+    const persistenceUrl = process.env.ARTIFACTS_URL;
+    if (!persistenceUrl) {
+      throw new Error('Mission controls require ARTIFACTS_URL');
+    }
+    const response = await fetch(`${persistenceUrl}/api/artifacts/missions/${encodeURIComponent(missionId)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status, controlState, updatedAt: Date.now() }),
+    });
+    if (!response.ok) {
+      const details = (await response.text()).slice(0, 500);
+      throw new Error(`Could not update mission control state (${response.status}): ${details}`);
+    }
+  }
+
+  private async awaitDirectMissionControl(missionId: string): Promise<void> {
+    if (!process.env.ARTIFACTS_URL) return;
+    let record = await this.getPersistedMissionControlRecord(missionId);
+    if (!record) throw new Error(`Mission ${missionId} disappeared during execution`);
+
+    if (
+      record.status === 'canceled'
+      || record.controlState === 'terminate_requested'
+      || record.controlState === 'terminated'
+    ) {
+      throw new MissionTerminationRequestedError();
+    }
+    if (record.controlState !== 'pause_requested' && record.controlState !== 'paused' && record.status !== 'paused') {
+      return;
     }
 
-    // Also mark as terminated in persistence
-    const missionKey = workflowId.startsWith('mission-') ? workflowId.slice(8) : workflowId;
-    try {
-      const persistenceUrl = process.env.ARTIFACTS_URL;
-      if (persistenceUrl) {
-        await fetch(`${persistenceUrl}/api/artifacts/missions/${missionKey}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: 'canceled', completedAt: Date.now() }),
-        });
-      }
-    } catch (err) {
-      logger.warn({ err: (err as Error).message }, 'Failed to update mission state on terminate');
+    if (record.status !== 'paused' || record.controlState !== 'paused') {
+      await this.updatePersistedMissionControl(missionId, 'paused', 'paused');
+      await this.broadcastMissionUpdate({
+        type: 'mission_paused',
+        missionId,
+        workflowId: `mission-${missionId}`,
+        status: 'paused',
+        timestamp: Date.now(),
+      });
     }
+
+    while (true) {
+      await new Promise((resolve) => setTimeout(resolve, DIRECT_MISSION_CONTROL_POLL_MS));
+      record = await this.getPersistedMissionControlRecord(missionId);
+      if (!record) throw new Error(`Mission ${missionId} disappeared while paused`);
+      if (
+        record.status === 'canceled'
+        || record.controlState === 'terminate_requested'
+        || record.controlState === 'terminated'
+      ) {
+        throw new MissionTerminationRequestedError();
+      }
+      if (record.status === 'running' && record.controlState === 'running') break;
+    }
+
+    await this.broadcastMissionUpdate({
+      type: 'mission_resumed',
+      missionId,
+      workflowId: `mission-${missionId}`,
+      status: 'running',
+      timestamp: Date.now(),
+    });
   }
 
   async deleteMission(workflowId: string): Promise<void> {
@@ -891,11 +1156,12 @@ export class TemporalClient {
     tenantId: string;
     assistantId: string;
     status: string;
+    controlState?: PersistedMissionControlRecord['controlState'];
     currentStep: number;
     totalSteps: number;
     history: Array<{
       step: number;
-       status: 'pending' | 'running' | 'completed' | 'failed' | 'awaiting_review' | 'incomplete';
+       status: 'pending' | 'running' | 'completed' | 'failed' | 'canceled' | 'awaiting_review' | 'incomplete';
       startedAt?: number;
       completedAt?: number;
       result?: unknown;
@@ -924,6 +1190,7 @@ export class TemporalClient {
           tenantId: state.tenantId || '',
           assistantId: state.assistantId || '',
           status: state.status,
+          controlState: state.controlState,
           currentStep: state.currentStep,
           totalSteps: state.totalSteps,
           history: state.history,

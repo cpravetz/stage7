@@ -154,4 +154,88 @@ describe('MissionOrchestrator checkpoint recovery', () => {
       }),
     )
   })
+
+  it('checks mission control after persisting the current task and before starting the next task', async () => {
+    const plan: Plan = {
+      summary: 'Complete two dependent tasks',
+      estimatedDuration: 'short',
+      estimatedCost: 'low',
+      requiresClarification: false,
+      clarificationQuestions: [],
+      phases: [{
+        id: 'phase-1',
+        name: 'Execution',
+        goal: 'Complete both tasks',
+        requiresApproval: false,
+        status: 'in_progress',
+        tasks: [
+          {
+            id: 'task-1',
+            title: 'First task',
+            description: 'Complete the first task.',
+            agentRole: 'worker',
+            systemPrompt: 'Complete the task.',
+            expectedArtifacts: [],
+            status: 'pending',
+            artifacts: [],
+          },
+          {
+            id: 'task-2',
+            title: 'Second task',
+            description: 'Complete the second task.',
+            agentRole: 'worker',
+            systemPrompt: 'Complete the task.',
+            expectedArtifacts: [],
+            dependsOnTaskIds: ['task-1'],
+            status: 'pending',
+            artifacts: [],
+          },
+        ],
+      }],
+    }
+    let firstTaskPersisted = false
+    let controlChecks = 0
+    const fetchMock = jest.spyOn(global, 'fetch').mockImplementation(async (input, init) => {
+      if (
+        String(input).endsWith('/tasks/task-1')
+        && init?.method === 'PUT'
+        && String(init.body).includes('"status":"completed"')
+      ) {
+        firstTaskPersisted = true
+      }
+      return jsonResponse()
+    })
+    const executeTask = jest.spyOn(MissionAgentRuntime.prototype, 'executeTask')
+      .mockResolvedValue({ output: 'done', artifacts: [], tokensUsed: 0 })
+    jest.spyOn(MissionAgentRuntime.prototype, 'getOrCreateAgent').mockResolvedValue('agent-worker')
+    const controlCheckpoint = jest.fn(async () => {
+      controlChecks++
+      if (controlChecks === 3) {
+        expect(firstTaskPersisted).toBe(true)
+        throw new Error('pause requested at safe checkpoint')
+      }
+    })
+
+    const context: MissionContext = {
+      missionId: 'mission-pause-boundary',
+      prompt: 'Complete both tasks',
+      tenantId: 'tenant-1',
+      persistenceUrl: 'http://artifacts',
+      gatewayUrl: 'http://gateway',
+      broadcast: jest.fn().mockResolvedValue(undefined),
+      broadcastAll: jest.fn().mockResolvedValue(undefined),
+      waitForApproval: jest.fn(),
+      resumePlan: plan,
+      controlCheckpoint,
+    }
+
+    await expect(new MissionOrchestrator().run(context)).rejects.toThrow('pause requested at safe checkpoint')
+
+    expect(firstTaskPersisted).toBe(true)
+    expect(executeTask).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://artifacts/api/artifacts/missions/mission-pause-boundary/tasks/task-1',
+      expect.objectContaining({ method: 'PUT', body: expect.stringContaining('"status":"completed"') }),
+    )
+  })
 })

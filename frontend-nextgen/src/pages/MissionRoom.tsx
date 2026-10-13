@@ -51,6 +51,9 @@ type Tab = 'conversation' | 'timeline' | 'plan' | 'artifacts' | 'agents';
 
 const STATUS_BADGE: Record<string, string> = {
   running: 'running',
+  pausing: 'running',
+  canceling: 'running',
+  paused: 'paused',
   completed: 'completed',
   failed: 'failed',
   canceled: 'canceled',
@@ -63,6 +66,8 @@ const STATUS_BADGE: Record<string, string> = {
 function getMissionStatusLabel(status: string): string {
   switch (status) {
     case 'running': return 'Running';
+    case 'pausing': return 'Pausing after current task';
+    case 'canceling': return 'Stopping after current task';
     case 'completed': return 'Completed';
     case 'failed': return 'Failed';
     case 'canceled': return 'Canceled';
@@ -651,7 +656,7 @@ const MissionRoom = () => {
         </div>
 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <div style={{ display: 'flex', gap: 8 }}>
-                {status !== 'running' && status !== 'completed' && status !== 'failed' && status !== 'canceled' && (
+                {['paused', 'pending'].includes(status) && (
                  <button onClick={async () => {
                    try {
                      await postJSON(`/api/temporal/missions/${encodeURIComponent(workflowId)}/start`, {});
@@ -671,9 +676,9 @@ const MissionRoom = () => {
                    }
                  }}>Pause</button>
                )}
-               {status === 'running' && (
+               {['running', 'pausing', 'paused'].includes(status) && (
                  <button className="danger" onClick={async () => {
-                   if (!confirm('Stop mission? This will terminate running branches.')) return;
+                   if (!confirm('Stop mission after the current Agent task reaches a safe checkpoint?')) return;
                    try {
                      await postJSON(`/api/temporal/missions/${encodeURIComponent(workflowId)}/stop`, {});
                      refreshDetail(workflowId);

@@ -687,6 +687,7 @@ describe('PluginGenerator', () => {
     })
     expect(unsafeEntrypoint.success).toBe(false)
     expect(unsafeEntrypoint.error).toContain('entrypoint')
+
   })
 })
 

@@ -14,8 +14,8 @@ Output ONLY a single JSON object with this exact shape:
   "name": "string",
   "description": "string",
   "type": "code",
-  "language": "javascript",
-  "entrypoint": "index.js",
+  "language": "javascript" | "python",
+  "entrypoint": "index.js" | "main.py",
   "sourceCode": "string",
   "requirements": ["string"],
   "configSchema": { "type": "object", "properties": {} },
@@ -25,7 +25,7 @@ Output ONLY a single JSON object with this exact shape:
 
 Rules:
 - sourceCode must be complete, runnable code for the specified language.
-- Use JavaScript and CommonJS require() syntax.
+- For Node.js, use CommonJS require() syntax.
 - requirements must be empty; dependencies are not installed for generated plugins.
 - Do NOT include markdown fences or explanation text outside the JSON.`;
 
@@ -36,7 +36,7 @@ const generatedPluginSchema = z.object({
   name: z.string().trim().min(1).max(120),
   description: z.string().trim().min(1).max(1_000),
   type: z.literal('code'),
-  language: z.literal('javascript'),
+  language: z.enum(['javascript', 'python']),
   entrypoint: z.enum(['index.js', 'main.py']),
   sourceCode: z.string().min(1),
   requirements: z.array(z.string().trim().min(1)).max(0, 'Generated plugins cannot declare uninstalled dependencies'),
@@ -159,7 +159,6 @@ export class PluginGenerator {
           configSchema: parsed.configSchema || {},
           inputs: parsed.inputs || {},
           outputs: parsed.outputs || {},
-          executionProfile: 'generated-plugin',
         },
         inputSchema: parsed.inputs || { type: 'object', properties: {} },
         outputSchema: parsed.outputs || {},
@@ -222,7 +221,6 @@ export class PluginGenerator {
         type: tool.type,
         language,
         entrypoint,
-        executionProfile: 'generated-plugin',
         inputSchema: tool.inputSchema,
         outputSchema: tool.outputSchema,
         createdAt: tool.createdAt,
@@ -319,7 +317,6 @@ export class PluginGenerator {
           entrypoint,
           sourceCode,
           ...manifest,
-          executionProfile: 'generated-plugin',
         },
         inputSchema: manifest.inputSchema || { type: 'object', properties: {} },
         outputSchema: manifest.outputSchema || {},

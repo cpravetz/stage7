@@ -179,8 +179,11 @@ router.post(
   asyncHandler(async (req: Request, res: Response) => {
     const workflowId = req.params.workflowId as string;
 
-    await client.terminateMission(workflowId);
-
+    const status = await client.terminateMission(workflowId);
+    if (status === 'stopping') {
+      res.status(202).json({ status });
+      return;
+    }
     res.status(204).send();
   }),
 );
@@ -189,20 +192,8 @@ router.post(
   '/missions/:workflowId/start',
   asyncHandler(async (req: Request, res: Response) => {
     const workflowId = req.params.workflowId as string;
-    const missionId = workflowId.startsWith('mission-') ? workflowId.slice(8) : workflowId;
-    // Mark mission as running in persistence so UI reflects state.
-    try {
-      if (artifactsBase) {
-        await fetch(`${artifactsBase.origin}/api/artifacts/missions/${missionId}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: 'running', updatedAt: Date.now() }),
-        });
-      }
-    } catch (err) {
-      // best-effort; continue
-    }
-    res.status(202).json({ status: 'started' });
+    const status = await client.resumeMission(workflowId);
+    res.status(202).json({ status });
   }),
 );
 
@@ -210,19 +201,8 @@ router.post(
   '/missions/:workflowId/pause',
   asyncHandler(async (req: Request, res: Response) => {
     const workflowId = req.params.workflowId as string;
-    const missionId = workflowId.startsWith('mission-') ? workflowId.slice(8) : workflowId;
-    try {
-      if (artifactsBase) {
-        await fetch(`${artifactsBase.origin}/api/artifacts/missions/${missionId}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: 'paused', updatedAt: Date.now() }),
-        });
-      }
-    } catch (err) {
-      // ignore
-    }
-    res.status(200).json({ status: 'paused' });
+    const status = await client.pauseMission(workflowId);
+    res.status(status === 'paused' ? 200 : 202).json({ status });
   }),
 );
 
@@ -230,8 +210,8 @@ router.post(
   '/missions/:workflowId/stop',
   asyncHandler(async (req: Request, res: Response) => {
     const workflowId = req.params.workflowId as string;
-    await client.terminateMission(workflowId);
-    res.status(200).json({ status: 'stopped' });
+    const status = await client.terminateMission(workflowId);
+    res.status(status === 'stopping' ? 202 : 200).json({ status });
   }),
 );
 
@@ -240,7 +220,11 @@ router.delete(
   asyncHandler(async (req: Request, res: Response) => {
     const workflowId = req.params.workflowId as string;
 
-    await client.terminateMission(workflowId);
+    const status = await client.terminateMission(workflowId);
+    if (status === 'stopping') {
+      res.status(202).json({ status });
+      return;
+    }
     await client.deleteMission(workflowId);
 
     res.status(204).send();

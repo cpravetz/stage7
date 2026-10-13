@@ -41,7 +41,8 @@ export interface MissionState {
   missionId: string;
   tenantId: string;
   assistantId: string;
-  status: 'pending' | 'running' | 'completed' | 'failed' | 'canceled';
+  status: 'pending' | 'running' | 'paused' | 'completed' | 'failed' | 'canceled';
+  controlState?: 'running' | 'pause_requested' | 'paused' | 'terminate_requested' | 'terminated';
   currentStep: number;
   totalSteps: number;
   history: unknown[];

@@ -40,6 +40,7 @@ export interface MissionContext {
   executionPolicy?: AgentExecutionPolicy;
   onCheckpoint?: (checkpoint: MissionActivityCheckpoint) => void;
   heartbeat?: () => void;
+  controlCheckpoint?: () => Promise<void>;
 }
 
 export class MissionOrchestrator {
@@ -48,6 +49,7 @@ export class MissionOrchestrator {
   async run(ctx: MissionContext): Promise<{ plan: Plan; outputs: any; compensations: Array<{ phaseId: string; action: string }> }> {
     const compensations: Array<{ phaseId: string; action: string }> = [];
     const plannerAgentId = `agent-${ctx.missionId}-planner`;
+    await ctx.controlCheckpoint?.();
 
     const agentRuntime = new MissionAgentRuntime({
       missionId: ctx.missionId,
@@ -232,6 +234,7 @@ export class MissionOrchestrator {
 
       const executePendingTasks = async () => {
       while (completedInPhase.size < phase.tasks.length) {
+        await ctx.controlCheckpoint?.();
         const completedTaskIds = [...completedTasks.values()].map((task) => task.taskId);
         const readyTasks = phase.tasks.filter((task) =>
           !completedInPhase.has(task.id)
@@ -257,6 +260,7 @@ export class MissionOrchestrator {
       };
 
       await executePendingTasks();
+      await ctx.controlCheckpoint?.();
       if (!phaseIsComplete) {
         const existingAmendmentCount = phase.tasks.filter((task) =>
           task.id.startsWith(`${phase.id}-amendment-`),
@@ -293,6 +297,7 @@ export class MissionOrchestrator {
             },
           });
           await executePendingTasks();
+          await ctx.controlCheckpoint?.();
         }
       }
 
@@ -334,6 +339,7 @@ export class MissionOrchestrator {
       outputs.phases.push(phaseOutput);
     }
 
+    await ctx.controlCheckpoint?.();
     const satisfied = await this.evaluateMissionCompletion(ctx, plan, outputs);
     if (satisfied) {
       outputs.status = 'completed';

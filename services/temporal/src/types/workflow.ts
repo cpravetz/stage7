@@ -29,7 +29,7 @@ export interface MissionActivityCheckpoint {
 
 export interface WorkflowResult {
   missionId: string;
-  status: 'completed' | 'failed' | 'canceled' | 'continued-as-new' | 'awaiting_review' | 'incomplete';
+  status: 'completed' | 'failed' | 'canceled' | 'continued-as-new' | 'awaiting_review' | 'incomplete' | 'paused' | 'pausing' | 'canceling';
   output?: unknown;
   error?: string;
   startedAt: number;

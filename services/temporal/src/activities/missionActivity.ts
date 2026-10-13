@@ -18,6 +18,7 @@ import {
 interface MissionExecutionOptions {
   checkpoint?: MissionActivityCheckpoint;
   heartbeat?: (checkpoint: MissionActivityCheckpoint) => void;
+  controlCheckpoint?: () => Promise<void>;
 }
 
 function parseCheckpoint(value: unknown): MissionActivityCheckpoint | undefined {
@@ -153,6 +154,7 @@ async function executeMissionActivity(
     const approvalUrl = `${persistenceUrl}/api/artifacts/missions/${input.missionId}/phases/${phaseId}`;
     while (Date.now() - startTime < timeout) {
       await new Promise((r) => setTimeout(r, pollInterval));
+      await options.controlCheckpoint?.();
       heartbeat();
       checks++;
       try {
@@ -192,6 +194,7 @@ const orchestrator = new MissionOrchestrator();
      ...(options.checkpoint ? { resumeCheckpoint: options.checkpoint } : {}),
      onCheckpoint: saveCheckpoint,
      heartbeat,
+     controlCheckpoint: options.controlCheckpoint,
    });
 
   logger.info({ missionId: input.missionId, phases: result.plan.phases.length }, 'Mission activity completed');
@@ -210,8 +213,9 @@ export async function runMissionActivity(input: WorkflowInput): Promise<any> {
 export async function runMissionDirect(
   input: WorkflowInput,
   checkpoint?: MissionActivityCheckpoint,
+  controlCheckpoint?: () => Promise<void>,
 ): Promise<any> {
-  return executeMissionActivity(input, { checkpoint });
+  return executeMissionActivity(input, { checkpoint, controlCheckpoint });
 }
 
 export const missionActivities = {

@@ -276,6 +276,58 @@ describe('AgentExecutor', () => {
     expect(calls.some((call) => call.url.endsWith('/api/tool-executor/plugins/generate'))).toBe(false)
   })
 
+  it('lets an allowlisted Agent use a registered generated tool without granting other tools', async () => {
+    const calls: Array<{ url: string; body?: Record<string, unknown> }> = []
+    const prompts: string[] = []
+    let brainTurn = 0
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input)
+      const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined
+      calls.push({ url, body })
+
+      if (url.endsWith('/api/tool-executor/tools')) {
+        return jsonResponse({
+          tools: [
+            { id: 'registered-generated-tool', name: 'Generated Tool', description: 'Calculate a fare', type: 'code' },
+            { id: 'unapproved-tool', name: 'Unapproved Tool', description: 'Not granted', type: 'code' },
+          ],
+        })
+      }
+      if (url.endsWith('/api/brain/complete')) {
+        prompts.push(String(body?.systemPrompt))
+        brainTurn++
+        return jsonResponse({
+          content: brainTurn === 1
+            ? '{"tool":"registered-generated-tool","args":{"distance":10}}'
+            : 'The registered generated tool completed the task.',
+        })
+      }
+      if (url.endsWith('/api/tool-executor/tools/execute')) {
+        expect(body?.id).toBe('registered-generated-tool')
+        expect(body?.agentId).toBe(definition.id)
+        return jsonResponse({ status: 'completed', output: { fare: 23 } })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+
+    const restrictedAgent: AgentDefinition = {
+      ...definition,
+      tools: ['registered-generated-tool'],
+      toolPolicy: { mode: 'allowlist' },
+    }
+    const result = await new AgentExecutor({ fetcher }).execute(
+      restrictedAgent,
+      task() as AgentTask,
+      { missionId: 'mission-1', delegationDepth: 0 },
+    )
+
+    expect(result.output).toContain('registered generated tool completed')
+    expect(prompts[0]).toContain('registered-generated-tool')
+    expect(prompts[0]).not.toContain('unapproved-tool')
+    expect(calls.filter((call) => call.url.endsWith('/api/tool-executor/tools/execute'))).toHaveLength(1)
+    expect(calls.some((call) => call.url.endsWith('/api/tool-executor/plugins/generate'))).toBe(false)
+  })
+
   it('keeps a large live tool catalog below Brain request limits', async () => {
     let brainRequest = ''
     const largeToolCatalog = Array.from({ length: 170 }, (_, index) => ({

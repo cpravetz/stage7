@@ -128,7 +128,7 @@ describe('TemporalClient mission start', () => {
       plan,
       completedTasks: [{ phaseId: 'phase-1', taskId: 'task-1' }],
       completedPhases: ['phase-1'],
-    })
+    }, expect.any(Function))
   })
 
   it('allows only one Temporal client to recover the same running mission', async () => {
@@ -178,6 +178,109 @@ describe('TemporalClient mission start', () => {
     await new Promise((resolve) => setImmediate(resolve))
 
     expect(directRun).toHaveBeenCalledTimes(1)
+  })
+
+  it('resumes a paused mission only after claiming its recovery lease', async () => {
+    delete process.env.TEMPORAL_ADDRESS
+    process.env.ARTIFACTS_URL = 'http://artifacts'
+    delete process.env.GATEWAY_URL
+    const client = new TemporalClient()
+    const input = {
+      missionId: 'mission-paused',
+      tenantId: 'tenant-1',
+      assistantId: 'assistant-1',
+      prompt: 'Continue the mission',
+    }
+    const plan = {
+      summary: 'Continue work',
+      estimatedDuration: 'short',
+      estimatedCost: 'low',
+      requiresClarification: false,
+      clarificationQuestions: [],
+      phases: [],
+    }
+    jest.spyOn(client, 'startMission').mockResolvedValue(`mission-${input.missionId}`)
+    const fetchMock = jest.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
+      const requestUrl = String(url)
+      if (requestUrl.endsWith(`/api/artifacts/missions/${input.missionId}`) && !init?.method) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            missionId: input.missionId,
+            status: 'paused',
+            controlState: 'paused',
+            input,
+          }),
+        } as Response
+      }
+      if (requestUrl.endsWith(`/api/artifacts/missions/${input.missionId}/plan`)) {
+        return { ok: true, status: 200, json: async () => plan } as Response
+      }
+      if (requestUrl.endsWith(`/api/artifacts/missions/${input.missionId}/recovery-lease`)) {
+        expect(JSON.parse(String(init?.body))).toEqual(expect.objectContaining({ action: 'claim' }))
+        return { ok: true, status: 200, json: async () => ({ claimed: true }) } as Response
+      }
+      return { ok: true, status: 200, json: async () => ({}) } as Response
+    })
+
+    await expect(client.resumeMission(`mission-${input.missionId}`)).resolves.toBe('resuming')
+
+    expect(client.startMission).toHaveBeenCalledWith(
+      input,
+      expect.objectContaining({ plan, completedTasks: [], completedPhases: [] }),
+      true,
+      true,
+    )
+    expect(fetchMock).toHaveBeenCalledWith(
+      `http://artifacts/api/artifacts/missions/${input.missionId}`,
+      expect.objectContaining({
+        method: 'PUT',
+        body: expect.stringContaining('"controlState":"running"'),
+      }),
+    )
+  })
+
+  it('finishes a stale termination request without replaying uncertain task side effects', async () => {
+    delete process.env.TEMPORAL_ADDRESS
+    process.env.ARTIFACTS_URL = 'http://artifacts'
+    delete process.env.GATEWAY_URL
+    const client = new TemporalClient()
+    const missionId = 'mission-terminate-recovery'
+    const directRun = jest.spyOn(missionActivity, 'runMissionDirect')
+    let updatedControlState: unknown
+    jest.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
+      const requestUrl = String(url)
+      if (requestUrl.endsWith('/api/artifacts/missions') && !init?.method) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            missions: [{ missionId, status: 'running', controlState: 'terminate_requested' }],
+          }),
+        } as Response
+      }
+      if (requestUrl.endsWith(`/api/artifacts/missions/${missionId}/recovery-lease`)) {
+        const body = JSON.parse(String(init?.body)) as { action: string }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => body.action === 'claim' ? { claimed: true } : { released: true },
+        } as Response
+      }
+      if (requestUrl.endsWith(`/api/artifacts/missions/${missionId}`) && init?.method === 'PUT') {
+        updatedControlState = JSON.parse(String(init.body))
+      }
+      return { ok: true, status: 200, json: async () => ({}) } as Response
+    })
+
+    await expect(client.recoverInFlightMissions()).resolves.toBe(1)
+
+    expect(directRun).not.toHaveBeenCalled()
+    expect(updatedControlState).toEqual(expect.objectContaining({
+      status: 'canceled',
+      controlState: 'terminated',
+    }))
   })
 
   it('does not rerun a completed scheduled mission occurrence after a scheduler restart', async () => {

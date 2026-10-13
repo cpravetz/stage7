@@ -16,6 +16,7 @@ interface MissionRow {
 const STATUS_FILTERS: Array<{ value: 'all' | MissionRow['status']; label: string }> = [
   { value: 'all', label: 'All' },
   { value: 'running', label: 'Running' },
+  { value: 'paused', label: 'Paused' },
   { value: 'completed', label: 'Completed' },
   { value: 'failed', label: 'Failed' },
   { value: 'canceled', label: 'Canceled' },
@@ -101,8 +102,11 @@ const Missions = () => {
 
   const handleMissionAction = async (workflowId: string, action: 'start' | 'pause' | 'stop') => {
     try {
-      await postJSON(`/api/temporal/missions/${encodeURIComponent(workflowId)}/${action}`, {});
-      updateMissionStatus(workflowId, action === 'start' ? 'running' : action === 'pause' ? 'paused' : 'canceled');
+      const result = await postJSON<{ status: string }>(
+        `/api/temporal/missions/${encodeURIComponent(workflowId)}/${action}`,
+        {},
+      );
+      updateMissionStatus(workflowId, result.status);
     } catch (err) {
       console.error(`Failed to ${action} mission:`, err);
       alert(`Failed to ${action} mission: ${err instanceof Error ? err.message : 'Unknown error'}`);
@@ -112,6 +116,7 @@ const Missions = () => {
   const getMissionStatusLabel = (status: string) => {
     switch (status) {
       case 'running': return 'Running';
+      case 'paused': return 'Paused';
       case 'completed': return 'Completed';
       case 'failed': return 'Failed';
       case 'canceled': return 'Canceled';
@@ -302,7 +307,7 @@ const Missions = () => {
                           <td>{formatDuration(m)}</td>
                           <td>
                             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                              {m.status !== 'running' && m.status !== 'completed' && m.status !== 'failed' && m.status !== 'canceled' && (
+                              {['paused', 'pending'].includes(m.status) && (
                                 <button className="small" onClick={() => handleMissionAction(m.workflowId, 'start')} title="Start mission">
                                   Start
                                 </button>
@@ -312,7 +317,7 @@ const Missions = () => {
                                   Pause
                                 </button>
                               )}
-                              {m.status === 'running' && (
+                              {['running', 'pausing', 'paused'].includes(m.status) && (
                                 <button className="danger small" onClick={() => handleMissionAction(m.workflowId, 'stop')} title="Stop mission">
                                   Stop
                                 </button>

@@ -90,6 +90,8 @@ interface MissionsState {
 
 const STATUS_EVENT_MAP: Record<string, string> = {
   mission_started: 'running',
+  mission_paused: 'paused',
+  mission_resumed: 'running',
   mission_completed: 'completed',
   mission_failed: 'failed',
   mission_canceled: 'canceled',
@@ -98,6 +100,8 @@ const STATUS_EVENT_MAP: Record<string, string> = {
 };
 
 const LIFECYCLE_EVENTS = new Set([
+  'mission_paused',
+  'mission_resumed',
   'mission_completed',
   'mission_failed',
   'mission_canceled',
