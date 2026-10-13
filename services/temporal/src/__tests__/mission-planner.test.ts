@@ -1,6 +1,10 @@
+import {
+  BRAIN_MODEL_SELECTION_EXHAUSTED,
+  Plan,
+} from '@stage7-nextgen/shared'
 import { generateValidPlan, PlannerCompletionRequest } from '../planner/MissionPlanner'
 
-function validPlan(phaseCount = 3) {
+function validPlan(phaseCount = 3): Plan {
   return {
     summary: 'A goal-specific execution plan',
     estimatedDuration: 'One week',
@@ -19,6 +23,7 @@ function validPlan(phaseCount = 3) {
         description: `Produce deliverable ${phaseIndex + 1} for the stated goal`,
         agentRole: 'analyst',
         systemPrompt: 'Complete this task for the stated goal.',
+        dependsOnTaskIds: [],
         expectedArtifacts: [`deliverable-${phaseIndex + 1}.md`],
         status: 'pending',
         artifacts: [],
@@ -70,6 +75,28 @@ describe('generateValidPlan', () => {
     expect(requests[1]?.prompt).toContain('phases must contain 3-7 phases')
   })
 
+  it('rejects dependency cycles before the plan can reach task selection', async () => {
+    const cyclicPlan = validPlan()
+    const firstPhase = cyclicPlan.phases[0]!
+    const firstTask = firstPhase.tasks[0]!
+    const secondTask = { ...firstTask, id: 'phase-1-task-2', title: 'Dependent task' }
+    firstTask.dependsOnTaskIds = [secondTask.id]
+    secondTask.dependsOnTaskIds = [firstTask.id]
+    firstPhase.tasks.push(secondTask)
+    const requests: PlannerCompletionRequest[] = []
+    const responses = [JSON.stringify(cyclicPlan), JSON.stringify(validPlan())]
+    const complete = async (request: PlannerCompletionRequest): Promise<string> => {
+      requests.push(request)
+      return responses[request.attempt - 1]!
+    }
+
+    const plan = await generateValidPlan('Create a business plan', {}, 'mission-dependencies', complete)
+
+    expect(plan.phases[0]?.tasks).toHaveLength(1)
+    expect(requests).toHaveLength(2)
+    expect(requests[1]?.prompt).toContain('dependencies contain a cycle')
+  })
+
   it('keeps asking for corrections when duplicate task IDs persist', async () => {
     const duplicatePlan = validPlan()
     duplicatePlan.phases[1]!.tasks[0]!.id = duplicatePlan.phases[0]!.tasks[0]!.id
@@ -94,15 +121,40 @@ describe('generateValidPlan', () => {
     expect(requests[1]?.prompt).toContain('Do not reuse task IDs across phases');
   })
 
-  it('fails explicitly after bounded repair attempts instead of returning a generic plan', async () => {
+  it('continues repair attempts beyond six responses until a valid plan is returned', async () => {
+    let calls = 0
+    const complete = async (request: PlannerCompletionRequest): Promise<string> => {
+      calls++
+      expect(request.attempt).toBe(calls)
+      return calls < 9 ? '{"summary":"still invalid"}' : JSON.stringify(validPlan())
+    }
+
+    const plan = await generateValidPlan('Create a business plan', {}, 'mission-3', complete)
+
+    expect(plan.summary).toBe('A goal-specific execution plan')
+    expect(calls).toBe(9)
+  })
+
+  it('fails only when Brain reports that every eligible model is exhausted', async () => {
     let calls = 0
     const complete = async (): Promise<string> => {
       calls++
-      return '{"summary":"still invalid"}'
+      if (calls === 1) return '{"summary":"still invalid"}'
+      throw new Error(`${BRAIN_MODEL_SELECTION_EXHAUSTED}: all eligible models tried`)
     }
 
-    await expect(generateValidPlan('Create a business plan', {}, 'mission-3', complete))
-      .rejects.toThrow('Unable to generate a valid mission plan after 6 attempts')
-    expect(calls).toBe(6)
+    await expect(generateValidPlan('Create a business plan', {}, 'mission-4', complete))
+      .rejects.toThrow('Brain exhausted every eligible model')
+    expect(calls).toBe(2)
+  })
+
+  it('does not retry unrelated Planner or control-plane errors indefinitely', async () => {
+    const complete = jest.fn(async (): Promise<string> => {
+      throw new Error('Agent Runtime unavailable')
+    })
+
+    await expect(generateValidPlan('Create a business plan', {}, 'mission-5', complete))
+      .rejects.toThrow('Planner Agent request failed on attempt 1: Agent Runtime unavailable')
+    expect(complete).toHaveBeenCalledTimes(1)
   })
 })

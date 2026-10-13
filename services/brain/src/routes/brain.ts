@@ -27,7 +27,7 @@ router.post('/complete', asyncHandler(async (req: any, res: any) => {
   const brain = await getBrain();
   const requestId = `brain_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const startedAt = Date.now();
-  const { prompt, options, systemPrompt, maxTokens, budget, temperature, missionId } = req.body as {
+  const { prompt, options, systemPrompt, maxTokens, budget, temperature, missionId, routingSessionId } = req.body as {
     prompt: string;
     options?: CompletionOptions;
     systemPrompt?: string;
@@ -35,6 +35,7 @@ router.post('/complete', asyncHandler(async (req: any, res: any) => {
     budget?: number;
     temperature?: number;
     missionId?: string;
+    routingSessionId?: string;
   };
   if (!prompt) {
     throw BrainError.badRequest('Missing prompt');
@@ -48,6 +49,7 @@ router.post('/complete', asyncHandler(async (req: any, res: any) => {
     temperature: temperature ?? options?.temperature,
     missionId,
     optimizeFor: options?.optimizeFor,
+    routingSessionId: routingSessionId ?? options?.routingSessionId,
   };
   try {
     const result = await brain.complete(prompt, mergedOptions);

@@ -215,17 +215,17 @@ router.post(
       context: data.context,
     }
     const result: PluginGenerationResult = await generator.generate(request)
-    if (result.success && result.tool) {
-      try {
-        const deployed = await generator.deploy(result.tool)
-        if (deployed.success) {
-          logger.info({ toolId: result.tool.id, deployPath: deployed.deployPath }, 'Generated plugin deployed and registered')
-        } else {
-          logger.warn({ toolId: result.tool.id, error: deployed.error }, 'Generated plugin deployment failed')
-        }
-      } catch (deployErr) {
-        logger.warn({ toolId: result.tool.id, err: deployErr instanceof Error ? deployErr.message : String(deployErr) }, 'Generated plugin deployment threw')
+    if (result.success && result.tool && result.tool.manifest?.requiresInstallation !== true) {
+      const deployed = await generator.deploy(result.tool)
+      if (!deployed.success) {
+        logger.error({ toolId: result.tool.id, error: deployed.error }, 'Generated plugin deployment failed')
+        res.status(500).json({
+          success: false,
+          error: `Plugin deployment failed: ${deployed.error || 'unknown deployment error'}`,
+        })
+        return
       }
+      logger.info({ toolId: result.tool.id, deployPath: deployed.deployPath }, 'Generated plugin deployed and registered')
     }
     const statusCode = result.success ? 201 : 400
     res.status(statusCode).json(result)

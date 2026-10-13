@@ -11,6 +11,7 @@ import type { StoreWrite } from '../adk/events';
 export interface CodeExecutionOptions {
   language: 'javascript' | 'typescript' | 'python';
   code: string;
+  executionProfile?: 'generated-plugin';
   timeoutMs?: number;
   stdin?: string;
   input?: Record<string, unknown>;
@@ -74,6 +75,14 @@ export class CodeExecutor {
       {};
     const sourceMappings: NamedCredentialSource[] =
       (credentials as CodeExecutorCredentials)?.sources ?? [];
+
+    if (options.executionProfile === 'generated-plugin' && options.language !== 'javascript') {
+      return {
+        success: false,
+        error: 'Generated plugins currently require JavaScript to enforce the restricted runtime profile',
+        durationMs: Date.now() - startTime,
+      };
+    }
 
     if (options.language === 'javascript' || options.language === 'typescript') {
       return this.executeJavaScript(options, timeoutMs, startTime, resolvedCreds, sourceMappings);
@@ -163,13 +172,14 @@ export class CodeExecutor {
 
         try {
         const code = options.code;
+        const generatedPlugin = options.executionProfile === 'generated-plugin';
         const wrapped = `const __tool_input = ${JSON.stringify(options.input || {})};
 
 const __skill_config = ${JSON.stringify(options.config || {})}
 
-const __skill_credentials = ${JSON.stringify(options.credentials || {})};
+const __skill_credentials = ${JSON.stringify(generatedPlugin ? {} : options.credentials || {})};
 
-const __credential_sources = ${sourceMapJson};
+const __credential_sources = ${JSON.stringify(generatedPlugin ? [] : sourceMappings)};
 
 function __getCredential(logicalKey) {
   // Resolved by the executor's credential provider, not read from the process
@@ -250,14 +260,14 @@ async function __execute_tool(toolId, input) {
         }
 
         const env: Record<string, string | undefined> = {
-          ...process.env,
+          ...(generatedPlugin ? {} : process.env),
           NODE_ENV: 'production',
           HOME: sandboxDir,
           PATH: process.env.PATH || '/usr/bin:/bin',
           STAGE7_SANDBOX_DIR: sandboxDir,
         };
 
-        if (options.persistenceEnvVar) {
+        if (!generatedPlugin && options.persistenceEnvVar) {
           try {
             env[options.persistenceEnvVar] = process.env[options.persistenceEnvVar] || `/var/data/stage7/${options.persistenceEnvVar.toLowerCase()}`;
           } catch (_) {
@@ -265,20 +275,30 @@ async function __execute_tool(toolId, input) {
           }
         }
 
-        for (const [key, value] of Object.entries(resolvedCreds)) {
-          if (value !== undefined) {
-            env[key] = value;
+        if (!generatedPlugin) {
+          for (const [key, value] of Object.entries(resolvedCreds)) {
+            if (value !== undefined) {
+              env[key] = value;
+            }
           }
-        }
-        for (const source of sourceMappings) {
-          const value = resolvedCreds[source.logicalKey];
-          if (value !== undefined) {
-            if (source.envVar) env[source.envVar] = value;
-            if (source.configKey) env[source.configKey] = value;
+          for (const source of sourceMappings) {
+            const value = resolvedCreds[source.logicalKey];
+            if (value !== undefined) {
+              if (source.envVar) env[source.envVar] = value;
+              if (source.configKey) env[source.configKey] = value;
+            }
           }
         }
 
-        const proc = spawn('node', [scriptPath], {
+        const nodeArgs = generatedPlugin
+          ? [
+            '--experimental-permission',
+            `--allow-fs-read=${sandboxDir}`,
+            `--allow-fs-write=${sandboxDir}`,
+            scriptPath,
+          ]
+          : [scriptPath];
+        const proc = spawn(process.execPath, nodeArgs, {
           timeout: timeoutMs,
           cwd: sandboxDir,
           env,

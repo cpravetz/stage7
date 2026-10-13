@@ -9,6 +9,11 @@ import { buildProviderRegistry } from '../providers/registry';
 import { LLMProvider, CompletionRequest, CompletionResponse } from '../providers/Provider';
 import { CircuitBreaker } from '../utils/circuitBreaker';
 import * as crypto from 'crypto';
+import {
+  BRAIN_MODEL_SELECTION_EXHAUSTED,
+  BRAIN_MODEL_SELECTION_RETRY,
+} from '@stage7-nextgen/shared';
+import { BrainError } from '../utils/errors';
 
 export interface CompletionOptions {
   schema?: z.ZodSchema;
@@ -18,6 +23,7 @@ export interface CompletionOptions {
   temperature?: number;
   missionId?: string;
   optimizeFor?: 'cost' | 'speed' | 'accuracy' | 'creativity' | 'balanced';
+  routingSessionId?: string;
 }
 
 export interface CompletionResult {
@@ -58,9 +64,20 @@ export interface ModelPerformanceMetrics {
   lastUpdated: number;
 }
 
+interface ModelRoutingSession {
+  attemptedModelIds: Set<string>;
+  updatedAt: number;
+}
+
 const MAX_LOG_ENTRIES = 200;
 const BRAIN_LOG_DOC_ID = 'brain-log-history';
 const PERFORMANCE_METRICS_DOC_ID = 'model-performance-metrics';
+const MODEL_ROUTING_SESSION_TTL_MS = 60 * 60 * 1000;
+const MAX_MODEL_ROUTING_SESSIONS = 1000;
+
+function modelRoutingKey(model: Pick<ModelDefinition, 'id' | 'provider'>): string {
+  return `${model.provider}:${model.id}`;
+}
 
 function providerAttemptTimeoutMs(): number {
   const configured = Number(process.env.BRAIN_PROVIDER_ATTEMPT_TIMEOUT_MS);
@@ -84,8 +101,10 @@ export class BrainService {
   private cache = SemanticCache.getInstance();
   private context = new ContextManager();
   private providers: LLMProvider[] = [];
+  private modelCatalogReady: Promise<void>;
   private circuitBreakers: Map<string, CircuitBreaker> = new Map();
   private brainLog: BrainLogEntry[] = [];
+  private modelRoutingSessions = new Map<string, ModelRoutingSession>();
   private llmSettingsCache: { freeModelsOnly: boolean; fetchedAt: number } | null = null;
   private LLMS_SETTINGS_TTL_MS = 30000; // 30 seconds
 
@@ -104,6 +123,7 @@ export class BrainService {
     if (this.initialized) return;
     this.initialized = true;
     await Promise.all([
+      this.modelCatalogReady,
       this.loadPerformanceMetrics(),
       this.loadBrainLog(),
     ]);
@@ -115,30 +135,56 @@ export class BrainService {
     const defaultThreshold = Number(process.env.BRAIN_CIRCUIT_THRESHOLD) || 8;
     const defaultCooldown = Number(process.env.BRAIN_CIRCUIT_COOLDOWN_MS) || 60000; // 60s
     for (const p of this.providers) {
-      this.registerProviderModels(p);
       this.circuitBreakers.set(p.id, new CircuitBreaker(defaultThreshold, defaultCooldown));
     }
+    this.modelCatalogReady = Promise.all(this.providers.map((provider) => this.registerProviderModels(provider)))
+      .then(() => undefined);
     logger.info({ providers: this.providers.map((p) => p.id) }, 'Brain initialized with providers');
   }
 
-  
-
-  private registerProviderModels(provider: LLMProvider) {
-    provider.listModels()
-      .then((models) => {
-        const defs: ModelDefinition[] = models.map((m) => ({
+  private async registerProviderModels(provider: LLMProvider): Promise<void> {
+    try {
+      const models = await provider.listModels();
+      const defs: ModelDefinition[] = models.map((m) => ({
           id: m.id,
           provider: provider.id,
           costPer1kTokens: m.costPer1kTokens,
           maxTokens: m.maxTokens,
           capabilities: m.capabilities,
-        }));
-        this.router.registerModels(defs);
-        logger.info({ provider: provider.id, count: defs.length }, 'Registered models from provider');
-      })
-      .catch((err) => {
-        logger.warn({ provider: provider.id, err: err instanceof Error ? err.message : String(err) }, 'Failed to list provider models, using defaults');
-      });
+      }));
+      this.router.registerModels(defs);
+      logger.info({ provider: provider.id, count: defs.length }, 'Registered models from provider');
+    } catch (err) {
+      logger.warn({ provider: provider.id, err: err instanceof Error ? err.message : String(err) }, 'Failed to list provider models, using defaults');
+    }
+  }
+
+  private getRoutingSession(sessionId: string): ModelRoutingSession {
+    const now = Date.now();
+    for (const [key, session] of this.modelRoutingSessions) {
+      if (now - session.updatedAt > MODEL_ROUTING_SESSION_TTL_MS) {
+        this.modelRoutingSessions.delete(key);
+      }
+    }
+
+    let session = this.modelRoutingSessions.get(sessionId);
+    if (!session) {
+      if (this.modelRoutingSessions.size >= MAX_MODEL_ROUTING_SESSIONS) {
+        const oldest = Array.from(this.modelRoutingSessions.entries())
+          .sort((left, right) => left[1].updatedAt - right[1].updatedAt)[0];
+        if (oldest) this.modelRoutingSessions.delete(oldest[0]);
+      }
+      session = { attemptedModelIds: new Set(), updatedAt: now };
+      this.modelRoutingSessions.set(sessionId, session);
+    }
+    session.updatedAt = now;
+    return session;
+  }
+
+  private recordRoutingSessionAttempts(sessionId: string | undefined, modelIds: Iterable<string>): void {
+    if (!sessionId) return;
+    const session = this.getRoutingSession(sessionId);
+    for (const modelId of modelIds) session.attemptedModelIds.add(modelId);
   }
 
   listProviders(): Array<{ id: string; name: string; hasApiKey: boolean; openAICompatible: boolean }> {
@@ -209,8 +255,12 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
       ? crypto.createHash('sha256').update(options.systemPrompt).digest('hex').slice(0, 8)
       : 'none';
     const cacheKey = `brain:complete:auto:${promptHash}:${systemHash}`;
+    const routingSessionId = options.routingSessionId?.trim();
+    const routingSessionKey = routingSessionId
+     ? `${options.missionId || 'brain'}:${routingSessionId}`
+     : undefined;
 
-    const cached = await this.cache.get(cacheKey);
+    const cached = routingSessionKey ? null : await this.cache.get(cacheKey);
     if (cached) {
       logger.info({ cacheKey }, 'Cache hit');
       const cachedResult = cached as CompletionResult;
@@ -225,10 +275,11 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
       return { ...cachedResult, cached: true };
     }
 
+    await this.modelCatalogReady;
+
     // Optionally consult llm-config for runtime preference to prefer free models
     const settings = await this.loadLlmSettings();
 
-    // Build ordered candidate list and try providers/models until one succeeds.
     const routingOptions = {
       task: prompt,
       maxTokens: options.maxTokens ?? 1024,
@@ -236,40 +287,46 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
       freeOnly: settings?.freeModelsOnly,
       optimizeFor: options.optimizeFor,
     };
-    let candidates = this.router.getCandidates(routingOptions);
+    const eligibleCandidates = this.router.getCandidates(routingOptions);
+    const session = routingSessionKey ? this.getRoutingSession(routingSessionKey) : undefined;
+    const attemptedModelIds = new Set(session?.attemptedModelIds || []);
+    const attemptedThisCall = new Set<string>();
+    let candidates = this.router.getCandidates({
+      ...routingOptions,
+      excludedModelIds: attemptedModelIds,
+    });
 
     // Reorder candidates to prioritize recently successful models
-    const candidatesById = new Map(candidates.map((candidate) => [candidate.model.id, candidate]));
+    const candidatesById = new Map(candidates.map((candidate) => [modelRoutingKey(candidate.model), candidate]));
     candidates = this.prioritizeRecentSuccesses(candidates.map((candidate) => candidate.model))
       .flatMap((model) => {
-        const candidate = candidatesById.get(model.id);
+        const candidate = candidatesById.get(modelRoutingKey(model));
         return candidate ? [candidate] : [];
       });
 
-    // If no candidates found and we were preferring free models, retry without that constraint.
-    if ((!candidates || candidates.length === 0) && settings?.freeModelsOnly) {
-      logger.warn({ task: prompt.slice(0, 80) }, 'No free-model candidates found; retrying with paid models allowed');
-      const newCandidates = this.router.getCandidates({
-        task: prompt,
-        maxTokens: options.maxTokens ?? 1024,
-        budget: options.budget,
-        freeOnly: false,
-        optimizeFor: options.optimizeFor,
-      });
-      candidates = newCandidates;
-    }
-
     if (!candidates || candidates.length === 0) {
-      // As a last-resort fallback, allow any free chat-capable model from free providers.
-      const fallback = this.router.listModels().filter((m) => (m.costPer1kTokens === 0) && (m.capabilities.includes('chat') || m.capabilities.includes('creative')));
-      if (fallback.length > 0) {
-        logger.warn({ task: prompt.slice(0, 80), fallbackCount: fallback.length }, 'Using fallback free chat-capable models');
-        candidates = fallback.map(m => ({ model: m, score: 0 }));
+      if (routingSessionKey) {
+        const attemptedEligibleModelCount = eligibleCandidates
+          .filter((candidate) => attemptedModelIds.has(modelRoutingKey(candidate.model))).length;
+        const reason = eligibleCandidates.length === 0
+          ? 'No models are eligible under the current Brain settings'
+          : `All ${eligibleCandidates.length} eligible models have already been tried`;
+        const error = new BrainError(`${reason}${settings?.freeModelsOnly ? ' (free models only is enabled)' : ''}.`, 503, {
+          code: BRAIN_MODEL_SELECTION_EXHAUSTED,
+          eligibleModelCount: eligibleCandidates.length,
+          attemptedModelCount: attemptedEligibleModelCount,
+          freeModelsOnly: settings?.freeModelsOnly === true,
+        });
+        this.addLog({
+          type: 'error',
+          promptPreview,
+          success: false,
+          durationMs: Date.now() - startTime,
+          error: error.message,
+        });
+        throw error;
       }
-    }
-
-    if (!candidates || candidates.length === 0) {
-      const errMsg = 'No model available for the requested task. Ensure at least one LLM provider is configured with a valid API key.';
+      const errMsg = 'No model available for the requested task under the current Brain settings. Ensure an eligible LLM provider is configured.';
       this.addLog({
         type: 'error',
         promptPreview,
@@ -292,15 +349,26 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
     messagesBase.push({ role: 'user', content: prompt });
 
     for (const candidate of candidates) {
-      if (Date.now() >= completionDeadline) break;
+      if (Date.now() >= completionDeadline) {
+        lastErr = new Error('Brain completion deadline expired before the next eligible model could be attempted');
+        break;
+      }
       // Skip if there isn't enough time left to attempt this candidate at all.
-      if (Date.now() + attemptTimeout > completionDeadline) break;
+      if (Date.now() + attemptTimeout > completionDeadline) {
+        lastErr = new Error('Brain completion deadline did not leave enough time for the next eligible model attempt');
+        break;
+      }
+      const routingKey = modelRoutingKey(candidate.model);
+      attemptedModelIds.add(routingKey);
+      attemptedThisCall.add(routingKey);
       const provider = this.providers.find((p) => p.id === candidate.model.provider);
       if (!provider) {
+        lastErr = new Error(`Provider '${candidate.model.provider}' is not registered`);
         logger.warn({ candidate }, 'Skipping candidate: provider not registered');
         continue;
       }
       if (!provider.isAvailable()) {
+        lastErr = new Error(`Provider '${provider.id}' is not available`);
         logger.warn({ provider: provider.id }, 'Skipping candidate: provider not available');
         continue;
       }
@@ -376,11 +444,12 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
 
           // Update provider health in router
           this.updateProviderHealth(result.provider, true);
+          this.recordRoutingSessionAttempts(routingSessionKey, attemptedModelIds);
 
           // Record performance metrics
           await this.recordPerformanceMetrics(result.model, result.provider, Date.now() - startTime, response.tokensUsed, estimatedCost, true);
 
-          await this.cache.set(cacheKey, result);
+          if (!routingSessionKey) await this.cache.set(cacheKey, result);
 
           // if missionId provided, append a cost_estimate event to artifacts persistence
           try {
@@ -544,6 +613,34 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
         success: false,
         durationMs: Date.now() - startTime,
         error: finalErrMsg,
+      });
+    }
+    if (routingSessionKey) {
+      this.recordRoutingSessionAttempts(routingSessionKey, attemptedModelIds);
+      const attemptedEligibleModelCount = eligibleCandidates
+        .filter((candidate) => attemptedModelIds.has(modelRoutingKey(candidate.model))).length;
+      const remainingModelCount = eligibleCandidates.length - attemptedEligibleModelCount;
+      if (remainingModelCount > 0 && attemptedThisCall.size === 0) {
+        throw new BrainError(finalErrMsg, 504, {
+          code: 'BRAIN_COMPLETION_DEADLINE',
+          eligibleModelCount: eligibleCandidates.length,
+          attemptedModelCount: attemptedEligibleModelCount,
+          remainingModelCount,
+          freeModelsOnly: settings?.freeModelsOnly === true,
+        });
+      }
+      const code = remainingModelCount === 0
+        ? BRAIN_MODEL_SELECTION_EXHAUSTED
+        : BRAIN_MODEL_SELECTION_RETRY;
+      const message = remainingModelCount === 0
+        ? `Every eligible model was tried, but none completed the request. Last provider error: ${finalErrMsg}`
+        : `Brain could not complete the request yet; ${remainingModelCount} eligible model(s) remain untried. Last provider error: ${finalErrMsg}`;
+      throw new BrainError(message, 503, {
+        code,
+        eligibleModelCount: eligibleCandidates.length,
+        attemptedModelCount: attemptedEligibleModelCount,
+        remainingModelCount,
+        freeModelsOnly: settings?.freeModelsOnly === true,
       });
     }
     throw new Error(finalErrMsg);

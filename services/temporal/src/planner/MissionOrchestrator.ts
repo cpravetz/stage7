@@ -6,7 +6,11 @@ import {
   Task,
 } from '@stage7-nextgen/shared';
 import { logger } from '@stage7-nextgen/shared';
-import { MissionAgentRuntime, TaskExecutionResult } from '../agent/MissionAgentRuntime';
+import {
+  applyPhaseReview,
+  MissionAgentRuntime,
+  TaskExecutionResult,
+} from '../agent/MissionAgentRuntime';
 import { MissionActivityCheckpoint, MissionTaskCheckpoint } from '../types/workflow';
 
 const MISSION_REVIEWER_SYSTEM_PROMPT =
@@ -45,12 +49,13 @@ export class MissionOrchestrator {
     const compensations: Array<{ phaseId: string; action: string }> = [];
     const plannerAgentId = `agent-${ctx.missionId}-planner`;
 
-    this.agentRuntime = new MissionAgentRuntime({
+    const agentRuntime = new MissionAgentRuntime({
       missionId: ctx.missionId,
       tenantId: ctx.tenantId || 'tenant-1',
       agentRuntimeUrl: ctx.agentRuntimeUrl,
       broadcast: ctx.broadcastAll,
     });
+    this.agentRuntime = agentRuntime;
 
     await ctx.broadcast({
       type: 'planner_started',
@@ -65,13 +70,14 @@ export class MissionOrchestrator {
       },
     });
 
-    const plan = ctx.resumePlan || ctx.resumeCheckpoint?.plan || await this.generatePlan(ctx);
+    let plan = ctx.resumePlan || ctx.resumeCheckpoint?.plan || await this.generatePlan(ctx);
     const completedTasks = new Map<string, MissionTaskCheckpoint>(
       (ctx.resumeCheckpoint?.completedTasks || []).map((checkpoint) => [
         JSON.stringify([checkpoint.phaseId, checkpoint.taskId]),
         checkpoint,
       ]),
     );
+    const completedTaskSummaries = new Map<string, { taskId: string; output: string; artifactNames: string[] }>();
     const completedPhases = new Set(ctx.resumeCheckpoint?.completedPhases || []);
     const saveCheckpoint = () => ctx.onCheckpoint?.({
       version: 1,
@@ -111,7 +117,8 @@ export class MissionOrchestrator {
     }
 
     const outputs: any = { phases: [] };
-    for (const phase of plan.phases) {
+    for (let phaseIndex = 0; phaseIndex < plan.phases.length; phaseIndex++) {
+      let phase = plan.phases[phaseIndex]!;
       const phaseIsComplete = completedPhases.has(phase.id);
       if (phaseIsComplete && phase.tasks.some((task) =>
         !completedTasks.has(JSON.stringify([phase.id, task.id])),
@@ -124,11 +131,10 @@ export class MissionOrchestrator {
       }
 
       const phaseOutput: any = { phaseId: phase.id, name: phase.name, tasks: [] };
-
-      for (const task of phase.tasks) {
+      const completedInPhase = new Set<string>();
+      const executeTask = async (task: Task, savedTask: MissionTaskCheckpoint | undefined) => {
         ctx.heartbeat?.();
         const taskKey = JSON.stringify([phase.id, task.id]);
-        const savedTask = completedTasks.get(taskKey);
         if (!savedTask) {
           await ctx.broadcast({
             type: 'task_started',
@@ -149,8 +155,8 @@ export class MissionOrchestrator {
 
         let result: TaskExecutionResult;
         try {
-          const agentId = await this.agentRuntime.getOrCreateAgent(task.agentRole, task.systemPrompt);
-          result = await this.agentRuntime.executeTask(
+          const agentId = await agentRuntime.getOrCreateAgent(task.agentRole, task.systemPrompt);
+          result = await agentRuntime.executeTask(
             agentId,
             task,
             phase,
@@ -210,7 +216,84 @@ export class MissionOrchestrator {
         }
         phaseOutput.tasks.push({ taskId: task.id, status: 'completed', artifacts: result.artifacts });
         compensations.push({ phaseId: phase.id, action: `revert-phase-${phase.id}` });
+        completedInPhase.add(task.id);
+        completedTaskSummaries.set(task.id, {
+          taskId: task.id,
+          output: result.output.slice(0, 1_200),
+          artifactNames: result.artifacts.slice(0, 20).map((artifact) => artifact.name),
+        });
         ctx.heartbeat?.();
+      };
+
+      for (const task of phase.tasks) {
+        const savedTask = completedTasks.get(JSON.stringify([phase.id, task.id]));
+        if (savedTask) await executeTask(task, savedTask);
+      }
+
+      const executePendingTasks = async () => {
+      while (completedInPhase.size < phase.tasks.length) {
+        const completedTaskIds = [...completedTasks.values()].map((task) => task.taskId);
+        const readyTasks = phase.tasks.filter((task) =>
+          !completedInPhase.has(task.id)
+          && (task.dependsOnTaskIds || []).every((dependencyId) => completedTaskIds.includes(dependencyId)),
+        );
+        if (readyTasks.length === 0) {
+          throw new Error(`Mission phase ${phase.id} has pending tasks but no dependency-ready task`);
+        }
+        const task = readyTasks.length === 1
+          ? readyTasks[0]!
+          : await agentRuntime.selectNextTask(
+            ctx.prompt,
+            plan,
+            phase,
+            completedTaskIds,
+            [...completedTaskSummaries.values()].slice(-10),
+          );
+        if (!readyTasks.some((candidate) => candidate.id === task.id)) {
+          throw new Error(`Mission task selector chose a task that is not ready in phase ${phase.id}`);
+        }
+        await executeTask(task, undefined);
+      }
+      };
+
+      await executePendingTasks();
+      if (!phaseIsComplete) {
+        const existingAmendmentCount = phase.tasks.filter((task) =>
+          task.id.startsWith(`${phase.id}-amendment-`),
+        ).length;
+        for (let reviewIndex = existingAmendmentCount + 1; ; reviewIndex++) {
+          const review = await agentRuntime.reviewPhase(
+            ctx.prompt,
+            plan,
+            phase,
+            [...completedTaskSummaries.values()].slice(-10),
+            reviewIndex,
+          );
+          const applied = applyPhaseReview(plan, phase.id, review);
+          plan = applied.plan;
+          phase = applied.phase;
+          if (applied.satisfied) break;
+          if (!applied.amendment) {
+            throw new Error(
+              `Mission phase ${phase.id} remains incomplete after bounded amendments: ${applied.gaps.join('; ') || 'no review details supplied'}`,
+            );
+          }
+          saveCheckpoint();
+          await this.persistPlan(ctx, plan);
+          await ctx.broadcast({
+            type: 'phase_plan_amended',
+            missionId: ctx.missionId,
+            timestamp: Date.now(),
+            data: {
+              phaseId: phase.id,
+              reviewIndex,
+              gaps: applied.gaps,
+              task: applied.amendment,
+              plan,
+            },
+          });
+          await executePendingTasks();
+        }
       }
 
       if (!phaseIsComplete) {

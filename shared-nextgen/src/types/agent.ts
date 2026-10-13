@@ -8,6 +8,10 @@ export interface AgentExecutionPolicy {
   maxDelegations: number
 }
 
+export interface AgentToolPolicy {
+  mode: 'all' | 'allowlist'
+}
+
 export const DEFAULT_AGENT_EXECUTION_POLICY: AgentExecutionPolicy = {
   maxBrainCalls: 8,
   maxActions: 6,
@@ -24,6 +28,7 @@ export interface AgentDefinition {
   type: string
   systemPrompt: string
   tools: string[]
+  toolPolicy?: AgentToolPolicy
   metadata: Record<string, unknown>
   createdAt: string
   updatedAt: string

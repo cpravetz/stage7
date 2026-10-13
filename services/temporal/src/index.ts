@@ -1,6 +1,5 @@
 import express from 'express';
-import missionRoutes from './routes/missions';
-import { TemporalClient } from './client/TemporalClient';
+import missionRoutes, { temporalClient } from './routes/missions';
 import { startWatchScheduler } from './scheduler';
 import { runTemporalWorker } from './temporalWorker';
 import { logger } from '@stage7-nextgen/shared';
@@ -12,7 +11,11 @@ const app: express.Express = express();
 app.use(express.json());
 
 app.get('/api/temporal/health', (_req, res) => {
-  res.json({ status: 'ok', service: 'temporal' });
+  res.json({
+    status: 'ok',
+    service: 'temporal',
+    ...temporalClient.getRuntimeStatus(),
+  });
 });
 
 app.use('/api/temporal', missionRoutes);
@@ -25,10 +28,10 @@ if (require.main === module) {
   });
 
   // Start watch scheduler
-  const client = new TemporalClient();
+  const client = temporalClient;
   const stopWatchScheduler = startWatchScheduler(client);
 
-  if (process.env.TEMPORAL_ADDRESS) {
+  if (client.isConnected()) {
     runTemporalWorker().catch((error) => {
       logger.fatal(
         { error: error instanceof Error ? error.message : String(error) },
@@ -39,6 +42,26 @@ if (require.main === module) {
       server.closeAllConnections();
       process.exitCode = 1;
     });
+  } else {
+    let recoveryScanInProgress = false;
+    const recoverMissions = async () => {
+      if (recoveryScanInProgress) return;
+      recoveryScanInProgress = true;
+      try {
+        await client.recoverInFlightMissions();
+      } catch (error) {
+        logger.error(
+          { error: error instanceof Error ? error.message : String(error) },
+          'In-flight mission recovery scan failed',
+        );
+      } finally {
+        recoveryScanInProgress = false;
+      }
+    };
+    const recoveryScan = setInterval(() => void recoverMissions(), 30_000);
+    recoveryScan.unref();
+    server.on('close', () => clearInterval(recoveryScan));
+    void recoverMissions();
   }
 }
 

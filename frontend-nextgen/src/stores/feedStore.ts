@@ -129,6 +129,10 @@ export function normalize(raw: unknown): FeedEvent | null {
       case 'task_failed':
         message = `Task failed: ${(data.taskTitle as string) || (data.taskId as string) || ''} — ${(data.error as string) || ''}`.trim();
         break;
+      case 'user':
+      case 'user_message':
+        message = (data.content as string) || (data.message as string) || '';
+        break;
       case 'brain_error':
         message = `Brain error${(data.provider as string) ? ` (${data.provider})` : ''}: ${(data.error as string) || ''}`.trim();
         break;

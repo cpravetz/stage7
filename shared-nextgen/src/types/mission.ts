@@ -6,6 +6,7 @@ export const TaskSchema = z.object({
   description: z.string(),
   agentRole: z.string(),
   systemPrompt: z.string(),
+  dependsOnTaskIds: z.array(z.string()).optional(),
   expectedArtifacts: z.array(z.string()),
   status: z.enum(['pending', 'in_progress', 'awaiting_approval', 'completed', 'failed', 'skipped']),
   output: z.string().optional(),

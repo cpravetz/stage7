@@ -1,4 +1,4 @@
-import { TriggerScheduler } from '../services/TriggerScheduler';
+import { TriggerScheduler, type MissionScheduleDispatch } from '../services/TriggerScheduler';
 import { createInMemoryTriggerRecordStore, type TriggerRecordStore } from '../services/TriggerRecordStore';
 import { buildScheduledTriggers, dueTriggers, isDue, scheduleStatus } from '../adk/trigger-schedule';
 import { createDynamicTriggerRecord, type DynamicTriggerRecord } from '../adk/triggers';
@@ -185,6 +185,7 @@ type ExecuteFn = (
 interface Harness {
   scheduler: TriggerScheduler;
   calls: Array<{ toolId: string; input: Record<string, unknown>; assistantId: string; context?: Record<string, unknown> }>;
+  missionCalls: MissionScheduleDispatch[];
   store: TriggerRecordStore;
   setTools(tools: Tool[]): void;
   setNow(now: Date): void;
@@ -194,12 +195,14 @@ function harness(options: {
   tools: Tool[];
   workflows: AssistantWorkflow[];
   execute?: ExecuteFn;
+  runMission?: (mission: MissionScheduleDispatch) => Promise<{ workflowId: string }>;
   store?: TriggerRecordStore;
   now?: Date;
 } = { tools: [], workflows: [] }): Harness {
   let tools = options.tools;
   let now = options.now ?? AT_0905;
   const calls: Harness['calls'] = [];
+  const missionCalls: MissionScheduleDispatch[] = [];
   const store = options.store ?? createInMemoryTriggerRecordStore();
 
   const scheduler = new TriggerScheduler({
@@ -211,11 +214,18 @@ function harness(options: {
       calls.push({ toolId: skill.id, input, assistantId: opts.assistantId, ...(opts.context ? { context: opts.context } : {}) });
       return options.execute ? options.execute(skill, input, opts) : execution({ toolId: skill.id });
     },
+    runMission: async (mission) => {
+      missionCalls.push(mission);
+      return options.runMission
+        ? options.runMission(mission)
+        : { workflowId: `mission-${mission.missionId}` };
+    },
   });
 
   return {
     scheduler,
     calls,
+    missionCalls,
     store,
     setTools: (next) => {
       tools = next;
@@ -387,6 +397,57 @@ describe('TriggerScheduler.tick', () => {
 });
 
 describe('TriggerScheduler adaptations', () => {
+  it('dispatches mission schedules through the same tick and persists the occurrence checkpoint', async () => {
+    const weekly = tool({ id: 'weekly-report', tier: 'advise', isSkill: true, triggers: [scheduleTrigger('0 9 * * 1')] });
+    const store = createInMemoryTriggerRecordStore();
+    const { scheduler, calls, missionCalls } = harness({
+      tools: [weekly],
+      workflows: [workflow('Event', [weekly])],
+      store,
+    });
+
+    await scheduler.scheduleMission({
+      id: 'mission-schedule-weekly',
+      tenantId: 'tenant-1',
+      assistantId: 'event',
+      prompt: 'Review the weekly metrics',
+      cron: '0 9 * * 1',
+      metadata: { source: 'test' },
+    });
+    const results = await scheduler.tick();
+
+    expect(results.map((result) => result.target)).toEqual(['skill', 'mission']);
+    expect(calls).toHaveLength(1);
+    expect(missionCalls).toHaveLength(1);
+    expect(missionCalls[0]).toMatchObject({
+      scheduleId: 'mission-schedule-weekly',
+      tenantId: 'tenant-1',
+      assistantId: 'event',
+      prompt: 'Review the weekly metrics',
+      scheduledFor: new Date(2026, 9, 5, 9, 0).toISOString(),
+      metadata: { source: 'test' },
+    });
+    expect(missionCalls[0].missionId).toMatch(/^scheduled-[a-f0-9]{32}$/);
+
+    const restarted = harness({
+      tools: [weekly],
+      workflows: [workflow('Event', [weekly])],
+      store,
+    }).scheduler;
+    await restarted.refresh();
+    expect((await restarted.tick()).filter((result) => result.target === 'mission')).toHaveLength(0);
+  });
+
+  it('rejects invalid mission crons and requires a durable mission schedule identity', async () => {
+    const { scheduler } = harness();
+    await expect(scheduler.scheduleMission({
+      tenantId: 'tenant-1',
+      assistantId: 'event',
+      prompt: 'Run a mission',
+      cron: 'not cron',
+    })).rejects.toThrow('Invalid mission schedule cron');
+  });
+
   it('creates a persisted record that then becomes schedulable', async () => {
     const weekly = tool({ id: 'weekly-report', tier: 'advise', isSkill: true, triggers: [{ kind: 'user', phrase_examples: ['weekly'] }] });
     const { scheduler, calls, store } = harness({ tools: [weekly], workflows: [workflow('Event', [weekly])] });

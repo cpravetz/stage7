@@ -1,8 +1,14 @@
-import { logger } from '@stage7-nextgen/shared'
+import {
+  BRAIN_MODEL_SELECTION_EXHAUSTED,
+  BRAIN_MODEL_SELECTION_RETRY,
+  BRAIN_ROUTING_SESSION_CONTEXT_KEY,
+  logger,
+} from '@stage7-nextgen/shared'
 import {
   AgentDefinition,
   AgentExecutionPolicy,
   AgentTask,
+  AgentToolPolicy,
   DEFAULT_AGENT_EXECUTION_POLICY,
 } from '../types'
 
@@ -22,6 +28,11 @@ interface ToolCatalogResponse {
 interface BrainResponse {
   content?: string
   tokensUsed?: number
+}
+
+interface BrainErrorResponse {
+  error?: string
+  details?: { code?: unknown }
 }
 
 interface ToolExecutionResponse {
@@ -55,6 +66,22 @@ export interface AgentExecutionContext {
   delegationDepth: number
   executionPolicy?: AgentExecutionPolicy
   delegate?: (request: AgentDelegateRequest) => Promise<unknown>
+  resumeCheckpoint?: AgentExecutionCheckpoint
+  saveCheckpoint?: (checkpoint: AgentExecutionCheckpoint) => Promise<void>
+}
+
+export interface AgentExecutionCheckpoint {
+  version: 1 | 2
+  history: Array<{ role: 'user' | 'assistant'; content: string }>
+  tokensUsed: number
+  toolCalls: number
+  brainCalls: number
+  completionTokensReserved: number
+  delegations: number
+  lastAction: string
+  repeatedActionCount: number
+  pendingAction?: string
+  finalOutput?: string
 }
 
 export interface AgentExecutionResult {
@@ -79,12 +106,66 @@ const CREATE_TOOL_ACTION = '__create_tool'
 const DELEGATE_ACTION = '__delegate'
 const MAX_TOOL_DESCRIPTION_LENGTH = 200
 const MAX_BRAIN_REQUEST_BYTES = 96 * 1024
+const MAX_AGENT_CHECKPOINT_BYTES = 128 * 1024
 const MAX_COMPLETION_TOKENS_PER_CALL = 4_096
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
     : undefined
+}
+
+export function parseAgentExecutionCheckpoint(value: unknown): AgentExecutionCheckpoint | undefined {
+  if (value === undefined || value === null) return undefined
+  const checkpoint = asRecord(value)
+  const isCount = (candidate: unknown): candidate is number =>
+    typeof candidate === 'number' && Number.isSafeInteger(candidate) && candidate >= 0
+  if (
+    (checkpoint?.version !== 1 && checkpoint?.version !== 2)
+    || !Array.isArray(checkpoint.history)
+    || !isCount(checkpoint.tokensUsed)
+    || !isCount(checkpoint.toolCalls)
+    || !isCount(checkpoint.brainCalls)
+    || !isCount(checkpoint.completionTokensReserved)
+    || !isCount(checkpoint.delegations)
+    || !isCount(checkpoint.repeatedActionCount)
+    || typeof checkpoint.lastAction !== 'string'
+  ) {
+    throw new Error('Agent execution checkpoint is invalid or unsupported')
+  }
+
+  const history: AgentExecutionCheckpoint['history'] = checkpoint.history.map((message) => {
+    const item = asRecord(message)
+    const role = item?.role
+    const content = item?.content
+    if (
+      (role !== 'user' && role !== 'assistant')
+      || typeof content !== 'string'
+    ) {
+      throw new Error('Agent execution checkpoint contains an invalid conversation entry')
+    }
+    return { role, content }
+  })
+  if (checkpoint.pendingAction !== undefined && typeof checkpoint.pendingAction !== 'string') {
+    throw new Error('Agent execution checkpoint contains an invalid pending action')
+  }
+  if (checkpoint.finalOutput !== undefined && typeof checkpoint.finalOutput !== 'string') {
+    throw new Error('Agent execution checkpoint contains an invalid final output')
+  }
+
+  return {
+    version: checkpoint.version,
+    history,
+    tokensUsed: checkpoint.tokensUsed,
+    toolCalls: checkpoint.toolCalls,
+    brainCalls: checkpoint.brainCalls,
+    completionTokensReserved: checkpoint.completionTokensReserved,
+    delegations: checkpoint.delegations,
+    lastAction: checkpoint.lastAction,
+    repeatedActionCount: checkpoint.repeatedActionCount,
+    ...(typeof checkpoint.pendingAction === 'string' ? { pendingAction: checkpoint.pendingAction } : {}),
+    ...(typeof checkpoint.finalOutput === 'string' ? { finalOutput: checkpoint.finalOutput } : {}),
+  }
 }
 
 function parseAction(content: string): AgentAction | undefined {
@@ -99,6 +180,15 @@ function parseAction(content: string): AgentAction | undefined {
   } catch {
     return undefined
   }
+}
+
+export function isResumableDelegationCheckpoint(value: unknown): boolean {
+  const checkpoint = parseAgentExecutionCheckpoint(value)
+  if (checkpoint?.version !== 2 || !checkpoint.pendingAction) return false
+  const lastMessage = checkpoint.history[checkpoint.history.length - 1]
+  const action = lastMessage?.role === 'assistant' ? parseAction(lastMessage.content) : undefined
+  return action?.tool === DELEGATE_ACTION
+    && checkpoint.pendingAction === `${action.tool}:${JSON.stringify(action.args)}`
 }
 
 export class AgentExecutor {
@@ -127,27 +217,81 @@ export class AgentExecutor {
     task: AgentTask,
     context: AgentExecutionContext,
   ): Promise<AgentExecutionResult> {
+    const toolPolicy = this.resolveToolPolicy(definition)
     const taskInput = asRecord(task.input) || {}
     const taskContext = asRecord(taskInput.context) || {}
     const prompt = typeof taskInput.prompt === 'string' ? taskInput.prompt : JSON.stringify(taskInput)
-    const history: Array<{ role: 'user' | 'assistant'; content: string }> = [
+    const checkpoint = parseAgentExecutionCheckpoint(context.resumeCheckpoint)
+    let history = checkpoint?.history || [
       {
-        role: 'user',
+        role: 'user' as const,
         content: `Mission ID: ${context.missionId}\nTask: ${prompt}\nContext: ${JSON.stringify(taskContext)}`,
       },
     ]
-    let tokensUsed = 0
-    let toolCalls = 0
-    let brainCalls = 0
-    let completionTokensReserved = 0
-    let delegations = 0
-    let lastAction = ''
-    let repeatedActionCount = 0
+    let interruptedDelegation: AgentAction | undefined
+    if (checkpoint?.pendingAction) {
+      const lastMessage = history[history.length - 1]
+      const action = lastMessage?.role === 'assistant' ? parseAction(lastMessage.content) : undefined
+      if (!action || !isResumableDelegationCheckpoint(checkpoint) || !context.delegate) {
+        throw new Error(
+          `Agent action '${checkpoint.pendingAction}' was interrupted before its result was persisted; refusing to replay it`,
+        )
+      }
+      interruptedDelegation = action
+    }
+    let tokensUsed = checkpoint?.tokensUsed || 0
+    let toolCalls = checkpoint?.toolCalls || 0
+    let brainCalls = checkpoint?.brainCalls || 0
+    let completionTokensReserved = checkpoint?.completionTokensReserved || 0
+    let delegations = checkpoint?.delegations || 0
+    let lastAction = checkpoint?.lastAction || ''
+    let repeatedActionCount = checkpoint?.repeatedActionCount || 0
+    let finalOutput = checkpoint?.finalOutput
     const policy = this.resolvePolicy(context.executionPolicy)
     const brainCallLimit = Math.min(this.maxIterations, policy.maxBrainCalls)
+    const saveCheckpoint = context.saveCheckpoint
+      ? async (pendingAction?: string) => {
+      const next: AgentExecutionCheckpoint = {
+        version: 2,
+        history,
+        tokensUsed,
+        toolCalls,
+        brainCalls,
+        completionTokensReserved,
+        delegations,
+        lastAction,
+        repeatedActionCount,
+        ...(pendingAction ? { pendingAction } : {}),
+        ...(finalOutput !== undefined ? { finalOutput } : {}),
+      }
+      const size = Buffer.byteLength(JSON.stringify(next), 'utf8')
+      if (size > MAX_AGENT_CHECKPOINT_BYTES) {
+        throw new Error(`Agent execution checkpoint exceeded ${MAX_AGENT_CHECKPOINT_BYTES} bytes`)
+      }
+        await context.saveCheckpoint!(next)
+      }
+      : undefined;
 
-    for (let iteration = 0; iteration < brainCallLimit; iteration++) {
-      const tools = policy.maxActions > 0 ? await this.listTools() : []
+    if (finalOutput !== undefined) {
+      return { output: finalOutput, tokensUsed, toolCalls, brainCalls, completionTokensReserved }
+    }
+    if (saveCheckpoint) await saveCheckpoint()
+    if (interruptedDelegation) {
+      const result = await this.executeAction(interruptedDelegation, [], definition, context, toolPolicy)
+      history.push({
+        role: 'user',
+        content: result.isError
+          ? `Action failed: ${result.content}\nChoose a safe correction, another available tool, delegation, or explain the blocker.`
+          : `Action result: ${result.content}\nContinue toward the task goal. If complete, return the final answer as plain text.`,
+      })
+      if (saveCheckpoint) await saveCheckpoint()
+    }
+
+    while (brainCalls < brainCallLimit) {
+      const catalog = policy.maxActions > 0 ? await this.listTools() : []
+      const tools = toolPolicy.mode === 'allowlist'
+        ? catalog.filter((tool) => definition.tools.includes(tool.id))
+        : catalog
       const remainingCompletionTokens = policy.maxCompletionTokens - completionTokensReserved
       if (remainingCompletionTokens <= 0) {
         throw new Error(`Agent ${definition.id} exhausted its ${policy.maxCompletionTokens}-token completion budget`)
@@ -161,17 +305,30 @@ export class AgentExecutor {
         policy.maxActions - toolCalls,
         remainingCompletionTokens,
         policy.maxDelegations - delegations,
+        toolPolicy,
       )
       const maxTokens = Math.min(policy.maxCompletionTokensPerCall, remainingCompletionTokens)
-      const completion = await this.complete(definition, context.missionId, systemPrompt, history, maxTokens)
+      const routingSessionId = taskContext[BRAIN_ROUTING_SESSION_CONTEXT_KEY]
+      if (saveCheckpoint) await saveCheckpoint()
+      const completion = await this.complete(
+        definition,
+        context.missionId,
+        systemPrompt,
+        history,
+        maxTokens,
+        typeof routingSessionId === 'string' && routingSessionId.trim() ? routingSessionId.trim() : undefined,
+      )
       brainCalls++
       completionTokensReserved += maxTokens
       tokensUsed += completion.tokensUsed || 0
       const content = (completion.content || '').trim()
       if (!content) throw new Error(`Agent ${definition.id} received an empty Brain response`)
 
+      history = [...history, { role: 'assistant', content }]
       const action = parseAction(content)
       if (!action) {
+        finalOutput = content
+        if (saveCheckpoint) await saveCheckpoint()
         return { output: content, tokensUsed, toolCalls, brainCalls, completionTokensReserved }
       }
       if (toolCalls >= policy.maxActions) {
@@ -186,18 +343,18 @@ export class AgentExecutor {
       }
 
       toolCalls++
+      if (action.tool === DELEGATE_ACTION) delegations++
+      if (saveCheckpoint) await saveCheckpoint(signature)
       let result: ToolResult
-      if (action.tool === DELEGATE_ACTION && delegations >= policy.maxDelegations) {
+      if (action.tool === DELEGATE_ACTION && delegations > policy.maxDelegations) {
         result = {
           isError: true,
           content: `Agent delegation budget exhausted (${policy.maxDelegations} subtasks maximum). Complete the task without delegating further or explain the blocker.`,
         }
       } else {
-        if (action.tool === DELEGATE_ACTION) delegations++
-        result = await this.executeAction(action, tools, definition, context)
+        result = await this.executeAction(action, tools, definition, context, toolPolicy)
       }
       history.push(
-        { role: 'assistant', content },
         {
           role: 'user',
           content: result.isError
@@ -205,6 +362,7 @@ export class AgentExecutor {
             : `Action result: ${result.content}\nContinue toward the task goal. If complete, return the final answer as plain text.`,
         },
       )
+      if (saveCheckpoint) await saveCheckpoint()
     }
 
     throw new Error(`Agent ${definition.id} exceeded its ${brainCallLimit}-call Brain budget`)
@@ -241,6 +399,7 @@ export class AgentExecutor {
     remainingActions: number,
     remainingCompletionTokens: number,
     remainingDelegations: number,
+    toolPolicy: AgentToolPolicy,
   ): string {
     const catalog = tools.map(({ id, name, description, type, inputSchema }) => {
       const schema = asRecord(inputSchema)
@@ -274,8 +433,10 @@ export class AgentExecutor {
       `Execution policy caps: ${policy.maxBrainCalls} Brain calls, ${policy.maxActions} tool/delegation actions, ${policy.maxCompletionTokens} total generated completion tokens, ${policy.maxCompletionTokensPerCall} tokens per completion, and ${policy.maxDelegations} delegated subtasks.`,
       `Remaining budget: ${remainingBrainCalls} Brain calls, ${remainingActions} actions, ${remainingCompletionTokens} generated completion tokens, and ${remainingDelegations} delegations.`,
       'To call a registered system tool, respond with ONLY JSON: {"tool":"<tool-id>","args":{...}}.',
-      `Available system tools (the live catalog; generated tools appear after registration): ${JSON.stringify(catalog)}`,
-      `If no available tool can satisfy a concrete capability need, request one with {"tool":"${CREATE_TOOL_ACTION}","args":{"description":"...","requirements":["..."]}}. Do not claim a tool was created unless it is registered and available.`,
+      `Available system tools (${toolPolicy.mode === 'allowlist' ? 'restricted to this Agent allowlist' : 'the live catalog; generated tools appear after registration'}): ${JSON.stringify(catalog)}`,
+      toolPolicy.mode === 'allowlist'
+        ? 'Tool creation is disabled for this Agent. Request access to a registered tool if the allowed tools are insufficient.'
+        : `If no available tool can satisfy a concrete capability need, request one with {"tool":"${CREATE_TOOL_ACTION}","args":{"description":"...","requirements":["..."]}}. Do not claim a tool was created unless it is registered and available.`,
       delegation,
       'Tool errors are evidence; do not claim success when an action failed. Stop after the task is complete or explain a blocker.',
     ].join('\n\n')
@@ -287,6 +448,7 @@ export class AgentExecutor {
     systemPrompt: string,
     history: Array<{ role: 'user' | 'assistant'; content: string }>,
     maxTokens: number,
+    routingSessionId?: string,
   ): Promise<BrainResponse> {
     const requestBody = JSON.stringify({
       prompt: history.map((message) => `${message.role === 'user' ? 'User' : 'Agent'}: ${message.content}`).join('\n\n'),
@@ -294,6 +456,7 @@ export class AgentExecutor {
       maxTokens,
       temperature: 0.3,
       missionId,
+      ...(routingSessionId ? { routingSessionId } : {}),
     })
     const requestBytes = Buffer.byteLength(requestBody)
     if (requestBytes > MAX_BRAIN_REQUEST_BYTES) {
@@ -309,6 +472,20 @@ export class AgentExecutor {
     })
     if (!response.ok) {
       const text = await response.text()
+      try {
+        const body = JSON.parse(text) as BrainErrorResponse
+        const code = body.details?.code
+        if (code === BRAIN_MODEL_SELECTION_RETRY || code === BRAIN_MODEL_SELECTION_EXHAUSTED) {
+          throw new Error(`${code}: ${body.error || 'Brain model selection did not complete the request'}`)
+        }
+      } catch (error) {
+        if (error instanceof Error && (
+          error.message.startsWith(`${BRAIN_MODEL_SELECTION_RETRY}:`)
+          || error.message.startsWith(`${BRAIN_MODEL_SELECTION_EXHAUSTED}:`)
+        )) {
+          throw error
+        }
+      }
       throw new Error(`Brain request failed (${response.status}): ${text.slice(0, 300)}`)
     }
     const result = await response.json() as BrainResponse
@@ -334,13 +511,32 @@ export class AgentExecutor {
     )
   }
 
+  private resolveToolPolicy(definition: AgentDefinition): AgentToolPolicy {
+    const toolPolicy = definition.toolPolicy
+    if (toolPolicy === undefined) return { mode: 'all' }
+    if (toolPolicy.mode === 'all') return toolPolicy
+    if (toolPolicy.mode === 'allowlist') {
+      if (!Array.isArray(definition.tools) || !definition.tools.every((tool) =>
+        typeof tool === 'string' && tool.trim().length > 0,
+      )) {
+        throw new Error(`Agent ${definition.id} allowlist policy requires non-empty tool IDs`)
+      }
+      return toolPolicy
+    }
+    throw new Error(`Agent ${definition.id} has an invalid tool policy mode`)
+  }
+
   private async executeAction(
     action: AgentAction,
     tools: ToolDescriptor[],
     definition: AgentDefinition,
     context: AgentExecutionContext,
+    toolPolicy: AgentToolPolicy,
   ): Promise<ToolResult> {
     if (action.tool === CREATE_TOOL_ACTION) {
+      if (toolPolicy.mode === 'allowlist') {
+        return { isError: true, content: 'Tool creation is disabled for Agents with an allowlist policy.' }
+      }
       return this.createTool(action.args, context)
     }
     if (action.tool === DELEGATE_ACTION) {
@@ -349,6 +545,9 @@ export class AgentExecutor {
 
     const tool = tools.find((candidate) => candidate.id === action.tool || candidate.name === action.tool)
     if (!tool) {
+      if (toolPolicy.mode === 'allowlist' && !definition.tools.includes(action.tool)) {
+        return { isError: true, content: `Tool '${action.tool}' is not in this Agent's allowed tool set.` }
+      }
       return { isError: true, content: `Tool '${action.tool}' is not in the live system catalog.` }
     }
 

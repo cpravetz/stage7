@@ -82,16 +82,16 @@ export class ModelRouter {
   private providerHealth = new Map<string, ProviderHealth>();
 
   registerModel(model: ModelDefinition) {
-    this.models.set(model.id, model);
+    this.models.set(`${model.provider}:${model.id}`, model);
   }
 
   registerModels(models: ModelDefinition[]) {
-    for (const m of models) this.models.set(m.id, m);
+    for (const model of models) this.registerModel(model);
   }
 
   removeProviderModels(providerId: string) {
-    for (const [id, m] of Array.from(this.models.entries())) {
-      if (m.provider === providerId) this.models.delete(id);
+    for (const [key, model] of Array.from(this.models.entries())) {
+      if (model.provider === providerId) this.models.delete(key);
     }
   }
 
@@ -100,14 +100,14 @@ export class ModelRouter {
   }
 
   getModel(id: string): ModelDefinition | undefined {
-    return this.models.get(id);
+    return Array.from(this.models.values()).find((model) => model.id === id);
   }
 
   updateProviderHealth(health: ProviderHealth) {
     this.providerHealth.set(health.provider, health);
   }
 
-  route(options: { task: string; maxTokens?: number; budget?: number; freeOnly?: boolean; optimizeFor?: 'cost' | 'speed' | 'accuracy' | 'creativity' | 'balanced' }): ModelDefinition {
+  route(options: { task: string; maxTokens?: number; budget?: number; freeOnly?: boolean; optimizeFor?: 'cost' | 'speed' | 'accuracy' | 'creativity' | 'balanced'; excludedModelIds?: Iterable<string> }): ModelDefinition {
     const candidates = this.getCandidates(options);
     if (candidates.length === 0) {
       throw new Error('No model available for the requested task. Ensure at least one LLM provider is configured with a valid API key (OPENAI_API_KEY, OPENROUTER_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, MISTRAL_API_KEY, GROK_API_KEY, HUGGINGFACE_API_KEY, NVIDIA_API_KEY, or OPENWEB_URL).');
@@ -115,9 +115,11 @@ export class ModelRouter {
     return candidates[0].model;
   }
 
-  getCandidates(options: { task: string; maxTokens?: number; budget?: number; freeOnly?: boolean; optimizeFor?: 'cost' | 'speed' | 'accuracy' | 'creativity' | 'balanced' }): ScoredModel[] {
+  getCandidates(options: { task: string; maxTokens?: number; budget?: number; freeOnly?: boolean; optimizeFor?: 'cost' | 'speed' | 'accuracy' | 'creativity' | 'balanced'; excludedModelIds?: Iterable<string> }): ScoredModel[] {
     const excluded = getExcludedModelIds();
-    const isExcluded = (id: string) => excluded.has(id);
+    for (const id of options.excludedModelIds || []) excluded.add(id);
+    const isExcluded = (model: ModelDefinition) =>
+      excluded.has(model.id) || excluded.has(`${model.provider}:${model.id}`);
     const requiredCaps = inferCapabilities(options.task);
 
     let candidates = Array.from(this.models.values()).filter((m) => {
@@ -126,7 +128,7 @@ export class ModelRouter {
       if (options.freeOnly) {
         if (!(m.costPer1kTokens === 0)) return false;
       }
-      if (isExcluded(m.id)) return false;
+      if (isExcluded(m)) return false;
       return requiredCaps.every((cap) => m.capabilities.includes(cap));
     });
 
@@ -137,7 +139,7 @@ export class ModelRouter {
         if (options.freeOnly) {
           if (!(m.costPer1kTokens === 0)) return false;
         }
-        if (isExcluded(m.id)) return false;
+        if (isExcluded(m)) return false;
         return requiredCaps.length === 0 || requiredCaps.some((cap) => m.capabilities.includes(cap));
       });
     }

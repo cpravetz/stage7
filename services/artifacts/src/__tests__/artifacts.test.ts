@@ -75,6 +75,66 @@ describe('ArtifactsService', () => {
   });
 
   describe('missions', () => {
+    it('coordinates recovery leases and allows takeover after expiration', async () => {
+      const store = new InMemoryStore();
+      const now = new Date('2025-01-01T00:00:00Z');
+      const expiresAt = new Date(now.getTime() + 30_000);
+      const claims = await Promise.all([
+        store.claimMissionRecoveryLease('mission-lease', 'owner-a', expiresAt, now),
+        store.claimMissionRecoveryLease('mission-lease', 'owner-b', expiresAt, now),
+      ]);
+
+      expect(claims).toEqual([true, false]);
+      expect(await store.renewMissionRecoveryLease(
+        'mission-lease',
+        'owner-b',
+        new Date(now.getTime() + 60_000),
+      )).toBe(false);
+      expect(await store.releaseMissionRecoveryLease('mission-lease', 'owner-b')).toBe(false);
+      expect(await store.claimMissionRecoveryLease(
+        'mission-lease',
+        'owner-b',
+        new Date(now.getTime() + 90_000),
+        expiresAt,
+      )).toBe(true);
+      expect(await store.releaseMissionRecoveryLease('mission-lease', 'owner-a')).toBe(false);
+      expect(await store.releaseMissionRecoveryLease('mission-lease', 'owner-b')).toBe(true);
+    });
+
+    it('exposes recovery lease claims through the Artifacts mission API', async () => {
+      const app = express();
+      app.use(express.json());
+      app.use('/api/artifacts/missions', missionRoutes);
+      const base = '/api/artifacts/missions/mission-lease-api';
+
+      await request(app).post('/api/artifacts/missions').send({
+        missionId: 'mission-lease-api',
+        tenantId: 'tenant-1',
+        assistantId: 'assistant-1',
+        status: 'running',
+        currentStep: 0,
+        totalSteps: 1,
+        history: [],
+        input: { missionId: 'mission-lease-api', prompt: 'Resume' },
+        startedAt: new Date().toISOString(),
+      }).expect(201);
+
+      await request(app).post(`${base}/recovery-lease`).send({
+        action: 'claim',
+        ownerId: 'owner-a',
+        leaseDurationMs: 30_000,
+      }).expect(200, { claimed: true });
+      await request(app).post(`${base}/recovery-lease`).send({
+        action: 'claim',
+        ownerId: 'owner-b',
+        leaseDurationMs: 30_000,
+      }).expect(200, { claimed: false });
+      await request(app).post(`${base}/recovery-lease`).send({
+        action: 'release',
+        ownerId: 'owner-a',
+      }).expect(200, { released: true });
+    });
+
     it('blocks phase approval until tasks and expected artifacts are persisted', async () => {
       const app = express();
       app.use(express.json());
@@ -112,6 +172,80 @@ describe('ArtifactsService', () => {
         .send({ approvedBy: 'test' });
       expect(approved.status).toBe(200);
       expect(approved.body.status).toBe('approved');
+    });
+
+    it('preserves completed task results when an amendment is saved and shows added tasks for approval', async () => {
+      const app = express();
+      app.use(express.json());
+      app.use('/api/artifacts/missions', missionRoutes);
+      const base = '/api/artifacts/missions/mission-amended-approval';
+      const originalTask = {
+        id: 'task-1',
+        title: 'Prepare report',
+        status: 'pending',
+        expectedArtifacts: ['report'],
+      };
+
+      await request(app).put(`${base}/plan`).send({
+        phases: [{ id: 'phase-1', name: 'Review', requiresApproval: true, tasks: [originalTask] }],
+      }).expect(200);
+      await request(app).put(`${base}/tasks/task-1`).send({
+        phaseId: 'phase-1',
+        status: 'completed',
+        output: 'Report complete',
+        artifacts: [{ name: 'report', content: 'Published report contents' }],
+      }).expect(200);
+
+      const amendment = {
+        id: 'phase-1-amendment-1',
+        title: 'Verify report',
+        status: 'pending',
+        expectedArtifacts: ['verification'],
+      };
+      await request(app).put(`${base}/plan`).send({
+        phases: [{
+          id: 'phase-1',
+          name: 'Review',
+          requiresApproval: true,
+          tasks: [originalTask, amendment],
+        }],
+      }).expect(200);
+      await request(app).put(`${base}/phases/phase-1`)
+        .send({ status: 'awaiting_approval', approvalQuestion: 'Approve the deliverables?' })
+        .expect(200);
+
+      const planResponse = await request(app).get(`${base}/plan`).expect(200);
+      expect(planResponse.body.phases[0].tasks).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          id: 'task-1',
+          status: 'completed',
+          output: 'Report complete',
+          artifacts: [{ name: 'report', content: 'Published report contents' }],
+        }),
+        expect.objectContaining({ id: amendment.id, status: 'pending' }),
+      ]));
+
+      const approvals = await request(app).get('/api/artifacts/missions/approvals').expect(200);
+      expect(approvals.body.approvals[0].tasks).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: 'task-1', status: 'completed' }),
+        expect.objectContaining({ id: amendment.id, status: 'pending' }),
+      ]));
+
+      const blocked = await request(app)
+        .post(`${base}/phases/phase-1/approve`)
+        .send({ approvedBy: 'test' });
+      expect(blocked.status).toBe(409);
+      expect(blocked.body.details.incompleteTasks).toContain(amendment.id);
+
+      await request(app).put(`${base}/tasks/${amendment.id}`).send({
+        phaseId: 'phase-1',
+        status: 'completed',
+        artifacts: [{ name: 'verification', content: 'Verified report' }],
+      }).expect(200);
+      await request(app)
+        .post(`${base}/phases/phase-1/approve`)
+        .send({ approvedBy: 'test' })
+        .expect(200);
     });
 
     it('waits for mission-state persistence to finish before resolving', async () => {
@@ -326,6 +460,66 @@ describe('Artifacts Routes', () => {
 });
 
 describe('MongoStore state upserts', () => {
+  it('preserves completed task results when replacing a mission plan', async () => {
+    const store = new MongoStore();
+    const existingPlan = {
+      phases: [{
+        id: 'phase-1',
+        tasks: [{
+          id: 'task-1',
+          status: 'completed',
+          output: 'Stored task output',
+          artifacts: [{ name: 'report' }],
+          completedAt: 123,
+        }],
+      }],
+    };
+    const storedTasks = [{
+      taskId: 'task-1',
+      status: 'completed',
+      output: 'Stored task output',
+      artifacts: [{ name: 'report' }],
+      completedAt: 123,
+    }];
+    const replaceOne = jest.fn().mockResolvedValue({ matchedCount: 1 });
+    Object.defineProperty(store, 'missionPlans', {
+      value: {
+        findOne: jest.fn().mockResolvedValue({ plan: existingPlan }),
+        replaceOne,
+      },
+    });
+    Object.defineProperty(store, 'missionTasks', {
+      value: { find: jest.fn().mockReturnValue({ toArray: jest.fn().mockResolvedValue(storedTasks) }) },
+    });
+
+    const nextPlan = {
+      phases: [{
+        id: 'phase-1',
+        tasks: [
+          { id: 'task-1', status: 'pending', title: 'Existing task' },
+          { id: 'phase-1-amendment-1', status: 'pending', title: 'New task' },
+        ],
+      }],
+    };
+    const savedPlan = await store.saveMissionPlan('mission-amended', nextPlan);
+
+    expect(savedPlan.phases[0].tasks).toEqual([
+      expect.objectContaining({
+        id: 'task-1',
+        status: 'completed',
+        output: 'Stored task output',
+        artifacts: [{ name: 'report' }],
+        completedAt: 123,
+      }),
+      expect.objectContaining({ id: 'phase-1-amendment-1', status: 'pending' }),
+    ]);
+    expect(replaceOne).toHaveBeenCalledWith(
+      { missionId: 'mission-amended' },
+      { missionId: 'mission-amended', plan: savedPlan },
+      { upsert: true },
+    );
+  });
+
   it('matches mission state replacements by their stable Mongo id', async () => {
     const store = new MongoStore();
     const replaceOne = jest.fn().mockResolvedValue({ matchedCount: 1 });

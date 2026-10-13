@@ -1,12 +1,14 @@
 import {
   AgentExecutionPolicy,
+  BRAIN_MODEL_SELECTION_EXHAUSTED,
+  BRAIN_MODEL_SELECTION_RETRY,
   DEFAULT_AGENT_EXECUTION_POLICY,
   Plan,
   PlanSchema,
 } from '@stage7-nextgen/shared';
 import { logger } from '@stage7-nextgen/shared';
+import { randomUUID } from 'crypto';
 
-const MAX_PLAN_ATTEMPTS = 6;
 const MAX_PRIOR_RESPONSE_CHARS = 12_000;
 
 export const PLANNER_SYSTEM_PROMPT = `You are a mission planner for an AI agent platform. Given a user's goal, produce a complete structured plan tailored to that goal.
@@ -15,12 +17,12 @@ Requirements:
 1. If the goal is ambiguous, set requiresClarification=true and ask 2-4 focused questions. Otherwise set requiresClarification=false and clarificationQuestions=[].
 2. For a goal that does not need clarification, create 3-7 phases with clear deliverables. Each phase must contain 1-5 specific tasks.
 3. Each phase must include id, name, goal, tasks, requiresApproval, and status. Use "pending" for the initial status.
-4. Each task must include id, title, description, agentRole, systemPrompt, expectedArtifacts, status, and artifacts. Use "pending" for the initial status and [] when there are no artifacts yet.
-5. Give every phase a unique, stable id. Task ids must be globally unique across the entire plan, not merely unique within each phase. Use ids such as "phase-2-task-1"; never reuse "task-1" in another phase. Select agent roles based on the actual work.
+4. Each task must include id, title, description, agentRole, systemPrompt, dependsOnTaskIds, expectedArtifacts, status, and artifacts. Use "pending" for the initial status and [] when there are no artifacts yet. dependsOnTaskIds lists task IDs that must complete first; use [] only when the task is genuinely independent.
+5. Give every phase a unique, stable id. Task ids must be globally unique across the entire plan, not merely unique within each phase. Use ids such as "phase-2-task-1"; never reuse "task-1" in another phase. Dependencies may refer only to tasks in the same or an earlier phase, and must not form a cycle. Select agent roles based on the actual work.
 6. Mark requiresApproval=true only where a human decision is needed before work continues.
 
 Return one complete JSON object matching this structure:
-{"summary":"...","estimatedDuration":"...","estimatedCost":"...","requiresClarification":false,"clarificationQuestions":[],"phases":[{"id":"phase-1","name":"...","goal":"...","requiresApproval":false,"status":"pending","tasks":[{"id":"phase-1-task-1","title":"...","description":"...","agentRole":"...","systemPrompt":"...","expectedArtifacts":[],"status":"pending","artifacts":[]}]}]}
+{"summary":"...","estimatedDuration":"...","estimatedCost":"...","requiresClarification":false,"clarificationQuestions":[],"phases":[{"id":"phase-1","name":"...","goal":"...","requiresApproval":false,"status":"pending","tasks":[{"id":"phase-1-task-1","title":"...","description":"...","agentRole":"...","systemPrompt":"...","dependsOnTaskIds":[],"expectedArtifacts":[],"status":"pending","artifacts":[]}]}]}
 Do not include prose, markdown fences, or any text outside the JSON object.`;
 
 export const PLANNER_EXECUTION_POLICY: AgentExecutionPolicy = {
@@ -38,6 +40,7 @@ export interface PlannerCompletionRequest {
   maxTokens: number;
   temperature: number;
   missionId?: string;
+  routingSessionId?: string;
   attempt: number;
 }
 
@@ -76,6 +79,7 @@ function planStandardIssues(plan: Plan): string[] {
 
   const phaseIds = new Set<string>();
   const taskIds = new Map<string, string>();
+  const taskPhaseIndices = new Map<string, number>();
   for (const [phaseIndex, phase] of plan.phases.entries()) {
     if (phaseIds.has(phase.id)) issues.push(`phases[${phaseIndex}].id duplicates "${phase.id}"`);
     phaseIds.add(phase.id);
@@ -84,6 +88,12 @@ function planStandardIssues(plan: Plan): string[] {
     }
     for (const [taskIndex, task] of phase.tasks.entries()) {
       const taskPath = `phases[${phaseIndex}].tasks[${taskIndex}].id`;
+      if (!Array.isArray(task.dependsOnTaskIds)) {
+        issues.push(`phases[${phaseIndex}].tasks[${taskIndex}].dependsOnTaskIds must be provided; use [] for independent tasks`);
+      }
+      if (task.id.startsWith(`${phase.id}-amendment-`)) {
+        issues.push(`phases[${phaseIndex}].tasks[${taskIndex}].id uses the reserved amendment prefix`);
+      }
       const firstTaskPath = taskIds.get(task.id);
       if (firstTaskPath) {
         issues.push(
@@ -91,7 +101,42 @@ function planStandardIssues(plan: Plan): string[] {
         );
       } else {
         taskIds.set(task.id, taskPath);
+        taskPhaseIndices.set(task.id, phaseIndex);
       }
+    }
+  }
+
+  for (const [phaseIndex, phase] of plan.phases.entries()) {
+    const phaseTaskIds = new Set(phase.tasks.map((task) => task.id));
+    const dependenciesByTask = new Map<string, string[]>();
+    for (const [taskIndex, task] of phase.tasks.entries()) {
+      const dependencies = task.dependsOnTaskIds || [];
+      dependenciesByTask.set(task.id, dependencies.filter((dependencyId) => phaseTaskIds.has(dependencyId)));
+      for (const dependencyId of dependencies) {
+        const dependencyPhaseIndex = taskPhaseIndices.get(dependencyId);
+        if (dependencyId === task.id) {
+          issues.push(`phases[${phaseIndex}].tasks[${taskIndex}] cannot depend on itself`);
+        } else if (dependencyPhaseIndex === undefined) {
+          issues.push(`phases[${phaseIndex}].tasks[${taskIndex}] depends on unknown task "${dependencyId}"`);
+        } else if (dependencyPhaseIndex > phaseIndex) {
+          issues.push(`phases[${phaseIndex}].tasks[${taskIndex}] depends on a task in a later phase`);
+        }
+      }
+    }
+
+    const completed = new Set<string>();
+    let advanced = true;
+    while (advanced) {
+      advanced = false;
+      for (const [taskId, dependencies] of dependenciesByTask) {
+        if (!completed.has(taskId) && dependencies.every((dependencyId) => completed.has(dependencyId))) {
+          completed.add(taskId);
+          advanced = true;
+        }
+      }
+    }
+    if (completed.size < phaseTaskIds.size) {
+      issues.push(`phases[${phaseIndex}].tasks dependencies contain a cycle`);
     }
   }
   return issues;
@@ -109,13 +154,14 @@ export async function generateValidPlan(
 ): Promise<Plan> {
   let lastError = '';
   let previousResponse = '';
+  const routingSessionId = missionId ? `${missionId}:planner` : `planner:${randomUUID()}`;
 
-  for (let attempt = 1; attempt <= MAX_PLAN_ATTEMPTS; attempt++) {
+  for (let attempt = 1; ; attempt++) {
     const repairPrompt = attempt === 1
       ? ''
       : [
         '',
-        `Your previous plan was rejected (attempt ${attempt - 1} of ${MAX_PLAN_ATTEMPTS}). Fix every listed issue and return a complete replacement plan.`,
+        `Your previous plan was rejected (attempt ${attempt - 1}). Fix every listed issue and return a complete replacement plan.`,
         'Validation issues:',
         lastError,
         'Do not reuse task IDs across phases. When an ID is duplicated, assign each affected task a distinct stable ID that includes its phase number, such as "phase-3-task-1". Preserve all otherwise-valid plan content and do not omit tasks.',
@@ -131,11 +177,20 @@ export async function generateValidPlan(
         maxTokens: PLANNER_EXECUTION_POLICY.maxCompletionTokensPerCall,
         temperature: 0.3,
         missionId,
+        routingSessionId,
         attempt,
       });
     } catch (error) {
-      lastError = `Planner Agent request failed: ${error instanceof Error ? error.message : String(error)}`;
-      logger.warn({ missionId, attempt, maxAttempts: MAX_PLAN_ATTEMPTS, reason: lastError }, 'Planner request failed; retrying');
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes(BRAIN_MODEL_SELECTION_EXHAUSTED)) {
+        throw new Error(
+          `Unable to generate a valid mission plan because Brain exhausted every eligible model after ${attempt - 1} response(s). Last plan validation issue: ${lastError || 'none; no model produced a plan'}. Brain: ${message}`,
+        );
+      }
+      if (!message.includes(BRAIN_MODEL_SELECTION_RETRY)) {
+        throw new Error(`Planner Agent request failed on attempt ${attempt}: ${message}`);
+      }
+      logger.warn({ missionId, attempt, reason: message }, 'Brain requested another Planner attempt with an untried eligible model');
       continue;
     }
     previousResponse = content;
@@ -157,13 +212,11 @@ export async function generateValidPlan(
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
       logger.warn(
-        { missionId, attempt, maxAttempts: MAX_PLAN_ATTEMPTS, reason: lastError },
+        { missionId, attempt, reason: lastError },
         'Planner response rejected; requesting a corrected plan',
       );
     }
   }
-
-  throw new Error(`Unable to generate a valid mission plan after ${MAX_PLAN_ATTEMPTS} attempts: ${lastError}`);
 }
 
 export class MissionPlanner {

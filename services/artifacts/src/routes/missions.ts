@@ -54,6 +54,53 @@ router.get('/:missionId', asyncHandler(async (req, res) => {
   res.json(state);
 }));
 
+const RecoveryLeaseRequestSchema = z.discriminatedUnion('action', [
+  z.object({
+    action: z.literal('claim'),
+    ownerId: z.string().min(1).max(128),
+    leaseDurationMs: z.number().int().min(10_000).max(300_000),
+  }),
+  z.object({
+    action: z.literal('renew'),
+    ownerId: z.string().min(1).max(128),
+    leaseDurationMs: z.number().int().min(10_000).max(300_000),
+  }),
+  z.object({
+    action: z.literal('release'),
+    ownerId: z.string().min(1).max(128),
+  }),
+]);
+
+router.post('/:missionId/recovery-lease', asyncHandler(async (req, res) => {
+  const missionId = req.params.missionId as string;
+  const request = RecoveryLeaseRequestSchema.parse(req.body);
+
+  if (request.action === 'claim') {
+    const now = new Date();
+    const claimed = await service.claimMissionRecoveryLease(
+      missionId,
+      request.ownerId,
+      new Date(now.getTime() + request.leaseDurationMs),
+      now,
+    );
+    res.json({ claimed });
+    return;
+  }
+
+  if (request.action === 'renew') {
+    const renewed = await service.renewMissionRecoveryLease(
+      missionId,
+      request.ownerId,
+      new Date(Date.now() + request.leaseDurationMs),
+    );
+    res.json({ renewed });
+    return;
+  }
+
+  const released = await service.releaseMissionRecoveryLease(missionId, request.ownerId);
+  res.json({ released });
+}));
+
 router.put('/:missionId', asyncHandler(async (req, res) => {
   const existing = await service.getMissionState(req.params.missionId as string);
   if (!existing) {

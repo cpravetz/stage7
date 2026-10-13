@@ -445,8 +445,11 @@ A Skill declares how it can be invoked:
 
 ### Scheduled runs
 
-The tool-executor holds the only scheduler. It checks every `schedule` trigger once a minute and
-fires the ones that are due through the same executor a button press uses.
+The existing tool-executor service owns one shared schedule manager. It checks Assistant Skill
+`schedule` triggers and persisted mission schedules on the same one-minute tick. Skill triggers run
+through the same executor a button press uses; mission schedules dispatch to the Stage7 Temporal HTTP
+service on port 4100, whose built-in workflow runner uses Artifacts persistence by default. Neither
+needs an external Temporal Server or another container.
 
 **A schedule is never an authorisation.** The scheduler never sends `confirmation: true`. A gated
 Skill run on a schedule stops exactly as a manual run does, and leaves a `draft` approval on its
@@ -468,7 +471,36 @@ curl -X POST http://localhost:3900/api/tool-executor/triggers \
   }'
 ```
 
-The record is persisted, so the schedule survives a restart.
+With `ARTIFACTS_URL` configured, the record is persisted by Artifacts and survives a service restart.
+Without Artifacts, standalone Skill-trigger development can use the local-file fallback, which is not
+guaranteed to survive container replacement.
+
+### Scheduling a mission
+
+Mission schedules use the same cron parser, schedule manager, persistence store, and tick as Skill
+triggers. Each due occurrence receives a stable mission identity, so retrying a dispatch after a
+restart does not start that occurrence twice.
+
+```bash
+curl -X POST http://localhost:3900/api/tool-executor/triggers/missions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "tenantId": "tenant-1",
+    "assistantId": "analytics",
+    "prompt": "Review the previous week’s product metrics and report anomalies.",
+    "cron": "0 9 * * 1"
+  }'
+```
+
+Mission schedules require `ARTIFACTS_URL`; the manager refuses to create them as volatile
+configuration. List, pause, or remove them with the shared schedule API:
+
+```bash
+curl http://localhost:3900/api/tool-executor/triggers/missions
+curl -X PATCH http://localhost:3900/api/tool-executor/triggers/missions/SCHEDULE_ID \
+  -H "Content-Type: application/json" -d '{"enabled": false}'
+curl -X DELETE http://localhost:3900/api/tool-executor/triggers/missions/SCHEDULE_ID
+```
 
 ### What is scheduled, and when
 

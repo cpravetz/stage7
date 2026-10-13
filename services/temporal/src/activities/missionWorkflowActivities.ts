@@ -7,6 +7,7 @@ import {
 } from '@stage7-nextgen/shared';
 import { logger } from '@stage7-nextgen/shared';
 import { MissionAgentRuntime, TaskExecutionResult } from '../agent/MissionAgentRuntime';
+import { applyPhaseReview, MissionPhaseReview } from '../agent/MissionAgentRuntime';
 import { MissionOrchestrator } from '../planner/MissionOrchestrator';
 import { WorkflowInput } from '../types/workflow';
 
@@ -15,6 +16,30 @@ export interface MissionTaskActivityInput {
   plan: Plan;
   phase: Phase;
   task: Task;
+}
+
+export interface MissionTaskSelectionActivityInput {
+  input: WorkflowInput;
+  plan: Plan;
+  phase: Phase;
+  completedTaskIds: string[];
+  completedTaskSummaries: Array<{ taskId: string; output: string; artifactNames: string[] }>;
+}
+
+export interface MissionPhaseReviewActivityInput {
+  input: WorkflowInput;
+  plan: Plan;
+  phase: Phase;
+  completedTaskSummaries: Array<{ taskId: string; output: string; artifactNames: string[] }>;
+  reviewIndex: number;
+}
+
+export interface MissionPhaseReviewActivityResult {
+  plan: Plan;
+  phase: Phase;
+  satisfied: boolean;
+  gaps: string[];
+  amendment?: Task;
 }
 
 export interface MissionPhaseActivityInput {
@@ -105,6 +130,19 @@ async function persistUpdate(
   }
 }
 
+async function persistMissionPlan(input: WorkflowInput, plan: Plan): Promise<void> {
+  const persistenceUrl = serviceUrl('ARTIFACTS_URL', 'http://artifacts:4200');
+  const response = await fetch(`${persistenceUrl}/api/artifacts/missions/${encodeURIComponent(input.missionId)}/plan`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(plan),
+  });
+  if (!response.ok) {
+    const details = (await response.text()).slice(0, 1000);
+    throw new Error(`Persist mission plan failed (${response.status}): ${details}`);
+  }
+}
+
 export async function prepareMissionActivity(input: WorkflowInput): Promise<Plan> {
   await broadcast(input, {
     type: 'planner_started',
@@ -125,16 +163,7 @@ export async function prepareMissionActivity(input: WorkflowInput): Promise<Plan
     agentRuntimeUrl: process.env.AGENT_RUNTIME_URL,
   });
   const plan = await plannerRuntime.generatePlan(input.prompt, input.metadata);
-  const persistenceUrl = serviceUrl('ARTIFACTS_URL', 'http://artifacts:4200');
-  const response = await fetch(`${persistenceUrl}/api/artifacts/missions/${input.missionId}/plan`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(plan),
-  });
-  if (!response.ok) {
-    const details = (await response.text()).slice(0, 1000);
-    throw new Error(`Persist mission plan failed (${response.status}): ${details}`);
-  }
+  await persistMissionPlan(input, plan);
 
   await broadcast(input, {
     type: 'plan_generated',
@@ -170,6 +199,90 @@ export async function startMissionPhaseActivity({
     timestamp: Date.now(),
     data: { phaseId: phase.id, phaseName: phase.name },
   });
+}
+
+export async function selectNextMissionTaskActivity({
+  input,
+  plan,
+  phase,
+  completedTaskIds,
+  completedTaskSummaries,
+}: MissionTaskSelectionActivityInput): Promise<string> {
+  const activityContext = Context.current();
+  const heartbeatTimer = setInterval(() => {
+    activityContext.heartbeat({
+      missionId: input.missionId,
+      phaseId: phase.id,
+      completedTaskIds,
+    });
+  }, 30_000);
+  try {
+    const agentRuntime = new MissionAgentRuntime({
+      missionId: input.missionId,
+      tenantId: input.tenantId || 'tenant-1',
+      agentRuntimeUrl: process.env.AGENT_RUNTIME_URL,
+    });
+    const selectedTask = await agentRuntime.selectNextTask(
+      input.prompt,
+      plan,
+      phase,
+      completedTaskIds,
+      completedTaskSummaries,
+    );
+    return selectedTask.id;
+  } finally {
+    clearInterval(heartbeatTimer);
+  }
+}
+
+export async function reviewAndAmendMissionPhaseActivity({
+  input,
+  plan,
+  phase,
+  completedTaskSummaries,
+  reviewIndex,
+}: MissionPhaseReviewActivityInput): Promise<MissionPhaseReviewActivityResult> {
+  const activityContext = Context.current();
+  const heartbeatTimer = setInterval(() => {
+    activityContext.heartbeat({
+      missionId: input.missionId,
+      phaseId: phase.id,
+      reviewIndex,
+    });
+  }, 30_000);
+  try {
+    const agentRuntime = new MissionAgentRuntime({
+      missionId: input.missionId,
+      tenantId: input.tenantId || 'tenant-1',
+      agentRuntimeUrl: process.env.AGENT_RUNTIME_URL,
+    });
+    const review: MissionPhaseReview = await agentRuntime.reviewPhase(
+      input.prompt,
+      plan,
+      phase,
+      completedTaskSummaries,
+      reviewIndex,
+    );
+    const applied = applyPhaseReview(plan, phase.id, review);
+    if (applied.amendment) {
+      await persistMissionPlan(input, applied.plan);
+      await broadcast(input, {
+        type: 'phase_plan_amended',
+        missionId: input.missionId,
+        timestamp: Date.now(),
+        data: {
+          phaseId: phase.id,
+          reviewIndex,
+          gaps: applied.gaps,
+          task: applied.amendment,
+          plan: applied.plan,
+        },
+      });
+    }
+    return applied;
+  } finally {
+    clearInterval(heartbeatTimer);
+  }
 }
 
 export async function executeMissionTaskActivity({

@@ -8,15 +8,24 @@ import {
   AgentCollaboration,
   AgentSpecialization,
 } from '../types';
-import { AgentExecutor } from './AgentExecutor';
+import {
+  AgentExecutor,
+  isResumableDelegationCheckpoint,
+  parseAgentExecutionCheckpoint,
+} from './AgentExecutor';
 
 export class PersistentAgentRuntime {
   private runtime: AgentRuntime;
   private persistence: ArtifactsService;
 
   constructor(persistence: ArtifactsService, executor: AgentExecutor = new AgentExecutor()) {
-    this.runtime = new AgentRuntime(executor);
     this.persistence = persistence;
+    this.runtime = new AgentRuntime(
+      executor,
+      (state) => this.persistState(state),
+      (agentId, missionId) => this.startAgent(agentId, missionId),
+      (agentId, taskId, delegationDepth) => this.executeTask(agentId, taskId, false, delegationDepth),
+    );
   }
 
   registerAgentForMission(missionId: string, definition: AgentDefinition): AgentDefinition {
@@ -97,7 +106,12 @@ export class PersistentAgentRuntime {
     return fullTask;
   }
 
-  async executeTask(agentId: string, taskId: string, requireCompletedReceipt = false): Promise<AgentTask> {
+  async executeTask(
+    agentId: string,
+    taskId: string,
+    requireCompletedReceipt = false,
+    delegationDepth = 0,
+  ): Promise<AgentTask> {
     const state = this.runtime.getAgentState(agentId);
     if (!state) throw new Error(`Agent ${agentId} has not been started`);
     const receipts = state.context.taskReceipts && typeof state.context.taskReceipts === 'object'
@@ -108,6 +122,13 @@ export class PersistentAgentRuntime {
     if (!task || task.agentId !== agentId) throw new Error(`Task ${taskId} not found for agent ${agentId}`);
 
     if (task.status === 'running') throw new Error(`Agent task ${taskId} is already running`);
+    const checkpoints = state.context.executionCheckpoints;
+    if (checkpoints !== undefined && (!checkpoints || typeof checkpoints !== 'object' || Array.isArray(checkpoints))) {
+      throw new Error(`Agent ${agentId} has invalid persisted execution checkpoints`);
+    }
+    const executionCheckpoint = parseAgentExecutionCheckpoint(
+      checkpoints ? (checkpoints as Record<string, unknown>)[taskId] : undefined,
+    );
     if (requireCompletedReceipt && receipt?.status !== 'completed') {
       const reason = receipt?.status === 'failed'
         ? `Agent task ${taskId} has a failed receipt: ${receipt.error || 'unknown failure'}`
@@ -122,31 +143,34 @@ export class PersistentAgentRuntime {
       return task;
     }
     if (receipt?.status === 'failed') {
-      task.status = 'failed';
-      task.error = receipt.error || 'Task failed before the runtime restarted';
-      task.completedAt = receipt.completedAt || new Date().toISOString();
-      this.runtime.restoreTask(task);
-      throw new Error(task.error);
+      const canResumeDelegation = executionCheckpoint?.pendingAction
+        ? isResumableDelegationCheckpoint(executionCheckpoint)
+        : false;
+      if (!executionCheckpoint || (executionCheckpoint.pendingAction && !canResumeDelegation)) {
+        task.status = 'failed';
+        task.error = receipt.error || 'Task failed without a safe resumable checkpoint';
+        task.completedAt = receipt.completedAt || new Date().toISOString();
+        this.runtime.restoreTask(task);
+        throw new Error(`${task.error}; refusing to replay the task without a safe checkpoint`);
+      }
     }
-    if (typeof state.context.activeTaskId === 'string') {
+    if (typeof state.context.activeTaskId === 'string' && state.context.activeTaskId !== taskId) {
       throw new Error(
-        `Agent task ${state.context.activeTaskId} was interrupted before its outcome was persisted; refusing to replay external actions automatically`,
+        `Agent task ${state.context.activeTaskId} was interrupted before its outcome was persisted; refusing to start ${taskId}`,
+      );
+    }
+    if (state.context.activeTaskId === taskId && !executionCheckpoint) {
+      throw new Error(
+        `Agent task ${taskId} was interrupted before an execution checkpoint was persisted; refusing to replay external actions automatically`,
       );
     }
 
-    state.context = { ...state.context, activeTaskId: taskId };
-    state.status = 'running';
-    await this.persistState(state);
-    try {
-      const completed = await this.runtime.executeTask(agentId, taskId);
-      const currentState = this.runtime.getAgentState(agentId);
-      if (currentState) await this.persistState(currentState);
-      return completed;
-    } catch (error) {
-      const currentState = this.runtime.getAgentState(agentId);
-      if (currentState) await this.persistState(currentState);
-      throw error;
+    if (state.context.activeTaskId !== taskId) {
+      state.context = { ...state.context, activeTaskId: taskId };
+      state.status = 'running';
+      await this.persistState(state);
     }
+    return this.runtime.executeTask(agentId, taskId, delegationDepth);
   }
 
   getTask(taskId: string): AgentTask | undefined {

@@ -5,6 +5,7 @@ import { ToolRegistry } from '../services/ToolRegistry';
 import { ToolDiscovery, DiscoveredTool } from '../services/ToolDiscovery';
 import fs from 'fs';
 import path from 'path';
+import { z } from 'zod';
 
 const PLUGIN_SYSTEM_PROMPT = `You are a senior engineer generating production-ready plugins for an AI agent platform.
 Output ONLY a single JSON object with this exact shape:
@@ -13,8 +14,8 @@ Output ONLY a single JSON object with this exact shape:
   "name": "string",
   "description": "string",
   "type": "code",
-  "language": "javascript" | "python",
-  "entrypoint": "index.js" | "main.py",
+  "language": "javascript",
+  "entrypoint": "index.js",
   "sourceCode": "string",
   "requirements": ["string"],
   "configSchema": { "type": "object", "properties": {} },
@@ -24,11 +25,51 @@ Output ONLY a single JSON object with this exact shape:
 
 Rules:
 - sourceCode must be complete, runnable code for the specified language.
-- For Node.js, use CommonJS require() syntax.
-- For Python, use standard library only unless requirements list includes the package.
+- Use JavaScript and CommonJS require() syntax.
+- requirements must be empty; dependencies are not installed for generated plugins.
 - Do NOT include markdown fences or explanation text outside the JSON.`;
 
 const PLUGIN_DEPLOY_DIR = process.env.PLUGIN_DEPLOY_DIR || '/tmp/stage7-plugins';
+const MAX_PLUGIN_SOURCE_BYTES = 128 * 1024;
+const generatedPluginSchema = z.object({
+  id: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,63}$/i, 'id must be a safe plugin identifier'),
+  name: z.string().trim().min(1).max(120),
+  description: z.string().trim().min(1).max(1_000),
+  type: z.literal('code'),
+  language: z.literal('javascript'),
+  entrypoint: z.enum(['index.js', 'main.py']),
+  sourceCode: z.string().min(1),
+  requirements: z.array(z.string().trim().min(1)).max(0, 'Generated plugins cannot declare uninstalled dependencies'),
+  configSchema: z.record(z.unknown()),
+  inputs: z.record(z.unknown()),
+  outputs: z.record(z.unknown()),
+}).strict().superRefine((plugin, context) => {
+  if (Buffer.byteLength(plugin.sourceCode, 'utf8') > MAX_PLUGIN_SOURCE_BYTES) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['sourceCode'],
+      message: `sourceCode must not exceed ${MAX_PLUGIN_SOURCE_BYTES} bytes`,
+    });
+  }
+  const expectedEntrypoint = plugin.language === 'javascript' ? 'index.js' : 'main.py';
+  if (plugin.entrypoint !== expectedEntrypoint) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['entrypoint'],
+      message: `entrypoint must be ${expectedEntrypoint} for ${plugin.language}`,
+    });
+  }
+});
+
+function safePluginId(id: unknown): id is string {
+  return typeof id === 'string' && /^[a-z0-9][a-z0-9_-]{0,63}$/i.test(id);
+}
+
+function expectedEntrypoint(language: unknown): 'index.js' | 'main.py' | undefined {
+  if (language === 'javascript') return 'index.js';
+  if (language === 'python') return 'main.py';
+  return undefined;
+}
 
 export class PluginGenerator {
   private credentialProvider = CredentialProvider;
@@ -81,18 +122,34 @@ export class PluginGenerator {
         return { success: false, error: `LLM returned ${response.status}: ${text.slice(0, 200)}` };
       }
 
-      const data = await response.json() as { content: string };
-      const jsonMatch = data.content.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        logger.error({ content: data.content.slice(0, 200) }, 'Plugin generation response had no JSON');
-        return { success: false, error: 'LLM response did not contain valid JSON' };
+      const data = await response.json() as { content?: unknown };
+      if (typeof data.content !== 'string' || Buffer.byteLength(data.content, 'utf8') > MAX_PLUGIN_SOURCE_BYTES * 2) {
+        return { success: false, error: 'LLM plugin response content is missing or exceeds the response size limit' };
       }
-
-      const parsed = JSON.parse(jsonMatch[0]);
+      let rawPlugin: unknown;
+      try {
+        rawPlugin = JSON.parse(data.content);
+      } catch (error) {
+        return {
+          success: false,
+          error: `LLM plugin response must be a single JSON object: ${error instanceof Error ? error.message : String(error)}`,
+        };
+      }
+      const validation = generatedPluginSchema.safeParse(rawPlugin);
+      if (!validation.success) {
+        return {
+          success: false,
+          error: `Generated plugin failed validation: ${validation.error.issues.map((issue) => `${issue.path.join('.') || 'plugin'} ${issue.message}`).join('; ')}`,
+        };
+      }
+      const parsed = validation.data;
+      if (this.registry?.get(parsed.id)) {
+        return { success: false, error: `Generated plugin id '${parsed.id}' is already registered` };
+      }
       const tool: Tool = {
-        id: parsed.id || `plugin_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        name: parsed.name || 'generated-plugin',
-        description: parsed.description || request.description,
+        id: parsed.id,
+        name: parsed.name,
+        description: parsed.description,
         type: 'code',
         manifest: {
           language: parsed.language || 'javascript',
@@ -102,6 +159,7 @@ export class PluginGenerator {
           configSchema: parsed.configSchema || {},
           inputs: parsed.inputs || {},
           outputs: parsed.outputs || {},
+          executionProfile: 'generated-plugin',
         },
         inputSchema: parsed.inputs || { type: 'object', properties: {} },
         outputSchema: parsed.outputs || {},
@@ -119,48 +177,90 @@ export class PluginGenerator {
   }
 
   async deploy(tool: Tool): Promise<{ success: boolean; deployPath?: string; error?: string }> {
+    let stagingDir: string | undefined;
     try {
       const manifest = tool.manifest as Record<string, unknown>;
-      const language = (manifest?.language as string) || 'javascript';
-      const entrypoint = (manifest?.entrypoint as string) || 'index.js';
-      const sourceCode = (manifest?.sourceCode as string) || '';
-
-      if (!sourceCode) {
-        return { success: false, error: 'Plugin has no sourceCode to deploy' };
+      const validation = generatedPluginSchema.safeParse({
+        id: tool.id,
+        name: tool.name,
+        description: tool.description,
+        type: tool.type,
+        language: manifest?.language,
+        entrypoint: manifest?.entrypoint,
+        sourceCode: manifest?.sourceCode,
+        requirements: manifest?.requirements,
+        configSchema: manifest?.configSchema,
+        inputs: manifest?.inputs,
+        outputs: manifest?.outputs,
+      });
+      if (!validation.success) {
+        return {
+          success: false,
+          error: `Generated plugin failed validation: ${validation.error.issues.map((issue) => `${issue.path.join('.') || 'plugin'} ${issue.message}`).join('; ')}`,
+        };
       }
 
-      const pluginDir = path.join(PLUGIN_DEPLOY_DIR, tool.id);
-      if (!fs.existsSync(pluginDir)) {
-        fs.mkdirSync(pluginDir, { recursive: true });
+      const { language, entrypoint, sourceCode } = validation.data;
+      const deployRoot = path.resolve(PLUGIN_DEPLOY_DIR);
+      const pluginDir = path.resolve(deployRoot, tool.id);
+      const relativePluginPath = path.relative(deployRoot, pluginDir);
+      if (!relativePluginPath || relativePluginPath.startsWith('..') || path.isAbsolute(relativePluginPath)) {
+        return { success: false, error: 'Plugin id resolves outside the deployment directory' };
+      }
+      if (this.registry?.get(tool.id) || fs.existsSync(pluginDir)) {
+        return { success: false, error: `Plugin id '${tool.id}' is already registered or deployed` };
       }
 
-      const entryPath = path.join(pluginDir, entrypoint);
-      fs.writeFileSync(entryPath, sourceCode, 'utf-8');
+      fs.mkdirSync(deployRoot, { recursive: true });
+      stagingDir = fs.mkdtempSync(path.join(deployRoot, '.stage7-plugin-'));
+      fs.writeFileSync(path.join(stagingDir, entrypoint), sourceCode, 'utf-8');
 
-      const manifestPath = path.join(pluginDir, 'plugin.json');
-      fs.writeFileSync(manifestPath, JSON.stringify({
+      fs.writeFileSync(path.join(stagingDir, 'plugin.json'), JSON.stringify({
         id: tool.id,
         name: tool.name,
         description: tool.description,
         type: tool.type,
         language,
         entrypoint,
+        executionProfile: 'generated-plugin',
         inputSchema: tool.inputSchema,
         outputSchema: tool.outputSchema,
         createdAt: tool.createdAt,
         updatedAt: tool.updatedAt,
       }, null, 2), 'utf-8');
 
+      fs.renameSync(stagingDir, pluginDir);
+      stagingDir = undefined;
       if (this.registry) {
-        // registerOrReplace so re-deploying an already-registered plugin id
-        // overwrites rather than throwing on a duplicate.
-        this.registry.registerOrReplace(tool);
+        try {
+          this.registry.register(tool);
+        } catch (error) {
+          try {
+            fs.rmSync(pluginDir, { recursive: true, force: true });
+          } catch (cleanupError) {
+            logger.error(
+              { toolId: tool.id, error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError) },
+              'Failed to remove an unregistered generated plugin',
+            );
+          }
+          throw error;
+        }
         logger.info({ toolId: tool.id }, 'Plugin deployed and registered with ToolRegistry');
       } else {
         logger.info({ toolId: tool.id, deployPath: pluginDir }, 'Plugin deployed locally');
       }
       return { success: true, deployPath: pluginDir };
     } catch (err) {
+      if (stagingDir && fs.existsSync(stagingDir)) {
+        try {
+          fs.rmSync(stagingDir, { recursive: true, force: true });
+        } catch (cleanupError) {
+          logger.error(
+            { stagingDir, error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError) },
+            'Failed to remove generated plugin staging directory',
+          );
+        }
+      }
       const errorMessage = err instanceof Error ? err.message : 'Unknown error';
       logger.error({ error: errorMessage }, 'Plugin deployment failed');
       return { success: false, error: errorMessage };
@@ -182,6 +282,7 @@ export class PluginGenerator {
 
       try {
         const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
+        if (!safePluginId(manifest.id) || manifest.id !== entry.name) continue;
         plugins.push({
           id: manifest.id,
           name: manifest.name,
@@ -197,12 +298,15 @@ export class PluginGenerator {
   }
 
   static loadDeployed(id: string): Tool | undefined {
+    if (!safePluginId(id)) return undefined;
     const manifestPath = path.join(PLUGIN_DEPLOY_DIR, id, 'plugin.json');
     if (!fs.existsSync(manifestPath)) return undefined;
 
     try {
       const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf-8'));
-      const entrypoint = manifest.entrypoint || 'index.js';
+      if (manifest.id !== id) return undefined;
+      const entrypoint = expectedEntrypoint(manifest.language);
+      if (!entrypoint || manifest.entrypoint !== entrypoint) return undefined;
       const sourceCode = fs.readFileSync(path.join(PLUGIN_DEPLOY_DIR, id, entrypoint), 'utf-8');
 
       return {
@@ -215,6 +319,7 @@ export class PluginGenerator {
           entrypoint,
           sourceCode,
           ...manifest,
+          executionProfile: 'generated-plugin',
         },
         inputSchema: manifest.inputSchema || { type: 'object', properties: {} },
         outputSchema: manifest.outputSchema || {},

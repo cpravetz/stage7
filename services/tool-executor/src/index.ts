@@ -199,13 +199,17 @@ logger.info({ count: toolRegistry.list().length }, 'Registered default tools');
 }
 
 app.get('/api/tool-executor/health', (_req, res) => {
+  const skillScheduleCount = triggerScheduler.list().schedules.length;
+  const missionScheduleCount = triggerScheduler.listMissionSchedules().schedules.length;
   res.json({
     status: 'ok',
     service: 'tool-executor',
     tools: toolRegistry.list().length,
     scheduler: {
       running: triggerScheduler.isRunning(),
-      schedules: triggerScheduler.list().schedules.length,
+      schedules: skillScheduleCount + missionScheduleCount,
+      skillSchedules: skillScheduleCount,
+      missionSchedules: missionScheduleCount,
     },
   });
 });
@@ -253,8 +257,14 @@ if (require.main === module) {
     .then(() => {
       triggerScheduler.start();
       const { schedules, issues } = triggerScheduler.list();
+      const missionSchedules = triggerScheduler.listMissionSchedules();
       logger.info(
-        { schedules: schedules.length, issues: issues.length },
+        {
+          schedules: schedules.length + missionSchedules.schedules.length,
+          skillSchedules: schedules.length,
+          missionSchedules: missionSchedules.schedules.length,
+          issues: issues.length + missionSchedules.issues.length,
+        },
         'Trigger scheduler ready',
       );
     })

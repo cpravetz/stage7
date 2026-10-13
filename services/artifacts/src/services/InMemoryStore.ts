@@ -5,14 +5,17 @@ import {
   VectorSearchQuery,
   VectorSearchResult,
   MissionState,
+  MissionRecoveryLease,
   AgentState,
 } from '../types';
 import { AssistantDefinition, AssistantTemplate, AssistantRuntimeConfig } from '@stage7-nextgen/shared';
 import { logger } from '@stage7-nextgen/shared';
+import { preserveCompletedMissionTaskResults } from './missionPlanPersistence';
 
 export class InMemoryStore {
   private documents: Map<string, PersistenceDocument> = new Map();
   private missions: Map<string, MissionState> = new Map();
+  private missionRecoveryLeases: Map<string, MissionRecoveryLease> = new Map();
   private agents: Map<string, AgentState> = new Map();
   private vectors: Map<string, number[]> = new Map();
   private assistants: Map<string, AssistantDefinition> = new Map();
@@ -138,8 +141,37 @@ export class InMemoryStore {
     return Promise.resolve(all.filter((m) => m.tenantId === tenantId));
   }
 
+  claimMissionRecoveryLease(
+    missionId: string,
+    ownerId: string,
+    expiresAt: Date,
+    now: Date,
+  ): Promise<boolean> {
+    const existing = this.missionRecoveryLeases.get(missionId);
+    if (existing && existing.ownerId !== ownerId && existing.expiresAt > now) {
+      return Promise.resolve(false);
+    }
+    this.missionRecoveryLeases.set(missionId, { missionId, ownerId, expiresAt });
+    return Promise.resolve(true);
+  }
+
+  renewMissionRecoveryLease(missionId: string, ownerId: string, expiresAt: Date): Promise<boolean> {
+    const existing = this.missionRecoveryLeases.get(missionId);
+    if (!existing || existing.ownerId !== ownerId) return Promise.resolve(false);
+    this.missionRecoveryLeases.set(missionId, { ...existing, expiresAt });
+    return Promise.resolve(true);
+  }
+
+  releaseMissionRecoveryLease(missionId: string, ownerId: string): Promise<boolean> {
+    const existing = this.missionRecoveryLeases.get(missionId);
+    if (!existing || existing.ownerId !== ownerId) return Promise.resolve(false);
+    this.missionRecoveryLeases.delete(missionId);
+    return Promise.resolve(true);
+  }
+
   async deleteMissionState(missionId: string): Promise<void> {
     this.missions.delete(missionId);
+    this.missionRecoveryLeases.delete(missionId);
     this.missionPlans.delete(missionId);
     this.missionPhases.delete(missionId);
     this.missionTasks.delete(missionId);
@@ -247,8 +279,13 @@ export class InMemoryStore {
 
 
   saveMissionPlan(missionId: string, plan: any): Promise<any> {
-    this.missionPlans.set(missionId, plan);
-    return Promise.resolve(plan);
+    const mergedPlan = preserveCompletedMissionTaskResults(
+      this.missionPlans.get(missionId),
+      plan,
+      [...(this.missionTasks.get(missionId)?.values() || [])],
+    );
+    this.missionPlans.set(missionId, mergedPlan);
+    return Promise.resolve(mergedPlan);
   }
   getMissionPlan(missionId: string): Promise<any | undefined> {
     return Promise.resolve(this.missionPlans.get(missionId));
@@ -281,13 +318,15 @@ export class InMemoryStore {
       const assistantId = missionState?.assistantId;
       for (const [phaseId, phase] of phases) {
         if (phase?.status === 'awaiting_approval') {
+          const planPhase = this.missionPlans.get(missionId)?.phases
+            ?.find((candidate: any) => candidate.id === phaseId);
           result.push({
             missionId,
             phaseId,
             phaseName: (phase.name as string) || phaseId,
             question: (phase.approvalQuestion as string) || '',
             assistantId,
-            tasks: phase.tasks?.map((t: any) => ({
+            tasks: planPhase?.tasks?.map((t: any) => ({
               id: t.id,
               title: t.title,
               status: t.status,

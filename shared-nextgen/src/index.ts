@@ -4,6 +4,7 @@ export * from './types/mcp';
 export * from './types/agent';
 export * from './types/mission';
 export * from './types/auth';
+export * from './constants/brainRouting';
 export * from './utils/logger';
 export * from './errors';
 export * from './middleware/asyncHandler';

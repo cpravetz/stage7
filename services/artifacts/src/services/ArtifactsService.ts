@@ -7,6 +7,7 @@ import {
   VectorSearchQuery,
   VectorSearchResult,
   MissionState,
+  MissionRecoveryLease,
   AgentState,
 } from '../types';
 import { AssistantDefinition, AssistantTemplate, AssistantRuntimeConfig } from '@stage7-nextgen/shared';
@@ -131,6 +132,26 @@ export class ArtifactsService {
 
   async listMissionStates(tenantId?: string): Promise<MissionState[]> {
     return this.store.listMissionStates(tenantId);
+  }
+
+  async claimMissionRecoveryLease(
+    missionId: string,
+    ownerId: string,
+    expiresAt: Date,
+    now: Date,
+  ): Promise<boolean> {
+    await this.readyPromise;
+    return this.store.claimMissionRecoveryLease(missionId, ownerId, expiresAt, now);
+  }
+
+  async renewMissionRecoveryLease(missionId: string, ownerId: string, expiresAt: Date): Promise<boolean> {
+    await this.readyPromise;
+    return this.store.renewMissionRecoveryLease(missionId, ownerId, expiresAt);
+  }
+
+  async releaseMissionRecoveryLease(missionId: string, ownerId: string): Promise<boolean> {
+    await this.readyPromise;
+    return this.store.releaseMissionRecoveryLease(missionId, ownerId);
   }
 
   async deleteMissionState(missionId: string): Promise<void> {

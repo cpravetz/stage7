@@ -1,8 +1,12 @@
 import { AgentDefinition, AgentExecutionPolicy, AgentTask, DEFAULT_AGENT_EXECUTION_POLICY } from '../types'
-import { AgentExecutor } from '../services/AgentExecutor'
+import { AgentExecutionCheckpoint, AgentExecutor } from '../services/AgentExecutor'
 import { AgentRuntime } from '../services/AgentRuntime'
 import { PersistentAgentRuntime } from '../services/PersistentAgentRuntime'
 import { ArtifactsService } from '@stage7-nextgen/artifacts'
+import {
+  BRAIN_MODEL_SELECTION_RETRY,
+  BRAIN_ROUTING_SESSION_CONTEXT_KEY,
+} from '@stage7-nextgen/shared'
 
 function jsonResponse(body: unknown, status = 200): Response {
   return {
@@ -37,6 +41,133 @@ function task(taskId = 'mission-1:phase-1:task-1'): Omit<AgentTask, 'agentId' | 
 }
 
 describe('AgentExecutor', () => {
+  it('resumes after a persisted tool result without executing that action again', async () => {
+    let checkpoint: AgentExecutionCheckpoint | undefined
+    let toolExecutions = 0
+    let brainTurn = 0
+    const fetcher: typeof fetch = async (input) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) {
+        return jsonResponse({
+          tools: [{ id: 'lookup', name: 'Lookup', description: 'Look up data', type: 'code' }],
+        })
+      }
+      if (url.endsWith('/api/brain/complete')) {
+        brainTurn++
+        return jsonResponse({
+          content: brainTurn === 1
+            ? '{"tool":"lookup","args":{"query":"status"}}'
+            : 'The lookup result is confirmed.',
+          tokensUsed: 5,
+        })
+      }
+      if (url.endsWith('/api/tool-executor/tools/execute')) {
+        toolExecutions++
+        return jsonResponse({ status: 'completed', output: { status: 'ready' } })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+    const firstRun = new AgentExecutor({ fetcher })
+
+    await expect(firstRun.execute(definition, task() as AgentTask, {
+      missionId: 'mission-1',
+      delegationDepth: 0,
+      saveCheckpoint: async (saved) => {
+        checkpoint = saved
+        if (saved.history.some((message) => message.content.includes('Action result:'))) {
+          throw new Error('simulated process interruption')
+        }
+      },
+    })).rejects.toThrow('simulated process interruption')
+
+    expect(checkpoint?.pendingAction).toBeUndefined()
+    expect(checkpoint?.history.at(-1)?.content).toContain('Action result:')
+    expect(toolExecutions).toBe(1)
+
+    const resumed = await new AgentExecutor({
+      fetcher: async (input, init) => {
+        const url = String(input)
+        if (url.endsWith('/api/tool-executor/tools')) {
+          return jsonResponse({
+            tools: [{ id: 'lookup', name: 'Lookup', description: 'Look up data', type: 'code' }],
+          })
+        }
+        if (url.endsWith('/api/brain/complete')) {
+          const request = JSON.parse(String(init?.body)) as { prompt: string }
+          expect(request.prompt).toContain('Action result: {"status":"ready"}')
+          return jsonResponse({ content: 'The lookup result is confirmed.', tokensUsed: 4 })
+        }
+        if (url.endsWith('/api/tool-executor/tools/execute')) {
+          toolExecutions++
+          return jsonResponse({ status: 'completed', output: { status: 'ready' } })
+        }
+        throw new Error(`Unexpected request: ${url}`)
+      },
+    }).execute(definition, task() as AgentTask, {
+      missionId: 'mission-1',
+      delegationDepth: 0,
+      resumeCheckpoint: checkpoint,
+    })
+
+    expect(resumed.output).toBe('The lookup result is confirmed.')
+    expect(resumed.toolCalls).toBe(1)
+    expect(toolExecutions).toBe(1)
+  })
+
+  it('fails closed when a checkpoint contains an action without a persisted result', async () => {
+    const fetcher = jest.fn() as typeof fetch
+    const checkpoint: AgentExecutionCheckpoint = {
+      version: 1,
+      history: [{ role: 'user', content: 'do the task' }],
+      tokensUsed: 0,
+      toolCalls: 1,
+      brainCalls: 1,
+      completionTokensReserved: 1,
+      delegations: 0,
+      lastAction: 'write:{"value":1}',
+      repeatedActionCount: 0,
+      pendingAction: 'write:{"value":1}',
+    }
+
+    await expect(new AgentExecutor({ fetcher }).execute(definition, task() as AgentTask, {
+      missionId: 'mission-1',
+      delegationDepth: 0,
+      resumeCheckpoint: checkpoint,
+    })).rejects.toThrow('refusing to replay it')
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+
+  it('keeps legacy pending delegation checkpoints fail-closed', async () => {
+    const args = { goal: 'Find two relevant sources', role: 'researcher' }
+    const signature = `__delegate:${JSON.stringify(args)}`
+    const checkpoint: AgentExecutionCheckpoint = {
+      version: 1,
+      history: [
+        { role: 'user', content: 'do the task' },
+        { role: 'assistant', content: JSON.stringify({ tool: '__delegate', args }) },
+      ],
+      tokensUsed: 0,
+      toolCalls: 1,
+      brainCalls: 1,
+      completionTokensReserved: 1,
+      delegations: 1,
+      lastAction: signature,
+      repeatedActionCount: 0,
+      pendingAction: signature,
+    }
+    const delegate = jest.fn(async () => 'child result')
+    const fetcher = jest.fn() as typeof fetch
+
+    await expect(new AgentExecutor({ fetcher }).execute(definition, task() as AgentTask, {
+      missionId: 'mission-1',
+      delegationDepth: 0,
+      resumeCheckpoint: checkpoint,
+      delegate,
+    })).rejects.toThrow('refusing to replay it')
+    expect(delegate).not.toHaveBeenCalled()
+    expect(fetcher).not.toHaveBeenCalled()
+  })
+
   it('uses a live global tool catalog and can request, discover, and use a generated tool', async () => {
     const calls: Array<{ url: string; body?: Record<string, unknown> }> = []
     let toolRegistered = false
@@ -96,6 +227,55 @@ describe('AgentExecutor', () => {
       .every((call) => !Object.prototype.hasOwnProperty.call(call.body, 'model'))).toBe(true)
   })
 
+  it('restricts tool visibility and execution to an Agent allowlist', async () => {
+    const calls: Array<{ url: string; body?: Record<string, unknown> }> = []
+    const prompts: string[] = []
+    let brainTurn = 0
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input)
+      const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined
+      calls.push({ url, body })
+
+      if (url.endsWith('/api/tool-executor/tools')) {
+        return jsonResponse({
+          tools: [
+            { id: 'allowed-tool', name: 'Allowed Tool', description: 'Allowed', type: 'code' },
+            { id: 'blocked-tool', name: 'Blocked Tool', description: 'Blocked', type: 'code' },
+          ],
+        })
+      }
+      if (url.endsWith('/api/brain/complete')) {
+        prompts.push(String(body?.systemPrompt))
+        brainTurn++
+        const responses = [
+          '{"tool":"blocked-tool","args":{}}',
+          '{"tool":"__create_tool","args":{"description":"Create a tool","requirements":[]}}',
+          'I can continue without requesting unauthorized tools.',
+        ]
+        return jsonResponse({ content: responses[brainTurn - 1] })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+    const restrictedAgent: AgentDefinition = {
+      ...definition,
+      tools: ['allowed-tool'],
+      toolPolicy: { mode: 'allowlist' },
+    }
+
+    const result = await new AgentExecutor({ fetcher }).execute(
+      restrictedAgent,
+      task() as AgentTask,
+      { missionId: 'mission-1', delegationDepth: 0 },
+    )
+
+    expect(result.output).toContain('without requesting unauthorized tools')
+    expect(prompts[0]).toContain('allowed-tool')
+    expect(prompts[0]).not.toContain('blocked-tool')
+    expect(prompts[0]).toContain('Tool creation is disabled')
+    expect(calls.some((call) => call.url.endsWith('/api/tool-executor/tools/execute'))).toBe(false)
+    expect(calls.some((call) => call.url.endsWith('/api/tool-executor/plugins/generate'))).toBe(false)
+  })
+
   it('keeps a large live tool catalog below Brain request limits', async () => {
     let brainRequest = ''
     const largeToolCatalog = Array.from({ length: 170 }, (_, index) => ({
@@ -132,6 +312,41 @@ describe('AgentExecutor', () => {
     expect(brainRequest).not.toContain('large-schema')
   })
 
+  it('forwards the Brain routing session without requesting a model and preserves retry codes', async () => {
+    let brainRequest: Record<string, unknown> | undefined
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) return jsonResponse({ tools: [] })
+      if (url.endsWith('/api/brain/complete')) {
+        brainRequest = JSON.parse(String(init?.body)) as Record<string, unknown>
+        return jsonResponse({
+          success: false,
+          error: 'Brain has untried eligible models',
+          statusCode: 503,
+          details: { code: BRAIN_MODEL_SELECTION_RETRY },
+        }, 503)
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+    const plannerTask = {
+      ...task(),
+      agentId: 'planner-agent',
+      createdAt: new Date().toISOString(),
+      input: {
+        prompt: 'Repair the plan',
+        context: { [BRAIN_ROUTING_SESSION_CONTEXT_KEY]: 'mission-1:planner' },
+      },
+    } as AgentTask
+
+    await expect(new AgentExecutor({ fetcher }).execute(definition, plannerTask, {
+      missionId: 'mission-1',
+      delegationDepth: 0,
+    })).rejects.toThrow(`${BRAIN_MODEL_SELECTION_RETRY}: Brain has untried eligible models`)
+
+    expect(brainRequest?.routingSessionId).toBe('mission-1:planner')
+    expect(brainRequest).not.toHaveProperty('model')
+  })
+
   it('executes an agent-owned delegation and returns the child result to the parent', async () => {
     const brainCalls: Array<{ systemPrompt: string; prompt: string }> = []
     let parentTurn = 0
@@ -153,26 +368,35 @@ describe('AgentExecutor', () => {
       return jsonResponse({ content: 'I found two relevant sources.' })
     }
 
+    const restrictedDefinition: AgentDefinition = {
+      ...definition,
+      tools: ['lookup'],
+      toolPolicy: { mode: 'allowlist' },
+    }
     const runtime = new AgentRuntime(new AgentExecutor({ fetcher }))
     const executionPolicy: AgentExecutionPolicy = {
       ...DEFAULT_AGENT_EXECUTION_POLICY,
       maxBrainCalls: 5,
       maxCompletionTokens: 8192,
     }
-    runtime.registerAgentForMission('mission-1', definition)
-    runtime.startAgent(definition.id, 'mission-1')
-    const submitted = runtime.submitTask(definition.id, {
+    runtime.registerAgentForMission('mission-1', restrictedDefinition)
+    runtime.startAgent(restrictedDefinition.id, 'mission-1')
+    const submitted = runtime.submitTask(restrictedDefinition.id, {
       ...task(),
       input: {
         prompt: 'Complete the goal',
         context: { executionPolicy },
       },
     })
-    const completed = await runtime.executeTask(definition.id, submitted.taskId)
+    const completed = await runtime.executeTask(restrictedDefinition.id, submitted.taskId)
 
     expect(completed.status).toBe('completed')
     expect((completed.result as { output: string }).output).toBe('The child research is complete.')
     expect(runtime.listAgentsForMission('mission-1')).toHaveLength(2)
+    expect(runtime.listAgentsForMission('mission-1')[1]).toEqual(expect.objectContaining({
+      tools: ['lookup'],
+      toolPolicy: { mode: 'allowlist' },
+    }))
     expect(brainCalls.some((call) => call.systemPrompt.includes('researcher agent'))).toBe(true)
     expect(brainCalls.every((call) => call.systemPrompt.includes('5 Brain calls'))).toBe(true)
     expect(brainCalls).toHaveLength(3)
@@ -526,5 +750,177 @@ describe('AgentExecutor', () => {
     await expect(interruptedRuntime.executeTask(definition.id, interrupted.taskId))
       .rejects.toThrow('refusing to replay external actions automatically')
     expect(brainCalls).toBe(1)
+  })
+
+  it('resumes a failed task from a safe checkpoint after runtime recreation', async () => {
+    const savedStates = new Map<string, {
+      agentId: string
+      tenantId: string
+      missionId: string
+      status: string
+      context: Record<string, unknown>
+      artifacts: string[]
+      createdAt: Date
+      updatedAt: Date
+    }>()
+    const persistence = {
+      getAgentState: async (agentId: string) => savedStates.get(agentId),
+      saveAgentState: async (state: {
+        agentId: string
+        tenantId: string
+        missionId: string
+        status: string
+        context: Record<string, unknown>
+        artifacts: string[]
+        createdAt: Date
+        updatedAt: Date
+      }) => { savedStates.set(state.agentId, structuredClone(state)) },
+    } as unknown as ArtifactsService
+    const retryAgent = { ...definition, id: 'retryable-agent' }
+    let firstAttemptBrainCalls = 0
+    const failedFetcher: typeof fetch = async (input) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) return jsonResponse({ tools: [] })
+      if (url.endsWith('/api/brain/complete')) {
+        firstAttemptBrainCalls++
+        return new Response('Brain temporarily unavailable', { status: 503 })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+    const firstRuntime = new PersistentAgentRuntime(persistence, new AgentExecutor({ fetcher: failedFetcher }))
+    firstRuntime.registerAgentForMission('mission-1', retryAgent)
+    await firstRuntime.startAgent(retryAgent.id, 'mission-1')
+    const submitted = await firstRuntime.submitTask(retryAgent.id, task('retry-safe-checkpoint'))
+
+    await expect(firstRuntime.executeTask(retryAgent.id, submitted.taskId)).rejects.toThrow('Brain request failed (503)')
+    expect(savedStates.get(retryAgent.id)?.context).toMatchObject({
+      activeTaskId: submitted.taskId,
+      taskReceipts: {
+        [submitted.taskId]: { status: 'failed' },
+      },
+    })
+
+    let retryBrainCalls = 0
+    const recoveredFetcher: typeof fetch = async (input) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) return jsonResponse({ tools: [] })
+      if (url.endsWith('/api/brain/complete')) {
+        retryBrainCalls++
+        return jsonResponse({ content: 'Recovered without replaying an action.' })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+    const restartedRuntime = new PersistentAgentRuntime(persistence, new AgentExecutor({ fetcher: recoveredFetcher }))
+    restartedRuntime.registerAgentForMission('mission-1', retryAgent)
+    await restartedRuntime.startAgent(retryAgent.id, 'mission-1')
+    const restoredTask = await restartedRuntime.submitTask(retryAgent.id, task('retry-safe-checkpoint'))
+    const result = await restartedRuntime.executeTask(retryAgent.id, restoredTask.taskId)
+
+    expect(result.result).toMatchObject({
+      output: expect.stringContaining('Recovered without replaying an action.'),
+    })
+    expect(firstAttemptBrainCalls).toBe(1)
+    expect(retryBrainCalls).toBe(1)
+  })
+
+  it('recovers a completed delegated child when the parent checkpoint still has a pending delegation', async () => {
+    const savedStates = new Map<string, {
+      agentId: string
+      tenantId: string
+      missionId: string
+      status: string
+      context: Record<string, unknown>
+      artifacts: string[]
+      createdAt: Date
+      updatedAt: Date
+    }>()
+    const persistence = {
+      getAgentState: async (agentId: string) => savedStates.get(agentId),
+      saveAgentState: async (state: {
+        agentId: string
+        tenantId: string
+        missionId: string
+        status: string
+        context: Record<string, unknown>
+        artifacts: string[]
+        createdAt: Date
+        updatedAt: Date
+      }) => { savedStates.set(state.agentId, structuredClone(state)) },
+    } as unknown as ArtifactsService
+    const parent = { ...definition, id: 'persistent-parent' }
+    const delegationArgs = { goal: 'Find two relevant sources', role: 'researcher' }
+    const delegationAction = JSON.stringify({ tool: '__delegate', args: delegationArgs })
+    const delegationSignature = `__delegate:${JSON.stringify(delegationArgs)}`
+    let parentTurns = 0
+    let childBrainCalls = 0
+    const firstFetcher: typeof fetch = async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) return jsonResponse({ tools: [] })
+      if (!url.endsWith('/api/brain/complete')) throw new Error(`Unexpected request: ${url}`)
+      const body = JSON.parse(String(init?.body)) as { systemPrompt: string }
+      if (body.systemPrompt.includes('ROOT_AGENT')) {
+        parentTurns++
+        return parentTurns === 1
+          ? jsonResponse({ content: delegationAction })
+          : jsonResponse({ error: 'Parent Brain temporarily unavailable' }, 503)
+      }
+      childBrainCalls++
+      return jsonResponse({ content: 'The child completed its research.' })
+    }
+    const firstRuntime = new PersistentAgentRuntime(persistence, new AgentExecutor({ fetcher: firstFetcher }))
+    firstRuntime.registerAgentForMission('mission-1', parent)
+    await firstRuntime.startAgent(parent.id, 'mission-1')
+    const submitted = await firstRuntime.submitTask(parent.id, task('parent-delegation-resume'))
+
+    await expect(firstRuntime.executeTask(parent.id, submitted.taskId)).rejects.toThrow('Brain request failed (503)')
+    expect(childBrainCalls).toBe(1)
+    const parentState = savedStates.get(parent.id)
+    expect(parentState).toBeDefined()
+    const persistedCheckpoints = parentState?.context.executionCheckpoints as Record<string, AgentExecutionCheckpoint>
+    const parentCheckpoint = persistedCheckpoints[submitted.taskId]
+    expect(parentCheckpoint).toBeDefined()
+    const childStates = Array.from(savedStates.values()).filter((state) => state.agentId !== parent.id)
+    expect(childStates).toHaveLength(1)
+    const childReceipts = childStates[0].context.taskReceipts as Record<string, { status?: string }>
+    expect(Object.values(childReceipts)).toContainEqual(expect.objectContaining({ status: 'completed' }))
+
+    if (!parentState || !parentCheckpoint) throw new Error('Expected a persisted parent execution checkpoint')
+    parentState.context = {
+      ...parentState.context,
+      executionCheckpoints: {
+        ...persistedCheckpoints,
+        [submitted.taskId]: {
+          ...parentCheckpoint,
+          history: [
+            parentCheckpoint.history[0],
+            { role: 'assistant', content: delegationAction },
+          ],
+          lastAction: delegationSignature,
+          pendingAction: delegationSignature,
+        },
+      },
+    }
+    savedStates.set(parent.id, parentState)
+
+    const recoveredFetcher: typeof fetch = async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) return jsonResponse({ tools: [] })
+      if (!url.endsWith('/api/brain/complete')) throw new Error(`Unexpected request: ${url}`)
+      const body = JSON.parse(String(init?.body)) as { systemPrompt: string }
+      if (!body.systemPrompt.includes('ROOT_AGENT')) {
+        throw new Error('A completed delegated child must not execute again')
+      }
+      return jsonResponse({ content: 'Parent resumed after child recovery.' })
+    }
+    const restartedRuntime = new PersistentAgentRuntime(persistence, new AgentExecutor({ fetcher: recoveredFetcher }))
+    restartedRuntime.registerAgentForMission('mission-1', parent)
+    await restartedRuntime.startAgent(parent.id, 'mission-1')
+    const restoredTask = await restartedRuntime.submitTask(parent.id, task('parent-delegation-resume'))
+    const result = await restartedRuntime.executeTask(parent.id, restoredTask.taskId)
+
+    expect(result.result).toMatchObject({
+      output: expect.stringContaining('Parent resumed after child recovery.'),
+    })
+    expect(childBrainCalls).toBe(1)
   })
 })

@@ -92,6 +92,8 @@ describe('MissionOrchestrator checkpoint recovery', () => {
       .mockResolvedValue('agent-writer')
     const executeTask = jest.spyOn(MissionAgentRuntime.prototype, 'executeTask')
       .mockResolvedValue(taskResult)
+    const reviewPhase = jest.spyOn(MissionAgentRuntime.prototype, 'reviewPhase')
+      .mockResolvedValue({ satisfied: true, gaps: [] })
     const executePromptTask = jest.spyOn(MissionAgentRuntime.prototype, 'executePromptTask')
       .mockResolvedValue({ output: 'yes', artifacts: [], tokensUsed: 0 })
     const onCheckpoint = jest.fn()
@@ -120,6 +122,7 @@ describe('MissionOrchestrator checkpoint recovery', () => {
     expect(result.outputs.phases[0].tasks[0].artifacts).toEqual(taskResult.artifacts)
     expect(getAgent).toHaveBeenCalledWith('writer', plan.phases[0]!.tasks[0]!.systemPrompt)
     expect(getAgent).toHaveBeenCalledWith('mission-evaluator', expect.any(String))
+    expect(reviewPhase).toHaveBeenCalledTimes(1)
     expect(executeTask).toHaveBeenCalledWith(
       'agent-writer',
       plan.phases[0]!.tasks[0]!,

@@ -6,10 +6,12 @@ import {
   VectorSearchQuery,
   VectorSearchResult,
   MissionState,
+  MissionRecoveryLease,
   AgentState,
 } from '../types';
 import { AssistantDefinition, AssistantTemplate, AssistantRuntimeConfig } from '@stage7-nextgen/shared';
 import { logger } from '@stage7-nextgen/shared';
+import { preserveCompletedMissionTaskResults } from './missionPlanPersistence';
 
 const MONGO_URI = process.env.MONGO_URI || 'mongodb://mongo:27017';
 const MONGO_DB = process.env.MONGO_DB || 'stage7';
@@ -26,6 +28,7 @@ export class MongoStore {
 
   private documents!: Collection<PersistenceDocument>;
   private missions!: Collection<MissionState & { _id?: string }>;
+  private missionRecoveryLeases!: Collection<MissionRecoveryLease & { _id?: string }>;
   private agents!: Collection<AgentState & { _id?: string }>;
   private vectors!: Collection<VectorDoc>;
   private assistants!: Collection<AssistantDefinition & { _id?: string }>;
@@ -48,6 +51,7 @@ export class MongoStore {
 
       this.documents = this.db.collection<PersistenceDocument>('documents');
       this.missions = this.db.collection<MissionState & { _id?: string }>('missions');
+      this.missionRecoveryLeases = this.db.collection<MissionRecoveryLease & { _id?: string }>('missionRecoveryLeases');
       this.agents = this.db.collection<AgentState & { _id?: string }>('agents');
       this.vectors = this.db.collection<VectorDoc>('vectors');
       this.assistants = this.db.collection<AssistantDefinition & { _id?: string }>('assistants');
@@ -60,6 +64,7 @@ export class MongoStore {
 
       await this.documents.createIndex({ id: 1 }, { unique: true });
       await this.missions.createIndex({ missionId: 1 }, { unique: true });
+      await this.missionRecoveryLeases.createIndex({ missionId: 1 }, { unique: true });
       await this.agents.createIndex({ agentId: 1 }, { unique: true });
       await this.assistants.createIndex({ id: 1 }, { unique: true });
       await this.assistantTemplates.createIndex({ id: 1 }, { unique: true });
@@ -206,8 +211,46 @@ export class MongoStore {
     });
   }
 
+  async claimMissionRecoveryLease(
+    missionId: string,
+    ownerId: string,
+    expiresAt: Date,
+    now: Date,
+  ): Promise<boolean> {
+    try {
+      const result = await this.missionRecoveryLeases.updateOne(
+        {
+          missionId,
+          $or: [{ expiresAt: { $lte: now } }, { ownerId }],
+        } as any,
+        { $set: { ownerId, expiresAt } },
+        { upsert: true },
+      );
+      return result.modifiedCount > 0 || result.upsertedCount > 0;
+    } catch (error) {
+      if (typeof error === 'object' && error !== null && 'code' in error && error.code === 11000) {
+        return false;
+      }
+      throw error;
+    }
+  }
+
+  async renewMissionRecoveryLease(missionId: string, ownerId: string, expiresAt: Date): Promise<boolean> {
+    const result = await this.missionRecoveryLeases.updateOne(
+      { missionId, ownerId } as any,
+      { $set: { expiresAt } },
+    );
+    return result.modifiedCount > 0;
+  }
+
+  async releaseMissionRecoveryLease(missionId: string, ownerId: string): Promise<boolean> {
+    const result = await this.missionRecoveryLeases.deleteOne({ missionId, ownerId } as any);
+    return result.deletedCount > 0;
+  }
+
   async deleteMissionState(missionId: string): Promise<void> {
     await this.missions.deleteOne({ missionId } as any);
+    await this.missionRecoveryLeases.deleteOne({ missionId } as any);
     await this.missionPlans.deleteMany({ missionId } as any);
     await this.missionPhases.deleteMany({ missionId } as any);
     await this.missionTasks.deleteMany({ missionId } as any);
@@ -356,8 +399,13 @@ export class MongoStore {
   }
 
   async saveMissionPlan(missionId: string, plan: any): Promise<any> {
-    await this.missionPlans.replaceOne({ missionId }, { missionId, plan }, { upsert: true });
-    return plan;
+    const [existing, storedTasks] = await Promise.all([
+      this.missionPlans.findOne({ missionId }),
+      this.missionTasks.find({ missionId }).toArray(),
+    ]);
+    const mergedPlan = preserveCompletedMissionTaskResults(existing?.plan, plan, storedTasks);
+    await this.missionPlans.replaceOne({ missionId }, { missionId, plan: mergedPlan }, { upsert: true });
+    return mergedPlan;
   }
 
   async getMissionPlan(missionId: string): Promise<any | undefined> {

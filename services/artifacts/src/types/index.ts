@@ -62,3 +62,9 @@ export interface MissionState {
   startedAt: Date;
   completedAt?: Date;
 }
+
+export interface MissionRecoveryLease {
+  missionId: string;
+  ownerId: string;
+  expiresAt: Date;
+}

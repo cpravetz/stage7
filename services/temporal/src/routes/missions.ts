@@ -1,8 +1,8 @@
 import { Router, Request, Response } from 'express';
 import { TemporalClient } from '../client/TemporalClient';
 import { WorkflowInput, MissionTaskCheckpoint } from '../types/workflow';
-import { asyncHandler, NextGenError } from '@stage7-nextgen/shared';
-import { logger } from '@stage7-nextgen/shared';
+import { asyncHandler, NextGenError, PlanSchema, logger } from '@stage7-nextgen/shared';
+import { getMissionResumeProgress } from '../recovery/missionProgress';
 
 function validateServiceUrl(url: string | undefined): URL | null {
   if (!url) return null;
@@ -26,7 +26,8 @@ function validateServiceUrl(url: string | undefined): URL | null {
   }
 }
 
-const client = new TemporalClient();
+export const temporalClient = new TemporalClient();
+const client = temporalClient;
 const artifactsBase = validateServiceUrl(process.env.ARTIFACTS_URL);
 
 const router: Router = Router();
@@ -76,45 +77,32 @@ router.post(
       ? `${originalPrompt}\n\n--- RETRY GUIDANCE ---\n${guidance}\n--- END RETRY GUIDANCE ---`
       : originalPrompt;
 
-    // Fetch mission plan from artifacts to get completed phases/tasks
+    // A retry must know completed work so it does not replay side effects.
     const missionId = original.missionId;
-    let completedPhases: string[] = [];
-    let completedTasks: MissionTaskCheckpoint[] = [];
-    let resumeFromPhaseId: string | undefined;
-    let resumeFromTaskId: string | undefined;
-
-    if (artifactsBase) {
-      try {
-        // Get mission plan which contains phases and tasks with their statuses
-        const planRes = await fetch(`${artifactsBase.origin}/api/artifacts/missions/${missionId}/plan`);
-        if (planRes.ok) {
-          const planData = await planRes.json() as { plan?: { phases?: Array<{ id: string; status?: string; tasks?: Array<{ id: string; status?: string }> }> } };
-          if (planData.plan?.phases) {
-            for (const phase of planData.plan.phases) {
-              if (phase.status === 'completed') {
-                completedPhases.push(phase.id);
-              }
-              if (phase.tasks) {
-                for (const task of phase.tasks) {
-                  if (task.status === 'completed') {
-                    completedTasks.push({ phaseId: phase.id, taskId: task.id });
-                  } else if (!resumeFromPhaseId && !resumeFromTaskId) {
-                    // First incomplete task - resume from here
-                    resumeFromPhaseId = phase.id;
-                    resumeFromTaskId = task.id;
-                  }
-                }
-              } else if (!resumeFromPhaseId && phase.status !== 'completed') {
-                // Phase without tasks or incomplete phase
-                resumeFromPhaseId = phase.id;
-              }
-            }
-          }
-        }
-      } catch (err) {
-        logger.warn({ err: err instanceof Error ? err.message : String(err), missionId }, 'Failed to fetch mission plan for retry');
-      }
+    if (!artifactsBase) {
+      throw new NextGenError('Cannot safely retry without the Artifacts persistence service.', 503, { missionId });
     }
+    let progress;
+    try {
+      const planResponse = await fetch(
+        `${artifactsBase.origin}/api/artifacts/missions/${encodeURIComponent(missionId)}/plan`,
+      );
+      if (!planResponse.ok) {
+        throw new Error(`Artifacts returned HTTP ${planResponse.status}`);
+      }
+      progress = getMissionResumeProgress(PlanSchema.parse(await planResponse.json()));
+    } catch (error) {
+      const details = error instanceof Error ? error.message : String(error);
+      logger.error({ missionId, error: details }, 'Cannot load persisted mission progress for retry');
+      throw new NextGenError(
+        'Cannot safely retry mission because its persisted plan and completed work could not be loaded.',
+        503,
+        { missionId },
+      );
+    }
+    const completedPhases = progress.checkpoint.completedPhases || [];
+    const completedTasks: MissionTaskCheckpoint[] = progress.checkpoint.completedTasks || [];
+    const { resumeFromPhaseId, resumeFromTaskId } = progress;
 
     const retryCount = (original.input?.metadata?.retryCount as number) || 0;
 

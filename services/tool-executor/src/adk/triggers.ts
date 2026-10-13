@@ -22,6 +22,7 @@ export type TriggerKind = SkillTrigger['kind'];
 export const TRIGGER_KINDS: TriggerKind[] = ['user', 'schedule', 'event'];
 
 export interface DynamicTriggerRecord {
+  recordType?: 'dynamic-trigger';
   /** Stable identifier for the persisted record. */
   id: string;
   /** Skill this record adapts. The blueprint is not modified. */
@@ -35,9 +36,28 @@ export interface DynamicTriggerRecord {
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
+  lastFiredAt?: string;
   /** Free-form provenance, e.g. the chat message that requested it. */
   origin?: string;
 }
+
+export interface MissionScheduleRecord {
+  recordType: 'mission-schedule';
+  id: string;
+  tenantId: string;
+  assistantId: string;
+  prompt: string;
+  cron: string;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+  lastFiredAt?: string;
+  metadata?: Record<string, unknown>;
+  contextChunks?: Array<{ content: string; tokens: number; priority: number }>;
+  origin?: string;
+}
+
+export type PersistedTriggerRecord = DynamicTriggerRecord | MissionScheduleRecord;
 
 export interface TriggerIssue {
   skillId: string;

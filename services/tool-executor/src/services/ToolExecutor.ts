@@ -1528,7 +1528,7 @@ let lastError: string | undefined;
 
 while (healingAttempts <= MAX_HEALING_ATTEMPTS) {
   const result = await this.codeExecutor.execute(
-        { language: language as 'javascript' | 'typescript' | 'python', code: codeToRun, input, config: this.resolveSkillConfig(tool, input), credentials: credentials.resolved, executorCallback: this.nestedExecutorCallback(), timeoutMs: (manifest && typeof manifest === 'object' && (manifest as Record<string, unknown>).timeoutMs) as number | undefined, persistenceEnvVar: (manifest && typeof manifest === 'object' ? (manifest as Record<string, unknown>).persistenceEnvVar : undefined) as string | undefined },
+        { language: language as 'javascript' | 'typescript' | 'python', code: codeToRun, input, config: this.resolveSkillConfig(tool, input), credentials: credentials.resolved, executorCallback: this.nestedExecutorCallback(), timeoutMs: (manifest && typeof manifest === 'object' && (manifest as Record<string, unknown>).timeoutMs) as number | undefined, persistenceEnvVar: (manifest && typeof manifest === 'object' ? (manifest as Record<string, unknown>).persistenceEnvVar : undefined) as string | undefined, ...(manifest?.executionProfile === 'generated-plugin' ? { executionProfile: 'generated-plugin' as const } : {}) },
         { resolved, sources } as CodeExecutorCredentials,
       );
 
@@ -1924,7 +1924,7 @@ const deployed = await this.pluginGenerator.deploy(generated.tool);
 if (deployed.success) {
 logger.info({ toolId: generated.tool.id, deployPath: deployed.deployPath }, 'Auto-generated plugin deployed');
   const retryResult = await this.codeExecutor.execute(
-        { language: 'javascript', code: (generated.tool.manifest as Record<string, unknown>)?.sourceCode as string || '', input, executorCallback: this.nestedExecutorCallback(), timeoutMs: (generated.tool.manifest as Record<string, unknown>) && (generated.tool.manifest as Record<string, unknown>).timeoutMs as number | undefined, persistenceEnvVar: (generated.tool.manifest as Record<string, unknown>)?.persistenceEnvVar as string | undefined },
+        { language: 'javascript', code: (generated.tool.manifest as Record<string, unknown>)?.sourceCode as string || '', input, executorCallback: this.nestedExecutorCallback(), timeoutMs: (generated.tool.manifest as Record<string, unknown>) && (generated.tool.manifest as Record<string, unknown>).timeoutMs as number | undefined, persistenceEnvVar: (generated.tool.manifest as Record<string, unknown>)?.persistenceEnvVar as string | undefined, executionProfile: 'generated-plugin' },
         { resolved, sources } as CodeExecutorCredentials,
       );
 if (retryResult.success) {

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Client, Connection, WorkflowExecutionAlreadyStartedError } from '@temporalio/client';
 import { missionWorkflow } from '../workflows/missionWorkflow';
 import { watchWorkflow } from '../workflows/watchWorkflow';
@@ -6,10 +7,13 @@ import { runWatchActivity } from '../activities/watchActivity';
 import { fetchWatchActivity } from '../activities/watchActivity';
 import { runMissionDirect } from '../activities/missionActivity';
 import { runWatchLoop } from '../workflows/watchLoop';
-import { WorkflowInput, WorkflowResult } from '../types/workflow';
-import { logger } from '@stage7-nextgen/shared';
+import { logger, Plan, PlanSchema } from '@stage7-nextgen/shared';
+import { MissionActivityCheckpoint, WorkflowInput, WorkflowResult } from '../types/workflow';
+import { getMissionResumeProgress } from '../recovery/missionProgress';
 
 const TEMPORAL_TIMEOUT_MS = parseInt(process.env.TEMPORAL_OP_TIMEOUT_MS || '5000', 10);
+const DIRECT_RECOVERY_LEASE_DURATION_MS = 90_000;
+const DIRECT_RECOVERY_LEASE_RENEWAL_MS = 30_000;
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   let timeout: ReturnType<typeof setTimeout>;
@@ -88,6 +92,9 @@ async function runSingleWatch(watchId: string): Promise<SingleWatchOutcome> {
 export class TemporalClient {
   private client: Client | null = null;
   private namespace: string;
+  private readonly directMissionRuns = new Set<string>();
+  private readonly recoveryLeaseOwnerId = randomUUID();
+  private readonly recoveryLeaseRenewals = new Map<string, NodeJS.Timeout>();
   /**
    * Watch ids with an in-process orchestrator currently running. The scheduler polls on an interval
    * and re-offers every enabled watch each time, so without this the fallback path would start a
@@ -97,10 +104,18 @@ export class TemporalClient {
 
   constructor(namespace = 'default') {
     this.namespace = namespace;
+    const backend = process.env.TEMPORAL_BACKEND || 'direct';
+    if (backend === 'direct') {
+      logger.info('Using Stage7 in-process workflow runner backed by Artifacts');
+      return;
+    }
+    if (backend !== 'temporal-server') {
+      throw new Error(`Unsupported TEMPORAL_BACKEND: ${backend}`);
+    }
+
     const temporalAddress = process.env.TEMPORAL_ADDRESS;
     if (!temporalAddress) {
-      logger.info('No TEMPORAL_ADDRESS set, using direct execution mode');
-      return;
+      throw new Error('TEMPORAL_BACKEND=temporal-server requires TEMPORAL_ADDRESS');
     }
     try {
       this.client = new Client({ connection: Connection.lazy({ address: temporalAddress }), namespace });
@@ -113,6 +128,20 @@ export class TemporalClient {
 
   isConnected(): boolean {
     return this.client !== null;
+  }
+
+  getRuntimeStatus(): {
+    executionMode: 'artifacts-backed-direct' | 'external-temporal-compatibility';
+    activeMissions: number;
+    activeWatchLoops: number;
+    artifactsConfigured: boolean;
+  } {
+    return {
+      executionMode: this.client ? 'external-temporal-compatibility' : 'artifacts-backed-direct',
+      activeMissions: this.directMissionRuns.size,
+      activeWatchLoops: this.watchFallbacks.size,
+      artifactsConfigured: Boolean(process.env.ARTIFACTS_URL),
+    };
   }
 
   /**
@@ -190,97 +219,365 @@ export class TemporalClient {
     });
   }
 
-  async startMission(input: WorkflowInput): Promise<string> {
+  async startMission(
+    input: WorkflowInput,
+    resumeCheckpoint?: MissionActivityCheckpoint,
+    recoveryLeaseAlreadyClaimed = false,
+  ): Promise<string> {
     const workflowId = `mission-${input.missionId}`;
     logger.info({ missionId: input.missionId, assistantId: input.assistantId }, 'Starting mission');
 
-    // Persist "running" state immediately so the mission is visible before execution
-    await this.persistRunningState(input);
-
-    // Broadcast the mission-started event to connected WebSocket clients
-    await this.broadcastMissionUpdate({
-      type: 'mission_started',
-      missionId: input.missionId,
-      workflowId,
-      status: 'running',
-      assistantId: input.assistantId,
-      timestamp: Date.now(),
-    });
-
-    if (this.client) {
-      // Temporal path: start workflow asynchronously on the Temporal server
-      try {
-        await withTimeout(
-          this.client.workflow.start(missionWorkflow, {
-            taskQueue: 'stage7-workers',
-            workflowId,
-            args: [input],
-          }),
-          TEMPORAL_TIMEOUT_MS,
-        );
-        // Return immediately — Temporal handles async execution.
+    if (!this.client && input.metadata?.scheduled === true) {
+      if (await this.isPersistedScheduledOccurrence(input)) {
+        logger.info({ missionId: input.missionId }, 'Scheduled mission occurrence already exists; not starting a duplicate');
         return workflowId;
-      } catch (err) {
-        if (isAlreadyStarted(err)) {
-          return workflowId;
-        }
-        logger.error(
-          { err: err instanceof Error ? err.message : String(err), workflowId },
-          'Temporal workflow start outcome is ambiguous; refusing direct fallback to avoid duplicate mission execution',
-        );
-        throw err;
       }
     }
 
-    // Fallback: execute workflow asynchronously without Temporal.
-    const startTime = Date.now();
-    runMissionDirect(input)
-      .then((output) => ({
+    if (!this.client && this.directMissionRuns.has(input.missionId)) {
+      logger.info({ missionId: input.missionId }, 'Mission already running in this process; not starting a duplicate');
+      return workflowId;
+    }
+    if (!this.client) this.directMissionRuns.add(input.missionId);
+    let recoveryLeaseClaimed = recoveryLeaseAlreadyClaimed;
+
+    try {
+      if (!this.client && !resumeCheckpoint && (input.completedPhases?.length || input.completedTasks?.length)) {
+        resumeCheckpoint = await this.loadRetryCheckpoint(input);
+      }
+
+      if (!this.client && !recoveryLeaseAlreadyClaimed) {
+        const claimed = await this.claimDirectRecoveryLease(input.missionId);
+        if (claimed === false) {
+          logger.info({ missionId: input.missionId }, 'Another Temporal process owns the direct mission lease');
+          this.directMissionRuns.delete(input.missionId);
+          return workflowId;
+        }
+        recoveryLeaseClaimed = claimed === true;
+      }
+      if (!this.client && recoveryLeaseClaimed) this.startRecoveryLeaseRenewal(input.missionId);
+
+      // Claim direct execution before writing running state, so a duplicate launch
+      // cannot overwrite the active owner's mission timestamps or history.
+      if (!recoveryLeaseAlreadyClaimed) await this.persistRunningState(input);
+
+      // Broadcast the mission-started event to connected WebSocket clients.
+      await this.broadcastMissionUpdate({
+        type: 'mission_started',
         missionId: input.missionId,
-        status: missionStatus(output),
-        output,
-        startedAt: startTime,
-        completedAt: Date.now(),
-      } satisfies WorkflowResult))
-      .then(async (result) => {
-        await this.persistFinalState(input, result, startTime);
-        await this.broadcastMissionUpdate({
-          type: 'mission_completed',
-          missionId: input.missionId,
-          workflowId,
-          status: result.status,
-          output: result.output,
-          timestamp: result.completedAt || Date.now(),
-        });
-      })
-      .catch(async (err: any) => {
-        logger.error({ err: err.message }, 'Mission workflow failed');
-        await this.persistMissionState({
-          missionId: input.missionId,
-          tenantId: input.tenantId || '',
-          assistantId: input.assistantId || '',
-          status: 'failed',
-          currentStep: 0,
-          totalSteps: 1,
-          history: [{ step: 0, status: 'failed' as const, startedAt: startTime, completedAt: Date.now(), error: err.message }],
-          input,
-          error: err.message,
-          startedAt: startTime,
-          completedAt: Date.now(),
-          createdAt: startTime,
-          updatedAt: Date.now(),
-        });
-        await this.broadcastMissionUpdate({
-          type: 'mission_failed',
-          missionId: input.missionId,
-          workflowId,
-          status: 'failed',
-          error: err.message,
-          timestamp: Date.now(),
-        });
+        workflowId,
+        status: 'running',
+        assistantId: input.assistantId,
+        timestamp: Date.now(),
       });
 
-    return workflowId;
+      if (this.client) {
+        // Temporal path: start workflow asynchronously on the Temporal server.
+        try {
+          await withTimeout(
+            this.client.workflow.start(missionWorkflow, {
+              taskQueue: 'stage7-workers',
+              workflowId,
+              args: [input],
+            }),
+            TEMPORAL_TIMEOUT_MS,
+          );
+          return workflowId;
+        } catch (err) {
+          if (isAlreadyStarted(err)) {
+            return workflowId;
+          }
+          logger.error(
+            { err: err instanceof Error ? err.message : String(err), workflowId },
+            'Temporal workflow start outcome is ambiguous; refusing direct fallback to avoid duplicate mission execution',
+          );
+          throw err;
+        }
+      }
+
+      // Direct mode resumes from Artifacts state without requiring a Temporal Server.
+      const startTime = Date.now();
+      runMissionDirect(input, resumeCheckpoint)
+        .then((output) => ({
+          missionId: input.missionId,
+          status: missionStatus(output),
+          output,
+          startedAt: startTime,
+          completedAt: Date.now(),
+        } satisfies WorkflowResult))
+        .then(async (result) => {
+          await this.persistFinalState(input, result, startTime);
+          await this.broadcastMissionUpdate({
+            type: 'mission_completed',
+            missionId: input.missionId,
+            workflowId,
+            status: result.status,
+            output: result.output,
+            timestamp: result.completedAt || Date.now(),
+          });
+        })
+        .catch(async (err: unknown) => {
+          const error = err instanceof Error ? err.message : String(err);
+          logger.error({ missionId: input.missionId, error }, 'Mission workflow failed');
+          await this.persistMissionState({
+            missionId: input.missionId,
+            tenantId: input.tenantId || '',
+            assistantId: input.assistantId || '',
+            status: 'failed',
+            currentStep: 0,
+            totalSteps: 1,
+            history: [{ step: 0, status: 'failed' as const, startedAt: startTime, completedAt: Date.now(), error }],
+            input,
+            error,
+            startedAt: startTime,
+            completedAt: Date.now(),
+            createdAt: startTime,
+            updatedAt: Date.now(),
+          });
+          await this.broadcastMissionUpdate({
+            type: 'mission_failed',
+            missionId: input.missionId,
+            workflowId,
+            status: 'failed',
+            error,
+            timestamp: Date.now(),
+          });
+        })
+        .finally(async () => {
+          this.stopRecoveryLeaseRenewal(input.missionId);
+          if (recoveryLeaseClaimed) await this.releaseDirectRecoveryLease(input.missionId);
+          this.directMissionRuns.delete(input.missionId);
+        });
+
+      return workflowId;
+    } catch (error) {
+      if (!this.client) {
+        this.stopRecoveryLeaseRenewal(input.missionId);
+        if (recoveryLeaseClaimed) await this.releaseDirectRecoveryLease(input.missionId);
+        this.directMissionRuns.delete(input.missionId);
+      }
+      throw error;
+    }
+  }
+
+  private async isPersistedScheduledOccurrence(input: WorkflowInput): Promise<boolean> {
+    const scheduleId = input.metadata?.scheduleId;
+    const scheduledFor = input.metadata?.scheduledFor;
+    if (typeof scheduleId !== 'string' || typeof scheduledFor !== 'string') {
+      throw new Error('Scheduled missions require scheduleId and scheduledFor metadata');
+    }
+    const persistenceUrl = process.env.ARTIFACTS_URL;
+    if (!persistenceUrl) {
+      throw new Error('Scheduled missions require ARTIFACTS_URL for durable idempotency');
+    }
+    const response = await this.fetchArtifactsWithRetry(
+      `${persistenceUrl}/api/artifacts/missions/${encodeURIComponent(input.missionId)}`,
+    );
+    if (response.status === 404) return false;
+    if (!response.ok) {
+      throw new Error(`Could not check scheduled mission idempotency (${response.status})`);
+    }
+    const existing = await response.json() as {
+      missionId?: unknown;
+      input?: { metadata?: Record<string, unknown> };
+    };
+    return existing.missionId === input.missionId
+      && existing.input?.metadata?.scheduled === true
+      && existing.input.metadata.scheduleId === scheduleId
+      && existing.input.metadata.scheduledFor === scheduledFor;
+  }
+
+  private async claimDirectRecoveryLease(missionId: string): Promise<boolean | null> {
+    const persistenceUrl = process.env.ARTIFACTS_URL;
+    if (!persistenceUrl) {
+      logger.warn({ missionId }, 'ARTIFACTS_URL is not set; direct mission recovery is process-local only');
+      return null;
+    }
+
+    const result = await this.updateDirectRecoveryLease(persistenceUrl, missionId, 'claim');
+    if (typeof result.claimed !== 'boolean') {
+      throw new Error('Artifacts returned an invalid direct mission lease claim response');
+    }
+    return result.claimed;
+  }
+
+  private startRecoveryLeaseRenewal(missionId: string): void {
+    this.stopRecoveryLeaseRenewal(missionId);
+    const timer = setInterval(() => {
+      const persistenceUrl = process.env.ARTIFACTS_URL;
+      if (!persistenceUrl) return;
+      void this.updateDirectRecoveryLease(persistenceUrl, missionId, 'renew').then((result) => {
+        if (result.renewed !== true) {
+          logger.error({ missionId }, 'Direct mission recovery lease was lost');
+          this.stopRecoveryLeaseRenewal(missionId);
+        }
+      }).catch((error: unknown) => {
+        logger.error({
+          missionId,
+          error: error instanceof Error ? error.message : String(error),
+        }, 'Failed to renew direct mission recovery lease');
+      });
+    }, DIRECT_RECOVERY_LEASE_RENEWAL_MS);
+    timer.unref();
+    this.recoveryLeaseRenewals.set(missionId, timer);
+  }
+
+  private stopRecoveryLeaseRenewal(missionId: string): void {
+    const timer = this.recoveryLeaseRenewals.get(missionId);
+    if (timer) clearInterval(timer);
+    this.recoveryLeaseRenewals.delete(missionId);
+  }
+
+  private async releaseDirectRecoveryLease(missionId: string): Promise<void> {
+    const persistenceUrl = process.env.ARTIFACTS_URL;
+    if (!persistenceUrl) return;
+    try {
+      const result = await this.updateDirectRecoveryLease(persistenceUrl, missionId, 'release');
+      if (result.released !== true) {
+        logger.warn({ missionId }, 'Direct mission recovery lease was not released by its owner');
+      }
+    } catch (error) {
+      logger.error({
+        missionId,
+        error: error instanceof Error ? error.message : String(error),
+      }, 'Failed to release direct mission recovery lease; it will expire');
+    }
+  }
+
+  private async updateDirectRecoveryLease(
+    persistenceUrl: string,
+    missionId: string,
+    action: 'claim' | 'renew' | 'release',
+  ): Promise<Record<string, unknown>> {
+    const response = await this.fetchArtifactsWithRetry(
+      `${persistenceUrl}/api/artifacts/missions/${encodeURIComponent(missionId)}/recovery-lease`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action,
+          ownerId: this.recoveryLeaseOwnerId,
+          ...(action === 'release' ? {} : { leaseDurationMs: DIRECT_RECOVERY_LEASE_DURATION_MS }),
+        }),
+      },
+    );
+    if (!response.ok) {
+      throw new Error(`Artifacts rejected direct mission lease ${action} (${response.status})`);
+    }
+    const result = await response.json();
+    if (!result || typeof result !== 'object') {
+      throw new Error('Artifacts returned an invalid direct mission lease response');
+    }
+    return result as Record<string, unknown>;
+  }
+
+  async recoverInFlightMissions(): Promise<number> {
+    if (this.client) {
+      logger.info('Temporal Server is configured; in-flight recovery is owned by Temporal');
+      return 0;
+    }
+
+    const persistenceUrl = process.env.ARTIFACTS_URL;
+    if (!persistenceUrl) {
+      throw new Error('Cannot recover in-flight missions: ARTIFACTS_URL is not configured');
+    }
+
+    const response = await this.fetchArtifactsWithRetry(`${persistenceUrl}/api/artifacts/missions`);
+    if (!response.ok) {
+      throw new Error(`Cannot list persisted missions for recovery (${response.status})`);
+    }
+    const result = await response.json() as { missions?: unknown };
+    if (!Array.isArray(result.missions)) {
+      throw new Error('Artifacts returned an invalid mission list during recovery');
+    }
+
+    let recovered = 0;
+    for (const value of result.missions) {
+      if (!value || typeof value !== 'object') continue;
+      const mission = value as { missionId?: unknown; status?: unknown; input?: unknown };
+      if (mission.status !== 'running') continue;
+      if (typeof mission.missionId === 'string' && this.directMissionRuns.has(mission.missionId)) continue;
+
+      try {
+        const input = mission.input as WorkflowInput | undefined;
+        if (
+          !input
+          || typeof input !== 'object'
+          || typeof input.missionId !== 'string'
+          || input.missionId !== mission.missionId
+          || typeof input.prompt !== 'string'
+        ) {
+          throw new Error('Persisted mission does not contain a valid workflow input');
+        }
+
+        const checkpoint = await this.loadPersistedCheckpoint(input.missionId);
+        const claimed = await this.claimDirectRecoveryLease(input.missionId);
+        if (!claimed) {
+          logger.info({ missionId: input.missionId }, 'Skipping mission recovery; another process owns its lease');
+          continue;
+        }
+        await this.startMission(input, checkpoint, claimed);
+        recovered++;
+      } catch (error) {
+        logger.error({
+          missionId: mission.missionId,
+          error: error instanceof Error ? error.message : String(error),
+        }, 'Could not recover persisted in-flight mission');
+      }
+    }
+
+    logger.info({ recovered }, 'In-flight mission recovery scan completed');
+    return recovered;
+  }
+
+  private async loadRetryCheckpoint(input: WorkflowInput): Promise<MissionActivityCheckpoint> {
+    const plan = await this.loadPersistedPlan(input.missionId);
+    if (!plan) {
+      throw new Error(`Cannot resume mission ${input.missionId}: persisted plan is missing`);
+    }
+    return {
+      version: 1,
+      plan,
+      completedTasks: input.completedTasks || [],
+      completedPhases: input.completedPhases || [],
+    };
+  }
+
+  private async loadPersistedCheckpoint(missionId: string): Promise<MissionActivityCheckpoint | undefined> {
+    const plan = await this.loadPersistedPlan(missionId);
+    if (!plan) return undefined;
+    return getMissionResumeProgress(plan).checkpoint;
+  }
+
+  private async loadPersistedPlan(missionId: string): Promise<Plan | undefined> {
+    const persistenceUrl = process.env.ARTIFACTS_URL;
+    if (!persistenceUrl) {
+      throw new Error('ARTIFACTS_URL is not configured');
+    }
+    const response = await this.fetchArtifactsWithRetry(
+      `${persistenceUrl}/api/artifacts/missions/${encodeURIComponent(missionId)}/plan`,
+    );
+    if (response.status === 404) return undefined;
+    if (!response.ok) {
+      throw new Error(`Could not load persisted plan for mission ${missionId} (${response.status})`);
+    }
+    return PlanSchema.parse(await response.json());
+  }
+
+  private async fetchArtifactsWithRetry(url: string, init?: RequestInit): Promise<Response> {
+    let lastError: Error | undefined;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        const response = await fetch(url, init);
+        if (response.status < 500 || attempt === 4) return response;
+        lastError = new Error(`Artifacts returned HTTP ${response.status}`);
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        if (attempt === 4) break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1_000 * (attempt + 1)));
+    }
+    throw new Error(`Artifacts request failed after retries: ${lastError?.message || url}`);
   }
 
   async startWatch(watchId: string): Promise<string> {

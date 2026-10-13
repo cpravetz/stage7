@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { v4 as uuidv4 } from 'uuid'
 import { logger } from '@stage7-nextgen/shared'
 import {
@@ -9,7 +10,12 @@ import {
   DEFAULT_AGENT_EXECUTION_POLICY,
   AgentExecutionPolicy,
 } from '../types'
-import { AgentExecutor, AgentDelegateRequest } from './AgentExecutor'
+import {
+  AgentExecutionCheckpoint,
+  AgentExecutor,
+  AgentDelegateRequest,
+  parseAgentExecutionCheckpoint,
+} from './AgentExecutor'
 
 const MAX_AGENTS_PER_MISSION = 16
 
@@ -62,9 +68,24 @@ export class AgentRuntime {
   private collaborations: Map<string, AgentCollaboration> = new Map()
   private specializations: Map<string, AgentSpecialization[]> = new Map()
   private executor: AgentExecutor
+  private persistAgentState?: (state: AgentState) => Promise<void>
+  private startDelegatedAgent?: (agentId: string, missionId: string) => Promise<AgentState>
+  private executeDelegatedTask?: (
+    agentId: string,
+    taskId: string,
+    delegationDepth: number,
+  ) => Promise<AgentTask>
 
-  constructor(executor: AgentExecutor = new AgentExecutor()) {
+  constructor(
+    executor: AgentExecutor = new AgentExecutor(),
+    persistAgentState?: (state: AgentState) => Promise<void>,
+    startDelegatedAgent?: (agentId: string, missionId: string) => Promise<AgentState>,
+    executeDelegatedTask?: (agentId: string, taskId: string, delegationDepth: number) => Promise<AgentTask>,
+  ) {
     this.executor = executor
+    this.persistAgentState = persistAgentState
+    this.startDelegatedAgent = startDelegatedAgent
+    this.executeDelegatedTask = executeDelegatedTask
   }
 
   registerAgent(definition: AgentDefinition): void {
@@ -217,12 +238,34 @@ export class AgentRuntime {
         ? input.context as Record<string, unknown>
         : {}
       const executionPolicy = readExecutionPolicy(taskContext.executionPolicy)
+      const checkpoints = state.context.executionCheckpoints
+      if (checkpoints !== undefined && (!checkpoints || typeof checkpoints !== 'object' || Array.isArray(checkpoints))) {
+        throw new Error(`Agent ${agentId} has invalid persisted execution checkpoints`)
+      }
+      const resumeCheckpoint = parseAgentExecutionCheckpoint(
+        checkpoints ? (checkpoints as Record<string, unknown>)[taskId] : undefined,
+      )
       const missionId = state.missionId
+      const saveCheckpoint = this.persistAgentState
+        ? async (checkpoint: AgentExecutionCheckpoint) => {
+          const current = state.context.executionCheckpoints;
+          const currentCheckpoints = current && typeof current === 'object' && !Array.isArray(current)
+            ? current as Record<string, unknown>
+            : {};
+          state.context = {
+            ...state.context,
+            executionCheckpoints: { ...currentCheckpoints, [taskId]: checkpoint },
+          };
+          await this.persistAgentState?.(state);
+        }
+        : undefined;
       const result = await this.executor.execute(agent, task, {
         missionId,
         delegationDepth,
         ...(executionPolicy ? { executionPolicy } : {}),
         delegate: (request) => this.delegateTask(agent, task, request, delegationDepth + 1),
+        ...(resumeCheckpoint ? { resumeCheckpoint } : {}),
+        ...(saveCheckpoint ? { saveCheckpoint } : {}),
       })
 
       task.status = 'completed'
@@ -240,11 +283,13 @@ export class AgentRuntime {
         },
         activeTaskId: undefined,
         currentTaskId: undefined,
+        executionCheckpoints: this.withoutTaskCheckpoint(state.context.executionCheckpoints, taskId),
         lastCompletedTaskId: taskId,
         lastTaskResult: result,
       }
       state.status = 'waiting'
       this.states.set(agentId, state)
+      await this.persistAgentState?.(state)
       logger.info({ agentId, taskId, toolCalls: result.toolCalls }, 'Agent task completed')
       return task
     } catch (error) {
@@ -263,15 +308,23 @@ export class AgentRuntime {
           ...receipts,
           [taskId]: { status: 'failed', error: message, completedAt: task.completedAt },
         },
-        activeTaskId: undefined,
+        activeTaskId: taskId,
         currentTaskId: undefined,
         lastFailedTaskId: taskId,
         lastError: message,
       }
       this.states.set(agentId, state)
+      await this.persistAgentState?.(state)
       logger.error({ agentId, taskId, error: message }, 'Agent task failed')
       throw error
     }
+  }
+
+  private withoutTaskCheckpoint(value: unknown, taskId: string): Record<string, unknown> {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+    const checkpoints = value as Record<string, unknown>
+    const { [taskId]: _removed, ...remaining } = checkpoints
+    return remaining
   }
 
   private async delegateTask(
@@ -286,12 +339,23 @@ export class AgentRuntime {
     const parentState = this.states.get(parent.id)
     if (!parentState) throw new Error(`Parent agent ${parent.id} has no active mission state`)
     const missionAgents = this.missionAgents.get(parentState.missionId)
-    if ((missionAgents?.size || 0) >= MAX_AGENTS_PER_MISSION) {
+    const role = request.role?.trim() || 'delegate'
+    const systemPrompt = request.systemPrompt || `You are a ${role} agent. Complete the delegated goal and report your findings.`
+    const delegationId = createHash('sha256')
+      .update(JSON.stringify({
+        missionId: parentState.missionId,
+        parentAgentId: parent.id,
+        parentTaskId: parentTask.taskId,
+        goal: request.goal,
+        role,
+        systemPrompt,
+      }))
+      .digest('hex')
+      .slice(0, 24)
+    const agentId = `agent-delegation-${delegationId}`
+    if ((missionAgents?.size || 0) >= MAX_AGENTS_PER_MISSION && !missionAgents?.has(agentId)) {
       throw new Error(`Mission agent limit of ${MAX_AGENTS_PER_MISSION} reached`)
     }
-
-    const role = request.role?.trim() || 'delegate'
-    const agentId = `agent-${uuidv4()}`
     const now = new Date().toISOString()
     const child: AgentDefinition = {
       ...parent,
@@ -299,14 +363,17 @@ export class AgentRuntime {
       name: `${role} agent`,
       description: `Mission-scoped delegate for ${parentTask.taskId}: ${request.goal}`,
       type: role,
-      systemPrompt: request.systemPrompt || `You are a ${role} agent. Complete the delegated goal and report your findings.`,
-      tools: [],
+      systemPrompt,
       metadata: { ...parent.metadata, missionId: parentState.missionId, parentAgentId: parent.id },
       createdAt: now,
       updatedAt: now,
     }
     this.registerAgentForMission(parentState.missionId, child)
-    this.startAgent(agentId, parentState.missionId)
+    if (this.startDelegatedAgent) {
+      await this.startDelegatedAgent(agentId, parentState.missionId)
+    } else {
+      this.startAgent(agentId, parentState.missionId)
+    }
 
     const parentInput = parentTask.input && typeof parentTask.input === 'object' && !Array.isArray(parentTask.input)
       ? parentTask.input as Record<string, unknown>
@@ -316,6 +383,7 @@ export class AgentRuntime {
       : {}
     const executionPolicy = readExecutionPolicy(parentContext.executionPolicy)
     const childTask = this.submitTask(agentId, {
+      taskId: `${parentTask.taskId}:delegation:${delegationId}`,
       type: 'delegated',
       input: {
         prompt: request.goal,
@@ -329,7 +397,9 @@ export class AgentRuntime {
       priority: parentTask.priority,
       status: 'pending',
     })
-    const completed = await this.executeTask(agentId, childTask.taskId, delegationDepth)
+    const completed = this.executeDelegatedTask
+      ? await this.executeDelegatedTask(agentId, childTask.taskId, delegationDepth)
+      : await this.executeTask(agentId, childTask.taskId, delegationDepth)
     return completed.result
   }
 

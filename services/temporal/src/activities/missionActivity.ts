@@ -10,6 +10,8 @@ import {
   finishMissionPhaseActivity,
   prepareMissionActivity,
   recordMissionPhaseApprovalActivity,
+  reviewAndAmendMissionPhaseActivity,
+  selectNextMissionTaskActivity,
   startMissionPhaseActivity,
 } from './missionWorkflowActivities';
 
@@ -205,14 +207,19 @@ export async function runMissionActivity(input: WorkflowInput): Promise<any> {
   });
 }
 
-export async function runMissionDirect(input: WorkflowInput): Promise<any> {
-  return executeMissionActivity(input);
+export async function runMissionDirect(
+  input: WorkflowInput,
+  checkpoint?: MissionActivityCheckpoint,
+): Promise<any> {
+  return executeMissionActivity(input, { checkpoint });
 }
 
 export const missionActivities = {
   runMissionActivity,
   prepareMissionActivity,
   startMissionPhaseActivity,
+  selectNextMissionTaskActivity,
+  reviewAndAmendMissionPhaseActivity,
   executeMissionTaskActivity,
   finishMissionPhaseActivity,
   awaitMissionPhaseApprovalActivity,

@@ -7,6 +7,7 @@ import { Tool, PluginGenerationRequest, CredentialRequiredError, ConfirmationReq
 import toolsRouter from '../routes/tools'
 import { ToolNotFoundError, ValidationError } from '../utils/errors'
 import { eventSkills } from '../assistants/event/index'
+import { pluginGenerator as routePluginGenerator } from '../utils/sharedInstance'
 
 const app: Application = express()
 app.use(express.json())
@@ -655,6 +656,38 @@ describe('PluginGenerator', () => {
     expect(result.tool?.type).toBe('code')
     expect(result.tool?.description).toContain('Generate a calculator plugin')
   })
+
+  it('rejects plugin IDs and entrypoints that could escape the deployment directory', async () => {
+    const base: Tool = {
+      id: '../outside',
+      name: 'Unsafe plugin',
+      description: 'Invalid generated plugin',
+      type: 'code',
+      manifest: {
+        language: 'javascript',
+        entrypoint: 'index.js',
+        sourceCode: 'module.exports = {};',
+        requirements: [],
+        configSchema: {},
+        inputs: {},
+        outputs: {},
+      },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }
+
+    const unsafeId = await generator.deploy(base)
+    expect(unsafeId.success).toBe(false)
+    expect(unsafeId.error).toContain('safe plugin identifier')
+
+    const unsafeEntrypoint = await generator.deploy({
+      ...base,
+      id: 'safe-plugin',
+      manifest: { ...base.manifest, entrypoint: '../outside.js' },
+    })
+    expect(unsafeEntrypoint.success).toBe(false)
+    expect(unsafeEntrypoint.error).toContain('entrypoint')
+  })
 })
 
 describe('REST endpoints', () => {
@@ -703,6 +736,43 @@ describe('REST endpoints', () => {
       .send({ description: 'New plugin' })
     expect(res.status).toBe(201)
     expect(res.body.success).toBe(true)
+  })
+
+  it('reports a failed plugin deployment instead of returning a success response', async () => {
+    const generatedTool: Tool = {
+      id: 'deployment-failure-test',
+      name: 'Generated Tool',
+      description: 'A generated tool',
+      type: 'code',
+      manifest: {
+        language: 'javascript',
+        entrypoint: 'index.js',
+        sourceCode: 'module.exports = {};',
+        requirements: [],
+        configSchema: {},
+        inputs: {},
+        outputs: {},
+      },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }
+    const generate = jest.spyOn(routePluginGenerator, 'generate')
+      .mockResolvedValue({ success: true, tool: generatedTool })
+    const deploy = jest.spyOn(routePluginGenerator, 'deploy')
+      .mockResolvedValue({ success: false, error: 'deployment storage unavailable' })
+    try {
+      const res = await request(app)
+        .post('/api/plugins/generate')
+        .send({ description: 'Generate a tool' })
+      expect(res.status).toBe(500)
+      expect(res.body).toEqual({
+        success: false,
+        error: 'Plugin deployment failed: deployment storage unavailable',
+      })
+    } finally {
+      generate.mockRestore()
+      deploy.mockRestore()
+    }
   })
 
   it('should return 428 when tool requires missing credentials', async () => {

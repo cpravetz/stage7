@@ -1,6 +1,7 @@
 import { BrainService } from '../services/BrainService';
 import { SemanticCache } from '../services/SemanticCache';
 import { LLMProvider, CompletionRequest, CompletionResponse, ProviderInfo } from '../providers/Provider';
+import { BRAIN_MODEL_SELECTION_EXHAUSTED } from '@stage7-nextgen/shared';
 
 const mockProviderInfo: ProviderInfo = {
   id: 'mock',
@@ -122,14 +123,14 @@ describe('BrainService', () => {
       },
       isAvailable: () => true,
       listModels: async () => [{
-        id: 'backup-chat-model',
+        id: 'mock-model',
         capabilities: ['chat', 'reasoning'],
         maxTokens: 128000,
         costPer1kTokens: 0.2,
       }],
       complete: jest.fn(async () => ({
         content: 'completed through backup',
-        model: 'backup-chat-model',
+        model: 'mock-model',
         provider: 'backup',
         tokensUsed: 12,
       })),
@@ -143,7 +144,7 @@ describe('BrainService', () => {
 
     expect(result).toMatchObject({
       content: 'completed through backup',
-      model: 'backup-chat-model',
+      model: 'mock-model',
       provider: 'backup',
     });
     expect(mockProviderInstance.calls).toBe(1);
@@ -170,6 +171,51 @@ describe('BrainService', () => {
   it('should pick the cheapest model that matches required capabilities', async () => {
     const result = await brain.complete('Help me write some code');
     expect(result.model).toBe('mock-model');
+  });
+
+  it('tries a different eligible model on each routing-session call and then reports exhaustion', async () => {
+    const options = { missionId: 'mission-routing', routingSessionId: 'mission-routing:planner' };
+
+    await brain.complete('Help me with a chat response', options);
+    expect(mockProviderInstance.lastRequest?.model).toBe('mock-model');
+
+    await brain.complete('Help me with a chat response', options);
+    expect(mockProviderInstance.lastRequest?.model).toBe('mock-expensive');
+    expect(mockProviderInstance.calls).toBe(2);
+
+    await expect(brain.complete('Help me with a chat response', options))
+      .rejects.toMatchObject({
+        details: {
+          code: BRAIN_MODEL_SELECTION_EXHAUSTED,
+          eligibleModelCount: 2,
+          attemptedModelCount: 2,
+        },
+      });
+    expect(mockProviderInstance.calls).toBe(2);
+  });
+
+  it('does not select paid models when free-model-only is enabled and no free candidates exist', async () => {
+    const fetchSpy = jest.spyOn(global, 'fetch').mockImplementation(async () => ({
+      ok: true,
+      json: async () => ({ data: { freeModelsOnly: true } }),
+    }) as Response);
+    const freeOnlyBrain = new BrainService();
+
+    try {
+      await expect(freeOnlyBrain.complete('Help me with a chat response', {
+        missionId: 'mission-free-routing',
+        routingSessionId: 'mission-free-routing:planner',
+      })).rejects.toMatchObject({
+        details: {
+          code: BRAIN_MODEL_SELECTION_EXHAUSTED,
+          eligibleModelCount: 0,
+          freeModelsOnly: true,
+        },
+      });
+      expect(mockProviderInstance.calls).toBe(0);
+    } finally {
+      fetchSpy.mockRestore();
+    }
   });
 
   it('should list providers', () => {

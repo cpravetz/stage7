@@ -20,7 +20,7 @@
 import fs from 'fs';
 import path from 'path';
 import logger from '../utils/logger';
-import type { DynamicTriggerRecord } from '../adk/triggers';
+import type { PersistedTriggerRecord } from '../adk/triggers';
 
 const ARTIFACTS_URL = process.env.ARTIFACTS_URL || '';
 const LOCAL_STORE_DIR = process.env.TRIGGER_STORE_DIR || '/tmp/stage7-triggers';
@@ -46,17 +46,33 @@ function resolveLocal(recordId: string): string | null {
   return resolved.startsWith(root + path.sep) ? resolved : null;
 }
 
-function writeLocal(target: string, record: DynamicTriggerRecord): void {
+function isPersistedTriggerRecord(value: unknown): value is PersistedTriggerRecord {
+  if (!value || typeof value !== 'object') return false;
+  const record = value as Record<string, unknown>;
+  if (!isValidName(record.id)) return false;
+  if (record.recordType === 'mission-schedule') {
+    return typeof record.tenantId === 'string'
+      && typeof record.assistantId === 'string'
+      && typeof record.prompt === 'string'
+      && typeof record.cron === 'string'
+      && typeof record.enabled === 'boolean';
+  }
+  return typeof record.skillId === 'string'
+    && !!record.kind
+    && typeof record.kind === 'object'
+    && typeof (record.kind as Record<string, unknown>).kind === 'string';
+}
+
+function writeLocal(target: string, record: PersistedTriggerRecord): void {
   fs.mkdirSync(path.dirname(target), { recursive: true });
   fs.writeFileSync(target, JSON.stringify(record, null, 2), 'utf8');
 }
 
-function readLocal(target: string): DynamicTriggerRecord | null {
+function readLocal(target: string): PersistedTriggerRecord | null {
   try {
     if (!fs.existsSync(target)) return null;
     const parsed = JSON.parse(fs.readFileSync(target, 'utf8'));
-    if (!parsed || typeof parsed !== 'object' || !isValidName((parsed as any).id)) return null;
-    return parsed as DynamicTriggerRecord;
+    return isPersistedTriggerRecord(parsed) ? parsed : null;
   } catch (err) {
     logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Corrupt local trigger record');
     return null;
@@ -70,35 +86,68 @@ function readLocal(target: string): DynamicTriggerRecord | null {
  */
 async function artifactsFetch(route: string, init?: RequestInit): Promise<any | null> {
   if (!ARTIFACTS_URL) return null;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REMOTE_TIMEOUT_MS);
   try {
-    const res = await fetch(`${ARTIFACTS_URL}/api/artifacts/documents${route}`, {
-      headers: { 'Content-Type': 'application/json' },
-      signal: controller.signal,
-      ...init,
-    });
+    const res = await artifactsRequest(route, init);
     if (!res.ok) return null;
     const text = await res.text();
     return text ? JSON.parse(text) : null;
   } catch (err) {
     logger.warn({ err: err instanceof Error ? err.message : String(err), route }, 'Artifacts persistence unavailable');
     return null;
+  }
+}
+
+async function artifactsRequest(route: string, init?: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REMOTE_TIMEOUT_MS);
+  try {
+    return await fetch(`${ARTIFACTS_URL}/api/artifacts/documents${route}`, {
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      ...init,
+    });
   } finally {
     clearTimeout(timer);
+  }
+}
+
+async function persistRemoteRecord(record: PersistedTriggerRecord): Promise<void> {
+  if (!ARTIFACTS_URL) throw new Error('ARTIFACTS_URL is required for durable schedule records');
+  const documentId = `${TRIGGER_RECORDS_COLLECTION}:${record.id}`;
+  const route = `/${encodeURIComponent(documentId)}`;
+  const existing = await artifactsRequest(route);
+  const write = existing.status === 404
+    ? await artifactsRequest('', {
+      method: 'POST',
+      body: JSON.stringify({
+        id: documentId,
+        tenantId: 'tenantId' in record ? record.tenantId : 'system',
+        collection: TRIGGER_RECORDS_COLLECTION,
+        data: envelope(record),
+      }),
+    })
+    : existing.ok
+      ? await artifactsRequest(route, {
+        method: 'PUT',
+        body: JSON.stringify({ data: envelope(record) }),
+      })
+      : existing;
+
+  if (!write.ok) {
+    throw new Error(`Artifacts could not persist schedule record ${record.id} (HTTP ${write.status})`);
   }
 }
 
 /** The persisted envelope, so a record round-trips through the documents API. */
 interface Envelope {
   collection: string;
-  data: DynamicTriggerRecord;
+  data: PersistedTriggerRecord;
   persistedAt: string;
   source: string;
   updatedAt: string;
 }
 
-function envelope(record: DynamicTriggerRecord): Envelope {
+function envelope(record: PersistedTriggerRecord): Envelope {
   return {
     collection: TRIGGER_RECORDS_COLLECTION,
     data: record,
@@ -109,9 +158,9 @@ function envelope(record: DynamicTriggerRecord): Envelope {
 }
 
 export interface TriggerRecordStore {
-  list(): Promise<DynamicTriggerRecord[]>;
-  get(recordId: string): Promise<DynamicTriggerRecord | null>;
-  save(record: DynamicTriggerRecord): Promise<DynamicTriggerRecord>;
+  list(): Promise<PersistedTriggerRecord[]>;
+  get(recordId: string): Promise<PersistedTriggerRecord | null>;
+  save(record: PersistedTriggerRecord): Promise<PersistedTriggerRecord>;
   remove(recordId: string): Promise<boolean>;
 }
 
@@ -121,31 +170,32 @@ export interface TriggerRecordStore {
  * without having to know the ids in advance.
  */
 export function createTriggerRecordStore(): TriggerRecordStore {
-  async function readRecord(recordId: string): Promise<DynamicTriggerRecord | null> {
+  async function readRecord(recordId: string): Promise<PersistedTriggerRecord | null> {
     const remote = await artifactsFetch(`/${encodeURIComponent(`${TRIGGER_RECORDS_COLLECTION}:${recordId}`)}`);
     const remoteData = remote?.data?.data;
-    if (remoteData && typeof remoteData === 'object' && isValidName(remoteData.id)) {
-      return remoteData as DynamicTriggerRecord;
-    }
+    if (isPersistedTriggerRecord(remoteData)) return remoteData;
     const target = resolveLocal(recordId);
     return target ? readLocal(target) : null;
   }
 
   return {
-    async list(): Promise<DynamicTriggerRecord[]> {
+    async list(): Promise<PersistedTriggerRecord[]> {
       const result = await artifactsFetch('/search', {
         method: 'POST',
         body: JSON.stringify({ collection: TRIGGER_RECORDS_COLLECTION, limit: 1000 }),
       });
-      const records: DynamicTriggerRecord[] = [];
+      if (!result && ARTIFACTS_URL) {
+        throw new Error('Artifacts is unavailable; persisted schedule records could not be loaded');
+      }
+      const records: PersistedTriggerRecord[] = [];
       const seen = new Set<string>();
 
       for (const doc of (result?.documents as any[]) ?? []) {
         // The documents API nests under `data`; accept a flat record too so a
         // hand-written document is not silently skipped.
         const candidate = doc?.data?.data ?? doc?.data ?? doc;
-        if (candidate && isValidName(candidate.id) && candidate.kind) {
-          records.push(candidate as DynamicTriggerRecord);
+        if (isPersistedTriggerRecord(candidate)) {
+          records.push(candidate);
           seen.add(candidate.id);
         }
       }
@@ -170,22 +220,29 @@ export function createTriggerRecordStore(): TriggerRecordStore {
       return records;
     },
 
-    async get(recordId: string): Promise<DynamicTriggerRecord | null> {
+    async get(recordId: string): Promise<PersistedTriggerRecord | null> {
       if (!isValidName(recordId)) return null;
       return readRecord(recordId);
     },
 
-    async save(record: DynamicTriggerRecord): Promise<DynamicTriggerRecord> {
-      await artifactsFetch(`/${encodeURIComponent(`${TRIGGER_RECORDS_COLLECTION}:${record.id}`)}`, {
-        method: 'PUT',
-        body: JSON.stringify({ data: envelope(record) }),
-      });
-      const target = resolveLocal(record.id);
-      if (target) {
+    async save(record: PersistedTriggerRecord): Promise<PersistedTriggerRecord> {
+      if (record.recordType === 'mission-schedule') {
+        await persistRemoteRecord(record);
+      } else {
         try {
-          writeLocal(target, record);
+          await persistRemoteRecord(record);
         } catch (err) {
-          logger.error({ err: err instanceof Error ? err.message : String(err) }, 'Local trigger record write failed');
+          logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Falling back to local trigger record storage');
+          const target = resolveLocal(record.id);
+          if (target) {
+            try {
+              writeLocal(target, record);
+            } catch (writeError) {
+              logger.error({
+                err: writeError instanceof Error ? writeError.message : String(writeError),
+              }, 'Local trigger record write failed');
+            }
+          }
         }
       }
       return record;
@@ -193,6 +250,17 @@ export function createTriggerRecordStore(): TriggerRecordStore {
 
     async remove(recordId: string): Promise<boolean> {
       if (!isValidName(recordId)) return false;
+      if (recordId.startsWith('mission-schedule-')) {
+        if (!ARTIFACTS_URL) throw new Error('ARTIFACTS_URL is required to delete a durable mission schedule');
+        const response = await artifactsRequest(`/${encodeURIComponent(`${TRIGGER_RECORDS_COLLECTION}:${recordId}`)}`, {
+          method: 'DELETE',
+        });
+        if (response.status === 404) return false;
+        if (!response.ok) {
+          throw new Error(`Artifacts could not delete mission schedule ${recordId} (HTTP ${response.status})`);
+        }
+        return true;
+      }
       await artifactsFetch(`/${encodeURIComponent(`${TRIGGER_RECORDS_COLLECTION}:${recordId}`)}`, {
         method: 'DELETE',
       });
@@ -210,8 +278,8 @@ export function createTriggerRecordStore(): TriggerRecordStore {
 }
 
 /** In-memory store for tests and for running without any persistence at all. */
-export function createInMemoryTriggerRecordStore(seed: DynamicTriggerRecord[] = []): TriggerRecordStore {
-  const records = new Map<string, DynamicTriggerRecord>();
+export function createInMemoryTriggerRecordStore(seed: PersistedTriggerRecord[] = []): TriggerRecordStore {
+  const records = new Map<string, PersistedTriggerRecord>();
   for (const record of seed) records.set(record.id, record);
   return {
     async list() {
