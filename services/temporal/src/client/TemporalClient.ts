@@ -108,6 +108,7 @@ export class TemporalClient {
   private client: Client | null = null;
   private namespace: string;
   private readonly directMissionRuns = new Set<string>();
+  private readonly directMissionRunner: typeof runMissionDirect;
   private readonly recoveryLeaseOwnerId = randomUUID();
   private readonly recoveryLeaseRenewals = new Map<string, NodeJS.Timeout>();
   /**
@@ -117,8 +118,9 @@ export class TemporalClient {
    */
   private watchFallbacks = new Map<string, Promise<unknown>>();
 
-  constructor(namespace = 'default') {
+  constructor(namespace = 'default', directMissionRunner: typeof runMissionDirect = runMissionDirect) {
     this.namespace = namespace;
+    this.directMissionRunner = directMissionRunner;
     const backend = process.env.TEMPORAL_BACKEND || 'direct';
     if (backend === 'direct') {
       logger.info('Using Stage7 in-process workflow runner backed by Artifacts');
@@ -318,7 +320,7 @@ export class TemporalClient {
       // Direct mode resumes from Artifacts state without requiring a Temporal Server.
       const startTime = Date.now();
       const controlCheckpoint = () => this.awaitDirectMissionControl(input.missionId);
-      runMissionDirect(input, resumeCheckpoint, controlCheckpoint)
+      this.directMissionRunner(input, resumeCheckpoint, controlCheckpoint)
         .then((output) => ({
           missionId: input.missionId,
           status: missionStatus(output),
@@ -489,6 +491,13 @@ export class TemporalClient {
       throw error;
     }
     await this.startMission(input, checkpoint, leaseClaimed === true, true);
+    await this.broadcastMissionUpdate({
+      type: 'mission_resumed',
+      missionId,
+      workflowId: `mission-${missionId}`,
+      status: 'running',
+      timestamp: Date.now(),
+    });
     return 'resuming';
   }
 

@@ -41,6 +41,25 @@ function task(taskId = 'mission-1:phase-1:task-1'): Omit<AgentTask, 'agentId' | 
 }
 
 describe('AgentExecutor', () => {
+  it('bounds Brain request time and surfaces a recoverable task error', async () => {
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) return jsonResponse({ tools: [] })
+      if (url.endsWith('/api/brain/complete')) {
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new Error('request aborted')), { once: true })
+        })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+
+    await expect(new AgentExecutor({ fetcher, brainRequestTimeoutMs: 1_000 }).execute(
+      definition,
+      task() as AgentTask,
+      { missionId: 'mission-1', delegationDepth: 0 },
+    )).rejects.toThrow('Brain request timed out after 1000ms')
+  })
+
   it('resumes after a persisted tool result without executing that action again', async () => {
     let checkpoint: AgentExecutionCheckpoint | undefined
     let toolExecutions = 0
@@ -556,10 +575,12 @@ describe('AgentExecutor', () => {
     }
     const savedStates = new Map<string, SavedAgentState>()
     const persistence = {
+      ready: async () => undefined,
       getAgentState: async (agentId: string) => savedStates.get(agentId),
       saveAgentState: async (state: SavedAgentState) => {
         savedStates.set(state.agentId, structuredClone(state))
       },
+      queryDocuments: async () => ({ documents: [] }),
     } as unknown as ArtifactsService
     const turns = new Map<string, number>()
     const brainCalls: Array<{ systemPrompt: string; prompt: string }> = []
@@ -741,6 +762,7 @@ describe('AgentExecutor', () => {
       updatedAt: Date
     }>()
     const persistence = {
+      ready: async () => undefined,
       getAgentState: async (agentId: string) => savedStates.get(agentId),
       saveAgentState: async (state: {
         agentId: string
@@ -752,6 +774,7 @@ describe('AgentExecutor', () => {
         createdAt: Date
         updatedAt: Date
       }) => { savedStates.set(state.agentId, structuredClone(state)) },
+      queryDocuments: async () => ({ documents: [] }),
     } as unknown as ArtifactsService
     let brainCalls = 0
     const fetcher: typeof fetch = async (input) => {
@@ -816,6 +839,7 @@ describe('AgentExecutor', () => {
       updatedAt: Date
     }>()
     const persistence = {
+      ready: async () => undefined,
       getAgentState: async (agentId: string) => savedStates.get(agentId),
       saveAgentState: async (state: {
         agentId: string
@@ -827,6 +851,7 @@ describe('AgentExecutor', () => {
         createdAt: Date
         updatedAt: Date
       }) => { savedStates.set(state.agentId, structuredClone(state)) },
+      queryDocuments: async () => ({ documents: [] }),
     } as unknown as ArtifactsService
     const retryAgent = { ...definition, id: 'retryable-agent' }
     let firstAttemptBrainCalls = 0
@@ -887,6 +912,7 @@ describe('AgentExecutor', () => {
       updatedAt: Date
     }>()
     const persistence = {
+      ready: async () => undefined,
       getAgentState: async (agentId: string) => savedStates.get(agentId),
       saveAgentState: async (state: {
         agentId: string
@@ -898,6 +924,7 @@ describe('AgentExecutor', () => {
         createdAt: Date
         updatedAt: Date
       }) => { savedStates.set(state.agentId, structuredClone(state)) },
+      queryDocuments: async () => ({ documents: [] }),
     } as unknown as ArtifactsService
     const parent = { ...definition, id: 'persistent-parent' }
     const delegationArgs = { goal: 'Find two relevant sources', role: 'researcher' }

@@ -15,6 +15,15 @@ export interface ProviderHealth {
   recentSuccess: boolean;
 }
 
+export interface ModelPerformanceOutcome {
+  successRate: number;
+  avgLatencyMs: number;
+  avgCostPerRequest: number;
+  totalRequests: number;
+  totalCost?: number;
+  costRequests?: number;
+}
+
 const FREE_PROVIDER_PRIORITY: Record<string, number> = {} as Record<string, number>;
 
 function providerPriority(provider: string): number {
@@ -80,6 +89,7 @@ interface ScoredModel {
 export class ModelRouter {
   private models = new Map<string, ModelDefinition>();
   private providerHealth = new Map<string, ProviderHealth>();
+  private performanceMetrics = new Map<string, ModelPerformanceOutcome>();
 
   registerModel(model: ModelDefinition) {
     this.models.set(`${model.provider}:${model.id}`, model);
@@ -105,6 +115,10 @@ export class ModelRouter {
 
   updateProviderHealth(health: ProviderHealth) {
     this.providerHealth.set(health.provider, health);
+  }
+
+  setPerformanceMetrics(metrics: ReadonlyMap<string, ModelPerformanceOutcome>) {
+    this.performanceMetrics = new Map(metrics);
   }
 
   route(options: { task: string; maxTokens?: number; budget?: number; freeOnly?: boolean; optimizeFor?: 'cost' | 'speed' | 'accuracy' | 'creativity' | 'balanced'; excludedModelIds?: Iterable<string> }): ModelDefinition {
@@ -204,6 +218,24 @@ export class ModelRouter {
       }
       if (health.recentSuccess) {
         score += 20;
+      }
+    }
+
+    const metrics = this.performanceMetrics.get(`${model.provider}:${model.id}`);
+    if (metrics && metrics.totalRequests > 0) {
+      // Keep persisted outcomes a bounded ranking signal; eligibility stays above this scoring step.
+      const successRate = Math.max(0, Math.min(1, metrics.successRate));
+      score += (successRate - 0.5) * 40;
+
+      if (Number.isFinite(metrics.avgLatencyMs) && metrics.avgLatencyMs >= 0) {
+        score += (10 / (1 + metrics.avgLatencyMs / 1000)) - 5;
+      }
+
+      const hasMeasuredCost = (metrics.costRequests ?? 0) > 0
+        || (metrics.totalCost ?? 0) > 0
+        || metrics.avgCostPerRequest > 0;
+      if (hasMeasuredCost && Number.isFinite(metrics.avgCostPerRequest) && metrics.avgCostPerRequest >= 0) {
+        score += (10 / (1 + metrics.avgCostPerRequest * 100)) - 5;
       }
     }
 

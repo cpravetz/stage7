@@ -56,23 +56,43 @@ describe('generateValidPlan', () => {
     expect(requests[1]?.prompt).toContain('incomplete')
   })
 
-  it('asks Brain to amend a plan that violates phase-count standards', async () => {
-    const requests: PlannerCompletionRequest[] = []
-    let responseIndex = 0
-    const responses = [
-      JSON.stringify(validPlan(1)),
-      JSON.stringify(validPlan(3)),
-    ]
-    const complete = async (request: PlannerCompletionRequest): Promise<string> => {
-      requests.push(request)
-      return responses[responseIndex++]!
+  it('accepts one phase with more than five dependency-ordered tasks', async () => {
+    const manyTaskPlan = validPlan(1)
+    const phase = manyTaskPlan.phases[0]!
+    let previousTaskId = phase.tasks[0]!.id
+    for (let index = 1; index <= 7; index++) {
+      const taskId = `phase-1-task-${index}`
+      phase.tasks.push({
+        id: taskId,
+        title: `Complete deliverable part ${index}`,
+        description: `Produce part ${index} for the stated goal`,
+        agentRole: 'analyst',
+        systemPrompt: 'Complete this task for the stated goal.',
+        dependsOnTaskIds: [previousTaskId],
+        expectedArtifacts: [`deliverable-part-${index}.md`],
+        status: 'pending',
+        artifacts: [],
+      })
+      previousTaskId = taskId
     }
+    const complete = jest.fn(async (): Promise<string> => JSON.stringify(manyTaskPlan))
 
-    const plan = await generateValidPlan('Build a research plan', {}, 'mission-2', complete)
+    const plan = await generateValidPlan('Build a research plan', {}, 'mission-many-tasks', complete)
 
-    expect(plan.phases).toHaveLength(3)
-    expect(requests).toHaveLength(2)
-    expect(requests[1]?.prompt).toContain('phases must contain 3-7 phases')
+    expect(plan.phases).toHaveLength(1)
+    expect(plan.phases[0]?.tasks).toHaveLength(8)
+    expect(plan.phases[0]?.tasks[7]?.dependsOnTaskIds).toEqual([plan.phases[0]?.tasks[6]?.id])
+    expect(complete).toHaveBeenCalledTimes(1)
+  })
+
+  it('accepts plans with more than seven phases', async () => {
+    const manyPhasePlan = validPlan(9)
+    const complete = jest.fn(async (): Promise<string> => JSON.stringify(manyPhasePlan))
+
+    const plan = await generateValidPlan('Build a research plan', {}, 'mission-many-phases', complete)
+
+    expect(plan.phases).toHaveLength(9)
+    expect(complete).toHaveBeenCalledTimes(1)
   })
 
   it('rejects dependency cycles before the plan can reach task selection', async () => {
@@ -104,7 +124,6 @@ describe('generateValidPlan', () => {
     const responses = [
       JSON.stringify(duplicatePlan),
       JSON.stringify(duplicatePlan),
-      JSON.stringify(duplicatePlan),
       JSON.stringify(validPlan()),
     ]
     const complete = async (request: PlannerCompletionRequest): Promise<string> => {
@@ -115,24 +134,24 @@ describe('generateValidPlan', () => {
     const plan = await generateValidPlan('Create a business plan', {}, 'mission-duplicates', complete)
 
     expect(plan.phases[1]?.tasks[0]?.id).not.toBe(plan.phases[0]?.tasks[0]?.id)
-    expect(requests.map((request) => request.attempt)).toEqual([1, 2, 3, 4])
+    expect(requests.map((request) => request.attempt)).toEqual([1, 2, 3])
     expect(requests[1]?.prompt).toContain('task ids must be globally unique');
     expect(requests[1]?.prompt).toContain('phases[1].tasks[0].id duplicates');
     expect(requests[1]?.prompt).toContain('Do not reuse task IDs across phases');
   })
 
-  it('continues repair attempts beyond six responses until a valid plan is returned', async () => {
+  it('stops after the bounded planner repair attempts', async () => {
     let calls = 0
     const complete = async (request: PlannerCompletionRequest): Promise<string> => {
       calls++
       expect(request.attempt).toBe(calls)
-      return calls < 9 ? '{"summary":"still invalid"}' : JSON.stringify(validPlan())
+      return '{"summary":"still invalid"}'
     }
 
-    const plan = await generateValidPlan('Create a business plan', {}, 'mission-3', complete)
+    await expect(generateValidPlan('Create a business plan', {}, 'mission-3', complete))
+      .rejects.toThrow('Unable to generate a valid mission plan after 3 attempts')
 
-    expect(plan.summary).toBe('A goal-specific execution plan')
-    expect(calls).toBe(9)
+    expect(calls).toBe(3)
   })
 
   it('fails only when Brain reports that every eligible model is exhausted', async () => {

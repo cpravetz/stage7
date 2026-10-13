@@ -1,13 +1,17 @@
 import { AgentRuntime } from './AgentRuntime';
 import { ArtifactsService } from '@stage7-nextgen/artifacts';
 import { logger } from '@stage7-nextgen/shared';
+import { createHash } from 'crypto';
 import {
+  AgentLearning,
+  AgentLearningInput,
   AgentDefinition,
   AgentState,
   AgentTask,
   AgentCollaboration,
   AgentSpecialization,
 } from '../types';
+import { BadRequestError, ConflictError, NotFoundError } from '../utils/errors';
 import {
   AgentExecutor,
   isResumableDelegationCheckpoint,
@@ -165,6 +169,29 @@ export class PersistentAgentRuntime {
       );
     }
 
+    const taskContext = task.input.context && typeof task.input.context === 'object' && !Array.isArray(task.input.context)
+      ? task.input.context as Record<string, unknown>
+      : {};
+    const domain = typeof taskContext.domain === 'string' && taskContext.domain.trim()
+      ? taskContext.domain.trim()
+      : task.type;
+    const learnings = await this.getLearningsForAgent(agentId, state.missionId, domain);
+    task.input = {
+      ...task.input,
+      context: {
+        ...taskContext,
+        agentLearnings: learnings.map((learning) => ({
+          domain: learning.domain,
+          guidance: learning.guidance,
+          evidence: learning.evidence,
+          source: learning.source,
+          sourceRef: learning.sourceRef,
+          confidence: learning.confidence,
+        })),
+      },
+    };
+    this.runtime.restoreTask(task);
+
     if (state.context.activeTaskId !== taskId) {
       state.context = { ...state.context, activeTaskId: taskId };
       state.status = 'running';
@@ -209,6 +236,118 @@ export class PersistentAgentRuntime {
 
   getSpecializations(agentId: string): AgentSpecialization[] {
     return this.runtime.getSpecializations(agentId);
+  }
+
+  async recordLearning(
+    agentId: string,
+    missionId: string,
+    input: AgentLearningInput,
+  ): Promise<AgentLearning> {
+    const { state, definition } = this.getAgentScope(agentId, missionId);
+    if (
+      !input
+      || typeof input.domain !== 'string'
+      || !input.domain.trim()
+      || input.domain.length > 80
+      || typeof input.guidance !== 'string'
+      || !input.guidance.trim()
+      || input.guidance.length > 1_000
+      || (input.evidence !== undefined && (typeof input.evidence !== 'string' || input.evidence.length > 2_000))
+      || (input.source !== 'human_feedback' && input.source !== 'validated_outcome')
+      || typeof input.sourceRef !== 'string'
+      || !input.sourceRef.trim()
+      || input.sourceRef.length > 200
+      || typeof input.recordedBy !== 'string'
+      || !input.recordedBy.trim()
+      || input.recordedBy.length > 120
+      || !Number.isFinite(input.confidence)
+      || input.confidence < 0
+      || input.confidence > 1
+    ) {
+      throw new BadRequestError('Agent learning requires bounded guidance and explicit, scoped provenance');
+    }
+
+    await this.persistence.ready();
+    const id = `agent-learning-${createHash('sha256')
+      .update(`${state.tenantId}\0${agentId}\0${input.sourceRef.trim()}`)
+      .digest('hex')}`;
+    const existing = await this.persistence.getDocument(id);
+    if (existing) {
+      if (existing.tenantId !== state.tenantId || existing.collection !== 'agent-learnings') {
+        throw new ConflictError(`Agent learning provenance key ${input.sourceRef} is already owned by another scope`);
+      }
+      const stored = existing.data as unknown as AgentLearning;
+      if (
+        stored.agentId !== agentId
+        || stored.sourceRef !== input.sourceRef.trim()
+        || stored.domain !== input.domain.trim()
+        || stored.guidance !== input.guidance.trim()
+        || stored.evidence !== input.evidence?.trim()
+        || stored.source !== input.source
+        || stored.recordedBy !== input.recordedBy.trim()
+        || stored.confidence !== input.confidence
+      ) {
+        throw new ConflictError(`Agent learning provenance key ${input.sourceRef} cannot be reused with different content`);
+      }
+      return stored;
+    }
+
+    const learning: AgentLearning = {
+      id,
+      tenantId: state.tenantId,
+      agentId: definition.id,
+      domain: input.domain.trim(),
+      guidance: input.guidance.trim(),
+      ...(input.evidence?.trim() ? { evidence: input.evidence.trim() } : {}),
+      source: input.source,
+      sourceRef: input.sourceRef.trim(),
+      recordedBy: input.recordedBy.trim(),
+      confidence: input.confidence,
+      createdAt: new Date().toISOString(),
+    };
+    await this.persistence.createDocument({
+      id,
+      tenantId: state.tenantId,
+      collection: 'agent-learnings',
+      data: { ...learning },
+    });
+    logger.info(
+      { agentId, missionId, domain: learning.domain, source: learning.source },
+      'Tenant-scoped Agent learning recorded',
+    );
+    return learning;
+  }
+
+  async getLearningsForAgent(
+    agentId: string,
+    missionId: string,
+    domain?: string,
+  ): Promise<AgentLearning[]> {
+    const { state } = this.getAgentScope(agentId, missionId);
+    await this.persistence.ready();
+    const { documents } = await this.persistence.queryDocuments({
+      collection: 'agent-learnings',
+      filter: { tenantId: state.tenantId },
+      sort: { createdAt: -1 },
+      limit: 100,
+    });
+    return documents
+      .map((document) => document.data as unknown as AgentLearning)
+      .filter((learning) => (
+        learning.tenantId === state.tenantId
+        && typeof learning.guidance === 'string'
+        && (learning.domain === 'general' || learning.domain === domain)
+      ))
+      .slice(0, 5);
+  }
+
+  private getAgentScope(agentId: string, missionId: string): { state: AgentState; definition: AgentDefinition } {
+    const definition = this.runtime.getAgent(agentId);
+    const state = this.runtime.getAgentState(agentId);
+    if (!definition || !state || state.missionId !== missionId || definition.tenantId !== state.tenantId) {
+      throw new NotFoundError('Mission agent');
+    }
+    return { state, definition };
   }
 
   private async persistState(state: AgentState): Promise<void> {

@@ -54,6 +54,7 @@ export class MissionOrchestrator {
     const agentRuntime = new MissionAgentRuntime({
       missionId: ctx.missionId,
       tenantId: ctx.tenantId || 'tenant-1',
+      metadata: ctx.metadata,
       agentRuntimeUrl: ctx.agentRuntimeUrl,
       broadcast: ctx.broadcastAll,
     });
@@ -222,7 +223,7 @@ export class MissionOrchestrator {
         completedTaskSummaries.set(task.id, {
           taskId: task.id,
           output: result.output.slice(0, 1_200),
-          artifactNames: result.artifacts.slice(0, 20).map((artifact) => artifact.name),
+          artifactNames: result.artifacts.map((artifact) => artifact.name),
         });
         ctx.heartbeat?.();
       };
@@ -270,7 +271,7 @@ export class MissionOrchestrator {
             ctx.prompt,
             plan,
             phase,
-            [...completedTaskSummaries.values()].slice(-10),
+            [...completedTaskSummaries.values()],
             reviewIndex,
           );
           const applied = applyPhaseReview(plan, phase.id, review);
@@ -279,7 +280,7 @@ export class MissionOrchestrator {
           if (applied.satisfied) break;
           if (!applied.amendment) {
             throw new Error(
-              `Mission phase ${phase.id} remains incomplete after bounded amendments: ${applied.gaps.join('; ') || 'no review details supplied'}`,
+              `Mission phase ${phase.id} remains incomplete and the reviewer provided no actionable follow-up task: ${applied.gaps.join('; ') || 'no review details supplied'}`,
             );
           }
           saveCheckpoint();

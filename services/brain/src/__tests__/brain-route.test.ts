@@ -2,6 +2,7 @@ import express from 'express';
 import request from 'supertest';
 import brainRouter from '../routes/brain';
 import { brainInstance } from '../utils/sharedInstance';
+import * as sharedInstance from '../utils/sharedInstance';
 
 const app = express();
 app.use(express.json());
@@ -13,6 +14,7 @@ describe('Brain completion route model selection', () => {
   });
 
   it('ignores model and provider fields and delegates selection to Brain', async () => {
+    jest.spyOn(sharedInstance, 'getBrainInstance').mockResolvedValue(brainInstance);
     const complete = jest.spyOn(brainInstance, 'complete').mockResolvedValue({
       content: 'Brain selected a suitable model.',
       model: 'selected-by-brain',

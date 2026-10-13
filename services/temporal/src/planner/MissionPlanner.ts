@@ -10,12 +10,13 @@ import { logger } from '@stage7-nextgen/shared';
 import { randomUUID } from 'crypto';
 
 const MAX_PRIOR_RESPONSE_CHARS = 12_000;
+const MAX_PLANNER_ATTEMPTS = 3;
 
 export const PLANNER_SYSTEM_PROMPT = `You are a mission planner for an AI agent platform. Given a user's goal, produce a complete structured plan tailored to that goal.
 
 Requirements:
 1. If the goal is ambiguous, set requiresClarification=true and ask 2-4 focused questions. Otherwise set requiresClarification=false and clarificationQuestions=[].
-2. For a goal that does not need clarification, create 3-7 phases with clear deliverables. Each phase must contain 1-5 specific tasks.
+2. For a goal that does not need clarification, create as many phases and specific tasks as needed to fully accomplish it. Keep every phase meaningful and include at least one task in each phase.
 3. Each phase must include id, name, goal, tasks, requiresApproval, and status. Use "pending" for the initial status.
 4. Each task must include id, title, description, agentRole, systemPrompt, dependsOnTaskIds, expectedArtifacts, status, and artifacts. Use "pending" for the initial status and [] when there are no artifacts yet. dependsOnTaskIds lists task IDs that must complete first; use [] only when the task is genuinely independent.
 5. Give every phase a unique, stable id. Task ids must be globally unique across the entire plan, not merely unique within each phase. Use ids such as "phase-2-task-1"; never reuse "task-1" in another phase. Dependencies may refer only to tasks in the same or an earlier phase, and must not form a cycle. Select agent roles based on the actual work.
@@ -73,8 +74,8 @@ function planStandardIssues(plan: Plan): string[] {
     return issues;
   }
 
-  if (plan.phases.length < 3 || plan.phases.length > 7) {
-    issues.push(`phases must contain 3-7 phases; received ${plan.phases.length}`);
+  if (plan.phases.length === 0) {
+    issues.push('phases must contain at least one phase when clarification is not required');
   }
 
   const phaseIds = new Set<string>();
@@ -83,8 +84,8 @@ function planStandardIssues(plan: Plan): string[] {
   for (const [phaseIndex, phase] of plan.phases.entries()) {
     if (phaseIds.has(phase.id)) issues.push(`phases[${phaseIndex}].id duplicates "${phase.id}"`);
     phaseIds.add(phase.id);
-    if (phase.tasks.length < 1 || phase.tasks.length > 5) {
-      issues.push(`phases[${phaseIndex}].tasks must contain 1-5 tasks; received ${phase.tasks.length}`);
+    if (phase.tasks.length === 0) {
+      issues.push(`phases[${phaseIndex}].tasks must contain at least one task`);
     }
     for (const [taskIndex, task] of phase.tasks.entries()) {
       const taskPath = `phases[${phaseIndex}].tasks[${taskIndex}].id`;
@@ -156,7 +157,7 @@ export async function generateValidPlan(
   let previousResponse = '';
   const routingSessionId = missionId ? `${missionId}:planner` : `planner:${randomUUID()}`;
 
-  for (let attempt = 1; ; attempt++) {
+  for (let attempt = 1; attempt <= MAX_PLANNER_ATTEMPTS; attempt++) {
     const repairPrompt = attempt === 1
       ? ''
       : [
@@ -201,14 +202,15 @@ export async function generateValidPlan(
         lastError = formatSchemaIssues(parsed.error.issues).join('\n');
         throw new Error(lastError);
       }
-      const standardsIssues = planStandardIssues(parsed.data);
+      const plan = parsed.data;
+      const standardsIssues = planStandardIssues(plan);
       if (standardsIssues.length) {
         lastError = standardsIssues.join('\n');
         throw new Error(lastError);
       }
 
-      logger.info({ missionId, missionGoal: prompt.slice(0, 50), phases: parsed.data.phases.length, attempt }, 'Plan generated');
-      return parsed.data;
+      logger.info({ missionId, missionGoal: prompt.slice(0, 50), phases: plan.phases.length, attempt }, 'Plan generated');
+      return plan;
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
       logger.warn(
@@ -217,6 +219,10 @@ export async function generateValidPlan(
       );
     }
   }
+
+  throw new Error(
+    `Unable to generate a valid mission plan after ${MAX_PLANNER_ATTEMPTS} attempts. Last validation issue: ${lastError || 'Brain did not return a valid plan'}`,
+  );
 }
 
 export class MissionPlanner {

@@ -61,6 +61,7 @@ export interface ModelPerformanceMetrics {
   avgLatencyMs: number;
   successRate: number;
   avgCostPerRequest: number;
+  costRequests?: number;
   lastUpdated: number;
 }
 
@@ -108,10 +109,6 @@ export class BrainService {
   private llmSettingsCache: { freeModelsOnly: boolean; fetchedAt: number } | null = null;
   private LLMS_SETTINGS_TTL_MS = 30000; // 30 seconds
 
-  // Track recently successful model+provider combinations to prioritize them
-  private recentSuccesses: Map<string, number> = new Map();
-  private readonly RECENT_SUCCESS_TTL_MS = 300000; // 5 minutes
-
   // Performance tracking - persisted to artifacts service
   private performanceMetricsCache: Map<string, ModelPerformanceMetrics> | null = null;
   private performanceCacheFetchedAt: number = 0;
@@ -127,6 +124,7 @@ export class BrainService {
       this.loadPerformanceMetrics(),
       this.loadBrainLog(),
     ]);
+    this.router.setPerformanceMetrics(this.performanceMetricsCache || new Map());
     logger.info('Brain initialized with persisted history and metrics');
   }
 
@@ -204,31 +202,6 @@ export class BrainService {
     return this.router.listModels();
   }
 
-  private prioritizeRecentSuccesses(candidates: ModelDefinition[]): ModelDefinition[] {
-    const now = Date.now();
-    const recent = candidates
-      .filter((m) => {
-        const key = `${m.provider}:${m.id}`;
-        const ts = this.recentSuccesses.get(key);
-        return ts !== undefined && (now - ts) < this.RECENT_SUCCESS_TTL_MS;
-      })
-      .sort((a, b) => {
-        const ka = `${a.provider}:${a.id}`;
-        const kb = `${b.provider}:${b.id}`;
-        return (this.recentSuccesses.get(kb) || 0) - (this.recentSuccesses.get(ka) || 0);
-      });
-
-    if (recent.length === 0) return candidates;
-
-    // Move recently successful models to the front, keep the rest after
-    const remaining = candidates.filter((m) => !recent.includes(m));
-    return [...recent, ...remaining];
-  }
-
-  private recordSuccess(provider: string, model: string) {
-    this.recentSuccesses.set(`${provider}:${model}`, Date.now());
-  }
-
   private updateProviderHealth(provider: string, success: boolean) {
     const breaker = this.circuitBreakers.get(provider);
     const state = breaker?.getState() ?? 'closed';
@@ -276,6 +249,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
     }
 
     await this.modelCatalogReady;
+    this.router.setPerformanceMetrics(await this.loadPerformanceMetrics());
 
     // Optionally consult llm-config for runtime preference to prefer free models
     const settings = await this.loadLlmSettings();
@@ -295,14 +269,6 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
       ...routingOptions,
       excludedModelIds: attemptedModelIds,
     });
-
-    // Reorder candidates to prioritize recently successful models
-    const candidatesById = new Map(candidates.map((candidate) => [modelRoutingKey(candidate.model), candidate]));
-    candidates = this.prioritizeRecentSuccesses(candidates.map((candidate) => candidate.model))
-      .flatMap((model) => {
-        const candidate = candidatesById.get(modelRoutingKey(model));
-        return candidate ? [candidate] : [];
-      });
 
     if (!candidates || candidates.length === 0) {
       if (routingSessionKey) {
@@ -381,6 +347,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
         temperature: options.temperature,
       };
 
+      const candidateStartTime = Date.now();
       logger.info({ provider: provider.id, model: candidate.model.id }, 'Dispatching completion (candidate)');
       lastCandidate = { id: candidate.model.id, provider: provider.id };
       const breaker = this.circuitBreakers.get(provider.id) || new CircuitBreaker(Number(process.env.BRAIN_CIRCUIT_THRESHOLD) || 8, Number(process.env.BRAIN_CIRCUIT_COOLDOWN_MS) || 60000);
@@ -439,15 +406,12 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
             estimatedCost,
           });
 
-          // Record this provider/model as recently successful for prioritization
-          this.recordSuccess(result.provider, result.model);
-
           // Update provider health in router
           this.updateProviderHealth(result.provider, true);
           this.recordRoutingSessionAttempts(routingSessionKey, attemptedModelIds);
 
           // Record performance metrics
-          await this.recordPerformanceMetrics(result.model, result.provider, Date.now() - startTime, response.tokensUsed, estimatedCost, true);
+          await this.recordPerformanceMetrics(result.model, result.provider, Date.now() - candidateStartTime, response.tokensUsed, estimatedCost, true);
 
           if (!routingSessionKey) await this.cache.set(cacheKey, result);
 
@@ -510,6 +474,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
               error: errMsg,
             });
             this.updateProviderHealth(provider.id, false);
+            await this.recordPerformanceMetrics(candidate.model.id, provider.id, Date.now() - candidateStartTime, undefined, undefined, false);
             break;
           }
           if (isProviderFatal) {
@@ -532,6 +497,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
               modelIssue: false,
             });
             this.updateProviderHealth(provider.id, false);
+            await this.recordPerformanceMetrics(candidate.model.id, provider.id, Date.now() - candidateStartTime, undefined, undefined, false);
             lastFailureWasLogged = true;
             break;
           }
@@ -550,6 +516,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
               modelIssue: true,
             });
             this.updateProviderHealth(provider.id, false);
+            await this.recordPerformanceMetrics(candidate.model.id, provider.id, Date.now() - candidateStartTime, undefined, undefined, false);
             lastFailureWasLogged = true;
             break;
           }
@@ -567,6 +534,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
               error: errMsg,
             });
             this.updateProviderHealth(provider.id, false);
+            await this.recordPerformanceMetrics(candidate.model.id, provider.id, Date.now() - candidateStartTime, undefined, undefined, false);
             lastFailureWasLogged = true;
             break;
           }
@@ -579,6 +547,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
           }
 
           // exhausted attempts for this candidate; log and try next candidate
+          await this.recordPerformanceMetrics(candidate.model.id, provider.id, Date.now() - candidateStartTime, undefined, undefined, false);
           this.addLog({
             type: 'error',
             model: candidate.model.id,
@@ -598,11 +567,6 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
 
     const finalModel = lastCandidate?.id;
     const finalProvider = lastCandidate?.provider;
-
-    // Record performance metrics for final failure
-    if (finalModel && finalProvider) {
-      await this.recordPerformanceMetrics(finalModel, finalProvider, Date.now() - startTime, undefined, undefined, false);
-    }
 
     if (!lastFailureWasLogged) {
       this.addLog({
@@ -773,6 +737,7 @@ private async savePerformanceMetrics(metrics: Map<string, ModelPerformanceMetric
         avgLatencyMs: 0,
         successRate: 0,
         avgCostPerRequest: 0,
+        costRequests: 0,
         lastUpdated: now,
       };
       metricsMap.set(key, metrics);
@@ -785,9 +750,12 @@ private async savePerformanceMetrics(metrics: Map<string, ModelPerformanceMetric
     if (tokensUsed) {
       metrics.totalTokensUsed += tokensUsed;
     }
-    if (cost) {
+    if (cost !== undefined) {
+      const priorCostRequests = metrics.costRequests
+        ?? (metrics.totalCost > 0 ? metrics.totalRequests - 1 : 0);
       metrics.totalCost += cost;
-      metrics.avgCostPerRequest = metrics.totalCost / metrics.totalRequests;
+      metrics.costRequests = priorCostRequests + 1;
+      metrics.avgCostPerRequest = metrics.totalCost / metrics.costRequests;
     }
     
     if (success) {
@@ -801,6 +769,7 @@ private async savePerformanceMetrics(metrics: Map<string, ModelPerformanceMetric
     await this.savePerformanceMetrics(metricsMap);
     // Update local cache
     this.performanceMetricsCache = metricsMap;
+    this.router.setPerformanceMetrics(metricsMap);
   }
 
   async getPerformanceMetrics(): Promise<ModelPerformanceMetrics[]> {
@@ -819,6 +788,7 @@ private async savePerformanceMetrics(metrics: Map<string, ModelPerformanceMetric
     await this.savePerformanceMetrics(emptyMap);
     this.performanceMetricsCache = emptyMap;
     this.performanceCacheFetchedAt = 0;
+    this.router.setPerformanceMetrics(emptyMap);
   }
 
   validateStructuredOutput<T>(schema: z.ZodSchema, data: unknown): T {

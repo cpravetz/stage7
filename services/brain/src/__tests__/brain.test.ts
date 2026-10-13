@@ -218,6 +218,90 @@ describe('BrainService', () => {
     }
   });
 
+  it('reloads persisted measured outcomes and uses them in a later Brain instance', async () => {
+    const models = {
+      'baseline-cheap': {
+        id: 'baseline-cheap',
+        capabilities: ['chat', 'code'],
+        maxTokens: 4096,
+        costPer1kTokens: 0.05,
+      },
+      'measured-model': {
+        id: 'measured-model',
+        capabilities: ['chat', 'code'],
+        maxTokens: 4096,
+        costPer1kTokens: 0.09,
+      },
+    };
+    const provider = {
+      id: 'outcomes',
+      name: 'Outcome Provider',
+      info: {
+        id: 'outcomes',
+        name: 'Outcome Provider',
+        apiBase: 'http://outcomes',
+        hasApiKey: true,
+        openAICompatible: true,
+      },
+      isAvailable: () => true,
+      listModels: async () => Object.values(models),
+      complete: async (req: CompletionRequest) => {
+        if (req.model === 'baseline-cheap') throw new Error('model baseline-cheap does not exist');
+        return {
+          content: 'outcome response',
+          model: req.model,
+          provider: 'outcomes',
+          tokensUsed: 10,
+        };
+      },
+    } satisfies LLMProvider;
+    mockProviderInstances.push(provider);
+
+    let persistedMetrics: Record<string, Record<string, unknown>> = {};
+    const fetchSpy = jest.spyOn(global, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || 'GET';
+      if (url.endsWith('/api/artifacts/documents/llm-config')) {
+        return { ok: true, json: async () => ({ data: { freeModelsOnly: false } }) } as Response;
+      }
+      if (url.endsWith('/api/artifacts/documents/model-performance-metrics')) {
+        if (method === 'PUT') {
+          persistedMetrics = JSON.parse(String(init?.body)).data;
+          return { ok: true, json: async () => ({}) } as Response;
+        }
+        return { ok: true, json: async () => ({ data: persistedMetrics }) } as Response;
+      }
+      return { ok: true, json: async () => ({}) } as Response;
+    });
+
+    try {
+      const firstBrain = new BrainService();
+      const measuredResult = await firstBrain.complete('implement code', { optimizeFor: 'balanced' });
+      expect(measuredResult.model).toBe('measured-model');
+      expect(persistedMetrics['outcomes:baseline-cheap']).toMatchObject({
+        failedRequests: 1,
+        successRate: 0,
+      });
+      expect(persistedMetrics['outcomes:measured-model']).toMatchObject({
+        successfulRequests: 1,
+        successRate: 1,
+        avgLatencyMs: expect.any(Number),
+        avgCostPerRequest: expect.any(Number),
+        costRequests: 1,
+      });
+
+      const reloadedBrain = new BrainService();
+      const laterResult = await reloadedBrain.complete('chat response');
+      expect(laterResult.model).toBe('measured-model');
+      expect(fetchSpy).toHaveBeenCalledWith(
+        expect.stringContaining('/api/artifacts/documents/model-performance-metrics'),
+        { method: 'GET' },
+      );
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
   it('should list providers', () => {
     const providers = brain.listProviders();
     expect(providers.length).toBe(1);

@@ -53,6 +53,8 @@ const STATUS_BADGE: Record<string, string> = {
   running: 'running',
   pausing: 'running',
   canceling: 'running',
+  stopping: 'running',
+  resuming: 'running',
   paused: 'paused',
   completed: 'completed',
   failed: 'failed',
@@ -68,6 +70,8 @@ function getMissionStatusLabel(status: string): string {
     case 'running': return 'Running';
     case 'pausing': return 'Pausing after current task';
     case 'canceling': return 'Stopping after current task';
+    case 'stopping': return 'Stopping after current task';
+    case 'resuming': return 'Resuming';
     case 'completed': return 'Completed';
     case 'failed': return 'Failed';
     case 'canceled': return 'Canceled';
@@ -262,12 +266,14 @@ const MissionRoom = () => {
   const detailError = useMissionsStore((s) => s.detailError[workflowId]);
   const fetchMissionDetail = useMissionsStore((s) => s.fetchMissionDetail);
   const refreshDetail = useMissionsStore((s) => s.refreshDetail);
+  const updateMissionStatus = useMissionsStore((s) => s.updateMissionStatus);
   const retryMission = useMissionsStore((s) => s.retryMission);
 
   const [tab, setTab] = useState<Tab>('conversation');
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [controlError, setControlError] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
   const transcriptRef = useRef<HTMLDivElement>(null);
   const [retryGuidance, setRetryGuidance] = useState('');
@@ -377,6 +383,16 @@ const MissionRoom = () => {
       });
     }
     let phases: PhaseOutput[] = detail?.output?.outputs?.phases || [];
+    const taskTitleById = new Map<string, string>();
+    for (const p of plan?.phases || []) {
+      for (const t of p.tasks || []) {
+        if (t.title) taskTitleById.set(t.id, t.title);
+      }
+    }
+    const taskLabel = (taskId: string): string => {
+      const title = taskTitleById.get(taskId);
+      return title && title.length > 0 ? (title.length > 80 ? `${title.slice(0, 77)}…` : title) : taskId;
+    };
     if (phases.length === 0 && plan?.phases) {
       phases = plan.phases.map((p) => ({
         phaseId: p.id,
@@ -394,7 +410,7 @@ const MissionRoom = () => {
     for (const phase of phases) {
       const phaseStartedAt = (phase as any).startedAt ? new Date((phase as any).startedAt).getTime() : startedAt;
       const phaseCompletedAt = (phase as any).completedAt ? new Date((phase as any).completedAt).getTime() : phaseStartedAt + 1000;
-      
+
       fromOutput.push({
         id: `derived-phase-started-${phase.phaseId}`,
         type: 'phase_started',
@@ -411,7 +427,7 @@ const MissionRoom = () => {
           id: `derived-task-${phase.phaseId}-${task.taskId}`,
           type: task.status === 'failed' ? 'task_failed' : 'task_completed',
           source: 'orchestrator',
-          message: `${task.status === 'failed' ? 'Task failed' : 'Task completed'}: ${task.taskId}`,
+          message: `${task.status === 'failed' ? 'Task failed' : 'Task completed'}: ${taskLabel(task.taskId)}`,
           timestamp: taskCompletedAt,
           missionId,
           metadata: { phaseId: phase.phaseId, taskId: task.taskId, output: task.output },
@@ -658,32 +674,47 @@ const MissionRoom = () => {
             <div style={{ display: 'flex', gap: 8 }}>
                 {['paused', 'pending'].includes(status) && (
                  <button onClick={async () => {
+                   setControlError(null);
                    try {
-                     await postJSON(`/api/temporal/missions/${encodeURIComponent(workflowId)}/start`, {});
-                     refreshDetail(workflowId);
-                   } catch {
-                     // ignore — refresh will show errors
+                     const result = await postJSON<{ status: string }>(
+                       `/api/temporal/missions/${encodeURIComponent(workflowId)}/start`,
+                       {},
+                     );
+                     updateMissionStatus(workflowId, result.status);
+                     await refreshDetail(workflowId);
+                   } catch (error) {
+                     setControlError(error instanceof Error ? error.message : 'Failed to resume mission');
                    }
                  }}>Start</button>
                )}
                {status === 'running' && (
                  <button onClick={async () => {
+                   setControlError(null);
                    try {
-                     await postJSON(`/api/temporal/missions/${encodeURIComponent(workflowId)}/pause`, {});
-                     refreshDetail(workflowId);
-                   } catch {
-                     // ignore — refresh will show errors
+                     const result = await postJSON<{ status: string }>(
+                       `/api/temporal/missions/${encodeURIComponent(workflowId)}/pause`,
+                       {},
+                     );
+                     updateMissionStatus(workflowId, result.status);
+                     await refreshDetail(workflowId);
+                   } catch (error) {
+                     setControlError(error instanceof Error ? error.message : 'Failed to pause mission');
                    }
                  }}>Pause</button>
                )}
                {['running', 'pausing', 'paused'].includes(status) && (
                  <button className="danger" onClick={async () => {
                    if (!confirm('Stop mission after the current Agent task reaches a safe checkpoint?')) return;
+                   setControlError(null);
                    try {
-                     await postJSON(`/api/temporal/missions/${encodeURIComponent(workflowId)}/stop`, {});
-                     refreshDetail(workflowId);
-                   } catch {
-                     // ignore — refresh will show errors
+                     const result = await postJSON<{ status: string }>(
+                       `/api/temporal/missions/${encodeURIComponent(workflowId)}/stop`,
+                       {},
+                     );
+                     updateMissionStatus(workflowId, result.status);
+                     await refreshDetail(workflowId);
+                   } catch (error) {
+                     setControlError(error instanceof Error ? error.message : 'Failed to stop mission');
                    }
                  }}>Stop</button>
                )}
@@ -692,6 +723,7 @@ const MissionRoom = () => {
                    {retrying ? 'Retrying...' : 'Retry'}
                  </button>
                )}
+               {controlError && <div className="error-banner">{controlError}</div>}
             </div>
             <span className={`badge ${badge}`}>{getMissionStatusLabel(status)}</span>
              <span className={`connection-status ${connected ? 'online' : 'offline'}`}>

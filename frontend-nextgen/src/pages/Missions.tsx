@@ -116,6 +116,10 @@ const Missions = () => {
   const getMissionStatusLabel = (status: string) => {
     switch (status) {
       case 'running': return 'Running';
+      case 'pausing': return 'Pausing after current task';
+      case 'canceling':
+      case 'stopping': return 'Stopping after current task';
+      case 'resuming': return 'Resuming';
       case 'paused': return 'Paused';
       case 'completed': return 'Completed';
       case 'failed': return 'Failed';
@@ -129,7 +133,9 @@ const Missions = () => {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return missions.filter((m) => {
-      if (filter !== 'all' && m.status !== filter) return false;
+      const isActiveTransition = filter === 'running'
+        && ['pausing', 'canceling', 'stopping', 'resuming'].includes(m.status);
+      if (filter !== 'all' && m.status !== filter && !isActiveTransition) return false;
       if (!q) return true;
       return (
         m.missionId.toLowerCase().includes(q) ||

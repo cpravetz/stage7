@@ -2,9 +2,36 @@ import { Router, Request, Response } from 'express'
 import { runtime } from '../utils/sharedInstance'
 import { asyncHandler } from '../utils/asyncHandler'
 import { AppError, BadRequestError, NotFoundError } from '../utils/errors'
-import { AgentDefinition, AgentTask, AgentCollaboration, AgentSpecialization } from '../types'
+import { AgentDefinition, AgentLearningInput, AgentTask, AgentCollaboration, AgentSpecialization } from '../types'
+import { z } from 'zod'
 
 const router: Router = Router()
+
+const AgentLearningInputSchema = z.object({
+  domain: z.string().trim().min(1).max(80),
+  guidance: z.string().trim().min(1).max(1_000),
+  evidence: z.string().max(2_000).optional(),
+  source: z.enum(['human_feedback', 'validated_outcome']),
+  sourceRef: z.string().trim().min(1).max(200),
+  recordedBy: z.string().trim().min(1).max(120),
+  confidence: z.number().finite().min(0).max(1),
+}).strict()
+
+function requireMissionAgent(missionId: string, agentId: string): AgentDefinition {
+  const agent = runtime.listAgentsForMission(missionId).find((candidate) => candidate.id === agentId)
+  if (!agent || agent.metadata.missionId !== missionId) throw new NotFoundError('Mission agent')
+  const state = runtime.getAgentState(agentId)
+  if (state && (state.missionId !== missionId || state.tenantId !== agent.tenantId)) {
+    throw new NotFoundError('Mission agent')
+  }
+  return agent
+}
+
+function requireMissionTask(agentId: string, taskId: string): AgentTask {
+  const task = runtime.getTask(taskId)
+  if (!task || task.agentId !== agentId) throw new NotFoundError('Agent task')
+  return task
+}
 
 // Backward-compatible unscoped routes for clients that predate mission-scoped URLs.
 router.post('/agents', asyncHandler(async (req: Request, res: Response) => {
@@ -77,62 +104,97 @@ router.get('/missions/:missionId/agents', asyncHandler((req: Request, res: Respo
 }))
 
 router.get('/missions/:missionId/agents/:id', asyncHandler((req: Request, res: Response) => {
-  const { id } = req.params
-  const agent = runtime.getAgent(id)
-  if (!agent) throw new NotFoundError('Agent')
+  const { id, missionId } = req.params as { id: string; missionId: string }
+  const agent = requireMissionAgent(missionId, id)
   res.json(agent)
 }))
 
 router.delete('/missions/:missionId/agents/:id', asyncHandler((req: Request, res: Response) => {
-  const deleted = runtime.unregisterAgent(req.params.id as string)
+  const { id, missionId } = req.params as { id: string; missionId: string }
+  requireMissionAgent(missionId, id)
+  const deleted = runtime.unregisterAgent(id)
   if (!deleted) throw new NotFoundError('Agent')
   res.status(204).send()
 }))
 
 router.post('/missions/:missionId/agents/:id/start', asyncHandler(async (req: Request, res: Response) => {
-  const { missionId } = req.params as { missionId: string }
-  const state = await runtime.startAgent(req.params.id as string, missionId)
+  const { id, missionId } = req.params as { id: string; missionId: string }
+  requireMissionAgent(missionId, id)
+  const state = await runtime.startAgent(id, missionId)
   res.status(201).json(state)
 }))
 
 router.post('/missions/:missionId/agents/:id/stop', asyncHandler(async (req: Request, res: Response) => {
-  await runtime.stopAgent(req.params.id as string)
+  const { id, missionId } = req.params as { id: string; missionId: string }
+  requireMissionAgent(missionId, id)
+  await runtime.stopAgent(id)
   res.status(204).send()
 }))
 
 router.get('/missions/:missionId/agents/:id/state', asyncHandler((req: Request, res: Response) => {
-  const state = runtime.getAgentState(req.params.id as string)
+  const { id, missionId } = req.params as { id: string; missionId: string }
+  requireMissionAgent(missionId, id)
+  const state = runtime.getAgentState(id)
   if (!state) throw new NotFoundError('Agent state')
   res.json(state)
 }))
 
+router.post('/missions/:missionId/agents/:id/learnings', asyncHandler(async (req: Request, res: Response) => {
+  const { missionId, id } = req.params as { missionId: string; id: string }
+  requireMissionAgent(missionId, id)
+  const parsed = AgentLearningInputSchema.safeParse(req.body)
+  if (!parsed.success) {
+    const details = parsed.error.issues
+      .map((issue) => `${issue.path.join('.') || 'body'}: ${issue.message}`)
+      .join('; ')
+    throw new BadRequestError(`Invalid Agent learning: ${details}`)
+  }
+  const input = parsed.data as AgentLearningInput
+  const learning = await runtime.recordLearning(id, missionId, input)
+  res.status(201).json(learning)
+}))
+
+router.get('/missions/:missionId/agents/:id/learnings', asyncHandler(async (req: Request, res: Response) => {
+  const { missionId, id } = req.params as { missionId: string; id: string }
+  requireMissionAgent(missionId, id)
+  const domain = typeof req.query.domain === 'string' ? req.query.domain : undefined
+  const learnings = await runtime.getLearningsForAgent(id, missionId, domain)
+  res.json({ learnings })
+}))
+
 router.post('/missions/:missionId/agents/:id/tasks', asyncHandler(async (req: Request, res: Response) => {
+  const { id, missionId } = req.params as { id: string; missionId: string }
+  requireMissionAgent(missionId, id)
   const taskData = req.body as Omit<AgentTask, 'agentId' | 'taskId' | 'createdAt'> & { taskId?: string }
-  const task = await runtime.submitTask(req.params.id as string, taskData)
+  const task = await runtime.submitTask(id, taskData)
   res.status(201).json(task)
 }))
 
 router.post('/missions/:missionId/agents/:id/tasks/:taskId/execute', asyncHandler(async (req: Request, res: Response) => {
   const { missionId, id, taskId } = req.params as { missionId: string; id: string; taskId: string }
-  const state = runtime.getAgentState(id)
-  if (!state || state.missionId !== missionId) throw new NotFoundError('Mission agent')
-  const task = runtime.getTask(taskId)
-  if (!task || task.agentId !== id) throw new NotFoundError('Agent task')
+  requireMissionAgent(missionId, id)
+  requireMissionTask(id, taskId)
   const requireCompletedReceipt = req.body.requireCompletedReceipt === true
   res.json(await runtime.executeTask(id, taskId, requireCompletedReceipt))
 }))
 
 router.post('/missions/:missionId/agents/:id/tasks/:taskId/complete', asyncHandler(async (req: Request, res: Response) => {
+  const { id, missionId, taskId } = req.params as { id: string; missionId: string; taskId: string }
+  requireMissionAgent(missionId, id)
+  requireMissionTask(id, taskId)
   const { result } = req.body as { result?: any }
-  const task = await runtime.completeTask(req.params.taskId as string, result)
+  const task = await runtime.completeTask(taskId, result)
   if (!task) throw new NotFoundError('Task')
   res.json(task)
 }))
 
 router.post('/missions/:missionId/agents/:id/tasks/:taskId/fail', asyncHandler(async (req: Request, res: Response) => {
+  const { id, missionId, taskId } = req.params as { id: string; missionId: string; taskId: string }
+  requireMissionAgent(missionId, id)
+  requireMissionTask(id, taskId)
   const { error } = req.body as { error: string }
   if (!error) throw new BadRequestError('error is required')
-  const task = runtime.failTask(req.params.taskId as string, error)
+  const task = runtime.failTask(taskId, error)
   if (!task) throw new NotFoundError('Task')
   res.json(task)
 }))
@@ -153,13 +215,17 @@ router.post('/missions/:missionId/collaborations/:id/messages', asyncHandler((re
 }))
 
 router.post('/missions/:missionId/agents/:id/specializations', asyncHandler((req: Request, res: Response) => {
+  const { id, missionId } = req.params as { id: string; missionId: string }
+  requireMissionAgent(missionId, id)
   const specialization = req.body as AgentSpecialization
-  runtime.registerSpecialization(req.params.id as string, specialization)
+  runtime.registerSpecialization(id, specialization)
   res.status(201).json(specialization)
 }))
 
 router.get('/missions/:missionId/agents/:id/specializations', asyncHandler((req: Request, res: Response) => {
-  const specializations = runtime.getSpecializations(req.params.id as string)
+  const { id, missionId } = req.params as { id: string; missionId: string }
+  requireMissionAgent(missionId, id)
+  const specializations = runtime.getSpecializations(id)
   res.json(specializations)
 }))
 

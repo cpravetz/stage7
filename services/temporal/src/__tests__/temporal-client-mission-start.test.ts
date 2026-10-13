@@ -66,7 +66,8 @@ describe('TemporalClient mission start', () => {
     delete process.env.TEMPORAL_ADDRESS
     process.env.ARTIFACTS_URL = 'http://artifacts'
     delete process.env.GATEWAY_URL
-    const client = new TemporalClient()
+    const directRun = jest.fn(async () => ({}))
+    const client = new TemporalClient('default', directRun)
     const input = {
       missionId: 'mission-recovery',
       tenantId: 'tenant-1',
@@ -97,7 +98,6 @@ describe('TemporalClient mission start', () => {
         }],
       }],
     }
-    const directRun = jest.spyOn(missionActivity, 'runMissionDirect').mockResolvedValue({})
     jest.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
       const requestUrl = String(url)
       if (requestUrl.endsWith('/api/artifacts/missions') && !init?.method) {
@@ -135,7 +135,11 @@ describe('TemporalClient mission start', () => {
     delete process.env.TEMPORAL_ADDRESS
     process.env.ARTIFACTS_URL = 'http://artifacts'
     delete process.env.GATEWAY_URL
-    const clients = [new TemporalClient(), new TemporalClient()]
+    const directRun = jest.fn(async () => ({}))
+    const clients = [
+      new TemporalClient('default', directRun),
+      new TemporalClient('default', directRun),
+    ]
     const input = {
       missionId: 'mission-recovery-race',
       tenantId: 'tenant-1',
@@ -143,7 +147,6 @@ describe('TemporalClient mission start', () => {
       prompt: 'Recover once',
     }
     let leaseOwner: string | undefined
-    const directRun = jest.spyOn(missionActivity, 'runMissionDirect').mockResolvedValue({})
     jest.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
       const requestUrl = String(url)
       if (requestUrl.endsWith('/api/artifacts/missions') && !init?.method) {
@@ -241,14 +244,17 @@ describe('TemporalClient mission start', () => {
     )
   })
 
-  it('finishes a stale termination request without replaying uncertain task side effects', async () => {
+  it('recovers stale pause and termination requests without replaying uncertain task side effects', async () => {
     delete process.env.TEMPORAL_ADDRESS
     process.env.ARTIFACTS_URL = 'http://artifacts'
     delete process.env.GATEWAY_URL
     const client = new TemporalClient()
-    const missionId = 'mission-terminate-recovery'
+    const missions = [
+      { missionId: 'mission-pause-recovery', controlState: 'pause_requested', status: 'paused' },
+      { missionId: 'mission-terminate-recovery', controlState: 'terminate_requested', status: 'canceled' },
+    ]
     const directRun = jest.spyOn(missionActivity, 'runMissionDirect')
-    let updatedControlState: unknown
+    const updatedStates = new Map<string, unknown>()
     jest.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
       const requestUrl = String(url)
       if (requestUrl.endsWith('/api/artifacts/missions') && !init?.method) {
@@ -256,11 +262,11 @@ describe('TemporalClient mission start', () => {
           ok: true,
           status: 200,
           json: async () => ({
-            missions: [{ missionId, status: 'running', controlState: 'terminate_requested' }],
+            missions: missions.map(({ status: _status, ...mission }) => ({ ...mission, status: 'running' })),
           }),
         } as Response
       }
-      if (requestUrl.endsWith(`/api/artifacts/missions/${missionId}/recovery-lease`)) {
+      if (requestUrl.endsWith('/recovery-lease')) {
         const body = JSON.parse(String(init?.body)) as { action: string }
         return {
           ok: true,
@@ -268,16 +274,21 @@ describe('TemporalClient mission start', () => {
           json: async () => body.action === 'claim' ? { claimed: true } : { released: true },
         } as Response
       }
-      if (requestUrl.endsWith(`/api/artifacts/missions/${missionId}`) && init?.method === 'PUT') {
-        updatedControlState = JSON.parse(String(init.body))
+      if (init?.method === 'PUT') {
+        const missionId = requestUrl.split('/').pop()!
+        updatedStates.set(missionId, JSON.parse(String(init.body)))
       }
       return { ok: true, status: 200, json: async () => ({}) } as Response
     })
 
-    await expect(client.recoverInFlightMissions()).resolves.toBe(1)
+    await expect(client.recoverInFlightMissions()).resolves.toBe(2)
 
     expect(directRun).not.toHaveBeenCalled()
-    expect(updatedControlState).toEqual(expect.objectContaining({
+    expect(updatedStates.get('mission-pause-recovery')).toEqual(expect.objectContaining({
+      status: 'paused',
+      controlState: 'paused',
+    }))
+    expect(updatedStates.get('mission-terminate-recovery')).toEqual(expect.objectContaining({
       status: 'canceled',
       controlState: 'terminated',
     }))

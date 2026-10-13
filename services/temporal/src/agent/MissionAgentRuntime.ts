@@ -9,6 +9,7 @@ import {
   AgentCollaboration,
   AgentSpecialization,
   AgentExecutionPolicy,
+  AgentToolPolicy,
   DEFAULT_AGENT_EXECUTION_POLICY,
 } from '@stage7-nextgen/shared';
 import { Plan, Phase, Task } from '@stage7-nextgen/shared';
@@ -28,7 +29,7 @@ const TASK_SELECTOR_EXECUTION_POLICY: AgentExecutionPolicy = {
   maxCompletionTokensPerCall: 256,
   maxDelegations: 0,
 };
-const PHASE_REVIEW_SYSTEM_PROMPT = `You are a critical phase reviewer. Compare completed task outputs and artifacts with the mission goal and phase goal. Do not mark a phase complete just because its tasks ran. If the phase goal is satisfied, return {"satisfied":true,"gaps":[],"followUpTask":null}. Otherwise identify concrete gaps and propose exactly one bounded follow-up task that can address a gap, returning {"satisfied":false,"gaps":["..."],"followUpTask":{"title":"...","description":"...","agentRole":"...","systemPrompt":"...","expectedArtifacts":[]}}. Do not propose tasks that repeat completed work. Return only JSON.`;
+const PHASE_REVIEW_SYSTEM_PROMPT = `You are a critical phase reviewer. Compare completed task outputs and artifacts with the mission goal and phase goal. Do not mark a phase complete just because its tasks ran. If the phase goal is satisfied, return {"satisfied":true,"gaps":[],"followUpTask":null}. Otherwise identify concrete gaps and propose exactly one focused follow-up task that can address a gap, returning {"satisfied":false,"gaps":["..."],"followUpTask":{"title":"...","description":"...","agentRole":"...","systemPrompt":"...","expectedArtifacts":[]}}. Do not propose tasks that repeat completed work. Return only JSON.`;
 const PHASE_REVIEW_EXECUTION_POLICY: AgentExecutionPolicy = {
   ...DEFAULT_AGENT_EXECUTION_POLICY,
   maxBrainCalls: 1,
@@ -37,8 +38,7 @@ const PHASE_REVIEW_EXECUTION_POLICY: AgentExecutionPolicy = {
   maxCompletionTokensPerCall: 1_024,
   maxDelegations: 0,
 };
-export const MAX_PHASE_AMENDMENTS = 2;
-export const MAX_TASKS_PER_AMENDED_PHASE = 7;
+const MAX_SAFE_AGENT_TASK_RETRIES = 1;
 
 export interface MissionPhaseReview {
   satisfied: boolean;
@@ -69,24 +69,38 @@ export function applyPhaseReview(
   if (!phase) throw new Error(`Cannot amend missing mission phase ${phaseId}`);
   if (review.satisfied) return { plan, phase, satisfied: true, gaps: review.gaps };
 
-  const amendmentCount = phase.tasks.filter((task) =>
-    task.id.startsWith(`${phase.id}-amendment-`),
-  ).length;
-  if (
-    amendmentCount >= MAX_PHASE_AMENDMENTS
-    || phase.tasks.length >= MAX_TASKS_PER_AMENDED_PHASE
-    || !review.followUpTask
-  ) {
+  const followUpTask = review.followUpTask;
+  if (!followUpTask) {
     return { plan, phase, satisfied: false, gaps: review.gaps };
   }
 
-  const taskId = `${phase.id}-amendment-${amendmentCount + 1}`;
-  if (plan.phases.some((entry) => entry.tasks.some((task) => task.id === taskId))) {
-    throw new Error(`Phase amendment task ID ${taskId} already exists`);
+  const normalize = (value: string) => value.trim().replace(/\s+/g, ' ').toLowerCase();
+  const expectedArtifacts = (artifacts: string[]) => artifacts.map(normalize).sort();
+  const repeatedTask = phase.tasks.find((task) =>
+    normalize(task.title) === normalize(followUpTask.title)
+    && normalize(task.description) === normalize(followUpTask.description)
+    && JSON.stringify(expectedArtifacts(task.expectedArtifacts))
+      === JSON.stringify(expectedArtifacts(followUpTask.expectedArtifacts)),
+  );
+  if (repeatedTask) {
+    return {
+      plan,
+      phase,
+      satisfied: false,
+      gaps: [...review.gaps, `Reviewer repeated existing task "${repeatedTask.title}"; no new task was added.`],
+    };
+  }
+
+  const existingTaskIds = new Set(plan.phases.flatMap((entry) => entry.tasks.map((task) => task.id)));
+  let amendmentIndex = 1;
+  let taskId = `${phase.id}-amendment-${amendmentIndex}`;
+  while (existingTaskIds.has(taskId)) {
+    amendmentIndex++;
+    taskId = `${phase.id}-amendment-${amendmentIndex}`;
   }
   const amendment: Task = {
     id: taskId,
-    ...review.followUpTask,
+    ...followUpTask,
     dependsOnTaskIds: phase.tasks.map((task) => task.id),
     status: 'pending',
     artifacts: [],
@@ -106,8 +120,56 @@ function getAgentRuntimeUrl(): string {
 export interface MissionAgentConfig {
   missionId: string;
   tenantId: string;
+  metadata?: Record<string, unknown>;
   broadcast?: (event: any) => Promise<void>;
   agentRuntimeUrl?: string;
+}
+
+interface MissionAgentToolGrant extends AgentToolPolicy {
+  tools?: string[];
+}
+
+function parseMissionAgentToolPolicies(value: unknown): Map<string, MissionAgentToolGrant> {
+  if (value === undefined) return new Map();
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('metadata.agentToolPolicies must be an object keyed by Agent role or "*"');
+  }
+
+  const policies = new Map<string, MissionAgentToolGrant>();
+  for (const [rawRole, rawPolicy] of Object.entries(value)) {
+    const role = rawRole.trim().toLowerCase();
+    if (role !== '*' && !/^[a-z0-9][a-z0-9_-]{0,79}$/.test(role)) {
+      throw new Error(`metadata.agentToolPolicies contains invalid Agent role '${rawRole}'`);
+    }
+    if (policies.has(role)) {
+      throw new Error(`metadata.agentToolPolicies contains duplicate normalized Agent role '${role}'`);
+    }
+    if (!rawPolicy || typeof rawPolicy !== 'object' || Array.isArray(rawPolicy)) {
+      throw new Error(`metadata.agentToolPolicies.${rawRole} must be an object`);
+    }
+
+    const policy = rawPolicy as Record<string, unknown>;
+    const unknownFields = Object.keys(policy).filter((key) => key !== 'mode' && key !== 'tools');
+    if (unknownFields.length > 0) {
+      throw new Error(`metadata.agentToolPolicies.${rawRole} contains unsupported field '${unknownFields[0]}'`);
+    }
+    if (policy.mode === 'all') {
+      if (policy.tools !== undefined && (!Array.isArray(policy.tools) || policy.tools.length > 0)) {
+        throw new Error(`metadata.agentToolPolicies.${rawRole}.tools must be omitted or empty when mode is 'all'`);
+      }
+      policies.set(role, { mode: 'all' });
+      continue;
+    }
+    if (policy.mode !== 'allowlist' || !Array.isArray(policy.tools) || policy.tools.length > 100) {
+      throw new Error(`metadata.agentToolPolicies.${rawRole} must define mode 'all' or an allowlist of at most 100 tool IDs`);
+    }
+    const tools = policy.tools.map((tool) => typeof tool === 'string' ? tool.trim() : '');
+    if (tools.some((tool) => !tool) || new Set(tools).size !== tools.length) {
+      throw new Error(`metadata.agentToolPolicies.${rawRole}.tools must contain unique, non-empty tool IDs`);
+    }
+    policies.set(role, { mode: 'allowlist', tools });
+  }
+  return policies;
 }
 
 export interface TaskExecutionResult {
@@ -128,7 +190,7 @@ export interface PromptTaskRequest {
 }
 
 class MissionAgentRuntimeApiError extends Error {
-  constructor(path: string, readonly status: number, details: string) {
+  constructor(readonly path: string, readonly status: number, details: string) {
     super(`Agent Runtime API ${path} failed (${status}): ${details.slice(0, 200)}`);
     this.name = 'MissionAgentRuntimeApiError';
   }
@@ -139,6 +201,7 @@ export class MissionAgentRuntime {
   private tenantId: string;
   private agentRuntimeUrl: string;
   private broadcast: MissionAgentConfig['broadcast'];
+  private agentToolPolicies: Map<string, MissionAgentToolGrant>;
   private agentCache: Map<string, string> = new Map(); // agentRole -> agentId
   private taskAgentMap: Map<string, string> = new Map(); // taskId -> agentId
 
@@ -147,6 +210,7 @@ export class MissionAgentRuntime {
     this.tenantId = config.tenantId;
     this.agentRuntimeUrl = config.agentRuntimeUrl || getAgentRuntimeUrl();
     this.broadcast = config.broadcast || (async () => {});
+    this.agentToolPolicies = parseMissionAgentToolPolicies(config.metadata?.agentToolPolicies);
   }
 
   private async api<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -168,6 +232,7 @@ export class MissionAgentRuntime {
     try {
       const existing = await this.api<AgentDefinition>(`/missions/${this.missionId}/agents/${agentId}`);
       if (existing.id) {
+        this.assertToolAccess(existing, 'planner');
         await this.api(`/missions/${this.missionId}/agents/${agentId}/start`, { method: 'POST' });
         this.agentCache.set('planner', agentId);
         return agentId;
@@ -178,6 +243,7 @@ export class MissionAgentRuntime {
       }
     }
 
+    const toolAccess = this.resolveToolAccess('planner');
     const definition: AgentDefinition = {
       id: agentId,
       tenantId: this.tenantId,
@@ -185,7 +251,8 @@ export class MissionAgentRuntime {
       description: `Planner agent for mission ${this.missionId}`,
       type: 'planner',
       systemPrompt,
-      tools: [],
+      tools: toolAccess.tools,
+      ...(toolAccess.policy ? { toolPolicy: toolAccess.policy } : {}),
       metadata: { missionId: this.missionId, agentRole: 'planner' },
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -317,10 +384,10 @@ export class MissionAgentRuntime {
         description,
         expectedArtifacts,
       })),
-      completedTaskSummaries: completedTaskSummaries.slice(-10).map((summary) => ({
+      completedTaskSummaries: completedTaskSummaries.map((summary) => ({
         taskId: summary.taskId,
         output: summary.output.slice(0, 1_200),
-        artifactNames: summary.artifactNames.slice(0, 20),
+        artifactNames: summary.artifactNames,
       })),
     });
     let previousResponse = '';
@@ -395,12 +462,11 @@ export class MissionAgentRuntime {
           typeof proposal[key] === 'string' && (proposal[key] as string).trim().length > 0,
         )
         || !Array.isArray(proposal.expectedArtifacts)
-        || proposal.expectedArtifacts.length > 5
         || !proposal.expectedArtifacts.every((artifact) =>
           typeof artifact === 'string' && artifact.trim().length > 0 && artifact.length <= 200,
         )
       ) {
-        validationIssue = 'followUpTask must contain non-empty title, description, agentRole, systemPrompt, and up to five expectedArtifacts';
+        validationIssue = 'followUpTask must contain non-empty title, description, agentRole, systemPrompt, and expectedArtifacts as non-empty strings no longer than 200 characters';
         continue;
       }
       return {
@@ -429,6 +495,7 @@ export class MissionAgentRuntime {
         `/missions/${this.missionId}/agents/${agentId}`
       );
       if (existing.id) {
+        this.assertToolAccess(existing, agentRole);
         await this.api(`/missions/${this.missionId}/agents/${agentId}/start`, { method: 'POST' });
         this.agentCache.set(cacheKey, agentId);
         return agentId;
@@ -439,6 +506,7 @@ export class MissionAgentRuntime {
       }
     }
 
+    const toolAccess = this.resolveToolAccess(agentRole);
     const definition: AgentDefinition = {
       id: agentId,
       tenantId: this.tenantId,
@@ -446,7 +514,8 @@ export class MissionAgentRuntime {
       description: `Dynamic agent for role: ${agentRole} in mission ${this.missionId}`,
       type: agentRole,
       systemPrompt,
-      tools: [],
+      tools: toolAccess.tools,
+      ...(toolAccess.policy ? { toolPolicy: toolAccess.policy } : {}),
       metadata: { missionId: this.missionId, agentRole },
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -456,6 +525,33 @@ export class MissionAgentRuntime {
     await this.api(`/missions/${this.missionId}/agents/${agentId}/start`, { method: 'POST' });
     this.agentCache.set(cacheKey, agentId);
     return agentId;
+  }
+
+  private resolveToolAccess(agentRole: string): { tools: string[]; policy?: AgentToolPolicy } {
+    const key = agentRole.trim().toLowerCase();
+    const grant = this.agentToolPolicies.get(key) || this.agentToolPolicies.get('*');
+    if (!grant) return { tools: [] };
+    return {
+      tools: grant.mode === 'allowlist' ? [...(grant.tools || [])] : [],
+      policy: { mode: grant.mode },
+    };
+  }
+
+  private assertToolAccess(agent: AgentDefinition, role: string): void {
+    const expected = this.resolveToolAccess(role);
+    const existingMode = agent.toolPolicy?.mode || 'all';
+    const expectedMode = expected.policy?.mode || 'all';
+    const existingTools = [...agent.tools].sort();
+    const expectedTools = [...expected.tools].sort();
+    if (
+      existingMode !== expectedMode
+      || existingTools.length !== expectedTools.length
+      || existingTools.some((tool, index) => tool !== expectedTools[index])
+    ) {
+      throw new Error(
+        `Persisted mission Agent ${agent.id} has a tool policy that differs from metadata.agentToolPolicies`,
+      );
+    }
   }
 
   async executeTask(
@@ -502,13 +598,31 @@ export class MissionAgentRuntime {
       { method: 'POST', body: JSON.stringify(taskData) }
     );
 
-    const completed = await this.api<AgentTask>(
-      `/missions/${this.missionId}/agents/${agentId}/tasks/${submitted.taskId}/execute`,
-      {
-        method: 'POST',
-        body: JSON.stringify({ requireCompletedReceipt: request.requireCompletedReceipt || false }),
-      },
-    );
+    const executePath = `/missions/${this.missionId}/agents/${agentId}/tasks/${submitted.taskId}/execute`;
+    let completed: AgentTask | undefined;
+    for (let retry = 0; retry <= MAX_SAFE_AGENT_TASK_RETRIES; retry++) {
+      try {
+        completed = await this.api<AgentTask>(executePath, {
+          method: 'POST',
+          body: JSON.stringify({ requireCompletedReceipt: request.requireCompletedReceipt || false }),
+        });
+        break;
+      } catch (error) {
+        if (
+          retry >= MAX_SAFE_AGENT_TASK_RETRIES
+          || !(error instanceof MissionAgentRuntimeApiError)
+          || error.path !== executePath
+          || error.status < 500
+        ) {
+          throw error;
+        }
+        logger.warn(
+          { missionId: this.missionId, agentId, taskId: submitted.taskId, status: error.status },
+          'Retrying failed Agent task once from its persisted checkpoint',
+        );
+      }
+    }
+    if (!completed) throw new Error(`Agent task ${submitted.taskId} returned no execution response`);
     if (completed.status !== 'completed') {
       throw new Error(completed.error || `Agent task ${submitted.taskId} returned status '${completed.status}'`);
     }
@@ -557,10 +671,11 @@ export class MissionAgentRuntime {
     return (
       `Task: ${task.title}\n\n` +
       `Description: ${task.description}\n\n` +
+      `Task Instructions: ${task.systemPrompt}\n\n` +
       `Phase: ${phase.name} (${phase.goal})\n` +
       `Plan Summary: ${plan.summary}\n` +
       `Expected Artifacts: ${task.expectedArtifacts.join(', ')}\n\n` +
-      `Execute this task thoroughly. Produce every expected artifact as a clearly labeled section.`
+      'Execute this task now and return completed results for its expected artifacts. Do not return a plan, future-tense promises, or placeholders. If the work cannot be completed with available tools or context, state the specific blocker instead.'
     );
   }
 

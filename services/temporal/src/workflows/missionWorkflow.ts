@@ -164,7 +164,7 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
           completedTaskSummaries.set(task.id, {
             taskId: task.id,
             output: result.output.slice(0, 1_200),
-            artifactNames: result.artifacts.slice(0, 20).map((artifact) => artifact.name),
+            artifactNames: result.artifacts.map((artifact) => artifact.name),
           });
         }
       };
@@ -176,7 +176,7 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
             input,
             plan,
             phase,
-            completedTaskSummaries: [...completedTaskSummaries.values()].slice(-10),
+            completedTaskSummaries: [...completedTaskSummaries.values()],
             reviewIndex,
           });
           plan = review.plan;
@@ -184,7 +184,7 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
           if (review.satisfied) break;
           if (!review.amendment) {
             throw new Error(
-              `Mission phase ${phase.id} remains incomplete after bounded amendments: ${review.gaps.join('; ') || 'no review details supplied'}`,
+              `Mission phase ${phase.id} remains incomplete and the reviewer provided no actionable follow-up task: ${review.gaps.join('; ') || 'no review details supplied'}`,
             );
           }
           await executePendingTasks();

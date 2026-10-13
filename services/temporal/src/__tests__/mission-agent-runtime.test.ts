@@ -130,6 +130,9 @@ describe('MissionAgentRuntime', () => {
     expect(result.artifacts[0]?.name).toBe('research.md')
     expect(requests.some((request) => request.url.includes('/api/workers/assistants/'))).toBe(false)
     expect(requests.find((request) => request.url.endsWith('/tasks'))?.body?.taskId).toBe('mission-1:phase-1:task-1')
+    const submittedInput = requests.find((request) => request.url.endsWith('/tasks'))?.body?.input as Record<string, unknown>
+    expect(submittedInput.prompt).toContain(`Task Instructions: ${task.systemPrompt}`)
+    expect(submittedInput.prompt).toContain('Do not return a plan, future-tense promises, or placeholders.')
     expect(
       (requests.find((request) => request.url.endsWith('/tasks'))?.body?.input as Record<string, unknown>)
         ?.context,
@@ -159,6 +162,93 @@ describe('MissionAgentRuntime', () => {
       .resolves.toBe(agent.id)
 
     expect(requests.map((request) => request.method)).toEqual(['GET', 'POST', 'POST'])
+  })
+
+  it('applies validated role-specific tool policies from mission metadata', async () => {
+    const requests: Array<{ url: string; method: string; body?: Record<string, unknown> }> = []
+    jest.spyOn(global, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input)
+      const method = init?.method || 'GET'
+      const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined
+      requests.push({ url, method, body })
+      if (method === 'GET') return jsonResponse({ error: 'not found' }, 404)
+      if (url.endsWith('/agents') && method === 'POST') return jsonResponse(body || {}, 201)
+      if (method === 'POST') return jsonResponse({})
+      throw new Error(`Unexpected request: ${method} ${url}`)
+    })
+
+    const runtime = new MissionAgentRuntime({
+      missionId: 'mission-1',
+      tenantId: 'tenant-1',
+      agentRuntimeUrl: 'http://agent-runtime:3400',
+      metadata: {
+        agentToolPolicies: {
+          researcher: { mode: 'allowlist', tools: ['web_search', 'fetch_url'] },
+          '*': { mode: 'all' },
+        },
+      },
+    })
+
+    await runtime.getOrCreateAgent('researcher', task.systemPrompt)
+    const registered = requests.find((request) =>
+      request.method === 'POST' && request.url.endsWith('/missions/mission-1/agents'),
+    )?.body
+    expect(registered).toMatchObject({
+      tools: ['web_search', 'fetch_url'],
+      toolPolicy: { mode: 'allowlist' },
+      metadata: { missionId: 'mission-1', agentRole: 'researcher' },
+    })
+  })
+
+  it('retries a failed Agent execution once using the same persisted task ID', async () => {
+    const executedPaths: string[] = []
+    const completedTask: AgentTask = {
+      agentId: agent.id,
+      taskId: 'mission-1:phase-1:task-1',
+      type: 'researcher',
+      input: {},
+      priority: 1,
+      status: 'completed',
+      createdAt: new Date().toISOString(),
+      completedAt: new Date().toISOString(),
+      result: { output: 'Recovered from the saved checkpoint.', artifacts: [], tokensUsed: 10 },
+    }
+    jest.spyOn(global, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input)
+      const method = init?.method || 'GET'
+      if (url.endsWith(`/missions/mission-1/agents/${agent.id}`) && method === 'GET') {
+        return jsonResponse(agent)
+      }
+      if (url.endsWith(`/missions/mission-1/agents/${agent.id}/start`)) return jsonResponse({})
+      if (url.endsWith('/tasks') && method === 'POST') {
+        return jsonResponse({
+          ...completedTask,
+          status: 'pending',
+          result: undefined,
+          completedAt: undefined,
+          input: (JSON.parse(String(init?.body)) as Record<string, unknown>).input,
+        })
+      }
+      if (url.endsWith('/tasks/mission-1:phase-1:task-1/execute')) {
+        executedPaths.push(url)
+        return executedPaths.length === 1
+          ? jsonResponse({ error: 'Brain temporarily unavailable' }, 503)
+          : jsonResponse(completedTask)
+      }
+      throw new Error(`Unexpected request: ${method} ${url}`)
+    })
+
+    const runtime = new MissionAgentRuntime({
+      missionId: 'mission-1',
+      tenantId: 'tenant-1',
+      agentRuntimeUrl: 'http://agent-runtime:3400',
+    })
+    const agentId = await runtime.getOrCreateAgent('researcher', task.systemPrompt)
+    const result = await runtime.executeTask(agentId, task, phase, plan)
+
+    expect(result.output).toBe('Recovered from the saved checkpoint.')
+    expect(executedPaths).toHaveLength(2)
+    expect(executedPaths[0]).toBe(executedPaths[1])
   })
 
   it('passes one stable Brain routing session through Planner repair tasks', async () => {
@@ -294,34 +384,77 @@ describe('MissionAgentRuntime', () => {
     expect(submitted?.taskId).toBe('mission-1:phase-1:selector-2:attempt-1')
   })
 
-  it('adds at most two follow-up tasks and makes each depend on already planned work', () => {
+  it('keeps adding follow-up tasks while gaps remain, without an amendment or phase-size cap', () => {
+    const baseTasks = Array.from({ length: 8 }, (_, index) => ({
+      ...task,
+      id: `task-${index + 1}`,
+      title: `Existing task ${index + 1}`,
+      dependsOnTaskIds: index === 0 ? [] : [`task-${index}`],
+      status: 'completed' as const,
+    }))
     const basePlan: Plan = {
       ...plan,
-      phases: [{ ...phase, tasks: [{ ...task, dependsOnTaskIds: [] }] }],
+      phases: [{ ...phase, tasks: baseTasks }],
+    }
+    let amendedPlan = basePlan
+
+    for (let index = 1; index <= 10; index++) {
+      const currentPhase = amendedPlan.phases[0]!
+      const applied = applyPhaseReview(amendedPlan, phase.id, {
+        satisfied: false,
+        gaps: [`The result needs verification ${index}.`],
+        followUpTask: {
+          title: `Verify result ${index}`,
+          description: `Check the result against requirement ${index}.`,
+          agentRole: 'reviewer',
+          systemPrompt: `Verify result ${index}.`,
+          expectedArtifacts: Array.from({ length: 6 }, (_, artifactIndex) =>
+            `verification-${index}-${artifactIndex}.md`,
+          ),
+        },
+      })
+
+      expect(applied.amendment?.id).toBe(`phase-1-amendment-${index}`)
+      expect(applied.amendment?.dependsOnTaskIds).toEqual(currentPhase.tasks.map((item) => item.id))
+      expect(applied.amendment?.expectedArtifacts).toHaveLength(6)
+      amendedPlan = applied.plan
+    }
+
+    expect(amendedPlan.phases[0]?.tasks).toHaveLength(18)
+  })
+
+  it('does not append an identical follow-up task more than once', () => {
+    const followUpTask = {
+      title: 'Complete the market assessment',
+      description: 'Choose an AI business opportunity from the completed research.',
+      agentRole: 'reviewer',
+      systemPrompt: 'Select one opportunity and explain the evidence.',
+      expectedArtifacts: ['market-assessment.md'],
     }
     const review = {
       satisfied: false,
-      gaps: ['The result needs verification.'],
-      followUpTask: {
-        title: 'Verify result',
-        description: 'Check the result against the mission requirements.',
-        agentRole: 'reviewer',
-        systemPrompt: 'Verify the result.',
-        expectedArtifacts: ['verification.md'],
-      },
+      gaps: ['The phase still lacks a selected opportunity.'],
+      followUpTask,
     }
-
-    const first = applyPhaseReview(basePlan, phase.id, review)
-    const second = applyPhaseReview(first.plan, phase.id, review)
-    const overLimit = applyPhaseReview(second.plan, phase.id, review)
+    const first = applyPhaseReview(plan, phase.id, review)
+    const repeated = applyPhaseReview(first.plan, phase.id, {
+      ...review,
+      followUpTask: {
+        ...followUpTask,
+        title: '  COMPLETE   the market assessment ',
+        description: 'Choose an AI business opportunity\nfrom the completed research.',
+        systemPrompt: 'A revised instruction that requests the same deliverable.',
+        expectedArtifacts: ['MARKET-ASSESSMENT.MD'],
+      },
+    })
 
     expect(first.amendment?.id).toBe('phase-1-amendment-1')
-    expect(first.amendment?.dependsOnTaskIds).toEqual(['task-1'])
-    expect(second.amendment?.id).toBe('phase-1-amendment-2')
-    expect(second.amendment?.dependsOnTaskIds).toEqual(['task-1', 'phase-1-amendment-1'])
-    expect(overLimit.amendment).toBeUndefined()
-    expect(overLimit.satisfied).toBe(false)
-    expect(overLimit.plan.phases[0]?.tasks).toHaveLength(3)
+    expect(repeated.amendment).toBeUndefined()
+    expect(repeated.plan).toBe(first.plan)
+    expect(repeated.phase.tasks).toHaveLength(2)
+    expect(repeated.gaps).toContain(
+      'Reviewer repeated existing task "Complete the market assessment"; no new task was added.',
+    )
   })
 
   it('parses satisfied and incomplete phase reviews through a mission Agent', async () => {
@@ -336,7 +469,7 @@ describe('MissionAgentRuntime', () => {
           description: 'Check the result against the mission requirements.',
           agentRole: 'reviewer',
           systemPrompt: 'Verify the result.',
-          expectedArtifacts: ['verification.md'],
+          expectedArtifacts: Array.from({ length: 6 }, (_, index) => `verification-${index}.md`),
         },
       },
     ]
@@ -370,7 +503,11 @@ describe('MissionAgentRuntime', () => {
       tenantId: 'tenant-1',
       agentRuntimeUrl: 'http://agent-runtime:3400',
     })
-    const summaries = [{ taskId: task.id, output: 'Research complete.', artifactNames: ['research.md'] }]
+    const summaries = Array.from({ length: 12 }, (_, index) => ({
+      taskId: `review-summary-${index}`,
+      output: `Research complete ${index}.`,
+      artifactNames: [`research-${index}.md`],
+    }))
 
     await expect(runtime.reviewPhase('Understand the topic', plan, phase, summaries, 1))
       .resolves.toEqual({ satisfied: true, gaps: [] })
@@ -383,17 +520,19 @@ describe('MissionAgentRuntime', () => {
           description: 'Check the result against the mission requirements.',
           agentRole: 'reviewer',
           systemPrompt: 'Verify the result.',
-          expectedArtifacts: ['verification.md'],
+          expectedArtifacts: Array.from({ length: 6 }, (_, index) => `verification-${index}.md`),
         },
       })
 
     expect(taskRequests).toHaveLength(2)
-      const firstTaskInput = taskRequests[0]?.input as { context: Record<string, unknown> }
-      const secondTaskInput = taskRequests[1]?.input as { context: Record<string, unknown> }
-      expect(firstTaskInput.context[BRAIN_ROUTING_SESSION_CONTEXT_KEY])
-        .toBe('mission-1:phase-review:phase-1:1')
-      expect(secondTaskInput.context[BRAIN_ROUTING_SESSION_CONTEXT_KEY])
-        .toBe('mission-1:phase-review:phase-1:2')
+    const firstTaskInput = taskRequests[0]?.input as { prompt: string; context: Record<string, unknown> }
+    const secondTaskInput = taskRequests[1]?.input as { context: Record<string, unknown> }
+    expect(firstTaskInput.prompt).toContain('"taskId":"review-summary-0"')
+    expect(firstTaskInput.prompt).toContain('"taskId":"review-summary-11"')
+    expect(firstTaskInput.context[BRAIN_ROUTING_SESSION_CONTEXT_KEY])
+      .toBe('mission-1:phase-review:phase-1:1')
+    expect(secondTaskInput.context[BRAIN_ROUTING_SESSION_CONTEXT_KEY])
+      .toBe('mission-1:phase-review:phase-1:2')
   })
 
   it('does not hide agent-runtime outages as missing agents', async () => {

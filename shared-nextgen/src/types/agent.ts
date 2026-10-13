@@ -75,3 +75,21 @@ export interface AgentSpecialization {
   examples: string[]
   lastUsed: string
 }
+
+export type AgentLearningSource = 'human_feedback' | 'validated_outcome'
+
+export interface AgentLearning {
+  id: string
+  tenantId: string
+  agentId: string
+  domain: string
+  guidance: string
+  evidence?: string
+  source: AgentLearningSource
+  sourceRef: string
+  recordedBy: string
+  confidence: number
+  createdAt: string
+}
+
+export type AgentLearningInput = Omit<AgentLearning, 'id' | 'tenantId' | 'agentId' | 'createdAt'>

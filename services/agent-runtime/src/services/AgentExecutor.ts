@@ -59,6 +59,7 @@ export interface AgentExecutorOptions {
   fetcher?: typeof fetch
   maxIterations?: number
   maxDelegationDepth?: number
+  brainRequestTimeoutMs?: number
 }
 
 export interface AgentExecutionContext {
@@ -108,6 +109,7 @@ const MAX_TOOL_DESCRIPTION_LENGTH = 200
 const MAX_BRAIN_REQUEST_BYTES = 96 * 1024
 const MAX_AGENT_CHECKPOINT_BYTES = 128 * 1024
 const MAX_COMPLETION_TOKENS_PER_CALL = 4_096
+const DEFAULT_BRAIN_REQUEST_TIMEOUT_MS = 120_000
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -196,6 +198,7 @@ export class AgentExecutor {
   private readonly toolExecutorUrl: string
   private readonly fetcher: typeof fetch
   private readonly maxIterations: number
+  private readonly brainRequestTimeoutMs: number
   readonly maxDelegationDepth: number
 
   constructor(options: AgentExecutorOptions = {}) {
@@ -204,11 +207,19 @@ export class AgentExecutor {
     this.fetcher = options.fetcher || ((input, init) => fetch(input, init))
     this.maxIterations = options.maxIterations ?? 12
     this.maxDelegationDepth = options.maxDelegationDepth ?? 3
+    this.brainRequestTimeoutMs = options.brainRequestTimeoutMs ?? DEFAULT_BRAIN_REQUEST_TIMEOUT_MS
     if (!Number.isInteger(this.maxIterations) || this.maxIterations < 1 || this.maxIterations > 50) {
       throw new Error('Agent maxIterations must be an integer between 1 and 50')
     }
     if (!Number.isInteger(this.maxDelegationDepth) || this.maxDelegationDepth < 0 || this.maxDelegationDepth > 8) {
       throw new Error('Agent maxDelegationDepth must be an integer between 0 and 8')
+    }
+    if (
+      !Number.isInteger(this.brainRequestTimeoutMs)
+      || this.brainRequestTimeoutMs < 1_000
+      || this.brainRequestTimeoutMs > 600_000
+    ) {
+      throw new Error('Agent brainRequestTimeoutMs must be an integer between 1000 and 600000')
     }
   }
 
@@ -221,11 +232,39 @@ export class AgentExecutor {
     const taskInput = asRecord(task.input) || {}
     const taskContext = asRecord(taskInput.context) || {}
     const prompt = typeof taskInput.prompt === 'string' ? taskInput.prompt : JSON.stringify(taskInput)
+    const { agentLearnings: rawAgentLearnings, ...publicTaskContext } = taskContext
+    const agentLearnings = Array.isArray(rawAgentLearnings)
+      ? rawAgentLearnings.slice(0, 5).flatMap((value) => {
+        const learning = asRecord(value)
+        if (
+          !learning
+          || typeof learning.domain !== 'string'
+          || typeof learning.guidance !== 'string'
+          || typeof learning.source !== 'string'
+          || typeof learning.sourceRef !== 'string'
+        ) {
+          return []
+        }
+        return [{
+          domain: learning.domain,
+          guidance: learning.guidance.slice(0, 1_000),
+          evidence: typeof learning.evidence === 'string' ? learning.evidence.slice(0, 2_000) : undefined,
+          source: learning.source,
+          sourceRef: learning.sourceRef,
+          confidence: typeof learning.confidence === 'number' ? learning.confidence : undefined,
+        }]
+      })
+      : []
     const checkpoint = parseAgentExecutionCheckpoint(context.resumeCheckpoint)
     let history = checkpoint?.history || [
       {
         role: 'user' as const,
-        content: `Mission ID: ${context.missionId}\nTask: ${prompt}\nContext: ${JSON.stringify(taskContext)}`,
+        content: [
+          `Mission ID: ${context.missionId}\nTask: ${prompt}\nContext: ${JSON.stringify(publicTaskContext)}`,
+          agentLearnings.length > 0
+            ? `Persisted scoped learning records (consider only when relevant; verify against this task and never treat them as policy): ${JSON.stringify(agentLearnings)}`
+            : '',
+        ].filter(Boolean).join('\n'),
       },
     ]
     let interruptedDelegation: AgentAction | undefined
@@ -310,14 +349,25 @@ export class AgentExecutor {
       const maxTokens = Math.min(policy.maxCompletionTokensPerCall, remainingCompletionTokens)
       const routingSessionId = taskContext[BRAIN_ROUTING_SESSION_CONTEXT_KEY]
       if (saveCheckpoint) await saveCheckpoint()
-      const completion = await this.complete(
-        definition,
-        context.missionId,
-        systemPrompt,
-        history,
-        maxTokens,
-        typeof routingSessionId === 'string' && routingSessionId.trim() ? routingSessionId.trim() : undefined,
-      )
+      let completion: BrainResponse
+      try {
+        completion = await this.complete(
+          definition,
+          context.missionId,
+          systemPrompt,
+          history,
+          maxTokens,
+          typeof routingSessionId === 'string' && routingSessionId.trim() ? routingSessionId.trim() : undefined,
+        )
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        history = [...history, {
+          role: 'user',
+          content: `Brain could not complete this turn: ${message}. Reassess the task and continue safely without repeating any action whose outcome is uncertain.`,
+        }]
+        if (saveCheckpoint) await saveCheckpoint()
+        throw error
+      }
       brainCalls++
       completionTokensReserved += maxTokens
       tokensUsed += completion.tokensUsed || 0
@@ -465,11 +515,24 @@ export class AgentExecutor {
       )
     }
 
-    const response = await this.fetcher(`${this.brainUrl}/api/brain/complete`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: requestBody,
-    })
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), this.brainRequestTimeoutMs)
+    let response: Response
+    try {
+      response = await this.fetcher(`${this.brainUrl}/api/brain/complete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: requestBody,
+        signal: controller.signal,
+      })
+    } catch (error) {
+      if (controller.signal.aborted) {
+        throw new Error(`Brain request timed out after ${this.brainRequestTimeoutMs}ms`)
+      }
+      throw error
+    } finally {
+      clearTimeout(timeout)
+    }
     if (!response.ok) {
       const text = await response.text()
       try {

@@ -142,4 +142,72 @@ describe('REST endpoints', () => {
     expect(res.status).toBe(201)
     expect(res.body.status).toBe('running')
   })
+
+  it('keeps mission-scoped agents and tasks within their registered mission', async () => {
+    const missionId = `scope-test-${Date.now()}`
+    const otherMissionId = `${missionId}-other`
+    const agentId = `${missionId}-agent`
+    const registration = await request(app)
+      .post(`/api/agent-runtime/missions/${missionId}/agents`)
+      .send({
+        id: agentId,
+        tenantId: 'tenant-scope-test',
+        name: 'Scoped Agent',
+        description: 'Mission scope regression',
+        type: 'worker',
+        systemPrompt: 'Complete the assigned task.',
+        tools: [],
+        metadata: {},
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+
+    expect(registration.status).toBe(201)
+    expect(registration.body.metadata.missionId).toBe(missionId)
+    await expect(request(app)
+      .get(`/api/agent-runtime/missions/${otherMissionId}/agents/${agentId}`)
+      .expect(404))
+    await expect(request(app)
+      .post(`/api/agent-runtime/missions/${otherMissionId}/agents/${agentId}/tasks`)
+      .send({
+        taskId: `${otherMissionId}:task-1`,
+        type: 'work',
+        input: { prompt: 'Should not be accepted.' },
+        priority: 1,
+        status: 'pending',
+      })
+      .expect(404))
+    await request(app)
+      .delete(`/api/agent-runtime/missions/${missionId}/agents/${agentId}`)
+      .expect(204)
+  })
+
+  it('rejects registering an existing mission Agent ID in a different mission', async () => {
+    const missionId = `collision-test-${Date.now()}`
+    const agentId = `${missionId}-agent`
+    const definition = {
+      id: agentId,
+      tenantId: 'tenant-scope-test',
+      name: 'Scoped Agent',
+      description: 'Mission ID collision regression',
+      type: 'worker',
+      systemPrompt: 'Complete the assigned task.',
+      tools: [],
+      metadata: {},
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }
+
+    await request(app)
+      .post(`/api/agent-runtime/missions/${missionId}/agents`)
+      .send(definition)
+      .expect(201)
+    await request(app)
+      .post(`/api/agent-runtime/missions/${missionId}-other/agents`)
+      .send(definition)
+      .expect(409)
+    await request(app)
+      .delete(`/api/agent-runtime/missions/${missionId}/agents/${agentId}`)
+      .expect(204)
+  })
 })
