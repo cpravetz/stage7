@@ -8,7 +8,7 @@ export const WRITE_PRD = createDeclarativeCodeSkill({
     isSkill: true,
     name: 'Write PRD',
     description: 'Generate a structured product requirements document with INVEST user stories, Given/When/Then acceptance criteria, technical requirements, data model, UX flows, and phased rollout plan.',
-    persistenceEnvVar: 'STORAGE_DIR',
+    persistenceEnvVar: 'ASSISTANT_HOME',
     inputSchema: {
       type: 'object',
       properties: {

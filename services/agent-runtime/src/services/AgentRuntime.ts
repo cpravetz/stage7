@@ -37,7 +37,7 @@ function readExecutionPolicy(value: unknown): AgentExecutionPolicy | undefined {
     'maxDelegations',
   ]
   for (const key of keys) {
-    const maximum = key === 'maxCompletionTokensPerCall' ? 4096 : DEFAULT_AGENT_EXECUTION_POLICY[key]
+    const maximum = key === 'maxCompletionTokensPerCall' ? 8192 : DEFAULT_AGENT_EXECUTION_POLICY[key]
     const minimum = key === 'maxActions' || key === 'maxDelegations' ? 0 : 1
     if (
       typeof policy[key] !== 'number'
@@ -271,10 +271,16 @@ export class AgentRuntime {
     if (!this.agents.has(task.agentId)) {
       throw new Error(`Agent ${task.agentId} must be registered before restoring task ${task.taskId}`)
     }
+    if (task.status === 'completed') delete task.error
     this.tasks.set(task.taskId, task)
   }
 
-  async executeTask(agentId: string, taskId: string, delegationDepth = 0): Promise<AgentTask> {
+  async executeTask(
+    agentId: string,
+    taskId: string,
+    delegationDepth = 0,
+    retryGuidance?: string,
+  ): Promise<AgentTask> {
     const agent = this.agents.get(agentId)
     if (!agent) throw new Error(`Agent ${agentId} not found`)
     const task = this.tasks.get(taskId)
@@ -320,6 +326,7 @@ export class AgentRuntime {
       const result = await this.executor.execute(agent, task, {
         missionId,
         delegationDepth,
+        ...(retryGuidance ? { retryGuidance } : {}),
         ...(executionPolicy ? { executionPolicy } : {}),
         delegate: (request) => this.delegateTask(agent, task, request, delegationDepth + 1),
         ...(resumeCheckpoint ? { resumeCheckpoint } : {}),
@@ -329,6 +336,7 @@ export class AgentRuntime {
       task.status = 'completed'
       task.completedAt = new Date().toISOString()
       task.result = result
+      delete task.error
       this.tasks.set(taskId, task)
       const receipts = state.context.taskReceipts && typeof state.context.taskReceipts === 'object'
         ? state.context.taskReceipts as Record<string, unknown>
@@ -467,6 +475,7 @@ export class AgentRuntime {
     task.status = 'completed'
     task.completedAt = new Date().toISOString()
     task.result = result
+    delete task.error
     this.tasks.set(taskId, task)
     logger.info({ taskId }, 'Task completed')
     return task

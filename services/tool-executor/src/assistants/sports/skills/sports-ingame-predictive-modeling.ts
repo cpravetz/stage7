@@ -41,7 +41,7 @@ export const SPORTS_PREDICTOR_AD_HOC = createDeclarativeCodeSkill({
   id: 'sports-predictor-ad-hoc',
   name: 'In-Game Predictor (Ad-hoc)',
   description: 'Predicts win probabilities and key in-game events from live play-by-play data, lineup information, and momentum signals during an active game.',
-  persistenceEnvVar: 'SPORTS_GROUP_B_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   tier: 'advise',
   domainKnowledge: 'Live sports predictive modeling, win probability estimation, momentum signal interpretation, and lineup impact analysis',
   inputSchema: INGAME_PREDICTIVE_INPUT,

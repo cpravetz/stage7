@@ -32,6 +32,7 @@ export interface CompletionResult {
   provider: string;
   cached: boolean;
   tokensUsed?: number;
+  requestId: string;
 }
 
 export interface BrainLogEntry {
@@ -62,6 +63,8 @@ export interface ModelPerformanceMetrics {
   successRate: number;
   avgCostPerRequest: number;
   costRequests?: number;
+  complaintCount: number;
+  complaintRate: number;
   lastUpdated: number;
 }
 
@@ -115,6 +118,9 @@ export class BrainService {
   private readonly PERFORMANCE_CACHE_TTL_MS = 30000; // 30 seconds
 
   private initialized = false;
+
+  // Request ID -> {provider, model} mapping for complaints
+  private requestIdMap = new Map<string, { provider: string; model: string; complaintRecorded?: boolean }>();
 
   async initialize() {
     if (this.initialized) return;
@@ -216,6 +222,7 @@ export class BrainService {
 
 async complete(prompt: string, options: CompletionOptions = {}): Promise<CompletionResult> {
      const startTime = Date.now();
+     const requestId = `brain_${startTime}_${crypto.randomBytes(6).toString('hex')}`;
      const attemptTimeout = providerAttemptTimeoutMs();
      const maxRetries = 2;
      const configuredDeadline = Number(process.env.BRAIN_COMPLETION_DEADLINE_MS);
@@ -245,6 +252,12 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
         success: true,
         durationMs: Date.now() - startTime,
       });
+      // Ensure requestId mapping exists for cached responses
+      if (cachedResult.requestId) {
+        if (!this.requestIdMap.has(cachedResult.requestId)) {
+          this.requestIdMap.set(cachedResult.requestId, { provider: cachedResult.provider, model: cachedResult.model });
+        }
+      }
       return { ...cachedResult, cached: true };
     }
 
@@ -388,6 +401,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
             provider: response.provider || provider.id,
             cached: false,
             tokensUsed: response.tokensUsed,
+            requestId,
           };
 
           // estimate cost based on model's costPer1kTokens
@@ -408,10 +422,17 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
 
           // Update provider health in router
           this.updateProviderHealth(result.provider, true);
-          this.recordRoutingSessionAttempts(routingSessionKey, attemptedModelIds);
+          // Keep failed candidates excluded, but allow a model that answered successfully to serve later turns.
+          this.recordRoutingSessionAttempts(
+            routingSessionKey,
+            Array.from(attemptedThisCall).filter((attemptedModelId) => attemptedModelId !== routingKey),
+          );
 
           // Record performance metrics
           await this.recordPerformanceMetrics(result.model, result.provider, Date.now() - candidateStartTime, response.tokensUsed, estimatedCost, true);
+
+          // Record request ID mapping for complaint tracking
+          this.requestIdMap.set(requestId, { provider: result.provider, model: result.model });
 
           if (!routingSessionKey) await this.cache.set(cacheKey, result);
 
@@ -450,10 +471,12 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
           // but other models on this provider may still work. Do NOT trip the
           // provider circuit breaker — just skip to the next candidate model.
           const isModelSpecific = /is not found for API version|model .* does not exist|model .* not found/i.test(errMsg)
-            || /\b(404)\b/.test(errMsg);
+            || /\b(404)\b/.test(errMsg)
+            || (/\b403\b/.test(errMsg) && /only available (?:on|to) agentic harness(?:es)?/i.test(errMsg));
           // classify error: provider-key / quota issues vs transient vs rate-limit
           const isProviderFatal = /key limit exceeded|quota exceeded|no remaining credits|insufficient credits|credit balance is too low|credits? exhausted|payment required|invalid api key|incorrect api key|authentication|unauthorized|no route for that uri|object identifier is invalid|invalid account|invalid endpoint|unauthorized account/i.test(errMsg)
-            || /\b(401|402|403)\b/.test(errMsg);
+            || /\b(401|402)\b/.test(errMsg)
+            || (/\b403\b/.test(errMsg) && !isModelSpecific);
           // 429 / rate-limit / too-many-requests: move to the next candidate model
           // (which may be on the same provider or a different one) rather than retrying
           // the same model, since retrying would just hit the same rate limit.
@@ -660,7 +683,26 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
       const metricsMap = new Map<string, ModelPerformanceMetrics>();
       if (doc.data && typeof doc.data === 'object') {
         for (const [key, value] of Object.entries(doc.data)) {
-          metricsMap.set(key, value as ModelPerformanceMetrics);
+          const m = value as Partial<ModelPerformanceMetrics>;
+          const totalRequests = m.totalRequests || 0;
+          const complaintCount = m.complaintCount || 0;
+          metricsMap.set(key, {
+            model: m.model || '',
+            provider: m.provider || '',
+            totalRequests,
+            successfulRequests: m.successfulRequests || 0,
+            failedRequests: m.failedRequests || 0,
+            totalLatencyMs: m.totalLatencyMs || 0,
+            totalTokensUsed: m.totalTokensUsed || 0,
+            totalCost: m.totalCost || 0,
+            avgLatencyMs: m.avgLatencyMs || 0,
+            successRate: m.successRate || 0,
+            avgCostPerRequest: m.avgCostPerRequest || 0,
+            costRequests: m.costRequests || 0,
+            complaintCount,
+            complaintRate: Math.max(0, Math.min(1, complaintCount / Math.max(totalRequests, 1))),
+            lastUpdated: m.lastUpdated || now,
+          });
         }
       }
       this.performanceMetricsCache = metricsMap;
@@ -674,22 +716,47 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
     }
   }
 
-private async savePerformanceMetrics(metrics: Map<string, ModelPerformanceMetrics>): Promise<void> {
+private async savePerformanceMetrics(
+  metrics: Map<string, ModelPerformanceMetrics>,
+  required = false,
+): Promise<void> {
     try {
       const persistenceUrl = this.getArtifactsUrl();
-      const data: Record<string, ModelPerformanceMetrics> = {};
-      for (const [key, value] of metrics.entries()) {
-        data[key] = value;
-      }
-      await fetch(`${persistenceUrl}/api/artifacts/documents/model-performance-metrics`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data }),
-      });
-    } catch (err) {
-      logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Failed to save performance metrics to artifacts');
+    const documentUrl = `${persistenceUrl}/api/artifacts/documents/${PERFORMANCE_METRICS_DOC_ID}`;
+    const data: Record<string, ModelPerformanceMetrics> = {};
+    for (const [key, value] of metrics.entries()) {
+      data[key] = value;
     }
+    const headers = { 'Content-Type': 'application/json' };
+    let response = await fetch(documentUrl, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ data }),
+    });
+    if (response.status === 404) {
+      response = await fetch(`${persistenceUrl}/api/artifacts/documents`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          id: PERFORMANCE_METRICS_DOC_ID,
+          tenantId: 'system',
+          collection: 'brain-performance-metrics',
+          data,
+        }),
+      });
+    }
+    if (!response.ok) {
+      const details = await response.text();
+      throw new Error(`Artifacts returned HTTP ${response.status}: ${details.slice(0, 300)}`);
+    }
+  } catch (err) {
+    logger.error(
+      { err: err instanceof Error ? err.message : String(err) },
+      'Failed to persist Brain model performance metrics',
+    );
+    if (required) throw err;
   }
+}
 
   private async loadBrainLog(): Promise<void> {
     try {
@@ -738,6 +805,8 @@ private async savePerformanceMetrics(metrics: Map<string, ModelPerformanceMetric
         successRate: 0,
         avgCostPerRequest: 0,
         costRequests: 0,
+        complaintCount: 0,
+        complaintRate: 0,
         lastUpdated: now,
       };
       metricsMap.set(key, metrics);
@@ -764,6 +833,10 @@ private async savePerformanceMetrics(metrics: Map<string, ModelPerformanceMetric
       metrics.failedRequests++;
     }
     metrics.successRate = metrics.successfulRequests / metrics.totalRequests;
+    metrics.complaintRate = Math.max(
+      0,
+      Math.min(1, metrics.complaintCount / Math.max(metrics.totalRequests, 1)),
+    );
     metrics.lastUpdated = now;
     
     await this.savePerformanceMetrics(metricsMap);
@@ -813,5 +886,49 @@ private async savePerformanceMetrics(metrics: Map<string, ModelPerformanceMetric
 
   getLogs(): BrainLogEntry[] {
     return this.brainLog;
+  }
+
+  async recordComplaint(requestId: string): Promise<boolean> {
+    const mapping = this.requestIdMap.get(requestId);
+    if (!mapping) {
+      logger.warn({ requestId }, 'Complaint received for unknown requestId');
+      return false;
+    }
+    if (mapping.complaintRecorded) return true;
+
+    const currentMetrics = await this.loadPerformanceMetrics();
+    const metrics = new Map(
+      Array.from(currentMetrics, ([key, value]) => [key, { ...value }] as const),
+    );
+    const key = `${mapping.provider}:${mapping.model}`;
+    const existing = metrics.get(key);
+    const complaintCount = (existing?.complaintCount || 0) + 1;
+    metrics.set(key, {
+      model: mapping.model,
+      provider: mapping.provider,
+      totalRequests: existing?.totalRequests ?? 0,
+      successfulRequests: existing?.successfulRequests ?? 0,
+      failedRequests: existing?.failedRequests ?? 0,
+      totalLatencyMs: existing?.totalLatencyMs ?? 0,
+      totalTokensUsed: existing?.totalTokensUsed ?? 0,
+      totalCost: existing?.totalCost ?? 0,
+      avgLatencyMs: existing?.avgLatencyMs ?? 0,
+      successRate: existing?.successRate ?? 0,
+      avgCostPerRequest: existing?.avgCostPerRequest ?? 0,
+      costRequests: existing?.costRequests ?? 0,
+      complaintCount,
+      complaintRate: Math.max(
+        0,
+        Math.min(1, complaintCount / Math.max(existing?.totalRequests ?? 0, 1)),
+      ),
+      lastUpdated: Date.now(),
+    });
+
+    await this.savePerformanceMetrics(metrics, true);
+    mapping.complaintRecorded = true;
+    this.performanceMetricsCache = metrics;
+    this.performanceCacheFetchedAt = Date.now();
+    this.router.setPerformanceMetrics(metrics);
+    return true;
   }
 }

@@ -38,7 +38,7 @@ const UPSKILL_ROLE_TARGETED_LEARNING_PLANNER = createDeclarativeCodeSkill({
   id: 'career-upskill-role-targeted-learning-planner',
   name: 'Upskill & Learning Planner',
   description: 'Recommends a concise upskilling plan and curated learning resources for a specific job title or pasted job posting. Delegates to career-advisory. Reports not-connected when no usable recommendations come back.',
-  persistenceEnvVar: 'STORAGE_DIR',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: UPSKILL_ROLE_TARGETED_LEARNING_PLANNER_INPUT,
   outputSchema: UPSKILL_ROLE_TARGETED_LEARNING_PLANNER_OUTPUT,
   triggers: [

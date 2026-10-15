@@ -4,9 +4,19 @@ import { LESSON_ASSESSMENT_DRAFTING_SCHEDULED } from './skills/education-lesson-
 import { LEARNER_INSIGHT } from './skills/learner-insight';
 import { ADAPTIVE_PERSONALIZATION } from './skills/adaptive-personalization';
 import { RESOURCE_LIBRARY_OPS } from './skills/education-resource-library';
+import { EDUCATION_ASSESSMENT_CONTENT_GENERATOR } from './tools/education-assessment-content-generator';
+import { EDUCATION_ASSESSMENT_CONTENT_REVIEWER } from './tools/education-assessment-content-reviewer';
 import { createWorkflow } from '../../adk/workflow-common';
 
-export const educationSkills = [LESSON_ASSESSMENT_DRAFTING_USER, LESSON_ASSESSMENT_DRAFTING_SCHEDULED, LEARNER_INSIGHT, ADAPTIVE_PERSONALIZATION, RESOURCE_LIBRARY_OPS];
+export const educationSkills = [
+  LESSON_ASSESSMENT_DRAFTING_USER,
+  LESSON_ASSESSMENT_DRAFTING_SCHEDULED,
+  LEARNER_INSIGHT,
+  ADAPTIVE_PERSONALIZATION,
+  RESOURCE_LIBRARY_OPS,
+  EDUCATION_ASSESSMENT_CONTENT_GENERATOR,
+  EDUCATION_ASSESSMENT_CONTENT_REVIEWER,
+];
 
 export const educationWorkflow = createWorkflow({
   assistant: 'Education',

@@ -11,7 +11,7 @@ export const ANALYTICS_SCHEDULED_TREND_MONITOR = createDeclarativeCodeSkill({
   isSkill: true,
   name: 'Scheduled Trend Monitor',
   description: 'Runs periodic grounded trend analysis on warehouse or local business metrics on a schedule. Detects trends, anomalies, and statistical signals over time windows.',
-  persistenceEnvVar: 'ANALYTICS_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: ANALYTICS_INPUT_SCHEMA,
   outputSchema: ANALYTICS_OUTPUT_SCHEMA,
   triggers: [

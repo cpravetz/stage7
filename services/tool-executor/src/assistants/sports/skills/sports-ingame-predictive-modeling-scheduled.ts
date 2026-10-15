@@ -13,7 +13,7 @@ const SPORTS_INGAME_PREDICTIVE_MODELING_SCHEDULED = createDeclarativeCodeSkill({
   id: 'sports-ingame-predictive-modeling-scheduled',
   name: 'In-Game Predictive Modeling (Scoped)',
   description: 'Watches the configured matches, teams, or sports and reports win-probability movement.',
-  persistenceEnvVar: 'SPORTS_GROUP_B_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   tier: 'advise',
   domainKnowledge: 'Live sports predictive modeling, win probability estimation, momentum signal interpretation, and lineup impact analysis',
   inputSchema: {

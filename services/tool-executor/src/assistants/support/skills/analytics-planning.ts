@@ -7,7 +7,7 @@ export const ANALYTICS_PLANNING = createDeclarativeCodeSkill({
   id: 'analytics-planning',
   name: 'Support Analytics & Planning',
   description: 'Analyze support metrics, trends, and performance data, and plan capacity, staffing, and resource allocation.',
-  persistenceEnvVar: 'SUPPORT_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   tier: 'advise',
   domainKnowledge: 'Customer success metrics (CSAT, NPS, Churn Rate), SLA management, support escalation tiers, ticket triage',
   inputSchema: {

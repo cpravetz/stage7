@@ -6,7 +6,7 @@ export const PRODUCT_INSIGHTS_SCHEDULED = createDeclarativeCodeSkill({
     id: 'product-insights-scheduled',
     name: 'Product Insights (Scheduled)',
     description: 'Scheduled metrics sweep over the configured metrics and segments, reporting movement against configured thresholds.',
-    persistenceEnvVar: 'STORAGE_DIR',
+    persistenceEnvVar: 'ASSISTANT_HOME',
     tier: 'advise',
     isSkill: true,
     domainKnowledge: 'Product management frameworks (RICE, WSJF, Jobs-to-be-Done), Agile/Scrum methodologies, user telemetry interpretation',

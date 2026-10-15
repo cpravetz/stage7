@@ -17,7 +17,7 @@ function withUxMetadata(schema: SchemaRecord): SchemaRecord {
 }
 
 const SAFETY_BOUNDARY = 'Decision support and education only: do not diagnose, prescribe, change treatment, or make autonomous clinical decisions; use only authorized minimum-necessary data and approved secure endpoints for PHI; a qualified clinician must review all outputs.'
-const metadata = { domain: 'healthcare', persistenceEnv: 'HEALTHCARE_HOME', HEALTHCARE_HOME: 'HEALTHCARE_HOME', homeEnv: 'HEALTHCARE_HOME', healthcareHome: 'HEALTHCARE_HOME', clinicalSafetyBoundary: SAFETY_BOUNDARY }
+const metadata = { domain: 'healthcare', persistenceEnv: 'ASSISTANT_HOME', HEALTHCARE_HOME: 'ASSISTANT_HOME', homeEnv: 'ASSISTANT_HOME', healthcareHome: 'ASSISTANT_HOME', clinicalSafetyBoundary: SAFETY_BOUNDARY }
 const triggers = [
   { kind: 'user' as const, phrase_examples: ['evaluate clinic workflow', 'review this clinical case', 'create a care plan', 'stage intake dispatch'] },
   { kind: 'schedule' as const, cadence: 'daily clinical operations review' },
@@ -26,7 +26,7 @@ const triggers = [
 ]
 
 const intakeConfig = createSchemaRecord({
-  endpointUrl: SchemaProps.url({ description: 'Healthcare intake endpoint URL; may also be supplied at runtime through HEALTHCARE_INTAKE_ENDPOINT' }),
+  endpointUrl: SchemaProps.url({ description: 'Healthcare intake endpoint URL; may also be supplied at runtime via configuration' }),
   defaultDryRun: SchemaProps.boolean({ description: 'Default intake execution to dry-run', default: true }),
 })
 
@@ -35,7 +35,7 @@ const intake = createDeclarativeCodeSkill({
   isSkill: true,
   name: 'Appointment & Patient Intake Dispatcher',
   description: 'Stage patient intake in dry-run mode by default and dispatch it to a configured healthcare endpoint only after explicit confirmation, with honest disconnected and safety states.',
-  persistenceEnvVar: 'HEALTHCARE_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   tier: 'represent',
   emitEvent: 'healthcare.patient_intake.dispatched',
   domainKnowledge: 'Patient intake scheduling, appointment management, and healthcare endpoint dispatch coordination',
@@ -70,7 +70,7 @@ const intake = createDeclarativeCodeSkill({
       token: { configKey: 'token', required: false, label: "upstream API token (set in this Skill configuration, or a vault secret)" },
     },
     configSchema: intakeConfig,
-    healthcareHome: 'HEALTHCARE_HOME',
+    healthcareHome: 'ASSISTANT_HOME',
     endpointConfigKey: 'endpointUrl',
     ui: { view: 'intake-approval' },
     metadata: metadata

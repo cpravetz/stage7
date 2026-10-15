@@ -82,7 +82,7 @@ The `leadSheetDemoDispatcher` skill accepts three `format` values:
 | `demo-metadata` | key, tempoBpm, duration (m:ss), section and line counts |
 | `registration` | writer and publisher names, rights note |
 
-Dispatch requires `dryRun: false` and `confirmation: true`. In dry-run mode the artifact is staged at `ctx.store.getFilePath('lead-sheets')` and nothing leaves the system. An `endpointUrl` in the skill's dispatch config (`SONGWRITER_HOME`) is required before any live send can proceed. The `apiKey` credential is injected via vault reference and never echoed in output.
+Dispatch requires `dryRun: false` and `confirmation: true`. In dry-run mode the artifact is staged at `ctx.store.getFilePath('lead-sheets')` and nothing leaves the system. An `endpointUrl` in the skill's dispatch config (`ASSISTANT_HOME`) is required before any live send can proceed. The `apiKey` credential is injected via vault reference and never echoed in output.
 
 ## Verse-Line Uniqueness Constraint
 

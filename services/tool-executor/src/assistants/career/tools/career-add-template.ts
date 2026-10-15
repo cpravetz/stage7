@@ -45,7 +45,7 @@ const CAREER_ADD_TEMPLATE = createDeclarativeCodeSkill({
   isSkill: false,
   name: 'Add Template',
   description: 'Register a new resume or cover letter template in the career workspace. Templates are named, versioned, and can be reused across applications with variable substitution.',
-  persistenceEnvVar: 'CAREER_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: CAREER_ADD_TEMPLATE_INPUT,
   outputSchema: CAREER_ADD_TEMPLATE_OUTPUT,
   triggers: [

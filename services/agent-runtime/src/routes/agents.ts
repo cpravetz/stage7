@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express'
+import { NextFunction, Router, Request, Response } from 'express'
 import { runtime } from '../utils/sharedInstance'
 import { asyncHandler } from '../utils/asyncHandler'
 import { AppError, BadRequestError, NotFoundError } from '../utils/errors'
@@ -170,12 +170,22 @@ router.post('/missions/:missionId/agents/:id/tasks', asyncHandler(async (req: Re
   res.status(201).json(task)
 }))
 
+router.get('/missions/:missionId/agents/:id/tasks/:taskId', asyncHandler((req: Request, res: Response) => {
+  const { missionId, id, taskId } = req.params as { missionId: string; id: string; taskId: string }
+  requireMissionAgent(missionId, id)
+  res.json(requireMissionTask(id, taskId))
+}))
+
 router.post('/missions/:missionId/agents/:id/tasks/:taskId/execute', asyncHandler(async (req: Request, res: Response) => {
   const { missionId, id, taskId } = req.params as { missionId: string; id: string; taskId: string }
   requireMissionAgent(missionId, id)
   requireMissionTask(id, taskId)
   const requireCompletedReceipt = req.body.requireCompletedReceipt === true
-  res.json(await runtime.executeTask(id, taskId, requireCompletedReceipt))
+  const retryGuidance = req.body.retryGuidance
+  if (retryGuidance !== undefined && (typeof retryGuidance !== 'string' || retryGuidance.length > 4_000)) {
+    throw new BadRequestError('Retry guidance must be a string of at most 4000 characters')
+  }
+  res.json(await runtime.executeTask(id, taskId, requireCompletedReceipt, 0, retryGuidance))
 }))
 
 router.post('/missions/:missionId/agents/:id/tasks/:taskId/complete', asyncHandler(async (req: Request, res: Response) => {
@@ -228,5 +238,16 @@ router.get('/missions/:missionId/agents/:id/specializations', asyncHandler((req:
   const specializations = runtime.getSpecializations(id)
   res.json(specializations)
 }))
+
+router.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  const appError = err instanceof AppError
+    ? err
+    : new AppError(500, err instanceof Error ? err.message : 'Internal server error', false)
+  res.status(appError.statusCode).json({
+    success: false,
+    error: appError.message,
+    statusCode: appError.statusCode,
+  })
+})
 
 export default router

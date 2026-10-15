@@ -37,7 +37,7 @@ const CRM_SYNC = createDeclarativeCodeSkill({
   name: 'CRM Sync',
   description:
     'Stages a deal sync against the configured CRM. Defaults to dry run; a live write requires confirmation. With no endpoint configured, reports the staged payload and marks itself not-connected rather than implying the CRM was updated.',
-  persistenceEnvVar: 'SALES_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: {
     type: 'object',
     properties: {

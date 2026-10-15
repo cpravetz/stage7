@@ -13,32 +13,46 @@ import {
   DEFAULT_AGENT_EXECUTION_POLICY,
 } from '@stage7-nextgen/shared';
 import { Plan, Phase, Task } from '@stage7-nextgen/shared';
+import type { CompletedTaskSummary } from '../types/workflow';
 import {
   PlannerCompletionRequest,
   PLANNER_EXECUTION_POLICY,
   PLANNER_SYSTEM_PROMPT,
   generateValidPlan,
+  missionTaskActionIssues,
+  missionTaskDependencyIssues,
 } from '../planner/MissionPlanner';
 
 const TASK_SELECTOR_SYSTEM_PROMPT = `You are the mission task selector. Select the single best next task from the supplied ready tasks, using the mission goal, phase goal, and completed task IDs. You may not select a task that is not listed as ready, add tasks, or change task instructions. Return only JSON in the form {"taskId":"<ready-task-id>"}.`;
 const TASK_SELECTOR_EXECUTION_POLICY: AgentExecutionPolicy = {
   ...DEFAULT_AGENT_EXECUTION_POLICY,
-  maxBrainCalls: 1,
+  maxBrainCalls: 2,
   maxActions: 0,
-  maxCompletionTokens: 256,
+  maxCompletionTokens: 512,
   maxCompletionTokensPerCall: 256,
   maxDelegations: 0,
 };
-const PHASE_REVIEW_SYSTEM_PROMPT = `You are a critical phase reviewer. Compare completed task outputs and artifacts with the mission goal and phase goal. Do not mark a phase complete just because its tasks ran. If the phase goal is satisfied, return {"satisfied":true,"gaps":[],"followUpTask":null}. Otherwise identify concrete gaps and propose exactly one focused follow-up task that can address a gap, returning {"satisfied":false,"gaps":["..."],"followUpTask":{"title":"...","description":"...","agentRole":"...","systemPrompt":"...","expectedArtifacts":[]}}. Do not propose tasks that repeat completed work. Return only JSON.`;
+const PHASE_REVIEW_SYSTEM_PROMPT = `You are a critical phase reviewer. Compare completed task outputs and artifacts with the mission goal and phase goal. Only observed results and artifacts count as evidence; plans, proposed tool actions, and claims that a tool was used are not evidence that it ran. Treat system-action-receipts.json as the record of actual tool results: every required action must have a matching receipt with its required outcome, failed receipts do not support success, and claimed results that contradict receipts are gaps. Do not mark a phase complete just because its tasks ran. If the phase goal is satisfied, return {"satisfied":true,"gaps":[],"followUpTask":null}. Otherwise identify concrete gaps and propose exactly one focused follow-up task that can address a gap, returning {"satisfied":false,"gaps":["..."],"followUpTask":{"title":"...","description":"...","agentRole":"...","systemPrompt":"...","expectedArtifacts":[],"requiredActions":[]}}. Every explicit tool call in systemPrompt must have a requiredActions receipt using the exact tool ID. Child-Agent delegation uses toolId "__delegate", never "delegate"; denial attempts require outcome "denied"; recovery from a tool error requires both "failure" and "success" receipts. Explicitly instruct the Agent to make each required action. Never repeat a successfully completed side-effect action or change a requested identifier; when verification is missing, propose a safe read-only verification task. The follow-up systemPrompt must name each prerequisite task ID and identify the specific output, artifact, or receipt it consumes. Do not propose tasks that repeat completed work. Return exactly one JSON object with this shape; do not include explanations, task metadata, plans, tool actions, or Markdown fences.`;
 const PHASE_REVIEW_EXECUTION_POLICY: AgentExecutionPolicy = {
   ...DEFAULT_AGENT_EXECUTION_POLICY,
-  maxBrainCalls: 1,
+  maxBrainCalls: 2,
   maxActions: 0,
-  maxCompletionTokens: 1_024,
+  maxCompletionTokens: 2_048,
   maxCompletionTokensPerCall: 1_024,
   maxDelegations: 0,
 };
+const MISSION_COMPLETION_REVIEWER_SYSTEM_PROMPT = `You are an objective mission-completion reviewer. Determine whether the observed task outputs and artifacts satisfy the mission goal. Treat each task's requiredActions as explicit action obligations and system-action-receipts.json as the record of actual tool results: every required action must have a matching receipt with its required outcome, failed receipts do not support success, and claimed results that contradict receipts are gaps. Return exactly one JSON object with {"satisfied":true,"gaps":[]} or {"satisfied":false,"gaps":["concrete unmet requirement"]}. Never infer success from a task merely being marked complete. Do not include explanations, Markdown fences, or any text outside the JSON object.`;
+const MISSION_COMPLETION_REVIEW_EXECUTION_POLICY: AgentExecutionPolicy = {
+  ...DEFAULT_AGENT_EXECUTION_POLICY,
+  maxBrainCalls: 2,
+  maxActions: 0,
+  maxCompletionTokens: 1_024,
+  maxCompletionTokensPerCall: 512,
+  maxDelegations: 0,
+};
 const MAX_SAFE_AGENT_TASK_RETRIES = 1;
+const MAX_STRUCTURED_RESPONSE_ATTEMPTS = 5;
+const MAX_ACTION_RECEIPTS = 50;
 
 export interface MissionPhaseReview {
   satisfied: boolean;
@@ -49,6 +63,7 @@ export interface MissionPhaseReview {
     agentRole: string;
     systemPrompt: string;
     expectedArtifacts: string[];
+    requiredActions?: NonNullable<Task['requiredActions']>;
   };
 }
 
@@ -80,7 +95,8 @@ export function applyPhaseReview(
     normalize(task.title) === normalize(followUpTask.title)
     && normalize(task.description) === normalize(followUpTask.description)
     && JSON.stringify(expectedArtifacts(task.expectedArtifacts))
-      === JSON.stringify(expectedArtifacts(followUpTask.expectedArtifacts)),
+      === JSON.stringify(expectedArtifacts(followUpTask.expectedArtifacts))
+    && JSON.stringify(task.requiredActions || []) === JSON.stringify(followUpTask.requiredActions || []),
   );
   if (repeatedTask) {
     return {
@@ -98,13 +114,60 @@ export function applyPhaseReview(
     amendmentIndex++;
     taskId = `${phase.id}-amendment-${amendmentIndex}`;
   }
+  const dependencies = phase.tasks.map((task) => task.id);
+  const completedSideEffectActions = new Set(
+    phase.tasks
+      .filter((task) => task.status === 'completed')
+      .flatMap((task) => (task.requiredActions || [])
+      .filter((action) => action.outcome === 'success' && action.toolId.toLowerCase() !== '__list_tools')
+      .map((action) => action.toolId.toLowerCase())),
+  );
+  const repeatedSideEffect = followUpTask.requiredActions?.find((action) =>
+    action.outcome === 'success'
+    && action.toolId.toLowerCase() !== '__list_tools'
+    && completedSideEffectActions.has(action.toolId.toLowerCase()),
+  );
+  if (repeatedSideEffect) {
+    return {
+      plan,
+      phase,
+      satisfied: false,
+      gaps: [
+        ...review.gaps,
+        `Reviewer proposed repeating successful side-effect action "${repeatedSideEffect.toolId}"; no new task was added.`,
+      ],
+    };
+  }
+
+  const dependencyInstructions = phase.tasks.map((task) => {
+    const evidenceNames = [...new Set([
+      ...task.expectedArtifacts,
+      ...task.artifacts.map((artifact) => artifact.name),
+    ])];
+    const evidence = evidenceNames.length > 0 ? `, including ${evidenceNames.join(', ')}` : '';
+    return `Use the outputs produced by task ${task.id}${evidence}`;
+  });
   const amendment: Task = {
     id: taskId,
     ...followUpTask,
-    dependsOnTaskIds: phase.tasks.map((task) => task.id),
+    systemPrompt: `${followUpTask.systemPrompt.trim()}\n\n${dependencyInstructions.join('. ')} as authoritative phase context, and do not repeat completed work.`,
+    requiredActions: followUpTask.requiredActions || [],
+    dependsOnTaskIds: dependencies,
     status: 'pending',
     artifacts: [],
   };
+  const allTaskIds = new Set(
+    [...plan.phases.flatMap((entry) => entry.tasks.map((task) => task.id)), taskId]
+      .map((existingTaskId) => existingTaskId.toLowerCase()),
+  );
+  const taskPath = `phase follow-up "${amendment.title}"`;
+  const contractIssues = [
+    ...missionTaskActionIssues(amendment, taskPath, allTaskIds),
+    ...missionTaskDependencyIssues(amendment, allTaskIds, taskPath),
+  ];
+  if (contractIssues.length > 0) {
+    throw new Error(`Phase reviewer proposed an invalid follow-up task: ${contractIssues.join('; ')}`);
+  }
   const amendedPhase: Phase = { ...phase, tasks: [...phase.tasks, amendment] };
   const amendedPlan: Plan = {
     ...plan,
@@ -115,6 +178,10 @@ export function applyPhaseReview(
 
 function getAgentRuntimeUrl(): string {
   return process.env.AGENT_RUNTIME_URL || 'http://agent-runtime:3400';
+}
+
+function encodePathSegment(value: string): string {
+  return encodeURIComponent(value).replace(/%3A/gi, ':');
 }
 
 export interface MissionAgentConfig {
@@ -175,7 +242,11 @@ function parseMissionAgentToolPolicies(value: unknown): Map<string, MissionAgent
 export interface TaskExecutionResult {
   output: string;
   artifacts: Array<{ name: string; type: string; content: string }>;
+  actionReceipts?: Array<{ toolId: string; isError: boolean; content: string; outcome: 'success' | 'failure' | 'denied' }>;
   tokensUsed: number;
+  model?: string;
+  provider?: string;
+  requestId?: string;
 }
 
 export interface PromptTaskRequest {
@@ -184,9 +255,11 @@ export interface PromptTaskRequest {
   prompt: string;
   phaseId?: string;
   expectedArtifacts?: string[];
+  requiredActions?: NonNullable<Task['requiredActions']>;
   context?: Record<string, unknown>;
   requireCompletedReceipt?: boolean;
   executionPolicy?: AgentExecutionPolicy;
+  retryGuidance?: string;
 }
 
 class MissionAgentRuntimeApiError extends Error {
@@ -202,6 +275,7 @@ export class MissionAgentRuntime {
   private agentRuntimeUrl: string;
   private broadcast: MissionAgentConfig['broadcast'];
   private agentToolPolicies: Map<string, MissionAgentToolGrant>;
+  private missionRetryCount: number;
   private agentCache: Map<string, string> = new Map(); // agentRole -> agentId
   private taskAgentMap: Map<string, string> = new Map(); // taskId -> agentId
 
@@ -211,13 +285,29 @@ export class MissionAgentRuntime {
     this.agentRuntimeUrl = config.agentRuntimeUrl || getAgentRuntimeUrl();
     this.broadcast = config.broadcast || (async () => {});
     this.agentToolPolicies = parseMissionAgentToolPolicies(config.metadata?.agentToolPolicies);
+    const retryCount = config.metadata?.retryCount;
+    if (
+      retryCount !== undefined
+      && (typeof retryCount !== 'number' || !Number.isSafeInteger(retryCount) || retryCount < 0)
+    ) {
+      throw new Error('metadata.retryCount must be a non-negative safe integer');
+    }
+    this.missionRetryCount = typeof retryCount === 'number' ? retryCount : 0;
   }
 
   private async api<T>(path: string, options: RequestInit = {}): Promise<T> {
-    const res = await fetch(`${this.agentRuntimeUrl}/api/agent-runtime${path}`, {
-      ...options,
-      headers: { 'Content-Type': 'application/json', ...options.headers },
-    });
+    const url = `${this.agentRuntimeUrl}/api/agent-runtime${path}`;
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        ...options,
+        headers: { 'Content-Type': 'application/json', ...options.headers },
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error({ path, url, err: message }, 'Agent runtime fetch failed');
+      throw new MissionAgentRuntimeApiError(path, 500, message);
+    }
     if (!res.ok) {
       const text = await res.text();
       throw new MissionAgentRuntimeApiError(path, res.status, text);
@@ -225,15 +315,63 @@ export class MissionAgentRuntime {
     return res.json() as Promise<T>;
   }
 
+  private missionAgentsPath(): string {
+    return `/missions/${encodePathSegment(this.missionId)}/agents`;
+  }
+
+  private missionAgentPath(agentId: string, ...segments: string[]): string {
+    return `${this.missionAgentsPath()}/${encodePathSegment(agentId)}${
+      segments.map((segment) => `/${encodePathSegment(segment)}`).join('')
+    }`;
+  }
+
+  private async reportBrainComplaint(requestId: string | undefined, reason: string): Promise<void> {
+    if (!requestId) {
+      logger.warn(
+        { missionId: this.missionId, reason },
+        'Cannot report rejected Agent output to Brain without a request ID',
+      );
+      return;
+    }
+
+    const brainUrl = process.env.BRAIN_URL || 'http://brain:3100';
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5_000);
+    try {
+      const response = await fetch(`${brainUrl}/api/brain/complaint`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requestId, reason, missionId: this.missionId }),
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        const details = await response.text();
+        logger.error(
+          { missionId: this.missionId, requestId, status: response.status, details: details.slice(0, 300) },
+          'Brain rejected a mission Agent output complaint',
+        );
+        return;
+      }
+      logger.info({ missionId: this.missionId, requestId, reason }, 'Mission Agent reported a Brain output complaint');
+    } catch (error) {
+      logger.error(
+        { missionId: this.missionId, requestId, error: error instanceof Error ? error.message : String(error) },
+        'Failed to report a mission Agent output complaint',
+      );
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
   async registerPlannerAgent(systemPrompt: string): Promise<string> {
     const agentId = `agent-${this.missionId}-planner`;
     if (this.agentCache.has('planner')) return this.agentCache.get('planner')!;
 
     try {
-      const existing = await this.api<AgentDefinition>(`/missions/${this.missionId}/agents/${agentId}`);
+      const existing = await this.api<AgentDefinition>(this.missionAgentPath(agentId));
       if (existing.id) {
         this.assertToolAccess(existing, 'planner');
-        await this.api(`/missions/${this.missionId}/agents/${agentId}/start`, { method: 'POST' });
+        await this.api(this.missionAgentPath(agentId, 'start'), { method: 'POST' });
         this.agentCache.set('planner', agentId);
         return agentId;
       }
@@ -257,14 +395,15 @@ export class MissionAgentRuntime {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    await this.api(`/missions/${this.missionId}/agents`, { method: 'POST', body: JSON.stringify(definition) });
-    await this.api(`/missions/${this.missionId}/agents/${agentId}/start`, { method: 'POST' });
+    await this.api(this.missionAgentsPath(), { method: 'POST', body: JSON.stringify(definition) });
+    await this.api(this.missionAgentPath(agentId, 'start'), { method: 'POST' });
     this.agentCache.set('planner', agentId);
     return agentId;
   }
 
   async generatePlan(prompt: string, context?: Record<string, unknown>): Promise<Plan> {
     const agentId = await this.registerPlannerAgent(PLANNER_SYSTEM_PROMPT);
+    let responseRequestId: string | undefined;
     return generateValidPlan(prompt, context, this.missionId, async (request: PlannerCompletionRequest) => {
       const result = await this.executePromptTask(agentId, {
         taskId: `${this.missionId}:planner:attempt-${request.attempt}`,
@@ -279,7 +418,13 @@ export class MissionAgentRuntime {
         },
         executionPolicy: PLANNER_EXECUTION_POLICY,
       });
+      responseRequestId = result.requestId;
       return result.output;
+    }, async (reason) => {
+      await this.reportBrainComplaint(
+        responseRequestId,
+        `Mission planner validation failed: ${reason}`,
+      );
     });
   }
 
@@ -288,7 +433,7 @@ export class MissionAgentRuntime {
     plan: Plan,
     phase: Phase,
     completedTaskIds: string[],
-    completedTaskSummaries: Array<{ taskId: string; output: string; artifactNames: string[] }> = [],
+    completedTaskSummaries: CompletedTaskSummary[] = [],
   ): Promise<Task> {
     const completed = new Set(completedTaskIds);
     const readyTasks = phase.tasks.filter((task) =>
@@ -312,6 +457,7 @@ export class MissionAgentRuntime {
         taskId: summary.taskId,
         output: summary.output.slice(0, 1_200),
         artifactNames: summary.artifactNames.slice(0, 20),
+        artifacts: summary.artifacts,
       })),
       readyTasks: readyTasks.map(({ id, title, description, agentRole }) => ({
         id,
@@ -324,10 +470,14 @@ export class MissionAgentRuntime {
     let validationIssue = '';
 
     for (let attempt = 1; ; attempt++) {
+      if (attempt > MAX_STRUCTURED_RESPONSE_ATTEMPTS) {
+        throw new Error(`Mission task selection exceeded ${MAX_STRUCTURED_RESPONSE_ATTEMPTS} structured-response attempts in phase ${phase.id}`);
+      }
       const repair = attempt === 1
         ? ''
         : `\n\nYour previous response was rejected: ${validationIssue}\nPrevious response: ${previousResponse.slice(0, 2_000)}\nReturn a corrected JSON object selecting one of the currently ready task IDs.`;
       let output: string;
+      let responseRequestId: string | undefined;
       try {
         const result = await this.executePromptTask(agentId, {
           taskId: `${this.missionId}:${phase.id}:selector-${selectionIndex}:attempt-${attempt}`,
@@ -341,6 +491,7 @@ export class MissionAgentRuntime {
           executionPolicy: TASK_SELECTOR_EXECUTION_POLICY,
         });
         output = result.output;
+        responseRequestId = result.requestId;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (message.includes(BRAIN_MODEL_SELECTION_EXHAUSTED)) {
@@ -362,6 +513,10 @@ export class MissionAgentRuntime {
       } catch (error) {
         validationIssue = `response must be valid JSON: ${error instanceof Error ? error.message : String(error)}`;
       }
+      await this.reportBrainComplaint(
+        responseRequestId,
+        `Mission task-selection validation failed: ${validationIssue}`,
+      );
     }
   }
 
@@ -369,40 +524,48 @@ export class MissionAgentRuntime {
     missionGoal: string,
     plan: Plan,
     phase: Phase,
-    completedTaskSummaries: Array<{ taskId: string; output: string; artifactNames: string[] }>,
+    completedTaskSummaries: CompletedTaskSummary[],
     reviewIndex: number,
   ): Promise<MissionPhaseReview> {
-    const routingSessionId = `${this.missionId}:phase-review:${phase.id}:${reviewIndex}`;
+    const retryScope = this.missionRetryCount > 0 ? `:retry-${this.missionRetryCount}` : '';
+    const routingSessionId = `${this.missionId}:phase-review:${phase.id}:${reviewIndex}${retryScope}`;
     const agentId = await this.getOrCreateAgent('phase-reviewer', PHASE_REVIEW_SYSTEM_PROMPT);
     const reviewContext = JSON.stringify({
       missionGoal,
       planSummary: plan.summary,
       phase: { id: phase.id, name: phase.name, goal: phase.goal },
-      tasks: phase.tasks.map(({ id, title, description, expectedArtifacts }) => ({
+      tasks: phase.tasks.map(({ id, title, description, expectedArtifacts, requiredActions }) => ({
         id,
         title,
         description,
         expectedArtifacts,
+        requiredActions: requiredActions || [],
       })),
       completedTaskSummaries: completedTaskSummaries.map((summary) => ({
         taskId: summary.taskId,
         output: summary.output.slice(0, 1_200),
         artifactNames: summary.artifactNames,
+        artifacts: summary.artifacts,
+        requiredActions: summary.requiredActions || [],
       })),
     });
     let previousResponse = '';
     let validationIssue = '';
 
     for (let attempt = 1; ; attempt++) {
+      if (attempt > MAX_STRUCTURED_RESPONSE_ATTEMPTS) {
+        throw new Error(`Mission phase review exceeded ${MAX_STRUCTURED_RESPONSE_ATTEMPTS} structured-response attempts for phase ${phase.id}`);
+      }
       const repair = attempt === 1
         ? ''
-        : `\n\nYour previous review was rejected: ${validationIssue}\nPrevious response: ${previousResponse.slice(0, 2_000)}\nReturn a corrected JSON review.`;
+        : `\n\nYour previous review was rejected: ${validationIssue}\nPrevious response: ${previousResponse.slice(0, 2_000)}\nReturn exactly one JSON object with either {"satisfied":true,"gaps":[],"followUpTask":null} or {"satisfied":false,"gaps":["concrete gap"],"followUpTask":{"title":"...","description":"...","agentRole":"...","systemPrompt":"...","expectedArtifacts":[],"requiredActions":[]}}. Never repeat a successfully completed side-effect action or change a requested identifier. For a verification gap, propose a safe read-only verification task. Its systemPrompt must name each prerequisite task ID and identify the specific output, artifact, or receipt it consumes. Do not include a plan, tool action, metadata, explanation, or Markdown fence.`;
       let output: string;
+      let responseRequestId: string | undefined;
       try {
         const result = await this.executePromptTask(agentId, {
-          taskId: `${this.missionId}:${phase.id}:review-${reviewIndex}:attempt-${attempt}`,
+          taskId: `${this.missionId}:${phase.id}:review-${reviewIndex}${retryScope}:attempt-${attempt}`,
           type: 'phase-review',
-          prompt: `Review whether this phase's work satisfies its goal.\n\n${reviewContext}${repair}`,
+          prompt: `Review whether this phase's work satisfies its goal. Judge only actual task outputs and artifacts, not plans or proposed tool actions. Return exactly one JSON object using the required phase-review shape; do not include task metadata, a plan, tool actions, explanations, or Markdown fences.\n\n${reviewContext}${repair}`,
           phaseId: phase.id,
           context: {
             reviewAttempt: attempt,
@@ -411,6 +574,7 @@ export class MissionAgentRuntime {
           executionPolicy: PHASE_REVIEW_EXECUTION_POLICY,
         });
         output = result.output;
+        responseRequestId = result.requestId;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (message.includes(BRAIN_MODEL_SELECTION_EXHAUSTED)) {
@@ -427,11 +591,19 @@ export class MissionAgentRuntime {
         value = JSON.parse(normalized);
       } catch (error) {
         validationIssue = `response must be valid JSON: ${error instanceof Error ? error.message : String(error)}`;
+        await this.reportBrainComplaint(
+          responseRequestId,
+          `Mission phase-review validation failed: ${validationIssue}`,
+        );
         continue;
       }
 
       if (!value || typeof value !== 'object' || Array.isArray(value)) {
         validationIssue = 'response must be a JSON object';
+        await this.reportBrainComplaint(
+          responseRequestId,
+          `Mission phase-review validation failed: ${validationIssue}`,
+        );
         continue;
       }
       const review = value as Record<string, unknown>;
@@ -441,11 +613,19 @@ export class MissionAgentRuntime {
         || !review.gaps.every((gap) => typeof gap === 'string')
       ) {
         validationIssue = 'satisfied must be boolean and gaps must be a string array';
+        await this.reportBrainComplaint(
+          responseRequestId,
+          `Mission phase-review validation failed: ${validationIssue}`,
+        );
         continue;
       }
       if (review.satisfied) {
         if (review.followUpTask !== null && review.followUpTask !== undefined) {
           validationIssue = 'followUpTask must be null when satisfied is true';
+          await this.reportBrainComplaint(
+            responseRequestId,
+            `Mission phase-review validation failed: ${validationIssue}`,
+          );
           continue;
         }
         return { satisfied: true, gaps: review.gaps as string[] };
@@ -454,6 +634,10 @@ export class MissionAgentRuntime {
       const followUpTask = review.followUpTask;
       if (!followUpTask || typeof followUpTask !== 'object' || Array.isArray(followUpTask)) {
         validationIssue = 'followUpTask must be supplied when the phase is incomplete';
+        await this.reportBrainComplaint(
+          responseRequestId,
+          `Mission phase-review validation failed: ${validationIssue}`,
+        );
         continue;
       }
       const proposal = followUpTask as Record<string, unknown>;
@@ -465,11 +649,36 @@ export class MissionAgentRuntime {
         || !proposal.expectedArtifacts.every((artifact) =>
           typeof artifact === 'string' && artifact.trim().length > 0 && artifact.length <= 200,
         )
+        || !Array.isArray(proposal.requiredActions)
+        || !proposal.requiredActions.every((action) =>
+          action !== null
+          && typeof action === 'object'
+          && !Array.isArray(action)
+          && typeof (action as Record<string, unknown>).toolId === 'string'
+          && ((action as Record<string, unknown>).toolId as string).trim().length > 0
+          && ['success', 'failure', 'denied'].includes(String((action as Record<string, unknown>).outcome)),
+        )
       ) {
-        validationIssue = 'followUpTask must contain non-empty title, description, agentRole, systemPrompt, and expectedArtifacts as non-empty strings no longer than 200 characters';
+        validationIssue = 'followUpTask must contain non-empty title, description, agentRole, systemPrompt, expectedArtifacts, and valid requiredActions';
+        await this.reportBrainComplaint(
+          responseRequestId,
+          `Mission phase-review validation failed: ${validationIssue}`,
+        );
         continue;
       }
-      return {
+      const proposedActionIssues = missionTaskActionIssues({
+        systemPrompt: proposal.systemPrompt as string,
+        requiredActions: proposal.requiredActions as NonNullable<Task['requiredActions']>,
+      }, `followUpTask "${(proposal.title as string).trim()}"`);
+      if (proposedActionIssues.length > 0) {
+        validationIssue = `followUpTask action contract is invalid: ${proposedActionIssues.join('; ')}`;
+        await this.reportBrainComplaint(
+          responseRequestId,
+          `Mission phase-review validation failed: ${validationIssue}`,
+        );
+        continue;
+      }
+      const candidateReview: MissionPhaseReview = {
         satisfied: false,
         gaps: review.gaps as string[],
         followUpTask: {
@@ -478,9 +687,119 @@ export class MissionAgentRuntime {
           agentRole: (proposal.agentRole as string).trim(),
           systemPrompt: (proposal.systemPrompt as string).trim(),
           expectedArtifacts: (proposal.expectedArtifacts as string[]).map((artifact) => artifact.trim()),
+          requiredActions: proposal.requiredActions as NonNullable<Task['requiredActions']>,
         },
       };
+      try {
+        const applied = applyPhaseReview(plan, phase.id, candidateReview);
+        if (!applied.amendment) {
+          validationIssue = applied.gaps.slice(candidateReview.gaps.length).join('; ')
+            || 'followUpTask must add a new, actionable task';
+          await this.reportBrainComplaint(
+            responseRequestId,
+            `Mission phase-review validation failed: ${validationIssue}`,
+          );
+          continue;
+        }
+      } catch (error) {
+        validationIssue = error instanceof Error ? error.message : String(error);
+        await this.reportBrainComplaint(
+          responseRequestId,
+          `Mission phase-review validation failed: ${validationIssue}`,
+        );
+        continue;
+      }
+      return candidateReview;
     }
+  }
+
+  async reviewMissionCompletion(
+    missionGoal: string,
+    planSummary: string,
+    completedTaskSummaries: CompletedTaskSummary[],
+  ): Promise<{ satisfied: boolean; gaps: string[] }> {
+    const routingSessionId = `${this.missionId}:completion-review`;
+    const agentId = await this.getOrCreateAgent(
+      'mission-evaluator',
+      MISSION_COMPLETION_REVIEWER_SYSTEM_PROMPT,
+    );
+    const reviewContext = JSON.stringify({
+      missionGoal,
+      planSummary,
+      completedTaskSummaries,
+    });
+    let previousResponse = '';
+    let validationIssue = '';
+
+    for (let attempt = 1; attempt <= MAX_STRUCTURED_RESPONSE_ATTEMPTS; attempt++) {
+      const repair = attempt === 1
+        ? ''
+        : `\n\nYour previous response was rejected: ${validationIssue}\nPrevious response: ${previousResponse.slice(0, 2_000)}\nReturn exactly {"satisfied":true,"gaps":[]} or {"satisfied":false,"gaps":["concrete unmet requirement"]} as one JSON object. Do not include any other text.`;
+      const retryScope = this.missionRetryCount > 0 ? `:retry-${this.missionRetryCount}` : '';
+      let result: TaskExecutionResult;
+      try {
+        result = await this.executePromptTask(agentId, {
+          taskId: `${this.missionId}:review:completion${retryScope}:attempt-${attempt}`,
+          type: 'mission-completion-review',
+          prompt: `Evaluate whether these observed mission results satisfy the mission goal. Check actual results and action receipts; failed receipts are not evidence of successful work, and claims that contradict receipts are unmet requirements. Return exactly one JSON object with the required completion-review shape.\n\n${reviewContext}${repair}`,
+          phaseId: 'mission-review',
+          context: {
+            reviewAttempt: attempt,
+            [BRAIN_ROUTING_SESSION_CONTEXT_KEY]: routingSessionId,
+          },
+          executionPolicy: MISSION_COMPLETION_REVIEW_EXECUTION_POLICY,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.includes(BRAIN_MODEL_SELECTION_EXHAUSTED)) {
+          throw new Error(`Unable to review mission completion: Brain exhausted every eligible model. ${message}`);
+        }
+        if (message.includes(BRAIN_MODEL_SELECTION_RETRY)) continue;
+        throw new Error(`Mission completion review failed: ${message}`);
+      }
+
+      previousResponse = result.output;
+      let value: unknown;
+      try {
+        const normalized = result.output.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+        value = JSON.parse(normalized);
+      } catch (error) {
+        validationIssue = `response must be valid JSON: ${error instanceof Error ? error.message : String(error)}`;
+        await this.reportBrainComplaint(
+          result.requestId,
+          `Mission completion-review validation failed: ${validationIssue}`,
+        );
+        continue;
+      }
+
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        validationIssue = 'response must be a JSON object';
+        await this.reportBrainComplaint(
+          result.requestId,
+          `Mission completion-review validation failed: ${validationIssue}`,
+        );
+        continue;
+      }
+      const review = value as Record<string, unknown>;
+      if (
+        typeof review.satisfied !== 'boolean'
+        || !Array.isArray(review.gaps)
+        || !review.gaps.every((gap) => typeof gap === 'string' && gap.trim())
+        || (review.satisfied && review.gaps.length > 0)
+        || (!review.satisfied && review.gaps.length === 0)
+      ) {
+        validationIssue = 'satisfied must be boolean with no gaps when true, or at least one concrete string gap when false';
+        await this.reportBrainComplaint(
+          result.requestId,
+          `Mission completion-review validation failed: ${validationIssue}`,
+        );
+        continue;
+      }
+      return { satisfied: review.satisfied, gaps: review.gaps as string[] };
+    }
+    throw new Error(
+      `Mission completion review exceeded ${MAX_STRUCTURED_RESPONSE_ATTEMPTS} structured-response attempts`,
+    );
   }
 
   async getOrCreateAgent(agentRole: string, systemPrompt: string): Promise<string> {
@@ -489,14 +808,17 @@ export class MissionAgentRuntime {
       return this.agentCache.get(cacheKey)!;
     }
 
-    const agentId = `agent-${this.missionId}-${cacheKey}`;
+    const retryScope = cacheKey === 'mission-evaluator' && this.missionRetryCount > 0
+      ? `-retry-${this.missionRetryCount}`
+      : '';
+    const agentId = `agent-${this.missionId}-${cacheKey}${retryScope}`;
     try {
       const existing = await this.api<AgentDefinition>(
-        `/missions/${this.missionId}/agents/${agentId}`
+        this.missionAgentPath(agentId)
       );
       if (existing.id) {
         this.assertToolAccess(existing, agentRole);
-        await this.api(`/missions/${this.missionId}/agents/${agentId}/start`, { method: 'POST' });
+        await this.api(this.missionAgentPath(agentId, 'start'), { method: 'POST' });
         this.agentCache.set(cacheKey, agentId);
         return agentId;
       }
@@ -521,8 +843,8 @@ export class MissionAgentRuntime {
       updatedAt: new Date().toISOString(),
     };
 
-    await this.api(`/missions/${this.missionId}/agents`, { method: 'POST', body: JSON.stringify(definition) });
-    await this.api(`/missions/${this.missionId}/agents/${agentId}/start`, { method: 'POST' });
+    await this.api(this.missionAgentsPath(), { method: 'POST', body: JSON.stringify(definition) });
+    await this.api(this.missionAgentPath(agentId, 'start'), { method: 'POST' });
     this.agentCache.set(cacheKey, agentId);
     return agentId;
   }
@@ -561,16 +883,40 @@ export class MissionAgentRuntime {
     plan: Plan,
     requireCompletedReceipt = false,
     executionPolicy?: AgentExecutionPolicy,
+    completedTaskSummaries: CompletedTaskSummary[] = [],
+    retryGuidance?: string,
   ): Promise<TaskExecutionResult> {
-    const taskPrompt = this.buildTaskPrompt(task, phase, plan);
+    const dependencyIds = task.dependsOnTaskIds || [];
+    const completedById = new Map(completedTaskSummaries.map((summary) => [summary.taskId, summary]));
+    const completedDependencies: CompletedTaskSummary[] = [];
+    const missingDependencies: string[] = [];
+    for (const dependencyId of dependencyIds) {
+      const summary = completedById.get(dependencyId);
+      if (summary) completedDependencies.push(summary);
+      else missingDependencies.push(dependencyId);
+    }
+    if (missingDependencies.length > 0) {
+      throw new Error(
+        `Mission task "${task.id}" cannot execute because completed dependency results are missing for: ${missingDependencies.join(', ')}`,
+      );
+    }
+    const basePrompt = this.buildTaskPrompt(task, phase, plan, completedDependencies);
+    const taskPrompt = retryGuidance
+      ? `${basePrompt}\n\nRetry guidance for remaining work:\n${retryGuidance}`
+      : basePrompt;
     return this.executePromptTask(agentId, {
       taskId: `${this.missionId}:${phase.id}:${task.id}`,
       type: task.agentRole,
       prompt: taskPrompt,
       phaseId: phase.id,
       expectedArtifacts: task.expectedArtifacts,
+      requiredActions: task.requiredActions || [],
+      context: {
+        [BRAIN_ROUTING_SESSION_CONTEXT_KEY]: `${this.missionId}:task:${phase.id}:${task.id}`,
+      },
       requireCompletedReceipt,
       executionPolicy,
+      retryGuidance,
     });
   }
 
@@ -586,6 +932,7 @@ export class MissionAgentRuntime {
           ...(request.phaseId ? { phaseId: request.phaseId } : {}),
           taskId: request.taskId,
           expectedArtifacts: request.expectedArtifacts || [],
+          requiredActions: request.requiredActions || [],
           ...(request.executionPolicy ? { executionPolicy: request.executionPolicy } : {}),
         },
       },
@@ -594,20 +941,37 @@ export class MissionAgentRuntime {
     };
 
     const submitted = await this.api<AgentTask>(
-      `/missions/${this.missionId}/agents/${agentId}/tasks`,
+      this.missionAgentPath(agentId, 'tasks'),
       { method: 'POST', body: JSON.stringify(taskData) }
     );
 
-    const executePath = `/missions/${this.missionId}/agents/${agentId}/tasks/${submitted.taskId}/execute`;
+    const executePath = this.missionAgentPath(agentId, 'tasks', submitted.taskId, 'execute');
     let completed: AgentTask | undefined;
+    let recoveredResult: TaskExecutionResult | undefined;
     for (let retry = 0; retry <= MAX_SAFE_AGENT_TASK_RETRIES; retry++) {
       try {
         completed = await this.api<AgentTask>(executePath, {
           method: 'POST',
-          body: JSON.stringify({ requireCompletedReceipt: request.requireCompletedReceipt || false }),
+          body: JSON.stringify({
+            requireCompletedReceipt: request.requireCompletedReceipt || false,
+            ...(request.retryGuidance ? { retryGuidance: request.retryGuidance } : {}),
+          }),
         });
         break;
       } catch (error) {
+        if (
+          error instanceof MissionAgentRuntimeApiError
+          && error.path === executePath
+          && error.status === 500
+          && error.message.includes('is already running')
+        ) {
+          logger.warn(
+            { missionId: this.missionId, agentId, taskId: submitted.taskId },
+            'Agent task is already running; waiting for its persisted result instead of executing it again',
+          );
+          recoveredResult = await this.waitForTaskCompletion(agentId, submitted.taskId);
+          break;
+        }
         if (
           retry >= MAX_SAFE_AGENT_TASK_RETRIES
           || !(error instanceof MissionAgentRuntimeApiError)
@@ -622,17 +986,30 @@ export class MissionAgentRuntime {
         );
       }
     }
+    if (recoveredResult) return recoveredResult;
     if (!completed) throw new Error(`Agent task ${submitted.taskId} returned no execution response`);
     if (completed.status !== 'completed') {
       throw new Error(completed.error || `Agent task ${submitted.taskId} returned status '${completed.status}'`);
     }
     const result = completed.result as Partial<TaskExecutionResult> | undefined;
     const output = typeof result?.output === 'string' ? result.output : '';
-    const artifacts = Array.isArray(result?.artifacts)
-      ? result.artifacts
-      : this.extractArtifacts(output, request.expectedArtifacts || []);
+    const expectedArtifacts = request.expectedArtifacts || [];
+    const artifacts = this.parseArtifacts(result?.artifacts, output, expectedArtifacts, submitted.taskId);
+    this.assertExpectedArtifacts(artifacts, expectedArtifacts, submitted.taskId);
+    const actionReceipts = this.parseActionReceipts(result?.actionReceipts, submitted.taskId);
     const tokensUsed = typeof result?.tokensUsed === 'number' ? result.tokensUsed : 0;
-    return { output, artifacts, tokensUsed };
+    const model = result?.model;
+    const provider = result?.provider;
+    const requestId = result?.requestId;
+    return {
+      output,
+      artifacts: this.withActionReceiptArtifact(artifacts, actionReceipts, submitted.taskId),
+      actionReceipts,
+      tokensUsed,
+      model,
+      provider,
+      requestId,
+    };
   }
 
   private async markTaskCompleted(taskId: string, result: any): Promise<void> {
@@ -643,7 +1020,7 @@ export class MissionAgentRuntime {
         return;
       }
       await this.api(
-        `/missions/${this.missionId}/agents/${agentId}/tasks/${taskId}/complete`,
+        this.missionAgentPath(agentId, 'tasks', taskId, 'complete'),
         { method: 'POST', body: JSON.stringify({ result }) }
       );
     } catch (err) {
@@ -659,7 +1036,7 @@ export class MissionAgentRuntime {
         return;
       }
       await this.api(
-        `/missions/${this.missionId}/agents/${agentId}/tasks/${taskId}/fail`,
+        this.missionAgentPath(agentId, 'tasks', taskId, 'fail'),
         { method: 'POST', body: JSON.stringify({ error }) }
       );
     } catch (err) {
@@ -667,34 +1044,51 @@ export class MissionAgentRuntime {
     }
   }
 
-  private buildTaskPrompt(task: Task, phase: Phase, plan: Plan): string {
+  private buildTaskPrompt(
+    task: Task,
+    phase: Phase,
+    plan: Plan,
+    completedDependencies: CompletedTaskSummary[],
+  ): string {
+    const artifactOutputContract = task.expectedArtifacts.length > 0
+      ? `Return one Markdown section headed by the exact name of each expected artifact: ${task.expectedArtifacts.map((name) => `## ${name}`).join(', ')}. Put only that artifact's verified result under its heading.`
+      : 'Return only the verified result for this task.';
     return (
       `Task: ${task.title}\n\n` +
       `Description: ${task.description}\n\n` +
       `Task Instructions: ${task.systemPrompt}\n\n` +
+      (completedDependencies.length > 0
+        ? `Completed dependency results (authoritative persisted outputs and artifacts; do not infer results from task IDs): ${JSON.stringify(completedDependencies)}\n\n`
+        : '') +
       `Phase: ${phase.name} (${phase.goal})\n` +
       `Plan Summary: ${plan.summary}\n` +
-      `Expected Artifacts: ${task.expectedArtifacts.join(', ')}\n\n` +
+      `Expected Artifacts: ${task.expectedArtifacts.join(', ')}\n` +
+      `Required Actions: ${JSON.stringify(task.requiredActions || [])}\n` +
+      `Output contract: ${artifactOutputContract} Use only actual system-tool results and completed dependency results; do not infer values or include results from future mission steps.\n\n` +
       'Execute this task now and return completed results for its expected artifacts. Do not return a plan, future-tense promises, or placeholders. If the work cannot be completed with available tools or context, state the specific blocker instead.'
     );
   }
 
-  private async waitForTaskCompletion(taskId: string, maxWaitMs = 300000): Promise<TaskExecutionResult> {
+  private async waitForTaskCompletion(agentId: string, taskId: string, maxWaitMs = 300000): Promise<TaskExecutionResult> {
     const startTime = Date.now();
     const pollInterval = 2000;
 
     while (Date.now() - startTime < maxWaitMs) {
       await new Promise((r) => setTimeout(r, pollInterval));
+      let task: AgentTask;
       try {
-        const task = await this.api<AgentTask>(`/missions/${this.missionId}/agents/tasks/${taskId}`);
-        if (task.status === 'completed') {
-          return this.parseTaskResult(task);
-        }
-        if (task.status === 'failed') {
-          throw new Error(task.error || 'Task failed');
-        }
+        task = await this.api<AgentTask>(this.missionAgentPath(agentId, 'tasks', taskId));
       } catch (err) {
-        if (err instanceof Error && err.message.includes('Task failed')) throw err;
+        if (!(err instanceof MissionAgentRuntimeApiError) || err.status < 500) throw err;
+        logger.warn(
+          { missionId: this.missionId, agentId, taskId, status: err.status },
+          'Agent task status polling failed; retrying after a transient API error',
+        );
+        continue;
+      }
+      if (task.status === 'completed') return this.parseTaskResult(task);
+      if (task.status === 'failed') {
+        throw new Error(task.error || `Agent task ${taskId} failed`);
       }
     }
     throw new Error(`Task ${taskId} timed out after ${maxWaitMs}ms`);
@@ -703,27 +1097,157 @@ export class MissionAgentRuntime {
   private parseTaskResult(task: AgentTask): TaskExecutionResult {
     const result = task.result as any;
     const output = result?.output || JSON.stringify(result || {});
-    const artifacts = result?.artifacts || this.extractArtifacts(output, []);
+    const input = task.input && typeof task.input === 'object' && !Array.isArray(task.input)
+      ? task.input as Record<string, unknown>
+      : {};
+    const context = input.context && typeof input.context === 'object' && !Array.isArray(input.context)
+      ? input.context as Record<string, unknown>
+      : {};
+    const expectedArtifacts = this.parseExpectedArtifacts(context.expectedArtifacts, task.taskId);
+    const artifacts = this.parseArtifacts(result?.artifacts, output, expectedArtifacts, task.taskId);
+    this.assertExpectedArtifacts(artifacts, expectedArtifacts, task.taskId);
+    const actionReceipts = this.parseActionReceipts(result?.actionReceipts, task.taskId);
     const tokensUsed = result?.tokensUsed || 0;
-    return { output, artifacts, tokensUsed };
+    const model = result?.model;
+    const provider = result?.provider;
+    const requestId = result?.requestId;
+    return {
+      output,
+      artifacts: this.withActionReceiptArtifact(artifacts, actionReceipts, task.taskId),
+      actionReceipts,
+      tokensUsed,
+      model,
+      provider,
+      requestId,
+    };
+  }
+
+  private parseExpectedArtifacts(value: unknown, taskId: string): string[] {
+    if (value === undefined) return [];
+    if (!Array.isArray(value) || !value.every((name) => typeof name === 'string' && name.trim())) {
+      throw new Error(`Agent task ${taskId} returned invalid expected artifact names`);
+    }
+    return value;
+  }
+
+  private parseArtifacts(
+    value: unknown,
+    output: string,
+    expected: string[],
+    taskId: string,
+  ): Array<{ name: string; type: string; content: string }> {
+    if (value === undefined || (Array.isArray(value) && value.length === 0)) {
+      return this.extractArtifacts(output, expected);
+    }
+    if (!Array.isArray(value)) {
+      throw new Error(`Agent task ${taskId} returned invalid artifacts`);
+    }
+    return value.map((candidate) => {
+      if (
+        !candidate
+        || typeof candidate !== 'object'
+        || Array.isArray(candidate)
+      ) {
+        throw new Error(`Agent task ${taskId} returned an invalid artifact`);
+      }
+      const artifact = candidate as Record<string, unknown>;
+      if (
+        typeof artifact.name !== 'string'
+        || !artifact.name.trim()
+        || typeof artifact.type !== 'string'
+        || typeof artifact.content !== 'string'
+      ) {
+        throw new Error(`Agent task ${taskId} returned an invalid artifact`);
+      }
+      return {
+        name: artifact.name,
+        type: artifact.type,
+        content: artifact.content,
+      };
+    });
+  }
+
+  private assertExpectedArtifacts(
+    artifacts: Array<{ name: string; type: string; content: string }>,
+    expected: string[],
+    taskId: string,
+  ): void {
+    const normalize = (name: string) => name.trim().toLocaleLowerCase();
+    const missing = expected.filter((name) => !artifacts.some((artifact) =>
+      normalize(artifact.name) === normalize(name) && artifact.content.trim().length > 0,
+    ));
+    if (missing.length > 0) {
+      throw new Error(`Agent task ${taskId} omitted required artifact section(s): ${missing.join(', ')}`);
+    }
+  }
+
+  private parseActionReceipts(
+    value: unknown,
+    taskId: string,
+  ): Array<{ toolId: string; isError: boolean; content: string; outcome: 'success' | 'failure' | 'denied' }> {
+    if (value === undefined) return [];
+    if (!Array.isArray(value) || value.length > MAX_ACTION_RECEIPTS) {
+      throw new Error(`Agent task ${taskId} returned invalid action receipts`);
+    }
+    return value.map((candidate) => {
+      if (
+        !candidate
+        || typeof candidate !== 'object'
+        || Array.isArray(candidate)
+        || typeof candidate.toolId !== 'string'
+        || !candidate.toolId.trim()
+        || typeof candidate.isError !== 'boolean'
+        || typeof candidate.content !== 'string'
+        || (candidate.outcome !== undefined && !['success', 'failure', 'denied'].includes(String(candidate.outcome)))
+      ) {
+        throw new Error(`Agent task ${taskId} returned an invalid action receipt`);
+      }
+      return {
+        toolId: candidate.toolId,
+        isError: candidate.isError,
+        content: candidate.content.slice(0, 2_048),
+        outcome: (candidate.outcome as 'success' | 'failure' | 'denied' | undefined)
+          || (candidate.isError ? 'failure' : 'success'),
+      };
+    });
+  }
+
+  private withActionReceiptArtifact(
+    artifacts: Array<{ name: string; type: string; content: string }>,
+    actionReceipts: Array<{ toolId: string; isError: boolean; content: string; outcome: 'success' | 'failure' | 'denied' }>,
+    taskId: string,
+  ): Array<{ name: string; type: string; content: string }> {
+    if (actionReceipts.length === 0) return artifacts;
+    const name = 'system-action-receipts.json';
+    if (artifacts.some((artifact) => artifact.name.toLocaleLowerCase() === name)) {
+      throw new Error(`Agent task ${taskId} returned a reserved action receipt artifact name`);
+    }
+    return [
+      ...artifacts,
+      { name, type: 'evidence', content: JSON.stringify(actionReceipts) },
+    ];
   }
 
   private extractArtifacts(content: string, expected: string[]): Array<{ name: string; type: string; content: string }> {
     const artifacts: Array<{ name: string; type: string; content: string }> = [];
-    const sections = content.split(/^##\s+/m).filter((s) => s.trim());
-    for (const section of sections) {
-      const firstLine = section.split('\n')[0].trim();
-      const name = firstLine.replace(/[^a-z0-9-]/gi, '-').toLowerCase();
-      const matched = expected.find((e) => e.toLowerCase().includes(name) || name.includes(e.toLowerCase().replace(/\.[^.]+$/, '')));
+    const headings = [...content.matchAll(/^##[ \t]+(.+?)[ \t]*$/gm)];
+    const normalize = (name: string) => name.trim().toLocaleLowerCase();
+    for (const [index, heading] of headings.entries()) {
+      const name = heading[1]?.trim();
+      if (!name) continue;
+      const start = (heading.index ?? 0) + heading[0].length;
+      const end = headings[index + 1]?.index ?? content.length;
+      const section = content.slice(start, end).trim();
+      if (!section) continue;
+      const matched = expected.find((artifactName) => normalize(artifactName) === normalize(name));
+      if (expected.length > 0 && !matched) continue;
       artifacts.push({
-        name: matched || `${name}.md`,
+        name: matched || `${name.replace(/[^a-z0-9-]/gi, '-').toLowerCase()}.md`,
         type: this.inferType(section),
-        content: section.trim(),
+        content: section,
       });
     }
-    if (artifacts.length === 0 && expected.length > 0) {
-      artifacts.push({ name: expected[0], type: 'document', content: content.trim() });
-    } else if (artifacts.length === 0) {
+    if (artifacts.length === 0 && expected.length === 0) {
       artifacts.push({ name: 'output.md', type: 'document', content: content.trim() });
     }
     return artifacts;
@@ -743,7 +1267,7 @@ export class MissionAgentRuntime {
 
   async getAgentState(agentId: string): Promise<AgentState | undefined> {
     try {
-      return await this.api<AgentState>(`/missions/${this.missionId}/agents/${agentId}/state`);
+      return await this.api<AgentState>(this.missionAgentPath(agentId, 'state'));
     } catch (error) {
       if (error instanceof MissionAgentRuntimeApiError && error.status === 404) return undefined;
       throw error;

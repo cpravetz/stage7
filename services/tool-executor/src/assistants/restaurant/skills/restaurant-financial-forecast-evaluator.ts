@@ -36,8 +36,8 @@ const FINANCIAL_FORECAST_INPUT_SCHEMA = createSchemaRecord({
 export const RESTAURANT_FINANCIAL_FORECAST_EVALUATOR = createDeclarativeCodeSkill({
   id: 'restaurant-financial-forecast-evaluator',
   name: 'Restaurant Financial Performance & Demand Forecast Evaluator',
-  description: 'Evaluate financial performance (P&L, variance, trends) and forecast demand by delegating to menu engineering, supply chain reorder, and shift prep copilot skills. Forecasts are deterministic (derived from supplied P&L with a trend factor), not random. Reports not-connected when RESTAURANT_HOME is absent.',
-  persistenceEnvVar: 'STORAGE_DIR',
+  description: 'Evaluate financial performance (P&L, variance, trends) and forecast demand by delegating to menu engineering, supply chain reorder, and shift prep copilot skills. Forecasts are deterministic (derived from supplied P&L with a trend factor), not random. Reports not-connected when ASSISTANT_HOME is absent.',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: FINANCIAL_FORECAST_INPUT_SCHEMA,
   outputSchema: restaurantResultSchema('Forecast result data including P&L, variance, demand projections, delegation coverage, and step results'),
   triggers: [

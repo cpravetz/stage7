@@ -20,6 +20,7 @@ describe('Brain completion route model selection', () => {
       model: 'selected-by-brain',
       provider: 'healthy-provider',
       cached: false,
+      requestId: 'brain_test_request_id',
     });
 
     const response = await request(app)
@@ -48,5 +49,21 @@ describe('Brain completion route model selection', () => {
     });
     expect(completionOptions).not.toHaveProperty('model');
     expect(completionOptions).not.toHaveProperty('provider');
+  });
+
+  it('returns an explicit not-found response when a complaint references an unknown request', async () => {
+    jest.spyOn(sharedInstance, 'getBrainInstance').mockResolvedValue(brainInstance);
+    const recordComplaint = jest.spyOn(brainInstance, 'recordComplaint').mockResolvedValue(false);
+
+    const response = await request(app)
+      .post('/api/brain/complaint')
+      .send({ requestId: 'unknown-brain-request', reason: 'validation failed' });
+
+    expect(response.status).toBe(404);
+    expect(response.body).toMatchObject({
+      recorded: false,
+      requestId: 'unknown-brain-request',
+    });
+    expect(recordComplaint).toHaveBeenCalledWith('unknown-brain-request');
   });
 });

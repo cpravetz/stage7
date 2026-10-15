@@ -18,7 +18,7 @@ const DELIVERY_SYNC = createDeclarativeCodeSkill({
   name: 'Delivery Sync Orchestrator',
   description:
     'Fans a feature status change out across Jira, Confluence and Slack by delegating to the delivery tools, and reports per-target what actually landed. Defaults to dry run; a live sync requires confirmation. A target that is not configured is reported as not-connected rather than skipped silently.',
-  persistenceEnvVar: 'PRODUCT_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   emitEvent: 'product.feature_status.synced',
   inputSchema: {
     type: 'object',

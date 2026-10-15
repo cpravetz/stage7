@@ -34,14 +34,14 @@ const SPEECH_INPUT = createSchemaRecord({
 }, { required: [] });
 
 const SPEECH_CONFIG = createSchemaRecord({
-  executiveHome: SchemaProps.text({ description: 'Executive workspace path; defaults to EXECUTIVE_HOME' }),
+  executiveHome: SchemaProps.text({ description: 'Executive workspace path; defaults to ASSISTANT_HOME' }),
 });
 
 export const SPEECH_COMMUNICATION_COPILOT = createDeclarativeCodeSkill({
   id: 'executive-speech-communication-copilot',
   name: 'Speech & Communication Co-Pilot',
   description: 'Draft executive speeches, board communications, stakeholder messages, and leadership communications with tone, structure, and messaging guidance.',
-  persistenceEnvVar: 'EXECUTIVE_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   tier: 'aid',
   domainKnowledge: 'Executive communication strategy, speechwriting, board governance communication, crisis communication, stakeholder messaging frameworks',
   inputSchema: SPEECH_INPUT,

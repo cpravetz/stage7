@@ -34,7 +34,7 @@ const financeModelingAnalysisSkill = createDeclarativeCodeSkill({
   id: 'finance-modeling-analysis',
   name: 'Finance Modeling & Analysis',
   description: 'Produce financial models with revenue projections, FCFF, NPV, IRR, and sensitivity analysis, refreshed on a schedule.',
-  persistenceEnvVar: 'FINANCE_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   tier: 'advise',
   domainKnowledge: 'Corporate finance principles, US GAAP/IFRS standards, financial modeling, and capital allocation strategies',
   configSchema: financeModelingAnalysisConfigSchema,

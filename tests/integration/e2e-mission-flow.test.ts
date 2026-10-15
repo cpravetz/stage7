@@ -4,7 +4,6 @@ import request from 'supertest';
 
 import artifactsMissionRoutes from '../../services/artifacts/src/routes/missions';
 import artifactsDocumentRoutes from '../../services/artifacts/src/routes/documents';
-import agentRoutes from '../../services/agent-runtime/src/routes/agents';
 import workerPoolAssistantRoutes from '../../services/worker-pool/src/routes/assistants';
 import temporalRoutes from '../../services/temporal/src/routes/missions';
 import gatewayRoutes from '../../services/gateway/src/routes/gateway';
@@ -15,6 +14,7 @@ import { setWsGateway } from '../../services/gateway/src/utils/sharedInstances';
 describe('Integration: End-to-End Mission Flow', () => {
   let persistenceServer: http.Server;
   let agentRuntimeServer: http.Server;
+  let toolExecutorServer: http.Server;
   let workerPoolServer: http.Server;
   let gatewayServer: http.Server;
   let brainServer: http.Server;
@@ -22,6 +22,7 @@ describe('Integration: End-to-End Mission Flow', () => {
 
   let artifactsUrl: string;
   let agentRuntimeUrl: string;
+  let toolExecutorUrl: string;
   let workerPoolUrl: string;
   let gatewayUrl: string;
   let brainUrl: string;
@@ -39,7 +40,12 @@ describe('Integration: End-to-End Mission Flow', () => {
 
     const agentRuntimeApp = express();
     agentRuntimeApp.use(express.json());
-    agentRuntimeApp.use('/api/agent-runtime', agentRoutes);
+
+    const toolExecutorApp = express();
+    toolExecutorApp.use(express.json());
+    toolExecutorApp.get('/api/tool-executor/tools', (_req, res) => {
+      res.json({ tools: [] });
+    });
 
     const workerPoolApp = express();
     workerPoolApp.use(express.json());
@@ -56,8 +62,19 @@ describe('Integration: End-to-End Mission Flow', () => {
       const { prompt, systemPrompt } = req.body || {};
       const isPlanner = systemPrompt?.includes('mission planner');
       const isWorker = systemPrompt?.includes('executing task');
+      const isTaskSelector = systemPrompt?.includes('mission task selector');
+      const isPhaseReviewer = systemPrompt?.includes('critical phase reviewer');
       const isEvaluator = systemPrompt?.includes('objective mission evaluator');
 
+      if (isPhaseReviewer) {
+        res.json({ content: JSON.stringify({ satisfied: true, gaps: [], followUpTask: null }) });
+        return;
+      }
+      if (isTaskSelector) {
+        const taskId = (prompt || '').match(/"readyTasks":\s*\[\s*\{\s*"id":\s*"([^"]+)"/)?.[1];
+        res.json({ content: JSON.stringify({ taskId }) });
+        return;
+      }
       if (isEvaluator) {
         res.json({ content: 'yes' });
         return;
@@ -83,6 +100,7 @@ describe('Integration: End-to-End Mission Flow', () => {
                     description: `Analyze the goal and create a concrete, step-by-step execution plan for: ${prompt}`,
                     agentRole: 'general-purpose',
                     systemPrompt: 'You are a planning agent. Analyze the goal and create a concrete, step-by-step execution plan. Be thorough and consider edge cases.',
+                    dependsOnTaskIds: [],
                     expectedArtifacts: ['plan.md'],
                     status: 'pending',
                     artifacts: [],
@@ -102,6 +120,7 @@ describe('Integration: End-to-End Mission Flow', () => {
                     description: `Execute the previously created plan to accomplish: ${prompt}`,
                     agentRole: 'general-purpose',
                     systemPrompt: 'You are an execution agent. Execute the plan thoroughly and produce the required artifacts. If you need tools, use the available tool execution interface.',
+                    dependsOnTaskIds: [],
                     expectedArtifacts: ['output.md'],
                     status: 'pending',
                     artifacts: [],
@@ -121,6 +140,7 @@ describe('Integration: End-to-End Mission Flow', () => {
                     description: 'Review the execution output for completeness, accuracy, and quality. Refine or request follow-up tasks if needed.',
                     agentRole: 'reviewer',
                     systemPrompt: 'You are a reviewer agent. Evaluate outputs for completeness, accuracy, and quality. Identify gaps and suggest improvements.',
+                    dependsOnTaskIds: [],
                     expectedArtifacts: ['review.md'],
                     status: 'pending',
                     artifacts: [],
@@ -160,6 +180,7 @@ describe('Integration: End-to-End Mission Flow', () => {
 
     persistenceServer = http.createServer(artifactsApp);
     agentRuntimeServer = http.createServer(agentRuntimeApp);
+    toolExecutorServer = http.createServer(toolExecutorApp);
     workerPoolServer = http.createServer(workerPoolApp);
     gatewayServer = http.createServer(gatewayApp);
     brainServer = http.createServer(brainApp);
@@ -167,6 +188,7 @@ describe('Integration: End-to-End Mission Flow', () => {
     await Promise.all([
       new Promise<void>((resolve) => persistenceServer.listen(0, '127.0.0.1', resolve)),
       new Promise<void>((resolve) => agentRuntimeServer.listen(0, '127.0.0.1', resolve)),
+      new Promise<void>((resolve) => toolExecutorServer.listen(0, '127.0.0.1', resolve)),
       new Promise<void>((resolve) => workerPoolServer.listen(0, '127.0.0.1', resolve)),
       new Promise<void>((resolve) => gatewayServer.listen(0, '127.0.0.1', resolve)),
       new Promise<void>((resolve) => brainServer.listen(0, '127.0.0.1', resolve)),
@@ -174,23 +196,29 @@ describe('Integration: End-to-End Mission Flow', () => {
 
     const persistenceAddr = persistenceServer.address() as { address: string; port: number };
     const agentRuntimeAddr = agentRuntimeServer.address() as { address: string; port: number };
+    const toolExecutorAddr = toolExecutorServer.address() as { address: string; port: number };
     const workerPoolAddr = workerPoolServer.address() as { address: string; port: number };
     const gatewayAddr = gatewayServer.address() as { address: string; port: number };
     const brainAddr = brainServer.address() as { address: string; port: number };
 
     artifactsUrl = `http://${persistenceAddr.address}:${persistenceAddr.port}`;
     agentRuntimeUrl = `http://${agentRuntimeAddr.address}:${agentRuntimeAddr.port}`;
+    toolExecutorUrl = `http://${toolExecutorAddr.address}:${toolExecutorAddr.port}`;
     workerPoolUrl = `http://${workerPoolAddr.address}:${workerPoolAddr.port}`;
     gatewayUrl = `http://${gatewayAddr.address}:${gatewayAddr.port}`;
     brainUrl = `http://${brainAddr.address}:${brainAddr.port}`;
 
     process.env.ARTIFACTS_URL = artifactsUrl;
     process.env.AGENT_RUNTIME_URL = agentRuntimeUrl;
+    process.env.TOOL_EXECUTOR_URL = toolExecutorUrl;
     process.env.WORKER_POOL_URL = workerPoolUrl;
     process.env.GATEWAY_URL = gatewayUrl;
     process.env.BRAIN_URL = brainUrl;
     process.env.APPROVAL_POLL_INTERVAL_MS = '500';
     delete process.env.TEMPORAL_ADDRESS;
+
+    const { default: agentRoutes } = await import('../../services/agent-runtime/src/routes/agents');
+    agentRuntimeApp.use('/api/agent-runtime', agentRoutes);
 
     const healthCheck = await fetch(`${artifactsUrl}/api/artifacts/health`);
     expect(healthCheck.ok).toBe(true);
@@ -222,6 +250,7 @@ describe('Integration: End-to-End Mission Flow', () => {
 
     delete process.env.ARTIFACTS_URL;
     delete process.env.AGENT_RUNTIME_URL;
+    delete process.env.TOOL_EXECUTOR_URL;
     delete process.env.WORKER_POOL_URL;
     delete process.env.GATEWAY_URL;
     delete process.env.BRAIN_URL;
@@ -230,6 +259,7 @@ describe('Integration: End-to-End Mission Flow', () => {
     await Promise.all([
       new Promise<void>((resolve) => persistenceServer.close(() => resolve())),
       new Promise<void>((resolve) => agentRuntimeServer.close(() => resolve())),
+      new Promise<void>((resolve) => toolExecutorServer.close(() => resolve())),
       new Promise<void>((resolve) => workerPoolServer.close(() => resolve())),
       new Promise<void>((resolve) => gatewayServer.close(() => resolve())),
       new Promise<void>((resolve) => brainServer.close(() => resolve())),

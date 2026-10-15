@@ -9,7 +9,7 @@ export interface CodeExecutionOptions {
   timeoutMs?: number;
   stdin?: string;
   input?: Record<string, unknown>;
-  // Optional environment variable name that tools use to persist state (e.g. 'CTO_HOME')
+  // Optional environment variable name that tools use to persist state (e.g. 'ASSISTANT_HOME')
   persistenceEnvVar?: string;
 }
 

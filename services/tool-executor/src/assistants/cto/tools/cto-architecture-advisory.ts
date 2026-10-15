@@ -7,7 +7,7 @@ export const CTO_ARCHITECTURE_ADVISORY = (() => { const t = createDeclarativeCod
   isSkill: false,
   name: 'Architecture & Tech Stack Advisory',
   description: 'Reasoning-based architectural guidance and tech stack recommendations',
-  persistenceEnvVar: 'CTO_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   manifest: {
     reasoningConfig: {
       temperature: 0.3,

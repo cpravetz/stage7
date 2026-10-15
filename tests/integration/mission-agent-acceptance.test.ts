@@ -72,10 +72,12 @@ describe('mission Agent acceptance across Temporal task retry', () => {
     };
     const savedStates = new Map<string, SavedAgentState>();
     const persistence = {
+      ready: async () => {},
       getAgentState: async (agentId: string) => savedStates.get(agentId),
       saveAgentState: async (state: SavedAgentState) => {
         savedStates.set(state.agentId, structuredClone(state));
       },
+      queryDocuments: async () => ({ documents: [] }),
     } as unknown as ArtifactsService;
     const brainTurns = new Map<string, number>();
     const brainPrompts: string[] = [];

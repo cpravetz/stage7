@@ -99,7 +99,7 @@ const DRAFT = createDeclarativeCodeSkill({
   name: 'Draft Legal Document',
   description:
     'Assembles a first-draft legal document from supplied parties, terms and document type, with every clause family it could not fill marked as requiring input. Produces a document for the lawyer to revise; it does not send or file anything.',
-  persistenceEnvVar: 'LEGAL_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: {
     type: 'object',
     properties: {
@@ -254,7 +254,7 @@ const REDLINE = createDeclarativeCodeSkill({
   name: 'Redline Document',
   description:
     'Compares an original and a proposed text, reports every changed clause family, and marks the risk variance each change carries against the practice position. Produces markup for a lawyer to work from; it does not send or file anything.',
-  persistenceEnvVar: 'LEGAL_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: {
     type: 'object',
     properties: {
@@ -371,7 +371,7 @@ const ANALYZE_CLAUSES = createDeclarativeCodeSkill({
   name: 'Analyse Clauses',
   description:
     'Classifies supplied clause text into clause families, compares each against the practice position for that family, and scores the divergence. Reports from the text given; it does not read a contract store or fetch anything.',
-  persistenceEnvVar: 'LEGAL_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: {
     type: 'object',
     properties: {
@@ -470,7 +470,7 @@ const FINALIZE = createDeclarativeCodeSkill({
   name: 'Finalize Document',
   description:
     'Takes reviewed document text, strips redline artefacts and drafting placeholders, and returns a clean reading copy. The output is a work product for the user to review and deliver themselves; nothing is sent, filed or executed.',
-  persistenceEnvVar: 'LEGAL_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: {
     type: 'object',
     properties: {

@@ -8,7 +8,7 @@ export const GOVERNED_PUBLISHING_CMS_DISPATCHER = createDeclarativeCodeSkill({
   name: 'Governed Publishing & CMS Dispatcher',
   description:
     'Runs a computed pre-flight over a publishing payload, then either previews it or sends it to the CMS. Pre-flight measures the payload you supplied (title and body length, derived slug, SEO field lengths, tags) against stated SEO conventions, so the governance result is real whether or not a CMS is connected. Sending requires dryRun: false plus confirmation: true; without it nothing is sent and the result says the run stopped at the approval gate. Reports blocked, not-connected, confirmation-required, failed, and published as distinct outcomes.',
-  persistenceEnvVar: 'CONTENT_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   tier: 'represent',
   emitEvent: 'content.article.published',
   domainKnowledge:

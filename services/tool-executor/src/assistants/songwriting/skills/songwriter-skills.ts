@@ -7,7 +7,7 @@ export const lyricProsodyEvaluator = createDeclarativeCodeSkill({
   id: 'songwriting_lyric_prosody_evaluator',
   name: 'Advise Lyric & Structural Prosody Evaluator',
   description: 'Analyzes song lyrics for meter consistency, syllable deviation from a target, rhyme pairs, refrain detection, and recurring thematic vocabulary, separating section labels from sung lines, then returns concrete structural revision recommendations and a formatted report.',
-  persistenceEnvVar: 'SONGWRITING_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   tier: 'advise',
   domainKnowledge: 'Lyric prosody metrics, syllable and stress patterning, rhyme evaluation, and structural songwriting craft',
   inputSchema: {
@@ -257,7 +257,7 @@ export const musicalCoCreation = createDeclarativeCodeSkill({
   id: 'songwriting_musical_lyric_cocreation',
   name: 'Aid Musical & Lyric Co-Creation Engine',
   description: 'Generates a structured song draft with a key, meter, tempo feel and a real chord progression per section, rhyme-matched lyric lines drawn from theme vocabulary, a verbatim-repeating chorus hook, computed per-section rhyme schemes, a beat sheet, and a formatted plain-text song with chords over the lyrics.',
-  persistenceEnvVar: 'SONGWRITING_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   tier: 'aid',
   domainKnowledge: 'Song craft co-creation, genre-aware chord progression, lyric section structure, hook design',
   inputSchema: {
@@ -271,7 +271,7 @@ export const musicalCoCreation = createDeclarativeCodeSkill({
       sectionCount: SchemaProps.number({ title: 'Section Count', description: 'Number of sections to generate, from 2 to 12', order: 6, minimum: 2, maximum: 12, hint: 'Controls how many sections the engine produces from the template' }),
       seed: SchemaProps.integer({ title: 'Seed', description: 'Optional deterministic seed for repeatable variations', order: 7, minimum: 0, hint: 'Enter a number for reproducible drafts across runs' }),
       existingContent: SchemaProps.textarea({ title: 'Existing Content', description: 'Optional existing lyric or brief to preserve while generating a revision', order: 8, hint: 'Paste existing material to build upon or revise' }),
-      save: SchemaProps.boolean({ title: 'Save', description: 'Persist the generated draft in the songwriter workspace', order: 9, default: true, hint: 'Writes the draft to SONGWRITING_HOME/drafts.json when true' }),
+      save: SchemaProps.boolean({ title: 'Save', description: 'Persist the generated draft in the songwriter workspace', order: 9, default: true, hint: 'Writes the draft to ASSISTANT_HOME/drafts.json when true' }),
     },
     required: ['theme'],
   },

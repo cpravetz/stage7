@@ -67,7 +67,7 @@ const RESUME_TEMPLATE_MANAGER = createDeclarativeCodeSkill({
   id: 'career-resume-template-manager',
   name: 'Resume & Template Manager',
   description: 'Manage, edit, upload, and organize resume and cover letter templates.',
-  persistenceEnvVar: 'CAREER_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   tier: 'aid',
   domainKnowledge: 'Career coaching, job search strategy, resume and cover letter optimization',
   isSkill: true,

@@ -120,4 +120,24 @@ router.get('/performance', asyncHandler(async (_req: any, res: any) => {
   res.json(await brain.getPerformanceMetrics());
 }));
 
+router.post('/complaint', asyncHandler(async (req: any, res: any) => {
+  const brain = await getBrain();
+  const { requestId, reason, missionId } = req.body as {
+    requestId: string;
+    reason?: string;
+    missionId?: string;
+  };
+  if (!requestId) {
+    throw BrainError.badRequest('Missing requestId');
+  }
+  const recorded = await brain.recordComplaint(requestId);
+  if (!recorded) {
+    logger.warn({ requestId, reason, missionId }, 'Quality complaint referenced an unknown Brain request');
+    res.status(404).json({ recorded: false, requestId, error: 'Unknown Brain requestId' });
+    return;
+  }
+  logger.info({ requestId, reason, missionId }, 'Quality complaint recorded');
+  res.json({ recorded: true, requestId });
+}));
+
 export default router;

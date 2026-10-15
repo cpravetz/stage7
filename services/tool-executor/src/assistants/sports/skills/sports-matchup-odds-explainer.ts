@@ -31,7 +31,7 @@ export const MATCHUP_ODDS_EXPLAINER = createDeclarativeCodeSkill({
   id: 'sports-matchup-odds-explainer',
   name: 'Matchup & Odds Explainer',
   description: 'Advises on market odds, line movements, and statistical match-ups with mandatory responsible-play framing. Insights are strictly entertainment and expected-value math. Includes responsible-gaming disclaimers on every output.',
-  persistenceEnvVar: 'SPORTS_GROUP_B_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: MATCHUP_ODDS_INPUT,
   outputSchema: sportsResultSchema('Odds explanation result'),
   tier: 'advise',

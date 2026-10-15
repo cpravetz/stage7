@@ -17,7 +17,7 @@ function withUxMetadata(schema: SchemaRecord): SchemaRecord {
 }
 
 const SAFETY_BOUNDARY = 'Decision support and education only: do not diagnose, prescribe, change treatment, or make autonomous clinical decisions; use only authorized minimum-necessary data and approved secure endpoints for PHI; a qualified clinician must review all outputs.'
-const metadata = { domain: 'healthcare', persistenceEnv: 'HEALTHCARE_HOME', HEALTHCARE_HOME: 'HEALTHCARE_HOME', homeEnv: 'HEALTHCARE_HOME', healthcareHome: 'HEALTHCARE_HOME', clinicalSafetyBoundary: SAFETY_BOUNDARY }
+const metadata = { domain: 'healthcare', persistenceEnv: 'ASSISTANT_HOME', HEALTHCARE_HOME: 'ASSISTANT_HOME', homeEnv: 'ASSISTANT_HOME', healthcareHome: 'ASSISTANT_HOME', clinicalSafetyBoundary: SAFETY_BOUNDARY }
 const triggers = [
   { kind: 'user' as const, phrase_examples: ['evaluate clinic workflow', 'review this clinical case', 'create a care plan', 'stage intake dispatch'] },
   { kind: 'schedule' as const, cadence: 'daily clinical operations review' },
@@ -26,7 +26,7 @@ const triggers = [
 ]
 
 const decisionConfig = createSchemaRecord({
-  healthcareHome: SchemaProps.text({ description: 'Healthcare workspace path or base URL; defaults to HEALTHCARE_HOME' }),
+  healthcareHome: SchemaProps.text({ description: 'Healthcare workspace path or base URL; defaults to ASSISTANT_HOME' }),
   minimumEvidenceSources: SchemaProps.integer({ description: 'Minimum supplied evidence sources for a reviewable synthesis', default: 1 }),
   requireClinicianReview: SchemaProps.boolean({ description: 'Keep all decision-support output provider-review only', default: true }),
 })
@@ -36,7 +36,7 @@ export const healthcareClinicalDecisionSupportEvaluator = createDeclarativeCodeS
   isSkill: true,
   name: 'Clinical Decision-Support Evaluator',
   description: 'Synthesize supplied patient symptoms, history, and evidence-based guideline inputs into provider-facing considerations with explicit safety boundaries and no autonomous diagnosis.',
-  persistenceEnvVar: 'HEALTHCARE_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   tier: 'advise',
   domainKnowledge: 'Clinical symptom assessment, patient history analysis, and evidence-based guideline synthesis',
   inputSchema: createSchemaRecord({
@@ -56,7 +56,7 @@ export const healthcareClinicalDecisionSupportEvaluator = createDeclarativeCodeS
   triggers,
   manifest: {
     configSchema: decisionConfig,
-    healthcareHome: 'HEALTHCARE_HOME',
+    healthcareHome: 'ASSISTANT_HOME',
     ui: { view: 'clinical-decision-support' },
     metadata: metadata
   },

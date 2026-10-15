@@ -60,7 +60,7 @@ const JOB_MARKET_POSITIONING_EVALUATOR = createDeclarativeCodeSkill({
   id: 'career-job-market-positioning-evaluator',
   name: 'Resume & Market Positioning Advisor',
   description: 'Reviews your resume and profile against the roles already found by Job Discovery & Fit Ranking to suggest resume edits and a realistic target salary range. Run Job Discovery first for the best results. Propagates upstream job-source failures: a market read built on a partial discovery is reported as status "partial" with a non-null error, and a discovery that failed outright is reported as a failure rather than as a clean positioning read.',
-  persistenceEnvVar: 'CAREER_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: JOB_MARKET_POSITIONING_EVALUATOR_INPUT,
   outputSchema: JOB_MARKET_POSITIONING_EVALUATOR_OUTPUT,
   triggers: [

@@ -58,7 +58,7 @@ export const CTO_ENGINEERING_ACTIONS = (() => { const t = createExternalActionSk
     }), { description: 'Pre-formatted user-facing output blocks' }),
   }),
   manifest: {
-    persistenceEnvVar: 'CTO_HOME',
+    persistenceEnvVar: 'ASSISTANT_HOME',
     emitEvent: 'cto.engineering_action.executed',
   },
   tier: 'represent',

@@ -128,7 +128,7 @@ The formatted output object returned by the skill contains these fields:
 | `submissionMessage` | Human-readable status message |
 | `submissionResponse` | `{ status: number|null, data: object|null }` from the endpoint |
 | `generatedAt` | ISO 8601 timestamp |
-| `storePath` | Path in `SCRIPTWRITING_HOME/formatting-submissions.json` |
+| `storePath` | Path in `ASSISTANT_HOME/formatting-submissions.json` |
 
 The artifact is persisted to the store before any submission attempt. The `storePath` is always available regardless of whether a submission is made.
 

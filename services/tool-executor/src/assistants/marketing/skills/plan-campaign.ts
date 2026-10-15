@@ -9,7 +9,7 @@ export const PLAN_CAMPAIGN = createDeclarativeCodeSkill({
   isSkill: true,
   name: 'Plan Campaign',
   description: 'Plan a marketing campaign with budget, channels, and timeline.',
-  persistenceEnvVar: 'MARKETING_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: {
     type: 'object',
     properties: {

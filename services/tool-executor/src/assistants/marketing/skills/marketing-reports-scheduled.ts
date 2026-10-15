@@ -13,7 +13,7 @@ export const MARKETING_REPORTS_SCHEDULED = createDeclarativeCodeSkill({
   id: 'marketing-reports-scheduled',
   name: 'Marketing Reports',
   description: 'Scheduled campaign report across the configured campaigns and channels, dispatched to the analytics channel.',
-  persistenceEnvVar: 'STORAGE_DIR',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: {
     type: 'object',
     properties: {

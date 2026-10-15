@@ -19,7 +19,7 @@ export const HR_INTERVIEW_SCHEDULING_USER = createDeclarativeCodeSkill({
   id: 'hr-interview-scheduling-user',
   name: 'Interview Scheduling',
   description: 'Coordinates with ATS, calendar, and email systems to book an interview you are scheduling by hand.',
-  persistenceEnvVar: 'HR_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   configSchema: {
     type: 'object',
     properties: {

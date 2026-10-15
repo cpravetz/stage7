@@ -12,7 +12,7 @@ const RESPONSE_DRAFTING_NOTIFIER = createDeclarativeCodeSkill({
   id: 'response-drafting-notifier',
   name: 'Response Drafting Notifier',
   description: 'Drafts replies for queued inbound messages and notifies the configured channels.',
-  persistenceEnvVar: 'SUPPORT_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   tier: 'aid',
   domainKnowledge: 'Customer success metrics (CSAT, NPS, Churn Rate), SLA management, support escalation tiers, ticket triage',
   inputSchema: {

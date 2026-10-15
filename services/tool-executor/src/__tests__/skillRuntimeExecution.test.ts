@@ -51,6 +51,7 @@ interface Case {
   config?: Record<string, unknown>;
   input: Record<string, unknown>;
   seed?: Record<string, unknown>;
+  brainResponses?: Array<Record<string, unknown>>;
   /** The envelope is expected to fail, and to say why in `error`. */
   expectFailure?: RegExp;
 }
@@ -100,7 +101,11 @@ const CASES: Case[] = [
     // One usable message and one with no readable body, so the skip path runs.
     seed: { 'inbound-queue': [{ ticket: 'T-9', message: 'Where is my refund?' }, { ticket: 'T-10' }] },
   },
-  { id: 'education-lesson-assessment-drafting-user', input: { task: 'quiz', subject: 'Maths', topic: 'Fractions' } },
+  {
+    id: 'education-lesson-assessment-drafting-user',
+    input: { task: 'quiz', subject: 'Maths', grade: '5', topic: 'Fractions', questionCount: 10 },
+    brainResponses: [generatedQuizResponse(10), quizReviewResponse(true)],
+  },
   {
     id: 'education-lesson-assessment-drafting-scheduled',
     config: { courseId: ['course-a'] },
@@ -171,7 +176,236 @@ function shim(tool: Tool): Tool {
   return tool;
 }
 
-async function execute(c: Case): Promise<{ topStatus?: string; topError?: string | null; raw?: string }> {
+function generatedQuizResponse(questionCount: number): Record<string, unknown> {
+  const questions = Array.from({ length: questionCount }, (_, index) => {
+    const number = index + 1;
+    const isMultipleChoice = index % 2 === 0;
+    return {
+      number,
+      type: isMultipleChoice ? 'multiple-choice' : 'short-answer',
+      bloomLevel: number < 3 ? 'Understand' : 'Apply',
+      stem: isMultipleChoice
+        ? `Which fraction is equivalent to ${number}/2?`
+        : `Explain how to find a fraction equivalent to ${number}/2.`,
+      ...(isMultipleChoice ? {
+        choices: [
+          { label: 'A', text: `${number * 2}/3` },
+          { label: 'B', text: `${number * 2}/4` },
+          { label: 'C', text: `${number}/3` },
+          { label: 'D', text: `${number + 2}/2` },
+        ],
+      } : {}),
+      points: isMultipleChoice ? 2 : 5,
+    };
+  });
+  const answerKey = questions.map((question, index) => ({
+    number: index + 1,
+    answer: question.type === 'multiple-choice'
+      ? (index % 2 === 0 ? 'B' : 'A')
+      : 'Multiply the numerator and denominator by the same non-zero number.',
+    rationale: 'Equivalent fractions represent the same value.',
+  }));
+  return { content: JSON.stringify({ questions, answerKey }) };
+}
+
+function generatedQuizWithoutPointsResponse(questionCount: number): Record<string, unknown> {
+  const response = generatedQuizResponse(questionCount);
+  const content = JSON.parse(String(response.content)) as {
+    questions: Array<Record<string, unknown>>;
+  };
+  content.questions.forEach((question) => delete question.points);
+  return { content: JSON.stringify(content) };
+}
+
+function teacherVersionAnswerKeyResponse(questionCount: number): Record<string, unknown> {
+  const response = generatedQuizResponse(questionCount);
+  const content = JSON.parse(String(response.content)) as {
+    answerKey: Array<{ answer: string }>;
+  };
+  content.answerKey[0]!.answer = 'Available in teacher version';
+  return { content: JSON.stringify(content) };
+}
+
+function quizReviewResponse(valid: boolean, issues: string[] = []): Record<string, unknown> {
+  return { content: JSON.stringify({ valid, issues }) };
+}
+
+function incorrectShortAnswerQuizResponse(questionCount: number): Record<string, unknown> {
+  const response = generatedQuizResponse(questionCount);
+  const content = JSON.parse(String(response.content)) as {
+    answerKey: Array<{ answer: string }>;
+  };
+  content.answerKey[1]!.answer = 'Bananas';
+  return { content: JSON.stringify(content) };
+}
+
+function mathematicallyIncorrectFractionsQuizResponse(): Record<string, unknown> {
+  return {
+    content: JSON.stringify({
+      questions: [
+        {
+          number: 1,
+          type: 'multiple-choice',
+          stem: 'Which of the following fractions is equal to 3/4 when added to 5/6?',
+          choices: [
+            { label: 'A', text: '1/3' },
+            { label: 'B', text: '2/3' },
+            { label: 'C', text: '1/2' },
+            { label: 'D', text: '5/12' },
+          ],
+          points: 2,
+        },
+        {
+          number: 2,
+          type: 'short-answer',
+          stem: 'Write an equation to represent the addition of 2/3 and 3/5.',
+          points: 2,
+        },
+        {
+          number: 3,
+          type: 'multiple-choice',
+          stem: 'Which fraction is equivalent to 7/8 when simplified?',
+          choices: [
+            { label: 'A', text: '9/10' },
+            { label: 'B', text: '7/8' },
+            { label: 'C', text: '5/6' },
+            { label: 'D', text: '3/4' },
+          ],
+          points: 2,
+        },
+        {
+          number: 4,
+          type: 'short-answer',
+          stem: 'Compare the fractions 11/15 and 7/10. Which fraction is larger, and by how many parts per hundred does it exceed the other?',
+          points: 2,
+        },
+      ],
+      answerKey: [
+        {
+          number: 1,
+          answer: 'D',
+          rationale: 'Adding these gives 19/12, which is equal to 5/12 when simplified.',
+        },
+        {
+          number: 2,
+          answer: 'The equation is 3/5 + 2/3.',
+          rationale: 'The least common denominator is 15, so 9/15 + 10/15 = 19/15.',
+        },
+        {
+          number: 3,
+          answer: 'B',
+          rationale: '7/8 becomes 75/100, and 7/8 is already 70/100.',
+        },
+        {
+          number: 4,
+          answer: '7/10 is larger by 3 parts per hundred.',
+          rationale: '11/15 becomes 66.67/100, and 7/10 is exactly 70/100.',
+        },
+      ],
+    }),
+  };
+}
+
+function ambiguousFractionChoicesQuizResponse(valid: boolean): Record<string, unknown> {
+  const questions = [
+    {
+      number: 1,
+      type: 'multiple-choice',
+      stem: 'Which fraction is equivalent to 1/2?',
+      choices: valid
+        ? [
+        { label: 'A', text: '2/4' },
+        { label: 'B', text: '2/3' },
+        { label: 'C', text: '3/5' },
+        { label: 'D', text: '1/3' },
+        ]
+        : [
+        { label: 'A', text: '1/2' },
+        { label: 'B', text: '2/4' },
+        { label: 'C', text: '3/6' },
+        { label: 'D', text: '4/8' },
+        ],
+      points: 1,
+    },
+    {
+      number: 2,
+      type: 'multiple-choice',
+      stem: 'What is the product of 2/3 and 7/8?',
+      choices: valid
+        ? [
+          { label: 'A', text: '5/16' },
+          { label: 'B', text: '7/12' },
+          { label: 'C', text: '4/9' },
+          { label: 'D', text: '3/10' },
+        ]
+        : [
+          { label: 'A', text: '5/16' },
+          { label: 'B', text: '7/12' },
+          { label: 'C', text: '14/24' },
+          { label: 'D', text: '3/10' },
+        ],
+      points: 1,
+    },
+    {
+      number: 3,
+      type: 'multiple-choice',
+      stem: 'If 5/6 of a whole is equal to 10, what is the whole?',
+      choices: [
+        { label: 'A', text: '12' },
+        { label: 'B', text: '15' },
+        { label: 'C', text: '18' },
+        { label: 'D', text: '20' },
+      ],
+      points: 1,
+    },
+    {
+      number: 4,
+      type: 'multiple-choice',
+      stem: 'Compare 7/8 and 2/3. Which fraction is greater?',
+      choices: [
+        { label: 'A', text: '7/8' },
+        { label: 'B', text: '2/3' },
+        { label: 'C', text: '1/2' },
+        { label: 'D', text: '1/3' },
+      ],
+      points: 1,
+    },
+  ];
+  const answerKey = [
+    {
+      number: 1,
+      answer: 'A',
+      rationale: valid
+        ? '2/4 simplifies to 1/2, while the other options are not equivalent to 1/2.'
+        : 'All four choices are equivalent to 1/2.',
+    },
+    {
+      number: 2,
+      answer: 'B',
+      rationale: valid
+        ? '2/3 * 7/8 = 14/24 = 7/12.'
+        : 'Multiplying numerator and denominator gives 7*2/3*8 = 14/6, then 7/3 = 7/12.',
+    },
+    {
+      number: 3,
+      answer: 'A',
+      rationale: '10 divided by 5/6 is 12, so the whole group contains 12 items.',
+    },
+    {
+      number: 4,
+      answer: 'A',
+      rationale: '7/8 is greater than 2/3.',
+    },
+  ];
+  return { content: JSON.stringify({ questions, answerKey }) };
+}
+
+async function execute(c: Case): Promise<{
+  topStatus?: string;
+  topError?: string | null;
+  raw?: string;
+  outputSchemaIssues?: unknown[];
+}> {
   // Copy the Skill rather than mutating the registry's instance. Two cases for
   // the same Skill (a scoped run and an unscoped one) would otherwise share
   // externalConfig, and the second would silently inherit the first's config.
@@ -199,13 +433,36 @@ async function execute(c: Case): Promise<{ topStatus?: string; topError?: string
     ? { ...c.input, confirmation: true }
     : c.input;
 
-  const result = (await executor.execute(skill, input)) as {
+  const originalFetch = global.fetch;
+  if (c.brainResponses) {
+    let responseIndex = 0;
+    global.fetch = jest.fn(async () => {
+      const response = c.brainResponses![responseIndex++];
+      if (!response) throw new Error('No mocked Brain response remains');
+      return {
+        ok: true,
+        json: async () => response,
+      } as Response;
+    });
+  }
+
+  let result: {
     status?: string;
     error?: string | null;
-    output?: { output?: string } | string;
+    output?: { output?: string; outputSchemaIssues?: unknown[] } | string;
   };
+  try {
+    result = (await executor.execute(skill, input)) as typeof result;
+  } finally {
+    global.fetch = originalFetch;
+  }
   const raw = typeof result.output === 'string' ? result.output : result.output?.output;
-  return { topStatus: result.status, topError: result.error, raw };
+  return {
+    topStatus: result.status,
+    topError: result.error,
+    raw,
+    outputSchemaIssues: typeof result.output === 'string' ? [] : result.output?.outputSchemaIssues,
+  };
 }
 
 beforeAll(() => {
@@ -256,6 +513,7 @@ describe('Split Skills produce real output when executed', () => {
         return;
       }
 
+      expect(envelope.error).toBeUndefined();
       expect(envelope.success).toBe(true);
 
       // A success with nothing rendered is the "completed but the user sees an
@@ -266,4 +524,173 @@ describe('Split Skills produce real output when executed', () => {
       expect(String(present![0].body ?? '').length).toBeGreaterThan(0);
     },
   );
+
+  it('generates a complete quiz with contiguous numbering and a matching answer key', async () => {
+    const quizCase = CASES.find((c) => c.id === 'education-lesson-assessment-drafting-user')!;
+    const { raw, outputSchemaIssues } = await execute(quizCase);
+    const envelope = JSON.parse(raw!) as {
+      success: boolean;
+      error?: string | null;
+      data: { draft: { quiz: { questionCount: number; questions: Array<{ number: number; type: string; stem: string; choices?: unknown[] }>; answerKey: Array<{ number: number; answer: string; rationale: string }> } } };
+    };
+    const quiz = envelope.data.draft.quiz;
+
+    expect(envelope.success).toBe(true);
+    expect(envelope.error).toBeUndefined();
+    expect(outputSchemaIssues ?? []).toEqual([]);
+    expect(quiz.questions).toHaveLength(10);
+    expect(quiz.questions.map((question) => question.number)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    const placeholderPattern = /\.\.\.|\[[^\]]+\]|\b(?:placeholder|todo|tbd)\b|\bavailable in (?:the )?teacher (?:version|key)\b|\bsee (?:the )?teacher(?:'s)? (?:version|key)\b|\bprovided separately\b/i;
+    expect(quiz.questions.every((question) => !placeholderPattern.test(question.stem))).toBe(true);
+    expect(quiz.answerKey).toHaveLength(10);
+    expect(quiz.answerKey.map((entry) => entry.number)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    expect(quiz.answerKey.every((entry) =>
+      entry.answer.trim()
+      && entry.rationale.trim()
+      && !placeholderPattern.test(entry.answer)
+      && !placeholderPattern.test(entry.rationale),
+    )).toBe(true);
+    for (const [index, question] of quiz.questions.entries()) {
+      if (question.type !== 'multiple-choice') continue;
+      const choices = question.choices as Array<{ label: string; text: string }>;
+      expect(choices.map((choice) => choice.label)).toEqual(['A', 'B', 'C', 'D']);
+      expect(new Set(choices.map((choice) => choice.text.trim().toLowerCase())).size).toBe(4);
+      expect(choices.map((choice) => choice.label)).toContain(quiz.answerKey[index]?.answer);
+    }
+  });
+
+  it('assigns the default one-point value when generated questions omit points', async () => {
+    const quizCase = CASES.find((c) => c.id === 'education-lesson-assessment-drafting-user')!;
+    const { raw } = await execute({
+      ...quizCase,
+      input: { ...quizCase.input, questionCount: 2 },
+      brainResponses: [
+        generatedQuizWithoutPointsResponse(2),
+        quizReviewResponse(true),
+      ],
+    });
+    const envelope = JSON.parse(raw!) as {
+      success: boolean;
+      data: { draft: { quiz: { questions: Array<{ points: number }> } } };
+    };
+
+    expect(envelope.success).toBe(true);
+    expect(envelope.data.draft.quiz.questions.map((question) => question.points)).toEqual([1, 1]);
+  });
+
+  it('repairs an incomplete teacher-version answer key before storing the quiz', async () => {
+    const quizCase = CASES.find((c) => c.id === 'education-lesson-assessment-drafting-user')!;
+    const { raw, outputSchemaIssues } = await execute({
+      ...quizCase,
+      brainResponses: [
+        teacherVersionAnswerKeyResponse(10),
+        generatedQuizResponse(10),
+        quizReviewResponse(true),
+      ],
+    });
+    const envelope = JSON.parse(raw!) as {
+      success: boolean;
+      data: { draft: { quiz: { answerKey: Array<{ answer: string }> } } };
+    };
+
+    expect(envelope.success).toBe(true);
+    expect(envelope.data.draft.quiz.answerKey[0]?.answer).toBe('B');
+    expect(outputSchemaIssues ?? []).toEqual([]);
+  });
+
+  it('repairs an answer-key error reported by the independent reviewer before storing the quiz', async () => {
+    const quizCase = CASES.find((c) => c.id === 'education-lesson-assessment-drafting-user')!;
+    const { raw, outputSchemaIssues } = await execute({
+      ...quizCase,
+      input: { ...quizCase.input, questionCount: 5 },
+      brainResponses: [
+        incorrectShortAnswerQuizResponse(5),
+        quizReviewResponse(false, ['Question 2: the short-answer key does not provide the requested explanation.']),
+        generatedQuizResponse(5),
+        quizReviewResponse(true),
+      ],
+    });
+    const envelope = JSON.parse(raw!) as {
+      success: boolean;
+      data: { draft: { quiz: { answerKey: Array<{ answer: string }> } } };
+    };
+
+    expect(envelope.success).toBe(true);
+    expect(envelope.data.draft.quiz.answerKey[0]?.answer).toBe('B');
+    expect(outputSchemaIssues ?? []).toEqual([]);
+  });
+
+  it('repairs incorrect fraction arithmetic and answer-key reasoning before review', async () => {
+    const quizCase = CASES.find((c) => c.id === 'education-lesson-assessment-drafting-user')!;
+    const { raw, outputSchemaIssues } = await execute({
+      ...quizCase,
+      input: {
+        ...quizCase.input,
+        topic: 'Adding and comparing fractions with unlike denominators',
+        questionCount: 4,
+      },
+      brainResponses: [
+        mathematicallyIncorrectFractionsQuizResponse(),
+        generatedQuizResponse(4),
+        quizReviewResponse(true),
+      ],
+    });
+    const envelope = JSON.parse(raw!) as {
+      success: boolean;
+      data: { draft: { quiz: { answerKey: Array<{ answer: string }> } } };
+    };
+
+    expect(envelope.success).toBe(true);
+    expect(envelope.data.draft.quiz.answerKey).toHaveLength(4);
+    expect(outputSchemaIssues ?? []).toEqual([]);
+  });
+
+  it('repairs ambiguous fraction choices and false multiplication reasoning before review', async () => {
+    const quizCase = CASES.find((c) => c.id === 'education-lesson-assessment-drafting-user')!;
+    const { raw, outputSchemaIssues } = await execute({
+      ...quizCase,
+      input: {
+        ...quizCase.input,
+        topic: 'Fractions',
+        quizType: 'multiple-choice',
+        questionCount: 4,
+      },
+      brainResponses: [
+        ambiguousFractionChoicesQuizResponse(false),
+        ambiguousFractionChoicesQuizResponse(true),
+        quizReviewResponse(true),
+      ],
+    });
+    const envelope = JSON.parse(raw!) as {
+      success: boolean;
+      data: { draft: { quiz: { answerKey: Array<{ answer: string }> } } };
+    };
+
+    expect(envelope.success).toBe(true);
+    expect(envelope.data.draft.quiz.answerKey.map((entry) => entry.answer)).toEqual(['A', 'B', 'A', 'A']);
+    expect(outputSchemaIssues ?? []).toEqual([]);
+  });
+
+  it('returns a schema-valid failed envelope when a math quiz remains incorrect after repair', async () => {
+    const quizCase = CASES.find((c) => c.id === 'education-lesson-assessment-drafting-user')!;
+    const { raw, outputSchemaIssues } = await execute({
+      ...quizCase,
+      input: {
+        ...quizCase.input,
+        topic: 'Fractions',
+        quizType: 'multiple-choice',
+        questionCount: 4,
+      },
+      brainResponses: [
+        ambiguousFractionChoicesQuizResponse(false),
+        ambiguousFractionChoicesQuizResponse(false),
+      ],
+    });
+    const envelope = JSON.parse(raw!) as { success: boolean; data: unknown; error: string };
+
+    expect(envelope.success).toBe(false);
+    expect(envelope.data).toBeNull();
+    expect(envelope.error).toContain('returned an invalid quiz after repair');
+    expect(outputSchemaIssues ?? []).toEqual([]);
+  });
 });

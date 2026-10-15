@@ -19,7 +19,7 @@ const INTERVIEW_PRACTICE_MOCK_INTERVIEWER = createDeclarativeCodeSkill({
   id: 'career-interview-practice-mock-interviewer',
   name: 'Interview Practice & Mock Interviewer',
   description: 'Runs interactive mock interviews using role/company battlecards, records performance, and produces actionable coaching notes. Delegates to career-interview-prep. Reports not-connected when no interview context is available.',
-  persistenceEnvVar: 'CAREER_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: INTERVIEW_PRACTICE_MOCK_INTERVIEWER_INPUT,
   outputSchema: careerResultSchema('Mock interview session data with practice material and session ID'),
   manifest: {

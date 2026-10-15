@@ -76,6 +76,7 @@ describe('missionWorkflow activity boundary', () => {
       plan,
       phase: plan.phases[0],
       task: plan.phases[0]!.tasks[0],
+      completedTaskSummaries: [],
     })
     expect(mockActivities.startMissionPhaseActivity).toHaveBeenCalledTimes(1)
     expect(mockActivities.finishMissionPhaseActivity).toHaveBeenCalledWith({

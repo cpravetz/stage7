@@ -21,7 +21,7 @@ export const SCRIPTWRITER_GENRE_MARKET_EVALUATOR_USER = createDeclarativeCodeSki
   id: 'scriptwriting-genre-market-evaluator-user',
   name: 'Scriptwriter Genre & Market Evaluator',
   description: 'Evaluates a script or topic against genre craft conventions by delegating to narrative-arc-pacing-evaluator and scene-beat-dialogue-copilot, scoring structural readiness, and reporting which dependencies answered. Reports not-connected or partial status when a dependency fails instead of silently returning a half-empty evaluation. Does not query external market or chart data and says so in its output.',
-  persistenceEnvVar: 'SCRIPTWRITING_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: {
     type: 'object',
     properties: {

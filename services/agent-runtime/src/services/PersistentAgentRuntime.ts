@@ -115,7 +115,11 @@ export class PersistentAgentRuntime {
     taskId: string,
     requireCompletedReceipt = false,
     delegationDepth = 0,
+    retryGuidance?: string,
   ): Promise<AgentTask> {
+    if (retryGuidance !== undefined && (typeof retryGuidance !== 'string' || retryGuidance.length > 4_000)) {
+      throw new BadRequestError('Retry guidance must be a string of at most 4000 characters');
+    }
     const state = this.runtime.getAgentState(agentId);
     if (!state) throw new Error(`Agent ${agentId} has not been started`);
     const receipts = state.context.taskReceipts && typeof state.context.taskReceipts === 'object'
@@ -143,6 +147,7 @@ export class PersistentAgentRuntime {
       task.status = 'completed';
       task.result = receipt.result;
       task.completedAt = receipt.completedAt || new Date().toISOString();
+      delete task.error;
       this.runtime.restoreTask(task);
       return task;
     }
@@ -197,7 +202,7 @@ export class PersistentAgentRuntime {
       state.status = 'running';
       await this.persistState(state);
     }
-    return this.runtime.executeTask(agentId, taskId, delegationDepth);
+    return this.runtime.executeTask(agentId, taskId, delegationDepth, retryGuidance);
   }
 
   getTask(taskId: string): AgentTask | undefined {

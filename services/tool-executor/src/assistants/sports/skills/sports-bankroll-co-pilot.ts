@@ -26,7 +26,7 @@ export const BANKROLL_CO_PILOT = createDeclarativeCodeSkill({
   id: 'sports-bankroll-co-pilot',
   name: 'Bankroll Co-Pilot',
   description: 'Aids bankroll discipline by modeling unit sizing, Kelly Criterion limits, session exposure, and variance. Enforces responsible-play rules: single-bet caps, unit limits, and stake percentage limits. All calculations run locally with no external calls. Does not place wagers or access sportsbook accounts.',
-  persistenceEnvVar: 'SPORTS_GROUP_B_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: BANKROLL_COPILOT_INPUT,
   outputSchema: sportsResultSchema('Bankroll check result'),
   tier: 'aid',

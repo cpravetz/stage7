@@ -29,7 +29,7 @@ export interface CodeExecutionOptions {
    * process.env.
    */
   credentials?: Record<string, string | undefined>;
-  // Optional environment variable name that tools use to persist state (e.g. 'CTO_HOME')
+  // Optional environment variable name that tools use to persist state (e.g. 'ASSISTANT_HOME')
   persistenceEnvVar?: string;
   // Optional callback for tool execution bridge
   executorCallback?: (toolId: string, input: Record<string, unknown>) => Promise<Record<string, unknown>>;
@@ -259,7 +259,9 @@ async function __execute_tool(toolId, input) {
 
         if (options.persistenceEnvVar) {
           try {
-            env[options.persistenceEnvVar] = process.env[options.persistenceEnvVar] || `/var/data/stage7/${options.persistenceEnvVar.toLowerCase()}`;
+            const dir = process.env.ASSISTANT_HOME || process.env[options.persistenceEnvVar] || `/var/data/stage7/${(options.persistenceEnvVar || 'assistant').toLowerCase()}`;
+            env[options.persistenceEnvVar || 'ASSISTANT_HOME'] = dir;
+            env['ASSISTANT_HOME'] = dir;
           } catch (_) {
             // Ignore failures when the optional persistence variable is unavailable.
           }
@@ -502,7 +504,9 @@ async def __execute_tool(tool_id, input):
 
         if (options.persistenceEnvVar) {
           try {
-            env[options.persistenceEnvVar] = process.env[options.persistenceEnvVar] || `/var/data/stage7/${options.persistenceEnvVar.toLowerCase()}`;
+            const dir = process.env.ASSISTANT_HOME || process.env[options.persistenceEnvVar] || `/var/data/stage7/${(options.persistenceEnvVar || 'assistant').toLowerCase()}`;
+            env[options.persistenceEnvVar || 'ASSISTANT_HOME'] = dir;
+            env['ASSISTANT_HOME'] = dir;
           } catch (_) {
             // Ignore failures when the optional persistence variable is unavailable.
           }

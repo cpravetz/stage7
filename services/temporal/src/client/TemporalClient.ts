@@ -264,7 +264,15 @@ export class TemporalClient {
     let recoveryLeaseClaimed = recoveryLeaseAlreadyClaimed;
 
     try {
-      if (!this.client && !resumeCheckpoint && (input.completedPhases?.length || input.completedTasks?.length)) {
+      const isMissionResume = Boolean(
+        input.retryGuidance
+        || input.metadata?.retriedFrom
+        || input.resumeFromPhaseId
+        || input.resumeFromTaskId
+        || input.completedPhases?.length
+        || input.completedTasks?.length
+      );
+      if (!this.client && !resumeCheckpoint && isMissionResume) {
         resumeCheckpoint = await this.loadRetryCheckpoint(input);
       }
 

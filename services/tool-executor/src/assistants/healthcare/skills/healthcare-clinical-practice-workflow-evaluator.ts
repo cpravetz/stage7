@@ -17,7 +17,7 @@ function withUxMetadata(schema: SchemaRecord): SchemaRecord {
 }
 
 const SAFETY_BOUNDARY = 'Decision support and education only: do not diagnose, prescribe, change treatment, or make autonomous clinical decisions; use only authorized minimum-necessary data and approved secure endpoints for PHI; a qualified clinician must review all outputs.'
-const metadata = { domain: 'healthcare', persistenceEnv: 'HEALTHCARE_HOME', HEALTHCARE_HOME: 'HEALTHCARE_HOME', homeEnv: 'HEALTHCARE_HOME', healthcareHome: 'HEALTHCARE_HOME', clinicalSafetyBoundary: SAFETY_BOUNDARY }
+const metadata = { domain: 'healthcare', persistenceEnv: 'ASSISTANT_HOME', HEALTHCARE_HOME: 'ASSISTANT_HOME', homeEnv: 'ASSISTANT_HOME', healthcareHome: 'ASSISTANT_HOME', clinicalSafetyBoundary: SAFETY_BOUNDARY }
 const triggers = [
   { kind: 'user' as const, phrase_examples: ['evaluate clinic workflow', 'review this clinical case', 'create a care plan', 'stage intake dispatch'] },
   { kind: 'schedule' as const, cadence: 'daily clinical operations review' },
@@ -26,7 +26,7 @@ const triggers = [
 ]
 
 const workflowConfig = createSchemaRecord({
-  healthcareHome: SchemaProps.text({ description: 'Healthcare workspace path or base URL; defaults to HEALTHCARE_HOME' }),
+  healthcareHome: SchemaProps.text({ description: 'Healthcare workspace path or base URL; defaults to ASSISTANT_HOME' }),
   accessWaitThresholdMinutes: SchemaProps.number({ description: 'Wait-time threshold in minutes for an access bottleneck', default: 30 }),
   billingDelayThresholdDays: SchemaProps.number({ description: 'Billing-delay threshold in days for a billing bottleneck', default: 7 }),
 })
@@ -36,7 +36,7 @@ export const healthcareClinicalPracticeWorkflowEvaluator = createDeclarativeCode
   isSkill: true,
   name: 'Clinical Practice & Workflow Evaluator',
   description: 'Evaluate supplied scheduling, completion, no-show, wait-time, and billing-delay records to identify deterministic operational bottlenecks without making clinical claims.',
-  persistenceEnvVar: 'HEALTHCARE_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   tier: 'advise',
   domainKnowledge: 'Healthcare clinic operations, scheduling metrics, workflow efficiency, and billing-delay analysis',
   inputSchema: createSchemaRecord({
@@ -57,7 +57,7 @@ export const healthcareClinicalPracticeWorkflowEvaluator = createDeclarativeCode
     configSchema: workflowConfig,
     // Operational analytics is how this Skill measures the workflow it evaluates.
     lowerOrderTools: ['healthcare-operational-analytics'],
-    healthcareHome: 'HEALTHCARE_HOME',
+    healthcareHome: 'ASSISTANT_HOME',
     ui: { view: 'clinical-operations' },
     metadata: metadata
   },

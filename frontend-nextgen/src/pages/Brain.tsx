@@ -190,13 +190,13 @@ const Brain = () => {
                       <span
                         className={`badge ${
                           cb.state === 'closed'
-                            ? 'completed'
+                            ? 'running'
                             : cb.state === 'open'
                               ? 'failed'
                               : 'pending'
                         }`}
                       >
-                        {cb.state === 'closed' ? 'Closed' : cb.state === 'open' ? 'Open' : cb.state === 'half' ? 'Half-Open' : cb.state}
+                        {cb.state === 'closed' ? 'On-line' : cb.state === 'open' ? 'off-line' : cb.state === 'half' ? 'Intermittent' : cb.state}
                       </span>
                     </td>
                     <td>{cb.failures}</td>

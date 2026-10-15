@@ -43,7 +43,7 @@ export const NARRATIVE_ARC_PACING_EVALUATOR = createDeclarativeCodeSkill({
   id: 'scriptwriting-narrative-arc-pacing-evaluator',
   name: 'Narrative Arc & Pacing Evaluator',
   description: 'Parses a script into scenes with page positions, character presence, and dialogue ratios, places the five structural beats (opening, inciting incident, midpoint, climax, resolution) with a stated detection basis, flags pacing and formatting problems, and returns a formatted report with scored recommendations.',
-  persistenceEnvVar: 'SCRIPTWRITING_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: NARRATIVE_ARC_PACING_INPUT,
   outputSchema: NARRATIVE_ARC_PACING_OUTPUT,
   triggers: [

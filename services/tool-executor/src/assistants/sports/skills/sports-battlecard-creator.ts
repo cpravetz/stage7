@@ -39,7 +39,7 @@ export const BATTLECARD_CREATOR = createDeclarativeCodeSkill({
   id: 'sports-battlecard-creator',
   name: 'Game Plan & Opposition Battlecard Creator',
   description: 'Aid tool that compiles opponent scout reports, situational playbooks, and key matchup cheat sheets. Connects to StatsPerform and Opta for opposition data; falls back to local data when API is unavailable.',
-  persistenceEnvVar: 'SPORTS_GROUP_A_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: BATTLECARD_CREATOR_INPUT,
   outputSchema: sportsResultSchema('Battlecard result'),
   tier: 'aid',

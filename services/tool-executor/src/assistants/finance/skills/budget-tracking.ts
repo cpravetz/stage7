@@ -40,7 +40,7 @@ const budgetTrackingSkill = createDeclarativeCodeSkill({
   id: 'budget-tracking',
   name: 'Budget Tracking',
   description: 'Track budget vs. actuals across categories, deriving variance, exception categories and a run-rate forecast, then stage that analysis for the configured accounting ERP behind an explicit confirmation gate. With no endpoint configured it reports the variance it computed and marks the write as not connected rather than inventing a ledger result.',
-  persistenceEnvVar: 'STORAGE_DIR',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   tier: 'represent',
   emitEvent: 'finance.budget.updated',
   domainKnowledge: 'Corporate finance principles, US GAAP/IFRS standards, operating budget models, and budget-variance analysis',
@@ -65,7 +65,7 @@ const budgetTrackingSkill = createDeclarativeCodeSkill({
     // write, so gating on it would block the analysis-only and dry-run paths that
 
     // report what this Skill can honestly compute without one.
-    persistenceEnv: 'FINANCE_HOME',
+    persistenceEnv: 'ASSISTANT_HOME',
     timeoutMs: 30000
   },
   handler: async function handler(input, ctx) {

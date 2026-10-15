@@ -21,7 +21,7 @@ const pipelineOps = createDeclarativeCodeSkill({
   name: 'Pipeline Ops',
   description:
     'Stage or send CRM pipeline operations for a configured sales endpoint. Pass dryRun true to stage the request and see exactly what would be sent; a live write requires dryRun false plus explicit confirmation. With no endpoint configured it reports the staged request and marks itself not connected rather than inventing a result.',
-  persistenceEnvVar: 'STORAGE_DIR',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   tier: 'represent',
   emitEvent: 'sales.pipeline.record_updated',
   domainKnowledge: 'Sales pipeline management, CRM operations, and deal tracking',
@@ -80,7 +80,7 @@ const pipelineOps = createDeclarativeCodeSkill({
     // write, so gating on it would block the analysis-only and dry-run paths that
 
     // report what this Skill can honestly compute without one.
-    persistenceEnv: 'SALES_HOME',
+    persistenceEnv: 'ASSISTANT_HOME',
     timeoutMs: 30000,
     ui: { view: 'pipeline-ops' }
   },

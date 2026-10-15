@@ -22,9 +22,15 @@ export interface ModelPerformanceOutcome {
   totalRequests: number;
   totalCost?: number;
   costRequests?: number;
+  complaintCount: number;
+  complaintRate: number;
 }
 
+type PerformanceMetricsMap = ReadonlyMap<string, ModelPerformanceOutcome | { successRate: number; avgLatencyMs: number; avgCostPerRequest: number; totalRequests: number; totalCost?: number; costRequests?: number; complaintCount?: number; complaintRate?: number }>;
+
 const FREE_PROVIDER_PRIORITY: Record<string, number> = {} as Record<string, number>;
+const RESPONSE_TIME_BASELINE_MS = 30_000;
+const RESPONSE_TIME_SCORE_RANGE = 80;
 
 function providerPriority(provider: string): number {
   return FREE_PROVIDER_PRIORITY[provider] ?? 10;
@@ -40,18 +46,25 @@ function modelSpecializationPenalty(model: ModelDefinition, task: string): numbe
 
 const CAPABILITY_KEYWORDS: Record<string, string[]> = {
   vision: ['image', 'picture', 'photo', 'visual', 'see', 'look', 'analyze image', 'describe image'],
-  code: ['code', 'program', 'function', 'script', 'debug', 'refactor', 'implement', 'build', 'develop', 'software'],
-  chat: ['chat', 'talk', 'conversation', 'discuss', 'question', 'answer', 'help', 'assist'],
-  reasoning: ['reason', 'think', 'analyze', 'logic', 'math', 'solve', 'complex', 'plan', 'strategy'],
-  creative: ['write', 'story', 'poem', 'creative', 'brainstorm', 'idea', 'generate', 'compose', 'draft'],
+  code: ['code', 'coding', 'program', 'programming', 'function', 'script', 'debug', 'refactor', 'implement', 'implementation', 'build', 'develop', 'software'],
+  chat: ['chat', 'talk', 'conversation', 'discuss', 'question', 'answer', 'help', 'assist', 'assistant'],
+  reasoning: ['reason', 'reasoning', 'think', 'analyze', 'logic', 'math', 'mathematical', 'mathematics', 'solve', 'complex', 'plan', 'strategy'],
+  creative: ['write', 'writing', 'story', 'poem', 'creative', 'brainstorm', 'idea', 'generate', 'compose', 'draft'],
   search: ['search', 'find', 'lookup', 'google', 'web', 'research', 'browse', 'fetch'],
 };
+
+function hasKeyword(task: string, keyword: string): boolean {
+  const pattern = keyword
+    .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    .replace(/\s+/g, '\\s+');
+  return new RegExp(`\\b${pattern}\\b`).test(task);
+}
 
 function inferCapabilities(task: string): string[] {
   const lower = task.toLowerCase();
   const matched = new Set<string>();
   for (const [cap, keywords] of Object.entries(CAPABILITY_KEYWORDS)) {
-    if (keywords.some((kw) => lower.includes(kw))) {
+    if (keywords.some((kw) => hasKeyword(lower, kw))) {
       matched.add(cap);
       if (cap === 'creative') matched.add('chat');
     }
@@ -73,12 +86,6 @@ function getOptimizeForPriority(model: ModelDefinition, optimizeFor: string): nu
     default:
       return 0;
   }
-}
-
-function getExcludedModelIds(): Set<string> {
-  const raw = process.env.BRAIN_EXCLUDE_MODELS;
-  if (!raw) return new Set();
-  return new Set(raw.split(/\s*,\s*/).filter(Boolean));
 }
 
 interface ScoredModel {
@@ -117,8 +124,29 @@ export class ModelRouter {
     this.providerHealth.set(health.provider, health);
   }
 
-  setPerformanceMetrics(metrics: ReadonlyMap<string, ModelPerformanceOutcome>) {
-    this.performanceMetrics = new Map(metrics);
+  setPerformanceMetrics(metrics: ReadonlyMap<string, { successRate: number; avgLatencyMs: number; avgCostPerRequest: number; totalRequests: number; totalCost?: number; costRequests?: number; complaintCount?: number; complaintRate?: number }>) {
+    this.performanceMetrics = new Map(metrics as ReadonlyMap<string, ModelPerformanceOutcome>);
+  }
+
+  recordComplaint(provider: string, modelId: string) {
+    const key = `${provider}:${modelId}`;
+    const metrics = this.performanceMetrics.get(key);
+    if (metrics) {
+      metrics.complaintCount = (metrics.complaintCount || 0) + 1;
+      metrics.complaintRate = Math.max(
+        0,
+        Math.min(1, metrics.complaintCount / Math.max(metrics.totalRequests, 1)),
+      );
+    } else {
+      this.performanceMetrics.set(key, {
+        successRate: 0,
+        avgLatencyMs: 0,
+        avgCostPerRequest: 0,
+        totalRequests: 0,
+        complaintCount: 1,
+        complaintRate: 1,
+      });
+    }
   }
 
   route(options: { task: string; maxTokens?: number; budget?: number; freeOnly?: boolean; optimizeFor?: 'cost' | 'speed' | 'accuracy' | 'creativity' | 'balanced'; excludedModelIds?: Iterable<string> }): ModelDefinition {
@@ -130,32 +158,35 @@ export class ModelRouter {
   }
 
   getCandidates(options: { task: string; maxTokens?: number; budget?: number; freeOnly?: boolean; optimizeFor?: 'cost' | 'speed' | 'accuracy' | 'creativity' | 'balanced'; excludedModelIds?: Iterable<string> }): ScoredModel[] {
-    const excluded = getExcludedModelIds();
+    const excluded = new Set<string>();
     for (const id of options.excludedModelIds || []) excluded.add(id);
     const isExcluded = (model: ModelDefinition) =>
       excluded.has(model.id) || excluded.has(`${model.provider}:${model.id}`);
-    const requiredCaps = inferCapabilities(options.task);
-
-    let candidates = Array.from(this.models.values()).filter((m) => {
+    const eligibleModels = Array.from(this.models.values()).filter((m) => {
       if (options.maxTokens && m.maxTokens < options.maxTokens) return false;
       if (options.budget !== undefined && m.costPer1kTokens > options.budget) return false;
       if (options.freeOnly) {
         if (!(m.costPer1kTokens === 0)) return false;
       }
       if (isExcluded(m)) return false;
-      return requiredCaps.every((cap) => m.capabilities.includes(cap));
+      return true;
     });
 
+    const availableCapabilities = new Set(eligibleModels.flatMap((model) => model.capabilities));
+    // Search is an Agent tool capability; do not make it a hard LLM constraint when absent.
+    const requiredCaps = inferCapabilities(options.task).filter((cap) =>
+      cap !== 'search' || availableCapabilities.has(cap),
+    );
+    if (requiredCaps.length === 0) requiredCaps.push('chat');
+
+    let candidates = eligibleModels.filter((model) =>
+      requiredCaps.every((cap) => model.capabilities.includes(cap)),
+    );
+
     if (candidates.length === 0) {
-      candidates = Array.from(this.models.values()).filter((m) => {
-        if (options.maxTokens && m.maxTokens < options.maxTokens) return false;
-        if (options.budget !== undefined && m.costPer1kTokens > options.budget) return false;
-        if (options.freeOnly) {
-          if (!(m.costPer1kTokens === 0)) return false;
-        }
-        if (isExcluded(m)) return false;
-        return requiredCaps.length === 0 || requiredCaps.some((cap) => m.capabilities.includes(cap));
-      });
+      candidates = eligibleModels.filter((model) =>
+        requiredCaps.some((cap) => model.capabilities.includes(cap)),
+      );
     }
 
     const generalCandidates = candidates.filter((candidate) => modelSpecializationPenalty(candidate, options.task) === 0);
@@ -228,7 +259,8 @@ export class ModelRouter {
       score += (successRate - 0.5) * 40;
 
       if (Number.isFinite(metrics.avgLatencyMs) && metrics.avgLatencyMs >= 0) {
-        score += (10 / (1 + metrics.avgLatencyMs / 1000)) - 5;
+        score += (RESPONSE_TIME_SCORE_RANGE / (1 + metrics.avgLatencyMs / RESPONSE_TIME_BASELINE_MS))
+          - RESPONSE_TIME_SCORE_RANGE / 2;
       }
 
       const hasMeasuredCost = (metrics.costRequests ?? 0) > 0
@@ -236,6 +268,13 @@ export class ModelRouter {
         || metrics.avgCostPerRequest > 0;
       if (hasMeasuredCost && Number.isFinite(metrics.avgCostPerRequest) && metrics.avgCostPerRequest >= 0) {
         score += (10 / (1 + metrics.avgCostPerRequest * 100)) - 5;
+      }
+
+      // Complaint penalty: heavily weight quality complaints from agents
+      const complaintRate = metrics.complaintRate || 0;
+      if (complaintRate > 0) {
+        // Each 10% complaint rate = -30 points (steep penalty)
+        score -= complaintRate * 300;
       }
     }
 

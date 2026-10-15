@@ -60,6 +60,578 @@ describe('AgentExecutor', () => {
     )).rejects.toThrow('Brain request timed out after 1000ms')
   })
 
+  it('waits for the configured Brain completion deadline plus response grace', async () => {
+    const previousDeadline = process.env.BRAIN_COMPLETION_DEADLINE_MS
+    const previousAttemptTimeout = process.env.BRAIN_PROVIDER_ATTEMPT_TIMEOUT_MS
+    let aborted = false
+    jest.useFakeTimers()
+    process.env.BRAIN_COMPLETION_DEADLINE_MS = '150000'
+    process.env.BRAIN_PROVIDER_ATTEMPT_TIMEOUT_MS = '120000'
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) return jsonResponse({ tools: [] })
+      if (url.endsWith('/api/brain/complete')) {
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => {
+            aborted = true
+            reject(new Error('request aborted'))
+          }, { once: true })
+        })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+
+    try {
+      const execution = new AgentExecutor({ fetcher }).execute(
+        definition,
+        task() as AgentTask,
+        { missionId: 'mission-1', delegationDepth: 0 },
+      )
+      const timeoutAssertion = expect(execution).rejects.toThrow('Brain request timed out after 180000ms')
+      await jest.advanceTimersByTimeAsync(120_000)
+      expect(aborted).toBe(false)
+      await jest.advanceTimersByTimeAsync(60_000)
+      await timeoutAssertion
+    } finally {
+      jest.useRealTimers()
+      if (previousDeadline === undefined) delete process.env.BRAIN_COMPLETION_DEADLINE_MS
+      else process.env.BRAIN_COMPLETION_DEADLINE_MS = previousDeadline
+      if (previousAttemptTimeout === undefined) delete process.env.BRAIN_PROVIDER_ATTEMPT_TIMEOUT_MS
+      else process.env.BRAIN_PROVIDER_ATTEMPT_TIMEOUT_MS = previousAttemptTimeout
+    }
+  })
+
+  it.each([
+    ['raw JSON', '{"tool":"calculate","args":{"expression":"17 + 25"}}\n\nThe result is 42. I have completed the task.'],
+    ['a leading JSON code fence', '```json\n{"tool":"calculate","args":{"expression":"17 + 25"}}\n```\nThe result is 42. I have completed the task.'],
+  ])('executes a single leading %s action and ignores trailing narration', async (_format, firstResponse) => {
+    const brainResponses = [firstResponse, '42']
+    const prompts: string[] = []
+    const complaints: Array<{ requestId: string; reason: string; missionId: string }> = []
+    let toolExecutions = 0
+    let optimizeFor = ''
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) {
+        return jsonResponse({
+          tools: [{ id: 'calculate', name: 'Calculate', description: 'Calculate an expression', type: 'code' }],
+        })
+      }
+      if (url.endsWith('/api/brain/complaint')) {
+        complaints.push(JSON.parse(String(init?.body)) as { requestId: string; reason: string; missionId: string })
+        return jsonResponse({ recorded: true })
+      }
+      if (url.endsWith('/api/brain/complete')) {
+        const request = JSON.parse(String(init?.body)) as {
+          prompt: string
+          options?: { optimizeFor?: string }
+        }
+        prompts.push(request.prompt)
+        optimizeFor = request.options?.optimizeFor || ''
+        const content = brainResponses.shift()
+        if (!content) throw new Error('Unexpected additional Brain request')
+        return jsonResponse({ content, requestId: `brain-request-${prompts.length}`, tokensUsed: 5 })
+      }
+      if (url.endsWith('/api/tool-executor/tools/execute')) {
+        toolExecutions++
+        return jsonResponse({ status: 'completed', output: { result: 42 } })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+
+    const result = await new AgentExecutor({ fetcher }).execute(
+      { ...definition, tools: ['calculate'], toolPolicy: { mode: 'allowlist' } },
+      task() as AgentTask,
+      { missionId: 'mission-1', delegationDepth: 0 },
+    )
+
+    expect(result.output).toBe('42')
+    expect(result.toolCalls).toBe(1)
+    expect(result.actionReceipts).toEqual([
+      { toolId: 'calculate', isError: false, content: '{"result":42}', outcome: 'success' },
+    ])
+    expect(toolExecutions).toBe(1)
+    expect(prompts[1]).toContain('Only the leading action object was considered')
+    expect(prompts[1]).not.toContain('I have completed the task.')
+    expect(optimizeFor).toBe('accuracy')
+    expect(complaints).toEqual([expect.objectContaining({
+      requestId: 'brain-request-1',
+      missionId: 'mission-1',
+      reason: expect.stringContaining('trailing narration'),
+    })])
+  })
+
+  it('complains about an empty Brain response and retries without treating it as task output', async () => {
+    const prompts: string[] = []
+    const complaints: Array<{ requestId: string; reason: string; missionId: string }> = []
+    let brainCalls = 0
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) return jsonResponse({ tools: [] })
+      if (url.endsWith('/api/brain/complaint')) {
+        complaints.push(JSON.parse(String(init?.body)) as { requestId: string; reason: string; missionId: string })
+        return jsonResponse({ recorded: true })
+      }
+      if (url.endsWith('/api/brain/complete')) {
+        const request = JSON.parse(String(init?.body)) as { prompt: string }
+        prompts.push(request.prompt)
+        brainCalls++
+        return jsonResponse({
+          content: brainCalls === 1 ? '' : 'Recovered after the empty response.',
+          requestId: `empty-response-${brainCalls}`,
+          tokensUsed: 1,
+        })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+
+    const result = await new AgentExecutor({ fetcher }).execute(
+      definition,
+      task() as AgentTask,
+      { missionId: 'mission-1', delegationDepth: 0 },
+    )
+
+    expect(result.output).toBe('Recovered after the empty response.')
+    expect(result.brainCalls).toBe(2)
+    expect(prompts[1]).toContain('Your previous Brain response was empty')
+    expect(complaints).toEqual([
+      expect.objectContaining({
+        requestId: 'empty-response-1',
+        missionId: 'mission-1',
+        reason: expect.stringContaining('returned empty content'),
+      }),
+    ])
+  })
+
+  it('requires non-empty exact sections for expected artifacts before completing a task', async () => {
+    const prompts: string[] = []
+    const complaints: Array<{ requestId: string; reason: string; missionId: string }> = []
+    let brainTurn = 0
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) return jsonResponse({ tools: [] })
+      if (url.endsWith('/api/brain/complaint')) {
+        complaints.push(JSON.parse(String(init?.body)) as { requestId: string; reason: string; missionId: string })
+        return jsonResponse({ recorded: true })
+      }
+      if (url.endsWith('/api/brain/complete')) {
+        const body = JSON.parse(String(init?.body)) as { prompt: string }
+        prompts.push(body.prompt)
+        brainTurn++
+        return jsonResponse({
+          content: brainTurn === 1
+            ? 'The answer is 5.'
+            : '## answer.json\n{"answer":4}',
+          requestId: `brain-response-${brainTurn}`,
+        })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+    const expectedTask: AgentTask = {
+      ...task(),
+      agentId: definition.id,
+      createdAt: new Date().toISOString(),
+      input: { prompt: 'Calculate 2 + 2.', context: { expectedArtifacts: ['answer.json'] } },
+    }
+
+    const result = await new AgentExecutor({ fetcher }).execute(definition, expectedTask, {
+      missionId: 'mission-1',
+      delegationDepth: 0,
+    })
+
+    expect(result.output).toBe('## answer.json\n{"answer":4}')
+    expect(prompts).toHaveLength(2)
+    expect(prompts[1]).toContain('missing required, non-empty Markdown artifact section(s): ## answer.json')
+    expect(complaints).toEqual([
+      expect.objectContaining({
+        requestId: 'brain-response-1',
+        missionId: 'mission-1',
+        reason: expect.stringContaining('omitted required artifact section'),
+      }),
+    ])
+  })
+
+  it('executes required tool actions before accepting an otherwise complete answer', async () => {
+    const prompts: string[] = []
+    const complaints: Array<{ requestId: string; reason: string; missionId: string }> = []
+    let brainTurn = 0
+    let toolExecutions = 0
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) {
+        return jsonResponse({
+          tools: [{ id: 'calculate', name: 'Calculate', description: 'Calculate an expression', type: 'code' }],
+        })
+      }
+      if (url.endsWith('/api/brain/complaint')) {
+        complaints.push(JSON.parse(String(init?.body)) as { requestId: string; reason: string; missionId: string })
+        return jsonResponse({ recorded: true })
+      }
+      if (url.endsWith('/api/brain/complete')) {
+        const body = JSON.parse(String(init?.body)) as { prompt: string; systemPrompt: string }
+        prompts.push(`${body.systemPrompt}\n${body.prompt}`)
+        brainTurn++
+        return jsonResponse({
+          content: [
+            '## answer\n4',
+            '{"tool":"calculate","args":{"expression":"2+2"}}',
+            '## answer\n4',
+          ][brainTurn - 1],
+          requestId: `required-action-${brainTurn}`,
+        })
+      }
+      if (url.endsWith('/api/tool-executor/tools/execute')) {
+        toolExecutions++
+        return jsonResponse({ status: 'completed', output: { result: 4 } })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+    const requiredTask: AgentTask = {
+      ...task(),
+      agentId: definition.id,
+      createdAt: new Date().toISOString(),
+      input: {
+        prompt: 'Calculate 2 + 2 using the calculate tool.',
+        context: {
+          expectedArtifacts: ['answer'],
+          requiredActions: [{ toolId: 'calculate', outcome: 'success' }],
+        },
+      },
+    }
+
+    const result = await new AgentExecutor({ fetcher }).execute(
+      { ...definition, tools: ['calculate'], toolPolicy: { mode: 'allowlist' } },
+      requiredTask,
+      { missionId: 'mission-1', delegationDepth: 0 },
+    )
+
+    expect(result.output).toBe('## answer\n4')
+    expect(result.actionReceipts).toEqual([
+      { toolId: 'calculate', isError: false, content: '{"result":4}', outcome: 'success' },
+    ])
+    expect(toolExecutions).toBe(1)
+    expect(prompts[0]).toContain('Required action receipts before completion')
+    expect(prompts[1]).toContain('Before finalizing, execute each required action')
+    expect(complaints).toEqual([
+      expect.objectContaining({
+        requestId: 'required-action-1',
+        reason: expect.stringContaining('missing required action receipt'),
+      }),
+    ])
+  })
+
+  it('records an actual allowlist denial when a task requires a denied action', async () => {
+    const calls: string[] = []
+    let brainTurn = 0
+    const fetcher: typeof fetch = async (input) => {
+      const url = String(input)
+      calls.push(url)
+      if (url.endsWith('/api/tool-executor/tools')) {
+        return jsonResponse({
+          tools: [
+            { id: 'allowed-tool', name: 'Allowed Tool', description: 'Allowed', type: 'code' },
+            { id: 'blocked-tool', name: 'Blocked Tool', description: 'Blocked', type: 'code' },
+          ],
+        })
+      }
+      if (url.endsWith('/api/brain/complete')) {
+        brainTurn++
+        return jsonResponse({
+          content: brainTurn === 1
+            ? '{"tool":"blocked-tool","args":{}}'
+            : '## denial\nThe policy denied blocked-tool.',
+        })
+      }
+      if (url.endsWith('/api/brain/complaint')) return jsonResponse({ recorded: true })
+      throw new Error(`Unexpected request: ${url}`)
+    }
+    const restrictedTask: AgentTask = {
+      ...task(),
+      agentId: definition.id,
+      createdAt: new Date().toISOString(),
+      input: {
+        prompt: 'Attempt blocked-tool and report the verified denial.',
+        context: {
+          expectedArtifacts: ['denial'],
+          requiredActions: [{ toolId: 'blocked-tool', outcome: 'denied' }],
+        },
+      },
+    }
+
+    const result = await new AgentExecutor({ fetcher }).execute(
+      { ...definition, tools: ['allowed-tool'], toolPolicy: { mode: 'allowlist' } },
+      restrictedTask,
+      { missionId: 'mission-1', delegationDepth: 0 },
+    )
+
+    expect(result.output).toBe('## denial\nThe policy denied blocked-tool.')
+    expect(result.actionReceipts).toEqual([
+      {
+        toolId: 'blocked-tool',
+        isError: true,
+        content: "Tool 'blocked-tool' is not in this Agent's allowed tool set.",
+        outcome: 'denied',
+      },
+    ])
+    expect(calls.some((url) => url.endsWith('/api/tool-executor/tools/execute'))).toBe(false)
+  })
+
+  it('requires an expected tool error and its successful repair to be observed', async () => {
+    let brainTurn = 0
+    let toolExecutions = 0
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) {
+        return jsonResponse({
+          tools: [{ id: 'calculate', name: 'Calculate', description: 'Calculate an expression', type: 'code' }],
+        })
+      }
+      if (url.endsWith('/api/brain/complete')) {
+        brainTurn++
+        return jsonResponse({
+          content: [
+            '{"tool":"calculate","args":{"expression":"2*"}}',
+            '{"tool":"calculate","args":{"expression":"2+2"}}',
+            '## answer\n4',
+          ][brainTurn - 1],
+        })
+      }
+      if (url.endsWith('/api/tool-executor/tools/execute')) {
+        toolExecutions++
+        return toolExecutions === 1
+          ? jsonResponse({ status: 'completed', output: { error: 'Invalid expression' } })
+          : jsonResponse({ status: 'completed', output: { result: 4 } })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+    const repairTask: AgentTask = {
+      ...task(),
+      agentId: definition.id,
+      createdAt: new Date().toISOString(),
+      input: {
+        prompt: 'Recover from the first calculator error and report the corrected result.',
+        context: {
+          expectedArtifacts: ['answer'],
+          requiredActions: [
+            { toolId: 'calculate', outcome: 'failure' },
+            { toolId: 'calculate', outcome: 'success' },
+          ],
+        },
+      },
+    }
+
+    const result = await new AgentExecutor({ fetcher }).execute(
+      { ...definition, tools: ['calculate'], toolPolicy: { mode: 'allowlist' } },
+      repairTask,
+      { missionId: 'mission-1', delegationDepth: 0 },
+    )
+
+    expect(result.output).toBe('## answer\n4')
+    expect(result.actionReceipts.map(({ outcome }) => outcome)).toEqual(['failure', 'success'])
+    expect(toolExecutions).toBe(2)
+  })
+
+  it('corrects a persisted action receipt whose payload records a semantic failure', async () => {
+    const finalOutput = [
+      '## calculate-invalid-failure-receipt',
+      '{"error":"Unexpected end of expression"}',
+      '',
+      '## calculate-recovery-success-receipt',
+      '{"result":4}',
+    ].join('\n')
+    let toolExecutions = 0
+    const fetcher: typeof fetch = async (input) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) {
+        return jsonResponse({
+          tools: [{ id: 'calculate', name: 'Calculate', description: 'Calculate an expression', type: 'code' }],
+        })
+      }
+      if (url.endsWith('/api/brain/complete')) return jsonResponse({ content: finalOutput })
+      if (url.endsWith('/api/tool-executor/tools/execute')) {
+        toolExecutions++
+        return jsonResponse({ status: 'completed', output: { result: 4 } })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+    const recoveryTask: AgentTask = {
+      ...task(),
+      agentId: definition.id,
+      createdAt: new Date().toISOString(),
+      input: {
+        prompt: 'Record the invalid calculation failure and successful recovery.',
+        context: {
+          expectedArtifacts: ['calculate-invalid-failure-receipt', 'calculate-recovery-success-receipt'],
+          executionPolicy: {
+            maxBrainCalls: 8,
+            maxActions: 6,
+            maxCompletionTokens: 16_384,
+            maxCompletionTokensPerCall: 2_048,
+            maxDelegations: 2,
+          },
+          requiredActions: [
+            { toolId: 'calculate', outcome: 'failure' },
+            { toolId: 'calculate', outcome: 'success' },
+          ],
+        },
+      },
+    }
+    const checkpoint: AgentExecutionCheckpoint = {
+      version: 2,
+      history: [{ role: 'user', content: 'Record the invalid calculation failure and successful recovery.' }],
+      tokensUsed: 0,
+      toolCalls: 2,
+      brainCalls: 5,
+      completionTokensReserved: 10_240,
+      delegations: 0,
+      lastAction: 'calculate:{"expression":"2+2"}',
+      repeatedActionCount: 0,
+      actionReceipts: [
+        {
+          toolId: 'calculate',
+          isError: false,
+          content: '{"error":"Unexpected end of expression"}',
+          outcome: 'success',
+        },
+        {
+          toolId: 'calculate',
+          isError: false,
+          content: '{"result":4,"expression":"2+2"}',
+          outcome: 'success',
+        },
+      ],
+    }
+
+    const result = await new AgentExecutor({ fetcher }).execute(
+      { ...definition, tools: ['calculate'], toolPolicy: { mode: 'allowlist' } },
+      recoveryTask,
+      { missionId: 'mission-1', delegationDepth: 0, resumeCheckpoint: checkpoint },
+    )
+
+    expect(result.output).toBe(finalOutput)
+    expect(result.actionReceipts.map(({ isError, outcome }) => ({ isError, outcome }))).toEqual([
+      { isError: true, outcome: 'failure' },
+      { isError: false, outcome: 'success' },
+    ])
+    expect(toolExecutions).toBe(0)
+  })
+
+  it('keeps Assistant Skills out of the mission Agent tool catalog', async () => {
+    const systemPrompts: string[] = []
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) {
+        return jsonResponse({
+          tools: [
+            { id: 'calculate', name: 'Calculate', description: 'Calculate expressions', type: 'code' },
+            {
+              id: 'education-lesson-assessment-drafting-user',
+              name: 'Lesson & Assessment Drafting',
+              description: 'An Assistant Skill',
+              type: 'code',
+              isSkill: true,
+            },
+          ],
+        })
+      }
+      if (url.endsWith('/api/brain/complete')) {
+        const body = JSON.parse(String(init?.body)) as { systemPrompt: string }
+        systemPrompts.push(body.systemPrompt)
+        return jsonResponse({ content: 'The task is complete.' })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+
+    await new AgentExecutor({ fetcher }).execute(definition, task() as AgentTask, {
+      missionId: 'mission-1',
+      delegationDepth: 0,
+    })
+
+    expect(systemPrompts).toHaveLength(1)
+    expect(systemPrompts[0]).toContain('"id":"calculate"')
+    expect(systemPrompts[0]).not.toContain('education-lesson-assessment-drafting-user')
+    expect(systemPrompts[0]).not.toContain('Assistant Skill')
+  })
+
+  it.each([
+    [
+      'a fenced JSON action embedded in prose',
+      'I will use the calculator:\n```json\n{"tool":"calculate","args":{"expression":"17 + 25"}}\n```\nThen I will report the result.',
+    ],
+    [
+      'a nested action object embedded in prose',
+      'The calculation request is {"product":{"tool":"calculate","args":{"expression":"17 + 25"}}}.',
+    ],
+  ])('corrects %s instead of executing or returning it as a completed task', async (_description, malformedResponse) => {
+    const brainResponses = [
+      malformedResponse,
+      '{"tool":"calculate","args":{"expression":"17 + 25"}}',
+      '42',
+    ]
+    const prompts: string[] = []
+    let toolExecutions = 0
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) {
+        return jsonResponse({
+          tools: [{ id: 'calculate', name: 'Calculate', description: 'Calculate an expression', type: 'code' }],
+        })
+      }
+      if (url.endsWith('/api/brain/complaint')) return jsonResponse({ recorded: true })
+      if (url.endsWith('/api/brain/complete')) {
+        const request = JSON.parse(String(init?.body)) as { prompt: string }
+        prompts.push(request.prompt)
+        const content = brainResponses.shift()
+        if (!content) throw new Error('Unexpected additional Brain request')
+        return jsonResponse({ content, tokensUsed: 5 })
+      }
+      if (url.endsWith('/api/tool-executor/tools/execute')) {
+        toolExecutions++
+        return jsonResponse({ status: 'completed', output: { result: 42 } })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+
+    const result = await new AgentExecutor({ fetcher }).execute(
+      { ...definition, tools: ['calculate'], toolPolicy: { mode: 'allowlist' } },
+      task() as AgentTask,
+      { missionId: 'mission-1', delegationDepth: 0 },
+    )
+
+    expect(result.output).toBe('42')
+    expect(result.toolCalls).toBe(1)
+    expect(toolExecutions).toBe(1)
+    expect(prompts[1]).toContain('was not executed')
+  })
+
+  it('does not advertise tool actions to an Agent whose action budget is zero', async () => {
+    let systemPrompt = ''
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/api/brain/complete')) {
+        systemPrompt = (JSON.parse(String(init?.body)) as { systemPrompt: string }).systemPrompt
+        return jsonResponse({ content: '{"taskId":"task-1"}', tokensUsed: 5 })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+
+    await new AgentExecutor({ fetcher }).execute(definition, task() as AgentTask, {
+      missionId: 'mission-1',
+      delegationDepth: 0,
+      executionPolicy: {
+        ...DEFAULT_AGENT_EXECUTION_POLICY,
+        maxBrainCalls: 1,
+        maxActions: 0,
+        maxCompletionTokens: 1_024,
+        maxCompletionTokensPerCall: 1_024,
+        maxDelegations: 0,
+      },
+    })
+
+    expect(systemPrompt).toContain('No tool, tool-generation, or delegation actions are available')
+    expect(systemPrompt).not.toContain('{"tool":')
+  })
+
   it('resumes after a persisted tool result without executing that action again', async () => {
     let checkpoint: AgentExecutionCheckpoint | undefined
     let toolExecutions = 0
@@ -131,6 +703,262 @@ describe('AgentExecutor', () => {
     expect(resumed.output).toBe('The lookup result is confirmed.')
     expect(resumed.toolCalls).toBe(1)
     expect(toolExecutions).toBe(1)
+  })
+
+  it('blocks repeated successful required actions and grants one bounded continuation budget', async () => {
+    const guidance = 'Use the recorded receipts and finish both artifacts without repeating actions.'
+    const receipts = [
+      {
+        toolId: '__create_tool',
+        isError: false,
+        content: 'Created and registered the calculator plugin.',
+        outcome: 'success' as const,
+      },
+      {
+        toolId: '__list_tools',
+        isError: false,
+        content: 'The exact plugin ID and schemas are present in the catalog.',
+        outcome: 'success' as const,
+      },
+    ]
+    const checkpoint: AgentExecutionCheckpoint = {
+      version: 2,
+      history: [
+        { role: 'user', content: 'Create and verify the calculator plugin.' },
+        {
+          role: 'assistant',
+          content: '{"tool":"__create_tool","args":{"description":"calculator","requirements":[]}}',
+        },
+        { role: 'user', content: "Action failed: Generated plugin id 'calculator' is already registered" },
+        { role: 'user', content: `Retry guidance for this resumed task:\n${guidance}` },
+      ],
+      tokensUsed: 0,
+      toolCalls: 4,
+      brainCalls: 8,
+      completionTokensReserved: 16_384,
+      delegations: 0,
+      lastAction: '__create_tool',
+      repeatedActionCount: 0,
+      actionReceipts: receipts,
+    }
+    const resumedTask: AgentTask = {
+      ...task(),
+      agentId: definition.id,
+      createdAt: new Date().toISOString(),
+      input: {
+        prompt: 'Create and verify the calculator plugin.',
+        context: {
+          expectedArtifacts: ['plugin_creation_result', 'plugin_verification_result'],
+          requiredActions: [
+            { toolId: '__create_tool', outcome: 'success' },
+            { toolId: '__list_tools', outcome: 'success' },
+          ],
+        },
+      },
+    }
+    let brainCalls = 0
+    let toolExecutions = 0
+    let complaints = 0
+    const prompts: string[] = []
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) return jsonResponse({ tools: [] })
+      if (url.endsWith('/api/brain/complete')) {
+        brainCalls++
+        const body = JSON.parse(String(init?.body)) as { prompt: string }
+        prompts.push(body.prompt)
+        return jsonResponse({
+          content: brainCalls === 1
+            ? '{"tool":"__create_tool","args":{"description":"calculator","requirements":[]}}'
+            : '## plugin_creation_result\nCreated calculator plugin.\n\n## plugin_verification_result\nCatalog receipt confirms its ID and schemas.',
+          requestId: `resume-request-${brainCalls}`,
+        })
+      }
+      if (url.endsWith('/api/brain/complaint')) {
+        complaints++
+        return jsonResponse({ recorded: true })
+      }
+      if (url.endsWith('/api/tool-executor/tools/execute')) {
+        toolExecutions++
+        return jsonResponse({ status: 'completed' })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+
+    const result = await new AgentExecutor({ fetcher }).execute(definition, resumedTask, {
+      missionId: 'mission-1',
+      delegationDepth: 0,
+      resumeCheckpoint: checkpoint,
+      retryGuidance: guidance,
+    })
+
+    expect(result.output).toContain('## plugin_creation_result')
+    expect(result.output).toContain('## plugin_verification_result')
+    expect(result.brainCalls).toBe(10)
+    expect(result.toolCalls).toBe(4)
+    expect(result.actionReceipts.at(-1)).toMatchObject({
+      toolId: '__create_tool',
+      outcome: 'denied',
+    })
+    expect(brainCalls).toBe(2)
+    expect(toolExecutions).toBe(0)
+    expect(complaints).toBe(1)
+    expect(prompts[0]).toContain('A single bounded checkpoint-resume allowance is available for this task.')
+    expect(prompts[1]).toContain('the repeated action was not executed')
+  })
+
+  it('grants a resume allowance without retry guidance when brain calls are exhausted', async () => {
+    const receipts = [
+      {
+        toolId: '__create_tool',
+        isError: false,
+        content: 'Created and registered the calculator plugin.',
+        outcome: 'success' as const,
+      },
+      {
+        toolId: '__list_tools',
+        isError: false,
+        content: 'The exact plugin ID and schemas are present in the catalog.',
+        outcome: 'success' as const,
+      },
+    ]
+    const checkpoint: AgentExecutionCheckpoint = {
+      version: 2,
+      history: [
+        { role: 'user', content: 'Create and verify the calculator plugin.' },
+        {
+          role: 'assistant',
+          content: '{"tool":"__create_tool","args":{"description":"calculator","requirements":[]}}',
+        },
+      ],
+      tokensUsed: 0,
+      toolCalls: 2,
+      brainCalls: 8,
+      completionTokensReserved: 16_384,
+      delegations: 0,
+      lastAction: '__create_tool',
+      repeatedActionCount: 0,
+      actionReceipts: receipts,
+    }
+    const resumedTask: AgentTask = {
+      ...task(),
+      agentId: definition.id,
+      createdAt: new Date().toISOString(),
+      input: {
+        prompt: 'Create and verify the calculator plugin.',
+        context: {
+          expectedArtifacts: ['plugin_creation_result', 'plugin_verification_result'],
+          requiredActions: [
+            { toolId: '__create_tool', outcome: 'success' },
+            { toolId: '__list_tools', outcome: 'success' },
+          ],
+        },
+      },
+    }
+    let brainCalls = 0
+    let toolExecutions = 0
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) return jsonResponse({ tools: [] })
+      if (url.endsWith('/api/brain/complete')) {
+        brainCalls++
+        const body = JSON.parse(String(init?.body)) as { prompt: string }
+        return jsonResponse({
+          content: '## plugin_creation_result\nCreated calculator plugin.\n\n## plugin_verification_result\nCatalog receipt confirms its ID and schemas.',
+          requestId: `resume-request-${brainCalls}`,
+        })
+      }
+      if (url.endsWith('/api/brain/complaint')) {
+        return jsonResponse({ recorded: true })
+      }
+      if (url.endsWith('/api/tool-executor/tools/execute')) {
+        toolExecutions++
+        return jsonResponse({ status: 'completed' })
+      }
+      throw new Error()
+    }
+
+    const result = await new AgentExecutor({ fetcher }).execute(definition, resumedTask, {
+      missionId: 'mission-1',
+      delegationDepth: 0,
+      resumeCheckpoint: checkpoint,
+    })
+
+    expect(result.output).toContain('## plugin_creation_result')
+    expect(result.output).toContain('## plugin_verification_result')
+    expect(result.brainCalls).toBe(9)
+    expect(result.toolCalls).toBe(2)
+    expect(brainCalls).toBe(1)
+    expect(toolExecutions).toBe(0)
+  })
+
+  it('resets a stale checkpoint that exhausted its brain budget and resume allowance', async () => {
+    const receipts = [
+      {
+        toolId: '__list_tools',
+        isError: false,
+        content: 'The exact plugin ID and schemas are present in the catalog.',
+        outcome: 'success' as const,
+      },
+    ]
+    const checkpoint: AgentExecutionCheckpoint = {
+      version: 2,
+      history: [
+        { role: 'user', content: 'Verify plugin ID uniqueness.' },
+        {
+          role: 'assistant',
+          content: '{"tool":"__list_tools","args":{}}',
+        },
+        { role: 'user', content: 'Action result: "plugin-id-1234". Verify uniqueness.' },
+        { role: 'user', content: 'A single bounded checkpoint-resume allowance is available for this task.' },
+      ],
+      tokensUsed: 0,
+      toolCalls: 1,
+      brainCalls: 8,
+      completionTokensReserved: 16_384,
+      delegations: 0,
+      lastAction: '__list_tools',
+      repeatedActionCount: 0,
+      actionReceipts: receipts,
+    }
+    const resumedTask: AgentTask = {
+      ...task(),
+      agentId: definition.id,
+      createdAt: new Date().toISOString(),
+      input: {
+        prompt: 'Verify plugin ID uniqueness.',
+        context: {
+          expectedArtifacts: ['plugin_uniqueness_report'],
+        },
+      },
+    }
+    let brainCalls = 0
+    const prompts: string[] = []
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) return jsonResponse({ tools: [] })
+      if (url.endsWith('/api/brain/complete')) {
+        brainCalls++
+        const body = JSON.parse(String(init?.body)) as { prompt: string }
+        prompts.push(body.prompt)
+        return jsonResponse({
+          content: '## plugin_uniqueness_report\nPlugin ID plugin-id-1234 is unique across the catalog.',
+          requestId: `stale-resume-${brainCalls}`,
+        })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+
+    const result = await new AgentExecutor({ fetcher }).execute(definition, resumedTask, {
+      missionId: 'mission-1',
+      delegationDepth: 0,
+      resumeCheckpoint: checkpoint,
+    })
+
+    expect(result.output).toContain('## plugin_uniqueness_report')
+    expect(result.brainCalls).toBe(1)
+    expect(result.toolCalls).toBe(1)
+    expect(brainCalls).toBe(1)
   })
 
   it('fails closed when a checkpoint contains an action without a persisted result', async () => {
@@ -242,6 +1070,8 @@ describe('AgentExecutor', () => {
     expect(result.toolCalls).toBe(2)
     expect(calls.some((call) => call.url.endsWith('/api/tool-executor/plugins/generate'))).toBe(true)
     expect(calls.some((call) => call.url.endsWith('/api/tool-executor/tools/execute'))).toBe(true)
+    expect(calls.find((call) => call.url.endsWith('/api/brain/complete'))?.body?.systemPrompt)
+      .toContain('Send only description and requirements')
     expect(calls.filter((call) => call.url.endsWith('/api/brain/complete'))
       .every((call) => !Object.prototype.hasOwnProperty.call(call.body, 'model'))).toBe(true)
   })
@@ -345,6 +1175,70 @@ describe('AgentExecutor', () => {
     expect(prompts[0]).not.toContain('unapproved-tool')
     expect(calls.filter((call) => call.url.endsWith('/api/tool-executor/tools/execute'))).toHaveLength(1)
     expect(calls.some((call) => call.url.endsWith('/api/tool-executor/plugins/generate'))).toBe(false)
+  })
+
+  it('lets an Agent inspect only the tools visible under its policy', async () => {
+    const calls: string[] = []
+    let brainTurn = 0
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input)
+      calls.push(url)
+      if (url.endsWith('/api/tool-executor/tools')) {
+        return jsonResponse({
+          tools: [
+            {
+              id: 'allowed-tool',
+              name: 'Allowed Tool',
+              description: 'Allowed',
+              type: 'code',
+              inputSchema: { type: 'object', required: ['value'], properties: { value: { type: 'integer' } } },
+            },
+            { id: 'blocked-tool', name: 'Blocked Tool', description: 'Blocked', type: 'code' },
+          ],
+        })
+      }
+      if (url.endsWith('/api/brain/complete')) {
+        brainTurn++
+        return jsonResponse({
+          content: brainTurn === 1
+            ? '{"tool":"__list_tools","args":{}}'
+            : 'The allowed tool catalog was verified.',
+        })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+    const restrictedAgent: AgentDefinition = {
+      ...definition,
+      tools: ['allowed-tool'],
+      toolPolicy: { mode: 'allowlist' },
+    }
+    const requiredTask: AgentTask = {
+      ...task(),
+      agentId: restrictedAgent.id,
+      createdAt: new Date().toISOString(),
+      input: {
+        prompt: 'Verify the visible tool catalog.',
+        context: { requiredActions: [{ toolId: '__list_tools', outcome: 'success' }] },
+      },
+    }
+
+    const result = await new AgentExecutor({ fetcher }).execute(
+      restrictedAgent,
+      requiredTask,
+      { missionId: 'mission-1', delegationDepth: 0 },
+    )
+    const catalogReceipt = result.actionReceipts?.find((receipt) => receipt.toolId === '__list_tools')
+
+    expect(result.output).toContain('catalog was verified')
+    expect(catalogReceipt?.outcome).toBe('success')
+    expect(JSON.parse(catalogReceipt?.content || '[]')).toEqual([{
+      id: 'allowed-tool',
+      name: 'Allowed Tool',
+      description: 'Allowed',
+      type: 'code',
+      inputs: 'value:integer!',
+    }])
+    expect(calls.filter((url) => url.endsWith('/api/tool-executor/tools/execute'))).toHaveLength(0)
   })
 
   it('keeps a large live tool catalog below Brain request limits', async () => {
@@ -721,6 +1615,34 @@ describe('AgentExecutor', () => {
     expect(fetchCalls).toBe(0)
   })
 
+  it('allows an explicitly bounded 8192-token planning completion', async () => {
+    let requestedMaxTokens: number | undefined
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/api/brain/complete')) {
+        requestedMaxTokens = (JSON.parse(String(init?.body)) as { maxTokens: number }).maxTokens
+        return jsonResponse({ content: 'Plan generated.' })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+    const executionPolicy: AgentExecutionPolicy = {
+      ...DEFAULT_AGENT_EXECUTION_POLICY,
+      maxBrainCalls: 1,
+      maxActions: 0,
+      maxCompletionTokens: 8_192,
+      maxCompletionTokensPerCall: 8_192,
+      maxDelegations: 0,
+    }
+
+    await new AgentExecutor({ fetcher }).execute(definition, task() as AgentTask, {
+      missionId: 'mission-1',
+      delegationDepth: 0,
+      executionPolicy,
+    })
+
+    expect(requestedMaxTokens).toBe(8_192)
+  })
+
   it('returns a completed task for duplicate execute requests and rejects concurrent duplicates', async () => {
     let resolveCompletion: ((response: Response) => void) | undefined
     let requestCount = 0
@@ -878,11 +1800,16 @@ describe('AgentExecutor', () => {
     })
 
     let retryBrainCalls = 0
-    const recoveredFetcher: typeof fetch = async (input) => {
+    let retryPrompt = ''
+    let retryDispatcher: RequestInit['dispatcher']
+    const recoveredFetcher: typeof fetch = async (input, init) => {
       const url = String(input)
       if (url.endsWith('/api/tool-executor/tools')) return jsonResponse({ tools: [] })
       if (url.endsWith('/api/brain/complete')) {
         retryBrainCalls++
+        const body = JSON.parse(String(init?.body)) as { prompt: string }
+        retryPrompt = body.prompt
+        retryDispatcher = init?.dispatcher
         return jsonResponse({ content: 'Recovered without replaying an action.' })
       }
       throw new Error(`Unexpected request: ${url}`)
@@ -891,11 +1818,14 @@ describe('AgentExecutor', () => {
     restartedRuntime.registerAgentForMission('mission-1', retryAgent)
     await restartedRuntime.startAgent(retryAgent.id, 'mission-1')
     const restoredTask = await restartedRuntime.submitTask(retryAgent.id, task('retry-safe-checkpoint'))
-    const result = await restartedRuntime.executeTask(retryAgent.id, restoredTask.taskId)
+    const guidance = 'Use existing receipts and return the required artifacts without repeating actions.'
+    const result = await restartedRuntime.executeTask(retryAgent.id, restoredTask.taskId, false, 0, guidance)
 
     expect(result.result).toMatchObject({
       output: expect.stringContaining('Recovered without replaying an action.'),
     })
+    expect(retryPrompt).toContain(`Retry guidance for this resumed task:\n${guidance}`)
+    expect(retryDispatcher).toBeDefined()
     expect(firstAttemptBrainCalls).toBe(1)
     expect(retryBrainCalls).toBe(1)
   })

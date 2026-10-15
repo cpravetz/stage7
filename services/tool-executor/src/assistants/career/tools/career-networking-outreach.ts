@@ -47,7 +47,7 @@ const CAREER_NETWORKING_OUTREACH = createDeclarativeCodeSkill({
   isSkill: false,
   name: 'Networking Outreach',
   description: 'Drafts recruiter outreach messages for cold outreach, follow-ups, thank-you notes, and referral asks across email and LinkedIn.',
-  persistenceEnvVar: 'STORAGE_DIR',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   emitEvent: 'career.outreach_message.drafted',
   inputSchema: CAREER_NETWORKING_OUTREACH_INPUT,
   outputSchema: CAREER_NETWORKING_OUTREACH_OUTPUT,

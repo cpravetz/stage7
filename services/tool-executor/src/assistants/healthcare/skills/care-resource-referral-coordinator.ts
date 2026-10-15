@@ -17,13 +17,13 @@ function withUxMetadata(schema: SchemaRecord): SchemaRecord {
 }
 
 const SAFETY_BOUNDARY = 'Decision support and care coordination only: do not diagnose, prescribe, change treatment, allocate clinical resources autonomously, or make autonomous clinical decisions; use only authorized minimum-necessary data and approved secure endpoints for PHI; a qualified clinician or authorized care team must review all outputs and referrals.';
-const metadata = { domain: 'healthcare', persistenceEnv: 'HEALTHCARE_HOME', HEALTHCARE_HOME: 'HEALTHCARE_HOME', homeEnv: 'HEALTHCARE_HOME', healthcareHome: 'HEALTHCARE_HOME', clinicalSafetyBoundary: SAFETY_BOUNDARY };
+const metadata = { domain: 'healthcare', persistenceEnv: 'ASSISTANT_HOME', HEALTHCARE_HOME: 'ASSISTANT_HOME', homeEnv: 'ASSISTANT_HOME', healthcareHome: 'ASSISTANT_HOME', clinicalSafetyBoundary: SAFETY_BOUNDARY };
 const triggers = [
   { kind: 'user' as const, phrase_examples: ['coordinate a care referral', 'match a patient to care resources'] },
 ];
 
 const referralConfig = createSchemaRecord({
-  healthcareHome: SchemaProps.text({ description: 'Healthcare workspace path or base URL; defaults to HEALTHCARE_HOME' }),
+  healthcareHome: SchemaProps.text({ description: 'Healthcare workspace path or base URL; defaults to ASSISTANT_HOME' }),
   endpointUrl: SchemaProps.url({ description: 'Optional referral coordination endpoint URL; the connected resource coordination tool may supply its own endpoint' }),
   defaultDryRun: SchemaProps.boolean({ description: 'Default referral coordination to dry-run', default: true }),
   maxResults: SchemaProps.integer({ description: 'Maximum resource candidates to request', minimum: 1, maximum: 50, default: 10 }),
@@ -34,7 +34,7 @@ const careResourceReferralCoordinator = createDeclarativeCodeSkill({
   isSkill: true,
   name: 'Care Resource & Referral Coordinator',
   description: 'Coordinate patient care-resource matching, referral creation, and referral status follow-up by delegating to healthcare records scheduling, resource coordination, and patient communication tools with dry-run and explicit-confirmation gates, reporting delegation coverage honestly.',
-  persistenceEnvVar: 'HEALTHCARE_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   tier: 'represent',
   emitEvent: 'healthcare.referral.created',
   domainKnowledge: 'Care resource matching, referral coordination, and resource utilization optimization',
@@ -62,7 +62,7 @@ const careResourceReferralCoordinator = createDeclarativeCodeSkill({
   triggers,
   manifest: {
     configSchema: referralConfig,
-    healthcareHome: 'HEALTHCARE_HOME',
+    healthcareHome: 'ASSISTANT_HOME',
     lowerOrderTools: ['healthcare-records-scheduling-ops', 'healthcare-resource-coordination', 'healthcare-patient-communication'],
     ui: { view: 'care-resource-referral-coordination' },
     metadata: metadata

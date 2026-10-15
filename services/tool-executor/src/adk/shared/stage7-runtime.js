@@ -13,7 +13,7 @@
  * - __tool_input: the tool's input object
  * - __execute_tool: callback for delegating to other tools
  * - process.env.ARTIFACTS_URL: artifacts service URL (optional)
- * - process.env[persistenceEnvVar] (e.g. HOTEL_HOME, STORAGE_DIR): local persistence dir
+ * - (process.env.ASSISTANT_HOME || process.env[persistenceEnvVar]) (e.g. ASSISTANT_HOME, STORAGE_DIR): local persistence dir
  */
 
 const fs = require('fs');
@@ -25,11 +25,14 @@ const GLOBAL_STORE_DIR = '/tmp/stage7-store';
 const REMOTE_TIMEOUT_MS = 2000;
 
 /**
- * `HOTEL_HOME` -> `hotel`, `LEGAL_HOME` -> `legal`. Used as the Mongo-backed
+ * `ASSISTANT_HOME` maps to the shared assistant collection. Used as the Mongo-backed
  * collection name on the artifacts service so each domain gets its own bucket.
  */
 function deriveCollection(persistenceEnvVar) {
-  return persistenceEnvVar.replace(/_HOME$/i, '').replace(/^STORAGE_DIR$/i, 'default').toLowerCase() || 'default';
+  if (persistenceEnvVar === 'ASSISTANT_HOME' || /^ASSISTANT_HOME/i.test(persistenceEnvVar)) {
+    return 'assistant';
+  }
+  return 'assistant';
 }
 
 /**
@@ -143,9 +146,9 @@ function createRuntimeContext(opts) {
     return typeof value === 'string' && value.length > 0 ? value : undefined;
   }
 
-  const persistenceEnvVar = options.persistenceEnvVar || 'STORAGE_DIR';
-  const baseDir = (typeof process !== 'undefined' && process.env && process.env[persistenceEnvVar]) || '/tmp/stage7';
-  const collection = deriveCollection(persistenceEnvVar);
+  const persistenceEnvVar = options.persistenceEnvVar || 'ASSISTANT_HOME';
+  const baseDir = (typeof process !== 'undefined' && process.env && (process.env.ASSISTANT_HOME || (process.env.ASSISTANT_HOME || process.env[persistenceEnvVar]))) || '/tmp/stage7';
+  const collection = deriveCollection(process.env.ASSISTANT_HOME ? 'ASSISTANT_HOME' : persistenceEnvVar);
 
   function readLocal(key, defaultValue) {
     const fallback = defaultValue === undefined ? [] : defaultValue;
@@ -262,12 +265,14 @@ function createRuntimeContext(opts) {
       const res = result || {};
       const output = {
         success: true,
-        data: res.data || null,
+        ...(res.data !== undefined ? { data: res.data } : {}),
         status: res.status || 'ok',
-        error: res.error || null,
         present: res.present || [],
         ...res,
       };
+      if (output.error === null || output.error === undefined || output.error === '') {
+        delete output.error;
+      }
       console.log(JSON.stringify(output));
       return output;
     },

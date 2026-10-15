@@ -25,7 +25,7 @@ export const RESTAURANT_SHIFT_PREP_LIST_COPILOT = createDeclarativeCodeSkill({
   id: 'restaurant-shift-prep-list-copilot',
   name: 'Restaurant Shift Prep List Copilot',
   description: 'Generate shift prep lists from forecasted covers and prep ratios, compute shortages, and allocate staff based on cover volume and service duration with deterministic calculations.',
-  persistenceEnvVar: 'STORAGE_DIR',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: RESTAURANT_SHIFT_PREP_LIST_COPILOT_INPUT,
   outputSchema: restaurantResultSchema('Prep items with quantities, shortages, order quantities, and totals'),
   triggers: [

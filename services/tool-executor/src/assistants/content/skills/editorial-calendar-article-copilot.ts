@@ -8,7 +8,7 @@ export const EDITORIAL_CALENDAR_ARTICLE_COPILOT = createDeclarativeCodeSkill({
   name: 'Editorial Calendar & Article Co-Pilot',
   description:
     'Turns supplied editorial topics into a dated calendar and drafts a computed brief for each one. Dates come from the supplied deadlines, or are derived from the cycle start and cadence when a topic has none. Draft briefs are produced by the content drafting tool; if that fails the result says so, states the failure, and reports the number of topics actually drafted rather than reporting a full-looking calendar with empty drafts.',
-  persistenceEnvVar: 'CONTENT_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   tier: 'aid',
   domainKnowledge:
     'Editorial calendar planning: topic placement, publication cadence, search-intent-led topic selection, and content brief construction for each slot',

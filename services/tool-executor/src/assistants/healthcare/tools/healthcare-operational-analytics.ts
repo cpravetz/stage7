@@ -8,7 +8,7 @@ export const OPERATIONAL_ANALYTICS = createDeclarativeCodeSkill({
   name: 'Operational Analytics',
   description:
     'Generate healthcare operational analytics including clinical KPIs, throughput metrics, resource utilization, and financial summaries. Computes insights locally with reasoning over available data and can reference the healthcare analytics platform for deeper reporting.',
-  persistenceEnvVar: 'HEALTHCARE_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   tier: 'advise',
   domainKnowledge: 'Healthcare operational analytics, clinical KPIs, throughput metrics, and resource utilization',
   inputSchema: {

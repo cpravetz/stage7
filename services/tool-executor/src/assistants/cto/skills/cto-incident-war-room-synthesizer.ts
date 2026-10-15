@@ -8,7 +8,7 @@ export const CTO_INCIDENT_WAR_ROOM_SYNTHESIZER = createDeclarativeCodeSkill({
     isSkill: true,
     name: 'Incident War Room Synthesizer',
     description: 'Correlate supplied telemetry, logs, alerts, and deployment signals into hypotheses and mitigation steps.',
-    persistenceEnvVar: 'CTO_HOME',
+    persistenceEnvVar: 'ASSISTANT_HOME',
     inputSchema: createSchemaRecord({
       signals: SchemaProps.objectArray(SchemaProps.object({
         source: SchemaProps.text({ description: 'Telemetry, log, alert, or deployment source' }),

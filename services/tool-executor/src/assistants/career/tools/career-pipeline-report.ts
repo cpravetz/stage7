@@ -38,7 +38,7 @@ const CAREER_PIPELINE_REPORT = createDeclarativeCodeSkill({
   isSkill: false,
   name: 'Pipeline Report',
   description: 'Aggregates application tracking data into a pipeline summary with status breakdowns and stale follow-up detection.',
-  persistenceEnvVar: 'CAREER_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: CAREER_PIPELINE_REPORT_INPUT,
   outputSchema: CAREER_PIPELINE_REPORT_OUTPUT,
   triggers: [

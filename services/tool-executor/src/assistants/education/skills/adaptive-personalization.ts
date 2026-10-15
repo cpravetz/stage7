@@ -7,7 +7,7 @@ export const ADAPTIVE_PERSONALIZATION = createDeclarativeCodeSkill({
   id: 'education-adaptive-personalization',
   name: 'Personalised Learning Plan',
   description: 'Recommend instructional adaptations and engagement strategies based on Learner Insight output. Reasoning-only: consumes learner analytics to suggest differentiation, pacing, and interventions.',
-  persistenceEnvVar: 'EDUCATION_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: {
     type: 'object',
     properties: {

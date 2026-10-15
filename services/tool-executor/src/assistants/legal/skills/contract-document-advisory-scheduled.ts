@@ -12,7 +12,7 @@ const CONTRACT_DOCUMENT_ADVISORY_SCHEDULED = createDeclarativeCodeSkill({
   id: 'contract-document-advisory-scheduled',
   name: 'Contract Risk Sweep',
   description: 'Scheduled sweep of configured contract stores, reporting risk clauses found since the last run.',
-  persistenceEnvVar: 'LEGAL_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   // No user-supplied input. What this Skill reviews comes from configuration,
   // not from whoever happened to trigger the run.
   inputSchema: {

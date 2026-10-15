@@ -12,7 +12,7 @@ const COMPLIANCE_TRACKING_SCHEDULED = createDeclarativeCodeSkill({
   id: 'compliance-tracking-scheduled',
   name: 'Compliance Audit Sweep',
   description: 'Scheduled compliance scan across configured sources, reporting scope and any findings for review.',
-  persistenceEnvVar: 'LEGAL_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: {
     type: 'object',
     properties: {

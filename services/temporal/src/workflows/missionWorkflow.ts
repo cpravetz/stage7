@@ -1,7 +1,13 @@
 import { patched, proxyActivities } from '@temporalio/workflow';
 import { logger } from '@stage7-nextgen/shared';
 import type { MissionActivities } from '../activities/missionActivity';
-import { MissionTaskCheckpoint, WorkflowInput, WorkflowResult } from '../types/workflow';
+import {
+  CompletedTaskSummary,
+  createCompletedTaskSummary,
+  MissionTaskCheckpoint,
+  WorkflowInput,
+  WorkflowResult,
+} from '../types/workflow';
 
 const planActivities = proxyActivities<MissionActivities>({
   startToCloseTimeout: '10m',
@@ -108,7 +114,25 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
     const useAgentTaskSelection = patched('agent-owned-task-selection-v1');
     const useAgentPhaseAmendments = patched('bounded-phase-amendments-v1');
     const completedTaskIds = new Set((input.completedTasks || []).map((task) => task.taskId));
-    const completedTaskSummaries = new Map<string, { taskId: string; output: string; artifactNames: string[] }>();
+    const completedTaskSummaries = new Map<string, CompletedTaskSummary>();
+    for (const savedPhase of plan.phases) {
+      for (const savedTask of savedPhase.tasks) {
+        if (
+          savedTask.status === 'completed'
+          && (savedTask.output || savedTask.artifacts.length > 0)
+        ) {
+          completedTaskSummaries.set(
+            savedTask.id,
+            createCompletedTaskSummary(
+              savedTask.id,
+              savedTask.output || '',
+              savedTask.artifacts,
+              savedTask.requiredActions,
+            ),
+          );
+        }
+      }
+    }
 
     for (let phaseIndex = 0; phaseIndex < plan.phases.length; phaseIndex++) {
       let phase = plan.phases[phaseIndex]!;
@@ -119,6 +143,7 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
       }
 
       await phaseActivities.startMissionPhaseActivity({ input, phase });
+      phase.status = 'in_progress';
       const phaseOutput = { phaseId: phase.id, name: phase.name, tasks: [] as typeof phases[number]['tasks'] };
 
       const completedInPhase = new Set(phase.tasks
@@ -152,7 +177,16 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
           if (unmetDependency) {
             throw new Error(`Mission task selector chose ${task.id} before dependency ${unmetDependency} completed`);
           }
-          const result = await taskActivities.executeMissionTaskActivity({ input, plan, phase, task });
+          const result = await taskActivities.executeMissionTaskActivity({
+            input,
+            plan,
+            phase,
+            task,
+            completedTaskSummaries: [...completedTaskSummaries.values()],
+          });
+          task.status = 'completed';
+          task.output = result.output;
+          task.artifacts = result.artifacts;
           phaseOutput.tasks.push({
             taskId: task.id,
             status: 'completed',
@@ -161,11 +195,10 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
           compensations.push({ phaseId: phase.id, action: `revert-phase-${phase.id}` });
           completedInPhase.add(task.id);
           completedTaskIds.add(task.id);
-          completedTaskSummaries.set(task.id, {
-            taskId: task.id,
-            output: result.output.slice(0, 1_200),
-            artifactNames: result.artifacts.map((artifact) => artifact.name),
-          });
+          completedTaskSummaries.set(
+            task.id,
+            createCompletedTaskSummary(task.id, result.output, result.artifacts, task.requiredActions),
+          );
         }
       };
 
@@ -194,6 +227,8 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
       await phaseActivities.finishMissionPhaseActivity({ input, phase, tasks: phaseOutput.tasks });
       if (phase.requiresApproval) {
         const question = phase.approvalQuestion || `Phase "${phase.name}" complete. Approve to continue?`;
+        phase.status = 'awaiting_approval';
+        phase.approvalQuestion = question;
         const decision = await approvalActivities.awaitMissionPhaseApprovalActivity({
           input,
           phase,
@@ -201,6 +236,8 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
         });
         await phaseActivities.recordMissionPhaseApprovalActivity({ input, phase, decision });
         if (!decision.approved) {
+          phase.status = 'rejected';
+          phase.rejectionReason = decision.reason;
           const result = {
             plan,
             outputs: {
@@ -219,6 +256,9 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
             completedAt: Date.now(),
           };
         }
+        phase.status = 'approved';
+      } else {
+        phase.status = 'completed';
       }
       phases.push(phaseOutput);
     }

@@ -36,14 +36,14 @@ const FEEDBACK_INPUT = createSchemaRecord({
 }, { required: ['focusArea'] });
 
 const FEEDBACK_CONFIG = createSchemaRecord({
-  executiveHome: SchemaProps.text({ description: 'Executive workspace path; defaults to EXECUTIVE_HOME' }),
+  executiveHome: SchemaProps.text({ description: 'Executive workspace path; defaults to ASSISTANT_HOME' }),
 });
 
 export const FEEDBACK = createDeclarativeCodeSkill({
   id: 'executive-feedback',
   name: 'Feedback Collection & Analysis',
   description: 'Feedback collection planning, theme analysis from supplied text, and performance metric tracking. Derives themes from feedback text when not provided. Use focusArea to select.',
-  persistenceEnvVar: 'EXECUTIVE_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   tier: 'advise',
   domainKnowledge: '360-degree feedback, performance management, organizational development',
   inputSchema: FEEDBACK_INPUT,

@@ -24,7 +24,7 @@ export const HOTEL_EXTERNAL_OUTPUT_SCHEMA = createSchemaRecord({
 export const HOTEL_EXTERNAL_CONFIG_SCHEMA = createSchemaRecord({
   hotelHome: SchemaProps.text({
     description: 'Hotel PMS base URL or local hotel service home',
-    default: 'HOTEL_HOME',
+    default: 'ASSISTANT_HOME',
   }),
   apiToken: SchemaProps.password({ description: 'Bearer token for the hotel PMS' }),
   provider: SchemaProps.text({ description: 'PMS or channel manager provider, such as opera, mews, cloudbeds, or custom' }),

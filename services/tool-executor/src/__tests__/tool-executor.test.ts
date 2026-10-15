@@ -3,6 +3,7 @@ import express, { Application } from 'express'
 import { ToolRegistry } from '../services/ToolRegistry'
 import { ToolExecutor } from '../services/ToolExecutor'
 import { PluginGenerator } from '../services/PluginGenerator'
+import { CodeExecutor } from '../executors/CodeExecutor'
 import { Tool, PluginGenerationRequest, CredentialRequiredError, ConfirmationRequiredError } from '../types'
 import toolsRouter from '../routes/tools'
 import { ToolNotFoundError, ValidationError } from '../utils/errors'
@@ -45,7 +46,7 @@ beforeAll(() => {
             type: 'code',
             language: 'javascript',
             entrypoint: 'index.js',
-            sourceCode: 'module.exports = { add: (a, b) => a + b };',
+            sourceCode: 'console.log(JSON.stringify({ sum: __tool_input.left + __tool_input.right }));',
             requirements: [],
             configSchema: {},
             inputs: {},
@@ -511,6 +512,7 @@ describe('ToolExecutor', () => {
       manifest: {},
       reasoningConfig: {
         systemPrompt: 'You are a reasoning tool.',
+        optimizeFor: 'accuracy',
         outputFormat: 'json',
       },
       inputSchema: { type: 'object', properties: { query: { type: 'string' } } },
@@ -519,9 +521,23 @@ describe('ToolExecutor', () => {
       updatedAt: new Date(),
     };
 
-    const execution = await executor.execute(reasoningTool, { query: 'test pattern' });
+    const execution = await executor.execute(reasoningTool, {
+      query: 'test pattern',
+      routingSessionId: 'assessment-review-1',
+    });
     expect(execution.status).toBe('completed');
     expect(execution.toolId).toBe(reasoningTool.id);
+    const fetchMock = global.fetch as jest.Mock;
+    const request = fetchMock.mock.calls.at(-1)?.[1] as RequestInit | undefined;
+    const body = JSON.parse(String(request?.body)) as {
+      prompt: string;
+      options: { optimizeFor?: string; routingSessionId?: string };
+    };
+    expect(body.options).toMatchObject({
+      optimizeFor: 'accuracy',
+      routingSessionId: 'assessment-review-1',
+    });
+    expect(body.prompt).not.toContain('assessment-review-1');
   });
 
   it('should throw ConfirmationRequiredError directly for re-thrown confirmations', async () => {
@@ -655,6 +671,78 @@ describe('PluginGenerator', () => {
     expect(result.tool).toBeDefined()
     expect(result.tool?.type).toBe('code')
     expect(result.tool?.description).toContain('Generate a calculator plugin')
+    const manifest = result.tool?.manifest
+    const sourceCode = manifest && typeof manifest === 'object' && 'sourceCode' in manifest
+      ? manifest.sourceCode
+      : undefined
+    expect(typeof sourceCode).toBe('string')
+    if (typeof sourceCode !== 'string') throw new Error('Generated plugin source was missing')
+    const execution = await new CodeExecutor().execute({
+      language: 'javascript',
+      code: sourceCode,
+      input: { left: 19, right: 23 },
+    })
+    expect(execution.success).toBe(true)
+    expect(JSON.parse(execution.output || 'null')).toEqual({ sum: 42 })
+  })
+
+  it('reports schema-invalid Brain output as a quality complaint', async () => {
+    const previousFetch = global.fetch;
+    const requests: Array<{ url: string; body?: Record<string, unknown> }> = [];
+    const mockResponse = (body: Record<string, unknown>): Response => ({
+      ok: true,
+      status: 200,
+      json: async () => body,
+      text: async () => JSON.stringify(body),
+    } as Response);
+    global.fetch = jest.fn(async (url: string | URL, init?: RequestInit) => {
+      const urlString = String(url);
+      const body = typeof init?.body === 'string'
+        ? JSON.parse(init.body) as Record<string, unknown>
+        : undefined;
+      requests.push({ url: urlString, body });
+
+      if (urlString.endsWith('/api/brain/complete')) {
+        return mockResponse({
+          requestId: 'brain_invalid_plugin_response',
+          content: JSON.stringify({
+            id: 'invalid-plugin',
+            name: 'Invalid plugin',
+            description: 'Missing config schema',
+            type: 'code',
+            language: 'javascript',
+            entrypoint: 'index.js',
+            sourceCode: 'console.log(JSON.stringify({ ok: true }));',
+            requirements: [],
+            inputs: {},
+            outputs: {},
+          }),
+        });
+      }
+      if (urlString.endsWith('/api/brain/complaint')) {
+        return mockResponse({ recorded: true });
+      }
+      return mockResponse({ objects: [], projects: [], items: [] });
+    }) as typeof fetch;
+
+    try {
+      const result = await generator.generate({
+        ...request,
+        context: { ...request.context, missionId: 'mission-plugin-validation' },
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('configSchema');
+      expect(requests.find(({ url }) => url.endsWith('/api/brain/complete'))?.body?.missionId)
+        .toBe('mission-plugin-validation');
+      expect(requests.find(({ url }) => url.endsWith('/api/brain/complaint'))?.body).toEqual({
+        requestId: 'brain_invalid_plugin_response',
+        reason: expect.stringContaining('configSchema'),
+        missionId: 'mission-plugin-validation',
+      });
+    } finally {
+      global.fetch = previousFetch;
+    }
   })
 
   it('rejects plugin IDs and entrypoints that could escape the deployment directory', async () => {

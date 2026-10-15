@@ -1,6 +1,10 @@
 import { Context } from '@temporalio/activity';
 import { MissionAgentRuntime } from '../agent/MissionAgentRuntime';
-import { executeMissionTaskActivity } from '../activities/missionWorkflowActivities';
+import {
+  executeMissionTaskActivity,
+  prepareMissionActivity,
+  selectNextMissionTaskActivity,
+} from '../activities/missionWorkflowActivities';
 import { WorkflowInput } from '../types/workflow';
 import { Plan } from '@stage7-nextgen/shared';
 
@@ -78,18 +82,45 @@ describe('mission task activity retry safety', () => {
     else process.env.GATEWAY_URL = originalGatewayUrl;
   });
 
+  it('reuses the persisted plan for a retry instead of calling the planner again', async () => {
+    const generatePlan = jest.spyOn(MissionAgentRuntime.prototype, 'generatePlan')
+      .mockRejectedValue(new Error('retry must not regenerate the plan'));
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => plan,
+    } as Response);
+
+    await expect(prepareMissionActivity({
+      ...input,
+      metadata: { retriedFrom: `mission-${input.missionId}` },
+    })).resolves.toEqual(plan);
+
+    expect(generatePlan).not.toHaveBeenCalled();
+    expect(global.fetch).toHaveBeenCalledWith(
+      `http://artifacts.test/api/artifacts/missions/${input.missionId}/plan`,
+    );
+  });
+
   it('executes a new task without requiring a receipt and returns its persisted result', async () => {
     const heartbeat = jest.fn();
+    const restrictedInput: WorkflowInput = {
+      ...input,
+      metadata: {
+        agentToolPolicies: {
+          worker: { mode: 'allowlist', tools: ['calculate'] },
+        },
+      },
+    }
     jest.spyOn(Context, 'current').mockReturnValue({
       info: { attempt: 1 },
       heartbeat,
     } as unknown as ReturnType<typeof Context.current>);
-    const getOrCreate = jest.spyOn(MissionAgentRuntime.prototype, 'getOrCreateAgent')
-      .mockResolvedValue('agent-mission-task-activity-worker');
+    const getOrCreate = jest.spyOn(MissionAgentRuntime.prototype, 'getOrCreateAgent');
     const execute = jest.spyOn(MissionAgentRuntime.prototype, 'executeTask')
       .mockResolvedValue(result);
 
-    await expect(executeMissionTaskActivity({ input, plan, phase, task })).resolves.toEqual(result);
+    await expect(executeMissionTaskActivity({ input: restrictedInput, plan, phase, task })).resolves.toEqual(result);
 
     expect(getOrCreate).toHaveBeenCalledWith('worker', 'Be careful.');
     expect(execute).toHaveBeenCalledWith(
@@ -99,7 +130,17 @@ describe('mission task activity retry safety', () => {
       plan,
       false,
       expect.objectContaining({ maxBrainCalls: 8 }),
+      [],
     );
+    const createdAgentRequest = (global.fetch as jest.Mock).mock.calls.find(
+      ([url, options]) =>
+        String(url).endsWith('/missions/mission-task-activity/agents')
+        && (options as RequestInit).method === 'POST',
+    )
+    expect(JSON.parse((createdAgentRequest?.[1] as RequestInit).body as string)).toMatchObject({
+      tools: ['calculate'],
+      toolPolicy: { mode: 'allowlist' },
+    })
     expect(global.fetch).toHaveBeenCalledWith(
       'http://artifacts.test/api/artifacts/missions/mission-task-activity/tasks/task-1',
       expect.objectContaining({
@@ -128,6 +169,7 @@ describe('mission task activity retry safety', () => {
       plan,
       true,
       expect.objectContaining({ maxBrainCalls: 8 }),
+      [],
     );
     const persistedEvents = (global.fetch as jest.Mock).mock.calls
       .filter(([, options]) => (options as RequestInit).method === 'POST')
@@ -148,5 +190,39 @@ describe('mission task activity retry safety', () => {
 
     await expect(executeMissionTaskActivity({ input, plan, phase, task }))
       .rejects.toThrow('no completed Agent receipt');
+  });
+
+  it('fails a persisted human-role task without sending it to an Agent', async () => {
+    jest.spyOn(Context, 'current').mockReturnValue({
+      info: { attempt: 1 },
+      heartbeat: jest.fn(),
+    } as unknown as ReturnType<typeof Context.current>);
+    const humanTask = { ...task, agentRole: 'Human' };
+    const getOrCreate = jest.spyOn(MissionAgentRuntime.prototype, 'getOrCreateAgent');
+    const execute = jest.spyOn(MissionAgentRuntime.prototype, 'executeTask');
+
+    await expect(executeMissionTaskActivity({ input, plan, phase, task: humanTask }))
+      .rejects.toThrow('cannot be executed with human agentRole "Human"');
+
+    expect(getOrCreate).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+    expect(global.fetch).toHaveBeenCalledWith(
+      'http://artifacts.test/api/artifacts/missions/mission-task-activity/tasks/task-1',
+      expect.objectContaining({ method: 'PUT', body: expect.stringContaining('"status":"failed"') }),
+    );
+  });
+
+  it('does not send a persisted human-role phase to the task selector', async () => {
+    const selectNext = jest.spyOn(MissionAgentRuntime.prototype, 'selectNextTask');
+
+    await expect(selectNextMissionTaskActivity({
+      input,
+      plan,
+      phase: { ...phase, tasks: [{ ...task, agentRole: 'User' }] },
+      completedTaskIds: [],
+      completedTaskSummaries: [],
+    })).rejects.toThrow('Refusing to send the phase to the task selector');
+
+    expect(selectNext).not.toHaveBeenCalled();
   });
 });

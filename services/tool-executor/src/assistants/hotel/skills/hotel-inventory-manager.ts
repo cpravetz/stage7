@@ -21,7 +21,7 @@ export const INVENTORY_MANAGER_SKILL = createDeclarativeCodeSkill({
   id: 'hotel-inventory-manager',
   name: 'Supply & Inventory Reorder',
   description: 'Adjust hotel supply and housekeeping stock quantities and list stock that has fallen below its reorder threshold. Mutating requests require confirmation and default to dry-run.',
-  persistenceEnvVar: 'HOTEL_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: INVENTORY_INPUT_SCHEMA,
   outputSchema: HOTEL_EXTERNAL_OUTPUT_SCHEMA,
   tier: 'represent',

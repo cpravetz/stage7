@@ -291,7 +291,7 @@ router.get(
     const { sourceId } = req.params
     const safeSourceId = basename(sourceId).replace(/[^a-zA-Z0-9_-]/g, '')
     const workspaceId = req.query.workspaceId as string | undefined
-    const careerHome = process.env.CAREER_HOME || '/tmp/career'
+    const careerHome = process.env.ASSISTANT_HOME || '/tmp/career'
 
     if (!safeSourceId) {
       res.json({

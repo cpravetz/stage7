@@ -67,10 +67,29 @@ describe('AgentRuntime', () => {
       status: 'pending',
     } as Omit<AgentTask, 'taskId' | 'createdAt'>)
     expect(task.taskId).toBeDefined()
-    const completed = runtime.completeTask(task.taskId, { output: 'done' })
-    expect(completed?.status).toBe('completed')
     const failed = runtime.failTask(task.taskId, 'error')
     expect(failed?.status).toBe('failed')
+    expect(failed?.error).toBe('error')
+    const completed = runtime.completeTask(task.taskId, { output: 'done' })
+    expect(completed).toMatchObject({ status: 'completed', result: { output: 'done' } })
+    expect(completed?.error).toBeUndefined()
+  })
+
+  it('clears stale errors when restoring a completed task', () => {
+    runtime.registerAgent(agent)
+    const restored = runtime.submitTask('agent-1', {
+      agentId: 'agent-1',
+      type: 'code',
+      input: { prompt: 'write code' },
+      priority: 1,
+      status: 'completed',
+      error: 'stale failure',
+    } as Omit<AgentTask, 'taskId' | 'createdAt'>)
+
+    runtime.restoreTask(restored)
+
+    expect(runtime.getTask(restored.taskId)).toMatchObject({ status: 'completed' })
+    expect(runtime.getTask(restored.taskId)?.error).toBeUndefined()
   })
 
   it('should create collaboration and send messages', () => {
@@ -164,6 +183,7 @@ describe('REST endpoints', () => {
 
     expect(registration.status).toBe(201)
     expect(registration.body.metadata.missionId).toBe(missionId)
+    const taskId = `${missionId}:task-1`
     await expect(request(app)
       .get(`/api/agent-runtime/missions/${otherMissionId}/agents/${agentId}`)
       .expect(404))
@@ -177,6 +197,23 @@ describe('REST endpoints', () => {
         status: 'pending',
       })
       .expect(404))
+    await request(app)
+      .post(`/api/agent-runtime/missions/${missionId}/agents/${agentId}/tasks`)
+      .send({
+        taskId,
+        type: 'work',
+        input: { prompt: 'Retrieve this persisted task.' },
+        priority: 1,
+        status: 'pending',
+      })
+      .expect(201)
+    const task = await request(app)
+      .get(`/api/agent-runtime/missions/${missionId}/agents/${agentId}/tasks/${taskId}`)
+      .expect(200)
+    expect(task.body).toMatchObject({ agentId, taskId, status: 'pending' })
+    await request(app)
+      .get(`/api/agent-runtime/missions/${otherMissionId}/agents/${agentId}/tasks/${taskId}`)
+      .expect(404)
     await request(app)
       .delete(`/api/agent-runtime/missions/${missionId}/agents/${agentId}`)
       .expect(204)

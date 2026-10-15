@@ -46,14 +46,14 @@ const RISK_SCENARIO_INPUT = createSchemaRecord({
 }, { required: ['focusArea'] });
 
 const RISK_SCENARIO_CONFIG = createSchemaRecord({
-  executiveHome: SchemaProps.text({ description: 'Executive workspace path; defaults to EXECUTIVE_HOME' }),
+  executiveHome: SchemaProps.text({ description: 'Executive workspace path; defaults to ASSISTANT_HOME' }),
 });
 
 export const RISK_SCENARIO = createDeclarativeCodeSkill({
   id: 'executive-risk-scenario',
   name: 'Risk & Scenario Advisory',
   description: 'Risk assessment and scenario modeling for strategic decisions. Derives scores from input likelihood/impact; computes projections from supplied assumptions. Use focusArea to select.',
-  persistenceEnvVar: 'EXECUTIVE_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   tier: 'advise',
   domainKnowledge: 'Risk assessment, scenario planning, executive decision support',
   inputSchema: RISK_SCENARIO_INPUT,

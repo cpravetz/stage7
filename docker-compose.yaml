@@ -154,8 +154,10 @@ services:
       - .env
     environment:
       - STAGE7_ASSISTANTS=${STAGE7_ASSISTANTS}
-      - BRAIN_FALLBACK_MODEL=google/gemini-1.5-flash
-      - BRAIN_FALLBACK_PROVIDER=openrouter
+      - TOOL_STORE_DIR=/var/lib/stage7/tool-executor/tools
+      - PLUGIN_DEPLOY_DIR=/var/lib/stage7/tool-executor/plugins
+    volumes:
+      - tool_executor_data:/var/lib/stage7/tool-executor
     depends_on:
       - redis
       - artifacts
@@ -180,6 +182,7 @@ volumes:
   redis_data:
   config_data:
   security_keys:
+  tool_executor_data:
 
 networks:
   default:

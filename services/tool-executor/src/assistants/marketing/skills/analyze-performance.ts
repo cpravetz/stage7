@@ -9,7 +9,7 @@ export const ANALYZE_PERFORMANCE = createDeclarativeCodeSkill({
   isSkill: true,
   name: 'Analyze Performance',
   description: 'Analyze campaign performance against KPIs.',
-  persistenceEnvVar: 'MARKETING_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: {
     type: 'object',
     properties: {

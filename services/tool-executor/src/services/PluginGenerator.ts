@@ -25,8 +25,13 @@ Output ONLY a single JSON object with this exact shape:
 
 Rules:
 - sourceCode must be complete, runnable code for the specified language.
-- For Node.js, use CommonJS require() syntax.
+- CodeExecutor runs sourceCode directly as a script; do not rely on module.exports or an external caller invoking a function.
+- For JavaScript, read inputs from the global __tool_input object and print exactly one JSON result object with console.log(JSON.stringify(result)).
+- For Python, read inputs from __tool_input and print exactly one JSON result object with print(json.dumps(result)).
+- Do not print logs, explanations, or other text alongside the JSON result.
 - requirements must be empty; dependencies are not installed for generated plugins.
+- Preserve any exact plugin ID, name, input schema, output schema, and behavior requested by the user prompt.
+- Include configSchema in every response; use {"type":"object","properties":{}} when no configuration is needed.
 - Do NOT include markdown fences or explanation text outside the JSON.`;
 
 const PLUGIN_DEPLOY_DIR = process.env.PLUGIN_DEPLOY_DIR || '/tmp/stage7-plugins';
@@ -84,6 +89,47 @@ export class PluginGenerator {
     this.registry = registry;
   }
 
+  private async reportBrainComplaint(requestId: unknown, reason: string, missionId?: string): Promise<void> {
+    if (typeof requestId !== 'string' || !requestId.trim()) {
+      logger.warn(
+        { missionId, reason },
+        'Cannot report rejected plugin-generation output to Brain without a request ID',
+      );
+      return;
+    }
+
+    const brainUrl = (process.env.BRAIN_URL || 'http://brain:3100').replace(/\/+$/, '');
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5_000);
+    try {
+      const response = await fetch(`${brainUrl}/api/brain/complaint`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requestId: requestId.trim(), reason: reason.slice(0, 2_000), missionId }),
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        const details = await response.text();
+        logger.error(
+          { missionId, requestId, status: response.status, details: details.slice(0, 300) },
+          'Brain rejected a plugin-generation quality complaint',
+        );
+        return;
+      }
+      logger.info(
+        { missionId, requestId, reason },
+        'Plugin-generation validation complaint recorded',
+      );
+    } catch (error) {
+      logger.error(
+        { missionId, requestId, error: error instanceof Error ? error.message : String(error) },
+        'Failed to report a plugin-generation quality complaint',
+      );
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
   async generate(request: PluginGenerationRequest): Promise<PluginGenerationResult> {
     logger.info({ description: request.description }, 'Plugin generation started');
 
@@ -104,6 +150,9 @@ export class PluginGenerator {
       }
 
       const brainUrl = process.env.BRAIN_URL || 'http://brain:3100';
+      const missionId = typeof request.context?.missionId === 'string'
+        ? request.context.missionId
+        : undefined;
       const userPrompt = `Generate a plugin for: ${request.description}\nRequirements: ${(request.requirements || []).join(', ')}\nContext: ${JSON.stringify(request.context || {})}`;
 
       const response = await fetch(`${brainUrl}/api/brain/complete`, {
@@ -113,6 +162,7 @@ export class PluginGenerator {
           prompt: userPrompt,
           systemPrompt: PLUGIN_SYSTEM_PROMPT,
           options: { temperature: 0.2, maxTokens: 4096 },
+          missionId,
         }),
       });
 
@@ -122,29 +172,37 @@ export class PluginGenerator {
         return { success: false, error: `LLM returned ${response.status}: ${text.slice(0, 200)}` };
       }
 
-      const data = await response.json() as { content?: unknown };
+      const data = await response.json() as { content?: unknown; requestId?: unknown };
       if (typeof data.content !== 'string' || Buffer.byteLength(data.content, 'utf8') > MAX_PLUGIN_SOURCE_BYTES * 2) {
-        return { success: false, error: 'LLM plugin response content is missing or exceeds the response size limit' };
+        const error = 'LLM plugin response content is missing or exceeds the response size limit';
+        await this.reportBrainComplaint(data.requestId, error, missionId);
+        return { success: false, error };
       }
       let rawPlugin: unknown;
       try {
         rawPlugin = JSON.parse(data.content);
       } catch (error) {
+        const reason = `LLM plugin response must be a single JSON object: ${error instanceof Error ? error.message : String(error)}`;
+        await this.reportBrainComplaint(data.requestId, reason, missionId);
         return {
           success: false,
-          error: `LLM plugin response must be a single JSON object: ${error instanceof Error ? error.message : String(error)}`,
+          error: reason,
         };
       }
       const validation = generatedPluginSchema.safeParse(rawPlugin);
       if (!validation.success) {
+        const reason = `Generated plugin failed validation: ${validation.error.issues.map((issue) => `${issue.path.join('.') || 'plugin'} ${issue.message}`).join('; ')}`;
+        await this.reportBrainComplaint(data.requestId, reason, missionId);
         return {
           success: false,
-          error: `Generated plugin failed validation: ${validation.error.issues.map((issue) => `${issue.path.join('.') || 'plugin'} ${issue.message}`).join('; ')}`,
+          error: reason,
         };
       }
       const parsed = validation.data;
       if (this.registry?.get(parsed.id)) {
-        return { success: false, error: `Generated plugin id '${parsed.id}' is already registered` };
+        const reason = `Generated plugin id '${parsed.id}' is already registered`;
+        await this.reportBrainComplaint(data.requestId, reason, missionId);
+        return { success: false, error: reason };
       }
       const tool: Tool = {
         id: parsed.id,

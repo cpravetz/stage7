@@ -94,8 +94,8 @@ describe('MissionOrchestrator checkpoint recovery', () => {
       .mockResolvedValue(taskResult)
     const reviewPhase = jest.spyOn(MissionAgentRuntime.prototype, 'reviewPhase')
       .mockResolvedValue({ satisfied: true, gaps: [] })
-    const executePromptTask = jest.spyOn(MissionAgentRuntime.prototype, 'executePromptTask')
-      .mockResolvedValue({ output: 'yes', artifacts: [], tokensUsed: 0 })
+    const reviewMissionCompletion = jest.spyOn(MissionAgentRuntime.prototype, 'reviewMissionCompletion')
+      .mockResolvedValue({ satisfied: true, gaps: [] })
     const onCheckpoint = jest.fn()
     const broadcast = jest.fn().mockResolvedValue(undefined)
     const context: MissionContext = {
@@ -120,9 +120,24 @@ describe('MissionOrchestrator checkpoint recovery', () => {
 
     expect(result.outputs.status).toBe('completed')
     expect(result.outputs.phases[0].tasks[0].artifacts).toEqual(taskResult.artifacts)
+    expect(result.plan.phases[0]?.status).toBe('completed')
+    expect(result.plan.phases[0]?.tasks[0]).toMatchObject({
+      status: 'completed',
+      output: taskResult.output,
+      artifacts: taskResult.artifacts,
+    })
     expect(getAgent).toHaveBeenCalledWith('writer', plan.phases[0]!.tasks[0]!.systemPrompt)
-    expect(getAgent).toHaveBeenCalledWith('mission-evaluator', expect.any(String))
     expect(reviewPhase).toHaveBeenCalledTimes(1)
+    expect(reviewMissionCompletion).toHaveBeenCalledWith(
+      context.prompt,
+      plan.summary,
+      expect.arrayContaining([
+        expect.objectContaining({
+          taskId: 'task-1',
+          artifactNames: ['answer.md'],
+        }),
+      ]),
+    )
     expect(executeTask).toHaveBeenCalledWith(
       'agent-writer',
       plan.phases[0]!.tasks[0]!,
@@ -130,6 +145,7 @@ describe('MissionOrchestrator checkpoint recovery', () => {
       plan,
       true,
       DEFAULT_AGENT_EXECUTION_POLICY,
+      [],
     )
     expect(onCheckpoint).toHaveBeenCalledWith(expect.objectContaining({
       completedTasks: [{ phaseId: 'phase-1', taskId: 'task-1' }],
@@ -143,16 +159,6 @@ describe('MissionOrchestrator checkpoint recovery', () => {
       }),
     )
     expect(broadcast).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'task_completed' }))
-    expect(executePromptTask).toHaveBeenCalledWith(
-      'agent-writer',
-      expect.objectContaining({
-        type: 'review',
-        executionPolicy: expect.objectContaining({
-          maxActions: 0,
-          maxCompletionTokensPerCall: 256,
-        }),
-      }),
-    )
   })
 
   it('checks mission control after persisting the current task and before starting the next task', async () => {

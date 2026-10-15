@@ -12,7 +12,7 @@ export const HR_HIRING_ANALYTICS = createDeclarativeCodeSkill({
   id: 'hr-hiring-analytics',
   name: 'Hiring Pipeline Analytics',
   description: 'Evaluates team headcount needs, attrition trends, and market salary data. Generates hiring metrics, pipeline reports, and diversity analytics. Runs weekly.',
-  persistenceEnvVar: 'HR_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   configSchema: {
     type: 'object',
     properties: {

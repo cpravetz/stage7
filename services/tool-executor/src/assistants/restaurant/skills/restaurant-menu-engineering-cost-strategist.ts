@@ -27,7 +27,7 @@ export const RESTAURANT_MENU_ENGINEERING_COST_STRATEGIST = createDeclarativeCode
   id: 'restaurant-menu-engineering-cost-strategist',
   name: 'Restaurant Menu Engineering & Cost Strategist',
   description: 'Perform menu engineering analysis (BCG-style quadrant classification), food cost calculation, pricing optimization, and category mix analysis with deterministic cost-based computations.',
-  persistenceEnvVar: 'STORAGE_DIR',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: RESTAURANT_MENU_ENGINEERING_COST_STRATEGIST_INPUT,
   outputSchema: restaurantResultSchema('Menu items with quadrant classification, food cost, margin, score, and low-performing recommendations'),
   triggers: [

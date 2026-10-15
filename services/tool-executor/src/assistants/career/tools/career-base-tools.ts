@@ -52,7 +52,7 @@ const CAREER_PROFILE_INTAKE = createDeclarativeCodeSkill({
   isSkill: false,
   name: 'Profile Intake',
   description: 'Collects and persists the candidate profile: personal details, target roles, skills, resume text, and job-search preferences. All other career tools read from this profile.',
-  persistenceEnvVar: 'CAREER_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: CAREER_PROFILE_INTAKE_INPUT,
   outputSchema: CAREER_PROFILE_INTAKE_OUTPUT,
   triggers: [

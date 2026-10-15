@@ -46,8 +46,8 @@ const REVENUE_INPUT_SCHEMA = createSchemaRecord({
 export const REVENUE_SKILL = createDeclarativeCodeSkill({
   id: 'hotel-revenue-performance-advisory',
   name: 'Revenue & Performance Advisory',
-  description: 'Hybrid revenue, operational analytics, and staff-performance advisor grounded in supplied records, local hotel state, and the PMS configured through HOTEL_HOME.',
-  persistenceEnvVar: 'HOTEL_HOME',
+  description: 'Hybrid revenue, operational analytics, and staff-performance advisor grounded in supplied records, local hotel state, and the PMS configured through ASSISTANT_HOME.',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: REVENUE_INPUT_SCHEMA,
   outputSchema: createSchemaRecord({
     success: SchemaProps.boolean({ description: 'Whether the advisory analysis completed' }),

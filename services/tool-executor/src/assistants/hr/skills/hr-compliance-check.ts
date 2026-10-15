@@ -12,7 +12,7 @@ export const HR_COMPLIANCE_CHECK = createDeclarativeCodeSkill({
   id: 'hr-compliance-check',
   name: 'Compliance Audit Check',
   description: 'Generates compliance checks for EEO statements, GDPR consent, and ADEA violations. Runs monthly.',
-  persistenceEnvVar: 'HR_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   configSchema: {
     type: 'object',
     properties: {

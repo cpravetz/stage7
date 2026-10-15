@@ -33,8 +33,8 @@ const RESTAURANT_SUPPLY_CHAIN_INVENTORY_REORDER_MANAGER_INPUT = createSchemaReco
 export const RESTAURANT_SUPPLY_CHAIN_INVENTORY_REORDER_MANAGER = createDeclarativeCodeSkill({
   id: 'restaurant-supply-chain-inventory-reorder-manager',
   name: 'Restaurant Supply Chain & Inventory Reorder Manager',
-  description: 'Manage inventory reorder points, EOQ calculations, and supplier status with dry-run defaults and confirmation requirements for live endpoint actions. Returns not-connected when RESTAURANT_SUPPLY_ENDPOINT is absent.',
-  persistenceEnvVar: 'STORAGE_DIR',
+  description: 'Manage inventory reorder points, EOQ calculations, and supplier status with dry-run defaults and confirmation requirements for live endpoint actions. Returns not-connected when supply endpoint is not configured.',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: RESTAURANT_SUPPLY_CHAIN_INVENTORY_REORDER_MANAGER_INPUT,
   outputSchema: restaurantResultSchema('Reorder items with quantities, reorder points, safety stock, lead time demand, and summary'),
   triggers: [
@@ -85,7 +85,7 @@ export const RESTAURANT_SUPPLY_CHAIN_INVENTORY_REORDER_MANAGER = createDeclarati
       }
 
       if (!endpoint) {
-        return presentNotice('Not connected', 'RESTAURANT_SUPPLY_ENDPOINT is not configured. Supply chain operations require a live endpoint. No reorder was placed or modified.');
+        return presentNotice('Not connected', 'Restaurant supply endpoint is not configured in skill configuration. Supply chain operations require a live endpoint. No reorder was placed or modified.');
       }
 
       const items = Array.isArray(input.items) ? input.items : [];

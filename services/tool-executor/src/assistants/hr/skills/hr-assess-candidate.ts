@@ -12,7 +12,7 @@ export const HR_ASSESS_CANDIDATE = createDeclarativeCodeSkill({
   id: 'hr-assess-candidate',
   name: 'Assess Candidate Skills and Experience',
   description: 'Evaluates candidate technical skills, soft skills, and experience against assessment criteria. Triggered on new application received.',
-  persistenceEnvVar: 'HR_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   configSchema: {
     type: 'object',
     properties: {

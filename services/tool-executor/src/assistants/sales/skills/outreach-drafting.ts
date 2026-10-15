@@ -23,16 +23,16 @@ const outreachDrafting = createDeclarativeCodeSkill({
     'Draft sales outreach from built-in cold, follow-up, and nurture templates using only the recipient and variable values you supply. Templates that need an unsupplied variable are skipped and reported rather than filled with invented text, subject variants are deduplicated, and nothing is ever sent.',
   tier: 'aid',
   domainKnowledge: 'Sales outreach methodology, personalization frameworks, subject-line testing, and sequence design',
-  persistenceEnvVar: 'SALES_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   manifest: {
-    persistenceEnv: 'SALES_HOME',
-    salesHome: 'SALES_HOME',
+    persistenceEnv: 'ASSISTANT_HOME',
+    salesHome: 'ASSISTANT_HOME',
     ui: { view: 'outreach-drafting' },
   },
   configSchema: {
     type: 'object',
     properties: {
-      salesHome: SchemaProps.text({ description: 'Directory used to persist drafts; defaults to SALES_HOME' }),
+      salesHome: SchemaProps.text({ description: 'Directory used to persist drafts; defaults to ASSISTANT_HOME' }),
       defaultSequenceDelay: SchemaProps.number({ description: 'Default hours between sequence steps', default: 48 }),
     },
   },

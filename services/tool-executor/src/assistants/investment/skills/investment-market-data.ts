@@ -12,7 +12,7 @@ const marketDataConfigSchema = {
     cacheTtlSeconds: { type: 'number', description: 'Cache time-to-live in seconds' },
     rateLimitPerSecond: { type: 'number', description: 'Maximum requests per second' },
     timeoutMs: { type: 'number', description: 'Request timeout in milliseconds' },
-    endpoint: { type: 'string', format: 'uri', description: 'Market data API base URL (env: INVESTMENT_MARKET_DATA_ENDPOINT)' },
+    endpoint: { type: 'string', format: 'uri', description: 'Market data API base URL' },
   },
 };
 
@@ -38,8 +38,8 @@ const INVESTMENT_MARKET_DATA = createDeclarativeCodeSkill({
   id: 'investment-market-data',
   name: 'Investment Market Data',
   description:
-    'Retrieves real-time or historical market data (quotes, historical prices, fundamentals, options chains, news, and economic calendar events) for supplied symbols. Reads the endpoint from the INVESTMENT_MARKET_DATA_ENDPOINT environment variable. Defaults to dry run; a live request requires confirmation: true. When no endpoint is configured, reports the staged request and marks itself not-connected rather than inventing data.',
-  persistenceEnvVar: 'INVESTMENT_HOME',
+    'Retrieves real-time or historical market data (quotes, historical prices, fundamentals, options chains, news, and economic calendar events) for supplied symbols. Reads the endpoint from Skill configuration. Defaults to dry run; a live request requires confirmation: true. When no endpoint is configured, reports the staged request and marks itself not-connected rather than inventing data.',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: marketDataInputSchema,
   outputSchema: investmentResultSchema('Market data request metadata, response, and staging record'),
   timeoutMs: 15000,
@@ -138,8 +138,8 @@ const INVESTMENT_MARKET_DATA = createDeclarativeCodeSkill({
       if (!endpoint) {
         const lines = formatRequest('Market data request -- not connected');
         lines.push('');
-        lines.push('No endpoint is configured. Set the INVESTMENT_MARKET_DATA_ENDPOINT environment variable to enable live retrieval.');
-        return { success: false, status: 'not-connected', data: requestSummary, error: 'Not connected: no investment market data endpoint is configured (INVESTMENT_MARKET_DATA_ENDPOINT).', present: [{ id: 'notice', title: 'Not connected -- no market data endpoint', kind: 'text', body: lines.join(NL) }] };
+        lines.push('No endpoint is configured. Set endpoint in Skill configuration to enable live retrieval.');
+        return { success: false, status: 'not-connected', data: requestSummary, error: 'Not connected: no investment market data endpoint is configured', present: [{ id: 'notice', title: 'Not connected -- no market data endpoint', kind: 'text', body: lines.join(NL) }] };
         return;
       }
 

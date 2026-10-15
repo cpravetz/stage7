@@ -5,6 +5,7 @@ import {
   DEFAULT_AGENT_EXECUTION_POLICY,
   Plan,
   PlanSchema,
+  Task,
 } from '@stage7-nextgen/shared';
 import { logger } from '@stage7-nextgen/shared';
 import { randomUUID } from 'crypto';
@@ -16,22 +17,25 @@ export const PLANNER_SYSTEM_PROMPT = `You are a mission planner for an AI agent 
 
 Requirements:
 1. If the goal is ambiguous, set requiresClarification=true and ask 2-4 focused questions. Otherwise set requiresClarification=false and clarificationQuestions=[].
-2. For a goal that does not need clarification, create as many phases and specific tasks as needed to fully accomplish it. Keep every phase meaningful and include at least one task in each phase.
+2. For a goal that does not need clarification, create as many phases and specific tasks as needed to fully accomplish it. Keep every phase meaningful and include at least one task in each phase. Keep descriptions and systemPrompts concise and operational; do not omit required actions, task IDs, dependencies, or consumed outputs to save space.
 3. Each phase must include id, name, goal, tasks, requiresApproval, and status. Use "pending" for the initial status.
-4. Each task must include id, title, description, agentRole, systemPrompt, dependsOnTaskIds, expectedArtifacts, status, and artifacts. Use "pending" for the initial status and [] when there are no artifacts yet. dependsOnTaskIds lists task IDs that must complete first; use [] only when the task is genuinely independent.
+4. Each task must include id, title, description, agentRole, systemPrompt, dependsOnTaskIds, expectedArtifacts, requiredActions, status, and artifacts. Use "pending" for the initial status and [] when there are no artifacts or required actions yet. dependsOnTaskIds lists task IDs that must complete first; use [] only when the task is genuinely independent.
 5. Give every phase a unique, stable id. Task ids must be globally unique across the entire plan, not merely unique within each phase. Use ids such as "phase-2-task-1"; never reuse "task-1" in another phase. Dependencies may refer only to tasks in the same or an earlier phase, and must not form a cycle. Select agent roles based on the actual work.
-6. Mark requiresApproval=true only where a human decision is needed before work continues.
+6. Every task must be executable by an autonomous software Agent. Never assign agentRole "Human", "User", or another human decision-maker. Represent a needed human decision with requiresApproval or requiresClarification instead.
+7. Mark requiresApproval=true only where a human decision is needed before work continues.
+8. A task's systemPrompt is its operational instruction, not just a question restating the goal. When the goal or task description requires a tool action or delegation, include it in requiredActions as {"toolId":"<exact tool id or __delegate>","outcome":"success"}. The systemPrompt must explicitly name and instruct every required direct tool action using its exact tool ID; for delegation, explicitly instruct the Agent to delegate to a child Agent. A tool mentioned only as an action for that child is not a direct action receipt for the parent. If a task performs a failure and recovery in one task, include both the expected {"outcome":"failure"} and recovery {"outcome":"success"} action receipts. If recovery is split into ordered tasks, the failing task must record its failure receipt and the recovery task must depend on and name that failure task and record its success receipt. When a task must attempt an unavailable or disallowed tool, include {"outcome":"denied"} and instruct the Agent to make the actual action request. Do not require actions for reasoning-only tasks.
+9. If a task consumes another task's result or artifact, list that producer's exact task ID in dependsOnTaskIds and in the task's systemPrompt, and say which output is consumed. Do not refer vaguely to "initial", "final", or "previous" values without naming their producing task IDs. Dependencies belong on the consuming task, not on a producer that merely names a future consumer. Do not infer a dependency from a task ID mentioned in a negative instruction or in a statement that the task's output will be consumed downstream. Include only tasks that produce an input the task actually uses. Dependencies impose execution order and make completed producer outputs available to the Agent.
 
 Return one complete JSON object matching this structure:
-{"summary":"...","estimatedDuration":"...","estimatedCost":"...","requiresClarification":false,"clarificationQuestions":[],"phases":[{"id":"phase-1","name":"...","goal":"...","requiresApproval":false,"status":"pending","tasks":[{"id":"phase-1-task-1","title":"...","description":"...","agentRole":"...","systemPrompt":"...","dependsOnTaskIds":[],"expectedArtifacts":[],"status":"pending","artifacts":[]}]}]}
+{"summary":"...","estimatedDuration":"...","estimatedCost":"...","requiresClarification":false,"clarificationQuestions":[],"phases":[{"id":"phase-1","name":"...","goal":"...","requiresApproval":false,"status":"pending","tasks":[{"id":"phase-1-task-1","title":"...","description":"...","agentRole":"...","systemPrompt":"...","dependsOnTaskIds":[],"expectedArtifacts":[],"requiredActions":[],"status":"pending","artifacts":[]}]}]}
 Do not include prose, markdown fences, or any text outside the JSON object.`;
 
 export const PLANNER_EXECUTION_POLICY: AgentExecutionPolicy = {
   ...DEFAULT_AGENT_EXECUTION_POLICY,
-  maxBrainCalls: 1,
+  maxBrainCalls: 2,
   maxActions: 0,
-  maxCompletionTokens: 4_096,
-  maxCompletionTokensPerCall: 4_096,
+  maxCompletionTokens: 16_384,
+  maxCompletionTokensPerCall: 8_192,
   maxDelegations: 0,
 };
 
@@ -46,6 +50,7 @@ export interface PlannerCompletionRequest {
 }
 
 export type PlannerCompletion = (request: PlannerCompletionRequest) => Promise<string>;
+export type PlannerValidationReporter = (reason: string) => Promise<void>;
 
 function parsePlanJson(content: string): unknown {
   const trimmed = content.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
@@ -65,6 +70,252 @@ function parsePlanJson(content: string): unknown {
   }
 }
 
+const NEGATED_ACTION = /\b(?:do not|don't|never|avoid)\s+(?:use|using|call|calling|invoke|invoking|execute|executing|run|running|attempt|attempting|request|requesting|retry|retrying)\b/i;
+const ACTION_TOOL_TARGET =
+  /(?<![a-z0-9_-])(?:use|using|call|calling|invoke|invoking|execute|executing|run|running|attempt|attempting|request|requesting|retry|retrying)\s+(?:(?:the|registered|available|exact|specific|permitted|disallowed|unavailable|new|existing|only|special)\s+)*(?:tool\s+)?(?:[`"']([a-z_][a-z0-9_-]{0,119})[`"']|([a-z_][a-z0-9_-]{0,119}))(?=\s+(?:tool|action|with|on|for|to|once|twice|exactly)\b|[.,;:!?]|$)/gi;
+const NAMED_TOOL_ACTION =
+  /\b([a-z_][a-z0-9_-]{0,119})\s+tool\s+(?:to|for)\s+(?:calculate|compute|derive|search|retrieve|fetch|read|write|create|update|delete|analyze|validate|inspect|review|compare|convert|format|summarize|translate|generate|execute|run|send|query|look up)\b/gi;
+const GENERIC_TOOL_TOKENS = new Set([
+  'a', 'an', 'actual', 'agent', 'allowed', 'answer', 'any', 'artifact', 'available', 'around', 'child', 'data',
+  'deficient', 'disallowed', 'error', 'evidence', 'exact', 'exactly', 'fail', 'fails', 'failing', 'failure', 'failed', 'input',
+  'instruction', 'instructions', 'missing', 'new', 'once', 'only', 'output', 'outputs', 'parent',
+  'policy', 'raw', 'receipt', 'receipts', 'registered', 'request', 'response', 'result', 'results',
+  'review', 'specific', 'succeed', 'succeeds', 'succeeded', 'succeeding', 'success', 'successful', 'task', 'that', 'the', 'these', 'this', 'those',
+  'tool', 'twice', 'value', 'work',
+]);
+const PRIOR_OUTPUT_REFERENCE = /\b(?:previous|prior|earlier|upstream|completed)\b[^.!?;\n]{0,80}\b(?:result|output|artifact|value|answer|calculation|product)\b|\b(?:initial|final)\b[^.!?;\n]{0,80}\b(?:calculated|computed|derived)\s+(?:result|output|artifact|value|answer|calculation|product)s?\b/i;
+const TASK_OUTPUT_TERMS =
+  '(?:outputs?|results?|artifacts?|values?|answers?|products?|calculations?|receipts?|evidence|failures?|errors?|outcomes?|statuses?|findings?|conclusions?|recommendations?|reports?|summaries?|records?|observations?)';
+const TASK_CONSUMER_VERBS =
+  '(?:use|uses|using|consume|consumes|consumed|consuming|read|reads|reading|retrieve|retrieves|retrieved|retrieving|load|loads|loaded|loading|derive|derives|derived|deriving|calculate|calculates|calculated|calculating|compute|computes|computed|computing|compare|compares|compared|comparing|validate|validates|validated|validating|inspect|inspects|inspected|inspecting|review|reviews|reviewed|reviewing|check|checks|checked|checking|take|takes|taken|taking|synthesize|synthesizes|synthesized|synthesizing|combine|combines|combined|combining|integrate|integrates|integrated|integrating|incorporate|incorporates|incorporated|incorporating|aggregate|aggregates|aggregated|aggregating)';
+
+function isNegatedActionAt(text: string, actionIndex: number): boolean {
+  const prefix = text.slice(0, actionIndex);
+  const conjunctions = [...prefix.matchAll(/\b(?:and|but|while|then)\b/gi)];
+  const lastConjunction = conjunctions.at(-1);
+  const localPrefix = prefix.slice(lastConjunction ? lastConjunction.index! + lastConjunction[0].length : 0);
+  return /\b(?:do not|don't|never|avoid|without)\b[^.!?;\n]{0,60}$/i.test(localPrefix);
+}
+
+function taskOutputReferences(instructions: string, taskIds: Set<string>): Set<string> {
+  const referencedTaskIds = new Set<string>();
+  const taskIdAlternation = [...taskIds]
+    .sort((left, right) => right.length - left.length)
+    .map((taskId) => taskId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('|');
+
+  for (const taskId of taskIds) {
+    const escapedId = taskId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const taskReference = `(?:task\\s+)?${escapedId}`;
+    const patterns = [
+      new RegExp(
+        `\\b${TASK_CONSUMER_VERBS}\\b[^.!?;\\n]{0,240}\\b${TASK_OUTPUT_TERMS}\\b[^.!?;\\n]{0,80}\\b(?:from|of|produced by|provided by)\\s+${taskReference}\\b`,
+        'gi',
+      ),
+      new RegExp(
+        `\\b${TASK_CONSUMER_VERBS}\\b[^.!?;\\n]{0,120}\\b${taskReference}\\b[^.!?;\\n]{0,60}\\b${TASK_OUTPUT_TERMS}\\b`,
+        'gi',
+      ),
+      new RegExp(
+        `\\b(?:verify|review|check|inspect|validate)\\b[^.!?;\\n]{0,80}\\b${taskReference}\\b[^.!?;\\n]{0,80}\\b${TASK_OUTPUT_TERMS}\\b`,
+        'gi',
+      ),
+      new RegExp(
+        `\\b(?:following|after|upon|once|when)\\b[^.!?;\\n]{0,80}\\b(?:failure|error|outcome|status)\\b[^.!?;\\n]{0,40}\\b${taskReference}\\b`,
+        'gi',
+      ),
+    ];
+
+    for (const pattern of patterns) {
+      for (const match of instructions.matchAll(pattern)) {
+        if (!isNegatedActionAt(instructions, match.index ?? 0)) referencedTaskIds.add(taskId);
+      }
+    }
+  }
+
+  if (taskIdAlternation) {
+    const listedTaskOutputs = new RegExp(
+      `\\b${TASK_CONSUMER_VERBS}\\b[^.!?;\\n]{0,240}\\b${TASK_OUTPUT_TERMS}\\b[^.!?;\\n]{0,80}\\b(?:from|of|produced by|provided by|generated by|recorded by|returned by)\\s+(?:(?:tasks?)\\s+)?(?:${taskIdAlternation})(?:(?:\\s*,\\s*(?:(?:and|or)\\s+)?|\\s+(?:and|or)\\s+)(?:(?:tasks?)\\s+)?(?:${taskIdAlternation}))*`,
+      'gi',
+    );
+    for (const match of instructions.matchAll(listedTaskOutputs)) {
+      if (isNegatedActionAt(instructions, match.index ?? 0)) continue;
+      for (const taskId of taskIds) {
+        if (containsIdentifier(match[0], taskId)) referencedTaskIds.add(taskId);
+      }
+    }
+  }
+
+  return referencedTaskIds;
+}
+
+function hasPositivePriorOutputReference(instructions: string): boolean {
+  return instructions
+    .split(/[.!?;,\n]+|\b(?:but|while|then)\b/i)
+    .some((clause) => {
+      const match = PRIOR_OUTPUT_REFERENCE.exec(clause);
+      return Boolean(match)
+        && !/\b(?:do not|don't|never|avoid|without)\b[^.!?;\n]{0,60}\b(?:use|consume|read|retrieve|load|derive|calculate|compute|compare|validate|inspect|review|check|take)\b/i.test(clause.slice(0, match!.index));
+    });
+}
+
+function containsIdentifier(text: string, identifier: string): boolean {
+  const escaped = identifier.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?:^|[^a-z0-9_-])${escaped}(?=$|[^a-z0-9_-])`, 'i').test(text);
+}
+
+function explicitToolIds(instructions: string, taskIds: Set<string>): Set<string> {
+  const toolIds = new Set<string>();
+  const segments = instructions.split(/[.!?;,\n]+|\b(?:but|while|then)\b/i);
+  for (const segment of segments) {
+    const candidates: Array<{ toolId: string; index: number }> = [];
+    for (const match of segment.matchAll(ACTION_TOOL_TARGET)) {
+      candidates.push({ toolId: (match[1] || match[2] || '').toLowerCase(), index: match.index ?? 0 });
+    }
+    for (const match of segment.matchAll(NAMED_TOOL_ACTION)) {
+      const toolId = match[1]!.toLowerCase();
+      candidates.push({ toolId, index: (match.index ?? 0) + match[0].indexOf(match[1]!) });
+    }
+
+    for (const candidate of candidates) {
+      if (!candidate.toolId || isNegatedActionAt(segment, candidate.index)) continue;
+      if (GENERIC_TOOL_TOKENS.has(candidate.toolId) || taskIds.has(candidate.toolId)) continue;
+      const instructionPrefix = segment.slice(0, candidate.index);
+      const lastClauseBoundary = Math.max(
+        instructionPrefix.lastIndexOf(':'),
+        instructionPrefix.lastIndexOf(','),
+      );
+      const recipientContext = instructionPrefix.slice(lastClauseBoundary + 1);
+      if (/\b(?:child\s+agent|sub[- ]?agent|subagent)\b/i.test(recipientContext)) continue;
+
+      toolIds.add(candidate.toolId);
+    }
+  }
+  return toolIds;
+}
+
+function explicitlyRequiresDelegation(instructions: string): boolean {
+  return instructions.split(/[.!?;\n]+/).some((segment) => {
+    if (
+      /\b(?:do not|don't|never|avoid|without)\s+(?:delegate|delegating|delegation)\b/i.test(segment)
+      || /\b(?:do not|don't|never|avoid|without)\s+(?:use|call|invoke|execute|run)\s+__delegate\b/i.test(segment)
+    ) return false;
+    return (/\b(?:delegate|delegating|delegation)\b/i.test(segment) || containsIdentifier(segment, '__delegate'))
+      && /\b(?:child\s+agent|sub[- ]?agent|subagent)\b/i.test(segment);
+  });
+}
+
+export function missionTaskActionIssues(
+  task: Pick<Task, 'systemPrompt' | 'requiredActions'>,
+  taskPath = 'task',
+  allTaskIds: Set<string> = new Set(),
+): string[] {
+  const issues: string[] = [];
+  const instructions = task.systemPrompt;
+  const requiredActions = task.requiredActions || [];
+  const requiredToolIds = new Set(requiredActions.map((action) => action.toolId.toLowerCase()));
+  const namedToolIds = explicitToolIds(instructions, allTaskIds);
+  const delegationRequired = explicitlyRequiresDelegation(instructions);
+
+  if (delegationRequired && !requiredToolIds.has('__delegate')) {
+    issues.push(`${taskPath} explicitly instructs child-Agent delegation but requiredActions is missing {"toolId":"__delegate","outcome":"success"}`);
+  }
+  if (requiredToolIds.has('__delegate') && !delegationRequired) {
+    issues.push(`${taskPath} requires __delegate but systemPrompt does not explicitly instruct child-Agent delegation`);
+  }
+  for (const toolId of namedToolIds) {
+    if (!requiredToolIds.has(toolId)) {
+      issues.push(`${taskPath} explicitly instructs use of tool "${toolId}" but requiredActions is missing its receipt`);
+    }
+  }
+  for (const action of requiredActions) {
+    if (action.toolId !== '__delegate' && !namedToolIds.has(action.toolId.toLowerCase())) {
+      issues.push(`${taskPath} requires tool "${action.toolId}" but systemPrompt does not explicitly name and instruct that tool`);
+    }
+  }
+
+  const denialSegments = instructions.split(/[.!?;\n]+/).filter((segment) =>
+    /\b(?:denied|denial|disallowed|not permitted|forbidden|blocked|policy rejection)\b/i.test(segment),
+  );
+  for (const toolId of namedToolIds) {
+    if (
+      denialSegments.some((segment) => containsIdentifier(segment, toolId))
+      && !requiredActions.some((action) => action.toolId.toLowerCase() === toolId && action.outcome === 'denied')
+    ) {
+      issues.push(`${taskPath} expects a policy denial for tool "${toolId}" but has no denied action receipt`);
+    }
+  }
+
+  return issues;
+}
+
+function missionTaskRecoveryIssues(
+  task: Pick<Task, 'systemPrompt' | 'requiredActions' | 'dependsOnTaskIds'>,
+  tasksById: Map<string, Task>,
+  taskPath: string,
+): string[] {
+  const recoveryIntent = task.systemPrompt
+    .split(/[.!?;\n,]+|\b(?:and|but|while|then)\b/i)
+    .some((segment) => {
+      const match =
+        /\b(?:recover|recovery|repair|retry|correct)\b|\b(?:following|after|upon|once|when)\b[^.!?;\n]{0,80}\b(?:failure|error)\b/i.exec(
+          segment,
+        );
+      return Boolean(match) && !isNegatedActionAt(segment, match!.index);
+    });
+  if (!recoveryIntent) return [];
+
+  const issues: string[] = [];
+  for (const action of (task.requiredActions || []).filter((candidate) => candidate.toolId !== '__delegate')) {
+    const toolId = action.toolId.toLowerCase();
+    const outcomes = new Set(
+      (task.requiredActions || [])
+        .filter((candidate) => candidate.toolId.toLowerCase() === toolId)
+        .map((candidate) => candidate.outcome),
+    );
+    if (outcomes.has('failure') && outcomes.has('success')) continue;
+
+    const priorFailureDependency = (task.dependsOnTaskIds || []).some((dependencyId) =>
+      (tasksById.get(dependencyId)?.requiredActions || []).some(
+        (candidate) => candidate.toolId.toLowerCase() === toolId && candidate.outcome === 'failure',
+      ),
+    );
+    if (outcomes.has('success') && priorFailureDependency) continue;
+
+    issues.push(
+      `${taskPath} requires recovery from a tool error for "${action.toolId}" but must include failure and success receipts in the task or depend on a task that records the failure`,
+    );
+  }
+  return issues;
+}
+
+export function missionTaskDependencyIssues(
+  task: Pick<Task, 'id' | 'systemPrompt' | 'dependsOnTaskIds'>,
+  allTaskIds: Set<string>,
+  taskPath = `task "${task.id}"`,
+): string[] {
+  const issues: string[] = [];
+  const instructions = task.systemPrompt;
+  const dependencies = task.dependsOnTaskIds || [];
+  const consumedTaskIds = taskOutputReferences(instructions, allTaskIds);
+  if (hasPositivePriorOutputReference(instructions) && dependencies.length === 0 && consumedTaskIds.size === 0) {
+    issues.push(`${taskPath} refers to a prior task result or value but has no dependency on its producer task`);
+  }
+  for (const dependencyId of dependencies) {
+    if (!containsIdentifier(instructions, dependencyId)) {
+      issues.push(`${taskPath} depends on "${dependencyId}" but systemPrompt must name that producer task ID and its consumed output`);
+    } else if (!consumedTaskIds.has(dependencyId)) {
+      issues.push(`${taskPath} depends on "${dependencyId}" but systemPrompt must identify the output or evidence consumed from that producer task`);
+    }
+  }
+  for (const referencedTaskId of consumedTaskIds) {
+    if (!dependencies.includes(referencedTaskId)) {
+      issues.push(`${taskPath} consumes output or evidence from task "${referencedTaskId}" but does not declare it in dependsOnTaskIds`);
+    }
+  }
+  return issues;
+}
+
 function planStandardIssues(plan: Plan): string[] {
   const issues: string[] = [];
   if (plan.requiresClarification) {
@@ -81,6 +332,10 @@ function planStandardIssues(plan: Plan): string[] {
   const phaseIds = new Set<string>();
   const taskIds = new Map<string, string>();
   const taskPhaseIndices = new Map<string, number>();
+  const allTasks = plan.phases.flatMap((phase) => phase.tasks);
+  const allTaskIds = new Set(allTasks.map((task) => task.id));
+  const tasksById = new Map(allTasks.map((task) => [task.id, task]));
+  const normalizedTaskIds = new Set([...allTaskIds].map((taskId) => taskId.toLowerCase()));
   for (const [phaseIndex, phase] of plan.phases.entries()) {
     if (phaseIds.has(phase.id)) issues.push(`phases[${phaseIndex}].id duplicates "${phase.id}"`);
     phaseIds.add(phase.id);
@@ -89,9 +344,20 @@ function planStandardIssues(plan: Plan): string[] {
     }
     for (const [taskIndex, task] of phase.tasks.entries()) {
       const taskPath = `phases[${phaseIndex}].tasks[${taskIndex}].id`;
+      if (!Array.isArray(task.requiredActions)) {
+        issues.push(`phases[${phaseIndex}].tasks[${taskIndex}].requiredActions must be provided; use [] when no action receipt is required`);
+      }
+      if (isHumanAgentRole(task.agentRole)) {
+        issues.push(
+          `phases[${phaseIndex}].tasks[${taskIndex}].agentRole "${task.agentRole}" is not executable; assign an autonomous software Agent and represent human decisions with requiresApproval or requiresClarification`,
+        );
+      }
       if (!Array.isArray(task.dependsOnTaskIds)) {
         issues.push(`phases[${phaseIndex}].tasks[${taskIndex}].dependsOnTaskIds must be provided; use [] for independent tasks`);
       }
+      issues.push(...missionTaskActionIssues(task, taskPath, normalizedTaskIds));
+      issues.push(...missionTaskRecoveryIssues(task, tasksById, taskPath));
+      issues.push(...missionTaskDependencyIssues(task, normalizedTaskIds, taskPath));
       if (task.id.startsWith(`${phase.id}-amendment-`)) {
         issues.push(`phases[${phaseIndex}].tasks[${taskIndex}].id uses the reserved amendment prefix`);
       }
@@ -147,11 +413,17 @@ function formatSchemaIssues(issues: Array<{ path: PropertyKey[]; message: string
   return issues.map((issue) => `${issue.path.length ? issue.path.join('.') : '<root>'}: ${issue.message}`);
 }
 
+export function isHumanAgentRole(agentRole: string): boolean {
+  const normalizedRole = agentRole.trim().toLowerCase().replace(/[-_]+/g, ' ').replace(/\s+/g, ' ');
+  return /^(human|user|person|requester|customer)(\s+(approver|reviewer|operator|decision maker|in the loop))?$/.test(normalizedRole);
+}
+
 export async function generateValidPlan(
   prompt: string,
   context: Record<string, unknown> | undefined,
   missionId: string | undefined,
   complete: PlannerCompletion,
+  reportValidation?: PlannerValidationReporter,
 ): Promise<Plan> {
   let lastError = '';
   let previousResponse = '';
@@ -165,7 +437,8 @@ export async function generateValidPlan(
         `Your previous plan was rejected (attempt ${attempt - 1}). Fix every listed issue and return a complete replacement plan.`,
         'Validation issues:',
         lastError,
-        'Do not reuse task IDs across phases. When an ID is duplicated, assign each affected task a distinct stable ID that includes its phase number, such as "phase-3-task-1". Preserve all otherwise-valid plan content and do not omit tasks.',
+        'Do not reuse task IDs across phases. When an ID is duplicated, assign each affected task a distinct stable ID that includes its phase number, such as "phase-3-task-1". Preserve all otherwise-valid plan content and do not omit tasks. For dependency issues, map each consumed value to the task that actually produces it, name that exact task ID in systemPrompt, and do not use a downstream task as a substitute for its source.',
+        'For a missing tool instruction, keep the requiredActions receipt and add an imperative sentence to that task systemPrompt that names the exact tool ID, such as "Call the exact tool __list_tools to verify the registered tool." For a dependency issue, name the producer task ID and identify the specific output consumed in the consumer systemPrompt. For a JSON parsing issue, return exactly one valid JSON object with no prose, Markdown fences, or trailing text.',
         'Previous response (possibly truncated):',
         previousResponse.slice(0, MAX_PRIOR_RESPONSE_CHARS),
       ].join('\n');
@@ -213,6 +486,7 @@ export async function generateValidPlan(
       return plan;
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
+      await reportValidation?.(lastError);
       logger.warn(
         { missionId, attempt, reason: lastError },
         'Planner response rejected; requesting a corrected plan',

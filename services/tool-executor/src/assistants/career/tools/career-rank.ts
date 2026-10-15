@@ -67,7 +67,7 @@ const CAREER_RANK = createDeclarativeCodeSkill({
   isSkill: false,
   name: 'Rank Opportunities',
   description: 'Scores and ranks job listings against the search terms and the user profile, weighting role match most heavily, then description keywords, salary fit, location/remote and company preference. Returns each listing with the role match that produced its score.',
-  persistenceEnvVar: 'CAREER_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: CAREER_RANK_INPUT,
   outputSchema: CAREER_RANK_OUTPUT,
   triggers: [

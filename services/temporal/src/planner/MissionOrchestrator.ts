@@ -11,24 +11,19 @@ import {
   MissionAgentRuntime,
   TaskExecutionResult,
 } from '../agent/MissionAgentRuntime';
-import { MissionActivityCheckpoint, MissionTaskCheckpoint } from '../types/workflow';
-
-const MISSION_REVIEWER_SYSTEM_PROMPT =
-  'You are an objective mission evaluator. Determine whether the produced artifacts fully satisfy the stated mission goal. Answer with only "yes" or "no".';
-const MISSION_REVIEWER_EXECUTION_POLICY: AgentExecutionPolicy = {
-  ...DEFAULT_AGENT_EXECUTION_POLICY,
-  maxBrainCalls: 1,
-  maxActions: 0,
-  maxCompletionTokens: 256,
-  maxCompletionTokensPerCall: 256,
-  maxDelegations: 0,
-};
+import {
+  CompletedTaskSummary,
+  createCompletedTaskSummary,
+  MissionActivityCheckpoint,
+  MissionTaskCheckpoint,
+} from '../types/workflow';
 
 export interface MissionContext {
   missionId: string;
   prompt: string;
   tenantId?: string;
   metadata?: Record<string, unknown>;
+  retryGuidance?: string;
   agentRuntimeUrl?: string;
   persistenceUrl: string;
   gatewayUrl: string;
@@ -80,7 +75,25 @@ export class MissionOrchestrator {
         checkpoint,
       ]),
     );
-    const completedTaskSummaries = new Map<string, { taskId: string; output: string; artifactNames: string[] }>();
+    const completedTaskSummaries = new Map<string, CompletedTaskSummary>();
+    for (const completedPhase of plan.phases) {
+      for (const completedTask of completedPhase.tasks) {
+        if (
+          completedTask.status === 'completed'
+          && (completedTask.output || completedTask.artifacts.length > 0)
+        ) {
+          completedTaskSummaries.set(
+            completedTask.id,
+            createCompletedTaskSummary(
+              completedTask.id,
+              completedTask.output || '',
+              completedTask.artifacts,
+              completedTask.requiredActions,
+            ),
+          );
+        }
+      }
+    }
     const completedPhases = new Set(ctx.resumeCheckpoint?.completedPhases || []);
     const saveCheckpoint = () => ctx.onCheckpoint?.({
       version: 1,
@@ -131,6 +144,7 @@ export class MissionOrchestrator {
       if (!phaseIsComplete) {
         await ctx.broadcast({ type: 'phase_started', missionId: ctx.missionId, timestamp: Date.now(), data: { phaseId: phase.id, phaseName: phase.name } });
         await this.updatePhase(ctx, phase.id, { status: 'in_progress' });
+        phase.status = 'in_progress';
       }
 
       const phaseOutput: any = { phaseId: phase.id, name: phase.name, tasks: [] };
@@ -139,6 +153,7 @@ export class MissionOrchestrator {
         ctx.heartbeat?.();
         const taskKey = JSON.stringify([phase.id, task.id]);
         if (!savedTask) {
+          const startedAt = Date.now();
           await ctx.broadcast({
             type: 'task_started',
             missionId: ctx.missionId,
@@ -152,25 +167,43 @@ export class MissionOrchestrator {
               agentRole: task.agentRole,
             },
           });
-          await this.updateTask(ctx, phase.id, task.id, { status: 'in_progress', startedAt: Date.now() });
-
+          await this.updateTask(ctx, phase.id, task.id, { status: 'in_progress', startedAt });
+          task.status = 'in_progress';
+          task.startedAt = startedAt;
         }
 
         let result: TaskExecutionResult;
         try {
           const agentId = await agentRuntime.getOrCreateAgent(task.agentRole, task.systemPrompt);
-          result = await agentRuntime.executeTask(
+          const executionArgs: [
+            string,
+            Task,
+            Phase,
+            Plan,
+            boolean,
+            AgentExecutionPolicy,
+            CompletedTaskSummary[],
+          ] = [
             agentId,
             task,
             phase,
             plan,
             !!savedTask,
             ctx.executionPolicy || DEFAULT_AGENT_EXECUTION_POLICY,
-          );
+            [...completedTaskSummaries.values()],
+          ];
+          const taskRetryGuidance = ctx.retryGuidance ? ctx.retryGuidance : undefined;
+          result = taskRetryGuidance
+            ? await agentRuntime.executeTask(...executionArgs, taskRetryGuidance)
+            : await agentRuntime.executeTask(...executionArgs);
         } catch (err) {
           if (!savedTask) {
             const error = err instanceof Error ? err.message : String(err);
-            await this.updateTask(ctx, phase.id, task.id, { status: 'failed', completedAt: Date.now(), output: error });
+            const completedAt = Date.now();
+            await this.updateTask(ctx, phase.id, task.id, { status: 'failed', completedAt, output: error });
+            task.status = 'failed';
+            task.completedAt = completedAt;
+            task.output = error;
             await ctx.broadcast({
               type: 'task_failed',
               missionId: ctx.missionId,
@@ -194,12 +227,17 @@ export class MissionOrchestrator {
           saveCheckpoint();
         }
 
+        const completedAt = Date.now();
         await this.updateTask(ctx, phase.id, task.id, {
           status: 'completed',
-          completedAt: Date.now(),
+          completedAt,
           output: result.output,
           artifacts: result.artifacts,
         });
+        task.status = 'completed';
+        task.completedAt = completedAt;
+        task.output = result.output;
+        task.artifacts = result.artifacts;
         if (!savedTask) {
           await ctx.broadcast({
             type: 'task_completed',
@@ -220,11 +258,10 @@ export class MissionOrchestrator {
         phaseOutput.tasks.push({ taskId: task.id, status: 'completed', artifacts: result.artifacts });
         compensations.push({ phaseId: phase.id, action: `revert-phase-${phase.id}` });
         completedInPhase.add(task.id);
-        completedTaskSummaries.set(task.id, {
-          taskId: task.id,
-          output: result.output.slice(0, 1_200),
-          artifactNames: result.artifacts.map((artifact) => artifact.name),
-        });
+        completedTaskSummaries.set(
+          task.id,
+          createCompletedTaskSummary(task.id, result.output, result.artifacts, task.requiredActions),
+        );
         ctx.heartbeat?.();
       };
 
@@ -304,6 +341,7 @@ export class MissionOrchestrator {
 
       if (!phaseIsComplete) {
         await this.updatePhase(ctx, phase.id, { status: 'awaiting_approval' });
+        phase.status = 'awaiting_approval';
         await ctx.broadcast({ type: 'phase_completed', missionId: ctx.missionId, timestamp: Date.now(), data: { phaseId: phase.id, phaseName: phase.name, artifacts: phaseOutput.tasks.flatMap((t: any) => t.artifacts) } });
       }
 
@@ -316,6 +354,7 @@ export class MissionOrchestrator {
         const question = phase.approvalQuestion || `Phase "${phase.name}" complete. Approve to continue?`;
         const approvalId = `approval-${ctx.missionId}-${phase.id}-${Date.now()}`;
         await this.updatePhase(ctx, phase.id, { approvalQuestion: question });
+        phase.approvalQuestion = question;
         await ctx.broadcast({
           type: 'approval_requested',
           missionId: ctx.missionId,
@@ -325,14 +364,19 @@ export class MissionOrchestrator {
         const decision = await ctx.waitForApproval(phase.id, question);
         if (!decision.approved) {
           await this.updatePhase(ctx, phase.id, { status: 'rejected', rejectionReason: decision.reason });
+          phase.status = 'rejected';
+          phase.rejectionReason = decision.reason;
           await ctx.broadcast({ type: 'approval_rejected', missionId: ctx.missionId, timestamp: Date.now(), data: { phaseId: phase.id, reason: decision.reason } });
           return { plan, outputs: { ...outputs, status: 'rejected_at_phase', phaseId: phase.id, reason: decision.reason }, compensations };
         }
         await this.updatePhase(ctx, phase.id, { status: 'approved', approvedAt: Date.now(), approvedBy: 'user' });
+        phase.status = 'approved';
+        phase.approvedBy = 'user';
         await ctx.broadcast({ type: 'approval_approved', missionId: ctx.missionId, timestamp: Date.now(), data: { phaseId: phase.id } });
         await ctx.broadcast({ type: 'phase_approved', missionId: ctx.missionId, timestamp: Date.now(), data: { phaseId: phase.id } });
       } else {
         await this.updatePhase(ctx, phase.id, { status: 'completed' });
+        phase.status = 'completed';
       }
 
       completedPhases.add(phase.id);
@@ -424,43 +468,78 @@ export class MissionOrchestrator {
   }
 
   async evaluateMissionCompletion(
-    ctx: Pick<MissionContext, 'missionId' | 'prompt' | 'tenantId' | 'agentRuntimeUrl'>,
+    ctx: Pick<MissionContext, 'missionId' | 'prompt' | 'tenantId' | 'metadata' | 'agentRuntimeUrl'>,
     plan: Plan,
-    outputs: { phases?: Array<{ tasks?: Array<{ artifacts?: unknown[]; output?: string }> }> },
+    outputs: {
+      phases?: Array<{
+        phaseId?: string;
+        tasks?: Array<{
+          taskId?: string;
+          status?: string;
+          artifacts?: Array<{ name: string; type: string; content: string }>;
+          output?: string;
+        }>;
+      }>;
+    },
   ): Promise<boolean> {
     const phases = outputs?.phases || [];
-    if (!plan.phases.length || phases.length === 0) return false;
-    const artifacts = phases.flatMap((p) => (p.tasks || []).flatMap((t) => t.artifacts || []));
-    const artifactSummary = artifacts.length
-      ? artifacts.map((a) => `- ${typeof a === 'string' ? a : JSON.stringify(a)}`).join('\n')
-      : '(none)';
+    if (!plan.phases.length || phases.length !== plan.phases.length) return false;
+    const expectedTaskIds = plan.phases.flatMap((phase) =>
+      phase.tasks.map((task) => JSON.stringify([phase.id, task.id])),
+    );
+    const actualTasks = phases.flatMap((phase) =>
+      (phase.tasks || []).map((task) => ({
+        phaseId: phase.phaseId,
+        taskId: task.taskId,
+        status: task.status,
+      })),
+    );
+    const actualTaskIds = actualTasks.map((task) => JSON.stringify([task.phaseId, task.taskId]));
+    if (
+      actualTasks.length !== expectedTaskIds.length
+      || actualTasks.some((task) => task.status !== 'completed')
+      || expectedTaskIds.some((taskId) => !actualTaskIds.includes(taskId))
+    ) {
+      logger.warn(
+        { missionId: ctx.missionId, expectedTaskIds, actualTasks },
+        'Mission completion review refused because the completed task set does not match the plan',
+      );
+      return false;
+    }
 
     const agentRuntime = this.agentRuntime || new MissionAgentRuntime({
       missionId: ctx.missionId,
       tenantId: ctx.tenantId || 'tenant-1',
+      metadata: ctx.metadata,
       agentRuntimeUrl: ctx.agentRuntimeUrl,
     });
-    const reviewerAgentId = await agentRuntime.getOrCreateAgent(
-      'mission-evaluator',
-      MISSION_REVIEWER_SYSTEM_PROMPT,
+    const plannedTasks = new Map(plan.phases.flatMap((phase) =>
+      phase.tasks.map((task) => [task.id, task] as const),
+    ));
+    const completedTaskSummaries: CompletedTaskSummary[] = phases.flatMap((phase, phaseIndex) =>
+      (phase.tasks || []).map((task, taskIndex) => {
+        const artifacts = task.artifacts || [];
+        const taskId = task.taskId || `phase-${phaseIndex + 1}-task-${taskIndex + 1}`;
+        return {
+          taskId,
+          output: task.output || '',
+          artifactNames: artifacts.map((artifact) => artifact.name),
+          artifacts,
+          requiredActions: plannedTasks.get(taskId)?.requiredActions || [],
+        };
+      }),
     );
-    const review = await agentRuntime.executePromptTask(reviewerAgentId, {
-      taskId: `${ctx.missionId}:review:completion`,
-      type: 'review',
-      prompt: [
-        `Mission goal: ${ctx.prompt}`,
-        `Plan summary: ${plan.summary || ''}`,
-        'Produced artifacts:',
-        artifactSummary,
-        'Do these artifacts fully satisfy the mission goal? Answer exactly "yes" or "no".',
-      ].join('\n'),
-      phaseId: 'mission-review',
-      executionPolicy: MISSION_REVIEWER_EXECUTION_POLICY,
-    });
-    const answer = review.output.trim().toLowerCase();
-    if (answer !== 'yes' && answer !== 'no') {
-      throw new Error(`Mission evaluator returned an invalid decision: ${review.output.slice(0, 200)}`);
+    const review = await agentRuntime.reviewMissionCompletion(
+      ctx.prompt,
+      plan.summary || '',
+      completedTaskSummaries,
+    );
+    if (!review.satisfied) {
+      logger.warn(
+        { missionId: ctx.missionId, gaps: review.gaps },
+        'Mission completion review identified unmet requirements',
+      );
     }
-    return answer === 'yes';
+    return review.satisfied;
   }
 }

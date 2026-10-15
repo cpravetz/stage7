@@ -1173,7 +1173,7 @@ export function resolveActionLabel(skillName: string, explicit?: string): { acti
 }
 
 export function createDeclarativeCodeSkill(options: DeclarativeSkillOptions): Tool {
-  const persistenceEnvVar = options.persistenceEnvVar || 'STORAGE_DIR'
+  const persistenceEnvVar = options.persistenceEnvVar || 'ASSISTANT_HOME'
   let rawFnStr = stripTypeScript(options.handler.toString().trim())
   // Arrow functions first: an arrow source also matches the named-function patterns
   // below (`async (a, b) => {}` looks like an identifier call), and prefixing it with

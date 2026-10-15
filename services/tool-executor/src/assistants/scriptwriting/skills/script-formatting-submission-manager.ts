@@ -47,7 +47,7 @@ export const SCRIPT_FORMATTING_SUBMISSION_MANAGER = createDeclarativeCodeSkill({
   id: 'scriptwriting-script-formatting-submission-manager',
   name: 'Script Formatting & Submission Manager',
   description: 'Parses raw script text into scene headings, action, character cues, parentheticals, dialogue and transitions, then re-renders it in Fountain syntax or industry-standard screenplay layout with page markers. Submission status reports exactly what was sent: nothing is claimed as submitted without a configured endpoint and explicit confirmation.',
-  persistenceEnvVar: 'SCRIPTWRITING_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: SCRIPT_FORMATTING_INPUT,
   outputSchema: SCRIPT_FORMATTING_OUTPUT,
   triggers: [
@@ -316,7 +316,7 @@ export const SCRIPT_FORMATTING_SUBMISSION_MANAGER = createDeclarativeCodeSkill({
         submissionMessage = 'No submission platforms were selected; the formatted script was produced and staged locally only.';
       } else if (!endpoint) {
         submissionStatus = 'blocked-not-connected';
-        submissionMessage = 'Platforms were selected but no submission endpoint is configured, so nothing was sent to ' + submitTo.join(', ') + '. Set submissionEndpointUrl (or SCRIPTWRITING_SUBMISSION_ENDPOINT) to enable dispatch.';
+        submissionMessage = 'Platforms were selected but no submission endpoint is configured, so nothing was sent to ' + submitTo.join(', ') + '. Set submissionEndpointUrl (in Skill configuration) to enable dispatch.';
       } else if (dryRun) {
         submissionStatus = 'dry-run';
         submissionMessage = 'Submission to ' + submitTo.join(', ') + ' was staged as a dry run against ' + endpoint + '. No request was sent. Re-run with dryRun false and confirmation true to submit.';

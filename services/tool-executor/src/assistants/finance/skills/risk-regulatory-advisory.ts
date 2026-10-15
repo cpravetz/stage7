@@ -35,7 +35,7 @@ const riskRegulatoryAdvisorySkill = createDeclarativeCodeSkill({
   id: 'risk-regulatory-advisory',
   name: 'Risk & Regulatory Advisory',
   description: 'Assess financial and regulatory risk (VaR, ES, CVA, market/credit/operational) with stress testing and concentration analysis on a periodic schedule.',
-  persistenceEnvVar: 'FINANCE_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   tier: 'advise',
   domainKnowledge: 'risk-management',
   inputSchema: riskRegulatoryAdvisoryInputSchema,
@@ -54,7 +54,7 @@ const riskRegulatoryAdvisorySkill = createDeclarativeCodeSkill({
 
       // The store path is reported back to the caller so a persisted assessment can be
       // located, but the store itself is owned by ctx.store, which resolves the
-      // directory from FINANCE_HOME and creates it as needed.
+      // directory from ASSISTANT_HOME and creates it as needed.
       function storePath(): string {
         return ctx.store.getFilePath('risk-assessments');
       }
@@ -87,8 +87,8 @@ const riskRegulatoryAdvisorySkill = createDeclarativeCodeSkill({
       const apiKey = String((ctx.getCredential ? ctx.getCredential('apiKey') : undefined) || '');
 
       if (!endpointUrl) {
-        const present = [{ id: 'not-connected', title: 'Not connected', kind: 'text', body: 'Risk assessment endpoint is not configured. Set FINANCE_RISK_ENDPOINT to enable full risk assessment.' }];
-        return { success: false, status: 'not-connected', data: null, error: 'Not connected: FINANCE_RISK_ENDPOINT is not configured', present };
+        const present = [{ id: 'not-connected', title: 'Not connected', kind: 'text', body: 'Risk assessment endpoint is not configured. Set endpointUrl in this Skill's configuration to enable full risk assessment.' }];
+        return { success: false, status: 'not-connected', data: null, error: 'Not connected: risk assessment endpoint not configured', present };
       }
 
       const headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apiKey };

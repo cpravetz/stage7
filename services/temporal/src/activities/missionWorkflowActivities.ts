@@ -2,20 +2,23 @@ import { Context } from '@temporalio/activity';
 import {
   DEFAULT_AGENT_EXECUTION_POLICY,
   Plan,
+  PlanSchema,
   Phase,
   Task,
 } from '@stage7-nextgen/shared';
 import { logger } from '@stage7-nextgen/shared';
 import { MissionAgentRuntime, TaskExecutionResult } from '../agent/MissionAgentRuntime';
 import { applyPhaseReview, MissionPhaseReview } from '../agent/MissionAgentRuntime';
+import { isHumanAgentRole } from '../planner/MissionPlanner';
 import { MissionOrchestrator } from '../planner/MissionOrchestrator';
-import { WorkflowInput } from '../types/workflow';
+import { CompletedTaskSummary, WorkflowInput } from '../types/workflow';
 
 export interface MissionTaskActivityInput {
   input: WorkflowInput;
   plan: Plan;
   phase: Phase;
   task: Task;
+  completedTaskSummaries?: CompletedTaskSummary[];
 }
 
 export interface MissionTaskSelectionActivityInput {
@@ -23,14 +26,14 @@ export interface MissionTaskSelectionActivityInput {
   plan: Plan;
   phase: Phase;
   completedTaskIds: string[];
-  completedTaskSummaries: Array<{ taskId: string; output: string; artifactNames: string[] }>;
+  completedTaskSummaries: CompletedTaskSummary[];
 }
 
 export interface MissionPhaseReviewActivityInput {
   input: WorkflowInput;
   plan: Plan;
   phase: Phase;
-  completedTaskSummaries: Array<{ taskId: string; output: string; artifactNames: string[] }>;
+  completedTaskSummaries: CompletedTaskSummary[];
   reviewIndex: number;
 }
 
@@ -144,6 +147,20 @@ async function persistMissionPlan(input: WorkflowInput, plan: Plan): Promise<voi
 }
 
 export async function prepareMissionActivity(input: WorkflowInput): Promise<Plan> {
+  if (input.metadata?.retriedFrom) {
+    const persistenceUrl = serviceUrl('ARTIFACTS_URL', 'http://artifacts:4200');
+    const response = await fetch(
+      `${persistenceUrl}/api/artifacts/missions/${encodeURIComponent(input.missionId)}/plan`,
+    );
+    if (!response.ok) {
+      const details = (await response.text()).slice(0, 1000);
+      throw new Error(`Could not load persisted plan for mission retry (${response.status}): ${details}`);
+    }
+    const plan = PlanSchema.parse(await response.json());
+    logger.info({ missionId: input.missionId }, 'Reusing persisted plan for mission retry');
+    return plan;
+  }
+
   await broadcast(input, {
     type: 'planner_started',
     missionId: input.missionId,
@@ -160,6 +177,7 @@ export async function prepareMissionActivity(input: WorkflowInput): Promise<Plan
   const plannerRuntime = new MissionAgentRuntime({
     missionId: input.missionId,
     tenantId: input.tenantId || 'tenant-1',
+    metadata: input.metadata,
     agentRuntimeUrl: process.env.AGENT_RUNTIME_URL,
   });
   const plan = await plannerRuntime.generatePlan(input.prompt, input.metadata);
@@ -208,6 +226,12 @@ export async function selectNextMissionTaskActivity({
   completedTaskIds,
   completedTaskSummaries,
 }: MissionTaskSelectionActivityInput): Promise<string> {
+  const humanTask = phase.tasks.find((task) => isHumanAgentRole(task.agentRole));
+  if (humanTask) {
+    throw new Error(
+      `Mission phase "${phase.id}" contains task "${humanTask.id}" with human agentRole "${humanTask.agentRole}"; use requiresApproval or requiresClarification instead. Refusing to send the phase to the task selector.`,
+    );
+  }
   const activityContext = Context.current();
   const heartbeatTimer = setInterval(() => {
     activityContext.heartbeat({
@@ -220,6 +244,7 @@ export async function selectNextMissionTaskActivity({
     const agentRuntime = new MissionAgentRuntime({
       missionId: input.missionId,
       tenantId: input.tenantId || 'tenant-1',
+      metadata: input.metadata,
       agentRuntimeUrl: process.env.AGENT_RUNTIME_URL,
     });
     const selectedTask = await agentRuntime.selectNextTask(
@@ -254,6 +279,7 @@ export async function reviewAndAmendMissionPhaseActivity({
     const agentRuntime = new MissionAgentRuntime({
       missionId: input.missionId,
       tenantId: input.tenantId || 'tenant-1',
+      metadata: input.metadata,
       agentRuntimeUrl: process.env.AGENT_RUNTIME_URL,
     });
     const review: MissionPhaseReview = await agentRuntime.reviewPhase(
@@ -290,6 +316,7 @@ export async function executeMissionTaskActivity({
   plan,
   phase,
   task,
+  completedTaskSummaries = [],
 }: MissionTaskActivityInput): Promise<TaskExecutionResult> {
   const activityContext = Context.current();
   const retrying = activityContext.info.attempt > 1;
@@ -297,6 +324,7 @@ export async function executeMissionTaskActivity({
   const agentRuntime = new MissionAgentRuntime({
     missionId: input.missionId,
     tenantId: input.tenantId || 'tenant-1',
+    metadata: input.metadata,
     agentRuntimeUrl: process.env.AGENT_RUNTIME_URL,
   });
   const heartbeatTimer = setInterval(() => {
@@ -304,6 +332,11 @@ export async function executeMissionTaskActivity({
   }, 30_000);
 
   try {
+    if (isHumanAgentRole(task.agentRole)) {
+      throw new Error(
+        `Mission task "${task.id}" cannot be executed with human agentRole "${task.agentRole}"; represent human decisions with requiresApproval or requiresClarification.`,
+      );
+    }
     await persistUpdate(input, 'tasks', task.id, {
       phaseId: phase.id,
       status: 'in_progress',
@@ -326,14 +359,18 @@ export async function executeMissionTaskActivity({
     }
 
     const registeredAgentId = await agentRuntime.getOrCreateAgent(task.agentRole, task.systemPrompt);
-    const result = await agentRuntime.executeTask(
+    const executionArgs = [
       registeredAgentId,
       task,
       phase,
       plan,
       retrying,
       DEFAULT_AGENT_EXECUTION_POLICY,
-    );
+      completedTaskSummaries,
+    ] as const;
+    const result = input.retryGuidance
+      ? await agentRuntime.executeTask(...executionArgs, input.retryGuidance)
+      : await agentRuntime.executeTask(...executionArgs);
     await persistUpdate(input, 'tasks', task.id, {
       phaseId: phase.id,
       status: 'completed',

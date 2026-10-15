@@ -8,7 +8,7 @@ export const CREATE_ROADMAP = createDeclarativeCodeSkill({
     isSkill: true,
     name: 'Create Roadmap',
     description: 'Generate a product roadmap with RICE-prioritized goals, topologically-sorted initiatives, capacity planning, milestones, risk assessment, theme allocation, and OKR alignment.',
-    persistenceEnvVar: 'STORAGE_DIR',
+    persistenceEnvVar: 'ASSISTANT_HOME',
     inputSchema: {
       type: 'object',
       properties: {

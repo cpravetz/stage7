@@ -70,12 +70,10 @@ router.post(
       throw NextGenError.badRequest(`Cannot retry mission with status: ${original.status}`);
     }
 
-    const originalPrompt = original.input?.prompt || '';
+    const originalPrompt = (original.input?.prompt || '')
+      .replace(/\n*--- RETRY GUIDANCE ---[\s\S]*?--- END RETRY GUIDANCE ---/g, '')
+      .trimEnd();
     const guidance = retryPrompt || userGuidance || '';
-    
-    const enhancedPrompt = guidance
-      ? `${originalPrompt}\n\n--- RETRY GUIDANCE ---\n${guidance}\n--- END RETRY GUIDANCE ---`
-      : originalPrompt;
 
     // A retry must know completed work so it does not replay side effects.
     const missionId = original.missionId;
@@ -110,8 +108,9 @@ router.post(
       missionId: missionId, // Keep the same mission ID
       tenantId: original.input?.tenantId || '',
       assistantId: original.input?.assistantId || '',
-      prompt: enhancedPrompt,
+      prompt: originalPrompt,
       contextChunks: original.input?.contextChunks,
+      retryGuidance: guidance,
       metadata: {
         ...original.input?.metadata,
         retryCount: retryCount + 1,

@@ -8,7 +8,7 @@ export const CONTENT_STRATEGY_SEO_EVALUATOR = createDeclarativeCodeSkill({
   name: 'Content Strategy & SEO Evaluator',
   description:
     'Evaluates supplied content performance records (or records returned by connected analytics) and ranks them by a relative engagement index. Measures CTR and conversion rate from the supplied impressions, clicks, and conversions; excludes any metric the caller did not supply instead of scoring it as zero, and states which inputs are missing. Queries no search-volume or ranking data, so the index is relative to the supplied set only.',
-  persistenceEnvVar: 'CONTENT_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   tier: 'advise',
   domainKnowledge:
     'Content performance measurement: CTR and conversion-rate derivation, relative engagement indexing, search-intent and keyword-match evaluation, and editorial performance benchmarking',

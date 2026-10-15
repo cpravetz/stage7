@@ -8,7 +8,7 @@ export const CLINICAL_DECISION_SUPPORT = createDeclarativeCodeSkill({
   name: 'Clinical Decision Support',
   description:
     'Clinical reasoning assistant for healthcare professionals. Provides differential diagnosis suggestions, risk assessments, and care plan recommendations with heavy safety caveats. Always recommends consulting a qualified clinician. This tool does not replace clinical judgment.',
-  persistenceEnvVar: 'HEALTHCARE_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   tier: 'advise',
   domainKnowledge: 'Clinical reasoning, differential diagnosis, risk assessment, and care plan recommendations',
   inputSchema: {

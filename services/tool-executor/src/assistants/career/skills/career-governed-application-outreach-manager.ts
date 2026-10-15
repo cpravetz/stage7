@@ -31,7 +31,7 @@ const GOVERNED_APPLICATION_OUTREACH_MANAGER = createDeclarativeCodeSkill({
   id: 'career-governed-application-outreach-manager',
   name: 'Application & Outreach Manager',
   description: 'Customizes resumes and cover letters, drafts outreach messages, and stages submissions for your review before anything is sent, with a full audit log. Delegates to career-networking-outreach and career-application-execution.',
-  persistenceEnvVar: 'STORAGE_DIR',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   emitEvent: 'career.application_outreach.staged',
   inputSchema: GOVERNED_APPLICATION_OUTREACH_MANAGER_INPUT,
   outputSchema: GOVERNED_APPLICATION_OUTREACH_MANAGER_OUTPUT,

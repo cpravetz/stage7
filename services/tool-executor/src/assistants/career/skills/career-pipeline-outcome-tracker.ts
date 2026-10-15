@@ -22,7 +22,7 @@ const PIPELINE_OUTCOME_TRACKER = createDeclarativeCodeSkill({
 id: 'career-pipeline-outcome-tracker',
 name: 'Pipeline & Outcome Tracker',
 description: 'Tracks application statuses, records outcomes and feedback, and combines pipeline reporting with outcome history. Delegates to career-pipeline-report and career-outcome, with honest not-connected fallbacks for either dependency.',
-persistenceEnvVar: 'CAREER_HOME',
+persistenceEnvVar: 'ASSISTANT_HOME',
 inputSchema: PIPELINE_OUTCOME_TRACKER_INPUT,
 outputSchema: careerResultSchema('Pipeline data, outcome recording results, role info, and stale follow-ups'),
 triggers: [

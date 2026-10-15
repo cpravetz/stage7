@@ -21,7 +21,7 @@ export const ROOM_STATUS_MANAGER_SKILL = createDeclarativeCodeSkill({
   id: 'hotel-room-status-manager',
   name: 'Room Status & Availability',
   description: 'Update room status and saleable availability, including marking a room occupied on arrival, available on departure, or out of order. Mutating requests require confirmation and default to dry-run.',
-  persistenceEnvVar: 'HOTEL_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: ROOM_STATUS_INPUT_SCHEMA,
   outputSchema: HOTEL_EXTERNAL_OUTPUT_SCHEMA,
   tier: 'represent',

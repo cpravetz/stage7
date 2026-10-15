@@ -54,7 +54,7 @@ const RESEARCH_PLANNING = createDeclarativeCodeSkill({
   id: 'research-planning',
   name: 'Research & Planning',
   description: 'Market and security research: filters the research documents supplied with the request, and supplements them with a real live web search for public source pointers via the general web search tool, labelling supplied material and web results apart and reporting whether the web portion returned results, returned none, errored, or was unavailable; a web portion that could not be retrieved is surfaced at the top level as a partial result with an error, or as a failure when nothing was returned at all, never as a clean pass. Financial planning actions compute projections from supplied profile values and assumptions. Analyst estimates, the earnings calendar, ESG scores, and price alerts are declared but not connected to any data provider and return no data.',
-  persistenceEnvVar: 'INVESTMENT_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   tier: 'aid',
   domainKnowledge: 'Equity research methods, earnings and filing analysis, ESG evaluation, and financial planning projections',
   inputSchema: researchPlanningInputSchema,

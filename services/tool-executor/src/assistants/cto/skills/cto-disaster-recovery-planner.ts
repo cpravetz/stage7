@@ -18,7 +18,7 @@ export const ctoDisasterRecoveryPlanner = createDeclarativeCodeSkill({
   id: 'cto-disaster-recovery-planner',
   name: 'Disaster Recovery Planner',
   description: 'Incident readiness planner using disaster recovery checks with configurable RTO/RPO targets.',
-  persistenceEnvVar: 'CTO_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: {
     type: 'object',
     properties: {

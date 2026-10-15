@@ -9,7 +9,7 @@ export const ANALYTICS_ADHOC_QUERY_EVALUATOR = createDeclarativeCodeSkill({
   isSkill: true,
   name: 'Adhoc Query Evaluator',
   description: 'Executes read-only warehouse queries and explains the results. Triggered on demand by the user for ad-hoc analytical exploration.',
-  persistenceEnvVar: 'ANALYTICS_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: ANALYTICS_INPUT_SCHEMA,
   outputSchema: ANALYTICS_OUTPUT_SCHEMA,
   triggers: [

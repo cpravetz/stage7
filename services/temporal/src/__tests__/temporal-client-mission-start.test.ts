@@ -244,6 +244,52 @@ describe('TemporalClient mission start', () => {
     )
   })
 
+  it('loads the persisted plan when retrying before any phase or task completed', async () => {
+    delete process.env.TEMPORAL_ADDRESS
+    process.env.ARTIFACTS_URL = 'http://artifacts'
+    delete process.env.GATEWAY_URL
+    const directRun = jest.fn(async () => ({}))
+    const client = new TemporalClient('default', directRun)
+    const input = {
+      missionId: 'mission-retry-no-progress',
+      tenantId: 'tenant-1',
+      assistantId: 'assistant-1',
+      prompt: 'Continue the mission',
+      retryGuidance: 'Use the existing receipts.',
+      metadata: { retriedFrom: 'mission-retry-no-progress' },
+      completedPhases: [],
+      completedTasks: [],
+      resumeFromPhaseId: 'phase-1',
+      resumeFromTaskId: 'task-1',
+    }
+    const plan = {
+      summary: 'Continue saved work',
+      estimatedDuration: 'short',
+      estimatedCost: 'low',
+      requiresClarification: false,
+      clarificationQuestions: [],
+      phases: [],
+    }
+    jest.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
+      const requestUrl = String(url)
+      if (requestUrl.endsWith(`/api/artifacts/missions/${input.missionId}/plan`)) {
+        return { ok: true, status: 200, json: async () => plan } as Response
+      }
+      if (requestUrl.endsWith('/recovery-lease')) {
+        return { ok: true, status: 200, json: async () => ({ claimed: true }) } as Response
+      }
+      return { ok: true, status: 200, json: async () => ({}) } as Response
+    })
+
+    await expect(client.startMission(input)).resolves.toBe(`mission-${input.missionId}`)
+
+    expect(directRun).toHaveBeenCalledWith(
+      input,
+      expect.objectContaining({ plan, completedTasks: [], completedPhases: [] }),
+      expect.any(Function),
+    )
+  })
+
   it('recovers stale pause and termination requests without replaying uncertain task side effects', async () => {
     delete process.env.TEMPORAL_ADDRESS
     process.env.ARTIFACTS_URL = 'http://artifacts'

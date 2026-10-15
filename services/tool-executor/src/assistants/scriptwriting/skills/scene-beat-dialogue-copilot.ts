@@ -15,7 +15,7 @@ const SCENE_BEAT_DIALOGUE_INPUT = {
     genre: SchemaProps.text({ title: 'Genre', description: 'Genre (e.g. drama, comedy, thriller, documentary)', order: 7, hint: 'Genre shapes pacing and cast defaults' }),
     audience: SchemaProps.text({ title: 'Audience', description: 'Intended audience', order: 8, hint: 'Recorded on the outline for submission review' }),
     targetDuration: SchemaProps.number({ title: 'Target Runtime', description: 'Target runtime in minutes', order: 9, minimum: 1, default: 5, hint: 'Used to derive scene count and page budget when sceneCount is not set' }),
-    save: SchemaProps.boolean({ title: 'Save', description: 'Persist the generated scene outline', order: 10, default: true, hint: 'Writes to SCRIPTWRITING_HOME/scene-beat-dialogue.json when true' }),
+    save: SchemaProps.boolean({ title: 'Save', description: 'Persist the generated scene outline', order: 10, default: true, hint: 'Writes to ASSISTANT_HOME/scene-beat-dialogue.json when true' }),
   },
   required: ['topic'],
 };
@@ -48,7 +48,7 @@ export const SCENE_BEAT_DIALOGUE_COPILOT = createDeclarativeCodeSkill({
   id: 'scriptwriting-scene-beat-dialogue-copilot',
   name: 'Scene, Beat & Dialogue Copilot',
   description: 'Generates a distinct scene-by-scene outline with story-function beats, screenplay slug lines, action and character dialogue, plus a formatted screenplay and act/page breakdown. Each scene advances a different story beat rather than repeating one template.',
-  persistenceEnvVar: 'SCRIPTWRITING_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: SCENE_BEAT_DIALOGUE_INPUT,
   outputSchema: SCENE_BEAT_DIALOGUE_OUTPUT,
   triggers: [

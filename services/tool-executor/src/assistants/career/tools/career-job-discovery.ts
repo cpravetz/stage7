@@ -130,7 +130,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
   id: 'career-job-discovery',
   name: 'Job Discovery',
   description: 'Finds real job listings from public, no-auth sources and returns normalized postings.',
-  persistenceEnvVar: 'CAREER_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   configSchema: CAREER_BASE_CONFIG_SCHEMA,
   inputSchema: CAREER_JOB_DISCOVERY_INPUT,
   outputSchema: careerResultSchema(
@@ -148,7 +148,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
   manifest: {
     language: 'javascript',
     entrypoint: 'index.js',
-    readsEnvironment: ['CAREER_HOME', 'CAREER_REQUEST_TIMEOUT_MS', 'CAREER_REQUEST_RETRIES', 'CAREER_REQUEST_RETRY_BASE_MS', 'CAREER_REQUEST_RETRY_MAX_MS', 'CAREER_PER_SOURCE_CONCURRENCY', 'CAREER_INTER_REQUEST_DELAY_MS'],
+    readsEnvironment: ['ASSISTANT_HOME', 'CAREER_PER_SOURCE_CONCURRENCY', 'CAREER_INTER_REQUEST_DELAY_MS'],
     // A discovery run reads many sources, paginates them, and can enrich each
     // posting with a detail request. The previous 30s default was shared with
     // every other code skill and could SIGKILL a legitimate multi-source sweep,

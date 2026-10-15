@@ -18,7 +18,7 @@ export const SUPPORT_SENTIMENT_ANALYSIS = createDeclarativeCodeSkill({
   id: 'support-sentiment-analysis',
   name: 'Analyze Ticket Sentiment',
   description: 'Analyze sentiment of customer communications. Triggered automatically on new ticket receipt.',
-  persistenceEnvVar: 'SUPPORT_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   tier: 'advise',
   domainKnowledge: 'Customer sentiment analysis, support ticket prioritization, and emotional tone detection.',
   inputSchema: {
@@ -65,7 +65,7 @@ export const SUPPORT_ISSUE_ANALYSIS = createDeclarativeCodeSkill({
   id: 'support-issue-analysis',
   name: 'Analyze Support Issue',
   description: 'Analyze and classify support issues for escalation. Triggered when ticket is escalated to tier 2.',
-  persistenceEnvVar: 'SUPPORT_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   tier: 'advise',
   domainKnowledge: 'Issue classification, root cause analysis, support escalation patterns, and customer context evaluation.',
   inputSchema: {
@@ -113,7 +113,7 @@ export const SUPPORT_SEARCH_KB = createDeclarativeCodeSkill({
   id: 'support-search-kb',
   name: 'Search Knowledge Base',
   description: 'Search the support knowledge base for relevant articles. Triggered automatically on new ticket receipt.',
-  persistenceEnvVar: 'SUPPORT_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   tier: 'advise',
   domainKnowledge: 'Knowledge base search, article retrieval, support documentation lookup, and self-service resolution.',
   inputSchema: {

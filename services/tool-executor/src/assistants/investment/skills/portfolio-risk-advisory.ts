@@ -32,7 +32,7 @@ const PORTFOLIO_RISK_ADVISORY = createDeclarativeCodeSkill({
   id: 'portfolio-risk-advisory',
   name: 'Portfolio & Risk Advisory',
   description: 'Comprehensive portfolio analysis, optimization, risk assessment (VaR, stress testing), and investment evaluation using quantitative models and factor analysis.',
-  persistenceEnvVar: 'INVESTMENT_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   tier: 'advise',
   domainKnowledge: 'Portfolio construction, value-at-risk and stress testing, factor analysis, and quantitative allocation methods',
   inputSchema: portfolioAdvisoryInputSchema,

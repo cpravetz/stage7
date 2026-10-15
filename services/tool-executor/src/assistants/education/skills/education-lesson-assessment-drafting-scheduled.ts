@@ -11,7 +11,7 @@ export const LESSON_ASSESSMENT_DRAFTING_SCHEDULED = createDeclarativeCodeSkill({
   id: 'education-lesson-assessment-drafting-scheduled',
   name: 'Lesson & Assessment Sweep',
   description: 'Scheduled sweep of configured courses, drafting assessments for courses that have none.',
-  persistenceEnvVar: 'EDUCATION_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   tier: 'represent',
   emitEvent: 'education.assessment.drafted',
   isSkill: true,

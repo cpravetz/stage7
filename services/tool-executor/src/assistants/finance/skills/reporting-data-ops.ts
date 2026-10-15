@@ -43,7 +43,7 @@ const reportingDataOpsSkill = createDeclarativeCodeSkill({
   id: 'reporting-data-ops',
   name: 'Reporting & Data Ops',
   description: 'Assemble periodic financial reports from ledger lines, deriving section and net totals and cross-checking any stated figure, then stage the report for a configured board-reporting destination behind an explicit confirmation gate. With no destination configured it renders the report from local data and marks the publish as not connected.',
-  persistenceEnvVar: 'STORAGE_DIR',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   tier: 'represent',
   emitEvent: 'finance.report.published',
   domainKnowledge: 'US GAAP/IFRS reporting standards, board reporting templates, and financial statement preparation',
@@ -70,7 +70,7 @@ const reportingDataOpsSkill = createDeclarativeCodeSkill({
     // write, so gating on it would block the analysis-only and dry-run paths that
 
     // report what this Skill can honestly compute without one.
-    persistenceEnv: 'FINANCE_HOME',
+    persistenceEnv: 'ASSISTANT_HOME',
     timeoutMs: 30000
   },
   handler: async function handler(input, ctx) {

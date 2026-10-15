@@ -8,7 +8,7 @@ const EVENT_PLANNING_BUDGETING = createDeclarativeCodeSkill({
     'Create comprehensive event plans and budgets with timelines, vendor categories, cost estimates, and risk mitigation. Reasoning-only: generates the plan draft for approval before any bookings.',
   tier: 'advise',
   domainKnowledge: 'Event planning conventions, budget estimation, vendor cost categories, timelines, and risk mitigation',
-  persistenceEnvVar: 'EVENT_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: {
     type: 'object',
     properties: {

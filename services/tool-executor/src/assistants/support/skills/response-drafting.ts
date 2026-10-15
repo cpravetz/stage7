@@ -17,7 +17,7 @@ const RESPONSE_DRAFTING_USER = createDeclarativeCodeSkill({
   id: 'response-drafting-user',
   name: 'Response Drafting',
   description: 'Draft a support reply to a customer message you supply, using KB articles and response templates.',
-  persistenceEnvVar: 'SUPPORT_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   tier: 'aid',
   domainKnowledge: 'Customer success metrics (CSAT, NPS, Churn Rate), SLA management, support escalation tiers, ticket triage',
   inputSchema: {

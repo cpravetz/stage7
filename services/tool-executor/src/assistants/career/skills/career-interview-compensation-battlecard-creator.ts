@@ -19,7 +19,7 @@ const INTERVIEW_COMPENSATION_BATTLECARD = createDeclarativeCodeSkill({
   id: 'career-interview-compensation-battlecard-creator',
   name: 'Interview & Negotiation Prep',
   description: 'Generates a tailored interview Q&A briefing and a compensation negotiation script for a specific company. Delegates to career-interview-prep and career-advisory where available.',
-  persistenceEnvVar: 'STORAGE_DIR',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: INTERVIEW_COMPENSATION_BATTLECARD_INPUT,
   outputSchema: careerResultSchema('Interview briefing with questions and negotiation guide, derived from inputs'),
   triggers: [
@@ -194,7 +194,7 @@ const INTERVIEW_COMPENSATION_BATTLECARD = createDeclarativeCodeSkill({
       }
 
       function brainBaseUrl() {
-      return String(ctx.config?.brainEndpoint || process.env.BRAIN_URL || 'http://brain:3100').trim();
+      return String(ctx.config?.brainEndpoint || 'http://brain:3100').trim();
       }
 
       async function callBrain(prompt) {

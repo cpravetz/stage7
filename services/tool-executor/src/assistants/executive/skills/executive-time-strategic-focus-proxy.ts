@@ -43,7 +43,7 @@ const TIME_INPUT = createSchemaRecord({
 }, {});
 
 const TIME_CONFIG = createSchemaRecord({
-  executiveHome: SchemaProps.text({ description: 'Executive workspace path; defaults to EXECUTIVE_HOME' }),
+  executiveHome: SchemaProps.text({ description: 'Executive workspace path; defaults to ASSISTANT_HOME' }),
   defaultFocusBufferMinutes: SchemaProps.integer({ description: 'Default buffer in minutes around protected focus blocks' }),
   defaultConflictWindowHours: SchemaProps.integer({ description: 'Default lookahead window in hours for conflict detection' }),
   defaultDelegateRoles: SchemaProps.stringArray({ description: 'Default roles eligible for meeting delegation' }),
@@ -53,7 +53,7 @@ export const TIME_STRATEGIC_FOCUS_PROXY = createDeclarativeCodeSkill({
   id: 'executive-time-strategic-focus-proxy',
   name: 'Time & Strategic Focus Proxy',
   description: 'Manage executive calendar, protect strategic focus time, resolve conflicts, delegate meetings, and optimize the schedule.',
-  persistenceEnvVar: 'EXECUTIVE_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   tier: 'advise',
   domainKnowledge: 'Executive calendar management, strategic focus protection, conflict resolution, meeting delegation, time optimization',
   inputSchema: TIME_INPUT,

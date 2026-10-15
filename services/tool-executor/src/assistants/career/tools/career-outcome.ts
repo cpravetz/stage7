@@ -47,7 +47,7 @@ const CAREER_OUTCOME = createDeclarativeCodeSkill({
   isSkill: false,
   name: 'Track Outcomes',
   description: 'Records application outcomes (offer, rejection, interview, screening, no-response) and updates career search stats. Also supports outcome analytics and trend reporting.',
-  persistenceEnvVar: 'CAREER_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: CAREER_OUTCOME_INPUT,
   outputSchema: CAREER_OUTCOME_OUTPUT,
   triggers: [

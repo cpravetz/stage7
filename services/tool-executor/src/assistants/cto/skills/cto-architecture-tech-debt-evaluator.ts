@@ -8,7 +8,7 @@ export const CTO_ARCHITECTURE_TECH_DEBT_EVALUATOR = createDeclarativeCodeSkill({
     isSkill: true,
     name: 'Architecture & Tech Debt Evaluator',
     description: 'Evaluate supplied system health scores and produce a prioritized architecture modernization roadmap.',
-    persistenceEnvVar: 'CTO_HOME',
+    persistenceEnvVar: 'ASSISTANT_HOME',
     inputSchema: createSchemaRecord({
       systems: SchemaProps.objectArray(SchemaProps.object({
         name: SchemaProps.text({ description: 'System or service name' }),

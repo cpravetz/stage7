@@ -54,7 +54,7 @@ const ACCOUNT_BRIEF_GENERATOR = createDeclarativeCodeSkill({
   name: 'Account Brief Generator',
   description:
     'Builds a full account brief and MEDDPICC dossier from supplied company and persona detail, marking every stage the caller has not answered. Returns a document for the rep to work from; it does not contact the account or write to a CRM.',
-  persistenceEnvVar: 'SALES_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: {
     type: 'object',
     properties: {

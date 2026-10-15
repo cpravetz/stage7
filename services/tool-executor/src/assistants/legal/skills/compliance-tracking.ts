@@ -10,7 +10,7 @@ const COMPLIANCE_TRACKING_USER = createDeclarativeCodeSkill({
   id: 'compliance-tracking-user',
   name: 'Compliance Tracking',
   description: 'Records a compliance check against a regulation and jurisdiction you choose.',
-  persistenceEnvVar: 'LEGAL_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: {
     type: 'object',
     properties: {

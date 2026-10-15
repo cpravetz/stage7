@@ -31,7 +31,7 @@ export const LINE_ALERT_DISPATCHER = createDeclarativeCodeSkill({
   id: 'sports-line-alert-dispatcher',
   name: 'Line-Alert Dispatcher',
   description: 'Evaluates line movement significance relative to the user betting strategy and current bankroll exposure; determines whether movements warrant informational alerts or action recommendations by integrating with Bankroll Co-Pilot state; distinguishes genuine value signals from market noise using historical variance patterns; dispatches contextualized alerts when conditions are material. STRICTLY BARRED from ever placing wagers or accessing sportsbook accounts.',
-  persistenceEnvVar: 'SPORTS_GROUP_B_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: LINE_ALERT_INPUT,
   outputSchema: sportsResultSchema('Line alert dispatch result'),
   tier: 'represent',
@@ -69,7 +69,7 @@ export const LINE_ALERT_DISPATCHER = createDeclarativeCodeSkill({
 
       async function fetchOddsData(apiUrl) {
         if (!apiUrl) {
-          return { ok: false, status: 'not-configured', data: null, error: 'ODDS_DATA_API_URL not set' };
+          return { ok: false, status: 'not-configured', data: null, error: 'No odds provider configured: set oddsEndpoint in this Skill's configuration' };
         }
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), requestTimeoutMs);

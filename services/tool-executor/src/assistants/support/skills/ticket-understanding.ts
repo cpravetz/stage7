@@ -10,7 +10,7 @@ export const SUPPORT_RESOLVE_TICKET = createDeclarativeCodeSkill({
   id: 'support-resolve-ticket',
   name: 'Resolve Support Ticket',
   description: 'Resolve a support ticket by creating a resolution record. Grounded by the support knowledge base.',
-  persistenceEnvVar: 'SUPPORT_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   tier: 'advise',
   domainKnowledge: 'Support ticket resolution workflows, customer issue tracking, and resolution documentation.',
   inputSchema: {

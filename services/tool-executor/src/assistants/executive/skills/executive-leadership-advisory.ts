@@ -57,7 +57,7 @@ const LEADERSHIP_INPUT = createSchemaRecord({
 }, { required: ['focusArea'] });
 
 const LEADERSHIP_CONFIG = createSchemaRecord({
-  executiveHome: SchemaProps.text({ description: 'Executive workspace path; defaults to EXECUTIVE_HOME' }),
+  executiveHome: SchemaProps.text({ description: 'Executive workspace path; defaults to ASSISTANT_HOME' }),
 });
 
 /**
@@ -75,10 +75,10 @@ const leadershipAdvisory = createDeclarativeCodeSkill({
   description: 'Coaching plans, decision frameworks, leadership/EQ/presence assessments, communication analysis and coaching. All outputs derived from supplied input. Use focusArea to select.',
   tier: 'advise',
   domainKnowledge: 'Executive coaching, leadership assessment, decision frameworks, communication strategy',
-  persistenceEnvVar: 'EXECUTIVE_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   manifest: {
-    persistenceEnv: 'EXECUTIVE_HOME',
-    executiveHome: 'EXECUTIVE_HOME',
+    persistenceEnv: 'ASSISTANT_HOME',
+    executiveHome: 'ASSISTANT_HOME',
     ui: { view: 'leadership-advisory' },
   },
   configSchema: LEADERSHIP_CONFIG,

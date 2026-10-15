@@ -43,14 +43,14 @@ const DEV_CAREER_INPUT = createSchemaRecord({
 }, { required: ['focusArea'] });
 
 const DEV_CAREER_CONFIG = createSchemaRecord({
-  executiveHome: SchemaProps.text({ description: 'Executive workspace path; defaults to EXECUTIVE_HOME' }),
+  executiveHome: SchemaProps.text({ description: 'Executive workspace path; defaults to ASSISTANT_HOME' }),
 });
 
 export const DEV_CAREER = createDeclarativeCodeSkill({
   id: 'executive-dev-career',
   name: 'Development & Career Planning',
   description: 'Skill gap analysis, development plans, improvement plans, career planning, roadmaps, and resource recommendations. All outputs derived from supplied input. Use focusArea to select.',
-  persistenceEnvVar: 'EXECUTIVE_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   tier: 'advise',
   domainKnowledge: 'Career development, skill assessment, professional growth planning',
   inputSchema: DEV_CAREER_INPUT,

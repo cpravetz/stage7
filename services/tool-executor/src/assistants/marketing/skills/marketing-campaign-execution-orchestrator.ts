@@ -22,7 +22,7 @@ export const MARKETING_CENTER = createDeclarativeCodeSkill({
   emitEvent: 'marketing.campaign.executed',
   tier: 'represent',
   isSkill: true,
-  persistenceEnvVar: 'STORAGE_DIR',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: {
     type: 'object',
     properties: {

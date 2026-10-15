@@ -169,7 +169,7 @@ docker compose down --remove-orphans --timeout 30 || echo "Warning: docker compo
 # --- 4. Build Docker images ---
 echo ""
 echo "Building Docker images..."
-if ! docker compose build --no-cache; then
+if ! docker compose build; then
     echo "Error: Docker compose build failed."
     exit 1
 fi

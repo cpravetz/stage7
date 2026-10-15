@@ -12,7 +12,7 @@ export const HR_SCREEN_RESUME = createDeclarativeCodeSkill({
   id: 'hr-screen-resume',
   name: 'Screen Resume for Role Fit',
   description: 'Filters inbound applicant profiles against role criteria and computes match score. Dry-run mode and explicit confirmation required.',
-  persistenceEnvVar: 'HR_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   configSchema: {
     type: 'object',
     properties: {

@@ -25,8 +25,8 @@ const RESTAURANT_RESERVATIONS_GUEST_PROFILE_MANAGER_INPUT = createSchemaRecord({
 export const RESTAURANT_RESERVATIONS_GUEST_PROFILE_MANAGER = createDeclarativeCodeSkill({
   id: 'restaurant-reservations-guest-profile-manager',
   name: 'Restaurant Reservations & Guest Profile Manager',
-  description: 'Manage guest profiles, reservations, and reservation history with dry-run defaults and explicit confirmation requirements for live endpoint actions. Returns not-connected when RESTAURANT_RESERVATION_ENDPOINT is absent.',
-  persistenceEnvVar: 'STORAGE_DIR',
+  description: 'Manage guest profiles, reservations, and reservation history with dry-run defaults and explicit confirmation requirements for live endpoint actions. Returns not-connected when reservation endpoint is not configured.',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: RESTAURANT_RESERVATIONS_GUEST_PROFILE_MANAGER_INPUT,
   outputSchema: restaurantResultSchema('Guest profile or reservation record'),
   triggers: [
@@ -77,7 +77,7 @@ export const RESTAURANT_RESERVATIONS_GUEST_PROFILE_MANAGER = createDeclarativeCo
       }
 
       if (!endpoint) {
-        return presentNotice('Not connected', 'RESTAURANT_RESERVATION_ENDPOINT is not configured. Reservation operations require a live endpoint. No guest profile was created or modified.');
+        return presentNotice('Not connected', 'Restaurant reservation endpoint is not configured in skill configuration. Reservation operations require a live endpoint. No guest profile was created or modified.');
       }
 
       const guestId = input.guestId || ('guest_' + Date.now());

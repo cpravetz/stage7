@@ -34,7 +34,7 @@ export const CONTENT_DRAFTING_ADAPTATION = createDeclarativeCodeSkill({
   name: 'Content Drafting & Adaptation',
   description:
     'Produces a computed editorial brief and measures supplied source text. For draft tasks it derives a section plan with word budgets and a keyword placement plan from the supplied parameters. For adapt/repurpose it measures the source (words, sentences, headings, Flesch reading ease, keyword coverage) and returns the concrete transformation steps. It does not write prose: it has no language model behind it and says so in its output.',
-  persistenceEnvVar: 'CONTENT_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: {
     type: 'object',
     properties: {

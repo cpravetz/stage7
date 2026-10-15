@@ -17,7 +17,7 @@ function withUxMetadata(schema: SchemaRecord): SchemaRecord {
 }
 
 const SAFETY_BOUNDARY = 'Decision support and education only: do not diagnose, prescribe, change treatment, or make autonomous clinical decisions; use only authorized minimum-necessary data and approved secure endpoints for PHI; a qualified clinician must review all outputs.'
-const metadata = { domain: 'healthcare', persistenceEnv: 'HEALTHCARE_HOME', HEALTHCARE_HOME: 'HEALTHCARE_HOME', homeEnv: 'HEALTHCARE_HOME', healthcareHome: 'HEALTHCARE_HOME', clinicalSafetyBoundary: SAFETY_BOUNDARY }
+const metadata = { domain: 'healthcare', persistenceEnv: 'ASSISTANT_HOME', HEALTHCARE_HOME: 'ASSISTANT_HOME', homeEnv: 'ASSISTANT_HOME', healthcareHome: 'ASSISTANT_HOME', clinicalSafetyBoundary: SAFETY_BOUNDARY }
 const triggers = [
   { kind: 'user' as const, phrase_examples: ['evaluate clinic workflow', 'review this clinical case', 'create a care plan', 'stage intake dispatch'] },
   { kind: 'schedule' as const, cadence: 'daily clinical operations review' },
@@ -26,7 +26,7 @@ const triggers = [
 ]
 
 const carePlanConfig = createSchemaRecord({
-  healthcareHome: SchemaProps.text({ description: 'Healthcare workspace path or base URL; defaults to HEALTHCARE_HOME' }),
+  healthcareHome: SchemaProps.text({ description: 'Healthcare workspace path or base URL; defaults to ASSISTANT_HOME' }),
   defaultLanguage: SchemaProps.text({ description: 'Default language for the educational briefing', default: 'English' }),
   requireClinicianReview: SchemaProps.boolean({ description: 'Require clinician review before using the briefing', default: true }),
 })
@@ -36,7 +36,7 @@ const healthcarePatientCarePlanEducationalBriefingCopilot = createDeclarativeCod
   isSkill: true,
   name: 'Patient Care Plan & Educational Briefing Co-Pilot',
   description: 'Generate a structured, plain-language care-plan briefing from supplied clinician-authored condition, goals, medications, and education topics without changing treatment.',
-  persistenceEnvVar: 'HEALTHCARE_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   tier: 'aid',
   domainKnowledge: 'Care plan development, medication management, and patient education briefing',
   inputSchema: createSchemaRecord({
@@ -54,7 +54,7 @@ const healthcarePatientCarePlanEducationalBriefingCopilot = createDeclarativeCod
   triggers,
   manifest: {
     configSchema: carePlanConfig,
-    healthcareHome: 'HEALTHCARE_HOME',
+    healthcareHome: 'ASSISTANT_HOME',
     ui: { view: 'care-plan' },
     metadata: metadata
   },

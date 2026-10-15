@@ -185,6 +185,7 @@ const orchestrator = new MissionOrchestrator();
     prompt: input.prompt,
     tenantId: input.tenantId,
     metadata: input.metadata,
+    retryGuidance: input.retryGuidance,
      persistenceUrl: process.env.ARTIFACTS_URL || 'http://artifacts:4200',
      gatewayUrl: process.env.GATEWAY_URL || 'http://gateway:3000',
      agentRuntimeUrl: process.env.AGENT_RUNTIME_URL,

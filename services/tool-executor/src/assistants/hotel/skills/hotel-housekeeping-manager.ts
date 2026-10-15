@@ -32,7 +32,7 @@ export const HOUSEKEEPING_MANAGER_SKILL = createDeclarativeCodeSkill({
   id: 'hotel-housekeeping-manager',
   name: 'Housekeeping & Room Turnover',
   description: 'Create, update, assign, dispatch, and complete housekeeping tasks and room turnover work. Mutating requests require confirmation and default to dry-run.',
-  persistenceEnvVar: 'HOTEL_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: HOUSEKEEPING_INPUT_SCHEMA,
   outputSchema: HOTEL_EXTERNAL_OUTPUT_SCHEMA,
   tier: 'represent',

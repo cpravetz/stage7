@@ -34,7 +34,7 @@ export const MAINTENANCE_DISPATCHER_SKILL = createDeclarativeCodeSkill({
   id: 'hotel-maintenance-dispatcher',
   name: 'Maintenance Dispatch & Resolution',
   description: 'Create, update, assign, dispatch, complete, close, resolve, and escalate maintenance work orders from reported property issues. Mutating requests require confirmation and default to dry-run.',
-  persistenceEnvVar: 'HOTEL_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: MAINTENANCE_INPUT_SCHEMA,
   outputSchema: HOTEL_EXTERNAL_OUTPUT_SCHEMA,
   tier: 'represent',

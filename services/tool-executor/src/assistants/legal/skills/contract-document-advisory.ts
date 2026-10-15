@@ -25,7 +25,7 @@ const CONTRACT_DOCUMENT_ADVISORY_USER = createDeclarativeCodeSkill({
   id: 'contract-document-advisory-user',
   name: 'Contract & Document Advisory',
   description: 'Reviews a contract you supply: clause risk assessment and issue list, stored locally for follow-up.',
-  persistenceEnvVar: 'LEGAL_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: {
     type: 'object',
     properties: {

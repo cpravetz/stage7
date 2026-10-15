@@ -20,7 +20,7 @@ const leadDealAdvisory = createDeclarativeCodeSkill({
   name: 'Lead & Deal Advisory',
   description:
     'Score and rank leads against a documented BANT-style rubric computed entirely from the lead records you supply, with per-signal rationale, explicit coverage of unassessed inputs, and an honest not-connected result when no leads are given. Local computation only; no CRM or external data source is queried.',
-  persistenceEnvVar: 'SALES_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: createSchemaRecord({
     leads: SchemaProps.objectArray(
       SchemaProps.object(
@@ -57,7 +57,7 @@ const leadDealAdvisory = createDeclarativeCodeSkill({
       defaultThreshold: SchemaProps.number({ description: 'Default qualification threshold', default: 50 }),
       defaultHotThreshold: SchemaProps.number({ description: 'Default hot-lead threshold', default: 70 }),
     }),
-    persistenceEnv: 'SALES_HOME',
+    persistenceEnv: 'ASSISTANT_HOME',
     ui: { view: 'lead-deal-advisory' },
   },
   triggers: [

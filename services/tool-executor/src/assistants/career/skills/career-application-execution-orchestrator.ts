@@ -21,7 +21,7 @@ const APPLICATION_EXECUTION_ORCHESTRATOR = createDeclarativeCodeSkill({
   id: 'career-application-execution-orchestrator',
   name: 'Apply to Selected Jobs',
   description: 'Applies to a selected job or set of jobs using the board attached to each posting, with optional custom materials from saved templates. Delegates to career-application-execution. Human review is still recommended before sending where required.',
-  persistenceEnvVar: 'STORAGE_DIR',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   emitEvent: 'career.application_batch.submitted',
   inputSchema: APPLICATION_EXECUTION_ORCHESTRATOR_INPUT,
   outputSchema: careerResultSchema('Application batch results, per-role errors, and the tracking file'),

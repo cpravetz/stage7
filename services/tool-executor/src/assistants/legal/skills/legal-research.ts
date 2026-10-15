@@ -6,7 +6,7 @@ const LEGAL_RESEARCH = createDeclarativeCodeSkill({
   id: 'legal-research',
   name: 'Legal Research',
   description: 'Research a legal question against live web sources for statutes, regulations, case law, and secondary commentary by delegating to the general web search tool, and report the ranked source pointers together with the exact query that was run. Results are pointers to sources to read, not legal advice or legal conclusions.',
-  persistenceEnvVar: 'LEGAL_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: {
     type: 'object',
     properties: {

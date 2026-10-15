@@ -12,7 +12,7 @@ const SCRIPTWRITING_MARKET_REPORT_SCHEDULED = createDeclarativeCodeSkill({
   id: 'scriptwriting-market-report-scheduled',
   name: 'Genre Market Report',
   description: 'Scheduled genre and region market report built from configured project records, with no external trend data.',
-  persistenceEnvVar: 'SCRIPTWRITING_HOME',
+  persistenceEnvVar: 'ASSISTANT_HOME',
   inputSchema: {
     type: 'object',
     properties: {
