@@ -192,7 +192,7 @@ export class MissionOrchestrator {
             ctx.executionPolicy || DEFAULT_AGENT_EXECUTION_POLICY,
             [...completedTaskSummaries.values()],
           ];
-          const taskRetryGuidance = ctx.retryGuidance ? ctx.retryGuidance : undefined;
+          const taskRetryGuidance = savedTask ? ctx.retryGuidance : undefined;
           result = taskRetryGuidance
             ? await agentRuntime.executeTask(...executionArgs, taskRetryGuidance)
             : await agentRuntime.executeTask(...executionArgs);

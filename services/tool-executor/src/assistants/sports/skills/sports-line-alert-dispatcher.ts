@@ -69,7 +69,7 @@ export const LINE_ALERT_DISPATCHER = createDeclarativeCodeSkill({
 
       async function fetchOddsData(apiUrl) {
         if (!apiUrl) {
-          return { ok: false, status: 'not-configured', data: null, error: 'No odds provider configured: set oddsEndpoint in this Skill's configuration' };
+          return { ok: false, status: 'not-configured', data: null, error: 'No odds provider configured: set oddsEndpoint in this Skill\'s configuration' };
         }
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), requestTimeoutMs);

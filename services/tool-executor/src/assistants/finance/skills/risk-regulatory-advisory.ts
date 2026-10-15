@@ -87,7 +87,7 @@ const riskRegulatoryAdvisorySkill = createDeclarativeCodeSkill({
       const apiKey = String((ctx.getCredential ? ctx.getCredential('apiKey') : undefined) || '');
 
       if (!endpointUrl) {
-        const present = [{ id: 'not-connected', title: 'Not connected', kind: 'text', body: 'Risk assessment endpoint is not configured. Set endpointUrl in this Skill's configuration to enable full risk assessment.' }];
+        const present = [{ id: 'not-connected', title: 'Not connected', kind: 'text', body: 'Risk assessment endpoint is not configured. Set endpointUrl in this Skill\'s configuration to enable full risk assessment.' }];
         return { success: false, status: 'not-connected', data: null, error: 'Not connected: risk assessment endpoint not configured', present };
       }
 
