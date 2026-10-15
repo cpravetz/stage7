@@ -39,16 +39,21 @@ function readExecutionPolicy(value: unknown): AgentExecutionPolicy | undefined {
   for (const key of keys) {
     const maximum = key === 'maxCompletionTokensPerCall' ? 8192 : DEFAULT_AGENT_EXECUTION_POLICY[key]
     const minimum = key === 'maxActions' || key === 'maxDelegations' ? 0 : 1
+    const isUnlimited = policy[key] === Number.MAX_SAFE_INTEGER
     if (
       typeof policy[key] !== 'number'
       || !Number.isInteger(policy[key])
       || policy[key] < minimum
-      || policy[key] > maximum
+      || (!isUnlimited && policy[key] > maximum)
     ) {
-      throw new Error(`Agent execution policy ${key} must be an integer`)
+      throw new Error(`Agent execution policy ${key} must be an integer between ${minimum} and ${maximum}, or ${Number.MAX_SAFE_INTEGER} for unlimited`)
     }
   }
-  if (policy.maxCompletionTokensPerCall > policy.maxCompletionTokens) {
+  if (
+    policy.maxCompletionTokensPerCall !== Number.MAX_SAFE_INTEGER
+    && policy.maxCompletionTokens !== Number.MAX_SAFE_INTEGER
+    && policy.maxCompletionTokensPerCall > policy.maxCompletionTokens
+  ) {
     throw new Error('Agent execution policy maxCompletionTokensPerCall cannot exceed maxCompletionTokens')
   }
   return {

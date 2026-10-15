@@ -13,11 +13,11 @@ export interface AgentToolPolicy {
 }
 
 export const DEFAULT_AGENT_EXECUTION_POLICY: AgentExecutionPolicy = {
-  maxBrainCalls: 8,
-  maxActions: 6,
-  maxCompletionTokens: 16_384,
-  maxCompletionTokensPerCall: 2_048,
-  maxDelegations: 2,
+  maxBrainCalls: Number.MAX_SAFE_INTEGER,
+  maxActions: Number.MAX_SAFE_INTEGER,
+  maxCompletionTokens: Number.MAX_SAFE_INTEGER,
+  maxCompletionTokensPerCall: Number.MAX_SAFE_INTEGER,
+  maxDelegations: Number.MAX_SAFE_INTEGER,
 }
 
 export interface AgentDefinition {

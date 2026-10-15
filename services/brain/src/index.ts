@@ -4,7 +4,7 @@ import { brainInstance as brain } from './utils/sharedInstance';
 import { logger } from './utils/logger';
 
 const app: Application = express();
-app.use(express.json());
+app.use(express.json({ limit: "256kb" }));
 
 setTimeout(() => {
   const providers = brain.listProviders();

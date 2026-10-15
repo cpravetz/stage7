@@ -105,6 +105,12 @@ router.get('/cache/stats', asyncHandler(async (_req: any, res: any) => {
   res.json(brain.getCacheStats());
 }));
 
+router.post('/circuit-breakers/reset', asyncHandler(async (_req: any, res: any) => {
+  const brain = await getBrain();
+  brain.resetCircuitBreakers();
+  res.json({ reset: true });
+}));
+
 router.get('/circuit-breakers', asyncHandler(async (_req: any, res: any) => {
   const brain = await getBrain();
   res.json(brain.getCircuitBreakerStats());

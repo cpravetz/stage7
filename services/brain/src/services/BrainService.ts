@@ -873,6 +873,10 @@ private async savePerformanceMetrics(
     return this.cache.stats();
   }
 
+  resetCircuitBreakers(): void {
+    for (const breaker of this.circuitBreakers.values()) breaker.reset();
+  }
+
   getCircuitBreakerStats(): Array<{ provider: string; state: string; failures: number }> {
     return this.providers.map((p) => {
       const breaker = this.circuitBreakers.get(p.id);

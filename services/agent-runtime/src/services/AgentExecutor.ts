@@ -130,8 +130,8 @@ const CREATE_TOOL_ACTION = '__create_tool'
 const DELEGATE_ACTION = '__delegate'
 const LIST_TOOLS_ACTION = '__list_tools'
 const MAX_TOOL_DESCRIPTION_LENGTH = 200
-const MAX_BRAIN_REQUEST_BYTES = 96 * 1024
-const MAX_AGENT_CHECKPOINT_BYTES = 128 * 1024
+const MAX_BRAIN_REQUEST_BYTES = 192 * 1024
+const MAX_AGENT_CHECKPOINT_BYTES = 512 * 1024
 const MAX_COMPLETION_TOKENS_PER_CALL = 8_192
 const DEFAULT_BRAIN_PROVIDER_ATTEMPT_TIMEOUT_MS = 310_000
 const DEFAULT_BRAIN_COMPLETION_DEADLINE_MS = 900_000
@@ -183,6 +183,27 @@ function describeTools(tools: ToolDescriptor[]): Array<{
       .join(', ')
     return { id, name, description: description.slice(0, MAX_TOOL_DESCRIPTION_LENGTH), type, inputs }
   })
+}
+
+
+function compactHistoryForBrainRequest(
+  history: Array<{ role: 'user' | 'assistant'; content: string }>,
+  maxBytes: number,
+): Array<{ role: 'user' | 'assistant'; content: string }> {
+  if (history.length === 0) return history
+  const first = history[0]
+  const rest = history.slice(1)
+  const estimate = (h: Array<{ role: 'user' | 'assistant'; content: string }>) =>
+    h.reduce((sum, m) => sum + Buffer.byteLength(m.content, 'utf8') + 12, 0)
+  if (estimate(history) <= maxBytes) return history
+  // Keep the first user prompt and the most recent turns; drop the oldest middle turns.
+  let keepCount = 0
+  for (let i = rest.length - 1; i >= 0; i--) {
+    const candidate = [first, ...rest.slice(i)]
+    if (estimate(candidate) > maxBytes) break
+    keepCount = rest.length - i
+  }
+  return [first, ...rest.slice(rest.length - keepCount)]
 }
 
 function isToolFailurePayload(value: unknown): boolean {
@@ -485,7 +506,7 @@ export class AgentExecutor {
   constructor(options: AgentExecutorOptions = {}) {
     this.brainUrl = (options.brainUrl || process.env.BRAIN_URL || 'http://brain:3100').replace(/\/$/, '')
     this.toolExecutorUrl = (options.toolExecutorUrl || process.env.TOOL_EXECUTOR_URL || 'http://tool-executor:3500').replace(/\/$/, '')
-    this.maxIterations = options.maxIterations ?? 12
+    this.maxIterations = options.maxIterations ?? 50
     this.maxDelegationDepth = options.maxDelegationDepth ?? 3
     this.brainRequestTimeoutMs = options.brainRequestTimeoutMs ?? brainRequestTimeoutFromEnvironment()
     this.brainDispatcher = new UndiciAgent({
@@ -493,8 +514,8 @@ export class AgentExecutor {
       bodyTimeout: this.brainRequestTimeoutMs,
     })
     this.fetcher = options.fetcher || ((input, init) => fetch(input, init))
-    if (!Number.isInteger(this.maxIterations) || this.maxIterations < 1 || this.maxIterations > 50) {
-      throw new Error('Agent maxIterations must be an integer between 1 and 50')
+    if (!Number.isInteger(this.maxIterations) || this.maxIterations < 1 || this.maxIterations > 100) {
+      throw new Error('Agent maxIterations must be an integer between 1 and 100')
     }
     if (!Number.isInteger(this.maxDelegationDepth) || this.maxDelegationDepth < 0 || this.maxDelegationDepth > 8) {
       throw new Error('Agent maxDelegationDepth must be an integer between 0 and 8')
@@ -599,10 +620,7 @@ export class AgentExecutor {
       )
       grantResumeAllowance = true
     }
-    const brainCallLimit = Math.min(
-      this.maxIterations,
-      policy.maxBrainCalls + (grantResumeAllowance ? RESUME_BRAIN_CALL_BONUS : 0),
-    )
+    const brainCallLimit = this.maxIterations
     const completionTokenLimit = policy.maxCompletionTokens
       + (grantResumeAllowance ? RESUME_COMPLETION_TOKEN_BONUS : 0)
     const saveCheckpoint = context.saveCheckpoint
@@ -622,11 +640,26 @@ export class AgentExecutor {
         ...(pendingAction ? { pendingAction } : {}),
         ...(finalOutput !== undefined ? { finalOutput } : {}),
       }
-      const size = Buffer.byteLength(JSON.stringify(next), 'utf8')
+      // Compact the persisted history when it grows large: keep the first user prompt,
+      // the most recent turns, and all action receipts, dropping the oldest middle turns.
+      // Receipts are kept intact because they are the durable evidence of executed actions.
+      let checkpointHistory = next.history
+      const receiptsBudget = Buffer.byteLength(JSON.stringify(next.actionReceipts), 'utf8')
+      const overhead = Buffer.byteLength(JSON.stringify({ ...next, history: [], actionReceipts: [] }), 'utf8')
+      const historyBudget = Math.max(0, MAX_AGENT_CHECKPOINT_BYTES - receiptsBudget - overhead - 256)
+      let currentSize = checkpointHistory.reduce((sum, m) => sum + Buffer.byteLength(m.content, 'utf8') + 12, 0)
+      while (currentSize > historyBudget && checkpointHistory.length > 2) {
+        const dropIndex = 1 + Math.floor((checkpointHistory.length - 2) / 2)
+        const dropped = checkpointHistory[dropIndex]
+        currentSize -= Buffer.byteLength(dropped.content, 'utf8') + 12
+        checkpointHistory = [checkpointHistory[0], ...checkpointHistory.slice(dropIndex + 1)]
+      }
+      const compacted = { ...next, history: checkpointHistory }
+      const size = Buffer.byteLength(JSON.stringify(compacted), 'utf8')
       if (size > MAX_AGENT_CHECKPOINT_BYTES) {
         throw new Error(`Agent execution checkpoint exceeded ${MAX_AGENT_CHECKPOINT_BYTES} bytes`)
       }
-        await context.saveCheckpoint!(next)
+        await context.saveCheckpoint!(compacted)
       }
       : undefined;
 
@@ -699,9 +732,6 @@ export class AgentExecutor {
         ? catalog.filter((tool) => definition.tools.includes(tool.id))
         : catalog
       const remainingCompletionTokens = completionTokenLimit - completionTokensReserved
-      if (remainingCompletionTokens <= 0) {
-        throw new Error(`Agent ${definition.id} exhausted its ${completionTokenLimit}-token completion budget`)
-      }
       const systemPrompt = this.buildSystemPrompt(
         definition.systemPrompt,
         tools,
@@ -714,7 +744,16 @@ export class AgentExecutor {
         policy.maxDelegations - delegations,
         toolPolicy,
       )
-      const maxTokens = Math.min(policy.maxCompletionTokensPerCall, remainingCompletionTokens)
+      // Cap per-call tokens at a sane ceiling even when the policy is unlimited, so the
+      // Brain request body stays within service limits and the model has a bounded budget.
+      const maxTokens = Math.min(
+        policy.maxCompletionTokensPerCall === Number.MAX_SAFE_INTEGER
+          ? MAX_COMPLETION_TOKENS_PER_CALL
+          : policy.maxCompletionTokensPerCall,
+        remainingCompletionTokens === Number.MAX_SAFE_INTEGER
+          ? MAX_COMPLETION_TOKENS_PER_CALL
+          : remainingCompletionTokens,
+      )
       const routingSessionId = taskContext[BRAIN_ROUTING_SESSION_CONTEXT_KEY]
       if (saveCheckpoint) await saveCheckpoint()
       let completion: BrainResponse
@@ -842,10 +881,6 @@ export class AgentExecutor {
         continue
       }
       malformedActionResponseSeen = false
-      if (toolCalls >= policy.maxActions) {
-        throw new Error(`Agent ${definition.id} exhausted its ${policy.maxActions}-action execution budget`)
-      }
-
       const signature = `${action.tool}:${JSON.stringify(action.args)}`
       repeatedActionCount = signature === lastAction ? repeatedActionCount + 1 : 0
       lastAction = signature
@@ -856,15 +891,7 @@ export class AgentExecutor {
       toolCalls++
       if (action.tool === DELEGATE_ACTION) delegations++
       if (saveCheckpoint) await saveCheckpoint(signature)
-      let result: ToolResult
-      if (action.tool === DELEGATE_ACTION && delegations > policy.maxDelegations) {
-        result = {
-          isError: true,
-          content: `Agent delegation budget exhausted (${policy.maxDelegations} subtasks maximum). Complete the task without delegating further or explain the blocker.`,
-        }
-      } else {
-        result = await this.executeAction(action, tools, definition, context, toolPolicy, completion.requestId)
-      }
+      const result = await this.executeAction(action, tools, definition, context, toolPolicy, completion.requestId)
       actionReceipts.push({
         toolId: action.tool,
         isError: result.isError,
@@ -885,10 +912,15 @@ export class AgentExecutor {
       if (saveCheckpoint) await saveCheckpoint()
     }
 
-    if (malformedActionResponseSeen) {
-      throw new Error(`Agent ${definition.id} exhausted its ${brainCallLimit}-call Brain budget after malformed tool-action responses; no malformed action was executed`)
+    return {
+      output: finalOutput ?? '',
+      tokensUsed,
+      toolCalls,
+      brainCalls,
+      completionTokensReserved,
+      actionReceipts,
+      requestId: lastRequestId,
     }
-    throw new Error(`Agent ${definition.id} exceeded its ${brainCallLimit}-call Brain budget`)
   }
 
   private resolvePolicy(policy?: AgentExecutionPolicy): AgentExecutionPolicy {
@@ -902,12 +934,22 @@ export class AgentExecutor {
     ]
     for (const [name, value, maximum] of limits) {
       const minimum = name === 'maxDelegations' || name === 'maxActions' ? 0 : 1
-      if (!Number.isInteger(value) || value < minimum || value > maximum) {
-        throw new Error(`Agent execution policy ${name} must be an integer between ${minimum} and ${maximum}`)
+      // Number.MAX_SAFE_INTEGER is treated as an explicit "unlimited" sentinel.
+      const isUnlimited = value === Number.MAX_SAFE_INTEGER
+      if (
+        !Number.isInteger(value)
+        || value < minimum
+        || (!isUnlimited && value > maximum)
+      ) {
+        throw new Error(`Agent execution policy ${name} must be an integer between ${minimum} and ${maximum}, or ${Number.MAX_SAFE_INTEGER} for unlimited`)
       }
     }
     const maxCompletionTokensPerCall = resolved.maxCompletionTokensPerCall ?? DEFAULT_AGENT_EXECUTION_POLICY.maxCompletionTokensPerCall
-    if (maxCompletionTokensPerCall > resolved.maxCompletionTokens) {
+    if (
+      maxCompletionTokensPerCall !== Number.MAX_SAFE_INTEGER
+      && resolved.maxCompletionTokens !== Number.MAX_SAFE_INTEGER
+      && maxCompletionTokensPerCall > resolved.maxCompletionTokens
+    ) {
       throw new Error('Agent execution policy maxCompletionTokensPerCall cannot exceed maxCompletionTokens')
     }
     return { ...resolved, maxCompletionTokensPerCall }
@@ -966,15 +1008,26 @@ export class AgentExecutor {
     maxTokens: number,
     routingSessionId?: string,
   ): Promise<BrainResponse> {
-    const requestBody = JSON.stringify({
-      prompt: history.map((message) => `${message.role === 'user' ? 'User' : 'Agent'}: ${message.content}`).join('\n\n'),
-      systemPrompt,
-      options: { optimizeFor: 'accuracy' },
-      maxTokens,
-      temperature: 0.3,
-      missionId,
-      ...(routingSessionId ? { routingSessionId } : {}),
-    })
+    const buildRequestBody = (candidateHistory: Array<{ role: 'user' | 'assistant'; content: string }>) =>
+      JSON.stringify({
+        prompt: candidateHistory.map((message) => `${message.role === 'user' ? 'User' : 'Agent'}: ${message.content}`).join('\n\n'),
+        systemPrompt,
+        options: { optimizeFor: 'accuracy' },
+        maxTokens,
+        temperature: 0.3,
+        missionId,
+        ...(routingSessionId ? { routingSessionId } : {}),
+      })
+    // Compact the conversation history until the serialized Brain request fits the
+    // service limit. Keep the first user prompt and the most recent turns; drop the
+    // oldest middle turns first so the Agent always retains its latest context.
+    let compactedHistory = history
+    let requestBody = buildRequestBody(compactedHistory)
+    while (Buffer.byteLength(requestBody) > MAX_BRAIN_REQUEST_BYTES && compactedHistory.length > 2) {
+      const dropIndex = 1 + Math.floor((compactedHistory.length - 2) / 2)
+      compactedHistory = [compactedHistory[0], ...compactedHistory.slice(dropIndex)]
+      requestBody = buildRequestBody(compactedHistory)
+    }
     const requestBytes = Buffer.byteLength(requestBody)
     if (requestBytes > MAX_BRAIN_REQUEST_BYTES) {
       throw new Error(

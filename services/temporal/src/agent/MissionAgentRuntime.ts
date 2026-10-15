@@ -26,7 +26,6 @@ import {
 const TASK_SELECTOR_SYSTEM_PROMPT = `You are the mission task selector. Select the single best next task from the supplied ready tasks, using the mission goal, phase goal, and completed task IDs. You may not select a task that is not listed as ready, add tasks, or change task instructions. Return only JSON in the form {"taskId":"<ready-task-id>"}.`;
 const TASK_SELECTOR_EXECUTION_POLICY: AgentExecutionPolicy = {
   ...DEFAULT_AGENT_EXECUTION_POLICY,
-  maxBrainCalls: 2,
   maxActions: 0,
   maxCompletionTokens: 512,
   maxCompletionTokensPerCall: 256,
@@ -35,7 +34,6 @@ const TASK_SELECTOR_EXECUTION_POLICY: AgentExecutionPolicy = {
 const PHASE_REVIEW_SYSTEM_PROMPT = `You are a critical phase reviewer. Compare completed task outputs and artifacts with the mission goal and phase goal. Only observed results and artifacts count as evidence; plans, proposed tool actions, and claims that a tool was used are not evidence that it ran. Treat system-action-receipts.json as the record of actual tool results: every required action must have a matching receipt with its required outcome, failed receipts do not support success, and claimed results that contradict receipts are gaps. Do not mark a phase complete just because its tasks ran. If the phase goal is satisfied, return {"satisfied":true,"gaps":[],"followUpTask":null}. Otherwise identify concrete gaps and propose exactly one focused follow-up task that can address a gap, returning {"satisfied":false,"gaps":["..."],"followUpTask":{"title":"...","description":"...","agentRole":"...","systemPrompt":"...","expectedArtifacts":[],"requiredActions":[]}}. Every explicit tool call in systemPrompt must have a requiredActions receipt using the exact tool ID. Child-Agent delegation uses toolId "__delegate", never "delegate"; denial attempts require outcome "denied"; recovery from a tool error requires both "failure" and "success" receipts. Explicitly instruct the Agent to make each required action. Never repeat a successfully completed side-effect action or change a requested identifier; when verification is missing, propose a safe read-only verification task. The follow-up systemPrompt must name each prerequisite task ID and identify the specific output, artifact, or receipt it consumes. Do not propose tasks that repeat completed work. Return exactly one JSON object with this shape; do not include explanations, task metadata, plans, tool actions, or Markdown fences.`;
 const PHASE_REVIEW_EXECUTION_POLICY: AgentExecutionPolicy = {
   ...DEFAULT_AGENT_EXECUTION_POLICY,
-  maxBrainCalls: 2,
   maxActions: 0,
   maxCompletionTokens: 2_048,
   maxCompletionTokensPerCall: 1_024,
@@ -44,7 +42,6 @@ const PHASE_REVIEW_EXECUTION_POLICY: AgentExecutionPolicy = {
 const MISSION_COMPLETION_REVIEWER_SYSTEM_PROMPT = `You are an objective mission-completion reviewer. Determine whether the observed task outputs and artifacts satisfy the mission goal. Treat each task's requiredActions as explicit action obligations and system-action-receipts.json as the record of actual tool results: every required action must have a matching receipt with its required outcome, failed receipts do not support success, and claimed results that contradict receipts are gaps. Return exactly one JSON object with {"satisfied":true,"gaps":[]} or {"satisfied":false,"gaps":["concrete unmet requirement"]}. Never infer success from a task merely being marked complete. Do not include explanations, Markdown fences, or any text outside the JSON object.`;
 const MISSION_COMPLETION_REVIEW_EXECUTION_POLICY: AgentExecutionPolicy = {
   ...DEFAULT_AGENT_EXECUTION_POLICY,
-  maxBrainCalls: 2,
   maxActions: 0,
   maxCompletionTokens: 1_024,
   maxCompletionTokensPerCall: 512,
@@ -1069,7 +1066,7 @@ export class MissionAgentRuntime {
     );
   }
 
-  private async waitForTaskCompletion(agentId: string, taskId: string, maxWaitMs = 300000): Promise<TaskExecutionResult> {
+  private async waitForTaskCompletion(agentId: string, taskId: string, maxWaitMs = 900000): Promise<TaskExecutionResult> {
     const startTime = Date.now();
     const pollInterval = 2000;
 

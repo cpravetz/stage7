@@ -32,7 +32,6 @@ Do not include prose, markdown fences, or any text outside the JSON object.`;
 
 export const PLANNER_EXECUTION_POLICY: AgentExecutionPolicy = {
   ...DEFAULT_AGENT_EXECUTION_POLICY,
-  maxBrainCalls: 2,
   maxActions: 0,
   maxCompletionTokens: 16_384,
   maxCompletionTokensPerCall: 8_192,
@@ -81,7 +80,7 @@ const GENERIC_TOOL_TOKENS = new Set([
   'instruction', 'instructions', 'missing', 'new', 'once', 'only', 'output', 'outputs', 'parent',
   'policy', 'raw', 'receipt', 'receipts', 'registered', 'request', 'response', 'result', 'results',
   'review', 'specific', 'succeed', 'succeeds', 'succeeded', 'succeeding', 'success', 'successful', 'task', 'that', 'the', 'these', 'this', 'those',
-  'tool', 'twice', 'value', 'work',
+  'it', 'its', 'tool', 'twice', 'value', 'work',
 ]);
 const PRIOR_OUTPUT_REFERENCE = /\b(?:previous|prior|earlier|upstream|completed)\b[^.!?;\n]{0,80}\b(?:result|output|artifact|value|answer|calculation|product)\b|\b(?:initial|final)\b[^.!?;\n]{0,80}\b(?:calculated|computed|derived)\s+(?:result|output|artifact|value|answer|calculation|product)s?\b/i;
 const TASK_OUTPUT_TERMS =

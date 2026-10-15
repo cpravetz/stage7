@@ -1,3 +1,4 @@
+console.log('missions route module loaded');
 import { Router, Request, Response } from 'express';
 import { TemporalClient } from '../client/TemporalClient';
 import { WorkflowInput, MissionTaskCheckpoint } from '../types/workflow';
@@ -35,12 +36,14 @@ const router: Router = Router();
 router.post(
   '/missions',
   asyncHandler(async (req: Request, res: Response) => {
+    logger.info('missions route handler called');
     const { missionId, prompt, tenantId, assistantId, contextChunks, metadata } = req.body;
 
     if (!missionId || !prompt) {
       throw NextGenError.badRequest('missionId and prompt are required');
     }
 
+    logger.info('missions route handler called');
     const input: WorkflowInput = {
       missionId,
       tenantId,
@@ -50,6 +53,7 @@ router.post(
       metadata,
     };
 
+    console.log('missions route: About to call startMission with missionId ', input.missionId);
     const workflowId = await client.startMission(input);
 
     res.status(202).json({ workflowId, status: 'started' });
@@ -101,9 +105,9 @@ router.post(
     const completedPhases = progress.checkpoint.completedPhases || [];
     const completedTasks: MissionTaskCheckpoint[] = progress.checkpoint.completedTasks || [];
     const { resumeFromPhaseId, resumeFromTaskId } = progress;
-
     const retryCount = (original.input?.metadata?.retryCount as number) || 0;
 
+    logger.info('missions route handler called');
     const input: WorkflowInput = {
       missionId: missionId, // Keep the same mission ID
       tenantId: original.input?.tenantId || '',

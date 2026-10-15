@@ -1270,7 +1270,7 @@ describe('AgentExecutor', () => {
     })
 
     expect(result.output).toBe('Completed using the compact tool catalog.')
-    expect(Buffer.byteLength(brainRequest)).toBeLessThan(96 * 1024)
+    expect(Buffer.byteLength(brainRequest)).toBeLessThan(192 * 1024)
     expect(brainRequest).toContain('system-tool-0')
     expect(brainRequest).toContain('system-tool-169')
     expect(brainRequest).toContain('payload:string!')

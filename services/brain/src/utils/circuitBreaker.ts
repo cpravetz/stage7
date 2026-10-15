@@ -52,6 +52,12 @@ export class CircuitBreaker {
     this.nextAttempt = Date.now() + this.cooldownMs;
   }
 
+  reset(): void {
+    this.failureCount = 0;
+    this.state = 'closed';
+    this.nextAttempt = 0;
+  }
+
   private onSuccess(): void {
     this.failureCount = 0;
     this.state = 'closed';
