@@ -8,6 +8,8 @@ export interface CompletionRequest {
   messages: CompletionMessage[];
   maxTokens?: number;
   temperature?: number;
+  inputFormat?: string;
+  outputFormat?: string;
 }
 
 export interface CompletionResponse {
@@ -31,6 +33,6 @@ export interface LLMProvider {
   readonly name: string;
   readonly info: ProviderInfo;
   isAvailable(): boolean;
-  listModels(): Promise<Array<{ id: string; capabilities: string[]; maxTokens: number; costPer1kTokens: number }>>;
+  listModels(): Promise<Array<{ id: string; capabilities: string[]; maxTokens: number; costPer1kTokens: number; inputFormat?: string; outputFormat?: string }>>;
   complete(req: CompletionRequest): Promise<CompletionResponse>;
 }

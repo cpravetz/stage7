@@ -67,7 +67,6 @@ function readCapabilities(model: Record<string, unknown>, id: string): string[] 
   }
   return caps;
 }
-
 export interface OpenAICompatibleConfig {
   id: string;
   name: string;
@@ -170,11 +169,15 @@ export class OpenAICompatibleProvider implements LLMProvider {
             if (this.id === 'openwebui' || id.endsWith(':free')) {
               caps.push('reasoning', 'creative');
             }
+            const inputFormat = (m as any).input_format || (m as any).inputFormat || (m as any).input_modalities;
+            const outputFormat = (m as any).output_format || (m as any).outputFormat || (m as any).output_modalities;
             return {
               id,
               capabilities: caps,
               maxTokens: readContextWindow(m),
               costPer1kTokens: cost,
+              inputFormat,
+              outputFormat,
             };
           }).filter((m): m is { id: string; capabilities: string[]; maxTokens: number; costPer1kTokens: number } => !!m);
           if (mapped.length > 0) {
@@ -210,6 +213,8 @@ export class OpenAICompatibleProvider implements LLMProvider {
       messages: req.messages,
       max_tokens: req.maxTokens,
       temperature: req.temperature,
+      input_format: (req as any).inputFormat,
+      output_format: (req as any).outputFormat,
     });
 
     // Try chat/completions first, fall back to /completions if the server doesn't support chat endpoint.
@@ -255,13 +260,15 @@ export class OpenAICompatibleProvider implements LLMProvider {
         res = await fetchProvider(`${this.apiBase}${this.completionsPath}`, {
           method: 'POST',
           headers,
-          body: JSON.stringify({
-            model: req.model,
-            prompt,
-            max_tokens: req.maxTokens,
-            temperature: req.temperature,
-          }),
-        });
+            body: JSON.stringify({
+              model: req.model,
+              prompt,
+              max_tokens: req.maxTokens,
+              temperature: req.temperature,
+              input_format: (req as any).inputFormat,
+              output_format: (req as any).outputFormat,
+            }),
+          });
         if (!res.ok) {
           const errText2 = await (res.text ? res.text() : Promise.resolve(String(res)));
           throw new Error(`[${this.id}] completion failed (chat then completions): ${res.status} ${errText2}. ${pathSuggestion}`);

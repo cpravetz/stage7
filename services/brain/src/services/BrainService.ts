@@ -24,6 +24,8 @@ export interface CompletionOptions {
   missionId?: string;
   optimizeFor?: 'cost' | 'speed' | 'accuracy' | 'creativity' | 'balanced';
   routingSessionId?: string;
+  inputFormat?: string;
+  outputFormat?: string;
 }
 
 export interface CompletionResult {
@@ -234,7 +236,8 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
     const systemHash = options.systemPrompt
       ? crypto.createHash('sha256').update(options.systemPrompt).digest('hex').slice(0, 8)
       : 'none';
-    const cacheKey = `brain:complete:auto:${promptHash}:${systemHash}`;
+    const formatHash = `${(options as any).inputFormat || 'none'}:${(options as any).outputFormat || 'none'}`;
+    const cacheKey = `brain:complete:auto:${promptHash}:${systemHash}:${formatHash}`;
     const routingSessionId = options.routingSessionId?.trim();
     const routingSessionKey = routingSessionId
      ? `${options.missionId || 'brain'}:${routingSessionId}`
@@ -267,13 +270,15 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
     // Optionally consult llm-config for runtime preference to prefer free models
     const settings = await this.loadLlmSettings();
 
-    const routingOptions = {
-      task: prompt,
-      maxTokens: options.maxTokens ?? 1024,
-      budget: options.budget,
-      freeOnly: settings?.freeModelsOnly,
-      optimizeFor: options.optimizeFor,
-    };
+      const routingOptions = {
+        task: prompt,
+        maxTokens: options.maxTokens ?? 1024,
+        budget: options.budget,
+        freeOnly: settings?.freeModelsOnly,
+        optimizeFor: options.optimizeFor,
+        inputFormat: (options as any).inputFormat,
+        outputFormat: (options as any).outputFormat,
+      };
     const eligibleCandidates = this.router.getCandidates(routingOptions);
     const session = routingSessionKey ? this.getRoutingSession(routingSessionKey) : undefined;
     const attemptedModelIds = new Set(session?.attemptedModelIds || []);
@@ -358,6 +363,8 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
         messages: messagesBase,
         maxTokens: options.maxTokens ?? 1024,
         temperature: options.temperature,
+        inputFormat: (options as any).inputFormat,
+        outputFormat: (options as any).outputFormat,
       };
 
       const candidateStartTime = Date.now();

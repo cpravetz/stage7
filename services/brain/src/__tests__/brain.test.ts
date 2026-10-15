@@ -286,6 +286,23 @@ describe('BrainService', () => {
     expect(mockProviderInstance.lastRequest!.messages[1].content).toBe('hi');
   });
 
+  it('should pass inputFormat and outputFormat to the provider when provided', async () => {
+    await brain.complete('chat response', {
+      inputFormat: 'image',
+      outputFormat: 'text',
+    });
+    expect(mockProviderInstance.lastRequest).not.toBeNull();
+    expect(mockProviderInstance.lastRequest!.inputFormat).toBe('image');
+    expect(mockProviderInstance.lastRequest!.outputFormat).toBe('text');
+  });
+
+  it('should not pass inputFormat and outputFormat when not provided', async () => {
+    await brain.complete('chat response');
+    expect(mockProviderInstance.lastRequest).not.toBeNull();
+    expect(mockProviderInstance.lastRequest!.inputFormat).toBeUndefined();
+    expect(mockProviderInstance.lastRequest!.outputFormat).toBeUndefined();
+  });
+
   it('should cache the result on a second identical call', async () => {
     const r1 = await brain.complete('cache test prompt');
     expect(r1.cached).toBe(false);
@@ -430,7 +447,7 @@ describe('BrainService', () => {
       );
 
       const reloadedBrain = new BrainService();
-      const laterResult = await reloadedBrain.complete('chat response');
+      const laterResult = await reloadedBrain.complete('chat response after reload');
       expect(laterResult.model).toBe('measured-model');
       expect(fetchSpy).toHaveBeenCalledWith(
         expect.stringContaining('/api/artifacts/documents/model-performance-metrics'),

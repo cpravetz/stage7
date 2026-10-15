@@ -8,6 +8,21 @@ const model = (id: string, costPer1kTokens = 0.1): ModelDefinition => ({
   capabilities: ['chat'],
 });
 
+const modelWithFormats = (
+  id: string,
+  inputFormat?: string,
+  outputFormat?: string,
+  costPer1kTokens = 0.1,
+): ModelDefinition => ({
+  id,
+  provider: 'provider',
+  costPer1kTokens,
+  maxTokens: 4096,
+  capabilities: ['chat'],
+  inputFormat,
+  outputFormat,
+});
+
 describe('ModelRouter performance outcomes', () => {
   const router = new ModelRouter();
   const alpha = model('alpha');
@@ -109,5 +124,75 @@ describe('ModelRouter performance outcomes', () => {
     });
 
     expect(candidates.map(({ model: candidate }) => candidate.id)).toEqual(['general-chat']);
+  });
+
+  it('filters models by inputFormat', () => {
+    const router = new ModelRouter();
+    router.registerModel(modelWithFormats('text-in', 'text', undefined));
+    router.registerModel(modelWithFormats('image-in', 'image', undefined));
+    router.registerModel(modelWithFormats('any-in', undefined, undefined));
+
+    const candidates = router.getCandidates({ task: 'chat response', inputFormat: 'image' });
+
+    const candidateIds = candidates.map(({ model: candidate }) => candidate.id);
+    expect(candidateIds).toContain('image-in');
+    expect(candidateIds).toContain('any-in');
+    expect(candidateIds).not.toContain('text-in');
+  });
+
+  it('filters models by outputFormat', () => {
+    const router = new ModelRouter();
+    router.registerModel(modelWithFormats('text-out', undefined, 'text'));
+    router.registerModel(modelWithFormats('format-out', undefined, 'code'));
+    router.registerModel(modelWithFormats('any-out', undefined, undefined));
+
+    const candidates = router.getCandidates({ task: 'chat response', outputFormat: 'code' });
+
+    const candidateIds = candidates.map(({ model: candidate }) => candidate.id);
+    expect(candidateIds).toContain('format-out');
+    expect(candidateIds).toContain('any-out');
+    expect(candidateIds).not.toContain('text-out');
+  });
+
+  it('filters models by both inputFormat and outputFormat', () => {
+    const router = new ModelRouter();
+    router.registerModel(modelWithFormats('img-to-text', 'image', 'text'));
+    router.registerModel(modelWithFormats('img-to-code', 'image', 'code'));
+    router.registerModel(modelWithFormats('text-to-text', 'text', 'text'));
+
+    const candidates = router.getCandidates({
+      task: 'chat response',
+      inputFormat: 'image',
+      outputFormat: 'code',
+    });
+
+    const candidateIds = candidates.map(({ model: candidate }) => candidate.id);
+    expect(candidateIds).toContain('img-to-code');
+    expect(candidateIds).not.toContain('img-to-text');
+    expect(candidateIds).not.toContain('text-to-text');
+  });
+
+  it('does not exclude models that do not declare formats when none requested', () => {
+    const router = new ModelRouter();
+    router.registerModel(modelWithFormats('declared', 'text', 'text'));
+    router.registerModel(modelWithFormats('undeclared', undefined, undefined));
+
+    const candidates = router.getCandidates({ task: 'chat response' });
+
+    const candidateIds = candidates.map(({ model: candidate }) => candidate.id);
+    expect(candidateIds).toContain('declared');
+    expect(candidateIds).toContain('undeclared');
+  });
+
+  it('excludes models that declare a different format than requested', () => {
+    const router = new ModelRouter();
+    router.registerModel(modelWithFormats('text-model', 'text', 'text'));
+    router.registerModel(modelWithFormats('image-model', 'image', 'image'));
+
+    const candidates = router.getCandidates({ task: 'chat response', inputFormat: 'image' });
+
+    const candidateIds = candidates.map(({ model: candidate }) => candidate.id);
+    expect(candidateIds).toContain('image-model');
+    expect(candidateIds).not.toContain('text-model');
   });
 });

@@ -6,6 +6,8 @@ export interface ModelDefinition {
   costPer1kTokens: number;
   maxTokens: number;
   capabilities: string[];
+  inputFormat?: string;
+  outputFormat?: string;
 }
 
 export interface ProviderHealth {
@@ -13,6 +15,17 @@ export interface ProviderHealth {
   circuitState: 'closed' | 'open' | 'half-open';
   failureCount: number;
   recentSuccess: boolean;
+}
+
+export interface RoutingOptions {
+  task: string;
+  maxTokens?: number;
+  budget?: number;
+  freeOnly?: boolean;
+  optimizeFor?: 'cost' | 'speed' | 'accuracy' | 'creativity' | 'balanced';
+  excludedModelIds?: Iterable<string>;
+  inputFormat?: string;
+  outputFormat?: string;
 }
 
 export interface ModelPerformanceOutcome {
@@ -149,7 +162,7 @@ export class ModelRouter {
     }
   }
 
-  route(options: { task: string; maxTokens?: number; budget?: number; freeOnly?: boolean; optimizeFor?: 'cost' | 'speed' | 'accuracy' | 'creativity' | 'balanced'; excludedModelIds?: Iterable<string> }): ModelDefinition {
+  route(options: RoutingOptions): ModelDefinition {
     const candidates = this.getCandidates(options);
     if (candidates.length === 0) {
       throw new Error('No model available for the requested task. Ensure at least one LLM provider is configured with a valid API key (OPENAI_API_KEY, OPENROUTER_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, MISTRAL_API_KEY, GROK_API_KEY, HUGGINGFACE_API_KEY, NVIDIA_API_KEY, or OPENWEB_URL).');
@@ -157,7 +170,7 @@ export class ModelRouter {
     return candidates[0].model;
   }
 
-  getCandidates(options: { task: string; maxTokens?: number; budget?: number; freeOnly?: boolean; optimizeFor?: 'cost' | 'speed' | 'accuracy' | 'creativity' | 'balanced'; excludedModelIds?: Iterable<string> }): ScoredModel[] {
+  getCandidates(options: RoutingOptions): ScoredModel[] {
     const excluded = new Set<string>();
     for (const id of options.excludedModelIds || []) excluded.add(id);
     const isExcluded = (model: ModelDefinition) =>
@@ -169,6 +182,14 @@ export class ModelRouter {
         if (!(m.costPer1kTokens === 0)) return false;
       }
       if (isExcluded(m)) return false;
+      if (options.inputFormat) {
+        const modelInput = (m as any).inputFormat;
+        if (modelInput && modelInput !== options.inputFormat) return false;
+      }
+      if (options.outputFormat) {
+        const modelOutput = (m as any).outputFormat;
+        if (modelOutput && modelOutput !== options.outputFormat) return false;
+      }
       return true;
     });
 
