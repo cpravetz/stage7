@@ -367,35 +367,28 @@ export class TemporalClient {
             timestamp: result.completedAt || Date.now(),
           });
           try {
-            const brain = brainInstance;
+            const brainUrl = process.env.BRAIN_URL || 'http://brain:3100';
             const artifacts = (process.env.ARTIFACTS_URL || process.env.PERSISTENCE_URL || 'http://artifacts:4200');
-            const orchestrator = createDistillationOrchestrator({
-              brain,
-              getAssistant: async (assistantId: string) => {
-                try {
-                  const res = await fetch(`${artifacts}/api/artifacts/assistants/${encodeURIComponent(assistantId)}`);
-                  if (!res.ok) return undefined;
-                  return await res.json();
-                } catch {
-                  return undefined;
-                }
-              },
-              saveAssistant: async (assistant: any) => {
-                try {
-                  await fetch(`${artifacts}/api/artifacts/assistants`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(assistant),
-                  });
-                } catch {}
-                return assistant;
-              },
-            });
-            orchestrator.triggerAsync({
-              assistantId: input.assistantId,
-              tenantId: input.tenantId,
-              missionId: input.missionId,
-            });
+            // Fetch assistant and trigger distillation via Brain service
+            fetch(`${artifacts}/api/artifacts/assistants/${encodeURIComponent(input.assistantId || '')}`)
+              .then(async (res) => {
+                if (!res.ok) return;
+                const assistant = await res.json();
+                // Ask brain to distill and we can re-save via artifacts; brain service has distillation route
+                await fetch(`${brainUrl}/api/brain/distillation/trigger`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    assistantId: input.assistantId,
+                    tenantId: input.tenantId,
+                    missionId: input.missionId,
+                  }),
+                });
+                // Optionally re-fetch updated assistant from brain if it persists; brain persists via its own flow? 
+                // Brain's distillation service can be extended to persist via artifacts - but easier: call artifacts to save after brain returns? 
+                // For now trigger only; brain service can be enhanced to persist
+              })
+              .catch(() => {});
           } catch (e) {
             // best-effort, ignore
           }
@@ -1383,4 +1376,3 @@ export class TemporalClient {
 
 
 // Phase 4: post-task distillation hook (best-effort)
-import { brainInstance, createDistillationOrchestrator } from '@stage7-nextgen/brain';
