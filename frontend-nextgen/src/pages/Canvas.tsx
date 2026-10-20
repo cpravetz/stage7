@@ -78,11 +78,15 @@ const Canvas = () => {
 
   useEffect(() => {
     if (entities.length === 0) return;
-    const width = 800;
-    const height = 500;
+    // The graph is drawn in its own coordinate space and scaled to the panel,
+    // so the node geometry is expressed in a compact viewBox rather than in
+    // pixels. Labels stay readable because the scale factor stays near 1.
+    const width = 400;
+    const height = 320;
     const cx = width / 2;
     const cy = height / 2;
-    const radius = Math.min(width, height) / 3;
+    const radiusX = width * 0.42;
+    const radiusY = height * 0.38;
 
     setNodes(entities.map((e, i) => {
       const angle = (2 * Math.PI * i) / entities.length - Math.PI / 2;
@@ -91,8 +95,8 @@ const Canvas = () => {
         name: e.name,
         type: e.type,
         status: e.status,
-        x: cx + radius * Math.cos(angle),
-        y: cy + radius * Math.sin(angle),
+        x: cx + radiusX * Math.cos(angle),
+        y: cy + radiusY * Math.sin(angle),
       };
     }));
     setEdges(buildEdges(entities));
@@ -126,7 +130,7 @@ const Canvas = () => {
       <h1>Multi-Agent Canvas</h1>
       <div className="canvas-layout">
         <div className="canvas-container">
-          <svg className="canvas-svg" viewBox="0 0 800 500">
+          <svg className="canvas-svg" viewBox="0 0 400 320">
             {edges.map((edge) => {
               const from = nodes.find((n) => n.id === edge.from);
               const to = nodes.find((n) => n.id === edge.to);
@@ -160,14 +164,15 @@ const Canvas = () => {
                 style={{ cursor: 'pointer' }}
               >
                 <circle
-                  r="24"
+                  r="26"
                   fill={node.type === 'assistant' ? '#1e40af' : '#065f46'}
                   stroke={selected === node.id ? '#fbbf24' : '#374151'}
                   strokeWidth={selected === node.id ? 4 : 2}
                 />
-                <text textAnchor="middle" dy="5" fill="white" fontSize="10" fontWeight="bold">
-                  {node.name.slice(0, 8)}
+                <text textAnchor="middle" dy="4" fill="white" fontSize="11" fontWeight="bold">
+                  {node.name.slice(0, 7)}
                 </text>
+                <title>{node.name}</title>
               </g>
             ))}
           </svg>
@@ -178,40 +183,53 @@ const Canvas = () => {
         </div>
         <div className="canvas-sidebar">
           {selectedEntity ? (
-            <div className="card">
-              <h3>{selectedEntity.name}</h3>
-              <span className={`badge ${selectedEntity.status}`}>{selectedEntity.status}</span>
-              <p>{selectedEntity.description}</p>
-              <div className="meta-grid">
-                <div><strong>Type:</strong> {selectedEntity.type}</div>
-                <div><strong>Tools:</strong> {toolNames(selectedEntity).length}</div>
+            <>
+              <div className="card canvas-detail-card">
+                <div>
+                  <h3 style={{ margin: 0 }}>{selectedEntity.name}</h3>
+                  <span className={`badge ${selectedEntity.status}`}>{selectedEntity.status}</span>
+                </div>
+                <p>{selectedEntity.description}</p>
+                <div className="meta-grid">
+                  <div><strong>Type:</strong> {selectedEntity.type}</div>
+                  <div><strong>Tools:</strong> {toolNames(selectedEntity).length}</div>
+                </div>
               </div>
 
-              <h4>Knowledge supplied to this assistant</h4>
-              {knowledgeError && <p className="error-text">Failed to load knowledge: {knowledgeError}</p>}
-              {!knowledgeError && knowledge === null && <p>Loading knowledge…</p>}
-              {knowledge && knowledge.length === 0 && (
-                <p>No knowledge recorded. This assistant runs without a knowledge block.</p>
-              )}
-              {knowledge && knowledge.length > 0 && (
-                <ul className="knowledge-list">
-                  {knowledge.map((entry) => (
-                    <li key={entry.id}>
-                      <div className="knowledge-header">
-                        <strong>{entry.title}</strong>
-                        {entry.scope && <span className="badge">{entry.scope}</span>}
-                        {entry.origin && <span className="badge">{entry.origin}</span>}
-                      </div>
-                      {entry.source && <div className="knowledge-source">source: {entry.source}</div>}
-                      <details>
-                        <summary>{entry.content.length} characters</summary>
+              <div className="card canvas-knowledge-card">
+                <div className="canvas-knowledge-header">
+                  <h3 style={{ margin: 0 }}>Knowledge supplied to this assistant</h3>
+                  <span className="muted" style={{ fontSize: '12px' }}>
+                    {knowledge === null
+                      ? 'loading…'
+                      : `${knowledge.length} block${knowledge.length === 1 ? '' : 's'}`}
+                  </span>
+                </div>
+                {knowledgeError && <p className="error-text">Failed to load knowledge: {knowledgeError}</p>}
+                {!knowledgeError && knowledge === null && <p>Loading knowledge…</p>}
+                {knowledge && knowledge.length === 0 && (
+                  <p>No knowledge recorded. This assistant runs without a knowledge block.</p>
+                )}
+                {knowledge && knowledge.length > 0 && (
+                  <ul className="knowledge-list canvas-knowledge-list">
+                    {knowledge.map((entry) => (
+                      <li key={entry.id}>
+                        <div className="knowledge-header">
+                          <strong>{entry.title}</strong>
+                          {entry.scope && <span className="badge">{entry.scope}</span>}
+                          {entry.origin && <span className="badge">{entry.origin}</span>}
+                          <span className="muted" style={{ fontSize: '11px' }}>
+                            {entry.content.length} characters
+                          </span>
+                        </div>
+                        {entry.source && <div className="knowledge-source">source: {entry.source}</div>}
                         <pre className="knowledge-content">{entry.content}</pre>
-                      </details>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </>
           ) : (
             <div className="card">
               <h3>Select a Node</h3>

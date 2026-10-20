@@ -8,7 +8,7 @@ export const CTO_ENGINEERING_ACTION_IAC_DRIFT_REMEDIATION = createDeclarativeCod
     isSkill: true,
     name: 'Engineering Action & IaC Drift Remediation',
     description: 'Dry-run and, after explicit confirmation, apply approved engineering or IaC remediation through a configured endpoint.',
-    persistenceEnvVar: 'ASSISTANT_HOME',
+    persistenceEnvVar: 'CTO_HOME',
     inputSchema: createSchemaRecord({
       remediation: SchemaProps.object({
         target: SchemaProps.text({ description: 'What to change, e.g. the resource or file in drift' }),

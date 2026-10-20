@@ -15,12 +15,10 @@
     "declarationMap": true,
     "sourceMap": true,
     "rootDir": "./src",
-    "baseUrl": ".",
     "types": ["node", "jest"]
   },
   "include": [
-    "src/**/*",
-    "__tests__/**/*"
+    "src/**/*"
   ],
   "exclude": [
     "node_modules",

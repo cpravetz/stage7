@@ -6,15 +6,17 @@ WORKDIR /usr/src/app
 
 COPY package*.json ./
 COPY shared-nextgen/package*.json ./shared-nextgen/
-COPY services ./services
+COPY services/artifacts/package*.json ./services/artifacts/
+COPY services/artifacts/tsconfig.json ./services/artifacts/
+COPY shared-nextgen/tsconfig.json ./shared-nextgen/
+COPY services/artifacts/src ./services/artifacts/src/
 
-RUN npm install --legacy-peer-deps
+RUN npm install --legacy-peer-deps --ignore-scripts
 
-COPY shared-nextgen ./shared-nextgen
-COPY services/artifacts ./services/artifacts
+COPY shared-nextgen/src ./shared-nextgen/src/
 
-RUN cd shared-nextgen && npm run build
-RUN cd services/artifacts && rm -rf dist && npm run build
+RUN cd shared-nextgen && npx tsc
+RUN cd services/artifacts && rm -rf dist && npx tsc
 
 WORKDIR /usr/src/app/services/artifacts
 

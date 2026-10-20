@@ -61,6 +61,7 @@ export const SPORTS_PREDICTOR_AD_HOC = createDeclarativeCodeSkill({
   isSkill: true,
   manifest: {},
   handler: async function handler(input, ctx) {
+      const _sgHome = process.env.SPORTS_GROUP_B_HOME;
       const eventId = input.event || input.gameId || '';
       const sport = input.sport || 'generic';
       const gameStatus = input.gameStatus || 'in-progress';

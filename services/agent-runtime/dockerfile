@@ -6,15 +6,21 @@ WORKDIR /usr/src/app
 
 COPY package*.json ./
 COPY shared-nextgen/package*.json ./shared-nextgen/
-COPY services ./services
+COPY services/agent-runtime/package*.json ./services/agent-runtime/
+COPY services/artifacts/package*.json ./services/artifacts/
+COPY services/agent-runtime/tsconfig.json ./services/agent-runtime/
+COPY services/artifacts/tsconfig.json ./services/artifacts/
+COPY shared-nextgen/tsconfig.json ./shared-nextgen/
+COPY services/agent-runtime/src ./services/agent-runtime/src/
+COPY services/artifacts/src ./services/artifacts/src/
 
-RUN npm install --legacy-peer-deps
+RUN npm install --legacy-peer-deps --ignore-scripts
 
-COPY shared-nextgen ./shared-nextgen
-COPY services/agent-runtime ./services/agent-runtime
+COPY shared-nextgen/src ./shared-nextgen/src/
 
-RUN cd shared-nextgen && npm run build
-RUN cd services/agent-runtime && rm -rf dist && npm run build
+RUN cd shared-nextgen && npx tsc
+RUN cd services/artifacts && rm -rf dist && npx tsc
+RUN cd services/agent-runtime && rm -rf dist && npx tsc
 
 WORKDIR /usr/src/app/services/agent-runtime
 

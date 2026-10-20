@@ -45,7 +45,7 @@ const CALCULATE_DORA = createDeclarativeCodeSkill({
   name: 'Calculate DORA Metrics',
   description:
     'Computes the four DORA metrics — deployment frequency, lead time for change, change failure rate and time to restore — from supplied deployment and incident records, and reports each against its performance band with the trade-off between them named. Computes from what it is given; it does not fetch repository data itself.',
-  persistenceEnvVar: 'ASSISTANT_HOME',
+  persistenceEnvVar: 'CTO_HOME',
   inputSchema: {
     type: 'object',
     properties: {

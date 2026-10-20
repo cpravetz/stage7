@@ -82,6 +82,7 @@ interface MissionsState {
   refreshDetail: (workflowId: string) => Promise<void>;
   fetchPendingApprovals: () => Promise<void>;
   deleteMission: (workflowId: string) => Promise<void>;
+  deleteMissions: (workflowIds: string[]) => Promise<void>;
   retryMission: (workflowId: string, retryPrompt?: string) => Promise<{ workflowId: string; status: string; retriedFrom: string; retryCount: number }>;
   addMission: (mission: MissionRow) => void;
   updateMissionStatus: (identifier: string, status: string, extra?: Partial<MissionRow>) => void;
@@ -407,21 +408,56 @@ export const useMissionsStore = create<MissionsState>((set, get) => ({
   },
 
   deleteMission: async (workflowId: string) => {
-    try {
-      await deleteResource(
-        `/api/temporal/missions/${encodeURIComponent(workflowId)}`
-      );
-      set((s) => ({
-        missions: s.missions.filter((m) => m.workflowId !== workflowId),
-        details: Object.fromEntries(
-          Object.entries(s.details).filter(([k]) => k !== workflowId)
-        ),
-      }));
-    } catch (err) {
-      set({
-        missionsError:
-          err instanceof Error ? err.message : 'Failed to delete mission',
-      });
+    await get().deleteMissions([workflowId]);
+  },
+
+  /**
+   * Deletes missions from the workflow engine. The engine removes the
+   * persisted artifacts of each mission, including the live feed events
+   * recorded in the artifacts service, so a deleted mission does not keep a
+   * live feed. The events are also dropped from the local feed so the live
+   * feed view stops showing a mission that no longer exists.
+   */
+  deleteMissions: async (workflowIds: string[]) => {
+    if (workflowIds.length === 0) return;
+
+    const targets = workflowIds.map((workflowId) => ({
+      workflowId,
+      missionId: get().missions.find((m) => m.workflowId === workflowId)?.missionId,
+    }));
+
+    const errors: string[] = [];
+    const removedMissionIds: string[] = [];
+    const deleted = new Set<string>();
+
+    for (const { workflowId, missionId } of targets) {
+      try {
+        await deleteResource(
+          `/api/temporal/missions/${encodeURIComponent(workflowId)}`
+        );
+      } catch (err) {
+        errors.push(
+          err instanceof Error
+            ? err.message
+            : `Failed to delete mission ${workflowId}`
+        );
+        continue;
+      }
+
+      deleted.add(workflowId);
+      if (missionId) removedMissionIds.push(missionId);
+    }
+
+    set((s) => ({
+      missions: s.missions.filter((m) => !deleted.has(m.workflowId)),
+      details: Object.fromEntries(
+        Object.entries(s.details).filter(([k]) => !deleted.has(k))
+      ),
+      missionsError: errors.length > 0 ? errors.join('; ') : null,
+    }));
+
+    for (const missionId of removedMissionIds) {
+      useFeedStore.getState().removeMissionEvents(missionId);
     }
   },
 

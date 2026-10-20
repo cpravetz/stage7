@@ -11,6 +11,8 @@ import {
   AgentExecutionPolicy,
   AgentToolPolicy,
   DEFAULT_AGENT_EXECUTION_POLICY,
+  describeRequestError,
+  httpRequest,
 } from '@stage7-nextgen/shared';
 import { Plan, Phase, Task } from '@stage7-nextgen/shared';
 import type { CompletedTaskSummary } from '../types/workflow';
@@ -177,6 +179,20 @@ function getAgentRuntimeUrl(): string {
   return process.env.AGENT_RUNTIME_URL || 'http://agent-runtime:3400';
 }
 
+/**
+ * An agent task runs a full model completion, which can take many minutes.
+ * The default must outlast the Brain completion deadline, otherwise the
+ * request is aborted while the agent is still working and the mission fails
+ * even though the agent eventually succeeds.
+ */
+function agentRuntimeTimeoutMs(): number {
+  const configured = Number(process.env.AGENT_RUNTIME_TIMEOUT_MS);
+  if (Number.isFinite(configured) && configured > 0) return configured;
+  const brainDeadline = Number(process.env.BRAIN_COMPLETION_DEADLINE_MS);
+  if (Number.isFinite(brainDeadline) && brainDeadline > 0) return brainDeadline + 60_000;
+  return 900_000;
+}
+
 function encodePathSegment(value: string): string {
   return encodeURIComponent(value).replace(/%3A/gi, ':');
 }
@@ -296,12 +312,17 @@ export class MissionAgentRuntime {
     const url = `${this.agentRuntimeUrl}/api/agent-runtime${path}`;
     let res: Response;
     try {
-      res = await fetch(url, {
-        ...options,
-        headers: { 'Content-Type': 'application/json', ...options.headers },
+      // `fetch` aborts a request that has not received response headers
+      // within 300 seconds, which kills long running agent tasks and
+      // reports them as an opaque "fetch failed".
+      res = await httpRequest(url, {
+        method: options.method,
+        headers: { 'Content-Type': 'application/json', ...(options.headers as Record<string, string> | undefined) },
+        body: options.body as string | undefined,
+        timeoutMs: agentRuntimeTimeoutMs(),
       });
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = describeRequestError(err);
       logger.error({ path, url, err: message }, 'Agent runtime fetch failed');
       throw new MissionAgentRuntimeApiError(path, 500, message);
     }

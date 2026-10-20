@@ -11,7 +11,7 @@ export const TaskSchema = z.object({
   requiredActions: z.array(z.object({
     toolId: z.string().trim().min(1).max(120),
     outcome: z.enum(['success', 'failure', 'denied']),
-  }).strict()).max(50).optional(),
+  }).passthrough()).max(50).optional(),
   status: z.enum(['pending', 'in_progress', 'awaiting_approval', 'completed', 'failed', 'skipped']),
   output: z.string().optional(),
   artifacts: z.array(z.object({

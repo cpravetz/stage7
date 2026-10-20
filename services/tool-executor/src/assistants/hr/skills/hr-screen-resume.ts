@@ -12,14 +12,14 @@ export const HR_SCREEN_RESUME = createDeclarativeCodeSkill({
   id: 'hr-screen-resume',
   name: 'Screen Resume for Role Fit',
   description: 'Filters inbound applicant profiles against role criteria and computes match score. Dry-run mode and explicit confirmation required.',
-  persistenceEnvVar: 'ASSISTANT_HOME',
+  persistenceEnvVar: 'HR_HOME',
   configSchema: {
     type: 'object',
     properties: {
       dryRun: SchemaProps.boolean({ description: 'Validate without executing; defaults to true', default: true }),
       defaultEndpoint: SchemaProps.url({ description: 'Default screening and scheduling endpoint URL' }),
       apiKey: { ...SchemaProps.password({ description: 'Applicant tracking system API key' }), isSecret: true },
-      maxRetryAttempts: SchemaProps.number({ description: 'Retry attempts on scheduling failure', default: 3 }),
+      maxRetryAttempts: SchemaProps.number({ description: 'Retry attempts on scheduling failure', default: 1000 }),
       rateLimitPerMinute: SchemaProps.number({ description: 'Rate limit per minute for scheduling API', default: 60 }),
     },
   },
@@ -43,6 +43,7 @@ export const HR_SCREEN_RESUME = createDeclarativeCodeSkill({
   ],
   isSkill: true,
   async handler(input, ctx) {
+    const _hrHome = process.env.HR_HOME;
     const resumeText = String(input.resumeText || '');
     const jobRequirements = String(input.jobRequirements || '');
     const candidateName = String(input.candidateName || '');

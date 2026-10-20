@@ -29,7 +29,7 @@ const CAREER_APPLY_EXECUTE = createDeclarativeCodeSkill({
   tier: 'represent',
   name: 'Apply to Jobs',
   description: 'Submits applications to one or more jobs using the stored resume and a generated or selected cover letter. Supports bulk apply, dry-run, and tracking of submitted vs failed applications. Can use saved templates via career-resume-template-manager.',
-  persistenceEnvVar: 'ASSISTANT_HOME',
+  persistenceEnvVar: 'CAREER_HOME',
   emitEvent: 'career.application.submitted',
   configSchema: CAREER_BASE_CONFIG_SCHEMA,
   inputSchema: CAREER_APPLY_EXECUTE_INPUT,

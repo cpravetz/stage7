@@ -3,6 +3,26 @@ import { fetchProvider, providerTimeoutMs } from '../utils/providerFetch';
 
 const FALLBACK_CONTEXT_WINDOW = 8192;
 
+/**
+ * Routes a gateway may serve its OpenAI-compatible API on. They are probed in
+ * order when the configured route does not exist, so a provider that serves
+ * the API under a different prefix still works without any configuration.
+ */
+const CHAT_PATH_CANDIDATES = [
+  '/chat/completions',
+  '/v1/chat/completions',
+  '/api/chat/completions',
+  '/api/v1/chat/completions',
+  '/openai/chat/completions',
+];
+
+const COMPLETIONS_PATH_CANDIDATES = [
+  '/completions',
+  '/v1/completions',
+  '/api/completions',
+  '/api/v1/completions',
+];
+
 function toNumber(value: unknown): number | null {
   const n = typeof value === 'number' ? value : typeof value === 'string' ? parseFloat(value) : NaN;
   return Number.isFinite(n) ? n : null;
@@ -136,6 +156,48 @@ export class OpenAICompatibleProvider implements LLMProvider {
     this.info.apiBase = this.apiBase;
   }
 
+  /**
+   * The completion endpoints to try, in order: the configured route first,
+   * then the well-known OpenAI-compatible routes. A gateway whose API base
+   * is missing its version prefix is also probed with that prefix added.
+   */
+  private endpointCandidates(
+    configuredPath: string,
+    fallbacks: string[],
+  ): Array<{ url: string; base: string; path: string }> {
+    const bases: Array<{ base: string; prefix: string }> = [{ base: this.apiBase, prefix: '' }];
+    if (!/\/v\d+[a-z0-9]*$/i.test(this.apiBase)) {
+      bases.push({ base: this.apiBase, prefix: '/v1' });
+    }
+
+    const paths = [configuredPath, ...fallbacks];
+    const seen = new Set<string>();
+    const candidates: Array<{ url: string; base: string; path: string }> = [];
+
+    for (const { base, prefix } of bases) {
+      for (const path of paths) {
+        const normalized = path.startsWith('/') ? path : `/${path}`;
+        const url = `${base}${prefix}${normalized}`;
+        if (seen.has(url)) continue;
+        seen.add(url);
+        candidates.push({ url, base: `${base}${prefix}`, path: normalized });
+      }
+    }
+
+    return candidates;
+  }
+
+  /** Remembers an endpoint that answered, so later calls go straight to it. */
+  private rememberEndpoint(base: string, path: string, kind: 'chat' | 'completions'): void {
+    if (base !== this.apiBase) {
+      this.apiBase = base;
+      this.modelCache = null;
+      this.info.apiBase = base;
+    }
+    if (kind === 'chat') this.chatCompletionsPath = path;
+    else this.completionsPath = path;
+  }
+
   isAvailable(): boolean {
     return !!this.apiBase;
   }
@@ -206,7 +268,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
 
     const upperId = this.id.toUpperCase().replace(/[^A-Z0-9]/g, '_');
     const alt = upperId.replace(/UI$/, '');
-    const pathSuggestion = `Set ${upperId}_CHAT_PATH or ${upperId}_COMPLETIONS_PATH (or ${alt}_CHAT_PATH / ${alt}_COMPLETIONS_PATH) env var to the provider's supported completion endpoint (e.g. /api/chat/completions, /completions).`;
+    const pathSuggestion = `Set ${upperId}_CHAT_PATH or ${upperId}_COMPLETIONS_PATH${alt && alt !== upperId ? ` (or ${alt}_CHAT_PATH / ${alt}_COMPLETIONS_PATH)` : ''} env var to the provider's supported completion endpoint (e.g. /api/chat/completions, /completions).`;
 
     const buildBody = (model: string) => ({
       model,
@@ -217,49 +279,72 @@ export class OpenAICompatibleProvider implements LLMProvider {
       output_format: (req as any).outputFormat,
     });
 
-    // Try chat/completions first, fall back to /completions if the server doesn't support chat endpoint.
-    let res = await fetchProvider(`${this.apiBase}${this.chatCompletionsPath}`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(buildBody(req.model)),
-    });
+    const tried: string[] = [];
+    let triedCompletions = false;
+    let res: Response | undefined;
+    let lastStatus = 0;
+    let lastText = '';
+    let lastUrl = '';
 
-    let data: any;
+    // Try the chat endpoint first. When the gateway does not serve that
+    // route, the well-known OpenAI-compatible routes are probed before giving
+    // up, and the one that answers is remembered for later calls.
+    const chatCandidates = this.endpointCandidates(this.chatCompletionsPath, CHAT_PATH_CANDIDATES);
+    for (const candidate of chatCandidates) {
+      tried.push(candidate.url);
+      const attempt = await fetchProvider(candidate.url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(buildBody(req.model)),
+      });
+      if (attempt.ok) {
+        res = attempt;
+        this.rememberEndpoint(candidate.base, candidate.path, 'chat');
+        break;
+      }
+      lastStatus = attempt.status;
+      lastText = await (attempt.text ? attempt.text() : Promise.resolve(String(attempt)));
+      lastUrl = candidate.url;
+      // Only "this route does not exist" justifies probing another route.
+      if (lastStatus !== 404 && lastStatus !== 405) break;
+    }
 
-    if (!res.ok) {
-      const errText = await (res.text ? res.text() : Promise.resolve(String(res)));
-
+    if (!res && lastStatus === 400 && /Model not found/i.test(lastText)) {
       // If the server returns 400 with a "Model not found" message, try to
       // discover available models and retry with a known model once.
-      if (res.status === 400 && /Model not found/i.test(errText)) {
-        try {
-          const available = await this.listModels();
-          if (available && available.length > 0) {
-            const fallbackModel = available[0].id;
-            res = await fetchProvider(`${this.apiBase}${this.chatCompletionsPath}`, {
-              method: 'POST',
-              headers,
-              body: JSON.stringify(buildBody(fallbackModel)),
-            });
-            if (res.ok) {
-              data = await res.json();
-            } else {
-              const errText2 = await (res.text ? res.text() : Promise.resolve(String(res)));
-              throw new Error(`[${this.id}] completion failed after fallback model attempt: ${res.status} ${errText2}`);
-            }
+      try {
+        const available = await this.listModels();
+        if (available && available.length > 0) {
+          const fallbackModel = available[0].id;
+          const retry = await fetchProvider(lastUrl, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(buildBody(fallbackModel)),
+          });
+          if (retry.ok) {
+            res = retry;
           }
-        } catch (e) {
-          // fall through to other fallback logic
         }
+      } catch {
+        // fall through to other fallback logic
       }
+    }
 
-      // If the server indicates the model or endpoint does not support chat (400),
-      // or method not allowed / not found, try the older /completions endpoint.
-      if (res.status === 405 || res.status === 404 || /Method Not Allowed/i.test(errText) || /Not Found/i.test(errText) || (res.status === 400 && /does not support chat|does not support/i.test(errText))) {
+    if (!res) {
+      // The chat endpoint is not usable. Fall back to the legacy completions
+      // endpoint when the server says the route is missing or unsupported.
+      const wantsCompletions = lastStatus === 405 || lastStatus === 404
+        || /Method Not Allowed/i.test(lastText) || /Not Found/i.test(lastText)
+        || (lastStatus === 400 && /does not support chat|does not support/i.test(lastText));
+      if (wantsCompletions) {
+        triedCompletions = true;
         const prompt = req.messages.map((m: CompletionMessage) => `${m.role}: ${m.content}`).join('\n');
-        res = await fetchProvider(`${this.apiBase}${this.completionsPath}`, {
-          method: 'POST',
-          headers,
+        const completionsCandidates = this.endpointCandidates(this.completionsPath, COMPLETIONS_PATH_CANDIDATES);
+        for (const candidate of completionsCandidates) {
+          tried.push(candidate.url);
+          const attempt = await fetchProvider(candidate.url, {
+            method: 'POST',
+            headers,
             body: JSON.stringify({
               model: req.model,
               prompt,
@@ -269,20 +354,31 @@ export class OpenAICompatibleProvider implements LLMProvider {
               output_format: (req as any).outputFormat,
             }),
           });
-        if (!res.ok) {
-          const errText2 = await (res.text ? res.text() : Promise.resolve(String(res)));
-          throw new Error(`[${this.id}] completion failed (chat then completions): ${res.status} ${errText2}. ${pathSuggestion}`);
+          if (attempt.ok) {
+            res = attempt;
+            this.rememberEndpoint(candidate.base, candidate.path, 'completions');
+            break;
+          }
+          lastStatus = attempt.status;
+          lastText = await (attempt.text ? attempt.text() : Promise.resolve(String(attempt)));
+          if (lastStatus !== 404 && lastStatus !== 405) break;
         }
-        data = await res.json();
-      } else {
-        // Generic failure: timeouts (AbortError), 429 rate limits, 4xx/5xx, etc.
-        // The env-var path suggestion is only meaningful for 404/405/"does not support chat"
-        // cases, so it is intentionally NOT included here.
-        throw new Error(`[${this.id}] completion failed: ${res.status} ${errText}`);
       }
-    } else {
-      data = await res.json();
     }
+
+    if (!res) {
+      // Generic failure: timeouts (AbortError), 429 rate limits, 4xx/5xx, etc.
+      // The env-var path suggestion is only meaningful for 404/405/"does not support chat"
+      // cases, so it is intentionally NOT included here.
+      const isRouteProblem = lastStatus === 404 || lastStatus === 405;
+      const label = triedCompletions ? 'chat then completions' : 'chat';
+      throw new Error(
+        `[${this.id}] completion failed (${label}): ${lastStatus} ${lastText}`
+        + (isRouteProblem ? `. Tried: ${tried.join(', ')}. ${pathSuggestion}` : ''),
+      );
+    }
+
+    const data: any = await res.json();
     // Normalize response for both /chat/completions and /completions
     let content = '';
     if (data.choices && data.choices[0] && data.choices[0].message) {

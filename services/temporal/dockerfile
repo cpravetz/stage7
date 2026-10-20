@@ -8,15 +8,17 @@ WORKDIR /usr/src/app
 
 COPY package*.json ./
 COPY shared-nextgen/package*.json ./shared-nextgen/
-COPY services ./services
+COPY services/temporal/package*.json ./services/temporal/
+COPY services/temporal/tsconfig.json ./services/temporal/
+COPY shared-nextgen/tsconfig.json ./shared-nextgen/
+COPY services/temporal/src ./services/temporal/src/
 
-RUN npm install --legacy-peer-deps
+RUN npm install --legacy-peer-deps --ignore-scripts
 
-COPY shared-nextgen ./shared-nextgen
-COPY services/temporal ./services/temporal
+COPY shared-nextgen/src ./shared-nextgen/src/
 
-RUN cd shared-nextgen && npm run build
-RUN cd services/temporal && rm -rf dist && npm run build
+RUN cd shared-nextgen && npx tsc
+RUN cd services/temporal && rm -rf dist && npx tsc
 
 WORKDIR /usr/src/app/services/temporal
 

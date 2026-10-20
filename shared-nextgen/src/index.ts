@@ -6,5 +6,6 @@ export * from './types/mission';
 export * from './types/auth';
 export * from './constants/brainRouting';
 export * from './utils/logger';
+export * from './utils/httpClient';
 export * from './errors';
 export * from './middleware/asyncHandler';

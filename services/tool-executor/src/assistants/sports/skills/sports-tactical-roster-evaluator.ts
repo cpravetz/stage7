@@ -61,6 +61,7 @@ export const TACTICAL_ROSTER_EVALUATOR = createDeclarativeCodeSkill({
     }
   },
   handler: async function handler(input, ctx) {
+      const _sgHome = process.env.SPORTS_GROUP_A_HOME;
       const entity = input.entity || input.teamId || input.playerId || '';
       const opponent = input.opponent || input.opponentId || '';
       const sport = input.sport || 'generic';

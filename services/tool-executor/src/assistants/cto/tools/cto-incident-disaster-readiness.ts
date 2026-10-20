@@ -8,7 +8,7 @@ export const CTO_INCIDENT_DISASTER_READINESS = (() => { const t = createDeclarat
   isSkill: false,
   name: 'Incident & Disaster Readiness',
   description: 'Hybrid skill for disaster recovery operations and incident readiness checks',
-  persistenceEnvVar: 'ASSISTANT_HOME',
+  persistenceEnvVar: 'CTO_HOME',
   manifest: {},
   inputSchema: createSchemaRecord({
     provider: SchemaProps.select(DISASTER_PROVIDERS, {

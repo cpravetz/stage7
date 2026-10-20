@@ -9,6 +9,13 @@ export interface CustomProviderSpec {
   apiKey: string;
   apiBase: string;
   listModelsPath?: string;
+  /**
+   * Route overrides for the completion endpoints. A custom gateway does not
+   * have to serve the OpenAI default paths, so the operator can point it at
+   * the routes it actually implements.
+   */
+  chatCompletionsPath?: string;
+  completionsPath?: string;
 }
 
 function sanitizePrefix(raw: string): string {
@@ -61,6 +68,10 @@ export function parseCustomProviderSpecs(existingIds: Set<string> = new Set()): 
       apiKey,
       apiBase,
       listModelsPath: process.env[`${prefix}_LIST_MODELS_PATH`] || '/models',
+      // The error the provider raises names these variables, so they have to
+      // be read here for that advice to be of any use.
+      chatCompletionsPath: process.env[`${prefix}_CHAT_PATH`] || undefined,
+      completionsPath: process.env[`${prefix}_COMPLETIONS_PATH`] || undefined,
     });
   }
 
@@ -77,6 +88,8 @@ export function buildCustomProvidersFromEnv(existingIds: Set<string> = new Set()
       apiKey: spec.apiKey,
       defaultModels: [],
       listModelsPath: spec.listModelsPath,
+      chatCompletionsPath: spec.chatCompletionsPath,
+      completionsPath: spec.completionsPath,
     });
     logger.info({ provider: spec.id, name: spec.name, url: spec.apiBase }, 'Registered custom OpenAI-compatible provider');
     return provider;

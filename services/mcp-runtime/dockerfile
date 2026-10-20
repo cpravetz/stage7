@@ -6,15 +6,17 @@ WORKDIR /usr/src/app
 
 COPY package*.json ./
 COPY shared-nextgen/package*.json ./shared-nextgen/
-COPY services ./services
+COPY services/mcp-runtime/package*.json ./services/mcp-runtime/
+COPY services/mcp-runtime/tsconfig.json ./services/mcp-runtime/
+COPY shared-nextgen/tsconfig.json ./shared-nextgen/
+COPY services/mcp-runtime/src ./services/mcp-runtime/src/
 
-RUN npm install --legacy-peer-deps
+RUN npm install --legacy-peer-deps --ignore-scripts
 
-COPY shared-nextgen ./shared-nextgen
-COPY services/mcp-runtime ./services/mcp-runtime
+COPY shared-nextgen/src ./shared-nextgen/src/
 
-RUN cd shared-nextgen && npm run build
-RUN cd services/mcp-runtime && rm -rf dist && npm run build
+RUN cd shared-nextgen && npx tsc
+RUN cd services/mcp-runtime && rm -rf dist && npx tsc
 
 WORKDIR /usr/src/app/services/mcp-runtime
 

@@ -1,5 +1,5 @@
 import jwt from 'jsonwebtoken';
-import bcrypt from 'bcrypt';
+import bcrypt from 'bcryptjs';
 import { TokenPayload, AuthResult, User, ServiceAccount } from '../types';
 
 export class TokenService {

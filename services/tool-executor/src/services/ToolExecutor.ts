@@ -1,5 +1,8 @@
 import { createContextPolicy } from '../adk';
-import { Tool, ToolExecution, WorkflowState, CredentialRequest, CredentialRequiredError, ConfirmationRequiredError, CrossObjectHandoffError, SchemaRecord, ApprovalSummary, HandoffRequest, RuntimeWorkflow, RuntimeWorkflowAction } from '../types';
+import {
+  Tool, ToolExecution, WorkflowState, CredentialRequest, CredentialRequiredError, ConfirmationRequiredError,
+  CrossObjectHandoffError, SchemaRecord, ApprovalSummary, HandoffRequest, RuntimeWorkflow, RuntimeWorkflowAction,
+} from '../types';
 import logger from '../utils/logger';
 import { ErrorHandler } from '../utils/ErrorHandler';
 import { EmailExecutor } from '../executors/EmailExecutor';
@@ -1414,6 +1417,14 @@ return { resolved: merged, sources: namedSources };
     return config;
   }
 
+  /**
+   * MCP Tool Discovery hook (§3). When a tool is not registered, ask the MCP
+   * Tool Executive to search approved MCP library sources. If a candidate
+   * needs user permission, throw MCPToolDiscoveryRequiredError so the caller
+   * can present the permission request. If pre-approved or already granted,
+   * integrate and retry with the new tool. Otherwise fall through so the
+   * existing dispatch fallback (plugin generation, discovery) still applies.
+   */
   private async dispatch(tool: Tool, input: Record<string, unknown>, credentials: { resolved: Record<string, string | undefined>; sources: NamedCredentialSource[] }): Promise<Record<string, unknown>> {
 const { resolved, sources } = credentials;
 const name = tool.name.toLowerCase();

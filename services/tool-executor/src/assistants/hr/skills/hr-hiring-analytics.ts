@@ -12,7 +12,7 @@ export const HR_HIRING_ANALYTICS = createDeclarativeCodeSkill({
   id: 'hr-hiring-analytics',
   name: 'Hiring Pipeline Analytics',
   description: 'Evaluates team headcount needs, attrition trends, and market salary data. Generates hiring metrics, pipeline reports, and diversity analytics. Runs weekly.',
-  persistenceEnvVar: 'ASSISTANT_HOME',
+  persistenceEnvVar: 'HR_HOME',
   configSchema: {
     type: 'object',
     properties: {
@@ -40,6 +40,7 @@ export const HR_HIRING_ANALYTICS = createDeclarativeCodeSkill({
   ],
   isSkill: true,
   async handler(input, ctx) {
+    const _hrHome = process.env.HR_HOME;
     function computeAnalytics(records: any[]) {
       const totalCandidates = records.length;
       const byStage: Record<string, number> = {};

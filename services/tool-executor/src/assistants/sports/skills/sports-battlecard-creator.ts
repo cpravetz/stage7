@@ -70,6 +70,7 @@ export const BATTLECARD_CREATOR = createDeclarativeCodeSkill({
     }
   },
   handler: async function handler(input, ctx) {
+      const _sgHome = process.env.SPORTS_GROUP_A_HOME;
       const entity = input.entity || input.teamId || '';
       const opponent = input.opponent || input.opponentId || '';
       const sport = input.sport || 'generic';

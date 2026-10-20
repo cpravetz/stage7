@@ -15,6 +15,7 @@ const MissionStateSchema = z.object({
   assistantId: z.string(),
   status: z.enum(['pending', 'running', 'paused', 'completed', 'failed', 'canceled', 'awaiting_review', 'incomplete']),
   controlState: z.enum(['running', 'pause_requested', 'paused', 'terminate_requested', 'terminated']).optional(),
+  pendingDeletion: z.boolean().optional(),
   currentStep: z.number(),
   totalSteps: z.number(),
   history: z.array(z.any()),

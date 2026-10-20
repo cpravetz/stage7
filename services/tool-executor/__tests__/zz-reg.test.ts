@@ -1,0 +1,13 @@
+import { ToolRegistry } from '../src/services/ToolRegistry';
+import { careerSkills, careerCanonicalSkills } from '../src/assistants/career';
+
+it('registry surfaces career skills', () => {
+  const reg = new ToolRegistry();
+  for (const t of [...careerSkills, ...careerCanonicalSkills]) {
+    if (!reg.get(t.id)) reg.registerDefault({ ...t });
+  }
+  for (const s of careerCanonicalSkills) {
+    const live = reg.get(s.id);
+    console.log(`${s.id.padEnd(50)} registered=${!!live} isSkill=${String(live?.isSkill)}`);
+  }
+});

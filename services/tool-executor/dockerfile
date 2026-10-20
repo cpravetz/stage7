@@ -6,22 +6,23 @@ WORKDIR /usr/src/app
 
 COPY package*.json ./
 COPY shared-nextgen/package*.json ./shared-nextgen/
-COPY services ./services
+COPY services/tool-executor/package*.json ./services/tool-executor/
+COPY services/tool-executor/tsconfig.json ./services/tool-executor/
+COPY shared-nextgen/tsconfig.json ./shared-nextgen/
+COPY services/tool-executor/src ./services/tool-executor/src/
+COPY services/tool-executor/scripts ./services/tool-executor/scripts/
 
-RUN npm install --legacy-peer-deps
+RUN npm install --legacy-peer-deps --ignore-scripts
 
-COPY shared-nextgen ./shared-nextgen
-COPY services/tool-executor ./services/tool-executor
+COPY shared-nextgen/src ./shared-nextgen/src/
 
-RUN cd shared-nextgen && npm run build
-RUN cd services/tool-executor && rm -rf dist && npm run build
+RUN cd shared-nextgen && npx tsc
+RUN cd services/tool-executor && rm -rf dist && npx tsc && node scripts/copy-runtime-assets.js
 
 WORKDIR /usr/src/app/services/tool-executor
 
 EXPOSE 3500
 
-# Assistant selection: STAGE7_ASSISTANTS env var (set via docker-compose) controls
-# which assistants are loaded at runtime. Leave empty for all assistants.
 ENV STAGE7_ASSISTANTS=${STAGE7_ASSISTANTS}
 
 CMD ["node", "dist/index.js"]

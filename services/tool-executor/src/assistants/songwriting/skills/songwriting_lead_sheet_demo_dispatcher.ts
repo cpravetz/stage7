@@ -15,7 +15,7 @@ export const leadSheetDemoDispatcher = createDeclarativeCodeSkill({
   id: 'songwriting_lead_sheet_demo_dispatcher',
   name: 'Represent Lead Sheet & Demo Asset Dispatcher',
   description: 'Parses final lyrics into sections, aligns the supplied chord symbols to the line they belong on, renders a column-aligned lead sheet, builds demo metadata (key, tempo, duration, section and line counts) or a copyright registration record, stages the artifact locally, and only dispatches to a configured provider after explicit confirmation.',
-  persistenceEnvVar: 'ASSISTANT_HOME',
+  persistenceEnvVar: 'SONGWRITING_HOME',
   inputSchema: {
     type: 'object',
     properties: {

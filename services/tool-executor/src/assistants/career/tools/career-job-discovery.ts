@@ -130,7 +130,7 @@ export const CAREER_JOB_DISCOVERY: Tool = createDeclarativeCodeSkill({
   id: 'career-job-discovery',
   name: 'Job Discovery',
   description: 'Finds real job listings from public, no-auth sources and returns normalized postings.',
-  persistenceEnvVar: 'ASSISTANT_HOME',
+  persistenceEnvVar: 'CAREER_HOME',
   configSchema: CAREER_BASE_CONFIG_SCHEMA,
   inputSchema: CAREER_JOB_DISCOVERY_INPUT,
   outputSchema: careerResultSchema(

@@ -35,6 +35,7 @@ const Missions = () => {
   const fetchPendingApprovals = useMissionsStore((s) => s.fetchPendingApprovals);
   const addMission = useMissionsStore((s) => s.addMission);
   const deleteMission = useMissionsStore((s) => s.deleteMission);
+  const deleteMissions = useMissionsStore((s) => s.deleteMissions);
   const updateMissionStatus = useMissionsStore((s) => s.updateMissionStatus);
 
   const [showCreate, setShowCreate] = useState(false);
@@ -42,6 +43,9 @@ const Missions = () => {
   const [prompt, setPrompt] = useState('');
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
+
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [batchDeleting, setBatchDeleting] = useState(false);
 
   const [filter, setFilter] = useState<'all' | MissionRow['status']>('all');
   const [search, setSearch] = useState('');
@@ -63,6 +67,15 @@ const Missions = () => {
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, [hasRunning]);
+
+  // Drop selections for missions that no longer exist after a refresh or delete.
+  useEffect(() => {
+    setSelected((prev) => {
+      const known = new Set(missions.map((m) => m.workflowId));
+      const next = new Set(Array.from(prev).filter((id) => known.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [missions]);
 
   const handleStart = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -144,6 +157,51 @@ const Missions = () => {
       );
     });
   }, [missions, filter, search]);
+
+  const visibleIds = useMemo(
+    () => filtered.map((m) => m.workflowId),
+    [filtered]
+  );
+  const allVisibleSelected =
+    visibleIds.length > 0 && visibleIds.every((id) => selected.has(id));
+
+  const toggleSelect = (workflowId: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(workflowId)) next.delete(workflowId);
+      else next.add(workflowId);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allVisibleSelected) visibleIds.forEach((id) => next.delete(id));
+      else visibleIds.forEach((id) => next.add(id));
+      return next;
+    });
+  };
+
+  const handleDeleteSelected = async () => {
+    const ids = Array.from(selected);
+    if (ids.length === 0) return;
+    const label = ids.length === 1 ? 'mission' : 'missions';
+    if (
+      !window.confirm(
+        `Delete ${ids.length} ${label}? Their live feed events and artifacts are removed as well.`
+      )
+    ) {
+      return;
+    }
+    setBatchDeleting(true);
+    try {
+      await deleteMissions(ids);
+      setSelected(new Set());
+    } finally {
+      setBatchDeleting(false);
+    }
+  };
 
   const counts = useMemo(() => {
     const c: Record<string, number> = {
@@ -278,10 +336,44 @@ const Missions = () => {
         </div>
 
         <div className="mission-table-wrapper" style={{ marginTop: 12 }}>
+          {selected.size > 0 && (
+            <div className="mission-batch-bar">
+              <span>
+                <strong>{selected.size}</strong> mission
+                {selected.size === 1 ? '' : 's'} selected
+              </span>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  className="secondary small"
+                  onClick={() => setSelected(new Set())}
+                  disabled={batchDeleting}
+                >
+                  Clear selection
+                </button>
+                <button
+                  className="danger small"
+                  onClick={handleDeleteSelected}
+                  disabled={batchDeleting}
+                >
+                  {batchDeleting ? 'Deleting…' : 'Delete selected'}
+                </button>
+              </div>
+            </div>
+          )}
           <div className="mission-table-scroll">
             <table className="data-table">
               <thead>
                 <tr>
+                  <th style={{ width: 36 }}>
+                    <input
+                      type="checkbox"
+                      className="mission-select-checkbox"
+                      checked={allVisibleSelected}
+                      onChange={toggleSelectAll}
+                      disabled={visibleIds.length === 0}
+                      aria-label="Select all missions"
+                    />
+                  </th>
                   <th>Mission</th>
                   <th>Status</th>
                   <th>Started</th>
@@ -292,7 +384,7 @@ const Missions = () => {
               <tbody>
                 {showLoading ? (
                   <tr>
-                    <td colSpan={5}>
+                    <td colSpan={6}>
                       <div className="loading">Loading missions...</div>
                     </td>
                   </tr>
@@ -300,6 +392,15 @@ const Missions = () => {
                   <>
 {filtered.map((m) => (
                         <tr key={m.workflowId} style={(m.status === 'awaiting_review' || pendingApprovals.some((p) => p.missionId === m.missionId)) ? { backgroundColor: '#fefce8', borderLeft: '3px solid #f59e0b' } : undefined}>
+                          <td>
+                            <input
+                              type="checkbox"
+                              className="mission-select-checkbox"
+                              checked={selected.has(m.workflowId)}
+                              onChange={() => toggleSelect(m.workflowId)}
+                              aria-label={`Select mission ${m.missionId || m.workflowId}`}
+                            />
+                          </td>
                           <td className="truncate">
                             <Link to={`/missions/${encodeURIComponent(m.workflowId)}`}>
                               {(m.status === 'awaiting_review' || pendingApprovals.some((p) => p.missionId === m.missionId)) && (
@@ -342,7 +443,7 @@ const Missions = () => {
                     ))}
                     {filtered.length === 0 && (
                       <tr>
-                        <td colSpan={5}>
+                        <td colSpan={6}>
                           <div className="empty-state">
                             {search.trim() || filter !== 'all'
                               ? 'No missions match the current filter.'

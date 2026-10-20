@@ -17,7 +17,7 @@ export const HR_DRAFT_JD_INTERVIEW_KIT = createDeclarativeCodeSkill({
   id: 'hr-draft-jd-interview-kit',
   name: 'Draft Job Description & Interview Kit',
   description: 'Generates structured job descriptions, interview scorecards, role-specific behavioral questions, and rubric guides.',
-  persistenceEnvVar: 'ASSISTANT_HOME',
+  persistenceEnvVar: 'HR_HOME',
   configSchema: {
     type: 'object',
     properties: {

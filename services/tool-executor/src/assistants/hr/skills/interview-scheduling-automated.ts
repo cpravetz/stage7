@@ -16,7 +16,7 @@ const HR_INTERVIEW_SCHEDULING_AUTOMATED = createDeclarativeCodeSkill({
   id: 'hr-interview-scheduling-automated',
   name: 'Interview Scheduling (Automated)',
   description: 'Schedules interviews for candidates that pass screening, against the configured calendar and round policy.',
-  persistenceEnvVar: 'ASSISTANT_HOME',
+  persistenceEnvVar: 'HR_HOME',
   // Declared as a credential, not a plain config field, so the secret can be
   // sourced from the vault via `vault:<id>` and is never echoed into output.
   credentialSource: {

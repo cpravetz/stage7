@@ -1,6 +1,9 @@
 **/node_modules
 **/.git
 **/.vscode
+**/__tests__
+**/*.test.ts
+**/*.spec.ts
 # **/dist
 # **/build
 **/.DS_Store

@@ -13,13 +13,12 @@
     "resolveJsonModule": true,
     "declaration": true,
     "sourceMap": true,
-    "incremental": true,
-    "baseUrl": "."
+    "incremental": true
   },
   "include": [
     "src/**/*",
     "__tests__/**/*"
-  ],
+, "__tests__"  ],
   "exclude": [
     "node_modules",
     "dist"

@@ -94,7 +94,7 @@ export async function withDeterministicRetry<T>(
   operation: () => Promise<T>,
   options: { attempts?: number; baseMs?: number; sleep?: (ms: number) => Promise<void> } = {},
 ): Promise<T> {
-  const attempts = Math.max(1, options.attempts ?? 3);
+  const attempts = options.attempts === undefined ? Number.MAX_SAFE_INTEGER : Math.max(1, options.attempts);
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 
   let lastError: unknown;

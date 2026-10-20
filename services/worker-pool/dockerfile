@@ -6,23 +6,31 @@ WORKDIR /usr/src/app
 
 COPY package*.json ./
 COPY shared-nextgen/package*.json ./shared-nextgen/
-COPY services ./services
+COPY services/worker-pool/package*.json ./services/worker-pool/
+COPY services/artifacts/package*.json ./services/artifacts/
+COPY services/mcp-runtime/package*.json ./services/mcp-runtime/
+COPY services/worker-pool/tsconfig.json ./services/worker-pool/
+COPY services/artifacts/tsconfig.json ./services/artifacts/
+COPY services/mcp-runtime/tsconfig.json ./services/mcp-runtime/
+COPY shared-nextgen/tsconfig.json ./shared-nextgen/
+COPY services/worker-pool/src ./services/worker-pool/src/
+COPY services/worker-pool/assistants ./services/worker-pool/assistants/
+COPY services/worker-pool/knowledge ./services/worker-pool/knowledge/
+COPY services/artifacts/src ./services/artifacts/src/
+COPY services/mcp-runtime/src ./services/mcp-runtime/src/
 
-RUN npm install --legacy-peer-deps
+RUN npm install --legacy-peer-deps --ignore-scripts
 
-COPY shared-nextgen ./shared-nextgen
-# Includes knowledge/assistants/*.txt, which the assistant catalog reads at
-# startup. Without these files the service fails fast on boot.
-COPY services/worker-pool ./services/worker-pool
+COPY shared-nextgen/src ./shared-nextgen/src/
+
+RUN cd shared-nextgen && npx tsc
+RUN cd services/artifacts && rm -rf dist && npx tsc
+RUN cd services/mcp-runtime && rm -rf dist && npx tsc
+RUN cd services/worker-pool && rm -rf dist && npx tsc
 
 # Assistants are discovered from folders. When a selection is requested, drop
 # every other assistant folder from the image so the container carries only the
 # assistants it will actually seed, and their knowledge files stay in step.
-#
-# Both trees are pruned together on purpose: a knowledge file without its
-# assistant folder is dead weight, and an assistant folder without its
-# knowledge file is a hard startup failure. Pruning one but not the other
-# would produce either of those states.
 ARG STAGE7_ASSISTANTS=""
 RUN set -eu; \
     if [ -n "$STAGE7_ASSISTANTS" ]; then \
@@ -49,15 +57,10 @@ RUN set -eu; \
       rm -rf /tmp/keep; \
     fi
 
-RUN cd shared-nextgen && npm run build
-RUN cd services/worker-pool && rm -rf dist && npm run build
-
 WORKDIR /usr/src/app/services/worker-pool
 
 EXPOSE 3200
 
-# Assistant selection: STAGE7_ASSISTANTS env var (set via docker-compose) controls
-# which assistants are loaded at runtime. Leave empty for all assistants.
 ENV STAGE7_ASSISTANTS=${STAGE7_ASSISTANTS}
 
 CMD ["node", "dist/index.js"]

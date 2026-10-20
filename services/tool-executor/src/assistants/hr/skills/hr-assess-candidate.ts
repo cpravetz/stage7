@@ -12,13 +12,13 @@ export const HR_ASSESS_CANDIDATE = createDeclarativeCodeSkill({
   id: 'hr-assess-candidate',
   name: 'Assess Candidate Skills and Experience',
   description: 'Evaluates candidate technical skills, soft skills, and experience against assessment criteria. Triggered on new application received.',
-  persistenceEnvVar: 'ASSISTANT_HOME',
+  persistenceEnvVar: 'HR_HOME',
   configSchema: {
     type: 'object',
     properties: {
       dryRun: SchemaProps.boolean({ description: 'Validate without executing; defaults to true', default: true }),
       defaultEndpoint: SchemaProps.url({ description: 'Default screening and scheduling endpoint URL' }),
-      maxRetryAttempts: SchemaProps.number({ description: 'Retry attempts on scheduling failure', default: 3 }),
+      maxRetryAttempts: SchemaProps.number({ description: 'Retry attempts on scheduling failure', default: 1000 }),
       rateLimitPerMinute: SchemaProps.number({ description: 'Rate limit per minute for scheduling API', default: 60 }),
     },
   },
@@ -48,6 +48,7 @@ export const HR_ASSESS_CANDIDATE = createDeclarativeCodeSkill({
   ],
   isSkill: true,
   async handler(input, ctx) {
+    const _hrHome = process.env.HR_HOME;
     const resumeText = String(input.resumeText || '');
     const candidateName = String(input.candidateName || '');
     const assessmentData = input.assessmentData || {};

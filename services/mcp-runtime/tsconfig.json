@@ -14,12 +14,11 @@
     "declaration": true,
     "sourceMap": true,
     "incremental": true,
-    "baseUrl": ".",
     "types": ["node", "jest"]
   },
   "include": [
     "src/**/*"
-  ],
+, "__tests__"  ],
   "exclude": [
     "node_modules",
     "dist",

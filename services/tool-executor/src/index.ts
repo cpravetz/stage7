@@ -6,13 +6,15 @@ import watchRoutes from './routes/watches';
 import triggerRoutes from './routes/triggers';
 import eventRoutes from './routes/events';
 import mcpServerRoutes from './routes/mcpServers';
+import mcpDiscoveryRoutes from './routes/mcpDiscovery';
 import skillStoreRoutes from './routes/skill-store';
-import { Tool } from './types';
+import { Tool, MCPToolDiscoveryRequiredError } from './types';
 import { toolRegistry, toolStore, triggerScheduler } from './utils/sharedInstance';
 import { legacyGeneralTools } from './data/generalTools';
 import { nativeTools } from './data/nativeTools';
 import logger from './utils/logger';
 import { ToolNotFoundError, ValidationError } from './utils/errors';
+import { renderPermissionPrompt } from './services/ToolPermissionService';
 import { PluginGenerator } from './services/PluginGenerator';
 
 process.on('unhandledRejection', (reason, promise) => {
@@ -220,6 +222,7 @@ app.get('/api/tool-executor/tools', (_req, res) => {
 
 app.use('/api/tool-executor', toolRoutes);
 app.use('/api/tool-executor', mcpServerRoutes);
+app.use('/api/tool-executor', mcpDiscoveryRoutes);
 app.use('/api/tool-executor/workflows', workflowRoutes);
 app.use('/api/tool-executor/workspaces', workspaceRoutes);
 app.use('/api/tool-executor/watches', watchRoutes);
@@ -237,6 +240,20 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
   }
   if (err instanceof ValidationError) {
     return res.status(400).json({ success: false, error: err.message, statusCode: 400 });
+  }
+  if (err instanceof MCPToolDiscoveryRequiredError) {
+    return res.status(202).json({
+      success: false,
+      error: err.message,
+      permissionRequired: true,
+      toolId: err.toolId,
+      toolName: err.toolName,
+      capability: err.capability,
+      request: err.permissionRequest,
+      prompt: renderPermissionPrompt(err.permissionRequest),
+      candidate: err.candidate,
+      statusCode: 202,
+    });
   }
   logger.error({ err: err?.message || String(err) }, 'Unhandled error in tool-executor');
   res.status(500).json({ success: false, error: err?.message || 'Internal server error', statusCode: 500 });

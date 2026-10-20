@@ -54,6 +54,12 @@ export interface MissionState {
   assistantId: string;
   status: 'pending' | 'running' | 'paused' | 'completed' | 'failed' | 'canceled' | 'awaiting_review' | 'incomplete';
   controlState?: 'running' | 'pause_requested' | 'paused' | 'terminate_requested' | 'terminated';
+  /**
+   * Set when the user deleted the mission while it was still winding down.
+   * The mission runner still owns the state until it finalizes, so the
+   * deletion is recorded here and applied by the runner once it is done.
+   */
+  pendingDeletion?: boolean;
   currentStep: number;
   totalSteps: number;
   history: unknown[];

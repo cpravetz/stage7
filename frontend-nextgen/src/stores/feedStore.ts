@@ -43,6 +43,7 @@ interface FeedState {
   disconnect: () => void;
   addEvent: (event: FeedEvent) => void;
   addEvents: (events: FeedEvent[]) => void;
+  removeMissionEvents: (missionId: string) => void;
   clear: () => void;
 }
 
@@ -261,4 +262,11 @@ export const useFeedStore = create<FeedState>((set, get) => ({
     });
   },
   clear: () => set({ events: [] }),
+  removeMissionEvents: (missionId: string) =>
+    set((state) => {
+      if (!missionId) return state;
+      const remaining = state.events.filter((e) => e.missionId !== missionId);
+      if (remaining.length === state.events.length) return state;
+      return { events: remaining };
+    }),
 }));

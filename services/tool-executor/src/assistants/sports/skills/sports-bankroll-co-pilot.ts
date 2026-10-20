@@ -37,6 +37,7 @@ export const BANKROLL_CO_PILOT = createDeclarativeCodeSkill({
   isSkill: true,
   manifest: {},
   handler: async function handler(input, ctx) {
+      const _sgHome = process.env.SPORTS_GROUP_B_HOME;
       const bankroll = Number(input.bankroll) || 0;
       const unitSize = Number(input.unitSize) || 0;
       const unit = Number(input.unit) || 1;

@@ -10,16 +10,14 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "moduleResolution": "node",
     "resolveJsonModule": true,
     "isolatedModules": true,
     "jsx": "react-jsx",
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
-    "baseUrl": ".",
     "paths": {
-      "@stage7-nextgen/shared": ["shared-nextgen/src"],
-      "@stage7-nextgen/shared/*": ["shared-nextgen/src/*"]
+      "@stage7-nextgen/shared": ["./shared-nextgen/src"],
+      "@stage7-nextgen/shared/*": ["./shared-nextgen/src/*"]
     },
     "typeRoots": ["./node_modules/@types", "./src/types"]
   },

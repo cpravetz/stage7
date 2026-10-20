@@ -8,7 +8,7 @@ export const CTO_INFRASTRUCTURE_QUERY = (() => { const t = createDeclarativeCode
   isSkill: false,
   name: 'Infrastructure Query',
   description: 'Read-only queries across infrastructure providers (Datadog, AWS, GCP, Azure, Kubernetes, Service Mesh, Cost Optimization, IaC Monitoring, Database Operations, Team Metrics, GitHub Read)',
-  persistenceEnvVar: 'ASSISTANT_HOME',
+  persistenceEnvVar: 'CTO_HOME',
   manifest: {},
   inputSchema: createSchemaRecord({
     provider: SchemaProps.select(INFRA_PROVIDERS, {

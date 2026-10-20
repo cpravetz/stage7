@@ -49,6 +49,7 @@ export const SCOUTING_ALERT_DISPATCHER = createDeclarativeCodeSkill({
     }
   },
   handler: async function handler(input, ctx) {
+      const _sgHome = process.env.SPORTS_GROUP_A_HOME;
       const entity = input.entity || input.playerId || input.teamId || '';
       const alertType = input.alertType || 'scouting';
       const sport = input.sport || 'generic';

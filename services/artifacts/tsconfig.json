@@ -14,12 +14,11 @@
     "declaration": true,
     "sourceMap": true,
     "incremental": true,
-    "rootDir": "./src",
-    "baseUrl": "."
+    "rootDir": "./src"
   },
   "include": [
     "src/**/*"
-  ],
+, "__tests__"  ],
   "exclude": [
     "node_modules",
     "dist"

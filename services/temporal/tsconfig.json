@@ -14,13 +14,11 @@
     "declaration": true,
     "sourceMap": true,
     "incremental": true,
-    "baseUrl": ".",
     "rootDir": "./src",
     "types": ["node", "jest"]
   },
   "include": [
-    "src/**/*",
-    "__tests__/**/*"
+    "src/**/*"
   ],
   "exclude": [
     "node_modules",

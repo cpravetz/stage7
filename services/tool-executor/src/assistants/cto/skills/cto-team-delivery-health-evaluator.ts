@@ -18,7 +18,7 @@ export const ctoTeamDeliveryHealthEvaluator = createDeclarativeCodeSkill({
   id: 'cto-team-delivery-health-evaluator',
   name: 'Team Delivery Health Evaluator',
   description: 'Evaluate DORA metrics, team capacity, and sprint velocity using team-metrics data to assess engineering delivery health.',
-  persistenceEnvVar: 'ASSISTANT_HOME',
+  persistenceEnvVar: 'CTO_HOME',
   inputSchema: {
     type: 'object',
     properties: {

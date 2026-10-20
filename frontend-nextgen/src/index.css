@@ -566,35 +566,68 @@ button:disabled {
   color: #e2e8f0;
 }
 
+/* The node graph is an index, not the payload. It stays compact so the
+   selected node's details and its knowledge own the available width. */
+.canvas-page {
+  max-width: 1600px;
+}
+
 .canvas-page .canvas-layout {
   display: flex;
   gap: 16px;
+  align-items: flex-start;
 }
 
 .canvas-container {
-  flex: 1;
+  flex: 0 0 30%;
+  min-width: 260px;
+  max-width: 440px;
   background: #1e293b;
   border: 1px solid #334155;
   border-radius: 8px;
-  padding: 16px;
-  min-height: 520px;
+  padding: 12px;
 }
 
 .canvas-svg {
   width: 100%;
-  height: 500px;
+  height: 320px;
   background: #0f172a;
   border-radius: 6px;
 }
 
-.canvas-sidebar {
-  width: 280px;
-}
-
 .canvas-legend {
-  margin: 12px 0 0;
+  margin: 10px 0 0;
   font-size: 12px;
   color: #94a3b8;
+}
+
+/* The details panel takes the remaining width. */
+.canvas-sidebar {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.canvas-detail-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.canvas-knowledge-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+}
+
+.canvas-knowledge-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .knowledge-list {
@@ -604,6 +637,12 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.canvas-knowledge-list {
+  overflow-y: auto;
+  max-height: 60vh;
+  padding-right: 4px;
 }
 
 .knowledge-list li {
@@ -627,12 +666,13 @@ button:disabled {
   margin-bottom: 6px;
 }
 
+/* The knowledge text is the payload: render it in full and let the list
+   scroll, instead of hiding it behind a collapsed disclosure. */
 .knowledge-content {
-  max-height: 260px;
-  overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
-  font-size: 11px;
+  font-size: 12px;
+  line-height: 1.5;
   background: #0f172a;
   border: 1px solid #334155;
   border-radius: 4px;
@@ -737,6 +777,11 @@ button:disabled {
 
 .secondary:hover {
   background: #475569;
+}
+
+.secondary.small {
+  padding: 4px 8px;
+  font-size: 12px;
 }
 
 .link-button {
@@ -1046,6 +1091,27 @@ a:hover {
   border: 1px solid #334155;
   border-radius: 8px;
   overflow: hidden;
+}
+
+.mission-batch-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: #0f172a;
+  border-bottom: 1px solid #334155;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: #e2e8f0;
+}
+
+.mission-select-checkbox {
+  accent-color: #0ea5e9;
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  margin: 0;
 }
 
 .mission-table-scroll {

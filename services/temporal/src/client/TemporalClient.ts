@@ -21,7 +21,12 @@ interface PersistedMissionControlRecord {
   missionId?: string;
   status?: string;
   controlState?: 'running' | 'pause_requested' | 'paused' | 'terminate_requested' | 'terminated';
+  pendingDeletion?: boolean;
   input?: WorkflowInput;
+}
+
+function missionIdFromWorkflowId(workflowId: string): string {
+  return workflowId.startsWith('mission-') ? workflowId.slice(8) : workflowId;
 }
 
 function visibleMissionStatus(record: PersistedMissionControlRecord): string {
@@ -366,6 +371,7 @@ export class TemporalClient {
           if (err instanceof MissionTerminationRequestedError) {
             const error = err.message;
             logger.info({ missionId: input.missionId }, 'Mission stopped at a task checkpoint');
+            const pendingDeletion = await this.isMissionPendingDeletion(input.missionId);
             await this.persistMissionState({
               missionId: input.missionId,
               tenantId: input.tenantId || '',
@@ -387,6 +393,7 @@ export class TemporalClient {
               completedAt: Date.now(),
               createdAt: startTime,
               updatedAt: Date.now(),
+              pendingDeletion,
             });
             await this.broadcastMissionUpdate({
               type: 'mission_canceled',
@@ -396,6 +403,12 @@ export class TemporalClient {
               error,
               timestamp: Date.now(),
             });
+            if (pendingDeletion) {
+              // The user deleted this mission while it was running. The final
+              // state is written above, so the mission can now be removed
+              // together with its live feed events.
+              await this.deleteMissionArtifacts(input.missionId);
+            }
             return;
           }
           const error = err instanceof Error ? err.message : String(err);
@@ -718,6 +731,11 @@ export class TemporalClient {
             status,
             timestamp: Date.now(),
           });
+          if (terminating && await this.isMissionPendingDeletion(mission.missionId)) {
+            // The mission was deleted by the user before the process restarted.
+            // It is finalized now, so its artifacts and live feed events go too.
+            await this.deleteMissionArtifacts(mission.missionId);
+          }
           recovered++;
         } catch (error) {
           logger.error({
@@ -1103,16 +1121,88 @@ export class TemporalClient {
     });
   }
 
-  async deleteMission(workflowId: string): Promise<void> {
-    const missionKey = workflowId.startsWith('mission-') ? workflowId.slice(8) : workflowId;
+  /**
+   * Deletes a mission and everything persisted for it, including the live feed
+   * events recorded in the artifacts service.
+   *
+   * A mission that is still running owns its own persisted state until it
+   * winds down, and the runner writes that state again when it finalizes. The
+   * deletion is therefore recorded on the mission and applied by the runner
+   * once it is done, so the mission is not resurrected by that final write.
+   */
+  async deleteMission(workflowId: string): Promise<'deleted' | 'stopping'> {
+    const missionId = missionIdFromWorkflowId(workflowId);
+
+    const record = await this.getPersistedMissionControlRecord(missionId).catch(() => null);
+    // Only a mission that is running or paused still has a runner attached to
+    // it. Every other status is a mission the runner has already finalized.
+    const runnerOwnsMission = !!record && (
+      record.status === 'running' || record.status === 'paused'
+    );
+
+    const status = await this.terminateMission(workflowId);
+
+    if (runnerOwnsMission) {
+      await this.markPersistedMissionForDeletion(missionId);
+      return 'stopping';
+    }
+
+    await this.deleteMissionArtifacts(missionId);
+    return status === 'stopping' ? 'stopping' : 'deleted';
+  }
+
+  /**
+   * Records that the user deleted a mission that is still winding down.
+   */
+  private async markPersistedMissionForDeletion(missionId: string): Promise<void> {
     const persistenceUrl = process.env.ARTIFACTS_URL;
     if (!persistenceUrl) return;
     try {
-      await fetch(`${persistenceUrl}/api/artifacts/missions/${missionKey}`, {
+      const response = await fetch(`${persistenceUrl}/api/artifacts/missions/${encodeURIComponent(missionId)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pendingDeletion: true, updatedAt: Date.now() }),
+      });
+      if (!response.ok) {
+        const details = (await response.text()).slice(0, 500);
+        logger.warn({ missionId, status: response.status, details }, 'Failed to mark mission for deletion');
+      }
+    } catch (err) {
+      logger.warn({ err: (err as Error).message, missionId }, 'Failed to mark mission for deletion');
+    }
+  }
+
+  /**
+   * Removes the persisted artifacts of a mission, including the live feed
+   * events stored for it.
+   */
+  private async deleteMissionArtifacts(missionId: string): Promise<void> {
+    const persistenceUrl = process.env.ARTIFACTS_URL;
+    if (!persistenceUrl) return;
+    try {
+      const response = await fetch(`${persistenceUrl}/api/artifacts/missions/${encodeURIComponent(missionId)}`, {
         method: 'DELETE',
       });
+      if (!response.ok && response.status !== 404) {
+        const details = (await response.text()).slice(0, 500);
+        logger.warn({ missionId, status: response.status, details }, 'Failed to delete mission artifacts');
+      }
     } catch (err) {
-      logger.warn({ err: (err as Error).message }, 'Failed to delete mission from persistence');
+      logger.warn({ err: (err as Error).message, missionId }, 'Failed to delete mission artifacts');
+    }
+  }
+
+  /**
+   * True when the user deleted this mission while it was still running. The
+   * runner applies the deletion once it has written its final state.
+   */
+  private async isMissionPendingDeletion(missionId: string): Promise<boolean> {
+    try {
+      const record = await this.getPersistedMissionControlRecord(missionId);
+      return record?.pendingDeletion === true;
+    } catch (err) {
+      logger.warn({ err: (err as Error).message, missionId }, 'Failed to read mission deletion flag');
+      return false;
     }
   }
 
@@ -1188,6 +1278,7 @@ export class TemporalClient {
     assistantId: string;
     status: string;
     controlState?: PersistedMissionControlRecord['controlState'];
+    pendingDeletion?: boolean;
     currentStep: number;
     totalSteps: number;
     history: Array<{
@@ -1222,6 +1313,7 @@ export class TemporalClient {
           assistantId: state.assistantId || '',
           status: state.status,
           controlState: state.controlState,
+          pendingDeletion: state.pendingDeletion,
           currentStep: state.currentStep,
           totalSteps: state.totalSteps,
           history: state.history,

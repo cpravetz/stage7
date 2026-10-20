@@ -477,13 +477,24 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
           // Model-specific errors: the specific model is invalid or misconfigured,
           // but other models on this provider may still work. Do NOT trip the
           // provider circuit breaker — just skip to the next candidate model.
+          //
+          // A 403 is scoped to the model in the common case: the model is
+          // gated, unavailable, or not permitted for this account, while the
+          // provider itself keeps working for every other model. Treating it
+          // as provider-wide takes the whole provider's catalogue down with a
+          // single unusable model, so only a denial that names neither the
+          // model nor the endpoint is treated as provider-wide.
+          const mentionsModel = /\bmodels?\b/i.test(errMsg);
+          const isProviderAccessDenied = /\b403\b/.test(errMsg)
+            && !mentionsModel
+            && /(your (?:api )?key|your account|your organization|your org\b|this key|not authorized|unauthorized|api key .*(?:not|invalid)|not allowed to use|permission to use)/i.test(errMsg);
           const isModelSpecific = /is not found for API version|model .* does not exist|model .* not found/i.test(errMsg)
             || /\b(404)\b/.test(errMsg)
-            || (/\b403\b/.test(errMsg) && /only available (?:on|to) agentic harness(?:es)?/i.test(errMsg));
+            || (/\b403\b/.test(errMsg) && !isProviderAccessDenied);
           // classify error: provider-key / quota issues vs transient vs rate-limit
           const isProviderFatal = /key limit exceeded|quota exceeded|no remaining credits|insufficient credits|credit balance is too low|credits? exhausted|payment required|invalid api key|incorrect api key|authentication|unauthorized|no route for that uri|object identifier is invalid|invalid account|invalid endpoint|unauthorized account/i.test(errMsg)
             || /\b(401|402)\b/.test(errMsg)
-            || (/\b403\b/.test(errMsg) && !isModelSpecific);
+            || isProviderAccessDenied;
           // 429 / rate-limit / too-many-requests: move to the next candidate model
           // (which may be on the same provider or a different one) rather than retrying
           // the same model, since retrying would just hit the same rate limit.
@@ -505,6 +516,10 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
             });
             this.updateProviderHealth(provider.id, false);
             await this.recordPerformanceMetrics(candidate.model.id, provider.id, Date.now() - candidateStartTime, undefined, undefined, false);
+            // Timeouts are transient: do NOT mark this model as permanently tried,
+            // so a later turn (or a retry from the caller) can attempt it again.
+            attemptedModelIds.delete(routingKey);
+            attemptedThisCall.delete(routingKey);
             break;
           }
           if (isProviderFatal) {
@@ -566,6 +581,10 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
             this.updateProviderHealth(provider.id, false);
             await this.recordPerformanceMetrics(candidate.model.id, provider.id, Date.now() - candidateStartTime, undefined, undefined, false);
             lastFailureWasLogged = true;
+            // A rate limit is transient: the same model may succeed on a later
+            // attempt once the window resets, so do not permanently exclude it.
+            attemptedModelIds.delete(routingKey);
+            attemptedThisCall.delete(routingKey);
             break;
           }
 
@@ -649,6 +668,14 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
       const persistenceUrl = process.env.ARTIFACTS_URL || process.env.PERSISTENCE_URL || 'http://artifacts:4200';
       const res = await fetch(`${persistenceUrl}/api/artifacts/documents/llm-config`, { method: 'GET' });
       if (!res.ok) {
+        // A missing or unreachable llm-config means the "free models only"
+        // preference is unknown. Say so, instead of silently routing to paid
+        // models while the operator believes the restriction is active.
+        if (res.status === 404) {
+          logger.warn('llm-config not found; model selection is not restricted to free models');
+        } else {
+          logger.warn({ status: res.status }, 'Failed to read llm-config; model selection is not restricted to free models');
+        }
         return null;
       }
       const doc = await res.json() as { id?: string; tenantId?: string; collection?: string; data?: Record<string, unknown> };
@@ -782,11 +809,28 @@ private async savePerformanceMetrics(
   private async saveBrainLog(): Promise<void> {
     try {
       const persistenceUrl = this.getArtifactsUrl();
-      await fetch(`${persistenceUrl}/api/artifacts/documents/${BRAIN_LOG_DOC_ID}`, {
+      const documentUrl = `${persistenceUrl}/api/artifacts/documents/${BRAIN_LOG_DOC_ID}`;
+      let response = await fetch(documentUrl, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ data: { entries: this.brainLog } }),
       });
+      if (response.status === 404) {
+        response = await fetch(`${persistenceUrl}/api/artifacts/documents`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: BRAIN_LOG_DOC_ID,
+            tenantId: 'system',
+            collection: 'brain-history',
+            data: { entries: this.brainLog },
+          }),
+        });
+      }
+      if (!response.ok) {
+        const details = await response.text();
+        throw new Error(`Artifacts returned HTTP ${response.status}: ${details.slice(0, 300)}`);
+      }
     } catch (err) {
       logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Failed to save brain log to artifacts');
     }

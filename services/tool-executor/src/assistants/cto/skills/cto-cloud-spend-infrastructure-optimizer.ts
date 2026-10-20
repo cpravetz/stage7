@@ -8,7 +8,7 @@ export const CTO_CLOUD_SPEND_INFRASTRUCTURE_OPTIMIZER = createDeclarativeCodeSki
     isSkill: true,
     name: 'Cloud Spend & Infrastructure Optimizer',
     description: 'Analyze supplied cloud billing and utilization rows to recommend rightsizing and capacity actions.',
-    persistenceEnvVar: 'ASSISTANT_HOME',
+    persistenceEnvVar: 'CTO_HOME',
     inputSchema: createSchemaRecord({
       billingRows: SchemaProps.objectArray(SchemaProps.object({
         service: SchemaProps.text({ description: 'Cloud service or account name' }),

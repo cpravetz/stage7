@@ -375,6 +375,30 @@ export class CrossObjectHandoffError extends Error {
   }
 }
 
+/**
+ * Thrown by the Tool Executor when no registered tool can satisfy a
+ * capability and the MCP Tool Executive has issued a permission request.
+ * The caller presents the request to the user; on grant, the tool is
+ * integrated automatically and the execution can be retried.
+ */
+export class MCPToolDiscoveryRequiredError extends Error {
+  readonly toolId: string;
+  readonly toolName: string;
+  readonly capability: string;
+  readonly permissionRequest: import('../types/mcp-discovery').PermissionRequest;
+  readonly candidate?: import('../types/mcp-discovery').MCPToolCandidate;
+
+  constructor(tool: Tool, permissionRequest: import('../types/mcp-discovery').PermissionRequest, candidate?: import('../types/mcp-discovery').MCPToolCandidate) {
+    super(`No registered tool provides capability "${permissionRequest.neededCapability}". Permission required to discover and integrate an MCP tool.`);
+    this.name = 'MCPToolDiscoveryRequiredError';
+    this.toolId = tool.id;
+    this.toolName = tool.name;
+    this.capability = permissionRequest.neededCapability;
+    this.permissionRequest = permissionRequest;
+    this.candidate = candidate;
+  }
+}
+
 export interface AssistantWorkspace {
   workspaceId: string;
   assistant: string;

@@ -54,6 +54,7 @@ export const LINE_ALERT_DISPATCHER = createDeclarativeCodeSkill({
     }
   },
   handler: async function handler(input, ctx) {
+      const _sgHome = process.env.SPORTS_GROUP_B_HOME;
       const entity = input.entity || input.market || 'general';
       const sport = input.sport || 'generic';
       const dryRun = input.dryRun !== false;

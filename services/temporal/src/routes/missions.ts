@@ -223,12 +223,13 @@ router.delete(
   asyncHandler(async (req: Request, res: Response) => {
     const workflowId = req.params.workflowId as string;
 
-    const status = await client.terminateMission(workflowId);
-    if (status === 'stopping') {
-      res.status(202).json({ status });
+    const outcome = await client.deleteMission(workflowId);
+    if (outcome === 'stopping') {
+      // The mission is still winding down. The runner removes its persisted
+      // artifacts, including the live feed events, once it has finalized.
+      res.status(202).json({ status: 'stopping' });
       return;
     }
-    await client.deleteMission(workflowId);
 
     res.status(204).send();
   }),

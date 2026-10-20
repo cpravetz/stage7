@@ -92,7 +92,7 @@ const JOB_DISCOVERY_FIT_RANKING = createDeclarativeCodeSkill({
 id: 'career-job-discovery-fit-ranking',
 name: 'Job Search & Fit Ranking',
 description: 'Searches job boards for roles matching your profile, scores fit and ATS compatibility, and ranks opportunities by match quality. Reads the public Greenhouse, Ashby and Lever board APIs with no key required. Reports per-source status so empty results are never silent, and propagates upstream retrieval failures: a search where some job boards could not be reached is reported as status "partial" with a non-null error rather than as a clean ranking. Optionally auto-submits applications to roles meeting an auto-apply threshold via Apply to Jobs.',
-persistenceEnvVar: 'ASSISTANT_HOME',
+persistenceEnvVar: 'CAREER_HOME',
 inputSchema: JOB_DISCOVERY_FIT_RANKING_INPUT,
 outputSchema: JOB_DISCOVERY_FIT_RANKING_OUTPUT,
 triggers: [

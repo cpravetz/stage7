@@ -51,6 +51,7 @@ export const MATCHUP_ODDS_EXPLAINER = createDeclarativeCodeSkill({
     }
   },
   handler: async function handler(input, ctx) {
+      const _sgHome = process.env.SPORTS_GROUP_B_HOME;
       const eventId = input.event || input.gameId || '';
       const teamA = input.teamA || 'Team A';
       const teamB = input.teamB || 'Team B';

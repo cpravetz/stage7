@@ -155,6 +155,7 @@ export class ArtifactsService {
   }
 
   async deleteMissionState(missionId: string): Promise<void> {
+    await this.readyPromise;
     await this.store.deleteMissionState(missionId);
   }
 

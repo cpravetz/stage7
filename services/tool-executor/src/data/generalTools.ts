@@ -316,7 +316,7 @@ export const legacyGeneralTools: Tool[] = [
         body: { description: 'Request body, sent as JSON' },
         secret: { type: 'string', description: 'Secret token added as the X-Webhook-Secret header (sensitive)', sensitive: true },
         event: { type: 'string', description: 'Event name added as the X-Webhook-Event header' },
-        retries: { type: 'integer', minimum: 1, description: 'Number of delivery attempts (default 3)' },
+        retries: { type: 'integer', minimum: 1, description: 'Number of delivery attempts (default 10)' },
         timeoutMs: { type: 'integer', minimum: 1, description: 'Per-attempt timeout in milliseconds (default 10000)' },
       },
       required: ['url'],

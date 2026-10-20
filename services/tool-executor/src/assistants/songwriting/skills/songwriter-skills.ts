@@ -7,7 +7,7 @@ export const lyricProsodyEvaluator = createDeclarativeCodeSkill({
   id: 'songwriting_lyric_prosody_evaluator',
   name: 'Advise Lyric & Structural Prosody Evaluator',
   description: 'Analyzes song lyrics for meter consistency, syllable deviation from a target, rhyme pairs, refrain detection, and recurring thematic vocabulary, separating section labels from sung lines, then returns concrete structural revision recommendations and a formatted report.',
-  persistenceEnvVar: 'ASSISTANT_HOME',
+  persistenceEnvVar: 'SONGWRITING_HOME',
   tier: 'advise',
   domainKnowledge: 'Lyric prosody metrics, syllable and stress patterning, rhyme evaluation, and structural songwriting craft',
   inputSchema: {
@@ -257,7 +257,7 @@ export const musicalCoCreation = createDeclarativeCodeSkill({
   id: 'songwriting_musical_lyric_cocreation',
   name: 'Aid Musical & Lyric Co-Creation Engine',
   description: 'Generates a structured song draft with a key, meter, tempo feel and a real chord progression per section, rhyme-matched lyric lines drawn from theme vocabulary, a verbatim-repeating chorus hook, computed per-section rhyme schemes, a beat sheet, and a formatted plain-text song with chords over the lyrics.',
-  persistenceEnvVar: 'ASSISTANT_HOME',
+  persistenceEnvVar: 'SONGWRITING_HOME',
   tier: 'aid',
   domainKnowledge: 'Song craft co-creation, genre-aware chord progression, lyric section structure, hook design',
   inputSchema: {

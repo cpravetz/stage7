@@ -96,12 +96,18 @@ export class MongoStore {
 
   async createDocument(doc: Omit<PersistenceDocument, 'createdAt' | 'updatedAt'>): Promise<PersistenceDocument> {
     const now = new Date();
+    // A document written with an explicit id is a save, not a one-off insert.
+    // Settings such as llm-config are written repeatedly under the same id,
+    // and an insert would fail with a duplicate key error and silently drop
+    // every change after the first one. The in-memory store already behaves
+    // this way, so both stores now agree.
+    const existing = await this.documents.findOne({ id: doc.id } as any);
     const document: PersistenceDocument = {
       ...doc,
-      createdAt: now,
+      createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     };
-    await this.documents.insertOne(document);
+    await this.documents.replaceOne({ id: document.id } as any, document, { upsert: true });
     logger.debug({ documentId: document.id, collection: document.collection }, 'Document created');
     return document;
   }

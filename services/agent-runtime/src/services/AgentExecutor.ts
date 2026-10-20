@@ -768,6 +768,18 @@ export class AgentExecutor {
         )
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
+        if (message.startsWith(BRAIN_MODEL_SELECTION_RETRY)) {
+          // Brain still has untried eligible models/providers. Re-issue the same
+          // Brain request (same routing session) so it advances to the remaining
+          // candidates instead of aborting the agent task.
+          logger.info({ missionId: context.missionId, reason: message }, 'Brain requested a retry with an untried eligible model; re-issuing Brain call')
+          history = [...history, {
+            role: 'user',
+            content: 'The previous Brain attempt could not complete yet because some eligible models were not tried. Retry the Brain request now; it will continue with the remaining eligible models.',
+          }]
+          if (saveCheckpoint) await saveCheckpoint()
+          continue
+        }
         history = [...history, {
           role: 'user',
           content: `Brain could not complete this turn: ${message}. Reassess the task and continue safely without repeating any action whose outcome is uncertain.`,
