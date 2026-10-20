@@ -38,6 +38,31 @@ export class AssistantLoader {
     return validateManifest(this.getManifestSelectedIds());
   }
 
+
+  private migrateAssistant(def: AssistantDefinition): AssistantDefinition {
+    if (def.harness) {
+      return def;
+    }
+    // Initialize harness from existing systemPrompt and tools for backward compat
+    const migrated: AssistantDefinition = {
+      ...def,
+      harness: {
+        version: '1.0',
+        systemPrompt: def.systemPrompt,
+        tools: def.tools,
+        skills: [],
+        heuristics: [],
+        memory: { episodic: [], semantic: [], working: {} },
+        subAgents: [],
+        routing: {},
+        guardrails: {},
+        metadata: {},
+        updatedAt: def.updatedAt || new Date(),
+      },
+    };
+    return migrated;
+  }
+
   async loadFromPersistence(): Promise<number> {
     const stored = await this.persistence.listAssistants();
 
@@ -48,9 +73,10 @@ export class AssistantLoader {
     const problematic: Array<{ id: string; createdAt?: Date; updatedAt?: Date; tools?: any }> = [];
 
     for (const assistant of stored) {
-      this.assistants.set(assistant.id, assistant);
-      if (!assistant.tools || assistant.tools.length === 0) {
-        problematic.push({ id: assistant.id, createdAt: assistant.createdAt, updatedAt: assistant.updatedAt, tools: assistant.tools });
+      const migrated = this.migrateAssistant(assistant);
+      this.assistants.set(migrated.id, migrated);
+      if (!migrated.tools || migrated.tools.length === 0) {
+        problematic.push({ id: migrated.id, createdAt: migrated.createdAt, updatedAt: migrated.updatedAt, tools: migrated.tools });
       }
     }
 
@@ -95,9 +121,10 @@ export class AssistantLoader {
     }
 
     const saved = await this.persistence.saveAssistant(defToSave as AssistantDefinition);
-    this.assistants.set(saved.id, saved);
-    logger.info({ assistantId: saved.id }, 'Assistant registered and persisted');
-    return saved;
+    const migratedSaved = this.migrateAssistant(saved);
+    this.assistants.set(migratedSaved.id, migratedSaved);
+    logger.info({ assistantId: migratedSaved.id }, 'Assistant registered and persisted');
+    return migratedSaved;
   }
 
   async unregister(assistantId: string): Promise<boolean> {
@@ -122,10 +149,13 @@ export class AssistantLoader {
       tenantId: existing.tenantId,
       updatedAt: new Date(),
     };
-    const saved = await this.persistence.saveAssistant(updated);
-    this.assistants.set(assistantId, saved);
+    // Ensure harness is preserved/migrated if missing
+    const toSave = updated.harness ? updated : this.migrateAssistant(updated);
+    const saved = await this.persistence.saveAssistant(toSave);
+    const migratedSaved = this.migrateAssistant(saved);
+    this.assistants.set(assistantId, migratedSaved);
     logger.info({ assistantId }, 'Assistant updated and persisted');
-    return saved;
+    return migratedSaved;
   }
 
   get(assistantId: string): AssistantDefinition | undefined {

@@ -366,6 +366,39 @@ export class TemporalClient {
             output: result.output,
             timestamp: result.completedAt || Date.now(),
           });
+          try {
+            const brain = brainInstance;
+            const artifacts = (process.env.ARTIFACTS_URL || process.env.PERSISTENCE_URL || 'http://artifacts:4200');
+            const orchestrator = createDistillationOrchestrator({
+              brain,
+              getAssistant: async (assistantId: string) => {
+                try {
+                  const res = await fetch(`${artifacts}/api/artifacts/assistants/${encodeURIComponent(assistantId)}`);
+                  if (!res.ok) return undefined;
+                  return await res.json();
+                } catch {
+                  return undefined;
+                }
+              },
+              saveAssistant: async (assistant: any) => {
+                try {
+                  await fetch(`${artifacts}/api/artifacts/assistants`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(assistant),
+                  });
+                } catch {}
+                return assistant;
+              },
+            });
+            orchestrator.triggerAsync({
+              assistantId: input.assistantId,
+              tenantId: input.tenantId,
+              missionId: input.missionId,
+            });
+          } catch (e) {
+            // best-effort, ignore
+          }
         })
         .catch(async (err: unknown) => {
           if (err instanceof MissionTerminationRequestedError) {
@@ -1347,3 +1380,7 @@ export class TemporalClient {
     }
   }
 }
+
+
+// Phase 4: post-task distillation hook (best-effort)
+import { brainInstance, createDistillationOrchestrator } from '@stage7-nextgen/brain';

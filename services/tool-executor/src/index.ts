@@ -8,6 +8,7 @@ import eventRoutes from './routes/events';
 import mcpServerRoutes from './routes/mcpServers';
 import mcpDiscoveryRoutes from './routes/mcpDiscovery';
 import skillStoreRoutes from './routes/skill-store';
+import harnessRoutes from './routes/harness';
 import { Tool, MCPToolDiscoveryRequiredError } from './types';
 import { toolRegistry, toolStore, triggerScheduler } from './utils/sharedInstance';
 import { legacyGeneralTools } from './data/generalTools';
@@ -233,6 +234,9 @@ app.use('/api/tool-executor/events', eventRoutes);
 // skill processes addresses it as /api/skill-store, not under the
 // tool-executor prefix.
 app.use('/api/skill-store', skillStoreRoutes);
+
+// Harness² — the propose–probe–compose loop.
+app.use('/api/tool-executor', harnessRoutes);
 
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   if (err instanceof ToolNotFoundError) {

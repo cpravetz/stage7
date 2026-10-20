@@ -6,6 +6,7 @@ import { PluginGenerator } from '../services/PluginGenerator';
 import { TriggerScheduler } from '../services/TriggerScheduler';
 import { createTriggerRecordStore } from '../services/TriggerRecordStore';
 import { createEventLog } from '../services/EventLog';
+import { HarnessEditService } from '../services/HarnessEditService';
 import { allWorkflows } from '../data/skills';
 import type { MissionScheduleDispatch } from '../services/TriggerScheduler';
 
@@ -15,6 +16,9 @@ export const workspaceManager = new AssistantWorkspaceManager();
 export const eventLog = createEventLog();
 export const executor = new ToolExecutor(toolRegistry.getMap(), workspaceManager, eventLog);
 export const pluginGenerator = new PluginGenerator();
+
+/** The Harness² inner loop. Opt-in per assistant and per tenant. */
+export const harnessEditService = new HarnessEditService({ registry: toolRegistry });
 
 pluginGenerator.setRegistry(toolRegistry);
 

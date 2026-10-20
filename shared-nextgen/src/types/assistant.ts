@@ -1,5 +1,74 @@
 import type { MCPTool } from './mcp';
 
+// ---------------------------------------------------------------------------
+// Harness² types (as specified for learning enhancements)
+// ---------------------------------------------------------------------------
+
+export interface SynthesizedSkillRef {
+  skillId: string;
+  name: string;
+  description?: string;
+  source?: 'synthesized' | 'acquired' | 'authored';
+  path?: string;
+  hash?: string;
+  createdAt?: Date;
+  validatedAt?: Date;
+  language?: 'bash' | 'python' | 'typescript' | 'javascript';
+  metadata?: Record<string, unknown>;
+}
+
+export interface HeuristicEntry {
+  id: string;
+  rule: string;
+  rationale?: string;
+  confidence?: number;
+  source?: 'experience' | 'distillation' | 'manual';
+  appliedCount?: number;
+  lastAppliedAt?: Date;
+  metadata?: Record<string, unknown>;
+  evidence?: string[];
+  active?: boolean;
+  ts?: string | Date;
+  context?: string;
+}
+
+export interface AssistantHarness {
+  version?: string;
+  harnessVersion?: number;
+  systemPrompt?: string;
+  tools?: MCPTool[];
+  skills?: SynthesizedSkillRef[];
+  synthesizedSkills?: SynthesizedSkillRef[];
+  heuristics?: HeuristicEntry[];
+  heuristicsLog?: HeuristicEntry[];
+  memory?: {
+    episodic?: unknown[];
+    semantic?: unknown[];
+    working?: Record<string, unknown>;
+  };
+  subAgents?: Array<{
+    id: string;
+    role: string;
+    capabilities?: string[];
+    config?: Record<string, unknown>;
+  }>;
+  routing?: {
+    strategy?: string;
+    rules?: Array<Record<string, unknown>>;
+    preferences?: Record<string, unknown>;
+  };
+  routingRules?: Record<string, unknown>;
+  guardrails?: {
+    policies?: string[];
+    constraints?: string[];
+    approvalRules?: Record<string, unknown>;
+  };
+  sandboxPolicy?: { timeoutMs: number; network: 'off' | 'restricted'; fs: 'ephemeral' };
+  metadata?: Record<string, unknown>;
+  history?: Array<{ version: string | number; snapshot: AssistantHarness; timestamp: Date; reason?: string }>;
+  updatedAt?: Date;
+}
+
 export interface AssistantKnowledgeEntry {
   id: string;
   title: string;
@@ -43,6 +112,8 @@ export interface AssistantDefinition {
   metadata: Record<string, unknown>;
   createdAt: Date;
   updatedAt: Date;
+  /** Optional Harness² — the optimizable surface. Absent for backward compat. */
+  harness?: AssistantHarness;
 }
 
 export interface AssistantTemplate {
@@ -57,6 +128,8 @@ export interface AssistantTemplate {
   metadata: Record<string, unknown>;
   createdAt: Date;
   updatedAt: Date;
+  /** Optional Harness² template. Absent for backward compat. */
+  harness?: AssistantHarness;
 }
 
 export interface AssistantInstance {
@@ -76,6 +149,8 @@ export interface AssistantInstance {
   missionHistory?: Array<{ missionId: string; status: string; timestamp: string }>;
   createdAt: Date;
   updatedAt: Date;
+  /** Optional Harness² — the optimizable surface. Absent for backward compat. */
+  harness?: AssistantHarness;
 }
 
 export interface AssistantRuntimeConfig {

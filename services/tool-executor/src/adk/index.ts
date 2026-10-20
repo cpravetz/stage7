@@ -117,6 +117,40 @@ export {
 export { createExecutionContext, type ExecutionContextPorts, type StorePort } from './context';
 
 export {
+  ProbeExecutor,
+  type ProbeExecutorOptions,
+  type ProbeExpectation,
+  type ProbeLanguage,
+  type ProbeResult,
+  type ProbeSpec,
+} from './probeExecutor';
+
+export {
+  HarnessLoop,
+  HARNESS_LEARNING_METADATA_KEY,
+  decideHarnessGate,
+  diffHarness,
+  diffPaths,
+  mergeHarness,
+  proposeHarnessEdit,
+  resolveHarnessLearningPolicy,
+  validateHarness,
+  type HarnessComposeRequest,
+  type HarnessComposeResult,
+  type HarnessEditCandidate,
+  type HarnessEditKind,
+  type HarnessEditSpec,
+  type HarnessGateDecision,
+  type HarnessGatePolicy,
+  type HarnessGateReason,
+  type HarnessLearningPolicy,
+  type HarnessLearningSource,
+  type HarnessPatch,
+  type HarnessProbeEvidence,
+  type HarnessSkillFacts,
+} from './harness-loop';
+
+export {
   loadBlueprint,
   inspectLayout,
   expectedSubfolder,

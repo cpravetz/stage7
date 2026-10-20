@@ -398,6 +398,7 @@ The Auth service includes RBAC:
 - [ADK_OVERVIEW.md](./ADK_OVERVIEW.md) - ADK system overview
 - [USER_GUIDE.md](./USER_GUIDE.md) - End-user guide for using assistants
 - [ADK_DEVELOPER_GUIDE.md](./ADK_DEVELOPER_GUIDE.md) - Assistant developer guide
+- [HARNESS_LEARNING.md](./HARNESS_LEARNING.md) - Harness² propose–probe–compose loop
 - [SDK-ARCHITECTURE.md](./SDK-ARCHITECTURE.md) - Technical API reference
 - [TOOL-DEVELOPMENT.md](./TOOL-DEVELOPMENT.md) - Skill/tools developer guide
 - [DEPLOYMENT.md](./DEPLOYMENT.md) - Production deployment
