@@ -9,9 +9,59 @@ import {
 } from '@stage7-nextgen/shared';
 import { logger } from '@stage7-nextgen/shared';
 import { randomUUID } from 'crypto';
+import { parsePlanJson } from './planJson';
 
 const MAX_PRIOR_RESPONSE_CHARS = 12_000;
-const MAX_PLANNER_ATTEMPTS = Infinity;
+
+/**
+ * How many model answers may be rejected on their content before the planner
+ * gives up on the plan. Every rejected answer rotates to another eligible
+ * model through the Brain routing session, so this is the number of models
+ * tried before the mission reports that it cannot produce a plan.
+ */
+const DEFAULT_MAX_PLANNER_ATTEMPTS = 3;
+
+/**
+ * How many transient Brain failures (provider timeouts, expired completion
+ * deadlines) are tolerated before the planner gives up. These failures say
+ * nothing about the plan, so they are counted separately from rejected
+ * answers: a slow provider must not consume the budget that decides whether
+ * the plan content is acceptable.
+ */
+const DEFAULT_MAX_PLANNER_TRANSPORT_ATTEMPTS = 6;
+
+function maxPlannerAttempts(): number {
+  const configured = Number(process.env.PLANNER_MAX_ATTEMPTS);
+  return Number.isFinite(configured) && configured > 0
+    ? Math.floor(configured)
+    : DEFAULT_MAX_PLANNER_ATTEMPTS;
+}
+
+function maxPlannerTransportAttempts(): number {
+  const configured = Number(process.env.PLANNER_MAX_TRANSPORT_ATTEMPTS);
+  return Number.isFinite(configured) && configured > 0
+    ? Math.floor(configured)
+    : DEFAULT_MAX_PLANNER_TRANSPORT_ATTEMPTS;
+}
+
+/**
+ * Failures that say nothing about the plan and can be retried against another
+ * eligible model: a provider that timed out, a completion deadline that
+ * expired with models still available, or a transient upstream error.
+ */
+const TRANSIENT_BRAIN_FAILURE_PATTERNS: RegExp[] = [
+  /Brain request failed \(5\d\d\)/i,
+  /Brain request timed out/i,
+  /Provider request timed out/i,
+  /BRAIN_COMPLETION_DEADLINE/,
+  /Brain completion deadline/i,
+  /\bfetch failed\b/i,
+  /ECONNRESET|ETIMEDOUT|EAI_AGAIN|ECONNREFUSED/i,
+];
+
+function isTransientBrainFailure(message: string): boolean {
+  return TRANSIENT_BRAIN_FAILURE_PATTERNS.some((pattern) => pattern.test(message));
+}
 
 export const PLANNER_SYSTEM_PROMPT = `You are a mission planner for an AI agent platform. Given a user's goal, produce a complete structured plan tailored to that goal.
 
@@ -37,28 +87,6 @@ export const PLANNER_EXECUTION_POLICY: AgentExecutionPolicy = {
   maxCompletionTokensPerCall: 8192,
   maxDelegations: 0,
 };
-function parsePlanJson(content: string): unknown {
-    let trimmed = content.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
-    // Try to fix common typos
-    trimmed = trimmed.replace(/"outout"\s*:/g, '"outcome":');
-    try {
-        return JSON.parse(trimmed);
-    }
-    catch (directError) {
-        const start = trimmed.indexOf('{');
-        const end = trimmed.lastIndexOf('}');
-        if (start < 0 || end <= start) {
-            throw new Error(`Planner response did not contain a JSON plan: ${directError instanceof Error ? directError.message : String(directError)}`);
-        }
-        try {
-            return JSON.parse(trimmed.slice(start, end + 1));
-        }
-        catch (error) {
-            throw new Error(`Planner response did not contain valid plan JSON: ${error instanceof Error ? error.message : String(error)}`);
-        }
-    }
-}
-
 function sanitizePlan(obj: any): any {
   if (!obj || typeof obj !== 'object') return obj;
   if (Array.isArray(obj)) return obj.map(sanitizePlan);
@@ -86,7 +114,7 @@ const GENERIC_TOOL_TOKENS = new Set([
 ]);
 const PRIOR_OUTPUT_REFERENCE = /\b(?:previous|prior|earlier|upstream|completed)\b[^.!?;\n]{0,80}\b(?:result|output|artifact|value|answer|calculation|product)\b|\b(?:initial|final)\b[^.!?;\n]{0,80}\b(?:calculated|computed|derived)\s+(?:result|output|artifact|value|answer|calculation|product)s?\b/i;
 const TASK_OUTPUT_TERMS = '(?:outputs?|results?|artifacts?|values?|answers?|products?|calculations?|receipts?|evidence|failures?|errors?|outcomes?|statuses?|findings?|conclusions?|recommendations?|reports?|summaries?|records?|observations?)';
-const TASK_CONSUMER_VERBS = '(?:use|uses|using|consume|consumes|consumed|consuming|read|reads|reading|retrieve|retrieves|retrieved|retrieving|load|loads|loaded|loading|derive|derives|derived|deriving|calculate|calculates|calculated|calculating|compute|computes|computed|computing|compare|compares|compared|comparing|validate|validates|validated|validating|inspect|inspects|inspected|inspecting|review|reviews|reviewed|reviewing|check|checks|checked|checking|take|takes|taken|taking|synthesize|synthesizes|synthesized|synthesizing|combine|combines|combined|combining|integrate|integrates|integrated|integrating|incorporate|incorporates|incorporated|incorporating|aggregate|aggregates|aggregated|aggregating)';
+const TASK_CONSUMER_VERBS = '(?:use|uses|using|consume|consumes|consumed|consuming|read|reads|reading|retrieve|retrieves|retrieved|retrieving|load|loads|loaded|loading|derive|derives|derived|deriving|calculate|calculates|calculated|calculating|compute|computes|computed|computing|compare|compares|compared|comparing|validate|validates|validated|validating|inspect|inspects|inspected|inspecting|review|reviews|reviewed|reviewing|check|checks|checked|checking|take|takes|taken|taking|synthesize|synthesizes|synthesized|synthesizing|combine|combines|combined|combining|integrate|integrates|integrated|integrating|incorporate|incorporates|incorporated|incorporating|aggregate|aggregates|aggregated|aggregating|based|built|drawing|starting|rooted)';
 function isNegatedActionAt(text: string, actionIndex: number) {
     const prefix = text.slice(0, actionIndex);
     const conjunctions = [...prefix.matchAll(/\b(?:and|but|while|then)\b/gi)];
@@ -237,7 +265,12 @@ function missionTaskRecoveryIssues(task: any, tasksById: any, taskPath: any): st
     }
     return issues;
 }
-export function missionTaskDependencyIssues(task: Task, allTaskIds: Set<string>, taskPath = `task "${task.id}"`) {
+export function missionTaskDependencyIssues(
+    task: Task,
+    allTaskIds: Set<string>,
+    taskPath = `task "${task.id}"`,
+    producerArtifactsByTaskId?: Map<string, string[]>,
+) {
     const issues: string[] = [];
     const instructions = task.systemPrompt;
     const dependencies = (task.dependsOnTaskIds || []);
@@ -249,7 +282,7 @@ export function missionTaskDependencyIssues(task: Task, allTaskIds: Set<string>,
         if (!containsIdentifier(instructions, dependencyId)) {
             issues.push(`${taskPath} depends on "${dependencyId}" but systemPrompt must name that producer task ID and its consumed output`);
         }
-        else if (!consumedTaskIds.has(dependencyId)) {
+        else if (!consumedTaskIds.has(dependencyId) && !namesProducerArtifact(instructions, dependencyId, producerArtifactsByTaskId)) {
             issues.push(`${taskPath} depends on "${dependencyId}" but systemPrompt must identify the output or evidence consumed from that producer task`);
         }
     }
@@ -259,6 +292,33 @@ export function missionTaskDependencyIssues(task: Task, allTaskIds: Set<string>,
         }
     }
     return issues;
+}
+/**
+ * Matches an artifact the producer task declares against the consumer's
+ * instructions. A consumer that names the producer's own artifact - for
+ * example "Based on the Business Model Definition from phase-2-task-2" - has
+ * identified the output it consumes even when the artifact name is not one of
+ * the generic output nouns.
+ */
+function namesProducerArtifact(instructions: string, dependencyId: string, producerArtifactsByTaskId?: Map<string, string[]>) {
+    if (!producerArtifactsByTaskId) return false;
+    const artifacts = producerArtifactsByTaskId.get(dependencyId.toLowerCase()) || [];
+    for (const artifact of artifacts) {
+        const pattern = looseArtifactPattern(artifact);
+        if (!pattern) continue;
+        const match = pattern.exec(instructions);
+        if (match && !isNegatedActionAt(instructions, match.index)) return true;
+    }
+    return false;
+}
+function looseArtifactPattern(artifactName: string): RegExp | null {
+    const parts = artifactName.split(/[^a-z0-9]+/i).filter((part) => part.length > 0);
+    if (parts.length === 0) return null;
+    if (parts.join('').length < 4) return null;
+    const source = parts
+        .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+        .join('[^a-z0-9]{0,3}');
+    return new RegExp(source, 'i');
 }
 function planStandardIssues(plan: any): string[] {
     const issues = [];
@@ -277,6 +337,12 @@ function planStandardIssues(plan: any): string[] {
     const allTasks = (plan as any).phases.flatMap((phase: any) => phase.tasks as Task[]);
     const allTaskIds = new Set(allTasks.map((task: Task) => task.id));
     const tasksById = new Map(allTasks.map((task: any) => [task.id, task]));
+    const producerArtifactsByTaskId = new Map<string, string[]>(
+        allTasks.map((task: any) => [
+            (task.id as string).toLowerCase(),
+            ((task.expectedArtifacts || []) as string[]).map((artifact: string) => String(artifact)),
+        ]),
+    );
     const normalizedTaskIds = new Set([...allTaskIds].map((taskId) => (taskId as string).toLowerCase()));
     for (const [phaseIndex, phase] of (plan as any).phases.entries() as [number, any][]) { const ph: any = phase;
         if (phaseIds.has((ph as any).id))
@@ -298,7 +364,7 @@ function planStandardIssues(plan: any): string[] {
             }
             issues.push(...missionTaskActionIssues(task, taskPath, normalizedTaskIds));
             issues.push(...missionTaskRecoveryIssues(task, tasksById, taskPath));
-            issues.push(...missionTaskDependencyIssues(task, normalizedTaskIds, taskPath));
+            issues.push(...missionTaskDependencyIssues(task, normalizedTaskIds, taskPath, producerArtifactsByTaskId));
             if (task.id.startsWith(`${ph.id}-amendment-`)) {
                 issues.push(`phases[${phaseIndex}].tasks[${taskIndex}].id uses the reserved amendment prefix`);
             }
@@ -352,20 +418,40 @@ function formatSchemaIssues(issues: Array<{ path: PropertyKey[]; message: string
     return issues.map((issue) => `${issue.path.length ? issue.path.join('.') : '<root>'}: ${issue.message}`);
 }
 export function isHumanAgentRole(agentRole: string): boolean {
-    const normalizedRole = agentRole.trim().toLowerCase().replace(/[-_]+/g, ' ').replace(/\s+/g, ' ');
-    return /^(human|user|person|requester|customer)(\s+(approver|reviewer|operator|decision maker|in the loop))?$/.test(normalizedRole);
+  const normalizedRole = agentRole.trim().toLowerCase().replace(/[-_]+/g, ' ').replace(/\s+/g, ' ');
+  return /^(human|user|person|requester|customer)(\s+(approver|reviewer|operator|decision maker|in the loop))?$/.test(normalizedRole);
 }
+
+/**
+ * A progress update the planner shares with the user while it works. A planner
+ * run can take a long time when a provider is slow, and without an update the
+ * mission looks silent even though it is still making progress.
+ */
+export interface PlannerProgress {
+  attempt: number;
+  status: 'retrying' | 'rejected';
+  reason: string;
+  transient: boolean;
+}
+
+export type PlannerProgressReporter = (progress: PlannerProgress) => Promise<void>;
+
 export async function generateValidPlan(
   prompt: string,
   context: Record<string, unknown> | undefined,
   missionId: string | undefined,
   complete: PlannerCompletion,
   reportValidation?: PlannerValidationReporter,
+  reportProgress?: PlannerProgressReporter,
 ): Promise<Plan> {
     let lastError = '';
     let previousResponse = '';
     const routingSessionId = missionId ? `${missionId}:planner` : `planner:${randomUUID()}`;
     let attempt = 0;
+    let rejectedAnswers = 0;
+    let transientFailures = 0;
+    const answerBudget = maxPlannerAttempts();
+    const transportBudget = maxPlannerTransportAttempts();
     while (true) {
         attempt++;
         const repairPrompt = attempt === 1
@@ -397,15 +483,33 @@ export async function generateValidPlan(
             if (message.includes(BRAIN_MODEL_SELECTION_EXHAUSTED)) {
                 throw new Error(`Unable to generate a valid mission plan because Brain exhausted every eligible model. Last plan validation issue: ${lastError || 'none; no model produced a plan'}. Brain: ${message}`);
             }
-            if (!message.includes(BRAIN_MODEL_SELECTION_RETRY)) {
-                throw new Error(`Planner Agent request failed on attempt ${attempt}: ${message}`);
+            if (message.includes(BRAIN_MODEL_SELECTION_RETRY)) {
+                logger.warn({ missionId, attempt, reason: message }, 'Brain requested another Planner attempt with an untried eligible model');
+                await reportProgress?.({ attempt, status: 'retrying', reason: message, transient: true });
+                continue;
             }
-            logger.warn({ missionId, attempt, reason: message }, 'Brain requested another Planner attempt with an untried eligible model');
-            continue;
+            if (isTransientBrainFailure(message)) {
+                // The provider or the completion deadline failed, not the plan.
+                // Brain rotates to another eligible model on the next attempt,
+                // so retry instead of failing the mission while models remain.
+                transientFailures += 1;
+                if (transientFailures >= transportBudget) {
+                    throw new Error(`Planner Agent request failed after ${transientFailures} transient Brain failures on attempt ${attempt}: ${message}`);
+                }
+                logger.warn({ missionId, attempt, transientFailures, reason: message }, 'Planner Brain request failed transiently; retrying with another eligible model');
+                await reportProgress?.({ attempt, status: 'retrying', reason: message, transient: true });
+                continue;
+            }
+            throw new Error(`Planner Agent request failed on attempt ${attempt}: ${message}`);
         }
+        rejectedAnswers += 1;
         previousResponse = content;
         try {
-            const sanitized = sanitizePlan(parsePlanJson(content));
+            const parsedPlan = parsePlanJson(content);
+            if (parsedPlan.repaired) {
+                logger.info({ missionId, attempt, repairs: parsedPlan.repairs }, 'Repaired structurally invalid planner JSON');
+            }
+            const sanitized = sanitizePlan(parsedPlan.value);
             const parsed = PlanSchema.safeParse(sanitized);
             if (!parsed.success) {
                 lastError = formatSchemaIssues(parsed.error.issues).join('\n');
@@ -424,16 +528,23 @@ export async function generateValidPlan(
             lastError = error instanceof Error ? error.message : String(error);
             await (reportValidation === null || reportValidation === void 0 ? void 0 : reportValidation(lastError));
             logger.warn({ missionId, attempt, reason: lastError }, 'Planner response rejected; requesting a corrected plan');
+            await reportProgress?.({ attempt, status: 'rejected', reason: lastError, transient: false });
+            if (rejectedAnswers >= answerBudget) {
+                throw new Error(`Unable to generate a valid mission plan after ${rejectedAnswers} rejected model answers. Last validation issue: ${lastError || 'Brain did not return a valid plan'}`);
+            }
         }
     }
-    // No attempt limit - this should never be reached unless all models exhausted in a non-recoverable way
-    throw new Error(`Unable to generate a valid mission plan. All eligible models exhausted or failed. Last validation issue: ${lastError || 'Brain did not return a valid plan'}`);
 }
 export class MissionPlanner {
   constructor(private readonly complete: PlannerCompletion) {}
 
-  async generatePlan(prompt: string, context?: Record<string, unknown>, missionId?: string): Promise<Plan> {
-    return generateValidPlan(prompt, context, missionId, this.complete);
+  async generatePlan(
+    prompt: string,
+    context?: Record<string, unknown>,
+    missionId?: string,
+    reportProgress?: PlannerProgressReporter,
+  ): Promise<Plan> {
+    return generateValidPlan(prompt, context, missionId, this.complete, undefined, reportProgress);
   }
 }
 

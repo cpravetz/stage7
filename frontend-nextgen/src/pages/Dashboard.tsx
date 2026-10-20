@@ -159,7 +159,7 @@ const Dashboard = () => {
     return rm ? `${h}h ${rm}m` : `${h}h`;
   };
 
-  const recentEvents = feedEvents.slice(0, 10);
+  const recentEvents = feedEvents.filter((e) => e.type !== 'cost_estimate').slice(0, 10);
 
   return (
     <div className="page">

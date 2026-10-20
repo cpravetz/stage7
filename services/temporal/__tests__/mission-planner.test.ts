@@ -409,4 +409,87 @@ describe('generateValidPlan', () => {
       .rejects.toThrow('Planner Agent request failed on attempt 1: Agent Runtime unavailable')
     expect(complete).toHaveBeenCalledTimes(1)
   })
+
+  it('retries a transient Brain failure instead of failing the mission', async () => {
+    const requests: PlannerCompletionRequest[] = []
+    const complete = async (request: PlannerCompletionRequest): Promise<string> => {
+      requests.push(request)
+      if (request.attempt === 1) {
+        throw new Error('Brain request failed (504): {"success":false,"error":"Brain completion deadline did not leave enough time for the next eligible model attempt"}')
+      }
+      return JSON.stringify(validPlan())
+    }
+
+    const plan = await generateValidPlan('Create a business plan', {}, 'mission-transient', complete)
+
+    expect(plan.phases).toHaveLength(3)
+    expect(requests).toHaveLength(2)
+  })
+
+  it('does not let transient Brain failures consume the plan-content budget', async () => {
+    const requests: PlannerCompletionRequest[] = []
+    const complete = async (request: PlannerCompletionRequest): Promise<string> => {
+      requests.push(request)
+      if (request.attempt <= 2) {
+        throw new Error('Brain request failed (504): provider timed out')
+      }
+      if (request.attempt === 3) return '{"summary":"still invalid"}'
+      return JSON.stringify(validPlan())
+    }
+
+    const plan = await generateValidPlan('Create a business plan', {}, 'mission-transient-budget', complete)
+
+    expect(plan.phases).toHaveLength(3)
+    expect(requests).toHaveLength(4)
+  })
+
+  it('gives up after the transient Brain failure budget is spent', async () => {
+    const complete = jest.fn(async (): Promise<string> => {
+      throw new Error('Brain request failed (504): provider timed out')
+    })
+
+    await expect(generateValidPlan('Create a business plan', {}, 'mission-transient-exhausted', complete))
+      .rejects.toThrow(/transient Brain failures/)
+    expect(complete).toHaveBeenCalledTimes(6)
+  })
+
+  it('accepts a plan whose phase object was closed twice', async () => {
+    const complete = jest.fn(async (): Promise<string> => {
+      const plan = validPlan(2)
+      const phase = plan.phases[0]!
+      const task = phase.tasks[0]!
+      return JSON.stringify(plan).replace(
+        `"tasks":[${JSON.stringify(task)}]}`,
+        `"tasks":[${JSON.stringify(task)}]}}`,
+      )
+    })
+
+    const plan = await generateValidPlan('Create a business plan', {}, 'mission-repair', complete)
+
+    expect(plan.phases).toHaveLength(2)
+    expect(complete).toHaveBeenCalledTimes(1)
+  })
+
+  it('accepts a dependency that names the producer task artifact', async () => {
+    const plan = validPlan(1)
+    const producer = plan.phases[0]!.tasks[0]!
+    producer.id = 'phase-1-task-1'
+    producer.expectedArtifacts = ['Business Model Definition']
+    const consumer = {
+      ...producer,
+      id: 'phase-1-task-2',
+      title: 'Create the budget',
+      description: 'Create a budget from the business model definition.',
+      systemPrompt: 'Based on the Business Model Definition from phase-1-task-1, create the budget.',
+      dependsOnTaskIds: ['phase-1-task-1'],
+      expectedArtifacts: ['Budget'],
+    }
+    plan.phases[0]!.tasks.push(consumer)
+    const complete = jest.fn(async (): Promise<string> => JSON.stringify(plan))
+
+    const generated = await generateValidPlan('Create a budget from a business model', {}, 'mission-artifact-lineage', complete)
+
+    expect(generated.phases[0]?.tasks[1]?.dependsOnTaskIds).toEqual(['phase-1-task-1'])
+    expect(complete).toHaveBeenCalledTimes(1)
+  })
 })

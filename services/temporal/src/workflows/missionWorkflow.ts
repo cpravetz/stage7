@@ -10,7 +10,11 @@ import {
 } from '../types/workflow';
 
 const planActivities = proxyActivities<MissionActivities>({
-  startToCloseTimeout: '10m',
+  // The planner asks Brain for a plan, and Brain may spend its whole
+  // completion deadline on a slow provider before it answers. This has to
+  // outlast the Brain completion deadline plus the Agent Runtime grace
+  // period, or the activity is killed while Brain is still working.
+  startToCloseTimeout: '35m',
   retry: {
     maximumAttempts: 1,
   },

@@ -12,10 +12,12 @@ interface BrainLogEntry {
   durationMs?: number;
   error?: string;
   tokensUsed?: number;
+  estimatedCost?: number;
   missionId?: string;
 }
 
 const LOGS_POLL_INTERVAL = 30000;
+const PAGE_SIZE = 25;
 
 const Brain = () => {
   const [prompt, setPrompt] = useState('');
@@ -27,6 +29,8 @@ const Brain = () => {
   const [serviceLogs, setServiceLogs] = useState<BrainLogEntry[]>([]);
   const [serviceLogsLoading, setServiceLogsLoading] = useState(true);
   const [loading, setLoading] = useState(false);
+  const [page, setPage] = useState(0);
+  const [modalEntry, setModalEntry] = useState<BrainLogEntry | null>(null);
 
   const feedEvents = useFeedStore((s) => s.events);
 
@@ -110,24 +114,23 @@ const Brain = () => {
     );
   }, [brainErrorEvents, serviceLogs]);
 
-    const errorCount = combinedLogs.filter((l) => l.type === 'error' && l.error).length;
-    const completionCount = combinedLogs.filter(
-      (l) => l.type === 'completion'
-    ).length;
-    const cacheHitCount = combinedLogs.filter((l) => l.type === 'cache_hit').length;
+  const totalPages = Math.max(1, Math.ceil(combinedLogs.length / PAGE_SIZE));
+  const pagedLogs = combinedLogs.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
-    // Circuit-breaker "failures" and the activity-log "errors" are different metrics:
-    //   - breakers only trip on provider-level fatal errors (401/403/auth/quota),
-    //     and their failure count resets on any successful call.
-    //   - the log counts every failed attempt (transient, timeout, rate-limit, fatal,
-    //     no-model, final all-providers-failed) plus live WebSocket brain_error events.
-    const totalBreakerFailures = circuitBreakers.reduce(
-      (sum, cb) => sum + (cb.failures || 0),
-      0
-    );
-    const trippedBreakers = circuitBreakers.filter(
-      (cb) => cb.state === 'open'
-    ).length;
+  const providerCallCounts = useMemo(() => {
+    const counts: Record<string, { total: number; failures: number }> = {};
+    combinedLogs.forEach((l) => {
+      if (!l.provider) return;
+      counts[l.provider] = counts[l.provider] || { total: 0, failures: 0 };
+      counts[l.provider].total += 1;
+      if (l.type === 'error' || l.success === false) counts[l.provider].failures += 1;
+    });
+    return counts;
+  }, [combinedLogs]);
+
+  const errorCount = combinedLogs.filter((l) => l.type === 'error' && l.error).length;
+  const completionCount = combinedLogs.filter((l) => l.type === 'completion').length;
+  const cacheHitCount = combinedLogs.filter((l) => l.type === 'cache_hit').length;
 
   return (
     <div className="page">
@@ -180,38 +183,38 @@ const Brain = () => {
                   <th>Provider</th>
                   <th>State</th>
                   <th>Failures</th>
+                  <th>Failure Rate</th>
                 </tr>
               </thead>
               <tbody>
-                {circuitBreakers.map((cb) => (
-                  <tr key={cb.provider}>
-                    <td>{cb.provider}</td>
-                    <td>
-                      <span
-                        className={`badge ${
-                          cb.state === 'closed'
-                            ? 'running'
-                            : cb.state === 'open'
-                              ? 'failed'
-                              : 'pending'
-                        }`}
-                      >
-                        {cb.state === 'closed' ? 'On-line' : cb.state === 'open' ? 'off-line' : cb.state === 'half' ? 'Intermittent' : cb.state}
-                      </span>
-                    </td>
-                    <td>{cb.failures}</td>
-                  </tr>
-                ))}
+                {circuitBreakers.map((cb) => {
+                  const stats = providerCallCounts[cb.provider] || { total: 0, failures: 0 };
+                  const rate = stats.total > 0 ? (stats.failures / stats.total) * 100 : 0;
+                  return (
+                    <tr key={cb.provider}>
+                      <td>{cb.provider}</td>
+                      <td>
+                        <span
+                          className={`badge ${
+                            cb.state === 'closed'
+                              ? 'running'
+                              : cb.state === 'open'
+                                ? 'failed'
+                                : 'pending'
+                          }`}
+                        >
+                          {cb.state === 'closed' ? 'On-line' : cb.state === 'open' ? 'off-line' : cb.state === 'half' ? 'Intermittent' : cb.state}
+                        </span>
+                      </td>
+                      <td>{cb.failures}</td>
+                      <td>{rate.toFixed(1)}%</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           ) : (
             <p>No provider failure data.</p>
-          )}
-          {trippedBreakers > 0 && (
-            <p className="muted" style={{ fontSize: '12px', marginTop: '8px' }}>
-              {trippedBreakers} provider(s) currently tripped ({totalBreakerFailures} fatal
-              failure(s) tracked). These are provider-level, not attempt-level.
-            </p>
           )}
         </div>
       </div>
@@ -239,7 +242,7 @@ const Brain = () => {
               style={{ fontSize: '12px' }}
             >
               {useFeedStore.getState().connected ? 'Live' : 'Offline'}
-              </span>
+            </span>
             <button className="secondary" onClick={loadServiceLogs} disabled={serviceLogsLoading}>
               {serviceLogsLoading ? 'Refreshing…' : 'Refresh'}
             </button>
@@ -252,64 +255,100 @@ const Brain = () => {
         {combinedLogs.length === 0 ? (
           <div className="empty-state">No activity logged yet.</div>
         ) : (
-          <div className="table-container">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Time</th>
-                  <th>Status</th>
-                  <th>Provider</th>
-                  <th>Model</th>
-                  <th>Mission</th>
-                  <th>Duration</th>
-                  <th>Tokens</th>
-                  <th>Error / Preview</th>
-                </tr>
-              </thead>
-              <tbody>
-                {combinedLogs.map((l, i) => (
-                  <tr key={`${l.timestamp}-${i}`}>
-                    <td style={{ fontSize: '12px' }}>
-                      {new Date(l.timestamp).toLocaleTimeString()}
-                    </td>
-                    <td>
-                      <span
-                        className={`badge ${
-                          l.type === 'error'
-                            ? 'failed'
-                            : l.type === 'cache_hit'
-                              ? 'idle'
-                              : 'completed'
-                        }`}
-                      >
-                        {l.type === 'error'
-                          ? 'Error'
-                          : l.type === 'cache_hit'
-                            ? 'Cache Hit'
-                            : 'OK'}
-                      </span>
-                    </td>
-                    <td style={{ fontSize: '12px' }}>{l.provider || '—'}</td>
-                    <td style={{ fontSize: '12px' }}>{l.model || '—'}</td>
-                    <td style={{ fontSize: '12px' }}>{l.missionId || (l.type === 'error' ? '—' : '')}</td>
-                    <td style={{ fontSize: '12px' }}>{formatDuration(l.durationMs)}</td>
-                    <td style={{ fontSize: '12px' }}>{l.tokensUsed || '—'}</td>
-                    <td style={{ fontSize: '12px' }}>
-                      {l.error ? (
-                        <span style={{ color: '#ef4444' }}>{l.error}</span>
-                      ) : (
-                        <span className="muted">
-                          {l.promptPreview ? l.promptPreview.slice(0, 80) : '—'}
-                        </span>
-                      )}
-                    </td>
+          <>
+            <div className="table-container">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Status</th>
+                    <th>Provider</th>
+                    <th>Model</th>
+                    <th>Mission</th>
+                    <th>Duration</th>
+                    <th>Tokens</th>
+                    <th>Error / Preview</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {pagedLogs.map((l, i) => (
+                    <tr key={`${l.timestamp}-${i}`} onClick={() => setModalEntry(l)} style={{ cursor: 'pointer' }}>
+                      <td style={{ fontSize: '12px' }}>
+                        {new Date(l.timestamp).toLocaleTimeString()}
+                      </td>
+                      <td>
+                        <span
+                          className={`badge ${
+                            l.type === 'error'
+                              ? 'failed'
+                              : l.type === 'cache_hit'
+                                ? 'idle'
+                                : 'completed'
+                          }`}
+                        >
+                          {l.type === 'error'
+                            ? 'Error'
+                            : l.type === 'cache_hit'
+                              ? 'Cache Hit'
+                              : 'OK'}
+                        </span>
+                      </td>
+                      <td style={{ fontSize: '12px' }}>{l.provider || '—'}</td>
+                      <td style={{ fontSize: '12px' }}>{l.model || '—'}</td>
+                      <td style={{ fontSize: '12px' }}>{l.missionId || (l.type === 'error' ? '—' : '')}</td>
+                      <td style={{ fontSize: '12px' }}>{formatDuration(l.durationMs)}</td>
+                      <td style={{ fontSize: '12px' }}>{l.tokensUsed || '—'}</td>
+                      <td style={{ fontSize: '12px' }}>
+                        {l.error ? (
+                          <span style={{ color: '#ef4444' }}>{l.error}</span>
+                        ) : (
+                          <span className="muted">
+                            {l.promptPreview ? l.promptPreview.slice(0, 80) : '—'}
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', marginTop: '12px' }}>
+              <button className="secondary" disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>Prev</button>
+              <span style={{ fontSize: '12px', alignSelf: 'center' }}>Page {page + 1} of {totalPages}</span>
+              <button className="secondary" disabled={page >= totalPages - 1} onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}>Next</button>
+            </div>
+          </>
         )}
       </div>
+
+      {modalEntry && (
+        <div className="modal-overlay" onClick={() => setModalEntry(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ background: '#1e293b', padding: '20px', borderRadius: '8px', maxWidth: '700px', width: '90%', maxHeight: '80vh', overflow: 'auto' }}>
+            <h3>LLM Call Details</h3>
+            <p><strong>Time:</strong> {new Date(modalEntry.timestamp).toLocaleString()}</p>
+            <p><strong>Status:</strong> {modalEntry.type}</p>
+            <p><strong>Provider:</strong> {modalEntry.provider || '—'}</p>
+            <p><strong>Model:</strong> {modalEntry.model || '—'}</p>
+            <p><strong>Duration:</strong> {formatDuration(modalEntry.durationMs)}</p>
+            <p><strong>Tokens:</strong> {modalEntry.tokensUsed || '—'}</p>
+            <p><strong>Estimated Cost:</strong> {modalEntry.estimatedCost ?? '—'}</p>
+            {modalEntry.missionId && <p><strong>Mission:</strong> {modalEntry.missionId}</p>}
+            {modalEntry.promptPreview && (
+              <>
+                <h4>Prompt</h4>
+                <pre style={{ whiteSpace: 'pre-wrap', fontSize: '12px' }}>{modalEntry.promptPreview}</pre>
+              </>
+            )}
+            {modalEntry.error && (
+              <>
+                <h4>Error</h4>
+                <pre style={{ whiteSpace: 'pre-wrap', fontSize: '12px', color: '#ef4444' }}>{modalEntry.error}</pre>
+              </>
+            )}
+            <button className="secondary" onClick={() => setModalEntry(null)} style={{ marginTop: '12px' }}>Close</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -18,6 +18,7 @@ import { Plan, Phase, Task } from '@stage7-nextgen/shared';
 import type { CompletedTaskSummary } from '../types/workflow';
 import {
   PlannerCompletionRequest,
+  PlannerProgressReporter,
   PLANNER_EXECUTION_POLICY,
   PLANNER_SYSTEM_PROMPT,
   generateValidPlan,
@@ -419,7 +420,11 @@ export class MissionAgentRuntime {
     return agentId;
   }
 
-  async generatePlan(prompt: string, context?: Record<string, unknown>): Promise<Plan> {
+  async generatePlan(
+    prompt: string,
+    context?: Record<string, unknown>,
+    onProgress?: PlannerProgressReporter,
+  ): Promise<Plan> {
     const agentId = await this.registerPlannerAgent(PLANNER_SYSTEM_PROMPT);
     let responseRequestId: string | undefined;
     return generateValidPlan(prompt, context, this.missionId, async (request: PlannerCompletionRequest) => {
@@ -443,7 +448,7 @@ export class MissionAgentRuntime {
         responseRequestId,
         `Mission planner validation failed: ${reason}`,
       );
-    });
+    }, onProgress);
   }
 
   async selectNextTask(

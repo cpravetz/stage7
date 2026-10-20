@@ -1,7 +1,7 @@
 import { BrainService } from '../src/services/BrainService';
 import { SemanticCache } from '../src/services/SemanticCache';
 import { LLMProvider, CompletionRequest, CompletionResponse, ProviderInfo } from '../src/providers/Provider';
-import { BRAIN_MODEL_SELECTION_EXHAUSTED } from '@stage7-nextgen/shared';
+import { BRAIN_MODEL_SELECTION_EXHAUSTED, BRAIN_MODEL_SELECTION_RETRY } from '@stage7-nextgen/shared';
 
 const mockProviderInfo: ProviderInfo = {
   id: 'mock',
@@ -560,6 +560,66 @@ describe('BrainService', () => {
       );
     } finally {
       fetchSpy.mockRestore();
+    }
+  });
+
+  it('excludes a complained model from its routing session so the next turn tries another model', async () => {
+    const fetchSpy = jest.spyOn(global, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || 'GET';
+      if (url.endsWith('/api/artifacts/documents/llm-config')) {
+        return { ok: true, json: async () => ({ data: { freeModelsOnly: false } }) } as Response;
+      }
+      if (url.endsWith('/api/artifacts/documents/model-performance-metrics')) {
+        if (method === 'PUT') {
+          return { ok: false, status: 404, text: async () => 'Document not found' } as Response;
+        }
+        return { ok: false, status: 404, json: async () => ({}), text: async () => 'Document not found' } as Response;
+      }
+      if (url.endsWith('/api/artifacts/documents') && method === 'POST') {
+        return { ok: true, status: 201, json: async () => ({}) } as Response;
+      }
+      return { ok: true, json: async () => ({}) } as Response;
+    });
+
+    try {
+      const options = { missionId: 'mission-complaint', routingSessionId: 'mission-complaint:planner' };
+
+      const first = await brain.complete('Help me with a chat response', options);
+      expect(mockProviderInstance.lastRequest?.model).toBe('mock-model');
+
+      expect(await brain.recordComplaint(first.requestId)).toBe(true);
+
+      await brain.complete('Continue the chat response', options);
+      expect(mockProviderInstance.lastRequest?.model).not.toBe('mock-model');
+      expect(mockProviderInstance.lastRequest?.model).toBe('mock-expensive');
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('reports a retryable routing error while eligible models remain', async () => {
+    const previousDeadline = process.env.BRAIN_COMPLETION_DEADLINE_MS;
+    const previousAttemptTimeout = process.env.BRAIN_PROVIDER_ATTEMPT_TIMEOUT_MS;
+    process.env.BRAIN_COMPLETION_DEADLINE_MS = '1';
+    process.env.BRAIN_PROVIDER_ATTEMPT_TIMEOUT_MS = '1';
+
+    try {
+      await expect(brain.complete('Help me with a chat response', {
+        missionId: 'mission-deadline',
+        routingSessionId: 'mission-deadline:planner',
+      })).rejects.toMatchObject({
+        statusCode: 503,
+        details: {
+          code: BRAIN_MODEL_SELECTION_RETRY,
+          remainingModelCount: 2,
+        },
+      });
+    } finally {
+      if (previousDeadline === undefined) delete process.env.BRAIN_COMPLETION_DEADLINE_MS;
+      else process.env.BRAIN_COMPLETION_DEADLINE_MS = previousDeadline;
+      if (previousAttemptTimeout === undefined) delete process.env.BRAIN_PROVIDER_ATTEMPT_TIMEOUT_MS;
+      else process.env.BRAIN_PROVIDER_ATTEMPT_TIMEOUT_MS = previousAttemptTimeout;
     }
   });
 

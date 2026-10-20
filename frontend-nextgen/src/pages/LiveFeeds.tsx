@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useFeedStore } from '../stores/feedStore';
 
 const LiveFeeds = () => {
-  const events = useFeedStore((s) => s.events);
+  const events = useFeedStore((s) => s.events).filter((e) => e.type !== 'cost_estimate');
   const connected = useFeedStore((s) => s.connected);
   const clear = useFeedStore((s) => s.clear);
   const bottomRef = useRef<HTMLDivElement>(null);

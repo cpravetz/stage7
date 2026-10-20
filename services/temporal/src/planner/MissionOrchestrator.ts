@@ -17,6 +17,13 @@ import {
   MissionActivityCheckpoint,
   MissionTaskCheckpoint,
 } from '../types/workflow';
+import { PlannerProgress } from './MissionPlanner';
+
+/**
+ * Identical planner updates that arrive within this window are reported once.
+ * A burst of identical provider failures is one piece of news, not many.
+ */
+const PLANNER_PROGRESS_MIN_INTERVAL_MS = 60_000;
 
 export interface MissionContext {
   missionId: string;
@@ -40,6 +47,7 @@ export interface MissionContext {
 
 export class MissionOrchestrator {
   private agentRuntime: MissionAgentRuntime | null = null;
+  private lastPlannerProgress: { key: string; at: number } | null = null;
 
   async run(ctx: MissionContext): Promise<{ plan: Plan; outputs: any; compensations: Array<{ phaseId: string; action: string }> }> {
     const compensations: Array<{ phaseId: string; action: string }> = [];
@@ -405,7 +413,51 @@ export class MissionOrchestrator {
     if (!this.agentRuntime) {
       throw new Error(`Mission Agent Runtime is not initialized for mission ${ctx.missionId}`);
     }
-    return this.agentRuntime.generatePlan(ctx.prompt, ctx.metadata);
+    return this.agentRuntime.generatePlan(ctx.prompt, ctx.metadata, async (progress) => {
+      await this.reportPlannerProgress(ctx, progress);
+    });
+  }
+
+  /**
+   * Shares the planner's progress with the user. A planning run can take a
+   * long time while a provider is slow, and a silent mission is
+   * indistinguishable from a stalled one.
+   */
+  private async reportPlannerProgress(ctx: MissionContext, progress: PlannerProgress): Promise<void> {
+    // The report repeats the request path and the attempt number, so the
+    // numbers are masked to recognize an update that says the same thing.
+    const key = `${progress.status}|${progress.reason.replace(/\d+/g, '#')}`;
+    const now = Date.now();
+    const last = this.lastPlannerProgress;
+    if (
+      last
+      && last.key === key
+      && now - last.at < PLANNER_PROGRESS_MIN_INTERVAL_MS
+    ) {
+      return;
+    }
+    this.lastPlannerProgress = { key, at: now };
+    try {
+      await ctx.broadcast({
+        type: 'planner_progress',
+        missionId: ctx.missionId,
+        timestamp: now,
+        data: {
+          attempt: progress.attempt,
+          status: progress.status,
+          reason: progress.reason,
+          transient: progress.transient,
+          agentId: `agent-${ctx.missionId}-planner`,
+          agentName: 'Mission Planner',
+          agentRole: 'planner',
+        },
+      });
+    } catch (err) {
+      logger.warn(
+        { missionId: ctx.missionId, err: err instanceof Error ? err.message : String(err) },
+        'Failed to report planner progress',
+      );
+    }
   }
 
   private async persistPlan(ctx: MissionContext, plan: Plan): Promise<void> {

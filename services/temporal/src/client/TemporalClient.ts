@@ -786,7 +786,16 @@ export class TemporalClient {
   private async loadRetryCheckpoint(input: WorkflowInput): Promise<MissionActivityCheckpoint> {
     const plan = await this.loadPersistedPlan(input.missionId);
     if (!plan) {
-      throw new Error(`Cannot resume mission ${input.missionId}: persisted plan is missing`);
+      // The mission failed before a plan was ever persisted, so there is no
+      // completed work to resume and no side effect to replay. The mission
+      // restarts from its original prompt and plans again. Failing here would
+      // leave every planning-stage failure permanently unretryable.
+      logger.warn({ missionId: input.missionId }, 'No persisted plan for mission retry; restarting from the original prompt');
+      return {
+        version: 1,
+        completedTasks: [],
+        completedPhases: [],
+      };
     }
     return {
       version: 1,
@@ -1206,7 +1215,7 @@ export class TemporalClient {
     }
   }
 
-  async appendMissionEvent(missionId: string, event: { type: string; timestamp?: number; data?: Record<string, unknown> }): Promise<void> {
+  async appendMissionEvent(missionId: string, event: { type: string; timestamp?: number; data?: Record<string, unknown>; [key: string]: unknown }): Promise<void> {
     const persistenceUrl = process.env.ARTIFACTS_URL;
     if (!persistenceUrl) {
       logger.warn('ARTIFACTS_URL not set, skipping event append');
@@ -1217,7 +1226,8 @@ export class TemporalClient {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          type: event.type,
+          ...event,
+          missionId,
           timestamp: event.timestamp || Date.now(),
           data: event.data || {},
         }),
@@ -1234,10 +1244,15 @@ export class TemporalClient {
     // Persist event to artifacts service
     const missionId = event.missionId as string | undefined;
     if (missionId) {
+      // The mission output is persisted as the mission state, so it is not
+      // repeated in the event. Everything else, including the failure reason,
+      // is persisted so a reloaded mission still explains what happened.
+      const { output: _output, ...rest } = event;
       await this.appendMissionEvent(missionId, {
+        ...rest,
         type: event.type as string,
         timestamp: (event.timestamp as number) || Date.now(),
-        data: event.data as Record<string, unknown> || {},
+        data: (event.data as Record<string, unknown>) || {},
       });
     }
 

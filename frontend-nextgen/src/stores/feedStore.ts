@@ -8,20 +8,27 @@ export type FeedEventType =
   | 'mission_started'
   | 'mission_completed'
   | 'mission_failed'
+  | 'mission_canceled'
   | 'mission_incomplete'
   | 'mission_needs_review'
+  | 'mission_paused'
+  | 'mission_resumed'
   | 'plan_generated'
   | 'planner_started'
+  | 'planner_progress'
+  | 'clarification_needed'
   | 'phase_started'
   | 'phase_completed'
   | 'phase_approved'
   | 'phase_rejected'
+  | 'phase_plan_amended'
   | 'approval_requested'
   | 'approval_approved'
   | 'approval_rejected'
   | 'task_started'
   | 'task_completed'
   | 'task_failed'
+  | 'cost_estimate'
   | 'assistant'
   | 'user';
 
@@ -96,6 +103,21 @@ export function normalize(raw: unknown): FeedEvent | null {
       case 'planner_started':
         message = `Planning mission${(data.prompt as string) ? `: "${String(data.prompt).slice(0, 80)}"` : ''}`;
         break;
+      case 'planner_progress': {
+        const attempt = data.attempt !== undefined ? ` (attempt ${String(data.attempt)})` : '';
+        const reason = String(data.reason || '').trim();
+        message = `Planning update${attempt}${reason ? `: ${reason.slice(0, 200)}` : ''}`;
+        break;
+      }
+      case 'clarification_needed':
+        message = `The planner needs clarification: ${(data.questions as string[])?.join(' ') || ''}`.trim();
+        break;
+      case 'phase_plan_amended':
+        message = `Phase plan amended: ${(data.phaseId as string) || ''}`.trim();
+        break;
+      case 'cost_estimate':
+        message = `Model call: ${(data.model as string) || 'unknown model'}${data.tokensUsed ? ` (${String(data.tokensUsed)} tokens)` : ''}`;
+        break;
       case 'plan_generated':
         message = 'Plan generated';
         break;
@@ -142,6 +164,15 @@ export function normalize(raw: unknown): FeedEvent | null {
         break;
       case 'mission_completed':
         message = 'Mission completed';
+        break;
+      case 'mission_canceled':
+        message = 'Mission canceled';
+        break;
+      case 'mission_paused':
+        message = 'Mission paused';
+        break;
+      case 'mission_resumed':
+        message = 'Mission resumed';
         break;
       case 'mission_failed':
         message = `Mission failed: ${(r.error as string) || (data.error as string) || ''}`.trim();

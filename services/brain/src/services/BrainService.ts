@@ -14,6 +14,7 @@ import {
   BRAIN_MODEL_SELECTION_RETRY,
 } from '@stage7-nextgen/shared';
 import { BrainError } from '../utils/errors';
+import { providerTimeoutMs } from '../utils/providerFetch';
 
 export interface CompletionOptions {
   schema?: z.ZodSchema;
@@ -122,7 +123,7 @@ export class BrainService {
   private initialized = false;
 
   // Request ID -> {provider, model} mapping for complaints
-  private requestIdMap = new Map<string, { provider: string; model: string; complaintRecorded?: boolean }>();
+  private requestIdMap = new Map<string, { provider: string; model: string; complaintRecorded?: boolean; routingSessionKey?: string }>();
 
   async initialize() {
     if (this.initialized) return;
@@ -226,6 +227,13 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
      const startTime = Date.now();
      const requestId = `brain_${startTime}_${crypto.randomBytes(6).toString('hex')}`;
      const attemptTimeout = providerAttemptTimeoutMs();
+     // A candidate attempt cannot cost more than the lower of the two
+     // ceilings: the provider fetch timeout fires before the attempt ceiling,
+     // so the completion deadline has to be budgeted against that smaller
+     // cost. Budgeting against the attempt ceiling alone made the deadline
+     // fit fewer candidates than it was meant to, and the leftover budget
+     // then expired between candidates instead of paying for another one.
+     const attemptCostMs = Math.min(attemptTimeout, providerTimeoutMs());
      const maxRetries = 2;
      const configuredDeadline = Number(process.env.BRAIN_COMPLETION_DEADLINE_MS);
      const defaultDeadline = Math.max(attemptTimeout, Math.min(attemptTimeout * 3, 900000));
@@ -338,7 +346,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
         break;
       }
       // Skip if there isn't enough time left to attempt this candidate at all.
-      if (Date.now() + attemptTimeout > completionDeadline) {
+      if (Date.now() + attemptCostMs > completionDeadline) {
         lastErr = new Error('Brain completion deadline did not leave enough time for the next eligible model attempt');
         break;
       }
@@ -396,7 +404,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
         if (Date.now() >= completionDeadline) break;
         // Skip if there isn't enough time left to even start this attempt
         // (each attempt may take up to providerAttemptTimeoutMs).
-        if (Date.now() + attemptTimeout > completionDeadline) break;
+        if (Date.now() + attemptCostMs > completionDeadline) break;
         try {
           const response: CompletionResponse = await withProviderTimeout(
             breaker.execute(async () => provider.complete(req)),
@@ -439,7 +447,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
           await this.recordPerformanceMetrics(result.model, result.provider, Date.now() - candidateStartTime, response.tokensUsed, estimatedCost, true);
 
           // Record request ID mapping for complaint tracking
-          this.requestIdMap.set(requestId, { provider: result.provider, model: result.model });
+          this.requestIdMap.set(requestId, { provider: result.provider, model: result.model, routingSessionKey });
 
           if (!routingSessionKey) await this.cache.set(cacheKey, result);
 
@@ -516,10 +524,10 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
             });
             this.updateProviderHealth(provider.id, false);
             await this.recordPerformanceMetrics(candidate.model.id, provider.id, Date.now() - candidateStartTime, undefined, undefined, false);
-            // Timeouts are transient: do NOT mark this model as permanently tried,
-            // so a later turn (or a retry from the caller) can attempt it again.
-            attemptedModelIds.delete(routingKey);
-            attemptedThisCall.delete(routingKey);
+            // Keep the model in the routing session's attempted set so the next
+            // turn rotates to a different eligible model instead of repeating
+            // the same slow provider until the completion deadline expires. A
+            // later routing session can still use this model.
             break;
           }
           if (isProviderFatal) {
@@ -581,10 +589,9 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
             this.updateProviderHealth(provider.id, false);
             await this.recordPerformanceMetrics(candidate.model.id, provider.id, Date.now() - candidateStartTime, undefined, undefined, false);
             lastFailureWasLogged = true;
-            // A rate limit is transient: the same model may succeed on a later
-            // attempt once the window resets, so do not permanently exclude it.
-            attemptedModelIds.delete(routingKey);
-            attemptedThisCall.delete(routingKey);
+            // Keep the model in the routing session's attempted set so the next
+            // turn rotates to a different eligible model rather than retrying a
+            // rate-limited provider until the completion deadline expires.
             break;
           }
 
@@ -633,27 +640,23 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
       const attemptedEligibleModelCount = eligibleCandidates
         .filter((candidate) => attemptedModelIds.has(modelRoutingKey(candidate.model))).length;
       const remainingModelCount = eligibleCandidates.length - attemptedEligibleModelCount;
-      if (remainingModelCount > 0 && attemptedThisCall.size === 0) {
-        throw new BrainError(finalErrMsg, 504, {
-          code: 'BRAIN_COMPLETION_DEADLINE',
-          eligibleModelCount: eligibleCandidates.length,
-          attemptedModelCount: attemptedEligibleModelCount,
-          remainingModelCount,
-          freeModelsOnly: settings?.freeModelsOnly === true,
-        });
-      }
       const code = remainingModelCount === 0
         ? BRAIN_MODEL_SELECTION_EXHAUSTED
         : BRAIN_MODEL_SELECTION_RETRY;
       const message = remainingModelCount === 0
         ? `Every eligible model was tried, but none completed the request. Last provider error: ${finalErrMsg}`
         : `Brain could not complete the request yet; ${remainingModelCount} eligible model(s) remain untried. Last provider error: ${finalErrMsg}`;
+      // While eligible models remain, this call is a routing decision and not a
+      // verdict: the caller retries, the routing session hands it a model that
+      // has not been tried yet, and the next call gets a fresh deadline. Only
+      // an exhausted model set is reported as a terminal failure.
       throw new BrainError(message, 503, {
         code,
         eligibleModelCount: eligibleCandidates.length,
         attemptedModelCount: attemptedEligibleModelCount,
         remainingModelCount,
         freeModelsOnly: settings?.freeModelsOnly === true,
+        deadlineExpired: Date.now() >= completionDeadline,
       });
     }
     throw new Error(finalErrMsg);
@@ -984,6 +987,14 @@ private async savePerformanceMetrics(
     this.performanceMetricsCache = metrics;
     this.performanceCacheFetchedAt = Date.now();
     this.router.setPerformanceMetrics(metrics);
+    // A rejected answer is a reason to try a different model, not to repeat
+    // the same one. Mark the model as attempted for the routing session that
+    // produced it so the next turn of that session routes to an eligible model
+    // that has not been tried yet.
+    if (mapping.routingSessionKey) {
+      this.recordRoutingSessionAttempts(mapping.routingSessionKey, [modelRoutingKey({ id: mapping.model, provider: mapping.provider })]);
+      logger.info({ provider: mapping.provider, model: mapping.model, routingSessionKey: mapping.routingSessionKey }, 'Complained model excluded from its routing session');
+    }
     return true;
   }
 }

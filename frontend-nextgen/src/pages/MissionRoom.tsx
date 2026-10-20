@@ -5,6 +5,13 @@ import AgentOutputsPanel from '../components/AgentOutputsPanel';
 import { useMissionsStore } from '../stores/missionsStore';
 import { postJSON } from '../utils/api';
 import { missionIdFromWorkflowId } from '../utils/missionId';
+import {
+  buildMissionEvents,
+  buildTranscript,
+  CONVERSATION_EVENT_TYPES,
+  summarizeModelUsage,
+  TIMELINE_EVENT_TYPES,
+} from '../utils/missionEvents';
 
 interface Plan {
   summary?: string;
@@ -224,35 +231,6 @@ function getTaskStatus(
   return task.status || outputStatus;
 }
 
-const CONVERSATION_EVENT_TYPES = new Set([
-  'user',
-  'user_message',
-  'monologue',
-  'tool',
-  'assistant',
-  'planner_started',
-  'plan_generated',
-  'phase_started',
-  'phase_completed',
-  'task_started',
-  'task_completed',
-  'task_failed',
-]);
-
-const TIMELINE_EVENT_TYPES = new Set([
-  'mission_started',
-  'mission_completed',
-  'mission_failed',
-  'mission_canceled',
-  'mission_incomplete',
-  'mission_needs_review',
-  'phase_approved',
-  'phase_rejected',
-  'approval_requested',
-  'approval_approved',
-  'approval_rejected',
-]);
-
 const MissionRoom = () => {
   const { workflowId = '' } = useParams<{ workflowId: string }>();
   const missionId = useMemo(() => missionIdFromWorkflowId(workflowId), [workflowId]);
@@ -313,195 +291,26 @@ const MissionRoom = () => {
   }, [detail?.output?.outputs?.phases]);
 
   const missionEvents = useMemo<FeedEvent[]>(() => {
-    const fromOutput: FeedEvent[] = [];
-    const startedAt = detail?.startedAt
-      ? new Date(detail.startedAt).getTime()
-      : Date.now();
-    fromOutput.push({
-      id: `derived-mission-started-${startedAt}`,
-      type: 'mission_started',
-      source: 'orchestrator',
-      message: 'Mission started',
-      timestamp: startedAt,
+    return buildMissionEvents({
       missionId,
+      liveEvents: events,
+      detail: detail
+        ? {
+            status: detail.status,
+            error: detail.error,
+            startedAt: detail.startedAt,
+            completedAt: detail.completedAt,
+            input: detail.input,
+            output: detail.output,
+          }
+        : null,
+      plan,
+      phaseOutputs,
     });
-    const hasLivePlannerStarted = events.some(
-      (event) => event.missionId === missionId && event.type === 'planner_started'
-    );
-    const hasLivePlanGenerated = events.some(
-      (event) => event.missionId === missionId && event.type === 'plan_generated'
-    );
-    
-    // Show original user prompt if available
-    const originalPrompt = detail?.input?.prompt;
-    if (originalPrompt) {
-      fromOutput.push({
-        id: `derived-user-prompt-${startedAt}`,
-        type: 'user',
-        source: 'user',
-        message: originalPrompt,
-        timestamp: startedAt,
-        missionId,
-      });
-    }
-    if (plan) {
-      if (!hasLivePlannerStarted) {
-        fromOutput.push({
-          id: `derived-planner-started-${startedAt + 1}`,
-          type: 'planner_started',
-          source: 'orchestrator',
-          message: `Planning: ${plan.summary || 'mission plan'}`,
-          timestamp: startedAt + 1,
-          missionId,
-          metadata: { agentId: `agent-${missionId}-planner`, agentName: 'Mission Planner', agentRole: 'planner' },
-        });
-      }
-      if (!hasLivePlanGenerated) {
-        fromOutput.push({
-          id: `derived-plan-generated-${startedAt + 2}`,
-          type: 'plan_generated',
-          source: 'orchestrator',
-          message: `Plan generated (${plan.phases.length} phases)`,
-          timestamp: startedAt + 2,
-          missionId,
-        });
-      }
-    } else if (detail?.status === 'running' && !hasLivePlannerStarted) {
-      fromOutput.push({
-        id: `derived-planner-started-${startedAt + 1}`,
-        type: 'planner_started',
-        source: 'orchestrator',
-        message: 'The planning agent is developing a plan for this mission.',
-        timestamp: startedAt + 1,
-        missionId,
-        metadata: {
-          agentId: `agent-${missionId}-planner`,
-          agentName: 'Mission Planner',
-          agentRole: 'planner',
-          status: 'planning',
-        },
-      });
-    }
-    let phases: PhaseOutput[] = detail?.output?.outputs?.phases || [];
-    const taskTitleById = new Map<string, string>();
-    for (const p of plan?.phases || []) {
-      for (const t of p.tasks || []) {
-        if (t.title) taskTitleById.set(t.id, t.title);
-      }
-    }
-    const taskLabel = (taskId: string): string => {
-      const title = taskTitleById.get(taskId);
-      return title && title.length > 0 ? (title.length > 80 ? `${title.slice(0, 77)}…` : title) : taskId;
-    };
-    if (phases.length === 0 && plan?.phases) {
-      phases = plan.phases.map((p) => ({
-        phaseId: p.id,
-        name: p.name,
-        status:
-          detail?.status === 'completed'
-            ? 'completed'
-            : detail?.status === 'failed'
-              ? 'failed'
-              : 'planned',
-        tasks: p.tasks.map((t) => ({ taskId: t.id, status: 'planned' })),
-      }));
-    }
-    // Use actual timestamps from phase outputs if available, otherwise derive sequentially
-    for (const phase of phases) {
-      const phaseStartedAt = (phase as any).startedAt ? new Date((phase as any).startedAt).getTime() : startedAt;
-      const phaseCompletedAt = (phase as any).completedAt ? new Date((phase as any).completedAt).getTime() : phaseStartedAt + 1000;
+  }, [events, detail, plan, phaseOutputs, missionId]);
 
-      fromOutput.push({
-        id: `derived-phase-started-${phase.phaseId}`,
-        type: 'phase_started',
-        source: 'orchestrator',
-        message: `Phase started: ${phase.name || phase.phaseId}`,
-        timestamp: phaseStartedAt,
-        missionId,
-        metadata: { phaseId: phase.phaseId, phaseName: phase.name },
-      });
-      let taskCursor = phaseStartedAt + 1;
-      for (const task of phase.tasks || []) {
-        const taskCompletedAt = (task as any).completedAt ? new Date((task as any).completedAt).getTime() : taskCursor;
-        fromOutput.push({
-          id: `derived-task-${phase.phaseId}-${task.taskId}`,
-          type: task.status === 'failed' ? 'task_failed' : 'task_completed',
-          source: 'orchestrator',
-          message: `${task.status === 'failed' ? 'Task failed' : 'Task completed'}: ${taskLabel(task.taskId)}`,
-          timestamp: taskCompletedAt,
-          missionId,
-          metadata: { phaseId: phase.phaseId, taskId: task.taskId, output: task.output },
-        });
-        taskCursor = taskCompletedAt + 1;
-      }
-      fromOutput.push({
-        id: `derived-phase-completed-${phase.phaseId}`,
-        type: 'phase_completed',
-        source: 'orchestrator',
-        message: `Phase completed: ${phase.name || phase.phaseId}`,
-        timestamp: phaseCompletedAt,
-        missionId,
-        metadata: { phaseId: phase.phaseId, phaseName: phase.name },
-      });
-    }
-    if (detail?.status === 'completed') {
-      const completedAt = detail?.completedAt ? new Date(detail.completedAt).getTime() : startedAt + 1000;
-      fromOutput.push({
-        id: `derived-mission-completed-${completedAt}`,
-        type: 'mission_completed',
-        source: 'orchestrator',
-        message: 'Mission completed',
-        timestamp: completedAt,
-        missionId,
-      });
-    } else if (detail?.status === 'failed' || detail?.status === 'canceled') {
-      const failedAt = detail?.completedAt ? new Date(detail.completedAt).getTime() : startedAt + 1000;
-      fromOutput.push({
-        id: `derived-mission-failed-${failedAt}`,
-        type: 'mission_failed',
-        source: 'orchestrator',
-        message: `Mission ${detail.status}: ${detail.error || ''}`.trim(),
-        timestamp: failedAt,
-        missionId,
-        metadata: { error: detail.error },
-      });
-    }
-    const live = events.filter((e) => e.missionId === missionId);
-    const map = new Map<string, FeedEvent>();
-    for (const e of fromOutput) map.set(e.id, e);
-    for (const e of live) {
-      const key = e.id || `${e.type}-${e.timestamp}-${e.source || ''}`;
-      if (!map.has(key)) map.set(key, e);
-    }
-    return Array.from(map.values()).sort((a, b) => a.timestamp - b.timestamp);
-  }, [events, detail, plan, missionId]);
-
-  const totalEstimatedCost = useMemo(() => {
-    const costEvents = missionEvents.filter((e) => e.type === 'cost_estimate');
-    let sum = 0;
-    for (const e of costEvents) {
-      const nestedData =
-        e.metadata?.data !== undefined &&
-        e.metadata.data !== null &&
-        typeof e.metadata.data === 'object' &&
-        !Array.isArray(e.metadata.data)
-          ? (e.metadata.data as Record<string, unknown>)
-          : undefined;
-      const c =
-        e.metadata?.estimatedCost ??
-        e.metadata?.cost ??
-        nestedData?.estimatedCost ??
-        nestedData?.cost;
-      const num =
-        typeof c === 'number'
-          ? c
-          : typeof c === 'string'
-            ? Number(c.trim())
-            : Number.NaN;
-      if (Number.isFinite(num)) sum += num;
-    }
-    return sum;
-  }, [missionEvents]);
+  const modelUsage = useMemo(() => summarizeModelUsage(missionEvents), [missionEvents]);
+  const totalEstimatedCost = modelUsage.estimatedCost;
 
   const conversationEvents = useMemo(
     () => missionEvents.filter((e) => CONVERSATION_EVENT_TYPES.has(e.type as string)),
@@ -872,6 +681,12 @@ const MissionRoom = () => {
           </span>
         )}
         {plan && <span><strong>Phases:</strong> {plan.phases.length}</span>}
+        {modelUsage.calls > 0 && (
+          <span>
+            <strong>Model calls:</strong> {modelUsage.calls}
+            {modelUsage.tokens > 0 ? ` (${modelUsage.tokens.toLocaleString()} tokens)` : ''}
+          </span>
+        )}
         {totalEstimatedCost > 0 && (
           <span>
             <strong>Estimated Cost:</strong> ${totalEstimatedCost.toFixed(4)}
@@ -1198,123 +1013,6 @@ const MissionRoom = () => {
     </div>
   );
 };
-
-interface TranscriptLine {
-  kind: 'text' | 'tool' | 'plan' | 'task';
-  type: string;
-  text: string;
-  approval?: { phaseId: string; question: string };
-}
-
-interface TranscriptTurn {
-  id: string;
-  role: 'user' | 'assistant' | 'system';
-  label: string;
-  timestamp: number;
-  lines: TranscriptLine[];
-}
-
-function buildTranscript(events: FeedEvent[]): TranscriptTurn[] {
-  const turns: TranscriptTurn[] = [];
-  let current: TranscriptTurn | null = null;
-
-  const startTurn = (
-    role: TranscriptTurn['role'],
-    label: string,
-    ts: number,
-    idHint: string
-  ): TranscriptTurn => {
-    const t: TranscriptTurn = {
-      id: `${idHint}-${ts}`,
-      role,
-      label,
-      timestamp: ts,
-      lines: [],
-    };
-    turns.push(t);
-    return t;
-  };
-
-  for (const evt of events) {
-    const type = String(evt.type);
-    const ts = evt.timestamp || Date.now();
-    const data = evt.metadata || {};
-    if (type === 'user' || type === 'user_message') {
-      current = startTurn('user', 'You', ts, evt.id);
-      current.lines.push({ kind: 'text', type, text: evt.message });
-      continue;
-    }
-    if (
-      type === 'planner_started' ||
-      type === 'plan_generated' ||
-      type === 'phase_started' ||
-      type === 'phase_completed' ||
-      type === 'phase_approved' ||
-      type === 'phase_rejected'
-    ) {
-      if (
-        !current ||
-        current.role !== 'assistant' ||
-        (current.label !== 'Planner' && current.label !== 'Orchestrator')
-      ) {
-        current = startTurn(
-          'assistant',
-          type === 'planner_started' || type === 'plan_generated'
-            ? 'Planner'
-            : 'Orchestrator',
-          ts,
-          evt.id
-        );
-      }
-      current.lines.push({ kind: 'plan', type, text: evt.message });
-      continue;
-    }
-    if (type.startsWith('task_')) {
-      if (!current || current.role !== 'assistant' || current.label !== 'Agent') {
-        current = startTurn('assistant', 'Agent', ts, evt.id);
-      }
-      current.lines.push({ kind: 'task', type, text: evt.message });
-      continue;
-    }
-    if (type === 'tool' || type === 'monologue') {
-      if (!current || current.role !== 'assistant') {
-        current = startTurn('assistant', 'Agent', ts, evt.id);
-      }
-      current.lines.push({
-        kind: type === 'tool' ? 'tool' : 'text',
-        type,
-        text: evt.message,
-      });
-      continue;
-    }
-    if (
-      type === 'mission_started' ||
-      type === 'mission_completed' ||
-      type === 'mission_failed' ||
-      type === 'mission_incomplete' ||
-      type === 'mission_needs_review' ||
-      type === 'mission_canceled' ||
-      type === 'approval_requested' ||
-      type === 'approval_approved' ||
-      type === 'approval_rejected'
-    ) {
-      current = startTurn('system', 'Mission', ts, evt.id);
-      const line: TranscriptLine = { kind: 'text', type, text: evt.message };
-      if (type === 'approval_requested') {
-        line.approval = {
-          phaseId: (data.phaseId as string) || '',
-          question: (data.question as string) || evt.message,
-        };
-      }
-      current.lines.push(line);
-      continue;
-    }
-    if (!current) current = startTurn('system', 'Mission', ts, evt.id);
-    current.lines.push({ kind: 'text', type, text: evt.message });
-  }
-
-  return turns;
-}
 
 interface ArtifactsViewProps {
   missionId: string;

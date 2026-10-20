@@ -180,7 +180,22 @@ export async function prepareMissionActivity(input: WorkflowInput): Promise<Plan
     metadata: input.metadata,
     agentRuntimeUrl: process.env.AGENT_RUNTIME_URL,
   });
-  const plan = await plannerRuntime.generatePlan(input.prompt, input.metadata);
+  const plan = await plannerRuntime.generatePlan(input.prompt, input.metadata, async (progress) => {
+    await broadcast(input, {
+      type: 'planner_progress',
+      missionId: input.missionId,
+      timestamp: Date.now(),
+      data: {
+        attempt: progress.attempt,
+        status: progress.status,
+        reason: progress.reason,
+        transient: progress.transient,
+        agentId: `agent-${input.missionId}-planner`,
+        agentName: 'Mission Planner',
+        agentRole: 'planner',
+      },
+    });
+  });
   await persistMissionPlan(input, plan);
 
   await broadcast(input, {

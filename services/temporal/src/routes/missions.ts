@@ -89,10 +89,18 @@ router.post(
       const planResponse = await fetch(
         `${artifactsBase.origin}/api/artifacts/missions/${encodeURIComponent(missionId)}/plan`,
       );
-      if (!planResponse.ok) {
+      if (planResponse.status === 404) {
+        // The mission failed before a plan was ever persisted, so there is no
+        // completed work to protect and no side effect to replay. Retrying
+        // from the start is safe; refusing the retry would leave the mission
+        // permanently unrecoverable.
+        logger.info({ missionId }, 'No persisted plan for mission; retrying from the start');
+        progress = { checkpoint: { version: 1, completedPhases: [], completedTasks: [] } };
+      } else if (!planResponse.ok) {
         throw new Error(`Artifacts returned HTTP ${planResponse.status}`);
+      } else {
+        progress = getMissionResumeProgress(PlanSchema.parse(await planResponse.json()));
       }
-      progress = getMissionResumeProgress(PlanSchema.parse(await planResponse.json()));
     } catch (error) {
       const details = error instanceof Error ? error.message : String(error);
       logger.error({ missionId, error: details }, 'Cannot load persisted mission progress for retry');
@@ -254,12 +262,7 @@ router.post(
       data: { content, role: role || 'user' },
     };
 
-    await client.appendMissionEvent(missionId, {
-      type: event.type,
-      timestamp: event.timestamp,
-      data: event.data,
-    });
-
+    // The broadcast persists the event as well, so the message is recorded once.
     await client.broadcastMissionUpdate(event);
 
     res.status(202).json({ status: 'accepted' });
