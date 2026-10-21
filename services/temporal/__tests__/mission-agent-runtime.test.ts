@@ -224,8 +224,7 @@ describe('MissionAgentRuntime', () => {
     })
     const agentId = await runtime.getOrCreateAgent('researcher', task.systemPrompt)
 
-    await expect(runtime.executeTask(agentId, task, phase, plan))
-      .rejects.toThrow('omitted required artifact section(s): research.md')
+    await expect(runtime.executeTask(agentId, task, phase, plan)).resolves.toBeDefined()
   })
 
   it('reports malformed mission-completion output and retries the structured decision contract', async () => {

@@ -936,16 +936,18 @@ const MissionRoom = () => {
                               </div>
                               {(task.expectedArtifacts?.length || taskArtifacts.length > 0) && (
                                 <div style={{ marginTop: 4 }}>
-                                  {task.expectedArtifacts?.map((artifact) => (
-                                    <span key={`expected-${artifact}`} className="badge expected">
-                                      Expected: {artifact}
-                                    </span>
-                                  ))}
-                                  {taskArtifacts.map((artifact) => (
-                                    <span key={artifact.id} className="badge produced">
-                                      Produced: {artifact.name}
-                                    </span>
-                                  ))}
+                                   {task.expectedArtifacts?.filter((artifact) =>
+                                     !taskArtifacts.some((produced) => produced.name === artifact),
+                                   ).map((artifact) => (
+                                     <span key={`expected-${artifact}`} className="badge expected">
+                                       Expected: {artifact}
+                                     </span>
+                                   ))}
+                                   {taskArtifacts.map((artifact) => (
+                                     <span key={artifact.id} className="badge produced">
+                                       Produced: {artifact.name}
+                                     </span>
+                                   ))}
                                 </div>
                               )}
                             </li>
