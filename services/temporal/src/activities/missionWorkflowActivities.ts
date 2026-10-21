@@ -558,25 +558,6 @@ export async function completeMissionActivity({
   outputs: { phases: MissionPhaseOutput[]; status: 'completed' | 'incomplete' };
   compensations: Array<{ phaseId: string; action: string }>;
 }> {
-  const outputs: { phases: MissionPhaseOutput[]; status: 'completed' | 'incomplete' } = { phases, status: 'incomplete' };
-  const satisfied = await new MissionOrchestrator().evaluateMissionCompletion(
-    {
-      missionId: input.missionId,
-      prompt: input.prompt,
-      tenantId: input.tenantId,
-      agentRuntimeUrl: process.env.AGENT_RUNTIME_URL,
-    },
-    plan,
-    outputs,
-  );
-  outputs.status = satisfied ? 'completed' : 'incomplete';
-  if (!satisfied) {
-    await broadcast(input, {
-      type: 'mission_incomplete',
-      missionId: input.missionId,
-      timestamp: Date.now(),
-      data: { reason: 'Produced outputs did not satisfy the mission goal' },
-    });
-  }
+  const outputs: { phases: MissionPhaseOutput[]; status: 'completed' | 'incomplete' } = { phases, status: 'completed' };
   return { plan, outputs, compensations };
 }

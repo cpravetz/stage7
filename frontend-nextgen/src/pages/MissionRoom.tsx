@@ -542,6 +542,9 @@ const MissionRoom = () => {
       </div>
 
       {detailError && <div className="error-banner">{detailError}</div>}
+      {detail?.status === 'failed' && detail?.error && (
+        <div className="error-banner">Mission failed: {detail.error}</div>
+      )}
 
       {showRetryDialog && (
         <div className="error-banner" style={{ background: 'rgba(56,189,248,0.15)' }}>

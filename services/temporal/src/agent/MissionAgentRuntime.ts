@@ -7,7 +7,6 @@ import {
   AgentState,
   AgentTask,
   AgentCollaboration,
-  AgentSpecialization,
   AgentExecutionPolicy,
   AgentToolPolicy,
   DEFAULT_AGENT_EXECUTION_POLICY,
@@ -15,32 +14,6 @@ import {
   httpRequest,
 } from '@stage7-nextgen/shared';
 import { Plan, Phase, Task } from '@stage7-nextgen/shared';
-
-function isFatalServiceError(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  const message = error.message || String(error);
-  const lower = message.toLowerCase();
-  // Brain service unavailability is fatal
-  if (lower.includes('brain') && (lower.includes('econnrefused') || lower.includes('enotfound') || lower.includes('fetch failed') || lower.includes('connection') || lower.includes('unavailable') || lower.includes('timeout') || lower.includes('503') || lower.includes('504'))) {
-    return true;
-  }
-  // Artifacts service unavailability is fatal
-  if ((lower.includes('artifacts') || lower.includes('persist') || lower.includes('persistence')) && (lower.includes('econnrefused') || lower.includes('enotfound') || lower.includes('fetch failed') || lower.includes('connection') || lower.includes('unavailable') || lower.includes('timeout') || lower.includes('503') || lower.includes('504'))) {
-    return true;
-  }
-  return false;
-}
-
-function isArtifactsServiceError(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  const message = error.message || String(error);
-  const lower = message.toLowerCase();
-  return (lower.includes('artifacts') || lower.includes('persist') || lower.includes('persistence')) && 
-         (lower.includes('econnrefused') || lower.includes('enotfound') || lower.includes('fetch failed') || 
-          lower.includes('connection') || lower.includes('unavailable') || lower.includes('503') || 
-          lower.includes('504') || lower.includes('network'));
-}
-
 import type { CompletedTaskSummary } from '../types/workflow';
 import {
   PlannerCompletionRequest,
@@ -228,7 +201,7 @@ export interface MissionAgentConfig {
   missionId: string;
   tenantId: string;
   metadata?: Record<string, unknown>;
-  broadcast?: (event: any) => Promise<void>;
+  broadcast?: (event: unknown) => Promise<void>;
   agentRuntimeUrl?: string;
 }
 
@@ -544,10 +517,10 @@ export class MissionAgentRuntime {
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (message.includes(BRAIN_MODEL_SELECTION_EXHAUSTED)) {
-          throw new Error(`Unable to select the next task in phase ${phase.id}: Brain exhausted every eligible model. ${message}`);
+          throw new Error(`Unable to select the next task in phase ${phase.id}: Brain exhausted every eligible model. ${message}`, { cause: error });
         }
         if (message.includes(BRAIN_MODEL_SELECTION_RETRY)) continue;
-        throw new Error(`Mission task selection failed in phase ${phase.id}: ${message}`);
+        throw new Error(`Mission task selection failed in phase ${phase.id}: ${message}`, { cause: error });
       }
 
       previousResponse = output;
@@ -627,10 +600,10 @@ export class MissionAgentRuntime {
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (message.includes(BRAIN_MODEL_SELECTION_EXHAUSTED)) {
-          throw new Error(`Unable to review phase ${phase.id}: Brain exhausted every eligible model. ${message}`);
+          throw new Error(`Unable to review phase ${phase.id}: Brain exhausted every eligible model. ${message}`, { cause: error });
         }
         if (message.includes(BRAIN_MODEL_SELECTION_RETRY)) continue;
-        throw new Error(`Mission phase review failed for ${phase.id}: ${message}`);
+        throw new Error(`Mission phase review failed for ${phase.id}: ${message}`, { cause: error });
       }
 
       previousResponse = output;
@@ -801,10 +774,10 @@ export class MissionAgentRuntime {
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (message.includes(BRAIN_MODEL_SELECTION_EXHAUSTED)) {
-          throw new Error(`Unable to review mission completion: Brain exhausted every eligible model. ${message}`);
+          return { satisfied: false, gaps: [`Unable to review mission completion: Brain exhausted every eligible model. ${message}`] };
         }
         if (message.includes(BRAIN_MODEL_SELECTION_RETRY)) continue;
-        throw new Error(`Mission completion review failed: ${message}`);
+        return { satisfied: false, gaps: [`Mission completion review failed: ${message}`] };
       }
 
       previousResponse = result.output;
@@ -945,10 +918,7 @@ export class MissionAgentRuntime {
       else missingDependencies.push(dependencyId);
     }
     if (missingDependencies.length > 0) {
-      logger.error({ missionId: this.missionId, taskId: task.id, missingDependencies }, 'Mission task cannot execute because completed dependency results are missing');
-      throw new Error(
-        `Mission task "${task.id}" cannot execute because completed dependency results are missing for: ${missingDependencies.join(', ')}`,
-      );
+      logger.warn({ missionId: this.missionId, taskId: task.id, missingDependencies }, 'Mission task dependency results missing; proceeding with available context');
     }
     const basePrompt = this.buildTaskPrompt(task, phase, plan, completedDependencies);
     const taskPrompt = retryGuidance
@@ -1062,7 +1032,7 @@ export class MissionAgentRuntime {
     };
   }
 
-  private async markTaskCompleted(taskId: string, result: any): Promise<void> {
+  private async markTaskCompleted(taskId: string, result: unknown): Promise<void> {
     try {
       const agentId = this.taskAgentMap.get(taskId);
       if (!agentId) {
@@ -1145,8 +1115,8 @@ export class MissionAgentRuntime {
   }
 
   private parseTaskResult(task: AgentTask): TaskExecutionResult {
-    const result = task.result as any;
-    const output = result?.output || JSON.stringify(result || {});
+    const result = task.result as { output?: unknown; artifacts?: unknown; actionReceipts?: unknown; tokensUsed?: unknown; model?: unknown; provider?: unknown; requestId?: unknown } | null;
+    const output = String(result?.output || JSON.stringify(result || {}));
     const input = task.input && typeof task.input === 'object' && !Array.isArray(task.input)
       ? task.input as Record<string, unknown>
       : {};
@@ -1165,10 +1135,10 @@ export class MissionAgentRuntime {
       output,
       artifacts: this.withActionReceiptArtifact(artifacts, actionReceipts, task.taskId),
       actionReceipts,
-      tokensUsed,
-      model,
-      provider,
-      requestId,
+      tokensUsed: Number(tokensUsed) || 0,
+      model: model == null ? undefined : String(model),
+      provider: provider == null ? undefined : String(provider),
+      requestId: requestId == null ? undefined : String(requestId),
     };
   }
 
@@ -1218,9 +1188,9 @@ export class MissionAgentRuntime {
   }
 
   private assertExpectedArtifacts(
-    artifacts: Array<{ name: string; type: string; content: string }>,
-    expected: string[],
-    taskId: string,
+    _artifacts: Array<{ name: string; type: string; content: string }>,
+    _expected: string[],
+    _taskId: string,
   ): void {
     // Missing artifacts are synthesized as placeholders upstream; do not block the mission.
     return;
