@@ -12,7 +12,7 @@ COPY shared-nextgen/tsconfig.json ./shared-nextgen/
 COPY services/tool-executor/src ./services/tool-executor/src/
 COPY services/tool-executor/scripts ./services/tool-executor/scripts/
 
-RUN npm install --legacy-peer-deps --ignore-scripts
+RUN --mount=type=cache,target=/root/.npm npm ci --legacy-peer-deps --ignore-scripts
 
 COPY shared-nextgen/src ./shared-nextgen/src/
 

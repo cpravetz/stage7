@@ -402,7 +402,7 @@ const EntityWorkspace = () => {
         }>;
       }>('/api/artifacts/missions/approvals');
       const workflowIdMap = (data.approvals || []).reduce<Record<string, string>>((acc, a) => {
-        acc[a.missionId] = a.missionId.startsWith('mission-') ? a.missionId : `mission-${a.missionId}`;
+        acc[a.missionId] = a.missionId; //.startsWith('mission-') ? a.missionId : `mission-${a.missionId}`;
         return acc;
       }, {});
       setHitlApprovals(

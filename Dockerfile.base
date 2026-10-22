@@ -27,7 +27,7 @@ COPY services/tool-executor/package.json ./services/tool-executor/
 COPY frontend-nextgen/package.json ./frontend-nextgen/
 
 # Install all dependencies with legacy peer deps to resolve MUI version conflicts
-RUN npm install --legacy-peer-deps
+RUN --mount=type=cache,target=/root/.npm npm ci --legacy-peer-deps
 
 # Copy source code for all shared workspaces
 COPY shared/ ./shared/

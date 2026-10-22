@@ -225,6 +225,39 @@ const AgentOutputsPanel = ({ missionId, missionStatus, plan, phaseOutputs }: Age
               </div>
             </div>
             <div style={{ marginTop: 8 }}>
+              <strong style={{ fontSize: 12 }}>Current activity</strong>
+              <div style={{ marginTop: 6 }}>
+                {(() => {
+                  const evs = eventsByAgent.get(a.id) || eventsByAgent.get(a.role || '') || [];
+                  const current = [...evs].reverse().find((e) => e.type === 'task_started' || e.type === 'planner_started');
+                  const last = evs[evs.length - 1];
+                  if (a.status === 'running' || a.status === 'in_progress') {
+                    if (current) {
+                      return (
+                        <div className="muted" style={{ fontSize: 12 }}>
+                          <span style={{ marginRight: 6 }}>[{new Date(current.timestamp || Date.now()).toLocaleTimeString()}]</span>
+                          <span>{current.message}</span>
+                        </div>
+                      );
+                    }
+                    return <div className="muted" style={{ fontSize: 12 }}>Working…</div>;
+                  }
+                  if (a.status === 'failed') return <div className="muted" style={{ fontSize: 12, color: '#d33' }}>Failed</div>;
+                  if (a.status === 'completed') return <div className="muted" style={{ fontSize: 12, color: '#2a7' }}>Completed</div>;
+                  if (a.status === 'planning') return <div className="muted" style={{ fontSize: 12 }}>Planning</div>;
+                  if (last && last.type !== 'task_completed') {
+                    return (
+                      <div className="muted" style={{ fontSize: 12 }}>
+                        <span style={{ marginRight: 6 }}>[{new Date(last.timestamp || Date.now()).toLocaleTimeString()}]</span>
+                        <span>{last.message}</span>
+                      </div>
+                    );
+                  }
+                  return <div className="muted" style={{ fontSize: 12 }}>Idle / waiting for input</div>;
+                })()}
+              </div>
+            </div>
+            <div style={{ marginTop: 8 }}>
               <strong style={{ fontSize: 12 }}>Recent output</strong>
               <div style={{ marginTop: 6 }}>
                 {(eventsByAgent.get(a.id) || eventsByAgent.get(a.role || '') || []).slice(-4).map((ev, i) => (

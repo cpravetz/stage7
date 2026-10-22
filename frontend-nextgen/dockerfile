@@ -6,7 +6,7 @@ COPY frontend-nextgen/tsconfig.json ./
 COPY frontend-nextgen/tsconfig.node.json ./
 COPY frontend-nextgen/index.html ./
 COPY frontend-nextgen/src ./src/
-RUN npm install
+RUN --mount=type=cache,target=/root/.npm npm ci
 RUN npm run build
 
 FROM nginx:alpine

@@ -19,7 +19,7 @@ COPY services/worker-pool/knowledge ./services/worker-pool/knowledge/
 COPY services/artifacts/src ./services/artifacts/src/
 COPY services/mcp-runtime/src ./services/mcp-runtime/src/
 
-RUN npm install --legacy-peer-deps --ignore-scripts
+RUN --mount=type=cache,target=/root/.npm npm ci --legacy-peer-deps --ignore-scripts
 
 COPY shared-nextgen/src ./shared-nextgen/src/
 

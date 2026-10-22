@@ -897,7 +897,17 @@ export class AgentExecutor {
       repeatedActionCount = signature === lastAction ? repeatedActionCount + 1 : 0
       lastAction = signature
       if (repeatedActionCount >= 2) {
-        throw new Error(`Agent ${definition.id} repeated the same action without progress: ${action.tool}`)
+        const reason = `Agent ${definition.id} repeated the same action without progress: ${action.tool}`
+        await this.reportBrainComplaint(completion.requestId, reason, context.missionId)
+        return {
+          output: reason,
+          tokensUsed,
+          toolCalls,
+          brainCalls,
+          completionTokensReserved,
+          actionReceipts,
+          requestId: lastRequestId,
+        }
       }
 
       toolCalls++
