@@ -201,7 +201,7 @@ export interface MissionAgentConfig {
   missionId: string;
   tenantId: string;
   metadata?: Record<string, unknown>;
-  broadcast?: (event: unknown) => Promise<void>;
+  broadcast?: (event: { type: string; missionId: string; timestamp: number; data?: any }) => Promise<void>;
   agentRuntimeUrl?: string;
 }
 
