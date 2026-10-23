@@ -69,20 +69,101 @@ function readContextWindow(model: Record<string, unknown>): number {
   return FALLBACK_CONTEXT_WINDOW;
 }
 
+function asStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) return value.filter((v): v is string => typeof v === 'string');
+  if (typeof value === 'string') return [value];
+  return [];
+}
+
+/**
+ * Reads a capability flag from either the flat OpenAI-style field
+ * (`supports_vision`) or the nested Mistral-style `capabilities` object
+ * (`capabilities.vision`), since gateways disagree on where they put it.
+ */
+function readCapabilityFlag(model: Record<string, unknown>, key: string): boolean {
+  if (model[key] === true || model[key] === 'true') return true;
+  const caps = model.capabilities;
+  if (caps && typeof caps === 'object') {
+    const value = (caps as Record<string, unknown>)[key];
+    if (value === true || value === 'true') return true;
+  }
+  return false;
+}
+
+/**
+ * Decides whether a catalogue entry can serve a text chat completion, using
+ * only metadata the provider publishes at runtime.
+ *
+ * Returns null when the gateway gives no signal at all, meaning
+ * "assume chat-capable" -- the historical behaviour for catalogs (mostly
+ * local ones) that omit capability flags entirely.
+ *
+ * The signals, in order:
+ *   1. Mistral's explicit `capabilities.completion_chat` boolean.
+ *   2. OpenRouter-style `output_modalities`: a model whose published output
+ *      modalities include no text cannot answer a chat completion.
+ *   3. xAI's sparse listing, where image-generation models carry
+ *      `image_price` and no text token prices while chat models carry text
+ *      token prices.
+ *
+ * Nothing here is inferred from the model id. Media models are distinguished
+ * by the modalities and pricing fields their own gateway reports, so a newly
+ * added image or OCR model is handled correctly with no stage7-side change.
+ */
+function canServeChat(model: Record<string, unknown>): boolean | null {
+  const caps = model.capabilities;
+  if (caps && typeof caps === 'object') {
+    const completionChat = (caps as Record<string, unknown>).completion_chat;
+    if (typeof completionChat === 'boolean') return completionChat;
+  }
+
+  const architecture = (model.architecture || {}) as Record<string, unknown>;
+  const outputModalities = asStringArray(architecture.output_modalities ?? model.output_modalities);
+
+  // A model whose published output modalities include no text cannot answer a
+  // chat completion (image/audio/video-only generators).
+  if (outputModalities.length > 0) {
+    return outputModalities.includes('text');
+  }
+
+  // xAI lists image-generation models alongside chat models on the same
+  // /models endpoint. The image models carry image_price and no text token
+  // prices; chat models carry text token prices. This is the only reliable
+  // discriminator in xAI's sparse listing.
+  const hasTextPrice = model.prompt_text_token_price != null || model.completion_text_token_price != null;
+  const hasImagePrice = model.image_price != null;
+  if (hasImagePrice || hasTextPrice) {
+    // A model with an image price and no text price is image-generation only.
+    if (hasImagePrice && !hasTextPrice) return false;
+    return true;
+  }
+
+  // No modality or pricing metadata: assume chat-capable.
+  return null;
+}
+
 function readCapabilities(model: Record<string, unknown>, id: string): string[] {
   const architecture = (model.architecture || {}) as Record<string, unknown>;
   const modality = architecture.modality;
-  const supports = (key: string): boolean => model[key] === true || model[key] === 'true';
+  const inputModalities = asStringArray(architecture.input_modalities ?? model.input_modalities);
 
-  const caps: string[] = ['chat'];
-  if (supports('supports_vision') || modality === 'vision+text' || id.includes('vision')) caps.push('vision');
+  const caps: string[] = [];
+  const chat = canServeChat(model);
+  if (chat !== false) caps.push('chat');
+  if (
+    readCapabilityFlag(model, 'supports_vision')
+    || modality === 'vision+text'
+    || id.includes('vision')
+    || inputModalities.includes('image')
+    || inputModalities.includes('video')
+  ) caps.push('vision');
   if (id.includes('code') || id.includes('coder')) caps.push('code');
   if (
-    supports('supports_reasoning') ||
-    id.includes('reason') || id.includes('r1') || id.includes('think') ||
-    id.includes('o1') || id.includes('o3')
+    readCapabilityFlag(model, 'supports_reasoning')
+    || id.includes('reason') || id.includes('r1') || id.includes('think')
+    || id.includes('o1') || id.includes('o3')
   ) caps.push('reasoning');
-  if (supports('supports_image_generation') || id.includes('creative') || id.includes('image') || id.includes('dall')) {
+  if (readCapabilityFlag(model, 'supports_image_generation') || id.includes('creative') || id.includes('image') || id.includes('dall')) {
     caps.push('creative');
   }
   return caps;

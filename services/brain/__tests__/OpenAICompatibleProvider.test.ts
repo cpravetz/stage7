@@ -159,6 +159,74 @@ describe('OpenAICompatibleProvider.listModels metadata parsing', () => {
     });
   });
 
+  describe('non-chat media models', () => {
+    // The Brain routes chat completions to whatever the router thinks is
+    // chat-capable. Media-only models (image generation, OCR, audio) must not
+    // be eligible, or every chat request burns a 400 against an endpoint that
+    // does not serve chat. Eligibility comes from metadata the provider itself
+    // publishes, never from the model id, so a new media model is handled
+    // without a stage7-side change.
+
+    it('drops xAI image-generation models that carry image_price and no text price', async () => {
+      const models = await providerWith({
+        data: [
+          { id: 'grok-2-latest', prompt_text_token_price: 20000, completion_text_token_price: 80000, context_length: 131072 },
+          { id: 'grok-imagine-image', image_price: 200000000, context_length: 1024 },
+          { id: 'grok-imagine-image-2.0', image_price: 200000000, context_length: 1024 },
+        ],
+      }).listModels();
+      expect(models.map((m) => m.id)).toEqual(['grok-2-latest']);
+      expect(models[0].capabilities).toEqual(['chat']);
+    });
+
+    it('drops models whose published output_modalities include no text', async () => {
+      const models = await providerWith({
+        data: [
+          { id: 'vendor/gpt-5-image', architecture: { modality: 'text+image->text+image', output_modalities: ['image', 'text'] } },
+          { id: 'vendor/image-only', architecture: { modality: 'text->image', output_modalities: ['image'] } },
+          { id: 'vendor/text-only', architecture: { modality: 'text->text', output_modalities: ['text'] } },
+        ],
+      }).listModels();
+      const byId = Object.fromEntries(models.map((m) => [m.id, m.capabilities]));
+      expect(byId['vendor/gpt-5-image']).toContain('chat');
+      expect(byId['vendor/text-only']).toContain('chat');
+      expect(byId['vendor/image-only']).not.toContain('chat');
+    });
+
+    it('drops Mistral OCR models via capabilities.completion_chat=false', async () => {
+      const models = await providerWith({
+        data: [
+          {
+            id: 'mistral-large-latest',
+            capabilities: { completion_chat: true, function_calling: true, vision: true },
+            max_context_length: 128000,
+          },
+          {
+            id: 'mistral-ocr-3',
+            capabilities: { completion_chat: false, vision: true },
+            max_context_length: 131072,
+          },
+          {
+            id: 'mistral-ocr-4-1',
+            capabilities: { completion_chat: false, vision: true },
+            max_context_length: 131072,
+          },
+        ],
+      }).listModels();
+      expect(models.map((m) => m.id)).toEqual(['mistral-large-latest']);
+      expect(models[0].capabilities).toEqual(['chat', 'vision']);
+    });
+
+    it('still assumes chat-capable when a gateway publishes no capability signal', async () => {
+      // Local catalogs and some gateways omit capability metadata entirely.
+      // Those stay eligible for chat rather than being silently dropped.
+      const models = await providerWith({
+        data: [{ id: 'vendor/unknown-model', context_length: 8192 }],
+      }).listModels();
+      expect(models[0].capabilities).toContain('chat');
+    });
+  });
+
   describe('regression: paid gateway models must not look free', () => {
     it('gives every paid Requesty model a non-zero cost', async () => {
       const paid = [

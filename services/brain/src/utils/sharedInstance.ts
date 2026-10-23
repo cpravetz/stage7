@@ -1,17 +1,18 @@
 import { BrainService } from '../services/BrainService';
 
 let brainPromise: Promise<BrainService> | null = null;
+const sharedBrain = new BrainService();
 
 export async function getBrainInstance(): Promise<BrainService> {
   if (!brainPromise) {
     brainPromise = (async () => {
-      const brain = new BrainService();
-      await brain.initialize();
-      return brain;
+      await sharedBrain.initialize();
+      return sharedBrain;
     })();
   }
   return brainPromise;
 }
 
-// For backward compatibility - returns uninitialized instance synchronously
-export const brainInstance = new BrainService();
+// Shared, initialized instance used by in-process consumers
+export const brainInstance = sharedBrain;
+void getBrainInstance();
