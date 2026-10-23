@@ -1,4 +1,5 @@
 console.log('missions route module loaded');
+import { MissionOrchestrator } from '../planner/MissionOrchestrator';
 import { Router, Request, Response } from 'express';
 import { TemporalClient } from '../client/TemporalClient';
 import { WorkflowInput, MissionTaskCheckpoint } from '../types/workflow';
@@ -264,6 +265,17 @@ router.post(
 
     // The broadcast persists the event as well, so the message is recorded once.
     await client.broadcastMissionUpdate(event);
+
+    const active = MissionOrchestrator.getActive(missionId);
+    if (active && role === 'user') {
+      try {
+        const result = await active.orchestrator.handleUserMessage(active.ctx, content);
+        res.status(202).json({ status: 'accepted', acknowledgement: result.acknowledgement, response: result.response });
+        return;
+      } catch (err) {
+        // fall through
+      }
+    }
 
     res.status(202).json({ status: 'accepted' });
   }),

@@ -91,7 +91,7 @@ const Persistence = () => {
             const res = await fetchJSON<{ artifacts: MissionArtifact[] }>(
               `/api/artifacts/missions/${encodeURIComponent(m.missionId)}/artifacts`,
             );
-            return [m.workflowId, (res.artifacts || []) as MissionArtifact[]] as const;
+            return [m.workflowId, (res.artifacts || []).filter((a: any) => String(a?.name || a?.id || '').toLowerCase() !== 'system-action-receipts.json') as MissionArtifact[]] as const;
           } catch {
             return [m.workflowId, [] as MissionArtifact[]] as const;
           }

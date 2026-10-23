@@ -122,6 +122,7 @@ function toMissionArtifactItem(
   taskId?: string,
 ): MissionArtifactItem | null {
   if (typeof value === 'string') {
+    if (value.toLowerCase() === 'system-action-receipts.json') return null;
     return {
       id: `${kind}-${phaseId || ''}-${taskId || ''}-${value}`,
       name: value,
@@ -138,6 +139,7 @@ function toMissionArtifactItem(
     : typeof artifact.id === 'string'
       ? artifact.id
       : 'artifact';
+  if (name.toLowerCase() === 'system-action-receipts.json') return null;
   const rawContent = artifact.content ?? artifact.text ?? artifact.body;
   const text = typeof rawContent === 'string'
     ? rawContent
@@ -1011,7 +1013,6 @@ const MissionRoom = () => {
             missionId={missionId}
             missionStatus={detail?.status}
             plan={plan}
-            phaseOutputs={phaseOutputs}
           />
         </div>
       )}

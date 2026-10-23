@@ -8,6 +8,8 @@ interface BrainLogEntry {
   provider?: string;
   model?: string;
   promptPreview?: string;
+  prompt?: string;
+  content?: string;
   success: boolean;
   durationMs?: number;
   error?: string;
@@ -105,6 +107,8 @@ const Brain = () => {
       provider: (e.metadata?.provider as string) || undefined,
       model: (e.metadata?.model as string) || undefined,
       promptPreview: (e.metadata?.promptPreview as string) || undefined,
+      prompt: (e.metadata?.prompt as string) || undefined,
+      content: (e.metadata?.content as string) || undefined,
       success: false,
       error: (e.metadata?.error as string) || e.message,
       missionId: e.missionId,
@@ -333,9 +337,21 @@ const Brain = () => {
             <p><strong>Tokens:</strong> {modalEntry.tokensUsed || '—'}</p>
             <p><strong>Estimated Cost:</strong> {modalEntry.estimatedCost ?? '—'}</p>
             {modalEntry.missionId && <p><strong>Mission:</strong> {modalEntry.missionId}</p>}
-            {modalEntry.promptPreview && (
+            {modalEntry.content && (
+              <>
+                <h4>Response</h4>
+                <pre style={{ whiteSpace: 'pre-wrap', fontSize: '12px', background: 'rgba(0,0,0,0.3)', padding: '8px', borderRadius: '4px' }}>{modalEntry.content}</pre>
+              </>
+            )}
+            {modalEntry.prompt && (
               <>
                 <h4>Prompt</h4>
+                <pre style={{ whiteSpace: 'pre-wrap', fontSize: '12px', background: 'rgba(0,0,0,0.3)', padding: '8px', borderRadius: '4px' }}>{modalEntry.prompt}</pre>
+              </>
+            )}
+            {modalEntry.promptPreview && !modalEntry.prompt && (
+              <>
+                <h4>Prompt Preview</h4>
                 <pre style={{ whiteSpace: 'pre-wrap', fontSize: '12px' }}>{modalEntry.promptPreview}</pre>
               </>
             )}

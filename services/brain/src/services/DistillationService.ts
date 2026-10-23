@@ -77,7 +77,7 @@ export class DistillationService {
             active: true,
             ts: new Date().toISOString(),
             context: typeof h.context === 'string' ? h.context : input.missionId || input.taskId || undefined,
-            metadata: { missionId: input.missionId, taskId: input.taskId },
+            metadata: { missionId: input.missionId || 'unknown', taskId: input.taskId },
           };
           heuristics.push(entry);
         }

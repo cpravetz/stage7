@@ -23,18 +23,10 @@ interface Plan {
   phases: PlanPhase[];
 }
 
-interface PhaseOutput {
-  tasks?: Array<{
-    taskId: string;
-    status?: string;
-  }>;
-}
-
 interface AgentOutputsPanelProps {
   missionId: string;
   missionStatus?: string;
   plan?: Plan | null;
-  phaseOutputs?: PhaseOutput[] | null;
 }
 
 type AgentLike = {
@@ -102,7 +94,7 @@ function extractAgentsFromEvents(events: Array<{ type: string; missionId?: strin
   return Array.from(agentMap.values());
 }
 
-const AgentOutputsPanel = ({ missionId, missionStatus, plan, phaseOutputs }: AgentOutputsPanelProps) => {
+const AgentOutputsPanel = ({ missionId, missionStatus, plan }: AgentOutputsPanelProps) => {
   const events = useFeedStore((s) => s.events);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [loading, setLoading] = useState(false);

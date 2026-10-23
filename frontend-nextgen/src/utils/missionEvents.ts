@@ -324,7 +324,46 @@ export function buildMissionEvents(options: {
   }
 
   const ordered = Array.from(merged.values()).sort((left, right) => left.timestamp - right.timestamp);
-  return applyMissionError(listMilestonesOnce(ordered), detail?.error);
+  return applyMissionError(dedupeTerminalAndApprovalEvents(listMilestonesOnce(ordered), detail?.status), detail?.error);
+}
+
+/**
+ * Collapses duplicate announcements of the same milestone and conflicting
+ * terminal lifecycle events so the conversation shows one outcome.
+ */
+function dedupeTerminalAndApprovalEvents(events: FeedEvent[], status?: string): FeedEvent[] {
+  const terminalTypes = new Set(['mission_completed', 'mission_failed', 'mission_canceled', 'mission_incomplete', 'mission_needs_review']);
+  const preferredTerminal = status === 'completed'
+    ? 'mission_completed'
+    : status === 'failed' || status === 'canceled'
+      ? (status === 'canceled' ? 'mission_canceled' : 'mission_failed')
+      : status === 'incomplete'
+        ? 'mission_incomplete'
+        : null;
+
+  const seenApprovalPhases = new Set<string>();
+  const result: FeedEvent[] = [];
+  for (const event of events) {
+    const type = String(event.type);
+
+    // Dedupe phase_approved / approval_approved for the same phase.
+    if (type === 'phase_approved' || type === 'approval_approved') {
+      const phaseId = eventPhaseId(event);
+      const key = phaseId || `${type}-${event.timestamp}`;
+      if (seenApprovalPhases.has(key)) continue;
+      seenApprovalPhases.add(key);
+    }
+
+    // Drop conflicting terminal events.
+    if (terminalTypes.has(type)) {
+      if (preferredTerminal && type !== preferredTerminal) continue;
+      // If no preferred, keep only the first terminal encountered.
+      if (!preferredTerminal && result.some((e) => terminalTypes.has(String(e.type)))) continue;
+    }
+
+    result.push(event);
+  }
+  return result;
 }
 
 /**

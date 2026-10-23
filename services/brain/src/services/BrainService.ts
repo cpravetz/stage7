@@ -44,6 +44,9 @@ export interface BrainLogEntry {
   model?: string;
   provider?: string;
   promptPreview?: string;
+  prompt?: string;
+  content?: string;
+  missionId?: string;
   success: boolean;
   durationMs?: number;
   error?: string;
@@ -260,6 +263,9 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
         model: cachedResult.model,
         provider: cachedResult.provider,
         promptPreview,
+        prompt,
+        content: cachedResult.content,
+        missionId: options.missionId,
         success: true,
         durationMs: Date.now() - startTime,
       });
@@ -312,6 +318,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
         this.addLog({
           type: 'error',
           promptPreview,
+          missionId: options.missionId,
           success: false,
           durationMs: Date.now() - startTime,
           error: error.message,
@@ -322,6 +329,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
       this.addLog({
         type: 'error',
         promptPreview,
+        missionId: options.missionId,
         success: false,
         durationMs: Date.now() - startTime,
         error: errMsg,
@@ -390,6 +398,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
             model: candidate.model.id,
             provider: provider.id,
             promptPreview,
+            missionId: options.missionId,
             success: false,
             durationMs: Date.now() - startTime,
             error: circuitError.message,
@@ -429,6 +438,9 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
             model: result.model,
             provider: result.provider,
             promptPreview,
+            prompt,
+            content: result.content,
+            missionId: options.missionId,
             success: true,
             durationMs: Date.now() - startTime,
             tokensUsed: response.tokensUsed,
@@ -518,6 +530,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
               model: candidate.model.id,
               provider: provider.id,
               promptPreview,
+              missionId: options.missionId,
               success: false,
               durationMs: Date.now() - startTime,
               error: errMsg,
@@ -544,6 +557,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
               model: candidate.model.id,
               provider: provider.id,
               promptPreview,
+              missionId: options.missionId,
               success: false,
               durationMs: Date.now() - startTime,
               error: errMsg,
@@ -563,6 +577,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
               model: candidate.model.id,
               provider: provider.id,
               promptPreview,
+              missionId: options.missionId,
               success: false,
               durationMs: Date.now() - startTime,
               error: errMsg,
@@ -582,6 +597,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
               model: candidate.model.id,
               provider: provider.id,
               promptPreview,
+              missionId: options.missionId,
               success: false,
               durationMs: Date.now() - startTime,
               error: errMsg,
@@ -609,6 +625,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
             model: candidate.model.id,
             provider: provider.id,
             promptPreview,
+            missionId: options.missionId,
             success: false,
             durationMs: Date.now() - startTime,
             error: errMsg,
@@ -630,6 +647,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
         model: finalModel,
         provider: finalProvider,
         promptPreview,
+        missionId: options.missionId,
         success: false,
         durationMs: Date.now() - startTime,
         error: finalErrMsg,

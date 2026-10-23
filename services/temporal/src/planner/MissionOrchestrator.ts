@@ -61,10 +61,16 @@ export interface MissionContext {
 
 export class MissionOrchestrator {
   private agentRuntime: MissionAgentRuntime | null = null;
+  private static active = new Map<string, { orchestrator: MissionOrchestrator; ctx: MissionContext }>();
+  static register(missionId: string, orchestrator: MissionOrchestrator, ctx: MissionContext) { this.active.set(missionId, { orchestrator, ctx }); }
+  static unregister(missionId: string) { this.active.delete(missionId); }
+  static getActive(missionId: string) { return this.active.get(missionId); }
   private lastPlannerProgress: { key: string; at: number } | null = null;
 
   async run(ctx: MissionContext): Promise<{ plan: Plan; outputs: any; compensations: Array<{ phaseId: string; action: string }> }> {
     const compensations: Array<{ phaseId: string; action: string }> = [];
+    MissionOrchestrator.register(ctx.missionId, this, ctx);
+    try {
     const plannerAgentId = `agent-${ctx.missionId}-planner`;
     await ctx.controlCheckpoint?.();
 
@@ -576,7 +582,6 @@ export class MissionOrchestrator {
         phase.status = 'approved';
         phase.approvedBy = 'user';
         await ctx.broadcast({ type: 'approval_approved', missionId: ctx.missionId, timestamp: Date.now(), data: { phaseId: phase.id } });
-        await ctx.broadcast({ type: 'phase_approved', missionId: ctx.missionId, timestamp: Date.now(), data: { phaseId: phase.id } });
       } else {
         await this.updatePhase(ctx, phase.id, { status: 'completed' });
         phase.status = 'completed';
@@ -601,7 +606,11 @@ export class MissionOrchestrator {
       });
     }
 
+    MissionOrchestrator.unregister(ctx.missionId);
     return { plan, outputs, compensations };
+    } finally {
+      MissionOrchestrator.unregister(ctx.missionId);
+    }
   }
 
   private async generatePlan(ctx: MissionContext): Promise<Plan> {
@@ -732,6 +741,51 @@ export class MissionOrchestrator {
       logger.error({ missionId: ctx.missionId, phaseId, taskId, err: err instanceof Error ? err.message : String(err) }, 'Error updating task');
       return;
     }
+  }
+
+  async handleUserMessage(ctx: MissionContext, content: string): Promise<{ acknowledgement: string; response: string }> {
+    if (!this.agentRuntime) {
+      const rt = new MissionAgentRuntime({
+        missionId: ctx.missionId,
+        tenantId: ctx.tenantId || 'tenant-1',
+        metadata: ctx.metadata,
+        agentRuntimeUrl: ctx.agentRuntimeUrl,
+        broadcast: ctx.broadcastAll,
+      });
+      this.agentRuntime = rt;
+    }
+    const agentRuntime = this.agentRuntime!;
+    const agentId = await agentRuntime.getOrCreateAgent('mission-director', 'You are the mission primary agent. Process user messages during a mission: understand intent, forward to another agent if needed by describing the delegation, formulate a brief acknowledgement, and provide a real helpful response. Return JSON {"acknowledgement":"...","response":"...","forwardTo":"..."}.');
+    let result: { output: string };
+    try {
+      result = await agentRuntime.executePromptTask(agentId, {
+        taskId: `${ctx.missionId}:user-message:${Date.now()}`,
+        type: 'user-message',
+        prompt: `User message during mission: ${content}\n\nMission goal: ${ctx.prompt}\n\nProcess and respond.`,
+        phaseId: 'user-message',
+        context: { [ 'missionId' ]: ctx.missionId },
+        executionPolicy: { ...DEFAULT_AGENT_EXECUTION_POLICY, maxActions: 0, maxCompletionTokens: 1024, maxCompletionTokensPerCall: 512, maxDelegations: 0 },
+      });
+    } catch (err) {
+      await ctx.broadcast({ type: 'agent_error', missionId: ctx.missionId, timestamp: Date.now(), data: { error: err instanceof Error ? err.message : String(err) } });
+      return { acknowledgement: 'Message received.', response: 'I received your message but could not process it right now.' };
+    }
+    let acknowledgement = 'Message received.';
+    let response = result.output || 'I received your message.';
+    let forwardTo: string | undefined;
+    try {
+      const parsed = JSON.parse(result.output.trim().replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,''));
+      if (parsed.acknowledgement) acknowledgement = parsed.acknowledgement;
+      if (parsed.response) response = parsed.response;
+      if (parsed.forwardTo) forwardTo = String(parsed.forwardTo);
+    } catch {}
+    if (!response.trim()) response = 'I received your message.';
+    if (forwardTo) {
+      await ctx.broadcast({ type: 'agent_delegation', missionId: ctx.missionId, timestamp: Date.now(), data: { from: 'mission-director', to: forwardTo, content } });
+    }
+    await ctx.broadcast({ type: 'agent_acknowledgement', missionId: ctx.missionId, timestamp: Date.now(), data: { content: acknowledgement } });
+    await ctx.broadcast({ type: 'agent_response', missionId: ctx.missionId, timestamp: Date.now(), data: { content: response } });
+    return { acknowledgement, response };
   }
 
   async evaluateMissionCompletion(
