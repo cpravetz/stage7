@@ -5,8 +5,8 @@ COPY frontend-nextgen/vite.config.ts ./
 COPY frontend-nextgen/tsconfig.json ./
 COPY frontend-nextgen/tsconfig.node.json ./
 COPY frontend-nextgen/index.html ./
-COPY frontend-nextgen/src ./src/
 RUN --mount=type=cache,target=/root/.npm npm ci
+COPY frontend-nextgen/src ./src/
 RUN npm run build
 
 FROM nginx:alpine

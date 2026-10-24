@@ -6,7 +6,6 @@ const Sidebar = () => {
     { path: '/', label: 'Dashboard', icon: '📊' },
     { path: '/assistants', label: 'Assistants', icon: '🤖' },
     { path: '/missions', label: 'Missions', icon: '🎯' },
-    { path: '/canvas', label: 'Canvas', icon: '🕸️' },
     { path: '/feeds', label: 'Live Feeds', icon: '📡' },
     { path: '/brain', label: 'Brain', icon: '🧠' },
     { path: '/vault', label: 'Vault', icon: '🔐' },

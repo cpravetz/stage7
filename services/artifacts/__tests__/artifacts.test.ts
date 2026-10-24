@@ -2,15 +2,56 @@ import request from 'supertest';
 import express from 'express';
 import documentRoutes from '../src/routes/documents';
 import missionRoutes from '../src/routes/missions';
-import { ArtifactsService } from '../src/services/ArtifactsService';
-import { InMemoryStore } from '../src/services/InMemoryStore';
+import brainPersistenceRoutes from '../src/routes/brainPersistence';
+import { artifactsService } from '../src/services/ArtifactsService';
+import { InMemoryStore } from './InMemoryStore';
 import { MongoStore } from '../src/services/MongoStore';
 
-describe('ArtifactsService', () => {
-  let service: ArtifactsService;
+function mockArtifactsService(store: InMemoryStore): void {
+  jest.spyOn(artifactsService, 'ready').mockResolvedValue();
+  jest.spyOn(artifactsService, 'isDurable').mockReturnValue(true);
+  jest.spyOn(artifactsService, 'createDocument').mockImplementation((document) => store.createDocument(document));
+  jest.spyOn(artifactsService, 'getDocument').mockImplementation((id) => store.getDocument(id));
+  jest.spyOn(artifactsService, 'updateDocument').mockImplementation((id, updates) => store.updateDocument(id, updates));
+  jest.spyOn(artifactsService, 'deleteDocument').mockImplementation((id) => store.deleteDocument(id));
+  jest.spyOn(artifactsService, 'saveMissionState').mockImplementation((state) => store.saveMissionState(state));
+  jest.spyOn(artifactsService, 'getMissionState').mockImplementation((id) => store.getMissionState(id));
+  jest.spyOn(artifactsService, 'listMissionStates').mockImplementation((tenantId) => store.listMissionStates(tenantId));
+  jest.spyOn(artifactsService, 'claimMissionRecoveryLease')
+    .mockImplementation((missionId, ownerId, expiresAt, now) => store.claimMissionRecoveryLease(missionId, ownerId, expiresAt, now));
+  jest.spyOn(artifactsService, 'renewMissionRecoveryLease')
+    .mockImplementation((missionId, ownerId, expiresAt) => store.renewMissionRecoveryLease(missionId, ownerId, expiresAt));
+  jest.spyOn(artifactsService, 'releaseMissionRecoveryLease')
+    .mockImplementation((missionId, ownerId) => store.releaseMissionRecoveryLease(missionId, ownerId));
+  jest.spyOn(artifactsService, 'deleteMissionState').mockImplementation((id) => store.deleteMissionState(id));
+  jest.spyOn(artifactsService, 'saveMissionPlan').mockImplementation((id, plan) => store.saveMissionPlan(id, plan));
+  jest.spyOn(artifactsService, 'getMissionPlan').mockImplementation((id) => store.getMissionPlan(id));
+  jest.spyOn(artifactsService, 'updateMissionPhase')
+    .mockImplementation((missionId, phaseId, update) => store.updateMissionPhase(missionId, phaseId, update));
+  jest.spyOn(artifactsService, 'getMissionPhase')
+    .mockImplementation((missionId, phaseId) => store.getMissionPhase(missionId, phaseId));
+  jest.spyOn(artifactsService, 'updateMissionTask')
+    .mockImplementation((missionId, taskId, update) => store.updateMissionTask(missionId, taskId, update));
+  jest.spyOn(artifactsService, 'getMissionTask')
+    .mockImplementation((missionId, taskId) => store.getMissionTask(missionId, taskId));
+  jest.spyOn(artifactsService, 'appendMissionEvent')
+    .mockImplementation((missionId, event) => store.appendMissionEvent(missionId, event));
+  jest.spyOn(artifactsService, 'listMissionEvents').mockImplementation((id) => store.listMissionEvents(id));
+  jest.spyOn(artifactsService, 'listPendingApprovals').mockImplementation(() => store.listPendingApprovals());
+  jest.spyOn(artifactsService, 'appendBrainLog').mockImplementation((entry) => store.appendBrainLog(entry));
+  jest.spyOn(artifactsService, 'listBrainLogs').mockImplementation((limit) => store.listBrainLogs(limit));
+  jest.spyOn(artifactsService, 'saveBrainPerformanceMetric')
+    .mockImplementation((metric) => store.saveBrainPerformanceMetric(metric));
+  jest.spyOn(artifactsService, 'listBrainPerformanceMetrics')
+    .mockImplementation(() => store.listBrainPerformanceMetrics());
+  jest.spyOn(artifactsService, 'clearBrainPerformanceMetrics').mockImplementation(() => store.clearBrainPerformanceMetrics());
+}
+
+describe('InMemoryStore', () => {
+  let service: InMemoryStore;
 
   beforeEach(() => {
-    service = new ArtifactsService();
+    service = new InMemoryStore();
   });
 
   afterEach(() => {
@@ -74,7 +115,31 @@ describe('ArtifactsService', () => {
     });
   });
 
+  describe('Brain persistence', () => {
+    it('bounds Brain logs and upserts metrics by model and provider', async () => {
+      const store = new InMemoryStore();
+      for (let index = 0; index < 205; index++) {
+        await store.appendBrainLog({ timestamp: new Date(index).toISOString(), index });
+      }
+
+      const entries = await store.listBrainLogs();
+      expect(entries).toHaveLength(200);
+      expect(entries[0].index).toBe(204);
+      expect(entries[199].index).toBe(5);
+
+      await store.saveBrainPerformanceMetric({ model: 'model-a', provider: 'provider-a', totalRequests: 1 });
+      await store.saveBrainPerformanceMetric({ model: 'model-a', provider: 'provider-a', totalRequests: 2 });
+      expect(await store.listBrainPerformanceMetrics()).toEqual([
+        { model: 'model-a', provider: 'provider-a', totalRequests: 2 },
+      ]);
+      await store.clearBrainPerformanceMetrics();
+      expect(await store.listBrainPerformanceMetrics()).toEqual([]);
+    });
+  });
+
   describe('missions', () => {
+    beforeEach(() => mockArtifactsService(new InMemoryStore()));
+
     it('coordinates recovery leases and allows takeover after expiration', async () => {
       const store = new InMemoryStore();
       const now = new Date('2025-01-01T00:00:00Z');
@@ -337,7 +402,7 @@ describe('ArtifactsService', () => {
         approvalQuestion: 'Approve planning phase?',
       });
 
-      const approvals = await (service as any).store.listPendingApprovals();
+      const approvals = await service.listPendingApprovals();
       expect(approvals).toHaveLength(1);
       expect(approvals[0].missionId).toBe('mission-appr-1');
       expect(approvals[0].phaseId).toBe('phase-1');
@@ -364,7 +429,7 @@ describe('ArtifactsService', () => {
         approvalQuestion: 'Approve?',
       });
 
-      const approvals = await (service as any).store.listPendingApprovals();
+      const approvals = await service.listPendingApprovals();
       expect(approvals).toHaveLength(1);
       expect(approvals[0].assistantId).toBe('');
     });
@@ -417,11 +482,20 @@ describe('ArtifactsService', () => {
 
 describe('Artifacts Routes', () => {
   let app: express.Application;
+  let routeStore: InMemoryStore;
 
   beforeEach(() => {
+    jest.restoreAllMocks();
+    routeStore = new InMemoryStore();
+    mockArtifactsService(routeStore);
     app = express();
     app.use(express.json());
     app.use('/api/artifacts/documents', documentRoutes);
+    app.use('/api/artifacts/brain', brainPersistenceRoutes);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
   });
 
   it('should create a document via API', async () => {
@@ -457,9 +531,92 @@ describe('Artifacts Routes', () => {
     const response = await request(app).get('/api/artifacts/documents/missing');
     expect(response.status).toBe(404);
   });
+
+  it('migrates legacy Brain history into the dedicated log store', async () => {
+    await artifactsService.createDocument({
+      id: 'brain-log-history',
+      tenantId: 'system',
+      collection: 'brain-history',
+      data: {
+        entries: [
+          { timestamp: '2026-01-02T00:00:00.000Z', type: 'completion' },
+          { timestamp: '2026-01-01T00:00:00.000Z', type: 'error' },
+        ],
+      },
+    });
+
+    const response = await request(app).get('/api/artifacts/brain/logs');
+
+    expect(response.status).toBe(200);
+    expect(response.body.entries).toEqual([
+      { timestamp: '2026-01-02T00:00:00.000Z', type: 'completion' },
+      { timestamp: '2026-01-01T00:00:00.000Z', type: 'error' },
+    ]);
+    expect(await artifactsService.getDocument('brain-log-history')).toBeUndefined();
+  });
+
+  it('migrates legacy Brain metrics into per-model records', async () => {
+    await request(app).delete('/api/artifacts/brain/performance-metrics').expect(204);
+    await artifactsService.createDocument({
+      id: 'model-performance-metrics',
+      tenantId: 'system',
+      collection: 'brain-performance-metrics',
+      data: {
+        'provider-a:model-a': {
+          model: 'model-a',
+          provider: 'provider-a',
+          totalRequests: 7,
+        },
+      },
+    });
+
+    const response = await request(app).get('/api/artifacts/brain/performance-metrics');
+
+    expect(response.status).toBe(200);
+    expect(response.body.metrics).toEqual([
+      { model: 'model-a', provider: 'provider-a', totalRequests: 7 },
+    ]);
+    expect(await artifactsService.getDocument('model-performance-metrics')).toBeUndefined();
+  });
+
+  it('rejects Brain writes when MongoDB is required but unavailable', async () => {
+    jest.spyOn(artifactsService, 'isDurable').mockReturnValue(false);
+    await request(app)
+      .post('/api/artifacts/brain/logs')
+      .send({ timestamp: '2026-01-02T00:00:00.000Z', type: 'completion' })
+      .expect(503);
+  });
 });
 
 describe('MongoStore state upserts', () => {
+  it('stores Brain logs as append-only records and metrics as individual model records', async () => {
+    const store = new MongoStore();
+    const entry = { timestamp: '2026-01-02T00:00:00.000Z', type: 'completion' };
+    const metric = { provider: 'provider-a', model: 'model-a', totalRequests: 1 };
+    const insertOne = jest.fn().mockResolvedValue({});
+    const deleteMany = jest.fn().mockResolvedValue({});
+    const replaceOne = jest.fn().mockResolvedValue({});
+    const cursor = {
+      sort: jest.fn().mockReturnThis(),
+      skip: jest.fn().mockReturnThis(),
+      toArray: jest.fn().mockResolvedValue([]),
+    };
+    const find = jest.fn().mockReturnValue(cursor);
+    Object.defineProperty(store, 'brainLogs', { value: { insertOne, find, deleteMany } });
+    Object.defineProperty(store, 'brainPerformanceMetrics', { value: { replaceOne } });
+
+    await store.appendBrainLog(entry);
+    await store.saveBrainPerformanceMetric(metric);
+
+    expect(insertOne).toHaveBeenCalledWith(entry);
+    expect(find).toHaveBeenCalledWith({}, { projection: { _id: 1 } });
+    expect(replaceOne).toHaveBeenCalledWith(
+      { _id: JSON.stringify(['provider-a', 'model-a']) },
+      { ...metric, _id: JSON.stringify(['provider-a', 'model-a']) },
+      { upsert: true },
+    );
+  });
+
   it('saves a document that is written again under the same id', async () => {
     // Settings such as llm-config are written repeatedly under one id. An
     // insert would fail with a duplicate key error and drop every change

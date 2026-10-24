@@ -2,7 +2,7 @@
 
 ### Here for the Career Coach Assistant with job search services?
 
-The Career Coach is one of the sample Assistants provided with stage7 and has job search/apply/prep skills. If that is what you are looking for, see the [Job Seach Quckstart](./JOBSEARCH_QUICKSTATRT.md)
+The Career Coach is one of the sample Assistants provided with stage7 and has job search/apply/prep skills. If that is what you are looking for, see the [Job Search Quickstart](./JOBSEARCH_QUICKSTART.md)
 
 ## Overview
 
@@ -18,43 +18,8 @@ The system is composed of independent Node.js services that communicate via REST
 - **Shared Worker Pool**: Dynamic worker pool for executing assistant tasks with Redis-backed task queue and retry logic.
 - **Brain/LLM Layer**: Modern LLM orchestration with structured output sampling (Zod), semantic Redis caching, token-aware context windows, and cost-based model routing.
 - **Temporal.io Workflow Engine**: Durable workflow execution for missions with state persistence, saga patterns, and crash fault-tolerance.
-- **Vault Integration**: AES-256-GCM 
-       - **Code Plugins (Python, JavaScript, Container)**:
-         1. Navigate to the 'Plugins' tab within the 'Plugins and Tools Panel'.
-         2. Click the 'Add New Plugin' button.
-         3. Select the plugin type (Python, JavaScript, or Container).
-         4. Upload your plugin code or provide the necessary container image details.
-         5. Configure any required environment variables or dependencies.
-         6. Save the plugin. The system will automatically validate and register it.
-       - **OpenAPI Tools**:
-         1. Navigate to the 'OpenAPI Tools' tab within the 'Plugins and Tools Panel'.
-         2. Click the 'Add New OpenAPI Tool' button.
-         3. Provide the OpenAPI specification URL or upload the OpenAPI JSON/YAML file.
-         4. Configure any necessary authentication details (e.g., API keys, OAuth settings) for the external service.
-         5. The system will parse the specification and list available actions.
-         6. Save the tool.
-       - **MCP Tools**:
-         1. Navigate to the 'MCP Tools' tab within the 'Plugins and Tools Panel'.
-         2. Click the 'Add New MCP Tool' button.
-         3. Define the MCP tool's manifest, including its name, description, and the internal service endpoint it interacts with.
-         4. Specify input and output schemas for the tool's actions.
-         5. Save the tool.
-
-     - **Discovering and Browsing Tools**: The main view of the panel displays a comprehensive list of all registered plugins and tools. Use the search bar and filtering options to quickly locate specific tools by name, type, or functionality.
-
-     - **Configuring and Managing Tools**: Click on any listed plugin or tool to view its detailed information. From here, you can:
-       - **Edit Settings**: Modify tool-specific configurations, suchs as API keys, base URLs, or other parameters.
-       - **Update Code/Specs**: For code plugins, upload new versions of the code. For OpenAPI tools, update the specification.
-       - **Enable/Disable**: Toggle the active status of a tool.
-       - **Delete**: Remove a tool from the system.
-
-     - **Triggering Tool Actions**: For tools that expose callable actions, select the desired action from the tool's detail view. Provide the required input parameters in the provided form. The system will execute the action, and its progress and results will be displayed in real-time.
-
-     - **Monitoring Execution & Outputs**: The panel provides real-time feedback on tool execution, including status updates, logs, and the final output. These outputs can be directly utilized or referenced by agents in subsequent mission steps.
-
-     - **Integrating into Missions**: All registered plugins and tools become available for agents to discover and use within their mission plans, enabling dynamic and extensible capabilities for complex tasks.
-
-   - **Monitoring and Visualization**: The frontend also offers tools for observing system and agent behavior:
+- **Vault Integration**: AES-256-GCM encrypted secret storage for credentials, API keys, and configuration
+- **Monitoring and Visualization**: The frontend also offers tools for observing system and agent behavior:
      - **Brain Metrics**: The Brain page surfaces live telemetry from the brain service. Users can view:
        - **Cache statistics**: Semantic cache hit and miss counts.
        - **Circuit breaker state**: Per-provider open or closed state and its failure count.

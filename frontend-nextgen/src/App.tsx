@@ -7,7 +7,6 @@ import MissionRoom from './pages/MissionRoom';
 import Settings from './pages/Settings';
 import Login from './pages/Login';
 import EntityWorkspace from './pages/EntityWorkspace';
-import Canvas from './pages/Canvas';
 import LiveFeeds from './pages/LiveFeeds';
 import Brain from './pages/Brain';
 import Vault from './pages/Vault';
@@ -24,7 +23,6 @@ function App() {
         <Route path="missions" element={<Missions />} />
         <Route path="missions/:workflowId" element={<MissionRoom />} />
         <Route path="entity/:id" element={<EntityWorkspace />} />
-        <Route path="canvas" element={<Canvas />} />
         <Route path="feeds" element={<LiveFeeds />} />
         <Route path="brain" element={<Brain />} />
         <Route path="vault" element={<Vault />} />

@@ -40,6 +40,9 @@ services:
       - "3100:3100"
     env_file:
       - .env
+    depends_on:
+      artifacts:
+        condition: service_healthy
     restart: unless-stopped
 
   mcp-runtime:
@@ -73,6 +76,8 @@ services:
     # before Mongo is accepting connections, or it would fall back to a
     # volatile in-memory store and refuse to start.
     depends_on:
+      redis:
+        condition: service_started
       mongo:
         condition: service_healthy
     restart: unless-stopped
@@ -112,8 +117,14 @@ services:
     env_file:
       - .env
     depends_on:
-      - redis
-      - mongo
+      mongo:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:4200/api/artifacts/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     restart: unless-stopped
 
   auth:

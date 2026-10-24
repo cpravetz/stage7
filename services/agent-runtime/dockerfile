@@ -11,12 +11,12 @@ COPY services/artifacts/package*.json ./services/artifacts/
 COPY services/agent-runtime/tsconfig.json ./services/agent-runtime/
 COPY services/artifacts/tsconfig.json ./services/artifacts/
 COPY shared-nextgen/tsconfig.json ./shared-nextgen/
-COPY services/agent-runtime/src ./services/agent-runtime/src/
-COPY services/artifacts/src ./services/artifacts/src/
 
 RUN --mount=type=cache,target=/root/.npm npm ci --legacy-peer-deps --ignore-scripts
 
 COPY shared-nextgen/src ./shared-nextgen/src/
+COPY services/agent-runtime/src ./services/agent-runtime/src/
+COPY services/artifacts/src ./services/artifacts/src/
 
 RUN cd shared-nextgen && npx tsc
 RUN cd services/artifacts && rm -rf dist && npx tsc

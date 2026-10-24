@@ -80,8 +80,6 @@ interface ModelRoutingSession {
 }
 
 const MAX_LOG_ENTRIES = 200;
-const BRAIN_LOG_DOC_ID = 'brain-log-history';
-const PERFORMANCE_METRICS_DOC_ID = 'model-performance-metrics';
 const MODEL_ROUTING_SESSION_TTL_MS = 60 * 60 * 1000;
 const MAX_MODEL_ROUTING_SESSIONS = 1000;
 
@@ -710,11 +708,12 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
   }
 
   private addLog(entry: Omit<BrainLogEntry, 'timestamp'>) {
-    this.brainLog.unshift({ timestamp: new Date().toISOString(), ...entry });
+    const logEntry = { timestamp: new Date().toISOString(), ...entry };
+    this.brainLog.unshift(logEntry);
     if (this.brainLog.length > MAX_LOG_ENTRIES) {
       this.brainLog = this.brainLog.slice(0, MAX_LOG_ENTRIES);
     }
-    this.saveBrainLog().catch((e) => logger.warn({ err: e instanceof Error ? e.message : String(e) }, 'Failed to persist brain log'));
+    this.saveBrainLog(logEntry).catch((e) => logger.warn({ err: e instanceof Error ? e.message : String(e) }, 'Failed to persist brain log'));
   }
 
   private getArtifactsUrl(): string {
@@ -728,20 +727,20 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
     }
     try {
       const persistenceUrl = this.getArtifactsUrl();
-      const res = await fetch(`${persistenceUrl}/api/artifacts/documents/model-performance-metrics`, { method: 'GET' });
+      const res = await fetch(`${persistenceUrl}/api/artifacts/brain/performance-metrics`, { method: 'GET' });
       if (!res.ok) {
         this.performanceMetricsCache = new Map();
         this.performanceCacheFetchedAt = now;
         return this.performanceMetricsCache;
       }
-      const doc = await res.json() as { data?: Record<string, unknown> };
+      const doc = await res.json() as { metrics?: Array<Partial<ModelPerformanceMetrics>> };
       const metricsMap = new Map<string, ModelPerformanceMetrics>();
-      if (doc.data && typeof doc.data === 'object') {
-        for (const [key, value] of Object.entries(doc.data)) {
-          const m = value as Partial<ModelPerformanceMetrics>;
+      if (Array.isArray(doc.metrics)) {
+        for (const value of doc.metrics) {
+          const m = value;
           const totalRequests = m.totalRequests || 0;
           const complaintCount = m.complaintCount || 0;
-          metricsMap.set(key, {
+          metricsMap.set(`${m.provider || ''}:${m.model || ''}`, {
             model: m.model || '',
             provider: m.provider || '',
             totalRequests,
@@ -771,35 +770,17 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
     }
   }
 
-private async savePerformanceMetrics(
-  metrics: Map<string, ModelPerformanceMetrics>,
+private async savePerformanceMetric(
+  metric: ModelPerformanceMetrics,
   required = false,
 ): Promise<void> {
     try {
       const persistenceUrl = this.getArtifactsUrl();
-    const documentUrl = `${persistenceUrl}/api/artifacts/documents/${PERFORMANCE_METRICS_DOC_ID}`;
-    const data: Record<string, ModelPerformanceMetrics> = {};
-    for (const [key, value] of metrics.entries()) {
-      data[key] = value;
-    }
-    const headers = { 'Content-Type': 'application/json' };
-    let response = await fetch(documentUrl, {
-      method: 'PUT',
-      headers,
-      body: JSON.stringify({ data }),
-    });
-    if (response.status === 404) {
-      response = await fetch(`${persistenceUrl}/api/artifacts/documents`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          id: PERFORMANCE_METRICS_DOC_ID,
-          tenantId: 'system',
-          collection: 'brain-performance-metrics',
-          data,
-        }),
+      const response = await fetch(`${persistenceUrl}/api/artifacts/brain/performance-metrics`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(metric),
       });
-    }
     if (!response.ok) {
       const details = await response.text();
       throw new Error(`Artifacts returned HTTP ${response.status}: ${details.slice(0, 300)}`);
@@ -816,38 +797,25 @@ private async savePerformanceMetrics(
   private async loadBrainLog(): Promise<void> {
     try {
       const persistenceUrl = this.getArtifactsUrl();
-      const res = await fetch(`${persistenceUrl}/api/artifacts/documents/${BRAIN_LOG_DOC_ID}`, { method: 'GET' });
+      const res = await fetch(`${persistenceUrl}/api/artifacts/brain/logs`, { method: 'GET' });
       if (!res.ok) return;
-      const doc = await res.json() as { data?: { entries?: BrainLogEntry[] } };
-      if (doc.data && Array.isArray(doc.data.entries)) {
-        this.brainLog = doc.data.entries.slice(0, MAX_LOG_ENTRIES);
+      const result = await res.json() as { entries?: BrainLogEntry[] };
+      if (Array.isArray(result.entries)) {
+        this.brainLog = result.entries.slice(0, MAX_LOG_ENTRIES);
       }
     } catch (err) {
       logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Failed to load brain log from artifacts');
     }
   }
 
-  private async saveBrainLog(): Promise<void> {
+  private async saveBrainLog(entry: BrainLogEntry): Promise<void> {
     try {
       const persistenceUrl = this.getArtifactsUrl();
-      const documentUrl = `${persistenceUrl}/api/artifacts/documents/${BRAIN_LOG_DOC_ID}`;
-      let response = await fetch(documentUrl, {
-        method: 'PUT',
+      const response = await fetch(`${persistenceUrl}/api/artifacts/brain/logs`, {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ data: { entries: this.brainLog } }),
+        body: JSON.stringify(entry),
       });
-      if (response.status === 404) {
-        response = await fetch(`${persistenceUrl}/api/artifacts/documents`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            id: BRAIN_LOG_DOC_ID,
-            tenantId: 'system',
-            collection: 'brain-history',
-            data: { entries: this.brainLog },
-          }),
-        });
-      }
       if (!response.ok) {
         const details = await response.text();
         throw new Error(`Artifacts returned HTTP ${response.status}: ${details.slice(0, 300)}`);
@@ -911,7 +879,7 @@ private async savePerformanceMetrics(
     );
     metrics.lastUpdated = now;
     
-    await this.savePerformanceMetrics(metricsMap);
+    await this.savePerformanceMetric(metrics);
     // Update local cache
     this.performanceMetricsCache = metricsMap;
     this.router.setPerformanceMetrics(metricsMap);
@@ -930,7 +898,14 @@ private async savePerformanceMetrics(
 
   async clearPerformanceMetrics(): Promise<void> {
     const emptyMap = new Map<string, ModelPerformanceMetrics>();
-    await this.savePerformanceMetrics(emptyMap);
+    const persistenceUrl = this.getArtifactsUrl();
+    const response = await fetch(`${persistenceUrl}/api/artifacts/brain/performance-metrics`, {
+      method: 'DELETE',
+    });
+    if (!response.ok) {
+      const details = await response.text();
+      throw new Error(`Artifacts returned HTTP ${response.status}: ${details.slice(0, 300)}`);
+    }
     this.performanceMetricsCache = emptyMap;
     this.performanceCacheFetchedAt = 0;
     this.router.setPerformanceMetrics(emptyMap);
@@ -1000,7 +975,7 @@ private async savePerformanceMetrics(
       lastUpdated: Date.now(),
     });
 
-    await this.savePerformanceMetrics(metrics, true);
+    await this.savePerformanceMetric(metrics.get(key)!, true);
     mapping.complaintRecorded = true;
     this.performanceMetricsCache = metrics;
     this.performanceCacheFetchedAt = Date.now();

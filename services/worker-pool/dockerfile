@@ -28,12 +28,8 @@ RUN cd services/artifacts && rm -rf dist && npx tsc
 RUN cd services/mcp-runtime && rm -rf dist && npx tsc
 RUN cd services/worker-pool && rm -rf dist && npx tsc
 
-# Assistants are discovered from folders. When a selection is requested, drop
-# every other assistant folder from the image so the container carries only the
-# assistants it will actually seed, and their knowledge files stay in step.
 ARG STAGE7_ASSISTANTS=""
-RUN set -eu; \
-    if [ -n "$STAGE7_ASSISTANTS" ]; then \
+RUN if [ -n "$STAGE7_ASSISTANTS" ]; then \
       echo "Restricting assistants to: $STAGE7_ASSISTANTS"; \
       mkdir -p /tmp/keep; \
       for a in $(echo "$STAGE7_ASSISTANTS" | tr ',' ' '); do \
@@ -51,6 +47,7 @@ RUN set -eu; \
       mkdir -p services/worker-pool/assistants; \
       cp -r /tmp/keep/. services/worker-pool/assistants/; \
       for f in services/worker-pool/knowledge/assistants/*.txt; do \
+        [ -e "$f" ] || continue; \
         b=$(basename "$f" .txt); \
         [ -d "services/worker-pool/assistants/$b" ] || rm -f "$f"; \
       done; \

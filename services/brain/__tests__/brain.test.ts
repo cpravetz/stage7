@@ -84,28 +84,19 @@ describe('BrainService', () => {
 
   it('persists quality complaints so later routing can use them after restart', async () => {
     let persistedMetrics: Record<string, Record<string, unknown>> = {};
-    let metricsDocumentExists = false;
     const fetchSpy = jest.spyOn(global, 'fetch').mockImplementation(async (input, init) => {
       const url = String(input);
       const method = init?.method || 'GET';
       if (url.endsWith('/api/artifacts/documents/llm-config')) {
         return { ok: true, json: async () => ({ data: { freeModelsOnly: false } }) } as Response;
       }
-      if (url.endsWith('/api/artifacts/documents/model-performance-metrics')) {
+      if (url.endsWith('/api/artifacts/brain/performance-metrics')) {
         if (method === 'PUT') {
-          if (!metricsDocumentExists) return { ok: false, status: 404, text: async () => 'Document not found' } as Response;
-          persistedMetrics = JSON.parse(String(init?.body)).data;
-          return { ok: true, status: 200, json: async () => ({}) } as Response;
+          const metric = JSON.parse(String(init?.body)) as { model: string; provider: string } & Record<string, unknown>;
+          persistedMetrics[`${metric.provider}:${metric.model}`] = metric;
+          return { ok: true, status: 204, json: async () => ({}) } as Response;
         }
-        return metricsDocumentExists
-          ? { ok: true, status: 200, json: async () => ({ data: persistedMetrics }) } as Response
-          : { ok: false, status: 404, json: async () => ({}) } as Response;
-      }
-      if (url.endsWith('/api/artifacts/documents') && method === 'POST') {
-        const document = JSON.parse(String(init?.body)) as { data: Record<string, Record<string, unknown>> };
-        metricsDocumentExists = true;
-        persistedMetrics = document.data;
-        return { ok: true, status: 201, json: async () => ({}) } as Response;
+        return { ok: true, status: 200, json: async () => ({ metrics: Object.values(persistedMetrics) }) } as Response;
       }
       return { ok: true, json: async () => ({}) } as Response;
     });
@@ -156,30 +147,14 @@ describe('BrainService', () => {
     const fetchSpy = jest.spyOn(global, 'fetch').mockImplementation(async (input, init) => {
       const url = String(input);
       const method = init?.method || 'GET';
-      if (url.endsWith('/api/artifacts/documents/brain-log-history')) {
-        if (method === 'PUT') {
-          if (!documentExists) {
-            return { ok: false, status: 404, text: async () => 'Document not found' } as Response;
-          }
-          brainLogDocument = JSON.parse(String(init?.body)).data as Record<string, unknown>;
-          return { ok: true, status: 200, json: async () => ({}) } as Response;
-        }
-        if (method === 'GET') {
-          return documentExists
-            ? { ok: true, status: 200, json: async () => ({ data: brainLogDocument }) } as Response
-            : { ok: false, status: 404, json: async () => ({}) } as Response;
-        }
-      }
-      if (url.endsWith('/api/artifacts/documents') && method === 'POST') {
-        const document = JSON.parse(String(init?.body)) as {
-          id: string;
-          data: Record<string, unknown>;
-        };
-        if (document.id === 'brain-log-history') {
+      if (url.endsWith('/api/artifacts/brain/logs')) {
+        if (method === 'POST') {
           documentExists = true;
-          brainLogDocument = document.data;
-          return { ok: true, status: 201, json: async () => ({}) } as Response;
+          const logEntries = (brainLogDocument?.entries as unknown[] | undefined) || [];
+          brainLogDocument = { entries: [JSON.parse(String(init?.body)), ...logEntries] };
+          return { ok: true, status: 201, json: async () => ({ accepted: true }) } as Response;
         }
+        return { ok: true, status: 200, json: async () => ({ entries: brainLogDocument?.entries || [] }) } as Response;
       }
       return { ok: true, json: async () => ({}) } as Response;
     });
@@ -498,35 +473,20 @@ describe('BrainService', () => {
     } satisfies LLMProvider;
     mockProviderInstances.push(provider);
 
-    let persistedMetrics: Record<string, Record<string, unknown>> = {};
-    let metricsDocumentExists = false;
+    const persistedMetrics: Record<string, Record<string, unknown>> = {};
     const fetchSpy = jest.spyOn(global, 'fetch').mockImplementation(async (input, init) => {
       const url = String(input);
       const method = init?.method || 'GET';
       if (url.endsWith('/api/artifacts/documents/llm-config')) {
         return { ok: true, json: async () => ({ data: { freeModelsOnly: false } }) } as Response;
       }
-      if (url.endsWith('/api/artifacts/documents/model-performance-metrics')) {
+      if (url.endsWith('/api/artifacts/brain/performance-metrics')) {
         if (method === 'PUT') {
-          if (!metricsDocumentExists) {
-            return { ok: false, status: 404, text: async () => 'Document not found' } as Response;
-          }
-          persistedMetrics = JSON.parse(String(init?.body)).data;
-          return { ok: true, status: 200, json: async () => ({}) } as Response;
+          const metric = JSON.parse(String(init?.body)) as { model: string; provider: string } & Record<string, unknown>;
+          persistedMetrics[`${metric.provider}:${metric.model}`] = metric;
+          return { ok: true, status: 204, json: async () => ({}) } as Response;
         }
-        return metricsDocumentExists
-          ? { ok: true, status: 200, json: async () => ({ data: persistedMetrics }) } as Response
-          : { ok: false, status: 404, json: async () => ({}) } as Response;
-      }
-      if (url.endsWith('/api/artifacts/documents') && method === 'POST') {
-        const document = JSON.parse(String(init?.body)) as {
-          id: string;
-          data: Record<string, Record<string, unknown>>;
-        };
-        expect(document.id).toBe('model-performance-metrics');
-        metricsDocumentExists = true;
-        persistedMetrics = document.data;
-        return { ok: true, status: 201, json: async () => ({}) } as Response;
+        return { ok: true, status: 200, json: async () => ({ metrics: Object.values(persistedMetrics) }) } as Response;
       }
       return { ok: true, json: async () => ({}) } as Response;
     });
@@ -547,15 +507,15 @@ describe('BrainService', () => {
         costRequests: 1,
       });
       expect(fetchSpy).toHaveBeenCalledWith(
-        expect.stringContaining('/api/artifacts/documents'),
-        expect.objectContaining({ method: 'POST' }),
+      expect.stringContaining('/api/artifacts/brain/performance-metrics'),
+      expect.objectContaining({ method: 'PUT' }),
       );
 
       const reloadedBrain = new BrainService();
       const laterResult = await reloadedBrain.complete('chat response after reload');
       expect(laterResult.model).toBe('measured-model');
       expect(fetchSpy).toHaveBeenCalledWith(
-        expect.stringContaining('/api/artifacts/documents/model-performance-metrics'),
+        expect.stringContaining('/api/artifacts/brain/performance-metrics'),
         { method: 'GET' },
       );
     } finally {
@@ -570,14 +530,11 @@ describe('BrainService', () => {
       if (url.endsWith('/api/artifacts/documents/llm-config')) {
         return { ok: true, json: async () => ({ data: { freeModelsOnly: false } }) } as Response;
       }
-      if (url.endsWith('/api/artifacts/documents/model-performance-metrics')) {
+      if (url.endsWith('/api/artifacts/brain/performance-metrics')) {
         if (method === 'PUT') {
-          return { ok: false, status: 404, text: async () => 'Document not found' } as Response;
+          return { ok: true, status: 204, json: async () => ({}) } as Response;
         }
-        return { ok: false, status: 404, json: async () => ({}), text: async () => 'Document not found' } as Response;
-      }
-      if (url.endsWith('/api/artifacts/documents') && method === 'POST') {
-        return { ok: true, status: 201, json: async () => ({}) } as Response;
+        return { ok: true, status: 200, json: async () => ({ metrics: [] }) } as Response;
       }
       return { ok: true, json: async () => ({}) } as Response;
     });

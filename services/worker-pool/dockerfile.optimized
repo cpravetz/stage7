@@ -1,0 +1,72 @@
+FROM node:22-alpine
+
+RUN apk add --no-cache python3 make g++ vips-dev
+
+WORKDIR /usr/src/app
+
+# Copy package files first for better layer caching
+COPY package*.json ./
+COPY shared-nextgen/package*.json ./shared-nextgen/
+COPY services/worker-pool/package*.json ./services/worker-pool/
+COPY services/artifacts/package*.json ./services/artifacts/
+COPY services/mcp-runtime/package*.json ./services/mcp-runtime/
+COPY services/worker-pool/tsconfig.json ./services/worker-pool/
+COPY services/artifacts/tsconfig.json ./services/artifacts/
+COPY services/mcp-runtime/tsconfig.json ./services/mcp-runtime/
+COPY shared-nextgen/tsconfig.json ./shared-nextgen/
+
+# Install deps with cache
+RUN --mount=type=cache,target=/root/.npm npm ci --legacy-peer-deps --ignore-scripts
+
+# Copy source and build
+COPY shared-nextgen/src ./shared-nextgen/src/
+RUN --mount=type=cache,target=/usr/src/app/shared-nextgen/node_modules/.cache \
+    cd shared-nextgen && npx tsc --incremental
+
+COPY services/artifacts/src ./services/artifacts/src/
+RUN --mount=type=cache,target=/usr/src/app/services/artifacts/node_modules/.cache \
+    cd services/artifacts && rm -rf dist && npx tsc --incremental
+
+COPY services/mcp-runtime/src ./services/mcp-runtime/src/
+RUN --mount=type=cache,target=/usr/src/app/services/mcp-runtime/node_modules/.cache \
+    cd services/mcp-runtime && rm -rf dist && npx tsc --incremental
+
+COPY services/worker-pool/src ./services/worker-pool/src/
+COPY services/worker-pool/assistants ./services/worker-pool/assistants/
+COPY services/worker-pool/knowledge ./services/worker-pool/knowledge/
+
+RUN --mount=type=cache,target=/usr/src/app/services/worker-pool/node_modules/.cache \
+    cd services/worker-pool && rm -rf dist && npx tsc --incremental
+
+# Assistants filtering...
+ARG STAGE7_ASSISTANTS=""
+RUN set -eu; \
+    if [ -n "$STAGE7_ASSISTANTS" ]; then \
+      echo "Restricting assistants to: $STAGE7_ASSISTANTS"; \
+      mkdir -p /tmp/keep; \
+      for a in $(echo "$STAGE7_ASSISTANTS" | tr ',' ' '); do \
+        case "$a" in \
+          *-canonical-assistant) a="${a%-canonical-assistant}" ;; \
+        esac; \
+        if [ -d "services/worker-pool/assistants/$a" ]; then \
+          cp -r "services/worker-pool/assistants/$a" /tmp/keep/; \
+        else \
+          echo "ERROR: requested assistant '$a' has no folder at services/worker-pool/assistants/$a" >&2; \
+          exit 1; \
+        fi; \
+      done; \
+      rm -rf services/worker-pool/assistants; \
+      mkdir -p services/worker-pool/assistants; \
+      cp -r /tmp/keep/. services/worker-pool/assistants/; \
+      for f in services/worker-pool/knowledge/assistants/*.txt 2>/dev/null || true; do \
+        [ -f "$f" ] || continue; \
+        b=$(basename "$f" .txt); \
+        [ -d "services/worker-pool/assistants/$b" ] || rm -f "$f"; \
+      done; \
+      rm -rf /tmp/keep; \
+    fi
+
+WORKDIR /usr/src/app/services/worker-pool
+EXPOSE 3200
+ENV STAGE7_ASSISTANTS=${STAGE7_ASSISTANTS}
+CMD ["node", "dist/index.js"]

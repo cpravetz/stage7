@@ -9,11 +9,11 @@ COPY shared-nextgen/package*.json ./shared-nextgen/
 COPY services/brain/package*.json ./services/brain/
 COPY services/brain/tsconfig.json ./services/brain/
 COPY shared-nextgen/tsconfig.json ./shared-nextgen/
-COPY services/brain/src ./services/brain/src/
 
 RUN --mount=type=cache,target=/root/.npm npm ci --legacy-peer-deps --ignore-scripts
 
 COPY shared-nextgen/src ./shared-nextgen/src/
+COPY services/brain/src ./services/brain/src/
 
 RUN cd shared-nextgen && npx tsc
 RUN cd services/brain && rm -rf dist && npx tsc

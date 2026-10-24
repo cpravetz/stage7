@@ -9,11 +9,11 @@ COPY shared-nextgen/package*.json ./shared-nextgen/
 COPY services/gateway/package*.json ./services/gateway/
 COPY services/gateway/tsconfig.json ./services/gateway/
 COPY shared-nextgen/tsconfig.json ./shared-nextgen/
-COPY services/gateway/src ./services/gateway/src/
 
 RUN --mount=type=cache,target=/root/.npm npm ci --legacy-peer-deps --ignore-scripts
 
 COPY shared-nextgen/src ./shared-nextgen/src/
+COPY services/gateway/src ./services/gateway/src/
 
 RUN cd shared-nextgen && npx tsc
 RUN cd services/gateway && rm -rf dist && npx tsc

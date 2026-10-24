@@ -106,8 +106,9 @@ docker compose ps
 docker compose down
 ```
 
-`mongo` and `redis` have health checks, and `worker-pool` waits for `mongo` to be healthy before it
-boots, so `docker compose up -d` is enough to get a correctly ordered start. To block until the
+`mongo` and `redis` have health checks. `artifacts` waits for healthy MongoDB, and `brain` waits for
+the durable artifacts API before starting, so Brain history is not written to a volatile fallback
+during a rebuild. To block until the
 stack is up, use the `--wait` form that `setup.sh` uses:
 
 ```bash
@@ -238,10 +239,16 @@ knowledge, stored secrets, and queued tasks. After a `-v`, the next `docker comp
 empty Mongo and Redis volumes, and `worker-pool` re-seeds the assistant catalog from the folders in
 its image on startup.
 
-`worker-pool` writes assistant knowledge to Mongo at startup. If `MONGO_URI` is set but Mongo is
-unreachable, it refuses to start rather than fall back to an in-memory store that would lose that
-knowledge on the next restart. A `worker-pool` container that will not start after a Mongo problem
-is the expected behavior, not a bug.
+`worker-pool` writes assistant knowledge to Mongo at startup and refuses to start if MongoDB is
+unavailable. `artifacts` similarly reports unhealthy and refuses persistence requests instead of
+falling back to in-memory storage; Brain waits for that health check rather than starting without
+durable history. A `worker-pool` or `brain` container that will not start after a Mongo problem is
+the expected behavior, not a bug.
+
+Brain history is stored in Mongo's dedicated `brainLogs` collection (the latest 200 entries), and
+performance aggregates are stored one record per model/provider in `brainPerformanceMetrics`.
+Older Brain records in the generic `documents` collection are migrated on the first Brain-history
+read after upgrading.
 
 ## 8. Troubleshooting
 

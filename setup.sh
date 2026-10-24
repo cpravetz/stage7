@@ -167,9 +167,13 @@ echo "Tearing down previous deployment (if any) to free ports and remove orphans
 docker compose down --remove-orphans --timeout 30 || echo "Warning: docker compose down returned a non-zero exit code. Continuing."
 
 # --- 4. Build Docker images ---
+# Cap BuildKit's internal parallelism to avoid snapshot corruption and
+# context deadline errors when running many builds concurrently under
+# Docker Desktop. 4 is a safe default; lower it if you still see failures.
 echo ""
-echo "Building Docker images..."
-if ! docker compose build --parallel; then
+echo "Building Docker images (parallel, BuildKit parallelism capped)..."
+export DOCKER_BUILDKIT_MAX_PARALLEL="${DOCKER_BUILDKIT_MAX_PARALLEL:-4}"
+if ! docker compose build --parallel --no-cache; then
     echo "Error: Docker compose build failed."
     exit 1
 fi

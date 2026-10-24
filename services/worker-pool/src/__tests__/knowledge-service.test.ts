@@ -1,13 +1,11 @@
-import { ArtifactsService } from '@stage7-nextgen/artifacts';
 import { KnowledgeService } from '../services/KnowledgeService';
 import { AssistantExecutor } from '../services/AssistantExecutor';
 import { toStoredAuthoredEntry } from '../data/assistantKnowledge';
 import type { AssistantDefinition, StoredKnowledgeEntry } from '@stage7-nextgen/shared';
+import { createTestArtifactsService } from './testArtifactsService';
 
 async function makeService(): Promise<KnowledgeService> {
-  const artifacts = new ArtifactsService();
-  await artifacts.ready();
-  return new KnowledgeService(artifacts);
+  return new KnowledgeService(createTestArtifactsService());
 }
 
 function entry(overrides: Partial<StoredKnowledgeEntry>): StoredKnowledgeEntry {

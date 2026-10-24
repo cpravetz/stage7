@@ -1,10 +1,16 @@
 import { Router } from 'express';
-import { ArtifactsService } from '../services/ArtifactsService';
+import { artifactsService as service } from '../services/ArtifactsService';
 import { asyncHandler, NextGenError } from '@stage7-nextgen/shared';
 import { z } from 'zod';
 
 const router: Router = Router();
-const service = new ArtifactsService();
+router.use(asyncHandler(async (_req, _res, next) => {
+  await service.ready();
+  if (!service.isPersistenceAvailable()) {
+    throw new NextGenError('Artifacts persistence is unavailable; refusing volatile storage', 503);
+  }
+  next();
+}));
 
 const CreateDocumentSchema = z.object({
   id: z.string().optional(),

@@ -42,6 +42,7 @@ export const PlanSchema = z.object({
   estimatedCost: z.string(),
   requiresClarification: z.boolean().default(false),
   clarificationQuestions: z.array(z.string()).default([]),
+  clarificationAnswers: z.array(z.string()).default([]),
   phases: z.array(PhaseSchema),
 });
 

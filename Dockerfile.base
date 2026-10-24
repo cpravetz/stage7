@@ -12,9 +12,6 @@ RUN apk add --no-cache vips-dev python3 make g++
 COPY package.json package-lock.json ./
 
 # Copy workspace package files
-COPY shared/package.json ./shared/
-COPY sdk/package.json ./sdk/
-COPY errorhandler/package.json ./errorhandler/
 COPY services/brain/package.json ./services/brain/
 COPY services/mcp-runtime/package.json ./services/mcp-runtime/
 COPY services/worker-pool/package.json ./services/worker-pool/
@@ -30,9 +27,6 @@ COPY frontend-nextgen/package.json ./frontend-nextgen/
 RUN --mount=type=cache,target=/root/.npm npm ci --legacy-peer-deps
 
 # Copy source code for all shared workspaces
-COPY shared/ ./shared/
-COPY sdk/ ./sdk/
-COPY errorhandler/ ./errorhandler/
 COPY services/brain/ ./services/brain/
 COPY services/mcp-runtime/ ./services/mcp-runtime/
 COPY services/worker-pool/ ./services/worker-pool/
@@ -45,9 +39,6 @@ COPY services/tool-executor/ ./services/tool-executor/
 COPY frontend-nextgen/ ./frontend-nextgen/
 
 # Build shared workspaces
-RUN npm run build --workspace=shared
-RUN npm run build --workspace=sdk
-RUN npm run build --workspace=errorhandler
 RUN npm run build --workspace=services/brain
 RUN npm run build --workspace=services/mcp-runtime
 RUN npm run build --workspace=services/worker-pool

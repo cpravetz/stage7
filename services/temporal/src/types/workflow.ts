@@ -13,6 +13,7 @@ export interface WorkflowInput {
   completedPhases?: string[];
   completedTasks?: MissionTaskCheckpoint[];
   retryGuidance?: string;
+  clarificationAnswers?: string[];
 }
 
 export interface MissionTaskCheckpoint {

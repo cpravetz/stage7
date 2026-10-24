@@ -16,9 +16,7 @@
     "incremental": true,
     "rootDir": "./src"
   },
-  "include": [
-    "src/**/*"
-, "__tests__"  ],
+  "include": ["src/**/*"],
   "exclude": [
     "node_modules",
     "dist"

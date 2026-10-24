@@ -373,18 +373,40 @@ describe('generateValidPlan', () => {
     expect(requests[1]?.prompt).toContain('Do not reuse task IDs across phases');
   })
 
-  it('stops after the bounded planner repair attempts', async () => {
+  it('keeps requesting corrected plans until one passes validation', async () => {
     let calls = 0
     const complete = async (request: PlannerCompletionRequest): Promise<string> => {
       calls++
       expect(request.attempt).toBe(calls)
+      if (calls === 4) return JSON.stringify(validPlan())
       return '{"summary":"still invalid"}'
     }
 
-    await expect(generateValidPlan('Create a business plan', {}, 'mission-3', complete))
-      .rejects.toThrow(/Unable to generate a valid mission plan/)
+    const plan = await generateValidPlan('Create a business plan', {}, 'mission-3', complete)
 
-    expect(calls).toBe(3)
+    expect(plan.summary).toBe('A goal-specific execution plan')
+    expect(calls).toBe(4)
+  })
+
+  it('requests a focused JSON repair without asking for a full replan', async () => {
+    const requests: PlannerCompletionRequest[] = []
+    const responses = [
+      `${JSON.stringify(validPlan())}\n${JSON.stringify(validPlan())}`,
+      JSON.stringify(validPlan()),
+    ]
+    const complete = async (request: PlannerCompletionRequest): Promise<string> => {
+      requests.push(request)
+      return responses[request.attempt - 1]!
+    }
+
+    const plan = await generateValidPlan('Create a business plan', {}, 'mission-json-repair', complete)
+
+    expect(plan.summary).toBe('A goal-specific execution plan')
+    expect(requests).toHaveLength(2)
+    expect(requests[1]?.prompt).toContain('Fix only the JSON syntax')
+    expect(requests[1]?.prompt).toContain('Problematic planner response')
+    expect(requests[1]?.prompt).not.toContain('Your previous plan was rejected')
+    expect(requests[1]?.prompt).not.toContain('GOAL: Create a business plan')
   })
 
   it('fails only when Brain reports that every eligible model is exhausted', async () => {
@@ -426,7 +448,7 @@ describe('generateValidPlan', () => {
     expect(requests).toHaveLength(2)
   })
 
-  it('does not let transient Brain failures consume the plan-content budget', async () => {
+  it('retries transient Brain failures while eligible models remain', async () => {
     const requests: PlannerCompletionRequest[] = []
     const complete = async (request: PlannerCompletionRequest): Promise<string> => {
       requests.push(request)
@@ -441,16 +463,6 @@ describe('generateValidPlan', () => {
 
     expect(plan.phases).toHaveLength(3)
     expect(requests).toHaveLength(4)
-  })
-
-  it('gives up after the transient Brain failure budget is spent', async () => {
-    const complete = jest.fn(async (): Promise<string> => {
-      throw new Error('Brain request failed (504): provider timed out')
-    })
-
-    await expect(generateValidPlan('Create a business plan', {}, 'mission-transient-exhausted', complete))
-      .rejects.toThrow(/transient Brain failures/)
-    expect(complete).toHaveBeenCalledTimes(6)
   })
 
   it('accepts a plan whose phase object was closed twice', async () => {

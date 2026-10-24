@@ -9,11 +9,11 @@ COPY shared-nextgen/package*.json ./shared-nextgen/
 COPY services/vault/package*.json ./services/vault/
 COPY services/vault/tsconfig.json ./services/vault/
 COPY shared-nextgen/tsconfig.json ./shared-nextgen/
-COPY services/vault/src ./services/vault/src/
 
 RUN --mount=type=cache,target=/root/.npm npm ci --legacy-peer-deps --ignore-scripts
 
 COPY shared-nextgen/src ./shared-nextgen/src/
+COPY services/vault/src ./services/vault/src/
 
 RUN cd shared-nextgen && npx tsc
 RUN cd services/vault && rm -rf dist && npx tsc

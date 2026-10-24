@@ -1,0 +1,25 @@
+FROM node:22-alpine
+
+RUN apk add --no-cache python3 make g++ vips-dev
+
+WORKDIR /usr/src/app
+
+COPY package*.json ./
+COPY shared-nextgen/package*.json ./shared-nextgen/
+COPY services/brain/package*.json ./services/brain/
+COPY services/brain/tsconfig.json ./services/brain/
+COPY shared-nextgen/tsconfig.json ./shared-nextgen/
+
+RUN --mount=type=cache,target=/root/.npm npm ci --legacy-peer-deps --ignore-scripts
+
+COPY shared-nextgen/src ./shared-nextgen/src/
+RUN --mount=type=cache,target=/usr/src/app/shared-nextgen/node_modules/.cache \
+    cd shared-nextgen && npx tsc --incremental
+
+COPY services/brain/src ./services/brain/src/
+RUN --mount=type=cache,target=/usr/src/app/services/brain/node_modules/.cache \
+    cd services/brain && rm -rf dist && npx tsc --incremental
+
+WORKDIR /usr/src/app/services/brain
+EXPOSE 3100
+CMD ["node", "dist/index.js"]

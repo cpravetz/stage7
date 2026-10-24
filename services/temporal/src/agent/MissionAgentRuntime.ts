@@ -50,7 +50,6 @@ const MISSION_COMPLETION_REVIEW_EXECUTION_POLICY: AgentExecutionPolicy = {
   maxDelegations: 0,
 };
 const MAX_SAFE_AGENT_TASK_RETRIES = 1;
-const MAX_STRUCTURED_RESPONSE_ATTEMPTS = 5;
 const MAX_ACTION_RECEIPTS = 50;
 
 export interface MissionPhaseReview {
@@ -479,7 +478,7 @@ export class MissionAgentRuntime {
         taskId: summary.taskId,
         output: summary.output.slice(0, 1_200),
         artifactNames: summary.artifactNames.slice(0, 20),
-        artifacts: summary.artifacts,
+        artifacts: (summary.artifacts || []).map((a: any) => ({ name: a.name, type: a.type, content: (a.content || '').split(/\n\s*\n/)[0].split(/\s+/).slice(0, 100).join(' ') })),
       })),
       readyTasks: readyTasks.map(({ id, title, description, agentRole }) => ({
         id,
@@ -492,9 +491,6 @@ export class MissionAgentRuntime {
     let validationIssue = '';
 
     for (let attempt = 1; ; attempt++) {
-      if (attempt > MAX_STRUCTURED_RESPONSE_ATTEMPTS) {
-        throw new Error(`Mission task selection exceeded ${MAX_STRUCTURED_RESPONSE_ATTEMPTS} structured-response attempts in phase ${phase.id}`);
-      }
       const repair = attempt === 1
         ? ''
         : `\n\nYour previous response was rejected: ${validationIssue}\nPrevious response: ${previousResponse.slice(0, 2_000)}\nReturn a corrected JSON object selecting one of the currently ready task IDs.`;
@@ -567,7 +563,7 @@ export class MissionAgentRuntime {
         taskId: summary.taskId,
         output: summary.output.slice(0, 1_200),
         artifactNames: summary.artifactNames,
-        artifacts: summary.artifacts,
+        artifacts: (summary.artifacts || []).map((a: any) => ({ name: a.name, type: a.type, content: (a.content || '').split(/\n\s*\n/)[0].split(/\s+/).slice(0, 100).join(' ') })),
         requiredActions: summary.requiredActions || [],
       })),
     });
@@ -575,9 +571,6 @@ export class MissionAgentRuntime {
     let validationIssue = '';
 
     for (let attempt = 1; ; attempt++) {
-      if (attempt > MAX_STRUCTURED_RESPONSE_ATTEMPTS) {
-        throw new Error(`Mission phase review exceeded ${MAX_STRUCTURED_RESPONSE_ATTEMPTS} structured-response attempts for phase ${phase.id}`);
-      }
       const repair = attempt === 1
         ? ''
         : `\n\nYour previous review was rejected: ${validationIssue}\nPrevious response: ${previousResponse.slice(0, 2_000)}\nReturn exactly one JSON object with either {"satisfied":true,"gaps":[],"followUpTask":null} or {"satisfied":false,"gaps":["concrete gap"],"followUpTask":{"title":"...","description":"...","agentRole":"...","systemPrompt":"...","expectedArtifacts":[],"requiredActions":[]}}. Never repeat a successfully completed side-effect action or change a requested identifier. For a verification gap, propose a safe read-only verification task. Its systemPrompt must name each prerequisite task ID and identify the specific output, artifact, or receipt it consumes. Do not include a plan, tool action, metadata, explanation, or Markdown fence.`;
@@ -753,7 +746,7 @@ export class MissionAgentRuntime {
     let previousResponse = '';
     let validationIssue = '';
 
-    for (let attempt = 1; attempt <= MAX_STRUCTURED_RESPONSE_ATTEMPTS; attempt++) {
+    for (let attempt = 1; ; attempt++) {
       const repair = attempt === 1
         ? ''
         : `\n\nYour previous response was rejected: ${validationIssue}\nPrevious response: ${previousResponse.slice(0, 2_000)}\nReturn exactly {"satisfied":true,"gaps":[]} or {"satisfied":false,"gaps":["concrete unmet requirement"]} as one JSON object. Do not include any other text.`;
@@ -819,9 +812,6 @@ export class MissionAgentRuntime {
       }
       return { satisfied: review.satisfied, gaps: review.gaps as string[] };
     }
-    throw new Error(
-      `Mission completion review exceeded ${MAX_STRUCTURED_RESPONSE_ATTEMPTS} structured-response attempts`,
-    );
   }
 
   async getOrCreateAgent(agentRole: string, systemPrompt: string): Promise<string> {

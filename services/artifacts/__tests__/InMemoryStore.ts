@@ -2,18 +2,22 @@ import {
   PersistenceDocument,
   PersistenceQuery,
   PersistenceResult,
+  BrainLogRecord,
+  BrainPerformanceMetric,
   VectorSearchQuery,
   VectorSearchResult,
   MissionState,
   MissionRecoveryLease,
   AgentState,
-} from '../types';
+} from '../src/types';
 import { AssistantDefinition, AssistantTemplate, AssistantRuntimeConfig } from '@stage7-nextgen/shared';
 import { logger } from '@stage7-nextgen/shared';
-import { preserveCompletedMissionTaskResults } from './missionPlanPersistence';
+import { preserveCompletedMissionTaskResults } from '../src/services/missionPlanPersistence';
 
 export class InMemoryStore {
   private documents: Map<string, PersistenceDocument> = new Map();
+  private brainLogs: BrainLogRecord[] = [];
+  private brainPerformanceMetrics = new Map<string, BrainPerformanceMetric>();
   private missions: Map<string, MissionState> = new Map();
   private missionRecoveryLeases: Map<string, MissionRecoveryLease> = new Map();
   private agents: Map<string, AgentState> = new Map();
@@ -102,6 +106,30 @@ export class InMemoryStore {
       total,
       hasMore: offset + limit < total,
     });
+  }
+
+  listBrainLogs(limit = 200): Promise<BrainLogRecord[]> {
+    return Promise.resolve(this.brainLogs.slice(0, limit));
+  }
+
+  appendBrainLog(entry: BrainLogRecord): Promise<void> {
+    this.brainLogs.unshift(entry);
+    this.brainLogs.length = Math.min(this.brainLogs.length, 200);
+    return Promise.resolve();
+  }
+
+  saveBrainPerformanceMetric(metric: BrainPerformanceMetric): Promise<void> {
+    this.brainPerformanceMetrics.set(JSON.stringify([metric.provider, metric.model]), metric);
+    return Promise.resolve();
+  }
+
+  listBrainPerformanceMetrics(): Promise<BrainPerformanceMetric[]> {
+    return Promise.resolve(Array.from(this.brainPerformanceMetrics.values()));
+  }
+
+  clearBrainPerformanceMetrics(): Promise<void> {
+    this.brainPerformanceMetrics.clear();
+    return Promise.resolve();
   }
 
   searchVectors(query: VectorSearchQuery): Promise<VectorSearchResult[]> {

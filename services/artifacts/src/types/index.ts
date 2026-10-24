@@ -22,6 +22,17 @@ export interface PersistenceResult {
   hasMore: boolean;
 }
 
+export interface BrainLogRecord {
+  timestamp: string;
+  [key: string]: unknown;
+}
+
+export interface BrainPerformanceMetric {
+  model: string;
+  provider: string;
+  [key: string]: unknown;
+}
+
 export interface VectorSearchQuery {
   collection: string;
   query: number[];

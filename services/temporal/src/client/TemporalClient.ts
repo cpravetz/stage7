@@ -358,8 +358,13 @@ export class TemporalClient {
         .then(async (result) => {
           await controlCheckpoint();
           await this.persistFinalState(input, result, startTime);
+          const completionType = result.status === 'awaiting_review'
+            ? 'mission_needs_review'
+            : result.status === 'incomplete'
+              ? 'mission_incomplete'
+              : 'mission_completed';
           await this.broadcastMissionUpdate({
-            type: 'mission_completed',
+            type: completionType,
             missionId: input.missionId,
             workflowId,
             status: result.status,
@@ -501,7 +506,7 @@ export class TemporalClient {
     return 'pausing';
   }
 
-  async resumeMission(workflowId: string): Promise<'running' | 'resuming'> {
+  async resumeMission(workflowId: string, clarificationAnswers?: string[]): Promise<'running' | 'resuming'> {
     if (this.client) {
       throw new Error('Cooperative resume is only available with TEMPORAL_BACKEND=direct');
     }
@@ -518,6 +523,8 @@ export class TemporalClient {
       record.status !== 'pending'
       &&
       record.status !== 'paused'
+      &&
+      record.status !== 'awaiting_review'
       && record.controlState !== 'pause_requested'
       && record.controlState !== 'paused'
     ) {
@@ -538,6 +545,9 @@ export class TemporalClient {
     ) {
       throw new Error(`Cannot resume mission ${missionId}: persisted workflow input is invalid`);
     }
+    const resumeInput = clarificationAnswers
+      ? { ...input, clarificationAnswers: [...clarificationAnswers] }
+      : input;
     const checkpoint = record.status === 'pending'
       ? undefined
       : await this.loadPersistedCheckpoint(missionId);
@@ -551,7 +561,7 @@ export class TemporalClient {
       if (leaseClaimed) await this.releaseDirectRecoveryLease(missionId);
       throw error;
     }
-    await this.startMission(input, checkpoint, leaseClaimed === true, true);
+    await this.startMission(resumeInput, checkpoint, leaseClaimed === true, true);
     await this.broadcastMissionUpdate({
       type: 'mission_resumed',
       missionId,

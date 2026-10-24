@@ -628,6 +628,7 @@ describe('MissionAgentRuntime', () => {
 
   it('asks the mission Agent to choose only from tasks whose dependencies are complete', async () => {
     const requests: Array<{ url: string; body?: Record<string, unknown> }> = []
+    let selectionAttempts = 0
     const selectionPhase: Phase = {
       ...phase,
       tasks: [
@@ -651,6 +652,9 @@ describe('MissionAgentRuntime', () => {
       if (url.endsWith('/agents/agent-mission-1-mission-director/start')) {
         return jsonResponse({})
       }
+      if (url.endsWith('/api/brain/complaint')) {
+        return jsonResponse({ recorded: true })
+      }
       if (url.endsWith('/tasks') && init?.method === 'POST') {
         return jsonResponse({
           taskId: body?.taskId,
@@ -658,10 +662,16 @@ describe('MissionAgentRuntime', () => {
           status: 'pending',
         })
       }
-      if (url.endsWith('/tasks/mission-1:phase-1:selector-2:attempt-1/execute')) {
+      if (/\/tasks\/mission-1:phase-1:selector-2:attempt-\d+\/execute$/.test(url)) {
+        selectionAttempts++
         return jsonResponse({
           status: 'completed',
-          result: { output: '{"taskId":"task-3"}', artifacts: [], tokensUsed: 0 },
+          result: {
+            output: selectionAttempts < 6 ? '{"taskId":"not-ready"}' : '{"taskId":"task-3"}',
+            artifacts: [],
+            tokensUsed: 0,
+            requestId: `selection-${selectionAttempts}`,
+          },
         })
       }
       throw new Error(`Unexpected request: ${url}`)
@@ -688,7 +698,9 @@ describe('MissionAgentRuntime', () => {
     expect(taskInput.prompt).toContain('"id":"task-3"')
     expect(taskInput.prompt).not.toContain('"id":"task-1"')
     expect(taskInput.prompt).toContain('Complete the full mission')
-    expect(submitted?.taskId).toBe('mission-1:phase-1:selector-2:attempt-1')
+    expect(selectionAttempts).toBe(6)
+    expect(requests.filter(({ url }) => url.endsWith('/tasks')).at(-1)?.body?.taskId)
+      .toBe('mission-1:phase-1:selector-2:attempt-6')
   })
 
   it('keeps adding follow-up tasks while gaps remain, without an amendment or phase-size cap', () => {

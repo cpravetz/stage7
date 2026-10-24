@@ -1,8 +1,8 @@
 import { AssistantExecutor } from '../services/AssistantExecutor';
 import { KnowledgeService } from '../services/KnowledgeService';
-import { ArtifactsService } from '@stage7-nextgen/artifacts';
 import { AssistantDefinition, MCPToolCall } from '@stage7-nextgen/shared';
 import { validateCatalogIntegrity } from '../routes/assistants';
+import { createTestArtifactsService } from './testArtifactsService';
 
 const originalFetch = global.fetch;
 beforeAll(() => {
@@ -57,13 +57,10 @@ afterAll(() => {
 
 describe('AssistantExecutor', () => {
   let executor: AssistantExecutor;
-  let artifacts: ArtifactsService;
   let knowledgeService: KnowledgeService;
 
   beforeEach(async () => {
-    artifacts = new ArtifactsService();
-    await artifacts.ready();
-    knowledgeService = new KnowledgeService(artifacts);
+    knowledgeService = new KnowledgeService(createTestArtifactsService());
     executor = new AssistantExecutor(knowledgeService);
   });
 

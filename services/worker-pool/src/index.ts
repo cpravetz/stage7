@@ -28,25 +28,14 @@ async function syncAuthoredKnowledge(catalog: AssistantDefinition[]): Promise<vo
 }
 
 async function initializeAssistants(): Promise<void> {
-  // The backing store must be settled before any write, otherwise writes during
-  // startup land in the in-memory store and are dropped when it is replaced.
-  await persistence.ready();
-
-  // If MONGO_URI is set but unreachable, this process would run on a volatile
-  // in-memory store and every knowledge write would be lost on restart. Refuse
-  // to start rather than run with data that cannot survive.
-  if (persistence.isDegraded()) {
-    const err = persistence.getMongoError();
+  try {
+    await persistence.ready();
+  } catch (err) {
     throw new Error(
-      'MONGO_URI is configured but MongoDB is unreachable, so assistant knowledge would be ' +
-      `stored in memory and lost on restart. Refusing to start. Underlying error: ${
+      `MongoDB is required for assistant knowledge persistence. Refusing to start: ${
         err instanceof Error ? err.message : String(err)
       }`,
-    );
-  }
-  if (!persistence.isDurable()) {
-    logger.warn(
-      'MONGO_URI is not set; assistant knowledge is held in memory and will not survive a restart',
+      { cause: err },
     );
   }
 

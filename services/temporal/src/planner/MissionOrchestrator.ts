@@ -53,6 +53,7 @@ export interface MissionContext {
   waitForApproval: (phaseId: string, question: string) => Promise<{ approved: boolean; reason?: string }>;
   resumePlan?: Plan;
   resumeCheckpoint?: MissionActivityCheckpoint;
+  clarificationAnswers?: string[];
   executionPolicy?: AgentExecutionPolicy;
   onCheckpoint?: (checkpoint: MissionActivityCheckpoint) => void;
   heartbeat?: () => void;
@@ -617,7 +618,10 @@ export class MissionOrchestrator {
     if (!this.agentRuntime) {
       throw new Error(`Mission Agent Runtime is not initialized for mission ${ctx.missionId}`);
     }
-    return this.agentRuntime.generatePlan(ctx.prompt, ctx.metadata, async (progress) => {
+    const prompt = ctx.clarificationAnswers && ctx.clarificationAnswers.length > 0
+      ? `${ctx.prompt}\n\nClarification answers:\n${ctx.clarificationAnswers.map((a, i) => `${i + 1}. ${a}`).join('\n')}`
+      : ctx.prompt;
+    return this.agentRuntime.generatePlan(prompt, ctx.metadata, async (progress) => {
       await this.reportPlannerProgress(ctx, progress);
     });
   }

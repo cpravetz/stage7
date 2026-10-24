@@ -14,37 +14,6 @@ import { parsePlanJson } from './planJson';
 const MAX_PRIOR_RESPONSE_CHARS = 12_000;
 
 /**
- * How many model answers may be rejected on their content before the planner
- * gives up on the plan. Every rejected answer rotates to another eligible
- * model through the Brain routing session, so this is the number of models
- * tried before the mission reports that it cannot produce a plan.
- */
-const DEFAULT_MAX_PLANNER_ATTEMPTS = 3;
-
-/**
- * How many transient Brain failures (provider timeouts, expired completion
- * deadlines) are tolerated before the planner gives up. These failures say
- * nothing about the plan, so they are counted separately from rejected
- * answers: a slow provider must not consume the budget that decides whether
- * the plan content is acceptable.
- */
-const DEFAULT_MAX_PLANNER_TRANSPORT_ATTEMPTS = 6;
-
-function maxPlannerAttempts(): number {
-  const configured = Number(process.env.PLANNER_MAX_ATTEMPTS);
-  return Number.isFinite(configured) && configured > 0
-    ? Math.floor(configured)
-    : DEFAULT_MAX_PLANNER_ATTEMPTS;
-}
-
-function maxPlannerTransportAttempts(): number {
-  const configured = Number(process.env.PLANNER_MAX_TRANSPORT_ATTEMPTS);
-  return Number.isFinite(configured) && configured > 0
-    ? Math.floor(configured)
-    : DEFAULT_MAX_PLANNER_TRANSPORT_ATTEMPTS;
-}
-
-/**
  * Failures that say nothing about the plan and can be retried against another
  * eligible model: a provider that timed out, a completion deadline that
  * expired with models still available, or a transient upstream error.
@@ -74,7 +43,8 @@ Requirements:
 6. Every task must be executable by an autonomous software Agent. Never assign agentRole "Human", "User", or another human decision-maker. Represent a needed human decision with requiresApproval or requiresClarification instead.
 7. Mark requiresApproval=true only where a human decision is needed before work continues.
 8. A task's systemPrompt is its operational instruction, not just a question restating the goal. When the goal or task description requires a tool action or delegation, include it in requiredActions as {"toolId":"<exact tool id or __delegate>","outcome":"success"}. The systemPrompt must explicitly name and instruct every required direct tool action using its exact tool ID; for delegation, explicitly instruct the Agent to delegate to a child Agent. A tool mentioned only as an action for that child is not a direct action receipt for the parent. If a task performs a failure and recovery in one task, include both the expected {"outcome":"failure"} and recovery {"outcome":"success"} action receipts. If recovery is split into ordered tasks, the failing task must record its failure receipt and the recovery task must depend on and name that failure task and record its success receipt. When a task must attempt an unavailable or disallowed tool, include {"outcome":"denied"} and instruct the Agent to make the actual action request. Do not require actions for reasoning-only tasks.
-9. If a task consumes another task's result or artifact, list that producer's exact task ID in dependsOnTaskIds and in the task's systemPrompt, and say which output is consumed. Do not refer vaguely to "initial", "final", or "previous" values without naming their producing task IDs. Dependencies belong on the consuming task, not on a producer that merely names a future consumer. Do not infer a dependency from a task ID mentioned in a negative instruction or in a statement that the task's output will be consumed downstream. Include only tasks that produce an input the task actually uses. Dependencies impose execution order and make completed producer outputs available to the Agent.
+9. When a task produces document artifacts, its systemPrompt must instruct the Agent to begin each artifact with a one-paragraph summary (under 100 words) before the full content, so downstream reviewers can judge the artifact from the summary alone.
+10. If a task consumes another task's result or artifact, list that producer's exact task ID in dependsOnTaskIds and in the task's systemPrompt, and say which output is consumed. Do not refer vaguely to "initial", "final", or "previous" values without naming their producing task IDs. Dependencies belong on the consuming task, not on a producer that merely names a future consumer. Do not infer a dependency from a task ID mentioned in a negative instruction or in a statement that the task's output will be consumed downstream. Include only tasks that produce an input the task actually uses. Dependencies impose execution order and make completed producer outputs available to the Agent.
 
 Return one complete JSON object matching this structure:
 {"summary":"...","estimatedDuration":"...","estimatedCost":"...","requiresClarification":false,"clarificationQuestions":[],"phases":[{"id":"phase-1","name":"...","goal":"...","requiresApproval":false,"status":"pending","tasks":[{"id":"phase-1-task-1","title":"...","description":"...","agentRole":"...","systemPrompt":"...","dependsOnTaskIds":[],"expectedArtifacts":[],"requiredActions":[],"status":"pending","artifacts":[]}]}]}
@@ -446,17 +416,24 @@ export async function generateValidPlan(
 ): Promise<Plan> {
     let lastError = '';
     let previousResponse = '';
+    let jsonRepairRequested = false;
     const routingSessionId = missionId ? `${missionId}:planner` : `planner:${randomUUID()}`;
     let attempt = 0;
-    let rejectedAnswers = 0;
-    let transientFailures = 0;
-    const answerBudget = maxPlannerAttempts();
-    const transportBudget = maxPlannerTransportAttempts();
     while (true) {
         attempt++;
-        const repairPrompt = attempt === 1
-            ? ''
-            : [
+        const isJsonRepair = jsonRepairRequested;
+        jsonRepairRequested = false;
+        const repairPrompt = isJsonRepair
+            ? [
+                'Fix only the JSON syntax in the planner response below. Do not replan, add, omit, or change any plan content.',
+                'Return exactly one corrected JSON object, with no prose or Markdown fences.',
+                `JSON parsing issue: ${lastError}`,
+                'Problematic planner response:',
+                previousResponse.slice(0, MAX_PRIOR_RESPONSE_CHARS),
+            ].join('\n')
+            : attempt === 1
+                ? ''
+                : [
                 '',
                 `Your previous plan was rejected (attempt ${attempt - 1}). Fix every listed issue and return a complete replacement plan.`,
                 'Validation issues:',
@@ -469,8 +446,12 @@ export async function generateValidPlan(
         let content;
         try {
             content = await complete({
-                prompt: `GOAL: ${prompt}\n\nCONTEXT: ${JSON.stringify(context || {})}${repairPrompt}`,
-                systemPrompt: PLANNER_SYSTEM_PROMPT,
+                prompt: isJsonRepair
+                    ? repairPrompt
+                    : `GOAL: ${prompt}\n\nCONTEXT: ${JSON.stringify(context || {})}${repairPrompt}`,
+                systemPrompt: isJsonRepair
+                    ? 'You repair JSON syntax. Preserve all values and keys exactly; only correct formatting and syntax. Return one valid JSON object and nothing else.'
+                    : PLANNER_SYSTEM_PROMPT,
                 maxTokens: PLANNER_EXECUTION_POLICY.maxCompletionTokensPerCall,
                 temperature: 0.3,
                 missionId,
@@ -489,20 +470,12 @@ export async function generateValidPlan(
                 continue;
             }
             if (isTransientBrainFailure(message)) {
-                // The provider or the completion deadline failed, not the plan.
-                // Brain rotates to another eligible model on the next attempt,
-                // so retry instead of failing the mission while models remain.
-                transientFailures += 1;
-                if (transientFailures >= transportBudget) {
-                    throw new Error(`Planner Agent request failed after ${transientFailures} transient Brain failures on attempt ${attempt}: ${message}`);
-                }
-                logger.warn({ missionId, attempt, transientFailures, reason: message }, 'Planner Brain request failed transiently; retrying with another eligible model');
+                logger.warn({ missionId, attempt, reason: message }, 'Planner Brain request failed transiently; retrying with another eligible model');
                 await reportProgress?.({ attempt, status: 'retrying', reason: message, transient: true });
                 continue;
             }
             throw new Error(`Planner Agent request failed on attempt ${attempt}: ${message}`);
         }
-        rejectedAnswers += 1;
         previousResponse = content;
         try {
             const parsedPlan = parsePlanJson(content);
@@ -527,11 +500,14 @@ export async function generateValidPlan(
         catch (error) {
             lastError = error instanceof Error ? error.message : String(error);
             await (reportValidation === null || reportValidation === void 0 ? void 0 : reportValidation(lastError));
+            if (lastError.startsWith('Planner response did not contain')) {
+                jsonRepairRequested = true;
+                logger.warn({ missionId, attempt, reason: lastError }, 'Planner JSON is malformed; requesting a JSON-only repair');
+                await reportProgress?.({ attempt, status: 'retrying', reason: lastError, transient: false });
+                continue;
+            }
             logger.warn({ missionId, attempt, reason: lastError }, 'Planner response rejected; requesting a corrected plan');
             await reportProgress?.({ attempt, status: 'rejected', reason: lastError, transient: false });
-            if (rejectedAnswers >= answerBudget) {
-                throw new Error(`Unable to generate a valid mission plan after ${rejectedAnswers} rejected model answers. Last validation issue: ${lastError || 'Brain did not return a valid plan'}`);
-            }
         }
     }
 }

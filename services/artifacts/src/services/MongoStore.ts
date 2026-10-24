@@ -1,8 +1,10 @@
-import { MongoClient, Db, Collection } from 'mongodb';
+import { MongoClient, Db, Collection, ObjectId } from 'mongodb';
 import {
   PersistenceDocument,
   PersistenceQuery,
   PersistenceResult,
+  BrainLogRecord,
+  BrainPerformanceMetric,
   VectorSearchQuery,
   VectorSearchResult,
   MissionState,
@@ -18,8 +20,11 @@ const MONGO_DB = process.env.MONGO_DB || 'stage7';
 // Bounded so an unreachable Mongo fails in seconds rather than the driver's
 // 30s default per attempt. Callers retry and then refuse to start.
 const MONGO_SERVER_SELECTION_TIMEOUT_MS = Number(process.env.MONGO_SERVER_SELECTION_TIMEOUT_MS) || 5000;
+const MAX_BRAIN_LOG_ENTRIES = 200;
 
 type VectorDoc = { _id: string; vector: number[] };
+type StoredBrainLogRecord = BrainLogRecord & { _id?: ObjectId };
+type StoredBrainPerformanceMetric = BrainPerformanceMetric & { _id?: string };
 
 export class MongoStore {
   private client: MongoClient | null = null;
@@ -27,6 +32,8 @@ export class MongoStore {
   private connected = false;
 
   private documents!: Collection<PersistenceDocument>;
+  private brainLogs!: Collection<StoredBrainLogRecord>;
+  private brainPerformanceMetrics!: Collection<StoredBrainPerformanceMetric>;
   private missions!: Collection<MissionState & { _id?: string }>;
   private missionRecoveryLeases!: Collection<MissionRecoveryLease & { _id?: string }>;
   private agents!: Collection<AgentState & { _id?: string }>;
@@ -50,6 +57,8 @@ export class MongoStore {
       this.db = this.client.db(MONGO_DB);
 
       this.documents = this.db.collection<PersistenceDocument>('documents');
+      this.brainLogs = this.db.collection<StoredBrainLogRecord>('brainLogs');
+      this.brainPerformanceMetrics = this.db.collection<StoredBrainPerformanceMetric>('brainPerformanceMetrics');
       this.missions = this.db.collection<MissionState & { _id?: string }>('missions');
       this.missionRecoveryLeases = this.db.collection<MissionRecoveryLease & { _id?: string }>('missionRecoveryLeases');
       this.agents = this.db.collection<AgentState & { _id?: string }>('agents');
@@ -63,6 +72,7 @@ export class MongoStore {
       this.missionEvents = this.db.collection<any>('missionEvents');
 
       await this.documents.createIndex({ id: 1 }, { unique: true });
+      await this.brainLogs.createIndex({ timestamp: -1, _id: -1 });
       await this.missions.createIndex({ missionId: 1 }, { unique: true });
       await this.missionRecoveryLeases.createIndex({ missionId: 1 }, { unique: true });
       await this.agents.createIndex({ agentId: 1 }, { unique: true });
@@ -170,6 +180,43 @@ export class MongoStore {
       total,
       hasMore: offset + limit < total,
     };
+  }
+
+  async listBrainLogs(limit = MAX_BRAIN_LOG_ENTRIES): Promise<BrainLogRecord[]> {
+    const entries = await this.brainLogs.find({})
+      .sort({ timestamp: -1, _id: -1 })
+      .limit(limit)
+      .toArray();
+    return entries.map(({ _id, ...entry }) => entry);
+  }
+
+  async appendBrainLog(entry: BrainLogRecord): Promise<void> {
+    await this.brainLogs.insertOne(entry);
+    const expired = await this.brainLogs.find({}, { projection: { _id: 1 } })
+      .sort({ timestamp: -1, _id: -1 })
+      .skip(MAX_BRAIN_LOG_ENTRIES)
+      .toArray();
+    if (expired.length > 0) {
+      await this.brainLogs.deleteMany({ _id: { $in: expired.map(({ _id }) => _id) } });
+    }
+  }
+
+  async saveBrainPerformanceMetric(metric: BrainPerformanceMetric): Promise<void> {
+    const id = JSON.stringify([metric.provider, metric.model]);
+    await this.brainPerformanceMetrics.replaceOne(
+      { _id: id },
+      { ...metric, _id: id },
+      { upsert: true },
+    );
+  }
+
+  async listBrainPerformanceMetrics(): Promise<BrainPerformanceMetric[]> {
+    const metrics = await this.brainPerformanceMetrics.find({}).toArray();
+    return metrics.map(({ _id, ...metric }) => metric);
+  }
+
+  async clearBrainPerformanceMetrics(): Promise<void> {
+    await this.brainPerformanceMetrics.deleteMany({});
   }
 
   async searchVectors(query: VectorSearchQuery): Promise<VectorSearchResult[]> {

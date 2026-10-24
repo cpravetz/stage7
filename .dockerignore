@@ -4,8 +4,8 @@
 **/__tests__
 **/*.test.ts
 **/*.spec.ts
-# **/dist
-# **/build
+**/dist
+**/build
 **/.DS_Store
 **/.env
 **/.env.local
@@ -21,5 +21,5 @@
 **/.cache
 **/tmp
 **/temp
-
+**/.kilo
 **/tsconfig.tsbuildinfo

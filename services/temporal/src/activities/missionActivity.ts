@@ -193,6 +193,7 @@ const orchestrator = new MissionOrchestrator();
      broadcastAll,
      waitForApproval,
      ...(options.checkpoint ? { resumeCheckpoint: options.checkpoint } : {}),
+     ...(input.clarificationAnswers && input.clarificationAnswers.length > 0 ? { clarificationAnswers: input.clarificationAnswers } : {}),
      onCheckpoint: saveCheckpoint,
      heartbeat,
      controlCheckpoint: options.controlCheckpoint,

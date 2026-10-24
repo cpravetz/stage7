@@ -204,7 +204,8 @@ router.post(
   '/missions/:workflowId/start',
   asyncHandler(async (req: Request, res: Response) => {
     const workflowId = req.params.workflowId as string;
-    const status = await client.resumeMission(workflowId);
+    const clarificationAnswers = req.body?.clarificationAnswers;
+    const status = await client.resumeMission(workflowId, clarificationAnswers);
     res.status(202).json({ status });
   }),
 );
