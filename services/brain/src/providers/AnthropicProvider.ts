@@ -58,9 +58,16 @@ export class AnthropicProvider implements LLMProvider {
       const errText = await res.text();
       throw new Error(`[anthropic] completion failed: ${res.status} ${errText}`);
     }
-    const data = await res.json() as { content?: Array<{ type: string; text?: string }>; model?: string; usage?: { input_tokens?: number; output_tokens?: number } };
+    const data = await res.json() as { content?: Array<{ type: string; text?: string; thinking?: string }>; model?: string; usage?: { input_tokens?: number; output_tokens?: number } };
     const textBlock = data.content?.find((b) => b.type === 'text');
     const content = textBlock?.text ?? '';
+    // Anthropic's extended-thinking responses include a separate 'thinking'
+    // content block alongside the final text answer. Extract it so callers
+    // can surface the model's chain-of-thought to the Reasoning box.
+    const thinkingBlock = data.content?.find((b) => b.type === 'thinking');
+    const reasoning = typeof thinkingBlock?.thinking === 'string' && thinkingBlock.thinking.trim().length > 0
+      ? thinkingBlock.thinking
+      : undefined;
     const tokens = (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0);
     return {
       content,
@@ -68,6 +75,7 @@ export class AnthropicProvider implements LLMProvider {
       provider: this.id,
       tokensUsed: tokens || undefined,
       raw: data,
+      reasoning,
     };
   }
 }

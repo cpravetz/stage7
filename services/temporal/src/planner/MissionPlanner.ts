@@ -71,7 +71,7 @@ function sanitizePlan(obj: any): any {
   return out;
 }
 
-const NEGATED_ACTION = /\b(?:do not|don't|never|avoid)\s+(?:use|using|call|calling|invoke|invoking|execute|executing|run|running|attempt|attempting|request|requesting|retry|retrying)\b/i;
+//const NEGATED_ACTION = /\b(?:do not|don't|never|avoid)\s+(?:use|using|call|calling|invoke|invoking|execute|executing|run|running|attempt|attempting|request|requesting|retry|retrying)\b/i;
 const ACTION_TOOL_TARGET = /(?<![a-z0-9_-])(?:use|using|call|calling|invoke|invoking|execute|executing|run|running|attempt|attempting|request|requesting|retry|retrying)\s+(?:(?:the|registered|available|exact|specific|permitted|disallowed|unavailable|new|existing|only|special)\s+)*(?:tool\s+)?(?:[`"']([a-z_][a-z0-9_-]{0,119})[`"']|([a-z_][a-z0-9_-]{0,119}))(?=\s+(?:tool|action|with|on|for|to|once|twice|exactly)\b|[.,;:!?]|$)/gi;
 const NAMED_TOOL_ACTION = /\b([a-z_][a-z0-9_-]{0,119})\s+tool\s+(?:to|for)\s+(?:calculate|compute|derive|search|retrieve|fetch|read|write|create|update|delete|analyze|validate|inspect|review|compare|convert|format|summarize|translate|generate|execute|run|send|query|look up)\b/gi;
 const GENERIC_TOOL_TOKENS = new Set([
@@ -322,21 +322,21 @@ function planStandardIssues(plan: any): string[] {
             issues.push(`phases[${phaseIndex}].tasks must contain at least one task`);
         }
         for (const [taskIndex, task] of Array.from((((ph as any).tasks) as any[]).entries()) as [number, any][]) {  
-            const taskPath = `phases[${phaseIndex}].tasks[${taskIndex}].id`;
+            const taskPath = `task "${task.id}" (phase ${phaseIndex + 1}, task ${taskIndex + 1})`;
             if (!Array.isArray(task.requiredActions)) {
-                issues.push(`phases[${phaseIndex}].tasks[${taskIndex}].requiredActions must be provided; use [] when no action receipt is required`);
+                issues.push(`${taskPath}.requiredActions must be provided; use [] when no action receipt is required`);
             }
             if (isHumanAgentRole(task.agentRole)) {
-                issues.push(`phases[${phaseIndex}].tasks[${taskIndex}].agentRole "${task.agentRole}" is not executable; assign an autonomous software Agent and represent human decisions with requiresApproval or requiresClarification`);
+                issues.push(`${taskPath}.agentRole "${task.agentRole}" is not executable; assign an autonomous software Agent and represent human decisions with requiresApproval or requiresClarification`);
             }
             if (!Array.isArray(task.dependsOnTaskIds)) {
-                issues.push(`phases[${phaseIndex}].tasks[${taskIndex}].dependsOnTaskIds must be provided; use [] for independent tasks`);
+                issues.push(`${taskPath}.dependsOnTaskIds must be provided; use [] for independent tasks`);
             }
             issues.push(...missionTaskActionIssues(task, taskPath, normalizedTaskIds));
             issues.push(...missionTaskRecoveryIssues(task, tasksById, taskPath));
             issues.push(...missionTaskDependencyIssues(task, normalizedTaskIds, taskPath, producerArtifactsByTaskId));
             if (task.id.startsWith(`${ph.id}-amendment-`)) {
-                issues.push(`phases[${phaseIndex}].tasks[${taskIndex}].id uses the reserved amendment prefix`);
+                issues.push(`${taskPath}.id uses the reserved amendment prefix`);
             }
             const firstTaskPath = taskIds.get(task.id);
             if (firstTaskPath) {
@@ -385,7 +385,61 @@ function planStandardIssues(plan: any): string[] {
     return issues;
 }
 function formatSchemaIssues(issues: Array<{ path: PropertyKey[]; message: string }>): string[] {
-    return issues.map((issue) => `${issue.path.length ? issue.path.join('.') : '<root>'}: ${issue.message}`);
+    return issues.map((issue) => {
+        const path = issue.path;
+        if (path.length === 0) {
+            return `<root>: ${issue.message}`;
+        }
+        const parts: string[] = [];
+        for (let i = 0; i < path.length; i++) {
+            const p = path[i];
+            const s = String(p);
+            if (s === 'phases' && i + 1 < path.length && /^\d+$/.test(String(path[i + 1]))) {
+                const idx = parseInt(String(path[i + 1]), 10) + 1;
+                parts.push(`Phase ${idx}`);
+                i++;
+                continue;
+            }
+            if (s === 'tasks' && i + 1 < path.length && /^\d+$/.test(String(path[i + 1]))) {
+                const idx = parseInt(String(path[i + 1]), 10) + 1;
+                parts.push(`task ${idx}`);
+                i++;
+                continue;
+            }
+            if (s === 'goal') { parts.push('goal'); continue; }
+            if (s === 'name') { parts.push('name'); continue; }
+            if (s === 'summary') { parts.push('summary'); continue; }
+            if (s === 'estimatedDuration') { parts.push('estimated duration'); continue; }
+            if (s === 'estimatedCost') { parts.push('estimated cost'); continue; }
+            if (s === 'phases') { parts.push('phases'); continue; }
+            if (s === 'clarificationQuestions') { parts.push('clarification questions'); continue; }
+            if (s === 'requiresClarification') { parts.push('clarification requirement'); continue; }
+            if (s === 'agentRole') { parts.push('agent role'); continue; }
+            if (s === 'systemPrompt') { parts.push('system prompt'); continue; }
+            if (s === 'requiredActions') { parts.push('required actions'); continue; }
+            if (s === 'dependsOnTaskIds') { parts.push('dependencies'); continue; }
+            if (s === 'description') { parts.push('description'); continue; }
+            if (s === 'title') { parts.push('title'); continue; }
+            if (s === 'id') { parts.push('id'); continue; }
+            if (s === 'expectedArtifacts') { parts.push('expected artifacts'); continue; }
+            if (s === 'status') { parts.push('status'); continue; }
+            parts.push(s);
+        }
+        const desc = parts.join(' ');
+        // Clean up for common patterns
+        if (issue.message === 'Required') {
+            // Ensure it reads naturally
+            if (desc.match(/^Phase \d+ goal$/)) return `${desc} is required`;
+            if (desc.match(/^Phase \d+ name$/)) return `${desc} is required`;
+            if (desc.match(/^Phase \d+ tasks$/)) return `${desc} are required`;
+            if (desc === 'estimated duration') return `Estimated duration is required`;
+            if (desc === 'estimated cost') return `Estimated cost is required`;
+            if (desc === 'summary') return `Summary is required`;
+            if (desc === 'phases') return `Phases are required`;
+            return `${desc} is required`.replace('  ', ' ');
+        }
+        return `${desc}: ${issue.message}`;
+    });
 }
 export function isHumanAgentRole(agentRole: string): boolean {
   const normalizedRole = agentRole.trim().toLowerCase().replace(/[-_]+/g, ' ').replace(/\s+/g, ' ');
@@ -435,8 +489,8 @@ export async function generateValidPlan(
                 ? ''
                 : [
                 '',
-                `Your previous plan was rejected (attempt ${attempt - 1}). Fix every listed issue and return a complete replacement plan.`,
-                'Validation issues:',
+                `Resolve only the specific issues listed below for the plan you just produced. Do not regenerate the entire plan from scratch or request a full replan. For each issue, make the minimal correction or completion needed while preserving all other plan content, task IDs, structure, and valid parts exactly as they are. Return a complete, valid replacement plan that incorporates only those fixes.`,
+                'Specific issues to resolve:',
                 lastError,
                 'Do not reuse task IDs across phases. When an ID is duplicated, assign each affected task a distinct stable ID that includes its phase number, such as "phase-3-task-1". Preserve all otherwise-valid plan content and do not omit tasks. For dependency issues, map each consumed value to the task that actually produces it, name that exact task ID in systemPrompt, and do not use a downstream task as a substitute for its source.',
                 'For a missing tool instruction, keep the requiredActions receipt and add an imperative sentence to that task systemPrompt that names the exact tool ID, such as "Call the exact tool __list_tools to verify the registered tool." For a dependency issue, name the producer task ID and identify the specific output consumed in the consumer systemPrompt. For a JSON parsing issue, return exactly one valid JSON object with no prose, Markdown fences, or trailing text.',
@@ -448,7 +502,7 @@ export async function generateValidPlan(
             content = await complete({
                 prompt: isJsonRepair
                     ? repairPrompt
-                    : `GOAL: ${prompt}\n\nCONTEXT: ${JSON.stringify(context || {})}${repairPrompt}`,
+                    : `Create a plan to achieve this goal: ${prompt}\n\nCONTEXT: ${JSON.stringify(context || {})}${repairPrompt}`,
                 systemPrompt: isJsonRepair
                     ? 'You repair JSON syntax. Preserve all values and keys exactly; only correct formatting and syntax. Return one valid JSON object and nothing else.'
                     : PLANNER_SYSTEM_PROMPT,
@@ -462,7 +516,7 @@ export async function generateValidPlan(
         catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             if (message.includes(BRAIN_MODEL_SELECTION_EXHAUSTED)) {
-                throw new Error(`Unable to generate a valid mission plan because Brain exhausted every eligible model. Last plan validation issue: ${lastError || 'none; no model produced a plan'}. Brain: ${message}`);
+                throw new Error(`Unable to generate a valid mission plan because Brain exhausted every eligible model. Last plan validation issue: ${lastError || 'none; no model produced a plan'}. Brain: ${message}`, { cause: error });
             }
             if (message.includes(BRAIN_MODEL_SELECTION_RETRY)) {
                 logger.warn({ missionId, attempt, reason: message }, 'Brain requested another Planner attempt with an untried eligible model');
@@ -474,7 +528,7 @@ export async function generateValidPlan(
                 await reportProgress?.({ attempt, status: 'retrying', reason: message, transient: true });
                 continue;
             }
-            throw new Error(`Planner Agent request failed on attempt ${attempt}: ${message}`);
+            throw new Error(`Planner Agent request failed on attempt ${attempt}: ${message}`, { cause: error });
         }
         previousResponse = content;
         try {

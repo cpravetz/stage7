@@ -74,12 +74,26 @@ export const TIMELINE_EVENT_TYPES = new Set([
   'approval_rejected',
 ]);
 
+const TERMINAL_LIFECYCLE_TYPES = new Set([
+  'mission_completed',
+  'mission_failed',
+  'mission_canceled',
+  'mission_incomplete',
+  'mission_needs_review',
+]);
+
 const FAILURE_LIFECYCLE_TYPES = new Set([
   'mission_failed',
   'mission_canceled',
   'mission_incomplete',
   'mission_needs_review',
 ]);
+
+function lifecycleRank(type: string): number {
+  if (type === 'mission_started') return 0;
+  if (TERMINAL_LIFECYCLE_TYPES.has(type)) return 2;
+  return 1;
+}
 
 /**
  * A mission milestone is announced once. A mission that is restarted after a
@@ -323,8 +337,62 @@ export function buildMissionEvents(options: {
     if (!merged.has(key)) merged.set(key, event);
   }
 
-  const ordered = Array.from(merged.values()).sort((left, right) => left.timestamp - right.timestamp);
-  return applyMissionError(dedupeTerminalAndApprovalEvents(listMilestonesOnce(ordered), detail?.status), detail?.error);
+  let events = Array.from(merged.values());
+  events = dedupeTaskEvents(events);
+  events = dedupePlannerProgress(events);
+  events = listMilestonesOnce(events);
+  events = dedupeTerminalAndApprovalEvents(events, detail?.status);
+  events.sort((left, right) => {
+    const l = lifecycleRank(String(left.type));
+    const r = lifecycleRank(String(right.type));
+    if (l !== r) return l - r;
+    return left.timestamp - right.timestamp;
+  });
+  return applyMissionError(events, detail?.error);
+}
+
+/**
+ * Deduplicate task_completed/task_failed events by phaseId+taskId keeping the latest timestamp.
+ */
+function dedupeTaskEvents(events: FeedEvent[]): FeedEvent[] {
+  const taskTypes = new Set(['task_completed', 'task_failed']);
+  const latest = new Map<string, FeedEvent>();
+  const others: FeedEvent[] = [];
+  for (const event of events) {
+    const type = String(event.type);
+    if (taskTypes.has(type)) {
+      const phaseId = eventPhaseId(event) || '';
+      const taskId = eventTaskId(event) || '';
+      const key = `${type}|${phaseId}|${taskId}`;
+      const existing = latest.get(key);
+      if (!existing || event.timestamp >= existing.timestamp) {
+        latest.set(key, event);
+      }
+      continue;
+    }
+    others.push(event);
+  }
+  const result = [...others, ...Array.from(latest.values())];
+  result.sort((left, right) => left.timestamp - right.timestamp);
+  return result;
+}
+
+/**
+ * Deduplicate planner_progress events, keeping the last announcement of each
+ * distinct status|reason key (digits masked) so a stalled planner does not
+ * flood the feed while at least one update per state is preserved.
+ */
+function dedupePlannerProgress(events: FeedEvent[]): FeedEvent[] {
+  const lastByKey = new Map<string, number>();
+  for (let i = 0; i < events.length; i++) {
+    const event = events[i];
+    if (String(event.type) !== 'planner_progress') continue;
+    const data = event.metadata || {};
+    const key = String(data.status || '') + '|' + String(data.reason || '').replace(/\\d+/g, '#');
+    lastByKey.set(key, i);
+  }
+  const keep = new Set(Array.from(lastByKey.values()));
+  return events.filter((_, i) => String(events[i].type) !== 'planner_progress' || keep.has(i));
 }
 
 /**
@@ -415,7 +483,7 @@ export interface TranscriptTurn {
   lines: TranscriptLine[];
 }
 
-const MAX_PLANNER_PROGRESS_LINES = 3;
+const MAX_PLANNER_PROGRESS_LINES = 12;
 
 function collapsePlannerProgress(lines: TranscriptLine[]): TranscriptLine[] {
   const progressIndexes: number[] = [];

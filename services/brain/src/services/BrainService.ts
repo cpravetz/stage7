@@ -36,6 +36,7 @@ export interface CompletionResult {
   cached: boolean;
   tokensUsed?: number;
   requestId: string;
+  reasoning?: string;
 }
 
 export interface BrainLogEntry {
@@ -424,6 +425,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
             cached: false,
             tokensUsed: response.tokensUsed,
             requestId,
+            reasoning: response.reasoning,
           };
 
           // estimate cost based on model's costPer1kTokens

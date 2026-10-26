@@ -7,7 +7,7 @@ import {
   Task,
 } from '@stage7-nextgen/shared';
 import { logger } from '@stage7-nextgen/shared';
-import { MissionAgentRuntime, TaskExecutionResult } from '../agent/MissionAgentRuntime';
+import { MissionAgentRuntime, MissionAgentConfig, TaskExecutionResult } from '../agent/MissionAgentRuntime';
 import { applyPhaseReview, MissionPhaseReview } from '../agent/MissionAgentRuntime';
 import { isHumanAgentRole } from '../planner/MissionPlanner';
 import { MissionOrchestrator } from '../planner/MissionOrchestrator';
@@ -80,6 +80,23 @@ function serviceUrl(name: string, fallback: string): string {
   return process.env[name] || fallback;
 }
 
+const PLANNER_PROGRESS_MIN_INTERVAL_MS = 60_000;
+const plannerProgressByMission = new Map<string, { key: string; at: number }>();
+
+function shouldReportPlannerProgress(missionId: string, status: string, reason: string): boolean {
+  // Mirror the orchestrator progress dedup: a 60s window keyed on
+  // status|reason with digits masked, so repeated identical planner
+  // updates do not spam the feed while at least one is kept.
+  const key = `${status}|${reason.replace(/\d+/g, '#')}`;
+  const now = Date.now();
+  const last = plannerProgressByMission.get(missionId);
+  if (last && last.key === key && now - last.at < PLANNER_PROGRESS_MIN_INTERVAL_MS) {
+    return false;
+  }
+  plannerProgressByMission.set(missionId, { key, at: now });
+  return true;
+}
+
 async function broadcast(
   input: WorkflowInput,
   event: { type: string; missionId: string; timestamp: number; data?: unknown },
@@ -112,6 +129,13 @@ async function broadcast(
   } catch (error) {
     logger.warn({ missionId: input.missionId, error: error instanceof Error ? error.message : String(error) }, 'Mission event broadcast failed');
   }
+}
+
+
+function createRuntimeBroadcast(input: WorkflowInput): MissionAgentConfig['broadcast'] {
+  return async (event) => {
+    await broadcast(input, event as { type: string; missionId: string; timestamp: number; data?: unknown });
+  };
 }
 
 async function persistUpdate(
@@ -179,8 +203,10 @@ export async function prepareMissionActivity(input: WorkflowInput): Promise<Plan
     tenantId: input.tenantId || 'tenant-1',
     metadata: input.metadata,
     agentRuntimeUrl: process.env.AGENT_RUNTIME_URL,
+    broadcast: createRuntimeBroadcast(input),
   });
   const plan = await plannerRuntime.generatePlan(input.prompt, input.metadata, async (progress) => {
+    if (!shouldReportPlannerProgress(input.missionId, progress.status, progress.reason)) return;
     await broadcast(input, {
       type: 'planner_progress',
       missionId: input.missionId,
@@ -261,6 +287,7 @@ export async function selectNextMissionTaskActivity({
       tenantId: input.tenantId || 'tenant-1',
       metadata: input.metadata,
       agentRuntimeUrl: process.env.AGENT_RUNTIME_URL,
+      broadcast: createRuntimeBroadcast(input),
     });
     const selectedTask = await agentRuntime.selectNextTask(
       input.prompt,
@@ -296,6 +323,7 @@ export async function reviewAndAmendMissionPhaseActivity({
       tenantId: input.tenantId || 'tenant-1',
       metadata: input.metadata,
       agentRuntimeUrl: process.env.AGENT_RUNTIME_URL,
+      broadcast: createRuntimeBroadcast(input),
     });
     const review: MissionPhaseReview = await agentRuntime.reviewPhase(
       input.prompt,
@@ -341,6 +369,7 @@ export async function executeMissionTaskActivity({
     tenantId: input.tenantId || 'tenant-1',
     metadata: input.metadata,
     agentRuntimeUrl: process.env.AGENT_RUNTIME_URL,
+    broadcast: createRuntimeBroadcast(input),
   });
   const heartbeatTimer = setInterval(() => {
     activityContext.heartbeat({ missionId: input.missionId, phaseId: phase.id, taskId: task.id });

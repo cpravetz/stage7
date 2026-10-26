@@ -17,6 +17,7 @@ function validPlan(phaseCount = 3): Plan {
     estimatedCost: 'Low',
     requiresClarification: false,
     clarificationQuestions: [],
+    clarificationAnswers: [],
     phases: Array.from({ length: phaseCount }, (_, phaseIndex) => ({
       id: `phase-${phaseIndex + 1}`,
       name: `Deliverable ${phaseIndex + 1}`,
@@ -57,11 +58,12 @@ describe('generateValidPlan', () => {
 
     expect(plan.summary).toBe('A goal-specific execution plan')
     expect(reportValidation).toHaveBeenCalledTimes(1)
-    expect(reportValidation).toHaveBeenCalledWith(expect.stringContaining('estimatedDuration: Required'))
+    expect(reportValidation).toHaveBeenCalledWith(expect.stringContaining('Estimated duration') || expect.stringContaining('estimatedDuration'))
     expect(requests).toHaveLength(2)
     expect(requests[0]?.maxTokens).toBe(8192)
-    expect(requests[1]?.prompt).toContain('Your previous plan was rejected')
-    expect(requests[1]?.prompt).toContain('estimatedDuration')
+    expect(requests[1]?.prompt).toContain('Resolve only the specific issues')
+    expect(requests[1]?.prompt).toContain('correction or completion')
+    expect(requests[1]?.prompt).toContain('Estimated duration')
     expect(requests[1]?.prompt).toContain('Previous response')
     expect(requests[1]?.prompt).toContain('incomplete')
   })
@@ -369,7 +371,7 @@ describe('generateValidPlan', () => {
     expect(plan.phases[1]?.tasks[0]?.id).not.toBe(plan.phases[0]?.tasks[0]?.id)
     expect(requests.map((request) => request.attempt)).toEqual([1, 2, 3])
     expect(requests[1]?.prompt).toContain('task ids must be globally unique');
-    expect(requests[1]?.prompt).toContain('phases[1].tasks[0].id duplicates');
+    expect(requests[1]?.prompt).toContain('task "task-1" (phase 2, task 1) duplicates');
     expect(requests[1]?.prompt).toContain('Do not reuse task IDs across phases');
   })
 

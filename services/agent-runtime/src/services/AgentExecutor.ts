@@ -31,6 +31,7 @@ interface BrainResponse {
   content?: string
   tokensUsed?: number
   requestId?: string
+  reasoning?: string
 }
 
 interface BrainErrorResponse {
@@ -113,6 +114,7 @@ export interface AgentExecutionResult {
   completionTokensReserved: number
   actionReceipts: AgentActionReceipt[]
   requestId?: string
+  reasoning?: string
 }
 
 interface AgentAction {
@@ -605,6 +607,7 @@ export class AgentExecutor {
     let finalOutput = checkpoint?.finalOutput
     const actionReceipts = checkpoint?.actionReceipts || []
     let lastRequestId = checkpoint?.lastRequestId
+    let reasoning: string | undefined
     let malformedActionResponseSeen = false
     // When a checkpoint has exhausted its normal brain-call budget AND already consumed
     // its single bounded resume allowance, the saved state is stale. Reset the budget
@@ -675,6 +678,7 @@ export class AgentExecutor {
           completionTokensReserved,
           actionReceipts,
           requestId: lastRequestId,
+          reasoning,
         }
       }
       if (missingActions.length > 0) {
@@ -791,6 +795,7 @@ export class AgentExecutor {
       completionTokensReserved += maxTokens
       tokensUsed += completion.tokensUsed || 0
       lastRequestId = completion.requestId
+      const reasoning = completion.reasoning || undefined
       const content = (completion.content || '').trim()
       if (!content) {
         await this.reportBrainComplaint(
@@ -869,6 +874,7 @@ export class AgentExecutor {
           completionTokensReserved,
           actionReceipts,
           requestId: lastRequestId,
+          reasoning,
         }
       }
       const alreadySatisfiedRequiredAction = requiredActions.some(
@@ -907,6 +913,7 @@ export class AgentExecutor {
           completionTokensReserved,
           actionReceipts,
           requestId: lastRequestId,
+          reasoning,
         }
       }
 
@@ -942,6 +949,7 @@ export class AgentExecutor {
       completionTokensReserved,
       actionReceipts,
       requestId: lastRequestId,
+      reasoning,
     }
   }
 

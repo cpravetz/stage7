@@ -259,6 +259,7 @@ export interface TaskExecutionResult {
   model?: string;
   provider?: string;
   requestId?: string;
+  reasoning?: string;
 }
 
 export interface PromptTaskRequest {
@@ -1011,6 +1012,17 @@ export class MissionAgentRuntime {
     const model = result?.model;
     const provider = result?.provider;
     const requestId = result?.requestId;
+    const reasoning = typeof result?.reasoning === 'string' && result.reasoning.trim().length > 0
+      ? result.reasoning
+      : undefined;
+    if (reasoning && this.broadcast) {
+      await this.broadcast({
+        type: 'monologue',
+        missionId: this.missionId,
+        timestamp: Date.now(),
+        data: { agentId, taskId: submitted.taskId, phaseId: request.phaseId, thought: reasoning, text: reasoning },
+      });
+    }
     return {
       output,
       artifacts: this.withActionReceiptArtifact(artifacts, actionReceipts, submitted.taskId),
@@ -1019,6 +1031,7 @@ export class MissionAgentRuntime {
       model,
       provider,
       requestId,
+      reasoning,
     };
   }
 
@@ -1105,7 +1118,7 @@ export class MissionAgentRuntime {
   }
 
   private parseTaskResult(task: AgentTask): TaskExecutionResult {
-    const result = task.result as { output?: unknown; artifacts?: unknown; actionReceipts?: unknown; tokensUsed?: unknown; model?: unknown; provider?: unknown; requestId?: unknown } | null;
+    const result = task.result as { output?: unknown; artifacts?: unknown; actionReceipts?: unknown; tokensUsed?: unknown; model?: unknown; provider?: unknown; requestId?: unknown; reasoning?: unknown } | null;
     const output = String(result?.output || JSON.stringify(result || {}));
     const input = task.input && typeof task.input === 'object' && !Array.isArray(task.input)
       ? task.input as Record<string, unknown>
@@ -1121,6 +1134,21 @@ export class MissionAgentRuntime {
     const model = result?.model;
     const provider = result?.provider;
     const requestId = result?.requestId;
+    const reasoning = typeof result?.reasoning === 'string' && result.reasoning.trim().length > 0
+      ? result.reasoning
+      : undefined;
+    if (reasoning && this.broadcast) {
+      const agentId = this.taskAgentMap.get(task.taskId);
+      const phaseId = typeof context.phaseId === 'string' ? context.phaseId : undefined;
+      if (agentId) {
+        this.broadcast({
+          type: 'monologue',
+          missionId: this.missionId,
+          timestamp: Date.now(),
+          data: { agentId, taskId: task.taskId, phaseId, thought: reasoning, text: reasoning },
+        }).catch((e) => logger.warn({ err: e instanceof Error ? e.message : String(e), taskId: task.taskId }, 'Failed to broadcast monologue for recovered task result'));
+      }
+    }
     return {
       output,
       artifacts: this.withActionReceiptArtifact(artifacts, actionReceipts, task.taskId),
@@ -1129,6 +1157,7 @@ export class MissionAgentRuntime {
       model: model == null ? undefined : String(model),
       provider: provider == null ? undefined : String(provider),
       requestId: requestId == null ? undefined : String(requestId),
+      reasoning,
     };
   }
 

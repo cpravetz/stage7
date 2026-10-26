@@ -76,6 +76,19 @@ function asStringArray(value: unknown): string[] {
 }
 
 /**
+ * Returns the first non-empty string from a list of candidate values, else
+ * undefined. Used to extract the model's chain-of-thought / reasoning field,
+ * which reasoning-capable models (o1, o3-mini, OpenRouter reasoning models)
+ * return under a variety of keys alongside the final content.
+ */
+function firstNonEmptyString(candidates: unknown[]): string | undefined {
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim().length > 0) return candidate;
+  }
+  return undefined;
+}
+
+/**
  * Reads a capability flag from either the flat OpenAI-style field
  * (`supports_vision`) or the nested Mistral-style `capabilities` object
  * (`capabilities.vision`), since gateways disagree on where they put it.
@@ -462,18 +475,38 @@ export class OpenAICompatibleProvider implements LLMProvider {
     const data: any = await res.json();
     // Normalize response for both /chat/completions and /completions
     let content = '';
+    let reasoning: string | undefined;
     if (data.choices && data.choices[0] && data.choices[0].message) {
       content = data.choices[0].message.content ?? '';
-      if ((!content || content.trim() === '') && data.choices[0].message.reasoning) {
-        content = data.choices[0].message.reasoning;
+      // Extract the model's chain-of-thought / reasoning field, if present.
+      // Reasoning-capable models (o1, o3-mini, OpenRouter reasoning models)
+      // return a separate reasoning/thinking field alongside the final content.
+      reasoning = firstNonEmptyString([
+        data.choices[0].message.reasoning,
+        data.choices[0].message.reasoning_content,
+        data.reasoning,
+        data.thought,
+      ]);
+      // Backward-compatible fallback: if content is empty but reasoning exists,
+      // surface the reasoning as the content so callers that only read content
+      // still get a usable answer.
+      if ((!content || content.trim() === '') && reasoning) {
+        content = reasoning;
       }
       if (!content && data.choices[0].message.refusal) {
         throw new Error(`[${this.id}] model refused: ${data.choices[0].message.refusal}`);
       }
     } else if (data.choices && data.choices[0] && data.choices[0].text) {
       content = data.choices[0].text;
+      reasoning = firstNonEmptyString([data.reasoning, data.thought]);
     } else if (data.output && Array.isArray(data.output) && data.output[0] && data.output[0].content) {
       content = data.output[0].content[0].text || '';
+      reasoning = firstNonEmptyString([
+        data.output[0].reasoning,
+        data.output[0].reasoning_content,
+        data.reasoning,
+        data.thought,
+      ]);
     }
 
     const tokensUsed = (data.usage && (data.usage.completion_tokens && data.usage.prompt_tokens))
@@ -485,6 +518,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
       provider: this.id,
       tokensUsed,
       raw: data,
+      reasoning: reasoning || undefined,
     };
   }
 }

@@ -173,7 +173,7 @@ docker compose down --remove-orphans --timeout 30 || echo "Warning: docker compo
 echo ""
 echo "Building Docker images (parallel, BuildKit parallelism capped)..."
 export DOCKER_BUILDKIT_MAX_PARALLEL="${DOCKER_BUILDKIT_MAX_PARALLEL:-4}"
-if ! docker compose build --parallel --no-cache; then
+if ! docker compose build --parallel ; then
     echo "Error: Docker compose build failed."
     exit 1
 fi

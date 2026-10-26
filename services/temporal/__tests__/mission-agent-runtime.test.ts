@@ -58,6 +58,7 @@ const plan: Plan = {
   estimatedCost: 'low',
   requiresClarification: false,
   clarificationQuestions: [],
+  clarificationAnswers: [],
   phases: [phase],
 }
 

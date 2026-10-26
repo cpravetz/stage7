@@ -123,6 +123,12 @@ export class TemporalClient {
    */
   private watchFallbacks = new Map<string, Promise<unknown>>();
 
+  /**
+   * Missions for which mission_started has been broadcast in this process,
+   * so recovery or resume does not re-announce the same milestone.
+   */
+  private readonly missionStartedEmitted = new Set<string>();
+
   constructor(namespace = 'default', directMissionRunner: typeof runMissionDirect = runMissionDirect) {
     this.namespace = namespace;
     this.directMissionRunner = directMissionRunner;
@@ -172,7 +178,8 @@ export class TemporalClient {
    * immediately, even while the workflow is still running.
    */
   private async persistRunningState(input: WorkflowInput): Promise<void> {
-    const startedAt = Date.now();
+    const existing = await this.getPersistedMissionControlRecord(input.missionId).catch(() => null);
+    const startedAt = existing ? (existing as { startedAt?: number }).startedAt ?? Date.now() : Date.now();
     // Ensure input has all optional fields to avoid validation issues
     const normalizedInput: WorkflowInput = {
       missionId: input.missionId,
@@ -308,17 +315,22 @@ export class TemporalClient {
 
       // Claim direct execution before writing running state, so a duplicate launch
       // cannot overwrite the active owner's mission timestamps or history.
-      if (!recoveryLeaseAlreadyClaimed) await this.persistRunningState(input);
+      const existingRecord = await this.getPersistedMissionControlRecord(input.missionId).catch(() => null);
+      const alreadyStarted = existingRecord?.status === 'running';
+      if (!recoveryLeaseAlreadyClaimed && !alreadyStarted) await this.persistRunningState(input);
 
       // Broadcast the mission-started event to connected WebSocket clients.
-      await this.broadcastMissionUpdate({
-        type: 'mission_started',
-        missionId: input.missionId,
-        workflowId,
-        status: 'running',
-        assistantId: input.assistantId,
-        timestamp: Date.now(),
-      });
+      if (!alreadyStarted && !this.missionStartedEmitted.has(input.missionId)) {
+        await this.broadcastMissionUpdate({
+                type: 'mission_started',
+                missionId: input.missionId,
+                workflowId,
+                status: 'running',
+                assistantId: input.assistantId,
+                timestamp: Date.now(),
+        });
+        this.missionStartedEmitted.add(input.missionId);
+      }
 
       if (this.client) {
         // Temporal path: start workflow asynchronously on the Temporal server.

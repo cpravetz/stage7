@@ -280,7 +280,10 @@ export const useFeedStore = create<FeedState>((set, get) => ({
     set({ ws: null, connected: false });
   },
   addEvent: (event: FeedEvent) =>
-    set((state) => ({ events: [event, ...state.events].slice(0, 500) })),
+    set((state) => {
+      if (state.events.some((e) => e.id === event.id)) return state;
+      return { events: [event, ...state.events].slice(0, 500) };
+    }),
   addEvents: (newEvents: FeedEvent[]) => {
     if (newEvents.length === 0) return;
     set((state) => {

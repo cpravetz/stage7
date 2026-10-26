@@ -25,6 +25,7 @@ const plan: Plan = {
   estimatedCost: 'low',
   requiresClarification: false,
   clarificationQuestions: [],
+  clarificationAnswers: [],
   phases: [{
     id: 'phase-1',
     name: 'Execution',

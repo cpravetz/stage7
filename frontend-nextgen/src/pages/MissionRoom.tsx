@@ -89,6 +89,56 @@ function getMissionStatusLabel(status: string): string {
   }
 }
 
+function isMissionComplete(plan: Plan | null, phaseOutputs: PhaseOutput[], missionEvents: FeedEvent[]): boolean {
+  if (!plan || !plan.phases || plan.phases.length === 0) return false;
+  const allPhasesComplete = plan.phases.every((phase) => {
+    const output = phaseOutputs.find((p) => p.phaseId === phase.id);
+    if (output && output.status === 'completed') return true;
+    // check tasks
+    const tasks = phase.tasks || [];
+    if (tasks.length === 0) return false;
+    const allTasksDone = tasks.every((task) => {
+      const taskOut = output?.tasks?.find((t) => t.taskId === task.id);
+      if (taskOut?.status === 'completed' || taskOut?.status === 'failed') {
+        // failed might count as done? but instruction says "all plan phases have all tasks completed"
+        return taskOut.status === 'completed';
+      }
+      // check events
+      const te = missionEvents.find((e) => e.metadata?.phaseId === phase.id && e.metadata?.taskId === task.id && (e.type === 'task_completed' || e.type === 'task_failed'));
+      if (te?.type === 'task_completed') return true;
+      return false;
+    });
+    return allTasksDone;
+  });
+  return allPhasesComplete;
+}
+
+function derivePhaseStatus(phase: PlanPhase, phaseOutputs: PhaseOutput[], missionEvents: FeedEvent[]): string | undefined {
+  const output = phaseOutputs.find((p) => p.phaseId === phase.id);
+  if (output?.status) {
+    if (output.status === 'completed') return 'completed';
+    if (output.status === 'failed') return 'failed';
+    if (output.status === 'in_progress' || output.status === 'running') return 'running';
+  }
+  const tasks = phase.tasks || [];
+  if (tasks.length === 0) return output?.status;
+  let hasFailed = false;
+  let hasRunning = false;
+  let allCompleted = true;
+  for (const task of tasks) {
+    const tstatus = getTaskStatus(task, phase.id, phaseOutputs, missionEvents);
+    if (tstatus === 'failed') hasFailed = true;
+    if (tstatus === 'in_progress' || tstatus === 'running') hasRunning = true;
+    if (tstatus !== 'completed') allCompleted = false;
+  }
+  if (allCompleted && tasks.length > 0) return 'completed';
+  if (hasFailed) return 'failed';
+  if (hasRunning) return 'running';
+  return output?.status;
+}
+
+
+
 function iconForType(type: string): string {
   if (type.startsWith('task_')) return type === 'task_failed' ? '❌' : '✅';
   if (type.startsWith('phase_')) return '📦';
@@ -169,7 +219,7 @@ function buildMissionArtifactItems(
   const add = (value: unknown, kind: MissionArtifactItem['kind'], phaseId?: string, taskId?: string) => {
     const item = toMissionArtifactItem(value, kind, phaseId, taskId);
     if (!item) return;
-    const key = `${item.kind}|${item.phaseId || ''}|${item.taskId || ''}|${item.name.toLowerCase()}`;
+    const key = `${item.phaseId || ''}|${item.taskId || ''}|${item.name.toLowerCase()}`;
     const existing = items.get(key);
     if (!existing || ((!existing.text && !existing.url) && (item.text || item.url))) {
       items.set(key, item);
@@ -293,12 +343,18 @@ const MissionRoom = () => {
   }, [detail?.output?.outputs?.phases]);
 
   const missionEvents = useMemo<FeedEvent[]>(() => {
+    let effectiveStatus = detail?.status || 'unknown';
+    if (detail && (detail.status === 'running' || detail.status === 'started')) {
+      if (isMissionComplete(plan, phaseOutputs, [])) {
+        effectiveStatus = 'completed';
+      }
+    }
     return buildMissionEvents({
       missionId,
       liveEvents: events,
       detail: detail
         ? {
-            status: detail.status,
+            status: effectiveStatus,
             error: detail.error,
             startedAt: detail.startedAt,
             completedAt: detail.completedAt,
@@ -456,7 +512,12 @@ const MissionRoom = () => {
     }
   };
 
-  const status = detail?.status || 'unknown';
+  const rawStatus = detail?.status || 'unknown';
+  let effectiveStatus = rawStatus;
+  if ((rawStatus === 'running' || rawStatus === 'started') && isMissionComplete(plan, phaseOutputs, missionEvents)) {
+    effectiveStatus = 'completed';
+  }
+  const status = effectiveStatus;
   const badge = STATUS_BADGE[status] || status;
   const artifactCount = artifactItems.length;
   const startedAtMs = detail?.startedAt ? new Date(detail.startedAt).getTime() : undefined;
@@ -464,13 +525,14 @@ const MissionRoom = () => {
   const wallClockMs =
     startedAtMs && completedAtMs
       ? completedAtMs - startedAtMs
-      : startedAtMs && (detail?.status === 'running' || !completedAtMs)
+      : startedAtMs && (rawStatus === 'running' || rawStatus === 'started' || !completedAtMs)
         ? now - startedAtMs
         : null;
   const wallClockLabel = wallClockMs != null ? formatDuration(wallClockMs) : null;
 
   return (
     <div className="page mission-room">
+
       <div className="mission-room-header">
         <div>
           <Link to="/missions" className="link-button" style={{ marginBottom: 4 }}>
@@ -878,20 +940,7 @@ const MissionRoom = () => {
               </div>
               <ol className="plan-phases">
                 {plan.phases.map((phase) => {
-                  const output = phaseOutputs.find((p) => p.phaseId === phase.id);
-                const phaseEvents = missionEvents.filter(
-                  (event) => event.metadata?.phaseId === phase.id &&
-                    ['phase_started', 'phase_completed', 'phase_approved', 'phase_rejected'].includes(event.type)
-                );
-                const latestPhaseEvent = phaseEvents[phaseEvents.length - 1];
-                const livePhaseStatus = latestPhaseEvent
-                  ? latestPhaseEvent.type === 'phase_started'
-                    ? 'in_progress'
-                    : latestPhaseEvent.type === 'phase_completed'
-                      ? phase.requiresApproval ? 'awaiting_approval' : 'completed'
-                      : latestPhaseEvent.type === 'phase_approved' ? 'approved' : 'rejected'
-                  : undefined;
-                const phaseStatus = output?.status || livePhaseStatus;
+                  const phaseStatus = derivePhaseStatus(phase, phaseOutputs, missionEvents) || phaseOutputs.find((p) => p.phaseId === phase.id)?.status;
                 return (
                   <li
                     key={phase.id}
@@ -941,7 +990,7 @@ const MissionRoom = () => {
                               </div>
                               {(task.expectedArtifacts?.length || taskArtifacts.length > 0) && (
                                 <div style={{ marginTop: 4 }}>
-                                   {task.expectedArtifacts?.filter((artifact) =>
+                                   {(task.expectedArtifacts || []).filter((artifact) =>
                                      !taskArtifacts.some((produced) => produced.name === artifact),
                                    ).map((artifact) => (
                                      <span key={`expected-${artifact}`} className="badge expected">

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFeedStore } from '../stores/feedStore';
 
 interface AgentInfo {
@@ -93,6 +93,43 @@ function extractAgentsFromEvents(events: Array<{ type: string; missionId?: strin
   }
   return Array.from(agentMap.values());
 }
+
+const LIFECYCLE_EVENT_TYPES = new Set([
+  'task_started', 'task_completed', 'task_failed',
+  'planner_started', 'plan_generated', 'planner_progress',
+  'phase_started', 'phase_completed', 'phase_approved', 'phase_rejected', 'phase_plan_amended',
+  'approval_requested', 'approval_approved', 'approval_rejected',
+  'mission_started', 'mission_completed', 'mission_failed', 'mission_canceled',
+  'mission_paused', 'mission_resumed', 'mission_incomplete', 'mission_needs_review',
+  'clarification_needed', 'cost_estimate',
+]);
+
+function isReasoningEvent(e: { type: string; metadata?: Record<string, unknown> }): boolean {
+  if (e.type === 'monologue') return true;
+  if (LIFECYCLE_EVENT_TYPES.has(e.type)) return false;
+  return !!(e.metadata && (e.metadata.thought || (e.metadata.data as Record<string, unknown> | undefined)?.thought));
+}
+
+const ReasoningBox = ({ events }: { events: Array<{ type: string; message: string; timestamp?: number; metadata?: Record<string, unknown> }> }) => {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
+  }, [events]);
+  return (
+    <div style={{ marginTop: 8 }}>
+      <strong style={{ fontSize: 12 }}>Reasoning</strong>
+      <div ref={ref} style={{ maxHeight: 160, overflow: 'auto', marginTop: 6 }}>
+        {events.map((ev, i) => (
+          <div key={i} className="muted" style={{ fontSize: 12 }}>
+            <span style={{ marginRight: 6 }}>[{new Date(ev.timestamp || Date.now()).toLocaleTimeString()}]</span>
+            <span>{ev.message}</span>
+          </div>
+        ))}
+        {events.length === 0 && <div className="muted" style={{ fontSize: 12 }}>No reasoning</div>}
+      </div>
+    </div>
+  );
+};
 
 const AgentOutputsPanel = ({ missionId, missionStatus, plan }: AgentOutputsPanelProps) => {
   const events = useFeedStore((s) => s.events);
@@ -263,6 +300,11 @@ const AgentOutputsPanel = ({ missionId, missionStatus, plan }: AgentOutputsPanel
                 )}
               </div>
             </div>
+            {(() => {
+              const evs = eventsByAgent.get(a.id) || eventsByAgent.get(a.role || '') || [];
+              const reasoning = evs.filter(isReasoningEvent);
+              return <ReasoningBox events={reasoning} />;
+            })()}
           </li>
         ))}
       </ul>

@@ -18,6 +18,8 @@ export interface CompletionResponse {
   provider: string;
   tokensUsed?: number;
   raw?: unknown;
+  reasoning?: string;
+  thought?: string;
 }
 
 export interface ProviderInfo {
