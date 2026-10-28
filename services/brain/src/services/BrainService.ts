@@ -1,7 +1,6 @@
-import { ModelRouter, ModelDefinition, ProviderHealth } from './ModelRouter';
+import { ModelRouter, ModelDefinition } from './ModelRouter';
 import { SemanticCache } from './SemanticCache';
 import { ContextManager } from './ContextManager';
-import { ContextChunk } from '../types/context';
 import { StructuredOutputSampler } from './StructuredOutputSampler';
 import { z } from 'zod';
 import { logger } from '../utils/logger';
@@ -160,6 +159,8 @@ export class BrainService {
           costPer1kTokens: m.costPer1kTokens,
           maxTokens: m.maxTokens,
           capabilities: m.capabilities,
+          inputFormat: m.inputFormat,
+          outputFormat: m.outputFormat,
       }));
       this.router.registerModels(defs);
       logger.info({ provider: provider.id, count: defs.length }, 'Registered models from provider');
@@ -289,14 +290,14 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
         budget: options.budget,
         freeOnly: settings?.freeModelsOnly,
         optimizeFor: options.optimizeFor,
-        inputFormat: (options as any).inputFormat,
-        outputFormat: (options as any).outputFormat,
+        inputFormat: options.inputFormat,
+        outputFormat: options.outputFormat,
       };
     const eligibleCandidates = this.router.getCandidates(routingOptions);
     const session = routingSessionKey ? this.getRoutingSession(routingSessionKey) : undefined;
     const attemptedModelIds = new Set(session?.attemptedModelIds || []);
     const attemptedThisCall = new Set<string>();
-    let candidates = this.router.getCandidates({
+    const candidates = this.router.getCandidates({
       ...routingOptions,
       excludedModelIds: attemptedModelIds,
     });
@@ -358,8 +359,6 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
         break;
       }
       const routingKey = modelRoutingKey(candidate.model);
-      attemptedModelIds.add(routingKey);
-      attemptedThisCall.add(routingKey);
       const provider = this.providers.find((p) => p.id === candidate.model.provider);
       if (!provider) {
         lastErr = new Error(`Provider '${candidate.model.provider}' is not registered`);
@@ -378,8 +377,8 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
         messages: messagesBase,
         maxTokens: options.maxTokens ?? 1024,
         temperature: options.temperature,
-        inputFormat: (options as any).inputFormat,
-        outputFormat: (options as any).outputFormat,
+        inputFormat: options.inputFormat,
+        outputFormat: options.outputFormat,
       };
 
       const candidateStartTime = Date.now();
@@ -414,9 +413,10 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
         // (each attempt may take up to providerAttemptTimeoutMs).
         if (Date.now() + attemptCostMs > completionDeadline) break;
         try {
-          const response: CompletionResponse = await withProviderTimeout(
-            breaker.execute(async () => provider.complete(req)),
-          );
+          attemptedModelIds.add(routingKey);
+          attemptedThisCall.add(routingKey);
+          const response: CompletionResponse = await withProviderTimeout(provider.complete(req));
+          breaker.recordSuccess();
 
           const result: CompletionResult = {
             content: response.content,
@@ -524,6 +524,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
           // skip to the next candidate immediately instead of wasting time.
           const isTimeout = /timed out after \d+ms/i.test(errMsg);
           if (isTimeout) {
+            breaker.recordFailure();
             logger.warn({ provider: provider.id, model: candidate.model.id, err: errMsg }, 'Provider timed out - trying next candidate');
             this.addLog({
               type: 'error',
@@ -569,6 +570,9 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
             break;
           }
           if (isModelSpecific) {
+            // A model-level denial confirms the provider responded; it must not
+            // contribute to provider-wide health or leave a half-open circuit.
+            breaker.reset();
             // Model-specific error (e.g. 404 for a specific model). Skip this model
             // but keep the provider active so other models on this provider can still be tried.
             logger.warn({ provider: provider.id, model: candidate.model.id, err: errMsg }, 'Model-specific error - skipping to next candidate');
@@ -612,6 +616,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
           }
 
           // transient: backoff a little then retry this provider (if attempts remain)
+          breaker.recordFailure();
           if (attempt < maxRetriesPerProvider - 1) {
             const backoffMs = 250 * (attempt + 1);
             await new Promise((res) => setTimeout(res, backoffMs));

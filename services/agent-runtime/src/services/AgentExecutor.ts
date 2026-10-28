@@ -237,7 +237,7 @@ function parseActionReceipts(value: unknown): AgentActionReceipt[] {
       || !receipt.toolId.trim()
       || typeof receipt.isError !== 'boolean'
       || typeof receipt.content !== 'string'
-      || (receipt.outcome !== undefined && !['success', 'failure', 'denied'].includes(String(receipt.outcome)))
+      || (receipt.outcome !== undefined && !['success', 'failure', 'denied', 'question_asked'].includes(String(receipt.outcome)))
     ) {
       throw new Error('Agent execution checkpoint contains an invalid action receipt')
     }

@@ -179,6 +179,32 @@ describe('OpenAICompatibleProvider.listModels metadata parsing', () => {
       expect(models[0].capabilities).toEqual(['chat']);
     });
 
+    it('drops xAI video-generation models that carry video_price and no text price', async () => {
+      const models = await providerWith({
+        data: [
+          { id: 'grok-2-latest', prompt_text_token_price: 20000, completion_text_token_price: 80000 },
+          { id: 'grok-imagine-video', video_price: 200000000 },
+        ],
+      }).listModels();
+
+      expect(models.map((m) => m.id)).toEqual(['grok-2-latest']);
+    });
+
+    it('drops clearly named image and video generators when the catalog omits modality metadata', async () => {
+      const models = await providerWith({
+        data: [
+          { id: 'vendor/image-generation-v2' },
+          { id: 'grok-imagine-video' },
+          { id: 'vendor/video-chat' },
+        ],
+      }).listModels();
+
+      const byId = Object.fromEntries(models.map((m) => [m.id, m.capabilities]));
+      expect(byId['vendor/image-generation-v2']).not.toContain('chat');
+      expect(byId['grok-imagine-video']).not.toContain('chat');
+      expect(byId['vendor/video-chat']).toContain('chat');
+    });
+
     it('drops models whose published output_modalities include no text', async () => {
       const models = await providerWith({
         data: [
@@ -190,7 +216,19 @@ describe('OpenAICompatibleProvider.listModels metadata parsing', () => {
       const byId = Object.fromEntries(models.map((m) => [m.id, m.capabilities]));
       expect(byId['vendor/gpt-5-image']).toContain('chat');
       expect(byId['vendor/text-only']).toContain('chat');
+      expect(byId['vendor/image-only']).toBeDefined();
       expect(byId['vendor/image-only']).not.toContain('chat');
+    });
+
+    it('reads generated-media capabilities from published output modalities', async () => {
+      const models = await providerWith({
+        data: [{
+          id: 'vendor/chat-image-generator',
+          architecture: { output_modalities: ['text', 'image'] },
+        }],
+      }).listModels();
+
+      expect(models[0].capabilities).toContain('image_generation');
     });
 
     it('drops Mistral OCR models via capabilities.completion_chat=false', async () => {
@@ -282,6 +320,39 @@ describe('OpenAICompatibleProvider completion endpoint discovery', () => {
   beforeEach(() => mockFetchProvider.mockReset());
 
   const completion = { choices: [{ message: { content: 'hello' } }], usage: { completion_tokens: 3, prompt_tokens: 4 } };
+
+  it('keeps provider reasoning separate from the answer content', async () => {
+    const result = await providerWith({
+      choices: [{
+        message: {
+          content: 'The final answer.',
+          reasoning: 'The model reasoning.',
+        },
+      }],
+    }).complete({
+      model: 'some-model',
+      messages: [{ role: 'user', content: 'hi' }],
+      maxTokens: 16,
+      temperature: 0,
+    });
+
+    expect(result.content).toBe('The final answer.');
+    expect(result.reasoning).toBe('The model reasoning.');
+  });
+
+  it('does not promote a reasoning-only response to answer content', async () => {
+    const result = await providerWith({
+      choices: [{ message: { reasoning: 'The model reasoning.' } }],
+    }).complete({
+      model: 'some-model',
+      messages: [{ role: 'user', content: 'hi' }],
+      maxTokens: 16,
+      temperature: 0,
+    });
+
+    expect(result.content).toBe('');
+    expect(result.reasoning).toBe('The model reasoning.');
+  });
 
   it('finds the chat route when the configured one does not exist', async () => {
     // A gateway that serves the API under a different prefix must still work

@@ -9,6 +9,7 @@ import {
   buildMissionEvents,
   buildTranscript,
   CONVERSATION_EVENT_TYPES,
+  friendlyMissionError,
   summarizeModelUsage,
   TIMELINE_EVENT_TYPES,
 } from '../utils/missionEvents';
@@ -607,7 +608,7 @@ const MissionRoom = () => {
 
       {detailError && <div className="error-banner">{detailError}</div>}
       {detail?.status === 'failed' && detail?.error && (
-        <div className="error-banner">Mission failed: {detail.error}</div>
+        <div className="error-banner">Mission failed: {friendlyMissionError(detail.error)}</div>
       )}
 
       {showRetryDialog && (

@@ -22,10 +22,10 @@ export class CircuitBreaker {
 
     try {
       const result = await fn();
-      this.onSuccess();
+      this.recordSuccess();
       return result;
     } catch (err) {
-      this.onFailure();
+      this.recordFailure();
       throw err;
     }
   }
@@ -56,6 +56,14 @@ export class CircuitBreaker {
     this.failureCount = 0;
     this.state = 'closed';
     this.nextAttempt = 0;
+  }
+
+  recordSuccess(): void {
+    this.onSuccess();
+  }
+
+  recordFailure(): void {
+    this.onFailure();
   }
 
   private onSuccess(): void {

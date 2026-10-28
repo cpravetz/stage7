@@ -41,6 +41,21 @@ function validPlan(phaseCount = 3): Plan {
 }
 
 describe('generateValidPlan', () => {
+  it('fills only unambiguous initial planning defaults locally', async () => {
+    const plan = validPlan(1)
+    delete (plan.phases[0] as any).requiresApproval
+    delete (plan.phases[0]!.tasks[0] as any).status
+    delete (plan.phases[0]!.tasks[0] as any).dependsOnTaskIds
+    const complete = jest.fn(async (): Promise<string> => JSON.stringify(plan))
+
+    const generated = await generateValidPlan('Create a business plan', {}, 'mission-planner-defaults', complete)
+
+    expect(generated.phases[0]?.requiresApproval).toBe(false)
+    expect(generated.phases[0]?.tasks[0]?.status).toBe('pending')
+    expect(generated.phases[0]?.tasks[0]?.dependsOnTaskIds).toEqual([])
+    expect(complete).toHaveBeenCalledTimes(1)
+  })
+
   it('asks Brain to amend a schema-invalid response and returns only the corrected plan', async () => {
     const requests: PlannerCompletionRequest[] = []
     let responseIndex = 0
@@ -61,11 +76,13 @@ describe('generateValidPlan', () => {
     expect(reportValidation).toHaveBeenCalledWith(expect.stringContaining('Estimated duration') || expect.stringContaining('estimatedDuration'))
     expect(requests).toHaveLength(2)
     expect(requests[0]?.maxTokens).toBe(8192)
-    expect(requests[1]?.prompt).toContain('Resolve only the specific issues')
-    expect(requests[1]?.prompt).toContain('correction or completion')
+    expect(requests[1]?.prompt).toContain('Make only these')
+    expect(requests[1]?.prompt).toContain('correction(s) to the plan below')
     expect(requests[1]?.prompt).toContain('Estimated duration')
-    expect(requests[1]?.prompt).toContain('Previous response')
+    expect(requests[1]?.prompt).toContain('Plan:')
     expect(requests[1]?.prompt).toContain('incomplete')
+    expect(requests[1]?.prompt).not.toContain('Create a plan to achieve this goal')
+    expect(requests[1]?.systemPrompt).toContain('editing an existing mission plan')
   })
 
   it('repairs plans that assign executable work to a human role', async () => {
@@ -82,7 +99,7 @@ describe('generateValidPlan', () => {
 
     expect(plan.phases[0]?.tasks[0]?.agentRole).toBe('analyst')
     expect(requests[1]?.prompt).toContain('agentRole "Human" is not executable')
-    expect(requests[1]?.systemPrompt).toContain('Every task must be executable by an autonomous software Agent')
+    expect(requests[1]?.systemPrompt).toContain('editing an existing mission plan')
   })
 
   it('repairs explicit tool and child-Agent instructions that omit action receipts', async () => {
@@ -108,7 +125,6 @@ describe('generateValidPlan', () => {
 
     expect(plan.phases[0]?.tasks[0]?.requiredActions).toEqual(correctedPlan.phases[0]?.tasks[0]?.requiredActions)
     expect(requests[1]?.prompt).toContain('explicitly instructs child-Agent delegation')
-    expect(requests[1]?.prompt).toContain('explicitly instructs use of tool "calculate"')
   })
 
   it('repairs a required tool receipt by adding its exact instruction to the task prompt', async () => {
@@ -199,21 +215,91 @@ describe('generateValidPlan', () => {
     }
     invalidPlan.phases[0]!.tasks.push(consumer)
 
-    const correctedPlan = JSON.parse(JSON.stringify(invalidPlan)) as Plan
-    correctedPlan.phases[0]!.tasks[1]!.systemPrompt =
-      'Use output from task phase-1-task-1 (the initial product) and the calculate tool to compute the difference.'
     const requests: PlannerCompletionRequest[] = []
-    const responses = [JSON.stringify(invalidPlan), JSON.stringify(correctedPlan)]
     const complete = async (request: PlannerCompletionRequest): Promise<string> => {
       requests.push(request)
-      return responses[request.attempt - 1]!
+      return JSON.stringify(invalidPlan)
     }
 
     const plan = await generateValidPlan('Use an initial product to calculate a final difference', {}, 'mission-output-lineage', complete)
 
     expect(plan.phases[0]?.tasks[1]?.dependsOnTaskIds).toEqual(['phase-1-task-1'])
     expect(plan.phases[0]?.tasks[1]?.systemPrompt).toContain('phase-1-task-1')
-    expect(requests[1]?.prompt).toContain('systemPrompt must name that producer task ID and its consumed output')
+    expect(plan.phases[0]?.tasks[1]?.systemPrompt).toContain('deliverable-1.md')
+    expect(requests).toHaveLength(1)
+  })
+
+  it('repairs multiple declared dependency instructions locally without another Brain call', async () => {
+    const plan = validPlan(5)
+    const dependencies: string[][] = [[], ['phase-1-task-1'], ['phase-2-task-1', 'phase-1-task-1'], ['phase-3-task-1'], ['phase-3-task-1', 'phase-2-task-1', 'phase-1-task-1']]
+    for (const [phaseIndex, phase] of plan.phases.entries()) {
+      const task = phase.tasks[0]!
+      task.id = `phase-${phaseIndex + 1}-task-1`
+      task.title = `Produce phase ${phaseIndex + 1} result`
+      task.expectedArtifacts = [`phase-${phaseIndex + 1}-result.md`]
+      task.dependsOnTaskIds = dependencies[phaseIndex]!
+    }
+    const complete = jest.fn(async (): Promise<string> => JSON.stringify(plan))
+
+    const generated = await generateValidPlan('Create a multi-phase plan', {}, 'mission-incremental-dependencies', complete)
+
+    expect(complete).toHaveBeenCalledTimes(1)
+    for (const [phaseIndex, phase] of generated.phases.entries()) {
+      const systemPrompt = phase.tasks[0]!.systemPrompt
+      for (const dependencyId of dependencies[phaseIndex]!) {
+        expect(systemPrompt).toContain(`task ${dependencyId}`)
+        const producerPhase = Number(dependencyId.match(/^phase-(\d+)-/)![1])
+        expect(systemPrompt).toContain(`phase-${producerPhase}-result.md`)
+      }
+    }
+  })
+
+  it('adds a dependency locally when a task explicitly consumes a known producer output', async () => {
+    const plan = validPlan(1)
+    const producer = plan.phases[0]!.tasks[0]!
+    producer.id = 'phase-1-task-1'
+    producer.expectedArtifacts = ['Research findings']
+    const consumer = {
+      ...producer,
+      id: 'phase-1-task-2',
+      title: 'Summarize research',
+      systemPrompt: 'Use the output from task phase-1-task-1 (Research findings) to write the summary.',
+      dependsOnTaskIds: [],
+    }
+    plan.phases[0]!.tasks.push(consumer)
+    const complete = jest.fn(async (): Promise<string> => JSON.stringify(plan))
+
+    const generated = await generateValidPlan('Summarize the research', {}, 'mission-inferred-dependency', complete)
+
+    expect(generated.phases[0]?.tasks[1]?.dependsOnTaskIds).toEqual(['phase-1-task-1'])
+    expect(complete).toHaveBeenCalledTimes(1)
+  })
+
+  it('asks Brain to correct only a small batch of remaining issues at a time', async () => {
+    const invalidPlan = validPlan(4)
+    for (const phase of invalidPlan.phases) phase.tasks[0]!.agentRole = 'Human'
+    const partiallyCorrectedPlan = JSON.parse(JSON.stringify(invalidPlan)) as Plan
+    for (const phase of partiallyCorrectedPlan.phases.slice(0, 3)) phase.tasks[0]!.agentRole = 'analyst'
+    const requests: PlannerCompletionRequest[] = []
+    const responses = [
+      JSON.stringify(invalidPlan),
+      JSON.stringify(partiallyCorrectedPlan),
+      JSON.stringify(validPlan(4)),
+    ]
+    const complete = async (request: PlannerCompletionRequest): Promise<string> => {
+      requests.push(request)
+      return responses[request.attempt - 1]!
+    }
+
+    const generated = await generateValidPlan('Create a business plan', {}, 'mission-focused-refinement', complete)
+
+    expect(generated.phases[3]?.tasks[0]?.agentRole).toBe('analyst')
+    expect(requests).toHaveLength(3)
+    expect(requests[1]?.prompt).toContain('Make only these 3 correction(s)')
+    expect(requests[1]?.prompt).toContain('task "task-3" (phase 3, task 1).agentRole "Human" is not executable')
+    expect(requests[1]?.prompt).not.toContain('task "task-4" (phase 4, task 1).agentRole "Human" is not executable')
+    expect(requests[2]?.prompt).toContain('Make only these 1 correction(s)')
+    expect(requests[2]?.prompt).toContain('task "task-4" (phase 4, task 1).agentRole "Human" is not executable')
   })
 
   it('tracks consumed producer outputs without treating downstream or excluded task references as dependencies', () => {
@@ -269,10 +355,9 @@ describe('generateValidPlan', () => {
     const invalidPlan = JSON.parse(JSON.stringify(plan)) as Plan
     invalidPlan.phases[0]!.tasks[1]!.dependsOnTaskIds = []
     const requests: PlannerCompletionRequest[] = []
-    const responses = [JSON.stringify(invalidPlan), JSON.stringify(plan)]
     const complete = async (request: PlannerCompletionRequest): Promise<string> => {
       requests.push(request)
-      return responses[request.attempt - 1]!
+      return JSON.stringify(invalidPlan)
     }
 
     const generated = await generateValidPlan(
@@ -285,7 +370,8 @@ describe('generateValidPlan', () => {
     expect(generated.phases[0]?.tasks[1]?.requiredActions).toEqual([
       { toolId: 'calculate', outcome: 'success' },
     ])
-    expect(requests[1]?.prompt).toContain('requires recovery from a tool error')
+    expect(generated.phases[0]?.tasks[1]?.dependsOnTaskIds).toEqual(['phase-1-task-1'])
+    expect(requests).toHaveLength(1)
   })
 
   it('accepts one phase with more than five dependency-ordered tasks', async () => {
@@ -372,7 +458,6 @@ describe('generateValidPlan', () => {
     expect(requests.map((request) => request.attempt)).toEqual([1, 2, 3])
     expect(requests[1]?.prompt).toContain('task ids must be globally unique');
     expect(requests[1]?.prompt).toContain('task "task-1" (phase 2, task 1) duplicates');
-    expect(requests[1]?.prompt).toContain('Do not reuse task IDs across phases');
   })
 
   it('keeps requesting corrected plans until one passes validation', async () => {
@@ -448,6 +533,8 @@ describe('generateValidPlan', () => {
 
     expect(plan.phases).toHaveLength(3)
     expect(requests).toHaveLength(2)
+    expect(requests[1]?.prompt).toContain('Create a plan to achieve this goal: Create a business plan')
+    expect(requests[1]?.prompt).not.toContain('Make only these')
   })
 
   it('retries transient Brain failures while eligible models remain', async () => {

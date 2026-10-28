@@ -340,6 +340,7 @@ export function buildMissionEvents(options: {
   let events = Array.from(merged.values());
   events = dedupeTaskEvents(events);
   events = dedupePlannerProgress(events);
+  events = dedupePlannerAndReasoningEvents(events);
   events = listMilestonesOnce(events);
   events = dedupeTerminalAndApprovalEvents(events, detail?.status);
   events.sort((left, right) => {
@@ -435,6 +436,25 @@ function dedupeTerminalAndApprovalEvents(events: FeedEvent[], status?: string): 
 }
 
 /**
+ * Keeps only the first occurrence of planner_started and plan_generated per
+ * mission, and the first occurrence of each distinct monologue message. This
+ * prevents a mission that is re-fetched or recovered from flooding the
+ * conversation with duplicated planning and reasoning announcements.
+ */
+function dedupePlannerAndReasoningEvents(events: FeedEvent[]): FeedEvent[] {
+  const seen = new Set<string>();
+  return events.filter((event) => {
+    const type = String(event.type);
+    if (type === 'planner_started' || type === 'plan_generated' || type === 'monologue') {
+      const key = type === 'monologue' ? `${type}|${event.message}` : type;
+      if (seen.has(key)) return false;
+      seen.add(key);
+    }
+    return true;
+  });
+}
+
+/**
  * Keeps the first announcement of every mission milestone.
  */
 function listMilestonesOnce(events: FeedEvent[]): FeedEvent[] {
@@ -453,6 +473,15 @@ function listMilestonesOnce(events: FeedEvent[]): FeedEvent[] {
  * persisted without it, so the reason is taken from the mission state whenever
  * the event itself does not carry one.
  */
+export function friendlyMissionError(error: string): string {
+  const trimmed = (error || '').trim();
+  if (!trimmed) return 'Something went wrong. Please try again.';
+  if (/fetch failed|Agent Runtime API|status(?:Code)?:?\s*\d{3}|\{.*"success"\s*:/i.test(trimmed)) {
+    return 'Something went wrong while running the mission. Please try again.';
+  }
+  return trimmed;
+}
+
 function applyMissionError(events: FeedEvent[], missionError?: string): FeedEvent[] {
   if (!missionError) return events;
   return events.map((event) => {
@@ -462,7 +491,7 @@ function applyMissionError(events: FeedEvent[], missionError?: string): FeedEven
     if (typeof existing === 'string' && existing.trim().length > 0) return event;
     return {
       ...event,
-      message: `${FAILURE_LABELS[type] || 'Mission failed'}: ${missionError}`,
+      message: `${FAILURE_LABELS[type] || 'Mission failed'}: ${friendlyMissionError(missionError)}`,
       metadata: { ...(event.metadata || {}), error: missionError },
     };
   });

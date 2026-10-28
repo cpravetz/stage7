@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { friendlyMissionError } from '../utils/missionEvents';
 
 export type FeedEventType =
   | 'log'
@@ -101,7 +102,7 @@ export function normalize(raw: unknown): FeedEvent | null {
   if (!message) {
     switch (type) {
       case 'planner_started':
-        message = `Planning mission${(data.prompt as string) ? `: "${String(data.prompt).slice(0, 80)}"` : ''}`;
+        message = `Planning mission...`;
         break;
       case 'planner_progress': {
         const attempt = data.attempt !== undefined ? ` (attempt ${String(data.attempt)})` : '';
@@ -175,7 +176,7 @@ export function normalize(raw: unknown): FeedEvent | null {
         message = 'Mission resumed';
         break;
       case 'mission_failed':
-        message = `Mission failed: ${(r.error as string) || (data.error as string) || ''}`.trim();
+        message = `Mission failed: ${friendlyMissionError((r.error as string) || (data.error as string) || '')}`.trim();
         break;
       case 'tool':
         message = (data.tool as string) || (data.name as string) || 'Tool call';

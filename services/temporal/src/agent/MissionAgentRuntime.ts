@@ -50,6 +50,7 @@ const MISSION_COMPLETION_REVIEW_EXECUTION_POLICY: AgentExecutionPolicy = {
   maxDelegations: 0,
 };
 const MAX_SAFE_AGENT_TASK_RETRIES = 1;
+const ASK_USER_MARKER = '__ASK_USER__:';
 const MAX_ACTION_RECEIPTS = 50;
 
 export interface MissionPhaseReview {
@@ -1004,17 +1005,52 @@ export class MissionAgentRuntime {
     }
     const result = completed.result as Partial<TaskExecutionResult> | undefined;
     const output = typeof result?.output === 'string' ? result.output : '';
-    const expectedArtifacts = request.expectedArtifacts || [];
-    const artifacts = this.parseArtifacts(result?.artifacts, output, expectedArtifacts, submitted.taskId);
-    this.assertExpectedArtifacts(artifacts, expectedArtifacts, submitted.taskId);
-    const actionReceipts = this.parseActionReceipts(result?.actionReceipts, submitted.taskId);
-    const tokensUsed = typeof result?.tokensUsed === 'number' ? result.tokensUsed : 0;
     const model = result?.model;
     const provider = result?.provider;
     const requestId = result?.requestId;
     const reasoning = typeof result?.reasoning === 'string' && result.reasoning.trim().length > 0
       ? result.reasoning
       : undefined;
+
+    // Detect __ask_user marker - agent is asking user a question mid-execution
+    if (output.startsWith(ASK_USER_MARKER)) {
+      const questionPayload = output.slice(ASK_USER_MARKER.length)
+      let questionText = ''
+      try {
+        const parsed = JSON.parse(questionPayload)
+        if (typeof parsed.question === 'string') {
+          questionText = parsed.question
+        }
+      } catch {
+        questionText = questionPayload
+      }
+      // Broadcast the question to the user
+      if (this.broadcast) {
+        await this.broadcast({
+          type: 'question_asked',
+          missionId: this.missionId,
+          timestamp: Date.now(),
+          data: { question: questionText, taskId: submitted.taskId },
+        })
+      }
+      // Return a result that indicates the task is waiting for user input
+      return {
+        output,
+        artifacts: [],
+        actionReceipts: [],
+        tokensUsed: 0,
+        model,
+        provider,
+        requestId,
+        reasoning,
+      }
+    }
+
+    const expectedArtifacts = request.expectedArtifacts || [];
+    const artifacts = this.parseArtifacts(result?.artifacts, output, expectedArtifacts, submitted.taskId);
+    this.assertExpectedArtifacts(artifacts, expectedArtifacts, submitted.taskId);
+    const actionReceipts = this.parseActionReceipts(result?.actionReceipts, submitted.taskId);
+    const tokensUsed = typeof result?.tokensUsed === 'number' ? result.tokensUsed : 0;
     if (reasoning && this.broadcast) {
       await this.broadcast({
         type: 'monologue',
@@ -1074,7 +1110,7 @@ export class MissionAgentRuntime {
     completedDependencies: CompletedTaskSummary[],
   ): string {
     const artifactOutputContract = task.expectedArtifacts.length > 0
-      ? `Return one Markdown section headed by the exact name of each expected artifact: ${task.expectedArtifacts.map((name) => `## ${name}`).join(', ')}. Put only that artifact's verified result under its heading.`
+      ? `Report verified results for each expected artifact (${task.expectedArtifacts.join(', ')}). Include each artifact's actual result under a clear heading using its exact name. If the work cannot be completed with available tools or context, state the specific blocker instead — do not fabricate results or claim actions that were not executed.`
       : 'Return only the verified result for this task.';
     return (
       `Task: ${task.title}\n\n` +
@@ -1308,18 +1344,28 @@ export class MissionAgentRuntime {
     }
   }
 
-  async createCollaboration(participants: string[], topic: string): Promise<string> {
-    const collab = await this.api<AgentCollaboration>(
-      `/missions/${this.missionId}/collaborations`,
-      { method: 'POST', body: JSON.stringify({ participants }) }
-    );
-    return collab.collaborationId;
+  async stopAgent(agentId: string): Promise<void> {
+    try {
+      await this.api(this.missionAgentPath(agentId, 'stop'), { method: 'POST' });
+    } catch (error) {
+      if (error instanceof MissionAgentRuntimeApiError && error.status === 404) return;
+      throw error;
+    }
   }
 
-  async sendCollaborationMessage(collabId: string, from: string, content: string): Promise<void> {
-    await this.api(
-      `/missions/${this.missionId}/collaborations/${collabId}/messages`,
-      { method: 'POST', body: JSON.stringify({ from, content }) }
-    );
+  async stopAllAgents(): Promise<void> {
+    try {
+      await this.api(`/missions/${this.missionId}/agents/stop-all`, { method: 'POST' });
+      return;
+    } catch (error) {
+      // Fallback to stopping individually
+    }
+    try {
+      const agents = await this.listAgents();
+      await Promise.allSettled(agents.map((a) => this.stopAgent(a.id)));
+    } catch (error) {
+      // Best effort - don't fail mission completion if stopping agents fails
+      logger.warn({ missionId: this.missionId, error: error instanceof Error ? error.message : String(error) }, 'Failed to stop agents');
+    }
   }
 }

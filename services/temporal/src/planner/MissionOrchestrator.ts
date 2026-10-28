@@ -607,6 +607,15 @@ export class MissionOrchestrator {
       });
     }
 
+    // Stop all mission agents when mission completes (success or incomplete)
+    try {
+      if (this.agentRuntime) {
+        await this.agentRuntime.stopAllAgents();
+      }
+    } catch (err) {
+      logger.warn({ missionId: ctx.missionId, err: err instanceof Error ? err.message : String(err) }, 'Failed to stop agents on mission completion');
+    }
+
     MissionOrchestrator.unregister(ctx.missionId);
     return { plan, outputs, compensations };
     } finally {

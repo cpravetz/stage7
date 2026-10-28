@@ -1,4 +1,4 @@
-import { LLMProvider } from '../providers/Provider';
+import type { ModelFormat } from '../providers/Provider';
 
 export interface ModelDefinition {
   id: string;
@@ -6,8 +6,8 @@ export interface ModelDefinition {
   costPer1kTokens: number;
   maxTokens: number;
   capabilities: string[];
-  inputFormat?: string;
-  outputFormat?: string;
+  inputFormat?: ModelFormat;
+  outputFormat?: ModelFormat;
 }
 
 export interface ProviderHealth {
@@ -39,15 +39,8 @@ export interface ModelPerformanceOutcome {
   complaintRate: number;
 }
 
-type PerformanceMetricsMap = ReadonlyMap<string, ModelPerformanceOutcome | { successRate: number; avgLatencyMs: number; avgCostPerRequest: number; totalRequests: number; totalCost?: number; costRequests?: number; complaintCount?: number; complaintRate?: number }>;
-
-const FREE_PROVIDER_PRIORITY: Record<string, number> = {} as Record<string, number>;
 const RESPONSE_TIME_BASELINE_MS = 30_000;
 const RESPONSE_TIME_SCORE_RANGE = 80;
-
-function providerPriority(provider: string): number {
-  return FREE_PROVIDER_PRIORITY[provider] ?? 10;
-}
 
 function modelSpecializationPenalty(model: ModelDefinition, task: string): number {
   const id = model.id.toLowerCase();
@@ -84,6 +77,35 @@ function inferCapabilities(task: string): string[] {
   }
   if (matched.size === 0) matched.add('chat');
   return Array.from(matched);
+}
+
+function formatValues(format: ModelFormat): string[] {
+  const values = Array.isArray(format) ? format : [format];
+  return values.flatMap((value) => value.toLowerCase().split(/[,+\s]+/)).filter(Boolean);
+}
+
+function isMediaFormat(format: string): boolean {
+  return ['image', 'audio', 'video'].includes(format.toLowerCase());
+}
+
+function supportsRequestedFormat(
+  modelFormat: ModelFormat | undefined,
+  requestedFormat: string,
+  capabilities: string[],
+  direction: 'input' | 'output',
+): boolean {
+  if (modelFormat !== undefined) {
+    return formatValues(modelFormat).includes(requestedFormat.toLowerCase());
+  }
+  if (!isMediaFormat(requestedFormat)) return true;
+
+  const format = requestedFormat.toLowerCase();
+  if (direction === 'input') {
+    return format === 'image' || format === 'video'
+      ? capabilities.includes('vision')
+      : capabilities.includes(format);
+  }
+  return capabilities.includes(`${format}_generation`);
 }
 
 function getOptimizeForPriority(model: ModelDefinition, optimizeFor: string): number {
@@ -183,12 +205,10 @@ export class ModelRouter {
       }
       if (isExcluded(m)) return false;
       if (options.inputFormat) {
-        const modelInput = (m as any).inputFormat;
-        if (modelInput && modelInput !== options.inputFormat) return false;
+        if (!supportsRequestedFormat(m.inputFormat, options.inputFormat, m.capabilities, 'input')) return false;
       }
       if (options.outputFormat) {
-        const modelOutput = (m as any).outputFormat;
-        if (modelOutput && modelOutput !== options.outputFormat) return false;
+        if (!supportsRequestedFormat(m.outputFormat, options.outputFormat, m.capabilities, 'output')) return false;
       }
       return true;
     });
@@ -199,15 +219,28 @@ export class ModelRouter {
       cap !== 'search' || availableCapabilities.has(cap),
     );
     if (requiredCaps.length === 0) requiredCaps.push('chat');
+    requiredCaps.push('chat');
 
     let candidates = eligibleModels.filter((model) =>
       requiredCaps.every((cap) => model.capabilities.includes(cap)),
     );
 
     if (candidates.length === 0) {
-      candidates = eligibleModels.filter((model) =>
-        requiredCaps.some((cap) => model.capabilities.includes(cap)),
-      );
+      // Fallback: prefer models that have the core capability (chat for text tasks)
+      if (requiredCaps.includes('chat')) {
+        candidates = eligibleModels.filter((model) =>
+          model.capabilities.includes('chat'),
+        );
+        if (candidates.length === 0) {
+          candidates = eligibleModels.filter((model) =>
+            requiredCaps.some((cap) => model.capabilities.includes(cap)),
+          );
+        }
+      } else {
+        candidates = eligibleModels.filter((model) =>
+          requiredCaps.some((cap) => model.capabilities.includes(cap)),
+        );
+      }
     }
 
     const generalCandidates = candidates.filter((candidate) => modelSpecializationPenalty(candidate, options.task) === 0);
@@ -219,7 +252,10 @@ export class ModelRouter {
     }));
 
     scored.sort((a, b) => b.score - a.score);
-    return scored;
+    // Prefer chat-capable models for text tasks
+    // Ensure text models are preferred for chat tasks
+    const final = scored.filter((c) => c.model.capabilities.includes('chat'));
+    return final.length > 0 ? final : scored;
   }
 
   private scoreModel(model: ModelDefinition, options: { task: string; optimizeFor?: string; freeOnly?: boolean }, requiredCaps: string[]): number {

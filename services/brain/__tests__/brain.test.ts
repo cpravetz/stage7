@@ -28,7 +28,7 @@ class MockProvider implements LLMProvider {
   isAvailable(): boolean { return true; }
   async listModels() {
     return [
-      { id: 'mock-model', capabilities: ['chat', 'code', 'reasoning', 'creative'], maxTokens: 128000, costPer1kTokens: 0.1 },
+      { id: 'mock-model', capabilities: ['chat', 'code', 'reasoning', 'creative'], maxTokens: 128000, costPer1kTokens: 0.1, inputFormat: 'image', outputFormat: 'text' },
       { id: 'mock-expensive', capabilities: ['chat'], maxTokens: 8192, costPer1kTokens: 5 },
     ];
   }
@@ -403,6 +403,32 @@ describe('BrainService', () => {
     expect(mockProviderInstance.lastRequest?.model).toBe('mock-expensive');
   });
 
+  it('does not open the provider circuit for model-scoped errors', async () => {
+    const previousThreshold = process.env.BRAIN_CIRCUIT_THRESHOLD;
+    process.env.BRAIN_CIRCUIT_THRESHOLD = '1';
+    mockProviderInstance.modelFailures.set(
+      'mock-model',
+      new Error('[mock] completion failed: 403 {"error":{"message":"This model is only available on agentic harnesses"}}'),
+    );
+
+    try {
+      const thresholdBrain = new BrainService();
+      const result = await thresholdBrain.complete('Describe the model-scoped circuit case', {
+        routingSessionId: 'mission-model-scoped-circuit',
+      });
+
+      expect(result.content).toBe('mocked response');
+      expect(mockProviderInstance.lastRequest?.model).toBe('mock-expensive');
+      expect(thresholdBrain.getCircuitBreakerStats().find((stat) => stat.provider === 'mock')).toMatchObject({
+        state: 'closed',
+        failures: 0,
+      });
+    } finally {
+      if (previousThreshold === undefined) delete process.env.BRAIN_CIRCUIT_THRESHOLD;
+      else process.env.BRAIN_CIRCUIT_THRESHOLD = previousThreshold;
+    }
+  });
+
   it('keeps the provider usable when a model is forbidden for the account', async () => {
     mockProviderInstance.modelFailures.set(
       'mock-model',
@@ -424,14 +450,18 @@ describe('BrainService', () => {
       '[mock] completion failed: 403 {"error":{"message":"Your organization is not allowed to use this provider"}}',
     );
 
-    await expect(
-      brain.complete('Describe the forbidden provider case', {
-        routingSessionId: 'mission-403-provider:planner',
-      }),
-    ).rejects.toBeDefined();
+    const options = { missionId: 'mission-403-provider', routingSessionId: 'mission-403-provider:planner' };
+    await expect(brain.complete('Describe the forbidden provider case', options)).rejects.toBeDefined();
 
     const stats = brain.getCircuitBreakerStats();
     expect(stats.find((s) => s.provider === 'mock')?.state).toBe('open');
+
+    await expect(brain.complete('Retry while the provider circuit is open', options)).rejects.toMatchObject({
+      details: {
+        code: BRAIN_MODEL_SELECTION_RETRY,
+        remainingModelCount: 1,
+      },
+    });
   });
 
   it('reloads persisted measured outcomes and uses them in a later Brain instance', async () => {

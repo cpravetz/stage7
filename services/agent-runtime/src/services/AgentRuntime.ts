@@ -239,6 +239,20 @@ export class AgentRuntime {
     }
   }
 
+  stopAllAgentsForMission(missionId: string): void {
+    const map = this.missionAgents.get(missionId)
+    if (!map) return
+    for (const agentId of map.keys()) {
+      const state = this.states.get(agentId)
+      if (state) {
+        state.status = 'idle'
+        state.completedAt = state.completedAt || new Date().toISOString()
+        this.states.set(agentId, state)
+        logger.info({ agentId, missionId }, 'Agent stopped on mission completion')
+      }
+    }
+  }
+
   getAgentState(agentId: string): AgentState | undefined {
     return this.states.get(agentId)
   }

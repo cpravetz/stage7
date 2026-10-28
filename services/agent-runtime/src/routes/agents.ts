@@ -124,10 +124,14 @@ router.post('/missions/:missionId/agents/:id/start', asyncHandler(async (req: Re
   res.status(201).json(state)
 }))
 
-router.post('/missions/:missionId/agents/:id/stop', asyncHandler(async (req: Request, res: Response) => {
-  const { id, missionId } = req.params as { id: string; missionId: string }
-  requireMissionAgent(missionId, id)
-  await runtime.stopAgent(id)
+router.post('/missions/:missionId/agents/stop-all', asyncHandler(async (req: Request, res: Response) => {
+  const { missionId } = req.params as { missionId: string }
+  if (typeof (runtime as any).stopAllAgentsForMission === 'function') {
+    await (runtime as any).stopAllAgentsForMission(missionId)
+  } else {
+    const agents = runtime.listAgentsForMission(missionId)
+    await Promise.allSettled(agents.map((a) => runtime.stopAgent(a.id)))
+  }
   res.status(204).send()
 }))
 

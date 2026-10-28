@@ -89,10 +89,23 @@ export class PersistentAgentRuntime {
   }
 
   async stopAgent(agentId: string): Promise<void> {
-    this.runtime.stopAgent(agentId);
-    const state = this.runtime.getAgentState(agentId);
+    this.runtime.stopAgent(agentId)
+    const state = this.runtime.getAgentState(agentId)
     if (state) {
-      await this.persistState(state);
+      await this.persistState(state)
+    }
+  }
+
+  async stopAllAgentsForMission(missionId: string): Promise<void> {
+    if (typeof (this.runtime as any).stopAllAgentsForMission === 'function') {
+      (this.runtime as any).stopAllAgentsForMission(missionId);
+      const map = (this.runtime as any).missionAgents?.get(missionId);
+      if (map) {
+        for (const agentId of map.keys()) {
+          const state = this.runtime.getAgentState(agentId);
+          if (state) await this.persistState(state);
+        }
+      }
     }
   }
 

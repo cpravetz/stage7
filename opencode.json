@@ -11,16 +11,17 @@
         "codeqwen:latest": {
           "name": "codeqwen:latest"
         },
-        "mistral:7b":{
-            "name": "mistral:7b"
+        "mistral:7b": {
+          "name": "mistral:7b"
         },
         "gpt-oss:20b": {
           "name": "gpt-oss:20b"
         },
-		"bjoernb/qwen3-coder-30b": {
-			"name": "bjoernb/qwen3-coder-30b"
-		}
+        "bjoernb/qwen3-coder-30b": {
+          "name": "bjoernb/qwen3-coder-30b"
+        }
       }
     }
-  }
+  },
+  "snapshot": false
 }

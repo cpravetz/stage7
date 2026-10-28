@@ -252,7 +252,7 @@ export class TemporalClient {
       tenantId: input.tenantId || '',
       assistantId: input.assistantId || '',
       status: result.status,
-      controlState: result.status === 'canceled' ? 'terminated' : 'running',
+      controlState: result.status === 'canceled' ? 'terminated' : undefined,
       currentStep: 1,
       totalSteps: 1,
       history,
@@ -817,6 +817,16 @@ export class TemporalClient {
           logger.info({ missionId: input.missionId }, 'Skipping mission recovery; another process owns its lease');
           continue;
         }
+
+        const persistedOutput = (mission as { output?: unknown }).output as
+          | { outputs?: { phases?: Array<{ status?: string }> } }
+          | undefined;
+        const phases = persistedOutput?.outputs?.phases;
+        if (phases && phases.length > 0 && phases.every((p) => p.status === 'completed')) {
+          logger.info({ missionId: input.missionId }, 'Skipping mission recovery; all phases already completed');
+          continue;
+        }
+
         await this.startMission(input, checkpoint, claimed);
         recovered++;
       } catch (error) {

@@ -126,17 +126,19 @@ describe('ModelRouter performance outcomes', () => {
     expect(candidates.map(({ model: candidate }) => candidate.id)).toEqual(['general-chat']);
   });
 
-  it('filters models by inputFormat', () => {
+  it('filters models by inputFormat and media input capability', () => {
     const router = new ModelRouter();
     router.registerModel(modelWithFormats('text-in', 'text', undefined));
     router.registerModel(modelWithFormats('image-in', 'image', undefined));
     router.registerModel(modelWithFormats('any-in', undefined, undefined));
+    router.registerModel({ ...model('image-capable'), capabilities: ['chat', 'vision'] });
 
     const candidates = router.getCandidates({ task: 'chat response', inputFormat: 'image' });
 
     const candidateIds = candidates.map(({ model: candidate }) => candidate.id);
     expect(candidateIds).toContain('image-in');
-    expect(candidateIds).toContain('any-in');
+    expect(candidateIds).toContain('image-capable');
+    expect(candidateIds).not.toContain('any-in');
     expect(candidateIds).not.toContain('text-in');
   });
 
@@ -170,6 +172,38 @@ describe('ModelRouter performance outcomes', () => {
     expect(candidateIds).toContain('img-to-code');
     expect(candidateIds).not.toContain('img-to-text');
     expect(candidateIds).not.toContain('text-to-text');
+  });
+
+  it('matches media formats declared as modality arrays', () => {
+    const router = new ModelRouter();
+    router.registerModel({
+      ...model('multimodal'),
+      inputFormat: ['text', 'image'],
+      outputFormat: ['text', 'image'],
+    });
+
+    const candidates = router.getCandidates({
+      task: 'chat response',
+      inputFormat: 'image',
+      outputFormat: 'image',
+    });
+
+    expect(candidates.map(({ model: candidate }) => candidate.id)).toEqual(['multimodal']);
+  });
+
+  it('requires explicit media-generation support for media outputs', () => {
+    const router = new ModelRouter();
+    router.registerModels([
+      modelWithFormats('unknown-output'),
+      {
+        ...model('image-output'),
+        capabilities: ['chat', 'image_generation'],
+      },
+    ]);
+
+    const candidates = router.getCandidates({ task: 'chat response', outputFormat: 'image' });
+
+    expect(candidates.map(({ model: candidate }) => candidate.id)).toEqual(['image-output']);
   });
 
   it('does not exclude models that do not declare formats when none requested', () => {

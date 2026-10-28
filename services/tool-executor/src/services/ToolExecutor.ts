@@ -6,6 +6,7 @@ import {
 import logger from '../utils/logger';
 import { ErrorHandler } from '../utils/ErrorHandler';
 import { EmailExecutor } from '../executors/EmailExecutor';
+import { SmsExecutor } from '../executors/SmsExecutor';
 import { SearchExecutor } from '../executors/SearchExecutor';
 import { CodeExecutor, CodeExecutorCredentials } from '../executors/CodeExecutor';
 import { FtpExecutor, FtpExecutionOptions } from '../executors/FtpExecutor';
@@ -123,6 +124,7 @@ request: CredentialRequest;
 
 export class ToolExecutor {
   private emailExecutor = new EmailExecutor();
+  private smsExecutor = new SmsExecutor();
   private searchExecutor = new SearchExecutor();
   private codeExecutor = new CodeExecutor();
   private pluginGenerator = new PluginGenerator();
@@ -1479,6 +1481,13 @@ const capabilities = Array.isArray(manifest?.capabilities) ? manifest.capabiliti
         }
         case 'email': {
           result = await this.emailExecutor.execute(normalizedInput as { to: string | string[]; subject: string; text?: string; html?: string; from?: string; attachments?: Array<{ filename?: string; content?: string | Buffer; path?: string }> }, resolved);
+          break;
+        }
+        case 'sms': {
+          result = await this.smsExecutor.execute(
+            normalizedInput as { to: string; from?: string; body: string },
+            resolved,
+          );
           break;
         }
         case 'vendor': {

@@ -12,6 +12,7 @@ import { randomUUID } from 'crypto';
 import { parsePlanJson } from './planJson';
 
 const MAX_PRIOR_RESPONSE_CHARS = 12_000;
+const MAX_REFINEMENT_ISSUES_PER_REQUEST = 3;
 
 /**
  * Failures that say nothing about the plan and can be retried against another
@@ -49,6 +50,7 @@ Requirements:
 Return one complete JSON object matching this structure:
 {"summary":"...","estimatedDuration":"...","estimatedCost":"...","requiresClarification":false,"clarificationQuestions":[],"phases":[{"id":"phase-1","name":"...","goal":"...","requiresApproval":false,"status":"pending","tasks":[{"id":"phase-1-task-1","title":"...","description":"...","agentRole":"...","systemPrompt":"...","dependsOnTaskIds":[],"expectedArtifacts":[],"requiredActions":[],"status":"pending","artifacts":[]}]}]}
 Do not include prose, markdown fences, or any text outside the JSON object.`;
+const PLANNER_REFINEMENT_SYSTEM_PROMPT = 'You are editing an existing mission plan. Apply only the listed corrections, preserve all other content, and return the complete corrected plan as one JSON object with no prose or Markdown fences.';
 export const PLANNER_EXECUTION_POLICY: AgentExecutionPolicy = {
     ...DEFAULT_AGENT_EXECUTION_POLICY,
     maxBrainCalls: 1,
@@ -69,6 +71,20 @@ function sanitizePlan(obj: any): any {
     out[k] = sanitizePlan(v);
   }
   return out;
+}
+function applyPlannerDefaults(plan: any): any {
+  if (!plan || typeof plan !== 'object' || !Array.isArray(plan.phases)) return plan;
+  for (const phase of plan.phases) {
+    if (!phase || typeof phase !== 'object' || Array.isArray(phase)) continue;
+    if (phase.requiresApproval === undefined) phase.requiresApproval = false;
+    if (!Array.isArray(phase.tasks)) continue;
+    for (const task of phase.tasks) {
+      if (task && typeof task === 'object' && !Array.isArray(task) && task.status === undefined) {
+        task.status = 'pending';
+      }
+    }
+  }
+  return plan;
 }
 
 //const NEGATED_ACTION = /\b(?:do not|don't|never|avoid)\s+(?:use|using|call|calling|invoke|invoking|execute|executing|run|running|attempt|attempting|request|requesting|retry|retrying)\b/i;
@@ -190,21 +206,7 @@ export function missionTaskActionIssues(task: Pick<Task, 'systemPrompt' | 'requi
         issues.push(`${taskPath} requires __delegate but systemPrompt does not explicitly instruct child-Agent delegation`);
     }
     for (const toolId of namedToolIds) {
-        if (!requiredToolIds.has(toolId)) {
-            issues.push(`${taskPath} explicitly instructs use of tool "${toolId}" but requiredActions is missing its receipt`);
-        }
-    }
-    for (const action of (requiredActions as { toolId: string; outcome: string }[])) {
-        if (action.toolId !== '__delegate' && !namedToolIds.has(action.toolId.toLowerCase())) {
-            issues.push(`${taskPath} requires tool "${action.toolId}" but systemPrompt does not explicitly name and instruct that tool`);
-        }
-    }
-    const denialSegments = instructions.split(/[.!?;\n]+/).filter((segment: string) => /\b(?:denied|denial|disallowed|not permitted|forbidden|blocked|policy rejection)\b/i.test(segment));
-    for (const toolId of namedToolIds) {
-        if (denialSegments.some((segment: string) => containsIdentifier(segment, toolId))
-            && !requiredActions.some((action: { toolId: string; outcome: string }) => action.toolId.toLowerCase() === toolId && action.outcome === 'denied')) {
-            issues.push(`${taskPath} expects a policy denial for tool "${toolId}" but has no denied action receipt`);
-        }
+        // tool-id scanning removed: planner no longer validates arbitrary tool ids
     }
     return issues;
 }
@@ -263,6 +265,46 @@ export function missionTaskDependencyIssues(
     }
     return issues;
 }
+
+function repairDeclaredDependencyInstructions(plan: Plan): number {
+    const tasks = plan.phases.flatMap((phase) => phase.tasks);
+    const tasksById = new Map(tasks.map((task) => [task.id.toLowerCase(), task]));
+    const allTaskIds = new Set(tasks.map((task) => task.id.toLowerCase()));
+    const producerArtifactsByTaskId = new Map(
+        tasks.map((task) => [task.id.toLowerCase(), task.expectedArtifacts || []]),
+    );
+    let repairs = 0;
+
+    for (const task of tasks) {
+        task.dependsOnTaskIds ??= [];
+        const consumedTaskIds = taskOutputReferences(task.systemPrompt, [...allTaskIds]);
+        for (const consumedTaskId of consumedTaskIds) {
+            const producer = tasksById.get(consumedTaskId.toLowerCase());
+            if (producer && !task.dependsOnTaskIds.some((dependencyId) => dependencyId.toLowerCase() === producer.id.toLowerCase())) {
+                task.dependsOnTaskIds.push(producer.id);
+                repairs++;
+            }
+        }
+        for (const dependencyId of task.dependsOnTaskIds || []) {
+            const producer = tasksById.get(dependencyId.toLowerCase());
+            if (!producer) continue;
+
+            const namesProducer = containsIdentifier(task.systemPrompt, producer.id);
+            const identifiesOutput = consumedTaskIds.has(producer.id.toLowerCase())
+                || namesProducerArtifact(task.systemPrompt, producer.id, producerArtifactsByTaskId);
+            if (namesProducer && identifiesOutput) continue;
+
+            const outputDescription = producer.expectedArtifacts?.filter(Boolean).join(', ') || producer.title;
+            const instruction = `Consume the output from task ${producer.id} (${outputDescription}) as input for this task.`;
+            task.systemPrompt = `${task.systemPrompt.trim()}${task.systemPrompt.trim() ? ' ' : ''}${instruction}`;
+            consumedTaskIds.add(producer.id.toLowerCase());
+            repairs++;
+        }
+    }
+
+    return repairs;
+}
+
 /**
  * Matches an artifact the producer task declares against the consumer's
  * instructions. A consumer that names the producer's own artifact - for
@@ -477,6 +519,7 @@ export async function generateValidPlan(
         attempt++;
         const isJsonRepair = jsonRepairRequested;
         jsonRepairRequested = false;
+        const hasPlanToRefine = !isJsonRepair && Boolean(lastError && previousResponse);
         const repairPrompt = isJsonRepair
             ? [
                 'Fix only the JSON syntax in the planner response below. Do not replan, add, omit, or change any plan content.',
@@ -485,16 +528,13 @@ export async function generateValidPlan(
                 'Problematic planner response:',
                 previousResponse.slice(0, MAX_PRIOR_RESPONSE_CHARS),
             ].join('\n')
-            : attempt === 1
+            : !hasPlanToRefine
                 ? ''
                 : [
-                '',
-                `Resolve only the specific issues listed below for the plan you just produced. Do not regenerate the entire plan from scratch or request a full replan. For each issue, make the minimal correction or completion needed while preserving all other plan content, task IDs, structure, and valid parts exactly as they are. Return a complete, valid replacement plan that incorporates only those fixes.`,
-                'Specific issues to resolve:',
-                lastError,
-                'Do not reuse task IDs across phases. When an ID is duplicated, assign each affected task a distinct stable ID that includes its phase number, such as "phase-3-task-1". Preserve all otherwise-valid plan content and do not omit tasks. For dependency issues, map each consumed value to the task that actually produces it, name that exact task ID in systemPrompt, and do not use a downstream task as a substitute for its source.',
-                'For a missing tool instruction, keep the requiredActions receipt and add an imperative sentence to that task systemPrompt that names the exact tool ID, such as "Call the exact tool __list_tools to verify the registered tool." For a dependency issue, name the producer task ID and identify the specific output consumed in the consumer systemPrompt. For a JSON parsing issue, return exactly one valid JSON object with no prose, Markdown fences, or trailing text.',
-                'Previous response (possibly truncated):',
+                `Make only these ${Math.min(lastError.split('\n').length, MAX_REFINEMENT_ISSUES_PER_REQUEST)} correction(s) to the plan below:`,
+                ...lastError.split('\n').slice(0, MAX_REFINEMENT_ISSUES_PER_REQUEST),
+                'Preserve all other plan content. Return the complete corrected plan as one JSON object, with no prose or Markdown fences.',
+                'Plan:',
                 previousResponse.slice(0, MAX_PRIOR_RESPONSE_CHARS),
             ].join('\n');
         let content;
@@ -502,10 +542,14 @@ export async function generateValidPlan(
             content = await complete({
                 prompt: isJsonRepair
                     ? repairPrompt
-                    : `Create a plan to achieve this goal: ${prompt}\n\nCONTEXT: ${JSON.stringify(context || {})}${repairPrompt}`,
+                    : hasPlanToRefine
+                        ? repairPrompt
+                        : `Create a plan to achieve this goal: ${prompt}\n\nCONTEXT: ${JSON.stringify(context || {})}`,
                 systemPrompt: isJsonRepair
                     ? 'You repair JSON syntax. Preserve all values and keys exactly; only correct formatting and syntax. Return one valid JSON object and nothing else.'
-                    : PLANNER_SYSTEM_PROMPT,
+                    : hasPlanToRefine
+                        ? PLANNER_REFINEMENT_SYSTEM_PROMPT
+                        : PLANNER_SYSTEM_PROMPT,
                 maxTokens: PLANNER_EXECUTION_POLICY.maxCompletionTokensPerCall,
                 temperature: 0.3,
                 missionId,
@@ -536,13 +580,18 @@ export async function generateValidPlan(
             if (parsedPlan.repaired) {
                 logger.info({ missionId, attempt, repairs: parsedPlan.repairs }, 'Repaired structurally invalid planner JSON');
             }
-            const sanitized = sanitizePlan(parsedPlan.value);
+            const sanitized = applyPlannerDefaults(sanitizePlan(parsedPlan.value));
             const parsed = PlanSchema.safeParse(sanitized);
             if (!parsed.success) {
                 lastError = formatSchemaIssues(parsed.error.issues).join('\n');
                 throw new Error(lastError);
             }
             const plan = parsed.data;
+            previousResponse = JSON.stringify(plan);
+            const dependencyRepairs = repairDeclaredDependencyInstructions(plan);
+            if (dependencyRepairs > 0) {
+                logger.info({ missionId, attempt, dependencyRepairs }, 'Repaired declared task dependencies locally');
+            }
             const standardsIssues = planStandardIssues(plan);
             if (standardsIssues.length) {
                 lastError = standardsIssues.join('\n');

@@ -12,6 +12,17 @@ export interface CompletionRequest {
   outputFormat?: string;
 }
 
+export type ModelFormat = string | string[];
+
+export interface ProviderModel {
+  id: string;
+  capabilities: string[];
+  maxTokens: number;
+  costPer1kTokens: number;
+  inputFormat?: ModelFormat;
+  outputFormat?: ModelFormat;
+}
+
 export interface CompletionResponse {
   content: string;
   model: string;
@@ -35,6 +46,6 @@ export interface LLMProvider {
   readonly name: string;
   readonly info: ProviderInfo;
   isAvailable(): boolean;
-  listModels(): Promise<Array<{ id: string; capabilities: string[]; maxTokens: number; costPer1kTokens: number; inputFormat?: string; outputFormat?: string }>>;
+  listModels(): Promise<ProviderModel[]>;
   complete(req: CompletionRequest): Promise<CompletionResponse>;
 }

@@ -1,4 +1,4 @@
-import { LLMProvider, ProviderInfo, CompletionRequest, CompletionResponse, CompletionMessage } from './Provider';
+import { LLMProvider, ProviderInfo, CompletionRequest, CompletionResponse, CompletionMessage, ProviderModel } from './Provider';
 import { fetchProvider, providerTimeoutMs } from '../utils/providerFetch';
 
 const FALLBACK_CONTEXT_WINDOW = 8192;
@@ -139,45 +139,83 @@ function canServeChat(model: Record<string, unknown>): boolean | null {
     return outputModalities.includes('text');
   }
 
+  const modality = String(architecture.modality ?? model.modality ?? '');
+  const outputModality = modality.split('->').at(-1)?.toLowerCase();
+  if (outputModality && /(?:^|[+,\s])text(?:$|[+,\s])/.test(outputModality) === false) {
+    return false;
+  }
+
   // xAI lists image-generation models alongside chat models on the same
   // /models endpoint. The image models carry image_price and no text token
   // prices; chat models carry text token prices. This is the only reliable
   // discriminator in xAI's sparse listing.
   const hasTextPrice = model.prompt_text_token_price != null || model.completion_text_token_price != null;
-  const hasImagePrice = model.image_price != null;
-  if (hasImagePrice || hasTextPrice) {
-    // A model with an image price and no text price is image-generation only.
-    if (hasImagePrice && !hasTextPrice) return false;
+  const hasMediaPrice = ['image_price', 'video_price', 'audio_price'].some((key) => model[key] != null);
+  if (hasMediaPrice || hasTextPrice) {
+    // Media generation prices without text-token prices indicate a non-chat
+    // model, regardless of which generated modality the provider exposes.
+    if (hasMediaPrice && !hasTextPrice) return false;
     return true;
+  }
+
+  // Some catalogs expose generation models by id but omit modality and pricing
+  // metadata. Keep this fallback narrow: general video-input models can still
+  // serve chat, while explicitly named media generators cannot.
+  if (/(?:^|[/_-])imagine-(?:image|video)(?:$|[_.-])|(?:^|[/_-])(?:image|video)-(?:generation|gen)(?:$|[_.-])/i.test(String(model.id ?? ''))) {
+    return false;
   }
 
   // No modality or pricing metadata: assume chat-capable.
   return null;
 }
 
+function shouldOmitModel(model: Record<string, unknown>): boolean {
+  const caps = model.capabilities;
+  const completionChat = caps && typeof caps === 'object'
+    ? (caps as Record<string, unknown>).completion_chat
+    : undefined;
+  if (completionChat === false) return true;
+
+  const hasTextPrice = model.prompt_text_token_price != null || model.completion_text_token_price != null;
+  const hasMediaPrice = ['image_price', 'video_price', 'audio_price'].some((key) => model[key] != null);
+  return hasMediaPrice && !hasTextPrice;
+}
+
 function readCapabilities(model: Record<string, unknown>, id: string): string[] {
   const architecture = (model.architecture || {}) as Record<string, unknown>;
   const modality = architecture.modality;
   const inputModalities = asStringArray(architecture.input_modalities ?? model.input_modalities);
+  const outputModalities = asStringArray(architecture.output_modalities ?? model.output_modalities);
 
   const caps: string[] = [];
   const chat = canServeChat(model);
   if (chat !== false) caps.push('chat');
   if (
+    readCapabilityFlag(model, 'vision')
+    ||
     readCapabilityFlag(model, 'supports_vision')
     || modality === 'vision+text'
     || id.includes('vision')
     || inputModalities.includes('image')
     || inputModalities.includes('video')
   ) caps.push('vision');
+  if (inputModalities.includes('audio') || readCapabilityFlag(model, 'supports_audio')) caps.push('audio');
   if (id.includes('code') || id.includes('coder')) caps.push('code');
   if (
     readCapabilityFlag(model, 'supports_reasoning')
     || id.includes('reason') || id.includes('r1') || id.includes('think')
     || id.includes('o1') || id.includes('o3')
   ) caps.push('reasoning');
-  if (readCapabilityFlag(model, 'supports_image_generation') || id.includes('creative') || id.includes('image') || id.includes('dall')) {
+  if (readCapabilityFlag(model, 'supports_image_generation') || id.includes('creative') || id.includes('image') || id.includes('dall') || id.includes('flux') || id.includes('stable') || id.includes('midjourney')) {
+    // pure image generation model
+  } else if (id.includes('creative')) {
     caps.push('creative');
+  }
+  for (const media of ['image', 'audio', 'video']) {
+    if (
+      outputModalities.includes(media)
+      || readCapabilityFlag(model, `supports_${media}_generation`)
+    ) caps.push(`${media}_generation`);
   }
   return caps;
 }
@@ -216,7 +254,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
   private listModelsPath?: string;
   private chatCompletionsPath: string;
   private completionsPath: string;
-  private modelCache: Array<{ id: string; capabilities: string[]; maxTokens: number; costPer1kTokens: number }> | null = null;
+  private modelCache: ProviderModel[] | null = null;
 
   constructor(config: OpenAICompatibleConfig) {
     this.id = config.id;
@@ -300,7 +338,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
     return this.excludeModelIds.has(id);
   }
 
-  async listModels(): Promise<Array<{ id: string; capabilities: string[]; maxTokens: number; costPer1kTokens: number }>> {
+  async listModels(): Promise<ProviderModel[]> {
     if (this.modelCache) return this.modelCache;
     if (this.listModelsPath) {
       try {
@@ -315,7 +353,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
           const arr = Array.isArray(data) ? data : (data.data || []);
           const mapped = arr.map((m: Record<string, unknown>) => {
             const id = m.id || (m as any).name || '';
-            if (!id || this.isExcluded(id)) return null;
+            if (!id || this.isExcluded(id) || shouldOmitModel(m)) return null;
             const cost = readCostPer1kTokens(m) ?? this.assumedCostPer1kTokens ?? 0;
             const isEmbedding = id.includes('embed') || (m.architecture as any)?.modality === 'embedding';
             if (isEmbedding) return { id, capabilities: ['embedding'], maxTokens: readContextWindow(m), costPer1kTokens: cost };
@@ -335,7 +373,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
               inputFormat,
               outputFormat,
             };
-          }).filter((m): m is { id: string; capabilities: string[]; maxTokens: number; costPer1kTokens: number } => !!m);
+          }).filter((m): m is ProviderModel => !!m);
           if (mapped.length > 0) {
             this.modelCache = mapped;
             return mapped;
@@ -487,12 +525,6 @@ export class OpenAICompatibleProvider implements LLMProvider {
         data.reasoning,
         data.thought,
       ]);
-      // Backward-compatible fallback: if content is empty but reasoning exists,
-      // surface the reasoning as the content so callers that only read content
-      // still get a usable answer.
-      if ((!content || content.trim() === '') && reasoning) {
-        content = reasoning;
-      }
       if (!content && data.choices[0].message.refusal) {
         throw new Error(`[${this.id}] model refused: ${data.choices[0].message.refusal}`);
       }
