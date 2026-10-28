@@ -7,7 +7,7 @@ import { artifactsService } from './services/ArtifactsService';
 import { asyncHandler, logger } from '@stage7-nextgen/shared';
 
 const app: express.Application = express();
-app.use(express.json());
+app.use(express.json({ limit: '15mb' }));
 
 app.get('/api/artifacts/health', asyncHandler(async (_req, res) => {
   await artifactsService.ready();

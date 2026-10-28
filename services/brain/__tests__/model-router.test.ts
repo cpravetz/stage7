@@ -82,6 +82,33 @@ describe('ModelRouter performance outcomes', () => {
     expect(router.getCandidates({ task: 'chat response' })[0]?.model.id).toBe('bravo');
   });
 
+  it('uses accuracy outcomes instead of cost when accuracy is requested', () => {
+    const accurate = model('accurate-paid', 2);
+    const unreliable = model('unreliable-free', 0);
+    router.registerModels([accurate, unreliable]);
+    router.setPerformanceMetrics(new Map([
+      ['provider:accurate-paid', {
+        successRate: 1,
+        avgLatencyMs: 30_000,
+        avgCostPerRequest: 0.1,
+        totalRequests: 10,
+        complaintCount: 0,
+        complaintRate: 0,
+      }],
+      ['provider:unreliable-free', {
+        successRate: 0,
+        avgLatencyMs: 1_000,
+        avgCostPerRequest: 0,
+        totalRequests: 10,
+        complaintCount: 5,
+        complaintRate: 0.5,
+      }],
+    ]));
+
+    expect(router.getCandidates({ task: 'chat response', optimizeFor: 'accuracy' })[0]?.model.id)
+      .toBe('accurate-paid');
+  });
+
   it('does not let performance outcomes bypass free-only or task-capability eligibility', () => {
     router.registerModel(model('paid-best', 0.1));
     router.registerModel({ ...model('free-code', 0), capabilities: ['code'] });

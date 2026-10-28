@@ -16,15 +16,148 @@ jest.mock('@temporalio/workflow', () => ({
   patched: jest.fn(() => true),
 }))
 
+jest.mock('@temporalio/activity', () => ({
+  Context: {
+    current: () => ({ info: { attempt: 2 }, heartbeat: jest.fn() }),
+  },
+}))
+
 import { patched, proxyActivities } from '@temporalio/workflow'
 import { missionWorkflow } from '../src/workflows/missionWorkflow'
 import { WorkflowInput } from '../src/types/workflow'
 import { Plan } from '@stage7-nextgen/shared'
+import {
+  completeMissionActivity,
+  executeMissionTaskActivity,
+} from '../src/activities/missionWorkflowActivities'
+import { MissionAgentRuntime } from '../src/agent/MissionAgentRuntime'
 
 describe('missionWorkflow activity boundary', () => {
   beforeEach(() => {
     Object.values(mockActivities).forEach((activity) => activity.mockReset());
     (patched as jest.Mock).mockReturnValue(false)
+  })
+
+  it('requires successful planned tasks and a positive mission-goal review before completion', async () => {
+    const plan: Plan = {
+      summary: 'Create a verified deliverable',
+      estimatedDuration: 'short',
+      estimatedCost: 'low',
+      requiresClarification: false,
+      clarificationQuestions: [],
+      phases: [{
+        id: 'phase-1',
+        name: 'Execution',
+        goal: 'Create the deliverable',
+        requiresApproval: false,
+        status: 'completed',
+        tasks: [{
+          id: 'task-1',
+          title: 'Create the deliverable',
+          description: 'Create it and verify it.',
+          agentRole: 'worker',
+          systemPrompt: 'Be thorough.',
+          expectedArtifacts: [],
+          status: 'completed',
+          artifacts: [],
+        }],
+      }],
+    }
+    const reviewMissionCompletion = jest.spyOn(MissionAgentRuntime.prototype, 'reviewMissionCompletion')
+      .mockResolvedValue({ satisfied: false, gaps: ['The goal is not verified.'] })
+    const input: WorkflowInput = {
+      missionId: 'mission-completion-review',
+      tenantId: 'tenant-1',
+      assistantId: 'assistant-1',
+      prompt: 'Create a verified deliverable',
+    }
+
+    const reviewed = await completeMissionActivity({
+      input,
+      plan,
+      phases: [{
+        phaseId: 'phase-1',
+        name: 'Execution',
+        status: 'completed',
+        tasks: [{ taskId: 'task-1', status: 'completed', artifacts: [], output: 'Created it.' }],
+      }],
+      compensations: [],
+    })
+    expect(reviewed.outputs).toMatchObject({
+      status: 'incomplete',
+      gaps: ['The goal is not verified.'],
+    })
+
+    const failedTask = await completeMissionActivity({
+      input,
+      plan,
+      phases: [{
+        phaseId: 'phase-1',
+        name: 'Execution',
+        status: 'completed',
+        tasks: [{ taskId: 'task-1', status: 'failed', artifacts: [], output: 'Task failed.' }],
+      }],
+      compensations: [],
+    })
+    expect(failedTask.outputs.status).toBe('incomplete')
+    expect(reviewMissionCompletion).toHaveBeenCalledTimes(1)
+  })
+
+  it('resumes failed task activities from safe checkpoints instead of requiring a completed receipt', async () => {
+    const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(jsonResponse())
+    const task = {
+      id: 'task-retry',
+      title: 'Retry the work',
+      description: 'Finish the requested work.',
+      agentRole: 'worker',
+      systemPrompt: 'Be thorough.',
+      expectedArtifacts: [],
+      status: 'in_progress' as const,
+      artifacts: [],
+    }
+    const phase = {
+      id: 'phase-retry',
+      name: 'Execution',
+      goal: 'Finish the requested work',
+      requiresApproval: false,
+      status: 'in_progress' as const,
+      tasks: [task],
+    }
+    const plan: Plan = {
+      summary: 'Finish the requested work',
+      estimatedDuration: 'short',
+      estimatedCost: 'low',
+      requiresClarification: false,
+      clarificationQuestions: [],
+      phases: [phase],
+    }
+    const executeTask = jest.spyOn(MissionAgentRuntime.prototype, 'executeTask')
+      .mockResolvedValue({ output: 'Finished safely.', artifacts: [], tokensUsed: 1 })
+    jest.spyOn(MissionAgentRuntime.prototype, 'getOrCreateAgent').mockResolvedValue('agent-worker')
+
+    await executeMissionTaskActivity({
+      input: {
+        missionId: 'mission-task-retry',
+        tenantId: 'tenant-1',
+        assistantId: 'assistant-1',
+        prompt: 'Finish the requested work',
+      },
+      plan,
+      phase,
+      task,
+    })
+
+    expect(executeTask).toHaveBeenCalledWith(
+      'agent-worker',
+      task,
+      phase,
+      plan,
+      false,
+      expect.any(Object),
+      [],
+      expect.stringContaining('persisted safe checkpoint and action receipts'),
+    )
+    expect(fetchMock).toHaveBeenCalled()
   })
 
   it('schedules plan, tasks, and completion as separate Temporal activities', async () => {
@@ -349,6 +482,56 @@ describe('missionWorkflow activity boundary', () => {
       prompt: 'Complete the mission',
     })
 
-    expect(result.status).not.toBe('failed')
+    expect(result.status).toBe('incomplete')
+  })
+
+  it('does not complete a phase when its completion review fails', async () => {
+    (patched as jest.Mock).mockReturnValue(true)
+    const phase = {
+      id: 'phase-review-failed',
+      name: 'Execution',
+      goal: 'Complete and verify the work',
+      requiresApproval: false,
+      status: 'pending' as const,
+      tasks: [{
+        id: 'task-1',
+        title: 'Do the work',
+        description: 'Complete the work.',
+        agentRole: 'worker',
+        systemPrompt: 'Be thorough.',
+        expectedArtifacts: [],
+        status: 'pending' as const,
+        artifacts: [],
+      }],
+    }
+    const plan: Plan = {
+      summary: 'Complete the requested work',
+      estimatedDuration: 'short',
+      estimatedCost: 'low',
+      requiresClarification: false,
+      clarificationQuestions: [],
+      phases: [phase],
+    }
+    mockActivities.prepareMissionActivity.mockResolvedValue(plan)
+    mockActivities.executeMissionTaskActivity.mockResolvedValue({ output: 'The work is done.', artifacts: [], tokensUsed: 1 })
+    mockActivities.reviewAndAmendMissionPhaseActivity.mockRejectedValue(new Error('review unavailable'))
+    mockActivities.completeMissionActivity.mockResolvedValue({
+      plan,
+      outputs: { phases: [], status: 'incomplete', gaps: ['The phase review did not complete.'] },
+      compensations: [],
+    })
+
+    const result = await missionWorkflow({
+      missionId: 'mission-review-failed',
+      tenantId: 'tenant-1',
+      assistantId: 'assistant-1',
+      prompt: 'Complete and verify the work',
+    })
+
+    expect(result.status).toBe('incomplete')
+    expect(mockActivities.finishMissionPhaseActivity).toHaveBeenCalledWith(expect.objectContaining({
+      phase: expect.objectContaining({ status: 'in_progress' }),
+    }))
+    expect(mockActivities.awaitMissionPhaseApprovalActivity).not.toHaveBeenCalled()
   })
 })

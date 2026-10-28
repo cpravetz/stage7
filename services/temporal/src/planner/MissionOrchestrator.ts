@@ -177,7 +177,19 @@ export class MissionOrchestrator {
         phase.status = 'in_progress';
       }
 
-      const phaseOutput: any = { phaseId: phase.id, name: phase.name, tasks: [] };
+      const phaseOutput: any = {
+        phaseId: phase.id,
+        name: phase.name,
+        status: 'completed',
+        tasks: phaseIsComplete
+          ? phase.tasks.map((task) => ({
+            taskId: task.id,
+            status: task.status,
+            artifacts: task.artifacts || [],
+            output: task.output || '',
+          }))
+          : [],
+      };
       const completedInPhase = new Set<string>();
       const executeTask = async (task: Task, savedTask: MissionTaskCheckpoint | undefined) => {
         ctx.heartbeat?.();
@@ -223,9 +235,24 @@ export class MissionOrchestrator {
             [...completedTaskSummaries.values()],
           ];
           const taskRetryGuidance = savedTask ? ctx.retryGuidance : undefined;
-          result = taskRetryGuidance
-            ? await agentRuntime.executeTask(...executionArgs, taskRetryGuidance)
-            : await agentRuntime.executeTask(...executionArgs);
+          try {
+            result = taskRetryGuidance
+              ? await agentRuntime.executeTask(...executionArgs, taskRetryGuidance)
+              : await agentRuntime.executeTask(...executionArgs);
+          } catch (err) {
+            if (savedTask) throw err;
+            const firstError = err instanceof Error ? err.message : String(err);
+            logger.warn(
+              { missionId: ctx.missionId, phaseId: phase.id, taskId: task.id, error: firstError },
+              'Retrying failed mission task from its persisted safe checkpoint',
+            );
+            const retryGuidance = [
+              `The previous attempt failed: ${firstError}`,
+              'Continue from the persisted safe checkpoint and action receipts.',
+              'Do not repeat external actions whose outcome is already recorded or uncertain.',
+            ].join(' ');
+            result = await agentRuntime.executeTask(...executionArgs, retryGuidance);
+          }
         } catch (err) {
           if (isFatalServiceError(err)) throw err;
           if (!savedTask) {
@@ -463,6 +490,7 @@ export class MissionOrchestrator {
 
       await executePendingTasks();
       await ctx.controlCheckpoint?.();
+      let phaseReviewSatisfied = phaseIsComplete;
       if (!phaseIsComplete) {
         const existingAmendmentCount = phase.tasks.filter((task) =>
           task.id.startsWith(`${phase.id}-amendment-`),
@@ -479,7 +507,10 @@ export class MissionOrchestrator {
             const applied = applyPhaseReview(plan, phase.id, review);
             plan = applied.plan;
             phase = applied.phase;
-            if (applied.satisfied) break;
+            if (applied.satisfied) {
+              phaseReviewSatisfied = phaseOutput.tasks.every((task: any) => task.status === 'completed');
+              break;
+            }
             if (!applied.amendment) {
               logger.error({ missionId: ctx.missionId, phaseId: phase.id, gaps: applied.gaps }, 'Mission phase remains incomplete and reviewer provided no actionable follow-up task');
               const amendmentIndex = phase.tasks.filter((t: any) => t.id.startsWith(`${phase.id}-amendment-`)).length + 1;
@@ -549,6 +580,15 @@ export class MissionOrchestrator {
         }
       }
 
+      if (!phaseReviewSatisfied) {
+        logger.error({ missionId: ctx.missionId, phaseId: phase.id }, 'Mission phase was not completed because its review did not confirm the phase goal');
+        phaseOutput.status = 'incomplete';
+        await this.updatePhase(ctx, phase.id, { status: 'in_progress' });
+        phase.status = 'in_progress';
+        outputs.phases.push(phaseOutput);
+        break;
+      }
+
       if (!phaseIsComplete) {
         await this.updatePhase(ctx, phase.id, { status: 'awaiting_approval' });
         phase.status = 'awaiting_approval';
@@ -594,16 +634,20 @@ export class MissionOrchestrator {
     }
 
     await ctx.controlCheckpoint?.();
-    const satisfied = await this.evaluateMissionCompletion(ctx, plan, outputs);
-    if (satisfied) {
+    const completionReview = await this.evaluateMissionCompletion(ctx, plan, outputs);
+    if (completionReview.satisfied) {
       outputs.status = 'completed';
     } else {
       outputs.status = 'incomplete';
+      outputs.gaps = completionReview.gaps;
       await ctx.broadcast({
         type: 'mission_incomplete',
         missionId: ctx.missionId,
         timestamp: Date.now(),
-        data: { reason: 'Produced outputs did not satisfy the mission goal' },
+        data: {
+          reason: completionReview.gaps.join('; '),
+          gaps: completionReview.gaps,
+        },
       });
     }
 
@@ -807,6 +851,7 @@ export class MissionOrchestrator {
     outputs: {
       phases?: Array<{
         phaseId?: string;
+        status?: string;
         tasks?: Array<{
           taskId?: string;
           status?: string;
@@ -815,9 +860,23 @@ export class MissionOrchestrator {
         }>;
       }>;
     },
-  ): Promise<boolean> {
+  ): Promise<{ satisfied: boolean; gaps: string[] }> {
     const phases = outputs?.phases || [];
-    if (!plan.phases.length || phases.length !== plan.phases.length) return false;
+    if (!plan.phases.length) {
+      return { satisfied: false, gaps: ['The mission plan contains no phases.'] };
+    }
+    if (phases.length !== plan.phases.length) {
+      return {
+        satisfied: false,
+        gaps: [`Completed ${phases.length} of ${plan.phases.length} planned phases.`],
+      };
+    }
+    if (phases.some((phase) => phase.status !== undefined && phase.status !== 'completed')) {
+      return {
+        satisfied: false,
+        gaps: ['One or more planned phases did not pass their completion review.'],
+      };
+    }
     const expectedTaskIds = plan.phases.flatMap((phase) =>
       phase.tasks.map((task) => JSON.stringify([phase.id, task.id])),
     );
@@ -838,7 +897,10 @@ export class MissionOrchestrator {
         { missionId: ctx.missionId, expectedTaskIds, actualTasks },
         'Mission completion review refused because the completed task set does not match the plan',
       );
-      return false;
+      return {
+        satisfied: false,
+        gaps: ['One or more planned tasks are missing or did not complete successfully.'],
+      };
     }
 
     const agentRuntime = this.agentRuntime || new MissionAgentRuntime({
@@ -848,7 +910,7 @@ export class MissionOrchestrator {
       agentRuntimeUrl: ctx.agentRuntimeUrl,
     });
     const plannedTasks = new Map(plan.phases.flatMap((phase) =>
-      phase.tasks.map((task) => [task.id, task] as const),
+      phase.tasks.map((task) => [JSON.stringify([phase.id, task.id]), task] as const),
     ));
     const completedTaskSummaries: CompletedTaskSummary[] = phases.flatMap((phase, phaseIndex) =>
       (phase.tasks || []).map((task, taskIndex) => {
@@ -859,7 +921,7 @@ export class MissionOrchestrator {
           output: task.output || '',
           artifactNames: artifacts.map((artifact) => artifact.name),
           artifacts,
-          requiredActions: plannedTasks.get(taskId)?.requiredActions || [],
+          requiredActions: plannedTasks.get(JSON.stringify([phase.phaseId, taskId]))?.requiredActions || [],
         };
       }),
     );
@@ -874,6 +936,6 @@ export class MissionOrchestrator {
         'Mission completion review identified unmet requirements',
       );
     }
-    return review.satisfied;
+    return review;
   }
 }

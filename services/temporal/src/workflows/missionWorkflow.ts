@@ -71,6 +71,13 @@ const phaseActivities = proxyActivities<MissionActivities>({
   },
 });
 
+const completionActivities = proxyActivities<MissionActivities>({
+  startToCloseTimeout: '35m',
+  retry: {
+    maximumAttempts: 1,
+  },
+});
+
 const approvalActivities = proxyActivities<MissionActivities>({
   startToCloseTimeout: '25h',
   heartbeatTimeout: '1m',
@@ -122,10 +129,12 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
     const phases: Array<{
       phaseId: string;
       name: string;
+      status: 'completed' | 'incomplete';
       tasks: Array<{
         taskId: string;
-        status: 'completed';
+        status: 'completed' | 'failed';
         artifacts: Array<{ name: string; type: string; content: string }>;
+        output?: string;
       }>;
     }> = [];
     const compensations: Array<{ phaseId: string; action: string }> = [];
@@ -162,7 +171,19 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
 
       await phaseActivities.startMissionPhaseActivity({ input, phase });
       phase.status = 'in_progress';
-      const phaseOutput = { phaseId: phase.id, name: phase.name, tasks: [] as typeof phases[number]['tasks'] };
+      const phaseOutput = {
+        phaseId: phase.id,
+        name: phase.name,
+        status: 'completed' as 'completed' | 'incomplete',
+        tasks: phase.tasks
+          .filter((task) => shouldSkipTask(task.id, phase.id, input.completedTasks))
+          .map((task) => ({
+            taskId: task.id,
+            status: task.status === 'completed' ? 'completed' as const : 'failed' as const,
+            artifacts: task.artifacts || [],
+            output: task.output || '',
+          })),
+      };
 
       const completedInPhase = new Set(phase.tasks
         .filter((task) => shouldSkipTask(task.id, phase.id, input.completedTasks))
@@ -182,8 +203,9 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
                 pendingTask.output = pendingTask.output || 'No dependency-ready task available (dependency deadlock or missing prerequisite)';
                 phaseOutput.tasks.push({
                   taskId: pendingTask.id,
-                  status: 'failed' as any,
+                  status: 'failed',
                   artifacts: pendingTask.artifacts || [],
+                  output: pendingTask.output,
                 });
                 completedInPhase.add(pendingTask.id);
               }
@@ -218,8 +240,9 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
                   pendingTask.output = pendingTask.output || 'Task selection returned invalid task';
                   phaseOutput.tasks.push({
                     taskId: pendingTask.id,
-                    status: 'failed' as any,
+                    status: 'failed',
                     artifacts: pendingTask.artifacts || [],
+                    output: pendingTask.output,
                   });
                   completedInPhase.add(pendingTask.id);
                 }
@@ -234,8 +257,9 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
                 pendingTask.output = pendingTask.output || 'No task selected';
                 phaseOutput.tasks.push({
                   taskId: pendingTask.id,
-                  status: 'failed' as any,
+                  status: 'failed',
                   artifacts: pendingTask.artifacts || [],
+                  output: pendingTask.output,
                 });
                 completedInPhase.add(pendingTask.id);
                 completedTaskIds.add(pendingTask.id);
@@ -256,8 +280,9 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
               task.output = task.output || `Chose before dependency ${unmetDependency} completed`;
               phaseOutput.tasks.push({
                 taskId: task.id,
-                status: 'failed' as any,
+                status: 'failed',
                 artifacts: task.artifacts || [],
+                output: task.output,
               });
               completedInPhase.add(task.id);
               completedTaskIds.add(task.id);
@@ -280,6 +305,7 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
               taskId: task.id,
               status: 'completed',
               artifacts: result.artifacts,
+              output: result.output,
             });
             compensations.push({ phaseId: phase.id, action: `revert-phase-${phase.id}` });
             completedInPhase.add(task.id);
@@ -297,8 +323,9 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
             task.artifacts = task.artifacts || [];
             phaseOutput.tasks.push({
               taskId: task.id,
-              status: 'failed' as any,
+              status: 'failed',
               artifacts: task.artifacts || [],
+              output: task.output,
             });
             compensations.push({ phaseId: phase.id, action: `revert-phase-${phase.id}` });
             completedInPhase.add(task.id);
@@ -312,6 +339,8 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
       };
 
       await executePendingTasks();
+      let phaseReviewSatisfied = !useAgentPhaseAmendments
+        && phaseOutput.tasks.every((task) => task.status === 'completed');
       if (useAgentPhaseAmendments) {
         for (let reviewIndex = 1; reviewIndex <= 10; reviewIndex++) {
           try {
@@ -324,7 +353,10 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
             });
             plan = review.plan;
             phase = review.phase;
-            if (review.satisfied) break;
+            if (review.satisfied) {
+              phaseReviewSatisfied = phaseOutput.tasks.every((task) => task.status === 'completed');
+              break;
+            }
             if (!review.amendment) {
               logger.error({ missionId: input.missionId, phaseId: phase.id, gaps: review.gaps }, 'Mission phase remains incomplete and reviewer provided no actionable follow-up task');
               // Try to create a simple follow-up task for remaining gaps
@@ -355,6 +387,15 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
         }
       }
 
+      if (!phaseReviewSatisfied) {
+        phaseOutput.status = 'incomplete';
+        phase.status = 'in_progress';
+        await phaseActivities.finishMissionPhaseActivity({ input, phase, tasks: phaseOutput.tasks });
+        phases.push(phaseOutput);
+        break;
+      }
+
+      phase.status = phase.requiresApproval ? 'awaiting_approval' : 'completed';
       await phaseActivities.finishMissionPhaseActivity({ input, phase, tasks: phaseOutput.tasks });
       if (phase.requiresApproval) {
         const question = phase.approvalQuestion || `Phase "${phase.name}" complete. Approve to continue?`;
@@ -394,18 +435,32 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
       phases.push(phaseOutput);
     }
 
-    const result = await phaseActivities.completeMissionActivity({
+    const result = await completionActivities.completeMissionActivity({
       input,
       plan,
       phases,
       compensations,
     });
-    const status: WorkflowResult['status'] = result.outputs.status === 'incomplete' ? 'incomplete' : 'completed';
+    const hasUnsuccessfulPhase = phases.some((phase) =>
+      phase.status !== 'completed' || phase.tasks.some((task) => task.status !== 'completed'),
+    );
+    const status: WorkflowResult['status'] =
+      result.outputs.status === 'incomplete' || hasUnsuccessfulPhase ? 'incomplete' : 'completed';
+    const output = status === 'incomplete' && result.outputs.status !== 'incomplete'
+      ? {
+        ...result,
+        outputs: {
+          ...result.outputs,
+          status: 'incomplete' as const,
+          gaps: ['One or more planned phases or tasks did not complete successfully.'],
+        },
+      }
+      : result;
     logger.info('Mission workflow completed', { missionId: input.missionId, status });
     return {
       missionId: input.missionId,
       status,
-      output: result,
+      output,
       startedAt,
       completedAt: Date.now(),
     };

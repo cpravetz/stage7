@@ -134,6 +134,55 @@ describe('buildMissionEvents', () => {
     expect(events.filter((event) => event.type === 'task_completed')).toHaveLength(1);
     expect(events.filter((event) => event.type === 'phase_completed')).toHaveLength(1);
   });
+
+  it('shows planner, phase, task, and incomplete milestones in the timeline', () => {
+    const liveEvents: FeedEvent[] = [
+      feedEvent({ id: 'e1', type: 'mission_started', timestamp: 1 }),
+      feedEvent({ id: 'e2', type: 'planner_started', timestamp: 2 }),
+      feedEvent({ id: 'e3', type: 'plan_generated', timestamp: 3 }),
+      feedEvent({ id: 'e4', type: 'phase_started', timestamp: 4, metadata: { phaseId: 'phase-1' } }),
+      feedEvent({ id: 'e5', type: 'task_started', timestamp: 5, metadata: { phaseId: 'phase-1', taskId: 'task-1' } }),
+      feedEvent({ id: 'e6', type: 'task_failed', timestamp: 6, metadata: { phaseId: 'phase-1', taskId: 'task-1' } }),
+      feedEvent({ id: 'e7', type: 'mission_incomplete', timestamp: 7, metadata: { reason: 'The deliverable is missing.' } }),
+    ];
+    const events = buildMissionEvents({
+      missionId: MISSION_ID,
+      liveEvents,
+      detail: {
+        status: 'incomplete',
+        startedAt: 1,
+        completedAt: 7,
+        output: { outputs: { gaps: ['The deliverable is missing.'] } },
+      },
+    });
+
+    const timeline = events.filter((event) => TIMELINE_EVENT_TYPES.has(String(event.type)));
+    expect(timeline.map((event) => event.type)).toEqual([
+      'mission_started',
+      'planner_started',
+      'plan_generated',
+      'phase_started',
+      'task_started',
+      'task_failed',
+      'mission_incomplete',
+    ]);
+  });
+
+  it('derives an incomplete outcome and reason from persisted mission state', () => {
+    const events = buildMissionEvents({
+      missionId: MISSION_ID,
+      liveEvents: [],
+      detail: {
+        status: 'incomplete',
+        startedAt: 1,
+        completedAt: 3,
+        output: { outputs: { gaps: ['A planned task did not complete.'] } },
+      },
+    });
+
+    const incomplete = events.find((event) => event.type === 'mission_incomplete');
+    expect(incomplete?.message).toBe('Mission incomplete: A planned task did not complete.');
+  });
 });
 
 describe('mission conversation', () => {
@@ -165,13 +214,13 @@ describe('mission conversation', () => {
     ]);
 
     const timeline = events.filter((event) => TIMELINE_EVENT_TYPES.has(String(event.type)));
-    expect(timeline.map((event) => event.type)).toEqual(['mission_started', 'mission_failed']);
+    expect(timeline.map((event) => event.type)).toEqual(['mission_started', 'planner_started', 'mission_failed']);
   });
 
   it('keeps the planner updates short when the planner retries a lot', () => {
     const liveEvents: FeedEvent[] = [
       feedEvent({ id: 'e1', type: 'planner_started', timestamp: 1, message: 'Planning mission' }),
-      ...Array.from({ length: 8 }, (_, index) => feedEvent({
+      ...Array.from({ length: 18 }, (_, index) => feedEvent({
         id: `p${index}`,
         type: 'planner_progress',
         timestamp: index + 2,
@@ -183,8 +232,8 @@ describe('mission conversation', () => {
     const plannerTurn = turns.find((turn) => turn.label === 'Planner');
     const progressLines = plannerTurn?.lines.filter((line) => line.type === 'planner_progress') ?? [];
 
-    expect(progressLines).toHaveLength(4);
-    expect(progressLines[0]?.text).toContain('5 earlier planning updates');
+    expect(progressLines).toHaveLength(13);
+    expect(progressLines[0]?.text).toContain('6 earlier planning updates');
   });
 
   it('reports the model usage of a mission instead of listing every call', () => {

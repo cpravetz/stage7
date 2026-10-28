@@ -140,7 +140,6 @@ const DEFAULT_BRAIN_COMPLETION_DEADLINE_MS = 900_000
 const BRAIN_RESPONSE_GRACE_MS = 30_000
 const MAX_BRAIN_REQUEST_TIMEOUT_MS = 2_147_483_647
 const MAX_ACTION_RECEIPT_CHARS = 2_048
-const RESUME_BRAIN_CALL_BONUS = 4
 const RESUME_COMPLETION_TOKEN_BONUS = 8_192
 const RESUME_BUDGET_MARKER = 'A single bounded checkpoint-resume allowance is available for this task.'
 
@@ -608,7 +607,6 @@ export class AgentExecutor {
     const actionReceipts = checkpoint?.actionReceipts || []
     let lastRequestId = checkpoint?.lastRequestId
     let reasoning: string | undefined
-    let malformedActionResponseSeen = false
     // When a checkpoint has exhausted its normal brain-call budget AND already consumed
     // its single bounded resume allowance, the saved state is stale. Reset the budget
     // so the agent gets a fresh normal budget instead of failing immediately.
@@ -623,7 +621,12 @@ export class AgentExecutor {
       )
       grantResumeAllowance = true
     }
-    const brainCallLimit = this.maxIterations
+    const brainCallLimit = Math.min(
+      this.maxIterations,
+      policy.maxBrainCalls === Number.MAX_SAFE_INTEGER
+        ? this.maxIterations
+        : policy.maxBrainCalls + Number(grantResumeAllowance),
+    )
     const completionTokenLimit = policy.maxCompletionTokens
       + (grantResumeAllowance ? RESUME_COMPLETION_TOKEN_BONUS : 0)
     const saveCheckpoint = context.saveCheckpoint
@@ -829,7 +832,6 @@ export class AgentExecutor {
             'Agent response validation failed: tool-action-shaped content was not a single valid executable action.',
             context.missionId,
           )
-          malformedActionResponseSeen = true
           history.push({
             role: 'user',
             content: 'Your response included a tool-action object, but it was not the sole valid action response and was not executed. To execute an action, return exactly one raw JSON object in the form {"tool":"<tool-id>","args":{...}} with no surrounding prose, Markdown fence, or nesting. Otherwise return plain text if the task is complete. Never describe or claim an action that was not executed.',
@@ -898,23 +900,13 @@ export class AgentExecutor {
         if (saveCheckpoint) await saveCheckpoint()
         continue
       }
-      malformedActionResponseSeen = false
       const signature = `${action.tool}:${JSON.stringify(action.args)}`
       repeatedActionCount = signature === lastAction ? repeatedActionCount + 1 : 0
       lastAction = signature
       if (repeatedActionCount >= 2) {
         const reason = `Agent ${definition.id} repeated the same action without progress: ${action.tool}`
         await this.reportBrainComplaint(completion.requestId, reason, context.missionId)
-        return {
-          output: reason,
-          tokensUsed,
-          toolCalls,
-          brainCalls,
-          completionTokensReserved,
-          actionReceipts,
-          requestId: lastRequestId,
-          reasoning,
-        }
+        throw new Error(reason)
       }
 
       toolCalls++
@@ -941,16 +933,21 @@ export class AgentExecutor {
       if (saveCheckpoint) await saveCheckpoint()
     }
 
-    return {
-      output: finalOutput ?? '',
-      tokensUsed,
-      toolCalls,
-      brainCalls,
-      completionTokensReserved,
-      actionReceipts,
-      requestId: lastRequestId,
-      reasoning,
-    }
+    const missingActions = missingRequiredActions(requiredActions, actionReceipts)
+    const missingArtifacts = finalOutput === undefined
+      ? expectedArtifacts
+      : missingExpectedArtifactSections(finalOutput, expectedArtifacts)
+    const unmetRequirements = [
+      ...missingActions.map((required) => `action ${required.toolId}:${required.outcome}`),
+      ...missingArtifacts.map((artifact) => `artifact section "${artifact}"`),
+      ...(finalOutput === undefined && missingActions.length === 0 && missingArtifacts.length === 0
+        ? ['a final task response']
+        : []),
+    ]
+    throw new Error(
+      `Agent ${definition.id} exhausted its ${brainCallLimit}-call Brain execution budget without completing the task`
+      + (unmetRequirements.length > 0 ? `; unmet requirements: ${unmetRequirements.join(', ')}` : ''),
+    )
   }
 
   private resolvePolicy(policy?: AgentExecutionPolicy): AgentExecutionPolicy {
@@ -1078,7 +1075,7 @@ export class AgentExecutor {
       })
     } catch (error) {
       if (controller.signal.aborted) {
-        throw new Error(`Brain request timed out after ${this.brainRequestTimeoutMs}ms`)
+        throw new Error(`Brain request timed out after ${this.brainRequestTimeoutMs}ms`, { cause: error })
       }
       throw error
     } finally {

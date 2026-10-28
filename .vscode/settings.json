@@ -28,7 +28,9 @@
         "Copy-Item": true,
         "npm run build": true,
         "npm --prefix frontend-nextgen": true,
-        "npm test": true
+        "npm test": true,
+        "command": true,
+        "true": true
     },
     "terminal.integrated.shellIntegration.environmentReporting": true
 }

@@ -178,6 +178,15 @@ export function normalize(raw: unknown): FeedEvent | null {
       case 'mission_failed':
         message = `Mission failed: ${friendlyMissionError((r.error as string) || (data.error as string) || '')}`.trim();
         break;
+      case 'mission_incomplete': {
+        const reason = typeof data.reason === 'string'
+          ? data.reason
+          : Array.isArray(data.gaps)
+            ? data.gaps.filter((gap): gap is string => typeof gap === 'string').join('; ')
+            : '';
+        message = reason ? `Mission incomplete: ${reason}` : 'Mission incomplete';
+        break;
+      }
       case 'tool':
         message = (data.tool as string) || (data.name as string) || 'Tool call';
         break;

@@ -62,10 +62,12 @@ export interface MissionApprovalResult {
 export interface MissionPhaseOutput {
   phaseId: string;
   name: string;
+  status: 'completed' | 'incomplete';
   tasks: Array<{
     taskId: string;
-    status: 'completed';
+    status: 'completed' | 'failed';
     artifacts: TaskExecutionResult['artifacts'];
+    output?: string;
   }>;
 }
 
@@ -363,6 +365,9 @@ export async function executeMissionTaskActivity({
 }: MissionTaskActivityInput): Promise<TaskExecutionResult> {
   const activityContext = Context.current();
   const retrying = activityContext.info.attempt > 1;
+  const retryGuidance = retrying
+    ? input.retryGuidance || 'Resume from the persisted safe checkpoint and action receipts. Do not repeat external actions whose outcome is already recorded or uncertain.'
+    : input.retryGuidance;
   const agentId = `agent-${input.missionId}-${task.agentRole.toLowerCase()}`;
   const agentRuntime = new MissionAgentRuntime({
     missionId: input.missionId,
@@ -408,12 +413,12 @@ export async function executeMissionTaskActivity({
       task,
       phase,
       plan,
-      retrying,
+      false,
       DEFAULT_AGENT_EXECUTION_POLICY,
       completedTaskSummaries,
     ] as const;
-    const result = input.retryGuidance
-      ? await agentRuntime.executeTask(...executionArgs, input.retryGuidance)
+    const result = retryGuidance
+      ? await agentRuntime.executeTask(...executionArgs, retryGuidance)
       : await agentRuntime.executeTask(...executionArgs);
     await persistUpdate(input, 'tasks', task.id, {
       phaseId: phase.id,
@@ -482,9 +487,15 @@ export async function finishMissionPhaseActivity({
   phase,
   tasks,
 }: MissionPhaseActivityInput & { tasks: MissionPhaseOutput['tasks'] }): Promise<void> {
+  const status = phase.status === 'in_progress'
+    ? 'in_progress'
+    : phase.requiresApproval
+      ? 'awaiting_approval'
+      : 'completed';
   await persistUpdate(input, 'phases', phase.id, {
-    status: phase.requiresApproval ? 'awaiting_approval' : 'completed',
+    status,
   });
+  if (status === 'in_progress') return;
   await broadcast(input, {
     type: 'phase_completed',
     missionId: input.missionId,
@@ -584,9 +595,70 @@ export async function completeMissionActivity({
   compensations,
 }: MissionCompletionActivityInput): Promise<{
   plan: Plan;
-  outputs: { phases: MissionPhaseOutput[]; status: 'completed' | 'incomplete' };
+  outputs: { phases: MissionPhaseOutput[]; status: 'completed' | 'incomplete'; gaps?: string[] };
   compensations: Array<{ phaseId: string; action: string }>;
 }> {
-  const outputs: { phases: MissionPhaseOutput[]; status: 'completed' | 'incomplete' } = { phases, status: 'completed' };
+  const expectedPhaseIds = plan.phases.map((phase) => phase.id);
+  const actualPhaseIds = phases.map((phase) => phase.phaseId);
+  const expectedTasks = plan.phases.flatMap((phase) => phase.tasks.map((task) => `${phase.id}\u0000${task.id}`));
+  const actualTasks = phases.flatMap((phase) => phase.tasks.map((task) => ({
+    key: `${phase.phaseId}\u0000${task.taskId}`,
+    status: task.status,
+  })));
+  const gaps: string[] = [];
+  if (
+    phases.length !== plan.phases.length
+    || expectedPhaseIds.some((phaseId) => !actualPhaseIds.includes(phaseId))
+    || phases.some((phase) => phase.status !== 'completed')
+  ) {
+    gaps.push('One or more planned phases are missing or did not complete successfully.');
+  }
+  if (
+    actualTasks.length !== expectedTasks.length
+    || actualTasks.some((task) => task.status !== 'completed')
+    || expectedTasks.some((taskId) => !actualTasks.some((task) => task.key === taskId))
+  ) {
+    gaps.push('One or more planned tasks are missing or did not complete successfully.');
+  }
+
+  if (gaps.length === 0) {
+    const plannedTasks = new Map(plan.phases.flatMap((phase) =>
+      phase.tasks.map((task) => [JSON.stringify([phase.id, task.id]), task] as const),
+    ));
+    const completedTaskSummaries: CompletedTaskSummary[] = phases.flatMap((phase) =>
+      phase.tasks.map((task) => {
+        const artifacts = task.artifacts || [];
+        return {
+          taskId: task.taskId,
+          output: task.output || '',
+          artifactNames: artifacts.map((artifact) => artifact.name),
+          artifacts,
+          requiredActions: plannedTasks.get(JSON.stringify([phase.phaseId, task.taskId]))?.requiredActions || [],
+        };
+      }),
+    );
+    const agentRuntime = new MissionAgentRuntime({
+      missionId: input.missionId,
+      tenantId: input.tenantId || 'tenant-1',
+      metadata: input.metadata,
+      agentRuntimeUrl: process.env.AGENT_RUNTIME_URL,
+      broadcast: createRuntimeBroadcast(input),
+    });
+    const review = await agentRuntime.reviewMissionCompletion(
+      input.prompt,
+      plan.summary || '',
+      completedTaskSummaries,
+    );
+    if (!review.satisfied) gaps.push(...review.gaps);
+  }
+
+  const outputs: { phases: MissionPhaseOutput[]; status: 'completed' | 'incomplete'; gaps?: string[] } = {
+    phases,
+    status: gaps.length === 0 ? 'completed' : 'incomplete',
+    ...(gaps.length > 0 ? { gaps } : {}),
+  };
+  if (gaps.length > 0) {
+    logger.warn({ missionId: input.missionId, gaps }, 'Temporal mission completion review found unmet requirements');
+  }
   return { plan, outputs, compensations };
 }

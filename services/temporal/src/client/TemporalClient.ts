@@ -375,11 +375,27 @@ export class TemporalClient {
             : result.status === 'incomplete'
               ? 'mission_incomplete'
               : 'mission_completed';
+          const outputDetails = result.output && typeof result.output === 'object'
+            ? (result.output as { outputs?: { gaps?: unknown } }).outputs
+            : undefined;
+          const incompleteGaps = Array.isArray(outputDetails?.gaps)
+            ? outputDetails.gaps.filter((gap): gap is string => typeof gap === 'string' && gap.trim().length > 0)
+            : [];
           await this.broadcastMissionUpdate({
             type: completionType,
             missionId: input.missionId,
             workflowId,
             status: result.status,
+            ...(result.status === 'incomplete'
+              ? {
+                data: {
+                  reason: incompleteGaps.length > 0
+                    ? incompleteGaps.join('; ')
+                    : 'Produced outputs did not satisfy the mission goal',
+                  ...(incompleteGaps.length > 0 ? { gaps: incompleteGaps } : {}),
+                },
+              }
+              : {}),
             output: result.output,
             timestamp: result.completedAt || Date.now(),
           });
@@ -480,6 +496,12 @@ export class TemporalClient {
             error,
             timestamp: Date.now(),
           });
+        })
+        .catch((finalizationError: unknown) => {
+          logger.error({
+            missionId: input.missionId,
+            error: finalizationError instanceof Error ? finalizationError.message : String(finalizationError),
+          }, 'Could not persist a terminal mission state');
         })
         .finally(async () => {
           this.stopRecoveryLeaseRenewal(input.missionId);
@@ -1376,33 +1398,33 @@ export class TemporalClient {
       return;
     }
 
-    try {
-      await fetch(`${persistenceUrl}/api/artifacts/missions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          missionId: state.missionId,
-          tenantId: state.tenantId || '',
-          assistantId: state.assistantId || '',
-          status: state.status,
-          controlState: state.controlState,
-          pendingDeletion: state.pendingDeletion,
-          currentStep: state.currentStep,
-          totalSteps: state.totalSteps,
-          history: state.history,
-          input: state.input,
-          output: state.output,
-          error: state.error,
-          startedAt: state.startedAt,
-          completedAt: state.completedAt,
-          createdAt: state.createdAt,
-          updatedAt: state.updatedAt,
-        }),
-      });
-      logger.debug({ missionId: state.missionId, status: state.status }, 'Mission state persisted');
-    } catch (err) {
-      logger.warn({ err: (err as Error).message }, 'Failed to persist mission state');
+    const response = await fetch(`${persistenceUrl}/api/artifacts/missions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        missionId: state.missionId,
+        tenantId: state.tenantId || '',
+        assistantId: state.assistantId || '',
+        status: state.status,
+        controlState: state.controlState,
+        pendingDeletion: state.pendingDeletion,
+        currentStep: state.currentStep,
+        totalSteps: state.totalSteps,
+        history: state.history,
+        input: state.input,
+        output: state.output,
+        error: state.error,
+        startedAt: state.startedAt,
+        completedAt: state.completedAt,
+        createdAt: state.createdAt,
+        updatedAt: state.updatedAt,
+      }),
+    });
+    if (!response.ok) {
+      const details = (await response.text()).slice(0, 500);
+      throw new Error(`Could not persist mission state (${response.status}): ${details}`);
     }
+    logger.debug({ missionId: state.missionId, status: state.status }, 'Mission state persisted');
   }
 }
 

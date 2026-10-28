@@ -18,6 +18,42 @@ describe('MissionOrchestrator checkpoint recovery', () => {
     jest.restoreAllMocks()
   })
 
+  it('returns a concrete gap when completed phase results do not cover the plan', async () => {
+    const plan: Plan = {
+      summary: 'Complete the work',
+      estimatedDuration: 'short',
+      estimatedCost: 'low',
+      requiresClarification: false,
+      clarificationQuestions: [],
+      phases: [{
+        id: 'phase-1',
+        name: 'Execution',
+        goal: 'Complete the task',
+        requiresApproval: false,
+        status: 'completed',
+        tasks: [{
+          id: 'task-1',
+          title: 'Complete the task',
+          description: 'Complete the task.',
+          agentRole: 'worker',
+          systemPrompt: 'Complete the task.',
+          expectedArtifacts: [],
+          status: 'completed',
+          artifacts: [],
+        }],
+      }],
+    }
+
+    await expect(new MissionOrchestrator().evaluateMissionCompletion(
+      { missionId: 'mission-incomplete', prompt: 'Complete the work' },
+      plan,
+      { phases: [] },
+    )).resolves.toEqual({
+      satisfied: false,
+      gaps: ['Completed 0 of 1 planned phases.'],
+    })
+  })
+
   it('reuses a checkpointed plan instead of generating another plan on retry', async () => {
     const plan: Plan = {
       summary: 'Clarify the requested outcome',
@@ -243,5 +279,100 @@ describe('MissionOrchestrator checkpoint recovery', () => {
       'http://artifacts/api/artifacts/missions/mission-pause-boundary/tasks/task-1',
       expect.objectContaining({ method: 'PUT', body: expect.stringContaining('"status":"completed"') }),
     )
+  })
+
+  it('does not mark a phase complete when phase review fails', async () => {
+    const plan: Plan = {
+      summary: 'Complete and verify the requested work',
+      estimatedDuration: 'short',
+      estimatedCost: 'low',
+      requiresClarification: false,
+      clarificationQuestions: [],
+      phases: [{
+        id: 'phase-1',
+        name: 'Execution',
+        goal: 'Complete and verify the requested work',
+        requiresApproval: false,
+        status: 'pending',
+        tasks: [],
+      }],
+    }
+    jest.spyOn(global, 'fetch').mockResolvedValue(jsonResponse())
+    const reviewPhase = jest.spyOn(MissionAgentRuntime.prototype, 'reviewPhase')
+      .mockRejectedValue(new Error('review service unavailable'))
+    const reviewMissionCompletion = jest.spyOn(MissionAgentRuntime.prototype, 'reviewMissionCompletion')
+      .mockResolvedValue({ satisfied: true, gaps: [] })
+    const broadcast = jest.fn().mockResolvedValue(undefined)
+
+    const result = await new MissionOrchestrator().run({
+      missionId: 'mission-phase-review-failure',
+      prompt: 'Complete and verify the requested work',
+      tenantId: 'tenant-1',
+      persistenceUrl: 'http://artifacts',
+      gatewayUrl: 'http://gateway',
+      broadcast,
+      broadcastAll: jest.fn().mockResolvedValue(undefined),
+      waitForApproval: jest.fn(),
+      resumePlan: plan,
+    })
+
+    expect(result.outputs.status).toBe('incomplete')
+    expect(result.plan.phases[0]?.status).toBe('in_progress')
+    expect(reviewPhase).toHaveBeenCalledTimes(1)
+    expect(reviewMissionCompletion).not.toHaveBeenCalled()
+    expect(broadcast).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'phase_completed' }))
+    expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({ type: 'mission_incomplete' }))
+  })
+
+  it('retries a failed task once from its safe checkpoint before recording it as failed', async () => {
+    const plan: Plan = {
+      summary: 'Complete the work',
+      estimatedDuration: 'short',
+      estimatedCost: 'low',
+      requiresClarification: false,
+      clarificationQuestions: [],
+      phases: [{
+        id: 'phase-1',
+        name: 'Execution',
+        goal: 'Complete the work',
+        requiresApproval: false,
+        status: 'pending',
+        tasks: [{
+          id: 'task-1',
+          title: 'Complete the work',
+          description: 'Complete the work.',
+          agentRole: 'worker',
+          systemPrompt: 'Be thorough.',
+          expectedArtifacts: [],
+          status: 'pending',
+          artifacts: [],
+        }],
+      }],
+    }
+    jest.spyOn(global, 'fetch').mockResolvedValue(jsonResponse())
+    jest.spyOn(MissionAgentRuntime.prototype, 'getOrCreateAgent').mockResolvedValue('agent-worker')
+    const executeTask = jest.spyOn(MissionAgentRuntime.prototype, 'executeTask')
+      .mockRejectedValueOnce(new Error('Brain request failed (503)'))
+      .mockResolvedValueOnce({ output: 'The work is complete.', artifacts: [], tokensUsed: 1 })
+    jest.spyOn(MissionAgentRuntime.prototype, 'reviewPhase')
+      .mockResolvedValue({ satisfied: true, gaps: [] })
+    jest.spyOn(MissionAgentRuntime.prototype, 'reviewMissionCompletion')
+      .mockResolvedValue({ satisfied: true, gaps: [] })
+
+    const result = await new MissionOrchestrator().run({
+      missionId: 'mission-safe-task-retry',
+      prompt: 'Complete the work',
+      tenantId: 'tenant-1',
+      persistenceUrl: 'http://artifacts',
+      gatewayUrl: 'http://gateway',
+      broadcast: jest.fn().mockResolvedValue(undefined),
+      broadcastAll: jest.fn().mockResolvedValue(undefined),
+      waitForApproval: jest.fn(),
+      resumePlan: plan,
+    })
+
+    expect(result.outputs.status).toBe('completed')
+    expect(executeTask).toHaveBeenCalledTimes(2)
+    expect(executeTask.mock.calls[1]?.[7]).toContain('persisted safe checkpoint and action receipts')
   })
 })

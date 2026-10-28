@@ -167,7 +167,8 @@ function processFeedEvents(newEvents: FeedEvent[]) {
       if (
         newStatus === 'completed' ||
         newStatus === 'failed' ||
-        newStatus === 'canceled'
+        newStatus === 'canceled' ||
+        newStatus === 'incomplete'
       ) {
         extra.completedAt = new Date(evt.timestamp).toISOString();
       } else if (newStatus === 'running') {

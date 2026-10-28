@@ -3,6 +3,7 @@ import type { FeedEvent } from '../stores/feedStore';
 export interface MissionEventPlanPhase {
   id: string;
   name?: string;
+  status?: string;
   tasks?: Array<{ id: string; title?: string; status?: string; output?: string }>;
 }
 
@@ -24,7 +25,7 @@ export interface MissionEventDetail {
   startedAt?: string | number;
   completedAt?: string | number;
   input?: { prompt?: string };
-  output?: { outputs?: { phases?: MissionEventPhaseOutput[] } };
+  output?: { outputs?: { phases?: MissionEventPhaseOutput[]; gaps?: string[] } };
 }
 
 export const CONVERSATION_EVENT_TYPES = new Set([
@@ -67,8 +68,17 @@ export const TIMELINE_EVENT_TYPES = new Set([
   'mission_needs_review',
   'mission_paused',
   'mission_resumed',
+  'planner_started',
+  'planner_progress',
+  'plan_generated',
+  'phase_started',
+  'phase_completed',
+  'phase_plan_amended',
   'phase_approved',
   'phase_rejected',
+  'task_started',
+  'task_completed',
+  'task_failed',
   'approval_requested',
   'approval_approved',
   'approval_rejected',
@@ -241,13 +251,12 @@ export function buildMissionEvents(options: {
     phases = planPhases.map((phase) => ({
       phaseId: phase.id,
       name: phase.name,
-      status:
-        detail?.status === 'completed'
-          ? 'completed'
-          : detail?.status === 'failed'
-            ? 'failed'
-            : 'planned',
-      tasks: (phase.tasks || []).map((task) => ({ taskId: task.id, status: 'planned' })),
+      status: phase.status || (detail?.status === 'completed' ? 'completed' : 'planned'),
+      tasks: (phase.tasks || []).map((task) => ({
+        taskId: task.id,
+        status: task.status || 'planned',
+        output: task.output,
+      })),
     }));
   }
 
@@ -257,7 +266,13 @@ export function buildMissionEvents(options: {
     const hasLivePhaseStarted = hasLive(['phase_started'], (event) => eventPhaseId(event) === phase.phaseId);
     const hasLivePhaseCompleted = hasLive(['phase_completed'], (event) => eventPhaseId(event) === phase.phaseId);
 
-    if (!hasLivePhaseStarted) {
+    if (
+      !hasLivePhaseStarted
+      && (phase.status === 'in_progress'
+        || phase.status === 'completed'
+        || phase.status === 'awaiting_approval'
+        || phase.status === 'approved')
+    ) {
       derived.push({
         id: `derived-phase-started-${phase.phaseId}`,
         type: 'phase_started',
@@ -276,12 +291,19 @@ export function buildMissionEvents(options: {
         ['task_started', 'task_completed', 'task_failed'],
         (event) => eventPhaseId(event) === phase.phaseId && eventTaskId(event) === task.taskId,
       );
-      if (!hasLiveTask) {
+      const derivedTaskType = task.status === 'completed'
+        ? 'task_completed'
+        : task.status === 'failed'
+          ? 'task_failed'
+          : task.status === 'in_progress'
+            ? 'task_started'
+            : undefined;
+      if (!hasLiveTask && derivedTaskType) {
         derived.push({
           id: `derived-task-${phase.phaseId}-${task.taskId}`,
-          type: task.status === 'failed' ? 'task_failed' : 'task_completed',
+          type: derivedTaskType,
           source: 'orchestrator',
-          message: `${task.status === 'failed' ? 'Task failed' : 'Task completed'}: ${taskLabel(task.taskId)}`,
+          message: `${derivedTaskType === 'task_failed' ? 'Task failed' : derivedTaskType === 'task_started' ? 'Task started' : 'Task completed'}: ${taskLabel(task.taskId)}`,
           timestamp: taskCompletedAt,
           missionId,
           metadata: { phaseId: phase.phaseId, taskId: task.taskId, output: task.output },
@@ -290,7 +312,10 @@ export function buildMissionEvents(options: {
       taskCursor = taskCompletedAt + 1;
     }
 
-    if (!hasLivePhaseCompleted) {
+    if (
+      !hasLivePhaseCompleted
+      && (phase.status === 'completed' || phase.status === 'awaiting_approval' || phase.status === 'approved')
+    ) {
       derived.push({
         id: `derived-phase-completed-${phase.phaseId}`,
         type: 'phase_completed',
@@ -328,6 +353,21 @@ export function buildMissionEvents(options: {
         metadata: { error: detail.error },
       });
     }
+  } else if (detail?.status === 'incomplete') {
+    const completedAt = toTimestamp(detail.completedAt) ?? startedAt + 1000;
+    if (!hasLive(['mission_incomplete'])) {
+      const gaps = detail.output?.outputs?.gaps || [];
+      const reason = gaps.join('; ');
+      derived.push({
+        id: `derived-mission-incomplete-${completedAt}`,
+        type: 'mission_incomplete',
+        source: 'orchestrator',
+        message: reason ? `Mission incomplete: ${reason}` : 'Mission incomplete',
+        timestamp: completedAt,
+        missionId,
+        metadata: gaps.length > 0 ? { reason, gaps } : undefined,
+      });
+    }
   }
 
   const merged = new Map<string, FeedEvent>();
@@ -344,9 +384,11 @@ export function buildMissionEvents(options: {
   events = listMilestonesOnce(events);
   events = dedupeTerminalAndApprovalEvents(events, detail?.status);
   events.sort((left, right) => {
-    const l = lifecycleRank(String(left.type));
-    const r = lifecycleRank(String(right.type));
-    if (l !== r) return l - r;
+    const leftType = String(left.type);
+    const rightType = String(right.type);
+    const leftRank = leftType === 'user' || leftType === 'user_message' ? -1 : lifecycleRank(leftType);
+    const rightRank = rightType === 'user' || rightType === 'user_message' ? -1 : lifecycleRank(rightType);
+    if (leftRank !== rightRank) return leftRank - rightRank;
     return left.timestamp - right.timestamp;
   });
   return applyMissionError(events, detail?.error);

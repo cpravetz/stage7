@@ -168,7 +168,7 @@ export class PersistentAgentRuntime {
       const canResumeDelegation = executionCheckpoint?.pendingAction
         ? isResumableDelegationCheckpoint(executionCheckpoint)
         : false;
-      if (!executionCheckpoint || (executionCheckpoint.pendingAction && !canResumeDelegation)) {
+      if (executionCheckpoint?.pendingAction && !canResumeDelegation) {
         task.status = 'failed';
         task.error = receipt.error || 'Task failed without a safe resumable checkpoint';
         task.completedAt = receipt.completedAt || new Date().toISOString();
@@ -176,10 +176,20 @@ export class PersistentAgentRuntime {
         throw new Error(`${task.error}; refusing to replay the task without a safe checkpoint`);
       }
     }
-    if (typeof state.context.activeTaskId === 'string' && state.context.activeTaskId !== taskId) {
-      throw new Error(
-        `Agent task ${state.context.activeTaskId} was interrupted before its outcome was persisted; refusing to start ${taskId}`,
+    const activeTaskId = state.context.activeTaskId;
+    if (typeof activeTaskId === 'string' && activeTaskId !== taskId) {
+      const activeReceipt = receipts[activeTaskId];
+      const activeCheckpoints = state.context.executionCheckpoints;
+      const activeCheckpoint = parseAgentExecutionCheckpoint(
+        activeCheckpoints && typeof activeCheckpoints === 'object' && !Array.isArray(activeCheckpoints)
+          ? (activeCheckpoints as Record<string, unknown>)[activeTaskId]
+          : undefined,
       );
+      if (activeReceipt?.status !== 'failed' || activeCheckpoint?.pendingAction) {
+        throw new Error(
+          `Agent task ${activeTaskId} was interrupted before its outcome was safely persisted; refusing to start ${taskId}`,
+        );
+      }
     }
     if (state.context.activeTaskId === taskId && !executionCheckpoint) {
       throw new Error(

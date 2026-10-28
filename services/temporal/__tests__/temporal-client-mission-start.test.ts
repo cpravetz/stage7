@@ -131,6 +131,70 @@ describe('TemporalClient mission start', () => {
     }, expect.any(Function))
   })
 
+  it('records a failed terminal-state write instead of silently leaving a mission running', async () => {
+    delete process.env.TEMPORAL_ADDRESS
+    process.env.ARTIFACTS_URL = 'http://artifacts'
+    delete process.env.GATEWAY_URL
+    const largeText = 'x'.repeat(60_000)
+    const directRun = jest.fn(async () => ({
+      plan: { summary: largeText },
+      outputs: { status: 'incomplete', phases: [{ tasks: [{ output: largeText }] }] },
+    }))
+    const client = new TemporalClient('default', directRun)
+    const missionId = 'mission-large-final-state'
+    const missionWrites: Array<Record<string, unknown>> = []
+    let missionReads = 0
+    let finishWrites!: () => void
+    const writesFinished = new Promise<void>((resolve) => { finishWrites = resolve })
+    jest.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
+      const requestUrl = String(url)
+      const method = init?.method || 'GET'
+      if (requestUrl.endsWith(`/api/artifacts/missions/${missionId}`) && method === 'GET') {
+        missionReads += 1
+        if (missionReads <= 2) {
+          return { ok: false, status: 404, json: async () => ({}) } as Response
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ missionId, status: 'running', controlState: 'running' }),
+        } as Response
+      }
+      if (requestUrl.endsWith('/recovery-lease')) {
+        const action = JSON.parse(String(init?.body)).action
+        return {
+          ok: true,
+          status: 200,
+          json: async () => action === 'claim' ? { claimed: true } : { released: true },
+        } as Response
+      }
+      if (requestUrl.endsWith('/api/artifacts/missions') && method === 'POST') {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>
+        missionWrites.push(body)
+        if (missionWrites.length === 2 && String(init?.body).length > 100 * 1024) {
+          return { ok: false, status: 413, text: async () => 'Payload too large' } as Response
+        }
+        if (missionWrites.length === 3) finishWrites()
+        return { ok: true, status: 201, text: async () => '' } as Response
+      }
+      return { ok: true, status: 201, text: async () => '' } as Response
+    })
+
+    await client.startMission({
+      missionId,
+      tenantId: 'tenant-1',
+      assistantId: 'assistant-1',
+      prompt: 'Complete a large mission',
+    })
+    await Promise.race([
+      writesFinished,
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Mission state was not finalized')), 5_000)),
+    ])
+
+    expect(missionWrites.map((write) => write.status)).toEqual(['running', 'incomplete', 'failed'])
+    expect(missionWrites[2]?.error).toContain('413')
+  })
+
   it('allows only one Temporal client to recover the same running mission', async () => {
     delete process.env.TEMPORAL_ADDRESS
     process.env.ARTIFACTS_URL = 'http://artifacts'

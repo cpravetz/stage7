@@ -1456,6 +1456,75 @@ describe('AgentExecutor', () => {
     expect(brainTurn).toBe(2)
   })
 
+  it('does not return success when the Brain-call budget ends after an action', async () => {
+    let toolExecutions = 0
+    const fetcher: typeof fetch = async (input) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) {
+        return jsonResponse({
+          tools: [{ id: 'lookup', name: 'Lookup', description: 'Look up a record', type: 'code' }],
+        })
+      }
+      if (url.endsWith('/api/brain/complete')) {
+        return jsonResponse({ content: '{"tool":"lookup","args":{"query":"record"}}' })
+      }
+      if (url.endsWith('/api/tool-executor/tools/execute')) {
+        toolExecutions++
+        return jsonResponse({ status: 'completed', output: { record: 'found' } })
+      }
+      if (url.endsWith('/api/brain/complaint')) return jsonResponse({ success: true })
+      throw new Error(`Unexpected request: ${url}`)
+    }
+
+    await expect(new AgentExecutor({ fetcher }).execute(definition, task() as AgentTask, {
+      missionId: 'mission-1',
+      delegationDepth: 0,
+      executionPolicy: {
+        ...DEFAULT_AGENT_EXECUTION_POLICY,
+        maxBrainCalls: 1,
+        maxActions: 1,
+      },
+    })).rejects.toThrow('exhausted its 1-call Brain execution budget')
+    expect(toolExecutions).toBe(1)
+  })
+
+  it('fails instead of reporting success after repeating an action without progress', async () => {
+    let brainCalls = 0
+    let toolExecutions = 0
+    const fetcher: typeof fetch = async (input) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) {
+        return jsonResponse({
+          tools: [{ id: 'lookup', name: 'Lookup', description: 'Look up a record', type: 'code' }],
+        })
+      }
+      if (url.endsWith('/api/brain/complete')) {
+        brainCalls++
+        return jsonResponse({
+          content: '{"tool":"lookup","args":{"query":"same"}}',
+          requestId: `request-${brainCalls}`,
+        })
+      }
+      if (url.endsWith('/api/tool-executor/tools/execute')) {
+        toolExecutions++
+        return jsonResponse({ status: 'completed', output: { record: 'found' } })
+      }
+      if (url.endsWith('/api/brain/complaint')) return jsonResponse({ success: true })
+      throw new Error(`Unexpected request: ${url}`)
+    }
+
+    await expect(new AgentExecutor({ fetcher }).execute(definition, task() as AgentTask, {
+      missionId: 'mission-1',
+      delegationDepth: 0,
+      executionPolicy: {
+        ...DEFAULT_AGENT_EXECUTION_POLICY,
+        maxBrainCalls: 5,
+      },
+    })).rejects.toThrow('repeated the same action without progress')
+    expect(brainCalls).toBe(3)
+    expect(toolExecutions).toBe(2)
+  })
+
   it('completes a bounded mission task through delegation, tool repair, and receipt replay after runtime recreation', async () => {
     type SavedAgentState = {
       agentId: string
@@ -1814,6 +1883,16 @@ describe('AgentExecutor', () => {
       }
       throw new Error(`Unexpected request: ${url}`)
     }
+    const continuationRuntime = new PersistentAgentRuntime(persistence, new AgentExecutor({ fetcher: recoveredFetcher }))
+    continuationRuntime.registerAgentForMission('mission-1', retryAgent)
+    await continuationRuntime.startAgent(retryAgent.id, 'mission-1')
+    const continuationTask = await continuationRuntime.submitTask(retryAgent.id, task('next-safe-task'))
+    await expect(continuationRuntime.executeTask(retryAgent.id, continuationTask.taskId))
+      .resolves.toMatchObject({
+        status: 'completed',
+        result: expect.objectContaining({ output: expect.stringContaining('Recovered without replaying an action.') }),
+      })
+
     const restartedRuntime = new PersistentAgentRuntime(persistence, new AgentExecutor({ fetcher: recoveredFetcher }))
     restartedRuntime.registerAgentForMission('mission-1', retryAgent)
     await restartedRuntime.startAgent(retryAgent.id, 'mission-1')

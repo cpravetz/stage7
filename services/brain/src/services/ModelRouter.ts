@@ -108,21 +108,6 @@ function supportsRequestedFormat(
   return capabilities.includes(`${format}_generation`);
 }
 
-function getOptimizeForPriority(model: ModelDefinition, optimizeFor: string): number {
-  switch (optimizeFor) {
-    case 'speed':
-      return model.maxTokens;
-    case 'accuracy':
-      return model.capabilities.includes('reasoning') ? 0 : 1;
-    case 'creativity':
-      return model.capabilities.includes('creative') ? 0 : 1;
-    case 'cost':
-    case 'balanced':
-    default:
-      return 0;
-  }
-}
-
 interface ScoredModel {
   model: ModelDefinition;
   score: number;
@@ -266,33 +251,20 @@ export class ModelRouter {
     const matchedCaps = requiredCaps.filter((cap) => model.capabilities.includes(cap)).length;
     score += matchedCaps * 10;
 
-    // Cost efficiency: inverse cost (free models get max bonus)
-    if (model.costPer1kTokens === 0) {
-      score += 50;
-    } else if (model.costPer1kTokens < 0.1) {
-      score += 30;
-    } else if (model.costPer1kTokens < 1) {
-      score += 20;
-    } else if (model.costPer1kTokens < 5) {
-      score += 10;
-    }
+    const costScore = model.costPer1kTokens === 0
+      ? 50
+      : model.costPer1kTokens < 0.1
+        ? 30
+        : model.costPer1kTokens < 1
+          ? 20
+          : model.costPer1kTokens < 5
+            ? 10
+            : 0;
+    if (optimizeFor === 'cost' || optimizeFor === 'balanced') score += costScore;
 
     // Specialization bonus/penalty
     const specPenalty = modelSpecializationPenalty(model, options.task);
     score -= specPenalty * 5;
-
-    // OptimizeFor preference
-    const optPriority = getOptimizeForPriority(model, optimizeFor);
-    if (optimizeFor === 'speed') {
-      // Lower maxTokens = faster (rough proxy)
-      score += Math.max(0, 100 - model.maxTokens / 1000);
-    } else if (optimizeFor === 'accuracy') {
-      if (model.capabilities.includes('reasoning')) score += 15;
-    } else if (optimizeFor === 'creativity') {
-      if (model.capabilities.includes('creative')) score += 15;
-    } else if (optimizeFor === 'cost' || optimizeFor === 'balanced') {
-      // Cost already factored above
-    }
 
     // Provider health
     const health = this.providerHealth.get(model.provider);
@@ -310,29 +282,34 @@ export class ModelRouter {
     }
 
     const metrics = this.performanceMetrics.get(`${model.provider}:${model.id}`);
-    if (metrics && metrics.totalRequests > 0) {
-      // Keep persisted outcomes a bounded ranking signal; eligibility stays above this scoring step.
-      const successRate = Math.max(0, Math.min(1, metrics.successRate));
-      score += (successRate - 0.5) * 40;
+    if (metrics) {
+      if (metrics.totalRequests > 0) {
+        const successRate = Math.max(0, Math.min(1, metrics.successRate));
+        const qualityWeight = optimizeFor === 'accuracy' ? 120 : 40;
+        score += (successRate - 0.5) * qualityWeight;
 
-      if (Number.isFinite(metrics.avgLatencyMs) && metrics.avgLatencyMs >= 0) {
-        score += (RESPONSE_TIME_SCORE_RANGE / (1 + metrics.avgLatencyMs / RESPONSE_TIME_BASELINE_MS))
-          - RESPONSE_TIME_SCORE_RANGE / 2;
-      }
+        if (Number.isFinite(metrics.avgLatencyMs) && metrics.avgLatencyMs >= 0) {
+          const latencyScore = (RESPONSE_TIME_SCORE_RANGE / (1 + metrics.avgLatencyMs / RESPONSE_TIME_BASELINE_MS))
+            - RESPONSE_TIME_SCORE_RANGE / 2;
+          if (optimizeFor === 'speed' || optimizeFor === 'balanced') score += latencyScore;
+        }
 
-      const hasMeasuredCost = (metrics.costRequests ?? 0) > 0
-        || (metrics.totalCost ?? 0) > 0
-        || metrics.avgCostPerRequest > 0;
-      if (hasMeasuredCost && Number.isFinite(metrics.avgCostPerRequest) && metrics.avgCostPerRequest >= 0) {
-        score += (10 / (1 + metrics.avgCostPerRequest * 100)) - 5;
+        const hasMeasuredCost = (metrics.costRequests ?? 0) > 0
+          || (metrics.totalCost ?? 0) > 0
+          || metrics.avgCostPerRequest > 0;
+        if (hasMeasuredCost && Number.isFinite(metrics.avgCostPerRequest) && metrics.avgCostPerRequest >= 0) {
+          const measuredCostScore = (10 / (1 + metrics.avgCostPerRequest * 100)) - 5;
+          if (optimizeFor === 'cost' || optimizeFor === 'balanced') score += measuredCostScore;
+        }
       }
+      const complaintRate = Math.max(0, Math.min(1, metrics.complaintRate || 0));
+      if (complaintRate > 0) score -= complaintRate * (optimizeFor === 'accuracy' ? 600 : 300);
+    } else if (optimizeFor === 'accuracy' && model.capabilities.includes('reasoning')) {
+      score += 10;
+    }
 
-      // Complaint penalty: heavily weight quality complaints from agents
-      const complaintRate = metrics.complaintRate || 0;
-      if (complaintRate > 0) {
-        // Each 10% complaint rate = -30 points (steep penalty)
-        score -= complaintRate * 300;
-      }
+    if (optimizeFor === 'creativity' && model.capabilities.includes('creative')) {
+      score += 10;
     }
 
     // Deterministic tiebreaker
