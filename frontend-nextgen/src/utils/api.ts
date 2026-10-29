@@ -42,6 +42,18 @@ export async function postJSON<T>(path: string, body: unknown, init?: RequestIni
   return response.json();
 }
 
+export async function postFormData<T>(path: string, body: FormData, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: 'POST',
+    body,
+    ...init,
+  });
+  if (!response.ok) {
+    throw new Error(`API error: ${response.status} ${response.statusText}`);
+  }
+  return response.json();
+}
+
 export async function deleteResource(path: string): Promise<void> {
   const response = await fetch(`${API_BASE}${path}`, {
     method: 'DELETE',

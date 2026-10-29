@@ -5,6 +5,7 @@ import Storage from '../services/Storage';
 import { asyncHandler, NextGenError } from '@stage7-nextgen/shared';
 import { z } from 'zod';
 import { MissionState } from '../types';
+import path from 'path';
 
 const router: Router = Router();
 router.use(asyncHandler(async (_req, _res, next) => {
@@ -78,6 +79,12 @@ const RecoveryLeaseRequestSchema = z.discriminatedUnion('action', [
     ownerId: z.string().min(1).max(128),
   }),
 ]);
+
+function isoDate(value: unknown): string | undefined {
+  if (typeof value !== 'string' && typeof value !== 'number' && !(value instanceof Date)) return undefined;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
+}
 
 router.post('/:missionId/recovery-lease', asyncHandler(async (req, res) => {
   const missionId = req.params.missionId as string;
@@ -194,41 +201,164 @@ router.get('/:missionId/artifacts', asyncHandler(async (req, res) => {
 
   const state = await service.getMissionState(missionId);
   const artifacts: Array<Record<string, unknown>> = [];
+  const seen = new Map<string, number>();
+  const addArtifact = (
+    artifact: Record<string, unknown>,
+    context: {
+      phaseId?: string;
+      phaseName?: string;
+      taskId?: string;
+      taskTitle?: string;
+      taskStatus?: string;
+      expectedArtifacts?: string[];
+      phaseStatus?: string;
+      createdAt?: string;
+    } = {},
+  ) => {
+    const name = typeof artifact.name === 'string'
+      ? artifact.name
+      : typeof artifact.id === 'string' ? artifact.id : 'artifact';
+    const expected = context.expectedArtifacts?.some(
+      (expectedName) => expectedName.trim().toLocaleLowerCase() === name.trim().toLocaleLowerCase(),
+    ) || false;
+    const isBlocker = typeof artifact.content === 'string'
+      && /^\s*(?:\*\*)?Blocker(?:\*\*)?\s*:/i.test(artifact.content);
+    const phaseId = typeof artifact.phaseId === 'string' ? artifact.phaseId : context.phaseId;
+    const artifactLineageId = expected && phaseId && !isBlocker
+      ? `mission:${encodeURIComponent(missionId)}:phase:${encodeURIComponent(phaseId)}:deliverable:${encodeURIComponent(name.trim().toLocaleLowerCase())}`
+      : undefined;
+    const legacyLineageId = `mission:${encodeURIComponent(missionId)}:${encodeURIComponent(name.trim().toLocaleLowerCase())}`;
+    const needsCanonicalLineage = artifactLineageId
+      && (artifact.artifactId === undefined || artifact.artifactId === legacyLineageId);
+    const enriched: Record<string, unknown> = {
+      ...artifact,
+      ...context.phaseId && typeof artifact.phaseId !== 'string' ? { phaseId: context.phaseId } : {},
+      ...context.phaseName && typeof artifact.phaseName !== 'string' ? { phaseName: context.phaseName } : {},
+      ...context.taskId && typeof artifact.taskId !== 'string' ? { taskId: context.taskId } : {},
+      ...context.taskTitle && typeof artifact.taskTitle !== 'string' ? { taskTitle: context.taskTitle } : {},
+      ...context.taskStatus && typeof artifact.taskStatus !== 'string' ? { taskStatus: context.taskStatus } : {},
+      ...context.createdAt && typeof artifact.createdAt !== 'string' ? { createdAt: context.createdAt } : {},
+      ...isBlocker
+        ? { purpose: 'execution-outcome' }
+        : artifact.purpose === undefined
+        ? {
+            purpose: artifact.isDeliverable === true || expected ? 'deliverable' : 'workproduct',
+          }
+        : {},
+      ...needsCanonicalLineage
+        ? { artifactId: artifactLineageId, lineageId: artifactLineageId }
+        : {},
+      ...isBlocker || artifact.purpose === 'execution-outcome'
+        ? {
+            isDeliverable: false,
+            ...isBlocker ? { status: 'blocked' } : {},
+          }
+        : {
+            ...artifact.isDeliverable === undefined && expected && artifact.purpose !== 'workproduct'
+              ? { isDeliverable: true }
+              : {},
+            ...artifact.status === undefined && expected
+              ? {
+                  status: context.phaseStatus === 'approved'
+                    ? 'approved'
+                    : context.phaseStatus === 'completed'
+                      ? 'completed'
+                    : context.phaseStatus === 'awaiting_approval' || context.phaseStatus === 'awaiting_review'
+                      ? 'in_review'
+                      : 'draft',
+                }
+              : {},
+          },
+    };
+    if (
+      enriched.visibility === 'internal'
+      || name.toLocaleLowerCase() === 'system-action-receipts.json'
+    ) return;
+    const key = typeof enriched.id === 'string' && enriched.id
+      ? JSON.stringify(['id', enriched.id, enriched.version ?? '', enriched.content ?? ''])
+      : JSON.stringify([
+          enriched.phaseId || '',
+          enriched.taskId || '',
+          name.toLocaleLowerCase(),
+          enriched.version ?? '',
+          enriched.versionOf ?? '',
+          enriched.url ?? '',
+          enriched.content ?? '',
+        ]);
+    const previousIndex = seen.get(key);
+    if (previousIndex === undefined) {
+      seen.set(key, artifacts.push(enriched) - 1);
+      return;
+    }
+    artifacts[previousIndex] = { ...artifacts[previousIndex], ...enriched };
+  };
+  const addArtifactValue = (
+    value: unknown,
+    context: {
+      phaseId?: string;
+      phaseName?: string;
+      taskId?: string;
+      taskTitle?: string;
+      taskStatus?: string;
+      expectedArtifacts?: string[];
+      phaseStatus?: string;
+      createdAt?: string;
+    } = {},
+  ) => {
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      addArtifact(value as Record<string, unknown>, context);
+    } else if (typeof value === 'string') {
+      addArtifact({ id: value, name: value }, context);
+    }
+  };
 
   if (plan) {
     for (const artifact of (plan as { artifacts?: unknown[] }).artifacts || []) {
-      if (artifact && typeof artifact === 'object') {
-        artifacts.push(artifact as Record<string, unknown>);
-      } else if (typeof artifact === 'string') {
-        artifacts.push({ id: artifact, name: artifact });
-      }
+      addArtifactValue(artifact);
     }
-    const phases = (plan as { phases?: Array<{ id: string; artifacts?: unknown[]; tasks?: Array<{ id: string; artifacts?: unknown[] }> }> }).phases || [];
+    const phases = (plan as { phases?: Array<{
+      id: string;
+      name?: string;
+      status?: string;
+      artifacts?: unknown[];
+      tasks?: Array<{
+        id: string;
+        title?: string;
+        status?: string;
+        completedAt?: number | string;
+        expectedArtifacts?: string[];
+        artifacts?: unknown[];
+      }>;
+    }> }).phases || [];
     for (const phase of phases) {
       for (const artifact of phase.artifacts || []) {
-        if (artifact && typeof artifact === 'object') {
-          artifacts.push({ phaseId: phase.id, ...(artifact as Record<string, unknown>) });
-        } else if (typeof artifact === 'string') {
-          artifacts.push({ id: artifact, name: artifact, phaseId: phase.id });
-        }
+        addArtifactValue(artifact, { phaseId: phase.id, phaseName: phase.name, phaseStatus: phase.status });
       }
       for (const task of phase.tasks || []) {
+        const taskContext = {
+          phaseId: phase.id,
+          phaseName: phase.name,
+          taskId: task.id,
+          taskTitle: task.title,
+          taskStatus: task.status,
+          expectedArtifacts: task.expectedArtifacts,
+          phaseStatus: phase.status,
+          createdAt: isoDate(task.completedAt),
+        };
         for (const artifact of task.artifacts || []) {
-          if (artifact && typeof artifact === 'object') {
-            artifacts.push({ phaseId: phase.id, taskId: task.id, ...(artifact as Record<string, unknown>) });
-          } else if (typeof artifact === 'string') {
-            artifacts.push({ id: artifact, name: artifact, phaseId: phase.id, taskId: task.id });
-          }
+          addArtifactValue(artifact, taskContext);
         }
 
         if (!task.artifacts?.length) {
           const storedTask = await service.getMissionTask(missionId, task.id);
           for (const artifact of storedTask?.artifacts || []) {
-            if (artifact && typeof artifact === 'object') {
-              artifacts.push({ phaseId: phase.id, taskId: task.id, ...(artifact as Record<string, unknown>) });
-            } else if (typeof artifact === 'string') {
-              artifacts.push({ id: artifact, name: artifact, phaseId: phase.id, taskId: task.id });
-            }
+            addArtifactValue(artifact, {
+              ...taskContext,
+              taskStatus: typeof storedTask?.status === 'string' ? storedTask.status : task.status,
+              createdAt: isoDate(storedTask?.completedAt)
+                ? isoDate(storedTask?.completedAt)
+                : taskContext.createdAt,
+            });
           }
         }
       }
@@ -237,18 +367,99 @@ router.get('/:missionId/artifacts', asyncHandler(async (req, res) => {
 
   const outputAny = state?.output as Record<string, unknown> | undefined;
   if (outputAny?.outputs && typeof outputAny.outputs === 'object') {
-    const phases = (outputAny.outputs as { phases?: Array<{ phaseId: string; name?: string; tasks?: Array<{ taskId: string; status: string; artifacts?: unknown[] }> }> }).phases || [];
+    const phases = (outputAny.outputs as { phases?: Array<{
+      phaseId: string;
+      name?: string;
+      status?: string;
+      tasks?: Array<{ taskId: string; status: string; title?: string; completedAt?: number | string; artifacts?: unknown[] }>;
+    }> }).phases || [];
     for (const phase of phases) {
       for (const task of phase.tasks || []) {
         for (const artifact of task.artifacts || []) {
-          if (artifact && typeof artifact === 'object') {
-            artifacts.push({ phaseId: phase.phaseId, taskId: task.taskId, ...(artifact as Record<string, unknown>) });
-          } else if (typeof artifact === 'string') {
-            artifacts.push({ id: artifact, name: artifact, phaseId: phase.phaseId, taskId: task.taskId });
-          }
+          const plannedTask = (plan as { phases?: Array<{ id: string; tasks?: Array<{ id: string; expectedArtifacts?: string[] }> }> } | undefined)
+            ?.phases?.find((candidate) => candidate.id === phase.phaseId)
+            ?.tasks?.find((candidate) => candidate.id === task.taskId);
+          const plannedPhase = (plan as { phases?: Array<{ id: string; status?: string }> } | undefined)
+            ?.phases?.find((candidate) => candidate.id === phase.phaseId);
+          addArtifactValue(artifact, {
+            phaseId: phase.phaseId,
+            phaseName: phase.name,
+            taskId: task.taskId,
+            taskTitle: task.title,
+            taskStatus: task.status,
+            phaseStatus: plannedPhase?.status || phase.status,
+            createdAt: isoDate(task.completedAt),
+            expectedArtifacts: plannedTask?.expectedArtifacts,
+          });
         }
       }
     }
+  }
+
+  const phases = (plan as {
+    phases?: Array<{ id: string; name?: string; status?: string; tasks?: Array<{ id: string; title?: string; expectedArtifacts?: string[] }> }>;
+  } | undefined)?.phases || [];
+  const missionEvents = await service.listMissionEvents(missionId);
+  for (const event of missionEvents) {
+    if (event.type !== 'task_completed' || !Array.isArray(event.data?.artifacts)) continue;
+    const phaseId = typeof event.data.phaseId === 'string' ? event.data.phaseId : undefined;
+    const taskId = typeof event.data.taskId === 'string' ? event.data.taskId : undefined;
+    const phase = phases.find((candidate) => candidate.id === phaseId);
+    const task = phase?.tasks?.find((candidate) => candidate.id === taskId);
+    for (const artifact of event.data.artifacts) {
+      addArtifactValue(artifact, {
+        phaseId,
+        phaseName: phase?.name,
+        taskId,
+        taskTitle: typeof event.data.taskTitle === 'string' ? event.data.taskTitle : task?.title,
+        taskStatus: 'completed',
+        expectedArtifacts: task?.expectedArtifacts,
+        phaseStatus: phase?.status,
+        createdAt: isoDate(event.timestamp),
+      });
+    }
+  }
+
+  const versionGroups = new Map<string, number[]>();
+  artifacts.forEach((artifact, index) => {
+    if (typeof artifact.artifactId !== 'string') return;
+    const group = versionGroups.get(artifact.artifactId) || [];
+    group.push(index);
+    versionGroups.set(artifact.artifactId, group);
+  });
+  for (const [lineageId, indexes] of versionGroups) {
+    const orderedIndexes = indexes.slice().sort((left, right) => {
+      const leftCreated = typeof artifacts[left].createdAt === 'string'
+        ? Date.parse(artifacts[left].createdAt as string)
+        : Number.NaN;
+      const rightCreated = typeof artifacts[right].createdAt === 'string'
+        ? Date.parse(artifacts[right].createdAt as string)
+        : Number.NaN;
+      if (Number.isFinite(leftCreated) && Number.isFinite(rightCreated) && leftCreated !== rightCreated) {
+        return leftCreated - rightCreated;
+      }
+      return left - right;
+    });
+    const assignedVersions = new Set(
+      indexes.map((index) => Number(artifacts[index].version)).filter((version) => Number.isFinite(version) && version > 0),
+    );
+    let nextVersion = 1;
+    for (const index of orderedIndexes) {
+      if (artifacts[index].version === undefined) {
+        while (assignedVersions.has(nextVersion)) nextVersion += 1;
+        artifacts[index].version = nextVersion;
+        assignedVersions.add(nextVersion);
+        nextVersion += 1;
+      } else {
+        nextVersion = Math.max(nextVersion, (Number(artifacts[index].version) || 0) + 1);
+      }
+      artifacts[index].isLatest = false;
+    }
+    const latestIndex = indexes.reduce((latest, candidate) =>
+      Number(artifacts[candidate].version) > Number(artifacts[latest].version) ? candidate : latest,
+    indexes[0]);
+    artifacts[latestIndex].isLatest = true;
+    artifacts[latestIndex].lineageId = lineageId;
   }
 
   res.json({ artifacts });
@@ -313,26 +524,70 @@ router.get('/:missionId/artifacts/:artifactId', asyncHandler(async (req, res) =>
 
 // Attach an artifact to a mission (phase-level or task-level)
 const upload = multer();
+const MissionArtifactUploadSchema = z.object({
+  id: z.string().optional(),
+  name: z.string().optional(),
+  content: z.unknown().optional(),
+  type: z.string().optional(),
+  mediaType: z.string().optional(),
+  contentEncoding: z.string().optional(),
+  phaseId: z.string().optional(),
+  taskId: z.string().optional(),
+  purpose: z.enum(['workproduct', 'deliverable', 'execution-outcome']).optional(),
+  isDeliverable: z.union([z.boolean(), z.enum(['true', 'false'])]).optional(),
+  artifactId: z.string().optional(),
+  version: z.union([z.string(), z.number()]).optional(),
+  versionOf: z.string().optional(),
+  status: z.enum(['draft']).optional(),
+}).passthrough();
 
 router.post('/:missionId/artifacts', upload.single('file'), asyncHandler(async (req, res) => {
   const missionId = req.params.missionId as string;
-  const { id, name, content, type, phaseId, taskId } = req.body as { id?: string; name?: string; content?: string; type?: string; phaseId?: string; taskId?: string };
+  const {
+    id,
+    name,
+    content,
+    type,
+    mediaType,
+    contentEncoding,
+    phaseId,
+    taskId,
+    purpose,
+    isDeliverable,
+    artifactId,
+    version,
+    versionOf,
+    status,
+  } = MissionArtifactUploadSchema.parse(req.body);
 
-  let artifactContent: string | undefined = content;
-  let mimeType: string | undefined = type;
+  let artifactContent: unknown = content;
+  let mimeType: string | undefined = mediaType || type;
+  let encoding: string | undefined = contentEncoding;
   let filename: string | undefined = name;
 
   if ((req as any).file) {
-      const file = (req as any).file as any;
-    artifactContent = file.buffer ? file.buffer.toString('base64') : undefined;
+    const file = (req as any).file as Express.Multer.File;
+    artifactContent = file.buffer.toString('base64');
+    encoding = 'base64';
     mimeType = file.mimetype || mimeType;
     filename = file.originalname || filename;
-    // attempt to upload binary to object storage
-    const key = `missions/${missionId}/${Date.now()}-${filename}`;
+    const storageFilename = path.basename(filename || 'artifact').replace(/[\\/]/g, '_');
+    const key = `missions/${missionId}/${Date.now()}-${storageFilename}`;
     const uploadResult = await Storage.uploadBufferToStorage(key, file.buffer, file.mimetype);
     if (uploadResult.url) {
-      // store reference instead of embedding binary
-      const artifactRef = { id: id || `artifact-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`, name: filename || 'artifact', type: mimeType, url: uploadResult.url } as any;
+      const artifactRef = {
+        id: id || `artifact-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+        name: filename || 'artifact',
+        type: mimeType,
+        mediaType: mimeType,
+        purpose,
+        isDeliverable: isDeliverable === true || isDeliverable === 'true',
+        artifactId,
+        version,
+        versionOf,
+        status,
+        url: uploadResult.url,
+      };
       if (taskId) {
         const existing = await service.getMissionTask(missionId, taskId);
         const artifacts = Array.isArray(existing?.artifacts) ? [...(existing!.artifacts as any[]), artifactRef] : [artifactRef];
@@ -353,14 +608,21 @@ router.post('/:missionId/artifacts', upload.single('file'), asyncHandler(async (
       res.status(201).json({ artifact: artifactRef, plan: { ...(plan as any), artifacts: metaArtifacts } });
       return;
     }
-    // if upload failed, fall back to embedding base64 content
   }
 
   const artifact = {
     id: id || `artifact-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
     name: filename || 'artifact',
     type: mimeType,
+    mediaType: mimeType,
     content: artifactContent,
+    contentEncoding: encoding,
+    purpose,
+    isDeliverable: isDeliverable === true || isDeliverable === 'true',
+    artifactId,
+    version,
+    versionOf,
+    status,
   } as any;
 
   if (taskId) {

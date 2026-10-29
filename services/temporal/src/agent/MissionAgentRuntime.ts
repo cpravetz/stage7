@@ -10,6 +10,8 @@ import {
   AgentExecutionPolicy,
   AgentToolPolicy,
   DEFAULT_AGENT_EXECUTION_POLICY,
+  MissionArtifact,
+  MissionArtifactSchema,
   describeRequestError,
   httpRequest,
 } from '@stage7-nextgen/shared';
@@ -292,7 +294,7 @@ function parseMissionAgentToolPolicies(value: unknown): Map<string, MissionAgent
 
 export interface TaskExecutionResult {
   output: string;
-  artifacts: Array<{ name: string; type: string; content: string }>;
+  artifacts: MissionArtifact[];
   actionReceipts?: Array<{ toolId: string; isError: boolean; content: string; outcome: 'success' | 'failure' | 'denied' }>;
   tokensUsed: number;
   model?: string;
@@ -1290,7 +1292,7 @@ export class MissionAgentRuntime {
     output: string,
     expected: string[],
     taskId: string,
-  ): Array<{ name: string; type: string; content: string }> {
+  ): MissionArtifact[] {
     if (value === undefined || (Array.isArray(value) && value.length === 0)) {
       return this.extractArtifacts(output, expected);
     }
@@ -1305,25 +1307,16 @@ export class MissionAgentRuntime {
       ) {
         throw new Error(`Agent task ${taskId} returned an invalid artifact`);
       }
-      const artifact = candidate as Record<string, unknown>;
-      if (
-        typeof artifact.name !== 'string'
-        || !artifact.name.trim()
-        || typeof artifact.type !== 'string'
-        || typeof artifact.content !== 'string'
-      ) {
+      const parsed = MissionArtifactSchema.safeParse(candidate);
+      if (!parsed.success) {
         throw new Error(`Agent task ${taskId} returned an invalid artifact`);
       }
-      return {
-        name: artifact.name,
-        type: artifact.type,
-        content: artifact.content,
-      };
+      return parsed.data;
     });
   }
 
   private assertExpectedArtifacts(
-    _artifacts: Array<{ name: string; type: string; content: string }>,
+    _artifacts: MissionArtifact[],
     _expected: string[],
     _taskId: string,
   ): void {
@@ -1363,10 +1356,10 @@ export class MissionAgentRuntime {
   }
 
   private withActionReceiptArtifact(
-    artifacts: Array<{ name: string; type: string; content: string }>,
+    artifacts: MissionArtifact[],
     actionReceipts: Array<{ toolId: string; isError: boolean; content: string; outcome: 'success' | 'failure' | 'denied' }>,
     taskId: string,
-  ): Array<{ name: string; type: string; content: string }> {
+  ): MissionArtifact[] {
     if (actionReceipts.length === 0) return artifacts;
     const name = 'system-action-receipts.json';
     if (artifacts.some((artifact) => artifact.name.toLocaleLowerCase() === name)) {
@@ -1374,13 +1367,13 @@ export class MissionAgentRuntime {
     }
     return [
       ...artifacts,
-      { name, type: 'evidence', content: JSON.stringify(actionReceipts) },
+      { name, type: 'evidence', content: JSON.stringify(actionReceipts), purpose: 'execution-outcome', visibility: 'internal' },
     ];
   }
 
-  private extractArtifacts(content: string, expected: string[]): Array<{ name: string; type: string; content: string }> {
+  private extractArtifacts(content: string, expected: string[]): MissionArtifact[] {
     if (expected.length === 0) return [];
-    const artifacts: Array<{ name: string; type: string; content: string }> = [];
+    const artifacts: MissionArtifact[] = [];
     const headings = [...content.matchAll(/^##[ \t]+(.+?)[ \t]*$/gm)];
     const normalize = (name: string) => name.trim().toLocaleLowerCase();
     for (const [index, heading] of headings.entries()) {
@@ -1396,6 +1389,8 @@ export class MissionAgentRuntime {
         name: matched || `${name.replace(/[^a-z0-9-]/gi, '-').toLowerCase()}.md`,
         type: this.inferType(section),
         content: section,
+        purpose: 'deliverable',
+        isDeliverable: true,
       });
     }
     return artifacts;

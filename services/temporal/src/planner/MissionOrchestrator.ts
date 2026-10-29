@@ -1,6 +1,7 @@
 import {
   DEFAULT_AGENT_EXECUTION_POLICY,
   AgentExecutionPolicy,
+  MissionArtifact,
   Plan,
   Phase,
   Task,
@@ -897,7 +898,7 @@ export class MissionOrchestrator {
         tasks?: Array<{
           taskId?: string;
           status?: string;
-          artifacts?: Array<{ name: string; type: string; content: string }>;
+          artifacts?: MissionArtifact[];
           output?: string;
         }>;
       }>;

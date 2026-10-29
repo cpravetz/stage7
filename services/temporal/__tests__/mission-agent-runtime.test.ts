@@ -93,7 +93,16 @@ describe('MissionAgentRuntime', () => {
           completedAt: new Date().toISOString(),
           result: {
             output: '## research.md\nResearch complete.',
-            artifacts: [],
+            artifacts: [
+              { name: 'research.md', type: 'text/markdown', content: 'Research complete.' },
+              {
+                name: 'audio.wav',
+                type: 'application/octet-stream',
+                mediaType: 'audio/wav',
+                contentEncoding: 'base64',
+                content: 'AAECAw==',
+              },
+            ],
             actionReceipts: [{ toolId: 'calculate', isError: false, content: '{"result":42}' }],
             tokensUsed: 19,
           },
@@ -142,10 +151,18 @@ describe('MissionAgentRuntime', () => {
     expect(result.tokensUsed).toBe(19)
     expect(result.artifacts[0]?.name).toBe('research.md')
     expect(result.artifacts[0]?.content).toBe('Research complete.')
-    expect(result.artifacts[1]).toEqual({
+    expect(result.artifacts[1]).toMatchObject({
+      name: 'audio.wav',
+      mediaType: 'audio/wav',
+      contentEncoding: 'base64',
+      content: 'AAECAw==',
+    })
+    expect(result.artifacts[2]).toEqual({
       name: 'system-action-receipts.json',
       type: 'evidence',
       content: JSON.stringify([{ toolId: 'calculate', isError: false, content: '{"result":42}', outcome: 'success' }]),
+      purpose: 'execution-outcome',
+      visibility: 'internal',
     })
     expect(result.actionReceipts).toEqual([
       { toolId: 'calculate', isError: false, content: '{"result":42}', outcome: 'success' },
@@ -154,6 +171,13 @@ describe('MissionAgentRuntime', () => {
       .toMatchObject({
         name: 'system-action-receipts.json',
         content: JSON.stringify([{ toolId: 'calculate', isError: false, content: '{"result":42}', outcome: 'success' }]),
+      })
+    expect(createCompletedTaskSummary('task-1', result.output, result.artifacts).artifacts?.[2])
+      .toMatchObject({
+        name: 'audio.wav',
+        content: undefined,
+        contentOmitted: true,
+        mediaType: 'audio/wav',
       })
     expect(requests.some((request) => request.url.includes('/api/workers/assistants/'))).toBe(false)
     expect(requests.find((request) => request.url.endsWith('/tasks'))?.body?.taskId).toBe('mission-1:phase-1:task-1')

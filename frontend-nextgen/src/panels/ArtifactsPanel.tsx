@@ -1,4 +1,6 @@
 import { AgentArtifact } from '../types/workspace';
+import MissionArtifactContent from '../components/MissionArtifactContent';
+import { getArtifactPurpose } from '../types/missionArtifact';
 
 interface ArtifactsPanelProps {
   agentArtifacts: AgentArtifact[];
@@ -18,41 +20,15 @@ export const ArtifactsPanel = ({ agentArtifacts }: ArtifactsPanelProps) => {
             <li key={a.id || a.name} className="artifact-item produced">
               <div className="artifact-header">
                 <strong>{a.name || a.id}</strong>
-                {a.type && <span className="badge">{a.type}</span>}
+                <span className={`badge ${getArtifactPurpose(a)}`}>
+                  {getArtifactPurpose(a) === 'execution-outcome'
+                    ? 'Execution outcome'
+                    : getArtifactPurpose(a)}
+                </span>
+                {a.status && <span className={`badge ${a.status}`}>{a.status}</span>}
+                {a.version !== undefined && <span className="badge">Version {a.version}</span>}
               </div>
-              {(a.content || a.url) && (
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                   <button onClick={() => {
-                     if (a.url) {
-                       window.open(a.url, '_blank');
-                     } else {
-                       const blob = new Blob([a.content || ''], { type: 'text/plain' });
-                       const url = URL.createObjectURL(blob);
-                       window.open(url, '_blank');
-                     }
-                   }}>Open in new tab</button>
-                   <button onClick={() => {
-                     if (a.url) {
-                       const aEl = document.createElement('a');
-                       aEl.href = a.url;
-                       aEl.target = '_blank';
-                       document.body.appendChild(aEl);
-                       aEl.click();
-                       aEl.remove();
-                     } else {
-                       const blob = new Blob([a.content || ''], { type: 'text/plain' });
-                       const url = URL.createObjectURL(blob);
-                       const aEl = document.createElement('a');
-                       aEl.href = url;
-                       aEl.download = (a.name || a.id || 'artifact') + '.txt';
-                       document.body.appendChild(aEl);
-                       aEl.click();
-                       aEl.remove();
-                       URL.revokeObjectURL(url);
-                     }
-                   }}>Download file</button>
-                </div>
-              )}
+              <MissionArtifactContent artifact={a} />
             </li>
           ))}
         </ul>

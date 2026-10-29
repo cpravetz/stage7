@@ -3,7 +3,14 @@ import { useParams, Link } from 'react-router-dom';
 import { useFeedStore, FeedEvent } from '../stores/feedStore';
 import AgentOutputsPanel from '../components/AgentOutputsPanel';
 import { useMissionsStore } from '../stores/missionsStore';
-import { postJSON } from '../utils/api';
+import { postFormData, postJSON } from '../utils/api';
+import MissionArtifactContent from '../components/MissionArtifactContent';
+import {
+  getArtifactMediaCategory,
+  groupMissionArtifactVersions,
+  getArtifactPurpose,
+  MissionArtifact,
+} from '../types/missionArtifact';
 import { missionIdFromWorkflowId } from '../utils/missionId';
 import {
   buildMissionEvents,
@@ -156,14 +163,10 @@ function iconForType(type: string): string {
   return '📋';
 }
 
-interface MissionArtifactItem {
+interface MissionArtifactItem extends MissionArtifact {
   id: string;
   name: string;
-  phaseId?: string;
-  taskId?: string;
   kind: 'expected' | 'produced';
-  text?: string;
-  url?: string;
 }
 
 function toMissionArtifactItem(
@@ -180,6 +183,8 @@ function toMissionArtifactItem(
       phaseId,
       taskId,
       kind,
+      purpose: 'deliverable',
+      isDeliverable: true,
     };
   }
   if (!value || typeof value !== 'object') return null;
@@ -192,12 +197,10 @@ function toMissionArtifactItem(
       : 'artifact';
   if (name.toLowerCase() === 'system-action-receipts.json') return null;
   const rawContent = artifact.content ?? artifact.text ?? artifact.body;
-  const text = typeof rawContent === 'string'
-    ? rawContent
-    : rawContent === undefined
-      ? undefined
-      : JSON.stringify(rawContent);
+  const isBlocker = typeof rawContent === 'string'
+    && /^\s*(?:\*\*)?Blocker(?:\*\*)?\s*:/i.test(rawContent);
   return {
+    ...artifact,
     id: typeof artifact.id === 'string'
       ? artifact.id
       : `${kind}-${phaseId || ''}-${taskId || ''}-${name}`,
@@ -205,8 +208,8 @@ function toMissionArtifactItem(
     phaseId: typeof artifact.phaseId === 'string' ? artifact.phaseId : phaseId,
     taskId: typeof artifact.taskId === 'string' ? artifact.taskId : taskId,
     kind,
-    text,
-    url: typeof artifact.url === 'string' ? artifact.url : undefined,
+    content: rawContent,
+    ...(isBlocker && typeof artifact.status !== 'string' ? { status: 'blocked' } : {}),
   };
 }
 
@@ -220,9 +223,20 @@ function buildMissionArtifactItems(
   const add = (value: unknown, kind: MissionArtifactItem['kind'], phaseId?: string, taskId?: string) => {
     const item = toMissionArtifactItem(value, kind, phaseId, taskId);
     if (!item) return;
-    const key = `${item.phaseId || ''}|${item.taskId || ''}|${item.name.toLowerCase()}`;
+    const key = kind === 'expected'
+      ? `expected|${item.phaseId || ''}|${item.name.toLocaleLowerCase()}`
+      : [
+          kind,
+          item.artifactId || item.logicalId || item.lineageId || item.id,
+          item.version ?? '',
+          item.phaseId || '',
+          item.taskId || '',
+          item.name.toLowerCase(),
+          item.url || '',
+          typeof item.content === 'string' ? item.content : JSON.stringify(item.content ?? ''),
+        ].join('|');
     const existing = items.get(key);
-    if (!existing || ((!existing.text && !existing.url) && (item.text || item.url))) {
+    if (!existing || ((!existing.content && !existing.url) && (item.content || item.url))) {
       items.set(key, item);
     }
   };
@@ -781,12 +795,15 @@ const MissionRoom = () => {
                           {produced.map((artifact) => (
                             <li key={artifact.id} style={{ marginBottom: 6, padding: 6, background: 'rgba(255,255,255,0.03)', borderRadius: 4 }}>
                               <strong style={{ color: '#38bdf8', fontSize: '12px' }}>{artifact.name}</strong>
-                              {artifact.text && (
+                              <span className={`badge ${getArtifactPurpose(artifact)}`}>
+                                {getArtifactPurpose(artifact) === 'execution-outcome'
+                                  ? 'Execution outcome'
+                                  : getArtifactPurpose(artifact)}
+                              </span>
+                              {(artifact.content !== undefined || artifact.data !== undefined || artifact.url) && (
                                 <details style={{ marginTop: 4 }}>
-                                  <summary style={{ cursor: 'pointer', fontSize: '11px', color: '#94a3b8' }}>View produced content</summary>
-                                  <pre style={{ marginTop: 4, padding: 8, background: 'rgba(0,0,0,0.3)', borderRadius: 4, fontSize: '10px', overflow: 'auto', maxHeight: 240, whiteSpace: 'pre-wrap' }}>
-                                    {artifact.text}
-                                  </pre>
+                                  <summary style={{ cursor: 'pointer', fontSize: '11px', color: '#94a3b8' }}>View artifact</summary>
+                                  <MissionArtifactContent artifact={artifact} />
                                 </details>
                               )}
                               {artifact.url && <a href={artifact.url} target="_blank" rel="noreferrer">Open artifact</a>}
@@ -1181,6 +1198,25 @@ interface ArtifactsViewProps {
 
 const ArtifactsView = ({ missionId, plan, phaseOutputs, events, storedArtifacts, loadError, onRefresh }: ArtifactsViewProps) => {
   const items = buildMissionArtifactItems(plan, phaseOutputs, events, storedArtifacts);
+  const [purposeFilter, setPurposeFilter] = useState<'all' | 'deliverable' | 'workproduct' | 'execution-outcome'>('all');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [typeFilter, setTypeFilter] = useState<'all' | 'document' | 'pdf' | 'image' | 'audio' | 'video' | 'other'>('all');
+  const [showVersionHistory, setShowVersionHistory] = useState(false);
+  const producedGroups = groupMissionArtifactVersions(items.filter((item) => item.kind === 'produced'))
+    .filter((group) => {
+      const versions = showVersionHistory ? group.artifacts : [group.latest];
+      return versions.some((artifact) =>
+        (purposeFilter === 'all' || getArtifactPurpose(artifact) === purposeFilter)
+        && (statusFilter === 'all' || artifact.status === statusFilter)
+        && (typeFilter === 'all' || getArtifactMediaCategory(artifact) === typeFilter),
+      );
+    });
+  const expectedItems = items.filter((item) => item.kind === 'expected')
+    .filter((item) =>
+      (purposeFilter === 'all' || purposeFilter === 'deliverable')
+      && (statusFilter === 'all' || statusFilter === 'expected')
+      && (typeFilter === 'all' || getArtifactMediaCategory(item) === typeFilter),
+    );
 
   if (items.length === 0) {
     return (
@@ -1191,105 +1227,144 @@ const ArtifactsView = ({ missionId, plan, phaseOutputs, events, storedArtifacts,
     );
   }
 
-  const handleOpenArtifact = (artifact: typeof items[0]) => {
-    if (artifact.url) {
-      window.open(artifact.url, '_blank');
-    } else if (artifact.text) {
-      const blob = new Blob([artifact.text], { type: 'text/plain' });
-      const url = URL.createObjectURL(blob);
-      window.open(url, '_blank');
-    }
-  };
-
-  const handleDownloadArtifact = (artifact: typeof items[0]) => {
-    if (artifact.url) {
-      const aEl = document.createElement('a');
-      aEl.href = artifact.url;
-      aEl.target = '_blank';
-      document.body.appendChild(aEl);
-      aEl.click();
-      aEl.remove();
-    } else if (artifact.text) {
-      const blob = new Blob([artifact.text], { type: 'text/plain' });
-      const url = URL.createObjectURL(blob);
-      const aEl = document.createElement('a');
-      aEl.href = url;
-      aEl.download = (artifact.name || 'artifact') + '.txt';
-      document.body.appendChild(aEl);
-      aEl.click();
-      aEl.remove();
-      URL.revokeObjectURL(url);
-    }
-  };
-
   return (
     <>
       {loadError && <div className="error-banner">Could not load persisted artifacts: {loadError}</div>}
+      <div className="mission-start-collapsed" style={{ marginBottom: 12 }}>
+        <label>
+          Purpose
+          <select value={purposeFilter} onChange={(event) => setPurposeFilter(event.target.value as typeof purposeFilter)}>
+            <option value="all">All artifacts</option>
+            <option value="deliverable">Deliverables</option>
+            <option value="workproduct">Workproducts</option>
+            <option value="execution-outcome">Execution outcomes</option>
+          </select>
+        </label>
+        <label>
+          Status
+          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+            <option value="all">All statuses</option>
+            <option value="expected">Expected</option>
+            <option value="draft">Draft</option>
+            <option value="in_review">Ready for review</option>
+            <option value="approved">Approved</option>
+            <option value="completed">Completed</option>
+            <option value="blocked">Blocked</option>
+            <option value="failed">Failed</option>
+          </select>
+        </label>
+        <label>
+          File type
+          <select value={typeFilter} onChange={(event) => setTypeFilter(event.target.value as typeof typeFilter)}>
+            <option value="all">All file types</option>
+            <option value="document">Documents & structured data</option>
+            <option value="pdf">PDF</option>
+            <option value="image">Images</option>
+            <option value="audio">Audio</option>
+            <option value="video">Video</option>
+            <option value="other">Other files</option>
+          </select>
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <input
+            type="checkbox"
+            checked={showVersionHistory}
+            onChange={(event) => setShowVersionHistory(event.target.checked)}
+          />
+          Show all versions
+        </label>
+        <span className="muted">Latest versions are shown first; older revisions stay available in history.</span>
+      </div>
       <ul className="artifact-list">
-        {items.map((a) => (
+        {expectedItems.map((a) => (
           <li key={a.id} className={`artifact-item ${a.kind}`}>
-            <div className="artifact-header" style={{ cursor: a.text || a.url ? 'pointer' : 'default' }} onClick={() => handleOpenArtifact(a)}>
+            <div className="artifact-header">
               <strong>{a.name}</strong>
-              <span className={`badge ${a.kind}`}>
-                {a.kind === 'expected' ? 'Expected' : 'Produced'}
-              </span>
+              <span className="badge expected">Expected deliverable</span>
               {a.phaseId && <span className="muted" title={a.phaseId}>phase: {a.phaseId.slice(-8)}</span>}
               {a.taskId && <span className="muted" title={a.taskId}>task: {a.taskId.slice(-8)}</span>}
             </div>
-          {a.text && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <pre className="code-block">{a.text}</pre>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={(e) => { e.stopPropagation(); handleOpenArtifact(a); }}>Open in new tab</button>
-                <button onClick={(e) => { e.stopPropagation(); handleDownloadArtifact(a); }}>Download file</button>
-                <label style={{ fontSize: 13 }}>
-                  Upload replacement: <input type="file" onChange={async (e) => {
-                    const file = e.target.files?.[0];
-                    if (!file) return;
-                    const text = await file.text();
-                    try {
-                        await postJSON(`/api/artifacts/missions/${encodeURIComponent(missionId)}/artifacts`, {
-                          name: file.name,
-                          content: text,
-                          type: file.type || 'text/plain',
-                          phaseId: a.phaseId,
-                          taskId: a.taskId,
-                        });
-                        onRefresh();
-                    } catch (err) {
-                      window.alert(err instanceof Error ? err.message : 'Upload failed');
-                    }
-                  }} /></label>
-              </div>
+          </li>
+        ))}
+        {producedGroups.map((group) => (
+          <li key={group.key} className={`artifact-item ${getArtifactPurpose(group.latest)}`}>
+            <div className="artifact-header">
+              <strong>{group.latest.name}</strong>
+              <span className={`badge ${getArtifactPurpose(group.latest)}`}>
+                {getArtifactPurpose(group.latest) === 'execution-outcome' ? 'Execution outcome' : getArtifactPurpose(group.latest)}
+              </span>
+              {group.latest.status && <span className={`badge ${group.latest.status}`}>{group.latest.status.replace('_', ' ')}</span>}
+              {group.latest.version !== undefined && <span className="badge">Version {group.latest.version}</span>}
+              {group.latest.phaseName && <span className="muted">Phase: {group.latest.phaseName}</span>}
+              {group.latest.taskTitle && <span className="muted">Task: {group.latest.taskTitle}</span>}
+              {group.latest.createdAt && <time className="muted">{new Date(group.latest.createdAt).toLocaleString()}</time>}
             </div>
-          )}
-          {(!a.text || a.url) && (
-            <div style={{ display: 'flex', gap: 8, marginTop: 8, paddingTop: 8, borderTop: '1px solid #eee' }}>
-              {(a.text || a.url) && <button onClick={(e) => { e.stopPropagation(); handleOpenArtifact(a); }}>Open in new tab</button>}
-              {(a.text || a.url) && <button onClick={(e) => { e.stopPropagation(); handleDownloadArtifact(a); }}>Download file</button>}
-              <label style={{ fontSize: 13 }}>
-                Upload replacement: <input type="file" onChange={async (e) => {
+            <MissionArtifactContent artifact={group.latest} />
+            {group.artifacts.length > 1 && (
+              showVersionHistory ? (
+                group.artifacts.filter((artifact) => artifact !== group.latest).map((artifact, index) => (
+                  <article key={artifact.id || `${artifact.name}-${index}`} style={{ marginTop: 12, paddingTop: 8, borderTop: '1px solid #334155' }}>
+                    <div className="artifact-header">
+                  <strong>{artifact.name}</strong>
+                  <span className="badge">{artifact.version !== undefined ? `Version ${artifact.version}` : `Revision ${index + 1}`}</span>
+                  {artifact.status && <span className={`badge ${artifact.status}`}>{artifact.status.replace('_', ' ')}</span>}
+                    </div>
+                    <MissionArtifactContent artifact={artifact} />
+                  </article>
+                ))
+              ) : (
+                <details style={{ marginTop: 8 }}>
+                  <summary style={{ cursor: 'pointer' }}>
+                    {group.artifacts.length - 1} previous version{group.artifacts.length === 2 ? '' : 's'}
+                  </summary>
+                  {group.artifacts.filter((artifact) => artifact !== group.latest).map((artifact, index) => (
+                    <article key={artifact.id || `${artifact.name}-${index}`} style={{ padding: '8px 0', borderTop: '1px solid #334155' }}>
+                  <div className="artifact-header">
+                    <strong>{artifact.name}</strong>
+                    <span className="badge">{artifact.version !== undefined ? `Version ${artifact.version}` : `Revision ${index + 1}`}</span>
+                    {artifact.status && <span className={`badge ${artifact.status}`}>{artifact.status.replace('_', ' ')}</span>}
+                  </div>
+                  <MissionArtifactContent artifact={artifact} />
+                    </article>
+                  ))}
+                </details>
+              )
+            )}
+            {getArtifactPurpose(group.latest) !== 'execution-outcome' && (
+              <div style={{ marginTop: 8 }}>
+                <label style={{ fontSize: 13 }}>
+                  Upload new version: <input type="file" onChange={async (e) => {
                   const file = e.target.files?.[0];
                   if (!file) return;
-                  const text = await file.text();
                   try {
-                      await postJSON(`/api/artifacts/missions/${encodeURIComponent(missionId)}/artifacts`, {
-                        name: file.name,
-                        content: text,
-                        type: file.type || 'text/plain',
-                        phaseId: a.phaseId,
-                        taskId: a.taskId,
-                      });
-                      onRefresh();
+                    const body = new FormData();
+                    body.append('file', file);
+                    const purpose = getArtifactPurpose(group.latest);
+                    body.append('purpose', purpose);
+                    body.append('isDeliverable', String(group.latest.isDeliverable === true));
+                    body.append('status', 'draft');
+                    const lineageId = group.latest.artifactId || group.latest.logicalId || group.latest.lineageId || group.latest.id;
+                    if (lineageId) body.append('artifactId', lineageId);
+                    if (group.latest.id) body.append('versionOf', group.latest.id);
+                    if (group.latest.version !== undefined && Number.isFinite(Number(group.latest.version))) {
+                  body.append('version', String(Number(group.latest.version) + 1));
+                    }
+                    if (group.latest.phaseId) body.append('phaseId', group.latest.phaseId);
+                    if (group.latest.taskId) body.append('taskId', group.latest.taskId);
+                    await postFormData(`/api/artifacts/missions/${encodeURIComponent(missionId)}/artifacts`, body);
+                    onRefresh();
                   } catch (err) {
                     window.alert(err instanceof Error ? err.message : 'Upload failed');
                   }
                 }} /></label>
-            </div>
-          )}
+              </div>
+            )}
           </li>
         ))}
       </ul>
+      {expectedItems.length === 0 && producedGroups.length === 0 && (
+        <div className="empty-state">No artifacts match this view. Try a different purpose filter.</div>
+      )}
     </>
   );
 };

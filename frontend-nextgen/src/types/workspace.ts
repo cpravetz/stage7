@@ -1,4 +1,5 @@
 import { EntityTool } from  '../stores/entityStore';
+import { MissionArtifact } from './missionArtifact';
 export interface ToolBinding {
   name: string;
   displayName?: string;
@@ -14,13 +15,7 @@ export interface EntityToolWithManifest extends EntityTool {
   actionLabel?: string;
 }
 
-export interface AgentArtifact {
-  id?: string;
-  name?: string;
-  type?: string;
-  content?: string;
-  url?: string;
-}
+export type AgentArtifact = MissionArtifact;
 
 export interface ToolCatalogEntry {
   id: string;

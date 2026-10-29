@@ -1,5 +1,5 @@
 import { patched, proxyActivities } from '@temporalio/workflow';
-import { logger } from '@stage7-nextgen/shared';
+import { logger, MissionArtifact } from '@stage7-nextgen/shared';
 import type { MissionActivities } from '../activities/missionActivity';
 import {
   CompletedTaskSummary,
@@ -138,7 +138,7 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
       tasks: Array<{
         taskId: string;
         status: 'completed' | 'failed';
-        artifacts: Array<{ name: string; type: string; content: string }>;
+        artifacts: MissionArtifact[];
         output?: string;
       }>;
     }> = [];

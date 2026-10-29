@@ -1,4 +1,4 @@
-import { Plan, Task } from '@stage7-nextgen/shared';
+import { MissionArtifact, Plan, Task } from '@stage7-nextgen/shared';
 
 export interface WorkflowInput {
   missionId: string;
@@ -26,14 +26,14 @@ export interface CompletedTaskSummary {
   taskId: string;
   output: string;
   artifactNames: string[];
-  artifacts?: Array<{ name: string; type: string; content: string }>;
+  artifacts?: MissionArtifact[];
   requiredActions?: NonNullable<Task['requiredActions']>;
 }
 
 export function createCompletedTaskSummary(
   taskId: string,
   output: string,
-  artifacts: Array<{ name: string; type: string; content: string }>,
+  artifacts: MissionArtifact[],
   requiredActions?: NonNullable<Task['requiredActions']>,
 ): CompletedTaskSummary {
   const textLimit = 1_200;
@@ -50,13 +50,34 @@ export function createCompletedTaskSummary(
     taskId,
     output: output.length > textLimit ? `${output.slice(0, textLimit)} [truncated]` : output,
     artifactNames: artifacts.map((artifact) => artifact.name),
-    artifacts: selectedArtifacts.map((artifact) => ({
-      name: artifact.name,
-      type: artifact.type,
-      content: artifact.content.length > (artifact === receipts ? receiptLimit : textLimit)
-        ? `${artifact.content.slice(0, artifact === receipts ? receiptLimit : textLimit)} [truncated]`
-        : artifact.content,
-    })),
+    artifacts: selectedArtifacts.map((artifact) => {
+      if (typeof artifact.content === 'string') {
+        const contentLimit = artifact === receipts ? receiptLimit : textLimit;
+        const mediaType = artifact.mediaType || artifact.mimeType || artifact.contentType || artifact.type || '';
+        const isBinary = artifact.contentEncoding === 'base64'
+          || (mediaType.includes('/') && !mediaType.startsWith('text/') && !mediaType.includes('json') && !mediaType.includes('xml'));
+        return {
+          ...artifact,
+          content: isBinary
+            ? undefined
+            : artifact.content.length > contentLimit
+              ? `${artifact.content.slice(0, contentLimit)} [truncated]`
+              : artifact.content,
+          ...(isBinary ? { contentOmitted: true } : {}),
+        };
+      }
+      if (artifact.content !== undefined) {
+        const serialized = JSON.stringify(artifact.content);
+        const contentLimit = artifact === receipts ? receiptLimit : textLimit;
+        return {
+          ...artifact,
+          content: serialized.length > contentLimit
+            ? `${serialized.slice(0, contentLimit)} [truncated]`
+            : artifact.content,
+        };
+      }
+      return artifact;
+    }),
     ...(requiredActions ? { requiredActions } : {}),
   };
 }

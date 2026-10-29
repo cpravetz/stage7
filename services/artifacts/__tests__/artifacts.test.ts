@@ -6,6 +6,7 @@ import brainPersistenceRoutes from '../src/routes/brainPersistence';
 import { artifactsService } from '../src/services/ArtifactsService';
 import { InMemoryStore } from './InMemoryStore';
 import { MongoStore } from '../src/services/MongoStore';
+import Storage from '../src/services/Storage';
 
 function mockArtifactsService(store: InMemoryStore): void {
   jest.spyOn(artifactsService, 'ready').mockResolvedValue();
@@ -140,6 +141,227 @@ describe('InMemoryStore', () => {
   describe('missions', () => {
     beforeEach(() => mockArtifactsService(new InMemoryStore()));
 
+    it('deduplicates mirrored artifact records while preserving deliverables and explicit versions', async () => {
+      const app = express();
+      app.use(express.json());
+      app.use('/api/artifacts/missions', missionRoutes);
+      const base = '/api/artifacts/missions/mission-artifact-lineage';
+      const firstVersion = {
+        id: 'budget-v1',
+        artifactId: 'budget-logical-id',
+        version: 1,
+        name: 'Budget.xlsx',
+        mediaType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        contentEncoding: 'base64',
+        content: 'AAECAw==',
+      };
+      const secondVersion = {
+        ...firstVersion,
+        id: 'budget-v2',
+        version: 2,
+        content: 'BAUGBw==',
+      };
+
+      await request(app).put(`${base}/plan`).send({
+        phases: [{
+          id: 'phase-1',
+          status: 'pending',
+          tasks: [{
+            id: 'phase-1-task-1',
+            expectedArtifacts: ['Budget.xlsx'],
+            artifacts: [firstVersion, secondVersion],
+          }],
+        }],
+      }).expect(200);
+      await request(app).put(`${base}/tasks/phase-1-task-1`).send({
+        status: 'completed',
+        artifacts: [firstVersion, secondVersion],
+      }).expect(200);
+      await request(app).post('/api/artifacts/missions').send({
+        missionId: 'mission-artifact-lineage',
+        tenantId: 'tenant-1',
+        assistantId: 'assistant-1',
+        status: 'completed',
+        currentStep: 1,
+        totalSteps: 1,
+        history: [],
+        input: {},
+        output: {
+          outputs: {
+            phases: [{
+              phaseId: 'phase-1',
+              tasks: [{
+                taskId: 'phase-1-task-1',
+                status: 'completed',
+                artifacts: [firstVersion, secondVersion],
+              }],
+            }],
+          },
+        },
+        startedAt: new Date().toISOString(),
+      }).expect(201);
+
+      const response = await request(app).get(`${base}/artifacts`).expect(200);
+      expect(response.body.artifacts).toHaveLength(2);
+      expect(response.body.artifacts).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          id: 'budget-v1',
+          purpose: 'deliverable',
+          isDeliverable: true,
+          artifactId: 'budget-logical-id',
+          version: 1,
+          status: 'draft',
+          contentEncoding: 'base64',
+        }),
+        expect.objectContaining({ id: 'budget-v2', version: 2 }),
+      ]));
+    });
+
+    it('assigns phase-scoped lineage and latest-version metadata to matching planned deliverables', async () => {
+      const app = express();
+      app.use(express.json());
+      app.use('/api/artifacts/missions', missionRoutes);
+      const base = '/api/artifacts/missions/mission-planned-lineage';
+      await request(app).put(`${base}/plan`).send({
+        phases: [
+          {
+            id: 'phase-1',
+            name: 'Business planning',
+            status: 'completed',
+            tasks: [
+              {
+                id: 'phase-1-task-1',
+                title: 'Draft budget',
+                status: 'completed',
+                completedAt: 1000,
+                expectedArtifacts: ['Budget.xlsx'],
+                artifacts: [{ id: 'budget-draft', name: 'Budget.xlsx', mediaType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', url: '/files/budget-draft' }],
+              },
+              {
+                id: 'phase-1-task-2',
+                title: 'Revise budget',
+                status: 'completed',
+                completedAt: 2000,
+                expectedArtifacts: ['Budget.xlsx'],
+                artifacts: [{ id: 'budget-revision', name: 'Budget.xlsx', mediaType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', url: '/files/budget-revision' }],
+              },
+            ],
+          },
+          {
+            id: 'phase-2',
+            name: 'Regional planning',
+            status: 'completed',
+            tasks: [{
+              id: 'phase-2-task-1',
+              title: 'Prepare regional budget',
+              status: 'completed',
+              expectedArtifacts: ['Budget.xlsx'],
+              artifacts: [{ id: 'regional-budget', name: 'Budget.xlsx', url: '/files/regional-budget' }],
+            }],
+          },
+        ],
+      }).expect(200);
+      await request(app).post(`${base}/events`).send({
+        type: 'task_completed',
+        timestamp: 3000,
+        data: {
+          phaseId: 'phase-1',
+          taskId: 'phase-1-task-2',
+          taskTitle: 'Revise budget',
+          artifacts: [{
+            name: 'Budget.xlsx',
+            mediaType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            url: '/files/budget-revision-2',
+          }],
+        },
+      }).expect(201);
+
+      const response = await request(app).get(`${base}/artifacts`).expect(200);
+      const businessBudgets = response.body.artifacts.filter(
+        (artifact: Record<string, unknown>) => artifact.phaseId === 'phase-1',
+      );
+      const regionalBudget = response.body.artifacts.find(
+        (artifact: Record<string, unknown>) => artifact.phaseId === 'phase-2',
+      );
+
+      expect(businessBudgets).toHaveLength(3);
+      expect(businessBudgets[0]).toMatchObject({
+        artifactId: businessBudgets[2].artifactId,
+        version: 1,
+        isLatest: false,
+        phaseName: 'Business planning',
+      });
+      expect(businessBudgets[1]).toMatchObject({
+        artifactId: businessBudgets[0].artifactId,
+        version: 2,
+        isLatest: false,
+      });
+      expect(businessBudgets[2]).toMatchObject({
+        artifactId: businessBudgets[0].artifactId,
+        version: 3,
+        isLatest: true,
+        taskTitle: 'Revise budget',
+        status: 'completed',
+      });
+      expect(regionalBudget.artifactId).not.toBe(businessBudgets[0].artifactId);
+    });
+
+    it('marks blocker text as a blocked execution outcome rather than a deliverable', async () => {
+      const app = express();
+      app.use(express.json());
+      app.use('/api/artifacts/missions', missionRoutes);
+      const base = '/api/artifacts/missions/mission-blocked-output';
+
+      await request(app).put(`${base}/plan`).send({
+        phases: [{
+          id: 'phase-1',
+          tasks: [{
+            id: 'phase-1-task-1',
+            expectedArtifacts: ['Budget'],
+            artifacts: [{ id: 'blocked-budget', name: 'Budget', content: '**Blocker:** Missing verified financial inputs.' }],
+          }],
+        }],
+      }).expect(200);
+
+      const response = await request(app).get(`${base}/artifacts`).expect(200);
+      expect(response.body.artifacts).toEqual([
+        expect.objectContaining({
+          purpose: 'execution-outcome',
+          status: 'blocked',
+        }),
+      ]);
+    });
+
+    it('stores uploaded binary bytes with their media type and encoding', async () => {
+      const app = express();
+      app.use(express.json());
+      app.use('/api/artifacts/missions', missionRoutes);
+      const binary = Buffer.from([0, 255, 1, 128, 42]);
+      jest.spyOn(Storage, 'uploadBufferToStorage').mockResolvedValue({});
+
+      const response = await request(app)
+        .post('/api/artifacts/missions/mission-binary/artifacts')
+        .field('purpose', 'deliverable')
+        .field('isDeliverable', 'true')
+        .attach('file', binary, { filename: 'audio.wav', contentType: 'audio/wav' })
+        .expect(201);
+
+      expect(response.body.artifact).toEqual(expect.objectContaining({
+        name: 'audio.wav',
+        type: 'audio/wav',
+        mediaType: 'audio/wav',
+        contentEncoding: 'base64',
+        content: binary.toString('base64'),
+        purpose: 'deliverable',
+        isDeliverable: true,
+      }));
+      expect(Storage.uploadBufferToStorage).toHaveBeenCalledWith(
+        expect.stringContaining('audio.wav'),
+        binary,
+        'audio/wav',
+      );
+    });
+
     it('coordinates recovery leases and allows takeover after expiration', async () => {
       const store = new InMemoryStore();
       const now = new Date('2025-01-01T00:00:00Z');
@@ -237,6 +459,10 @@ describe('InMemoryStore', () => {
         .send({ approvedBy: 'test' });
       expect(approved.status).toBe(200);
       expect(approved.body.status).toBe('approved');
+      const artifacts = await request(app).get(`${base}/artifacts`).expect(200);
+      expect(artifacts.body.artifacts).toEqual([
+        expect.objectContaining({ name: 'report', status: 'approved', purpose: 'deliverable' }),
+      ]);
     });
 
     it('preserves completed task results when an amendment is saved and shows added tasks for approval', async () => {
