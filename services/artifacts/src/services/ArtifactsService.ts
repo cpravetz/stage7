@@ -76,7 +76,10 @@ export class ArtifactsService {
       { err: lastErr, uri: process.env.MONGO_URI },
       'MongoDB unreachable after retries; artifacts persistence is unavailable',
     );
-    throw new Error('MongoDB unavailable; artifacts persistence cannot continue', { cause: lastErr });
+    throw Object.assign(
+      new Error('MongoDB unavailable; artifacts persistence cannot continue'),
+      { cause: lastErr },
+    );
   }
 
   private async useStore<T>(operation: (store: MongoStore) => Promise<T>): Promise<T> {

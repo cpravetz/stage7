@@ -114,7 +114,7 @@ function isMissionComplete(plan: Plan | null, phaseOutputs: PhaseOutput[], missi
   return allPhasesComplete;
 }
 
-function derivePhaseStatus(phase: PlanPhase, phaseOutputs: PhaseOutput[], missionEvents: FeedEvent[]): string | undefined {
+export function derivePhaseStatus(phase: PlanPhase, phaseOutputs: PhaseOutput[], missionEvents: FeedEvent[], missionStatus?: string): string | undefined {
   const output = phaseOutputs.find((p) => p.phaseId === phase.id);
   if (output?.status) {
     if (output.status === 'completed') return 'completed';
@@ -127,7 +127,7 @@ function derivePhaseStatus(phase: PlanPhase, phaseOutputs: PhaseOutput[], missio
   let hasRunning = false;
   let allCompleted = true;
   for (const task of tasks) {
-    const tstatus = getTaskStatus(task, phase.id, phaseOutputs, missionEvents);
+    const tstatus = getTaskStatus(task, phase.id, phaseOutputs, missionEvents, missionStatus);
     if (tstatus === 'failed') hasFailed = true;
     if (tstatus === 'in_progress' || tstatus === 'running') hasRunning = true;
     if (tstatus !== 'completed') allCompleted = false;
@@ -261,11 +261,12 @@ function buildMissionArtifactItems(
   return Array.from(items.values());
 }
 
-function getTaskStatus(
+export function getTaskStatus(
   task: PlanTask,
   phaseId: string,
   phaseOutputs: PhaseOutput[],
   events: FeedEvent[],
+  missionStatus?: string,
 ): string | undefined {
   const taskEvents = events
     .filter((event) => event.metadata?.phaseId === phaseId
@@ -281,6 +282,9 @@ function getTaskStatus(
   const outputStatus = phaseOutputs
     .find((phase) => phase.phaseId === phaseId)
     ?.tasks?.find((outputTask) => outputTask.taskId === task.id)?.status;
+  if (missionStatus === 'running' && (task.status === 'in_progress' || task.status === 'running' || outputStatus === 'in_progress' || outputStatus === 'running')) {
+    return 'in_progress';
+  }
   return task.status || outputStatus;
 }
 
@@ -305,6 +309,8 @@ const MissionRoom = () => {
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [controlError, setControlError] = useState<string | null>(null);
+  const [clarificationAnswer, setClarificationAnswer] = useState('');
+  const [clarificationSubmitting, setClarificationSubmitting] = useState(false);
   const [now, setNow] = useState(Date.now());
   const transcriptRef = useRef<HTMLDivElement>(null);
   const [retryGuidance, setRetryGuidance] = useState('');
@@ -377,6 +383,19 @@ const MissionRoom = () => {
   const modelUsage = useMemo(() => summarizeModelUsage(missionEvents), [missionEvents]);
   const totalEstimatedCost = modelUsage.estimatedCost;
 
+  const missionDuration = useMemo(() => {
+    if (!detail?.startedAt) return null;
+    const start = new Date(detail.startedAt).getTime();
+    const end = detail.completedAt ? new Date(detail.completedAt).getTime() : now;
+    const ms = Math.max(0, end - start);
+    const hours = Math.floor(ms / 3_600_000);
+    const minutes = Math.floor(ms / 60_000) % 60;
+    const seconds = Math.floor(ms / 1000) % 60;
+    if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
+    if (minutes > 0) return `${minutes}m ${seconds}s`;
+    return `${seconds}s`;
+  }, [detail?.startedAt, detail?.completedAt, now]);
+
   const conversationEvents = useMemo(
     () => missionEvents.filter((e) => CONVERSATION_EVENT_TYPES.has(e.type as string)),
     [missionEvents]
@@ -434,7 +453,7 @@ const MissionRoom = () => {
     let incompleteTasks = 0;
     let missingArtifacts = 0;
     for (const task of pendingPhase.tasks) {
-      if (getTaskStatus(task, pendingPhase.id, phaseOutputs, missionEvents) !== 'completed') {
+      if (getTaskStatus(task, pendingPhase.id, phaseOutputs, missionEvents, detail?.status) !== 'completed') {
         incompleteTasks += 1;
       }
       const expectedArtifacts = task.expectedArtifacts || [];
@@ -494,6 +513,26 @@ const MissionRoom = () => {
       setRetrying(false);
       setShowRetryDialog(false);
       setRetryGuidance('');
+    }
+  };
+
+  const handleClarificationSubmit = async () => {
+    const answer = clarificationAnswer.trim();
+    if (!answer || clarificationSubmitting) return;
+    setClarificationSubmitting(true);
+    setControlError(null);
+    try {
+      const result = await postJSON<{ status: string }>(
+        `/api/temporal/missions/${encodeURIComponent(workflowId)}/start`,
+        { clarificationAnswers: [answer] },
+      );
+      updateMissionStatus(workflowId, result.status);
+      setClarificationAnswer('');
+      await refreshDetail(workflowId);
+    } catch (error) {
+      setControlError(error instanceof Error ? error.message : 'Failed to submit clarification');
+    } finally {
+      setClarificationSubmitting(false);
     }
   };
 
@@ -617,6 +656,36 @@ const MissionRoom = () => {
         <div className="error-banner">Mission failed: {friendlyMissionError(detail.error)}</div>
       )}
 
+      {detail?.output?.outputs?.status === 'awaiting_clarification' && plan?.requiresClarification && (
+        <div className="error-banner" style={{ background: 'rgba(245,158,11,0.15)' }}>
+          <strong>More information is needed before the mission can continue.</strong>
+          {plan.clarificationQuestions && plan.clarificationQuestions.length > 0 && (
+            <ol style={{ margin: '8px 0', paddingLeft: 22 }}>
+              {plan.clarificationQuestions.map((question, index) => <li key={index}>{question}</li>)}
+            </ol>
+          )}
+          <p className="muted" style={{ margin: '6px 0' }}>
+            Do not enter passwords or API tokens here. Add secrets through the secure tool or credential settings.
+          </p>
+          <textarea
+            aria-label="Clarification answers"
+            placeholder="Answer the questions above"
+            value={clarificationAnswer}
+            onChange={(event) => setClarificationAnswer(event.target.value)}
+            rows={3}
+            style={{ width: '100%', marginTop: 6 }}
+          />
+          <button
+            onClick={handleClarificationSubmit}
+            disabled={clarificationSubmitting || !clarificationAnswer.trim()}
+            style={{ marginTop: 8 }}
+          >
+            {clarificationSubmitting ? 'Continuing...' : 'Continue mission'}
+          </button>
+          {controlError && <div className="error-banner">{controlError}</div>}
+        </div>
+      )}
+
       {showRetryDialog && (
         <div className="error-banner" style={{ background: 'rgba(56,189,248,0.15)' }}>
           <div>
@@ -687,7 +756,7 @@ const MissionRoom = () => {
               </div>
               <ul style={{ listStyle: 'none', padding: 0, margin: '6px 0', fontSize: '13px' }}>
                 {pendingPhase.tasks.map((task) => {
-                  const taskStatus = getTaskStatus(task, pendingPhase.id, phaseOutputs, missionEvents);
+                  const taskStatus = getTaskStatus(task, pendingPhase.id, phaseOutputs, missionEvents, detail?.status);
                   const expected = task.expectedArtifacts || [];
                   const produced = artifactItems.filter((artifact) =>
                     artifact.kind === 'produced'
@@ -763,8 +832,11 @@ const MissionRoom = () => {
         )}
         {totalEstimatedCost > 0 && (
           <span>
-            <strong>Estimated Cost:</strong> ${totalEstimatedCost.toFixed(4)}
+            <strong>Estimated Cost:</strong> ${totalEstimatedCost.toFixed(4)} USD
           </span>
+        )}
+        {modelUsage.calls > 0 && totalEstimatedCost === 0 && (
+          <span><strong>Estimated Cost:</strong> Free</span>
         )}
         {artifactCount > 0 && (
           <span>
@@ -823,7 +895,7 @@ const MissionRoom = () => {
                     {turn.lines.map((line, idx) => (
                       <div key={idx} className={`turn-line ${line.kind}`}>
                         <span className="turn-icon">{iconForType(line.type)}</span>
-                        <span>{line.text}</span>
+                        <span className="turn-line-text">{line.text}</span>
                         {line.approval && pendingApproval?.phaseId === line.approval.phaseId && (
                           <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
                             <button
@@ -931,15 +1003,18 @@ const MissionRoom = () => {
                 <p className="plan-summary">{plan.summary}</p>
               )}
               <div className="plan-meta">
-                {plan.estimatedDuration && (
+                {missionDuration && (
                   <span>
-                    <strong>Duration:</strong> {plan.estimatedDuration}
+                    <strong>Duration:</strong> {missionDuration}
                   </span>
                 )}
-                {plan.estimatedCost && (
+                {totalEstimatedCost > 0 && (
                   <span>
-                    <strong>Cost:</strong> {plan.estimatedCost}
+                    <strong>Cost:</strong> ${totalEstimatedCost.toFixed(4)} USD
                   </span>
+                )}
+                {modelUsage.calls > 0 && totalEstimatedCost === 0 && (
+                  <span><strong>Cost:</strong> Free</span>
                 )}
                 <span>
                   <strong>Phases:</strong> {plan.phases.length}
@@ -947,7 +1022,7 @@ const MissionRoom = () => {
               </div>
               <ol className="plan-phases">
                 {plan.phases.map((phase) => {
-                  const phaseStatus = derivePhaseStatus(phase, phaseOutputs, missionEvents) || phaseOutputs.find((p) => p.phaseId === phase.id)?.status;
+                  const phaseStatus = derivePhaseStatus(phase, phaseOutputs, missionEvents, detail?.status) || phaseOutputs.find((p) => p.phaseId === phase.id)?.status;
                 return (
                   <li
                     key={phase.id}
@@ -967,7 +1042,7 @@ const MissionRoom = () => {
                       {phase.goal && <p className="muted">{phase.goal}</p>}
                       <ul className="plan-tasks">
                         {phase.tasks.map((task) => {
-                          const taskStatus = getTaskStatus(task, phase.id, phaseOutputs, missionEvents);
+                          const taskStatus = getTaskStatus(task, phase.id, phaseOutputs, missionEvents, detail?.status);
                           const taskArtifacts = artifactItems.filter((artifact) =>
                             artifact.kind === 'produced'
                             && artifact.phaseId === phase.id
@@ -993,7 +1068,18 @@ const MissionRoom = () => {
                                     {taskStatus}
                                   </span>
                                 )}
-                                {taskArtifacts.length > 0 && <span className="badge">📎 {taskArtifacts.length}</span>}
+                                {taskArtifacts.length > 0 && taskArtifacts.map((artifact) => (
+                                  <a
+                                    key={artifact.id}
+                                    href={artifact.url || `#artifact-${artifact.id}`}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="badge"
+                                    style={{ textDecoration: 'underline', color: 'inherit' }}
+                                  >
+                                    📎 {artifact.name}
+                                  </a>
+                                ))}
                               </div>
                               {(task.expectedArtifacts?.length || taskArtifacts.length > 0) && (
                                 <div style={{ marginTop: 4 }}>
@@ -1004,11 +1090,18 @@ const MissionRoom = () => {
                                        Expected: {artifact}
                                      </span>
                                    ))}
-                                   {taskArtifacts.map((artifact) => (
-                                     <span key={artifact.id} className="badge produced">
-                                       Produced: {artifact.name}
-                                     </span>
-                                   ))}
+                                    {taskArtifacts.map((artifact) => (
+                                      <a
+                                        key={artifact.id}
+                                        href={artifact.url || `#artifact-${artifact.id}`}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="badge produced"
+                                        style={{ textDecoration: 'underline', color: 'inherit', marginLeft: 6 }}
+                                      >
+                                        Produced: {artifact.name}
+                                      </a>
+                                    ))}
                                 </div>
                               )}
                             </li>

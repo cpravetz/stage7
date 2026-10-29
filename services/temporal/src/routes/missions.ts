@@ -270,6 +270,14 @@ router.post(
   asyncHandler(async (req: Request, res: Response) => {
     const workflowId = req.params.workflowId as string;
     const clarificationAnswers = req.body?.clarificationAnswers;
+    if (
+      clarificationAnswers !== undefined
+      && (!Array.isArray(clarificationAnswers)
+        || clarificationAnswers.length === 0
+        || clarificationAnswers.some((answer: unknown) => typeof answer !== 'string' || !answer.trim()))
+    ) {
+      throw NextGenError.badRequest('clarificationAnswers must be a non-empty array of strings');
+    }
     const status = await client.resumeMission(workflowId, clarificationAnswers);
     res.status(202).json({ status });
   }),

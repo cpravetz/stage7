@@ -128,6 +128,17 @@ function eventTaskId(event: FeedEvent): string | undefined {
   return typeof taskId === 'string' ? taskId : undefined;
 }
 
+function agentLabel(metadata: Record<string, unknown>): string | undefined {
+  if (typeof metadata.agentName === 'string' && metadata.agentName.trim()) {
+    return metadata.agentName.trim();
+  }
+  if (typeof metadata.agentRole === 'string' && metadata.agentRole.trim()) {
+    const role = metadata.agentRole.trim().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ');
+    return `${role.replace(/\b\w/g, (letter) => letter.toLocaleUpperCase())} Agent`;
+  }
+  return undefined;
+}
+
 /**
  * Builds the ordered event list of a mission.
  *
@@ -613,26 +624,23 @@ export function buildTranscript(events: FeedEvent[]): TranscriptTurn[] {
       type === 'phase_plan_amended' ||
       type === 'clarification_needed'
     ) {
+      const label = type === 'planner_started' || type === 'planner_progress' || type === 'plan_generated'
+        ? 'Planner'
+        : agentLabel(data) || 'Orchestrator';
       if (
         !current ||
         current.role !== 'assistant' ||
-        (current.label !== 'Planner' && current.label !== 'Orchestrator')
+        current.label !== label
       ) {
-        current = startTurn(
-          'assistant',
-          type === 'planner_started' || type === 'planner_progress' || type === 'plan_generated'
-            ? 'Planner'
-            : 'Orchestrator',
-          ts,
-          evt.id
-        );
+        current = startTurn('assistant', label, ts, evt.id);
       }
       current.lines.push({ kind: 'plan', type, text: evt.message });
       continue;
     }
     if (type.startsWith('task_')) {
-      if (!current || current.role !== 'assistant' || current.label !== 'Agent') {
-        current = startTurn('assistant', 'Agent', ts, evt.id);
+      const label = agentLabel(data) || 'Agent';
+      if (!current || current.role !== 'assistant' || current.label !== label) {
+        current = startTurn('assistant', label, ts, evt.id);
       }
       current.lines.push({ kind: 'task', type, text: evt.message });
       if (type === 'task_completed' && typeof data.output === 'string' && data.output.trim()) {

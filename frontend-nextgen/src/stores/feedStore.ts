@@ -114,9 +114,19 @@ export function normalize(raw: unknown): FeedEvent | null {
         message = `The planner needs clarification: ${(data.questions as string[])?.join(' ') || ''}`.trim();
         break;
       case 'phase_plan_amended':
-        message = `Phase plan amended: ${(data.phaseId as string) || ''}${Array.isArray(data.gaps) && data.gaps.length > 0
-          ? ` — ${data.gaps.filter((gap): gap is string => typeof gap === 'string').slice(0, 2).join('; ').slice(0, 240)}`
-          : ''}`.trim();
+        {
+          const gaps = Array.isArray(data.gaps)
+            ? data.gaps.filter((gap): gap is string => typeof gap === 'string').slice(0, 2)
+            : [];
+          const task = data.task && typeof data.task === 'object'
+            ? data.task as Record<string, unknown>
+            : undefined;
+          const taskTitle = typeof task?.title === 'string' ? task.title.trim() : '';
+          message = `Phase plan amended: ${(data.phaseId as string) || ''}`
+            + (gaps.length > 0 ? ` — Phase review found: ${gaps.join('; ').slice(0, 240)}.` : '')
+            + (taskTitle ? ` Follow-up task added: ${taskTitle}.` : '');
+          break;
+        }
         break;
       case 'cost_estimate':
         message = `Model call: ${(data.model as string) || 'unknown model'}${data.tokensUsed ? ` (${String(data.tokensUsed)} tokens)` : ''}`;

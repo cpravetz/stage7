@@ -1191,7 +1191,7 @@ export class MissionAgentRuntime {
   ): string {
     const artifactOutputContract = task.expectedArtifacts.length > 0
       ? `Report verified results for each expected artifact (${task.expectedArtifacts.join(', ')}). Include each artifact's actual result under a clear heading using its exact name. If the work cannot be completed with available tools or context, state the specific blocker instead — do not fabricate results or claim actions that were not executed.`
-      : 'Return only the verified result for this task.';
+      : 'Return only the verified result for this task. Unless the user requested a formatted document, use plain text without Markdown headings, lists, or code fences. For email and text-message tasks, report the exact requested message and verified delivery status; do not invent samples or placeholders.';
     return (
       `Task: ${task.title}\n\n` +
       `Description: ${task.description}\n\n` +

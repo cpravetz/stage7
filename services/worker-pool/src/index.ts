@@ -31,10 +31,12 @@ async function initializeAssistants(): Promise<void> {
   try {
     await persistence.ready();
   } catch (err) {
-    throw new Error(
-      `MongoDB is required for assistant knowledge persistence. Refusing to start: ${
-        err instanceof Error ? err.message : String(err)
-      }`,
+    throw Object.assign(
+      new Error(
+        `MongoDB is required for assistant knowledge persistence. Refusing to start: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      ),
       { cause: err },
     );
   }

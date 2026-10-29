@@ -564,6 +564,9 @@ export class MissionOrchestrator {
                   gaps: applied.gaps,
                   task: amendmentTask,
                   plan,
+                  agentId: agentRuntime.getAgentIdForRole('phase-reviewer'),
+                  agentName: 'Phase Reviewer Agent',
+                  agentRole: 'phase-reviewer',
                 },
               });
               await executePendingTasks();
@@ -587,6 +590,9 @@ export class MissionOrchestrator {
                 gaps: applied.gaps,
                 task: applied.amendment,
                 plan,
+                agentId: agentRuntime.getAgentIdForRole('phase-reviewer'),
+                agentName: 'Phase Reviewer Agent',
+                agentRole: 'phase-reviewer',
               },
             });
             await executePendingTasks();

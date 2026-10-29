@@ -132,6 +132,7 @@ describe('TemporalClient mission start', () => {
       estimatedCost: 'low',
       requiresClarification: false,
       clarificationQuestions: [],
+      clarificationAnswers: [],
       phases: [{
         id: 'phase-1',
         name: 'Execution',
@@ -316,6 +317,7 @@ describe('TemporalClient mission start', () => {
       estimatedCost: 'low',
       requiresClarification: false,
       clarificationQuestions: [],
+      clarificationAnswers: [],
       phases: [],
     }
     jest.spyOn(client, 'startMission').mockResolvedValue(`mission-${input.missionId}`)
@@ -360,6 +362,52 @@ describe('TemporalClient mission start', () => {
     )
   })
 
+  it('replans after clarification answers instead of resuming the unanswered plan checkpoint', async () => {
+    delete process.env.TEMPORAL_ADDRESS
+    process.env.ARTIFACTS_URL = 'http://artifacts'
+    delete process.env.GATEWAY_URL
+    const client = new TemporalClient()
+    const input = {
+      missionId: 'mission-clarification',
+      tenantId: 'tenant-1',
+      assistantId: 'assistant-1',
+      prompt: 'Create and use an email service',
+    }
+    jest.spyOn(client, 'startMission').mockResolvedValue(`mission-${input.missionId}`)
+    const fetchMock = jest.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
+      const requestUrl = String(url)
+      if (requestUrl.endsWith(`/api/artifacts/missions/${input.missionId}`) && !init?.method) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            missionId: input.missionId,
+            status: 'awaiting_review',
+            input,
+            output: { outputs: { status: 'awaiting_clarification' } },
+          }),
+        } as Response
+      }
+      if (requestUrl.endsWith(`/api/artifacts/missions/${input.missionId}/recovery-lease`)) {
+        return { ok: true, status: 200, json: async () => ({ claimed: true }) } as Response
+      }
+      return { ok: true, status: 200, json: async () => ({}) } as Response
+    })
+
+    await expect(client.resumeMission(`mission-${input.missionId}`, ['SMTP host is smtp.example.com']))
+      .resolves.toBe('resuming')
+
+    expect(client.startMission).toHaveBeenCalledWith(
+      { ...input, clarificationAnswers: ['SMTP host is smtp.example.com'] },
+      undefined,
+      true,
+      true,
+    )
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      `http://artifacts/api/artifacts/missions/${input.missionId}/plan`,
+    )
+  })
+
   it('loads the persisted plan when retrying before any phase or task completed', async () => {
     delete process.env.TEMPORAL_ADDRESS
     process.env.ARTIFACTS_URL = 'http://artifacts'
@@ -384,6 +432,7 @@ describe('TemporalClient mission start', () => {
       estimatedCost: 'low',
       requiresClarification: false,
       clarificationQuestions: [],
+      clarificationAnswers: [],
       phases: [],
     }
     jest.spyOn(global, 'fetch').mockImplementation(async (url, init) => {

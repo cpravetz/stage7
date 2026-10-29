@@ -23,6 +23,7 @@ interface PersistedMissionControlRecord {
   controlState?: 'running' | 'pause_requested' | 'paused' | 'terminate_requested' | 'terminated';
   pendingDeletion?: boolean;
   input?: WorkflowInput;
+  output?: { outputs?: { status?: string } };
 }
 
 function missionIdFromWorkflowId(workflowId: string): string {
@@ -598,7 +599,9 @@ export class TemporalClient {
     const resumeInput = clarificationAnswers
       ? { ...input, clarificationAnswers: [...clarificationAnswers] }
       : input;
-    const checkpoint = record.status === 'pending'
+    const awaitingClarification = record.output?.outputs?.status === 'awaiting_clarification'
+      && Boolean(clarificationAnswers?.length);
+    const checkpoint = record.status === 'pending' || awaitingClarification
       ? undefined
       : await this.loadPersistedCheckpoint(missionId);
     const leaseClaimed = await this.claimDirectRecoveryLease(missionId);

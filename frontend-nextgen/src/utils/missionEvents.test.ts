@@ -9,6 +9,7 @@ import {
   summarizeModelUsage,
   TIMELINE_EVENT_TYPES,
 } from './missionEvents';
+import { derivePhaseStatus, getTaskStatus } from '../pages/MissionRoom';
 
 const MISSION_ID = 'mission-1792463149262';
 
@@ -187,6 +188,46 @@ describe('buildMissionEvents', () => {
 });
 
 describe('mission conversation', () => {
+  it('attributes task output to the named Agent and preserves multiline content', () => {
+    const taskEvent = feedEvent({
+      id: 'named-agent-output',
+      type: 'task_completed',
+      message: 'Task completed: Send message',
+      metadata: {
+        taskTitle: 'Send message',
+        agentId: 'agent-mission-sms-specialist',
+        agentName: 'SMS Specialist Agent',
+        agentRole: 'sms-specialist',
+        output: 'To: 347-882-8389\nMessage: Watson, come here.',
+      },
+    });
+
+    const transcript = buildTranscript([taskEvent]);
+
+    expect(transcript[0]?.label).toBe('SMS Specialist Agent');
+    expect(transcript[0]?.lines.at(-1)?.text).toBe('To: 347-882-8389\nMessage: Watson, come here.');
+  });
+
+  it('explains plan amendments and attributes review updates to the reviewer Agent', () => {
+    const amended = normalize({
+      type: 'phase_plan_amended',
+      missionId: MISSION_ID,
+      timestamp: 3,
+      data: {
+        phaseId: 'phase-1',
+        gaps: ['SMTP configuration is missing'],
+        task: { title: 'Collect email service configuration' },
+        agentId: 'agent-mission-phase-reviewer',
+        agentName: 'Phase Reviewer Agent',
+        agentRole: 'phase-reviewer',
+      },
+    });
+
+    expect(amended?.message).toContain('Phase review found: SMTP configuration is missing.');
+    expect(amended?.message).toContain('Follow-up task added: Collect email service configuration.');
+    expect(buildTranscript([amended!])[0]?.label).toBe('Phase Reviewer Agent');
+  });
+
   it('shows completed task output as text and preserves plan amendment gaps', () => {
     const completedTask = feedEvent({
       id: 'task-output',
@@ -273,5 +314,45 @@ describe('mission conversation', () => {
     ];
 
     expect(summarizeModelUsage(liveEvents)).toEqual({ calls: 2, tokens: 350, estimatedCost: 0.03 });
+  });
+});
+
+describe('task status', () => {
+  const task = { id: 'task-1', title: 'Do the thing' } as { id: string; title: string };
+  const phaseId = 'phase-1';
+
+  it('marks a task in progress when task_started is the latest event', () => {
+    const events: FeedEvent[] = [
+      feedEvent({ id: 'e1', type: 'task_started', timestamp: 1, metadata: { phaseId, taskId: 'task-1' } }),
+    ];
+    expect(getTaskStatus(task as any, phaseId, [], events)).toBe('in_progress');
+  });
+
+  it('marks a task completed when task_completed is the latest event', () => {
+    const events: FeedEvent[] = [
+      feedEvent({ id: 'e1', type: 'task_started', timestamp: 1, metadata: { phaseId, taskId: 'task-1' } }),
+      feedEvent({ id: 'e2', type: 'task_completed', timestamp: 2, metadata: { phaseId, taskId: 'task-1' } }),
+    ];
+    expect(getTaskStatus(task as any, phaseId, [], events)).toBe('completed');
+  });
+
+  it('marks a task running when the mission is running and the plan task is in_progress', () => {
+    const events: FeedEvent[] = [];
+    const planTask = { ...task, status: 'in_progress' } as any;
+    expect(getTaskStatus(planTask, phaseId, [], events, 'running')).toBe('in_progress');
+  });
+
+  it('marks a task pending when the mission is running but the task never started', () => {
+    const events: FeedEvent[] = [];
+    const planTask = { ...task, status: 'pending' } as any;
+    expect(getTaskStatus(planTask, phaseId, [], events, 'running')).toBe('pending');
+  });
+
+  it('derives a phase running when any task is running', () => {
+    const phase = { id: 'phase-1', name: 'Build', tasks: [task] } as any;
+    const events: FeedEvent[] = [
+      feedEvent({ id: 'e1', type: 'task_started', timestamp: 1, metadata: { phaseId, taskId: 'task-1' } }),
+    ];
+    expect(derivePhaseStatus(phase, [], events, 'running')).toBe('running');
   });
 });

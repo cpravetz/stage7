@@ -566,6 +566,11 @@ button:disabled {
   color: #e2e8f0;
 }
 
+.turn-line-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* The node graph is an index, not the payload. It stays compact so the
    selected node's details and its knowledge own the available width. */
 .canvas-page {

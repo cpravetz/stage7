@@ -358,6 +358,9 @@ export async function reviewAndAmendMissionPhaseActivity({
           gaps: applied.gaps,
           task: applied.amendment,
           plan: applied.plan,
+          agentId: agentRuntime.getAgentIdForRole('phase-reviewer'),
+          agentName: 'Phase Reviewer Agent',
+          agentRole: 'phase-reviewer',
         },
       });
     }
