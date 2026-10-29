@@ -296,7 +296,7 @@ button:disabled {
 }
 
 .table-container .data-table {
-  min-width: 600px;
+  min-width: 0;
 }
 
 .data-table th,

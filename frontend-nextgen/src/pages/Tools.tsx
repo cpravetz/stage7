@@ -195,10 +195,10 @@ const Tools = () => {
 
   return (
     <div className="page">
-      <h1>Tool Executor</h1>
+      <h1>Tools</h1>
       {error && <div className="error-banner">{error}</div>}
 
-      <div className="grid" style={{ gridTemplateColumns: '1fr 2fr', alignItems: 'start' }}>
+      <div className="grid" style={{ gridTemplateColumns: 'minmax(200px, 1fr) 3fr', alignItems: 'start', gap: 16 }}>
         <div className="card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
             <h3 style={{ margin: 0 }}>Registered Tools</h3>
@@ -265,21 +265,27 @@ const Tools = () => {
 
                 {addType === 'code' && (
                   <>
-                    <label className="field-label">
-                      Language
-                      <input type="text" value={addLanguage} onChange={(e) => setAddLanguage(e.target.value)} />
-                    </label>
-                    <label className="field-label">
-                      Source Code
-                      <textarea
-                        rows={8}
-                        value={addSourceCode}
-                        onChange={(e) => setAddSourceCode(e.target.value)}
-                        spellCheck={false}
-                        placeholder="Paste or write tool code here"
-                      />
-                    </label>
-                    <label className="field-label">
+                  <label className="field-label" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
+                    Language
+                    <select value={addLanguage} onChange={(e) => setAddLanguage(e.target.value)}>
+                      <option value="javascript">javascript</option>
+                      <option value="typescript">typescript</option>
+                      <option value="python">python</option>
+                      <option value="json">json</option>
+                    </select>
+                  </label>
+                  <label className="field-label" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
+                    Source Code
+                    <textarea
+                      rows={10}
+                      value={addSourceCode}
+                      onChange={(e) => setAddSourceCode(e.target.value)}
+                      spellCheck={false}
+                      placeholder="Paste or write tool code here"
+                      style={{ width: '100%', boxSizing: 'border-box' }}
+                    />
+                  </label>
+                    <label className="field-label" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
                       Upload Files (optional)
                       <input
                         type="file"
@@ -288,6 +294,7 @@ const Tools = () => {
                           const files = e.target.files ? Array.from(e.target.files) : [];
                           setAddFiles(files);
                         }}
+                        style={{ width: '100%' }}
                       />
                       {addFiles.length > 0 && (
                         <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: 4 }}>
@@ -298,7 +305,7 @@ const Tools = () => {
                   </>
                 )}
 
-                <label className="field-label">
+                <label className="field-label" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
                   Manifest (JSON)
                   <textarea
                     rows={4}
@@ -306,11 +313,12 @@ const Tools = () => {
                     onChange={(e) => setAddManifestText(e.target.value)}
                     spellCheck={false}
                     className={addManifestParse.ok ? '' : 'invalid'}
+                    style={{ width: '100%', boxSizing: 'border-box' }}
                   />
                   {!addManifestParse.ok && <span className="field-error">{addManifestParse.error}</span>}
                 </label>
 
-                <label className="field-label">
+                <label className="field-label" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
                   Input Schema (JSON)
                   <textarea
                     rows={6}
@@ -318,11 +326,12 @@ const Tools = () => {
                     onChange={(e) => setAddInputSchemaText(e.target.value)}
                     spellCheck={false}
                     className={addInputSchemaParse.ok ? '' : 'invalid'}
+                    style={{ width: '100%', boxSizing: 'border-box' }}
                   />
                   {!addInputSchemaParse.ok && <span className="field-error">{addInputSchemaParse.error}</span>}
                 </label>
 
-                <label className="field-label">
+                <label className="field-label" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
                   Output Schema (JSON)
                   <textarea
                     rows={6}
@@ -330,6 +339,7 @@ const Tools = () => {
                     onChange={(e) => setAddOutputSchemaText(e.target.value)}
                     spellCheck={false}
                     className={addOutputSchemaParse.ok ? '' : 'invalid'}
+                    style={{ width: '100%', boxSizing: 'border-box' }}
                   />
                   {!addOutputSchemaParse.ok && <span className="field-error">{addOutputSchemaParse.error}</span>}
                 </label>
