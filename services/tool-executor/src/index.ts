@@ -9,6 +9,8 @@ import mcpServerRoutes from './routes/mcpServers';
 import mcpDiscoveryRoutes from './routes/mcpDiscovery';
 import skillStoreRoutes from './routes/skill-store';
 import harnessRoutes from './routes/harness';
+import skillCompilationRoutes from './routes/skill-compilation';
+import batchExecutionRoutes from './routes/batch-execution';
 import { Tool, MCPToolDiscoveryRequiredError } from './types';
 import { toolRegistry, toolStore, triggerScheduler } from './utils/sharedInstance';
 import { legacyGeneralTools } from './data/generalTools';
@@ -222,6 +224,7 @@ app.get('/api/tool-executor/tools', (_req, res) => {
 });
 
 app.use('/api/tool-executor', toolRoutes);
+app.use('/api/tool-executor', batchExecutionRoutes);
 app.use('/api/tool-executor', mcpServerRoutes);
 app.use('/api/tool-executor', mcpDiscoveryRoutes);
 app.use('/api/tool-executor/workflows', workflowRoutes);
@@ -237,6 +240,7 @@ app.use('/api/skill-store', skillStoreRoutes);
 
 // Harness² — the propose–probe–compose loop.
 app.use('/api/tool-executor', harnessRoutes);
+app.use('/api/v1', skillCompilationRoutes);
 
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   if (err instanceof ToolNotFoundError) {

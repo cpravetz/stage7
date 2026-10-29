@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 
 import type { FeedEvent } from '../stores/feedStore';
+import { normalize } from '../stores/feedStore';
 import {
   buildMissionEvents,
   buildTranscript,
@@ -181,11 +182,40 @@ describe('buildMissionEvents', () => {
     });
 
     const incomplete = events.find((event) => event.type === 'mission_incomplete');
-    expect(incomplete?.message).toBe('Mission incomplete: A planned task did not complete.');
+    expect(incomplete?.message).toBe('Mission incomplete: A planned task did not complete. — retry this mission to address the unmet requirements.');
   });
 });
 
 describe('mission conversation', () => {
+  it('shows completed task output as text and preserves plan amendment gaps', () => {
+    const completedTask = feedEvent({
+      id: 'task-output',
+      type: 'task_completed',
+      message: 'Task completed: Draft message',
+      timestamp: 2,
+      metadata: {
+        phaseId: 'phase-1',
+        taskId: 'task-1',
+        taskTitle: 'Draft message',
+        output: 'Subject: Welcome\nBody: Your account is ready.',
+      },
+    });
+    const transcript = buildTranscript([completedTask]);
+    expect(transcript[0]?.lines).toContainEqual({
+      kind: 'text',
+      type: 'task_output',
+      text: 'Subject: Welcome\nBody: Your account is ready.',
+    });
+
+    const amended = normalize({
+      type: 'phase_plan_amended',
+      missionId: MISSION_ID,
+      timestamp: 3,
+      data: { phaseId: 'phase-1', gaps: ['Delivery API unavailable'] },
+    });
+    expect(amended?.message).toContain('Delivery API unavailable');
+  });
+
   it('tells the user what happened to a mission that failed while planning', () => {
     const liveEvents: FeedEvent[] = [
       feedEvent({ id: 'e1', type: 'mission_started', timestamp: 1, message: 'Mission started' }),

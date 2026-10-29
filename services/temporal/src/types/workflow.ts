@@ -5,6 +5,7 @@ export interface WorkflowInput {
   tenantId: string;
   assistantId: string;
   prompt: string;
+  cronSchedule?: string;
   contextChunks?: Array<{ content: string; tokens: number; priority: number }>;
   metadata?: Record<string, unknown>;
   // Resume support: skip already-completed phases/tasks

@@ -100,7 +100,41 @@ router.get('/missions/:missionId/agents', asyncHandler((req: Request, res: Respo
   const tenantId = req.query.tenantId as string | undefined
   let agents = runtime.listAgentsForMission(missionId)
   if (tenantId) agents = agents.filter((a) => a.tenantId === tenantId)
-  res.json({ agents })
+  const agentsWithState = agents.map((agent) => {
+    const state = runtime.getAgentState(agent.id)
+    const context = state?.context || {}
+    const activeTaskId = typeof context.currentTaskId === 'string'
+      ? context.currentTaskId
+      : typeof context.activeTaskId === 'string'
+        ? context.activeTaskId
+        : undefined
+    const checkpoints = context.executionCheckpoints
+    const checkpointMap = checkpoints && typeof checkpoints === 'object' && !Array.isArray(checkpoints)
+      ? checkpoints as Record<string, unknown>
+      : {}
+    const activeCheckpoint = activeTaskId
+      && checkpointMap[activeTaskId]
+      && typeof checkpointMap[activeTaskId] === 'object'
+      && !Array.isArray(checkpointMap[activeTaskId])
+      ? checkpointMap[activeTaskId] as Record<string, unknown>
+      : undefined
+    return {
+      ...agent,
+      status: state?.status || 'idle',
+      ...(activeTaskId ? { activeTaskId } : {}),
+      ...(activeCheckpoint ? {
+        progress: {
+          brainCalls: typeof activeCheckpoint.brainCalls === 'number' ? activeCheckpoint.brainCalls : 0,
+          toolCalls: typeof activeCheckpoint.toolCalls === 'number' ? activeCheckpoint.toolCalls : 0,
+          lastAction: typeof activeCheckpoint.lastAction === 'string'
+            ? activeCheckpoint.lastAction.split(':', 1)[0]
+            : '',
+        },
+      } : {}),
+      ...(typeof context.lastError === 'string' ? { lastError: context.lastError } : {}),
+    }
+  })
+  res.json({ agents: agentsWithState })
 }))
 
 router.get('/missions/:missionId/agents/:id', asyncHandler((req: Request, res: Response) => {

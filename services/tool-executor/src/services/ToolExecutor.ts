@@ -8,7 +8,9 @@ import { ErrorHandler } from '../utils/ErrorHandler';
 import { EmailExecutor } from '../executors/EmailExecutor';
 import { SmsExecutor } from '../executors/SmsExecutor';
 import { SearchExecutor } from '../executors/SearchExecutor';
-import { CodeExecutor, CodeExecutorCredentials } from '../executors/CodeExecutor';
+import type { CodeExecutorCredentials } from '../executors/CodeExecutor';
+import { DockerLocalDriver } from '../runners/DockerLocalDriver';
+import type { SandboxExecutionDriver } from '../runners/SandboxExecutionDriver';
 import { FtpExecutor, FtpExecutionOptions } from '../executors/FtpExecutor';
 import { WebhookExecutor, WebhookDispatchOptions } from '../executors/WebhookExecutor';
 import { DatabaseExecutor, DatabaseQueryOptions } from '../executors/DatabaseExecutor';
@@ -126,7 +128,7 @@ export class ToolExecutor {
   private emailExecutor = new EmailExecutor();
   private smsExecutor = new SmsExecutor();
   private searchExecutor = new SearchExecutor();
-  private codeExecutor = new CodeExecutor();
+  private sandboxDriver: SandboxExecutionDriver = new DockerLocalDriver();
   private pluginGenerator = new PluginGenerator();
   private toolDiscovery = new ToolDiscovery();
   private ftpExecutor = new FtpExecutor();
@@ -1547,7 +1549,7 @@ let healingAttempts = 0;
 let lastError: string | undefined;
 
 while (healingAttempts <= MAX_HEALING_ATTEMPTS) {
-  const result = await this.codeExecutor.execute(
+  const result = await this.sandboxDriver.execute(
         { language: language as 'javascript' | 'typescript' | 'python', code: codeToRun, input, config: this.resolveSkillConfig(tool, input), credentials: credentials.resolved, executorCallback: this.nestedExecutorCallback(), timeoutMs: (manifest && typeof manifest === 'object' && (manifest as Record<string, unknown>).timeoutMs) as number | undefined, persistenceEnvVar: (manifest && typeof manifest === 'object' ? (manifest as Record<string, unknown>).persistenceEnvVar : undefined) as string | undefined },
         { resolved, sources } as CodeExecutorCredentials,
       );
@@ -1943,7 +1945,7 @@ try {
 const deployed = await this.pluginGenerator.deploy(generated.tool);
 if (deployed.success) {
 logger.info({ toolId: generated.tool.id, deployPath: deployed.deployPath }, 'Auto-generated plugin deployed');
-  const retryResult = await this.codeExecutor.execute(
+  const retryResult = await this.sandboxDriver.execute(
         { language: 'javascript', code: (generated.tool.manifest as Record<string, unknown>)?.sourceCode as string || '', input, executorCallback: this.nestedExecutorCallback(), timeoutMs: (generated.tool.manifest as Record<string, unknown>) && (generated.tool.manifest as Record<string, unknown>).timeoutMs as number | undefined, persistenceEnvVar: (generated.tool.manifest as Record<string, unknown>)?.persistenceEnvVar as string | undefined },
         { resolved, sources } as CodeExecutorCredentials,
       );

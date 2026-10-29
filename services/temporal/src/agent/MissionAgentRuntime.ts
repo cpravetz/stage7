@@ -52,6 +52,44 @@ const MISSION_COMPLETION_REVIEW_EXECUTION_POLICY: AgentExecutionPolicy = {
 const MAX_SAFE_AGENT_TASK_RETRIES = 1;
 const ASK_USER_MARKER = '__ASK_USER__:';
 const MAX_ACTION_RECEIPTS = 50;
+const INTERNAL_ACTION_RECEIPT_ARTIFACT = 'system-action-receipts.json';
+
+function missionAgentRoleLabel(role: string): string {
+  return role.trim().replace(/[_-]+/g, ' ').replace(/(?:\s+Agent)+$/i, '').trim() || 'Agent';
+}
+
+function missionAgentRoleKey(role: string): string {
+  return missionAgentRoleLabel(role)
+    .toLocaleLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'agent';
+}
+
+function extractMissionAgents(value: unknown): AgentDefinition[] {
+  const entries = Array.isArray(value)
+    ? value
+    : value && typeof value === 'object' && !Array.isArray(value)
+      && Array.isArray((value as Record<string, unknown>).agents)
+      ? (value as { agents: unknown[] }).agents
+      : [];
+  return entries.filter((entry): entry is AgentDefinition => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false;
+    const agent = entry as Record<string, unknown>;
+    return typeof agent.id === 'string'
+      && typeof agent.tenantId === 'string'
+      && typeof agent.name === 'string'
+      && typeof agent.description === 'string'
+      && typeof agent.type === 'string'
+      && typeof agent.systemPrompt === 'string'
+      && Array.isArray(agent.tools)
+      && agent.tools.every((tool) => typeof tool === 'string')
+      && !!agent.metadata
+      && typeof agent.metadata === 'object'
+      && !Array.isArray(agent.metadata)
+      && typeof agent.createdAt === 'string'
+      && typeof agent.updatedAt === 'string';
+  });
+}
 
 export interface MissionPhaseReview {
   satisfied: boolean;
@@ -290,6 +328,8 @@ export class MissionAgentRuntime {
   private broadcast: MissionAgentConfig['broadcast'];
   private agentToolPolicies: Map<string, MissionAgentToolGrant>;
   private missionRetryCount: number;
+  private entityId?: string;
+  private assistantId?: string;
   private agentCache: Map<string, string> = new Map(); // agentRole -> agentId
   private taskAgentMap: Map<string, string> = new Map(); // taskId -> agentId
 
@@ -299,6 +339,8 @@ export class MissionAgentRuntime {
     this.agentRuntimeUrl = config.agentRuntimeUrl || getAgentRuntimeUrl();
     this.broadcast = config.broadcast || (async () => {});
     this.agentToolPolicies = parseMissionAgentToolPolicies(config.metadata?.agentToolPolicies);
+    this.entityId = typeof config.metadata?.entityId === 'string' ? config.metadata.entityId : undefined;
+    this.assistantId = typeof config.metadata?.assistantId === 'string' ? config.metadata.assistantId : undefined;
     const retryCount = config.metadata?.retryCount;
     if (
       retryCount !== undefined
@@ -515,10 +557,10 @@ export class MissionAgentRuntime {
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (message.includes(BRAIN_MODEL_SELECTION_EXHAUSTED)) {
-          throw new Error(`Unable to select the next task in phase ${phase.id}: Brain exhausted every eligible model. ${message}`, { cause: error });
+          throw new Error(`Unable to select the next task in phase ${phase.id}: Brain exhausted every eligible model. ${message}`);
         }
         if (message.includes(BRAIN_MODEL_SELECTION_RETRY)) continue;
-        throw new Error(`Mission task selection failed in phase ${phase.id}: ${message}`, { cause: error });
+        throw new Error(`Mission task selection failed in phase ${phase.id}: ${message}`);
       }
 
       previousResponse = output;
@@ -595,10 +637,10 @@ export class MissionAgentRuntime {
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         if (message.includes(BRAIN_MODEL_SELECTION_EXHAUSTED)) {
-          throw new Error(`Unable to review phase ${phase.id}: Brain exhausted every eligible model. ${message}`, { cause: error });
+          throw new Error(`Unable to review phase ${phase.id}: Brain exhausted every eligible model. ${message}`);
         }
         if (message.includes(BRAIN_MODEL_SELECTION_RETRY)) continue;
-        throw new Error(`Mission phase review failed for ${phase.id}: ${message}`, { cause: error });
+        throw new Error(`Mission phase review failed for ${phase.id}: ${message}`);
       }
 
       previousResponse = output;
@@ -817,7 +859,8 @@ export class MissionAgentRuntime {
   }
 
   async getOrCreateAgent(agentRole: string, systemPrompt: string): Promise<string> {
-    const cacheKey = agentRole.toLowerCase();
+    const roleLabel = missionAgentRoleLabel(agentRole);
+    const cacheKey = missionAgentRoleKey(agentRole);
     if (this.agentCache.has(cacheKey)) {
       return this.agentCache.get(cacheKey)!;
     }
@@ -842,17 +885,44 @@ export class MissionAgentRuntime {
       }
     }
 
+    try {
+      const agents = extractMissionAgents(await this.api<unknown>(this.missionAgentsPath()));
+      const existingAlias = agents.find((agent) => {
+        const roleValues = [
+          agent.metadata.agentRole,
+          agent.type,
+          agent.name,
+        ].filter((value): value is string => typeof value === 'string');
+        return roleValues.some((role) => missionAgentRoleKey(role) === cacheKey);
+      });
+      if (existingAlias) {
+        this.assertToolAccess(existingAlias, agentRole);
+        await this.api(this.missionAgentPath(existingAlias.id, 'start'), { method: 'POST' });
+        this.agentCache.set(cacheKey, existingAlias.id);
+        return existingAlias.id;
+      }
+    } catch (error) {
+      if (!(error instanceof MissionAgentRuntimeApiError) || error.status !== 404) {
+        throw error;
+      }
+    }
+
     const toolAccess = this.resolveToolAccess(agentRole);
     const definition: AgentDefinition = {
       id: agentId,
       tenantId: this.tenantId,
-      name: `${agentRole} Agent`,
-      description: `Dynamic agent for role: ${agentRole} in mission ${this.missionId}`,
-      type: agentRole,
+      name: `${roleLabel} Agent`,
+      description: `Dynamic agent for role: ${roleLabel} in mission ${this.missionId}`,
+      type: roleLabel,
       systemPrompt,
       tools: toolAccess.tools,
       ...(toolAccess.policy ? { toolPolicy: toolAccess.policy } : {}),
-      metadata: { missionId: this.missionId, agentRole },
+      metadata: {
+        missionId: this.missionId,
+        agentRole: roleLabel,
+        ...(this.entityId ? { entityId: this.entityId } : {}),
+        ...(this.assistantId ? { assistantId: this.assistantId } : {}),
+      },
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -863,9 +933,17 @@ export class MissionAgentRuntime {
     return agentId;
   }
 
+  getAgentIdForRole(agentRole: string): string {
+    const cacheKey = missionAgentRoleKey(agentRole);
+    return this.agentCache.get(cacheKey) || `agent-${this.missionId}-${cacheKey}`;
+  }
+
   private resolveToolAccess(agentRole: string): { tools: string[]; policy?: AgentToolPolicy } {
     const key = agentRole.trim().toLowerCase();
-    const grant = this.agentToolPolicies.get(key) || this.agentToolPolicies.get('*');
+    const canonicalKey = missionAgentRoleKey(agentRole);
+    const grant = this.agentToolPolicies.get(key)
+      || this.agentToolPolicies.get(canonicalKey)
+      || this.agentToolPolicies.get('*');
     if (!grant) return { tools: [] };
     return {
       tools: grant.mode === 'allowlist' ? [...(grant.tools || [])] : [],
@@ -910,7 +988,9 @@ export class MissionAgentRuntime {
       else missingDependencies.push(dependencyId);
     }
     if (missingDependencies.length > 0) {
-      logger.warn({ missionId: this.missionId, taskId: task.id, missingDependencies }, 'Mission task dependency results missing; proceeding with available context');
+      throw new Error(
+        `Cannot execute task "${task.id}": completed dependency results are missing for: ${missingDependencies.join(', ')}`,
+      );
     }
     const basePrompt = this.buildTaskPrompt(task, phase, plan, completedDependencies);
     const taskPrompt = retryGuidance
@@ -1202,7 +1282,7 @@ export class MissionAgentRuntime {
     if (!Array.isArray(value) || !value.every((name) => typeof name === 'string' && name.trim())) {
       throw new Error(`Agent task ${taskId} returned invalid expected artifact names`);
     }
-    return value;
+    return value.filter((name) => name.toLocaleLowerCase() !== INTERNAL_ACTION_RECEIPT_ARTIFACT);
   }
 
   private parseArtifacts(
@@ -1299,6 +1379,7 @@ export class MissionAgentRuntime {
   }
 
   private extractArtifacts(content: string, expected: string[]): Array<{ name: string; type: string; content: string }> {
+    if (expected.length === 0) return [];
     const artifacts: Array<{ name: string; type: string; content: string }> = [];
     const headings = [...content.matchAll(/^##[ \t]+(.+?)[ \t]*$/gm)];
     const normalize = (name: string) => name.trim().toLocaleLowerCase();
@@ -1316,9 +1397,6 @@ export class MissionAgentRuntime {
         type: this.inferType(section),
         content: section,
       });
-    }
-    if (artifacts.length === 0 && expected.length === 0) {
-      artifacts.push({ name: 'output.md', type: 'document', content: content.trim() });
     }
     return artifacts;
   }

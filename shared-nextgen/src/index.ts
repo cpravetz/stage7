@@ -3,6 +3,7 @@ export * from './types/assistant';
 export * from './types/mcp';
 export * from './types/agent';
 export * from './types/mission';
+export * from './types/adk/compiler';
 export * from './types/auth';
 export * from './constants/brainRouting';
 export * from './utils/logger';

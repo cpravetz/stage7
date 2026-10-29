@@ -1,8 +1,9 @@
+import { AgentExecutor } from '../src/services/AgentExecutor'
 import { AgentRuntime } from '../src/services/AgentRuntime'
 import request from 'supertest'
 import express from 'express'
 import agentsRouter from '../src/routes/agents'
-import { AgentDefinition, AgentTask, AgentSpecialization } from '../src/types'
+import { AgentDefinition, AgentState, AgentTask, AgentSpecialization } from '../src/types'
 
 const app = express()
 app.use(express.json())
@@ -50,11 +51,104 @@ describe('AgentRuntime', () => {
   it('should start and stop an agent', () => {
     runtime.registerAgent(agent)
     const state = runtime.startAgent('agent-1', 'mission-1')
-    expect(state.status).toBe('running')
+    expect(state.status).toBe('waiting')
     expect(state.missionId).toBe('mission-1')
     runtime.stopAgent('agent-1')
     const stopped = runtime.getAgentState('agent-1')
     expect(stopped?.status).toBe('idle')
+  })
+
+  it('restores an orphaned running agent as waiting until its task resumes', () => {
+    runtime.registerAgent(agent)
+    const restored: AgentState = {
+      agentId: agent.id,
+      tenantId: agent.tenantId,
+      missionId: 'mission-1',
+      status: 'running',
+      context: { currentTaskId: 'task-1', activeTaskId: 'task-1' },
+      artifacts: [],
+      assignedAt: new Date().toISOString(),
+    }
+
+    runtime.restoreAgentState(restored)
+
+    expect(runtime.getAgentState(agent.id)).toMatchObject({
+      status: 'waiting',
+      context: {},
+    })
+  })
+
+  it('preserves uncertain action checkpoints when an existing agent is started again', () => {
+    runtime.registerAgent(agent)
+    const restored: AgentState = {
+      agentId: agent.id,
+      tenantId: agent.tenantId,
+      missionId: 'mission-1',
+      status: 'failed',
+      context: {
+        currentTaskId: 'task-1',
+        activeTaskId: 'task-1',
+        executionCheckpoints: {
+          'task-1': { pendingAction: 'send_message:{}' },
+        },
+      },
+      artifacts: [],
+      assignedAt: new Date().toISOString(),
+    }
+    runtime.restoreAgentState(restored)
+
+    const restarted = runtime.startAgent(agent.id, 'mission-1')
+
+    expect(restarted.status).toBe('failed')
+    expect(restarted.context.executionCheckpoints).toEqual({
+      'task-1': { pendingAction: 'send_message:{}' },
+    })
+  })
+
+  it('resumes a task left running after an Agent Runtime restart', async () => {
+    const fetcher: typeof fetch = async (input) => {
+      const url = String(input)
+      const body = url.endsWith('/api/tool-executor/tools')
+        ? { tools: [] }
+        : url.endsWith('/api/brain/complete')
+          ? { content: 'Recovered task output.', requestId: 'recovery-request' }
+          : null
+      if (!body) throw new Error(`Unexpected request: ${url}`)
+      return {
+        ok: true,
+        status: 200,
+        json: async () => body,
+        text: async () => JSON.stringify(body),
+      } as Response
+    }
+    runtime = new AgentRuntime(new AgentExecutor({ fetcher }))
+    runtime.registerAgent(agent)
+    runtime.restoreAgentState({
+      agentId: agent.id,
+      tenantId: agent.tenantId,
+      missionId: 'mission-1',
+      status: 'running',
+      context: { currentTaskId: 'task-restart', activeTaskId: 'task-restart' },
+      artifacts: [],
+      assignedAt: new Date().toISOString(),
+    })
+    runtime.restoreTask({
+      taskId: 'task-restart',
+      agentId: agent.id,
+      type: 'research',
+      input: { prompt: 'Complete the goal', context: {} },
+      priority: 1,
+      status: 'running',
+      createdAt: new Date().toISOString(),
+    })
+
+    const completed = await runtime.executeTask(agent.id, 'task-restart')
+
+    expect(completed).toMatchObject({
+      status: 'completed',
+      result: { output: 'Recovered task output.' },
+    })
+    expect(runtime.getAgentState(agent.id)?.status).toBe('waiting')
   })
 
   it('should submit, complete, and fail tasks', () => {
@@ -159,7 +253,7 @@ describe('REST endpoints', () => {
     const res = await request(app)
       .post('/api/agent-runtime/missions/test-mission/agents/agent-rest-2/start')
     expect(res.status).toBe(201)
-    expect(res.body.status).toBe('running')
+    expect(res.body.status).toBe('waiting')
   })
 
   it('keeps mission-scoped agents and tasks within their registered mission', async () => {

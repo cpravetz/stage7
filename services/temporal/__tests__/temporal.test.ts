@@ -10,6 +10,7 @@ jest.mock('../src/client/TemporalClient', () => {
     getMissionResult: jest.fn(),
     terminateMission: jest.fn(),
     listMissions: jest.fn(),
+    isConnected: jest.fn(),
   };
   return {
     TemporalClient: jest.fn().mockImplementation(() => mocks),
@@ -17,17 +18,36 @@ jest.mock('../src/client/TemporalClient', () => {
   };
 });
 
+jest.mock('../src/schedules/missionScheduler', () => ({
+  createMissionSchedule: jest.fn(),
+  disableMissionSchedule: jest.fn(),
+  listMissionSchedules: jest.fn(),
+  recordScheduleMission: jest.fn(),
+  stopMissionSchedule: jest.fn(),
+}));
+
 describe('Temporal Routes', () => {
   let app: express.Application;
   let startMission: jest.Mock;
   let getMissionResult: jest.Mock;
   let listMissions: jest.Mock;
+  let isConnected: jest.Mock;
+  let createMissionSchedule: jest.Mock;
+  let recordScheduleMission: jest.Mock;
+  let listMissionSchedules: jest.Mock;
+  let stopMissionSchedule: jest.Mock;
 
   beforeEach(() => {
     const temporalMocks = require('../src/client/TemporalClient') as any;
     startMission = temporalMocks.startMission;
     getMissionResult = temporalMocks.getMissionResult;
     listMissions = temporalMocks.listMissions;
+    isConnected = temporalMocks.isConnected;
+    const scheduleMocks = require('../src/schedules/missionScheduler');
+    createMissionSchedule = scheduleMocks.createMissionSchedule;
+    recordScheduleMission = scheduleMocks.recordScheduleMission;
+    listMissionSchedules = scheduleMocks.listMissionSchedules;
+    stopMissionSchedule = scheduleMocks.stopMissionSchedule;
 
     app = express();
     app.use(express.json());
@@ -44,6 +64,33 @@ describe('Temporal Routes', () => {
     expect(res.body.status).toBe('started');
   });
 
+  it('should translate friendly recurrence options before starting a mission', async () => {
+    startMission.mockResolvedValue('wf-recurring' as any);
+    createMissionSchedule.mockResolvedValue({
+      scheduleId: 'schedule-1',
+      nextRunAt: '2026-10-29T09:30:00.000Z',
+    });
+    const res = await request(app)
+      .post('/api/temporal/missions')
+      .send({
+        missionId: 'm-recurring',
+        prompt: 'Check the inbox',
+        tenantId: 't1',
+        recurrence: { frequency: 'weekly', time: '09:30', dayOfWeek: 1 },
+      });
+
+    expect(res.status).toBe(202);
+    expect(startMission).toHaveBeenCalledWith(expect.objectContaining({
+      missionId: 'm-recurring',
+    }));
+    expect(createMissionSchedule).toHaveBeenCalledWith(
+      expect.objectContaining({ missionId: 'm-recurring' }),
+      { frequency: 'weekly', time: '09:30', dayOfWeek: 1 },
+    );
+    expect(recordScheduleMission).toHaveBeenCalledWith('schedule-1', 'm-recurring');
+    expect(res.body.scheduleId).toBe('schedule-1');
+  });
+
   it('should list missions', async () => {
     listMissions.mockResolvedValue([
       { workflowId: 'wf-1', status: 'completed', missionId: 'm1' },
@@ -52,6 +99,23 @@ describe('Temporal Routes', () => {
     expect(res.status).toBe(200);
     expect(res.body.missions).toHaveLength(1);
     expect(res.body.missions[0].workflowId).toBe('wf-1');
+  });
+
+  it('should list and stop persisted recurring schedules', async () => {
+    listMissionSchedules.mockResolvedValue([
+      { scheduleId: 'schedule-1', missionId: 'm1', enabled: true },
+    ]);
+    stopMissionSchedule.mockResolvedValue(true);
+
+    const listed = await request(app).get('/api/temporal/missions/recurring');
+    const stopped = await request(app)
+      .post('/api/temporal/missions/recurring/schedule-1/stop')
+      .send({});
+
+    expect(listed.status).toBe(200);
+    expect(listed.body.schedules).toHaveLength(1);
+    expect(stopped.status).toBe(200);
+    expect(stopMissionSchedule).toHaveBeenCalledWith('schedule-1');
   });
 
   it('should get mission result', async () => {

@@ -14,6 +14,7 @@ import { HITLPanel } from '../panels/HITLPanel';
 import { LiveFeedPanel } from '../components/LiveFeedPanel';
 import { ToolBinding, HITLApproval, ToolCatalogEntry, EntityToolWithManifest } from '../types/workspace';
 import { getToolInputSchema, getInitialInputValues } from '../utils/workspaceHelpers';
+import type { MissionRecurrence } from '../components/MissionRecurrenceOptions';
 
 const EntityWorkspace = () => {
   const { id: entityId } = useParams<{ id: string }>();
@@ -30,11 +31,14 @@ const EntityWorkspace = () => {
 
 
   const [missionInput, setMissionInput] = useState('');
+  const [missionRecurrence, setMissionRecurrence] = useState<MissionRecurrence | null>(null);
   const [running, setRunning] = useState(false);
   const [optimisticMissions, setOptimisticMissions] = useState<Array<{ missionId: string; status: string; timestamp: string; output?: string }>>([]);
   const missions = useMissionsStore((s) => s.missions);
   const missionsLoaded = useMissionsStore((s) => s.missionsLoaded);
   const fetchMissions = useMissionsStore((s) => s.fetchMissions);
+  const recurringSchedules = useMissionsStore((s) => s.recurringSchedules);
+  const fetchRecurringSchedules = useMissionsStore((s) => s.fetchRecurringSchedules);
   const [toolBindings, setToolBindings] = useState<ToolBinding[]>([]);
   const [availableSkills, setAvailableSkills] = useState<Array<{ id: string; name: string; description: string; inputSchema?: Record<string, unknown>; configSchema?: Record<string, unknown>; manifest?: Record<string, unknown> }>>([]);
   const [availableTools, setAvailableTools] = useState<Array<{ id: string; name: string; description: string }>>([]);
@@ -111,6 +115,10 @@ const EntityWorkspace = () => {
       void fetchMissions();
     }
   }, [missionsLoaded, fetchMissions]);
+
+  useEffect(() => {
+    void fetchRecurringSchedules();
+  }, [entityId, fetchRecurringSchedules]);
 
   // Clear locally-tracked missions when navigating to a different assistant.
   useEffect(() => {
@@ -228,6 +236,7 @@ const EntityWorkspace = () => {
         prompt: missionInput,
         tenantId: entity.tenantId,
         assistantId: entity.id,
+        ...(missionRecurrence ? { recurrence: missionRecurrence } : {}),
         contextChunks: [],
         metadata: {
           toolBindings: toolBindings.filter((t) => t.enabled).map((t) => t.name),
@@ -241,10 +250,20 @@ const EntityWorkspace = () => {
       ]);
       void fetchMissions();
       setMissionInput('');
+      setMissionRecurrence(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Mission failed');
     } finally {
       setRunning(false);
+    }
+  };
+
+  const stopRecurringMission = async (scheduleId: string) => {
+    try {
+      await postJSON(`/api/temporal/missions/recurring/${encodeURIComponent(scheduleId)}/stop`, {});
+      await fetchRecurringSchedules();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to stop recurring mission');
     }
   };
 
@@ -489,6 +508,10 @@ const EntityWorkspace = () => {
             memoryContext={memoryContext}
             missionInput={missionInput}
             setMissionInput={setMissionInput}
+            recurrence={missionRecurrence}
+            setRecurrence={setMissionRecurrence}
+            recurringMissions={recurringSchedules.filter((schedule) => schedule.assistantId === entity.id)}
+            stopRecurringMission={stopRecurringMission}
             running={running}
             runMission={runMission}
           />

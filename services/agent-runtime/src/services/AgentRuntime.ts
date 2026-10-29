@@ -73,6 +73,7 @@ export class AgentRuntime {
   private tasks: Map<string, AgentTask> = new Map()
   private collaborations: Map<string, AgentCollaboration> = new Map()
   private specializations: Map<string, AgentSpecialization[]> = new Map()
+  private activeExecutions: Set<string> = new Set()
   private executor: AgentExecutor
   private persistAgentState?: (state: AgentState) => Promise<void>
   private startDelegatedAgent?: (agentId: string, missionId: string) => Promise<AgentState>
@@ -206,11 +207,28 @@ export class AgentRuntime {
       throw new Error(`Agent ${agentId} not found`)
     }
 
+    const existing = this.states.get(agentId)
+    if (existing) {
+      if (existing.missionId !== missionId) {
+        throw new Error(`Agent ${agentId} is already assigned to mission ${existing.missionId}`)
+      }
+      if (existing.status === 'running' && !existing.context.currentTaskId) {
+        existing.status = 'waiting'
+        delete existing.context.activeTaskId
+      } else if (existing.status !== 'failed' && existing.status !== 'running') {
+        existing.status = 'waiting'
+      }
+      existing.startedAt ||= new Date().toISOString()
+      this.states.set(agentId, existing)
+      logger.info({ agentId, missionId, status: existing.status }, 'Existing agent resumed without discarding its checkpoint')
+      return existing
+    }
+
     const state: AgentState = {
       agentId,
       tenantId: agent.tenantId,
       missionId,
-      status: 'running',
+      status: 'waiting',
       context: {},
       artifacts: [],
       assignedAt: new Date().toISOString(),
@@ -226,7 +244,13 @@ export class AgentRuntime {
     if (!this.agents.has(state.agentId)) {
       throw new Error(`Agent ${state.agentId} must be registered before restoring its state`)
     }
-    this.states.set(state.agentId, state)
+    const restored = { ...state, context: { ...state.context } }
+    if (restored.status === 'running') {
+      restored.status = 'waiting'
+      delete restored.context.currentTaskId
+      delete restored.context.activeTaskId
+    }
+    this.states.set(state.agentId, restored)
   }
 
   stopAgent(agentId: string): void {
@@ -305,13 +329,27 @@ export class AgentRuntime {
     const task = this.tasks.get(taskId)
     if (!task || task.agentId !== agentId) throw new Error(`Task ${taskId} not found for agent ${agentId}`)
     if (task.status === 'completed') return task
-    if (task.status === 'running') throw new Error(`Task ${taskId} is already running`)
+    if (task.status === 'running' && this.activeExecutions.has(taskId)) {
+      throw new Error(`Task ${taskId} is already running`)
+    }
 
     const state = this.states.get(agentId)
     if (!state) throw new Error(`Agent ${agentId} has not been started`)
+    if (task.status === 'running') {
+      logger.warn({ agentId, taskId }, 'Resuming a task left running by a previous Agent Runtime process')
+      task.status = 'pending'
+      delete task.error
+      state.status = 'waiting'
+      state.context = { ...state.context }
+      delete state.context.currentTaskId
+      delete state.context.activeTaskId
+      await this.persistAgentState?.(state)
+    }
+    this.activeExecutions.add(taskId)
     task.status = 'running'
     state.status = 'running'
-    state.context = { ...state.context, currentTaskId: taskId }
+    state.context = { ...state.context, currentTaskId: taskId, activeTaskId: taskId }
+    delete state.context.lastError
 
     try {
       const input = task.input && typeof task.input === 'object' && !Array.isArray(task.input)
@@ -372,6 +410,7 @@ export class AgentRuntime {
         lastCompletedTaskId: taskId,
         lastTaskResult: result,
       }
+      delete state.context.lastError
       state.status = 'waiting'
       this.states.set(agentId, state)
       await this.persistAgentState?.(state)
@@ -383,7 +422,13 @@ export class AgentRuntime {
       task.error = message
       task.completedAt = new Date().toISOString()
       this.tasks.set(taskId, task)
-      state.status = 'failed'
+      const currentCheckpoints = state.context.executionCheckpoints
+      const checkpoints = currentCheckpoints && typeof currentCheckpoints === 'object' && !Array.isArray(currentCheckpoints)
+        ? currentCheckpoints as Record<string, unknown>
+        : {}
+      const checkpoint = parseAgentExecutionCheckpoint(checkpoints[taskId])
+      const hasUncertainAction = !!checkpoint?.pendingAction
+      state.status = hasUncertainAction ? 'failed' : 'waiting'
       const receipts = state.context.taskReceipts && typeof state.context.taskReceipts === 'object'
         ? state.context.taskReceipts as Record<string, unknown>
         : {}
@@ -393,7 +438,7 @@ export class AgentRuntime {
           ...receipts,
           [taskId]: { status: 'failed', error: message, completedAt: task.completedAt },
         },
-        activeTaskId: taskId,
+        activeTaskId: hasUncertainAction ? taskId : undefined,
         currentTaskId: undefined,
         lastFailedTaskId: taskId,
         lastError: message,
@@ -402,6 +447,8 @@ export class AgentRuntime {
       await this.persistAgentState?.(state)
       logger.error({ agentId, taskId, error: message }, 'Agent task failed')
       throw error
+    } finally {
+      this.activeExecutions.delete(taskId)
     }
   }
 
@@ -505,6 +552,18 @@ export class AgentRuntime {
     if (!task) return undefined
     task.status = 'failed'
     task.error = error
+    const state = this.states.get(task.agentId)
+    if (state) {
+      state.status = 'waiting'
+      state.context = {
+        ...state.context,
+        activeTaskId: undefined,
+        currentTaskId: undefined,
+        lastFailedTaskId: taskId,
+        lastError: error,
+      }
+      this.states.set(task.agentId, state)
+    }
     this.tasks.set(taskId, task)
     logger.error({ taskId, error }, 'Task failed')
     return task

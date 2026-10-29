@@ -363,7 +363,7 @@ describe('MissionAgentRuntime', () => {
     await expect(runtime.getOrCreateAgent('researcher', task.systemPrompt))
       .resolves.toBe(agent.id)
 
-    expect(requests.map((request) => request.method)).toEqual(['GET', 'POST', 'POST'])
+    expect(requests.map((request) => request.method)).toEqual(['GET', 'GET', 'POST', 'POST'])
   })
 
   it('applies validated role-specific tool policies from mission metadata', async () => {
@@ -646,6 +646,9 @@ describe('MissionAgentRuntime', () => {
 
       if (url.endsWith('/agents/agent-mission-1-mission-director')) {
         return jsonResponse({ error: 'not found' }, 404)
+      }
+      if (url.endsWith('/agents') && init?.method !== 'POST') {
+        return jsonResponse({ agents: [] })
       }
       if (url.endsWith('/agents') && init?.method === 'POST') {
         return jsonResponse({ ...agent, id: 'agent-mission-1-mission-director' }, 201)
@@ -1035,7 +1038,7 @@ describe('MissionAgentRuntime', () => {
     expect(requests).toHaveLength(1)
   })
 
-  it('encodes generated Agent IDs as URL path segments', async () => {
+  it('uses canonical generated Agent IDs in URL paths', async () => {
     const requests: string[] = []
     jest.spyOn(global, 'fetch').mockImplementation(async (input, init) => {
       requests.push(String(input))
@@ -1053,9 +1056,45 @@ describe('MissionAgentRuntime', () => {
     await runtime.getOrCreateAgent('verification analyst', task.systemPrompt)
 
     expect(requests).toEqual([
-      'http://agent-runtime:3400/api/agent-runtime/missions/mission-1/agents/agent-mission-1-verification%20analyst',
+      'http://agent-runtime:3400/api/agent-runtime/missions/mission-1/agents/agent-mission-1-verification-analyst',
       'http://agent-runtime:3400/api/agent-runtime/missions/mission-1/agents',
-      'http://agent-runtime:3400/api/agent-runtime/missions/mission-1/agents/agent-mission-1-verification%20analyst/start',
+      'http://agent-runtime:3400/api/agent-runtime/missions/mission-1/agents',
+      'http://agent-runtime:3400/api/agent-runtime/missions/mission-1/agents/agent-mission-1-verification-analyst/start',
+    ])
+  })
+
+  it('reuses an existing agent whose role differs only by an Agent suffix', async () => {
+    const alias: AgentDefinition = {
+      id: 'agent-mission-1-Execution Agent',
+      tenantId: 'tenant-1',
+      name: 'Execution Agent Agent',
+      description: 'Existing mission executor',
+      type: 'Execution Agent',
+      systemPrompt: 'Execute mission tasks',
+      tools: [],
+      metadata: { agentRole: 'Execution Agent' },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }
+    const requests: string[] = []
+    jest.spyOn(global, 'fetch').mockImplementation(async (input, init) => {
+      requests.push(`${init?.method || 'GET'} ${String(input)}`)
+      if (init?.method === 'POST') return jsonResponse({ id: alias.id }, 200)
+      if (String(input).endsWith('/agents')) return jsonResponse({ agents: [alias] })
+      return jsonResponse({ error: 'not found' }, 404)
+    })
+
+    const runtime = new MissionAgentRuntime({
+      missionId: 'mission-1',
+      tenantId: 'tenant-1',
+      agentRuntimeUrl: 'http://agent-runtime:3400',
+    })
+
+    await expect(runtime.getOrCreateAgent('execution', task.systemPrompt)).resolves.toBe(alias.id)
+    expect(requests).toEqual([
+      'GET http://agent-runtime:3400/api/agent-runtime/missions/mission-1/agents/agent-mission-1-execution',
+      'GET http://agent-runtime:3400/api/agent-runtime/missions/mission-1/agents',
+      `POST http://agent-runtime:3400/api/agent-runtime/missions/mission-1/agents/${encodeURIComponent(alias.id)}/start`,
     ])
   })
 })

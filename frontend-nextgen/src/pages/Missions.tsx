@@ -2,12 +2,16 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { postJSON } from '../utils/api';
 import { useMissionsStore } from '../stores/missionsStore';
+import { MissionRecurrenceOptions, type MissionRecurrence } from '../components/MissionRecurrenceOptions';
+import { describeMissionSchedule } from '../utils/missionSchedule';
 
 interface MissionRow {
   workflowId: string;
   status: string;
   missionId: string;
   prompt?: string;
+  assistantId?: string;
+  cronSchedule?: string;
   startedAt?: string;
   completedAt?: string;
   timestamp?: number;
@@ -28,10 +32,13 @@ const Missions = () => {
   const missions = useMissionsStore((s) => s.missions);
   const missionsLoading = useMissionsStore((s) => s.missionsLoading);
   const missionsError = useMissionsStore((s) => s.missionsError);
+  const recurringSchedules = useMissionsStore((s) => s.recurringSchedules);
+  const recurringSchedulesError = useMissionsStore((s) => s.recurringSchedulesError);
   const missionsLoaded = useMissionsStore((s) => s.missionsLoaded);
   const pendingApprovals = useMissionsStore((s) => s.pendingApprovals);
   const pendingApprovalsLoading = useMissionsStore((s) => s.pendingApprovalsLoading);
   const fetchMissions = useMissionsStore((s) => s.fetchMissions);
+  const fetchRecurringSchedules = useMissionsStore((s) => s.fetchRecurringSchedules);
   const fetchPendingApprovals = useMissionsStore((s) => s.fetchPendingApprovals);
   const addMission = useMissionsStore((s) => s.addMission);
   const deleteMission = useMissionsStore((s) => s.deleteMission);
@@ -41,6 +48,7 @@ const Missions = () => {
   const [showCreate, setShowCreate] = useState(false);
   const [missionId, setMissionId] = useState('');
   const [prompt, setPrompt] = useState('');
+  const [recurrence, setRecurrence] = useState<MissionRecurrence | null>(null);
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
 
@@ -52,7 +60,8 @@ const Missions = () => {
 
   useEffect(() => {
     fetchMissions();
-  }, [fetchMissions]);
+    void fetchRecurringSchedules();
+  }, [fetchMissions, fetchRecurringSchedules]);
 
   useEffect(() => {
     if (pendingApprovals.length === 0) {
@@ -82,7 +91,7 @@ const Missions = () => {
     setStarting(true);
     setStartError(null);
     try {
-      const data = await postJSON<{ workflowId: string; status: string }>(
+      const data = await postJSON<{ workflowId: string; status: string; cronSchedule?: string }>(
         '/api/temporal/missions',
         {
           missionId: missionId || `mission-${Date.now()}`,
@@ -90,16 +99,20 @@ const Missions = () => {
           tenantId: 'tenant-1',
           contextChunks: [],
           metadata: {},
+          ...(recurrence ? { recurrence } : {}),
         }
       );
       const newMission: MissionRow = {
         workflowId: data.workflowId,
         status: data.status,
         missionId: missionId || `mission-${Date.now()}`,
+        ...(data.cronSchedule ? { cronSchedule: data.cronSchedule } : {}),
       };
       addMission(newMission);
+      if (recurrence) void fetchRecurringSchedules();
       setMissionId('');
       setPrompt('');
+      setRecurrence(null);
       setShowCreate(false);
     } catch (err) {
       setStartError(err instanceof Error ? err.message : 'Failed to start mission');
@@ -126,8 +139,17 @@ const Missions = () => {
     }
   };
 
+  const stopRecurringSchedule = async (scheduleId: string) => {
+    try {
+      await postJSON(`/api/temporal/missions/recurring/${encodeURIComponent(scheduleId)}/stop`, {});
+      await fetchRecurringSchedules();
+    } catch (err) {
+      setStartError(err instanceof Error ? err.message : 'Failed to stop recurring schedule');
+    }
+  };
+
   const getMissionStatusLabel = (status: string) => {
-    switch (status) {
+    switch (status.toLowerCase()) {
       case 'running': return 'Running';
       case 'pausing': return 'Pausing after current task';
       case 'canceling':
@@ -147,8 +169,8 @@ const Missions = () => {
     const q = search.trim().toLowerCase();
     return missions.filter((m) => {
       const isActiveTransition = filter === 'running'
-        && ['pausing', 'canceling', 'stopping', 'resuming'].includes(m.status);
-      if (filter !== 'all' && m.status !== filter && !isActiveTransition) return false;
+        && ['pausing', 'canceling', 'stopping', 'resuming'].includes(m.status.toLowerCase());
+      if (filter !== 'all' && m.status.toLowerCase() !== filter && !isActiveTransition) return false;
       if (!q) return true;
       return (
         m.missionId.toLowerCase().includes(q) ||
@@ -214,7 +236,8 @@ const Missions = () => {
       incomplete: 0,
     };
     for (const m of missions) {
-      c[m.status] = (c[m.status] || 0) + 1;
+      const status = m.status.toLowerCase();
+      c[status] = (c[status] || 0) + 1;
     }
     return c;
   }, [missions]);
@@ -250,6 +273,7 @@ const Missions = () => {
       <h1>Missions</h1>
       {startError && <div className="error-banner">{startError}</div>}
       {missionsError && <div className="error-banner">{missionsError}</div>}
+      {recurringSchedulesError && <div className="error-banner">{recurringSchedulesError}</div>}
 
       {showCreate ? (
         <div className="card mission-start-expanded">
@@ -267,16 +291,18 @@ const Missions = () => {
               onChange={(e) => setMissionId(e.target.value)}
             />
             <textarea
+              className="mission-instructions"
               placeholder="What should the agents do?"
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               required
-               rows={6}
+              rows={8}
             />
+            <MissionRecurrenceOptions value={recurrence} onChange={setRecurrence} />
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span className="hint">Cmd/Ctrl+Enter to submit</span>
               <button type="submit" disabled={starting || !prompt.trim()}>
-                {starting ? 'Starting...' : 'Start Mission'}
+                {starting ? 'Starting...' : recurrence ? 'Schedule Mission' : 'Start Mission'}
               </button>
             </div>
           </form>
@@ -306,6 +332,36 @@ const Missions = () => {
           <button onClick={() => setShowCreate(true)}>+ Create Mission</button>
         </div>
       )}
+
+      <section className="card">
+        <div className="mission-start-collapsed">
+          <h2 style={{ margin: 0 }}>Recurring Missions</h2>
+          <button className="secondary" onClick={() => void fetchRecurringSchedules()}>Refresh schedules</button>
+        </div>
+        {recurringSchedules.length === 0 ? (
+          <p>No recurring missions are scheduled.</p>
+        ) : (
+          <div className="mission-schedule-list">
+            {recurringSchedules.map((schedule) => (
+              <div className="mission-schedule-row" key={schedule.scheduleId}>
+                <div>
+                  <Link to={`/missions/${encodeURIComponent(`mission-${schedule.missionId}`)}`}>
+                    {schedule.missionId}
+                  </Link>
+                  <div className="hint">
+                    {describeMissionSchedule(schedule.cronSchedule)}
+                    {schedule.assistantId ? ` · Assistant ${schedule.assistantId}` : ' · General mission'}
+                    {` · Next: ${formatTime(schedule.nextRunAt)}`}
+                  </div>
+                </div>
+                <button className="danger small" onClick={() => void stopRecurringSchedule(schedule.scheduleId)}>
+                  Stop schedule
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
 
       <div className="card" style={{ marginTop: 0 }}>
         <div className="mission-start-collapsed">
@@ -376,6 +432,7 @@ const Missions = () => {
                   </th>
                   <th>Mission</th>
                   <th>Status</th>
+                  <th>Schedule</th>
                   <th>Started</th>
                   <th>Duration</th>
                   <th>Actions</th>
@@ -384,7 +441,7 @@ const Missions = () => {
               <tbody>
                 {showLoading ? (
                   <tr>
-                    <td colSpan={6}>
+                    <td colSpan={7}>
                       <div className="loading">Loading missions...</div>
                     </td>
                   </tr>
@@ -410,26 +467,27 @@ const Missions = () => {
                             </Link>
                           </td>
                           <td><span className={`badge ${m.status}`}>{getMissionStatusLabel(m.status)}</span></td>
+                          <td>{m.cronSchedule ? describeMissionSchedule(m.cronSchedule) : '—'}</td>
                           <td>{formatTime(m.startedAt || m.timestamp)}</td>
                           <td>{formatDuration(m)}</td>
                           <td>
                             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                              {['paused', 'pending'].includes(m.status) && (
+                              {['paused', 'pending'].includes(m.status.toLowerCase()) && (
                                 <button className="small" onClick={() => handleMissionAction(m.workflowId, 'start')} title="Start mission">
                                   Start
                                 </button>
                               )}
-                              {m.status === 'running' && (
+                              {m.status.toLowerCase() === 'running' && (
                                 <button className="small" onClick={() => handleMissionAction(m.workflowId, 'pause')} title="Pause mission">
                                   Pause
                                 </button>
                               )}
-                              {['running', 'pausing', 'paused'].includes(m.status) && (
+                              {['running', 'pausing', 'paused'].includes(m.status.toLowerCase()) && (
                                 <button className="danger small" onClick={() => handleMissionAction(m.workflowId, 'stop')} title="Stop mission">
                                   Stop
                                 </button>
                               )}
-                              {(m.status === 'failed' || m.status === 'incomplete' || m.status === 'canceled') && (
+                              {['failed', 'incomplete', 'canceled'].includes(m.status.toLowerCase()) && (
                                 <button className="secondary small" onClick={() => window.location.href = `/missions/${encodeURIComponent(m.workflowId)}`} title="Retry mission with guidance">
                                   Retry
                                 </button>
@@ -443,7 +501,7 @@ const Missions = () => {
                     ))}
                     {filtered.length === 0 && (
                       <tr>
-                        <td colSpan={6}>
+                        <td colSpan={7}>
                           <div className="empty-state">
                             {search.trim() || filter !== 'all'
                               ? 'No missions match the current filter.'

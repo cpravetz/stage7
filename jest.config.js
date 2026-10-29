@@ -15,8 +15,12 @@ module.exports = {
     '<rootDir>/services/auth/src/__tests__/**/*.test.ts',
     '<rootDir>/services/agent-runtime/src/__tests__/**/*.test.ts',
     '<rootDir>/services/tool-executor/src/__tests__/**/*.test.ts',
+    '<rootDir>/services/tool-executor/__tests__/**/*.test.ts',
     '<rootDir>/tests/integration/**/*.test.ts'
   ],
+  // Resolve the Docker-only `mongo` service name to a locally reachable Mongo
+  // when one is available, so integration suites run without compose.
+  globalSetup: '<rootDir>/tests/setup.ts',
   transform: {
     '^.+\\.ts$': 'ts-jest',
   },

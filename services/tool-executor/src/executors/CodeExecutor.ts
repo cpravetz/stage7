@@ -12,6 +12,8 @@ export interface CodeExecutionOptions {
   language: 'javascript' | 'typescript' | 'python';
   code: string;
   timeoutMs?: number;
+  isolated?: boolean;
+  httpMocks?: IsolatedHttpMock[];
   stdin?: string;
   input?: Record<string, unknown>;
   /**
@@ -35,6 +37,15 @@ export interface CodeExecutionOptions {
   executorCallback?: (toolId: string, input: Record<string, unknown>) => Promise<Record<string, unknown>>;
 }
 
+export interface IsolatedHttpMock {
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+  urlPattern: string;
+  expectedRequestBody?: string;
+  responseStatus: number;
+  responseHeaders?: Record<string, string>;
+  responseBody: Record<string, unknown>;
+}
+
 export interface CodeExecutionResult {
   success: boolean;
   output?: string;
@@ -56,6 +67,165 @@ export interface CodeExecutorCredentials {
   sources: NamedCredentialSource[];
 }
 
+function isolatedCommand(
+  executable: string,
+  args: string[],
+  sandboxDir: string,
+): { command: string; args: string[]; env: NodeJS.ProcessEnv } {
+  const bwrapPath = '/usr/bin/bwrap';
+  const prlimitPath = '/usr/bin/prlimit';
+  if (process.platform !== 'linux' || !fs.existsSync(bwrapPath) || !fs.existsSync(prlimitPath)) {
+    throw new Error('Isolated plugin testing requires Linux bubblewrap and prlimit; refusing to run without network and resource isolation.');
+  }
+  if (!fs.existsSync('/usr')) {
+    throw new Error('Isolated plugin test runtime mounts are unavailable.');
+  }
+
+  const executablePath = path.isAbsolute(executable)
+    ? executable
+    : (process.env.PATH || '').split(path.delimiter)
+      .map((directory) => path.join(directory, executable))
+      .find((candidate) => fs.existsSync(candidate));
+  if (!executablePath || !fs.existsSync(executablePath)) {
+    throw new Error(`Isolated plugin test runtime '${executable}' is unavailable.`);
+  }
+  const runtimePath = fs.realpathSync(executablePath);
+  const isPythonRuntime = /python/i.test(path.basename(runtimePath));
+  const runtimeArgs = args.map((arg) => arg.startsWith(`${sandboxDir}${path.sep}`)
+    ? path.posix.join('/work', path.relative(sandboxDir, arg).split(path.sep).join(path.posix.sep))
+    : arg);
+  const libraryMounts = ['/lib', '/lib64'].flatMap((directory) =>
+    fs.existsSync(directory) ? ['--ro-bind', directory, directory] : [],
+  );
+  const loaderCacheMount = fs.existsSync('/etc/ld.so.cache')
+    ? ['--ro-bind', '/etc/ld.so.cache', '/etc/ld.so.cache']
+    : [];
+  const bubblewrapArgs = [
+    '--unshare-net',
+    '--unshare-pid',
+    '--die-with-parent',
+    '--new-session',
+    '--ro-bind', '/usr', '/usr',
+    ...libraryMounts,
+    '--dev', '/dev',
+    '--proc', '/proc',
+    '--dir', '/etc',
+    ...loaderCacheMount,
+    '--tmpfs', '/tmp',
+    '--dir', '/runtime',
+    '--ro-bind', runtimePath, '/runtime/plugin-runtime',
+    '--bind', sandboxDir, '/work',
+    '--chdir', '/work',
+    '--clearenv',
+    '--setenv', 'PATH', '/usr/bin:/usr/local/bin:/runtime',
+    '--setenv', 'HOME', '/tmp',
+    '--setenv', 'NODE_ENV', 'test',
+    '--setenv', 'PYTHONNOUSERSITE', '1',
+    '--setenv', 'PYTHONDONTWRITEBYTECODE', '1',
+    '--',
+    prlimitPath,
+    '--cpu=8',
+    '--fsize=10485760',
+    '--nofile=64',
+    ...(isPythonRuntime ? ['--as=536870912'] : ['--data=536870912']),
+    '--',
+    '/runtime/plugin-runtime',
+    ...(isPythonRuntime ? [] : ['--max-old-space-size=256']),
+    ...runtimeArgs,
+  ];
+  return {
+    command: bwrapPath,
+    args: bubblewrapArgs,
+    env: { PATH: '/usr/bin:/bin', LANG: 'C.UTF-8' },
+  };
+}
+
+function javascriptHttpMockPrelude(mocks: IsolatedHttpMock[]): string {
+  if (mocks.length === 0) return '';
+  return `
+const __stage7_http_mocks = ${JSON.stringify(mocks)};
+const __stage7_http_mock_uses = __stage7_http_mocks.map(() => 0);
+const __stage7_pattern_matches = (pattern, url) => {
+  const expression = new RegExp('^' + pattern.replace(/[.+?^\${}()|[\\]\\\\]/g, '\\\\$&').replace(/\\*/g, '.*') + '$');
+  return expression.test(url);
+};
+globalThis.fetch = async (input, init = {}) => {
+  const url = typeof input === 'string' ? input : input.url;
+  const method = String(init.method || input.method || 'GET').toUpperCase();
+  const index = __stage7_http_mocks.findIndex((fixture, fixtureIndex) =>
+    fixture.method === method
+    && __stage7_pattern_matches(fixture.urlPattern, url)
+    && __stage7_http_mock_uses[fixtureIndex] === 0
+  );
+  if (index < 0) throw new Error('Unmatched HTTP request blocked by the isolated test harness: ' + method + ' ' + url);
+  const fixture = __stage7_http_mocks[index];
+  const rawBody = init.body == null && input instanceof Request ? await input.text() : init.body;
+  const requestBody = typeof rawBody === 'string' ? rawBody : (rawBody == null ? '' : String(rawBody));
+  if (fixture.expectedRequestBody !== undefined && requestBody !== fixture.expectedRequestBody) {
+    throw new Error('HTTP request body did not match the test fixture for ' + method + ' ' + url);
+  }
+  __stage7_http_mock_uses[index]++;
+  const responseBody = fixture.responseStatus === 204 ? null : JSON.stringify(fixture.responseBody);
+  return new Response(responseBody, { status: fixture.responseStatus, headers: fixture.responseHeaders || {} });
+};
+process.on('beforeExit', () => {
+  if (__stage7_http_mock_uses.some((count) => count === 0)) {
+    console.error('One or more expected HTTP fixture requests were not made');
+    process.exitCode = 1;
+  }
+});
+`;
+}
+
+function pythonHttpMockPrelude(mocks: IsolatedHttpMock[]): string {
+  if (mocks.length === 0) return '';
+  return `
+import io
+import urllib.request
+
+__stage7_http_mocks = ${JSON.stringify(mocks)}
+__stage7_http_mock_uses = [0 for _ in __stage7_http_mocks]
+
+class __Stage7MockResponse(io.BytesIO):
+    def __init__(self, content, status, headers):
+        super().__init__(content)
+        self.status = status
+        self.code = status
+        self.headers = headers
+    def __enter__(self):
+        return self
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
+
+def __stage7_mock_urlopen(request, *args, **kwargs):
+    if isinstance(request, urllib.request.Request):
+        url = request.full_url
+        method = request.get_method().upper()
+        data = request.data
+    else:
+        url = str(request)
+        method = 'GET'
+        data = None
+    body = data.decode() if isinstance(data, bytes) else (str(data) if data is not None else '')
+    for index, fixture in enumerate(__stage7_http_mocks):
+        pattern = '^' + __import__('re').escape(fixture['urlPattern']).replace(r'\\*', '.*') + '$'
+        if fixture['method'] != method or not __import__('re').match(pattern, url) or __stage7_http_mock_uses[index] > 0:
+            continue
+        expected = fixture.get('expectedRequestBody')
+        if expected is not None and body != expected:
+            raise RuntimeError('HTTP request body did not match the test fixture for ' + method + ' ' + url)
+        __stage7_http_mock_uses[index] += 1
+        response_body = b'' if fixture['responseStatus'] == 204 else json.dumps(fixture['responseBody']).encode()
+        response = __Stage7MockResponse(response_body, fixture['responseStatus'], fixture.get('responseHeaders', {}))
+        if fixture['responseStatus'] >= 400:
+            raise urllib.error.HTTPError(url, fixture['responseStatus'], 'Mock HTTP error', response.headers, response)
+        return response
+    raise RuntimeError('Unmatched HTTP request blocked by the isolated test harness: ' + method + ' ' + url)
+
+urllib.request.urlopen = __stage7_mock_urlopen
+`;
+}
+
 export class CodeExecutor {
   private static readonly MAX_TIMEOUT_MS = 300000; // 5 minutes max
   private static readonly DEFAULT_TIMEOUT_MS = 30000;
@@ -74,6 +244,29 @@ export class CodeExecutor {
       {};
     const sourceMappings: NamedCredentialSource[] =
       (credentials as CodeExecutorCredentials)?.sources ?? [];
+
+    if (options.isolated && (
+      options.executorCallback
+      || options.persistenceEnvVar
+      || options.config
+      || options.credentials
+      || (options.httpMocks && !Array.isArray(options.httpMocks))
+      || Object.keys(resolvedCreds).length > 0
+      || sourceMappings.length > 0
+    )) {
+      return {
+        success: false,
+        error: 'Isolated plugin tests cannot receive callbacks, persistence, configuration, or credentials.',
+        durationMs: Date.now() - startTime,
+      };
+    }
+    if (options.httpMocks?.length && !options.isolated) {
+      return {
+        success: false,
+        error: 'HTTP fixtures are only supported in isolated plugin tests.',
+        durationMs: Date.now() - startTime,
+      };
+    }
 
     if (options.language === 'javascript' || options.language === 'typescript') {
       return this.executeJavaScript(options, timeoutMs, startTime, resolvedCreds, sourceMappings);
@@ -230,6 +423,7 @@ const __resolveAuth = async (auth) => {
   }
   return { headers, type };
 };
+${options.isolated ? javascriptHttpMockPrelude(options.httpMocks || []) : ''}
 ${code}`;
 
         if (hasBridge) {
@@ -280,10 +474,13 @@ async function __execute_tool(toolId, input) {
           }
         }
 
-        const proc = spawn('node', [scriptPath], {
+        const command = options.isolated
+          ? isolatedCommand(process.execPath, [scriptPath], sandboxDir)
+          : { command: 'node', args: [scriptPath], env };
+        const proc = spawn(command.command, command.args, {
           timeout: timeoutMs,
-          cwd: sandboxDir,
-          env,
+          cwd: options.isolated ? undefined : sandboxDir,
+          env: command.env,
           detached: false,
           stdio: ['ignore', 'pipe', 'pipe'],
         });
@@ -465,7 +662,7 @@ async def __resolve_auth(auth):
             raw = u + ':' + p
             headers['Authorization'] = 'Basic ' + base64.b64encode(raw.encode()).decode()
     elif type_ == 'api_key':
-        hn = auth.get('header') || 'X-API-Key'
+        hn = auth.get('header') or 'X-API-Key'
         v = await resolve_val(auth.get('value') or auth.get('apiKey'))
         if v:
             headers[hn] = v
@@ -476,6 +673,7 @@ async def __resolve_auth(auth):
                     headers[k] = str(v)
     return {'headers': headers, 'type': type_}
 
+${options.isolated ? pythonHttpMockPrelude(options.httpMocks || []) : ''}
 ${code}`;
 
         if (hasBridge) {
@@ -525,10 +723,13 @@ async def __execute_tool(tool_id, input):
           }
         }
 
-        const proc = spawn(pythonBin, [scriptPath], {
+        const command = options.isolated
+          ? isolatedCommand(pythonBin, [scriptPath], sandboxDir)
+          : { command: pythonBin, args: [scriptPath], env };
+        const proc = spawn(command.command, command.args, {
           timeout: timeoutMs,
-          cwd: sandboxDir,
-          env,
+          cwd: options.isolated ? undefined : sandboxDir,
+          env: command.env,
           detached: false,
           stdio: ['ignore', 'pipe', 'pipe'],
         });

@@ -1,6 +1,7 @@
 import { Context } from '@temporalio/activity';
 import { logger } from '@stage7-nextgen/shared';
 import { PlanSchema } from '@stage7-nextgen/shared';
+import type { Plan } from '@stage7-nextgen/shared';
 import { MissionOrchestrator } from '../planner/MissionOrchestrator';
 import { MissionActivityCheckpoint, MissionTaskCheckpoint, WorkflowInput } from '../types/workflow';
 import {
@@ -13,7 +14,10 @@ import {
   reviewAndAmendMissionPhaseActivity,
   selectNextMissionTaskActivity,
   startMissionPhaseActivity,
+  MissionPhaseOutput,
 } from './missionWorkflowActivities';
+import { MissionCompletedListener } from '../listeners/MissionCompletedListener';
+import { MissionStageCompletedListener } from '../listeners/MissionStageCompletedListener';
 
 interface MissionExecutionOptions {
   checkpoint?: MissionActivityCheckpoint;
@@ -184,7 +188,14 @@ const orchestrator = new MissionOrchestrator();
     missionId: input.missionId,
     prompt: input.prompt,
     tenantId: input.tenantId,
-    metadata: input.metadata,
+    assistantId: input.assistantId,
+    metadata: {
+      ...input.metadata,
+      assistantId: input.assistantId,
+      entityId: typeof input.metadata?.entityId === 'string' && input.metadata.entityId.trim()
+        ? input.metadata.entityId.trim()
+        : input.missionId,
+    },
     retryGuidance: input.retryGuidance,
      persistenceUrl: process.env.ARTIFACTS_URL || 'http://artifacts:4200',
      gatewayUrl: process.env.GATEWAY_URL || 'http://gateway:3000',
@@ -220,6 +231,22 @@ export async function runMissionDirect(
   return executeMissionActivity(input, { checkpoint, controlCheckpoint });
 }
 
+async function notifyMissionCompletedActivity(
+  input: WorkflowInput,
+  plan: Plan,
+  phases: MissionPhaseOutput[],
+): Promise<void> {
+  await new MissionCompletedListener().onMissionCompleted(input, plan, phases);
+}
+
+async function rollupEntityMemoryActivity(
+  input: WorkflowInput,
+  plan: Plan,
+  phase: MissionPhaseOutput,
+): Promise<void> {
+  await new MissionStageCompletedListener().onStageCompleted(input, plan, phase);
+}
+
 export const missionActivities = {
   runMissionActivity,
   prepareMissionActivity,
@@ -231,6 +258,8 @@ export const missionActivities = {
   awaitMissionPhaseApprovalActivity,
   recordMissionPhaseApprovalActivity,
   completeMissionActivity,
+  notifyMissionCompletedActivity,
+  rollupEntityMemoryActivity,
 };
 export type MissionActivities = typeof missionActivities;
 

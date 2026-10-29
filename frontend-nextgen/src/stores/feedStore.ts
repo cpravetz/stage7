@@ -114,7 +114,9 @@ export function normalize(raw: unknown): FeedEvent | null {
         message = `The planner needs clarification: ${(data.questions as string[])?.join(' ') || ''}`.trim();
         break;
       case 'phase_plan_amended':
-        message = `Phase plan amended: ${(data.phaseId as string) || ''}`.trim();
+        message = `Phase plan amended: ${(data.phaseId as string) || ''}${Array.isArray(data.gaps) && data.gaps.length > 0
+          ? ` — ${data.gaps.filter((gap): gap is string => typeof gap === 'string').slice(0, 2).join('; ').slice(0, 240)}`
+          : ''}`.trim();
         break;
       case 'cost_estimate':
         message = `Model call: ${(data.model as string) || 'unknown model'}${data.tokensUsed ? ` (${String(data.tokensUsed)} tokens)` : ''}`;
@@ -184,7 +186,9 @@ export function normalize(raw: unknown): FeedEvent | null {
           : Array.isArray(data.gaps)
             ? data.gaps.filter((gap): gap is string => typeof gap === 'string').join('; ')
             : '';
-        message = reason ? `Mission incomplete: ${reason}` : 'Mission incomplete';
+        message = reason
+          ? `Mission incomplete: ${reason} — retry this mission to address the unmet requirements.`
+          : 'Mission incomplete';
         break;
       }
       case 'tool':

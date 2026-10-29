@@ -6,8 +6,15 @@ import { asyncHandler } from '../utils/asyncHandler';
 import { BrainError } from '../utils/errors';
 import { StructuredOutputSampler } from '../services/StructuredOutputSampler';
 import { logger } from '../utils/logger';
+import { EntityMemoryStore } from '../services/EntityMemoryStore';
 
 const router: Router = Router();
+const entityMemoryExtractionSchema = z.object({
+  summary: z.string().min(1).max(4000),
+  preferences: z.array(z.string().min(1).max(500)).max(20),
+  constraints: z.array(z.string().min(1).max(500)).max(20),
+  decisions: z.array(z.string().min(1).max(500)).max(20),
+});
 
 async function getBrain() {
   return getBrainInstance();
@@ -23,11 +30,49 @@ router.get('/health', asyncHandler(async (_req, res) => {
   });
 }));
 
+router.post('/memory/entity', asyncHandler(async (req: any, res: any) => {
+  const parsed = z.object({
+    tenantId: z.string().min(1).max(200),
+    entityId: z.string().min(1).max(200),
+    assistantId: z.string().min(1).max(200),
+    missionId: z.string().min(1).max(200),
+    stageName: z.string().min(1).max(500),
+    stageOutput: z.string().min(1).max(20_000),
+  }).parse(req.body);
+  const brain = await getBrain();
+  const extraction = await brain.complete(
+    `Extract durable user preferences, domain constraints, and architectural decisions from this completed mission stage. Do not infer facts that are not stated. Keep the summary concise.\n\nStage: ${parsed.stageName}\nOutput:\n${parsed.stageOutput}`,
+    {
+      missionId: parsed.missionId,
+      maxTokens: 1200,
+      temperature: 0.1,
+      inputFormat: 'json',
+      outputFormat: 'json',
+      systemPrompt: 'Return only a JSON object with summary, preferences, constraints, and decisions. Use empty arrays when no durable fact is supported.',
+    },
+  );
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(extraction.content);
+  } catch (error) {
+    throw new Error(`Brain memory extraction returned invalid JSON: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const memory = entityMemoryExtractionSchema.parse(decoded);
+  const saved = await EntityMemoryStore.getInstance().upsert({
+    ...memory,
+    tenantId: parsed.tenantId,
+    entityId: parsed.entityId,
+    assistantId: parsed.assistantId,
+    missionId: parsed.missionId,
+  });
+  res.status(201).json({ memory: saved });
+}));
+
 router.post('/complete', asyncHandler(async (req: any, res: any) => {
   const brain = await getBrain();
   const requestId = `brain_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   const startedAt = Date.now();
-  const { prompt, options, systemPrompt, maxTokens, budget, temperature, missionId, routingSessionId, inputFormat, outputFormat } = req.body as {
+  const { prompt, options, systemPrompt, maxTokens, budget, temperature, missionId, routingSessionId, entityId, assistantId, tenantId, inputFormat, outputFormat } = req.body as {
     prompt: string;
     options?: CompletionOptions;
     systemPrompt?: string;
@@ -36,6 +81,9 @@ router.post('/complete', asyncHandler(async (req: any, res: any) => {
     temperature?: number;
     missionId?: string;
     routingSessionId?: string;
+    entityId?: string;
+    assistantId?: string;
+    tenantId?: string;
     inputFormat?: string;
     outputFormat?: string;
   };
@@ -52,6 +100,9 @@ router.post('/complete', asyncHandler(async (req: any, res: any) => {
     missionId,
     optimizeFor: options?.optimizeFor,
     routingSessionId: routingSessionId ?? options?.routingSessionId,
+    entityId: entityId ?? options?.entityId,
+    assistantId: assistantId ?? options?.assistantId,
+    tenantId: tenantId ?? options?.tenantId,
     inputFormat: inputFormat ?? options?.inputFormat,
     outputFormat: outputFormat ?? options?.outputFormat,
   };

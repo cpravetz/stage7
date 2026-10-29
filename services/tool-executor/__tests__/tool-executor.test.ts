@@ -9,6 +9,7 @@ import toolsRouter from '../src/routes/tools'
 import { ToolNotFoundError, ValidationError } from '../src/utils/errors'
 import { eventSkills } from '../src/assistants/event/index'
 import { pluginGenerator as routePluginGenerator } from '../src/utils/sharedInstance'
+import { mcpToolExecutive } from '../src/services/MCPToolExecutive'
 
 const app: Application = express()
 app.use(express.json())
@@ -28,13 +29,33 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
 const registry = new ToolRegistry()
 const executor = new ToolExecutor()
 const generator = new PluginGenerator()
-
+let generatedSourceCode = `import json
+print(json.dumps({ "sum": __tool_input["left"] + __tool_input["right"] }))`
+let repairedSourceCode = generatedSourceCode
 const originalFetch = global.fetch;
 beforeAll(() => {
   global.fetch = jest.fn(async (url: any, init: any) => {
     const urlStr = String(url);
     if (urlStr.includes('/api/brain/complete')) {
       const body = JSON.parse(init.body);
+      if (typeof body.systemPrompt === 'string' && body.systemPrompt.includes('You independently derive')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            content: JSON.stringify({
+              description: 'Verify the calculator adds two integers.',
+              cases: [{
+                name: 'adds two integers',
+                input: { left: 19, right: 23 },
+                expectedOutput: { sum: 42 },
+              }],
+            }),
+            requestId: 'brain-test-contract',
+          }),
+          text: async () => '',
+        } as any;
+      }
       return {
         ok: true,
         status: 200,
@@ -44,9 +65,11 @@ beforeAll(() => {
             name: 'calculator',
             description: body.prompt,
             type: 'code',
-            language: 'javascript',
-            entrypoint: 'index.js',
-            sourceCode: 'console.log(JSON.stringify({ sum: __tool_input.left + __tool_input.right }));',
+            language: 'python',
+            entrypoint: 'main.py',
+            sourceCode: body.prompt.includes('The previous generated code was rejected')
+              ? repairedSourceCode
+              : generatedSourceCode,
             requirements: [],
             configSchema: {},
             inputs: {},
@@ -56,6 +79,14 @@ beforeAll(() => {
           provider: 'openrouter',
           tokensUsed: 100,
         }),
+        text: async () => '',
+      } as any;
+    }
+    if (urlStr.includes('/api/brain/complaint')) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ recorded: true }),
         text: async () => '',
       } as any;
     }
@@ -677,13 +708,116 @@ describe('PluginGenerator', () => {
       : undefined
     expect(typeof sourceCode).toBe('string')
     if (typeof sourceCode !== 'string') throw new Error('Generated plugin source was missing')
+    expect(manifest).toMatchObject({
+      validation: { method: 'isolated-contract-tests', passed: true, testCount: 1 },
+      testContract: { cases: [{ name: 'adds two integers', expectedOutput: { sum: 42 } }] },
+    })
     const execution = await new CodeExecutor().execute({
-      language: 'javascript',
+      language: 'python',
       code: sourceCode,
       input: { left: 19, right: 23 },
     })
     expect(execution.success).toBe(true)
     expect(JSON.parse(execution.output || 'null')).toEqual({ sum: 42 })
+  })
+
+  it('runs isolated JavaScript and Python with no network or inherited secrets', async () => {
+    const previousSecret = process.env.STAGE7_PLUGIN_TEST_SECRET
+    process.env.STAGE7_PLUGIN_TEST_SECRET = 'must-not-leak'
+    try {
+      const js = await new CodeExecutor().execute({
+        language: 'javascript',
+        isolated: true,
+        timeoutMs: 5_000,
+        code: `fetch('http://1.1.1.1:80', { signal: AbortSignal.timeout(1000) })
+  .then(() => console.log(JSON.stringify({ blocked: false, secret: process.env.STAGE7_PLUGIN_TEST_SECRET || null })))
+  .catch(() => console.log(JSON.stringify({ blocked: true, secret: process.env.STAGE7_PLUGIN_TEST_SECRET || null })));`,
+      })
+      expect(js.success).toBe(true)
+      expect(JSON.parse(js.output || 'null')).toEqual({ blocked: true, secret: null })
+
+      const python = await new CodeExecutor().execute({
+        language: 'python',
+        isolated: true,
+        timeoutMs: 5_000,
+        code: `import json, os, urllib.request
+try:
+    urllib.request.urlopen('http://1.1.1.1:80', timeout=1)
+    blocked = False
+except Exception:
+    blocked = True
+print(json.dumps({"blocked": blocked, "secret": os.environ.get("STAGE7_PLUGIN_TEST_SECRET")}))`,
+      })
+      expect(python.success).toBe(true)
+      expect(JSON.parse(python.output || 'null')).toEqual({ blocked: true, secret: null })
+    } finally {
+      if (previousSecret === undefined) delete process.env.STAGE7_PLUGIN_TEST_SECRET
+      else process.env.STAGE7_PLUGIN_TEST_SECRET = previousSecret
+    }
+  })
+
+  it('satisfies HTTP integration cases through local fixtures in both languages', async () => {
+    const httpMocks = [{
+      method: 'POST' as const,
+      urlPattern: 'https://api.example.test/messages/*',
+      expectedRequestBody: 'to=%2B15551212&body=hello',
+      responseStatus: 201,
+      responseHeaders: { 'Content-Type': 'application/json' },
+      responseBody: { id: 'message-123', status: 'queued' },
+    }]
+    const javascript = await new CodeExecutor().execute({
+      language: 'javascript',
+      isolated: true,
+      httpMocks,
+      timeoutMs: 5_000,
+      code: `fetch('https://api.example.test/messages/send', {
+  method: 'POST',
+  body: 'to=%2B15551212&body=hello'
+}).then(async (response) => {
+  const result = await response.json();
+  console.log(JSON.stringify({ id: result.id, status: result.status }));
+});`,
+    })
+    expect(javascript.success).toBe(true)
+    expect(JSON.parse(javascript.output || 'null')).toEqual({ id: 'message-123', status: 'queued' })
+
+    const python = await new CodeExecutor().execute({
+      language: 'python',
+      isolated: true,
+      httpMocks,
+      timeoutMs: 5_000,
+      code: `import json
+import urllib.request
+request = urllib.request.Request(
+    'https://api.example.test/messages/send',
+    data=b'to=%2B15551212&body=hello',
+    method='POST',
+)
+with urllib.request.urlopen(request) as response:
+    result = json.loads(response.read().decode())
+print(json.dumps({"id": result["id"], "status": result["status"]}))`,
+    })
+    expect(python.success).toBe(true)
+    expect(JSON.parse(python.output || 'null')).toEqual({ id: 'message-123', status: 'queued' })
+  })
+
+  it('repairs generated code that does not satisfy its independent contract', async () => {
+    const originalSourceCode = generatedSourceCode
+    const originalRepairedSourceCode = repairedSourceCode
+    generatedSourceCode = 'print(json.dumps({ sum: 0 }))'
+    repairedSourceCode = originalSourceCode
+    try {
+      const result = await generator.generate(request)
+      expect(result.success).toBe(true)
+      expect(result.tool?.manifest.validation).toMatchObject({
+        method: 'isolated-contract-tests',
+        passed: true,
+        testCount: 1,
+      })
+    } finally {
+      generatedSourceCode = originalSourceCode
+      repairedSourceCode = originalRepairedSourceCode
+    }
   })
 
   it('reports schema-invalid Brain output as a quality complaint', async () => {
@@ -703,6 +837,16 @@ describe('PluginGenerator', () => {
       requests.push({ url: urlString, body });
 
       if (urlString.endsWith('/api/brain/complete')) {
+        const promptBody = body;
+        if (promptBody?.systemPrompt && String(promptBody.systemPrompt).includes('You independently derive')) {
+          return mockResponse({
+            requestId: 'brain_valid_test_contract',
+            content: JSON.stringify({
+              description: 'Verify integer addition.',
+              cases: [{ name: 'adds integers', input: { left: 1, right: 2 }, expectedOutput: { sum: 3 } }],
+            }),
+          });
+        }
         return mockResponse({
           requestId: 'brain_invalid_plugin_response',
           content: JSON.stringify({
@@ -733,6 +877,16 @@ describe('PluginGenerator', () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toContain('configSchema');
+      const completionRequests = requests.filter(({ url }) => url.endsWith('/api/brain/complete'));
+      expect(completionRequests).toHaveLength(3);
+      expect(completionRequests[0]?.body?.systemPrompt)
+        .toContain('independently derive a deterministic acceptance contract');
+      expect(completionRequests[2]?.body?.prompt)
+        .toContain('previous generated code was rejected');
+      expect(completionRequests[2]?.body?.prompt)
+        .toContain('configSchema Required');
+      expect(completionRequests[1]?.body?.systemPrompt)
+        .toContain('senior engineer generating production-ready plugins');
       expect(requests.find(({ url }) => url.endsWith('/api/brain/complete'))?.body?.missionId)
         .toBe('mission-plugin-validation');
       expect(requests.find(({ url }) => url.endsWith('/api/brain/complaint'))?.body).toEqual({
@@ -759,6 +913,17 @@ describe('PluginGenerator', () => {
         configSchema: {},
         inputs: {},
         outputs: {},
+        testContract: {
+          description: 'Verify generated output.',
+          cases: [{ name: 'produces JSON', input: {}, expectedOutput: { ok: true } }],
+        },
+        validation: {
+          method: 'isolated-contract-tests',
+          passed: true,
+          testCount: 1,
+          testNames: ['produces JSON'],
+          passedAt: new Date().toISOString(),
+        },
       },
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -776,6 +941,36 @@ describe('PluginGenerator', () => {
     expect(unsafeEntrypoint.success).toBe(false)
     expect(unsafeEntrypoint.error).toContain('entrypoint')
 
+    const invalidSyntax = await generator.deploy({
+      ...base,
+      id: 'syntax-invalid-plugin',
+      manifest: { ...base.manifest, sourceCode: 'const = ;' },
+    })
+    expect(invalidSyntax.success).toBe(false)
+    expect(invalidSyntax.error).toContain('javascript syntax validation')
+  })
+
+  it('refuses to deploy generated plugins without passing isolated contract evidence', async () => {
+    const result = await generator.deploy({
+      id: 'untested-plugin',
+      name: 'Untested Plugin',
+      description: 'A generated plugin without validation evidence',
+      type: 'code',
+      manifest: {
+        language: 'javascript',
+        entrypoint: 'index.js',
+        sourceCode: 'console.log(JSON.stringify({ ok: true }));',
+        requirements: [],
+        configSchema: {},
+        inputs: {},
+        outputs: {},
+      },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })
+
+    expect(result.success).toBe(false)
+    expect(result.error).toContain('must pass isolated contract tests')
   })
 })
 
@@ -825,6 +1020,72 @@ describe('REST endpoints', () => {
       .send({ description: 'New plugin' })
     expect(res.status).toBe(201)
     expect(res.body.success).toBe(true)
+  })
+
+  it('resolves an already-registered capability without generating a duplicate tool', async () => {
+    const existingTool: Tool = {
+      id: 'existing-capability-tool',
+      name: 'Existing Capability Tool',
+      description: 'Already satisfies the requested capability',
+      type: 'code',
+      manifest: {},
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }
+    const resolve = jest.spyOn(mcpToolExecutive, 'resolveCapability')
+      .mockReturnValue({ satisfied: true, tool: existingTool })
+    const discover = jest.spyOn(mcpToolExecutive, 'discoverAndRequestPermission')
+    const generate = jest.spyOn(routePluginGenerator, 'generate')
+    try {
+      const res = await request(app)
+        .post('/api/tools/resolve')
+        .send({ description: 'Need a capability' })
+
+      expect(res.status).toBe(200)
+      expect(res.body).toMatchObject({ success: true, source: 'registered', tool: { id: existingTool.id } })
+      expect(discover).not.toHaveBeenCalled()
+      expect(generate).not.toHaveBeenCalled()
+    } finally {
+      resolve.mockRestore()
+      discover.mockRestore()
+      generate.mockRestore()
+    }
+  })
+
+  it('falls back to generating a reusable tool when no registered or MCP tool resolves the capability', async () => {
+    const generatedTool: Tool = {
+      id: 'generated-capability-tool',
+      name: 'Generated Capability Tool',
+      description: 'Satisfies the requested capability',
+      type: 'code',
+      manifest: { language: 'javascript', entrypoint: 'index.js', sourceCode: 'console.log("{}")' },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }
+    const resolve = jest.spyOn(mcpToolExecutive, 'resolveCapability')
+      .mockReturnValue({ satisfied: false, error: 'No registered tool matches' })
+    const discover = jest.spyOn(mcpToolExecutive, 'discoverAndRequestPermission')
+      .mockResolvedValue({ satisfied: false, error: 'No suitable MCP tool found' })
+    const generate = jest.spyOn(routePluginGenerator, 'generate')
+      .mockResolvedValue({ success: true, tool: generatedTool })
+    const deploy = jest.spyOn(routePluginGenerator, 'deploy')
+      .mockResolvedValue({ success: true, deployPath: '/tmp/generated-capability-tool' })
+    try {
+      const res = await request(app)
+        .post('/api/tools/resolve')
+        .send({ description: 'Need a capability' })
+
+      expect(res.status).toBe(201)
+      expect(res.body).toMatchObject({ success: true, source: 'generated', tool: { id: generatedTool.id } })
+      expect(discover).toHaveBeenCalled()
+      expect(generate).toHaveBeenCalled()
+      expect(deploy).toHaveBeenCalledWith(generatedTool)
+    } finally {
+      resolve.mockRestore()
+      discover.mockRestore()
+      generate.mockRestore()
+      deploy.mockRestore()
+    }
   })
 
   it('reports a failed plugin deployment instead of returning a success response', async () => {

@@ -82,6 +82,17 @@ function serviceUrl(name: string, fallback: string): string {
   return process.env[name] || fallback;
 }
 
+function agentMemoryMetadata(input: WorkflowInput): Record<string, unknown> {
+  return {
+    ...input.metadata,
+    entityId: typeof input.metadata?.entityId === 'string' && input.metadata.entityId.trim()
+      ? input.metadata.entityId.trim()
+      : input.missionId,
+    assistantId: input.assistantId,
+    tenantId: input.tenantId || 'tenant-1',
+  };
+}
+
 const PLANNER_PROGRESS_MIN_INTERVAL_MS = 60_000;
 const plannerProgressByMission = new Map<string, { key: string; at: number }>();
 
@@ -203,7 +214,7 @@ export async function prepareMissionActivity(input: WorkflowInput): Promise<Plan
   const plannerRuntime = new MissionAgentRuntime({
     missionId: input.missionId,
     tenantId: input.tenantId || 'tenant-1',
-    metadata: input.metadata,
+    metadata: agentMemoryMetadata(input),
     agentRuntimeUrl: process.env.AGENT_RUNTIME_URL,
     broadcast: createRuntimeBroadcast(input),
   });
@@ -287,7 +298,7 @@ export async function selectNextMissionTaskActivity({
     const agentRuntime = new MissionAgentRuntime({
       missionId: input.missionId,
       tenantId: input.tenantId || 'tenant-1',
-      metadata: input.metadata,
+      metadata: agentMemoryMetadata(input),
       agentRuntimeUrl: process.env.AGENT_RUNTIME_URL,
       broadcast: createRuntimeBroadcast(input),
     });
@@ -323,7 +334,7 @@ export async function reviewAndAmendMissionPhaseActivity({
     const agentRuntime = new MissionAgentRuntime({
       missionId: input.missionId,
       tenantId: input.tenantId || 'tenant-1',
-      metadata: input.metadata,
+      metadata: agentMemoryMetadata(input),
       agentRuntimeUrl: process.env.AGENT_RUNTIME_URL,
       broadcast: createRuntimeBroadcast(input),
     });
@@ -368,14 +379,14 @@ export async function executeMissionTaskActivity({
   const retryGuidance = retrying
     ? input.retryGuidance || 'Resume from the persisted safe checkpoint and action receipts. Do not repeat external actions whose outcome is already recorded or uncertain.'
     : input.retryGuidance;
-  const agentId = `agent-${input.missionId}-${task.agentRole.toLowerCase()}`;
   const agentRuntime = new MissionAgentRuntime({
     missionId: input.missionId,
     tenantId: input.tenantId || 'tenant-1',
-    metadata: input.metadata,
+    metadata: agentMemoryMetadata(input),
     agentRuntimeUrl: process.env.AGENT_RUNTIME_URL,
     broadcast: createRuntimeBroadcast(input),
   });
+  let agentId = agentRuntime.getAgentIdForRole(task.agentRole);
   const heartbeatTimer = setInterval(() => {
     activityContext.heartbeat({ missionId: input.missionId, phaseId: phase.id, taskId: task.id });
   }, 30_000);
@@ -401,19 +412,20 @@ export async function executeMissionTaskActivity({
           taskId: task.id,
           taskTitle: task.title,
           agentId,
-          agentName: `${task.agentRole} Agent`,
+          agentName: `${task.agentRole.replace(/\s+Agent$/i, '')} Agent`,
           agentRole: task.agentRole,
         },
       });
     }
 
     const registeredAgentId = await agentRuntime.getOrCreateAgent(task.agentRole, task.systemPrompt);
+    agentId = registeredAgentId;
     const executionArgs = [
       registeredAgentId,
       task,
       phase,
       plan,
-      false,
+      retrying,
       DEFAULT_AGENT_EXECUTION_POLICY,
       completedTaskSummaries,
     ] as const;
@@ -436,9 +448,10 @@ export async function executeMissionTaskActivity({
         taskId: task.id,
         taskTitle: task.title,
         agentId,
-        agentName: `${task.agentRole} Agent`,
+        agentName: `${task.agentRole.replace(/\s+Agent$/i, '')} Agent`,
         agentRole: task.agentRole,
         artifacts: result.artifacts,
+        output: result.output.slice(0, 4_000),
         tokensUsed: result.tokensUsed,
       },
     });
@@ -471,7 +484,7 @@ export async function executeMissionTaskActivity({
         taskId: task.id,
         taskTitle: task.title,
         agentId,
-        agentName: `${task.agentRole} Agent`,
+        agentName: `${task.agentRole.replace(/\s+Agent$/i, '')} Agent`,
         agentRole: task.agentRole,
         error: message,
       },
@@ -640,7 +653,7 @@ export async function completeMissionActivity({
     const agentRuntime = new MissionAgentRuntime({
       missionId: input.missionId,
       tenantId: input.tenantId || 'tenant-1',
-      metadata: input.metadata,
+      metadata: agentMemoryMetadata(input),
       agentRuntimeUrl: process.env.AGENT_RUNTIME_URL,
       broadcast: createRuntimeBroadcast(input),
     });

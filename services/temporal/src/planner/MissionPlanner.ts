@@ -43,9 +43,10 @@ Requirements:
 5. Give every phase a unique, stable id. Task ids must be globally unique across the entire plan, not merely unique within each phase. Use ids such as "phase-2-task-1"; never reuse "task-1" in another phase. Dependencies may refer only to tasks in the same or an earlier phase, and must not form a cycle. Select agent roles based on the actual work.
 6. Every task must be executable by an autonomous software Agent. Never assign agentRole "Human", "User", or another human decision-maker. Represent a needed human decision with requiresApproval or requiresClarification instead.
 7. Mark requiresApproval=true only where a human decision is needed before work continues.
-8. A task's systemPrompt is its operational instruction, not just a question restating the goal. When the goal or task description requires a tool action or delegation, include it in requiredActions as {"toolId":"<exact tool id or __delegate>","outcome":"success"}. The systemPrompt must explicitly name and instruct every required direct tool action using its exact tool ID; for delegation, explicitly instruct the Agent to delegate to a child Agent. A tool mentioned only as an action for that child is not a direct action receipt for the parent. If a task performs a failure and recovery in one task, include both the expected {"outcome":"failure"} and recovery {"outcome":"success"} action receipts. If recovery is split into ordered tasks, the failing task must record its failure receipt and the recovery task must depend on and name that failure task and record its success receipt. When a task must attempt an unavailable or disallowed tool, include {"outcome":"denied"} and instruct the Agent to make the actual action request. Do not require actions for reasoning-only tasks.
-9. When a task produces document artifacts, its systemPrompt must instruct the Agent to begin each artifact with a one-paragraph summary (under 100 words) before the full content, so downstream reviewers can judge the artifact from the summary alone.
-10. If a task consumes another task's result or artifact, list that producer's exact task ID in dependsOnTaskIds and in the task's systemPrompt, and say which output is consumed. Do not refer vaguely to "initial", "final", or "previous" values without naming their producing task IDs. Dependencies belong on the consuming task, not on a producer that merely names a future consumer. Do not infer a dependency from a task ID mentioned in a negative instruction or in a statement that the task's output will be consumed downstream. Include only tasks that produce an input the task actually uses. Dependencies impose execution order and make completed producer outputs available to the Agent.
+8. A task's systemPrompt must clearly describe the outcome, constraints, and evidence needed to complete the task. Keep instructions focused on what must be accomplished; do not prescribe tool IDs, tool discovery, tool creation, delegation, or implementation steps. The runtime resolves required capabilities using available tools and determines whether an existing tool or a newly created one is needed. Leave requiredActions empty unless a specific action outcome must be independently verified. Do not lock an action to a generic API tool when its endpoint or credentials are not known; the Agent must be able to resolve another capability or report the concrete configuration blocker.
+9. Treat expectedArtifacts as user-requested deliverable files only. Do not invent design documents, source-code files, executables, or other artifacts just to describe work or prove an action. For communication, tool-creation, and other action-only tasks, use expectedArtifacts=[] and report the verified text/result in the task output. system-action-receipts.json is internal evidence supplied by the runtime and must never be listed as an expected artifact. Do not promise .exe binaries; generated tools are registered tools, not mission artifacts.
+10. When a task produces document artifacts, its systemPrompt must instruct the Agent to begin each artifact with a one-paragraph summary (under 100 words) before the full content, so downstream reviewers can judge the artifact from the summary alone.
+11. If a task consumes another task's result or artifact, list that producer's exact task ID in dependsOnTaskIds and in the task's systemPrompt, and say which output is consumed. Do not refer vaguely to "initial", "final", or "previous" values without naming their producing task IDs. Dependencies belong on the consuming task, not on a producer that merely names a future consumer. Do not infer a dependency from a task ID mentioned in a negative instruction or in a statement that the task's output will be consumed downstream. Include only tasks that produce an input the task actually uses. Dependencies impose execution order and make completed producer outputs available to the Agent.
 
 Return one complete JSON object matching this structure:
 {"summary":"...","estimatedDuration":"...","estimatedCost":"...","requiresClarification":false,"clarificationQuestions":[],"phases":[{"id":"phase-1","name":"...","goal":"...","requiresApproval":false,"status":"pending","tasks":[{"id":"phase-1-task-1","title":"...","description":"...","agentRole":"...","systemPrompt":"...","dependsOnTaskIds":[],"expectedArtifacts":[],"requiredActions":[],"status":"pending","artifacts":[]}]}]}
@@ -192,7 +193,11 @@ function explicitlyRequiresDelegation(instructions: string) {
             && /\b(?:child\s+agent|sub[- ]?agent|subagent)\b/i.test(segment);
     });
 }
-export function missionTaskActionIssues(task: Pick<Task, 'systemPrompt' | 'requiredActions'>, taskPath = 'task', allTaskIds = new Set<string>()) {
+export function missionTaskActionIssues(
+    task: Pick<Task, 'systemPrompt' | 'requiredActions'>,
+    taskPath = 'task',
+    allTaskIds = new Set<string>(),
+) {
     const issues: string[] = [];
     const instructions = task.systemPrompt;
     const requiredActions = task.requiredActions || [];
@@ -205,8 +210,11 @@ export function missionTaskActionIssues(task: Pick<Task, 'systemPrompt' | 'requi
     if (requiredToolIds.has('__delegate') && !delegationRequired) {
         issues.push(`${taskPath} requires __delegate but systemPrompt does not explicitly instruct child-Agent delegation`);
     }
-    for (const toolId of namedToolIds) {
-        // tool-id scanning removed: planner no longer validates arbitrary tool ids
+    for (const toolId of requiredToolIds) {
+        if (toolId === '__delegate' || toolId === '__create_tool' || namedToolIds.has(toolId)) {
+            continue;
+        }
+        issues.push(`${taskPath} requires an action receipt for "${toolId}", but the systemPrompt does not instruct the Agent to call it directly. For a missing tool instruction, the systemPrompt must include a direct instruction that names the exact tool ID "${toolId}" and explains the intended call.`);
     }
     return issues;
 }
@@ -367,6 +375,12 @@ function planStandardIssues(plan: any): string[] {
             const taskPath = `task "${task.id}" (phase ${phaseIndex + 1}, task ${taskIndex + 1})`;
             if (!Array.isArray(task.requiredActions)) {
                 issues.push(`${taskPath}.requiredActions must be provided; use [] when no action receipt is required`);
+            }
+            if (Array.isArray(task.expectedArtifacts) && task.expectedArtifacts.some(
+                (artifact: unknown) => typeof artifact === 'string'
+                    && artifact.trim().toLocaleLowerCase() === 'system-action-receipts.json',
+            )) {
+                issues.push(`${taskPath}.expectedArtifacts must not include system-action-receipts.json; action receipts are internal runtime evidence`);
             }
             if (isHumanAgentRole(task.agentRole)) {
                 issues.push(`${taskPath}.agentRole "${task.agentRole}" is not executable; assign an autonomous software Agent and represent human decisions with requiresApproval or requiresClarification`);
@@ -560,7 +574,7 @@ export async function generateValidPlan(
         catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             if (message.includes(BRAIN_MODEL_SELECTION_EXHAUSTED)) {
-                throw new Error(`Unable to generate a valid mission plan because Brain exhausted every eligible model. Last plan validation issue: ${lastError || 'none; no model produced a plan'}. Brain: ${message}`, { cause: error });
+                throw new Error(`Unable to generate a valid mission plan because Brain exhausted every eligible model. Last plan validation issue: ${lastError || 'none; no model produced a plan'}. Brain: ${message}`);
             }
             if (message.includes(BRAIN_MODEL_SELECTION_RETRY)) {
                 logger.warn({ missionId, attempt, reason: message }, 'Brain requested another Planner attempt with an untried eligible model');
@@ -572,7 +586,7 @@ export async function generateValidPlan(
                 await reportProgress?.({ attempt, status: 'retrying', reason: message, transient: true });
                 continue;
             }
-            throw new Error(`Planner Agent request failed on attempt ${attempt}: ${message}`, { cause: error });
+            throw new Error(`Planner Agent request failed on attempt ${attempt}: ${message}`);
         }
         previousResponse = content;
         try {

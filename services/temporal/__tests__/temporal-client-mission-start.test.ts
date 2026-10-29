@@ -62,6 +62,58 @@ describe('TemporalClient mission start', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
+  it('starts recurring missions with Temporal cron metadata', async () => {
+    delete process.env.TEMPORAL_ADDRESS
+    delete process.env.ARTIFACTS_URL
+    delete process.env.GATEWAY_URL
+    const client = new TemporalClient()
+    const start = jest.fn().mockResolvedValue(undefined)
+    Object.defineProperty(client, 'client', {
+      configurable: true,
+      value: { workflow: { start } },
+    })
+    jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      text: async () => '',
+      json: async () => ({}),
+    } as Response)
+
+    await client.startMission({
+      missionId: 'weekly-review',
+      tenantId: 'tenant-1',
+      assistantId: 'legal',
+      prompt: 'Review recent matters',
+      cronSchedule: '0 9 * * 1',
+    })
+
+    expect(start).toHaveBeenCalledWith(expect.any(Function), expect.objectContaining({
+      workflowId: 'mission-weekly-review',
+      cronSchedule: '0 9 * * 1',
+      memo: {
+        missionId: 'weekly-review',
+        assistantId: 'legal',
+        cronSchedule: '0 9 * * 1',
+      },
+    }))
+  })
+
+  it('refuses cron schedules when only the direct runner is available', async () => {
+    delete process.env.TEMPORAL_ADDRESS
+    const directRun = jest.fn(async () => ({}))
+    const client = new TemporalClient('default', directRun)
+
+    await expect(client.startMission({
+      missionId: 'direct-recurring',
+      tenantId: 'tenant-1',
+      assistantId: 'legal',
+      prompt: 'Review matters',
+      cronSchedule: '0 9 * * 1',
+    })).rejects.toThrow('Recurring missions require a connected Temporal Server');
+    expect(directRun).not.toHaveBeenCalled()
+  })
+
   it('recovers a running mission from its persisted plan and completed task statuses', async () => {
     delete process.env.TEMPORAL_ADDRESS
     process.env.ARTIFACTS_URL = 'http://artifacts'

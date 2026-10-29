@@ -3,6 +3,8 @@ import { ToolStore } from '../services/ToolStore';
 import { ToolExecutor } from '../services/ToolExecutor';
 import { AssistantWorkspaceManager } from '../services/AssistantWorkspaceManager';
 import { PluginGenerator } from '../services/PluginGenerator';
+import { mcpToolExecutive } from '../services/MCPToolExecutive';
+import { setToolRegistry } from '../services/ToolIntegrator';
 import { TriggerScheduler } from '../services/TriggerScheduler';
 import { createTriggerRecordStore } from '../services/TriggerRecordStore';
 import { createEventLog } from '../services/EventLog';
@@ -21,6 +23,8 @@ export const pluginGenerator = new PluginGenerator();
 export const harnessEditService = new HarnessEditService({ registry: toolRegistry });
 
 pluginGenerator.setRegistry(toolRegistry);
+mcpToolExecutive.setRegistry(toolRegistry);
+setToolRegistry(toolRegistry);
 
 const TEMPORAL_HTTP_URL = process.env.TEMPORAL_HTTP_URL || 'http://temporal:4100';
 

@@ -171,6 +171,7 @@ describe('mission task activity retry safety', () => {
       true,
       expect.objectContaining({ maxBrainCalls: Number.MAX_SAFE_INTEGER }),
       [],
+      'Resume from the persisted safe checkpoint and action receipts. Do not repeat external actions whose outcome is already recorded or uncertain.',
     );
     const persistedEvents = (global.fetch as jest.Mock).mock.calls
       .filter(([, options]) => (options as RequestInit).method === 'POST')

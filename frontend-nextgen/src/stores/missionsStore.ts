@@ -8,12 +8,26 @@ export interface MissionRow {
   missionId: string;
   prompt?: string;
   assistantId?: string;
+  cronSchedule?: string;
   startedAt?: string;
   completedAt?: string;
   timestamp?: number;
   retriedFrom?: string;
   retryCount?: number;
   retryGuidance?: string;
+}
+
+export interface MissionScheduleRow {
+  scheduleId: string;
+  missionId: string;
+  prompt: string;
+  tenantId: string;
+  assistantId?: string;
+  recurrence: { frequency: 'daily' | 'weekly' | 'monthly'; time: string; dayOfWeek?: number; dayOfMonth?: number };
+  cronSchedule: string;
+  enabled: boolean;
+  nextRunAt: string;
+  lastRunAt?: string;
 }
 
 export interface MissionDetail {
@@ -68,6 +82,8 @@ interface MissionsState {
   missionsLoaded: boolean;
   missionsLoading: boolean;
   missionsError: string | null;
+  recurringSchedules: MissionScheduleRow[];
+  recurringSchedulesError: string | null;
 
   details: Record<string, MissionDetail>;
   detailLoading: Record<string, boolean>;
@@ -78,6 +94,7 @@ interface MissionsState {
   pendingApprovalsError: string | null;
 
   fetchMissions: () => Promise<void>;
+  fetchRecurringSchedules: () => Promise<void>;
   fetchMissionDetail: (workflowId: string) => Promise<void>;
   refreshDetail: (workflowId: string) => Promise<void>;
   fetchPendingApprovals: () => Promise<void>;
@@ -133,6 +150,7 @@ function startPolling() {
     if (!state.missionsLoaded) return;
     state.fetchMissions();
     state.fetchPendingApprovals();
+    state.fetchRecurringSchedules();
   }, POLL_INTERVAL);
 }
 
@@ -291,6 +309,8 @@ export const useMissionsStore = create<MissionsState>((set, get) => ({
   missionsLoaded: false,
   missionsLoading: false,
   missionsError: null,
+  recurringSchedules: [],
+  recurringSchedulesError: null,
 
   details: {},
   detailLoading: {},
@@ -322,6 +342,17 @@ export const useMissionsStore = create<MissionsState>((set, get) => ({
         missionsError:
           err instanceof Error ? err.message : 'Failed to load missions',
         missionsLoading: false,
+      });
+    }
+  },
+
+  fetchRecurringSchedules: async () => {
+    try {
+      const data = await fetchJSON<{ schedules: MissionScheduleRow[] }>('/api/temporal/missions/recurring');
+      set({ recurringSchedules: data.schedules || [], recurringSchedulesError: null });
+    } catch (err) {
+      set({
+        recurringSchedulesError: err instanceof Error ? err.message : 'Failed to load recurring schedules',
       });
     }
   },

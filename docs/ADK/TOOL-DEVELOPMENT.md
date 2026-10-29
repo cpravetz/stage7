@@ -6,8 +6,56 @@ Tools are **data**, not classes. A tool is a plain object with an id, schemas, a
 Code skills attach a `handler` function to that object; the factory serialises it into the
 executable source the sandbox runs.
 
+## Generated plugin acceptance tests
+
+ToolExecutor resolves a capability against the registered tool catalog and approved MCP
+integrations before generating a plugin. For generated plugins, it asks Brain for a deterministic
+acceptance contract in a separate request from the code-generation request. The contract contains
+up to five named input/expected-output cases. Generated source is run against those cases before
+deployment; every result must be a single JSON object matching the expected output exactly.
+Passing contract metadata and the contract are persisted with the plugin for inspection and reuse.
+
+These tests run without credentials, configuration, callbacks, persistence access, or network
+access. On Linux, the test runner requires `bubblewrap` (`bwrap`) and `prlimit`; it creates network
+and PID namespaces, exposes only the runtime and a temporary working directory, and applies time,
+memory (Python address-space and Node data/heap), file-size, and descriptor limits. If that isolation
+cannot be established, plugin testing fails closed and the plugin is not registered. Install both
+system tools in every ToolExecutor runtime image and configure the host/container runtime to permit
+bubblewrap's user, network, and PID namespaces. Do not work around unavailable isolation by
+granting the service broad `CAP_SYS_ADMIN` privileges.
+
+Contract tests establish only the behaviors covered by their deterministic cases. They do not prove
+that a live third-party API, credentials, or external service is available or correctly configured.
+HTTP integration cases can declare local fixtures by method, URL pattern, expected request body,
+and fixed response. The harness intercepts JavaScript `fetch` and Python `urllib.request.urlopen`,
+and fails tests for unmatched requests or fixtures the plugin did not use. Other HTTP clients are
+not yet supported by the fixture interceptor and will fail closed in the network-isolated test
+namespace. Live smoke tests require separate explicit authorization and must not run as part of
+automatic plugin creation.
+
 For the composition model (workflows, lanes, stages, assistant definitions) see
 [ADK_DEVELOPER_GUIDE.md](./ADK_DEVELOPER_GUIDE.md).
+
+## Mission-generated skills and batch execution
+
+Successful mission trajectories can be synthesized into reusable ADK code skills through
+`POST /api/v1/compile-skill`. The request identifies the trajectory, target skill name and
+category, and author Assistant; the response contains the registered skill. ToolExecutor also
+writes the generated TypeScript source under
+`services/tool-executor/src/assistants/<assistant-id>/skills/generated/`. The compiler validates
+the structured synthesis, declared schemas, and JavaScript syntax, but does not behaviorally test
+the generated implementation. Review generated source and its required credentials before
+granting or executing the skill.
+
+For one-off sequential execution, `POST /api/tool-executor/tools/execute-batch` accepts 1–20
+registered tool steps and a JSON Schema for the final output. Each step may set
+`includePreviousOutput` to pass the preceding result as `previousOutput`; only the last result is
+returned, and only if it matches the supplied schema. Requests require Assistant context. Batch
+steps execute through the existing CodeExecutor and nested-tool bridge, so they retain that
+runtime's capabilities and limits rather than running in a separate isolation boundary.
+
+See the [User Guide](../USER_GUIDE.md) for mission learning, recurring schedule, entity-memory,
+and Agent skill-grant behavior.
 
 ## What are tools?
 
@@ -389,8 +437,11 @@ describe('send-email generated source', () => {
 ### End-to-end test: run the skill through the executor
 
 For behaviour, drive the skill through `ToolExecutor` the way production does. `CodeExecutor`
-spawns a real `node` child, so control the network with a `NODE_OPTIONS=--require <preload>`
-interceptor rather than an in-process `global.fetch` mock.
+spawns a real `node` child, so an in-process `global.fetch` mock does not intercept its requests.
+For generated plugin acceptance tests, use the isolated contract runner and its HTTP fixtures
+described above. For manually-authored skills executed through the normal production path, use a
+test-only `NODE_OPTIONS=--require <preload>` interceptor or a controlled test service; do not use
+live external services in unit tests.
 
 ```ts
 import { ToolExecutor } from '../../services/ToolExecutor';

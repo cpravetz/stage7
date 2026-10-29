@@ -14,6 +14,7 @@ import {
 } from '@stage7-nextgen/shared';
 import { BrainError } from '../utils/errors';
 import { providerTimeoutMs } from '../utils/providerFetch';
+import { EntityMemoryStore } from './EntityMemoryStore';
 
 export interface CompletionOptions {
   schema?: z.ZodSchema;
@@ -24,6 +25,9 @@ export interface CompletionOptions {
   missionId?: string;
   optimizeFor?: 'cost' | 'speed' | 'accuracy' | 'creativity' | 'balanced';
   routingSessionId?: string;
+  entityId?: string;
+  assistantId?: string;
+  tenantId?: string;
   inputFormat?: string;
   outputFormat?: string;
 }
@@ -228,6 +232,16 @@ export class BrainService {
 
 async complete(prompt: string, options: CompletionOptions = {}): Promise<CompletionResult> {
      const startTime = Date.now();
+     let systemPrompt = options.systemPrompt;
+     if (options.entityId) {
+       const memories = await EntityMemoryStore.getInstance().getActive(
+         options.entityId,
+         options.assistantId,
+         options.tenantId,
+       );
+       const memoryNudge = this.context.formatMemoryNudges(memories);
+       if (memoryNudge) systemPrompt = [memoryNudge, systemPrompt].filter(Boolean).join('\n\n');
+     }
      const requestId = `brain_${startTime}_${crypto.randomBytes(6).toString('hex')}`;
      const attemptTimeout = providerAttemptTimeoutMs();
      // A candidate attempt cannot cost more than the lower of the two
@@ -244,8 +258,8 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
      const promptPreview = prompt.slice(0, 120);
 
      const promptHash = crypto.createHash('sha256').update(prompt).digest('hex').slice(0, 16);
-    const systemHash = options.systemPrompt
-      ? crypto.createHash('sha256').update(options.systemPrompt).digest('hex').slice(0, 8)
+    const systemHash = systemPrompt
+      ? crypto.createHash('sha256').update(systemPrompt).digest('hex').slice(0, 8)
       : 'none';
     const formatHash = `${(options as any).inputFormat || 'none'}:${(options as any).outputFormat || 'none'}`;
     const cacheKey = `brain:complete:auto:${promptHash}:${systemHash}:${formatHash}`;
@@ -345,7 +359,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
      const maxRetriesPerProvider = maxRetries;
 
     const messagesBase: CompletionRequest['messages'] = [];
-    if (options.systemPrompt) messagesBase.push({ role: 'system', content: options.systemPrompt });
+    if (systemPrompt) messagesBase.push({ role: 'system', content: systemPrompt });
     messagesBase.push({ role: 'user', content: prompt });
 
     for (const candidate of candidates) {

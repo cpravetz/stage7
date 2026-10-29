@@ -18,6 +18,7 @@ The system is composed of independent Node.js services that communicate via REST
 - **Shared Worker Pool**: Dynamic worker pool for executing assistant tasks with Redis-backed task queue and retry logic.
 - **Brain/LLM Layer**: Modern LLM orchestration with structured output sampling (Zod), semantic Redis caching, token-aware context windows, and cost-based model routing.
 - **Temporal.io Workflow Engine**: Durable workflow execution for missions with state persistence, saga patterns, and crash fault-tolerance.
+- **Recurring Missions and Entity Memory**: The Temporal service manages recurring schedules persisted through Artifacts, while Artifacts-backed entity memory rollups provide concise context nudges within the existing service boundaries.
 - **Vault Integration**: AES-256-GCM encrypted secret storage for credentials, API keys, and configuration
 - **Monitoring and Visualization**: The frontend also offers tools for observing system and agent behavior:
      - **Brain Metrics**: The Brain page surfaces live telemetry from the brain service. Users can view:
@@ -53,8 +54,11 @@ The platform requires the following infrastructure services:
 ### Enterprise-Ready Tool Ecosystem
 - **Extensible Tool Types**: Register tools in TypeScript, Python, any language via Docker containers, or as OpenAPI/MCP tool definitions
 - **Skills as Tools**: Assistant skills are authored declaratively and compiled into tools with JSON input and output schemas by the tool-executor, then discovered through the Tools page and the tool-executor APIs
+- **Mission Learning and Batch Execution**: Successful mission trajectories can be compiled into registered ADK skills, and up to 20 registered tools can be run sequentially under a final output schema.
 - **Definition-Based Tools**: Integrate external APIs and proprietary services using OpenAPI or MCP tool definitions
 - **Unified Discovery**: The gateway and tool-executor expose one registry of tools with schema introspection and health checks
+
+For generated-skill review guidance, batch API details, recurring mission requirements, and entity-memory behavior, see the [User Guide](./docs/USER_GUIDE.md) and [Tool & Skill Development Guide](./docs/ADK/TOOL-DEVELOPMENT.md).
 
 ### Advanced AI Capabilities
 - **Self-modifying**: The system can create new plugins for itself using AI

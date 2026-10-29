@@ -5,6 +5,14 @@ import { TemporalClient } from '../client/TemporalClient';
 import { WorkflowInput, MissionTaskCheckpoint } from '../types/workflow';
 import { asyncHandler, NextGenError, PlanSchema, logger } from '@stage7-nextgen/shared';
 import { getMissionResumeProgress } from '../recovery/missionProgress';
+import { missionRecurrenceSchema } from '../schedules/missionRecurrence';
+import {
+  createMissionSchedule,
+  disableMissionSchedule,
+  listMissionSchedules,
+  recordScheduleMission,
+  stopMissionSchedule,
+} from '../schedules/missionScheduler';
 
 function validateServiceUrl(url: string | undefined): URL | null {
   if (!url) return null;
@@ -38,26 +46,66 @@ router.post(
   '/missions',
   asyncHandler(async (req: Request, res: Response) => {
     logger.info('missions route handler called');
-    const { missionId, prompt, tenantId, assistantId, contextChunks, metadata } = req.body;
+    const {
+      missionId,
+      prompt,
+      tenantId,
+      assistantId,
+      contextChunks,
+      metadata,
+      cronSchedule: requestedCronSchedule,
+      recurrence,
+    } = req.body;
 
     if (!missionId || !prompt) {
       throw NextGenError.badRequest('missionId and prompt are required');
     }
+    if (requestedCronSchedule !== undefined) {
+      throw NextGenError.badRequest('Use recurrence settings instead of a cronSchedule string.');
+    }
+    let parsedRecurrence;
+    if (recurrence !== undefined) {
+      const result = missionRecurrenceSchema.safeParse(recurrence);
+      if (!result.success) {
+        throw NextGenError.badRequest('recurrence must specify a valid daily, weekly, or monthly schedule.');
+      }
+      parsedRecurrence = result.data;
+    }
 
-    logger.info('missions route handler called');
     const input: WorkflowInput = {
       missionId,
-      tenantId,
-      assistantId,
+      tenantId: tenantId || 'tenant-1',
+      assistantId: assistantId || '',
       prompt,
       contextChunks,
       metadata,
     };
 
-    console.log('missions route: About to call startMission with missionId ', input.missionId);
-    const workflowId = await client.startMission(input);
+    let schedule;
+    if (parsedRecurrence) schedule = await createMissionSchedule(input, parsedRecurrence);
+    let workflowId: string;
+    try {
+      workflowId = await client.startMission(input);
+      if (schedule) await recordScheduleMission(schedule.scheduleId, input.missionId);
+    } catch (error) {
+      if (schedule) {
+        try {
+          await disableMissionSchedule(schedule.scheduleId);
+        } catch (cleanupError) {
+          logger.error(
+            { scheduleId: schedule.scheduleId, error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError) },
+            'Failed to disable recurring schedule after mission start failure',
+          );
+        }
+      }
+      throw error;
+    }
 
-    res.status(202).json({ workflowId, status: 'started' });
+    res.status(202).json({
+      workflowId,
+      status: 'started',
+      ...(schedule ? { scheduleId: schedule.scheduleId, nextRunAt: schedule.nextRunAt } : {}),
+    });
   }),
 );
 
@@ -168,6 +216,23 @@ router.get(
   asyncHandler(async (req: Request, res: Response) => {
     const result = await client.listMissions();
     res.json({ missions: result });
+  }),
+);
+
+router.get(
+  '/missions/recurring',
+  asyncHandler(async (_req: Request, res: Response) => {
+    const schedules = await listMissionSchedules();
+    res.json({ schedules });
+  }),
+);
+
+router.post(
+  '/missions/recurring/:scheduleId/stop',
+  asyncHandler(async (req: Request, res: Response) => {
+    const stopped = await stopMissionSchedule(req.params.scheduleId as string);
+    if (!stopped) throw NextGenError.notFound('Recurring mission schedule not found');
+    res.json({ status: 'stopped' });
   }),
 );
 

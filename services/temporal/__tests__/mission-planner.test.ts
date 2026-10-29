@@ -149,6 +149,21 @@ describe('generateValidPlan', () => {
     expect(requests[1]?.prompt).toContain('names the exact tool ID')
   })
 
+  it('keeps task planning outcome-focused for work that may need a tool', async () => {
+    const planResponse = validPlan(1)
+    const task = planResponse.phases[0]!.tasks[0]!
+    task.title = 'Deliver SMS notifications'
+    task.description = 'Send the requested notification through the approved channel.'
+    task.systemPrompt = 'Ensure the recipient receives the exact approved message and report the delivery result.'
+    const complete = jest.fn(async () => JSON.stringify(planResponse))
+
+    const plan = await generateValidPlan('Send an SMS notification', {}, 'mission-outcome-focused', complete)
+
+    expect(complete).toHaveBeenCalledTimes(1)
+    expect(plan.phases[0]?.tasks[0]?.systemPrompt).toBe(task.systemPrompt)
+    expect(plan.phases[0]?.tasks[0]?.requiredActions).toEqual([])
+  })
+
   it('distinguishes direct tool calls from child instructions, receipt labels, policy prose, and prohibited retries', () => {
     const actionCases: Array<Pick<Task, 'systemPrompt' | 'requiredActions'>> = [
       {
@@ -209,7 +224,7 @@ describe('generateValidPlan', () => {
       id: 'phase-1-task-2',
       title: 'Calculate final difference',
       description: 'Compute the difference between the initial and final calculated values.',
-      systemPrompt: 'Calculate the difference between initial and final calculated values.',
+      systemPrompt: 'Use the calculate tool to calculate the difference between initial and final calculated values.',
       dependsOnTaskIds: ['phase-1-task-1'],
       requiredActions: [{ toolId: 'calculate', outcome: 'success' as const }],
     }

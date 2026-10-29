@@ -9,6 +9,8 @@ import logger from '../utils/logger'
 import { toolRegistry as registry, executor, pluginGenerator as generator } from '../utils/sharedInstance'
 import { readFile } from 'fs/promises'
 import { join, basename } from 'path'
+import { mcpToolExecutive } from '../services/MCPToolExecutive'
+import { renderPermissionPrompt } from '../services/ToolPermissionService'
 
 const router: Router = Router()
 
@@ -202,6 +204,79 @@ router.post(
       }
       throw err;
     }
+  })
+)
+
+router.post(
+  '/tools/resolve',
+  asyncHandler(async (req: Request, res: Response) => {
+    const data = pluginGenerationSchema.parse(req.body)
+    const capability = [data.description, ...(data.requirements || [])].join(' ')
+    const actor = typeof data.context?.agentId === 'string' ? data.context.agentId : undefined
+    const existing = mcpToolExecutive.resolveCapability({
+      capability,
+      task: data.description,
+      actor,
+    })
+
+    if (existing.satisfied && existing.tool) {
+      res.json({ success: true, tool: existing.tool, source: 'registered' })
+      return
+    }
+
+    const discovered = await mcpToolExecutive.discoverAndRequestPermission({
+      capability,
+      task: data.description,
+      actor,
+    })
+    if (discovered.satisfied && discovered.tool) {
+      res.json({ success: true, tool: discovered.tool, source: 'mcp' })
+      return
+    }
+    if (discovered.permissionRequest) {
+      res.status(202).json({
+        success: false,
+        permissionRequired: true,
+        request: discovered.permissionRequest,
+        prompt: renderPermissionPrompt(discovered.permissionRequest),
+        candidate: discovered.candidate,
+      })
+      return
+    }
+    if (discovered.error) {
+      logger.warn(
+        { capability, actor, error: discovered.error },
+        'MCP discovery did not resolve tool capability; falling back to reusable plugin generation',
+      )
+    }
+
+    const generated = await generator.generate({
+      description: data.description,
+      requirements: data.requirements,
+      context: data.context,
+    })
+    if (!generated.success || !generated.tool) {
+      res.status(400).json({ success: false, error: generated.error || 'Tool capability could not be resolved or created.' })
+      return
+    }
+    if (generated.tool.manifest?.requiresInstallation === true) {
+      res.status(400).json({
+        success: false,
+        error: `Discovered '${generated.tool.name}', but it requires installation before use; no executable tool was created.`,
+      })
+      return
+    }
+
+    const deployed = await generator.deploy(generated.tool)
+    if (!deployed.success) {
+      logger.error({ toolId: generated.tool.id, error: deployed.error }, 'Resolved plugin deployment failed')
+      res.status(500).json({
+        success: false,
+        error: `Plugin deployment failed: ${deployed.error || 'unknown deployment error'}`,
+      })
+      return
+    }
+    res.status(201).json({ success: true, tool: generated.tool, source: 'generated' })
   })
 )
 

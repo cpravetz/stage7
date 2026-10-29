@@ -329,13 +329,19 @@ const MissionRoom = () => {
 
   const plan = useMemo(() => {
     const persistedPlan = (detail?.output?.plan as Plan | undefined) ?? null;
+    const liveAmendment = events
+      .filter((event) => event.missionId === missionId && event.type === 'phase_plan_amended')
+      .sort((left, right) => right.timestamp - left.timestamp)[0];
+    const amendedPlan = liveAmendment?.metadata?.plan;
+    if (amendedPlan && typeof amendedPlan === 'object' && Array.isArray((amendedPlan as Plan).phases)) {
+      return amendedPlan as Plan;
+    }
     if (persistedPlan) return persistedPlan;
-    const livePlanEvent = events.find(
-      (event) => event.missionId === missionId && event.type === 'plan_generated'
-    );
-    const livePlan = livePlanEvent?.metadata?.plan;
-    return livePlan && typeof livePlan === 'object' && Array.isArray((livePlan as Plan).phases)
-      ? livePlan as Plan
+    const generatedPlan = events.find(
+      (event) => event.missionId === missionId && event.type === 'plan_generated',
+    )?.metadata?.plan;
+    return generatedPlan && typeof generatedPlan === 'object' && Array.isArray((generatedPlan as Plan).phases)
+      ? generatedPlan as Plan
       : null;
   }, [detail?.output?.plan, events, missionId]);
 

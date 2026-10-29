@@ -18,6 +18,10 @@ import {
   MissionTaskCheckpoint,
 } from '../types/workflow';
 import { PlannerProgress } from './MissionPlanner';
+import type { MissionPhaseOutput } from '../activities/missionWorkflowActivities';
+import type { WorkflowInput } from '../types/workflow';
+import { MissionCompletedListener } from '../listeners/MissionCompletedListener';
+import { MissionStageCompletedListener } from '../listeners/MissionStageCompletedListener';
 
 function isFatalServiceError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
@@ -43,6 +47,7 @@ export interface MissionContext {
   missionId: string;
   prompt: string;
   tenantId?: string;
+  assistantId?: string;
   metadata?: Record<string, unknown>;
   retryGuidance?: string;
   agentRuntimeUrl?: string;
@@ -70,6 +75,19 @@ export class MissionOrchestrator {
 
   async run(ctx: MissionContext): Promise<{ plan: Plan; outputs: any; compensations: Array<{ phaseId: string; action: string }> }> {
     const compensations: Array<{ phaseId: string; action: string }> = [];
+    const workflowInput: WorkflowInput = {
+      missionId: ctx.missionId,
+      tenantId: ctx.tenantId || 'tenant-1',
+      assistantId: ctx.assistantId || 'general',
+      prompt: ctx.prompt,
+      metadata: {
+        ...ctx.metadata,
+        assistantId: ctx.assistantId || 'general',
+        entityId: typeof ctx.metadata?.entityId === 'string' && ctx.metadata.entityId.trim()
+          ? ctx.metadata.entityId.trim()
+          : ctx.missionId,
+      },
+    };
     MissionOrchestrator.register(ctx.missionId, this, ctx);
     try {
     const plannerAgentId = `agent-${ctx.missionId}-planner`;
@@ -204,8 +222,8 @@ export class MissionOrchestrator {
               phaseId: phase.id,
               taskId: task.id,
               taskTitle: task.title,
-              agentId: `agent-${ctx.missionId}-${task.agentRole.toLowerCase()}`,
-              agentName: `${task.agentRole} Agent`,
+              agentId: agentRuntime.getAgentIdForRole(task.agentRole),
+              agentName: `${task.agentRole.replace(/\s+Agent$/i, '')} Agent`,
               agentRole: task.agentRole,
             },
           });
@@ -274,8 +292,8 @@ export class MissionOrchestrator {
                 phaseId: phase.id,
                 taskId: task.id,
                 taskTitle: task.title,
-                agentId: `agent-${ctx.missionId}-${task.agentRole.toLowerCase()}`,
-                agentName: `${task.agentRole} Agent`,
+                agentId: agentRuntime.getAgentIdForRole(task.agentRole),
+                agentName: `${task.agentRole.replace(/\s+Agent$/i, '')} Agent`,
                 agentRole: task.agentRole,
                 error,
               },
@@ -326,10 +344,11 @@ export class MissionOrchestrator {
               phaseId: phase.id,
               taskId: task.id,
               taskTitle: task.title,
-              agentId: `agent-${ctx.missionId}-${task.agentRole.toLowerCase()}`,
-              agentName: `${task.agentRole} Agent`,
+              agentId: agentRuntime.getAgentIdForRole(task.agentRole),
+              agentName: `${task.agentRole.replace(/\s+Agent$/i, '')} Agent`,
               agentRole: task.agentRole,
               artifacts: result.artifacts,
+              output: result.output.slice(0, 4_000),
               tokensUsed: result.tokensUsed,
             },
           });
@@ -375,8 +394,8 @@ export class MissionOrchestrator {
                   phaseId: phase.id,
                   taskId: pendingTask.id,
                   taskTitle: pendingTask.title,
-                  agentId: `agent-${ctx.missionId}-${pendingTask.agentRole.toLowerCase()}`,
-                  agentName: `${pendingTask.agentRole} Agent`,
+                  agentId: agentRuntime.getAgentIdForRole(pendingTask.agentRole),
+                  agentName: `${pendingTask.agentRole.replace(/\s+Agent$/i, '')} Agent`,
                   agentRole: pendingTask.agentRole,
                   error: 'No dependency-ready task available',
                 },
@@ -430,8 +449,8 @@ export class MissionOrchestrator {
                     phaseId: phase.id,
                     taskId: pendingTask.id,
                     taskTitle: pendingTask.title,
-                    agentId: `agent-${ctx.missionId}-${pendingTask.agentRole.toLowerCase()}`,
-                    agentName: `${pendingTask.agentRole} Agent`,
+                    agentId: agentRuntime.getAgentIdForRole(pendingTask.agentRole),
+                    agentName: `${pendingTask.agentRole.replace(/\s+Agent$/i, '')} Agent`,
                     agentRole: pendingTask.agentRole,
                     error: 'Task selector invalid',
                   },
@@ -469,8 +488,8 @@ export class MissionOrchestrator {
               phaseId: phase.id,
               taskId: task.id,
               taskTitle: task.title,
-              agentId: `agent-${ctx.missionId}-${task.agentRole.toLowerCase()}`,
-              agentName: `${task.agentRole} Agent`,
+              agentId: agentRuntime.getAgentIdForRole(task.agentRole),
+              agentName: `${task.agentRole.replace(/\s+Agent$/i, '')} Agent`,
               agentRole: task.agentRole,
               error,
             },
@@ -597,6 +616,11 @@ export class MissionOrchestrator {
 
       if (phaseIsComplete) {
         outputs.phases.push(phaseOutput);
+        await new MissionStageCompletedListener().onStageCompleted(
+          workflowInput,
+          plan,
+          phaseOutput as MissionPhaseOutput,
+        );
         continue;
       }
 
@@ -631,12 +655,24 @@ export class MissionOrchestrator {
       completedPhases.add(phase.id);
       saveCheckpoint();
       outputs.phases.push(phaseOutput);
+      if (phaseOutput.status === 'completed') {
+        await new MissionStageCompletedListener().onStageCompleted(
+          workflowInput,
+          plan,
+          phaseOutput as MissionPhaseOutput,
+        );
+      }
     }
 
     await ctx.controlCheckpoint?.();
     const completionReview = await this.evaluateMissionCompletion(ctx, plan, outputs);
     if (completionReview.satisfied) {
       outputs.status = 'completed';
+      await new MissionCompletedListener().onMissionCompleted(
+        workflowInput,
+        plan,
+        outputs.phases as MissionPhaseOutput[],
+      );
     } else {
       outputs.status = 'incomplete';
       outputs.gaps = completionReview.gaps;

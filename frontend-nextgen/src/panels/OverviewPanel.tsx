@@ -6,6 +6,10 @@ import { useAssistantViewStore } from '../stores/assistantViewStore';
 import { SchemaFields, sfGetSchemaProperties as getSchemaProperties } from '../components/SchemaFields';
 import WatchControls from '../components/WatchControls';
 import { getToolInputSchema, getToolConfigSchema, getToolDisplayName } from '../utils/workspaceHelpers';
+import { MissionRecurrenceOptions, type MissionRecurrence } from '../components/MissionRecurrenceOptions';
+import type { MissionScheduleRow } from '../stores/missionsStore';
+import { describeMissionSchedule } from '../utils/missionSchedule';
+import { Link } from 'react-router-dom';
 
 interface OverviewPanelProps {
   entity: Entity;
@@ -16,6 +20,10 @@ interface OverviewPanelProps {
   memoryContext: Record<string, unknown>;
   missionInput: string;
   setMissionInput: (value: string) => void;
+  recurrence: MissionRecurrence | null;
+  setRecurrence: (value: MissionRecurrence | null) => void;
+  recurringMissions: MissionScheduleRow[];
+  stopRecurringMission: (scheduleId: string) => void | Promise<void>;
   running: boolean;
   runMission: () => void;
 }
@@ -29,6 +37,10 @@ export const OverviewPanel = ({
   memoryContext,
   missionInput,
   setMissionInput,
+  recurrence,
+  setRecurrence,
+  recurringMissions,
+  stopRecurringMission,
   running,
   runMission,
 }: OverviewPanelProps) => {
@@ -103,19 +115,47 @@ export const OverviewPanel = ({
         <h3>Quick Actions</h3>
         <div className="form">
           <textarea
+            className="mission-instructions"
             placeholder="Run a mission with this entity..."
             value={missionInput}
             onChange={(e) => setMissionInput(e.target.value)}
-            rows={4}
+            rows={7}
           />
+          <MissionRecurrenceOptions value={recurrence} onChange={setRecurrence} />
           <button onClick={runMission} disabled={running || !missionInput.trim()}>
-            {running ? 'Running...' : 'Run Mission'}
+            {running ? 'Running...' : recurrence ? 'Schedule Mission' : 'Run Mission'}
           </button>
           <p className="hint">
           Mission will use {enabledTools.length} bound skills
              · {knowledgeEntries.length} knowledge entries · {transactionGuidanceEntries.length} behavior rules
           </p>
         </div>
+      </div>
+
+      <div className="card" style={{ gridColumn: '1 / -1' }}>
+        <h3>Recurring Missions</h3>
+        {recurringMissions.length === 0 ? (
+          <p>No recurring missions are scheduled for this Assistant.</p>
+        ) : (
+          <div className="mission-schedule-list">
+            {recurringMissions.map((mission) => (
+              <div className="mission-schedule-row" key={mission.scheduleId}>
+                <div>
+                  <Link to="/missions">{mission.missionId}</Link>
+                  <div className="hint">
+                    {mission.cronSchedule ? describeMissionSchedule(mission.cronSchedule) : 'Schedule unavailable'}
+                  </div>
+                </div>
+                <button
+                  className="danger small"
+                  onClick={() => void stopRecurringMission(mission.scheduleId)}
+                >
+                  Stop schedule
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="card" style={{ gridColumn: '1 / -1' }}>

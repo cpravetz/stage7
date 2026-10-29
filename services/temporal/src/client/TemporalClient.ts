@@ -274,6 +274,9 @@ export class TemporalClient {
   ): Promise<string> {
     const workflowId = `mission-${input.missionId}`;
     logger.info({ missionId: input.missionId, assistantId: input.assistantId }, 'Starting mission');
+    if (input.cronSchedule && !this.client) {
+      throw new Error('Recurring missions require a connected Temporal Server; direct mode cannot persist cron schedules.');
+    }
 
     if (!this.client && input.metadata?.scheduled === true && !resumePausedOccurrence) {
       if (await this.isPersistedScheduledOccurrence(input)) {
@@ -340,12 +343,25 @@ export class TemporalClient {
               taskQueue: 'stage7-workers',
               workflowId,
               args: [input],
+              ...(input.cronSchedule ? {
+                cronSchedule: input.cronSchedule,
+                memo: {
+                  missionId: input.missionId,
+                  assistantId: input.assistantId,
+                  cronSchedule: input.cronSchedule,
+                },
+              } : {}),
             }),
             TEMPORAL_TIMEOUT_MS,
           );
           return workflowId;
         } catch (err) {
           if (isAlreadyStarted(err)) {
+            if (input.cronSchedule) {
+              throw new Error(
+                `Recurring mission workflow '${workflowId}' already exists; choose a unique missionId.`,
+              );
+            }
             return workflowId;
           }
           logger.error(
@@ -1068,8 +1084,8 @@ export class TemporalClient {
     return null;
   }
 
-  async listMissions(): Promise<Array<{ workflowId: string; status: string; missionId: string; prompt?: string; assistantId?: string; startedAt?: string; completedAt?: string }>> {
-    const results: Array<{ workflowId: string; status: string; missionId: string; prompt?: string; assistantId?: string; startedAt?: string; completedAt?: string }> = [];
+  async listMissions(): Promise<Array<{ workflowId: string; status: string; missionId: string; prompt?: string; assistantId?: string; cronSchedule?: string; startedAt?: string; completedAt?: string }>> {
+    const results: Array<{ workflowId: string; status: string; missionId: string; prompt?: string; assistantId?: string; cronSchedule?: string; startedAt?: string; completedAt?: string }> = [];
 
     if (this.client) {
       try {
@@ -1081,8 +1097,12 @@ export class TemporalClient {
           for await (const w of workflows) {
             results.push({
               workflowId: w.workflowId,
-              status: String(w.status || 'unknown'),
-              missionId: w.workflowId.replace('mission-', ''),
+              status: typeof w.status === 'string' ? w.status : w.status?.name || 'unknown',
+              missionId: typeof w.memo?.missionId === 'string'
+                ? w.memo.missionId
+                : w.workflowId.replace('mission-', ''),
+              ...(typeof w.memo?.assistantId === 'string' ? { assistantId: w.memo.assistantId } : {}),
+              ...(typeof w.memo?.cronSchedule === 'string' ? { cronSchedule: w.memo.cronSchedule } : {}),
             });
           }
         })();

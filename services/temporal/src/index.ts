@@ -1,6 +1,7 @@
 import express from 'express';
 import missionRoutes, { temporalClient } from './routes/missions';
 import { startWatchScheduler } from './scheduler';
+import { startMissionScheduler } from './schedules/missionScheduler';
 import { runTemporalWorker } from './temporalWorker';
 import { logger } from '@stage7-nextgen/shared';
 
@@ -30,6 +31,11 @@ if (require.main === module) {
   // Start watch scheduler
   const client = temporalClient;
   const stopWatchScheduler = startWatchScheduler(client);
+  const stopMissionScheduler = startMissionScheduler(client);
+  server.on('close', () => {
+    stopWatchScheduler();
+    stopMissionScheduler();
+  });
 
   if (client.isConnected()) {
     runTemporalWorker().catch((error) => {
@@ -38,6 +44,7 @@ if (require.main === module) {
         'Temporal worker stopped unexpectedly',
       );
       stopWatchScheduler();
+      stopMissionScheduler();
       server.close();
       server.closeAllConnections();
       process.exitCode = 1;

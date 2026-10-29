@@ -78,6 +78,11 @@ const completionActivities = proxyActivities<MissionActivities>({
   },
 });
 
+const memoryActivities = proxyActivities<MissionActivities>({
+  startToCloseTimeout: '35m',
+  retry: { maximumAttempts: 1 },
+});
+
 const approvalActivities = proxyActivities<MissionActivities>({
   startToCloseTimeout: '25h',
   heartbeatTimeout: '1m',
@@ -433,6 +438,9 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
         phase.status = 'completed';
       }
       phases.push(phaseOutput);
+      if (phaseOutput.status === 'completed') {
+        await memoryActivities.rollupEntityMemoryActivity(input, plan, phaseOutput);
+      }
     }
 
     const result = await completionActivities.completeMissionActivity({
@@ -456,6 +464,9 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
         },
       }
       : result;
+    if (status === 'completed') {
+      await completionActivities.notifyMissionCompletedActivity(input, plan, phases);
+    }
     logger.info('Mission workflow completed', { missionId: input.missionId, status });
     return {
       missionId: input.missionId,

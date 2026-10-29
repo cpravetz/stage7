@@ -8,7 +8,6 @@ import {
   VectorSearchQuery,
   VectorSearchResult,
   MissionState,
-  MissionRecoveryLease,
   AgentState,
 } from '../types';
 import { AssistantDefinition, AssistantTemplate, AssistantRuntimeConfig } from '@stage7-nextgen/shared';

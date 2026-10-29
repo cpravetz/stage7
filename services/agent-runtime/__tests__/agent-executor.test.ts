@@ -892,7 +892,7 @@ describe('AgentExecutor', () => {
     expect(toolExecutions).toBe(0)
   })
 
-  it('resets a stale checkpoint that exhausted its brain budget and resume allowance', async () => {
+  it('preserves the exhausted Brain budget when safely resuming a stale checkpoint', async () => {
     const receipts = [
       {
         toolId: '__list_tools',
@@ -956,7 +956,7 @@ describe('AgentExecutor', () => {
     })
 
     expect(result.output).toContain('## plugin_uniqueness_report')
-    expect(result.brainCalls).toBe(1)
+    expect(result.brainCalls).toBe(9)
     expect(result.toolCalls).toBe(1)
     expect(brainCalls).toBe(1)
   })
@@ -1042,7 +1042,7 @@ describe('AgentExecutor', () => {
         })
       }
 
-      if (url.endsWith('/api/tool-executor/plugins/generate')) {
+      if (url.endsWith('/api/tool-executor/tools/resolve')) {
         toolRegistered = true
         return jsonResponse({
           success: true,
@@ -1068,10 +1068,10 @@ describe('AgentExecutor', () => {
     expect(result.output).toBe('The generated tool returned the fare.')
     expect(result.tokensUsed).toBe(21)
     expect(result.toolCalls).toBe(2)
-    expect(calls.some((call) => call.url.endsWith('/api/tool-executor/plugins/generate'))).toBe(true)
+    expect(calls.some((call) => call.url.endsWith('/api/tool-executor/tools/resolve'))).toBe(true)
     expect(calls.some((call) => call.url.endsWith('/api/tool-executor/tools/execute'))).toBe(true)
     expect(calls.find((call) => call.url.endsWith('/api/brain/complete'))?.body?.systemPrompt)
-      .toContain('Send only description and requirements')
+      .toContain('ToolExecutor checks registered native tools')
     expect(calls.filter((call) => call.url.endsWith('/api/brain/complete'))
       .every((call) => !Object.prototype.hasOwnProperty.call(call.body, 'model'))).toBe(true)
   })
@@ -1122,7 +1122,7 @@ describe('AgentExecutor', () => {
     expect(prompts[0]).not.toContain('blocked-tool')
     expect(prompts[0]).toContain('Tool creation is disabled')
     expect(calls.some((call) => call.url.endsWith('/api/tool-executor/tools/execute'))).toBe(false)
-    expect(calls.some((call) => call.url.endsWith('/api/tool-executor/plugins/generate'))).toBe(false)
+    expect(calls.some((call) => call.url.endsWith('/api/tool-executor/tools/resolve'))).toBe(false)
   })
 
   it('lets an allowlisted Agent use a registered generated tool without granting other tools', async () => {

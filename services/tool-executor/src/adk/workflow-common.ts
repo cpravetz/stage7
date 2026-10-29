@@ -1,4 +1,5 @@
 import { Tool } from '../types';
+import { parseCron } from './cron';
 
 /**
  * An assistant's declared scope.
@@ -14,6 +15,7 @@ export interface AssistantWorkflow {
   productObject: string;
   flow: string;
   skills: Tool[];
+  cronSchedules?: string[];
 }
 
 export interface AssistantWorkflowConfig {
@@ -21,6 +23,7 @@ export interface AssistantWorkflowConfig {
   productObject: string;
   flow: string;
   skills: Tool[];
+  cronSchedules?: string[];
 }
 
 export function createWorkflow(config: AssistantWorkflowConfig): AssistantWorkflow {
@@ -38,10 +41,17 @@ export function createWorkflow(config: AssistantWorkflowConfig): AssistantWorkfl
     }
     seen.add(skill.id);
   }
+  const cronSchedules = [...(config.cronSchedules ?? [])];
+  for (const schedule of cronSchedules) {
+    if (!parseCron(schedule).valid) {
+      throw new Error(`workflow ${config.assistant} has an invalid cron schedule: ${schedule}`);
+    }
+  }
   return {
     assistant: config.assistant,
     productObject: config.productObject,
     flow: config.flow ?? '',
     skills,
+    ...(cronSchedules.length > 0 ? { cronSchedules } : {}),
   };
 }

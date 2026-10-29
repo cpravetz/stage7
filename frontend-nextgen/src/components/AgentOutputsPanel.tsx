@@ -6,6 +6,9 @@ interface AgentInfo {
   name?: string;
   role?: string;
   status?: string;
+  lastError?: string;
+  activeTaskId?: string;
+  progress?: { brainCalls?: number; toolCalls?: number; lastAction?: string };
 }
 
 interface PlanTask {
@@ -36,11 +39,37 @@ type AgentLike = {
   agentRole?: string;
   type?: string;
   status?: string;
+  lastError?: string;
+  activeTaskId?: string;
+  progress?: { brainCalls?: number; toolCalls?: number; lastAction?: string };
   metadata?: Record<string, unknown>;
 };
 
 function displayAgentName(name: string | undefined, fallback = ''): string {
-  return (name || fallback).replace(/\s+Agent$/i, '').trim();
+  return (name || fallback).replace(/(?:\s+Agent)+$/i, '').trim();
+}
+
+function canonicalRole(role: string): string {
+  return role
+    .replace(/[_-]+/g, ' ')
+    .replace(/(?:\s+Agent)+$/i, '')
+    .toLocaleLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'agent';
+}
+
+function chooseStatus(left?: string, right?: string): string | undefined {
+  const priority: Record<string, number> = {
+    running: 5,
+    waiting: 4,
+    failed: 3,
+    idle: 2,
+    completed: 1,
+    planned: 0,
+  };
+  if (!left) return right;
+  if (!right) return left;
+  return (priority[right] ?? 0) > (priority[left] ?? 0) ? right : left;
 }
 
 function getThought(event: { type: string; message: string; metadata?: Record<string, unknown> }): string | undefined {
@@ -76,12 +105,12 @@ function extractAgentsFromPlan(plan: Plan | null | undefined, missionId: string)
   for (const phase of plan.phases) {
     for (const task of phase.tasks) {
       if (task.agentRole) {
-        const agentId = `agent-${missionId}-${task.agentRole.toLowerCase()}`;
+        const agentId = `agent-${missionId}-${canonicalRole(task.agentRole)}`;
         if (!agentMap.has(agentId)) {
           agentMap.set(agentId, {
             id: agentId,
             name: displayAgentName(task.agentRole),
-            role: task.agentRole,
+            role: displayAgentName(task.agentRole),
             status: 'planned',
           });
         }
@@ -91,15 +120,17 @@ function extractAgentsFromPlan(plan: Plan | null | undefined, missionId: string)
   return Array.from(agentMap.values());
 }
 
-function extractAgentsFromEvents(events: Array<{ type: string; missionId?: string; source?: string; metadata?: Record<string, unknown> }>, missionId: string): AgentInfo[] {
+function extractAgentsFromEvents(events: Array<{ type: string; missionId?: string; source?: string; timestamp?: number; metadata?: Record<string, unknown> }>, missionId: string): AgentInfo[] {
   const agentMap = new Map<string, AgentInfo>();
-  for (const e of events.filter(ev => ev.missionId === missionId).reverse()) {
+  const missionEvents = events
+    .filter((event) => event.missionId === missionId)
+    .sort((left, right) => (left.timestamp || 0) - (right.timestamp || 0));
+  for (const e of missionEvents) {
     const role = e.metadata?.agentRole as string | undefined;
     const isPlannerEvent = e.type === 'planner_started' || e.type === 'plan_generated';
     if (!role && !isPlannerEvent) continue;
     const normalizedRole = role || 'planner';
-    const agentId = (e.metadata?.agentId as string | undefined)
-      || `agent-${missionId}-${normalizedRole.toLowerCase()}`;
+    const agentId = `agent-${missionId}-${canonicalRole(normalizedRole)}`;
     const status = (e.metadata?.status as string | undefined) || (
       e.type === 'planner_started' || e.type === 'task_started' ? 'running' :
       e.type === 'task_failed' ? 'failed' :
@@ -112,7 +143,7 @@ function extractAgentsFromEvents(events: Array<{ type: string; missionId?: strin
         e.metadata?.agentName as string | undefined,
         normalizedRole === 'planner' ? 'Mission Planner' : normalizedRole,
       ),
-      role: normalizedRole,
+      role: displayAgentName(normalizedRole),
       status,
     });
   }
@@ -165,13 +196,18 @@ const AgentOutputsPanel = ({ missionId, missionStatus, plan }: AgentOutputsPanel
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const eventsRef = useRef(events);
+
+  useEffect(() => {
+    eventsRef.current = events;
+  }, [events]);
 
   useEffect(() => {
     let mounted = true;
     const load = async () => {
       setLoading(true);
       setError(null);
-      const eventAgents = extractAgentsFromEvents(events, missionId)
+      const eventAgents = extractAgentsFromEvents(eventsRef.current, missionId)
         .filter((agent) => !SYSTEM_ROLES.has(String(agent.role || '').toLowerCase()));
       try {
         const res = await fetch(`/api/agent-runtime/missions/${encodeURIComponent(missionId)}/agents`);
@@ -179,10 +215,13 @@ const AgentOutputsPanel = ({ missionId, missionStatus, plan }: AgentOutputsPanel
         const data = await res.json();
         if (!mounted) return;
         const apiAgents = extractAgents(data).map((a) => ({
-          id: a.id,
+          id: `agent-${missionId}-${canonicalRole(a.role || a.agentRole || (a.metadata?.agentRole as string | undefined) || a.type || a.name || a.id)}`,
           name: displayAgentName(a.name, a.id),
           role: a.role || a.agentRole || (a.metadata?.agentRole as string | undefined) || a.type,
           status: a.status,
+          lastError: a.lastError,
+          activeTaskId: a.activeTaskId,
+          progress: a.progress,
         }));
         // Extract agents from plan
         const planAgents = extractAgentsFromPlan(plan, missionId);
@@ -191,8 +230,24 @@ const AgentOutputsPanel = ({ missionId, missionStatus, plan }: AgentOutputsPanel
         const filteredPlanAgents = planAgents.filter((a) => !SYSTEM_ROLES.has(String(a.role || '').toLowerCase()));
         // Merge agents, preferring API agents, then event agents, then plan agents
         const merged = new Map<string, AgentInfo>();
-        for (const a of filteredApiAgents) merged.set(a.id, a);
-        for (const a of eventAgents) merged.set(a.id, { ...merged.get(a.id), ...a });
+        for (const a of filteredApiAgents) {
+          const current = merged.get(a.id);
+          merged.set(a.id, {
+            ...current,
+            ...a,
+            status: chooseStatus(current?.status, a.status),
+            activeTaskId: a.activeTaskId || current?.activeTaskId,
+            progress: a.progress || current?.progress,
+          });
+        }
+        for (const a of eventAgents) {
+          const current = merged.get(a.id);
+          merged.set(a.id, {
+            ...a,
+            ...current,
+            status: current?.status || a.status,
+          });
+        }
         for (const a of filteredPlanAgents) {
           const current = merged.get(a.id);
           merged.set(a.id, { ...a, ...current, status: current?.status || a.status });
@@ -246,14 +301,23 @@ const AgentOutputsPanel = ({ missionId, missionStatus, plan }: AgentOutputsPanel
         if (mounted) setLoading(false);
       }
     };
-    load();
-    return () => { mounted = false; };
-  }, [missionId, events, missionStatus, plan]);
+    void load();
+    const interval = missionStatus === 'running'
+      ? setInterval(() => { void load(); }, 5_000)
+      : undefined;
+    return () => {
+      mounted = false;
+      if (interval) clearInterval(interval);
+    };
+  }, [missionId, missionStatus, plan]);
 
   const eventsByAgent = useMemo(() => {
     const map = new Map<string, Array<{ type: string; source?: string; message: string; timestamp?: number; metadata?: Record<string, unknown> }>>();
     for (const e of events.filter((ev) => ev.missionId === missionId)) {
-      const key = (e.metadata?.agentId as string | undefined) || (e.metadata?.agentRole as string | undefined) || e.source || 'unknown';
+      const role = e.metadata?.agentRole as string | undefined;
+      const key = role
+        ? `agent-${missionId}-${canonicalRole(role)}`
+        : (e.metadata?.agentId as string | undefined) || e.source || 'unknown';
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(e);
     }
@@ -268,31 +332,46 @@ const AgentOutputsPanel = ({ missionId, missionStatus, plan }: AgentOutputsPanel
       const res = await fetch(`/api/agent-runtime/missions/${encodeURIComponent(missionId)}/agents`);
       if (!res.ok) return;
       const data = await res.json();
-       const apiAgents = extractAgents(data).map((a) => ({
-          id: a.id,
-          name: displayAgentName(a.name, a.id),
-          role: a.role || a.agentRole || (a.metadata?.agentRole as string | undefined) || a.type,
-          status: a.status,
-        }));
-       const eventAgents = extractAgentsFromEvents(events, missionId).filter((a) => !SYSTEM_ROLES.has(String(a.role || '').toLowerCase()));
-       const planAgents = extractAgentsFromPlan(plan, missionId).filter((a) => !SYSTEM_ROLES.has(String(a.role || '').toLowerCase()));
-       const filteredApiAgents = apiAgents.filter((a) => !SYSTEM_ROLES.has(String(a.role || '').toLowerCase()));
-       const merged = new Map<string, AgentInfo>();
-       for (const a of filteredApiAgents) merged.set(a.id, a);
-       for (const a of eventAgents) if (!merged.has(a.id)) merged.set(a.id, a);
-       for (const a of planAgents) if (!merged.has(a.id)) merged.set(a.id, { ...a, status: a.status || 'planned' });
-       if (missionStatus === 'completed' || missionStatus === 'failed' || missionStatus === 'canceled' || missionStatus === 'incomplete' || missionStatus === 'awaiting_review' || missionStatus === 'needs_review') {
-         for (const [id, agent] of merged.entries()) {
-           if (agent.role === 'planner') {
-             merged.set(id, { ...agent, status: 'completed' });
-           } else {
-             merged.set(id, { ...agent, status: agent.status === 'failed' ? 'failed' : 'completed' });
-           }
-         }
-       }
-       setAgents(Array.from(merged.values()));
-     } catch {
-      // ignore
+      const apiAgents = extractAgents(data).map((a) => ({
+        id: `agent-${missionId}-${canonicalRole(a.role || a.agentRole || (a.metadata?.agentRole as string | undefined) || a.type || a.name || a.id)}`,
+        name: displayAgentName(a.name, a.id),
+        role: a.role || a.agentRole || (a.metadata?.agentRole as string | undefined) || a.type,
+        status: a.status,
+        lastError: a.lastError,
+        activeTaskId: a.activeTaskId,
+        progress: a.progress,
+      }));
+      const eventAgents = extractAgentsFromEvents(eventsRef.current, missionId).filter((a) => !SYSTEM_ROLES.has(String(a.role || '').toLowerCase()));
+      const planAgents = extractAgentsFromPlan(plan, missionId).filter((a) => !SYSTEM_ROLES.has(String(a.role || '').toLowerCase()));
+      const filteredApiAgents = apiAgents.filter((a) => !SYSTEM_ROLES.has(String(a.role || '').toLowerCase()));
+      const merged = new Map<string, AgentInfo>();
+      for (const a of filteredApiAgents) {
+        const current = merged.get(a.id);
+        merged.set(a.id, {
+          ...current,
+          ...a,
+          status: chooseStatus(current?.status, a.status),
+          activeTaskId: a.activeTaskId || current?.activeTaskId,
+          progress: a.progress || current?.progress,
+        });
+      }
+      for (const a of eventAgents) {
+        if (!merged.has(a.id)) merged.set(a.id, a);
+      }
+      for (const a of planAgents) if (!merged.has(a.id)) merged.set(a.id, { ...a, status: a.status || 'planned' });
+      if (missionStatus === 'completed' || missionStatus === 'failed' || missionStatus === 'canceled' || missionStatus === 'incomplete' || missionStatus === 'awaiting_review' || missionStatus === 'needs_review') {
+        for (const [id, agent] of merged.entries()) {
+          if (agent.role === 'planner') {
+            merged.set(id, { ...agent, status: 'completed' });
+          } else {
+            merged.set(id, { ...agent, status: agent.status === 'failed' ? 'failed' : 'completed' });
+          }
+        }
+      }
+      setAgents(Array.from(merged.values()));
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
     }
   };
 
@@ -302,6 +381,7 @@ const AgentOutputsPanel = ({ missionId, missionStatus, plan }: AgentOutputsPanel
   return (
     <div className="agent-outputs-panel">
       <h4 style={{ margin: '6px 0' }}>Agents</h4>
+      {error && <div className="error" role="alert">{error}</div>}
       {agents.length === 0 && <div className="muted">No agents recorded for this mission.</div>}
       <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
         {agents.map((a) => (
@@ -322,7 +402,7 @@ const AgentOutputsPanel = ({ missionId, missionStatus, plan }: AgentOutputsPanel
                 {(() => {
                   const evs = eventsByAgent.get(a.id) || eventsByAgent.get(a.role || '') || [];
                   const completedTasks = evs
-                    .filter((event) => event.type === 'task_completed')
+                    .filter((event) => event.type === 'task_completed' || event.type === 'task_failed')
                     .map((event) => ({ event, title: getCompletedTaskTitle(event) }))
                     .filter((item): item is { event: typeof evs[number]; title: string } => !!item.title)
                     .slice(-4);
@@ -332,25 +412,47 @@ const AgentOutputsPanel = ({ missionId, missionStatus, plan }: AgentOutputsPanel
                   return completedTasks.map(({ event, title }) => (
                     <div key={`${event.timestamp}-${title}`} className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
                       <span style={{ marginRight: 6 }}>[{new Date(event.timestamp || Date.now()).toLocaleTimeString()}]</span>
-                      <span>Completed: {title}</span>
+                      <span>{event.type === 'task_failed' ? 'Failed' : 'Completed'}: {title}</span>
                     </div>
                   ));
                 })()}
               </div>
             </div>
+            {a.activeTaskId && (
+              <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+                <strong>In progress:</strong>{' '}
+                {plan?.phases.flatMap((phase) => phase.tasks).find((task) =>
+                  a.activeTaskId?.endsWith(`:${task.id}`),
+                )?.title || a.activeTaskId}
+                {a.progress && (
+                  <span>{` — ${a.progress.brainCalls || 0} Brain calls, ${a.progress.toolCalls || 0} tool actions${a.progress.lastAction ? `; last: ${a.progress.lastAction}` : ''}`}</span>
+                )}
+              </div>
+            )}
+            {a.lastError && (
+              <div className="error" role="status" style={{ fontSize: 12, marginTop: 8 }}>
+                Latest task error: {a.lastError}
+              </div>
+            )}
             <div style={{ marginTop: 8 }}>
               <strong style={{ fontSize: 12 }}>Recent output</strong>
               <div style={{ marginTop: 6 }}>
                 {((eventsByAgent.get(a.id) || eventsByAgent.get(a.role || '') || [])
-                  .filter((ev) => !isReasoningEvent(ev) && !LIFECYCLE_EVENT_TYPES.has(ev.type))
+                  .filter((ev) => (
+                    (!isReasoningEvent(ev) && !LIFECYCLE_EVENT_TYPES.has(ev.type))
+                    || (ev.type === 'task_completed' && typeof ev.metadata?.output === 'string')
+                  ))
                   .slice(-4)).map((ev, i) => (
                   <div key={i} className="muted" style={{ fontSize: 12, marginBottom: 8, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
                     <span style={{ marginRight: 6 }}>[{new Date(ev.timestamp || Date.now()).toLocaleTimeString()}]</span>
-                    <span>{ev.message}</span>
+                    <span>{typeof ev.metadata?.output === 'string' ? ev.metadata.output : ev.message}</span>
                   </div>
                 ))}
                 {((eventsByAgent.get(a.id) || eventsByAgent.get(a.role || '') || [])
-                  .filter((ev) => !isReasoningEvent(ev) && !LIFECYCLE_EVENT_TYPES.has(ev.type)).length === 0) && (
+                  .filter((ev) => (
+                    (!isReasoningEvent(ev) && !LIFECYCLE_EVENT_TYPES.has(ev.type))
+                    || (ev.type === 'task_completed' && typeof ev.metadata?.output === 'string')
+                  )).length === 0) && (
                   <div className="muted" style={{ fontSize: 12 }}>No recent outputs</div>
                 )}
               </div>

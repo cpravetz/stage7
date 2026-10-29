@@ -1147,6 +1147,65 @@ a:hover {
   margin-bottom: 16px;
 }
 
+.mission-instructions {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 180px;
+}
+
+.mission-recurrence {
+  padding: 12px;
+  border: 1px solid #334155;
+  border-radius: 6px;
+}
+
+.mission-recurrence-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.mission-recurrence-toggle input {
+  width: auto;
+}
+
+.mission-recurrence-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.mission-recurrence-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mission-recurrence-fields .hint {
+  align-self: center;
+}
+
+.mission-schedule-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mission-schedule-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid #334155;
+}
+
+.mission-schedule-row:last-child {
+  border-bottom: 0;
+}
+
 .mission-banner {
   display: flex;
   align-items: center;

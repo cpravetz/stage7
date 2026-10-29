@@ -84,26 +84,12 @@ export const TIMELINE_EVENT_TYPES = new Set([
   'approval_rejected',
 ]);
 
-const TERMINAL_LIFECYCLE_TYPES = new Set([
-  'mission_completed',
-  'mission_failed',
-  'mission_canceled',
-  'mission_incomplete',
-  'mission_needs_review',
-]);
-
 const FAILURE_LIFECYCLE_TYPES = new Set([
   'mission_failed',
   'mission_canceled',
   'mission_incomplete',
   'mission_needs_review',
 ]);
-
-function lifecycleRank(type: string): number {
-  if (type === 'mission_started') return 0;
-  if (TERMINAL_LIFECYCLE_TYPES.has(type)) return 2;
-  return 1;
-}
 
 /**
  * A mission milestone is announced once. A mission that is restarted after a
@@ -168,6 +154,8 @@ export function buildMissionEvents(options: {
     );
 
   const startedAt = toTimestamp(detail?.startedAt) ?? Date.now();
+  const input = detail?.input as { prompt?: string; metadata?: Record<string, unknown> } | undefined;
+  const isRestarted = Boolean(input?.metadata?.retriedFrom);
 
   const originalPrompt = detail?.input?.prompt;
   if (originalPrompt && !hasLive(['user', 'user_message'], (event) => event.message === originalPrompt)) {
@@ -186,7 +174,7 @@ export function buildMissionEvents(options: {
       id: `derived-mission-started-${startedAt}`,
       type: 'mission_started',
       source: 'orchestrator',
-      message: 'Mission started',
+      message: isRestarted ? 'Mission restarted' : 'Mission started',
       timestamp: startedAt,
       missionId,
     });
@@ -362,7 +350,9 @@ export function buildMissionEvents(options: {
         id: `derived-mission-incomplete-${completedAt}`,
         type: 'mission_incomplete',
         source: 'orchestrator',
-        message: reason ? `Mission incomplete: ${reason}` : 'Mission incomplete',
+        message: reason
+          ? `Mission incomplete: ${reason} — retry this mission to address the unmet requirements.`
+          : 'Mission incomplete',
         timestamp: completedAt,
         missionId,
         metadata: gaps.length > 0 ? { reason, gaps } : undefined,
@@ -383,14 +373,19 @@ export function buildMissionEvents(options: {
   events = dedupePlannerAndReasoningEvents(events);
   events = listMilestonesOnce(events);
   events = dedupeTerminalAndApprovalEvents(events, detail?.status);
-  events.sort((left, right) => {
-    const leftType = String(left.type);
-    const rightType = String(right.type);
-    const leftRank = leftType === 'user' || leftType === 'user_message' ? -1 : lifecycleRank(leftType);
-    const rightRank = rightType === 'user' || rightType === 'user_message' ? -1 : lifecycleRank(rightType);
-    if (leftRank !== rightRank) return leftRank - rightRank;
-    return left.timestamp - right.timestamp;
-  });
+
+  // A retried/restarted mission announces its start again; surface that so the
+  // room reads "Mission restarted" instead of "Mission started".
+  if (isRestarted) {
+    events = events.map((event) =>
+      event.type === 'mission_started'
+        ? { ...event, message: 'Mission restarted' }
+        : event,
+    );
+  }
+
+  // Strict chronological order: oldest first, newest at the bottom.
+  events.sort((left, right) => left.timestamp - right.timestamp);
   return applyMissionError(events, detail?.error);
 }
 
@@ -640,6 +635,13 @@ export function buildTranscript(events: FeedEvent[]): TranscriptTurn[] {
         current = startTurn('assistant', 'Agent', ts, evt.id);
       }
       current.lines.push({ kind: 'task', type, text: evt.message });
+      if (type === 'task_completed' && typeof data.output === 'string' && data.output.trim()) {
+        current.lines.push({
+          kind: 'text',
+          type: 'task_output',
+          text: data.output.slice(0, 8_000),
+        });
+      }
       continue;
     }
     if (type === 'tool' || type === 'monologue') {
