@@ -605,6 +605,107 @@ describe('AgentExecutor', () => {
     expect(prompts[1]).toContain('was not executed')
   })
 
+  it('executes a single unambiguous action inside a JSON-only wrapper', async () => {
+    let brainCalls = 0
+    let toolExecutions = 0
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) {
+        return jsonResponse({
+          tools: [{ id: 'calculate', name: 'Calculate', description: 'Calculate an expression', type: 'code' }],
+        })
+      }
+      if (url.endsWith('/api/brain/complaint')) return jsonResponse({ recorded: true })
+      if (url.endsWith('/api/brain/complete')) {
+        brainCalls++
+        return jsonResponse({
+          content: brainCalls === 1
+            ? '{"action":{"tool":"calculate","args":{"expression":"17 + 25"}}}'
+            : '42',
+        })
+      }
+      if (url.endsWith('/api/tool-executor/tools/execute')) {
+        toolExecutions++
+        return jsonResponse({ status: 'completed', output: { result: 42 } })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+
+    const result = await new AgentExecutor({ fetcher }).execute(
+      { ...definition, tools: ['calculate'] },
+      task() as AgentTask,
+      { missionId: 'mission-1', delegationDepth: 0 },
+    )
+
+    expect(result.output).toBe('42')
+    expect(result.toolCalls).toBe(1)
+    expect(toolExecutions).toBe(1)
+    expect(brainCalls).toBe(2)
+  })
+
+  it('stops after Brain repeats a malformed tool-action response following correction', async () => {
+    let brainCalls = 0
+    const complaints: string[] = []
+    const malformedResponse = 'I will use the calculator:\n```json\n{"tool":"calculate","args":{"expression":"17 + 25"}}\n```\nThen I will report the result.'
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) {
+        return jsonResponse({
+          tools: [{ id: 'calculate', name: 'Calculate', description: 'Calculate an expression', type: 'code' }],
+        })
+      }
+      if (url.endsWith('/api/brain/complete')) {
+        brainCalls++
+        return jsonResponse({ content: malformedResponse, requestId: `malformed-${brainCalls}` })
+      }
+      if (url.endsWith('/api/brain/complaint')) {
+        const body = JSON.parse(String(init?.body)) as { reason: string }
+        complaints.push(body.reason)
+        return jsonResponse({ recorded: true })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+
+    await expect(new AgentExecutor({ fetcher }).execute(
+      { ...definition, tools: ['calculate'] },
+      task() as AgentTask,
+      { missionId: 'mission-1', delegationDepth: 0 },
+    )).rejects.toThrow('another non-executable tool-action response after receiving a format correction')
+
+    expect(brainCalls).toBe(2)
+    expect(complaints).toContain(
+      'Agent response validation failed: Brain returned another non-executable tool-action response after receiving a format correction.',
+    )
+  })
+
+  it('stops after Brain repeats an incomplete artifact response following correction', async () => {
+    let brainCalls = 0
+    const fetcher: typeof fetch = async (input) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) return jsonResponse({ tools: [] })
+      if (url.endsWith('/api/brain/complete')) {
+        brainCalls++
+        return jsonResponse({ content: 'I could not produce the requested artifact.', requestId: `artifact-${brainCalls}` })
+      }
+      if (url.endsWith('/api/brain/complaint')) return jsonResponse({ recorded: true })
+      throw new Error(`Unexpected request: ${url}`)
+    }
+    const incompleteTask: AgentTask = {
+      ...task(),
+      agentId: definition.id,
+      createdAt: new Date().toISOString(),
+      input: { prompt: 'Create the message artifact.', context: { expectedArtifacts: ['text-message'] } },
+    }
+
+    await expect(new AgentExecutor({ fetcher }).execute(
+      definition,
+      incompleteTask,
+      { missionId: 'mission-1', delegationDepth: 0 },
+    )).rejects.toThrow('still missing artifact section "text-message"')
+
+    expect(brainCalls).toBe(2)
+  })
+
   it('does not advertise tool actions to an Agent whose action budget is zero', async () => {
     let systemPrompt = ''
     const fetcher: typeof fetch = async (input, init) => {
@@ -1077,6 +1178,221 @@ describe('AgentExecutor', () => {
       .every((call) => !Object.prototype.hasOwnProperty.call(call.body, 'model'))).toBe(true)
   })
 
+  it('resolves a missing runtime dependency once and uses the registered alternative', async () => {
+    const calls: Array<{ url: string; body?: Record<string, unknown> }> = []
+    let brainTurn = 0
+    let replacementRegistered = false
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input)
+      const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined
+      calls.push({ url, body })
+
+      if (url.endsWith('/api/brain/complete')) {
+        brainTurn++
+        return jsonResponse({
+          content: [
+            '{"tool":"legacy-document-exporter","args":{"format":"csv"}}',
+            '{"tool":"document-exporter","args":{"format":"csv"}}',
+            'The registered exporter completed and verified the requested export.',
+          ][brainTurn - 1],
+        })
+      }
+
+      if (url.endsWith('/api/tool-executor/tools') && init?.method !== 'POST') {
+        return jsonResponse({
+          tools: replacementRegistered
+            ? [
+              { id: 'legacy-document-exporter', name: 'Legacy Document Exporter', description: 'Export documents to CSV', type: 'code' },
+              { id: 'document-exporter', name: 'Document Exporter', description: 'Export documents to CSV', type: 'code' },
+            ]
+            : [{ id: 'legacy-document-exporter', name: 'Legacy Document Exporter', description: 'Export documents to CSV', type: 'code' }],
+        })
+      }
+
+      if (url.endsWith('/api/tool-executor/tools/execute')) {
+        if (body?.id === 'legacy-document-exporter') {
+          return jsonResponse({
+            status: 'completed',
+            output: { error: "Cannot find module 'legacy-export-sdk'" },
+          })
+        }
+        expect(body?.id).toBe('document-exporter')
+        return jsonResponse({ status: 'completed', output: { delivered: true } })
+      }
+
+      if (url.endsWith('/api/tool-executor/tools/resolve')) {
+        replacementRegistered = true
+        return jsonResponse({
+          success: true,
+          tool: { id: 'document-exporter', name: 'Document Exporter', manifest: {} },
+        }, 201)
+      }
+
+      throw new Error(`Unexpected request: ${url}`)
+    }
+
+    const exportTask = task() as AgentTask
+    exportTask.input.context = {
+      requiredActions: [{ toolId: 'legacy-document-exporter', outcome: 'success' }],
+    }
+    const result = await new AgentExecutor({ fetcher }).execute(definition, exportTask, {
+      missionId: 'mission-1',
+      delegationDepth: 0,
+    })
+
+    expect(result.output).toBe('The registered exporter completed and verified the requested export.')
+    expect(result.toolCalls).toBe(3)
+    expect(result.actionReceipts.map(({ toolId, outcome }) => ({ toolId, outcome }))).toEqual([
+      { toolId: 'legacy-document-exporter', outcome: 'failure' },
+      { toolId: '__create_tool', outcome: 'success' },
+      { toolId: 'document-exporter', outcome: 'success' },
+    ])
+    expect(result.actionReceipts.at(-1)).toMatchObject({
+      fallbackForToolId: 'legacy-document-exporter',
+      outcome: 'success',
+    })
+    const resolution = calls.find((call) => call.url.endsWith('/api/tool-executor/tools/resolve'))
+    expect(String(resolution?.body?.capability).toLowerCase()).toContain('export')
+    expect(resolution?.body?.description).toContain('Resolve the capability')
+    expect(resolution?.body?.excludeToolIds).toEqual(['legacy-document-exporter'])
+    expect(resolution?.body?.requirements).toContain('Do not depend on unavailable runtime package "legacy-export-sdk".')
+    expect(calls.filter((call) => call.url.endsWith('/api/tool-executor/tools/execute')))
+      .toHaveLength(2)
+  })
+
+  it('does not re-execute a failed tool after its capability has already been resolved', async () => {
+    let brainTurn = 0
+    let originalExecutions = 0
+    let replacementExecutions = 0
+    let resolutionCalls = 0
+    let replacementRegistered = false
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input)
+      const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined
+      if (url.endsWith('/api/brain/complete')) {
+        brainTurn++
+        return jsonResponse({
+          content: [
+            '{"tool":"legacy-sender","args":{"recipient":"target"}}',
+            '{"tool":"legacy-sender","args":{"recipient":"target"}}',
+            '{"tool":"replacement-sender","args":{"recipient":"target"}}',
+            'The replacement sender completed the requested operation.',
+          ][brainTurn - 1],
+        })
+      }
+      if (url.endsWith('/api/tool-executor/tools')) {
+        return jsonResponse({
+          tools: replacementRegistered
+            ? [
+              { id: 'legacy-sender', name: 'Legacy Sender', description: 'Send a message', type: 'code' },
+              { id: 'replacement-sender', name: 'Replacement Sender', description: 'Send a message', type: 'code' },
+            ]
+            : [{ id: 'legacy-sender', name: 'Legacy Sender', description: 'Send a message', type: 'code' }],
+        })
+      }
+      if (url.endsWith('/api/tool-executor/tools/execute')) {
+        if (body?.id === 'legacy-sender') {
+          originalExecutions++
+          return jsonResponse({
+            status: 'completed',
+            output: { error: "Cannot find module 'legacy-sender-sdk'" },
+          })
+        }
+        expect(body?.id).toBe('replacement-sender')
+        replacementExecutions++
+        return jsonResponse({ status: 'completed', output: { sent: true } })
+      }
+      if (url.endsWith('/api/tool-executor/tools/resolve')) {
+        resolutionCalls++
+        replacementRegistered = true
+        return jsonResponse({
+          success: true,
+          tool: { id: 'replacement-sender', name: 'Replacement Sender', manifest: {} },
+        }, 201)
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+
+    const result = await new AgentExecutor({ fetcher }).execute(definition, task() as AgentTask, {
+      missionId: 'mission-1',
+      delegationDepth: 0,
+    })
+
+    expect(result.output).toBe('The replacement sender completed the requested operation.')
+    expect(originalExecutions).toBe(1)
+    expect(replacementExecutions).toBe(1)
+    expect(resolutionCalls).toBe(1)
+    expect(result.actionReceipts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ toolId: 'legacy-sender', outcome: 'failure', isError: true }),
+      expect.objectContaining({ toolId: '__create_tool', fallbackForToolId: 'legacy-sender', outcome: 'success' }),
+      expect.objectContaining({ toolId: 'replacement-sender', outcome: 'success' }),
+    ]))
+  })
+
+  it('resolves a requested capability when the Brain selects a tool that is not registered', async () => {
+    const calls: Array<{ url: string; body?: Record<string, unknown> }> = []
+    let brainTurn = 0
+    let capabilityRegistered = false
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input)
+      const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined
+      calls.push({ url, body })
+
+      if (url.endsWith('/api/brain/complete')) {
+        brainTurn++
+        return jsonResponse({
+          content: [
+            '{"tool":"archive_search","args":{"query":"quarterly report"}}',
+            '{"tool":"archive-search","args":{"query":"quarterly report"}}',
+            'The archive search completed.',
+          ][brainTurn - 1],
+        })
+      }
+
+      if (url.endsWith('/api/tool-executor/tools') && init?.method !== 'POST') {
+        return jsonResponse({
+          tools: capabilityRegistered
+            ? [{ id: 'archive-search', name: 'Archive Search', description: 'Search the archive', type: 'code' }]
+            : [],
+        })
+      }
+
+      if (url.endsWith('/api/tool-executor/tools/resolve')) {
+        capabilityRegistered = true
+        return jsonResponse({
+          success: true,
+          tool: { id: 'archive-search', name: 'Archive Search', manifest: {} },
+        }, 201)
+      }
+
+      if (url.endsWith('/api/tool-executor/tools/execute')) {
+        expect(body?.id).toBe('archive-search')
+        return jsonResponse({ status: 'completed', output: { results: ['quarterly report'] } })
+      }
+
+      throw new Error(`Unexpected request: ${url}`)
+    }
+
+    const requestedTask = task() as AgentTask
+    requestedTask.input.context = {
+      requiredActions: [{ toolId: 'archive_search', outcome: 'success' }],
+    }
+    const result = await new AgentExecutor({ fetcher }).execute(definition, requestedTask, {
+      missionId: 'mission-1',
+      delegationDepth: 0,
+    })
+
+    expect(result.output).toBe('The archive search completed.')
+    expect(result.actionReceipts.at(-1)).toMatchObject({
+      toolId: 'archive-search',
+      fallbackForToolId: 'archive_search',
+      outcome: 'success',
+    })
+    const resolution = calls.find((call) => call.url.endsWith('/api/tool-executor/tools/resolve'))
+    expect(resolution?.body?.capability).toBe('archive search')
+    expect(resolution?.body?.excludeToolIds).toEqual(['archive_search'])
+  })
+
   it('returns missing user input as a structured mission interruption marker', async () => {
     const fetcher: typeof fetch = async (input) => {
       const url = String(input)
@@ -1094,6 +1410,102 @@ describe('AgentExecutor', () => {
 
     expect(result.output).toBe('__ASK_USER__:{"question":"[secret:service_token] Provide the service token."}')
     expect(result.brainCalls).toBe(1)
+  })
+
+  it('pauses on a structured missing-credential response instead of treating it as a tool failure', async () => {
+    let resolveCalls = 0
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) {
+        return jsonResponse({
+          tools: [{ id: 'account-api', name: 'Account API', description: 'Update account settings', type: 'code' }],
+        })
+      }
+      if (url.endsWith('/api/brain/complete')) {
+        return jsonResponse({ content: '{"tool":"account-api","args":{"setting":"timezone"}}' })
+      }
+      if (url.endsWith('/api/tool-executor/tools/execute')) {
+        return jsonResponse({
+          error: 'Tool "Account API" requires credentials: API token',
+          request: {
+            executionId: 'exec-credential-1',
+            toolId: 'account-api',
+            toolName: 'Account API',
+            missingCredentials: [{
+              key: 'apiToken',
+              label: 'API token',
+              source: { vaultSecretId: 'account-api-token' },
+            }],
+          },
+        }, 428)
+      }
+      if (url.endsWith('/api/tool-executor/tools/resolve')) resolveCalls++
+      throw new Error(`Unexpected request: ${url}`)
+    }
+
+    const result = await new AgentExecutor({ fetcher }).execute(definition, task() as AgentTask, {
+      missionId: 'mission-1',
+      delegationDepth: 0,
+    })
+    const interruption = JSON.parse(result.output.slice('__ASK_USER__:'.length)) as {
+      question: string;
+      credentialRequest: { executionId: string; toolId: string; missingCredentials: Array<{ key: string; label: string }> };
+    }
+
+    expect(interruption.question).toMatch(/^\[secret:tool-credentials\]/)
+    expect(interruption.question).toContain('API token')
+    expect(interruption.credentialRequest).toEqual({
+      executionId: 'exec-credential-1',
+      toolId: 'account-api',
+      toolName: 'Account API',
+      missingCredentials: [{ key: 'apiToken', label: 'API token' }],
+    })
+    expect(result.actionReceipts).toEqual([
+      expect.objectContaining({ toolId: 'account-api', outcome: 'question_asked', isError: true }),
+    ])
+    expect(resolveCalls).toBe(0)
+  })
+
+  it('asks for ordinary tool configuration without labeling it as a secret or resolving a package', async () => {
+    let resolveCalls = 0
+    const fetcher: typeof fetch = async (input) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) {
+        return jsonResponse({
+          tools: [{ id: 'regional-service', name: 'Regional Service', description: 'Read regional data', type: 'code' }],
+        })
+      }
+      if (url.endsWith('/api/brain/complete')) {
+        return jsonResponse({ content: '{"tool":"regional-service","args":{}}' })
+      }
+      if (url.endsWith('/api/tool-executor/tools/execute')) {
+        return jsonResponse({
+          error: 'Tool "Regional Service" requires credentials: Region',
+          request: {
+            executionId: 'exec-config-1',
+            toolId: 'regional-service',
+            toolName: 'Regional Service',
+            missingCredentials: [{
+              key: 'region',
+              label: 'Region',
+              source: { configKey: 'service.region' },
+            }],
+          },
+        }, 428)
+      }
+      if (url.endsWith('/api/tool-executor/tools/resolve')) resolveCalls++
+      throw new Error(`Unexpected request: ${url}`)
+    }
+
+    const result = await new AgentExecutor({ fetcher }).execute(definition, task() as AgentTask, {
+      missionId: 'mission-1',
+      delegationDepth: 0,
+    })
+    const interruption = JSON.parse(result.output.slice('__ASK_USER__:'.length)) as { question: string }
+
+    expect(interruption.question).not.toContain('[secret:')
+    expect(interruption.question).toContain('Region')
+    expect(resolveCalls).toBe(0)
   })
 
   it('returns MCP permission requests out of band without sending them back to Brain', async () => {
@@ -1344,14 +1756,88 @@ describe('AgentExecutor', () => {
 
     expect(result.output).toContain('catalog was verified')
     expect(catalogReceipt?.outcome).toBe('success')
-    expect(JSON.parse(catalogReceipt?.content || '[]')).toEqual([{
-      id: 'allowed-tool',
-      name: 'Allowed Tool',
-      description: 'Allowed',
-      type: 'code',
-      inputs: 'value:integer!',
-    }])
+    expect(catalogReceipt?.content).toBe('allowed-tool')
     expect(calls.filter((url) => url.endsWith('/api/tool-executor/tools/execute'))).toHaveLength(0)
+  })
+
+  it('keeps explicit tool catalog inspection compact within Brain request limits', async () => {
+    let brainRequest = ''
+    let brainCalls = 0
+    const largeToolCatalog = Array.from({ length: 170 }, (_, index) => ({
+      id: `system-tool-${index}`,
+      name: `System Tool ${index}`,
+      description: `Tool ${index} ${'description '.repeat(30)}`,
+      type: 'code',
+      inputSchema: {
+        type: 'object',
+        required: ['payload'],
+        properties: { payload: { type: 'string', description: 'large-schema '.repeat(1000) } },
+      },
+    }))
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) return jsonResponse({ tools: largeToolCatalog })
+      if (url.endsWith('/api/brain/complete')) {
+        brainRequest = String(init?.body)
+        brainCalls++
+        return jsonResponse({
+          content: brainCalls === 1
+            ? '{"tool":"__list_tools","args":{}}'
+            : 'The matching capability is ready.',
+        })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+
+    const result = await new AgentExecutor({ fetcher }).execute(definition, task() as AgentTask, {
+      missionId: 'mission-1',
+      delegationDepth: 0,
+    })
+    const request = JSON.parse(brainRequest) as { prompt: string }
+
+    expect(result.output).toBe('The matching capability is ready.')
+    expect(brainCalls).toBe(2)
+    expect(Buffer.byteLength(brainRequest)).toBeLessThan(192 * 1024)
+    expect(request.prompt).toContain('system-tool-0')
+    expect(request.prompt).toContain('system-tool-169')
+    expect(request.prompt).not.toContain('large-schema')
+  })
+
+  it('bounds oversized tool results before continuing the Brain conversation', async () => {
+    let brainRequest = ''
+    let brainCalls = 0
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) {
+        return jsonResponse({
+          tools: [{ id: 'large-result', name: 'Large Result', description: 'Returns a large result', type: 'code' }],
+        })
+      }
+      if (url.endsWith('/api/brain/complete')) {
+        brainRequest = String(init?.body)
+        brainCalls++
+        return jsonResponse({
+          content: brainCalls === 1
+            ? '{"tool":"large-result","args":{}}'
+            : 'The task is complete.',
+        })
+      }
+      if (url.endsWith('/api/tool-executor/tools/execute')) {
+        return jsonResponse({ status: 'completed', output: { payload: 'large-result '.repeat(12_000) } })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+
+    const result = await new AgentExecutor({ fetcher }).execute(definition, task() as AgentTask, {
+      missionId: 'mission-1',
+      delegationDepth: 0,
+    })
+    const request = JSON.parse(brainRequest) as { prompt: string }
+
+    expect(result.output).toBe('The task is complete.')
+    expect(brainCalls).toBe(2)
+    expect(Buffer.byteLength(brainRequest)).toBeLessThan(192 * 1024)
+    expect(request.prompt).toContain('[Tool output truncated; request a targeted result for more detail.]')
   })
 
   it('keeps a large live tool catalog below Brain request limits', async () => {
@@ -1390,16 +1876,18 @@ describe('AgentExecutor', () => {
     expect(brainRequest).not.toContain('large-schema')
   })
 
-  it('forwards the Brain routing session without requesting a model and preserves retry codes', async () => {
+  it('stops retrying when Brain reports the same untried models without progress', async () => {
     let brainRequest: Record<string, unknown> | undefined
+    let brainCalls = 0
     const fetcher: typeof fetch = async (input, init) => {
       const url = String(input)
       if (url.endsWith('/api/tool-executor/tools')) return jsonResponse({ tools: [] })
       if (url.endsWith('/api/brain/complete')) {
+        brainCalls++
         brainRequest = JSON.parse(String(init?.body)) as Record<string, unknown>
         return jsonResponse({
           success: false,
-          error: 'Brain has untried eligible models',
+          error: 'Brain could not complete the request yet; 2 eligible model(s) remain untried.',
           statusCode: 503,
           details: { code: BRAIN_MODEL_SELECTION_RETRY },
         }, 503)
@@ -1419,10 +1907,11 @@ describe('AgentExecutor', () => {
     await expect(new AgentExecutor({ fetcher }).execute(definition, plannerTask, {
       missionId: 'mission-1',
       delegationDepth: 0,
-    })).rejects.toThrow(`${BRAIN_MODEL_SELECTION_RETRY}: Brain has untried eligible models`)
+    })).rejects.toThrow('Brain model routing made no progress after 2 retry request(s)')
 
     expect(brainRequest?.routingSessionId).toBe('mission-1:planner')
     expect(brainRequest).not.toHaveProperty('model')
+    expect(brainCalls).toBe(2)
   })
 
   it('executes an agent-owned delegation and returns the child result to the parent', async () => {
@@ -1636,6 +2125,75 @@ describe('AgentExecutor', () => {
     })).rejects.toThrow('repeated the same action without progress')
     expect(brainCalls).toBe(3)
     expect(toolExecutions).toBe(2)
+  })
+
+  it('tries generic capability resolution after repeated tool failures before declaring no progress', async () => {
+    let brainCalls = 0
+    let toolExecutions = 0
+    let resolutionCalls = 0
+    let alternativeRegistered = false
+    let resolutionBody: Record<string, unknown> | undefined
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input)
+      const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined
+      if (url.endsWith('/api/tool-executor/tools')) {
+        return jsonResponse({
+          tools: alternativeRegistered
+            ? [
+              { id: 'lookup', name: 'Lookup', description: 'Look up a record', type: 'code' },
+              { id: 'record-lookup-v2', name: 'Record Lookup', description: 'Look up a record safely', type: 'code' },
+            ]
+            : [{ id: 'lookup', name: 'Lookup', description: 'Look up a record', type: 'code' }],
+        })
+      }
+      if (url.endsWith('/api/brain/complete')) {
+        brainCalls++
+        return jsonResponse({
+          content: [
+            '{"tool":"lookup","args":{"query":"same"}}',
+            '{"tool":"lookup","args":{"query":"different"}}',
+            '{"tool":"record-lookup-v2","args":{"query":"same"}}',
+            'The requested record lookup completed.',
+          ][brainCalls - 1],
+        })
+      }
+      if (url.endsWith('/api/tool-executor/tools/execute')) {
+        if (body?.id === 'lookup') {
+          toolExecutions++
+          return jsonResponse({ status: 'completed', output: { error: 'The remote lookup endpoint rejected this request.' } })
+        }
+        expect(body?.id).toBe('record-lookup-v2')
+        return jsonResponse({ status: 'completed', output: { record: 'found' } })
+      }
+      if (url.endsWith('/api/tool-executor/tools/resolve')) {
+        resolutionCalls++
+        resolutionBody = body
+        alternativeRegistered = true
+        return jsonResponse({
+          success: true,
+          tool: { id: 'record-lookup-v2', name: 'Record Lookup', manifest: {} },
+        }, 201)
+      }
+      if (url.endsWith('/api/brain/complaint')) return jsonResponse({ success: true })
+      throw new Error(`Unexpected request: ${url}`)
+    }
+
+    const result = await new AgentExecutor({ fetcher }).execute(definition, task() as AgentTask, {
+      missionId: 'mission-1',
+      delegationDepth: 0,
+    })
+
+    expect(result.output).toBe('The requested record lookup completed.')
+    expect(toolExecutions).toBe(2)
+    expect(resolutionCalls).toBe(1)
+    expect(result.actionReceipts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ toolId: '__create_tool', outcome: 'success', resolvedToolId: 'record-lookup-v2' }),
+      expect.objectContaining({ toolId: 'record-lookup-v2', outcome: 'success' }),
+    ]))
+    expect(resolutionBody?.capability).toContain('Complete the goal')
+    expect(resolutionBody?.capability).toContain('Lookup')
+    expect(resolutionBody?.excludeToolIds).toEqual(['lookup'])
+    expect(resolutionBody?.description).toContain('exact task operation')
   })
 
   it('completes a bounded mission task through delegation, tool repair, and receipt replay after runtime recreation', async () => {

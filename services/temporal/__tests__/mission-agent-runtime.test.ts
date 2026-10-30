@@ -206,6 +206,65 @@ describe('MissionAgentRuntime', () => {
     expect(fetchMock).toHaveBeenCalledTimes(4)
   })
 
+  it('preserves structured tool credential requests as mission input interruptions', async () => {
+    const fetchMock = jest.spyOn(global, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/tasks')) {
+        return jsonResponse({
+          agentId: agent.id,
+          taskId: 'mission-1:credential-task',
+          type: 'researcher',
+          input: {},
+          priority: 1,
+          status: 'pending',
+          createdAt: new Date().toISOString(),
+        })
+      }
+      if (url.endsWith('/tasks/mission-1:credential-task/execute')) {
+        return jsonResponse({
+          taskId: 'mission-1:credential-task',
+          status: 'completed',
+          result: {
+            output: '__ASK_USER__:{"question":"[secret:tool-credentials] Provide the API token.","credentialRequest":{"executionId":"exec-1","toolId":"protected-api","toolName":"Protected API","missingCredentials":[{"key":"apiToken","label":"API token"}]}}',
+            actionReceipts: [{
+              toolId: 'protected-api',
+              isError: true,
+              content: 'credential request',
+              outcome: 'question_asked',
+              actionKey: 'a'.repeat(64),
+            }],
+          },
+        })
+      }
+      throw new Error(`Unexpected request: ${String(init?.method || 'GET')} ${url}`)
+    })
+    const runtime = new MissionAgentRuntime({
+      missionId: 'mission-1',
+      tenantId: 'tenant-1',
+      agentRuntimeUrl: 'http://agent-runtime:3400',
+    })
+
+    const result = await runtime.executePromptTask(agent.id, {
+      taskId: 'mission-1:credential-task',
+      type: 'researcher',
+      prompt: 'Complete the protected operation.',
+      expectedArtifacts: ['must-not-be-required-during-interruption.md'],
+    })
+
+    expect(result.interruption).toEqual({
+      kind: 'user_input',
+      question: '[secret:tool-credentials] Provide the API token.',
+      credentialRequest: {
+        executionId: 'exec-1',
+        toolId: 'protected-api',
+        toolName: 'Protected API',
+        missingCredentials: [{ key: 'apiToken', label: 'API token' }],
+      },
+    })
+    expect(result.artifacts).toEqual([])
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
   it('rejects task output that omits an expected artifact section', async () => {
     jest.spyOn(global, 'fetch').mockImplementation(async (input, init) => {
       const url = String(input)
@@ -249,13 +308,18 @@ describe('MissionAgentRuntime', () => {
     })
     const agentId = await runtime.getOrCreateAgent('researcher', task.systemPrompt)
 
-    await expect(runtime.executeTask(agentId, task, phase, plan)).resolves.toBeDefined()
+    await expect(runtime.executeTask(agentId, task, phase, plan))
+      .rejects.toThrow('did not produce expected artifact: research.md')
   })
 
   it('reports malformed mission-completion output and retries the structured decision contract', async () => {
     const complaints: Array<{ requestId: string; reason: string; missionId: string }> = []
     const prompts: string[] = []
-    const completionOutputs = ['No.', '{"satisfied":true,"gaps":[]}']
+    const completionOutputs = [
+      'No.',
+      '{"satisfied":false,"gaps":["concrete unmet requirement"]}',
+      '{"satisfied":true,"gaps":[]}',
+    ]
     const evaluatorAgent: AgentDefinition = {
       ...agent,
       id: 'agent-mission-1-mission-evaluator-retry-5',
@@ -331,10 +395,11 @@ describe('MissionAgentRuntime', () => {
     }])
 
     expect(result).toEqual({ satisfied: true, gaps: [] })
-    expect(completionAttempt).toBe(2)
+    expect(completionAttempt).toBe(3)
     expect(submittedTaskIds).toEqual([
       'mission-1:review:completion:retry-5:attempt-1',
       'mission-1:review:completion:retry-5:attempt-2',
+      'mission-1:review:completion:retry-5:attempt-3',
     ])
     const completionInput = submittedTask!.input as Record<string, unknown>
     const completionContext = completionInput.context as Record<string, unknown>
@@ -343,12 +408,20 @@ describe('MissionAgentRuntime', () => {
       maxCompletionTokens: 1_024,
       maxCompletionTokensPerCall: 512,
     })
-    expect(complaints).toEqual([{
-      requestId: 'review-1',
-      reason: expect.stringContaining('response must be valid JSON'),
-      missionId: 'mission-1',
-    }])
+    expect(complaints).toEqual([
+      {
+        requestId: 'review-1',
+        reason: expect.stringContaining('response must be valid JSON'),
+        missionId: 'mission-1',
+      },
+      {
+        requestId: 'review-2',
+        reason: expect.stringContaining('identify the exact task ID'),
+        missionId: 'mission-1',
+      },
+    ])
     expect(prompts[1]).toContain('Previous response: No.')
+    expect(prompts[2]).toContain('Do not return generic gap text')
   })
 
   it('refuses to execute a dependent task when its completed output is unavailable', async () => {
@@ -649,6 +722,60 @@ describe('MissionAgentRuntime', () => {
       plannerAttempt: 1,
       [BRAIN_ROUTING_SESSION_CONTEXT_KEY]: 'mission-1:planner',
     })
+  })
+
+  it('uses retry-scoped planner agents and task IDs after a mission retry', async () => {
+    const plannerAgent = { ...agent, id: 'agent-mission-retry-planner-retry-2', type: 'planner' }
+    const taskId = 'mission-retry:planner:retry-2:attempt-1'
+    const requests: Array<{ url: string; method: string; body?: Record<string, unknown> }> = []
+    jest.spyOn(global, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input)
+      const method = init?.method || 'GET'
+      const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined
+      requests.push({ url, method, body })
+
+      if (url.endsWith(`/agents/${plannerAgent.id}`) && method === 'GET') return jsonResponse({}, 404)
+      if (url.endsWith('/agents') && method === 'POST') return jsonResponse(plannerAgent, 201)
+      if (url.endsWith(`/agents/${plannerAgent.id}/start`)) return jsonResponse({})
+      if (url.endsWith('/tasks') && method === 'POST') {
+        return jsonResponse({
+          agentId: plannerAgent.id,
+          taskId: body?.taskId,
+          type: body?.type,
+          input: body?.input,
+          priority: body?.priority,
+          status: 'pending',
+          createdAt: new Date().toISOString(),
+        }, 201)
+      }
+      if (url.endsWith(`/tasks/${taskId}/execute`)) {
+        return jsonResponse({
+          agentId: plannerAgent.id,
+          taskId,
+          type: 'planning',
+          input: {},
+          priority: 1,
+          status: 'completed',
+          createdAt: new Date().toISOString(),
+          completedAt: new Date().toISOString(),
+          result: { output: JSON.stringify(plan), artifacts: [], tokensUsed: 0 },
+        })
+      }
+      throw new Error(`Unexpected request: ${method} ${url}`)
+    })
+
+    const runtime = new MissionAgentRuntime({
+      missionId: 'mission-retry',
+      tenantId: 'tenant-1',
+      metadata: { retryCount: 2 },
+      agentRuntimeUrl: 'http://agent-runtime:3400',
+    })
+    await expect(runtime.generatePlan('Create a plan')).resolves.toMatchObject({
+      summary: plan.summary,
+    })
+
+    expect(requests.some((request) => request.url.endsWith(`/agents/${plannerAgent.id}`))).toBe(true)
+    expect(requests.some((request) => request.url.endsWith(`/tasks/${taskId}/execute`))).toBe(true)
   })
 
   it('asks the mission Agent to choose only from tasks whose dependencies are complete', async () => {

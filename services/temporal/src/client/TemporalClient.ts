@@ -36,6 +36,43 @@ function visibleMissionStatus(record: PersistedMissionControlRecord): string {
   return record.status || 'unknown';
 }
 
+function credentialValuesFromResponse(
+  question: string | undefined,
+  response: string,
+  missingCredentials: Array<{ key: string; label: string }>,
+): Record<string, string> {
+  if (question?.match(/^\s*\[secret:tool-credentials\]/i)) {
+    const vaultReference = response.match(/Vault reference:\s*(vault:\/\/[a-zA-Z0-9._-]+)/i)?.[1];
+    if (!vaultReference) {
+      throw new Error('The secure credential answer did not include its Vault reference');
+    }
+    return Object.fromEntries(missingCredentials.map(({ key }) => [key, vaultReference]));
+  }
+
+  if (missingCredentials.length === 1) {
+    return { [missingCredentials[0].key]: response };
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(response);
+  } catch {
+    throw new Error('This tool requires multiple credential values; provide them as a JSON object using the listed keys');
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('This tool requires multiple credential values; provide them as a JSON object using the listed keys');
+  }
+  const values: Record<string, string> = {};
+  for (const { key } of missingCredentials) {
+    const value = (parsed as Record<string, unknown>)[key];
+    if (typeof value !== 'string' || !value.trim()) {
+      throw new Error(`The credential response is missing a non-empty string value for "${key}"`);
+    }
+    values[key] = value;
+  }
+  return values;
+}
+
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   let timeout: ReturnType<typeof setTimeout>;
   return Promise.race([
@@ -282,8 +319,13 @@ export class TemporalClient {
     recoveryLeaseAlreadyClaimed = false,
     resumePausedOccurrence = false,
   ): Promise<string> {
-    const workflowId = `mission-${input.missionId}`;
-    logger.info({ missionId: input.missionId, assistantId: input.assistantId }, 'Starting mission');
+    const rawMissionId = (input.missionId || '').replace(/^mission-+/i, '');
+    if (rawMissionId !== input.missionId) {
+      input.missionId = rawMissionId;
+    }
+    const missionId = input.missionId;
+    const workflowId = `mission-${missionId}`;
+    logger.info({ missionId, assistantId: input.assistantId }, 'Starting mission');
     if (input.cronSchedule && !this.client) {
       throw new Error('Recurring missions require a connected Temporal Server; direct mode cannot persist cron schedules.');
     }
@@ -613,12 +655,70 @@ export class TemporalClient {
     ) {
       throw new Error(`Cannot resume mission ${missionId}: persisted workflow input is invalid`);
     }
-    const pendingInteraction = record.output?.outputs?.pendingInteraction;
+    let pendingInteraction = record.output?.outputs?.pendingInteraction;
     let interactionResponse = continuation.interactionResponse?.trim();
     if (pendingInteraction?.kind === 'user_input' && !interactionResponse) {
       throw new Error('A non-empty response is required for the pending mission question');
     }
-    if (pendingInteraction?.kind === 'mcp_permission') {
+    if (pendingInteraction?.kind === 'user_input' && pendingInteraction.credentialRequest && interactionResponse) {
+      const credentialRequest = pendingInteraction.credentialRequest;
+      const credentials = credentialValuesFromResponse(
+        pendingInteraction.question,
+        interactionResponse,
+        credentialRequest.missingCredentials,
+      );
+      const toolExecutorUrl = (process.env.TOOL_EXECUTOR_URL || 'http://tool-executor:3500').replace(/\/+$/, '');
+      const response = await fetch(
+        `${toolExecutorUrl}/api/tool-executor/executions/${encodeURIComponent(credentialRequest.executionId)}/credentials`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ credentials }),
+        },
+      );
+      const bodyText = await response.text();
+      let execution: {
+        status?: string;
+        toolId?: string;
+        output?: unknown;
+        error?: string;
+        request?: { missingCredentials?: Array<{ label?: string; key?: string }> };
+      };
+      try {
+        execution = JSON.parse(bodyText) as typeof execution;
+      } catch {
+        throw new Error(`Tool Executor returned an invalid credential submission response (${response.status})`);
+      }
+      if (!response.ok || execution.status !== 'completed') {
+        const remaining = execution.request?.missingCredentials
+          ?.map((credential) => credential.label || credential.key)
+          .filter((value): value is string => typeof value === 'string');
+        const detail = remaining?.length
+          ? ` Still missing: ${remaining.join(', ')}.`
+          : '';
+        throw new Error(`${execution.error || `Credential submission failed (${response.status})`}${detail}`);
+      }
+      const actionReceipt = pendingInteraction.actionReceipts?.find(
+        (receipt) => receipt.toolId === credentialRequest.toolId && receipt.outcome === 'question_asked',
+      );
+      const completedReceipt = {
+        toolId: credentialRequest.toolId,
+        isError: false,
+        content: JSON.stringify(execution.output ?? { status: execution.status, toolId: credentialRequest.toolId }),
+        outcome: 'success' as const,
+        ...(actionReceipt?.actionKey ? { actionKey: actionReceipt.actionKey } : {}),
+      };
+      pendingInteraction = {
+        ...pendingInteraction,
+        actionReceipts: [
+          ...(pendingInteraction.actionReceipts || []).filter(
+            (receipt) => !(receipt.toolId === credentialRequest.toolId && receipt.outcome === 'question_asked'),
+          ),
+          completedReceipt,
+        ],
+      };
+      interactionResponse = `The required credentials were securely supplied. Tool Executor completed "${credentialRequest.toolName}". Use its verified action receipt and do not repeat the action.`;
+    } else if (pendingInteraction?.kind === 'mcp_permission') {
       const decision = continuation.permissionDecision;
       if (!decision || !pendingInteraction.requestId) {
         throw new Error('A permission decision is required for the pending MCP tool request');

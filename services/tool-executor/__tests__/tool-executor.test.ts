@@ -1646,6 +1646,74 @@ console.log(JSON.stringify({ success: true, data: cfg }));`,
       expect(credRes.status).toBe(200);
       expect(credRes.body.status).toBe('completed');
     });
+
+    it('resolves a Vault-stored credential bundle when resuming a missing-credential request', async () => {
+      const credentialTool = {
+        id: 'cred-vault-bundle-1',
+        name: 'Vault Bundle Tool',
+        description: 'Tool with two credentials supplied as one secure answer',
+        type: 'code',
+        manifest: {
+          language: 'javascript',
+          entrypoint: 'index.js',
+          sourceCode: `
+            const result = {
+              hasToken: process.env.BUNDLE_TEST_TOKEN === 'token-value',
+              hasEndpoint: process.env.BUNDLE_TEST_ENDPOINT === 'https://service.test',
+            };
+            console.log(JSON.stringify(result));
+          `,
+          credentialSource: {
+            token: { envVar: 'BUNDLE_TEST_TOKEN' },
+            endpoint: { envVar: 'BUNDLE_TEST_ENDPOINT' },
+          },
+        },
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      const previousVaultUrl = process.env.VAULT_URL;
+      process.env.VAULT_URL = 'http://vault.test';
+      const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          plaintext: JSON.stringify({
+            token: 'token-value',
+            endpoint: 'https://service.test',
+          }),
+        }),
+      } as Response);
+
+      try {
+        await request(app).post('/api/tools').send(credentialTool);
+        const executeResponse = await request(app)
+          .post('/api/tools/cred-vault-bundle-1/execute')
+          .send({ input: {} });
+        expect(executeResponse.status).toBe(428);
+
+        const credentialResponse = await request(app)
+          .post(`/api/executions/${executeResponse.body.request.executionId}/credentials`)
+          .send({
+            credentials: {
+              token: 'vault://mission-credential-bundle-1',
+              endpoint: 'vault://mission-credential-bundle-1',
+            },
+          });
+
+        expect(credentialResponse.status).toBe(200);
+        expect(credentialResponse.body.status).toBe('completed');
+        expect(credentialResponse.body.output.output).toContain('"hasToken":true');
+        expect(credentialResponse.body.output.output).toContain('"hasEndpoint":true');
+        expect(fetchMock).toHaveBeenCalledWith(
+          'http://vault.test/api/vault/secrets/mission-credential-bundle-1/decrypt',
+          expect.objectContaining({ method: 'GET' }),
+        );
+      } finally {
+        fetchMock.mockRestore();
+        if (previousVaultUrl === undefined) delete process.env.VAULT_URL;
+        else process.env.VAULT_URL = previousVaultUrl;
+      }
+    });
   });
 
   describe('Event skill credential alignment', () => {

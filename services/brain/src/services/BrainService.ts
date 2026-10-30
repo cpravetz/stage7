@@ -375,16 +375,24 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
       const routingKey = modelRoutingKey(candidate.model);
       const provider = this.providers.find((p) => p.id === candidate.model.provider);
       if (!provider) {
+        attemptedModelIds.add(routingKey);
+        attemptedThisCall.add(routingKey);
         lastErr = new Error(`Provider '${candidate.model.provider}' is not registered`);
         logger.warn({ candidate }, 'Skipping candidate: provider not registered');
         continue;
       }
       if (!provider.isAvailable()) {
+        attemptedModelIds.add(routingKey);
+        attemptedThisCall.add(routingKey);
         lastErr = new Error(`Provider '${provider.id}' is not available`);
         logger.warn({ provider: provider.id }, 'Skipping candidate: provider not available');
         continue;
       }
-      if (unavailableProviders.has(provider.id)) continue;
+      if (unavailableProviders.has(provider.id)) {
+        attemptedModelIds.add(routingKey);
+        attemptedThisCall.add(routingKey);
+        continue;
+      }
 
       const req: CompletionRequest = {
         model: candidate.model.id,
@@ -400,6 +408,8 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
       lastCandidate = { id: candidate.model.id, provider: provider.id };
       const breaker = this.circuitBreakers.get(provider.id) || new CircuitBreaker(Number(process.env.BRAIN_CIRCUIT_THRESHOLD) || 8, Number(process.env.BRAIN_CIRCUIT_COOLDOWN_MS) || 60000);
       if (breaker.getState() === 'open') {
+        attemptedModelIds.add(routingKey);
+        attemptedThisCall.add(routingKey);
         const circuitError = new Error(
           `Provider temporarily unavailable after repeated failures. Retry in about ${Math.max(1, Math.ceil(breaker.getRemainingCooldownMs() / 1000))} seconds.`,
         );
@@ -430,6 +440,30 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
           attemptedModelIds.add(routingKey);
           attemptedThisCall.add(routingKey);
           const response: CompletionResponse = await withProviderTimeout(provider.complete(req));
+          if (typeof response.content !== 'string' || response.content.trim().length === 0) {
+            const emptyCompletionError = new Error('Provider returned an empty completion');
+            lastErr = emptyCompletionError;
+            lastFailureWasLogged = true;
+            this.addLog({
+              type: 'error',
+              model: candidate.model.id,
+              provider: provider.id,
+              promptPreview,
+              missionId: options.missionId,
+              success: false,
+              durationMs: Date.now() - startTime,
+              error: emptyCompletionError.message,
+            });
+            await this.recordPerformanceMetrics(
+              candidate.model.id,
+              provider.id,
+              Date.now() - candidateStartTime,
+              undefined,
+              undefined,
+              false,
+            );
+            break;
+          }
           breaker.recordSuccess();
 
           const result: CompletionResult = {
@@ -681,7 +715,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
         ? BRAIN_MODEL_SELECTION_EXHAUSTED
         : BRAIN_MODEL_SELECTION_RETRY;
       const message = remainingModelCount === 0
-        ? `Every eligible model was tried, but none completed the request. Last provider error: ${finalErrMsg}`
+        ? `Every eligible model was attempted or unavailable, but none completed the request. Last provider error: ${finalErrMsg}`
         : `Brain could not complete the request yet; ${remainingModelCount} eligible model(s) remain untried. Last provider error: ${finalErrMsg}`;
       // While eligible models remain, this call is a routing decision and not a
       // verdict: the caller retries, the routing session hands it a model that

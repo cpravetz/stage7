@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { fetchJSON, postJSON, putJSON } from '../utils/api';
+import { fetchJSON, postJSON, putJSON, deleteResource } from '../utils/api';
 import { SchemaFields } from '../components/SchemaFields';
 import OutputTemplate from '../components/OutputTemplate';
 import { getInitialInputValues } from '../utils/workspaceHelpers';
@@ -309,7 +309,7 @@ const Tools = () => {
     if (!selectedTool) return;
     if (!confirm(`Delete tool "${selectedTool.name}"? This action cannot be undone.`)) return;
     try {
-      await fetchJSON(`/api/tool-executor/tools/${encodeURIComponent(selectedTool.id)}`, { method: 'DELETE' });
+      await deleteResource(`/api/tool-executor/tools/${encodeURIComponent(selectedTool.id)}`);
       setSelectedTool(null);
       setEditMode(false);
       await loadTools();

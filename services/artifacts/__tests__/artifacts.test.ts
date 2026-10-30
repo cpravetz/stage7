@@ -217,6 +217,49 @@ describe('InMemoryStore', () => {
       ]));
     });
 
+    it('deduplicates the same artifact identity when mirrored content differs', async () => {
+      const app = express();
+      app.use(express.json());
+      app.use('/api/artifacts/missions', missionRoutes);
+      const base = '/api/artifacts/missions/mission-artifact-content-refresh';
+      await request(app).put(`${base}/plan`).send({
+        phases: [{
+          id: 'phase-1',
+          name: 'Research',
+          status: 'completed',
+          tasks: [{
+            id: 'phase-1-task-1',
+            title: 'Write report',
+            status: 'completed',
+            expectedArtifacts: ['report.md'],
+            artifacts: [{
+              id: 'report-id',
+              artifactId: 'report-lineage',
+              name: 'report.md',
+              content: 'Initial report content',
+            }],
+          }],
+        }],
+      }).expect(200);
+      await request(app).put(`${base}/tasks/phase-1-task-1`).send({
+        status: 'completed',
+        artifacts: [{
+          id: 'report-id',
+          artifactId: 'report-lineage',
+          name: 'report.md',
+          content: 'Updated report content',
+        }],
+      }).expect(200);
+
+      const response = await request(app).get(`${base}/artifacts`).expect(200);
+      expect(response.body.artifacts).toHaveLength(1);
+      expect(response.body.artifacts[0]).toMatchObject({
+        id: 'report-id',
+        artifactId: 'report-lineage',
+        content: 'Updated report content',
+      });
+    });
+
     it('assigns phase-scoped lineage and latest-version metadata to matching planned deliverables', async () => {
       const app = express();
       app.use(express.json());

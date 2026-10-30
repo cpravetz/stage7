@@ -11,7 +11,11 @@ import { MissionAgentRuntime, MissionAgentConfig, TaskExecutionResult } from '..
 import { applyPhaseReview, MissionPhaseReview } from '../agent/MissionAgentRuntime';
 import { isHumanAgentRole } from '../planner/MissionPlanner';
 import { MissionOrchestrator } from '../planner/MissionOrchestrator';
-import { CompletedTaskSummary, WorkflowInput } from '../types/workflow';
+import {
+  CompletedTaskSummary,
+  missionExecutionEvidenceGaps,
+  WorkflowInput,
+} from '../types/workflow';
 
 export interface MissionTaskActivityInput {
   input: WorkflowInput;
@@ -80,6 +84,14 @@ export interface MissionCompletionActivityInput {
 
 function serviceUrl(name: string, fallback: string): string {
   return process.env[name] || fallback;
+}
+
+function plannerAgentId(input: WorkflowInput): string {
+  const retryCount = input.metadata?.retryCount;
+  const retryScope = typeof retryCount === 'number' && Number.isSafeInteger(retryCount) && retryCount > 0
+    ? `-retry-${retryCount}`
+    : '';
+  return `agent-${input.missionId}-planner${retryScope}`;
 }
 
 function agentMemoryMetadata(input: WorkflowInput): Record<string, unknown> {
@@ -189,13 +201,16 @@ export async function prepareMissionActivity(input: WorkflowInput): Promise<Plan
     const response = await fetch(
       `${persistenceUrl}/api/artifacts/missions/${encodeURIComponent(input.missionId)}/plan`,
     );
-    if (!response.ok) {
+    if (response.status !== 404 && !response.ok) {
       const details = (await response.text()).slice(0, 1000);
       throw new Error(`Could not load persisted plan for mission retry (${response.status}): ${details}`);
     }
-    const plan = PlanSchema.parse(await response.json());
-    logger.info({ missionId: input.missionId }, 'Reusing persisted plan for mission retry');
-    return plan;
+    if (response.ok) {
+      const plan = PlanSchema.parse(await response.json());
+      logger.info({ missionId: input.missionId }, 'Reusing persisted plan for mission retry');
+      return plan;
+    }
+    logger.info({ missionId: input.missionId }, 'No persisted plan for mission retry; generating a new plan');
   }
 
   await broadcast(input, {
@@ -204,7 +219,7 @@ export async function prepareMissionActivity(input: WorkflowInput): Promise<Plan
     timestamp: Date.now(),
     data: {
       prompt: input.prompt,
-      agentId: `agent-${input.missionId}-planner`,
+      agentId: plannerAgentId(input),
       agentName: 'Mission Planner',
       agentRole: 'planner',
       status: 'planning',
@@ -229,7 +244,7 @@ export async function prepareMissionActivity(input: WorkflowInput): Promise<Plan
         status: progress.status,
         reason: progress.reason,
         transient: progress.transient,
-        agentId: `agent-${input.missionId}-planner`,
+        agentId: plannerAgentId(input),
         agentName: 'Mission Planner',
         agentRole: 'planner',
       },
@@ -243,7 +258,7 @@ export async function prepareMissionActivity(input: WorkflowInput): Promise<Plan
     timestamp: Date.now(),
     data: {
       plan,
-      agentId: `agent-${input.missionId}-planner`,
+      agentId: plannerAgentId(input),
       agentName: 'Mission Planner',
       agentRole: 'planner',
       status: 'completed',
@@ -636,28 +651,8 @@ export async function completeMissionActivity({
   outputs: { phases: MissionPhaseOutput[]; status: 'completed' | 'incomplete'; gaps?: string[] };
   compensations: Array<{ phaseId: string; action: string }>;
 }> {
-  const expectedPhaseIds = plan.phases.map((phase) => phase.id);
-  const actualPhaseIds = phases.map((phase) => phase.phaseId);
-  const expectedTasks = plan.phases.flatMap((phase) => phase.tasks.map((task) => `${phase.id}\u0000${task.id}`));
-  const actualTasks = phases.flatMap((phase) => phase.tasks.map((task) => ({
-    key: `${phase.phaseId}\u0000${task.taskId}`,
-    status: task.status,
-  })));
   const gaps: string[] = [];
-  if (
-    phases.length !== plan.phases.length
-    || expectedPhaseIds.some((phaseId) => !actualPhaseIds.includes(phaseId))
-    || phases.some((phase) => phase.status !== 'completed')
-  ) {
-    gaps.push('One or more planned phases are missing or did not complete successfully.');
-  }
-  if (
-    actualTasks.length !== expectedTasks.length
-    || actualTasks.some((task) => task.status !== 'completed')
-    || expectedTasks.some((taskId) => !actualTasks.some((task) => task.key === taskId))
-  ) {
-    gaps.push('One or more planned tasks are missing or did not complete successfully.');
-  }
+  gaps.push(...missionExecutionEvidenceGaps(plan, phases));
 
   if (gaps.length === 0) {
     const plannedTasks = new Map(plan.phases.flatMap((phase) =>
@@ -671,6 +666,7 @@ export async function completeMissionActivity({
           output: task.output || '',
           artifactNames: artifacts.map((artifact) => artifact.name),
           artifacts,
+          expectedArtifacts: plannedTasks.get(JSON.stringify([phase.phaseId, task.taskId]))?.expectedArtifacts || [],
           requiredActions: plannedTasks.get(JSON.stringify([phase.phaseId, task.taskId]))?.requiredActions || [],
         };
       }),

@@ -152,7 +152,7 @@ function extractAgentsFromEvents(events: Array<{ type: string; missionId?: strin
 
 // Roles that are architectural elements or system processes, not
 // task-executing agents. They should not appear as agent cards.
-const SYSTEM_ROLES = new Set(['planner', 'mission-evaluator', 'phase-review', 'brain']);
+const SYSTEM_ROLES = new Set(['mission-evaluator', 'phase-review', 'brain']);
 
 const LIFECYCLE_EVENT_TYPES = new Set([
   'task_started', 'task_completed', 'task_failed',
@@ -204,13 +204,41 @@ const AgentOutputsPanel = ({ missionId, missionStatus, plan }: AgentOutputsPanel
 
   useEffect(() => {
     let mounted = true;
+    const activeRequests = new Set<AbortController>();
     const load = async () => {
-      setLoading(true);
+      if (activeRequests.size > 0) return;
       setError(null);
       const eventAgents = extractAgentsFromEvents(eventsRef.current, missionId)
         .filter((agent) => !SYSTEM_ROLES.has(String(agent.role || '').toLowerCase()));
+      const planAgents = extractAgentsFromPlan(plan, missionId)
+        .filter((agent) => !SYSTEM_ROLES.has(String(agent.role || '').toLowerCase()));
+      const fallbackAgents = new Map<string, AgentInfo>();
+      for (const agent of eventAgents) fallbackAgents.set(agent.id, agent);
+      for (const agent of planAgents) {
+        if (!fallbackAgents.has(agent.id)) fallbackAgents.set(agent.id, { ...agent, status: agent.status || 'planned' });
+      }
+      if (missionStatus === 'running' && !fallbackAgents.has(`agent-${missionId}-planner`)) {
+        fallbackAgents.set(`agent-${missionId}-planner`, {
+          id: `agent-${missionId}-planner`,
+          name: 'Mission Planner',
+          role: 'planner',
+          status: 'planning',
+        });
+      }
+      setAgents(Array.from(fallbackAgents.values()));
+      setLoading(fallbackAgents.size === 0);
+
+      const controller = new AbortController();
+      activeRequests.add(controller);
+      let timedOut = false;
+      const timeout = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, 8_000);
       try {
-        const res = await fetch(`/api/agent-runtime/missions/${encodeURIComponent(missionId)}/agents`);
+        const res = await fetch(`/api/agent-runtime/missions/${encodeURIComponent(missionId)}/agents`, {
+          signal: controller.signal,
+        });
         if (!res.ok) throw new Error(`Failed to load agents: ${res.status}`);
         const data = await res.json();
         if (!mounted) return;
@@ -260,11 +288,11 @@ const AgentOutputsPanel = ({ missionId, missionStatus, plan }: AgentOutputsPanel
             status: 'planning',
           });
         }
-        // If mission is complete/finished, override agent statuses to completed/idle
+        // A failed mission must not make its planner look successful.
         if (missionStatus === 'completed' || missionStatus === 'failed' || missionStatus === 'canceled' || missionStatus === 'incomplete' || missionStatus === 'awaiting_review' || missionStatus === 'needs_review') {
           for (const [id, agent] of merged.entries()) {
             if (agent.role === 'planner') {
-              merged.set(id, { ...agent, status: 'completed' });
+              merged.set(id, { ...agent, status: missionStatus === 'failed' ? 'failed' : 'completed' });
             } else {
               merged.set(id, { ...agent, status: agent.status === 'failed' ? 'failed' : 'completed' });
             }
@@ -274,10 +302,10 @@ const AgentOutputsPanel = ({ missionId, missionStatus, plan }: AgentOutputsPanel
       } catch (err) {
         if (!mounted) return;
         // Fallback to event-derived agents + plan agents
-        const planAgents = extractAgentsFromPlan(plan, missionId).filter((a) => !SYSTEM_ROLES.has(String(a.role || '').toLowerCase()));
+        const fallbackPlanAgents = extractAgentsFromPlan(plan, missionId).filter((a) => !SYSTEM_ROLES.has(String(a.role || '').toLowerCase()));
         const merged = new Map<string, AgentInfo>();
         for (const a of eventAgents) merged.set(a.id, a);
-        for (const a of planAgents) if (!merged.has(a.id)) merged.set(a.id, { ...a, status: a.status || 'planned' });
+        for (const a of fallbackPlanAgents) if (!merged.has(a.id)) merged.set(a.id, { ...a, status: a.status || 'planned' });
         if (missionStatus === 'running' && !merged.has(`agent-${missionId}-planner`)) {
           merged.set(`agent-${missionId}-planner`, {
             id: `agent-${missionId}-planner`,
@@ -289,15 +317,19 @@ const AgentOutputsPanel = ({ missionId, missionStatus, plan }: AgentOutputsPanel
         if (missionStatus === 'completed' || missionStatus === 'failed' || missionStatus === 'canceled' || missionStatus === 'incomplete' || missionStatus === 'awaiting_review' || missionStatus === 'needs_review') {
           for (const [id, agent] of merged.entries()) {
             if (agent.role === 'planner') {
-              merged.set(id, { ...agent, status: 'completed' });
+              merged.set(id, { ...agent, status: missionStatus === 'failed' ? 'failed' : 'completed' });
             } else {
               merged.set(id, { ...agent, status: agent.status === 'failed' ? 'failed' : 'completed' });
             }
           }
         }
         setAgents(Array.from(merged.values()));
-        setError(err instanceof Error ? err.message : String(err));
+        setError(timedOut
+          ? 'Agent status request timed out after 8 seconds; showing agents from the plan and mission events.'
+          : err instanceof Error ? err.message : String(err));
       } finally {
+        clearTimeout(timeout);
+        activeRequests.delete(controller);
         if (mounted) setLoading(false);
       }
     };
@@ -308,6 +340,7 @@ const AgentOutputsPanel = ({ missionId, missionStatus, plan }: AgentOutputsPanel
     return () => {
       mounted = false;
       if (interval) clearInterval(interval);
+      for (const controller of activeRequests) controller.abort();
     };
   }, [missionId, missionStatus, plan]);
 

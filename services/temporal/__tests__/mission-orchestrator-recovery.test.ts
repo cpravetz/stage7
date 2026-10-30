@@ -51,7 +51,7 @@ describe('MissionOrchestrator checkpoint recovery', () => {
       { phases: [] },
     )).resolves.toEqual({
       satisfied: false,
-      gaps: ['Completed 0 of 1 planned phases.'],
+      gaps: ['Phase "Execution" (phase-1) has no execution result.'],
     })
   })
 

@@ -483,13 +483,29 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
     );
     const status: WorkflowResult['status'] =
       result.outputs.status === 'incomplete' || hasUnsuccessfulPhase ? 'incomplete' : 'completed';
+    const workflowGaps = phases.flatMap((phase) => [
+      ...(phase.status !== 'completed'
+        ? [`Phase "${phase.name}" (${phase.phaseId}) did not complete successfully.`]
+        : []),
+      ...phase.tasks
+        .filter((task) => task.status !== 'completed')
+        .map((task) => {
+          const plannedTask = plan.phases
+            .find((candidate) => candidate.id === phase.phaseId)
+            ?.tasks.find((candidate) => candidate.id === task.taskId);
+          return `Task "${plannedTask?.title || task.taskId}" (${task.taskId}) is ${task.status}.`
+            + (task.output ? ` Reason: ${task.output.slice(0, 500)}` : '');
+        }),
+    ]);
     const output = status === 'incomplete' && result.outputs.status !== 'incomplete'
       ? {
         ...result,
         outputs: {
           ...result.outputs,
           status: 'incomplete' as const,
-          gaps: ['One or more planned phases or tasks did not complete successfully.'],
+          gaps: workflowGaps.length > 0
+            ? workflowGaps
+            : ['Mission completion validation found an incomplete phase or task not represented in the review result.'],
         },
       }
       : result;

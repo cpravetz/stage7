@@ -1,5 +1,6 @@
 import {
   BRAIN_MODEL_SELECTION_EXHAUSTED,
+  BRAIN_MODEL_SELECTION_RETRY,
   Plan,
   Task,
 } from '@stage7-nextgen/shared'
@@ -7,6 +8,7 @@ import {
   generateValidPlan,
   missionTaskActionIssues,
   missionTaskDependencyIssues,
+  PLANNER_SYSTEM_PROMPT,
   PlannerCompletionRequest,
 } from '../src/planner/MissionPlanner'
 
@@ -41,6 +43,135 @@ function validPlan(phaseCount = 3): Plan {
 }
 
 describe('generateValidPlan', () => {
+  it('plans outcomes separately from actions without assuming a specific implementation capability', () => {
+    expect(PLANNER_SYSTEM_PROMPT).toContain('Do not assume a particular provider, integration, or runtime configuration')
+    expect(PLANNER_SYSTEM_PROMPT).toContain('separate those tasks and make the action depend on the output task')
+    expect(PLANNER_SYSTEM_PROMPT).toContain('create an artifact containing that output')
+    expect(PLANNER_SYSTEM_PROMPT).toContain('missing capability does not replace a requested artifact with a refusal')
+    expect(PLANNER_SYSTEM_PROMPT).toContain('Do not turn capability resolution into a mission task')
+    expect(PLANNER_SYSTEM_PROMPT).toContain('plan the operational goal and let the runtime resolve the capability')
+  })
+
+  it('folds intermediate capability setup into the operational task when the user requested an action', async () => {
+    const plan = validPlan(2)
+    plan.summary = 'Plan to create a messaging service then use it to send the requested message'
+    plan.phases[0]!.tasks = [{
+      id: 'phase-1-task-1',
+      title: 'Create a messaging service',
+      description: 'Develop a service for sending messages.',
+      agentRole: 'Developer',
+      systemPrompt: 'Develop a service that sends a message.',
+      dependsOnTaskIds: [],
+      expectedArtifacts: ['phase-1-task-1-executable'],
+      requiredActions: [],
+      status: 'pending',
+      artifacts: [],
+    }]
+    plan.phases[1]!.tasks = [{
+      id: 'phase-2-task-1',
+      title: 'Send the message using the messaging service tool',
+      description: 'Use the developed messaging service to send the requested message.',
+      agentRole: 'Agent',
+      systemPrompt: 'Use the messaging service created in phase-1-task-1 to send the requested message. The tool output should include a receipt.',
+      dependsOnTaskIds: ['phase-1-task-1'],
+      expectedArtifacts: ['sent-message-receipt'],
+      requiredActions: [],
+      status: 'pending',
+      artifacts: [],
+    }]
+    const complete = jest.fn(async (): Promise<string> => JSON.stringify(plan))
+
+    const generated = await generateValidPlan(
+      'Send the requested message. You do not have a messaging tool yet, so create one.',
+      {},
+      'mission-capability-setup',
+      complete,
+    )
+
+    expect(generated.phases).toHaveLength(1)
+    expect(generated.phases[0]?.tasks).toHaveLength(1)
+    expect(generated.phases[0]?.tasks[0]).toEqual(expect.objectContaining({
+      id: 'phase-2-task-1',
+      title: 'Send the message using available capabilities',
+      expectedArtifacts: [],
+      dependsOnTaskIds: [],
+    }))
+    expect(generated.phases[0]?.tasks[0]?.systemPrompt).toContain('send the requested message')
+    expect(generated.phases[0]?.tasks[0]?.systemPrompt).toContain('the action result')
+    expect(generated.phases[0]?.tasks[0]?.systemPrompt).toContain('let the runtime discover, acquire, or create and register one')
+    expect(generated.phases[0]?.tasks[0]?.systemPrompt).not.toContain('messaging service created in')
+    expect(generated.phases[0]?.tasks[0]?.systemPrompt).not.toContain('tool output')
+    expect(generated.summary).toBe('Send the message using available capabilities')
+  })
+
+  it('converts preparation and capability-artifact plans into actual action tasks', async () => {
+    const plan = validPlan(4)
+    const makeTask = (id: string, title: string, expectedArtifacts: string[]) => ({
+      id,
+      title,
+      description: title,
+      agentRole: 'Mission Agent',
+      systemPrompt: title,
+      dependsOnTaskIds: [],
+      expectedArtifacts,
+      requiredActions: [],
+      status: 'pending' as const,
+      artifacts: [],
+    })
+    plan.summary = 'Create text and email services, then send both messages'
+    plan.phases[0]!.tasks = [makeTask('text-content-task', 'Generate text content', ['text-content'])]
+    plan.phases[1]!.tasks = [makeTask('email-content-task', 'Generate email content', ['email-content'])]
+    plan.phases[2]!.tasks = [makeTask('text-service-task', 'Create and configure text tool', ['text_tool_configuration'])]
+    plan.phases[3]!.tasks = [makeTask('email-service-task', 'Create and configure email tool', ['email_tool_configuration'])]
+    const complete = jest.fn(async (): Promise<string> => JSON.stringify(plan))
+
+    const generated = await generateValidPlan(
+      'Send a text to 347-882-8389 that reads "Watson, come here." You do not have text services or tools yet - you will need to create them. Send the same message as an email to chris@pravetz.net.',
+      {},
+      'mission-capability-artifact-plan',
+      complete,
+    )
+    const tasks = generated.phases.flatMap((phase) => phase.tasks)
+
+    expect(tasks).toHaveLength(2)
+    expect(tasks.map((task) => task.title)).toEqual(['Send text', 'Send email'])
+    expect(tasks.every((task) => task.expectedArtifacts.length === 0)).toBe(true)
+    expect(tasks.every((task) => (task.dependsOnTaskIds || []).length === 0)).toBe(true)
+    expect(tasks.every((task) => task.systemPrompt.includes('let the runtime discover, acquire, or create and register one'))).toBe(true)
+    expect(tasks.every((task) => task.systemPrompt.includes('Watson, come here.'))).toBe(true)
+    expect(tasks.some((task) => /create (?:text|email) service/i.test(task.title))).toBe(false)
+  })
+
+  it('preserves a capability setup task when the user explicitly requests a reusable deliverable', async () => {
+    const plan = validPlan(2)
+    plan.phases[0]!.tasks[0] = {
+      ...plan.phases[0]!.tasks[0]!,
+      title: 'Create a messaging service',
+      description: 'Develop a reusable service for sending messages.',
+      systemPrompt: 'Develop a reusable messaging service.',
+      expectedArtifacts: ['messaging-service'],
+    }
+    plan.phases[1]!.tasks[0] = {
+      ...plan.phases[1]!.tasks[0]!,
+      title: 'Send the message',
+      description: 'Use the developed messaging service to send the requested message.',
+      systemPrompt: 'Use the messaging service created in task-1 to send the requested message.',
+      dependsOnTaskIds: ['task-1'],
+    }
+    const complete = jest.fn(async (): Promise<string> => JSON.stringify(plan))
+
+    const generated = await generateValidPlan(
+      'Create a reusable messaging service as a deliverable, then send the requested message.',
+      {},
+      'mission-reusable-capability',
+      complete,
+    )
+
+    expect(generated.phases).toHaveLength(2)
+    expect(generated.phases[0]?.tasks[0]?.expectedArtifacts).toEqual(['messaging-service'])
+    expect(generated.phases[1]?.tasks[0]?.dependsOnTaskIds).toEqual(['task-1'])
+  })
+
   it('fills only unambiguous initial planning defaults locally', async () => {
     const plan = validPlan(1)
     delete (plan.phases[0] as any).requiresApproval
@@ -578,6 +709,18 @@ describe('generateValidPlan', () => {
     expect(calls).toBe(2)
   })
 
+  it('does not restart planning when Agent Runtime reports that model routing made no progress', async () => {
+    const complete = jest.fn(async (): Promise<string> => {
+      throw new Error(
+        `Brain model routing made no progress after 2 retry request(s): ${BRAIN_MODEL_SELECTION_RETRY}; 2 eligible model(s) remain untried`,
+      )
+    })
+
+    await expect(generateValidPlan('Create a business plan', {}, 'mission-routing-stalled', complete))
+      .rejects.toThrow('Brain routing did not complete within the current planner task')
+    expect(complete).toHaveBeenCalledTimes(1)
+  })
+
   it('does not retry unrelated Planner or control-plane errors indefinitely', async () => {
     const complete = jest.fn(async (): Promise<string> => {
       throw new Error('Agent Runtime unavailable')
@@ -606,6 +749,25 @@ describe('generateValidPlan', () => {
     expect(requests[1]?.prompt).not.toContain('Make only these')
   })
 
+  it('retries a Brain completion with no content using the same repair request', async () => {
+    const requests: PlannerCompletionRequest[] = []
+    const complete = async (request: PlannerCompletionRequest): Promise<string> => {
+      requests.push(request)
+      if (request.attempt === 1) return '{"summary":"incomplete"}'
+      if (request.attempt === 2) {
+        throw new Error('Agent Runtime API /missions/mission-1/agents/agent-planner/tasks/attempt-2/execute failed (500): {"error":"Brain returned a completion without content"}')
+      }
+      return JSON.stringify(validPlan())
+    }
+
+    const plan = await generateValidPlan('Create a business plan', {}, 'mission-empty-completion', complete)
+
+    expect(plan.phases).toHaveLength(3)
+    expect(requests).toHaveLength(3)
+    expect(requests[1]?.prompt).toContain('Make only these')
+    expect(requests[2]?.prompt).toContain('Make only these')
+  })
+
   it('retries transient Brain failures while eligible models remain', async () => {
     const requests: PlannerCompletionRequest[] = []
     const complete = async (request: PlannerCompletionRequest): Promise<string> => {
@@ -621,6 +783,16 @@ describe('generateValidPlan', () => {
 
     expect(plan.phases).toHaveLength(3)
     expect(requests).toHaveLength(4)
+  })
+
+  it('bounds repeated transient Brain failures with a specific error', async () => {
+    const complete = jest.fn(async (): Promise<string> => {
+      throw new Error('Brain request failed (504): provider timed out')
+    })
+
+    await expect(generateValidPlan('Create a business plan', {}, 'mission-transient-limit', complete))
+      .rejects.toThrow('after 3 transient Brain retries')
+    expect(complete).toHaveBeenCalledTimes(4)
   })
 
   it('accepts a plan whose phase object was closed twice', async () => {

@@ -18,14 +18,16 @@ class MockProvider implements LLMProvider {
   lastRequest: CompletionRequest | null = null;
   failure: Error | null = null;
   modelFailures = new Map<string, Error>();
+  responsesByModel = new Map<string, CompletionResponse>();
   calls = 0;
+  available = true;
   response: CompletionResponse = {
     content: 'mocked response',
     model: 'mock-model',
     provider: 'mock',
     tokensUsed: 10,
   };
-  isAvailable(): boolean { return true; }
+  isAvailable(): boolean { return this.available; }
   async listModels() {
     return [
       { id: 'mock-model', capabilities: ['chat', 'code', 'reasoning', 'creative'], maxTokens: 128000, costPer1kTokens: 0.1, inputFormat: 'image', outputFormat: 'text' },
@@ -38,7 +40,7 @@ class MockProvider implements LLMProvider {
     const modelFailure = this.modelFailures.get(req.model);
     if (modelFailure) throw modelFailure;
     if (this.failure) throw this.failure;
-    return this.response;
+    return this.responsesByModel.get(req.model) || this.response;
   }
 }
 
@@ -58,7 +60,9 @@ describe('BrainService', () => {
     mockProviderInstance.lastRequest = null;
     mockProviderInstance.failure = null;
     mockProviderInstance.modelFailures.clear();
+    mockProviderInstance.responsesByModel.clear();
     mockProviderInstance.calls = 0;
+    mockProviderInstance.available = true;
     mockProviderInstance.response = {
       content: 'mocked response',
       model: 'mock-model',
@@ -458,10 +462,32 @@ describe('BrainService', () => {
 
     await expect(brain.complete('Retry while the provider circuit is open', options)).rejects.toMatchObject({
       details: {
-        code: BRAIN_MODEL_SELECTION_RETRY,
-        remainingModelCount: 1,
+        code: BRAIN_MODEL_SELECTION_EXHAUSTED,
+        attemptedModelCount: 2,
       },
     });
+
+  });
+
+  it('exhausts routing when every candidate provider is unavailable', async () => {
+    mockProviderInstance.available = false;
+    const options = { missionId: 'mission-unavailable', routingSessionId: 'mission-unavailable:planner' };
+
+    await expect(brain.complete('Plan with no available provider', options)).rejects.toMatchObject({
+      details: {
+        code: BRAIN_MODEL_SELECTION_EXHAUSTED,
+        eligibleModelCount: 1,
+        attemptedModelCount: 1,
+      },
+    });
+
+    await expect(brain.complete('Retry with no available provider', options)).rejects.toMatchObject({
+      details: {
+        code: BRAIN_MODEL_SELECTION_EXHAUSTED,
+        attemptedModelCount: 2,
+      },
+    });
+    expect(mockProviderInstance.calls).toBe(0);
   });
 
   it('reloads persisted measured outcomes and uses them in a later Brain instance', async () => {
@@ -580,6 +606,57 @@ describe('BrainService', () => {
       await brain.complete('Continue the chat response', options);
       expect(mockProviderInstance.lastRequest?.model).not.toBe('mock-model');
       expect(mockProviderInstance.lastRequest?.model).toBe('mock-expensive');
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it('routes past a model that returns an empty completion', async () => {
+    mockProviderInstance.responsesByModel.set('mock-model', {
+      content: '',
+      model: 'mock-model',
+      provider: 'mock',
+      tokensUsed: 0,
+    });
+    mockProviderInstance.responsesByModel.set('mock-expensive', {
+      content: 'fallback response',
+      model: 'mock-expensive',
+      provider: 'mock',
+      tokensUsed: 10,
+    });
+
+    const fetchSpy = jest.spyOn(global, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input);
+      const method = init?.method || 'GET';
+      if (url.endsWith('/api/artifacts/documents/llm-config')) {
+        return { ok: true, json: async () => ({ data: { freeModelsOnly: false } }) } as Response;
+      }
+      if (url.endsWith('/api/artifacts/brain/performance-metrics')) {
+        if (method === 'PUT') {
+          return { ok: true, status: 204, json: async () => ({}) } as Response;
+        }
+        return { ok: true, status: 200, json: async () => ({ metrics: [] }) } as Response;
+      }
+      return { ok: true, json: async () => ({}) } as Response;
+    });
+
+    try {
+      const result = await brain.complete('Help me with a chat response', {
+        missionId: 'mission-empty-provider',
+        routingSessionId: 'mission-empty-provider:planner',
+      });
+
+      expect(result.content).toBe('fallback response');
+      expect(result.model).toBe('mock-expensive');
+      expect(mockProviderInstance.calls).toBe(2);
+      expect(brain.getLogs()).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          missionId: 'mission-empty-provider',
+          model: 'mock-model',
+          success: false,
+          error: 'Provider returned an empty completion',
+        }),
+      ]));
     } finally {
       fetchSpy.mockRestore();
     }

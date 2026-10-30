@@ -9,6 +9,12 @@ interface HITLPanelProps {
   handleHITLAction: (approvalId: string, action: 'approved' | 'rejected') => void;
 }
 
+const getMissionWorkflowId = (approval: HITLApproval): string => {
+  if (approval.workflowId) return approval.workflowId;
+  const mid = (approval.missionId || '').replace(/^mission-+/i, '');
+  return mid ? `mission-${mid}` : approval.missionId || '';
+};
+
 export const HITLPanel = ({
   hitlApprovals,
   loadingApprovals,
@@ -30,35 +36,38 @@ export const HITLPanel = ({
         <p>No pending approvals. Review requests will appear here when the assistant asks for approval.</p>
       ) : (
         <ul className="hitl-list">
-          {hitlApprovals.map((approval) => (
-            <li key={approval.id} className={`hitl-item ${approval.status}`}>
-              <div className="hitl-info">
-                <strong>{approval.action}</strong>
-                <p>
-                  Mission:{' '}
-                  <Link to={`/missions/${encodeURIComponent(approval.workflowId || `mission-${approval.missionId}`)}`}>
-                    {approval.missionId}
-                  </Link>
-                  {' · Phase: '} {approval.phaseId}
-                </p>
-                <p className="timestamp">Requested: {new Date(approval.requestedAt).toLocaleString()}</p>
-              </div>
-              {approval.status === 'pending' ? (
-                <div className="hitl-actions">
-                  <Link
-                    to={`/missions/${encodeURIComponent(approval.workflowId || `mission-${approval.missionId}`)}`}
-                    className="link-button"
-                  >
-                    Open Mission Room
-                  </Link>
-                  <button onClick={() => handleHITLAction(approval.id, 'approved')}>Approve</button>
-                  <button className="danger" onClick={() => handleHITLAction(approval.id, 'rejected')}>Reject</button>
+          {hitlApprovals.map((approval) => {
+            const workflowLink = getMissionWorkflowId(approval);
+            return (
+              <li key={approval.id} className={`hitl-item ${approval.status}`}>
+                <div className="hitl-info">
+                  <strong>{approval.action}</strong>
+                  <p>
+                    Mission:{' '}
+                    <Link to={`/missions/${encodeURIComponent(workflowLink)}`}>
+                      {approval.missionId}
+                    </Link>
+                    {' · Phase: '} {approval.phaseId}
+                  </p>
+                  <p className="timestamp">Requested: {new Date(approval.requestedAt).toLocaleString()}</p>
                 </div>
-              ) : (
-                <span className={`badge ${approval.status}`}>{approval.status}</span>
-              )}
-            </li>
-          ))}
+                {approval.status === 'pending' ? (
+                  <div className="hitl-actions">
+                    <Link
+                      to={`/missions/${encodeURIComponent(workflowLink)}`}
+                      className="link-button"
+                    >
+                      Open Mission Room
+                    </Link>
+                    <button onClick={() => handleHITLAction(approval.id, 'approved')}>Approve</button>
+                    <button className="danger" onClick={() => handleHITLAction(approval.id, 'rejected')}>Reject</button>
+                  </div>
+                ) : (
+                  <span className={`badge ${approval.status}`}>{approval.status}</span>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>

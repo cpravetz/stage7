@@ -18,6 +18,7 @@ import {
   MissionActivityCheckpoint,
   MissionPendingInteraction,
   MissionTaskCheckpoint,
+  missionExecutionEvidenceGaps,
 } from '../types/workflow';
 import { PlannerProgress } from './MissionPlanner';
 import type { MissionPhaseOutput } from '../activities/missionWorkflowActivities';
@@ -1003,42 +1004,36 @@ export class MissionOrchestrator {
     if (!plan.phases.length) {
       return { satisfied: false, gaps: ['The mission plan contains no phases.'] };
     }
-    if (phases.length !== plan.phases.length) {
-      return {
-        satisfied: false,
-        gaps: [`Completed ${phases.length} of ${plan.phases.length} planned phases.`],
-      };
-    }
-    if (phases.some((phase) => phase.status !== undefined && phase.status !== 'completed')) {
-      return {
-        satisfied: false,
-        gaps: ['One or more planned phases did not pass their completion review.'],
-      };
-    }
-    const expectedTaskIds = plan.phases.flatMap((phase) =>
-      phase.tasks.map((task) => JSON.stringify([phase.id, task.id])),
-    );
-    const actualTasks = phases.flatMap((phase) =>
-      (phase.tasks || []).map((task) => ({
-        phaseId: phase.phaseId,
-        taskId: task.taskId,
-        status: task.status,
-      })),
-    );
-    const actualTaskIds = actualTasks.map((task) => JSON.stringify([task.phaseId, task.taskId]));
-    if (
-      actualTasks.length !== expectedTaskIds.length
-      || actualTasks.some((task) => task.status !== 'completed')
-      || expectedTaskIds.some((taskId) => !actualTaskIds.includes(taskId))
-    ) {
+    const malformedEvidenceGaps: string[] = [];
+    const evidencePhases = phases.flatMap((phase) => {
+      if (typeof phase.phaseId !== 'string') {
+        malformedEvidenceGaps.push('An execution result is missing its phase ID.');
+        return [];
+      }
+      const tasks = (phase.tasks || []).flatMap((task) => {
+        if (typeof task.taskId !== 'string') {
+          malformedEvidenceGaps.push(`A task result in phase "${phase.phaseId}" is missing its task ID.`);
+          return [];
+        }
+        return [{
+          taskId: task.taskId,
+          status: task.status || 'unknown',
+          artifacts: task.artifacts || [],
+          output: task.output,
+        }];
+      });
+      return [{ phaseId: phase.phaseId, status: phase.status || 'unknown', tasks }];
+    });
+    const evidenceGaps = [
+      ...malformedEvidenceGaps,
+      ...missionExecutionEvidenceGaps(plan, evidencePhases),
+    ];
+    if (evidenceGaps.length > 0) {
       logger.warn(
-        { missionId: ctx.missionId, expectedTaskIds, actualTasks },
-        'Mission completion review refused because the completed task set does not match the plan',
+        { missionId: ctx.missionId, gaps: evidenceGaps },
+        'Mission completion review refused because planned task evidence is incomplete',
       );
-      return {
-        satisfied: false,
-        gaps: ['One or more planned tasks are missing or did not complete successfully.'],
-      };
+      return { satisfied: false, gaps: evidenceGaps };
     }
 
     const agentRuntime = this.agentRuntime || new MissionAgentRuntime({
@@ -1059,6 +1054,7 @@ export class MissionOrchestrator {
           output: task.output || '',
           artifactNames: artifacts.map((artifact) => artifact.name),
           artifacts,
+          expectedArtifacts: plannedTasks.get(JSON.stringify([phase.phaseId, taskId]))?.expectedArtifacts || [],
           requiredActions: plannedTasks.get(JSON.stringify([phase.phaseId, taskId]))?.requiredActions || [],
         };
       }),

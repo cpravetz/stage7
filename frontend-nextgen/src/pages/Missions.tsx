@@ -94,7 +94,7 @@ const Missions = () => {
       const data = await postJSON<{ workflowId: string; status: string; cronSchedule?: string }>(
         '/api/temporal/missions',
         {
-          missionId: missionId || `mission-${Date.now()}`,
+          missionId: missionId || `${Date.now()}`,
           prompt,
           tenantId: 'tenant-1',
           contextChunks: [],
@@ -105,7 +105,7 @@ const Missions = () => {
       const newMission: MissionRow = {
         workflowId: data.workflowId,
         status: data.status,
-        missionId: missionId || `mission-${Date.now()}`,
+        missionId: missionId || `${Date.now()}`,
         ...(data.cronSchedule ? { cronSchedule: data.cronSchedule } : {}),
       };
       addMission(newMission);

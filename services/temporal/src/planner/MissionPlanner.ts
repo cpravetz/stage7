@@ -14,6 +14,7 @@ import { parsePlanJson } from './planJson';
 const MAX_PRIOR_RESPONSE_CHARS = 12_000;
 const MAX_REFINEMENT_ISSUES_PER_REQUEST = 3;
 const MAX_PLAN_REPAIR_ATTEMPTS = 5;
+const MAX_TRANSIENT_BRAIN_RETRIES = 3;
 
 interface PlannerFieldRepair {
   path: PropertyKey[];
@@ -77,6 +78,7 @@ function plannerFieldRepairPrompt(repair: PlannerFieldRepair): string {
  */
 const TRANSIENT_BRAIN_FAILURE_PATTERNS: RegExp[] = [
   /Brain request failed \(5\d\d\)/i,
+  /Brain returned a completion without content/i,
   /Brain request timed out/i,
   /Provider request timed out/i,
   /BRAIN_COMPLETION_DEADLINE/,
@@ -92,15 +94,15 @@ function isTransientBrainFailure(message: string): boolean {
 export const PLANNER_SYSTEM_PROMPT = `You are a mission planner for an AI agent platform. Given a user's goal, produce a complete structured plan tailored to that goal.
 
 Requirements:
-1. Before planning execution, identify every user-provided value or environment-specific configuration required to complete the goal (including recipient details, service endpoints, account identifiers, and sender identities). If any required value is missing, set requiresClarification=true and ask 1-4 focused questions covering only the missing inputs; do not guess, use placeholders, or begin side effects. Keep requiresClarification=true for an ambiguous goal as well. You may ask for a required secret in clarificationQuestions, but prefix that question exactly with '[secret:<safe-key>] ', using a stable key containing only letters, digits, underscores, or hyphens. The Mission Room will save that answer directly to Vault and replace it with a Vault reference before any answer reaches a model. When an answer is supplied as '[secret-ref:<safe-key>] ... vault://...', preserve the reference only in the relevant task context and use it only for a tool input explicitly marked secret. Never echo the reference in user-facing summaries or ask for the secret again. Never ask users to paste secrets into ordinary mission messages. Otherwise set requiresClarification=false and clarificationQuestions=[].
-2. For a goal that does not need clarification, create as many phases and specific tasks as needed to fully accomplish it. Keep every phase meaningful and include at least one task in each phase. Keep descriptions and systemPrompts concise and operational; do not omit required actions, task IDs, dependencies, or consumed outputs to save space.
+1. Before planning execution, identify user-provided values required by the goal itself, independently of implementation choices. If one is missing, set requiresClarification=true and ask 1-4 focused questions; do not guess, use placeholders, or begin side effects. Do not assume a particular provider, integration, or runtime configuration before capability resolution. Ask for configuration only when an available or discovered capability identifies the exact missing value. Keep requiresClarification=true for an ambiguous goal as well. You may ask for a required secret in clarificationQuestions, but prefix that question exactly with '[secret:<safe-key>] ', using a stable key containing only letters, digits, underscores, or hyphens. The Mission Room will save that answer directly to Vault and replace it with a Vault reference before any answer reaches a model. When an answer is supplied as '[secret-ref:<safe-key>] ... vault://...', preserve the reference only in the relevant task context and use it only for a tool input explicitly marked secret. Never echo the reference in user-facing summaries or ask for the secret again. Never ask users to paste secrets into ordinary mission messages. Otherwise set requiresClarification=false and clarificationQuestions=[].
+2. For a goal that does not need clarification, create as many phases and specific tasks as needed to fully accomplish it. Keep every phase meaningful and include at least one task in each phase. When a goal requires both producing an output and taking a separate action with it, separate those tasks and make the action depend on the output task. Keep descriptions and systemPrompts concise and operational; do not omit required actions, task IDs, dependencies, or consumed outputs to save space.
 3. Each phase must include id, name, goal, tasks, requiresApproval, and status. Use "pending" for the initial status.
 4. Each task must include id, title, description, agentRole, systemPrompt, dependsOnTaskIds, expectedArtifacts, requiredActions, status, and artifacts. Use "pending" for the initial status and [] when there are no artifacts or required actions yet. dependsOnTaskIds lists task IDs that must complete first; use [] only when the task is genuinely independent.
 5. Give every phase a unique, stable id. Task ids must be globally unique across the entire plan, not merely unique within each phase. Use ids such as "phase-2-task-1"; never reuse "task-1" in another phase. Dependencies may refer only to tasks in the same or an earlier phase, and must not form a cycle. Select agent roles based on the actual work.
 6. Every task must be executable by an autonomous software Agent. Never assign agentRole "Human", "User", or another human decision-maker. Represent a needed human decision with requiresApproval or requiresClarification instead.
 7. Mark requiresApproval=true only where a human decision is needed before work continues.
-8. A task's systemPrompt must clearly describe the outcome, constraints, and evidence needed to complete the task. Keep instructions focused on what must be accomplished; do not prescribe tool IDs, tool discovery, tool creation, delegation, or implementation steps. The runtime resolves required capabilities using available tools and determines whether an existing tool or a newly created one is needed. Leave requiredActions empty unless a specific action outcome must be independently verified. Do not lock an action to a generic API tool when its endpoint or credentials are not known; the Agent must be able to resolve another capability or report the concrete configuration blocker. If an execution-time discovery reveals a missing non-secret user value, ask the user before continuing rather than inventing it. Secret values must be marked as secret schema inputs and supplied only as Vault references; never include secret values in Agent prompts or mission messages.
-9. Treat expectedArtifacts as user-requested deliverable files only. Do not invent design documents, source-code files, executables, or other artifacts just to describe work or prove an action. For communication, tool-creation, and other action-only tasks, use expectedArtifacts=[] and report the verified text/result in the task output. For email or text-message tasks, produce and send only the exact requested message; do not invent sample/test messages, claim delivery without tool evidence, or wrap the message in Markdown headings, lists, or fences. system-action-receipts.json is internal evidence supplied by the runtime and must never be listed as an expected artifact. Do not promise .exe binaries; generated tools are registered tools, not mission artifacts.
+8. A task's systemPrompt must clearly describe the outcome, constraints, and evidence needed to complete the task. Keep instructions focused on what must be accomplished; do not prescribe tool IDs, tool discovery, tool creation, delegation, or implementation steps. The runtime resolves required capabilities using available tools and determines whether an existing tool or a newly created one is needed. Do not turn capability resolution into a mission task: create/acquire/configure a tool or service as a task only when the user explicitly requests a reusable tool or service as a deliverable. If the user mentions creating a tool as a means to an operational goal, plan the operational goal and let the runtime resolve the capability; do not require a tool-instance artifact. Leave requiredActions empty unless a specific action outcome must be independently verified. Do not lock an action to a generic API tool when its endpoint or credentials are not known; the Agent must be able to resolve another capability or report the concrete configuration blocker. If an execution-time discovery reveals a missing non-secret user value, ask the user before continuing rather than inventing it. Secret values must be marked as secret schema inputs and supplied only as Vault references; never include secret values in Agent prompts or mission messages.
+9. Treat expectedArtifacts as user-requested deliverable files only. Do not invent design documents, source-code files, executables, or other artifacts just to describe work or prove an action. If the user requests an output as a deliverable, create an artifact containing that output—not an execution report, Brain response, or blocker explanation. For action-only tasks, use expectedArtifacts=[] and report the exact verified result in the task output. Keep producing an output distinct from a separate action performed with it so a missing capability does not replace a requested artifact with a refusal. Do not claim an action succeeded without tool evidence. system-action-receipts.json is internal evidence supplied by the runtime and must never be listed as an expected artifact. Do not promise .exe binaries; generated tools are registered tools, not mission artifacts.
 10. When a task produces document artifacts, its systemPrompt must instruct the Agent to begin each artifact with a one-paragraph summary (under 100 words) before the full content, so downstream reviewers can judge the artifact from the summary alone.
 11. If a task consumes another task's result or artifact, list that producer's exact task ID in dependsOnTaskIds and in the task's systemPrompt, and say which output is consumed. Do not refer vaguely to "initial", "final", or "previous" values without naming their producing task IDs. Dependencies belong on the consuming task, not on a producer that merely names a future consumer. Do not infer a dependency from a task ID mentioned in a negative instruction or in a statement that the task's output will be consumed downstream. Include only tasks that produce an input the task actually uses. Dependencies impose execution order and make completed producer outputs available to the Agent.
 
@@ -396,6 +398,158 @@ function looseArtifactPattern(artifactName: string): RegExp | null {
         .join('[^a-z0-9]{0,3}');
     return new RegExp(source, 'i');
 }
+function explicitlyRequestsReusableCapability(prompt: string): boolean {
+    return /\b(?:reusable|standalone|persistent|installable)\b.{0,60}\b(?:tool|service|plugin|integration|connector|sdk|library)\b/i.test(prompt)
+        || /\b(?:tool|service|plugin|integration|connector|sdk|library)\b.{0,60}\b(?:deliverable|artifact|source code|for future use)\b/i.test(prompt);
+}
+function isCapabilitySetupTask(task: Task): boolean {
+    const instructions = [task.title, task.description, task.systemPrompt].join(' ');
+    const createsCapability = /\b(?:create|develop|build|implement|acquire|configure|install|set up)\b[^.!?\n]{0,120}(?:service|tool|plugin|connector|integration|sdk|api)\b/i.test(instructions);
+    const declaresCapabilityArtifact = task.expectedArtifacts.some((artifact) =>
+        /\b(?:service|tool|plugin|connector|integration|instance|executable|binary|source|sdk|api)\b/i.test(
+            artifact.replace(/[_-]+/g, ' '),
+        ),
+    );
+    return createsCapability && declaresCapabilityArtifact;
+}
+function removeCapabilityPrerequisite(instructions: string): string {
+    const prefix = /^\s*(?:given|use|using)\s+(.+?)\s+(?:to|,)\s+/i.exec(instructions);
+    if (prefix && /(?:service|tool|plugin|integration|instance)/i.test(prefix[1] || '')) {
+        return instructions.slice(prefix[0].length).trim();
+    }
+    return instructions
+        .replace(/\b(?:consume|use)\s+(?:the\s+)?output\s+from\s+task\s+[a-z0-9_-]+[^.!?\n]*[.!?]?/gi, '')
+        .trim();
+}
+function removeCapabilityReferences(text: string): string {
+    return text
+        .replace(
+            /\buse\s+(?:the\s+)?(?:[\w-]+\s+){0,5}(?:tool|service|plugin|connector|integration)\b/gi,
+            'perform the requested operation using available capabilities',
+        )
+        .replace(
+            /\b(using|via|through)\s+(?:the\s+)?(?:[\w-]+\s+){0,5}(?:tool|service|plugin|connector|integration)\b/gi,
+            '$1 available capabilities',
+        )
+        .replace(
+            /\b(?:the\s+)?(?:[\w-]+\s+){0,5}(?:tool|service|plugin|connector|integration)(?:['’]s)?\s+output\b/gi,
+            'the action result',
+        )
+        .replace(/\s{2,}/g, ' ')
+        .trim();
+}
+function isInternalActionArtifact(artifact: string): boolean {
+    return /(?:^|[-_ ])(?:action[-_ ]?)?(?:receipt|confirmation|execution[-_ ]?(?:outcome|result)|send[-_ ]status)(?:$|[-_ ])/i.test(artifact);
+}
+function requestedOperationVerb(missionGoal: string): string | undefined {
+    return /\b(send|publish|submit|post|book|schedule|pay|transfer|notify|upload|deploy|file|email)\b/i
+        .exec(missionGoal)?.[1]?.toLocaleLowerCase();
+}
+function preparationTaskSubject(task: Task): string | undefined {
+    if (!/^(?:generate|draft|write|compose|prepare|produce|create)\b/i.test(task.title.trim())) return undefined;
+    const subject = task.title
+        .trim()
+        .replace(/^(?:generate|draft|write|compose|prepare|produce|create)\s+/i, '')
+        .replace(/\b(?:content|copy|draft|artifact)\b/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    return subject || undefined;
+}
+function normalizeCapabilitySetupTasks(plan: Plan, missionGoal: string): number {
+    if (explicitlyRequestsReusableCapability(missionGoal)) return 0;
+
+    const tasks = plan.phases.flatMap((phase) => phase.tasks);
+    const setupTaskIds = new Set(tasks.filter(isCapabilitySetupTask).map((task) => task.id));
+    if (setupTaskIds.size === 0) return 0;
+
+    const capabilityResolutionInstruction = 'Perform the requested operation using available capabilities. If no suitable capability is available, let the runtime discover, acquire, or create and register one. Tool and service creation is runtime infrastructure, not a mission deliverable. Report only the verified outcome and do not claim success without a successful action receipt.';
+    const operationalTasks = tasks.filter((task) =>
+        !setupTaskIds.has(task.id)
+        && (task.dependsOnTaskIds || []).some((dependencyId) => setupTaskIds.has(dependencyId))
+        && /\b(?:send|email|text|sms|publish|submit|post|book|schedule|pay|transfer|notify|upload|deploy|file)\b/i.test(
+            `${task.title} ${task.description} ${task.systemPrompt}`,
+        ),
+    );
+    if (operationalTasks.length === 0) {
+        const operationVerb = requestedOperationVerb(missionGoal);
+        if (!operationVerb) return 0;
+
+        const preparationTasks = tasks.filter((task) =>
+            !setupTaskIds.has(task.id) && preparationTaskSubject(task),
+        );
+        const fallbackSetupTask = tasks.find((task) => setupTaskIds.has(task.id));
+        const tasksToPromote = preparationTasks.length > 0
+            ? preparationTasks
+            : fallbackSetupTask ? [fallbackSetupTask] : [];
+        if (tasksToPromote.length === 0) return 0;
+
+        for (const task of tasksToPromote) {
+            const subject = preparationTaskSubject(task) || 'requested operation';
+            const displaySubject = subject.charAt(0).toLocaleUpperCase() + subject.slice(1);
+            task.title = `${operationVerb.charAt(0).toLocaleUpperCase()}${operationVerb.slice(1)} ${subject}`;
+            task.description = `Perform the ${subject} operation requested by the mission goal and verify its actual result.`;
+            task.agentRole = `${displaySubject} Action Agent`;
+            task.systemPrompt = [
+                `Mission goal: ${missionGoal}`,
+                `Task scope: ${subject}. Perform this operation; do not stop after preparing or drafting content.`,
+                capabilityResolutionInstruction,
+                'Perform only the assigned scope and do not duplicate other mission actions.',
+            ].join(' ');
+            task.dependsOnTaskIds = [];
+            task.expectedArtifacts = [];
+            task.artifacts = [];
+            task.status = 'pending';
+        }
+
+        const promotedTaskIds = new Set(tasksToPromote.map((task) => task.id));
+        for (const phase of plan.phases) {
+            phase.tasks = phase.tasks.filter((task) =>
+                !setupTaskIds.has(task.id) || promotedTaskIds.has(task.id),
+            );
+        }
+        plan.phases = plan.phases.filter((phase) => phase.tasks.length > 0);
+        for (const phase of plan.phases) {
+            phase.name = removeCapabilityReferences(phase.name);
+            phase.goal = removeCapabilityReferences(phase.goal);
+        }
+        plan.summary = tasksToPromote.map((task) => task.title).join('; ');
+        logger.info(
+            { removedTaskIds: [...setupTaskIds].filter((id) => !promotedTaskIds.has(id)), updatedTaskIds: tasksToPromote.map((task) => task.id) },
+            'Converted capability setup into action tasks for runtime capability resolution',
+        );
+        return setupTaskIds.size - promotedTaskIds.size;
+    }
+
+    const removedSetupTaskIds = new Set(
+        operationalTasks.flatMap((task) => (task.dependsOnTaskIds || []).filter((dependencyId) => setupTaskIds.has(dependencyId))),
+    );
+    if (removedSetupTaskIds.size === 0) return 0;
+
+    for (const task of operationalTasks) {
+        task.dependsOnTaskIds = (task.dependsOnTaskIds || []).filter((dependencyId) => !removedSetupTaskIds.has(dependencyId));
+        task.title = removeCapabilityReferences(removeCapabilityPrerequisite(task.title));
+        task.description = removeCapabilityReferences(removeCapabilityPrerequisite(task.description));
+        task.systemPrompt = `${removeCapabilityReferences(removeCapabilityPrerequisite(task.systemPrompt))} ${capabilityResolutionInstruction}`.trim();
+        task.expectedArtifacts = task.expectedArtifacts.filter((artifact) => !isInternalActionArtifact(artifact));
+    }
+
+    for (const phase of plan.phases) {
+        phase.tasks = phase.tasks.filter((task) => !removedSetupTaskIds.has(task.id));
+    }
+    plan.phases = plan.phases.filter((phase) => phase.tasks.length > 0);
+    for (const phase of plan.phases) {
+        phase.name = removeCapabilityReferences(phase.name);
+        phase.goal = removeCapabilityReferences(phase.goal);
+    }
+    if (/\b(?:create|build|develop|acquire|install)\b.{0,100}\b(?:tool|service|plugin|connector|integration)\b/i.test(plan.summary)) {
+        plan.summary = plan.phases.flatMap((phase) => phase.tasks.map((task) => task.title)).join('; ');
+    }
+    logger.info(
+        { removedTaskIds: [...removedSetupTaskIds], updatedTaskIds: operationalTasks.map((task) => task.id) },
+        'Removed intermediate capability setup tasks; runtime will resolve capabilities during the requested operation',
+    );
+    return removedSetupTaskIds.size;
+}
 function planStandardIssues(plan: any): string[] {
     const issues = [];
     if (plan.requiresClarification) {
@@ -586,6 +740,7 @@ export async function generateValidPlan(
     let pendingFieldRepair: PlannerFieldRepair | undefined;
     let fieldRepairBase: unknown;
     let failedRepairAttempts = 0;
+    let transientBrainRetries = 0;
     const routingSessionId = missionId ? `${missionId}:planner` : `planner:${randomUUID()}`;
     let attempt = 0;
     while (true) {
@@ -644,11 +799,17 @@ export async function generateValidPlan(
                 throw new Error(`Unable to generate a valid mission plan because Brain exhausted every eligible model. Last plan validation issue: ${lastError || 'none; no model produced a plan'}. Brain: ${message}`);
             }
             if (message.includes(BRAIN_MODEL_SELECTION_RETRY)) {
-                logger.warn({ missionId, attempt, reason: message }, 'Brain requested another Planner attempt with an untried eligible model');
-                await reportProgress?.({ attempt, status: 'retrying', reason: message, transient: true });
-                continue;
+                throw new Error(
+                    `Unable to generate a valid mission plan because Brain routing did not complete within the current planner task. No new planner task was started, to avoid repeating the same failed routing strategy. Brain: ${message}`,
+                );
             }
             if (isTransientBrainFailure(message)) {
+                transientBrainRetries++;
+                if (transientBrainRetries > MAX_TRANSIENT_BRAIN_RETRIES) {
+                    throw new Error(
+                        `Unable to generate a valid mission plan after ${MAX_TRANSIENT_BRAIN_RETRIES} transient Brain retries. Last error: ${message}`,
+                    );
+                }
                 logger.warn({ missionId, attempt, reason: message }, 'Planner Brain request failed transiently; retrying with another eligible model');
                 await reportProgress?.({ attempt, status: 'retrying', reason: message, transient: true });
                 continue;
@@ -692,6 +853,7 @@ export async function generateValidPlan(
             if (dependencyRepairs > 0) {
                 logger.info({ missionId, attempt, dependencyRepairs }, 'Repaired declared task dependencies locally');
             }
+            normalizeCapabilitySetupTasks(plan, prompt);
             const standardsIssues = planStandardIssues(plan);
             if (standardsIssues.length) {
                 lastError = standardsIssues.join('\n');

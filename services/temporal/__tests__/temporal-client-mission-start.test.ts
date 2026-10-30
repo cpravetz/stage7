@@ -507,6 +507,113 @@ describe('TemporalClient mission start', () => {
     )
   })
 
+  it('submits Vault-backed tool credentials and resumes with the completed action receipt', async () => {
+    delete process.env.TEMPORAL_ADDRESS
+    process.env.ARTIFACTS_URL = 'http://artifacts'
+    process.env.TOOL_EXECUTOR_URL = 'http://tool-executor:3500'
+    delete process.env.GATEWAY_URL
+    const client = new TemporalClient()
+    const input = {
+      missionId: 'mission-tool-credentials',
+      tenantId: 'tenant-1',
+      assistantId: 'assistant-1',
+      prompt: 'Complete the protected operation',
+    }
+    const plan = {
+      summary: 'Complete protected operation',
+      estimatedDuration: 'short',
+      estimatedCost: 'low',
+      requiresClarification: false,
+      clarificationQuestions: [],
+      clarificationAnswers: [],
+      phases: [],
+    }
+    const actionKey = 'a'.repeat(64)
+    const pendingInteraction = {
+      kind: 'user_input' as const,
+      phaseId: 'phase-1',
+      taskId: 'task-1',
+      taskTitle: 'Protected operation',
+      agentRole: 'worker',
+      question: '[secret:tool-credentials] Provide the API token.',
+      credentialRequest: {
+        executionId: 'exec-pending-credential',
+        toolId: 'protected-api',
+        toolName: 'Protected API',
+        missingCredentials: [{ key: 'apiToken', label: 'API token' }],
+      },
+      actionReceipts: [{
+        toolId: 'protected-api',
+        isError: true,
+        content: '__ASK_USER__:credential request',
+        outcome: 'question_asked' as const,
+        actionKey,
+      }],
+      resumeCount: 0,
+    }
+    jest.spyOn(client, 'startMission').mockResolvedValue(`mission-${input.missionId}`)
+    const calls: Array<{ url: string; method?: string; body?: string }> = []
+    jest.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
+      const requestUrl = String(url)
+      calls.push({
+        url: requestUrl,
+        method: init?.method,
+        body: init?.body ? String(init.body) : undefined,
+      })
+      if (requestUrl.endsWith(`/api/artifacts/missions/${input.missionId}`) && !init?.method) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            missionId: input.missionId,
+            status: 'awaiting_review',
+            input,
+            output: { outputs: { status: 'awaiting_user_input', pendingInteraction } },
+          }),
+        } as Response
+      }
+      if (requestUrl.endsWith(`/api/artifacts/missions/${input.missionId}/plan`)) {
+        return { ok: true, status: 200, json: async () => plan } as Response
+      }
+      if (requestUrl.endsWith(`/api/artifacts/missions/${input.missionId}/recovery-lease`)) {
+        return { ok: true, status: 200, json: async () => ({ claimed: true }) } as Response
+      }
+      if (requestUrl.endsWith('/api/tool-executor/executions/exec-pending-credential/credentials')) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({
+            status: 'completed',
+            toolId: 'protected-api',
+            output: { updated: true },
+          }),
+        } as Response
+      }
+      return { ok: true, status: 200, json: async () => ({}) } as Response
+    })
+
+    await expect(client.resumeMission(`mission-${input.missionId}`, {
+      interactionResponse: '[secret-ref:tool-credentials] Provide the API token.\nVault reference: vault://secret-credential-1',
+    })).resolves.toBe('resuming')
+
+    const credentialCall = calls.find((call) => call.url.endsWith('/credentials'))
+    expect(credentialCall?.body).toContain('"apiToken":"vault://secret-credential-1"')
+    const resumed = (client.startMission as jest.Mock).mock.calls[0] as [
+      Record<string, unknown>,
+      { pendingInteraction?: { actionReceipts?: Array<Record<string, unknown>> } },
+    ]
+    expect(resumed[0].interactionResponse).not.toContain('vault://')
+    expect(resumed[1].pendingInteraction?.actionReceipts).toEqual([
+      expect.objectContaining({
+        toolId: 'protected-api',
+        isError: false,
+        outcome: 'success',
+        actionKey,
+        content: '{"updated":true}',
+      }),
+    ])
+  })
+
   it('loads the persisted plan when retrying before any phase or task completed', async () => {
     delete process.env.TEMPORAL_ADDRESS
     process.env.ARTIFACTS_URL = 'http://artifacts'

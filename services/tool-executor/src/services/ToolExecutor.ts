@@ -879,7 +879,40 @@ if (!pending) {
 throw new Error(`No pending credential request for execution ${executionId}`);
 }
 
-this.pendingCredentialOverrides.set(pending.tool.id, submission.credentials);
+const resolvedCredentials: Record<string, string> = {};
+for (const [key, submittedValue] of Object.entries(submission.credentials)) {
+const vaultReference = submittedValue.match(/^vault:\/\/([a-zA-Z0-9._-]+)$/);
+if (!vaultReference) {
+resolvedCredentials[key] = submittedValue;
+continue;
+}
+
+const storedValue = await credentialProvider.resolve({ vaultSecretId: vaultReference[1] });
+if (storedValue === undefined) {
+throw new Error(`Could not resolve the submitted Vault value for credential "${key}"`);
+}
+
+let credentialValue = storedValue;
+if (storedValue.trimStart().startsWith('{')) {
+let bundle: unknown;
+try {
+bundle = JSON.parse(storedValue) as unknown;
+} catch {
+throw new Error('The submitted Vault credential bundle is not valid JSON');
+}
+if (!bundle || typeof bundle !== 'object' || Array.isArray(bundle)) {
+throw new Error('The submitted Vault credential bundle must be a JSON object');
+}
+const fieldValue = (bundle as Record<string, unknown>)[key];
+if (typeof fieldValue !== 'string') {
+throw new Error(`The submitted credential bundle is missing a string value for "${key}"`);
+}
+credentialValue = fieldValue;
+}
+resolvedCredentials[key] = credentialValue;
+}
+
+this.pendingCredentialOverrides.set(pending.tool.id, resolvedCredentials);
 
 if (submission.storeInVault && submission.vaultSecretId) {
 try {

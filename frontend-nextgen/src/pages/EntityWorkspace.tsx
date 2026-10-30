@@ -230,7 +230,7 @@ const EntityWorkspace = () => {
     setRunning(true);
     setError(null);
     try {
-      const missionId = `mission-${Date.now()}`;
+      const missionId = `${Date.now()}`;
       const data = await postJSON<{ status: string; output?: string }>('/api/temporal/missions', {
         missionId,
         prompt: missionInput,

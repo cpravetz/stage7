@@ -45,6 +45,16 @@ interface ToolExecutionResponse {
   status?: string
   output?: unknown
   error?: string
+  request?: {
+    executionId?: string
+    toolId?: string
+    toolName?: string
+    missingCredentials?: Array<{
+      key?: string
+      label?: string
+      source?: { vaultSecretId?: string; envVar?: string; configKey?: string }
+    }>
+  }
 }
 
 interface PluginGenerationResponse {
@@ -84,6 +94,8 @@ export interface AgentActionReceipt {
   content: string
   outcome: AgentActionOutcome
   actionKey?: string
+  fallbackForToolId?: string
+  resolvedToolId?: string
 }
 
 export type AgentActionOutcome = 'success' | 'failure' | 'denied' | 'question_asked' | 'permission_required'
@@ -129,6 +141,7 @@ interface ToolResult {
   isError: boolean
   content: string
   outcome?: AgentActionOutcome
+  resolvedToolId?: string
 }
 
 const CREATE_TOOL_ACTION = '__create_tool'
@@ -137,6 +150,7 @@ const LIST_TOOLS_ACTION = '__list_tools'
 const MAX_TOOL_DESCRIPTION_LENGTH = 200
 const MAX_BRAIN_REQUEST_BYTES = 192 * 1024
 const MAX_AGENT_CHECKPOINT_BYTES = 512 * 1024
+const MAX_ACTION_RESULT_CHARS = 12_000
 const MAX_COMPLETION_TOKENS_PER_CALL = 8_192
 const DEFAULT_BRAIN_PROVIDER_ATTEMPT_TIMEOUT_MS = 310_000
 const DEFAULT_BRAIN_COMPLETION_DEADLINE_MS = 900_000
@@ -171,7 +185,7 @@ function boundSchemaDescriptions(value: unknown): unknown {
   return Object.fromEntries(Object.entries(record).map(([key, child]) => [
     key,
     key === 'description' && typeof child === 'string'
-      ? child.slice(0, 500)
+      ? child.length > 500 ? '[Long schema description omitted.]' : child
       : boundSchemaDescriptions(child),
   ]))
 }
@@ -211,6 +225,12 @@ function describeTools(tools: ToolDescriptor[]): Array<{
       outputSchema: boundSchemaDescriptions(outputSchema || { type: 'object', properties: {} }),
     }
   })
+}
+
+function boundedActionResult(content: string): string {
+  if (content.length <= MAX_ACTION_RESULT_CHARS) return content
+  const marker = '\n[Tool output truncated; request a targeted result for more detail.]'
+  return `${content.slice(0, MAX_ACTION_RESULT_CHARS - marker.length)}${marker}`
 }
 
 
@@ -264,6 +284,8 @@ function parseActionReceipts(value: unknown): AgentActionReceipt[] {
       || typeof receipt.isError !== 'boolean'
       || typeof receipt.content !== 'string'
       || (receipt.actionKey !== undefined && (typeof receipt.actionKey !== 'string' || !/^[a-f0-9]{64}$/i.test(receipt.actionKey)))
+      || (receipt.fallbackForToolId !== undefined && (typeof receipt.fallbackForToolId !== 'string' || !receipt.fallbackForToolId.trim()))
+      || (receipt.resolvedToolId !== undefined && (typeof receipt.resolvedToolId !== 'string' || !receipt.resolvedToolId.trim()))
       || (receipt.outcome !== undefined && !['success', 'failure', 'denied', 'question_asked', 'permission_required'].includes(String(receipt.outcome)))
     ) {
       throw new Error('Agent execution checkpoint contains an invalid action receipt')
@@ -285,6 +307,8 @@ function parseActionReceipts(value: unknown): AgentActionReceipt[] {
       content: receipt.content.slice(0, MAX_ACTION_RECEIPT_CHARS),
       outcome,
       ...(typeof receipt.actionKey === 'string' ? { actionKey: receipt.actionKey } : {}),
+      ...(typeof receipt.fallbackForToolId === 'string' ? { fallbackForToolId: receipt.fallbackForToolId } : {}),
+      ...(typeof receipt.resolvedToolId === 'string' ? { resolvedToolId: receipt.resolvedToolId } : {}),
     }
   })
 }
@@ -318,7 +342,12 @@ function missingRequiredActions(
   const remainingReceipts = [...receipts]
   return requiredActions.filter((required) => {
     const matchingIndex = remainingReceipts.findIndex((receipt) =>
-      receipt.toolId === required.toolId && receipt.outcome === required.outcome,
+      (receipt.toolId === required.toolId
+        || (receipt.toolId !== CREATE_TOOL_ACTION
+          && required.outcome === 'success'
+          && receipt.outcome === 'success'
+          && receipt.fallbackForToolId === required.toolId))
+      && receipt.outcome === required.outcome,
     )
     if (matchingIndex < 0) return true
     remainingReceipts.splice(matchingIndex, 1)
@@ -327,7 +356,7 @@ function missingRequiredActions(
 }
 
 function requiredActionCorrection(actions: RequiredAction[]): string {
-  return `Before finalizing, execute each required action and provide a matching action receipt with its expected outcome: ${JSON.stringify(actions)}. For outcome "denied", make the actual action request even when the tool is absent from your available-tool list; only an explicit policy or catalog denial receipt satisfies that requirement. Never claim an action occurred without its receipt. If a required action is blocked by missing configuration or credentials, do not guess values or repeat the same failed call; try a different available capability or report the concrete blocker.`
+  return `Before finalizing, execute each required action and provide a matching action receipt with its expected outcome: ${JSON.stringify(actions)}. For outcome "denied", make the actual action request even when the tool is absent from your available-tool list; only an explicit policy or catalog denial receipt satisfies that requirement. Never claim an action occurred without its receipt. If a required action needs a missing user-provided value or credential, do not guess or repeat the failed call; pause with __ASK_USER__:{"question":"..."} and prefix secret questions with [secret:<key>]. If an error reports a missing runtime module or package, do not try to install it in the mission environment or treat it as a credential; the runtime attempts one alternative-capability lookup automatically when policy and action budget allow. If unavailable, use another visible capability or report the exact blocker.`
 }
 
 function parseExpectedArtifacts(value: unknown): string[] {
@@ -354,6 +383,10 @@ function parseExpectedArtifacts(value: unknown): string[] {
 
 function isConfigurationFailure(content: string): boolean {
   return /\b(?:not configured|no .{1,80} configured|missing (?:the )?.{1,80}credential|requires? (?:the )?.{1,80}credential|credential .{1,80} missing)\b/i.test(content)
+}
+
+function getMissingRuntimeModule(content: string): string | undefined {
+  return content.match(/Cannot find (?:module|package)\s+['"]?([@a-z0-9._/-]+)['"]?/i)?.[1]
 }
 
 function isExplicitBlocker(content: string): boolean {
@@ -446,6 +479,36 @@ function parseAction(content: string): AgentAction | undefined {
   }
 }
 
+function parseSingleWrappedAction(content: string): AgentAction | undefined {
+  const normalized = content.trim()
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/, '')
+  let value: unknown
+  try {
+    value = JSON.parse(normalized)
+  } catch {
+    return undefined
+  }
+
+  for (let depth = 0; depth < 8; depth++) {
+    if (Array.isArray(value)) {
+      if (value.length !== 1) return undefined
+      value = value[0]
+      continue
+    }
+    const record = asRecord(value)
+    if (!record) return undefined
+    const args = asRecord(record.args)
+    if (typeof record.tool === 'string' && args) {
+      return { tool: record.tool, args }
+    }
+    const keys = Object.keys(record)
+    if (keys.length !== 1) return undefined
+    value = record[keys[0]!]
+  }
+  return undefined
+}
+
 function parseLeadingAction(content: string): AgentAction | undefined {
   const normalized = content.trim()
   const leadingFence = normalized.match(/^```(?:json)?\s*([\s\S]*?)\s*```/i)
@@ -511,12 +574,12 @@ function containsToolAction(content: string): boolean {
     } else if (character === '}') {
       const start = objectStarts.pop()
       if (start === undefined) continue
-      try {
-        if (containsToolActionShape(JSON.parse(content.slice(start, index + 1)))) return true
-      } catch {
-        // Keep scanning nested objects so an invalid wrapper cannot hide an action.
-      }
       if (objectStarts.length === 0) {
+        try {
+          if (containsToolActionShape(JSON.parse(content.slice(start, index + 1)))) return true
+        } catch {
+          // Ignore malformed JSON objects; the caller will request a corrected response.
+        }
         inString = false
         escaped = false
       }
@@ -638,6 +701,8 @@ export class AgentExecutor {
     let brainCalls = checkpoint?.brainCalls || 0
     let completionTokensReserved = checkpoint?.completionTokensReserved || 0
     let delegations = checkpoint?.delegations || 0
+    let modelSelectionRetries = 0
+    let previousRemainingModelCount: number | undefined
     let lastAction = checkpoint?.lastAction || ''
     let repeatedActionCount = checkpoint?.repeatedActionCount || 0
     let finalOutput = checkpoint?.finalOutput
@@ -646,6 +711,13 @@ export class AgentExecutor {
       priorActionReceipts.flatMap((receipt) => receipt.actionKey ? [receipt.actionKey] : []),
     )
     const actionReceipts = [...(checkpoint?.actionReceipts || []), ...priorActionReceipts]
+    const fallbackToolIds = new Map(
+      actionReceipts.flatMap((receipt) => receipt.toolId === CREATE_TOOL_ACTION
+        && receipt.fallbackForToolId
+        && receipt.resolvedToolId
+        ? [[receipt.resolvedToolId, receipt.fallbackForToolId]]
+        : []),
+    )
     let lastRequestId = checkpoint?.lastRequestId
     let reasoning: string | undefined
     const configurationFailures = new Map<string, string>()
@@ -756,7 +828,7 @@ export class AgentExecutor {
         role: 'user',
         content: result.isError
           ? `Action failed: ${result.content}\nChoose a safe correction, another available tool, delegation, or explain the blocker.`
-          : `Action result: ${result.content}\nContinue toward the task goal. If complete, return the final answer as plain text.`,
+          : `Action result: ${boundedActionResult(result.content)}\nContinue toward the task goal. If complete, return the final answer as plain text.`,
       })
       if (saveCheckpoint) await saveCheckpoint()
     }
@@ -812,6 +884,20 @@ export class AgentExecutor {
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         if (message.startsWith(BRAIN_MODEL_SELECTION_RETRY)) {
+          const remainingMatch = message.match(/(\d+) eligible model\(s\) remain untried/i)
+          const remainingModelCount = remainingMatch ? Number(remainingMatch[1]) : undefined
+          modelSelectionRetries++
+          if (
+            modelSelectionRetries > 50
+            || (remainingModelCount !== undefined
+              && previousRemainingModelCount !== undefined
+              && remainingModelCount >= previousRemainingModelCount)
+          ) {
+            throw new Error(
+              `Brain model routing made no progress after ${modelSelectionRetries} retry request(s): ${message}`,
+            )
+          }
+          previousRemainingModelCount = remainingModelCount
           // Brain still has untried eligible models/providers. Re-issue the same
           // Brain request (same routing session) so it advances to the remaining
           // candidates instead of aborting the agent task.
@@ -852,11 +938,15 @@ export class AgentExecutor {
 
       history = [...history, { role: 'assistant', content }]
       const exactAction = parseAction(content)
-      const action = exactAction || parseLeadingAction(content)
+      const leadingAction = exactAction ? undefined : parseLeadingAction(content)
+      const wrappedAction = exactAction || leadingAction ? undefined : parseSingleWrappedAction(content)
+      const action = exactAction || leadingAction || wrappedAction
       if (!exactAction && action) {
         await this.reportBrainComplaint(
           completion.requestId,
-          'Agent response validation failed: a tool action was mixed with trailing narration; only the leading action was executed.',
+          wrappedAction
+            ? 'Agent response validation failed: a single unambiguous JSON-wrapped tool action was normalized; no other response content was executed.'
+            : 'Agent response validation failed: a tool action was mixed with trailing narration; only the leading action was executed.',
           context.missionId,
         )
         history[history.length - 1] = { role: 'assistant', content: JSON.stringify(action) }
@@ -877,14 +967,20 @@ export class AgentExecutor {
           }
         }
         if (containsToolAction(content)) {
+          const correction = 'Your response included a tool-action object, but it was not the sole valid action response and was not executed. To execute an action, return exactly one raw JSON object in the form {"tool":"<tool-id>","args":{...}} with no surrounding prose, Markdown fence, or nesting. Otherwise return plain text if the task is complete. Never describe or claim an action that was not executed.'
           await this.reportBrainComplaint(
             completion.requestId,
             'Agent response validation failed: tool-action-shaped content was not a single valid executable action.',
             context.missionId,
           )
+          if (history.some((message) => message.role === 'user' && message.content === correction)) {
+            const reason = 'Agent response validation failed: Brain returned another non-executable tool-action response after receiving a format correction.'
+            await this.reportBrainComplaint(completion.requestId, reason, context.missionId)
+            throw new Error(reason)
+          }
           history.push({
             role: 'user',
-            content: 'Your response included a tool-action object, but it was not the sole valid action response and was not executed. To execute an action, return exactly one raw JSON object in the form {"tool":"<tool-id>","args":{...}} with no surrounding prose, Markdown fence, or nesting. Otherwise return plain text if the task is complete. Never describe or claim an action that was not executed.',
+            content: correction,
           })
           if (saveCheckpoint) await saveCheckpoint()
           continue
@@ -927,12 +1023,21 @@ export class AgentExecutor {
               context.missionId,
             )
           }
+          const correction = [
+            ...(missingActions.length > 0 ? [requiredActionCorrection(missingActions)] : []),
+            ...(missingArtifacts.length > 0 ? [expectedArtifactCorrection(missingArtifacts)] : []),
+          ].join('\n\n')
+          if (history.some((message) => message.role === 'user' && message.content === correction)) {
+            const reason = `Agent response validation failed after one correction: still missing ${[
+              ...missingActions.map((required) => `required action receipt ${required.toolId}:${required.outcome}`),
+              ...missingArtifacts.map((artifact) => `artifact section "${artifact}"`),
+            ].join(' and ')}.`
+            await this.reportBrainComplaint(completion.requestId, reason, context.missionId)
+            throw new Error(reason)
+          }
           history.push({
             role: 'user',
-            content: [
-              ...(missingActions.length > 0 ? [requiredActionCorrection(missingActions)] : []),
-              ...(missingArtifacts.length > 0 ? [expectedArtifactCorrection(missingArtifacts)] : []),
-            ].join('\n\n'),
+            content: correction,
           })
           if (saveCheckpoint) await saveCheckpoint()
           continue
@@ -977,8 +1082,109 @@ export class AgentExecutor {
       const actionKey = createHash('sha256').update(signature).digest('hex')
       if (repeatedActionCount >= 2) {
         const reason = `Agent ${definition.id} repeated the same action without progress: ${action.tool}`
-        await this.reportBrainComplaint(completion.requestId, reason, context.missionId)
-        throw new Error(reason)
+        const previousFailure = [...actionReceipts].reverse().find(
+          (receipt) => receipt.actionKey === actionKey && receipt.isError,
+        )
+        const failedTool = tools.find((tool) => tool.id === action.tool || tool.name === action.tool)
+        const capabilityResolutionAttempted = actionReceipts.some(
+          (receipt) => receipt.toolId === CREATE_TOOL_ACTION
+            && (receipt.fallbackForToolId === (failedTool?.id || action.tool)),
+        )
+        if (
+          previousFailure
+          && !capabilityResolutionAttempted
+          && toolPolicy.mode !== 'allowlist'
+          && toolCalls < policy.maxActions
+        ) {
+          const taskGoal = typeof task.input.prompt === 'string' ? task.input.prompt.trim().slice(0, 1_000) : ''
+          const capability = taskGoal || (failedTool
+            ? `${failedTool.name} ${failedTool.description}`
+            : action.tool.replace(/[_-]+/g, ' '))
+          const resolutionArgs = {
+            capability,
+            description: [
+              `Resolve the capability required by this task: "${capability}".`,
+              `The selected tool "${failedTool?.name || action.tool}" failed: ${previousFailure.content.slice(0, 500)}`,
+              'Choose a tool that performs the exact requested operation and produces evidence of its result; a similarly named draft, queue, or storage tool is not a substitute for an external action.',
+              'Check registered and approved integrations first; create a compatible implementation only if none is suitable.',
+              'Do not install unavailable runtime packages or claim success without verified execution.',
+            ].join(' '),
+            requirements: [],
+            excludeToolIds: [failedTool?.id || action.tool],
+          }
+          const resolutionSignature = `${CREATE_TOOL_ACTION}:${JSON.stringify(resolutionArgs)}`
+          const resolutionActionKey = createHash('sha256').update(resolutionSignature).digest('hex')
+          toolCalls++
+          if (saveCheckpoint) await saveCheckpoint(resolutionSignature)
+          const resolution = await this.executeAction(
+            { tool: CREATE_TOOL_ACTION, args: resolutionArgs },
+            tools,
+            definition,
+            context,
+            toolPolicy,
+            completion.requestId,
+          )
+          actionReceipts.push({
+            toolId: CREATE_TOOL_ACTION,
+            isError: resolution.isError,
+            content: resolution.content.slice(0, MAX_ACTION_RECEIPT_CHARS),
+            outcome: resolution.outcome || (resolution.isError ? 'failure' : 'success'),
+            actionKey: resolutionActionKey,
+            fallbackForToolId: failedTool?.id || action.tool,
+            ...(resolution.resolvedToolId ? { resolvedToolId: resolution.resolvedToolId } : {}),
+          })
+          if (resolution.outcome === 'permission_required') {
+            finalOutput = resolution.content
+            if (saveCheckpoint) await saveCheckpoint()
+            return {
+              output: resolution.content,
+              tokensUsed,
+              toolCalls,
+              brainCalls,
+              completionTokensReserved,
+              actionReceipts,
+              requestId: lastRequestId,
+              reasoning,
+            }
+          }
+          if (!resolution.isError && resolution.resolvedToolId) {
+            fallbackToolIds.set(resolution.resolvedToolId, failedTool?.id || action.tool)
+            history.push({
+              role: 'user',
+              content: `Capability resolution registered "${resolution.resolvedToolId}". Use that tool to satisfy the task instead of repeating "${action.tool}".`,
+            })
+            lastAction = ''
+            repeatedActionCount = 0
+            if (saveCheckpoint) await saveCheckpoint()
+            continue
+          }
+          const resolutionFailure = resolution.isError
+            ? ` Automatic capability resolution failed: ${resolution.content}`
+            : ' Automatic capability resolution did not register a usable tool.'
+          await this.reportBrainComplaint(completion.requestId, `${reason}.${resolutionFailure}`, context.missionId)
+          throw new Error(`${reason}.${resolutionFailure}`)
+        }
+        const resolutionReceipt = capabilityResolutionAttempted
+          ? [...actionReceipts].reverse().find((receipt) =>
+            receipt.toolId === CREATE_TOOL_ACTION
+            && receipt.fallbackForToolId === (failedTool?.id || action.tool),
+          )
+          : undefined
+        const failureDetail = previousFailure
+          ? ` Previous tool result: ${previousFailure.content.slice(0, 500)}.`
+          : ''
+        const resolutionDetail = resolutionReceipt?.isError
+          ? ` Capability resolution also failed: ${resolutionReceipt.content.slice(0, 500)}.`
+          : ''
+        const blockedResolutionDetail = previousFailure
+          && !capabilityResolutionAttempted
+          && toolPolicy.mode !== 'allowlist'
+          && toolCalls >= policy.maxActions
+          ? ` Automatic capability resolution was not attempted because the action budget was exhausted (${toolCalls}/${policy.maxActions}).`
+          : ''
+        const detailedReason = `${reason}.${failureDetail}${resolutionDetail}${blockedResolutionDetail}`
+        await this.reportBrainComplaint(completion.requestId, detailedReason, context.missionId)
+        throw new Error(detailedReason)
       }
       if (priorActionKeys.has(actionKey)) {
         const previousReceipt = priorActionReceipts.find((receipt) => receipt.actionKey === actionKey)
@@ -986,15 +1192,61 @@ export class AgentExecutor {
           role: 'user',
           content: `This exact action already has a persisted result from before the mission interruption and was not repeated. Previous result: ${previousReceipt?.content || 'result unavailable'}. Continue using that result or explain the blocker.`,
         })
+        lastAction = ''
+        repeatedActionCount = 0
         if (saveCheckpoint) await saveCheckpoint()
         continue
+      }
+
+      const selectedTool = tools.find((tool) => tool.id === action.tool || tool.name === action.tool)
+      const selectedToolId = selectedTool?.id || action.tool
+      const earlierToolFailure = [...actionReceipts].reverse().find(
+        (receipt) => (receipt.toolId === action.tool || receipt.toolId === selectedToolId)
+          && receipt.outcome === 'failure',
+      )
+      const earlierResolution = [...actionReceipts].reverse().find(
+        (receipt) => receipt.toolId === CREATE_TOOL_ACTION
+          && receipt.fallbackForToolId === selectedToolId,
+      )
+      if (earlierToolFailure && earlierResolution) {
+        const alreadyBlocked = actionReceipts.some(
+          (receipt) => (receipt.toolId === action.tool || receipt.toolId === selectedToolId)
+            && receipt.outcome === 'failure'
+            && receipt.content.includes('capability resolution was already attempted'),
+        )
+        const reason = `Tool '${selectedToolId}' already failed and generic capability resolution was already attempted. Original failure: ${earlierToolFailure.content.slice(0, 400)} Resolution result: ${earlierResolution.content.slice(0, 400)}`
+        if (alreadyBlocked) {
+          await this.reportBrainComplaint(completion.requestId, reason, context.missionId)
+          throw new Error(reason)
+        }
+        actionReceipts.push({
+          toolId: action.tool,
+          isError: true,
+          content: reason,
+          outcome: 'failure',
+          actionKey,
+        })
+        history.push({
+          role: 'user',
+          content: `${reason} Do not call this tool again. Use the registered alternative if one was resolved, or report the exact remaining blocker.`,
+        })
+        lastAction = ''
+        repeatedActionCount = 0
+        if (saveCheckpoint) await saveCheckpoint()
+        continue
+      }
+
+      if (toolCalls >= policy.maxActions) {
+        const reason = `Agent ${definition.id} exhausted its ${policy.maxActions}-action execution budget before executing '${action.tool}'.`
+        await this.reportBrainComplaint(completion.requestId, reason, context.missionId)
+        throw new Error(reason)
       }
 
       toolCalls++
       if (action.tool === DELEGATE_ACTION) delegations++
       if (saveCheckpoint) await saveCheckpoint(signature)
       const previousConfigurationFailure = configurationFailures.get(action.tool)
-      const result = previousConfigurationFailure
+      let result: ToolResult = previousConfigurationFailure
         ? {
           isError: true,
           outcome: 'failure' as const,
@@ -1007,8 +1259,130 @@ export class AgentExecutor {
         content: result.content.slice(0, MAX_ACTION_RECEIPT_CHARS),
         outcome: result.outcome || (result.isError ? 'failure' : 'success'),
         actionKey,
+        ...(fallbackToolIds.has(action.tool) ? { fallbackForToolId: fallbackToolIds.get(action.tool) } : {}),
       })
+      const missingModule = result.isError ? getMissingRuntimeModule(result.content) : undefined
+      const failedTool = tools.find((tool) => tool.id === action.tool || tool.name === action.tool)
+      const failedToolId = failedTool?.id || action.tool
+      const failedCallsForTool = actionReceipts.filter(
+        (receipt) => receipt.isError
+          && receipt.outcome === 'failure'
+          && (receipt.toolId === action.tool || receipt.toolId === failedToolId),
+      ).length
+      const repeatedToolFailure = Boolean(
+        result.isError
+        && result.outcome !== 'denied'
+        && result.outcome !== 'question_asked'
+        && !isConfigurationFailure(result.content)
+        && failedTool
+        && failedCallsForTool >= 2,
+      )
+      const unavailableRequestedTool = result.isError
+        && !failedTool
+        && result.content.includes(`Tool '${action.tool}' is not in the live system catalog.`)
+      const capabilityDescription = failedTool
+        ? `${failedTool.name} ${failedTool.description}`
+        : action.tool.replace(/[_-]+/g, ' ')
+      const capabilityResolutionAttempted = actionReceipts.some(
+        (receipt) => receipt.toolId === CREATE_TOOL_ACTION
+          && receipt.fallbackForToolId === failedToolId,
+      )
+      const needsCapabilityResolution = Boolean(
+        (missingModule && failedTool)
+        || unavailableRequestedTool
+        || repeatedToolFailure,
+      )
+      if (
+        needsCapabilityResolution
+        && !capabilityResolutionAttempted
+        && toolPolicy.mode !== 'allowlist'
+        && toolCalls < policy.maxActions
+      ) {
+        const taskGoal = typeof task.input.prompt === 'string' ? task.input.prompt.trim().slice(0, 1_000) : ''
+        const capabilitySource = failedTool
+          ? `${failedTool.name} ${failedTool.description}`.slice(0, 1_500)
+          : capabilityDescription
+        const capability = capabilitySource
+          .match(/[a-z0-9]+/gi)
+          ?.join(' ')
+          || action.tool
+        const resolutionArgs = {
+          capability,
+          description: [
+            `Resolve the capability "${capability}".`,
+            failedTool
+              ? `The available tool "${failedTool.name}" (${failedTool.id}) failed${missingModule ? ` because runtime package "${missingModule}" is unavailable` : repeatedToolFailure ? ' repeatedly without progress' : ''}.`
+              : `The requested tool identifier "${action.tool}" is not registered.`,
+            taskGoal ? `Task goal: "${taskGoal}".` : '',
+            'Check registered and approved integrations first; create a compatible implementation only if none is suitable. The replacement must perform the exact task operation, not a similarly named draft, queue, or storage operation.',
+            'Do not install unavailable runtime packages or claim success without verified execution.',
+          ].filter(Boolean).join(' '),
+          requirements: missingModule
+            ? [`Do not depend on unavailable runtime package "${missingModule}".`]
+            : [],
+          excludeToolIds: failedTool ? [failedTool.id] : [action.tool],
+        }
+        const resolutionSignature = `${CREATE_TOOL_ACTION}:${JSON.stringify(resolutionArgs)}`
+        const resolutionActionKey = createHash('sha256').update(resolutionSignature).digest('hex')
+        toolCalls++
+        if (saveCheckpoint) await saveCheckpoint(resolutionSignature)
+        const resolution = await this.executeAction(
+          { tool: CREATE_TOOL_ACTION, args: resolutionArgs },
+          tools,
+          definition,
+          context,
+          toolPolicy,
+          completion.requestId,
+        )
+        actionReceipts.push({
+          toolId: CREATE_TOOL_ACTION,
+          isError: resolution.isError,
+          content: resolution.content.slice(0, MAX_ACTION_RECEIPT_CHARS),
+          outcome: resolution.outcome || (resolution.isError ? 'failure' : 'success'),
+          actionKey: resolutionActionKey,
+          fallbackForToolId: failedTool?.id || action.tool,
+          ...(resolution.resolvedToolId ? { resolvedToolId: resolution.resolvedToolId } : {}),
+        })
+        if (!resolution.isError && resolution.resolvedToolId) {
+          fallbackToolIds.set(resolution.resolvedToolId, failedTool?.id || action.tool)
+        }
+        priorActionKeys.add(resolutionActionKey)
+        if (resolution.outcome === 'permission_required') {
+          finalOutput = resolution.content
+          if (saveCheckpoint) await saveCheckpoint()
+          return {
+            output: resolution.content,
+            tokensUsed,
+            toolCalls,
+            brainCalls,
+            completionTokensReserved,
+            actionReceipts,
+            requestId: lastRequestId,
+            reasoning,
+          }
+        }
+        result = {
+          ...resolution,
+          content: resolution.isError
+            ? `The requested capability could not be executed by the original tool. Alternative resolution also failed: ${resolution.content}`
+            : `The original tool was unavailable or failed. ${resolution.content}`,
+        }
+      }
       if (result.outcome === 'permission_required') {
+        finalOutput = result.content
+        if (saveCheckpoint) await saveCheckpoint()
+        return {
+          output: result.content,
+          tokensUsed,
+          toolCalls,
+          brainCalls,
+          completionTokensReserved,
+          actionReceipts,
+          requestId: lastRequestId,
+          reasoning,
+        }
+      }
+      if (result.outcome === 'question_asked') {
         finalOutput = result.content
         if (saveCheckpoint) await saveCheckpoint()
         return {
@@ -1032,8 +1406,8 @@ export class AgentExecutor {
         {
           role: 'user',
           content: result.isError
-            ? `${ignoredNarration}Action failed: ${result.content}\nChoose a safe correction, another available tool, delegation, or explain the blocker.`
-            : `${ignoredNarration}Action result: ${result.content}\nContinue toward the task goal. If complete, return the final answer as plain text.`,
+            ? `${ignoredNarration}Action failed: ${boundedActionResult(result.content)}\nIf this is missing user-provided configuration or a credential, ask the user with __ASK_USER__ (use [secret:<key>] for secrets). If this is a missing runtime module, do not attempt installation; the runtime attempts one alternative-capability lookup when policy and action budget allow. If unavailable, use another visible capability or explain the exact blocker. Otherwise choose a safe correction or explain the exact blocker.`
+            : `${ignoredNarration}Action result: ${boundedActionResult(result.content)}\nContinue toward the task goal. If complete, return the final answer as plain text.`,
         },
       )
       if (saveCheckpoint) await saveCheckpoint()
@@ -1109,12 +1483,13 @@ export class AgentExecutor {
       ? [
         'To execute a registered system tool, respond with exactly one raw JSON object: {"tool":"<tool-id>","args":{...}}. Never quote, fence, nest, or describe a tool action; only a sole JSON action object is executed. Do not claim an action succeeded until you receive its result.',
         `Available system tools (${toolPolicy.mode === 'allowlist' ? 'restricted to this Agent allowlist' : 'the live catalog; generated tools appear after registration'}): ${JSON.stringify(catalog)}`,
-        `To inspect the current visible tool catalog explicitly, respond with {"tool":"${LIST_TOOLS_ACTION}","args":{}}. This action returns only tools visible to this Agent.`,
+        `To inspect the current visible tool catalog, respond with {"tool":"${LIST_TOOLS_ACTION}","args":{"query":"<capability>"}}. A query returns matching tool IDs, names, and short descriptions; omit it for a compact list of visible tool IDs.`,
         'Use each tool’s full inputSchema, configSchema, and outputSchema when preparing arguments. For inputs marked "x-stage7-secret": true (or sensitive password fields), provide only the supplied vault:// reference; never ask an LLM to handle or echo the secret value. If a required value is unavailable in task inputs or prior task outputs, ask the user through the mission conversation instead of guessing. Never expose a vault:// reference in user-facing text.',
         'To pause this mission for a missing user-provided value, return exactly __ASK_USER__:{"question":"..."} as your final response. For secrets, prefix the question text with [secret:<lowercase-key>] so the Mission Room saves the answer directly to Vault.',
         toolPolicy.mode === 'allowlist'
           ? 'Tool creation is disabled for this Agent. Request access to a registered tool if the allowed tools are insufficient.'
           : `If no available tool can satisfy a concrete capability need, ask ToolExecutor to resolve it with {"tool":"${CREATE_TOOL_ACTION}","args":{"description":"...","requirements":["..."]}}. Describe the capability and constraints, not implementation details. ToolExecutor checks registered native tools, discovers suitable MCP tools and handles their permission flow, then creates, validates, registers, and persists a reusable plugin only if no suitable tool can be used. Never write tool code yourself or claim resolution succeeded unless the returned tool is registered and available.`,
+        'Select a tool only when its description and schemas show it performs the exact requested operation and can verify the outcome. Name similarity is not enough: drafting, queuing, storing, or recording a request is not a substitute for sending, publishing, submitting, or otherwise carrying out the requested action.',
       ]
       : [
         'No tool, tool-generation, or delegation actions are available in this execution. Do not invent, quote, or describe tool actions; return only the requested reasoning result or structured response.',
@@ -1131,7 +1506,7 @@ export class AgentExecutor {
       ...actionInstructions,
       delegation,
       'Treat each system-tool result as authoritative. Report the returned value rather than recalculating or replacing it, and never claim a tool succeeded unless its actual result supports that claim.',
-      'When a tool fails because its endpoint, provider, or credentials are not configured, do not guess values or repeat that tool. Try another available tool or ask ToolExecutor to resolve a genuinely missing capability; if no safe path exists, return a concise explicit blocker naming the missing configuration.',
+      'When a tool fails because its endpoint, provider, or credentials are not configured, do not guess values or repeat that tool. A missing credential response will pause the mission for user input; other failures may trigger one generic capability resolution attempt. If no safe path exists, return a concise explicit blocker naming the missing configuration.',
       'Generated tools that need user-provided secrets must mark those input properties with "x-stage7-secret": true, "format": "password", and "writeOnly": true. The tool receives the plaintext only during execution; generated acceptance tests must use non-secret fixtures and must never request or embed real credentials.',
       'Tool errors are evidence; do not claim success when an action failed. Stop after the task is complete or explain a blocker.',
     ].join('\n\n')
@@ -1168,14 +1543,16 @@ export class AgentExecutor {
     let compactedHistory = history
     let requestBody = buildRequestBody(compactedHistory)
     while (Buffer.byteLength(requestBody) > MAX_BRAIN_REQUEST_BYTES && compactedHistory.length > 2) {
-      const dropIndex = 1 + Math.floor((compactedHistory.length - 2) / 2)
-      compactedHistory = [compactedHistory[0], ...compactedHistory.slice(dropIndex)]
+      const latestHistoryCount = Math.max(1, Math.floor((compactedHistory.length - 1) / 2))
+      const nextHistory = [compactedHistory[0], ...compactedHistory.slice(-latestHistoryCount)]
+      if (nextHistory.length >= compactedHistory.length) break
+      compactedHistory = nextHistory
       requestBody = buildRequestBody(compactedHistory)
     }
     const requestBytes = Buffer.byteLength(requestBody)
     if (requestBytes > MAX_BRAIN_REQUEST_BYTES) {
       throw new Error(
-        `Brain request for Agent ${definition.id} is ${requestBytes} bytes, exceeding the ${MAX_BRAIN_REQUEST_BYTES}-byte service limit; reduce the task context or tool output.`,
+        `Brain request for Agent ${definition.id} remains ${requestBytes} bytes after history compaction, exceeding the ${MAX_BRAIN_REQUEST_BYTES}-byte service limit; reduce the task context or tool output.`,
       )
     }
 
@@ -1302,7 +1679,23 @@ export class AgentExecutor {
     requestId?: string,
   ): Promise<ToolResult> {
     if (action.tool === LIST_TOOLS_ACTION) {
-      return { isError: false, content: JSON.stringify(describeTools(tools)) }
+      const query = typeof action.args.query === 'string' ? action.args.query.trim().toLocaleLowerCase() : ''
+      const queryTerms = query.split(/[^a-z0-9]+/).filter((term) => term.length > 1)
+      const matchingTools = queryTerms.length === 0
+        ? tools
+        : tools.filter((tool) => {
+          const searchable = `${tool.id} ${tool.name} ${tool.description}`.toLocaleLowerCase()
+          return queryTerms.some((term) => searchable.includes(term))
+        })
+      const content = queryTerms.length === 0
+        ? matchingTools.map((tool) => tool.id).join('\n')
+        : matchingTools.slice(0, 25).map((tool) =>
+          `${tool.id} | ${tool.name}: ${tool.description.slice(0, 160)}`,
+        ).join('\n')
+      return {
+        isError: false,
+        content: content || (query ? 'No visible tools matched the requested query.' : 'No visible tools.'),
+      }
     }
     if (action.tool === CREATE_TOOL_ACTION) {
       if (toolPolicy.mode === 'allowlist') {
@@ -1360,6 +1753,45 @@ export class AgentExecutor {
         }),
       })
       const result = await response.json() as ToolExecutionResponse
+      const credentialRequest = result.request
+      if (
+        response.status === 428
+        && typeof credentialRequest?.executionId === 'string'
+        && typeof credentialRequest.toolId === 'string'
+        && typeof credentialRequest.toolName === 'string'
+        && Array.isArray(credentialRequest.missingCredentials)
+      ) {
+        const missingCredentials = credentialRequest.missingCredentials.filter(
+          (credential): credential is { key: string; label?: string; source?: { vaultSecretId?: string; envVar?: string; configKey?: string } } =>
+            typeof credential?.key === 'string' && credential.key.trim().length > 0,
+        )
+        if (missingCredentials.length > 0) {
+          const requiresSecret = missingCredentials.some(
+            (credential) => Boolean(credential.source?.vaultSecretId || credential.source?.envVar),
+          )
+          const fields = missingCredentials.map((credential) =>
+            `${credential.label || credential.key} (key: ${credential.key})`,
+          )
+          const answerFormat = missingCredentials.length === 1
+            ? `Provide the value for ${fields[0]}.`
+            : `Provide a JSON object with a string value for each exact key: ${missingCredentials.map((credential) => `"${credential.key}"`).join(', ')}.`
+          const question = [
+            requiresSecret ? '[secret:tool-credentials] ' : '',
+            `${credentialRequest.toolName} needs user-provided configuration before it can run. ${answerFormat}`,
+          ].join('')
+          const safeRequest = {
+            executionId: credentialRequest.executionId,
+            toolId: credentialRequest.toolId,
+            toolName: credentialRequest.toolName,
+            missingCredentials: missingCredentials.map(({ key, label }) => ({ key, label: label || key })),
+          }
+          return {
+            isError: true,
+            outcome: 'question_asked',
+            content: `__ASK_USER__:${JSON.stringify({ question, credentialRequest: safeRequest })}`,
+          }
+        }
+      }
       if (!response.ok || result.status !== 'completed') {
         if (response.status === 400 || response.status === 422) {
           await this.reportBrainComplaint(
@@ -1397,8 +1829,12 @@ export class AgentExecutor {
   ): Promise<ToolResult> {
     const description = typeof args.description === 'string' ? args.description.trim() : ''
     if (!description) return { isError: true, content: 'Tool creation requires a non-empty description.' }
+    const capability = typeof args.capability === 'string' ? args.capability.trim() : ''
     const requirements = Array.isArray(args.requirements)
       ? args.requirements.filter((value): value is string => typeof value === 'string')
+      : []
+    const excludeToolIds = Array.isArray(args.excludeToolIds)
+      ? [...new Set(args.excludeToolIds.filter((value): value is string => typeof value === 'string' && value.trim().length > 0))]
       : []
 
     try {
@@ -1406,8 +1842,10 @@ export class AgentExecutor {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          ...(capability ? { capability } : {}),
           description,
           requirements,
+          excludeToolIds,
           context: { missionId: context.missionId, agentId },
         }),
       })
@@ -1443,6 +1881,7 @@ export class AgentExecutor {
       return {
         isError: false,
         content: `Created and registered tool '${registered.name}' (${registered.id}). It is now available in the live tool catalog.`,
+        resolvedToolId: registered.id,
       }
     } catch (error) {
       return { isError: true, content: error instanceof Error ? error.message : String(error) }

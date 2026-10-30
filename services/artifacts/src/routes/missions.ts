@@ -222,7 +222,10 @@ router.get('/:missionId/artifacts', asyncHandler(async (req, res) => {
       (expectedName) => expectedName.trim().toLocaleLowerCase() === name.trim().toLocaleLowerCase(),
     ) || false;
     const isBlocker = typeof artifact.content === 'string'
-      && /^\s*(?:\*\*)?Blocker(?:\*\*)?\s*:/i.test(artifact.content);
+      && (
+        /^\s*(?:\*\*)?Blocker(?:\*\*)?\s*:/i.test(artifact.content)
+        || /^\s*(?:Execution outcome|Artifact status)\b.{0,120}\b(?:blocked|failed|not created)\b/i.test(artifact.content)
+      );
     const phaseId = typeof artifact.phaseId === 'string' ? artifact.phaseId : context.phaseId;
     const artifactLineageId = expected && phaseId && !isBlocker
       ? `mission:${encodeURIComponent(missionId)}:phase:${encodeURIComponent(phaseId)}:deliverable:${encodeURIComponent(name.trim().toLocaleLowerCase())}`
@@ -274,8 +277,26 @@ router.get('/:missionId/artifacts', asyncHandler(async (req, res) => {
       enriched.visibility === 'internal'
       || name.toLocaleLowerCase() === 'system-action-receipts.json'
     ) return;
-    const key = typeof enriched.id === 'string' && enriched.id
-      ? JSON.stringify(['id', enriched.id, enriched.version ?? '', enriched.content ?? ''])
+    const key = typeof enriched.artifactId === 'string' && enriched.artifactId
+      ? JSON.stringify([
+          'artifact',
+          enriched.artifactId,
+          enriched.phaseId || '',
+          enriched.taskId || '',
+          enriched.version ?? '',
+          enriched.version === undefined ? enriched.url ?? '' : '',
+        ])
+      : typeof enriched.lineageId === 'string' && enriched.lineageId
+      ? JSON.stringify([
+          'lineage',
+          enriched.lineageId,
+          enriched.phaseId || '',
+          enriched.taskId || '',
+          enriched.version ?? '',
+          enriched.version === undefined ? enriched.url ?? '' : '',
+        ])
+      : typeof enriched.id === 'string' && enriched.id
+      ? JSON.stringify(['id', enriched.id, enriched.version ?? ''])
       : JSON.stringify([
           enriched.phaseId || '',
           enriched.taskId || '',
@@ -283,7 +304,6 @@ router.get('/:missionId/artifacts', asyncHandler(async (req, res) => {
           enriched.version ?? '',
           enriched.versionOf ?? '',
           enriched.url ?? '',
-          enriched.content ?? '',
         ]);
     const previousIndex = seen.get(key);
     if (previousIndex === undefined) {
@@ -702,7 +722,20 @@ function deriveEventsFromMissionState(state: any): Array<{ type: string; timesta
     events.push({ type: 'mission_failed', timestamp: cursor, data: { error: 'Mission canceled' } });
   } else if (state.status === 'incomplete') {
     cursor += 1000;
-    events.push({ type: 'mission_incomplete', timestamp: cursor, data: { error: state.error, reason: state.output?.outputs?.status || 'Outputs did not satisfy the mission goal' } });
+    const storedGaps = Array.isArray(state.output?.outputs?.gaps)
+      ? state.output.outputs.gaps.filter(
+          (gap: unknown): gap is string => typeof gap === 'string' && gap.trim().length > 0,
+        )
+      : [];
+    events.push({
+      type: 'mission_incomplete',
+      timestamp: cursor,
+      data: {
+        error: state.error,
+        reason: storedGaps.join('; ') || state.output?.outputs?.reason || 'Outputs did not satisfy the mission goal',
+        ...(storedGaps.length > 0 ? { gaps: storedGaps } : {}),
+      },
+    });
   } else if (state.status === 'awaiting_review') {
     cursor += 1000;
     events.push({ type: 'mission_needs_review', timestamp: cursor, data: { reason: state.output?.outputs?.reason || 'Awaiting user review' } });

@@ -6,6 +6,7 @@ import {
   buildMissionEvents,
   buildTranscript,
   CONVERSATION_EVENT_TYPES,
+  friendlyMissionError,
   summarizeModelUsage,
   TIMELINE_EVENT_TYPES,
 } from './missionEvents';
@@ -22,6 +23,26 @@ function feedEvent(partial: Partial<FeedEvent> & { id: string; type: string }): 
     ...partial,
   };
 }
+
+describe('friendlyMissionError', () => {
+  it('explains an Agent Runtime planning timeout without exposing the internal route', () => {
+    expect(friendlyMissionError(
+      'Agent Runtime API /missions/Oct30-2/agents/agent-Oct30-2-planner failed (500): Request timed out after 1860000ms',
+    )).toBe('Mission agent request timed out after 31 minute(s). The planner did not finish generating a plan.');
+  });
+
+  it('explains when no eligible model provider is available', () => {
+    expect(friendlyMissionError(
+      'Agent Runtime API /missions/Oct30-2/agents/agent-Oct30-2-planner failed (500): MODEL_SELECTION_EXHAUSTED: Every eligible model was attempted or unavailable.',
+    )).toBe('Planning stopped because no eligible LLM provider was available. Restore or configure an eligible provider, then retry.');
+  });
+
+  it('explains when model routing detects a repeated candidate', () => {
+    expect(friendlyMissionError(
+      'Agent Runtime API /missions/Oct30-2/agents/agent-Oct30-2-planner failed (500): Brain model routing made no progress after 2 retry requests.',
+    )).toBe('Planning stopped because the Brain model router repeated a candidate without advancing. Check model-provider availability before retrying.');
+  });
+});
 
 describe('buildMissionEvents', () => {
   it('does not repeat a mission milestone that the mission already recorded', () => {

@@ -9,6 +9,8 @@ const mockActivities = {
   awaitMissionPhaseApprovalActivity: jest.fn(),
   recordMissionPhaseApprovalActivity: jest.fn(),
   completeMissionActivity: jest.fn(),
+  rollupEntityMemoryActivity: jest.fn(),
+  notifyMissionCompletedActivity: jest.fn(),
 }
 
 jest.mock('@temporalio/workflow', () => ({
@@ -29,13 +31,83 @@ import { Plan } from '@stage7-nextgen/shared'
 import {
   completeMissionActivity,
   executeMissionTaskActivity,
+  prepareMissionActivity,
 } from '../src/activities/missionWorkflowActivities'
 import { MissionAgentRuntime } from '../src/agent/MissionAgentRuntime'
+
+function jsonResponse(): Response {
+  return new Response('{}', { status: 200 })
+}
 
 describe('missionWorkflow activity boundary', () => {
   beforeEach(() => {
     Object.values(mockActivities).forEach((activity) => activity.mockReset());
     (patched as jest.Mock).mockReturnValue(false)
+  })
+
+  it('generates a fresh plan when a retry has no persisted plan', async () => {
+    const plan: Plan = {
+      summary: 'Complete the requested operation',
+      estimatedDuration: 'short',
+      estimatedCost: 'low',
+      requiresClarification: false,
+      clarificationQuestions: [],
+      clarificationAnswers: [],
+      phases: [{
+        id: 'phase-1',
+        name: 'Execution',
+        goal: 'Complete the requested operation',
+        requiresApproval: false,
+        status: 'pending',
+        tasks: [{
+          id: 'phase-1-task-1',
+          title: 'Complete the requested operation',
+          description: 'Perform the requested action.',
+          agentRole: 'worker',
+          systemPrompt: 'Perform the requested action.',
+          dependsOnTaskIds: [],
+          expectedArtifacts: [],
+          requiredActions: [],
+          status: 'pending',
+          artifacts: [],
+        }],
+      }],
+    }
+    const input: WorkflowInput = {
+      missionId: 'retry-without-plan',
+      tenantId: 'tenant-1',
+      assistantId: '',
+      prompt: 'Perform the requested action.',
+      metadata: { retryCount: 1, retriedFrom: 'mission-retry-without-plan' },
+    }
+    const originalArtifactsUrl = process.env.ARTIFACTS_URL
+    process.env.ARTIFACTS_URL = 'http://artifacts:4200'
+    const generatePlan = jest.spyOn(MissionAgentRuntime.prototype, 'generatePlan').mockResolvedValue(plan)
+    const fetchMock = jest.spyOn(global, 'fetch').mockImplementation(async (request, init) => {
+      const url = String(request)
+      if (url.endsWith('/plan') && (init?.method || 'GET') === 'GET') {
+        return new Response('Plan not found', { status: 404 })
+      }
+      return new Response('{}', { status: 200 })
+    })
+
+    try {
+      await expect(prepareMissionActivity(input)).resolves.toEqual(plan)
+      expect(generatePlan).toHaveBeenCalledWith(
+        input.prompt,
+        input.metadata,
+        expect.any(Function),
+      )
+      expect(fetchMock).toHaveBeenCalledWith(
+        'http://artifacts:4200/api/artifacts/missions/retry-without-plan/plan',
+        expect.objectContaining({ method: 'PUT' }),
+      )
+    } finally {
+      fetchMock.mockRestore()
+      generatePlan.mockRestore()
+      if (originalArtifactsUrl === undefined) delete process.env.ARTIFACTS_URL
+      else process.env.ARTIFACTS_URL = originalArtifactsUrl
+    }
   })
 
   it('requires successful planned tasks and a positive mission-goal review before completion', async () => {
@@ -45,6 +117,7 @@ describe('missionWorkflow activity boundary', () => {
       estimatedCost: 'low',
       requiresClarification: false,
       clarificationQuestions: [],
+      clarificationAnswers: [],
       phases: [{
         id: 'phase-1',
         name: 'Execution',
@@ -103,6 +176,163 @@ describe('missionWorkflow activity boundary', () => {
     expect(reviewMissionCompletion).toHaveBeenCalledTimes(1)
   })
 
+  it('accepts a verified replacement capability for a required action after a missing dependency', async () => {
+    const plan: Plan = {
+      summary: 'Export a document',
+      estimatedDuration: 'short',
+      estimatedCost: 'low',
+      requiresClarification: false,
+      clarificationQuestions: [],
+      clarificationAnswers: [],
+      phases: [{
+        id: 'phase-1',
+        name: 'Document export',
+        goal: 'Export the requested document',
+        requiresApproval: false,
+        status: 'completed',
+        tasks: [{
+          id: 'export-document',
+          title: 'Export the document',
+          description: 'Export the requested document using an available capability.',
+          agentRole: 'worker',
+          systemPrompt: 'Complete and verify the document export.',
+          expectedArtifacts: [],
+          requiredActions: [{ toolId: 'legacy-document-exporter', outcome: 'success' }],
+          status: 'completed',
+          artifacts: [],
+        }],
+      }],
+    }
+    const reviewMissionCompletion = jest.spyOn(MissionAgentRuntime.prototype, 'reviewMissionCompletion')
+      .mockResolvedValue({ satisfied: false, gaps: ['The goal is not verified.'] })
+
+    const result = await completeMissionActivity({
+      input: {
+        missionId: 'mission-tool-fallback',
+        tenantId: 'tenant-1',
+        assistantId: 'assistant-1',
+        prompt: 'Export the requested document',
+      },
+      plan,
+      phases: [{
+        phaseId: 'phase-1',
+        name: 'Document export',
+        status: 'completed',
+        tasks: [{
+          taskId: 'export-document',
+          status: 'completed',
+          output: 'The exporter confirmed the document was created.',
+          artifacts: [{
+            name: 'system-action-receipts.json',
+            content: JSON.stringify([
+              {
+                toolId: 'legacy-document-exporter',
+                outcome: 'failure',
+                content: "Cannot find module 'legacy-export-sdk'",
+              },
+              {
+                toolId: '__create_tool',
+                outcome: 'success',
+                fallbackForToolId: 'legacy-document-exporter',
+                resolvedToolId: 'document-exporter',
+              },
+              {
+                toolId: 'document-exporter',
+                outcome: 'success',
+                fallbackForToolId: 'legacy-document-exporter',
+                content: 'The exporter confirmed the document was created.',
+              },
+            ]),
+            purpose: 'execution-outcome',
+          }],
+        }],
+      }],
+      compensations: [],
+    })
+
+    expect(result.outputs.gaps).toEqual(['The goal is not verified.'])
+    expect((result.outputs.gaps || []).some((gap) => gap.includes('did not satisfy required action'))).toBe(false)
+  })
+
+  it('reports the exact missing task artifact and failed action instead of asking the reviewer', async () => {
+    const plan: Plan = {
+      summary: 'Send a text message',
+      estimatedDuration: 'minutes',
+      estimatedCost: 'low',
+      requiresClarification: false,
+      clarificationQuestions: [],
+      clarificationAnswers: [],
+      phases: [{
+        id: 'phase-1',
+        name: 'Message delivery',
+        goal: 'Send the requested text message',
+        requiresApproval: false,
+        status: 'completed',
+        tasks: [{
+          id: 'phase-1-task-1',
+          title: 'Send the text message',
+          description: 'Send the exact requested message.',
+          agentRole: 'messenger',
+          systemPrompt: 'Send the requested message.',
+          expectedArtifacts: ['text-message.txt'],
+          requiredActions: [{ toolId: 'textMessageSentConfirmation', outcome: 'success' }],
+          status: 'completed',
+          artifacts: [],
+        }],
+      }],
+    }
+    const reviewMissionCompletion = jest.spyOn(MissionAgentRuntime.prototype, 'reviewMissionCompletion')
+      .mockResolvedValue({ satisfied: false, gaps: ['concrete unmet requirement'] })
+    reviewMissionCompletion.mockClear()
+
+    const result = await completeMissionActivity({
+      input: {
+        missionId: 'mission-concrete-gaps',
+        tenantId: 'tenant-1',
+        assistantId: 'assistant-1',
+        prompt: 'Send a text message',
+      },
+      plan,
+      phases: [{
+        phaseId: 'phase-1',
+        name: 'Message delivery',
+        status: 'completed',
+        tasks: [{
+          taskId: 'phase-1-task-1',
+          status: 'completed',
+          output: '**Blocker:** Cannot find module twilio.',
+          artifacts: [
+            {
+              name: 'system-action-receipts.json',
+              content: JSON.stringify([{
+                toolId: 'text-service-twilio-sms',
+                outcome: 'failure',
+                content: 'Cannot find module twilio',
+              }]),
+              purpose: 'execution-outcome',
+            },
+            {
+              name: 'text-message.txt',
+              content: '**Blocker:** Cannot find module twilio.',
+              purpose: 'execution-outcome',
+              status: 'blocked',
+            },
+          ],
+        }],
+      }],
+      compensations: [],
+    })
+
+    expect(result.outputs.status).toBe('incomplete')
+    expect(result.outputs.gaps).toEqual(expect.arrayContaining([
+      expect.stringContaining('Task "Send the text message" (phase-1-task-1) did not satisfy required action "textMessageSentConfirmation"'),
+      expect.stringContaining('Cannot find module twilio'),
+      expect.stringContaining('is missing expected artifact "text-message.txt"'),
+    ]))
+    expect(result.outputs.gaps).not.toContain('concrete unmet requirement')
+    expect(reviewMissionCompletion).not.toHaveBeenCalled()
+  })
+
   it('resumes failed task activities from safe checkpoints instead of requiring a completed receipt', async () => {
     const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(jsonResponse())
     const task = {
@@ -129,6 +359,7 @@ describe('missionWorkflow activity boundary', () => {
       estimatedCost: 'low',
       requiresClarification: false,
       clarificationQuestions: [],
+      clarificationAnswers: [],
       phases: [phase],
     }
     const executeTask = jest.spyOn(MissionAgentRuntime.prototype, 'executeTask')
@@ -152,7 +383,7 @@ describe('missionWorkflow activity boundary', () => {
       task,
       phase,
       plan,
-      false,
+      true,
       expect.any(Object),
       [],
       expect.stringContaining('persisted safe checkpoint and action receipts'),
@@ -173,6 +404,7 @@ describe('missionWorkflow activity boundary', () => {
       estimatedCost: 'low',
       requiresClarification: false,
       clarificationQuestions: [],
+      clarificationAnswers: [],
       phases: [{
         id: 'phase-1',
         name: 'Execution',
@@ -215,7 +447,7 @@ describe('missionWorkflow activity boundary', () => {
     expect(mockActivities.finishMissionPhaseActivity).toHaveBeenCalledWith({
       input,
       phase: plan.phases[0],
-      tasks: [{ taskId: 'task-1', status: 'completed', artifacts }],
+      tasks: [{ taskId: 'task-1', status: 'completed', artifacts, output: 'Done' }],
     })
     expect(mockActivities.completeMissionActivity).toHaveBeenCalledTimes(1)
     expect(proxyActivities).toHaveBeenCalledWith(expect.objectContaining({
@@ -232,6 +464,7 @@ describe('missionWorkflow activity boundary', () => {
       estimatedCost: 'low',
       requiresClarification: true,
       clarificationQuestions: ['Which environment should be targeted?'],
+      clarificationAnswers: [],
       phases: [],
     }
     mockActivities.prepareMissionActivity.mockResolvedValue(plan)
@@ -279,6 +512,7 @@ describe('missionWorkflow activity boundary', () => {
       estimatedCost: 'low',
       requiresClarification: false,
       clarificationQuestions: [],
+      clarificationAnswers: [],
       phases: [phase],
     }
     mockActivities.prepareMissionActivity.mockResolvedValue(plan)
@@ -314,6 +548,7 @@ describe('missionWorkflow activity boundary', () => {
       estimatedCost: 'low',
       requiresClarification: false,
       clarificationQuestions: [],
+      clarificationAnswers: [],
       phases: [{
         id: 'phase-1',
         name: 'Execution',
@@ -385,6 +620,7 @@ describe('missionWorkflow activity boundary', () => {
       estimatedCost: 'low',
       requiresClarification: false,
       clarificationQuestions: [],
+      clarificationAnswers: [],
       phases: [originalPhase],
     }
     const amendment = {
@@ -451,6 +687,7 @@ describe('missionWorkflow activity boundary', () => {
       estimatedCost: 'low',
       requiresClarification: false,
       clarificationQuestions: [],
+      clarificationAnswers: [],
       phases: [{
         id: 'phase-1',
         name: 'Execution',
@@ -510,6 +747,7 @@ describe('missionWorkflow activity boundary', () => {
       estimatedCost: 'low',
       requiresClarification: false,
       clarificationQuestions: [],
+      clarificationAnswers: [],
       phases: [phase],
     }
     mockActivities.prepareMissionActivity.mockResolvedValue(plan)

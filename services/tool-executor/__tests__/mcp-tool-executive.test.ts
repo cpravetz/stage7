@@ -124,11 +124,27 @@ describe('MCPToolExecutive', () => {
     it('returns satisfied when a registered tool matches', () => {
       executive.setRegistry({
         get: () => undefined,
-        list: () => [{ name: 'exec_cap_tool', description: 'does exec cap', manifest: {} } as any],
+        list: () => [{ id: 'exec_cap_tool', name: 'exec_cap_tool', description: 'does exec cap', manifest: {} } as any],
       })
       const res = executive.resolveCapability({ capability: 'exec_cap' })
       expect(res.satisfied).toBe(true)
       expect(res.tool).toBeDefined()
+    })
+
+    it('skips explicitly excluded broken tools and resolves an alternative', () => {
+      executive.setRegistry({
+        get: () => undefined,
+        list: () => [
+          { id: 'broken_sms', name: 'SMS via Twilio', description: 'send SMS', manifest: {} } as any,
+          { id: 'sms_api', name: 'SMS provider API', description: 'provide text message delivery', manifest: {} } as any,
+        ],
+      })
+      const res = executive.resolveCapability({
+        capability: 'send a text message',
+        excludeToolIds: ['broken_sms'],
+      })
+      expect(res.satisfied).toBe(true)
+      expect(res.tool?.id).toBe('sms_api')
     })
 
     it('returns not satisfied with no registry', () => {

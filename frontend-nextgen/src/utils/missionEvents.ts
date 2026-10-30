@@ -567,6 +567,25 @@ export function friendlyMissionError(error: string): string {
   }
 
   if (/fetch failed|Agent Runtime API|network error|ECONNREFUSED|ENOTFOUND|timeout|status(?:Code)?:?\s*\d{3}|\{.*"success"\s*:/i.test(trimmed)) {
+    const runtimeFailure = trimmed.match(/^Agent Runtime API \S+ failed \((\d{3})\):\s*(.+)$/i);
+    if (runtimeFailure) {
+      const detail = runtimeFailure[2].trim();
+      const timeout = detail.match(/timed out after (\d+)ms/i);
+      if (timeout) {
+        const milliseconds = Number(timeout[1]);
+        const duration = milliseconds >= 60_000
+          ? `${Math.round(milliseconds / 60_000)} minute(s)`
+          : `${Math.round(milliseconds / 1_000)} second(s)`;
+        return `Mission agent request timed out after ${duration}. The planner did not finish generating a plan.`;
+      }
+      if (/MODEL_SELECTION_EXHAUSTED|No models are eligible|No model available|none completed the request/i.test(detail)) {
+        return 'Planning stopped because no eligible LLM provider was available. Restore or configure an eligible provider, then retry.';
+      }
+      if (/Brain model routing made no progress/i.test(detail)) {
+        return 'Planning stopped because the Brain model router repeated a candidate without advancing. Check model-provider availability before retrying.';
+      }
+      return `Mission agent request failed (HTTP ${runtimeFailure[1]}). Check the mission activity for details.`;
+    }
     return 'Something went wrong while running the mission. Please try again.';
   }
   return trimmed;

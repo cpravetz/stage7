@@ -17,8 +17,10 @@ const router: Router = Router()
 const toolSchema = createToolSchema
 
 const pluginGenerationSchema = z.object({
+  capability: z.string().optional(),
   description: z.string(),
   requirements: z.array(z.string()).optional(),
+  excludeToolIds: z.array(z.string().min(1)).max(20).optional(),
   context: z.record(z.any()).optional(),
 })
 
@@ -212,12 +214,13 @@ router.post(
   '/tools/resolve',
   asyncHandler(async (req: Request, res: Response) => {
     const data = pluginGenerationSchema.parse(req.body)
-    const capability = [data.description, ...(data.requirements || [])].join(' ')
+    const capability = data.capability?.trim() || data.description
     const actor = typeof data.context?.agentId === 'string' ? data.context.agentId : undefined
     const existing = mcpToolExecutive.resolveCapability({
       capability,
       task: data.description,
       actor,
+      excludeToolIds: data.excludeToolIds,
     })
 
     if (existing.satisfied && existing.tool) {
@@ -229,6 +232,7 @@ router.post(
       capability,
       task: data.description,
       actor,
+      excludeToolIds: data.excludeToolIds,
     })
     if (discovered.satisfied && discovered.tool) {
       res.json({ success: true, tool: discovered.tool, source: 'mcp' })

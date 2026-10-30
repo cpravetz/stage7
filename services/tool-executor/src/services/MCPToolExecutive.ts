@@ -63,13 +63,19 @@ export class MCPToolExecutive {
     capability: string;
     task?: string;
     actor?: string;
+    excludeToolIds?: string[];
   }): CapabilityResolution {
-    const { capability, task, actor } = opts;
+    const { capability, task, actor, excludeToolIds = [] } = opts;
+    const excludedIds = new Set(excludeToolIds);
+    const excludedNames = new Set(excludeToolIds.flatMap((id) => {
+      const name = this.registry?.get(id)?.name;
+      return name ? [name.toLowerCase()] : [];
+    }));
 
     // §3 step 1: Need detected — check registered tools first.
     if (this.registry) {
       for (const tool of this.registry.list()) {
-        if (this.toolSatisfies(tool, capability)) {
+        if (!excludedIds.has(tool.id) && this.toolSatisfies(tool, capability)) {
           return { satisfied: true, tool };
         }
       }
@@ -78,8 +84,10 @@ export class MCPToolExecutive {
     // §3 step 7: an active grant already makes the tool available in scope.
     const activeGrants = listActiveGrants();
     for (const grant of activeGrants) {
-      if (grant.toolName.toLowerCase().includes(capability.toLowerCase())
-        || capability.toLowerCase().includes(grant.toolName.toLowerCase())) {
+      if (!excludedIds.has(grant.toolId)
+        && !excludedNames.has(grant.toolName.toLowerCase())
+        && (grant.toolName.toLowerCase().includes(capability.toLowerCase())
+          || capability.toLowerCase().includes(grant.toolName.toLowerCase()))) {
         return { satisfied: true, grant };
       }
     }
@@ -107,14 +115,23 @@ export class MCPToolExecutive {
     actor?: string;
     preApproveCurated?: boolean;
     preApprovedBy?: string;
+    excludeToolIds?: string[];
   }): Promise<CapabilityResolution> {
-    const { capability, task, actor, preApproveCurated = true, preApprovedBy } = opts;
+    const { capability, task, actor, preApproveCurated = true, preApprovedBy, excludeToolIds = [] } = opts;
 
-    const { candidates, errors } = await mcpToolDiscovery.discover({
+    const { candidates: discoveredCandidates, errors } = await mcpToolDiscovery.discover({
       neededCapability: capability,
       triggeringTask: task,
       actor,
     });
+    const excludedIds = new Set(excludeToolIds);
+    const excludedNames = new Set(excludeToolIds.flatMap((id) => {
+      const name = this.registry?.get(id)?.name;
+      return name ? [name.toLowerCase()] : [];
+    }));
+    const candidates = discoveredCandidates.filter((candidate) =>
+      !excludedIds.has(candidate.id) && !excludedNames.has(candidate.name.toLowerCase()),
+    );
 
     if (candidates.length === 0) {
       toolAuditLog.record({
@@ -383,7 +400,17 @@ export class MCPToolExecutive {
       JSON.stringify(tool.manifest?.capabilities ?? []),
     ].join(' ').toLowerCase();
     const needle = capability.toLowerCase();
-    return haystack.includes(needle);
+    if (haystack.includes(needle)) return true;
+
+    const genericWords = new Set([
+      'a', 'an', 'and', 'available', 'capability', 'create', 'do', 'for', 'from', 'in',
+      'into', 'message', 'of', 'or', 'provide', 'registered', 'same', 'send', 'service',
+      'the', 'through', 'to', 'tool', 'use', 'using', 'via', 'with',
+    ]);
+    const terms = needle
+      .match(/[a-z0-9]+/g)
+      ?.filter((term) => term.length > 1 && !genericWords.has(term)) || [];
+    return terms.length > 0 && terms.every((term) => haystack.includes(term));
   }
 }
 
