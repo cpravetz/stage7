@@ -1,6 +1,7 @@
 import { MCPToolExecutive } from '../src/services/MCPToolExecutive'
 import {
   buildPermissionRequest,
+  getPersistedPermissionDecision,
   getPermissionRequest,
   preApprove,
   decidePermission,
@@ -64,6 +65,7 @@ jest.mock('../src/services/MCPToolDiscovery', () => ({
 
 jest.mock('../src/services/ToolPermissionService', () => ({
   buildPermissionRequest: jest.fn(),
+  getPersistedPermissionDecision: jest.fn(),
   getPermissionRequest: jest.fn(),
   preApprove: jest.fn(),
   decidePermission: jest.fn(),
@@ -112,6 +114,7 @@ describe('MCPToolExecutive', () => {
     ;(listIntegratedToolsFn as jest.Mock).mockReturnValue([])
     ;(decidePermission as jest.Mock).mockReturnValue({ decision: 'denied', reason: 'default' })
     ;(getPermissionRequest as jest.Mock).mockReturnValue(undefined)
+    ;(getPersistedPermissionDecision as jest.Mock).mockReturnValue(undefined)
     ;(buildPermissionRequest as jest.Mock).mockReturnValue(undefined)
     ;(toolAuditLog.record as jest.Mock).mockReturnValue({ id: 'audit_1' })
     ;(toolGrantStore.findDenial as jest.Mock).mockReturnValue(undefined)
@@ -227,6 +230,27 @@ describe('MCPToolExecutive', () => {
       expect(res.satisfied).toBe(false)
       expect(res.error).toBe('user said no')
       expect(integrateGrantedTool).not.toHaveBeenCalled()
+    })
+
+    it('replays a persisted grant decision idempotently after a service restart', async () => {
+      const request = { id: 'perm_1', candidate: candidate() } as any
+      const grant = { id: 'g1', toolId: request.candidate.id, scope: 'task' } as any
+      const integrated = { tool: { id: request.candidate.id } as any, grant, egressPolicy: {} }
+      ;(getPersistedPermissionDecision as jest.Mock).mockReturnValue({
+        requestId: 'perm_1',
+        decision: 'granted',
+        request,
+        grant,
+      })
+      ;(integrateGrantedTool as jest.Mock).mockReturnValue(integrated)
+
+      const res = await executive.decidePermission({
+        requestId: 'perm_1', decision: 'granted', decidedBy: 'u',
+      })
+
+      expect(res.satisfied).toBe(true)
+      expect(res.tool).toEqual(integrated.tool)
+      expect(integrateGrantedTool).toHaveBeenCalledWith(grant, request.candidate)
     })
 
     it('returns error when request not found', async () => {

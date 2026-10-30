@@ -15,11 +15,43 @@ export interface WorkflowInput {
   completedTasks?: MissionTaskCheckpoint[];
   retryGuidance?: string;
   clarificationAnswers?: string[];
+  interactionResponse?: string;
 }
 
 export interface MissionTaskCheckpoint {
   phaseId: string;
   taskId: string;
+}
+
+export interface MissionPendingInteraction {
+  kind: 'user_input' | 'mcp_permission';
+  phaseId: string;
+  taskId: string;
+  taskTitle: string;
+  agentRole: string;
+  question?: string;
+  requestId?: string;
+  permission?: {
+    toolName: string;
+    toolDescription?: string;
+    publisher?: string;
+    trustTier?: string;
+    sideEffectClass?: string;
+    dataClasses: string[];
+    credentials: { needed: boolean; source?: string; keys: string[] };
+    defaultScope: string;
+    availableScopes: string[];
+    expiresAt?: string;
+    explanation: string;
+  };
+  actionReceipts?: Array<{
+    toolId: string;
+    isError: boolean;
+    content: string;
+    outcome: 'success' | 'failure' | 'denied' | 'question_asked' | 'permission_required';
+    actionKey?: string;
+  }>;
+  resumeCount: number;
 }
 
 export interface CompletedTaskSummary {
@@ -87,6 +119,7 @@ export interface MissionActivityCheckpoint {
   plan?: Plan;
   completedTasks?: MissionTaskCheckpoint[];
   completedPhases?: string[];
+  pendingInteraction?: MissionPendingInteraction;
 }
 
 export interface WorkflowResult {

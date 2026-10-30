@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { AgentDefinition, AgentExecutionPolicy, AgentTask, DEFAULT_AGENT_EXECUTION_POLICY } from '../src/types'
 import { AgentExecutionCheckpoint, AgentExecutor } from '../src/services/AgentExecutor'
 import { AgentRuntime } from '../src/services/AgentRuntime'
@@ -1074,6 +1075,118 @@ describe('AgentExecutor', () => {
       .toContain('ToolExecutor checks registered native tools')
     expect(calls.filter((call) => call.url.endsWith('/api/brain/complete'))
       .every((call) => !Object.prototype.hasOwnProperty.call(call.body, 'model'))).toBe(true)
+  })
+
+  it('returns missing user input as a structured mission interruption marker', async () => {
+    const fetcher: typeof fetch = async (input) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) return jsonResponse({ tools: [] })
+      if (url.endsWith('/api/brain/complete')) {
+        return jsonResponse({ content: '__ASK_USER__:{"question":"[secret:service_token] Provide the service token."}' })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+
+    const result = await new AgentExecutor({ fetcher }).execute(definition, task() as AgentTask, {
+      missionId: 'mission-1',
+      delegationDepth: 0,
+    })
+
+    expect(result.output).toBe('__ASK_USER__:{"question":"[secret:service_token] Provide the service token."}')
+    expect(result.brainCalls).toBe(1)
+  })
+
+  it('returns MCP permission requests out of band without sending them back to Brain', async () => {
+    const brainPrompts: string[] = []
+    let resolveCalls = 0
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) return jsonResponse({ tools: [] })
+      if (url.endsWith('/api/brain/complete')) {
+        const request = JSON.parse(String(init?.body)) as { systemPrompt: string }
+        brainPrompts.push(request.systemPrompt)
+        return jsonResponse({
+          content: '{"tool":"__create_tool","args":{"description":"Send a requested SMS","requirements":[]}}',
+        })
+      }
+      if (url.endsWith('/api/tool-executor/tools/resolve')) {
+        resolveCalls++
+        return jsonResponse({
+          success: false,
+          permissionRequired: true,
+          request: { id: 'perm-mission-test', neededCapability: 'send SMS' },
+          candidate: { id: 'mcp-sms', name: 'SMS via MCP' },
+          prompt: 'The user must approve this tool.',
+        }, 202)
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+
+    const result = await new AgentExecutor({ fetcher }).execute(definition, task() as AgentTask, {
+      missionId: 'mission-1',
+      delegationDepth: 0,
+    })
+
+    expect(result.output).toMatch(/^__MISSION_PERMISSION__:/)
+    expect(result.actionReceipts).toEqual([
+      expect.objectContaining({ outcome: 'permission_required', isError: true }),
+    ])
+    expect(resolveCalls).toBe(1)
+    expect(brainPrompts).toHaveLength(1)
+    expect(brainPrompts[0]).not.toContain('The user must approve this tool.')
+  })
+
+  it('does not replay a successful action already recorded before a mission interruption', async () => {
+    const action = { tool: 'send-message', args: { recipient: 'user-42', body: 'Hello' } }
+    const actionKey = createHash('sha256')
+      .update(`${action.tool}:${JSON.stringify(action.args)}`)
+      .digest('hex')
+    let brainTurn = 0
+    let executions = 0
+    const fetcher: typeof fetch = async (input) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) {
+        return jsonResponse({
+          tools: [{ id: 'send-message', name: 'Send Message', description: 'Send a message', type: 'code' }],
+        })
+      }
+      if (url.endsWith('/api/brain/complete')) {
+        brainTurn++
+        return jsonResponse({
+          content: brainTurn === 1
+            ? JSON.stringify(action)
+            : 'The earlier successful delivery remains valid.',
+        })
+      }
+      if (url.endsWith('/api/tool-executor/tools/execute')) {
+        executions++
+        return jsonResponse({ status: 'completed', output: { sent: true } })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+
+    const result = await new AgentExecutor({ fetcher }).execute(definition, {
+      ...(task() as AgentTask),
+      input: {
+        prompt: 'Continue after asking the user.',
+        context: {
+          priorActionReceipts: [{
+            toolId: action.tool,
+            isError: false,
+            content: '{"sent":true}',
+            outcome: 'success',
+            actionKey,
+          }],
+        },
+      },
+    }, {
+      missionId: 'mission-1',
+      delegationDepth: 0,
+    })
+
+    expect(result.output).toBe('The earlier successful delivery remains valid.')
+    expect(executions).toBe(0)
+    expect(result.actionReceipts[0]).toMatchObject({ actionKey, outcome: 'success' })
   })
 
   it('restricts tool visibility and execution to an Agent allowlist', async () => {

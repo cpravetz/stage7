@@ -37,7 +37,35 @@ export interface MissionDetail {
   artifactLoadError?: string;
   output?: {
     plan?: unknown;
-    outputs?: { phases?: MissionPhaseOutput[]; status?: string; phaseId?: string; reason?: string };
+    outputs?: {
+      phases?: MissionPhaseOutput[];
+      status?: string;
+      phaseId?: string;
+      reason?: string;
+      resumeSupported?: boolean;
+      pendingInteraction?: {
+        kind: 'user_input' | 'mcp_permission';
+        phaseId: string;
+        taskId: string;
+        taskTitle: string;
+        agentRole: string;
+        question?: string;
+        requestId?: string;
+        permission?: {
+          toolName: string;
+          toolDescription?: string;
+          publisher?: string;
+          trustTier?: string;
+          sideEffectClass?: string;
+          dataClasses: string[];
+          credentials: { needed: boolean; source?: string; keys: string[] };
+          defaultScope: string;
+          availableScopes: string[];
+          expiresAt?: string;
+          explanation: string;
+        };
+      };
+    };
   };
   error?: string;
   startedAt?: number | string;

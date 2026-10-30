@@ -52,5 +52,22 @@ describe('Vault', () => {
 
       expect(response.status).toBe(400);
     });
+
+    it('persists a secret before returning its reference and never returns plaintext metadata', async () => {
+      const createResponse = await request(app)
+        .post('/api/vault/secrets')
+        .send({ name: 'mission-test-token', plaintext: 'secret-data', tenantId: 'tenant-test' });
+
+      expect(createResponse.status).toBe(201);
+      expect(createResponse.body.id).toBeDefined();
+      expect(createResponse.body.tenantId).toBe('tenant-test');
+      expect(createResponse.body.plaintext).toBeUndefined();
+
+      const decryptResponse = await request(app)
+        .get(`/api/vault/secrets/${createResponse.body.id}/decrypt`);
+
+      expect(decryptResponse.status).toBe(200);
+      expect(decryptResponse.body.plaintext).toBe('secret-data');
+    });
   });
 });

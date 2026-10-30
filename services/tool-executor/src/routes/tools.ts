@@ -165,6 +165,7 @@ router.post(
         type: tool.type as Tool['type'],
         manifest: (tool.manifest as Record<string, unknown>) || {},
         inputSchema: tool.inputSchema as Record<string, unknown> | undefined,
+        configSchema: tool.configSchema as Record<string, unknown> | undefined,
         outputSchema: tool.outputSchema as Record<string, unknown> | undefined,
         createdAt: new Date(),
         updatedAt: new Date(),

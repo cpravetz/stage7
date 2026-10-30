@@ -16,6 +16,7 @@ import {
   CompletedTaskSummary,
   createCompletedTaskSummary,
   MissionActivityCheckpoint,
+  MissionPendingInteraction,
   MissionTaskCheckpoint,
 } from '../types/workflow';
 import { PlannerProgress } from './MissionPlanner';
@@ -44,6 +45,13 @@ function isFatalServiceError(error: unknown): boolean {
  */
 const PLANNER_PROGRESS_MIN_INTERVAL_MS = 60_000;
 
+class MissionUserInterruptionError extends Error {
+  constructor(readonly result: { plan: Plan; outputs: any; compensations: Array<{ phaseId: string; action: string }> }) {
+    super('Mission is waiting for a user response');
+    this.name = 'MissionUserInterruptionError';
+  }
+}
+
 export interface MissionContext {
   missionId: string;
   prompt: string;
@@ -60,6 +68,7 @@ export interface MissionContext {
   resumePlan?: Plan;
   resumeCheckpoint?: MissionActivityCheckpoint;
   clarificationAnswers?: string[];
+  interactionResponse?: string;
   executionPolicy?: AgentExecutionPolicy;
   onCheckpoint?: (checkpoint: MissionActivityCheckpoint) => void;
   heartbeat?: () => void;
@@ -76,6 +85,8 @@ export class MissionOrchestrator {
 
   async run(ctx: MissionContext): Promise<{ plan: Plan; outputs: any; compensations: Array<{ phaseId: string; action: string }> }> {
     const compensations: Array<{ phaseId: string; action: string }> = [];
+    let activePlan: Plan | undefined;
+    let pendingInteraction = ctx.resumeCheckpoint?.pendingInteraction;
     const workflowInput: WorkflowInput = {
       missionId: ctx.missionId,
       tenantId: ctx.tenantId || 'tenant-1',
@@ -117,6 +128,7 @@ export class MissionOrchestrator {
     });
 
     let plan = ctx.resumePlan || ctx.resumeCheckpoint?.plan || await this.generatePlan(ctx);
+    activePlan = plan;
     const completedTasks = new Map<string, MissionTaskCheckpoint>(
       (ctx.resumeCheckpoint?.completedTasks || []).map((checkpoint) => [
         JSON.stringify([checkpoint.phaseId, checkpoint.taskId]),
@@ -148,8 +160,10 @@ export class MissionOrchestrator {
       plan,
       completedTasks: [...completedTasks.values()],
       completedPhases: [...completedPhases],
+      ...(pendingInteraction ? { pendingInteraction } : {}),
     });
     saveCheckpoint();
+    activePlan = plan;
     await ctx.broadcast({
       type: 'plan_generated',
       missionId: ctx.missionId,
@@ -234,6 +248,22 @@ export class MissionOrchestrator {
         }
 
         let result: TaskExecutionResult;
+        const previousInteraction = ctx.resumeCheckpoint?.pendingInteraction;
+        const continuationInteraction = previousInteraction
+          ? {
+            ...previousInteraction,
+            actionReceipts: previousInteraction.actionReceipts?.filter((receipt) =>
+              !(receipt.toolId === '__create_tool' && receipt.outcome === 'permission_required'),
+            ),
+          }
+          : undefined;
+        const continuation = previousInteraction
+          && continuationInteraction
+          && previousInteraction.phaseId === phase.id
+          && previousInteraction.taskId === task.id
+          && ctx.interactionResponse
+          ? { response: ctx.interactionResponse, pendingInteraction: continuationInteraction }
+          : undefined;
         try {
           const agentId = await agentRuntime.getOrCreateAgent(task.agentRole, task.systemPrompt);
           const executionArgs: [
@@ -256,8 +286,10 @@ export class MissionOrchestrator {
           const taskRetryGuidance = savedTask ? ctx.retryGuidance : undefined;
           try {
             result = taskRetryGuidance
-              ? await agentRuntime.executeTask(...executionArgs, taskRetryGuidance)
-              : await agentRuntime.executeTask(...executionArgs);
+              ? await agentRuntime.executeTask(...executionArgs, taskRetryGuidance, continuation)
+              : continuation
+                ? await agentRuntime.executeTask(...executionArgs, undefined, continuation)
+                : await agentRuntime.executeTask(...executionArgs);
           } catch (err) {
             if (savedTask) throw err;
             const firstError = err instanceof Error ? err.message : String(err);
@@ -270,9 +302,12 @@ export class MissionOrchestrator {
               'Continue from the persisted safe checkpoint and action receipts.',
               'Do not repeat external actions whose outcome is already recorded or uncertain.',
             ].join(' ');
-            result = await agentRuntime.executeTask(...executionArgs, retryGuidance);
+            result = continuation
+              ? await agentRuntime.executeTask(...executionArgs, retryGuidance, continuation)
+              : await agentRuntime.executeTask(...executionArgs, retryGuidance);
           }
         } catch (err) {
+          if (err instanceof MissionUserInterruptionError) throw err;
           if (isFatalServiceError(err)) throw err;
           if (!savedTask) {
             const error = err instanceof Error ? err.message : String(err);
@@ -320,6 +355,47 @@ export class MissionOrchestrator {
           throw err;
         }
 
+        if (result.interruption) {
+          const interruption: MissionPendingInteraction = {
+            ...result.interruption,
+            phaseId: phase.id,
+            taskId: task.id,
+            taskTitle: task.title,
+            agentRole: task.agentRole,
+            actionReceipts: result.actionReceipts || [],
+            resumeCount: previousInteraction?.phaseId === phase.id && previousInteraction.taskId === task.id
+              ? previousInteraction.resumeCount + 1
+              : 0,
+          };
+          pendingInteraction = interruption;
+          task.status = 'pending';
+          task.output = '';
+          phaseOutput.status = 'pending';
+          phaseOutput.tasks.push({ taskId: task.id, status: 'pending', artifacts: [] });
+          outputs.phases.push(phaseOutput);
+          outputs.status = interruption.kind === 'user_input' ? 'awaiting_user_input' : 'awaiting_permission';
+          outputs.pendingInteraction = interruption;
+          await this.updateTask(ctx, phase.id, task.id, { status: 'pending', output: '' });
+          await this.persistPlan(ctx, plan);
+          saveCheckpoint();
+          await ctx.broadcast({
+            type: interruption.kind === 'user_input' ? 'question_asked' : 'permission_required',
+            missionId: ctx.missionId,
+            timestamp: Date.now(),
+            data: {
+              phaseId: phase.id,
+              taskId: task.id,
+              taskTitle: task.title,
+              agentRole: task.agentRole,
+              ...(interruption.question ? { question: interruption.question } : {}),
+              ...(interruption.requestId ? { requestId: interruption.requestId } : {}),
+              ...(interruption.permission ? { permission: interruption.permission } : {}),
+            },
+          });
+          throw new MissionUserInterruptionError({ plan, outputs, compensations });
+        }
+
+        if (continuation) pendingInteraction = undefined;
         if (!savedTask) {
           completedTasks.set(taskKey, { phaseId: phase.id, taskId: task.id });
           saveCheckpoint();
@@ -415,20 +491,27 @@ export class MissionOrchestrator {
           break;
         }
         let task: Task | undefined;
-        try {
-          task = readyTasks.length === 1
-            ? readyTasks[0]!
-            : await agentRuntime.selectNextTask(
-              ctx.prompt,
-              plan,
-              phase,
-              completedTaskIds,
-              [...completedTaskSummaries.values()].slice(-10),
-            );
-        } catch (err) {
-          if (isFatalServiceError(err)) throw err;
-          logger.error({ missionId: ctx.missionId, phaseId: phase.id, err: err instanceof Error ? err.message : String(err) }, 'Task selection failed');
-          task = readyTasks[0];
+        if (pendingInteraction?.phaseId === phase.id) {
+          task = readyTasks.find((candidate) => candidate.id === pendingInteraction?.taskId);
+          if (!task) {
+            throw new Error(`Interrupted task ${pendingInteraction.taskId} is no longer dependency-ready`);
+          }
+        } else {
+          try {
+            task = readyTasks.length === 1
+              ? readyTasks[0]!
+              : await agentRuntime.selectNextTask(
+                ctx.prompt,
+                plan,
+                phase,
+                completedTaskIds,
+                [...completedTaskSummaries.values()].slice(-10),
+              );
+          } catch (err) {
+            if (isFatalServiceError(err)) throw err;
+            logger.error({ missionId: ctx.missionId, phaseId: phase.id, err: err instanceof Error ? err.message : String(err) }, 'Task selection failed');
+            task = readyTasks[0];
+          }
         }
         if (!task || !readyTasks.some((candidate) => candidate.id === task!.id)) {
           logger.error({ missionId: ctx.missionId, phaseId: phase.id }, 'Mission task selector chose a task that is not ready');
@@ -473,6 +556,7 @@ export class MissionOrchestrator {
         try {
           await executeTask(task, undefined);
         } catch (err) {
+          if (err instanceof MissionUserInterruptionError) throw err;
           if (isFatalServiceError(err)) throw err;
           logger.error({ missionId: ctx.missionId, phaseId: phase.id, taskId: task.id, err: err instanceof Error ? err.message : String(err) }, 'Task execution failed');
           const taskKey = JSON.stringify([phase.id, task.id]);
@@ -526,6 +610,7 @@ export class MissionOrchestrator {
             );
             const applied = applyPhaseReview(plan, phase.id, review);
             plan = applied.plan;
+                  activePlan = plan;
             phase = applied.phase;
             if (applied.satisfied) {
               phaseReviewSatisfied = phaseOutput.tasks.every((task: any) => task.status === 'completed');
@@ -548,6 +633,7 @@ export class MissionOrchestrator {
               } as Task;
               phase.tasks.push(amendmentTask);
               plan.phases = plan.phases.map((p: any) => p.id === phase.id ? phase : p);
+              activePlan = plan;
               saveCheckpoint();
               try {
                 await this.persistPlan(ctx, plan);
@@ -705,6 +791,15 @@ export class MissionOrchestrator {
 
     MissionOrchestrator.unregister(ctx.missionId);
     return { plan, outputs, compensations };
+    } catch (error) {
+      if (error instanceof MissionUserInterruptionError) return error.result;
+      if (activePlan && pendingInteraction) {
+        logger.error(
+          { missionId: ctx.missionId, taskId: pendingInteraction.taskId },
+          'Mission stopped with a persisted pending user interaction',
+        );
+      }
+      throw error;
     } finally {
       MissionOrchestrator.unregister(ctx.missionId);
     }

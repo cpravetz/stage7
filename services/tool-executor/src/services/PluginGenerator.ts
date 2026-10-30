@@ -65,6 +65,14 @@ const PLUGIN_SYSTEM_PROMPT = `You are a senior engineer generating production-re
     with network access and credentials disabled before deployment.
   - Include configSchema in every response; use {"type":"object","properties":{}} when no
     configuration is needed.
+  - Every user-provided secret must be an input property marked with
+    "x-stage7-secret": true, "format": "password", and "writeOnly": true. Generated code
+    may receive that input only at runtime. Never put secrets in config defaults, source
+    code, logs, outputs, or acceptance-test fixtures; acceptance tests must use dummy
+    values and must not make live requests.
+  - If the tool must return a secret value, mark that output property with
+    "x-stage7-secret": true. ToolExecutor stores it in Vault and returns only a
+    vault:// reference to the Agent; never include real secret values in acceptance tests.
   - Do NOT include markdown fences or explanation text outside the JSON.`;
 
 const PLUGIN_DEPLOY_DIR = process.env.PLUGIN_DEPLOY_DIR || '/tmp/stage7-plugins';
@@ -294,6 +302,7 @@ export class PluginGenerator {
           testContract,
         },
         inputSchema: parsed.inputs,
+        configSchema: parsed.configSchema,
         outputSchema: parsed.outputs,
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -502,6 +511,7 @@ export class PluginGenerator {
           testContract,
         },
         inputSchema: parsed.inputs || { type: 'object', properties: {} },
+        configSchema: parsed.configSchema || { type: 'object', properties: {} },
         outputSchema: parsed.outputs || {},
         createdAt: new Date(),
         updatedAt: new Date(),

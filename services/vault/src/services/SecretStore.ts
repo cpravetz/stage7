@@ -42,15 +42,16 @@ export class SecretStore {
     this.connectPromise = (async () => {
       try {
         await this.mongoStore!.connect();
-      } catch {
-        this.mongoStore = null;
+      } catch (error) {
+        this.connectPromise = null;
+        throw error;
       }
     })();
 
     return this.connectPromise;
   }
 
-  createSecret(name: string, plaintext: string, tenantId: string): SecretMetadata {
+  async createSecret(name: string, plaintext: string, tenantId: string): Promise<SecretMetadata> {
     const now = new Date().toISOString();
     const encrypted = this.encryption.encrypt(plaintext);
     const secret: StoredSecret = {
@@ -62,39 +63,16 @@ export class SecretStore {
       updatedAt: now,
     };
 
-    if (this.mongoStore) {
-      this.createSecretInMongo(secret).catch(() => {
-        this.secrets.set(secret.id, secret);
-      });
-    } else {
-      this.secrets.set(secret.id, secret);
-    }
-
-    return this.toMetadata(secret);
-  }
-
-  private async createSecretInMongo(secret: StoredSecret): Promise<void> {
     await this.ensureMongo();
-    if (this.mongoStore) {
-      try {
-        await this.mongoStore.createSecret(secret);
-      } catch {
-        this.secrets.set(secret.id, secret);
-      }
-    } else {
-      this.secrets.set(secret.id, secret);
-    }
+    if (this.mongoStore) await this.mongoStore.createSecret(secret);
+    else this.secrets.set(secret.id, secret);
+    return this.toMetadata(secret);
   }
 
   async getSecret(id: string): Promise<StoredSecret | undefined> {
     await this.ensureMongo();
     if (this.mongoStore) {
-      try {
-        const result = await this.mongoStore.getSecret(id);
-        if (result) return result;
-      } catch {
-        // fallback
-      }
+      return this.mongoStore.getSecret(id);
     }
     return this.secrets.get(id);
   }
@@ -102,12 +80,8 @@ export class SecretStore {
   async listSecrets(): Promise<SecretMetadata[]> {
     await this.ensureMongo();
     if (this.mongoStore) {
-      try {
-        const tenantId = this.getTenantIdFromContext();
-        return await this.mongoStore.listSecrets(tenantId);
-      } catch {
-        // fallback
-      }
+      const tenantId = this.getTenantIdFromContext();
+      return this.mongoStore.listSecrets(tenantId);
     }
     return Array.from(this.secrets.values()).map((s) => this.toMetadata(s));
   }
@@ -115,15 +89,11 @@ export class SecretStore {
   async deleteSecret(id: string): Promise<boolean> {
     await this.ensureMongo();
     if (this.mongoStore) {
-      try {
-        const deleted = await this.mongoStore.deleteSecret(id);
-        if (deleted) {
-          this.secrets.delete(id);
-          return true;
-        }
-      } catch {
-        // fallback
+      const deleted = await this.mongoStore.deleteSecret(id);
+      if (deleted) {
+        this.secrets.delete(id);
       }
+      return deleted;
     }
     const existed = this.secrets.delete(id);
     return existed;

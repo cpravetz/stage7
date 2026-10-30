@@ -382,7 +382,7 @@ const __resolveAuth = async (auth) => {
     if (typeof val === 'object') {
       if (val.vaultSecretId) {
         try {
-          const r = await fetch((process.env.VAULT_URL || 'http://vault:4000') + '/secrets/' + val.vaultSecretId + '/decrypt', {
+          const r = await fetch((process.env.VAULT_URL || 'http://vault:4000') + '/api/vault/secrets/' + val.vaultSecretId + '/decrypt', {
             headers: { 'X-Tenant-Id': 'system' },
           });
           if (r.ok) { const d = await r.json(); return d.plaintext || ''; }
@@ -631,7 +631,7 @@ async def __resolve_auth(auth):
                 try:
                     vault_url = os.environ.get('VAULT_URL', 'http://vault:4000')
                     req = urllib.request.Request(
-                        f'{vault_url}/secrets/{val["vaultSecretId"]}/decrypt',
+                        f'{vault_url}/api/vault/secrets/{val["vaultSecretId"]}/decrypt',
                         headers={'X-Tenant-Id': 'system'}
                     )
                     with urllib.request.urlopen(req, timeout=5) as resp:

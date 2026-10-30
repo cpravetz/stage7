@@ -1,10 +1,19 @@
 # Tool & Skill Development Guide
 
-How to build tools and code skills for the Stage7 assistant runtime.
+How to build executable Tools and higher-order Skills for Stage7 Assistants.
 
-Tools are **data**, not classes. A tool is a plain object with an id, schemas, and a manifest.
-Code skills attach a `handler` function to that object; the factory serialises it into the
-executable source the sandbox runs.
+**Tools and Skills are different capabilities.** A Tool performs a bounded operation: it is
+locally executed TypeScript/JavaScript or Python code, or an integration invoked through MCP or
+OpenAPI. Its schemas and manifest describe how to call and configure it. A Skill is a higher-order
+Assistant function that leverages LLM reasoning to interpret a goal, decide how to proceed, and
+coordinate or compose Tools. A Skill may ask for user input; a Tool should receive its required
+values through its declared input/configuration contract.
+
+Some existing ToolExecutor and ADK APIs use “skill” in names such as `createDeclarativeCodeSkill`,
+or represent a code-backed capability with a shared Tool descriptor. That is an implementation
+compatibility detail, not a reason to treat an executable Tool as a higher-order Skill. When using
+those APIs to register a lower-order executable Tool, set `isSkill: false` where supported and keep
+LLM planning/orchestration in the Assistant/Skill layer.
 
 ## Generated plugin acceptance tests
 
@@ -33,19 +42,57 @@ not yet supported by the fixture interceptor and will fail closed in the network
 namespace. Live smoke tests require separate explicit authorization and must not run as part of
 automatic plugin creation.
 
+## Vault-backed secret schemas
+
+Do not pass a secret as ordinary mission text, a tool default, generated source, or a test
+fixture. A Planner may request a missing secret by prefixing one clarification question with
+`[secret:<key>] `, where `<key>` contains only letters, digits, underscores, or hyphens. The
+Mission Room sends the entered value directly to Vault and sends only a `vault://<id>` reference
+to the Planner and task Agents.
+
+Generated tools must mark secret inputs with `x-stage7-secret: true`, `format: password`, and
+`writeOnly: true`. ToolExecutor accepts a Vault reference in that field, resolves it immediately
+before execution, and keeps the reference—not the plaintext—in execution input and Agent-visible
+results. Mark secret-valued output properties with `x-stage7-secret: true`; ToolExecutor stores
+those values in Vault and returns only a Vault reference. Never log, echo, or place real secrets in
+acceptance tests. Use dummy values in contract tests.
+
+`inputSchema`, `configSchema`, and `outputSchema` are separate tool contracts. Agents receive all
+three schemas; the Tools page displays and edits them independently. A mission-specific credential
+should be a marked input when it is collected for one execution, not a plaintext configuration
+default.
+
+## Mission interruptions and tool permissions
+
+When a task lacks a user-provided value, its Agent can pause by returning
+`__ASK_USER__:{"question":"..."}` as its final response. The Mission Room stores the pending
+task and question with the mission checkpoint. A user answer resumes that task as a continuation;
+completed mission tasks and action receipts are carried forward so successful side effects are not
+replayed. Prefix a question with `[secret:<key>] ` to render a password field and save its answer
+directly to Vault. Only the resulting `vault://` reference is sent to the Agent.
+
+When ToolExecutor discovers an MCP capability that needs consent, the mission pauses with a
+permission card showing the tool, trust tier, side effects, data classes, credential requirements,
+and scope choices. Granting or denying permission resumes the interrupted task with the decision.
+Pending MCP permission requests are persisted under `TOOL_PERMISSION_REQUEST_STORE_DIR` (default
+`/tmp/stage7-tool-permissions`) so a ToolExecutor process restart does not silently discard the
+request. Mission execution, Temporal management, checkpointing, and continuation run within the
+existing Stage7 service containers.
+
 For the composition model (workflows, lanes, stages, assistant definitions) see
 [ADK_DEVELOPER_GUIDE.md](./ADK_DEVELOPER_GUIDE.md).
 
-## Mission-generated skills and batch execution
+## Mission-generated Skills and batch execution
 
-Successful mission trajectories can be synthesized into reusable ADK code skills through
+Successful mission trajectories can be synthesized into reusable higher-order ADK Skills through
 `POST /api/v1/compile-skill`. The request identifies the trajectory, target skill name and
-category, and author Assistant; the response contains the registered skill. ToolExecutor also
-writes the generated TypeScript source under
+category, and author Assistant; the response contains the registered Skill. ToolExecutor also
+writes the generated TypeScript implementation under
 `services/tool-executor/src/assistants/<assistant-id>/skills/generated/`. The compiler validates
 the structured synthesis, declared schemas, and JavaScript syntax, but does not behaviorally test
-the generated implementation. Review generated source and its required credentials before
-granting or executing the skill.
+the generated implementation. A Skill is not itself an executable Tool: if its implementation
+needs to perform an operation, it should call an appropriate registered Tool. Review generated
+source and its required credentials before granting or executing the Skill.
 
 For one-off sequential execution, `POST /api/tool-executor/tools/execute-batch` accepts 1–20
 registered tool steps and a JSON Schema for the final output. Each step may set
@@ -57,25 +104,30 @@ runtime's capabilities and limits rather than running in a separate isolation bo
 See the [User Guide](../USER_GUIDE.md) for mission learning, recurring schedule, entity-memory,
 and Agent skill-grant behavior.
 
-## What are tools?
+## Tool and Skill responsibilities
 
-Tools are the "actions" or "capabilities" your assistant can perform. They bridge the assistant to
-external systems, databases, APIs, or computation.
+A Tool is the executable capability an Assistant can call. Stage7 supports locally run code
+(TypeScript/JavaScript or Python) and integrations through MCP or OpenAPI. Tools can access
+computation, data, and external services within their declared contracts and runtime permissions.
+A Skill is a higher-order Assistant capability: it leverages LLM reasoning to interpret and carry
+out a user goal, calling one or more Tools as appropriate. Do not implement planning or open-ended
+decision-making as a Tool handler.
 
 **Examples:**
-- CRM lookup (Salesforce API integration)
-- Email sending (SMTP integration)
-- Data analysis (computation)
-- Document generation (template rendering)
-- Calendar management (Google Calendar API)
-- Jira ticket creation (project management)
+- A locally executed tool that validates or transforms data
+- An OpenAPI tool that calls a CRM endpoint
+- An MCP tool that sends an approved message
+- A Skill that determines what information is missing, gathers it, and coordinates the tools needed
+  to complete a user request
 
-## Creating a tool
+## Implementing a locally executed Tool
 
-A tool that delegates to other tools, or one whose behaviour lives entirely in a handler, is a
-**code skill**. Everything else is a declarative tool: schemas, triggers, and configuration only.
+Use a code Tool for a bounded operation whose behavior is implemented in TypeScript/JavaScript or
+Python. Use MCP or OpenAPI when the capability is provided by an external integration. A Tool may
+delegate to another Tool where supported, but delegation does not turn it into a Skill: the
+higher-order Skill/Assistant remains responsible for LLM-backed planning and coordination.
 
-### Step 1: Declare the tool with `createTool`
+### Step 1: Declare the tool contract
 
 ```ts
 import { createTool } from '../adk';
@@ -97,14 +149,24 @@ export const planningTool = createTool({
 });
 ```
 
+For a locally executed Tool, the registered manifest must also identify its language and provide
+its executable source (or use the existing code factory described below to generate that source).
+MCP and OpenAPI tools instead carry the corresponding integration details in their manifests.
+
 `outputSchema` is enforced at runtime. A result that does not match is logged and the mismatches are
 attached to the execution as `outputSchemaIssues`, so contract drift is observable rather than
 silent.
 
-### Step 2: Add a handler with `createDeclarativeCodeSkill`
+### Step 2: Implement the bounded operation
 
-`createDeclarativeCodeSkill` takes the same identity and schema fields plus a `handler`. It
-generates the executable `sourceCode` wrapper and wires persistence, delegation, and rendering.
+The existing `createDeclarativeCodeSkill` factory is a compatibility API for producing a
+locally-executed code Tool from a handler. Despite its name, a handler built this way is not an
+LLM-backed Skill. It generates the executable `sourceCode` wrapper and wires persistence, Tool
+delegation, and rendering. Use it for bounded tool behavior, not for LLM planning.
+
+The remainder of this section documents that ToolExecutor code-handler API and its current
+registry conventions. It is not a definition of an Agent Skill or a prescription to implement
+LLM-backed Skills as ordinary Tool handlers.
 
 ```ts
 import {
@@ -117,6 +179,7 @@ export const sendEmail = createDeclarativeCodeSkill({
   id: 'send-email',
   name: 'Send Email',
   description: 'Sends an email to a specified recipient',
+  isSkill: false,
   persistenceEnvVar: 'EMAIL_HOME',
   emitEvent: 'email-sent',
   inputSchema: createSchemaRecord({
@@ -157,10 +220,12 @@ export const sendEmail = createDeclarativeCodeSkill({
 });
 ```
 
-### Step 3: Register it
+### Step 3: Register the Tool
 
-Export the skill from the domain's `index.ts` and add it to the domain's skill array (and, when it
-belongs to a workflow stage, to that stage's `skillIds`):
+The current assistant/domain registry may use a `skills` array for compatibility. Export and add
+the code-backed Tool there as required by that registry, marking it `isSkill: false` where
+supported; this registry naming does not change its architectural role. Higher-order Skills belong
+in the Assistant/Agent orchestration layer and call Tools through the available runtime interface.
 
 ```ts
 import { leadDealAdvisory } from './lead-deal-advisory';
@@ -201,8 +266,9 @@ const bullets = ctx.render.list('items', 'Items', ['a', 'b']);
 ```
 
 Delegation returns `{ success, error, ... }` on failure instead of throwing, so always check the
-result. Nested execution is bounded by `MAX_NESTING_DEPTH` in the tool executor, and a skill marked
-`confirmBeforeSend` cannot be nested unless the caller passes `dryRun: true`.
+result. Nested execution is bounded by `MAX_NESTING_DEPTH` in ToolExecutor. Follow the registered
+Tool's permission and confirmation requirements; a Tool handler is not a substitute for the
+higher-order Skill's planning or user interaction.
 
 ## Options
 
@@ -215,7 +281,7 @@ result. Nested execution is bounded by `MAX_NESTING_DEPTH` in the tool executor,
 | `credentialSource`  | `Record<string, { vaultSecretId?, envVar?, configKey? }>` | Maps logical keys to vault/env/config sources  |
 | `configSchema`      | `SchemaRecord`                                | Documents the operator-supplied configuration                  |
 | `confirmBeforeSend` | `boolean`                                     | Requires user confirmation before the skill runs               |
-| `tier`              | `'advise' \| 'aid' \| 'represent'`            | Skill action model tier                                        |
+| `tier`              | `'advise' \| 'aid' \| 'represent'`            | Action tier metadata used by the existing runtime              |
 | `domainKnowledge`   | `string`                                      | Domain guidance handed to the model                            |
 | `triggers`          | `SkillTrigger[]`                              | User, schedule, event, or data triggers                        |
 | `timeoutMs`         | `number`                                      | Execution budget                                                |
@@ -262,9 +328,9 @@ A pending timer keeps the sandbox node process alive, so a leaked timer makes th
 budget even after the handler has returned — which shows up as a timeout under test and blows past
 the request deadline in production.
 
-## Presentation output
+## Tool result presentation
 
-A skill controls its own user-facing layout by returning `present` blocks. The contract lives in
+A code Tool can control its user-facing result layout by returning `present` blocks. The contract lives in
 [../../shared-nextgen/src/types/common.ts](../../shared-nextgen/src/types/common.ts) and is the only
 thing a renderer needs to know:
 
@@ -306,7 +372,7 @@ export interface PresentationBlock {
 
 ### 1. Single responsibility
 
-Each skill should do one thing well. Instead of one broad skill:
+Each Tool should do one bounded thing well. Instead of one broad Tool:
 
 - ✅ `create-opportunity`
 - ✅ `update-contact`
@@ -402,9 +468,9 @@ return {
 
 ## Testing
 
-A declarative skill's real behaviour lives in `manifest.sourceCode`, the generated script the
-sandbox runs. Assert on that emitted script, not just on the tool object: the factory rewrites the
-handler (type stripping, `ctx` wiring), so the emitted text is what counts.
+A code Tool created through the declarative code factory runs the generated script in the
+sandbox. Assert on `manifest.sourceCode`, not just on the Tool descriptor: the factory rewrites
+the handler (type stripping, `ctx` wiring), so the emitted text is what counts.
 
 ### Unit test: assert on the emitted source
 
@@ -434,7 +500,7 @@ describe('send-email generated source', () => {
 });
 ```
 
-### End-to-end test: run the skill through the executor
+### End-to-end test: run the code Tool through the executor
 
 For behaviour, drive the skill through `ToolExecutor` the way production does. `CodeExecutor`
 spawns a real `node` child, so an in-process `global.fetch` mock does not intercept its requests.
@@ -449,25 +515,25 @@ import { sendEmail } from './send-email';
 
 const executor = new ToolExecutor();
 
-async function runSkill(input: Record<string, unknown>) {
+async function runTool(input: Record<string, unknown>) {
   // execute() resolves a ToolExecution whose `output` is already the parsed
-  // object the skill emitted on stdout.
+  // object the Tool emitted on stdout.
   const execution = await executor.execute(sendEmail, input);
   if (execution.status !== 'completed') {
-    throw new Error(execution.error ?? `skill exited ${execution.status}`);
+    throw new Error(execution.error ?? `Tool exited ${execution.status}`);
   }
   return execution.output ?? {};
 }
 
 describe('send-email', () => {
   it('reports a failure envelope for an invalid address', async () => {
-    const out = await runSkill({ to: 'invalid-email', subject: 'Test', body: 'Test' });
+    const out = await runTool({ to: 'invalid-email', subject: 'Test', body: 'Test' });
     expect(out.success).toBe(false);
     expect(out.error).toContain('Invalid email address');
   }, 30000);
 
   it('emits exactly one JSON line on the success path', async () => {
-    const out = await runSkill({ to: 'test@example.com', subject: 'Test', body: 'Test' });
+    const out = await runTool({ to: 'test@example.com', subject: 'Test', body: 'Test' });
     expect(out.success).toBe(true);
     expect(out.data.messageId).toBe('msg-123');
   }, 30000);
@@ -486,7 +552,7 @@ executor does at runtime:
 import { validateAgainstOutputSchema } from '../../utils/schemaValidator';
 
 it('result matches its declared outputSchema', async () => {
-  const out = await runSkill({ to: 'test@example.com', subject: 'Test', body: 'Test' });
+  const out = await runTool({ to: 'test@example.com', subject: 'Test', body: 'Test' });
   expect(validateAgainstOutputSchema(out, sendEmail.outputSchema)).toEqual([]);
 }, 30000);
 ```

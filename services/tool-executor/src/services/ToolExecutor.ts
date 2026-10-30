@@ -6,7 +6,6 @@ import {
 import logger from '../utils/logger';
 import { ErrorHandler } from '../utils/ErrorHandler';
 import { EmailExecutor } from '../executors/EmailExecutor';
-import { SmsExecutor } from '../executors/SmsExecutor';
 import { SearchExecutor } from '../executors/SearchExecutor';
 import type { CodeExecutorCredentials } from '../executors/CodeExecutor';
 import { DockerLocalDriver } from '../runners/DockerLocalDriver';
@@ -48,6 +47,28 @@ const BRAIN_URL = process.env.BRAIN_URL || 'http://brain:3100';
 const HEALING_SYSTEM_PROMPT = `You are a senior engineer debugging a failed code execution. Given the error message, source code, and input that caused the failure, provide a corrected version of the code. Output ONLY a single JSON object with this exact shape: { "sourceCode": "corrected code string", "explanation": "brief explanation of the fix" }`;
 const MAX_HEALING_ATTEMPTS = 2;
 const MAX_NESTING_DEPTH = 4;
+
+function schemaRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function isVaultSecretProperty(schema: Record<string, unknown>): boolean {
+  return schema['x-stage7-secret'] === true
+    || (schema.sensitive === true && schema.format === 'password');
+}
+
+function redactSecrets(value: unknown, secrets: string[]): unknown {
+  if (typeof value === 'string') {
+    return secrets.reduce((redacted, secret) => redacted.split(secret).join('[REDACTED]'), value);
+  }
+  if (Array.isArray(value)) return value.map((item) => redactSecrets(item, secrets));
+  const record = schemaRecord(value);
+  return record
+    ? Object.fromEntries(Object.entries(record).map(([key, item]) => [key, redactSecrets(item, secrets)]))
+    : value;
+}
 
 /**
  * Object-continuity keys, expressed as an ADK context policy so the guard and
@@ -126,7 +147,6 @@ request: CredentialRequest;
 
 export class ToolExecutor {
   private emailExecutor = new EmailExecutor();
-  private smsExecutor = new SmsExecutor();
   private searchExecutor = new SearchExecutor();
   private sandboxDriver: SandboxExecutionDriver = new DockerLocalDriver();
   private pluginGenerator = new PluginGenerator();
@@ -544,6 +564,7 @@ export class ToolExecutor {
 
     logger.info({ executionId, toolId: tool.id, toolName: tool.name, toolType: tool.type, workspaceId: opts?.workspaceId, assistantId: opts?.assistantId }, 'Tool execution started');
 
+    const secretValues: string[] = [];
     try {
       this.enforceConfirmation(tool, input, executionId);
       this.validateSameContext(tool, input);
@@ -555,7 +576,10 @@ export class ToolExecutor {
         return configResult;
       }
       const { resolved, sources } = await this.resolveCredentials(tool, input);
-      const output = await this.dispatch(tool, input, { resolved, sources });
+      const hydratedInput = await this.hydrateSecretInputs(tool, input, secretValues);
+      const rawOutput = await this.dispatch(tool, hydratedInput, { resolved, sources });
+      const storedOutput = await this.storeSecretOutputs(tool, rawOutput, opts?.context?.tenantId, secretValues);
+      const output = redactSecrets(storedOutput, secretValues) as typeof rawOutput;
       this.pendingCredentialOverrides.delete(tool.id);
       // `dispatch` reports failure as `{ error }` rather than throwing, so a
       // tool that "succeeded" with an error payload must not emit its event.
@@ -605,7 +629,7 @@ export class ToolExecutor {
       }
 
       const completedAt = new Date();
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const errorMessage = String(redactSecrets(error instanceof Error ? error.message : 'Unknown error', secretValues));
       this.dispatchOutcomeEvent(
         tool, 'failed', errorMessage, opts?.workspaceId, opts?.assistantId, executionId,
       );
@@ -659,6 +683,7 @@ export class ToolExecutor {
       this.pendingCredentialOverrides.set(tool.id, providedCredentials);
     }
 
+    const secretValues: string[] = [];
     try {
       this.enforceConfirmation(tool, input, executionId);
       this.validateSameContext(tool, input);
@@ -670,7 +695,10 @@ export class ToolExecutor {
         return configResult;
       }
       const { resolved, sources } = await this.resolveCredentials(tool, input);
-      const output = await this.dispatch(tool, input, { resolved, sources });
+      const hydratedInput = await this.hydrateSecretInputs(tool, input, secretValues);
+      const rawOutput = await this.dispatch(tool, hydratedInput, { resolved, sources });
+      const storedOutput = await this.storeSecretOutputs(tool, rawOutput, opts?.context?.tenantId, secretValues);
+      const output = redactSecrets(storedOutput, secretValues) as typeof rawOutput;
       this.pendingCredentialOverrides.delete(tool.id);
       // `dispatch` reports failure as `{ error }` rather than throwing, so a
       // tool that "succeeded" with an error payload must not emit its event.
@@ -740,7 +768,7 @@ export class ToolExecutor {
         throw error;
       }
 
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const errorMessage = String(redactSecrets(error instanceof Error ? error.message : 'Unknown error', secretValues));
       this.dispatchOutcomeEvent(
         tool, 'failed', errorMessage, opts?.workspaceId, opts?.assistantId, executionId,
       );
@@ -1374,6 +1402,100 @@ throw new CredentialRequiredError(request);
 return { resolved: merged, sources: namedSources };
 }
 
+private async hydrateSecretInputs(
+  tool: Tool,
+  input: Record<string, unknown>,
+  resolvedValues: string[],
+): Promise<Record<string, unknown>> {
+  const hydrate = async (value: unknown, schemaValue: unknown, path: string): Promise<unknown> => {
+    const schema = schemaRecord(schemaValue);
+    if (!schema) return value;
+    if (isVaultSecretProperty(schema)) {
+      if (value === undefined || value === null || value === '') return value;
+      if (typeof value !== 'string' || !value.startsWith('vault://')) {
+        throw new Error(`Secret input "${path}" must contain a Vault reference`);
+      }
+      const secretId = value.slice('vault://'.length);
+      const plaintext = await credentialProvider.resolve({ vaultSecretId: secretId });
+      if (plaintext === undefined) {
+        throw new Error(`Vault secret for input "${path}" could not be resolved`);
+      }
+      resolvedValues.push(plaintext);
+      return plaintext;
+    }
+
+    if (Array.isArray(value) && schema.items) {
+      return Promise.all(value.map((item, index) => hydrate(item, schema.items, `${path}[${index}]`)));
+    }
+    const valueRecord = schemaRecord(value);
+    const properties = schemaRecord(schema.properties);
+    if (!valueRecord || !properties) return value;
+    const hydrated: Record<string, unknown> = { ...valueRecord };
+    for (const [key, propertySchema] of Object.entries(properties)) {
+      if (Object.prototype.hasOwnProperty.call(valueRecord, key)) {
+        hydrated[key] = await hydrate(valueRecord[key], propertySchema, path ? `${path}.${key}` : key);
+      }
+    }
+    return hydrated;
+  };
+
+  const schema = schemaRecord(tool.inputSchema);
+  const properties = schemaRecord(schema?.properties);
+  if (!properties) return input;
+  const hydrated: Record<string, unknown> = { ...input };
+  for (const [key, propertySchema] of Object.entries(properties)) {
+    if (Object.prototype.hasOwnProperty.call(input, key)) {
+      hydrated[key] = await hydrate(input[key], propertySchema, key);
+    }
+  }
+  return hydrated;
+}
+
+private async storeSecretOutputs(
+  tool: Tool,
+  output: unknown,
+  tenantId: unknown,
+  resolvedValues: string[],
+): Promise<unknown> {
+  const store = async (value: unknown, schemaValue: unknown, path: string): Promise<unknown> => {
+    const schema = schemaRecord(schemaValue);
+    if (!schema) return value;
+    if (isVaultSecretProperty(schema)) {
+      if (value === undefined || value === null || value === '') return value;
+      if (typeof value !== 'string' || typeof tenantId !== 'string' || !tenantId) {
+        throw new Error(`Secret output "${path}" must be a string and the execution must include a tenantId`);
+      }
+      resolvedValues.push(value);
+      return credentialProvider.storeInVault(value, tenantId, `tool-${tool.id}-${path.replace(/[^a-zA-Z0-9_-]/g, '-')}`);
+    }
+
+    if (Array.isArray(value) && schema.items) {
+      return Promise.all(value.map((item, index) => store(item, schema.items, `${path}[${index}]`)));
+    }
+    const valueRecord = schemaRecord(value);
+    const properties = schemaRecord(schema.properties);
+    if (!valueRecord || !properties) return value;
+    const redacted: Record<string, unknown> = { ...valueRecord };
+    for (const [key, propertySchema] of Object.entries(properties)) {
+      if (Object.prototype.hasOwnProperty.call(valueRecord, key)) {
+        redacted[key] = await store(valueRecord[key], propertySchema, path ? `${path}.${key}` : key);
+      }
+    }
+    return redacted;
+  };
+
+  const schema = schemaRecord(tool.outputSchema);
+  const execution = schemaRecord(output);
+  if (execution && typeof execution.output === 'string') {
+    const parsedOutput = parseToolOutputJson(execution.output);
+    if (parsedOutput !== undefined) {
+      const storedOutput = await store(parsedOutput, schema, '');
+      return { ...execution, output: JSON.stringify(storedOutput) };
+    }
+  }
+  return store(output, schema, '');
+}
+
 /**
    * Resolved Skill configuration, using the same precedence as `isConfigured` so
    * the gate and the value a handler reads can never disagree.
@@ -1483,13 +1605,6 @@ const capabilities = Array.isArray(manifest?.capabilities) ? manifest.capabiliti
         }
         case 'email': {
           result = await this.emailExecutor.execute(normalizedInput as { to: string | string[]; subject: string; text?: string; html?: string; from?: string; attachments?: Array<{ filename?: string; content?: string | Buffer; path?: string }> }, resolved);
-          break;
-        }
-        case 'sms': {
-          result = await this.smsExecutor.execute(
-            normalizedInput as { to: string; from?: string; body: string },
-            resolved,
-          );
           break;
         }
         case 'vendor': {

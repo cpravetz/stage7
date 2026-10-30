@@ -270,6 +270,9 @@ router.post(
   asyncHandler(async (req: Request, res: Response) => {
     const workflowId = req.params.workflowId as string;
     const clarificationAnswers = req.body?.clarificationAnswers;
+    const interactionResponse = req.body?.interactionResponse;
+    const permissionDecision = req.body?.permissionDecision;
+    const permissionScope = req.body?.permissionScope;
     if (
       clarificationAnswers !== undefined
       && (!Array.isArray(clarificationAnswers)
@@ -278,7 +281,21 @@ router.post(
     ) {
       throw NextGenError.badRequest('clarificationAnswers must be a non-empty array of strings');
     }
-    const status = await client.resumeMission(workflowId, clarificationAnswers);
+    if (interactionResponse !== undefined && (typeof interactionResponse !== 'string' || !interactionResponse.trim())) {
+      throw NextGenError.badRequest('interactionResponse must be a non-empty string');
+    }
+    if (permissionDecision !== undefined && permissionDecision !== 'granted' && permissionDecision !== 'denied') {
+      throw NextGenError.badRequest('permissionDecision must be granted or denied');
+    }
+    if (permissionScope !== undefined && !['task', 'assistant', 'all_agents'].includes(permissionScope)) {
+      throw NextGenError.badRequest('permissionScope must be task, assistant, or all_agents');
+    }
+    const status = await client.resumeMission(workflowId, {
+      ...(clarificationAnswers ? { clarificationAnswers } : {}),
+      ...(interactionResponse ? { interactionResponse } : {}),
+      ...(permissionDecision ? { permissionDecision } : {}),
+      ...(permissionScope ? { permissionScope } : {}),
+    });
     res.status(202).json({ status });
   }),
 );

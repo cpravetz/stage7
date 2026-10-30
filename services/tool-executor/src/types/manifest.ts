@@ -17,7 +17,6 @@ const nativeExecutorValues: NativeExecutorKey[] = [
   'email',
   'vendor',
   'data_analysis',
-  'sms',
   'calendar',
   'api_client',
 ];

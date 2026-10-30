@@ -3,7 +3,7 @@ import { logger } from '@stage7-nextgen/shared';
 import { PlanSchema } from '@stage7-nextgen/shared';
 import type { Plan } from '@stage7-nextgen/shared';
 import { MissionOrchestrator } from '../planner/MissionOrchestrator';
-import { MissionActivityCheckpoint, MissionTaskCheckpoint, WorkflowInput } from '../types/workflow';
+import { MissionActivityCheckpoint, MissionPendingInteraction, MissionTaskCheckpoint, WorkflowInput } from '../types/workflow';
 import {
   awaitMissionPhaseApprovalActivity,
   completeMissionActivity,
@@ -50,6 +50,17 @@ function parseCheckpoint(value: unknown): MissionActivityCheckpoint | undefined 
     };
   });
   const completedPhasesValue = (value as { completedPhases?: unknown }).completedPhases;
+  const pendingInteractionValue = (value as { pendingInteraction?: unknown }).pendingInteraction;
+  if (
+    pendingInteractionValue !== undefined
+    && (!pendingInteractionValue
+      || typeof pendingInteractionValue !== 'object'
+      || !['user_input', 'mcp_permission'].includes(String((pendingInteractionValue as { kind?: unknown }).kind))
+      || typeof (pendingInteractionValue as { phaseId?: unknown }).phaseId !== 'string'
+      || typeof (pendingInteractionValue as { taskId?: unknown }).taskId !== 'string')
+  ) {
+    throw new Error('Mission activity checkpoint contains invalid pending interaction data');
+  }
   if (
     completedPhasesValue !== undefined
     && (!Array.isArray(completedPhasesValue) || !completedPhasesValue.every((id) => typeof id === 'string'))
@@ -90,6 +101,7 @@ function parseCheckpoint(value: unknown): MissionActivityCheckpoint | undefined 
     ...(plan ? { plan } : {}),
     completedTasks,
     completedPhases: (completedPhasesValue || []) as string[],
+    ...(pendingInteractionValue ? { pendingInteraction: pendingInteractionValue as MissionPendingInteraction } : {}),
   };
 }
 
@@ -205,6 +217,7 @@ const orchestrator = new MissionOrchestrator();
      waitForApproval,
      ...(options.checkpoint ? { resumeCheckpoint: options.checkpoint } : {}),
      ...(input.clarificationAnswers && input.clarificationAnswers.length > 0 ? { clarificationAnswers: input.clarificationAnswers } : {}),
+     ...(input.interactionResponse ? { interactionResponse: input.interactionResponse } : {}),
      onCheckpoint: saveCheckpoint,
      heartbeat,
      controlCheckpoint: options.controlCheckpoint,

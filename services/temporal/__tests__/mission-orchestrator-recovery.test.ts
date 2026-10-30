@@ -25,6 +25,7 @@ describe('MissionOrchestrator checkpoint recovery', () => {
       estimatedCost: 'low',
       requiresClarification: false,
       clarificationQuestions: [],
+      clarificationAnswers: [],
       phases: [{
         id: 'phase-1',
         name: 'Execution',
@@ -61,6 +62,7 @@ describe('MissionOrchestrator checkpoint recovery', () => {
       estimatedCost: 'low',
       requiresClarification: true,
       clarificationQuestions: ['Which environment should be targeted?'],
+      clarificationAnswers: [],
       phases: [],
     }
     const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(jsonResponse())
@@ -98,6 +100,7 @@ describe('MissionOrchestrator checkpoint recovery', () => {
       estimatedCost: 'low',
       requiresClarification: false,
       clarificationQuestions: [],
+      clarificationAnswers: [],
       phases: [{
         id: 'phase-1',
         name: 'Answer',
@@ -204,6 +207,7 @@ describe('MissionOrchestrator checkpoint recovery', () => {
       estimatedCost: 'low',
       requiresClarification: false,
       clarificationQuestions: [],
+      clarificationAnswers: [],
       phases: [{
         id: 'phase-1',
         name: 'Execution',
@@ -288,6 +292,7 @@ describe('MissionOrchestrator checkpoint recovery', () => {
       estimatedCost: 'low',
       requiresClarification: false,
       clarificationQuestions: [],
+      clarificationAnswers: [],
       phases: [{
         id: 'phase-1',
         name: 'Execution',
@@ -331,6 +336,7 @@ describe('MissionOrchestrator checkpoint recovery', () => {
       estimatedCost: 'low',
       requiresClarification: false,
       clarificationQuestions: [],
+      clarificationAnswers: [],
       phases: [{
         id: 'phase-1',
         name: 'Execution',
@@ -374,5 +380,105 @@ describe('MissionOrchestrator checkpoint recovery', () => {
     expect(result.outputs.status).toBe('completed')
     expect(executeTask).toHaveBeenCalledTimes(2)
     expect(executeTask.mock.calls[1]?.[7]).toContain('persisted safe checkpoint and action receipts')
+  })
+
+  it('pauses on a task question and resumes the same task with the answer and prior receipts', async () => {
+    const plan: Plan = {
+      summary: 'Complete the work',
+      estimatedDuration: 'short',
+      estimatedCost: 'low',
+      requiresClarification: false,
+      clarificationQuestions: [],
+      clarificationAnswers: [],
+      phases: [{
+        id: 'phase-1',
+        name: 'Execution',
+        goal: 'Complete the work',
+        requiresApproval: false,
+        status: 'pending',
+        tasks: [{
+          id: 'task-1',
+          title: 'Complete the work',
+          description: 'Complete the requested action.',
+          agentRole: 'worker',
+          systemPrompt: 'Use the required values.',
+          expectedArtifacts: [],
+          status: 'pending',
+          artifacts: [],
+        }],
+      }],
+    }
+    jest.spyOn(global, 'fetch').mockResolvedValue(jsonResponse())
+    jest.spyOn(MissionAgentRuntime.prototype, 'getOrCreateAgent').mockResolvedValue('agent-worker')
+    const executeTask = jest.spyOn(MissionAgentRuntime.prototype, 'executeTask')
+      .mockResolvedValueOnce({
+        output: '__ASK_USER__:{"question":"Which account should be used?"}',
+        artifacts: [],
+        actionReceipts: [{ toolId: 'lookup-account', isError: false, content: '{"found":false}', outcome: 'success' }],
+        interruption: { kind: 'user_input', question: 'Which account should be used?' },
+        tokensUsed: 2,
+      })
+      .mockResolvedValueOnce({
+        output: 'The requested action is complete.',
+        artifacts: [],
+        actionReceipts: [{ toolId: 'send-message', isError: false, content: '{"sent":true}', outcome: 'success' }],
+        tokensUsed: 5,
+      })
+    jest.spyOn(MissionAgentRuntime.prototype, 'reviewPhase')
+      .mockResolvedValue({ satisfied: true, gaps: [] })
+    jest.spyOn(MissionAgentRuntime.prototype, 'reviewMissionCompletion')
+      .mockResolvedValue({ satisfied: true, gaps: [] })
+    const checkpoints: Array<unknown> = []
+    const first = await new MissionOrchestrator().run({
+      missionId: 'mission-ask-user',
+      prompt: 'Complete the action',
+      tenantId: 'tenant-1',
+      persistenceUrl: 'http://artifacts',
+      gatewayUrl: 'http://gateway',
+      broadcast: jest.fn().mockResolvedValue(undefined),
+      broadcastAll: jest.fn().mockResolvedValue(undefined),
+      waitForApproval: jest.fn(),
+      resumePlan: plan,
+      onCheckpoint: (checkpoint) => checkpoints.push(checkpoint),
+    })
+
+    expect(first.outputs.status).toBe('awaiting_user_input')
+    expect(first.outputs.pendingInteraction).toMatchObject({
+      kind: 'user_input',
+      phaseId: 'phase-1',
+      taskId: 'task-1',
+      question: 'Which account should be used?',
+      actionReceipts: [{ toolId: 'lookup-account', outcome: 'success' }],
+    })
+    expect(first.plan.phases[0]?.tasks[0]?.status).toBe('pending')
+    expect((checkpoints[checkpoints.length - 1] as { completedTasks: unknown[] }).completedTasks).toEqual([])
+
+    const checkpoint = checkpoints[checkpoints.length - 1] as {
+      version: 1;
+      plan: Plan;
+      completedTasks: [];
+      completedPhases: [];
+      pendingInteraction: NonNullable<typeof first.outputs.pendingInteraction>;
+    }
+    const resumed = await new MissionOrchestrator().run({
+      missionId: 'mission-ask-user',
+      prompt: 'Complete the action',
+      tenantId: 'tenant-1',
+      persistenceUrl: 'http://artifacts',
+      gatewayUrl: 'http://gateway',
+      broadcast: jest.fn().mockResolvedValue(undefined),
+      broadcastAll: jest.fn().mockResolvedValue(undefined),
+      waitForApproval: jest.fn(),
+      resumeCheckpoint: checkpoint,
+      interactionResponse: 'Account 42',
+    })
+
+    expect(resumed.outputs.status).toBe('completed')
+    expect(executeTask).toHaveBeenCalledTimes(2)
+    expect(executeTask.mock.calls[1]?.[8]).toEqual({
+      response: 'Account 42',
+      pendingInteraction: checkpoint.pendingInteraction,
+    })
+    expect(resumed.plan.phases[0]?.tasks[0]?.status).toBe('completed')
   })
 })

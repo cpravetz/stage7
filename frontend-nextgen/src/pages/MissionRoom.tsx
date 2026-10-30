@@ -323,8 +323,11 @@ const MissionRoom = () => {
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [controlError, setControlError] = useState<string | null>(null);
-  const [clarificationAnswer, setClarificationAnswer] = useState('');
+  const [clarificationAnswers, setClarificationAnswers] = useState<Record<number, string>>({});
   const [clarificationSubmitting, setClarificationSubmitting] = useState(false);
+  const [interactionAnswer, setInteractionAnswer] = useState('');
+  const [interactionSubmitting, setInteractionSubmitting] = useState(false);
+  const [permissionScope, setPermissionScope] = useState('');
   const [now, setNow] = useState(Date.now());
   const transcriptRef = useRef<HTMLDivElement>(null);
   const [retryGuidance, setRetryGuidance] = useState('');
@@ -531,22 +534,80 @@ const MissionRoom = () => {
   };
 
   const handleClarificationSubmit = async () => {
-    const answer = clarificationAnswer.trim();
-    if (!answer || clarificationSubmitting) return;
+    const questions = plan?.clarificationQuestions || [];
+    if (clarificationSubmitting || questions.some((_, index) => !clarificationAnswers[index]?.trim())) return;
     setClarificationSubmitting(true);
     setControlError(null);
     try {
+      const tenantId = detail?.input?.tenantId || 'tenant-1';
+      const safeAnswers = await Promise.all(questions.map(async (question, index) => {
+        const answer = clarificationAnswers[index].trim();
+        const secretQuestion = question.match(/^\s*\[secret:([a-z0-9_-]+)\]\s*(.*)$/i);
+        if (!secretQuestion) return `${question}\nAnswer: ${answer}`;
+        const [, key, prompt] = secretQuestion;
+        const secret = await postJSON<{ id: string }>('/api/vault/secrets', {
+          name: `mission-${missionId}-${key}`,
+          plaintext: answer,
+          tenantId,
+        });
+        return `[secret-ref:${key}] ${prompt.trim()}\nVault reference: vault://${secret.id}`;
+      }));
       const result = await postJSON<{ status: string }>(
         `/api/temporal/missions/${encodeURIComponent(workflowId)}/start`,
-        { clarificationAnswers: [answer] },
+        { clarificationAnswers: safeAnswers },
       );
       updateMissionStatus(workflowId, result.status);
-      setClarificationAnswer('');
+      setClarificationAnswers({});
       await refreshDetail(workflowId);
     } catch (error) {
       setControlError(error instanceof Error ? error.message : 'Failed to submit clarification');
     } finally {
       setClarificationSubmitting(false);
+    }
+  };
+
+  const handleMissionInteractionSubmit = async (decision?: 'granted' | 'denied') => {
+    const pending = detail?.output?.outputs?.pendingInteraction;
+    if (!pending || interactionSubmitting) return;
+    if (pending.kind === 'user_input' && !interactionAnswer.trim()) return;
+    setInteractionSubmitting(true);
+    setControlError(null);
+    try {
+      if (pending.kind === 'mcp_permission') {
+        if (!decision) return;
+        const result = await postJSON<{ status: string }>(
+          `/api/temporal/missions/${encodeURIComponent(workflowId)}/start`,
+          {
+            permissionDecision: decision,
+            ...(decision === 'granted' && permissionScope ? { permissionScope } : {}),
+          },
+        );
+        updateMissionStatus(workflowId, result.status);
+      } else {
+        let safeResponse = interactionAnswer.trim();
+        const secretQuestion = pending.question?.match(/^\s*\[secret:([a-z0-9_-]+)\]\s*(.*)$/i);
+        if (secretQuestion) {
+          const [, key, prompt] = secretQuestion;
+          const secret = await postJSON<{ id: string }>('/api/vault/secrets', {
+            name: `mission-${missionId}-${key}`,
+            plaintext: safeResponse,
+            tenantId: detail?.input?.tenantId || 'tenant-1',
+          });
+          safeResponse = `[secret-ref:${key}] ${prompt.trim()}\nVault reference: vault://${secret.id}`;
+        }
+        const result = await postJSON<{ status: string }>(
+          `/api/temporal/missions/${encodeURIComponent(workflowId)}/start`,
+          { interactionResponse: safeResponse },
+        );
+        updateMissionStatus(workflowId, result.status);
+      }
+      setInteractionAnswer('');
+      setPermissionScope('');
+      await refreshDetail(workflowId);
+    } catch (error) {
+      setControlError(error instanceof Error ? error.message : 'Failed to resume the mission');
+    } finally {
+      setInteractionSubmitting(false);
     }
   };
 
@@ -673,32 +734,151 @@ const MissionRoom = () => {
       {detail?.output?.outputs?.status === 'awaiting_clarification' && plan?.requiresClarification && (
         <div className="error-banner" style={{ background: 'rgba(245,158,11,0.15)' }}>
           <strong>More information is needed before the mission can continue.</strong>
-          {plan.clarificationQuestions && plan.clarificationQuestions.length > 0 && (
+          {detail.output.outputs.resumeSupported === false ? (
+            <p className="error-banner">
+              This mission uses the external Temporal Server backend. Interactive mission resume is currently supported only with TEMPORAL_BACKEND=direct.
+            </p>
+          ) : plan.clarificationQuestions && plan.clarificationQuestions.length > 0 && (
             <ol style={{ margin: '8px 0', paddingLeft: 22 }}>
-              {plan.clarificationQuestions.map((question, index) => <li key={index}>{question}</li>)}
+              {plan.clarificationQuestions.map((question, index) => {
+                const secretQuestion = question.match(/^\s*\[secret:([a-z0-9_-]+)\]\s*(.*)$/i);
+                const label = secretQuestion ? secretQuestion[2] : question;
+                return (
+                  <li key={index} style={{ marginBottom: 8 }}>
+                    <label style={{ display: 'block' }}>
+                      {label}
+                      <input
+                        type={secretQuestion ? 'password' : 'text'}
+                        autoComplete={secretQuestion ? 'new-password' : undefined}
+                        value={clarificationAnswers[index] || ''}
+                        onChange={(event) => setClarificationAnswers((previous) => ({
+                          ...previous,
+                          [index]: event.target.value,
+                        }))}
+                        style={{ display: 'block', width: '100%', marginTop: 4, boxSizing: 'border-box' }}
+                      />
+                      {secretQuestion && (
+                        <span className="muted">Saved directly to Vault; the value is not sent to the planner or Agents.</span>
+                      )}
+                    </label>
+                  </li>
+                );
+              })}
             </ol>
           )}
-          <p className="muted" style={{ margin: '6px 0' }}>
-            Do not enter passwords or API tokens here. Add secrets through the secure tool or credential settings.
-          </p>
-          <textarea
-            aria-label="Clarification answers"
-            placeholder="Answer the questions above"
-            value={clarificationAnswer}
-            onChange={(event) => setClarificationAnswer(event.target.value)}
-            rows={3}
-            style={{ width: '100%', marginTop: 6 }}
-          />
-          <button
-            onClick={handleClarificationSubmit}
-            disabled={clarificationSubmitting || !clarificationAnswer.trim()}
-            style={{ marginTop: 8 }}
-          >
-            {clarificationSubmitting ? 'Continuing...' : 'Continue mission'}
-          </button>
+          {detail.output.outputs.resumeSupported !== false && (
+            <button
+              onClick={handleClarificationSubmit}
+              disabled={clarificationSubmitting || (plan.clarificationQuestions || []).some((_, index) => !clarificationAnswers[index]?.trim())}
+              style={{ marginTop: 8 }}
+            >
+              {clarificationSubmitting ? 'Continuing...' : 'Continue mission'}
+            </button>
+          )}
           {controlError && <div className="error-banner">{controlError}</div>}
         </div>
       )}
+
+      {detail?.output?.outputs?.pendingInteraction && (() => {
+        const pending = detail.output.outputs.pendingInteraction;
+        const secretQuestion = pending.kind === 'user_input'
+          ? pending.question?.match(/^\s*\[secret:([a-z0-9_-]+)\]\s*(.*)$/i)
+          : null;
+        const permission = pending.permission;
+        return (
+          <section className="error-banner" style={{ background: 'rgba(245,158,11,0.15)' }}>
+            <strong>
+              {pending.kind === 'user_input'
+                ? 'The Agent needs your input to continue.'
+                : 'The Agent requests permission to use a discovered tool.'}
+            </strong>
+            <div style={{ marginTop: 6 }}>
+              Task: {pending.taskTitle} · {pending.agentRole}
+            </div>
+            {detail.output.outputs.resumeSupported === false && (
+              <p className="error-banner">
+                This mission uses the external Temporal Server backend. Interactive mission resume is currently supported only with TEMPORAL_BACKEND=direct.
+              </p>
+            )}
+            {detail.output.outputs.resumeSupported !== false && pending.kind === 'user_input' && (
+              <label style={{ display: 'block', marginTop: 10 }}>
+                {secretQuestion ? secretQuestion[2] : pending.question}
+                <input
+                  type={secretQuestion ? 'password' : 'text'}
+                  autoComplete={secretQuestion ? 'new-password' : undefined}
+                  value={interactionAnswer}
+                  onChange={(event) => setInteractionAnswer(event.target.value)}
+                  style={{ display: 'block', width: '100%', marginTop: 4, boxSizing: 'border-box' }}
+                />
+                {secretQuestion && (
+                  <span className="muted">Saved directly to Vault; only its reference is sent to the Agent.</span>
+                )}
+              </label>
+            )}
+            {pending.kind === 'mcp_permission' && permission && (
+              <div style={{ marginTop: 10 }}>
+                <h3 style={{ margin: '4px 0' }}>{permission.toolName}</h3>
+                {permission.publisher && <div>Publisher: {permission.publisher}</div>}
+                {permission.trustTier && <div>Trust tier: {permission.trustTier}</div>}
+                {permission.sideEffectClass && <div>Effect: {permission.sideEffectClass.replace(/_/g, ' ')}</div>}
+                <div>Data shared: {permission.dataClasses.length ? permission.dataClasses.join(', ') : 'No task data specified'}</div>
+                <div>
+                  Credentials: {permission.credentials.needed
+                    ? `${permission.credentials.keys.join(', ') || 'required'}${permission.credentials.source ? ` (${permission.credentials.source})` : ''}`
+                    : 'None required'}
+                </div>
+                <p style={{ whiteSpace: 'pre-wrap' }}>{permission.explanation}</p>
+                {permission.toolDescription && (
+                  <p className="muted">Publisher description (unverified): {permission.toolDescription}</p>
+                )}
+                {permission.availableScopes.length > 1 && (
+                  <label>
+                    Permission scope
+                    <select
+                      value={permissionScope || permission.defaultScope}
+                      onChange={(event) => setPermissionScope(event.target.value)}
+                      style={{ display: 'block', marginTop: 4 }}
+                    >
+                      {permission.availableScopes.map((scope) => (
+                        <option key={scope} value={scope}>{scope.replace(/_/g, ' ')}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                {permission.expiresAt && (
+                  <div className="muted">Request expires {new Date(permission.expiresAt).toLocaleString()}.</div>
+                )}
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+              {detail.output.outputs.resumeSupported === false ? null : pending.kind === 'user_input' ? (
+                <button
+                  onClick={() => void handleMissionInteractionSubmit()}
+                  disabled={interactionSubmitting || !interactionAnswer.trim()}
+                >
+                  {interactionSubmitting ? 'Continuing...' : 'Continue mission'}
+                </button>
+              ) : (
+                <>
+                  <button
+                    onClick={() => void handleMissionInteractionSubmit('granted')}
+                    disabled={interactionSubmitting || !pending.requestId}
+                  >
+                    {interactionSubmitting ? 'Applying decision...' : 'Grant and continue'}
+                  </button>
+                  <button
+                    onClick={() => void handleMissionInteractionSubmit('denied')}
+                    disabled={interactionSubmitting || !pending.requestId}
+                  >
+                    Deny
+                  </button>
+                </>
+              )}
+            </div>
+            {controlError && <div className="error-banner">{controlError}</div>}
+          </section>
+        );
+      })()}
 
       {showRetryDialog && (
         <div className="error-banner" style={{ background: 'rgba(56,189,248,0.15)' }}>

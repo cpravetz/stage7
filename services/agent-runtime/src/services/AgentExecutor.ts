@@ -4,6 +4,7 @@ import {
   BRAIN_ROUTING_SESSION_CONTEXT_KEY,
   logger,
 } from '@stage7-nextgen/shared'
+import { createHash } from 'node:crypto'
 import {
   AgentDefinition,
   AgentExecutionPolicy,
@@ -20,6 +21,8 @@ interface ToolDescriptor {
   isSkill?: boolean
   manifest?: Record<string, unknown>
   inputSchema?: Record<string, unknown>
+  configSchema?: Record<string, unknown>
+  outputSchema?: Record<string, unknown>
 }
 
 interface ToolCatalogResponse {
@@ -80,9 +83,10 @@ export interface AgentActionReceipt {
   isError: boolean
   content: string
   outcome: AgentActionOutcome
+  actionKey?: string
 }
 
-export type AgentActionOutcome = 'success' | 'failure' | 'denied'
+export type AgentActionOutcome = 'success' | 'failure' | 'denied' | 'question_asked' | 'permission_required'
 
 interface RequiredAction {
   toolId: string
@@ -160,14 +164,29 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
     : undefined
 }
 
+function boundSchemaDescriptions(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(boundSchemaDescriptions)
+  const record = asRecord(value)
+  if (!record) return value
+  return Object.fromEntries(Object.entries(record).map(([key, child]) => [
+    key,
+    key === 'description' && typeof child === 'string'
+      ? child.slice(0, 500)
+      : boundSchemaDescriptions(child),
+  ]))
+}
+
 function describeTools(tools: ToolDescriptor[]): Array<{
   id: string;
   name: string;
   description: string;
   type: string;
   inputs: string;
+  inputSchema: unknown;
+  configSchema: unknown;
+  outputSchema: unknown;
 }> {
-  return tools.map(({ id, name, description, type, inputSchema }) => {
+  return tools.map(({ id, name, description, type, inputSchema, configSchema, outputSchema, manifest }) => {
     const schema = asRecord(inputSchema)
     const properties = asRecord(schema?.properties) || {}
     const required = Array.isArray(schema?.required)
@@ -181,7 +200,16 @@ function describeTools(tools: ToolDescriptor[]): Array<{
         return `${key}:${propertyType}${required.includes(key) ? '!' : ''}`
       })
       .join(', ')
-    return { id, name, description: description.slice(0, MAX_TOOL_DESCRIPTION_LENGTH), type, inputs }
+    return {
+      id,
+      name,
+      description: description.slice(0, MAX_TOOL_DESCRIPTION_LENGTH),
+      type,
+      inputs,
+      inputSchema: boundSchemaDescriptions(inputSchema || { type: 'object', properties: {} }),
+      configSchema: boundSchemaDescriptions(configSchema || asRecord(manifest?.configSchema) || { type: 'object', properties: {} }),
+      outputSchema: boundSchemaDescriptions(outputSchema || { type: 'object', properties: {} }),
+    }
   })
 }
 
@@ -235,22 +263,28 @@ function parseActionReceipts(value: unknown): AgentActionReceipt[] {
       || !receipt.toolId.trim()
       || typeof receipt.isError !== 'boolean'
       || typeof receipt.content !== 'string'
-      || (receipt.outcome !== undefined && !['success', 'failure', 'denied', 'question_asked'].includes(String(receipt.outcome)))
+      || (receipt.actionKey !== undefined && (typeof receipt.actionKey !== 'string' || !/^[a-f0-9]{64}$/i.test(receipt.actionKey)))
+      || (receipt.outcome !== undefined && !['success', 'failure', 'denied', 'question_asked', 'permission_required'].includes(String(receipt.outcome)))
     ) {
       throw new Error('Agent execution checkpoint contains an invalid action receipt')
     }
     const semanticFailure = isToolFailurePayload(receipt.content)
     const outcome = receipt.outcome === 'denied'
       ? 'denied'
+      : receipt.outcome === 'permission_required'
+        ? 'permission_required'
+        : receipt.outcome === 'question_asked'
+          ? 'question_asked'
       : semanticFailure
         ? 'failure'
         : (receipt.outcome as AgentActionOutcome | undefined)
           || (receipt.isError ? 'failure' : 'success')
     return {
       toolId: receipt.toolId,
-      isError: receipt.isError || semanticFailure || outcome === 'failure',
+      isError: receipt.isError || semanticFailure || outcome === 'failure' || outcome === 'permission_required',
       content: receipt.content.slice(0, MAX_ACTION_RECEIPT_CHARS),
       outcome,
+      ...(typeof receipt.actionKey === 'string' ? { actionKey: receipt.actionKey } : {}),
     }
   })
 }
@@ -607,7 +641,11 @@ export class AgentExecutor {
     let lastAction = checkpoint?.lastAction || ''
     let repeatedActionCount = checkpoint?.repeatedActionCount || 0
     let finalOutput = checkpoint?.finalOutput
-    const actionReceipts = checkpoint?.actionReceipts || []
+    const priorActionReceipts = parseActionReceipts(taskContext.priorActionReceipts)
+    const priorActionKeys = new Set(
+      priorActionReceipts.flatMap((receipt) => receipt.actionKey ? [receipt.actionKey] : []),
+    )
+    const actionReceipts = [...(checkpoint?.actionReceipts || []), ...priorActionReceipts]
     let lastRequestId = checkpoint?.lastRequestId
     let reasoning: string | undefined
     const configurationFailures = new Map<string, string>()
@@ -710,6 +748,9 @@ export class AgentExecutor {
         isError: result.isError,
         content: result.content.slice(0, MAX_ACTION_RECEIPT_CHARS),
         outcome: result.outcome || (result.isError ? 'failure' : 'success'),
+        actionKey: createHash('sha256')
+          .update(`${interruptedDelegation.tool}:${JSON.stringify(interruptedDelegation.args)}`)
+          .digest('hex'),
       })
       history.push({
         role: 'user',
@@ -821,6 +862,20 @@ export class AgentExecutor {
         history[history.length - 1] = { role: 'assistant', content: JSON.stringify(action) }
       }
       if (!action) {
+        if (content.startsWith('__ASK_USER__:')) {
+          finalOutput = content
+          if (saveCheckpoint) await saveCheckpoint()
+          return {
+            output: content,
+            tokensUsed,
+            toolCalls,
+            brainCalls,
+            completionTokensReserved,
+            actionReceipts,
+            requestId: lastRequestId,
+            reasoning,
+          }
+        }
         if (containsToolAction(content)) {
           await this.reportBrainComplaint(
             completion.requestId,
@@ -919,10 +974,20 @@ export class AgentExecutor {
       const signature = `${action.tool}:${JSON.stringify(action.args)}`
       repeatedActionCount = signature === lastAction ? repeatedActionCount + 1 : 0
       lastAction = signature
+      const actionKey = createHash('sha256').update(signature).digest('hex')
       if (repeatedActionCount >= 2) {
         const reason = `Agent ${definition.id} repeated the same action without progress: ${action.tool}`
         await this.reportBrainComplaint(completion.requestId, reason, context.missionId)
         throw new Error(reason)
+      }
+      if (priorActionKeys.has(actionKey)) {
+        const previousReceipt = priorActionReceipts.find((receipt) => receipt.actionKey === actionKey)
+        history.push({
+          role: 'user',
+          content: `This exact action already has a persisted result from before the mission interruption and was not repeated. Previous result: ${previousReceipt?.content || 'result unavailable'}. Continue using that result or explain the blocker.`,
+        })
+        if (saveCheckpoint) await saveCheckpoint()
+        continue
       }
 
       toolCalls++
@@ -941,7 +1006,22 @@ export class AgentExecutor {
         isError: result.isError,
         content: result.content.slice(0, MAX_ACTION_RECEIPT_CHARS),
         outcome: result.outcome || (result.isError ? 'failure' : 'success'),
+        actionKey,
       })
+      if (result.outcome === 'permission_required') {
+        finalOutput = result.content
+        if (saveCheckpoint) await saveCheckpoint()
+        return {
+          output: result.content,
+          tokensUsed,
+          toolCalls,
+          brainCalls,
+          completionTokensReserved,
+          actionReceipts,
+          requestId: lastRequestId,
+          reasoning,
+        }
+      }
       if (result.isError && isConfigurationFailure(result.content)) {
         configurationFailures.set(action.tool, result.content)
       }
@@ -1030,6 +1110,8 @@ export class AgentExecutor {
         'To execute a registered system tool, respond with exactly one raw JSON object: {"tool":"<tool-id>","args":{...}}. Never quote, fence, nest, or describe a tool action; only a sole JSON action object is executed. Do not claim an action succeeded until you receive its result.',
         `Available system tools (${toolPolicy.mode === 'allowlist' ? 'restricted to this Agent allowlist' : 'the live catalog; generated tools appear after registration'}): ${JSON.stringify(catalog)}`,
         `To inspect the current visible tool catalog explicitly, respond with {"tool":"${LIST_TOOLS_ACTION}","args":{}}. This action returns only tools visible to this Agent.`,
+        'Use each tool’s full inputSchema, configSchema, and outputSchema when preparing arguments. For inputs marked "x-stage7-secret": true (or sensitive password fields), provide only the supplied vault:// reference; never ask an LLM to handle or echo the secret value. If a required value is unavailable in task inputs or prior task outputs, ask the user through the mission conversation instead of guessing. Never expose a vault:// reference in user-facing text.',
+        'To pause this mission for a missing user-provided value, return exactly __ASK_USER__:{"question":"..."} as your final response. For secrets, prefix the question text with [secret:<lowercase-key>] so the Mission Room saves the answer directly to Vault.',
         toolPolicy.mode === 'allowlist'
           ? 'Tool creation is disabled for this Agent. Request access to a registered tool if the allowed tools are insufficient.'
           : `If no available tool can satisfy a concrete capability need, ask ToolExecutor to resolve it with {"tool":"${CREATE_TOOL_ACTION}","args":{"description":"...","requirements":["..."]}}. Describe the capability and constraints, not implementation details. ToolExecutor checks registered native tools, discovers suitable MCP tools and handles their permission flow, then creates, validates, registers, and persists a reusable plugin only if no suitable tool can be used. Never write tool code yourself or claim resolution succeeded unless the returned tool is registered and available.`,
@@ -1050,6 +1132,7 @@ export class AgentExecutor {
       delegation,
       'Treat each system-tool result as authoritative. Report the returned value rather than recalculating or replacing it, and never claim a tool succeeded unless its actual result supports that claim.',
       'When a tool fails because its endpoint, provider, or credentials are not configured, do not guess values or repeat that tool. Try another available tool or ask ToolExecutor to resolve a genuinely missing capability; if no safe path exists, return a concise explicit blocker naming the missing configuration.',
+      'Generated tools that need user-provided secrets must mark those input properties with "x-stage7-secret": true, "format": "password", and "writeOnly": true. The tool receives the plaintext only during execution; generated acceptance tests must use non-secret fixtures and must never request or embed real credentials.',
       'Tool errors are evidence; do not claim success when an action failed. Stop after the task is complete or explain a blocker.',
     ].join('\n\n')
   }
@@ -1273,7 +1356,7 @@ export class AgentExecutor {
           manifest: {},
           input: action.args,
           agentId: definition.id,
-          context: { missionId: context.missionId, agentId: definition.id },
+          context: { missionId: context.missionId, agentId: definition.id, tenantId: definition.tenantId },
         }),
       })
       const result = await response.json() as ToolExecutionResponse
@@ -1332,12 +1415,17 @@ export class AgentExecutor {
         permissionRequired?: boolean
         prompt?: string
         request?: unknown
+        candidate?: unknown
       }
       if (result.permissionRequired) {
         return {
           isError: true,
-          content: result.prompt || result.error || 'A discovered MCP tool requires permission before it can be used.',
-          outcome: 'failure',
+          content: `__MISSION_PERMISSION__:${JSON.stringify({
+            request: result.request,
+            candidate: result.candidate,
+            prompt: result.prompt || result.error || 'A discovered MCP tool requires permission before it can be used.',
+          })}`,
+          outcome: 'permission_required',
         }
       }
       if (!response.ok || !result.success || !result.tool) {

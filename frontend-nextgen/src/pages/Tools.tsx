@@ -18,6 +18,7 @@ type Tool = {
   type: 'code' | 'openapi' | 'mcp' | 'native' | 'reasoning';
   manifest?: Record<string, unknown>;
   inputSchema?: JsonSchema;
+  configSchema?: JsonSchema;
   outputSchema?: JsonSchema;
   isSkill?: boolean;
   createdAt?: string;
@@ -31,6 +32,30 @@ type ExecutionResult = {
   error?: string;
   [key: string]: unknown;
 };
+
+type CredentialSource = {
+  label?: string;
+  envVar?: string;
+  vaultSecretId?: string;
+  configKey?: string;
+};
+
+function getToolCredentialSources(tool: Tool): Array<{ key: string; label: string; source: string }> {
+  const rawSources = tool.manifest?.credentialSource;
+  if (!rawSources || typeof rawSources !== 'object' || Array.isArray(rawSources)) return [];
+  return Object.entries(rawSources).flatMap(([key, rawSource]) => {
+    if (!rawSource || typeof rawSource !== 'object') return [];
+    const source = rawSource as CredentialSource;
+    const sourceLabel = source.envVar
+      ? `environment variable ${source.envVar}`
+      : source.vaultSecretId
+        ? `Vault secret ${source.vaultSecretId}`
+        : source.configKey
+          ? `tool configuration ${source.configKey}`
+          : 'no configured source';
+    return [{ key, label: source.label || key, source: sourceLabel }];
+  });
+}
 
 type AssistantWithTools = {
   id: string;
@@ -77,7 +102,6 @@ const Tools = () => {
   const [editMode, setEditMode] = useState(false);
   const [activeTab, setActiveTab] = useState<'details' | 'test' | 'assign'>('details');
 
-  const [executingTool, setExecutingTool] = useState<Tool | null>(null);
   const [executeInputValues, setExecuteInputValues] = useState<Record<string, unknown>>({});
   const [executing, setExecuting] = useState(false);
   const [executeResult, setExecuteResult] = useState<ExecutionResult | null>(null);
@@ -88,6 +112,7 @@ const Tools = () => {
   const [addDescription, setAddDescription] = useState('');
   const [addType, setAddType] = useState<'code' | 'openapi' | 'mcp' | 'native' | 'reasoning'>('code');
   const [addInputSchemaText, setAddInputSchemaText] = useState(JSON.stringify(DEFAULT_SCHEMA, null, 2));
+  const [addConfigSchemaText, setAddConfigSchemaText] = useState(JSON.stringify(DEFAULT_SCHEMA, null, 2));
   const [addOutputSchemaText, setAddOutputSchemaText] = useState(JSON.stringify(DEFAULT_SCHEMA, null, 2));
   const [addManifestText, setAddManifestText] = useState('{}');
   const [addSourceCode, setAddSourceCode] = useState('');
@@ -136,12 +161,15 @@ const Tools = () => {
   }, []);
 
   useEffect(() => {
-    if (executingTool) {
-      setExecuteInputValues(getInitialInputValues(executingTool.inputSchema || { type: 'object', properties: {} }));
-    }
-  }, [executingTool]);
+    if (!selectedTool) return;
+    setExecuteInputValues(getInitialInputValues(selectedTool.inputSchema || { type: 'object', properties: {} }));
+    setExecuteResult(null);
+    setExecuteError(null);
+    setExecuting(false);
+  }, [selectedTool]);
 
   const addInputSchemaParse = useMemo(() => safeParseJson(addInputSchemaText), [addInputSchemaText]);
+  const addConfigSchemaParse = useMemo(() => safeParseJson(addConfigSchemaText), [addConfigSchemaText]);
   const addOutputSchemaParse = useMemo(() => safeParseJson(addOutputSchemaText), [addOutputSchemaText]);
   const addManifestParse = useMemo(() => safeParseJsonAny(addManifestText), [addManifestText]);
 
@@ -156,6 +184,7 @@ const Tools = () => {
     setAddDescription('');
     setAddType('code');
     setAddInputSchemaText(JSON.stringify(DEFAULT_SCHEMA, null, 2));
+    setAddConfigSchemaText(JSON.stringify(DEFAULT_SCHEMA, null, 2));
     setAddOutputSchemaText(JSON.stringify(DEFAULT_SCHEMA, null, 2));
     setAddManifestText('{}');
     setAddSourceCode('');
@@ -172,6 +201,10 @@ const Tools = () => {
 
     if (!addInputSchemaParse.ok) {
       setAddError(`Input schema: ${addInputSchemaParse.error}`);
+      return;
+    }
+    if (!addConfigSchemaParse.ok) {
+      setAddError(`Config schema: ${addConfigSchemaParse.error}`);
       return;
     }
     if (!addOutputSchemaParse.ok) {
@@ -201,6 +234,7 @@ const Tools = () => {
         type: addType,
         manifest,
         inputSchema: addInputSchemaParse.value,
+        configSchema: addConfigSchemaParse.value,
         outputSchema: addOutputSchemaParse.value,
       };
       await postJSON('/api/tool-executor/tools', payload);
@@ -222,6 +256,10 @@ const Tools = () => {
 
     if (!addInputSchemaParse.ok) {
       setAddError(`Input schema: ${addInputSchemaParse.error}`);
+      return;
+    }
+    if (!addConfigSchemaParse.ok) {
+      setAddError(`Config schema: ${addConfigSchemaParse.error}`);
       return;
     }
     if (!addOutputSchemaParse.ok) {
@@ -251,6 +289,7 @@ const Tools = () => {
         type: addType,
         manifest,
         inputSchema: addInputSchemaParse.value,
+        configSchema: addConfigSchemaParse.value,
         outputSchema: addOutputSchemaParse.value,
         updatedAt: new Date().toISOString(),
       };
@@ -285,6 +324,7 @@ const Tools = () => {
     setAddDescription(selectedTool.description || '');
     setAddType(selectedTool.type);
     setAddInputSchemaText(JSON.stringify(selectedTool.inputSchema || DEFAULT_SCHEMA, null, 2));
+    setAddConfigSchemaText(JSON.stringify(selectedTool.configSchema || selectedTool.manifest?.configSchema || DEFAULT_SCHEMA, null, 2));
     setAddOutputSchemaText(JSON.stringify(selectedTool.outputSchema || DEFAULT_SCHEMA, null, 2));
     setAddManifestText(JSON.stringify(selectedTool.manifest || {}, null, 2));
     setAddSourceCode((selectedTool.manifest?.sourceCode as string) || '');
@@ -315,6 +355,7 @@ const Tools = () => {
         setAddDescription(t.description || '');
         setAddType('mcp');
         setAddInputSchemaText(JSON.stringify(t.inputSchema || DEFAULT_SCHEMA, null, 2));
+        setAddConfigSchemaText(JSON.stringify(t.configSchema || DEFAULT_SCHEMA, null, 2));
         setAddOutputSchemaText(JSON.stringify(t.outputSchema || DEFAULT_SCHEMA, null, 2));
         setAddManifestText(JSON.stringify({ ...(t.manifest || {}), server: t.manifest?.server || t.server }, null, 2));
       }
@@ -329,24 +370,33 @@ const Tools = () => {
     navigator.clipboard.writeText(text).catch(() => {});
   };
 
-  const closeExecute = () => {
-    setExecutingTool(null);
-    setExecuteInputValues({});
-    setExecuteResult(null);
-    setExecuteError(null);
-    setExecuting(false);
-  };
-
   const handleExecute = async () => {
-    if (!executingTool) return;
+    if (!selectedTool) return;
     setExecuting(true);
     setExecuteError(null);
     setExecuteResult(null);
     try {
-      const result = await postJSON<ExecutionResult>(
-        `/api/tool-executor/tools/${executingTool.id}/execute`,
-        { input: executeInputValues }
-      );
+      const response = await fetch(`/api/tool-executor/tools/${selectedTool.id}/execute`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ input: executeInputValues }),
+      });
+      const result = await response.json() as ExecutionResult & {
+        request?: { missingCredentials?: Array<{ key: string; label?: string }> };
+      };
+      if (response.status === 428) {
+        const missing = result.request?.missingCredentials || [];
+        const labels = missing.map((credential) => credential.label || credential.key);
+        setExecuteError(
+          labels.length > 0
+            ? `Missing tool credentials: ${labels.join(', ')}. Configure the listed Vault or environment sources; credentials are not tool inputs.`
+            : result.error || 'Required tool credentials are not configured.',
+        );
+        return;
+      }
+      if (!response.ok) {
+        throw new Error(result.error || `API error: ${response.status} ${response.statusText}`);
+      }
       setExecuteResult(result);
     } catch (err) {
       setExecuteError(err instanceof Error ? err.message : 'Execution failed');
@@ -604,6 +654,19 @@ const Tools = () => {
                 </label>
 
                 <label className="field-label" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
+                  Config Schema (JSON)
+                  <textarea
+                    rows={6}
+                    value={addConfigSchemaText}
+                    onChange={(e) => setAddConfigSchemaText(e.target.value)}
+                    spellCheck={false}
+                    className={addConfigSchemaParse.ok ? '' : 'invalid'}
+                    style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace' }}
+                  />
+                  {!addConfigSchemaParse.ok && <span className="field-error">{addConfigSchemaParse.error}</span>}
+                </label>
+
+                <label className="field-label" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
                   Output Schema (JSON)
                   <textarea
                     rows={6}
@@ -618,7 +681,7 @@ const Tools = () => {
 
                 {addError && <div className="error-banner">{addError}</div>}
 
-                <button type="submit" disabled={adding || !addInputSchemaParse.ok || !addOutputSchemaParse.ok || !addManifestParse.ok}>
+                <button type="submit" disabled={adding || !addInputSchemaParse.ok || !addConfigSchemaParse.ok || !addOutputSchemaParse.ok || !addManifestParse.ok}>
                   {adding ? 'Adding…' : 'Add Tool'}
                 </button>
               </form>
@@ -691,6 +754,19 @@ const Tools = () => {
                 </label>
 
                 <label className="field-label" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
+                  Config Schema (JSON)
+                  <textarea
+                    rows={6}
+                    value={addConfigSchemaText}
+                    onChange={(e) => setAddConfigSchemaText(e.target.value)}
+                    spellCheck={false}
+                    className={addConfigSchemaParse.ok ? '' : 'invalid'}
+                    style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace' }}
+                  />
+                  {!addConfigSchemaParse.ok && <span className="field-error">{addConfigSchemaParse.error}</span>}
+                </label>
+
+                <label className="field-label" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
                   Output Schema (JSON)
                   <textarea
                     rows={6}
@@ -706,7 +782,7 @@ const Tools = () => {
                 {addError && <div className="error-banner">{addError}</div>}
 
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <button type="submit" disabled={adding || !addInputSchemaParse.ok || !addOutputSchemaParse.ok || !addManifestParse.ok}>
+                  <button type="submit" disabled={adding || !addInputSchemaParse.ok || !addConfigSchemaParse.ok || !addOutputSchemaParse.ok || !addManifestParse.ok}>
                     {adding ? 'Saving…' : 'Save Changes'}
                   </button>
                   <button type="button" onClick={() => setEditMode(false)}>Cancel</button>
@@ -718,7 +794,7 @@ const Tools = () => {
               <div className="panel-header" style={{ marginBottom: 8, justifyContent: 'space-between' }}>
                 <h3 style={{ margin: 0 }}>{selectedTool.name} <span className={`badge badge-${selectedTool.type}`}>{selectedTool.type}</span></h3>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <button onClick={() => setExecutingTool(selectedTool)} style={{ background: '#22c55e' }}>Test</button>
+                  <button onClick={() => setActiveTab('test')} style={{ background: '#22c55e' }}>Test</button>
                   <button onClick={startEdit}>Edit</button>
                   <button onClick={handleDeleteTool} style={{ background: '#ef4444' }}>Delete</button>
                   <button onClick={() => setSelectedTool(null)} aria-label="Close tool details" style={{ background: 'transparent', border: 'none', color: '#94a3b8', fontSize: 18, cursor: 'pointer', padding: '2px 6px' }}>×</button>
@@ -747,16 +823,35 @@ const Tools = () => {
                     <h4 style={{ marginBottom: 8 }}>Input Schema</h4>
                     <pre className="code-block" style={{ maxHeight: 200, overflow: 'auto' }}>{JSON.stringify(selectedTool.inputSchema ?? {}, null, 2)}</pre>
                   </div>
+                  <div style={{ marginBottom: 12 }}>
+                    <h4 style={{ marginBottom: 8 }}>Config Schema</h4>
+                    <pre className="code-block" style={{ maxHeight: 200, overflow: 'auto' }}>{JSON.stringify(selectedTool.configSchema ?? selectedTool.manifest?.configSchema ?? {}, null, 2)}</pre>
+                  </div>
                   <div>
                     <h4 style={{ marginBottom: 8 }}>Output Schema</h4>
                     <pre className="code-block" style={{ maxHeight: 200, overflow: 'auto' }}>{JSON.stringify(selectedTool.outputSchema ?? {}, null, 2)}</pre>
                   </div>
+                  {getToolCredentialSources(selectedTool).length > 0 && (
+                    <div style={{ marginTop: 12 }}>
+                      <h4 style={{ marginBottom: 8 }}>Runtime credentials (not tool inputs)</h4>
+                      <ul style={{ margin: 0, paddingLeft: 20 }}>
+                        {getToolCredentialSources(selectedTool).map((credential) => (
+                          <li key={credential.key}>{credential.label}: {credential.source}</li>
+                        ))}
+                      </ul>
+                      <p className="muted" style={{ marginBottom: 0 }}>
+                        The tool executor resolves these values at runtime. They are not exposed to the Agent or entered in the tool input form.
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
 
               {activeTab === 'test' && (
                 <div>
-                  <p className="muted" style={{ marginBottom: 12 }}>Test this tool with sample inputs</p>
+                  <p className="muted" style={{ marginBottom: 12 }}>
+                    Test this tool with sample inputs. Any required credentials are resolved separately from configured Vault or environment sources.
+                  </p>
                   <SchemaFields
                     schema={selectedTool.inputSchema || { type: 'object', properties: {} }}
                     values={executeInputValues}
@@ -766,7 +861,7 @@ const Tools = () => {
                   />
                   <div className="actions" style={{ marginTop: 12 }}>
                     <button onClick={handleExecute} disabled={executing}>
-                      {executing ? 'Executing…' : 'Run'}
+                      {executing ? 'Executing…' : (typeof selectedTool.manifest?.actionLabel === 'string' && selectedTool.manifest.actionLabel.trim()) || 'Run'}
                     </button>
                   </div>
                   {executeError && <div className="error-banner" style={{ marginTop: 12 }}>{executeError}</div>}
@@ -818,37 +913,6 @@ const Tools = () => {
         </div>
       </div>
 
-      {executingTool && (
-        <div className="modal-backdrop" onClick={closeExecute}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <div className="panel-header">
-              <h3>Execute: {executingTool.name}</h3>
-              <button onClick={closeExecute} aria-label="Close">×</button>
-            </div>
-            <p className="muted">{executingTool.description}</p>
-            <SchemaFields
-              schema={executingTool.inputSchema || { type: 'object', properties: {} }}
-              values={executeInputValues}
-              onChange={(key, value) => {
-                setExecuteInputValues((prev) => ({ ...prev, [key]: value }));
-              }}
-            />
-            <div className="actions">
-              <button onClick={handleExecute} disabled={executing}>
-                {executing ? 'Executing…' : (typeof executingTool?.manifest?.actionLabel === 'string' && executingTool.manifest.actionLabel.trim()) || 'Run'}
-              </button>
-              <button onClick={closeExecute} disabled={executing}>Cancel</button>
-            </div>
-            {executeError && <div className="error-banner">{executeError}</div>}
-            {executeResult && (
-              <div className="card-inner">
-                <h4>Result</h4>
-                <OutputTemplate outputSchema={executingTool.outputSchema} result={executeResult.output ?? executeResult} />
-              </div>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 };

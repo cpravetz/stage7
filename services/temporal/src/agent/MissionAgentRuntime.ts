@@ -16,7 +16,7 @@ import {
   httpRequest,
 } from '@stage7-nextgen/shared';
 import { Plan, Phase, Task } from '@stage7-nextgen/shared';
-import type { CompletedTaskSummary } from '../types/workflow';
+import type { CompletedTaskSummary, MissionPendingInteraction } from '../types/workflow';
 import {
   PlannerCompletionRequest,
   PlannerProgressReporter,
@@ -295,7 +295,14 @@ function parseMissionAgentToolPolicies(value: unknown): Map<string, MissionAgent
 export interface TaskExecutionResult {
   output: string;
   artifacts: MissionArtifact[];
-  actionReceipts?: Array<{ toolId: string; isError: boolean; content: string; outcome: 'success' | 'failure' | 'denied' }>;
+  actionReceipts?: Array<{
+    toolId: string;
+    isError: boolean;
+    content: string;
+    outcome: 'success' | 'failure' | 'denied' | 'question_asked' | 'permission_required';
+    actionKey?: string;
+  }>;
+  interruption?: Pick<MissionPendingInteraction, 'kind' | 'question' | 'requestId' | 'permission'>;
   tokensUsed: number;
   model?: string;
   provider?: string;
@@ -979,6 +986,7 @@ export class MissionAgentRuntime {
     executionPolicy?: AgentExecutionPolicy,
     completedTaskSummaries: CompletedTaskSummary[] = [],
     retryGuidance?: string,
+    continuation?: { response: string; pendingInteraction: MissionPendingInteraction },
   ): Promise<TaskExecutionResult> {
     const dependencyIds = task.dependsOnTaskIds || [];
     const completedById = new Map(completedTaskSummaries.map((summary) => [summary.taskId, summary]));
@@ -995,11 +1003,25 @@ export class MissionAgentRuntime {
       );
     }
     const basePrompt = this.buildTaskPrompt(task, phase, plan, completedDependencies);
-    const taskPrompt = retryGuidance
-      ? `${basePrompt}\n\nRetry guidance for remaining work:\n${retryGuidance}`
-      : basePrompt;
+    const continuationPrompt = continuation
+      ? [
+        `This task is resuming after a ${continuation.pendingInteraction.kind === 'user_input' ? 'user question' : 'tool permission'} interruption.`,
+        `The user's response or permission decision is: ${continuation.response}`,
+        continuation.pendingInteraction.actionReceipts?.length
+          ? `Verified action receipts from before the interruption (do not repeat successful or uncertain side effects): ${JSON.stringify(continuation.pendingInteraction.actionReceipts)}`
+          : '',
+        'Continue the same task from this evidence. Do not repeat completed actions.',
+      ].filter(Boolean).join('\n')
+      : '';
+    const taskPrompt = [
+      basePrompt,
+      ...(retryGuidance ? [`Retry guidance for remaining work:\n${retryGuidance}`] : []),
+      ...(continuationPrompt ? [continuationPrompt] : []),
+    ].join('\n\n');
     return this.executePromptTask(agentId, {
-      taskId: `${this.missionId}:${phase.id}:${task.id}`,
+      taskId: continuation
+        ? `${this.missionId}:${phase.id}:${task.id}:resume-${continuation.pendingInteraction.resumeCount + 1}`
+        : `${this.missionId}:${phase.id}:${task.id}`,
       type: task.agentRole,
       prompt: taskPrompt,
       phaseId: phase.id,
@@ -1007,6 +1029,9 @@ export class MissionAgentRuntime {
       requiredActions: task.requiredActions || [],
       context: {
         [BRAIN_ROUTING_SESSION_CONTEXT_KEY]: `${this.missionId}:task:${phase.id}:${task.id}`,
+        ...(continuation?.pendingInteraction.actionReceipts
+          ? { priorActionReceipts: continuation.pendingInteraction.actionReceipts }
+          : {}),
       },
       requireCompletedReceipt,
       executionPolicy,
@@ -1080,7 +1105,10 @@ export class MissionAgentRuntime {
         );
       }
     }
-    if (recoveredResult) return recoveredResult;
+    if (recoveredResult) {
+      const interruption = this.parseInterruption(recoveredResult.output);
+      return interruption ? { ...recoveredResult, interruption } : recoveredResult;
+    }
     if (!completed) throw new Error(`Agent task ${submitted.taskId} returned no execution response`);
     if (completed.status !== 'completed') {
       throw new Error(completed.error || `Agent task ${submitted.taskId} returned status '${completed.status}'`);
@@ -1094,32 +1122,13 @@ export class MissionAgentRuntime {
       ? result.reasoning
       : undefined;
 
-    // Detect __ask_user marker - agent is asking user a question mid-execution
-    if (output.startsWith(ASK_USER_MARKER)) {
-      const questionPayload = output.slice(ASK_USER_MARKER.length)
-      let questionText = ''
-      try {
-        const parsed = JSON.parse(questionPayload)
-        if (typeof parsed.question === 'string') {
-          questionText = parsed.question
-        }
-      } catch {
-        questionText = questionPayload
-      }
-      // Broadcast the question to the user
-      if (this.broadcast) {
-        await this.broadcast({
-          type: 'question_asked',
-          missionId: this.missionId,
-          timestamp: Date.now(),
-          data: { question: questionText, taskId: submitted.taskId },
-        })
-      }
-      // Return a result that indicates the task is waiting for user input
+    const interruption = this.parseInterruption(output);
+    if (interruption) {
       return {
         output,
         artifacts: [],
-        actionReceipts: [],
+        actionReceipts: this.parseActionReceipts(result?.actionReceipts, submitted.taskId),
+        interruption,
         tokensUsed: 0,
         model,
         provider,
@@ -1151,6 +1160,75 @@ export class MissionAgentRuntime {
       requestId,
       reasoning,
     };
+  }
+
+  private parseInterruption(
+    output: string,
+  ): TaskExecutionResult['interruption'] | undefined {
+    if (output.startsWith(ASK_USER_MARKER)) {
+      const payload = output.slice(ASK_USER_MARKER.length);
+      let question = payload;
+      try {
+        const parsed = JSON.parse(payload) as { question?: unknown };
+        if (typeof parsed.question === 'string') question = parsed.question;
+      } catch {
+        // Plain-text question markers remain supported.
+      }
+      if (!question.trim()) throw new Error('Agent asked the user an empty question');
+      return { kind: 'user_input', question: question.trim() };
+    }
+
+    const permissionMarker = '__MISSION_PERMISSION__:';
+    if (!output.startsWith(permissionMarker)) return undefined;
+    let payload: Record<string, unknown>;
+    try {
+      const parsed = JSON.parse(output.slice(permissionMarker.length)) as unknown;
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new Error('invalid permission request');
+      }
+      payload = parsed as Record<string, unknown>;
+    } catch (error) {
+      throw new Error(`Agent returned an invalid MCP permission request: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    const request = payload.request && typeof payload.request === 'object'
+      ? payload.request as Record<string, unknown>
+      : {};
+    const candidate = payload.candidate && typeof payload.candidate === 'object'
+      ? payload.candidate as Record<string, unknown>
+      : request.candidate && typeof request.candidate === 'object'
+        ? request.candidate as Record<string, unknown>
+        : {};
+    const requestId = typeof request.id === 'string' ? request.id : '';
+    const asStrings = (value: unknown) =>
+      Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+    if (!requestId || typeof candidate.name !== 'string') {
+      throw new Error('Agent returned an MCP permission request without a request id or tool name');
+    }
+    const credentials = request.credentials && typeof request.credentials === 'object'
+      ? request.credentials as Record<string, unknown>
+      : {};
+    const expiration = request.expiresAt;
+    const expiresAt = typeof expiration === 'string' && Number.isFinite(Date.parse(expiration))
+      ? new Date(expiration).toISOString()
+      : undefined;
+    const permission = {
+      toolName: candidate.name,
+      ...(typeof candidate.description === 'string' ? { toolDescription: candidate.description } : {}),
+      ...(typeof candidate.publisher === 'string' ? { publisher: candidate.publisher } : {}),
+      ...(typeof candidate.tier === 'string' ? { trustTier: candidate.tier } : {}),
+      ...(typeof request.sideEffectClass === 'string' ? { sideEffectClass: request.sideEffectClass } : {}),
+      dataClasses: asStrings(request.dataClasses),
+      credentials: {
+        needed: credentials.needed === true,
+        ...(typeof credentials.source === 'string' ? { source: credentials.source } : {}),
+        keys: asStrings(credentials.keys),
+      },
+      defaultScope: typeof request.defaultScope === 'string' ? request.defaultScope : 'task',
+      availableScopes: asStrings(request.availableScopes),
+      ...(expiresAt ? { expiresAt } : {}),
+      explanation: typeof payload.prompt === 'string' ? payload.prompt : 'This discovered MCP tool requires your permission before it can be used.',
+    };
+    return { kind: 'mcp_permission', requestId, permission };
   }
 
   private async markTaskCompleted(taskId: string, result: unknown): Promise<void> {
@@ -1327,7 +1405,7 @@ export class MissionAgentRuntime {
   private parseActionReceipts(
     value: unknown,
     taskId: string,
-  ): Array<{ toolId: string; isError: boolean; content: string; outcome: 'success' | 'failure' | 'denied' }> {
+  ): NonNullable<TaskExecutionResult['actionReceipts']> {
     if (value === undefined) return [];
     if (!Array.isArray(value) || value.length > MAX_ACTION_RECEIPTS) {
       throw new Error(`Agent task ${taskId} returned invalid action receipts`);
@@ -1341,7 +1419,8 @@ export class MissionAgentRuntime {
         || !candidate.toolId.trim()
         || typeof candidate.isError !== 'boolean'
         || typeof candidate.content !== 'string'
-        || (candidate.outcome !== undefined && !['success', 'failure', 'denied'].includes(String(candidate.outcome)))
+        || (candidate.actionKey !== undefined && (typeof candidate.actionKey !== 'string' || !/^[a-f0-9]{64}$/i.test(candidate.actionKey)))
+        || (candidate.outcome !== undefined && !['success', 'failure', 'denied', 'question_asked', 'permission_required'].includes(String(candidate.outcome)))
       ) {
         throw new Error(`Agent task ${taskId} returned an invalid action receipt`);
       }
@@ -1349,15 +1428,16 @@ export class MissionAgentRuntime {
         toolId: candidate.toolId,
         isError: candidate.isError,
         content: candidate.content.slice(0, 2_048),
-        outcome: (candidate.outcome as 'success' | 'failure' | 'denied' | undefined)
+        outcome: (candidate.outcome as NonNullable<TaskExecutionResult['actionReceipts']>[number]['outcome'] | undefined)
           || (candidate.isError ? 'failure' : 'success'),
+        ...(typeof candidate.actionKey === 'string' ? { actionKey: candidate.actionKey } : {}),
       };
     });
   }
 
   private withActionReceiptArtifact(
     artifacts: MissionArtifact[],
-    actionReceipts: Array<{ toolId: string; isError: boolean; content: string; outcome: 'success' | 'failure' | 'denied' }>,
+    actionReceipts: NonNullable<TaskExecutionResult['actionReceipts']>,
     taskId: string,
   ): MissionArtifact[] {
     if (actionReceipts.length === 0) return artifacts;

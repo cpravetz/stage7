@@ -11,6 +11,8 @@
 
 import { logger } from '@stage7-nextgen/shared';
 import { randomUUID } from 'crypto';
+import fs from 'fs';
+import path from 'path';
 import { toolGrantStore } from './ToolGrantStore';
 import { toolAuditLog } from './ToolAuditLog';
 import { mcpLibrarySourceRegistry } from './MCPLibrarySourceRegistry';
@@ -26,11 +28,138 @@ import type {
 } from '../types/mcp-discovery';
 
 const DEFAULT_REQUEST_TTL_MS = 10 * 60 * 1000; // 10 minutes
+function pendingRequestsFile(): string {
+  return path.join(
+    process.env.TOOL_PERMISSION_REQUEST_STORE_DIR || '/tmp/stage7-tool-permissions',
+    'pending-requests.json',
+  );
+}
 
 /**
  * Pending permission requests awaiting a user decision. Keyed by request id.
  */
-const pendingRequests = new Map<string, PermissionRequest>();
+function permissionDecisionsFile(): string {
+  return path.join(path.dirname(pendingRequestsFile()), 'decisions.json');
+}
+
+export interface PersistedPermissionDecision {
+  requestId: string;
+  decision: PermissionDecision;
+  request: PermissionRequest;
+  grant?: ToolPermissionGrant;
+  denial?: ToolPermissionDenial;
+  reason?: string;
+}
+
+function readPermissionDecisions(): PersistedPermissionDecision[] {
+  let contents: string;
+  try {
+    contents = fs.readFileSync(permissionDecisionsFile(), 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw new Error(`Could not read persisted MCP permission decisions: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(contents);
+  } catch (error) {
+    throw new Error(`Persisted MCP permission decisions are invalid JSON: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (!Array.isArray(parsed)) throw new Error('Persisted MCP permission decisions must be an array');
+  return parsed.flatMap((item): PersistedPermissionDecision[] => {
+    if (
+      !item
+      || typeof item !== 'object'
+      || typeof item.requestId !== 'string'
+      || (item.decision !== 'granted' && item.decision !== 'denied')
+      || !item.request
+      || typeof item.request !== 'object'
+    ) return [];
+    return [{
+      ...item,
+      request: {
+        ...item.request,
+        createdAt: new Date(item.request.createdAt),
+        ...(item.request.expiresAt ? { expiresAt: new Date(item.request.expiresAt) } : {}),
+      },
+      ...(item.grant ? {
+        grant: {
+          ...item.grant,
+          grantedAt: new Date(item.grant.grantedAt),
+          ...(item.grant.expiresAt ? { expiresAt: new Date(item.grant.expiresAt) } : {}),
+        },
+      } : {}),
+      ...(item.denial ? { denial: { ...item.denial, deniedAt: new Date(item.denial.deniedAt) } } : {}),
+    } as PersistedPermissionDecision];
+  });
+}
+
+function writePermissionDecision(decision: PersistedPermissionDecision): void {
+  const file = permissionDecisionsFile();
+  try {
+    const decisions = readPermissionDecisions().filter((entry) => entry.requestId !== decision.requestId);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const temporaryFile = `${file}.${process.pid}.tmp`;
+    fs.writeFileSync(temporaryFile, JSON.stringify([...decisions, decision].slice(-1_000)), 'utf8');
+    fs.renameSync(temporaryFile, file);
+  } catch (error) {
+    throw new Error(`Could not persist MCP permission decision: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+export function getPersistedPermissionDecision(requestId: string): PersistedPermissionDecision | undefined {
+  return readPermissionDecisions().find((decision) => decision.requestId === requestId);
+}
+
+function readPersistedRequests(): PermissionRequest[] {
+  const file = pendingRequestsFile();
+  let contents: string;
+  try {
+    contents = fs.readFileSync(file, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw new Error(`Could not read persisted MCP permission requests: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(contents);
+  } catch (error) {
+    throw new Error(`Persisted MCP permission requests are invalid JSON: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (!Array.isArray(parsed)) throw new Error('Persisted MCP permission requests must be an array');
+  return parsed.flatMap((item): PermissionRequest[] => {
+    if (!item || typeof item !== 'object' || typeof item.id !== 'string' || !item.candidate || typeof item.candidate !== 'object') {
+      return [];
+    }
+    return [{
+      ...item,
+      createdAt: new Date(item.createdAt),
+      ...(item.expiresAt ? { expiresAt: new Date(item.expiresAt) } : {}),
+    } as PermissionRequest];
+  });
+}
+
+function writePersistedRequests(requests: PermissionRequest[]): void {
+  const file = pendingRequestsFile();
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const temporaryFile = `${file}.${process.pid}.tmp`;
+    fs.writeFileSync(temporaryFile, JSON.stringify(requests), 'utf8');
+    fs.renameSync(temporaryFile, file);
+  } catch (error) {
+    throw new Error(`Could not persist MCP permission requests: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+function savePendingRequest(request: PermissionRequest): void {
+  const requests = readPersistedRequests().filter((existing) => existing.id !== request.id);
+  writePersistedRequests([...requests, request]);
+}
+
+function removePendingRequest(requestId: string): void {
+  const requests = readPersistedRequests();
+  writePersistedRequests(requests.filter((request) => request.id !== requestId));
+}
 
 /**
  * Plain-language description of a side-effect class for the permission prompt
@@ -109,7 +238,7 @@ export function buildPermissionRequest(
     expiresAt,
   };
 
-  pendingRequests.set(id, request);
+  savePendingRequest(request);
 
   toolAuditLog.record({
     type: 'permission.requested',
@@ -150,11 +279,11 @@ export function defaultScopeFor(candidate: MCPToolCandidate): PermissionScope {
  * been decided.
  */
 export function getPermissionRequest(requestId: string): PermissionRequest | undefined {
-  const request = pendingRequests.get(requestId);
+  const request = readPersistedRequests().find((candidate) => candidate.id === requestId);
   if (!request) return undefined;
   const now = new Date();
   if (request.expiresAt && now > request.expiresAt) {
-    pendingRequests.delete(requestId);
+    removePendingRequest(requestId);
     return undefined;
   }
   return request;
@@ -218,7 +347,8 @@ export function decidePermission(
       metadata: { denialId: denial.id, scopeRequested: scope },
     });
 
-    pendingRequests.delete(requestId);
+    writePermissionDecision({ requestId, decision, request, denial });
+    removePendingRequest(requestId);
     logger.info({ requestId, toolId: candidate.id, decidedBy: opts.decidedBy }, 'Permission denied');
 
     return { decision: 'denied', denial };
@@ -266,7 +396,8 @@ export function decidePermission(
     metadata: { grantId: grant.id, expiresAt: grant.expiresAt?.toISOString(), preApproved: candidate.preApproved },
   });
 
-  pendingRequests.delete(requestId);
+  writePermissionDecision({ requestId, decision, request, grant });
+  removePendingRequest(requestId);
   logger.info({ requestId, grantId: grant.id, toolId: candidate.id, scope }, 'Permission granted');
 
   return { decision: 'granted', grant };

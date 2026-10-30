@@ -8,7 +8,7 @@ import { fetchWatchActivity } from '../activities/watchActivity';
 import { runMissionDirect } from '../activities/missionActivity';
 import { runWatchLoop } from '../workflows/watchLoop';
 import { logger, Plan, PlanSchema } from '@stage7-nextgen/shared';
-import { MissionActivityCheckpoint, WorkflowInput, WorkflowResult } from '../types/workflow';
+import { MissionActivityCheckpoint, MissionPendingInteraction, WorkflowInput, WorkflowResult } from '../types/workflow';
 import { getMissionResumeProgress } from '../recovery/missionProgress';
 import { MissionTerminationRequestedError } from '../types/missionControl';
 
@@ -23,7 +23,7 @@ interface PersistedMissionControlRecord {
   controlState?: 'running' | 'pause_requested' | 'paused' | 'terminate_requested' | 'terminated';
   pendingDeletion?: boolean;
   input?: WorkflowInput;
-  output?: { outputs?: { status?: string } };
+  output?: { outputs?: { status?: string; pendingInteraction?: MissionPendingInteraction } };
 }
 
 function missionIdFromWorkflowId(workflowId: string): string {
@@ -65,7 +65,12 @@ function missionStatus(result: unknown): WorkflowResult['status'] {
   const outputs = result && typeof result === 'object'
     ? (result as { outputs?: { status?: string } }).outputs
     : undefined;
-  if (outputs?.status === 'awaiting_clarification' || outputs?.status === 'rejected_at_phase') {
+  if (
+    outputs?.status === 'awaiting_clarification'
+    || outputs?.status === 'awaiting_user_input'
+    || outputs?.status === 'awaiting_permission'
+    || outputs?.status === 'rejected_at_phase'
+  ) {
     return 'awaiting_review';
   }
   return outputs?.status === 'incomplete' ? 'incomplete' : 'completed';
@@ -194,6 +199,8 @@ export class TemporalClient {
       completedPhases: input.completedPhases || [],
       completedTasks: input.completedTasks || [],
       retryGuidance: input.retryGuidance || undefined,
+      clarificationAnswers: input.clarificationAnswers || undefined,
+      interactionResponse: input.interactionResponse || undefined,
     };
     await this.persistMissionState({
       missionId: normalizedInput.missionId,
@@ -248,16 +255,18 @@ export class TemporalClient {
       },
     ];
 
+    const persistedInput = { ...input };
+    delete persistedInput.interactionResponse;
     await this.persistMissionState({
       missionId: input.missionId,
       tenantId: input.tenantId || '',
       assistantId: input.assistantId || '',
       status: result.status,
-      controlState: result.status === 'canceled' ? 'terminated' : undefined,
+      controlState: result.status === 'canceled' ? 'terminated' : 'running',
       currentStep: 1,
       totalSteps: 1,
       history,
-      input,
+      input: persistedInput,
       output: result.output,
       error: result.error,
       startedAt: result.startedAt,
@@ -557,7 +566,15 @@ export class TemporalClient {
     return 'pausing';
   }
 
-  async resumeMission(workflowId: string, clarificationAnswers?: string[]): Promise<'running' | 'resuming'> {
+  async resumeMission(
+    workflowId: string,
+    continuation: {
+      clarificationAnswers?: string[];
+      interactionResponse?: string;
+      permissionDecision?: 'granted' | 'denied';
+      permissionScope?: string;
+    } = {},
+  ): Promise<'running' | 'resuming'> {
     if (this.client) {
       throw new Error('Cooperative resume is only available with TEMPORAL_BACKEND=direct');
     }
@@ -596,20 +613,65 @@ export class TemporalClient {
     ) {
       throw new Error(`Cannot resume mission ${missionId}: persisted workflow input is invalid`);
     }
-    const resumeInput = clarificationAnswers
-      ? { ...input, clarificationAnswers: [...clarificationAnswers] }
-      : input;
+    const pendingInteraction = record.output?.outputs?.pendingInteraction;
+    let interactionResponse = continuation.interactionResponse?.trim();
+    if (pendingInteraction?.kind === 'user_input' && !interactionResponse) {
+      throw new Error('A non-empty response is required for the pending mission question');
+    }
+    if (pendingInteraction?.kind === 'mcp_permission') {
+      const decision = continuation.permissionDecision;
+      if (!decision || !pendingInteraction.requestId) {
+        throw new Error('A permission decision is required for the pending MCP tool request');
+      }
+      if (continuation.permissionScope && !pendingInteraction.permission?.availableScopes.includes(continuation.permissionScope)) {
+        throw new Error('The requested permission scope is not available for this tool');
+      }
+      const toolExecutorUrl = (process.env.TOOL_EXECUTOR_URL || 'http://tool-executor:3500').replace(/\/+$/, '');
+      const response = await fetch(
+        `${toolExecutorUrl}/api/tool-executor/mcp/permission/${encodeURIComponent(pendingInteraction.requestId)}/decide`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            decision,
+            ...(continuation.permissionScope ? { scope: continuation.permissionScope } : {}),
+            decidedBy: 'mission-user',
+          }),
+        },
+      );
+      const bodyText = await response.text();
+      let decisionResult: { decision?: string; error?: string } = {};
+      try {
+        decisionResult = JSON.parse(bodyText) as { decision?: string; error?: string };
+      } catch {
+        throw new Error(`Tool Executor returned an invalid permission decision response (${response.status})`);
+      }
+      const expectedStatus = decision === 'denied' ? response.status === 403 : response.ok;
+      if (!expectedStatus || decisionResult.decision !== decision) {
+        throw new Error(decisionResult.error || `Tool permission decision failed (${response.status})`);
+      }
+      interactionResponse = decision === 'granted'
+        ? `The user granted permission for MCP tool "${pendingInteraction.permission?.toolName || 'the requested tool'}". Continue the task.`
+        : `The user denied permission for MCP tool "${pendingInteraction.permission?.toolName || 'the requested tool'}". Do not use it; report the blocker or continue safely without it.`;
+    }
+    const resumeInput: WorkflowInput = {
+      ...input,
+      ...(continuation.clarificationAnswers
+        ? { clarificationAnswers: [...continuation.clarificationAnswers] }
+        : {}),
+      ...(interactionResponse ? { interactionResponse } : {}),
+    };
     const awaitingClarification = record.output?.outputs?.status === 'awaiting_clarification'
-      && Boolean(clarificationAnswers?.length);
+      && Boolean(continuation.clarificationAnswers?.length);
     const checkpoint = record.status === 'pending' || awaitingClarification
       ? undefined
-      : await this.loadPersistedCheckpoint(missionId);
+      : await this.loadPersistedCheckpoint(missionId, pendingInteraction);
     const leaseClaimed = await this.claimDirectRecoveryLease(missionId);
     if (leaseClaimed === false) {
       throw new Error(`Cannot resume mission ${missionId}: another process still owns its execution lease`);
     }
     try {
-      await this.updatePersistedMissionControl(missionId, 'running', 'running');
+      await this.updatePersistedMissionControl(missionId, 'running', 'running', resumeInput);
     } catch (error) {
       if (leaseClaimed) await this.releaseDirectRecoveryLease(missionId);
       throw error;
@@ -904,10 +966,16 @@ export class TemporalClient {
     };
   }
 
-  private async loadPersistedCheckpoint(missionId: string): Promise<MissionActivityCheckpoint | undefined> {
+  private async loadPersistedCheckpoint(
+    missionId: string,
+    pendingInteraction?: MissionPendingInteraction,
+  ): Promise<MissionActivityCheckpoint | undefined> {
     const plan = await this.loadPersistedPlan(missionId);
     if (!plan) return undefined;
-    return getMissionResumeProgress(plan).checkpoint;
+    return {
+      ...getMissionResumeProgress(plan).checkpoint,
+      ...(pendingInteraction ? { pendingInteraction } : {}),
+    };
   }
 
   private async loadPersistedPlan(missionId: string): Promise<Plan | undefined> {
@@ -1167,6 +1235,7 @@ export class TemporalClient {
     missionId: string,
     status: string,
     controlState: NonNullable<PersistedMissionControlRecord['controlState']>,
+    input?: WorkflowInput,
   ): Promise<void> {
     const persistenceUrl = process.env.ARTIFACTS_URL;
     if (!persistenceUrl) {
@@ -1175,7 +1244,7 @@ export class TemporalClient {
     const response = await fetch(`${persistenceUrl}/api/artifacts/missions/${encodeURIComponent(missionId)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status, controlState, updatedAt: Date.now() }),
+      body: JSON.stringify({ status, controlState, ...(input ? { input } : {}), updatedAt: Date.now() }),
     });
     if (!response.ok) {
       const details = (await response.text()).slice(0, 500);

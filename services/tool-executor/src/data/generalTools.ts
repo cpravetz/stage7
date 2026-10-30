@@ -130,33 +130,6 @@ export const legacyGeneralTools: Tool[] = [
     isSkill: false,
   },
   {
-    id: 'sms_sender',
-    name: 'SMS Sender',
-    description: 'Send SMS text messages via the Twilio REST API. Requires the `twilio_account_sid` and `twilio_auth_token` credentials (or TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN environment variables). The `to` parameter is the recipient phone number in E.164 format (e.g. +15551234567). The `from` parameter is optional and defaults to the Twilio sender number configured in your account. No message queueing or scheduling support; sends immediately.',
-    type: 'native',
-    manifest: { executor: 'sms', type: 'native', capabilities: ['sms.send'] },
-    inputSchema: {
-      type: 'object',
-      properties: {
-        to: { type: 'string', description: 'Recipient phone number in E.164 format (e.g. +15551234567), required' },
-        from: { type: 'string', description: 'Sender phone number in E.164 format (optional; defaults to Twilio account sender number)' },
-        body: { type: 'string', description: 'Message body text (required)' },
-      },
-      required: ['to', 'body'],
-    },
-    outputSchema: {
-      type: 'object',
-      properties: {
-        success: { type: 'boolean', description: 'Whether the SMS was sent' },
-        messageId: { type: 'string', description: 'Message SID assigned by Twilio' },
-        error: { type: 'string', description: 'Error message, if sending failed' },
-      },
-    },
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    isSkill: false,
-  },
-  {
     id: 'calendar_manager',
     name: 'Calendar Manager',
     description: 'Manage calendar events stored as RFC 5545 .ics files (base path via CALENDAR_BASE_PATH, default /tmp/stage7-calendars). Create, update, list, delete, export, and check availability of events. No operator credentials required.',

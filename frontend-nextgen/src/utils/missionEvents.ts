@@ -524,7 +524,49 @@ function listMilestonesOnce(events: FeedEvent[]): FeedEvent[] {
 export function friendlyMissionError(error: string): string {
   const trimmed = (error || '').trim();
   if (!trimmed) return 'Something went wrong. Please try again.';
-  if (/fetch failed|Agent Runtime API|status(?:Code)?:?\s*\d{3}|\{.*"success"\s*:/i.test(trimmed)) {
+
+  // Try to parse structured JSON error payloads for more specific messages
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      // Try to extract a meaningful error message from common shapes
+      if (parsed && typeof parsed === 'object') {
+        if (typeof parsed.error === 'string' && parsed.error.trim()) {
+          const inner = parsed.error.trim();
+          if (parsed.message && typeof parsed.message === 'string' && parsed.message.trim()) {
+            const msg = parsed.message.trim();
+            // If error is very generic and message is more specific, use message
+            if (/^(error|something went wrong|failed)$/i.test(inner) && msg.length > inner.length) {
+              return msg;
+            }
+          }
+          // Check if inner is also JSON
+          if (inner.startsWith('{')) {
+            try {
+              const innerParsed = JSON.parse(inner);
+              if (innerParsed && typeof innerParsed === 'object' && typeof innerParsed.message === 'string') {
+                return innerParsed.message.trim();
+              }
+              if (innerParsed && typeof innerParsed === 'object' && typeof innerParsed.error === 'string') {
+                return innerParsed.error.trim();
+              }
+            } catch {}
+          }
+          return inner;
+        }
+        if (typeof parsed.message === 'string' && parsed.message.trim()) {
+          return parsed.message.trim();
+        }
+        if (typeof parsed.reason === 'string' && parsed.reason.trim()) {
+          return parsed.reason.trim();
+        }
+      }
+    } catch {
+      // Fall through to pattern matching
+    }
+  }
+
+  if (/fetch failed|Agent Runtime API|network error|ECONNREFUSED|ENOTFOUND|timeout|status(?:Code)?:?\s*\d{3}|\{.*"success"\s*:/i.test(trimmed)) {
     return 'Something went wrong while running the mission. Please try again.';
   }
   return trimmed;

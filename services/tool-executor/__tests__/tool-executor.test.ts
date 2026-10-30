@@ -10,6 +10,7 @@ import { ToolNotFoundError, ValidationError } from '../src/utils/errors'
 import { eventSkills } from '../src/assistants/event/index'
 import { pluginGenerator as routePluginGenerator } from '../src/utils/sharedInstance'
 import { mcpToolExecutive } from '../src/services/MCPToolExecutive'
+import type { SandboxExecutionDriver } from '../src/runners/SandboxExecutionDriver'
 
 const app: Application = express()
 app.use(express.json())
@@ -159,6 +160,95 @@ describe('ToolExecutor', () => {
     expect(execution.status).toBe('completed')
     expect(execution.output).toBeDefined()
     expect(execution.toolId).toBe(codeTool.id)
+  })
+
+  it('resolves schema-marked Vault inputs only for tool execution and redacts the result', async () => {
+    const previousFetch = global.fetch
+    const vaultRequests: string[] = []
+    global.fetch = jest.fn(async (url: string | URL | Request) => {
+      vaultRequests.push(String(url))
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ plaintext: 'private-token' }),
+      } as Response
+    })
+    const testExecutor = new ToolExecutor()
+    const sandbox: SandboxExecutionDriver = {
+      execute: async (options) => ({
+        success: true,
+        output: JSON.stringify({ received: options.input?.token }),
+      }),
+    }
+    Object.defineProperty(testExecutor, 'sandboxDriver', { value: sandbox })
+    const secretTool: Tool = {
+      ...codeTool,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          token: { type: 'string', 'x-stage7-secret': true, format: 'password', writeOnly: true },
+        },
+      },
+    }
+
+    try {
+      const execution = await testExecutor.executeOrRequestCredentials(secretTool, { token: 'vault://secret-123' })
+      expect(execution).not.toBeInstanceOf(CredentialRequiredError)
+      if (execution instanceof CredentialRequiredError) return
+      expect(execution.status).toBe('completed')
+      expect(execution.input).toEqual({ token: 'vault://secret-123' })
+      expect(JSON.parse(String((execution.output as { output?: string }).output))).toEqual({ received: '[REDACTED]' })
+      expect(vaultRequests).toEqual(['http://vault:4000/api/vault/secrets/secret-123/decrypt'])
+    } finally {
+      global.fetch = previousFetch
+    }
+  })
+
+  it('stores schema-marked secret outputs in Vault and returns only a reference', async () => {
+    const previousFetch = global.fetch
+    const storedBodies: Array<Record<string, unknown>> = []
+    global.fetch = jest.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      storedBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>)
+      return {
+        ok: true,
+        status: 201,
+        json: async () => ({ id: 'output-secret-456' }),
+      } as Response
+    })
+    const testExecutor = new ToolExecutor()
+    const sandbox: SandboxExecutionDriver = {
+      execute: async () => ({ success: true, output: JSON.stringify({ apiKey: 'generated-secret' }) }),
+    }
+    Object.defineProperty(testExecutor, 'sandboxDriver', { value: sandbox })
+    const secretOutputTool: Tool = {
+      ...codeTool,
+      outputSchema: {
+        type: 'object',
+        properties: {
+          apiKey: { type: 'string', 'x-stage7-secret': true },
+        },
+      },
+    }
+
+    try {
+      const execution = await testExecutor.executeOrRequestCredentials(
+        secretOutputTool,
+        {},
+        undefined,
+        { context: { tenantId: 'tenant-1' } },
+      )
+      expect(execution).not.toBeInstanceOf(CredentialRequiredError)
+      if (execution instanceof CredentialRequiredError) return
+      expect(execution.status).toBe('completed')
+      expect(JSON.parse(String((execution.output as { output?: string }).output))).toEqual({ apiKey: 'vault://output-secret-456' })
+      expect(storedBodies).toEqual([{
+        name: `tool-${secretOutputTool.id}-apiKey`,
+        plaintext: 'generated-secret',
+        tenantId: 'tenant-1',
+      }])
+    } finally {
+      global.fetch = previousFetch
+    }
   })
 
   it('should attempt discovery and generation for unsupported tool type', async () => {

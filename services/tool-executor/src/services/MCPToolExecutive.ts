@@ -19,6 +19,7 @@ import { Tool } from '../types';
 import { mcpToolDiscovery } from './MCPToolDiscovery';
 import {
   buildPermissionRequest,
+  getPersistedPermissionDecision,
   getPermissionRequest,
   decidePermission,
   preApprove,
@@ -222,6 +223,28 @@ export class MCPToolExecutive {
 
     const request = getPermissionRequest(requestId);
     if (!request) {
+      const previous = getPersistedPermissionDecision(requestId);
+      if (previous?.decision === decision && (scope === undefined || previous.grant?.scope === scope || previous.denial?.scopeRequested === scope)) {
+        if (previous.decision === 'denied') {
+          return { satisfied: false, error: 'Permission denied.' };
+        }
+        if (previous.grant) {
+          const existingTool = listIntegratedToolsFn().find((tool) => {
+            const manifest = tool.manifest as Record<string, unknown> | undefined;
+            return manifest?.grantId === previous.grant?.id;
+          });
+          if (existingTool) return { satisfied: true, grant: previous.grant, tool: existingTool };
+          try {
+            const integrated = integrateGrantedTool(previous.grant, previous.request.candidate);
+            return { satisfied: true, grant: previous.grant, tool: integrated.tool };
+          } catch (error) {
+            return {
+              satisfied: false,
+              error: `Permission was granted, but tool integration could not be recovered: ${error instanceof Error ? error.message : String(error)}`,
+            };
+          }
+        }
+      }
       return { satisfied: false, error: 'Permission request not found or expired' };
     }
 

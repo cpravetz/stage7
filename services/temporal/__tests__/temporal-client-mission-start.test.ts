@@ -6,6 +6,7 @@ describe('TemporalClient mission start', () => {
   const originalTemporalBackend = process.env.TEMPORAL_BACKEND
   const originalArtifactsUrl = process.env.ARTIFACTS_URL
   const originalGatewayUrl = process.env.GATEWAY_URL
+  const originalToolExecutorUrl = process.env.TOOL_EXECUTOR_URL
 
   afterEach(() => {
     jest.restoreAllMocks()
@@ -17,6 +18,8 @@ describe('TemporalClient mission start', () => {
     else process.env.ARTIFACTS_URL = originalArtifactsUrl
     if (originalGatewayUrl === undefined) delete process.env.GATEWAY_URL
     else process.env.GATEWAY_URL = originalGatewayUrl
+    if (originalToolExecutorUrl === undefined) delete process.env.TOOL_EXECUTOR_URL
+    else process.env.TOOL_EXECUTOR_URL = originalToolExecutorUrl
   })
 
   it('uses the built-in runner by default even if TEMPORAL_ADDRESS points at an HTTP service', () => {
@@ -394,7 +397,9 @@ describe('TemporalClient mission start', () => {
       return { ok: true, status: 200, json: async () => ({}) } as Response
     })
 
-    await expect(client.resumeMission(`mission-${input.missionId}`, ['SMTP host is smtp.example.com']))
+    await expect(client.resumeMission(`mission-${input.missionId}`, {
+      clarificationAnswers: ['SMTP host is smtp.example.com'],
+    }))
       .resolves.toBe('resuming')
 
     expect(client.startMission).toHaveBeenCalledWith(
@@ -405,6 +410,100 @@ describe('TemporalClient mission start', () => {
     )
     expect(fetchMock).not.toHaveBeenCalledWith(
       `http://artifacts/api/artifacts/missions/${input.missionId}/plan`,
+    )
+  })
+
+  it('resolves an MCP permission decision and resumes from the persisted pending-task checkpoint', async () => {
+    delete process.env.TEMPORAL_ADDRESS
+    process.env.ARTIFACTS_URL = 'http://artifacts'
+    process.env.TOOL_EXECUTOR_URL = 'http://tool-executor:3500'
+    delete process.env.GATEWAY_URL
+    const client = new TemporalClient()
+    const input = {
+      missionId: 'mission-mcp-permission',
+      tenantId: 'tenant-1',
+      assistantId: 'assistant-1',
+      prompt: 'Use the discovered capability',
+    }
+    const plan = {
+      summary: 'Use the capability',
+      estimatedDuration: 'short',
+      estimatedCost: 'low',
+      requiresClarification: false,
+      clarificationQuestions: [],
+      clarificationAnswers: [],
+      phases: [],
+    }
+    const pendingInteraction = {
+      kind: 'mcp_permission' as const,
+      phaseId: 'phase-1',
+      taskId: 'task-1',
+      taskTitle: 'Use the capability',
+      agentRole: 'worker',
+      requestId: 'perm-mission-test',
+      permission: {
+        toolName: 'External Capability',
+        dataClasses: ['task-data'],
+        credentials: { needed: false, keys: [] },
+        defaultScope: 'task',
+        availableScopes: ['task'],
+        explanation: 'Approval required.',
+      },
+      actionReceipts: [],
+      resumeCount: 0,
+    }
+    jest.spyOn(client, 'startMission').mockResolvedValue(`mission-${input.missionId}`)
+    const calls: Array<{ url: string; method?: string; body?: string }> = []
+    jest.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
+      const requestUrl = String(url)
+      calls.push({
+        url: requestUrl,
+        method: init?.method,
+        body: init?.body ? String(init.body) : undefined,
+      })
+      if (requestUrl.endsWith(`/api/artifacts/missions/${input.missionId}`) && !init?.method) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            missionId: input.missionId,
+            status: 'awaiting_review',
+            input,
+            output: { outputs: { status: 'awaiting_permission', pendingInteraction } },
+          }),
+        } as Response
+      }
+      if (requestUrl.endsWith(`/api/artifacts/missions/${input.missionId}/plan`)) {
+        return { ok: true, status: 200, json: async () => plan } as Response
+      }
+      if (requestUrl.endsWith(`/api/artifacts/missions/${input.missionId}/recovery-lease`)) {
+        return { ok: true, status: 200, json: async () => ({ claimed: true }) } as Response
+      }
+      if (requestUrl.endsWith('/api/tool-executor/mcp/permission/perm-mission-test/decide')) {
+        return {
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ decision: 'granted', satisfied: true }),
+        } as Response
+      }
+      return { ok: true, status: 200, json: async () => ({}) } as Response
+    })
+
+    await expect(client.resumeMission(`mission-${input.missionId}`, {
+      permissionDecision: 'granted',
+      permissionScope: 'task',
+    })).resolves.toBe('resuming')
+
+    expect(calls.find((call) => call.url.includes('/api/tool-executor/mcp/permission/'))?.body)
+      .toContain('"decision":"granted"')
+    expect(client.startMission).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ...input,
+        interactionResponse: expect.stringContaining('granted permission'),
+      }),
+      expect.objectContaining({ pendingInteraction }),
+      true,
+      true,
     )
   })
 

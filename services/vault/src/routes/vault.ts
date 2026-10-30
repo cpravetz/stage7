@@ -60,7 +60,7 @@ router.post('/secrets', asyncHandler(async (req, res) => {
     throw VaultError.badRequest('Missing or invalid tenantId');
   }
 
-  const secret = secretStore.createSecret(name, plaintext, tenantId);
+  const secret = await secretStore.createSecret(name, plaintext, tenantId);
   res.status(201).json(secret);
 }));
 

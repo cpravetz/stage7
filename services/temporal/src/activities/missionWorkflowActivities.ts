@@ -65,7 +65,7 @@ export interface MissionPhaseOutput {
   status: 'completed' | 'incomplete';
   tasks: Array<{
     taskId: string;
-    status: 'completed' | 'failed';
+    status: 'completed' | 'failed' | 'pending';
     artifacts: TaskExecutionResult['artifacts'];
     output?: string;
   }>;
@@ -435,6 +435,28 @@ export async function executeMissionTaskActivity({
     const result = retryGuidance
       ? await agentRuntime.executeTask(...executionArgs, retryGuidance)
       : await agentRuntime.executeTask(...executionArgs);
+    if (result.interruption) {
+      await persistUpdate(input, 'tasks', task.id, {
+        phaseId: phase.id,
+        status: 'pending',
+        output: '',
+      });
+      await broadcast(input, {
+        type: result.interruption.kind === 'user_input' ? 'question_asked' : 'permission_required',
+        missionId: input.missionId,
+        timestamp: Date.now(),
+        data: {
+          phaseId: phase.id,
+          taskId: task.id,
+          taskTitle: task.title,
+          agentRole: task.agentRole,
+          ...(result.interruption.question ? { question: result.interruption.question } : {}),
+          ...(result.interruption.requestId ? { requestId: result.interruption.requestId } : {}),
+          ...(result.interruption.permission ? { permission: result.interruption.permission } : {}),
+        },
+      });
+      return result;
+    }
     await persistUpdate(input, 'tasks', task.id, {
       phaseId: phase.id,
       status: 'completed',

@@ -1,7 +1,10 @@
+import fs from 'fs'
+import path from 'path'
 import {
   buildPermissionRequest,
   defaultScopeFor,
   decidePermission,
+  getPersistedPermissionDecision,
   getPermissionRequest,
   preApprove,
   renderPermissionPrompt,
@@ -22,12 +25,15 @@ const TEST_DIR = '/tmp/stage7-perm-test'
 beforeAll(() => {
   process.env.TOOL_GRANT_STORE_DIR = TEST_DIR
   process.env.TOOL_DENIAL_STORE_DIR = TEST_DIR
+  process.env.TOOL_PERMISSION_REQUEST_STORE_DIR = TEST_DIR
   process.env.TOOL_AUDIT_LOG_DIR = '/tmp/stage7-perm-audit-test'
 })
 afterAll(() => {
   delete process.env.TOOL_GRANT_STORE_DIR
   delete process.env.TOOL_DENIAL_STORE_DIR
+  delete process.env.TOOL_PERMISSION_REQUEST_STORE_DIR
   delete process.env.TOOL_AUDIT_LOG_DIR
+  fs.rmSync(TEST_DIR, { recursive: true, force: true })
 })
 
 function candidate(overrides: Partial<MCPToolCandidate> = {}): MCPToolCandidate {
@@ -73,6 +79,7 @@ describe('ToolPermissionService', () => {
       expect(req.preApproved).toBe(true)
       expect(req.expiresAt).toBeInstanceOf(Date)
       expect(req.createdAt).toBeInstanceOf(Date)
+      expect(fs.existsSync(path.join(TEST_DIR, 'pending-requests.json'))).toBe(true)
     })
 
     it('uses provided defaultScope', () => {
@@ -115,6 +122,11 @@ describe('ToolPermissionService', () => {
       expect(result.grant!.toolId).toBe(c.id)
       expect(result.grant!.grantedBy).toBe('user_1')
       expect(result.grant!.scope).toBe(req.defaultScope)
+      expect(getPersistedPermissionDecision(req.id)).toMatchObject({
+        requestId: req.id,
+        decision: 'granted',
+        grant: { id: result.grant!.id },
+      })
     })
 
     it('denies and returns a denial', () => {
@@ -125,6 +137,11 @@ describe('ToolPermissionService', () => {
       expect(result.denial).toBeDefined()
       expect(result.denial!.deniedBy).toBe('user_1')
       expect(getPermissionRequest(req.id)).toBeUndefined()
+      expect(getPersistedPermissionDecision(req.id)).toMatchObject({
+        requestId: req.id,
+        decision: 'denied',
+        denial: { id: result.denial!.id },
+      })
     })
 
     it('rejects scope not in availableScopes', () => {

@@ -13,6 +13,62 @@ import { parsePlanJson } from './planJson';
 
 const MAX_PRIOR_RESPONSE_CHARS = 12_000;
 const MAX_REFINEMENT_ISSUES_PER_REQUEST = 3;
+const MAX_PLAN_REPAIR_ATTEMPTS = 5;
+
+interface PlannerFieldRepair {
+  path: PropertyKey[];
+  expectedType: string;
+  receivedType: string;
+  currentValue: unknown;
+}
+
+function getValueAtPath(value: unknown, path: PropertyKey[]): unknown {
+  return path.reduce<unknown>((current, key) => {
+    if (current === null || typeof current !== 'object') return undefined;
+    return (current as Record<PropertyKey, unknown>)[key];
+  }, value);
+}
+
+function setValueAtPath(value: unknown, path: PropertyKey[], replacement: unknown): void {
+  if (path.length === 0) throw new Error('Cannot replace the planner response root as a field value');
+  let current = value;
+  for (const key of path.slice(0, -1)) {
+    if (current === null || typeof current !== 'object') {
+      throw new Error(`Cannot locate planner field at ${path.map(String).join('.')}`);
+    }
+    current = (current as Record<PropertyKey, unknown>)[key];
+  }
+  if (current === null || typeof current !== 'object') {
+    throw new Error(`Cannot locate planner field at ${path.map(String).join('.')}`);
+  }
+  (current as Record<PropertyKey, unknown>)[path[path.length - 1] as PropertyKey] = replacement;
+}
+
+function findPlannerFieldRepair(issues: Array<{ path: PropertyKey[]; message: string }>, plan: unknown) {
+  for (const issue of issues) {
+    const mismatch = issue.message.match(/^Expected (.+), received (.+)$/);
+    if (!mismatch || issue.path.length < 2) continue;
+    return {
+      path: issue.path,
+      expectedType: mismatch[1] as string,
+      receivedType: mismatch[2] as string,
+      currentValue: getValueAtPath(plan, issue.path),
+    } satisfies PlannerFieldRepair;
+  }
+  return undefined;
+}
+
+function plannerFieldRepairPrompt(repair: PlannerFieldRepair): string {
+  const path = repair.path.map((part, index) =>
+    typeof part === 'number' ? `[${part}]` : `${index === 0 ? '' : '.'}${String(part)}`,
+  ).join('');
+  const serializedValue = JSON.stringify(repair.currentValue);
+  const currentValue = serializedValue === undefined ? 'undefined' : serializedValue.slice(0, 2_000);
+  const objectShape = repair.expectedType === 'object' && repair.path[repair.path.length - 2] === 'requiredActions'
+    ? ' The object must have a string "toolId" and an "outcome" of "success", "failure", or "denied".'
+    : '';
+  return `I need a ${repair.expectedType} for ${path}, but you gave me a ${repair.receivedType}: ${currentValue}.${objectShape} Return only the replacement value as valid JSON.`;
+}
 
 /**
  * Failures that say nothing about the plan and can be retried against another
@@ -36,14 +92,14 @@ function isTransientBrainFailure(message: string): boolean {
 export const PLANNER_SYSTEM_PROMPT = `You are a mission planner for an AI agent platform. Given a user's goal, produce a complete structured plan tailored to that goal.
 
 Requirements:
-1. Before planning execution, identify every user-provided value or environment-specific configuration required to complete the goal (including recipient details, service endpoints, account identifiers, and sender identities). If any required value is missing, set requiresClarification=true and ask 2-4 focused questions covering the missing inputs; do not guess, use placeholders, or begin side effects. Keep requiresClarification=true for an ambiguous goal as well. Never ask users to paste passwords, API tokens, or other secrets into mission chat; direct them to configure secrets through the secure tool/credential settings and ask only whether that configuration is in place. Otherwise set requiresClarification=false and clarificationQuestions=[].
+1. Before planning execution, identify every user-provided value or environment-specific configuration required to complete the goal (including recipient details, service endpoints, account identifiers, and sender identities). If any required value is missing, set requiresClarification=true and ask 1-4 focused questions covering only the missing inputs; do not guess, use placeholders, or begin side effects. Keep requiresClarification=true for an ambiguous goal as well. You may ask for a required secret in clarificationQuestions, but prefix that question exactly with '[secret:<safe-key>] ', using a stable key containing only letters, digits, underscores, or hyphens. The Mission Room will save that answer directly to Vault and replace it with a Vault reference before any answer reaches a model. When an answer is supplied as '[secret-ref:<safe-key>] ... vault://...', preserve the reference only in the relevant task context and use it only for a tool input explicitly marked secret. Never echo the reference in user-facing summaries or ask for the secret again. Never ask users to paste secrets into ordinary mission messages. Otherwise set requiresClarification=false and clarificationQuestions=[].
 2. For a goal that does not need clarification, create as many phases and specific tasks as needed to fully accomplish it. Keep every phase meaningful and include at least one task in each phase. Keep descriptions and systemPrompts concise and operational; do not omit required actions, task IDs, dependencies, or consumed outputs to save space.
 3. Each phase must include id, name, goal, tasks, requiresApproval, and status. Use "pending" for the initial status.
 4. Each task must include id, title, description, agentRole, systemPrompt, dependsOnTaskIds, expectedArtifacts, requiredActions, status, and artifacts. Use "pending" for the initial status and [] when there are no artifacts or required actions yet. dependsOnTaskIds lists task IDs that must complete first; use [] only when the task is genuinely independent.
 5. Give every phase a unique, stable id. Task ids must be globally unique across the entire plan, not merely unique within each phase. Use ids such as "phase-2-task-1"; never reuse "task-1" in another phase. Dependencies may refer only to tasks in the same or an earlier phase, and must not form a cycle. Select agent roles based on the actual work.
 6. Every task must be executable by an autonomous software Agent. Never assign agentRole "Human", "User", or another human decision-maker. Represent a needed human decision with requiresApproval or requiresClarification instead.
 7. Mark requiresApproval=true only where a human decision is needed before work continues.
-8. A task's systemPrompt must clearly describe the outcome, constraints, and evidence needed to complete the task. Keep instructions focused on what must be accomplished; do not prescribe tool IDs, tool discovery, tool creation, delegation, or implementation steps. The runtime resolves required capabilities using available tools and determines whether an existing tool or a newly created one is needed. Leave requiredActions empty unless a specific action outcome must be independently verified. Do not lock an action to a generic API tool when its endpoint or credentials are not known; the Agent must be able to resolve another capability or report the concrete configuration blocker. If an execution-time discovery reveals a missing non-secret user value, ask the user before continuing rather than inventing it; never request secrets in mission chat.
+8. A task's systemPrompt must clearly describe the outcome, constraints, and evidence needed to complete the task. Keep instructions focused on what must be accomplished; do not prescribe tool IDs, tool discovery, tool creation, delegation, or implementation steps. The runtime resolves required capabilities using available tools and determines whether an existing tool or a newly created one is needed. Leave requiredActions empty unless a specific action outcome must be independently verified. Do not lock an action to a generic API tool when its endpoint or credentials are not known; the Agent must be able to resolve another capability or report the concrete configuration blocker. If an execution-time discovery reveals a missing non-secret user value, ask the user before continuing rather than inventing it. Secret values must be marked as secret schema inputs and supplied only as Vault references; never include secret values in Agent prompts or mission messages.
 9. Treat expectedArtifacts as user-requested deliverable files only. Do not invent design documents, source-code files, executables, or other artifacts just to describe work or prove an action. For communication, tool-creation, and other action-only tasks, use expectedArtifacts=[] and report the verified text/result in the task output. For email or text-message tasks, produce and send only the exact requested message; do not invent sample/test messages, claim delivery without tool evidence, or wrap the message in Markdown headings, lists, or fences. system-action-receipts.json is internal evidence supplied by the runtime and must never be listed as an expected artifact. Do not promise .exe binaries; generated tools are registered tools, not mission artifacts.
 10. When a task produces document artifacts, its systemPrompt must instruct the Agent to begin each artifact with a one-paragraph summary (under 100 words) before the full content, so downstream reviewers can judge the artifact from the summary alone.
 11. If a task consumes another task's result or artifact, list that producer's exact task ID in dependsOnTaskIds and in the task's systemPrompt, and say which output is consumed. Do not refer vaguely to "initial", "final", or "previous" values without naming their producing task IDs. Dependencies belong on the consuming task, not on a producer that merely names a future consumer. Do not infer a dependency from a task ID mentioned in a negative instruction or in a statement that the task's output will be consumed downstream. Include only tasks that produce an input the task actually uses. Dependencies impose execution order and make completed producer outputs available to the Agent.
@@ -343,8 +399,8 @@ function looseArtifactPattern(artifactName: string): RegExp | null {
 function planStandardIssues(plan: any): string[] {
     const issues = [];
     if (plan.requiresClarification) {
-        if (plan.clarificationQuestions.length < 2 || plan.clarificationQuestions.length > 4) {
-            issues.push('clarificationQuestions must contain 2-4 focused questions when requiresClarification is true');
+        if (plan.clarificationQuestions.length < 1 || plan.clarificationQuestions.length > 4) {
+            issues.push('clarificationQuestions must contain 1-4 focused questions when requiresClarification is true');
         }
         return issues;
     }
@@ -527,13 +583,18 @@ export async function generateValidPlan(
     let lastError = '';
     let previousResponse = '';
     let jsonRepairRequested = false;
+    let pendingFieldRepair: PlannerFieldRepair | undefined;
+    let fieldRepairBase: unknown;
+    let failedRepairAttempts = 0;
     const routingSessionId = missionId ? `${missionId}:planner` : `planner:${randomUUID()}`;
     let attempt = 0;
     while (true) {
         attempt++;
         const isJsonRepair = jsonRepairRequested;
         jsonRepairRequested = false;
-        const hasPlanToRefine = !isJsonRepair && Boolean(lastError && previousResponse);
+        const activeFieldRepair = pendingFieldRepair;
+        const isFieldRepair = Boolean(activeFieldRepair);
+        const hasPlanToRefine = !isJsonRepair && !isFieldRepair && Boolean(lastError && previousResponse);
         const repairPrompt = isJsonRepair
             ? [
                 'Fix only the JSON syntax in the planner response below. Do not replan, add, omit, or change any plan content.',
@@ -542,6 +603,8 @@ export async function generateValidPlan(
                 'Problematic planner response:',
                 previousResponse.slice(0, MAX_PRIOR_RESPONSE_CHARS),
             ].join('\n')
+            : activeFieldRepair
+                ? plannerFieldRepairPrompt(activeFieldRepair)
             : !hasPlanToRefine
                 ? ''
                 : [
@@ -556,11 +619,15 @@ export async function generateValidPlan(
             content = await complete({
                 prompt: isJsonRepair
                     ? repairPrompt
+                    : isFieldRepair
+                        ? repairPrompt
                     : hasPlanToRefine
                         ? repairPrompt
                         : `Create a plan to achieve this goal: ${prompt}\n\nCONTEXT: ${JSON.stringify(context || {})}`,
                 systemPrompt: isJsonRepair
                     ? 'You repair JSON syntax. Preserve all values and keys exactly; only correct formatting and syntax. Return one valid JSON object and nothing else.'
+                    : isFieldRepair
+                        ? 'Return only one JSON value of the requested type. Do not return or describe the plan.'
                     : hasPlanToRefine
                         ? PLANNER_REFINEMENT_SYSTEM_PROMPT
                         : PLANNER_SYSTEM_PROMPT,
@@ -590,6 +657,21 @@ export async function generateValidPlan(
         }
         previousResponse = content;
         try {
+            if (activeFieldRepair) {
+                let replacement: unknown;
+                try {
+                    replacement = parsePlanJson(content).value;
+                } catch (error) {
+                    throw new Error(
+                        `Planner field repair for ${activeFieldRepair.path.map(String).join('.')} did not return a JSON value: ${error instanceof Error ? error.message : String(error)}`,
+                    );
+                }
+                setValueAtPath(fieldRepairBase, activeFieldRepair.path, replacement);
+                content = JSON.stringify(fieldRepairBase);
+                previousResponse = content;
+                pendingFieldRepair = undefined;
+                fieldRepairBase = undefined;
+            }
             const parsedPlan = parsePlanJson(content);
             if (parsedPlan.repaired) {
                 logger.info({ missionId, attempt, repairs: parsedPlan.repairs }, 'Repaired structurally invalid planner JSON');
@@ -598,8 +680,12 @@ export async function generateValidPlan(
             const parsed = PlanSchema.safeParse(sanitized);
             if (!parsed.success) {
                 lastError = formatSchemaIssues(parsed.error.issues).join('\n');
+                pendingFieldRepair = findPlannerFieldRepair(parsed.error.issues, sanitized);
+                fieldRepairBase = pendingFieldRepair ? sanitized : undefined;
                 throw new Error(lastError);
             }
+            pendingFieldRepair = undefined;
+            fieldRepairBase = undefined;
             const plan = parsed.data;
             previousResponse = JSON.stringify(plan);
             const dependencyRepairs = repairDeclaredDependencyInstructions(plan);
@@ -617,6 +703,14 @@ export async function generateValidPlan(
         catch (error) {
             lastError = error instanceof Error ? error.message : String(error);
             await (reportValidation === null || reportValidation === void 0 ? void 0 : reportValidation(lastError));
+            if (isJsonRepair || isFieldRepair || hasPlanToRefine) {
+                failedRepairAttempts += 1;
+                if (failedRepairAttempts >= MAX_PLAN_REPAIR_ATTEMPTS) {
+                    throw new Error(
+                        `Planner could not produce a valid plan after ${MAX_PLAN_REPAIR_ATTEMPTS} repair attempts. Last validation issue: ${lastError}`,
+                    );
+                }
+            }
             if (lastError.startsWith('Planner response did not contain')) {
                 jsonRepairRequested = true;
                 logger.warn({ missionId, attempt, reason: lastError }, 'Planner JSON is malformed; requesting a JSON-only repair');

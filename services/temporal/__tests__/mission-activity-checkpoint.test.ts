@@ -16,6 +16,7 @@ describe('runMissionActivity checkpoints', () => {
       estimatedCost: 'low',
       requiresClarification: true,
       clarificationQuestions: ['Which environment should be targeted?'],
+      clarificationAnswers: [],
       phases: [],
     }
     const heartbeat = jest.fn()
@@ -95,6 +96,7 @@ describe('runMissionActivity checkpoints', () => {
         estimatedCost: 'low',
         requiresClarification: false,
         clarificationQuestions: [],
+        clarificationAnswers: [],
         phases: [],
       },
       outputs: { status: 'awaiting_approval' },
@@ -134,6 +136,7 @@ describe('runMissionActivity checkpoints', () => {
       estimatedCost: 'low',
       requiresClarification: false,
       clarificationQuestions: [],
+      clarificationAnswers: [],
       phases: [{
         id: 'phase-1',
         name: 'Answer',
@@ -175,6 +178,7 @@ describe('runMissionActivity checkpoints', () => {
       estimatedCost: 'low',
       requiresClarification: true,
       clarificationQuestions: ['Which environment should be targeted?'],
+      clarificationAnswers: [],
       phases: [],
     }
     const run = jest.spyOn(MissionOrchestrator.prototype, 'run').mockResolvedValue({

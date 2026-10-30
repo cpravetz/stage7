@@ -85,6 +85,60 @@ describe('generateValidPlan', () => {
     expect(requests[1]?.systemPrompt).toContain('editing an existing mission plan')
   })
 
+  it('repairs malformed nested values with focused value-only requests', async () => {
+    const invalidPlan = validPlan(1)
+    const task = invalidPlan.phases[0]!.tasks[0]!
+    task.expectedArtifacts = [{ name: 'sent-message.txt' }] as any
+    task.requiredActions = ['textMessageSentConfirmation'] as any
+    task.systemPrompt = 'Call textMessageSentConfirmation to send the requested message.'
+    const requests: PlannerCompletionRequest[] = []
+    const responses = [
+      JSON.stringify(invalidPlan),
+      JSON.stringify('sent-message.txt'),
+      JSON.stringify({ toolId: 'textMessageSentConfirmation', outcome: 'success' }),
+    ]
+    const complete = async (request: PlannerCompletionRequest): Promise<string> => {
+      requests.push(request)
+      return responses[request.attempt - 1]!
+    }
+
+    const plan = await generateValidPlan('Send the requested message', {}, 'mission-focused-value-repair', complete)
+
+    expect(plan.phases[0]?.tasks[0]?.expectedArtifacts).toEqual(['sent-message.txt'])
+    expect(plan.phases[0]?.tasks[0]?.requiredActions).toEqual([
+      { toolId: 'textMessageSentConfirmation', outcome: 'success' },
+    ])
+    expect(requests).toHaveLength(3)
+    expect(requests[1]?.prompt).toContain('phases[0].tasks[0].expectedArtifacts[0]')
+    expect(requests[1]?.prompt).toContain('Return only the replacement value as valid JSON')
+    expect(requests[1]?.prompt).not.toContain('Plan:')
+    expect(requests[1]?.prompt).not.toContain('"phases"')
+    expect(requests[2]?.prompt).toContain('phases[0].tasks[0].requiredActions[0]')
+    expect(requests[2]?.prompt).toContain('"toolId"')
+    expect(requests[2]?.prompt).not.toContain('Plan:')
+    expect(requests[2]?.systemPrompt).toContain('Do not return or describe the plan')
+  })
+
+  it('stops after repeated failed plan repairs', async () => {
+    const invalidPlan = validPlan(1)
+    invalidPlan.phases[0]!.tasks[0]!.requiredActions = ['textMessageSentConfirmation'] as any
+    invalidPlan.phases[0]!.tasks[0]!.systemPrompt =
+      'Call textMessageSentConfirmation to send the requested message.'
+    const requests: PlannerCompletionRequest[] = []
+    const complete = async (request: PlannerCompletionRequest): Promise<string> => {
+      requests.push(request)
+      return request.attempt === 1
+        ? JSON.stringify(invalidPlan)
+        : JSON.stringify('still not an object')
+    }
+
+    await expect(generateValidPlan('Send the requested message', {}, 'mission-bounded-repair', complete))
+      .rejects.toThrow('could not produce a valid plan after 5 repair attempts')
+
+    expect(requests).toHaveLength(6)
+    expect(requests.slice(1).every((request) => !request.prompt.includes('"phases"'))).toBe(true)
+  })
+
   it('repairs plans that assign executable work to a human role', async () => {
     const humanRolePlan = validPlan()
     humanRolePlan.phases[0]!.tasks[0]!.agentRole = 'Human'

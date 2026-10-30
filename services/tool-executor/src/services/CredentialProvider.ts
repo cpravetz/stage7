@@ -81,6 +81,28 @@ export class CredentialProvider {
     return creds;
   }
 
+  async storeInVault(plaintext: string, tenantId: string, name: string): Promise<string> {
+    const vaultUrl = process.env.VAULT_URL || 'http://vault:4000';
+    const base = new URL(vaultUrl);
+    if ((base.protocol !== 'http:' && base.protocol !== 'https:') || base.username || base.password) {
+      throw new Error('VAULT_URL must be an HTTP(S) URL without embedded credentials');
+    }
+    const target = new URL('/api/vault/secrets', base);
+    const response = await fetch(target.toString(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, plaintext, tenantId }),
+    });
+    if (!response.ok) {
+      throw new Error(`Vault secret storage failed (${response.status})`);
+    }
+    const secret = await response.json() as { id?: string };
+    if (typeof secret.id !== 'string' || !/^[a-zA-Z0-9._-]+$/.test(secret.id)) {
+      throw new Error('Vault returned an invalid secret reference');
+    }
+    return `vault://${secret.id}`;
+  }
+
   private async fromVault(secretId: string): Promise<string | undefined> {
     const vaultUrl = process.env.VAULT_URL || 'http://vault:4000';
     let base: URL;
@@ -102,7 +124,7 @@ export class CredentialProvider {
       logger.warn({ secretId }, 'Invalid secretId format');
       return undefined;
     }
-    const target = new URL(`/secrets/${encodeURIComponent(secretId)}/decrypt`, base);
+    const target = new URL(`/api/vault/secrets/${encodeURIComponent(secretId)}/decrypt`, base);
     if (target.origin !== base.origin) {
       logger.warn({ secretId }, 'Vault URL origin escape attempt');
       return undefined;

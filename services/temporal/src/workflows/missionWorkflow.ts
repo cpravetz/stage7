@@ -1,9 +1,11 @@
 import { patched, proxyActivities } from '@temporalio/workflow';
-import { logger, MissionArtifact } from '@stage7-nextgen/shared';
+import { logger } from '@stage7-nextgen/shared';
 import type { MissionActivities } from '../activities/missionActivity';
+import type { MissionPhaseOutput } from '../activities/missionWorkflowActivities';
 import {
   CompletedTaskSummary,
   createCompletedTaskSummary,
+  MissionPendingInteraction,
   MissionTaskCheckpoint,
   WorkflowInput,
   WorkflowResult,
@@ -119,7 +121,7 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
     if (plan.requiresClarification && plan.clarificationQuestions.length > 0) {
       const result = {
         plan,
-        outputs: { status: 'awaiting_clarification', questions: plan.clarificationQuestions },
+        outputs: { status: 'awaiting_clarification', questions: plan.clarificationQuestions, resumeSupported: false },
         compensations: [],
       };
       return {
@@ -131,17 +133,7 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
       };
     }
 
-    const phases: Array<{
-      phaseId: string;
-      name: string;
-      status: 'completed' | 'incomplete';
-      tasks: Array<{
-        taskId: string;
-        status: 'completed' | 'failed';
-        artifacts: MissionArtifact[];
-        output?: string;
-      }>;
-    }> = [];
+    const phases: MissionPhaseOutput[] = [];
     const compensations: Array<{ phaseId: string; action: string }> = [];
     const useAgentTaskSelection = patched('agent-owned-task-selection-v1');
     const useAgentPhaseAmendments = patched('bounded-phase-amendments-v1');
@@ -176,7 +168,7 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
 
       await phaseActivities.startMissionPhaseActivity({ input, phase });
       phase.status = 'in_progress';
-      const phaseOutput = {
+      const phaseOutput: MissionPhaseOutput = {
         phaseId: phase.id,
         name: phase.name,
         status: 'completed' as 'completed' | 'incomplete',
@@ -303,6 +295,43 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
               task,
               completedTaskSummaries: [...completedTaskSummaries.values()],
             });
+            if (result.interruption) {
+              const pendingInteraction: MissionPendingInteraction = {
+                ...result.interruption,
+                phaseId: phase.id,
+                taskId: task.id,
+                taskTitle: task.title,
+                agentRole: task.agentRole,
+                actionReceipts: result.actionReceipts || [],
+                resumeCount: 0,
+              };
+              task.status = 'pending';
+              task.output = '';
+              phase.status = 'in_progress';
+              phaseOutput.status = 'incomplete';
+              phaseOutput.tasks.push({
+                taskId: task.id,
+                status: 'pending',
+                artifacts: [],
+              });
+              phases.push(phaseOutput);
+              return {
+                missionId: input.missionId,
+                status: 'awaiting_review',
+                output: {
+                  plan,
+                  outputs: {
+                    status: result.interruption.kind === 'user_input' ? 'awaiting_user_input' : 'awaiting_permission',
+                    pendingInteraction,
+                    resumeSupported: false,
+                    phases,
+                  },
+                  compensations,
+                },
+                startedAt,
+                completedAt: Date.now(),
+              };
+            }
             task.status = 'completed';
             task.output = result.output;
             task.artifacts = result.artifacts;
