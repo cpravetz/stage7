@@ -1456,10 +1456,12 @@ return this.executeOrRequestCredentials(pending.tool, pending.input);
       }
     }
 
-    const prefix = isExternalAction ? 'Not connected' : 'Missing required config';
-    let errorMsg = `${prefix}: required config fields missing: ${missing.join(', ')}`;
+    const prefix = isExternalAction ? 'Not connected' : 'Missing required configuration';
+    let errorMsg = `${prefix}: ${missing.join(', ')} are not configured for tool '${tool.name}' (${tool.id}).`;
     if (createdSecrets.length > 0) {
-      errorMsg += `. Created empty secrets in vault: ${createdSecrets.join(', ')}. Please edit them in the Vault with the correct values.`;
+      errorMsg += ` Empty secret entries were created in the Vault as 'tool:${tool.id}:<field>'. Go to Tools → ${tool.name} → Configure and set values for: ${missing.join(', ')} (or edit the corresponding secrets in the Vault).`;
+    } else {
+      errorMsg += ` Go to Tools → ${tool.name} → Configure to set values for: ${missing.join(', ')} (stored in Vault).`;
     }
     return {
       executionId,

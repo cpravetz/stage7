@@ -100,12 +100,17 @@ const Tools = () => {
   const [selectedTool, setSelectedTool] = useState<Tool | null>(null);
   const [addMode, setAddMode] = useState(false);
   const [editMode, setEditMode] = useState(false);
-  const [activeTab, setActiveTab] = useState<'details' | 'test' | 'assign'>('details');
+  const [activeTab, setActiveTab] = useState<'details' | 'configure' | 'test' | 'assign'>('details');
 
   const [executeInputValues, setExecuteInputValues] = useState<Record<string, unknown>>({});
   const [executing, setExecuting] = useState(false);
   const [executeResult, setExecuteResult] = useState<ExecutionResult | null>(null);
   const [executeError, setExecuteError] = useState<string | null>(null);
+  const [configValues, setConfigValues] = useState<Record<string, string>>({});
+  const [configLoading, setConfigLoading] = useState(false);
+  const [configSaving, setConfigSaving] = useState(false);
+  const [configError, setConfigError] = useState<string | null>(null);
+  const [configSuccess, setConfigSuccess] = useState<string | null>(null);
 
   // Add/Edit tool form state
   const [addName, setAddName] = useState('');
@@ -166,7 +171,19 @@ const Tools = () => {
     setExecuteResult(null);
     setExecuteError(null);
     setExecuting(false);
+    setConfigValues({});
+    setConfigError(null);
+    setConfigSuccess(null);
+    if (activeTab === 'configure') {
+      loadConfigValues(selectedTool);
+    }
   }, [selectedTool]);
+
+  useEffect(() => {
+    if (activeTab === 'configure') {
+      loadConfigValues(selectedTool);
+    }
+  }, [activeTab]);
 
   const addInputSchemaParse = useMemo(() => safeParseJson(addInputSchemaText), [addInputSchemaText]);
   const addConfigSchemaParse = useMemo(() => safeParseJson(addConfigSchemaText), [addConfigSchemaText]);
@@ -368,6 +385,72 @@ const Tools = () => {
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text).catch(() => {});
+  };
+
+  const loadConfigValues = async (tool: Tool | null) => {
+    if (!tool) return;
+    const schema = tool.configSchema || (tool.manifest?.configSchema as any);
+    const required = schema?.required || [];
+    if (!Array.isArray(required) || required.length === 0) {
+      setConfigValues({});
+      return;
+    }
+    setConfigLoading(true);
+    setConfigError(null);
+    setConfigSuccess(null);
+    const newValues: Record<string, string> = {};
+    try {
+      const vaultUrl = (import.meta as any).env?.VITE_VAULT_URL || 'http://localhost:4000';
+      for (const field of required) {
+        const name = `tool:${tool.id}:${field}`;
+        try {
+          const res = await fetch(`${vaultUrl}/api/vault/secrets/name/${encodeURIComponent(name)}/decrypt?tenantId=system`);
+          if (res.ok) {
+            const data = await res.json();
+            newValues[field] = data.plaintext || '';
+          } else {
+            newValues[field] = '';
+          }
+        } catch {
+          newValues[field] = '';
+        }
+      }
+      setConfigValues(newValues);
+    } catch (err: any) {
+      setConfigError(err?.message || 'Failed to load config values');
+    } finally {
+      setConfigLoading(false);
+    }
+  };
+
+  const saveConfigValues = async (tool: Tool | null) => {
+    if (!tool) return;
+    const schema = tool.configSchema || (tool.manifest?.configSchema as any);
+    const required = schema?.required || [];
+    if (!Array.isArray(required) || required.length === 0) {
+      setConfigSuccess('No configuration fields');
+      return;
+    }
+    setConfigSaving(true);
+    setConfigError(null);
+    setConfigSuccess(null);
+    try {
+      const vaultUrl = (import.meta as any).env?.VITE_VAULT_URL || 'http://localhost:4000';
+      for (const field of required) {
+        const name = `tool:${tool.id}:${field}`;
+        const value = configValues[field] || '';
+        await fetch(`${vaultUrl}/api/vault/secrets/ensure`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, plaintext: value, tenantId: 'system' }),
+        });
+      }
+      setConfigSuccess('Configuration saved to Vault');
+    } catch (err: any) {
+      setConfigError(err?.message || 'Failed to save config values');
+    } finally {
+      setConfigSaving(false);
+    }
   };
 
   const handleExecute = async () => {
@@ -809,6 +892,7 @@ const Tools = () => {
               </div>
               <div style={{ display: 'flex', gap: 12, marginBottom: 16, borderBottom: '1px solid #334155' }}>
                 <button onClick={() => setActiveTab('details')} style={{ background: 'transparent', border: 'none', color: activeTab === 'details' ? '#f1f5f9' : '#94a3b8', padding: '6px 0', borderBottom: activeTab === 'details' ? '2px solid #0ea5e9' : 'none' }}>Details</button>
+                <button onClick={() => setActiveTab('configure')} style={{ background: 'transparent', border: 'none', color: activeTab === 'configure' ? '#f1f5f9' : '#94a3b8', padding: '6px 0', borderBottom: activeTab === 'configure' ? '2px solid #0ea5e9' : 'none' }}>Configure</button>
                 <button onClick={() => setActiveTab('test')} style={{ background: 'transparent', border: 'none', color: activeTab === 'test' ? '#f1f5f9' : '#94a3b8', padding: '6px 0', borderBottom: activeTab === 'test' ? '2px solid #0ea5e9' : 'none' }}>Test</button>
                 <button onClick={() => setActiveTab('assign')} style={{ background: 'transparent', border: 'none', color: activeTab === 'assign' ? '#f1f5f9' : '#94a3b8', padding: '6px 0', borderBottom: activeTab === 'assign' ? '2px solid #0ea5e9' : 'none' }}>Assignments</button>
               </div>
@@ -844,6 +928,43 @@ const Tools = () => {
                       </p>
                     </div>
                   )}
+                </div>
+              )}
+
+              {activeTab === 'configure' && (
+                <div>
+                  <p className="muted" style={{ marginBottom: 12 }}>
+                    Configure secrets for this tool's configSchema variables. Values are stored in the Vault.
+                  </p>
+                  {(() => {
+                    const schema = selectedTool.configSchema || (selectedTool.manifest?.configSchema as any);
+                    const required = schema?.required || [];
+                    const properties = schema?.properties || {};
+                    if (!Array.isArray(required) || required.length === 0) {
+                      return <p className="muted">No configuration variables defined.</p>;
+                    }
+                    return (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                        {required.map((field: string) => (
+                          <ConfigFieldRow
+                            key={field}
+                            field={field}
+                            description={properties[field]?.description}
+                            value={configValues[field] || ''}
+                            onChange={(val) => setConfigValues((prev) => ({ ...prev, [field]: val }))}
+                          />
+                        ))}
+                        <div className="actions" style={{ marginTop: 8 }}>
+                          <button onClick={() => saveConfigValues(selectedTool)} disabled={configSaving}>
+                            {configSaving ? 'Saving…' : 'Save'}
+                          </button>
+                        </div>
+                        {configLoading && <span className="muted">Loading...</span>}
+                        {configError && <div className="error-banner">{configError}</div>}
+                        {configSuccess && <div style={{ color: '#22c55e' }}>{configSuccess}</div>}
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
 
@@ -913,6 +1034,28 @@ const Tools = () => {
         </div>
       </div>
 
+    </div>
+  );
+};
+
+const ConfigFieldRow = ({ field, description, value, onChange }: { field: string; description?: string; value: string; onChange: (val: string) => void }) => {
+  const [show, setShow] = useState(false);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <label style={{ fontWeight: 600 }}>{field}</label>
+      {description && <span className="muted" style={{ fontSize: 12 }}>{description}</span>}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <input
+          type={show ? 'text' : 'password'}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="Enter value"
+          style={{ padding: '8px', flex: 1 }}
+        />
+        <button type="button" onClick={() => setShow(!show)} style={{ padding: '6px 10px' }}>
+          {show ? '👁️‍🗨️ Hide' : '👁️ Show'}
+        </button>
+      </div>
     </div>
   );
 };
