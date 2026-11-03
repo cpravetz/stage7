@@ -38,6 +38,7 @@ const PLUGIN_SYSTEM_PROMPT = `You are a senior engineer generating production-re
     "sourceCode": "string",
     "requirements": ["string"],
     "configSchema": { "type": "object", "properties": {} },
+    "credentialSource": { "logicalKey": { "configKey": "field", "label": "Human-readable name", "sensitive": true } },
     "inputs": { "type": "object", "properties": {} },
     "outputs": { "type": "object", "properties": {} }
   }
@@ -65,11 +66,31 @@ const PLUGIN_SYSTEM_PROMPT = `You are a senior engineer generating production-re
     with network access and credentials disabled before deployment.
   - Include configSchema in every response; use {"type":"object","properties":{}} when no
     configuration is needed.
-  - Every user-provided secret must be an input property marked with
-    "x-stage7-secret": true, "format": "password", and "writeOnly": true. Generated code
-    may receive that input only at runtime. Never put secrets in config defaults, source
-    code, logs, outputs, or acceptance-test fixtures; acceptance tests must use dummy
-    values and must not make live requests.
+  - Never read configuration, credentials, or secrets from process.env, os.environ,
+    os.getenv, or any other process environment API. Runtime environment variables are
+    deployment settings and cannot be changed by a user at runtime.
+  - Keep persistent tool configuration separate from per-execution inputs:
+    configSchema is only for user-provided settings expected to remain consistent across
+    runs, while inputs is for values supplied or changed for a particular execution.
+    For example, a persistent account or service endpoint belongs in configSchema; a
+    recipient, message, query, or other task-specific value belongs in inputs, even when
+    the user supplies it. Do not put run-specific values in configSchema.
+  - Declare persistent settings as properties in configSchema.properties, with accurate
+    types and useful descriptions. Put every mandatory persistent setting in
+    configSchema.required. Read ordinary, non-secret persistent settings from
+    __skill_config["propertyName"] in JavaScript or __skill_config["property_name"] in
+    Python. Never substitute environment-variable lookups for declared config properties.
+  - Declare per-execution values in inputs and read them from __tool_input. For a
+    per-execution secret, mark the input property with "x-stage7-secret": true,
+    "format": "password", and "writeOnly": true; do not make it persistent configuration.
+  - For a secret that is intentionally persistent across runs, declare its configSchema
+    property and map it in credentialSource using configKey and a human-readable label.
+    Mark it with "sensitive": true. Read mapped values with
+    __getCredential("logicalKey") in JavaScript or __get_credential("logical_key") in
+    Python. These values resolve from runtime configuration or are requested from the
+    user if missing. Do not map per-execution secrets through credentialSource.
+  - Never put secrets in config defaults, source code, logs, outputs, or acceptance-test
+    fixtures; acceptance tests must use dummy values and must not make live requests.
   - If the tool must return a secret value, mark that output property with
     "x-stage7-secret": true. ToolExecutor stores it in Vault and returns only a
     vault:// reference to the Agent; never include real secret values in acceptance tests.
@@ -115,6 +136,12 @@ const generatedPluginSchema = z.object({
   sourceCode: z.string().min(1),
   requirements: z.array(z.string().trim().min(1)).max(0, 'Generated plugins cannot declare uninstalled dependencies'),
   configSchema: z.record(z.unknown()),
+  credentialSource: z.record(z.object({
+    configKey: z.string().trim().min(1),
+    label: z.string().trim().min(1).optional(),
+    required: z.boolean().optional(),
+    sensitive: z.boolean().optional(),
+  }).strict()).optional(),
   inputs: z.record(z.unknown()),
   outputs: z.record(z.unknown()),
 }).strict().superRefine((plugin, context) => {
@@ -131,6 +158,30 @@ const generatedPluginSchema = z.object({
       code: z.ZodIssueCode.custom,
       path: ['entrypoint'],
       message: `entrypoint must be ${expectedEntrypoint} for ${plugin.language}`,
+    });
+  }
+  const requiredConfig = Array.isArray(plugin.configSchema.required)
+    ? plugin.configSchema.required.filter((field): field is string => typeof field === 'string')
+    : [];
+  for (const field of requiredConfig) {
+    if (!Object.values(plugin.credentialSource || {}).some(
+      (source) => source.configKey === field && source.required !== false,
+    )) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['credentialSource'],
+        message: `required config field "${field}" must be mapped to a runtime configuration request`,
+      });
+    }
+  }
+  const environmentAccess = plugin.language === 'javascript'
+    ? /\bprocess\s*(?:\.\s*env\b|\[\s*['"`]env['"`]\s*\])/.test(plugin.sourceCode)
+    : /\bos\s*\.\s*(?:environ\b|getenv\s*\()|\bgetenv\s*\(|\bfrom\s+os\s+import\s+[^;\n]*\b(?:environ|getenv)\b/.test(plugin.sourceCode);
+  if (environmentAccess) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['sourceCode'],
+      message: 'generated plugins must use runtime configuration or credentials, not process environment variables',
     });
   }
 });
@@ -297,6 +348,7 @@ export class PluginGenerator {
           sourceCode: parsed.sourceCode,
           requirements: parsed.requirements,
           configSchema: parsed.configSchema,
+          ...(parsed.credentialSource ? { credentialSource: parsed.credentialSource } : {}),
           inputs: parsed.inputs,
           outputs: parsed.outputs,
           testContract,
@@ -506,12 +558,14 @@ export class PluginGenerator {
           sourceCode: parsed.sourceCode,
           requirements: parsed.requirements || [],
           configSchema: parsed.configSchema || {},
+          credentialSource: parsed.credentialSource || {},
           inputs: parsed.inputs || {},
           outputs: parsed.outputs || {},
           testContract,
         },
         inputSchema: parsed.inputs || { type: 'object', properties: {} },
         configSchema: parsed.configSchema || { type: 'object', properties: {} },
+        ...(parsed.credentialSource ? { credentialSource: parsed.credentialSource } : {}),
         outputSchema: parsed.outputs || {},
         createdAt: new Date(),
         updatedAt: new Date(),
@@ -582,6 +636,7 @@ export class PluginGenerator {
         sourceCode: manifest?.sourceCode,
         requirements: manifest?.requirements,
         configSchema: manifest?.configSchema,
+        credentialSource: manifest?.credentialSource,
         inputs: manifest?.inputs,
         outputs: manifest?.outputs,
       });
@@ -651,6 +706,7 @@ export class PluginGenerator {
         entrypoint,
         inputSchema: tool.inputSchema,
         outputSchema: tool.outputSchema,
+        credentialSource: manifest?.credentialSource,
         testContract: contractValidation.data,
         validation: testValidation.data,
         createdAt: tool.createdAt,

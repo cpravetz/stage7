@@ -36,7 +36,8 @@ export const TaskSchema = z.object({
   agentRole: z.string(),
   systemPrompt: z.string(),
   dependsOnTaskIds: z.array(z.string()).optional(),
-  expectedArtifacts: z.array(z.string()),
+  expectedArtifacts: z.array(z.string()).optional(),
+  requiresExternalAction: z.boolean().optional(),
   requiredActions: z.array(z.object({
     toolId: z.string().trim().min(1).max(120),
     outcome: z.enum(['success', 'failure', 'denied']),
@@ -63,8 +64,8 @@ export const PhaseSchema = z.object({
 
 export const PlanSchema = z.object({
   summary: z.string(),
-  estimatedDuration: z.string(),
-  estimatedCost: z.string(),
+  estimatedDuration: z.string().optional(),
+  estimatedCost: z.string().optional(),
   requiresClarification: z.boolean().default(false),
   clarificationQuestions: z.array(z.string()).default([]),
   clarificationAnswers: z.array(z.string()).default([]),

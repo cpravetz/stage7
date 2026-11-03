@@ -12,7 +12,7 @@
 
 import type { SkillExecutionResult } from './types';
 
-export type FailureClass = 'transient' | 'validation' | 'fatal';
+export type FailureClass = 'transient' | 'validation';
 
 const TRANSIENT_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 
@@ -45,7 +45,7 @@ export function classifyFailure(error: unknown): ClassifiedFailure {
 
   if (/not connected|not configured|no endpoint/i.test(message)) {
     return {
-      classification: 'fatal',
+      classification: 'validation',
       message: 'This action needs a connection that has not been configured yet.',
       retryable: false,
     };
@@ -59,7 +59,7 @@ export function classifyFailure(error: unknown): ClassifiedFailure {
     return { classification: 'transient', message: 'A network problem interrupted the request.', retryable: true };
   }
 
-  return { classification: 'fatal', message, retryable: false };
+  return { classification: 'validation', message, retryable: false };
 }
 
 function extractStatus(error: unknown): number | undefined {

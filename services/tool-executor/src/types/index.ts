@@ -225,7 +225,7 @@ export interface CredentialRequest {
   toolName: string;
   missingCredentials: Array<{
     key: string;
-    source: { vaultSecretId?: string; envVar?: string; configKey?: string };
+    source: { vaultSecretId?: string; envVar?: string; configKey?: string; sensitive?: boolean };
     label?: string;
   }>;
   message: string;

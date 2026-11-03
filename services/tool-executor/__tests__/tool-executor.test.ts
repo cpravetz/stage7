@@ -8,7 +8,7 @@ import { Tool, PluginGenerationRequest, CredentialRequiredError, ConfirmationReq
 import toolsRouter from '../src/routes/tools'
 import { ToolNotFoundError, ValidationError } from '../src/utils/errors'
 import { eventSkills } from '../src/assistants/event/index'
-import { pluginGenerator as routePluginGenerator } from '../src/utils/sharedInstance'
+import { pluginGenerator as routePluginGenerator, toolRegistry as routeToolRegistry } from '../src/utils/sharedInstance'
 import { mcpToolExecutive } from '../src/services/MCPToolExecutive'
 import type { SandboxExecutionDriver } from '../src/runners/SandboxExecutionDriver'
 
@@ -33,12 +33,16 @@ const generator = new PluginGenerator()
 let generatedSourceCode = `import json
 print(json.dumps({ "sum": __tool_input["left"] + __tool_input["right"] }))`
 let repairedSourceCode = generatedSourceCode
+const generatedPluginSystemPrompts: string[] = []
 const originalFetch = global.fetch;
 beforeAll(() => {
   global.fetch = jest.fn(async (url: any, init: any) => {
     const urlStr = String(url);
     if (urlStr.includes('/api/brain/complete')) {
       const body = JSON.parse(init.body);
+      if (typeof body.systemPrompt === 'string' && body.systemPrompt.includes('You are a senior engineer generating production-ready plugins')) {
+        generatedPluginSystemPrompts.push(body.systemPrompt);
+      }
       if (typeof body.systemPrompt === 'string' && body.systemPrompt.includes('You independently derive')) {
         return {
           ok: true,
@@ -262,8 +266,8 @@ describe('ToolExecutor', () => {
       updatedAt: new Date(),
     };
     const execution = await executor.execute(unsupportedTool, {})
-    expect(execution.status).toBe('completed')
-    expect(execution.output).toBeDefined()
+    expect(execution.status).toBe('failed')
+    expect(execution.error).toBeDefined()
     expect(execution.toolId).toBe('tool-unknown')
   })
 
@@ -585,6 +589,51 @@ describe('ToolExecutor', () => {
     expect(execution.error).toContain('apiKey');
   });
 
+  it('should request missing runtime configuration for credential-backed required fields', async () => {
+    const configTool: Tool = {
+      id: 'tool-runtime-config',
+      name: 'Runtime Config Tool',
+      description: 'Tool with user-configurable credentials',
+      type: 'code',
+      manifest: {
+        language: 'javascript',
+        sourceCode: 'console.log(JSON.stringify({ ok: true }));',
+        configSchema: { type: 'object', properties: { apiKey: { type: 'string' } }, required: ['apiKey'] },
+        credentialSource: { apiKey: { configKey: 'apiKey', label: 'Provider API key', sensitive: true } },
+      },
+      configSchema: { type: 'object', properties: { apiKey: { type: 'string' } }, required: ['apiKey'] },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const result = await executor.executeOrRequestCredentials(configTool, {});
+    expect(result).toBeInstanceOf(CredentialRequiredError);
+    if (!(result instanceof CredentialRequiredError)) return;
+    expect(result.request.missingCredentials).toEqual([
+      expect.objectContaining({ key: 'apiKey', label: 'Provider API key' }),
+    ]);
+  });
+
+  it('should report JSON error output from a code tool as failed execution', async () => {
+    const failingTool: Tool = {
+      id: 'tool-json-failure',
+      name: 'JSON Failure Tool',
+      description: 'Returns a structured provider error',
+      type: 'code',
+      manifest: {
+        language: 'javascript',
+        sourceCode: 'console.log(JSON.stringify({ error: "provider credentials are invalid" }));',
+      },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+
+    const result = await executor.executeOrRequestCredentials(failingTool, {});
+    if (result instanceof CredentialRequiredError) throw new Error('Unexpected credential request');
+    expect(result.status).toBe('failed');
+    expect(result.output?.error).toBe('provider credentials are invalid');
+  });
+
   it('should execute successfully when required config and endpoint are provided', async () => {
     const externalTool: Tool = {
       id: 'tool-external-2',
@@ -787,6 +836,7 @@ describe('PluginGenerator', () => {
   }
 
   it('should generate a plugin successfully', async () => {
+    generatedPluginSystemPrompts.length = 0;
     const result = await generator.generate(request)
     expect(result.success).toBe(true)
     expect(result.tool).toBeDefined()
@@ -798,6 +848,14 @@ describe('PluginGenerator', () => {
       : undefined
     expect(typeof sourceCode).toBe('string')
     if (typeof sourceCode !== 'string') throw new Error('Generated plugin source was missing')
+    expect(generatedPluginSystemPrompts).toHaveLength(1)
+    expect(generatedPluginSystemPrompts[0]).toContain('configSchema is only for user-provided settings expected to remain consistent across')
+    expect(generatedPluginSystemPrompts[0]).toContain('Declare per-execution values in inputs and read them from __tool_input')
+    expect(generatedPluginSystemPrompts[0]).toContain('Do not put run-specific values in configSchema')
+    expect(generatedPluginSystemPrompts[0]).toContain('__skill_config["propertyName"]')
+    expect(generatedPluginSystemPrompts[0]).toContain('Never read configuration, credentials, or secrets from process.env, os.environ')
+    expect(generatedPluginSystemPrompts[0]).toContain('For a secret that is intentionally persistent across runs')
+    expect(generatedPluginSystemPrompts[0]).toContain('Do not map per-execution secrets through credentialSource')
     expect(manifest).toMatchObject({
       validation: { method: 'isolated-contract-tests', passed: true, testCount: 1 },
       testContract: { cases: [{ name: 'adds two integers', expectedOutput: { sum: 42 } }] },
@@ -907,6 +965,26 @@ print(json.dumps({"id": result["id"], "status": result["status"]}))`,
     } finally {
       generatedSourceCode = originalSourceCode
       repairedSourceCode = originalRepairedSourceCode
+    }
+  })
+
+  it('rejects generated plugins that depend on process environment variables and repairs them', async () => {
+    const originalSourceCode = generatedSourceCode;
+    const originalRepairedSourceCode = repairedSourceCode;
+    generatedSourceCode = `import json, os
+print(json.dumps({"sum": os.environ.get("PROVIDER_API_KEY", "")}))`;
+    repairedSourceCode = originalSourceCode;
+    try {
+      const result = await generator.generate(request);
+      expect(result.success).toBe(true);
+      expect(result.tool?.manifest.sourceCode).toBe(originalSourceCode);
+      expect(result.tool?.manifest.validation).toMatchObject({
+        method: 'isolated-contract-tests',
+        passed: true,
+      });
+    } finally {
+      generatedSourceCode = originalSourceCode;
+      repairedSourceCode = originalRepairedSourceCode;
     }
   })
 
@@ -1095,13 +1173,14 @@ describe('REST endpoints', () => {
     expect(res.body.id).toBe(validTool.id)
   })
 
-  it('should execute a tool via POST /api/tools/:id/execute', async () => {
+  it('should surface a tool execution failure via POST /api/tools/:id/execute', async () => {
     await request(app).post('/api/tools').send(validTool)
     const res = await request(app)
       .post(`/api/tools/${validTool.id}/execute`)
       .send({ input: { test: true } })
-    expect(res.status).toBe(200)
-    expect(res.body.status).toBe('completed')
+    expect(res.status).toBe(500)
+    expect(res.body.status).toBe('failed')
+    expect(res.body.error).toBeDefined()
   })
 
   it('should generate a plugin via POST /api/plugins/generate', async () => {
@@ -1159,7 +1238,10 @@ describe('REST endpoints', () => {
     const generate = jest.spyOn(routePluginGenerator, 'generate')
       .mockResolvedValue({ success: true, tool: generatedTool })
     const deploy = jest.spyOn(routePluginGenerator, 'deploy')
-      .mockResolvedValue({ success: true, deployPath: '/tmp/generated-capability-tool' })
+      .mockImplementation(async (tool) => {
+        routeToolRegistry.register(tool)
+        return { success: true, deployPath: '/tmp/generated-capability-tool' }
+      })
     try {
       const res = await request(app)
         .post('/api/tools/resolve')
@@ -1170,6 +1252,42 @@ describe('REST endpoints', () => {
       expect(discover).toHaveBeenCalled()
       expect(generate).toHaveBeenCalled()
       expect(deploy).toHaveBeenCalledWith(generatedTool)
+      expect(routeToolRegistry.get(generatedTool.id)).toMatchObject({ isSkill: false })
+    } finally {
+      resolve.mockRestore()
+      discover.mockRestore()
+      generate.mockRestore()
+      deploy.mockRestore()
+      routeToolRegistry.unregister(generatedTool.id)
+    }
+  })
+
+  it('does not report a generated tool as resolved unless it is in the live catalog', async () => {
+    const generatedTool: Tool = {
+      id: 'unregistered-capability-tool',
+      name: 'Unregistered Capability Tool',
+      description: 'Satisfies the requested capability',
+      type: 'code',
+      manifest: { language: 'javascript', entrypoint: 'index.js', sourceCode: 'console.log("{}")' },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }
+    const resolve = jest.spyOn(mcpToolExecutive, 'resolveCapability')
+      .mockReturnValue({ satisfied: false, error: 'No registered tool matches' })
+    const discover = jest.spyOn(mcpToolExecutive, 'discoverAndRequestPermission')
+      .mockResolvedValue({ satisfied: false, error: 'No suitable MCP tool found' })
+    const generate = jest.spyOn(routePluginGenerator, 'generate')
+      .mockResolvedValue({ success: true, tool: generatedTool })
+    const deploy = jest.spyOn(routePluginGenerator, 'deploy')
+      .mockResolvedValue({ success: true, deployPath: '/tmp/unregistered-capability-tool' })
+
+    try {
+      const res = await request(app)
+        .post('/api/tools/resolve')
+        .send({ description: 'Need a capability' })
+
+      expect(res.status).toBe(500)
+      expect(res.body.error).toContain('without registering tool')
     } finally {
       resolve.mockRestore()
       discover.mockRestore()
@@ -1241,7 +1359,7 @@ describe('REST endpoints', () => {
     expect(res.body.request.missingCredentials.length).toBeGreaterThanOrEqual(1)
   })
 
-  it('should execute tool successfully after providing credentials', async () => {
+  it('should report unavailable MCP integration after providing credentials', async () => {
     const credentialTool = {
       id: 'cred-tool-2',
       name: 'Slack Tool',
@@ -1273,8 +1391,9 @@ describe('REST endpoints', () => {
         storeInVault: false,
       })
 
-    expect(credRes.status).toBe(200)
-    expect(credRes.body.status).toBe('completed')
+    expect(credRes.status).toBe(500)
+    expect(credRes.body.status).toBe('failed')
+    expect(credRes.body.error).toBeDefined()
   })
 
   describe('POST /api/tools/execute - flat payload support', () => {

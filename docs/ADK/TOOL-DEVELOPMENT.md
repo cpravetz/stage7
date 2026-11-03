@@ -58,9 +58,12 @@ those values in Vault and returns only a Vault reference. Never log, echo, or pl
 acceptance tests. Use dummy values in contract tests.
 
 `inputSchema`, `configSchema`, and `outputSchema` are separate tool contracts. Agents receive all
-three schemas; the Tools page displays and edits them independently. A mission-specific credential
-should be a marked input when it is collected for one execution, not a plaintext configuration
-default.
+three schemas; the Tools page displays and edits them independently. Use `configSchema` only for
+user-provided settings that should persist consistently across executions, such as an account or
+service endpoint. Use `inputSchema` for values supplied or changed for a particular execution,
+including mission-specific values such as a recipient, message, query, or one-time credential.
+Per-execution credentials should be marked secret inputs, not stored as persistent configuration or
+plaintext configuration defaults.
 
 ## Mission interruptions and tool permissions
 
@@ -278,7 +281,7 @@ higher-order Skill's planning or user interaction.
 | `persistenceEnvVar` | `string`                                      | Env var (e.g. `SALES_HOME`) the runtime uses for storage       |
 | `emitEvent`         | `string`                                      | Event id emitted on completion; auto-adds an event trigger     |
 | `endpointEnvVar`    | `string`                                      | Env var holding the external API endpoint URL                  |
-| `credentialSource`  | `Record<string, { vaultSecretId?, envVar?, configKey? }>` | Maps logical keys to vault/env/config sources  |
+| `credentialSource`  | `Record<string, { vaultSecretId?, envVar?, configKey?, sensitive? }>` | Maps logical keys to Vault or runtime configuration; `envVar` is legacy and deployment-managed only |
 | `configSchema`      | `SchemaRecord`                                | Documents the operator-supplied configuration                  |
 | `confirmBeforeSend` | `boolean`                                     | Requires user confirmation before the skill runs               |
 | `tier`              | `'advise' \| 'aid' \| 'represent'`            | Action tier metadata used by the existing runtime              |
@@ -392,32 +395,34 @@ createSchemaRecord({
 });
 ```
 
-### 3. Configuration from the environment, never hardcoded
+### 3. Runtime configuration, never hardcoded or read from Skill environment variables
 
 ```ts
-// ✅ Good
-persistenceEnvVar: 'SALES_HOME',
-endpointEnvVar: 'SALESFORCE_API_URL',
+configSchema: {
+  type: 'object',
+  properties: {
+    apiKey: { type: 'string', sensitive: true },
+    baseUrl: { type: 'string' },
+  },
+  required: ['apiKey', 'baseUrl'],
+},
 credentialSource: {
-  apiKey: { envVar: 'SALESFORCE_API_KEY' },
-  refreshToken: { vaultSecretId: 'vault/sales/sf-refresh' },
+  apiKey: { configKey: 'apiKey', label: 'Provider API key', sensitive: true },
+  baseUrl: { configKey: 'baseUrl', label: 'Provider endpoint' },
 };
 
-// ❌ Avoid
-credentialSource: { apiKey: { envVar: 'sk-1234567890abcdef' } };
+// In a Skill handler, read the configured values through the runtime context.
+const apiKey = ctx.getCredential('apiKey');
+const baseUrl = ctx.getCredential('baseUrl');
 ```
 
-```bash
-# In .env or deployment config
-SALES_HOME=/var/lib/stage7/sales
-SALESFORCE_API_URL=https://example.my.salesforce.com
-SALESFORCE_API_KEY=xxxxxxxx
-EXTERNAL_API_TIMEOUT=30000
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=notifications@example.com
-SMTP_PASS=app-specific-password
-```
+Required `configSchema` fields mapped through `credentialSource.configKey` are requested
+from the user when they are not already configured. Mark secrets as `sensitive: true`
+so the runtime presents them as secret input. Do not read provider settings or credentials
+from `process.env`, `os.environ`, or `os.getenv`; environment variables are for deployment
+settings controlled by the operator, not values that a mission can request or change.
+Legacy `envVar` mappings remain only for deployment-managed integrations while they are
+migrated to runtime configuration.
 
 ### 4. Stateless handlers
 

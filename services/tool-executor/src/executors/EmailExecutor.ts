@@ -20,16 +20,16 @@ export class EmailExecutor {
   private transporter: Transporter | null = null;
 
   async execute(options: EmailOptions, credentials: ToolCredentials): Promise<{ success: boolean; messageId?: string; error?: string }> {
-    const smtpHost = credentials.smtp_host || process.env.SMTP_HOST;
-    const smtpPort = credentials.smtp_port ? parseInt(credentials.smtp_port, 10) : parseInt(process.env.SMTP_PORT || '587', 10);
-    const smtpUser = credentials.smtp_user || process.env.SMTP_USER;
-    const smtpPass = credentials.smtp_pass || process.env.SMTP_PASS;
-    const fromAddress = options.from || credentials.from_address || process.env.SMTP_FROM || smtpUser;
+    const smtpHost = credentials.smtp_host;
+    const smtpPort = credentials.smtp_port ? parseInt(String(credentials.smtp_port), 10) : 587;
+    const smtpUser = credentials.smtp_user;
+    const smtpPass = credentials.smtp_pass;
+    const fromAddress = options.from || credentials.from_address || smtpUser;
 
     if (!smtpHost || !smtpUser || !smtpPass) {
       return {
         success: false,
-        error: 'Missing SMTP credentials. Provide smtp_host, smtp_user, and smtp_pass via Vault or environment.',
+        error: 'Missing SMTP credentials. Provide smtp_host, smtp_user, and smtp_pass.',
       };
     }
 

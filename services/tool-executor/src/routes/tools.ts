@@ -272,12 +272,20 @@ router.post(
       return
     }
 
+    generated.tool.isSkill = false
     const deployed = await generator.deploy(generated.tool)
     if (!deployed.success) {
       logger.error({ toolId: generated.tool.id, error: deployed.error }, 'Resolved plugin deployment failed')
       res.status(500).json({
         success: false,
         error: `Plugin deployment failed: ${deployed.error || 'unknown deployment error'}`,
+      })
+      return
+    }
+    if (!registry.get(generated.tool.id)) {
+      res.status(500).json({
+        success: false,
+        error: `Plugin deployment completed without registering tool '${generated.tool.id}' in the live catalog.`,
       })
       return
     }
@@ -296,12 +304,20 @@ router.post(
     }
     const result: PluginGenerationResult = await generator.generate(request)
     if (result.success && result.tool && result.tool.manifest?.requiresInstallation !== true) {
+      result.tool.isSkill = false
       const deployed = await generator.deploy(result.tool)
       if (!deployed.success) {
         logger.error({ toolId: result.tool.id, error: deployed.error }, 'Generated plugin deployment failed')
         res.status(500).json({
           success: false,
           error: `Plugin deployment failed: ${deployed.error || 'unknown deployment error'}`,
+        })
+        return
+      }
+      if (!registry.get(result.tool.id)) {
+        res.status(500).json({
+          success: false,
+          error: `Plugin deployment completed without registering tool '${result.tool.id}' in the live catalog.`,
         })
         return
       }

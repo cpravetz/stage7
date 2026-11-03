@@ -5,6 +5,7 @@ const mockActivities = {
   reviewAndAmendMissionPhaseActivity: jest.fn(),
   startMissionPhaseActivity: jest.fn(),
   executeMissionTaskActivity: jest.fn(),
+  requestMissionUserInputActivity: jest.fn(),
   finishMissionPhaseActivity: jest.fn(),
   awaitMissionPhaseApprovalActivity: jest.fn(),
   recordMissionPhaseApprovalActivity: jest.fn(),
@@ -16,6 +17,7 @@ const mockActivities = {
 jest.mock('@temporalio/workflow', () => ({
   proxyActivities: jest.fn(() => mockActivities),
   patched: jest.fn(() => true),
+  sleep: jest.fn(async () => undefined),
 }))
 
 jest.mock('@temporalio/activity', () => ({
@@ -26,7 +28,7 @@ jest.mock('@temporalio/activity', () => ({
 
 import { patched, proxyActivities } from '@temporalio/workflow'
 import { missionWorkflow } from '../src/workflows/missionWorkflow'
-import { WorkflowInput } from '../src/types/workflow'
+import { missionExecutionEvidenceGaps, MissionPhaseEvidence, WorkflowInput } from '../src/types/workflow'
 import { Plan } from '@stage7-nextgen/shared'
 import {
   completeMissionActivity,
@@ -43,6 +45,22 @@ describe('missionWorkflow activity boundary', () => {
   beforeEach(() => {
     Object.values(mockActivities).forEach((activity) => activity.mockReset());
     (patched as jest.Mock).mockReturnValue(false)
+    mockActivities.executeMissionTaskActivity.mockResolvedValue({
+      output: 'The available context was used to complete the requested outcome.',
+      artifacts: [],
+      tokensUsed: 1,
+    })
+    mockActivities.reviewAndAmendMissionPhaseActivity.mockImplementation(async ({ plan, phase }: any) => ({
+      plan,
+      phase,
+      satisfied: true,
+      gaps: [],
+    }))
+    mockActivities.completeMissionActivity.mockImplementation(async ({ plan, phases, compensations }: any) => ({
+      plan,
+      outputs: { phases, status: 'completed' },
+      compensations,
+    }))
   })
 
   it('generates a fresh plan when a retry has no persisted plan', async () => {
@@ -333,6 +351,65 @@ describe('missionWorkflow activity boundary', () => {
     expect(reviewMissionCompletion).not.toHaveBeenCalled()
   })
 
+  it('does not count successful tool discovery as evidence that an external action occurred', () => {
+    const plan: Plan = {
+      summary: 'Send a text message',
+      estimatedDuration: 'short',
+      estimatedCost: 'low',
+      requiresClarification: false,
+      clarificationQuestions: [],
+      clarificationAnswers: [],
+      phases: [{
+        id: 'phase-1',
+        name: 'Send message',
+        goal: 'Send the requested message',
+        requiresApproval: false,
+        status: 'pending',
+        tasks: [{
+          id: 'task-1',
+          title: 'Send the requested message',
+          description: 'Send the requested message to its recipient.',
+          agentRole: 'Executor',
+          systemPrompt: 'Send the requested message and verify the external action.',
+          dependsOnTaskIds: [],
+          expectedArtifacts: [],
+          requiresExternalAction: true,
+          status: 'pending',
+          artifacts: [],
+        }],
+      }],
+    }
+    const phases: MissionPhaseEvidence[] = [{
+      phaseId: 'phase-1',
+      status: 'completed',
+      tasks: [{
+        taskId: 'task-1',
+        status: 'completed',
+        artifacts: [{
+          name: 'system-action-receipts.json',
+          type: 'evidence',
+          purpose: 'execution-outcome',
+          content: JSON.stringify([{
+            toolId: '__list_tools',
+            outcome: 'success',
+            content: 'text-service-twilio-sms | TextService Twilio SMS',
+          }]),
+        }],
+      }],
+    }]
+
+    expect(missionExecutionEvidenceGaps(plan, phases)).toContain(
+      'Task "Send the requested message" (task-1) did not perform a verified external action. Tool discovery, tool creation, and delegation are not action evidence. No matching action receipt was recorded. Recorded tool IDs: __list_tools.',
+    )
+
+    phases[0].tasks[0].artifacts[0].content = JSON.stringify([{
+      toolId: 'text-service-twilio-sms',
+      outcome: 'success',
+      content: '{"sid":"SM123"}',
+    }])
+    expect(missionExecutionEvidenceGaps(plan, phases)).toEqual([])
+  })
+
   it('resumes failed task activities from safe checkpoints instead of requiring a completed receipt', async () => {
     const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(jsonResponse())
     const task = {
@@ -457,7 +534,7 @@ describe('missionWorkflow activity boundary', () => {
     }))
   })
 
-  it('returns awaiting review when the plan requires clarification', async () => {
+  it('replaces a clarification plan with autonomous outcome work', async () => {
     const plan: Plan = {
       summary: 'Clarify the requested outcome',
       estimatedDuration: 'short',
@@ -476,8 +553,8 @@ describe('missionWorkflow activity boundary', () => {
       prompt: 'Complete the mission',
     })
 
-    expect(result.status).toBe('awaiting_review')
-    expect(mockActivities.executeMissionTaskActivity).not.toHaveBeenCalled()
+    expect(result.status).toBe('completed')
+    expect(mockActivities.executeMissionTaskActivity).toHaveBeenCalledTimes(1)
   })
 
   it('lets the mission Agent select among dependency-ready tasks while Temporal owns execution', async () => {
@@ -680,7 +757,7 @@ describe('missionWorkflow activity boundary', () => {
     expect(mockActivities.completeMissionActivity).toHaveBeenCalledWith(expect.objectContaining({ plan: amendedPlan }))
   })
 
-  it('returns an explicit failed result when a task activity fails', async () => {
+  it('recovers from a task activity failure before completing the mission', async () => {
     const plan: Plan = {
       summary: 'Do the work',
       estimatedDuration: 'short',
@@ -707,10 +784,14 @@ describe('missionWorkflow activity boundary', () => {
       }],
     }
     mockActivities.prepareMissionActivity.mockResolvedValue(plan)
-    mockActivities.executeMissionTaskActivity.mockRejectedValue(new Error('interrupted task has no receipt'))
+    mockActivities.executeMissionTaskActivity
+      .mockRejectedValueOnce(new Error('interrupted task has no receipt'))
+      .mockResolvedValue({ output: 'The mission gap is resolved.', artifacts: [], tokensUsed: 1 })
     mockActivities.reviewAndAmendMissionPhaseActivity.mockResolvedValue({ plan, phase: plan.phases[0], satisfied: true, gaps: [] })
     mockActivities.finishMissionPhaseActivity.mockResolvedValue({})
-    mockActivities.completeMissionActivity.mockResolvedValue({ plan, outputs: { phases: [], status: 'completed' }, compensations: [] })
+    mockActivities.completeMissionActivity
+      .mockResolvedValueOnce({ plan, outputs: { phases: [], status: 'incomplete', gaps: ['The task execution failed.'] }, compensations: [] })
+      .mockResolvedValue({ plan, outputs: { phases: [], status: 'completed' }, compensations: [] })
 
     const result = await missionWorkflow({
       missionId: 'mission-1',
@@ -719,10 +800,12 @@ describe('missionWorkflow activity boundary', () => {
       prompt: 'Complete the mission',
     })
 
-    expect(result.status).toBe('incomplete')
+    expect(result.status).toBe('completed')
+    expect(mockActivities.executeMissionTaskActivity).toHaveBeenCalledTimes(2)
+    expect(mockActivities.completeMissionActivity).toHaveBeenCalledTimes(2)
   })
 
-  it('does not complete a phase when its completion review fails', async () => {
+  it('retries a transient phase-review failure before completing the phase', async () => {
     (patched as jest.Mock).mockReturnValue(true)
     const phase = {
       id: 'phase-review-failed',
@@ -752,10 +835,17 @@ describe('missionWorkflow activity boundary', () => {
     }
     mockActivities.prepareMissionActivity.mockResolvedValue(plan)
     mockActivities.executeMissionTaskActivity.mockResolvedValue({ output: 'The work is done.', artifacts: [], tokensUsed: 1 })
-    mockActivities.reviewAndAmendMissionPhaseActivity.mockRejectedValue(new Error('review unavailable'))
+    mockActivities.reviewAndAmendMissionPhaseActivity
+      .mockRejectedValueOnce(new Error('review unavailable'))
+      .mockResolvedValue({
+        plan,
+        phase,
+        satisfied: true,
+        gaps: [],
+      })
     mockActivities.completeMissionActivity.mockResolvedValue({
       plan,
-      outputs: { phases: [], status: 'incomplete', gaps: ['The phase review did not complete.'] },
+      outputs: { phases: [], status: 'completed' },
       compensations: [],
     })
 
@@ -766,10 +856,174 @@ describe('missionWorkflow activity boundary', () => {
       prompt: 'Complete and verify the work',
     })
 
-    expect(result.status).toBe('incomplete')
+    expect(result.status).toBe('completed')
+    expect(mockActivities.reviewAndAmendMissionPhaseActivity).toHaveBeenCalledTimes(2)
     expect(mockActivities.finishMissionPhaseActivity).toHaveBeenCalledWith(expect.objectContaining({
-      phase: expect.objectContaining({ status: 'in_progress' }),
+      phase: expect.objectContaining({ status: 'completed' }),
     }))
     expect(mockActivities.awaitMissionPhaseApprovalActivity).not.toHaveBeenCalled()
+  })
+
+  it('returns a pending user interaction instead of treating the task as complete', async () => {
+    const phase = {
+      id: 'phase-needs-input',
+      name: 'Configure service',
+      goal: 'Send the requested message',
+      requiresApproval: false,
+      status: 'pending' as const,
+      tasks: [{
+        id: 'task-needs-input',
+        title: 'Send the requested message',
+        description: 'Use the configured service.',
+        agentRole: 'assistant',
+        systemPrompt: 'Complete the requested outcome.',
+        expectedArtifacts: [],
+        status: 'pending' as const,
+        artifacts: [],
+      }],
+    }
+    const plan: Plan = {
+      summary: 'Send the requested message',
+      estimatedDuration: 'short',
+      estimatedCost: 'low',
+      requiresClarification: false,
+      clarificationQuestions: [],
+      clarificationAnswers: [],
+      phases: [phase],
+    }
+    mockActivities.prepareMissionActivity.mockResolvedValue(plan)
+    mockActivities.executeMissionTaskActivity.mockResolvedValue({
+      output: '__ASK_USER__:{"question":"[secret:tool-credentials] Enter the API token."}',
+      artifacts: [],
+      actionReceipts: [{ toolId: 'sms-service', isError: true, content: 'credentials required', outcome: 'question_asked' }],
+      interruption: {
+        kind: 'user_input',
+        question: '[secret:tool-credentials] Enter the API token.',
+        credentialRequest: {
+          executionId: 'execution-1',
+          toolId: 'sms-service',
+          toolName: 'SMS service',
+          missingCredentials: [{ key: 'apiToken', label: 'API token' }],
+        },
+      },
+      tokensUsed: 1,
+    })
+
+    const result = await missionWorkflow({
+      missionId: 'mission-needs-input',
+      tenantId: 'tenant-1',
+      assistantId: 'assistant-1',
+      prompt: 'Send the requested message',
+    })
+
+    expect(result.status).toBe('awaiting_review')
+    expect((result.output as any).outputs).toMatchObject({
+      status: 'awaiting_user_input',
+      pendingInteraction: {
+        kind: 'user_input',
+        taskId: 'task-needs-input',
+        credentialRequest: { executionId: 'execution-1' },
+      },
+    })
+    expect(mockActivities.reviewAndAmendMissionPhaseActivity).not.toHaveBeenCalled()
+    expect(mockActivities.completeMissionActivity).not.toHaveBeenCalled()
+  })
+
+  it('pauses visibly for provider configuration when a catalog blocker repeats', async () => {
+    (patched as jest.Mock).mockReturnValue(true)
+    const task = {
+      id: 'task-send-email',
+      title: 'Send the requested email',
+      description: 'Deliver the specified email.',
+      agentRole: 'assistant',
+      systemPrompt: 'Send the requested email.',
+      expectedArtifacts: [],
+      status: 'pending' as const,
+      artifacts: [],
+    }
+    const phase = {
+      id: 'phase-send-email',
+      name: 'Send email',
+      goal: 'Send the requested email',
+      requiresApproval: false,
+      status: 'pending' as const,
+      tasks: [task],
+    }
+    const plan: Plan = {
+      summary: 'Send email',
+      estimatedDuration: 'short',
+      estimatedCost: 'low',
+      requiresClarification: false,
+      clarificationQuestions: [],
+      clarificationAnswers: [],
+      phases: [phase],
+    }
+    const amendmentOne = {
+      id: 'phase-send-email-amendment-1',
+      title: 'Retry email delivery',
+      description: 'Use an available delivery capability.',
+      agentRole: 'assistant',
+      systemPrompt: 'Try an authorized alternative delivery capability.',
+      dependsOnTaskIds: [task.id],
+      expectedArtifacts: [],
+      status: 'pending' as const,
+      artifacts: [],
+    }
+    const amendmentTwo = {
+      ...amendmentOne,
+      id: 'phase-send-email-amendment-2',
+      title: 'Resolve email delivery blocker',
+    }
+    const planWithAmendmentOne: Plan = {
+      ...plan,
+      phases: [{ ...phase, tasks: [task, amendmentOne] }],
+    }
+    const planWithAmendmentTwo: Plan = {
+      ...plan,
+      phases: [{ ...phase, tasks: [task, amendmentOne, amendmentTwo] }],
+    }
+    mockActivities.prepareMissionActivity.mockResolvedValue(plan)
+    mockActivities.executeMissionTaskActivity.mockResolvedValue({
+      output: 'The available email tool is not configured.',
+      artifacts: [],
+      tokensUsed: 1,
+    })
+    mockActivities.reviewAndAmendMissionPhaseActivity
+      .mockResolvedValueOnce({
+        plan: planWithAmendmentOne,
+        phase: planWithAmendmentOne.phases[0]!,
+        satisfied: false,
+        gaps: ["Tool 'email_sender' is not in the live system catalog."],
+        amendment: amendmentOne,
+      })
+      .mockResolvedValueOnce({
+        plan: planWithAmendmentTwo,
+        phase: planWithAmendmentTwo.phases[0]!,
+        satisfied: false,
+        gaps: ["Tool 'email_sender' is not in the live system catalog."],
+        amendment: amendmentTwo,
+      })
+
+    const result = await missionWorkflow({
+      missionId: 'mission-config-blocker',
+      tenantId: 'tenant-1',
+      assistantId: 'assistant-1',
+      prompt: 'Send this email to the requested recipient.',
+    })
+
+    expect(result.status).toBe('awaiting_review')
+    expect((result.output as any).outputs).toMatchObject({
+      status: 'awaiting_user_input',
+      pendingInteraction: {
+        kind: 'user_input',
+        taskId: amendmentTwo.id,
+        question: expect.stringContaining('SMTP or an email API'),
+      },
+    })
+    expect(mockActivities.requestMissionUserInputActivity).toHaveBeenCalledWith(
+      expect.objectContaining({ task: amendmentTwo, question: expect.any(String) }),
+    )
+    expect(mockActivities.reviewAndAmendMissionPhaseActivity).toHaveBeenCalledTimes(2)
+    expect(mockActivities.completeMissionActivity).not.toHaveBeenCalled()
   })
 })

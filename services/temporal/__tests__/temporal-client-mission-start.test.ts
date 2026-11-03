@@ -22,99 +22,10 @@ describe('TemporalClient mission start', () => {
     else process.env.TOOL_EXECUTOR_URL = originalToolExecutorUrl
   })
 
-  it('uses the built-in runner by default even if TEMPORAL_ADDRESS points at an HTTP service', () => {
-    delete process.env.TEMPORAL_BACKEND
-    process.env.TEMPORAL_ADDRESS = 'temporal:4100'
-    expect(new TemporalClient().isConnected()).toBe(false)
-  })
-
-  it('requires an explicit backend choice before connecting to a Temporal Server', () => {
+  it('always uses the built-in runner regardless of legacy backend settings', () => {
     process.env.TEMPORAL_BACKEND = 'temporal-server'
-    delete process.env.TEMPORAL_ADDRESS
-    expect(() => new TemporalClient()).toThrow('TEMPORAL_BACKEND=temporal-server requires TEMPORAL_ADDRESS')
-  })
-
-  it('does not start a direct duplicate after an ambiguous Temporal start failure', async () => {
-    delete process.env.TEMPORAL_ADDRESS
-    delete process.env.ARTIFACTS_URL
-    delete process.env.GATEWAY_URL
-    const client = new TemporalClient()
-    const start = jest.fn().mockRejectedValue(new Error('connection lost during start'))
-    Object.defineProperty(client, 'client', {
-      configurable: true,
-      value: { workflow: { start } },
-    })
-    jest.spyOn(missionActivity, 'runMissionDirect').mockResolvedValue({})
-    const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue({
-      ok: true,
-      status: 200,
-      statusText: 'OK',
-      text: async () => '',
-      json: async () => ({}),
-    } as Response)
-
-    await expect(client.startMission({
-      missionId: 'mission-ambiguous',
-      tenantId: 'tenant-1',
-      assistantId: 'assistant-1',
-      prompt: 'Do the work',
-    })).rejects.toThrow('connection lost during start')
-
-    expect(start).toHaveBeenCalledTimes(1)
-    expect(missionActivity.runMissionDirect).not.toHaveBeenCalled()
-    expect(fetchMock).not.toHaveBeenCalled()
-  })
-
-  it('starts recurring missions with Temporal cron metadata', async () => {
-    delete process.env.TEMPORAL_ADDRESS
-    delete process.env.ARTIFACTS_URL
-    delete process.env.GATEWAY_URL
-    const client = new TemporalClient()
-    const start = jest.fn().mockResolvedValue(undefined)
-    Object.defineProperty(client, 'client', {
-      configurable: true,
-      value: { workflow: { start } },
-    })
-    jest.spyOn(global, 'fetch').mockResolvedValue({
-      ok: true,
-      status: 200,
-      statusText: 'OK',
-      text: async () => '',
-      json: async () => ({}),
-    } as Response)
-
-    await client.startMission({
-      missionId: 'weekly-review',
-      tenantId: 'tenant-1',
-      assistantId: 'legal',
-      prompt: 'Review recent matters',
-      cronSchedule: '0 9 * * 1',
-    })
-
-    expect(start).toHaveBeenCalledWith(expect.any(Function), expect.objectContaining({
-      workflowId: 'mission-weekly-review',
-      cronSchedule: '0 9 * * 1',
-      memo: {
-        missionId: 'weekly-review',
-        assistantId: 'legal',
-        cronSchedule: '0 9 * * 1',
-      },
-    }))
-  })
-
-  it('refuses cron schedules when only the direct runner is available', async () => {
-    delete process.env.TEMPORAL_ADDRESS
-    const directRun = jest.fn(async () => ({}))
-    const client = new TemporalClient('default', directRun)
-
-    await expect(client.startMission({
-      missionId: 'direct-recurring',
-      tenantId: 'tenant-1',
-      assistantId: 'legal',
-      prompt: 'Review matters',
-      cronSchedule: '0 9 * * 1',
-    })).rejects.toThrow('Recurring missions require a connected Temporal Server');
-    expect(directRun).not.toHaveBeenCalled()
+    process.env.TEMPORAL_ADDRESS = 'temporal:7233'
+    expect(new TemporalClient().getRuntimeStatus().executionMode).toBe('artifacts-backed-direct')
   })
 
   it('recovers a running mission from its persisted plan and completed task statuses', async () => {
@@ -197,7 +108,7 @@ describe('TemporalClient mission start', () => {
       outputs: { status: 'incomplete', phases: [{ tasks: [{ output: largeText }] }] },
     }))
     const client = new TemporalClient('default', directRun)
-    const missionId = 'mission-large-final-state'
+    const missionId = 'large-final-state'
     const missionWrites: Array<Record<string, unknown>> = []
     let missionReads = 0
     let finishWrites!: () => void

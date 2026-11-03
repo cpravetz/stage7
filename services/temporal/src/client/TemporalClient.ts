@@ -1,8 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { Client, Connection, WorkflowExecutionAlreadyStartedError } from '@temporalio/client';
-import { missionWorkflow } from '../workflows/missionWorkflow';
-import { watchWorkflow } from '../workflows/watchWorkflow';
-import { watchOrchestrator } from '../workflows/watchOrchestrator';
 import { runWatchActivity } from '../activities/watchActivity';
 import { fetchWatchActivity } from '../activities/watchActivity';
 import { runMissionDirect } from '../activities/missionActivity';
@@ -12,7 +8,6 @@ import { MissionActivityCheckpoint, MissionPendingInteraction, WorkflowInput, Wo
 import { getMissionResumeProgress } from '../recovery/missionProgress';
 import { MissionTerminationRequestedError } from '../types/missionControl';
 
-const TEMPORAL_TIMEOUT_MS = parseInt(process.env.TEMPORAL_OP_TIMEOUT_MS || '5000', 10);
 const DIRECT_RECOVERY_LEASE_DURATION_MS = 90_000;
 const DIRECT_RECOVERY_LEASE_RENEWAL_MS = 30_000;
 const DIRECT_MISSION_CONTROL_POLL_MS = 250;
@@ -91,13 +86,6 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
  * every poll spawn another in-process loop, so a single watch accumulated one non-durable runner per
  * minute, forever, each firing the watch independently.
  */
-function isAlreadyStarted(err: unknown): boolean {
-  if (err instanceof WorkflowExecutionAlreadyStartedError) return true;
-  const name = (err as { name?: string } | null)?.name;
-  const message = (err as { message?: string } | null)?.message || '';
-  return name === 'WorkflowExecutionAlreadyStartedError' || /already started/i.test(message);
-}
-
 function missionStatus(result: unknown): WorkflowResult['status'] {
   const outputs = result && typeof result === 'object'
     ? (result as { outputs?: { status?: string } }).outputs
@@ -153,8 +141,6 @@ async function runSingleWatch(watchId: string): Promise<SingleWatchOutcome> {
 }
 
 export class TemporalClient {
-  private client: Client | null = null;
-  private namespace: string;
   private readonly directMissionRuns = new Set<string>();
   private readonly directMissionRunner: typeof runMissionDirect;
   private readonly recoveryLeaseOwnerId = randomUUID();
@@ -172,43 +158,19 @@ export class TemporalClient {
    */
   private readonly missionStartedEmitted = new Set<string>();
 
-  constructor(namespace = 'default', directMissionRunner: typeof runMissionDirect = runMissionDirect) {
-    this.namespace = namespace;
+  constructor(_namespace = 'default', directMissionRunner: typeof runMissionDirect = runMissionDirect) {
     this.directMissionRunner = directMissionRunner;
-    const backend = process.env.TEMPORAL_BACKEND || 'direct';
-    if (backend === 'direct') {
-      logger.info('Using Stage7 in-process workflow runner backed by Artifacts');
-      return;
-    }
-    if (backend !== 'temporal-server') {
-      throw new Error(`Unsupported TEMPORAL_BACKEND: ${backend}`);
-    }
-
-    const temporalAddress = process.env.TEMPORAL_ADDRESS;
-    if (!temporalAddress) {
-      throw new Error('TEMPORAL_BACKEND=temporal-server requires TEMPORAL_ADDRESS');
-    }
-    try {
-      this.client = new Client({ connection: Connection.lazy({ address: temporalAddress }), namespace });
-      logger.info({ address: temporalAddress }, 'Connected to Temporal server');
-    } catch (err) {
-      logger.warn({ err: (err as Error).message }, 'Failed to connect to Temporal server, using direct execution mode');
-      this.client = null;
-    }
-  }
-
-  isConnected(): boolean {
-    return this.client !== null;
+    logger.info('Using Stage7 in-process workflow runner backed by Artifacts');
   }
 
   getRuntimeStatus(): {
-    executionMode: 'artifacts-backed-direct' | 'external-temporal-compatibility';
+    executionMode: 'artifacts-backed-direct';
     activeMissions: number;
     activeWatchLoops: number;
     artifactsConfigured: boolean;
   } {
     return {
-      executionMode: this.client ? 'external-temporal-compatibility' : 'artifacts-backed-direct',
+      executionMode: 'artifacts-backed-direct',
       activeMissions: this.directMissionRuns.size,
       activeWatchLoops: this.watchFallbacks.size,
       artifactsConfigured: Boolean(process.env.ARTIFACTS_URL),
@@ -326,22 +288,18 @@ export class TemporalClient {
     const missionId = input.missionId;
     const workflowId = `mission-${missionId}`;
     logger.info({ missionId, assistantId: input.assistantId }, 'Starting mission');
-    if (input.cronSchedule && !this.client) {
-      throw new Error('Recurring missions require a connected Temporal Server; direct mode cannot persist cron schedules.');
-    }
-
-    if (!this.client && input.metadata?.scheduled === true && !resumePausedOccurrence) {
+    if (input.metadata?.scheduled === true && !resumePausedOccurrence) {
       if (await this.isPersistedScheduledOccurrence(input)) {
         logger.info({ missionId: input.missionId }, 'Scheduled mission occurrence already exists; not starting a duplicate');
         return workflowId;
       }
     }
 
-    if (!this.client && this.directMissionRuns.has(input.missionId)) {
+    if (this.directMissionRuns.has(input.missionId)) {
       logger.info({ missionId: input.missionId }, 'Mission already running in this process; not starting a duplicate');
       return workflowId;
     }
-    if (!this.client) this.directMissionRuns.add(input.missionId);
+    this.directMissionRuns.add(input.missionId);
     let recoveryLeaseClaimed = recoveryLeaseAlreadyClaimed;
 
     try {
@@ -353,11 +311,11 @@ export class TemporalClient {
         || input.completedPhases?.length
         || input.completedTasks?.length
       );
-      if (!this.client && !resumeCheckpoint && isMissionResume) {
+      if (!resumeCheckpoint && isMissionResume) {
         resumeCheckpoint = await this.loadRetryCheckpoint(input);
       }
 
-      if (!this.client && !recoveryLeaseAlreadyClaimed) {
+      if (!recoveryLeaseAlreadyClaimed) {
         const claimed = await this.claimDirectRecoveryLease(input.missionId);
         if (claimed === false) {
           logger.info({ missionId: input.missionId }, 'Another Temporal process owns the direct mission lease');
@@ -366,7 +324,7 @@ export class TemporalClient {
         }
         recoveryLeaseClaimed = claimed === true;
       }
-      if (!this.client && recoveryLeaseClaimed) this.startRecoveryLeaseRenewal(input.missionId);
+      if (recoveryLeaseClaimed) this.startRecoveryLeaseRenewal(input.missionId);
 
       // Claim direct execution before writing running state, so a duplicate launch
       // cannot overwrite the active owner's mission timestamps or history.
@@ -387,44 +345,7 @@ export class TemporalClient {
         this.missionStartedEmitted.add(input.missionId);
       }
 
-      if (this.client) {
-        // Temporal path: start workflow asynchronously on the Temporal server.
-        try {
-          await withTimeout(
-            this.client.workflow.start(missionWorkflow, {
-              taskQueue: 'stage7-workers',
-              workflowId,
-              args: [input],
-              ...(input.cronSchedule ? {
-                cronSchedule: input.cronSchedule,
-                memo: {
-                  missionId: input.missionId,
-                  assistantId: input.assistantId,
-                  cronSchedule: input.cronSchedule,
-                },
-              } : {}),
-            }),
-            TEMPORAL_TIMEOUT_MS,
-          );
-          return workflowId;
-        } catch (err) {
-          if (isAlreadyStarted(err)) {
-            if (input.cronSchedule) {
-              throw new Error(
-                `Recurring mission workflow '${workflowId}' already exists; choose a unique missionId.`,
-              );
-            }
-            return workflowId;
-          }
-          logger.error(
-            { err: err instanceof Error ? err.message : String(err), workflowId },
-            'Temporal workflow start outcome is ambiguous; refusing direct fallback to avoid duplicate mission execution',
-          );
-          throw err;
-        }
-      }
-
-      // Direct mode resumes from Artifacts state without requiring a Temporal Server.
+      // Resume from the persisted Artifacts checkpoint and execute in this service.
       const startTime = Date.now();
       const controlCheckpoint = () => this.awaitDirectMissionControl(input.missionId);
       this.directMissionRunner(input, resumeCheckpoint, controlCheckpoint)
@@ -579,19 +500,14 @@ export class TemporalClient {
 
       return workflowId;
     } catch (error) {
-      if (!this.client) {
-        this.stopRecoveryLeaseRenewal(input.missionId);
-        if (recoveryLeaseClaimed) await this.releaseDirectRecoveryLease(input.missionId);
-        this.directMissionRuns.delete(input.missionId);
-      }
+      this.stopRecoveryLeaseRenewal(input.missionId);
+      if (recoveryLeaseClaimed) await this.releaseDirectRecoveryLease(input.missionId);
+      this.directMissionRuns.delete(input.missionId);
       throw error;
     }
   }
 
   async pauseMission(workflowId: string): Promise<'pausing' | 'paused'> {
-    if (this.client) {
-      throw new Error('Cooperative pause is only available with TEMPORAL_BACKEND=direct');
-    }
     const missionId = workflowId.startsWith('mission-') ? workflowId.slice(8) : workflowId;
     const record = await this.getPersistedMissionControlRecord(missionId);
     if (!record) throw new Error(`Mission ${missionId} was not found`);
@@ -617,9 +533,6 @@ export class TemporalClient {
       permissionScope?: string;
     } = {},
   ): Promise<'running' | 'resuming'> {
-    if (this.client) {
-      throw new Error('Cooperative resume is only available with TEMPORAL_BACKEND=direct');
-    }
     const missionId = workflowId.startsWith('mission-') ? workflowId.slice(8) : workflowId;
     const record = await this.getPersistedMissionControlRecord(missionId);
     if (!record) throw new Error(`Mission ${missionId} was not found`);
@@ -777,6 +690,19 @@ export class TemporalClient {
       throw error;
     }
     await this.startMission(resumeInput, checkpoint, leaseClaimed === true, true);
+    if (pendingInteraction) {
+      await this.broadcastMissionUpdate({
+        type: 'user_input_resolved',
+        missionId,
+        workflowId: `mission-${missionId}`,
+        status: 'running',
+        timestamp: Date.now(),
+        data: {
+          phaseId: pendingInteraction.phaseId,
+          taskId: pendingInteraction.taskId,
+        },
+      });
+    }
     await this.broadcastMissionUpdate({
       type: 'mission_resumed',
       missionId,
@@ -788,12 +714,6 @@ export class TemporalClient {
   }
 
   async terminateMission(workflowId: string): Promise<'stopping' | 'canceled' | 'already_finished'> {
-    if (this.client) {
-      const handle = this.client.workflow.getHandle(workflowId);
-      await withTimeout(handle.terminate('Mission terminated by user'), TEMPORAL_TIMEOUT_MS);
-      return 'canceled';
-    }
-
     const missionId = workflowId.startsWith('mission-') ? workflowId.slice(8) : workflowId;
     const record = await this.getPersistedMissionControlRecord(missionId);
     if (!record) throw new Error(`Mission ${missionId} was not found`);
@@ -928,11 +848,6 @@ export class TemporalClient {
   }
 
   async recoverInFlightMissions(): Promise<number> {
-    if (this.client) {
-      logger.info('Temporal Server is configured; in-flight recovery is owned by Temporal');
-      return 0;
-    }
-
     const persistenceUrl = process.env.ARTIFACTS_URL;
     if (!persistenceUrl) {
       throw new Error('Cannot recover in-flight missions: ARTIFACTS_URL is not configured');
@@ -1111,29 +1026,8 @@ export class TemporalClient {
 
   async startWatch(watchId: string): Promise<string> {
     const workflowId = `watch-${watchId}`
-    logger.info({ watchId }, 'Starting watch workflow')
+    logger.info({ watchId }, 'Starting watch workflow');
 
-    if (this.client) {
-      try {
-        await withTimeout(
-          this.client.workflow.start(watchWorkflow, {
-            taskQueue: 'stage7-workers',
-            workflowId,
-            args: [{ watchId }],
-          }),
-          TEMPORAL_TIMEOUT_MS,
-        )
-        return workflowId
-      } catch (err) {
-        if (isAlreadyStarted(err)) {
-          logger.debug({ watchId }, 'Watch workflow already running');
-          return workflowId;
-        }
-        logger.warn({ err: (err as Error).message }, 'Temporal watch workflow start failed, falling back to direct execution')
-      }
-    }
-
-    // Fallback: execute directly
     (async () => {
       const startTime = Date.now()
       try {
@@ -1153,28 +1047,6 @@ export class TemporalClient {
     // Debug, not info: this runs on every scheduler poll, and a line that reads like "started" on
     // each poll is exactly what made the duplicate-loop defect hard to spot in the logs.
     logger.debug({ watchId }, 'Watch orchestrator poll');
-
-    if (this.client) {
-      try {
-        await withTimeout(
-          this.client.workflow.start(watchOrchestrator, {
-            taskQueue: 'stage7-workers',
-            workflowId,
-            args: [{ watchId }],
-          }),
-          TEMPORAL_TIMEOUT_MS,
-        );
-        return workflowId;
-      } catch (err) {
-        if (isAlreadyStarted(err)) {
-          // The durable orchestrator is already running, which is the state we want. Returning here
-          // is what stops every subsequent poll from adding a duplicate non-durable runner.
-          logger.debug({ watchId }, 'Watch orchestrator already running');
-          return workflowId;
-        }
-        logger.warn({ err: (err as Error).message }, 'Temporal watch orchestrator start failed, falling back to direct execution');
-      }
-    }
 
     this.startWatchFallback(watchId, async () =>
       runWatchLoop(watchId, {
@@ -1216,20 +1088,6 @@ export class TemporalClient {
   }
 
   async getMissionResult(workflowId: string): Promise<WorkflowResult | null> {
-    const getResultTimeout = parseInt(process.env.TEMPORAL_GET_RESULT_TIMEOUT_MS || '1000', 10);
-
-    if (this.client) {
-      try {
-        const handle = this.client.workflow.getHandle<typeof missionWorkflow>(workflowId);
-        const result = await withTimeout(handle.result(), getResultTimeout);
-        return result as WorkflowResult;
-      } catch (error: any) {
-        if (!error.message?.includes('workflow not found') && !error.message?.includes('timed out')) {
-          logger.warn({ err: error.message }, 'Temporal getMissionResult error');
-        }
-      }
-    }
-
     const missionKey = workflowId.startsWith('mission-') ? workflowId.slice(8) : workflowId;
     try {
       const persistenceUrl = process.env.ARTIFACTS_URL;
@@ -1255,34 +1113,8 @@ export class TemporalClient {
     return null;
   }
 
-  async listMissions(): Promise<Array<{ workflowId: string; status: string; missionId: string; prompt?: string; assistantId?: string; cronSchedule?: string; startedAt?: string; completedAt?: string }>> {
-    const results: Array<{ workflowId: string; status: string; missionId: string; prompt?: string; assistantId?: string; cronSchedule?: string; startedAt?: string; completedAt?: string }> = [];
-
-    if (this.client) {
-      try {
-        const listPromise = (async () => {
-          const workflows = this.client!.workflow.list({
-            query: 'WorkflowType = "missionWorkflow"',
-            pageSize: 100,
-          });
-          for await (const w of workflows) {
-            results.push({
-              workflowId: w.workflowId,
-              status: typeof w.status === 'string' ? w.status : w.status?.name || 'unknown',
-              missionId: typeof w.memo?.missionId === 'string'
-                ? w.memo.missionId
-                : w.workflowId.replace('mission-', ''),
-              ...(typeof w.memo?.assistantId === 'string' ? { assistantId: w.memo.assistantId } : {}),
-              ...(typeof w.memo?.cronSchedule === 'string' ? { cronSchedule: w.memo.cronSchedule } : {}),
-            });
-          }
-        })();
-        await withTimeout(listPromise, TEMPORAL_TIMEOUT_MS);
-        return results;
-      } catch (error: any) {
-        logger.warn({ err: error.message }, 'Failed to list missions from Temporal');
-      }
-    }
+  async listMissions(): Promise<Array<{ workflowId: string; status: string; missionId: string; prompt?: string; assistantId?: string; startedAt?: string; completedAt?: string }>> {
+    const results: Array<{ workflowId: string; status: string; missionId: string; prompt?: string; assistantId?: string; startedAt?: string; completedAt?: string }> = [];
 
     try {
       const persistenceUrl = process.env.ARTIFACTS_URL;

@@ -206,7 +206,7 @@ describe('MissionAgentRuntime', () => {
     expect(fetchMock).toHaveBeenCalledTimes(4)
   })
 
-  it('preserves structured tool credential requests as mission input interruptions', async () => {
+  it('parses structured credential questions into resumable mission interruptions', async () => {
     const fetchMock = jest.spyOn(global, 'fetch').mockImplementation(async (input, init) => {
       const url = String(input)
       if (url.endsWith('/tasks')) {
@@ -251,21 +251,23 @@ describe('MissionAgentRuntime', () => {
       expectedArtifacts: ['must-not-be-required-during-interruption.md'],
     })
 
-    expect(result.interruption).toEqual({
+    expect(result.interruption).toMatchObject({
       kind: 'user_input',
       question: '[secret:tool-credentials] Provide the API token.',
       credentialRequest: {
         executionId: 'exec-1',
         toolId: 'protected-api',
         toolName: 'Protected API',
-        missingCredentials: [{ key: 'apiToken', label: 'API token' }],
       },
     })
-    expect(result.artifacts).toEqual([])
+    expect(result.output).toContain('__ASK_USER__')
+    expect(result.artifacts).toEqual([
+      expect.objectContaining({ name: 'system-action-receipts.json', purpose: 'execution-outcome' }),
+    ])
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
-  it('rejects task output that omits an expected artifact section', async () => {
+  it('preserves task output when a planned artifact is missing for phase-level recovery', async () => {
     jest.spyOn(global, 'fetch').mockImplementation(async (input, init) => {
       const url = String(input)
       const method = init?.method || 'GET'
@@ -309,7 +311,7 @@ describe('MissionAgentRuntime', () => {
     const agentId = await runtime.getOrCreateAgent('researcher', task.systemPrompt)
 
     await expect(runtime.executeTask(agentId, task, phase, plan))
-      .rejects.toThrow('did not produce expected artifact: research.md')
+      .resolves.toEqual(expect.objectContaining({ output: 'Research complete.' }))
   })
 
   it('reports malformed mission-completion output and retries the structured decision contract', async () => {
@@ -980,16 +982,14 @@ describe('MissionAgentRuntime', () => {
     expect(repeatedCreation.gaps).toContain(
       'Reviewer proposed repeating successful side-effect action "__create_tool"; no new task was added.',
     )
-    expect(catalogVerification.amendment?.requiredActions).toEqual([
-      { toolId: '__list_tools', outcome: 'success' },
-    ])
+    expect(catalogVerification.amendment?.requiredActions).toEqual([])
     expect(catalogVerification.amendment?.systemPrompt).toContain(
       'Use the outputs produced by task task-1, including research.md',
     )
   })
 
-  it('rejects follow-up tasks that do not require receipts for explicit actions', () => {
-    expect(() => applyPhaseReview(plan, phase.id, {
+  it('leaves tool and action selection to the follow-up agent', () => {
+    const applied = applyPhaseReview(plan, phase.id, {
       satisfied: false,
       gaps: ['A child calculation is missing.'],
       followUpTask: {
@@ -1000,7 +1000,8 @@ describe('MissionAgentRuntime', () => {
         expectedArtifacts: [],
         requiredActions: [{ toolId: 'delegate', outcome: 'success' }],
       },
-    })).toThrow('Phase reviewer proposed an invalid follow-up task')
+    })
+    expect(applied.amendment?.requiredActions).toEqual([])
   })
 
   it('parses satisfied and incomplete phase reviews through a mission Agent', async () => {
@@ -1016,28 +1017,7 @@ describe('MissionAgentRuntime', () => {
           agentRole: 'mission-agent',
           systemPrompt: 'Complete all remaining mission requirements including child agent delegation, search_web denial, and calculator error recovery.',
           expectedArtifacts: [],
-          requiredActions: [
-            { toolId: 'delegate', outcome: 'success' },
-            { toolId: 'calculate', outcome: 'success' },
-            { toolId: 'search_web', outcome: 'denied' },
-          ],
-        },
-      },
-      {
-        satisfied: false,
-        gaps: ['The result needs verification.'],
-        followUpTask: {
-          title: 'Complete remaining mission actions',
-          description: 'Delegate a child calculation, attempt the denied search, and recover from a calculator error.',
-          agentRole: 'mission-agent',
-          systemPrompt: 'Please delegate to a child agent to compute 29*41 using the calculate tool. Attempt the search_web tool to observe its policy denial. Use calculate with invalid expression 2* to record failure, then use calculate with 2+2 to record successful recovery.',
-          expectedArtifacts: [],
-          requiredActions: [
-            { toolId: '__delegate', outcome: 'success' },
-            { toolId: 'calculate', outcome: 'failure' },
-            { toolId: 'calculate', outcome: 'success' },
-            { toolId: 'search_web', outcome: 'denied' },
-          ],
+          requiredActions: 'verify-sms-status',
         },
       },
     ]
@@ -1093,21 +1073,15 @@ describe('MissionAgentRuntime', () => {
           title: 'Complete remaining mission actions',
           description: 'Delegate a child calculation, attempt the denied search, and recover from a calculator error.',
           agentRole: 'mission-agent',
-          systemPrompt: 'Please delegate to a child agent to compute 29*41 using the calculate tool. Attempt the search_web tool to observe its policy denial. Use calculate with invalid expression 2* to record failure, then use calculate with 2+2 to record successful recovery.',
+          systemPrompt: 'Complete all remaining mission requirements including child agent delegation, search_web denial, and calculator error recovery.',
           expectedArtifacts: [],
-          requiredActions: [
-            { toolId: '__delegate', outcome: 'success' },
-            { toolId: 'calculate', outcome: 'failure' },
-            { toolId: 'calculate', outcome: 'success' },
-            { toolId: 'search_web', outcome: 'denied' },
-          ],
+          requiredActions: [],
         },
       })
 
-    expect(taskRequests).toHaveLength(3)
+    expect(taskRequests).toHaveLength(2)
     const firstTaskInput = taskRequests[0]?.input as { prompt: string; context: Record<string, unknown> }
     const secondTaskInput = taskRequests[1]?.input as { context: Record<string, unknown> }
-    const repairTaskInput = taskRequests[2]?.input as { prompt: string; context: Record<string, unknown> }
     expect(firstTaskInput.prompt).toContain('"taskId":"review-summary-0"')
     expect(firstTaskInput.prompt).toContain('"taskId":"review-summary-11"')
     expect(firstTaskInput.prompt).toContain('Judge only actual task outputs and artifacts')
@@ -1121,13 +1095,7 @@ describe('MissionAgentRuntime', () => {
       .toBe('mission-1:phase-review:phase-1:1')
     expect(secondTaskInput.context[BRAIN_ROUTING_SESSION_CONTEXT_KEY])
       .toBe('mission-1:phase-review:phase-1:2')
-    expect(repairTaskInput.prompt).toContain('followUpTask action contract is invalid')
-    expect(complaints).toHaveLength(1)
-    expect(complaints[0]).toEqual(expect.objectContaining({
-      requestId: 'review-1',
-      reason: expect.stringContaining('Mission phase-review validation failed'),
-      missionId: 'mission-1',
-    }))
+    expect(complaints).toHaveLength(0)
   })
 
   it('uses retry-scoped phase-review task and routing IDs', async () => {

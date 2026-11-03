@@ -99,6 +99,19 @@ export class SecretStore {
     return existed;
   }
 
+  async getSecretByName(name: string, tenantId?: string): Promise<StoredSecret | undefined> {
+    await this.ensureMongo();
+    if (this.mongoStore) {
+      return this.mongoStore.getSecretByName(name, tenantId);
+    }
+    for (const secret of this.secrets.values()) {
+      if (secret.name === name && (!tenantId || secret.tenantId === tenantId)) {
+        return secret;
+      }
+    }
+    return undefined;
+  }
+
   async decryptSecret(id: string): Promise<string | undefined> {
     const secret = await this.getSecret(id);
     if (!secret) return undefined;

@@ -94,15 +94,15 @@ function isTransientBrainFailure(message: string): boolean {
 export const PLANNER_SYSTEM_PROMPT = `You are a mission planner for an AI agent platform. Given a user's goal, produce a complete structured plan tailored to that goal.
 
 Requirements:
-1. Before planning execution, identify user-provided values required by the goal itself, independently of implementation choices. If one is missing, set requiresClarification=true and ask 1-4 focused questions; do not guess, use placeholders, or begin side effects. Do not assume a particular provider, integration, or runtime configuration before capability resolution. Ask for configuration only when an available or discovered capability identifies the exact missing value. Keep requiresClarification=true for an ambiguous goal as well. You may ask for a required secret in clarificationQuestions, but prefix that question exactly with '[secret:<safe-key>] ', using a stable key containing only letters, digits, underscores, or hyphens. The Mission Room will save that answer directly to Vault and replace it with a Vault reference before any answer reaches a model. When an answer is supplied as '[secret-ref:<safe-key>] ... vault://...', preserve the reference only in the relevant task context and use it only for a tool input explicitly marked secret. Never echo the reference in user-facing summaries or ask for the secret again. Never ask users to paste secrets into ordinary mission messages. Otherwise set requiresClarification=false and clarificationQuestions=[].
+1. The planner must not pause for clarification: set requiresClarification=false and clarificationQuestions=[]. Do not invent missing values. Execution Agents may ask one focused question for an exact required value only after authorized alternatives are exhausted.
 2. For a goal that does not need clarification, create as many phases and specific tasks as needed to fully accomplish it. Keep every phase meaningful and include at least one task in each phase. When a goal requires both producing an output and taking a separate action with it, separate those tasks and make the action depend on the output task. Keep descriptions and systemPrompts concise and operational; do not omit required actions, task IDs, dependencies, or consumed outputs to save space.
 3. Each phase must include id, name, goal, tasks, requiresApproval, and status. Use "pending" for the initial status.
 4. Each task must include id, title, description, agentRole, systemPrompt, dependsOnTaskIds, expectedArtifacts, requiredActions, status, and artifacts. Use "pending" for the initial status and [] when there are no artifacts or required actions yet. dependsOnTaskIds lists task IDs that must complete first; use [] only when the task is genuinely independent.
 5. Give every phase a unique, stable id. Task ids must be globally unique across the entire plan, not merely unique within each phase. Use ids such as "phase-2-task-1"; never reuse "task-1" in another phase. Dependencies may refer only to tasks in the same or an earlier phase, and must not form a cycle. Select agent roles based on the actual work.
 6. Every task must be executable by an autonomous software Agent. Never assign agentRole "Human", "User", or another human decision-maker. Represent a needed human decision with requiresApproval or requiresClarification instead.
 7. Mark requiresApproval=true only where a human decision is needed before work continues.
-8. A task's systemPrompt must clearly describe the outcome, constraints, and evidence needed to complete the task. Keep instructions focused on what must be accomplished; do not prescribe tool IDs, tool discovery, tool creation, delegation, or implementation steps. The runtime resolves required capabilities using available tools and determines whether an existing tool or a newly created one is needed. Do not turn capability resolution into a mission task: create/acquire/configure a tool or service as a task only when the user explicitly requests a reusable tool or service as a deliverable. If the user mentions creating a tool as a means to an operational goal, plan the operational goal and let the runtime resolve the capability; do not require a tool-instance artifact. Leave requiredActions empty unless a specific action outcome must be independently verified. Do not lock an action to a generic API tool when its endpoint or credentials are not known; the Agent must be able to resolve another capability or report the concrete configuration blocker. If an execution-time discovery reveals a missing non-secret user value, ask the user before continuing rather than inventing it. Secret values must be marked as secret schema inputs and supplied only as Vault references; never include secret values in Agent prompts or mission messages.
-9. Treat expectedArtifacts as user-requested deliverable files only. Do not invent design documents, source-code files, executables, or other artifacts just to describe work or prove an action. If the user requests an output as a deliverable, create an artifact containing that output—not an execution report, Brain response, or blocker explanation. For action-only tasks, use expectedArtifacts=[] and report the exact verified result in the task output. Keep producing an output distinct from a separate action performed with it so a missing capability does not replace a requested artifact with a refusal. Do not claim an action succeeded without tool evidence. system-action-receipts.json is internal evidence supplied by the runtime and must never be listed as an expected artifact. Do not promise .exe binaries; generated tools are registered tools, not mission artifacts.
+8. Describe only WHAT outcome must be achieved, its constraints, dependencies, deliverables, and evidence of completion. Never choose, name, create, configure, or prescribe tools, integrations, providers, APIs, code, or execution methods. Do not create tool/service setup tasks unless the user explicitly requests a reusable tool/service as a deliverable. The Agent and runtime decide HOW to achieve each task, including capability discovery, repair, replacement, or an alternate approach. Always leave requiredActions=[]; action evidence is decided by the runtime, not the plan.
+9. Treat expectedArtifacts as user-requested deliverable files only. Do not invent planning documents, source-code files, executables, IDs, statuses, receipts, or other artifacts merely to describe work or prove an action. If the user requests an output as a deliverable, create an artifact containing that output. For action-only tasks, use expectedArtifacts=[] and report the exact verified result in task output. Do not claim an action succeeded without evidence. system-action-receipts.json is internal runtime evidence and must never be listed as an expected artifact.
 10. When a task produces document artifacts, its systemPrompt must instruct the Agent to begin each artifact with a one-paragraph summary (under 100 words) before the full content, so downstream reviewers can judge the artifact from the summary alone.
 11. If a task consumes another task's result or artifact, list that producer's exact task ID in dependsOnTaskIds and in the task's systemPrompt, and say which output is consumed. Do not refer vaguely to "initial", "final", or "previous" values without naming their producing task IDs. Dependencies belong on the consuming task, not on a producer that merely names a future consumer. Do not infer a dependency from a task ID mentioned in a negative instruction or in a statement that the task's output will be consumed downstream. Include only tasks that produce an input the task actually uses. Dependencies impose execution order and make completed producer outputs available to the Agent.
 
@@ -138,8 +138,9 @@ function applyPlannerDefaults(plan: any): any {
     if (phase.requiresApproval === undefined) phase.requiresApproval = false;
     if (!Array.isArray(phase.tasks)) continue;
     for (const task of phase.tasks) {
-      if (task && typeof task === 'object' && !Array.isArray(task) && task.status === undefined) {
-        task.status = 'pending';
+      if (task && typeof task === 'object' && !Array.isArray(task)) {
+        if (task.status === undefined) task.status = 'pending';
+        task.requiredActions = [];
       }
     }
   }
@@ -269,7 +270,7 @@ export function missionTaskActionIssues(
         issues.push(`${taskPath} requires __delegate but systemPrompt does not explicitly instruct child-Agent delegation`);
     }
     for (const toolId of requiredToolIds) {
-        if (toolId === '__delegate' || toolId === '__create_tool' || namedToolIds.has(toolId)) {
+        if (toolId === '__delegate' || toolId === '__create_tool' || toolId === '__external_action__' || namedToolIds.has(toolId)) {
             continue;
         }
         issues.push(`${taskPath} requires an action receipt for "${toolId}", but the systemPrompt does not instruct the Agent to call it directly. For a missing tool instruction, the systemPrompt must include a direct instruction that names the exact tool ID "${toolId}" and explains the intended call.`);
@@ -286,7 +287,7 @@ function missionTaskRecoveryIssues(task: any, tasksById: any, taskPath: any): st
     if (!recoveryIntent)
         return [];
     const issues = [];
-    for (const action of (task.requiredActions || []).filter((candidate: any) => candidate.toolId !== '__delegate')) {
+    for (const action of (task.requiredActions || []).filter((candidate: any) => candidate.toolId !== '__delegate' && candidate.toolId !== '__external_action__')) {
         const toolId = action.toolId.toLowerCase();
         const outcomes = new Set((task.requiredActions || [])
             .filter((candidate: any) => candidate.toolId.toLowerCase() === toolId)
@@ -405,7 +406,7 @@ function explicitlyRequestsReusableCapability(prompt: string): boolean {
 function isCapabilitySetupTask(task: Task): boolean {
     const instructions = [task.title, task.description, task.systemPrompt].join(' ');
     const createsCapability = /\b(?:create|develop|build|implement|acquire|configure|install|set up)\b[^.!?\n]{0,120}(?:service|tool|plugin|connector|integration|sdk|api)\b/i.test(instructions);
-    const declaresCapabilityArtifact = task.expectedArtifacts.some((artifact) =>
+    const declaresCapabilityArtifact = (task.expectedArtifacts || []).some((artifact) =>
         /\b(?:service|tool|plugin|connector|integration|instance|executable|binary|source|sdk|api)\b/i.test(
             artifact.replace(/[_-]+/g, ' '),
         ),
@@ -429,7 +430,7 @@ function removeCapabilityReferences(text: string): string {
         )
         .replace(
             /\b(using|via|through)\s+(?:the\s+)?(?:[\w-]+\s+){0,5}(?:tool|service|plugin|connector|integration)\b/gi,
-            '$1 available capabilities',
+            '',
         )
         .replace(
             /\b(?:the\s+)?(?:[\w-]+\s+){0,5}(?:tool|service|plugin|connector|integration)(?:['’]s)?\s+output\b/gi,
@@ -444,6 +445,26 @@ function isInternalActionArtifact(artifact: string): boolean {
 function requestedOperationVerb(missionGoal: string): string | undefined {
     return /\b(send|publish|submit|post|book|schedule|pay|transfer|notify|upload|deploy|file|email)\b/i
         .exec(missionGoal)?.[1]?.toLocaleLowerCase();
+}
+const LEADING_PLANNING_VERB = /^(?:design|plan|generate|draft|write|compose|prepare|produce|create)\b/i;
+const PLANNING_ARTIFACT_WORDS = /\b(?:content|copy|draft|artifact|delivery|service|tool|plugin|connector|integration)\b/gi;
+const CHANNEL_KEYWORDS = ['text message', 'sms', 'email', 'text', 'message', 'notification'];
+function channelKey(subject: string): string {
+    const lower = subject.toLowerCase();
+    for (const keyword of CHANNEL_KEYWORDS) {
+        if (lower.includes(keyword)) return keyword;
+    }
+    return lower;
+}
+function deriveActionSubject(task: Task): string | undefined {
+    const title = task.title.trim();
+    if (!LEADING_PLANNING_VERB.test(title)) return undefined;
+    const subject = title
+        .replace(LEADING_PLANNING_VERB, '')
+        .replace(PLANNING_ARTIFACT_WORDS, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    return subject || undefined;
 }
 function preparationTaskSubject(task: Task): string | undefined {
     if (!/^(?:generate|draft|write|compose|prepare|produce|create)\b/i.test(task.title.trim())) return undefined;
@@ -460,9 +481,8 @@ function normalizeCapabilitySetupTasks(plan: Plan, missionGoal: string): number 
 
     const tasks = plan.phases.flatMap((phase) => phase.tasks);
     const setupTaskIds = new Set(tasks.filter(isCapabilitySetupTask).map((task) => task.id));
-    if (setupTaskIds.size === 0) return 0;
 
-    const capabilityResolutionInstruction = 'Perform the requested operation using available capabilities. If no suitable capability is available, let the runtime discover, acquire, or create and register one. Tool and service creation is runtime infrastructure, not a mission deliverable. Report only the verified outcome and do not claim success without a successful action receipt.';
+    const outcomeInstruction = 'Complete the requested outcome rather than stopping after planning or preparing it, and verify the actual result.';
     const operationalTasks = tasks.filter((task) =>
         !setupTaskIds.has(task.id)
         && (task.dependsOnTaskIds || []).some((dependencyId) => setupTaskIds.has(dependencyId))
@@ -474,50 +494,64 @@ function normalizeCapabilitySetupTasks(plan: Plan, missionGoal: string): number 
         const operationVerb = requestedOperationVerb(missionGoal);
         if (!operationVerb) return 0;
 
-        const preparationTasks = tasks.filter((task) =>
-            !setupTaskIds.has(task.id) && preparationTaskSubject(task),
+        const candidates = tasks.filter((task) =>
+            !setupTaskIds.has(task.id) && LEADING_PLANNING_VERB.test(task.title.trim()),
         );
-        const fallbackSetupTask = tasks.find((task) => setupTaskIds.has(task.id));
-        const tasksToPromote = preparationTasks.length > 0
-            ? preparationTasks
-            : fallbackSetupTask ? [fallbackSetupTask] : [];
-        if (tasksToPromote.length === 0) return 0;
+        if (candidates.length === 0) {
+            for (const taskId of setupTaskIds) {
+                const setupTask = tasks.find((task) => task.id === taskId);
+                if (setupTask && LEADING_PLANNING_VERB.test(setupTask.title.trim()))
+                    candidates.push(setupTask);
+            }
+        }
+        const groups: Array<{ subject: string; task: Task }> = [];
+        const seenSubjects = new Set<string>();
+        for (const task of candidates) {
+            const subject = deriveActionSubject(task);
+            if (!subject) continue;
+            const key = channelKey(subject);
+            if (seenSubjects.has(key)) continue;
+            seenSubjects.add(key);
+            groups.push({ subject, task });
+        }
+        if (groups.length === 0) return 0;
 
-        for (const task of tasksToPromote) {
-            const subject = preparationTaskSubject(task) || 'requested operation';
+        const verbCapitalized = operationVerb.charAt(0).toLocaleUpperCase() + operationVerb.slice(1);
+        for (const { subject, task } of groups) {
             const displaySubject = subject.charAt(0).toLocaleUpperCase() + subject.slice(1);
-            task.title = `${operationVerb.charAt(0).toLocaleUpperCase()}${operationVerb.slice(1)} ${subject}`;
+            task.title = `${verbCapitalized} ${subject}`;
             task.description = `Perform the ${subject} operation requested by the mission goal and verify its actual result.`;
             task.agentRole = `${displaySubject} Action Agent`;
             task.systemPrompt = [
                 `Mission goal: ${missionGoal}`,
-                `Task scope: ${subject}. Perform this operation; do not stop after preparing or drafting content.`,
-                capabilityResolutionInstruction,
-                'Perform only the assigned scope and do not duplicate other mission actions.',
+                `Perform the ${subject} operation requested by the mission goal. ${outcomeInstruction}`,
             ].join(' ');
             task.dependsOnTaskIds = [];
             task.expectedArtifacts = [];
+            task.requiredActions = [];
             task.artifacts = [];
             task.status = 'pending';
         }
 
-        const promotedTaskIds = new Set(tasksToPromote.map((task) => task.id));
+        const keptTaskIds = new Set(groups.map((group) => group.task.id));
         for (const phase of plan.phases) {
-            phase.tasks = phase.tasks.filter((task) =>
-                !setupTaskIds.has(task.id) || promotedTaskIds.has(task.id),
-            );
+            phase.tasks = phase.tasks.filter((task) => keptTaskIds.has(task.id));
         }
         plan.phases = plan.phases.filter((phase) => phase.tasks.length > 0);
         for (const phase of plan.phases) {
             phase.name = removeCapabilityReferences(phase.name);
             phase.goal = removeCapabilityReferences(phase.goal);
         }
-        plan.summary = tasksToPromote.map((task) => task.title).join('; ');
+        plan.summary = groups.map((group) => `${verbCapitalized} ${group.subject}`).join('; ');
         logger.info(
-            { removedTaskIds: [...setupTaskIds].filter((id) => !promotedTaskIds.has(id)), updatedTaskIds: tasksToPromote.map((task) => task.id) },
-            'Converted capability setup into action tasks for runtime capability resolution',
+            {
+                removedTaskIds: [...setupTaskIds].filter((id) => !keptTaskIds.has(id)),
+                updatedTaskIds: groups.map((group) => group.task.id),
+                subjects: groups.map((group) => group.subject),
+            },
+            'Normalized intermediate setup tasks into requested outcome tasks',
         );
-        return setupTaskIds.size - promotedTaskIds.size;
+        return setupTaskIds.size + candidates.length - groups.length;
     }
 
     const removedSetupTaskIds = new Set(
@@ -529,8 +563,8 @@ function normalizeCapabilitySetupTasks(plan: Plan, missionGoal: string): number 
         task.dependsOnTaskIds = (task.dependsOnTaskIds || []).filter((dependencyId) => !removedSetupTaskIds.has(dependencyId));
         task.title = removeCapabilityReferences(removeCapabilityPrerequisite(task.title));
         task.description = removeCapabilityReferences(removeCapabilityPrerequisite(task.description));
-        task.systemPrompt = `${removeCapabilityReferences(removeCapabilityPrerequisite(task.systemPrompt))} ${capabilityResolutionInstruction}`.trim();
-        task.expectedArtifacts = task.expectedArtifacts.filter((artifact) => !isInternalActionArtifact(artifact));
+        task.systemPrompt = `${removeCapabilityReferences(removeCapabilityPrerequisite(task.systemPrompt))} ${outcomeInstruction}`.trim();
+        task.expectedArtifacts = (task.expectedArtifacts || []).filter((artifact) => !isInternalActionArtifact(artifact));
     }
 
     for (const phase of plan.phases) {
@@ -546,7 +580,7 @@ function normalizeCapabilitySetupTasks(plan: Plan, missionGoal: string): number 
     }
     logger.info(
         { removedTaskIds: [...removedSetupTaskIds], updatedTaskIds: operationalTasks.map((task) => task.id) },
-        'Removed intermediate capability setup tasks; runtime will resolve capabilities during the requested operation',
+        'Removed intermediate setup tasks so the plan describes requested outcomes rather than implementation steps',
     );
     return removedSetupTaskIds.size;
 }
@@ -598,8 +632,6 @@ function planStandardIssues(plan: any): string[] {
             if (!Array.isArray(task.dependsOnTaskIds)) {
                 issues.push(`${taskPath}.dependsOnTaskIds must be provided; use [] for independent tasks`);
             }
-            issues.push(...missionTaskActionIssues(task, taskPath, normalizedTaskIds));
-            issues.push(...missionTaskRecoveryIssues(task, tasksById, taskPath));
             issues.push(...missionTaskDependencyIssues(task, normalizedTaskIds, taskPath, producerArtifactsByTaskId));
             if (task.id.startsWith(`${ph.id}-amendment-`)) {
                 issues.push(`${taskPath}.id uses the reserved amendment prefix`);
@@ -854,6 +886,44 @@ export async function generateValidPlan(
                 logger.info({ missionId, attempt, dependencyRepairs }, 'Repaired declared task dependencies locally');
             }
             normalizeCapabilitySetupTasks(plan, prompt);
+            plan.requiresClarification = false;
+            plan.clarificationQuestions = [];
+            if (plan.phases.length === 0) {
+                plan.summary = plan.summary.trim() || prompt;
+                plan.phases = [{
+                    id: 'phase-1',
+                    name: 'Complete requested outcome',
+                    goal: prompt,
+                    requiresApproval: false,
+                    status: 'pending',
+                    tasks: [{
+                        id: 'phase-1-task-1',
+                        title: 'Complete the requested outcome',
+                        description: prompt,
+                        agentRole: 'assistant',
+                        systemPrompt: `Achieve the requested outcome: ${prompt}. Do not invent missing information. Try authorized alternatives first; if a specific required value is unavailable and no safe alternative can complete the outcome, ask one focused question for that value.`,
+                        dependsOnTaskIds: [],
+                        expectedArtifacts: [],
+                        requiredActions: [],
+                        status: 'pending',
+                        artifacts: [],
+                    }],
+                }];
+            }
+            for (const phase of plan.phases) {
+                phase.requiresApproval = false;
+                phase.approvalQuestion = undefined;
+                for (const task of phase.tasks) {
+                    if (!/\b(?:message|delivery)[-_ ]?(?:message[-_ ]?)?(?:id|status)\b/i.test(prompt)) {
+                        task.expectedArtifacts = (task.expectedArtifacts || []).filter((artifact) =>
+                            !/\b(?:sms|text|email|message|delivery)[-_ ]?(?:message[-_ ]?)?(?:id|status)\b/i.test(
+                                artifact.replace(/[_-]+/g, ' '),
+                            ),
+                        );
+                    }
+                    task.requiredActions = [];
+                }
+            }
             const standardsIssues = planStandardIssues(plan);
             if (standardsIssues.length) {
                 lastError = standardsIssues.join('\n');

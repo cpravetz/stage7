@@ -17,6 +17,7 @@ function validPlan(): Plan {
     estimatedCost: 'Low',
     requiresClarification: false,
     clarificationQuestions: [],
+    clarificationAnswers: [],
     phases: [{
       id: 'phase-1',
       name: 'Deliverable 1',
@@ -93,7 +94,7 @@ describe('planner progress reporting', () => {
 
     expect(progress).toHaveLength(1)
     expect(progress[0]).toMatchObject({ attempt: 1, status: 'rejected', transient: false })
-    expect(progress[0]?.reason).toContain('estimatedDuration')
+    expect(progress[0]?.reason).toContain('Phases are required')
   })
 
   it('reports a repeated planner update once', async () => {

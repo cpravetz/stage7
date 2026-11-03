@@ -734,11 +734,7 @@ const MissionRoom = () => {
       {detail?.output?.outputs?.status === 'awaiting_clarification' && plan?.requiresClarification && (
         <div className="error-banner" style={{ background: 'rgba(245,158,11,0.15)' }}>
           <strong>More information is needed before the mission can continue.</strong>
-          {detail.output.outputs.resumeSupported === false ? (
-            <p className="error-banner">
-              This mission uses the external Temporal Server backend. Interactive mission resume is currently supported only with TEMPORAL_BACKEND=direct.
-            </p>
-          ) : plan.clarificationQuestions && plan.clarificationQuestions.length > 0 && (
+          {plan.clarificationQuestions && plan.clarificationQuestions.length > 0 && (
             <ol style={{ margin: '8px 0', paddingLeft: 22 }}>
               {plan.clarificationQuestions.map((question, index) => {
                 const secretQuestion = question.match(/^\s*\[secret:([a-z0-9_-]+)\]\s*(.*)$/i);
@@ -766,15 +762,13 @@ const MissionRoom = () => {
               })}
             </ol>
           )}
-          {detail.output.outputs.resumeSupported !== false && (
-            <button
-              onClick={handleClarificationSubmit}
-              disabled={clarificationSubmitting || (plan.clarificationQuestions || []).some((_, index) => !clarificationAnswers[index]?.trim())}
-              style={{ marginTop: 8 }}
-            >
-              {clarificationSubmitting ? 'Continuing...' : 'Continue mission'}
-            </button>
-          )}
+          <button
+            onClick={handleClarificationSubmit}
+            disabled={clarificationSubmitting || (plan.clarificationQuestions || []).some((_, index) => !clarificationAnswers[index]?.trim())}
+            style={{ marginTop: 8 }}
+          >
+            {clarificationSubmitting ? 'Continuing...' : 'Continue mission'}
+          </button>
           {controlError && <div className="error-banner">{controlError}</div>}
         </div>
       )}
@@ -795,12 +789,7 @@ const MissionRoom = () => {
             <div style={{ marginTop: 6 }}>
               Task: {pending.taskTitle} · {pending.agentRole}
             </div>
-            {detail.output.outputs.resumeSupported === false && (
-              <p className="error-banner">
-                This mission uses the external Temporal Server backend. Interactive mission resume is currently supported only with TEMPORAL_BACKEND=direct.
-              </p>
-            )}
-            {detail.output.outputs.resumeSupported !== false && pending.kind === 'user_input' && (
+            {pending.kind === 'user_input' && (
               <label style={{ display: 'block', marginTop: 10 }}>
                 {secretQuestion ? secretQuestion[2] : pending.question}
                 <input
@@ -851,7 +840,7 @@ const MissionRoom = () => {
               </div>
             )}
             <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-              {detail.output.outputs.resumeSupported === false ? null : pending.kind === 'user_input' ? (
+              {pending.kind === 'user_input' ? (
                 <button
                   onClick={() => void handleMissionInteractionSubmit()}
                   disabled={interactionSubmitting || !interactionAnswer.trim()}

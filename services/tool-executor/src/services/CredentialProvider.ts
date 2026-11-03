@@ -6,6 +6,7 @@ export interface ToolCredentials {
 
 export interface CredentialSource {
   vaultSecretId?: string;
+  sensitive?: boolean;
   /**
    * @deprecated Env-var credentials are not for Skill settings. Use `configKey`
    * (resolved from the Skill's own configuration) or `vaultSecretId`. Retained
@@ -120,32 +121,52 @@ export class CredentialProvider {
       logger.warn({ vaultUrl }, 'VAULT_URL must not embed credentials');
       return undefined;
     }
-    if (!/^[a-zA-Z0-9._-]+$/.test(secretId)) {
-      logger.warn({ secretId }, 'Invalid secretId format');
-      return undefined;
-    }
-    const target = new URL(`/api/vault/secrets/${encodeURIComponent(secretId)}/decrypt`, base);
-    if (target.origin !== base.origin) {
-      logger.warn({ secretId }, 'Vault URL origin escape attempt');
-      return undefined;
-    }
-    try {
-      const res = await fetch(target.toString(), {
-        method: 'GET',
-        headers: {
-          'X-Tenant-Id': 'system',
-        },
-      });
-      if (!res.ok) {
-        logger.warn({ secretId, status: res.status }, 'Vault decrypt failed');
+
+    // Try as secret ID first (UUID format), otherwise try as name
+    const isIdFormat = /^[a-zA-Z0-9._-]+$/.test(secretId) && secretId.includes('-'); // rough UUID check
+    if (isIdFormat || /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(secretId)) {
+      const target = new URL(`/api/vault/secrets/${encodeURIComponent(secretId)}/decrypt`, base);
+      if (target.origin !== base.origin) {
+        logger.warn({ secretId }, 'Vault URL origin escape attempt');
         return undefined;
       }
-      const data = await res.json() as { plaintext?: string };
-      return data.plaintext;
-    } catch (err) {
-      logger.warn({ secretId, err: err instanceof Error ? err.message : String(err) }, 'Vault request failed');
-      return undefined;
+      try {
+        const res = await fetch(target.toString(), {
+          method: 'GET',
+          headers: {
+            'X-Tenant-Id': 'system',
+          },
+        });
+        if (res.ok) {
+          const data = await res.json() as { plaintext?: string };
+          if (data.plaintext !== undefined) return data.plaintext;
+        }
+      } catch (err) {
+        logger.warn({ secretId, err: err instanceof Error ? err.message : String(err) }, 'Vault request failed');
+      }
     }
+
+    // Try by name
+    try {
+      const target = new URL(`/api/vault/secrets/name/${encodeURIComponent(secretId)}/decrypt`, base);
+      if (target.origin === base.origin) {
+        const res = await fetch(target.toString(), {
+          method: 'GET',
+          headers: {
+            'X-Tenant-Id': 'system',
+          },
+        });
+        if (res.ok) {
+          const data = await res.json() as { plaintext?: string };
+          if (data.plaintext !== undefined) return data.plaintext;
+        }
+      }
+    } catch (err) {
+      logger.warn({ secretId, err: err instanceof Error ? err.message : String(err) }, 'Vault name lookup failed');
+    }
+
+    logger.warn({ secretId }, 'Vault decrypt failed');
+    return undefined;
   }
 
   invalidate(key?: string): void {

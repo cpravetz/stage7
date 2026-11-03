@@ -105,6 +105,18 @@ export const legacyGeneralTools: Tool[] = [
     description: 'Send emails via SMTP using nodemailer. Requires the `smtp_host`, `smtp_user`, and `smtp_pass` credentials (smtp_port and from_address are optional, defaulting via SMTP_PORT/SMTP_FROM env vars). No message queueing or scheduling support; sends immediately.',
     type: 'native',
     manifest: { executor: 'email', type: 'native', capabilities: ['email.send'] },
+    configSchema: {
+      type: 'object',
+      properties: {
+        smtp_host: { type: 'string', description: 'SMTP server hostname' },
+        smtp_port: { type: 'integer', description: 'SMTP server port (default 587)', default: 587 },
+        smtp_user: { type: 'string', description: 'SMTP username/email' },
+        smtp_pass: { type: 'string', description: 'SMTP password' },
+        from_address: { type: 'string', description: 'Default sender email address' },
+        secure: { type: 'boolean', description: 'Use SSL/TLS (true for port 465)', default: false },
+      },
+      required: ['smtp_host', 'smtp_user', 'smtp_pass'],
+    },
     inputSchema: {
       type: 'object',
       properties: {

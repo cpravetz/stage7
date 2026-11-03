@@ -428,6 +428,7 @@ export class AgentRuntime {
         : {}
       const checkpoint = parseAgentExecutionCheckpoint(checkpoints[taskId])
       const hasUncertainAction = !!checkpoint?.pendingAction
+      const hasExecutionCheckpoint = checkpoint !== undefined
       state.status = hasUncertainAction ? 'failed' : 'waiting'
       const receipts = state.context.taskReceipts && typeof state.context.taskReceipts === 'object'
         ? state.context.taskReceipts as Record<string, unknown>
@@ -438,7 +439,7 @@ export class AgentRuntime {
           ...receipts,
           [taskId]: { status: 'failed', error: message, completedAt: task.completedAt },
         },
-        activeTaskId: hasUncertainAction ? taskId : undefined,
+        activeTaskId: hasUncertainAction || hasExecutionCheckpoint ? taskId : undefined,
         currentTaskId: undefined,
         lastFailedTaskId: taskId,
         lastError: message,

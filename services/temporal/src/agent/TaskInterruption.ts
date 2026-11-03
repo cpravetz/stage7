@@ -1,0 +1,106 @@
+import type {
+  MissionCredentialRequest,
+  MissionPendingInteraction,
+} from '../types/workflow';
+import type { TaskExecutionResult } from './TaskExecutionResult';
+
+const ASK_USER_MARKER = '__ASK_USER__:';
+const PERMISSION_MARKER = '__MISSION_PERMISSION__:';
+
+export function parseInterruption(
+  output: string,
+): TaskExecutionResult['interruption'] | undefined {
+  if (output.startsWith(ASK_USER_MARKER)) {
+    const payload = output.slice(ASK_USER_MARKER.length);
+    let question = payload;
+    let credentialRequest: MissionCredentialRequest | undefined;
+    try {
+      const parsed = JSON.parse(payload) as { question?: unknown; credentialRequest?: unknown };
+      if (typeof parsed.question === 'string') question = parsed.question;
+      if (parsed.credentialRequest && typeof parsed.credentialRequest === 'object' && !Array.isArray(parsed.credentialRequest)) {
+        const candidate = parsed.credentialRequest as Record<string, unknown>;
+        const missingCredentials = Array.isArray(candidate.missingCredentials)
+          ? candidate.missingCredentials.filter((credential): credential is { key: string; label: string } =>
+            Boolean(credential)
+            && typeof credential === 'object'
+            && !Array.isArray(credential)
+            && typeof (credential as Record<string, unknown>).key === 'string'
+            && typeof (credential as Record<string, unknown>).label === 'string',
+          )
+          : [];
+        if (
+          typeof candidate.executionId === 'string'
+          && typeof candidate.toolId === 'string'
+          && typeof candidate.toolName === 'string'
+          && missingCredentials.length > 0
+        ) {
+          credentialRequest = {
+            executionId: candidate.executionId,
+            toolId: candidate.toolId,
+            toolName: candidate.toolName,
+            missingCredentials,
+          };
+        }
+      }
+    } catch {
+      // Plain-text question markers remain supported.
+    }
+    if (!question.trim()) throw new Error('Agent asked the user an empty question');
+    return {
+      kind: 'user_input',
+      question: question.trim(),
+      ...(credentialRequest ? { credentialRequest } : {}),
+    };
+  }
+
+  if (!output.startsWith(PERMISSION_MARKER)) return undefined;
+  let payload: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(output.slice(PERMISSION_MARKER.length)) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('invalid permission request');
+    }
+    payload = parsed as Record<string, unknown>;
+  } catch (error) {
+    throw new Error(`Agent returned an invalid MCP permission request: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const request = payload.request && typeof payload.request === 'object'
+    ? payload.request as Record<string, unknown>
+    : {};
+  const candidate = payload.candidate && typeof payload.candidate === 'object'
+    ? payload.candidate as Record<string, unknown>
+    : request.candidate && typeof request.candidate === 'object'
+      ? request.candidate as Record<string, unknown>
+      : {};
+  const requestId = typeof request.id === 'string' ? request.id : '';
+  const asStrings = (value: unknown) =>
+    Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+  if (!requestId || typeof candidate.name !== 'string') {
+    throw new Error('Agent returned an MCP permission request without a request id or tool name');
+  }
+  const credentials = request.credentials && typeof request.credentials === 'object'
+    ? request.credentials as Record<string, unknown>
+    : {};
+  const expiration = request.expiresAt;
+  const expiresAt = typeof expiration === 'string' && Number.isFinite(Date.parse(expiration))
+    ? new Date(expiration).toISOString()
+    : undefined;
+  const permission = {
+    toolName: candidate.name,
+    ...(typeof candidate.description === 'string' ? { toolDescription: candidate.description } : {}),
+    ...(typeof candidate.publisher === 'string' ? { publisher: candidate.publisher } : {}),
+    ...(typeof candidate.tier === 'string' ? { trustTier: candidate.tier } : {}),
+    ...(typeof request.sideEffectClass === 'string' ? { sideEffectClass: request.sideEffectClass } : {}),
+    dataClasses: asStrings(request.dataClasses),
+    credentials: {
+      needed: credentials.needed === true,
+      ...(typeof credentials.source === 'string' ? { source: credentials.source } : {}),
+      keys: asStrings(credentials.keys),
+    },
+    defaultScope: typeof request.defaultScope === 'string' ? request.defaultScope : 'task',
+    availableScopes: asStrings(request.availableScopes),
+    ...(expiresAt ? { expiresAt } : {}),
+    explanation: typeof payload.prompt === 'string' ? payload.prompt : 'This discovered MCP tool requires your permission before it can be used.',
+  };
+  return { kind: 'mcp_permission', requestId, permission };
+}

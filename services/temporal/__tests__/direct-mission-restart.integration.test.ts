@@ -207,7 +207,6 @@ describeProcess('direct Temporal process-restart acceptance', () => {
       env: {
         ...process.env,
         PORT: String(temporalPort),
-        TEMPORAL_BACKEND: 'direct',
         ARTIFACTS_URL: `http://127.0.0.1:${artifactsPort}`,
         PARITY_FIXTURE_URL: `http://127.0.0.1:${artifactsPort}`,
         GATEWAY_URL: '',

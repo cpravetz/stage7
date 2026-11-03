@@ -76,6 +76,21 @@ function asStringArray(value: unknown): string[] {
 }
 
 /**
+ * Normalizes a model's published input/output format metadata into lowercase
+ * tokens. A catalog entry may publish the format as a string ("json"), an
+ * array (["json", "text"]), or a comma/plus/whitespace-separated string
+ * ("json,text"). Returns an empty list when the entry publishes nothing.
+ */
+function formatTokens(format: unknown): string[] {
+  if (Array.isArray(format)) return format
+    .filter((v): v is string => typeof v === 'string')
+    .flatMap((v) => v.toLowerCase().split(/[,+\s]+/))
+    .filter(Boolean);
+  if (typeof format === 'string') return format.toLowerCase().split(/[,+\s]+/).filter(Boolean);
+  return [];
+}
+
+/**
  * Returns the first non-empty string from a list of candidate values, else
  * undefined. Used to extract the model's chain-of-thought / reasoning field,
  * which reasoning-capable models (o1, o3-mini, OpenRouter reasoning models)
@@ -389,6 +404,14 @@ export class OpenAICompatibleProvider implements LLMProvider {
   }
 
   async complete(req: CompletionRequest): Promise<CompletionResponse> {
+    // Ensure the model catalogue is loaded before building request bodies, so
+    // the input_format/output_format decision can consult the model's own
+    // published metadata. In production the catalogue is already cached from
+    // listModels() at startup; this is a no-op there and only fetches when the
+    // cache is genuinely empty (e.g. direct provider usage in tests).
+    if (!this.modelCache) {
+      try { await this.listModels(); } catch { /* fall through; formats stay omitted */ }
+    }
     const headers: Record<string, string> = {
       'Connection': 'close',
       'Content-Type': 'application/json',
@@ -402,13 +425,28 @@ export class OpenAICompatibleProvider implements LLMProvider {
     const alt = upperId.replace(/UI$/, '');
     const pathSuggestion = `Set ${upperId}_CHAT_PATH or ${upperId}_COMPLETIONS_PATH${alt && alt !== upperId ? ` (or ${alt}_CHAT_PATH / ${alt}_COMPLETIONS_PATH)` : ''} env var to the provider's supported completion endpoint (e.g. /api/chat/completions, /completions).`;
 
+    const buildFormatFields = (model: string): Record<string, unknown> => {
+      // input_format / output_format are not part of the OpenAI-compatible
+      // schema. Only emit them when the model's own catalog entry advertises
+      // support for the requested format; otherwise the gateway rejects the
+      // request (e.g. Mistral returns 422 "extra inputs are not permitted").
+      const entry = this.modelCache?.find((m) => m.id === model);
+      const fields: Record<string, unknown> = {};
+      if (req.inputFormat && formatTokens(entry?.inputFormat).includes(req.inputFormat.toLowerCase())) {
+        fields.input_format = req.inputFormat;
+      }
+      if (req.outputFormat && formatTokens(entry?.outputFormat).includes(req.outputFormat.toLowerCase())) {
+        fields.output_format = req.outputFormat;
+      }
+      return fields;
+    };
+
     const buildBody = (model: string) => ({
       model,
       messages: req.messages,
       max_tokens: req.maxTokens,
       temperature: req.temperature,
-      input_format: (req as any).inputFormat,
-      output_format: (req as any).outputFormat,
+      ...buildFormatFields(model),
     });
 
     const tried: string[] = [];
@@ -482,8 +520,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
               prompt,
               max_tokens: req.maxTokens,
               temperature: req.temperature,
-              input_format: (req as any).inputFormat,
-              output_format: (req as any).outputFormat,
+              ...buildFormatFields(req.model),
             }),
           });
           if (attempt.ok) {

@@ -66,6 +66,16 @@ export class MongoSecretStore {
     return result.deletedCount > 0;
   }
 
+  async getSecretByName(name: string, tenantId?: string): Promise<StoredSecret | undefined> {
+    if (!this.secrets) await this.connect();
+    const query: Record<string, string> = { name };
+    if (tenantId) query.tenantId = tenantId;
+    const result = await this.secrets!.findOne(query as any);
+    if (!result) return undefined;
+    const { _id, ...rest } = result as any;
+    return rest as StoredSecret;
+  }
+
   isConnected(): boolean {
     return this.connected;
   }

@@ -44,12 +44,10 @@ function validPlan(phaseCount = 3): Plan {
 
 describe('generateValidPlan', () => {
   it('plans outcomes separately from actions without assuming a specific implementation capability', () => {
-    expect(PLANNER_SYSTEM_PROMPT).toContain('Do not assume a particular provider, integration, or runtime configuration')
+    expect(PLANNER_SYSTEM_PROMPT).toContain('Never choose, name, create, configure, or prescribe tools')
     expect(PLANNER_SYSTEM_PROMPT).toContain('separate those tasks and make the action depend on the output task')
     expect(PLANNER_SYSTEM_PROMPT).toContain('create an artifact containing that output')
-    expect(PLANNER_SYSTEM_PROMPT).toContain('missing capability does not replace a requested artifact with a refusal')
-    expect(PLANNER_SYSTEM_PROMPT).toContain('Do not turn capability resolution into a mission task')
-    expect(PLANNER_SYSTEM_PROMPT).toContain('plan the operational goal and let the runtime resolve the capability')
+    expect(PLANNER_SYSTEM_PROMPT).toContain('Always leave requiredActions=[]')
   })
 
   it('folds intermediate capability setup into the operational task when the user requested an action', async () => {
@@ -92,16 +90,16 @@ describe('generateValidPlan', () => {
     expect(generated.phases[0]?.tasks).toHaveLength(1)
     expect(generated.phases[0]?.tasks[0]).toEqual(expect.objectContaining({
       id: 'phase-2-task-1',
-      title: 'Send the message using available capabilities',
+      title: 'Send the message',
       expectedArtifacts: [],
       dependsOnTaskIds: [],
     }))
     expect(generated.phases[0]?.tasks[0]?.systemPrompt).toContain('send the requested message')
     expect(generated.phases[0]?.tasks[0]?.systemPrompt).toContain('the action result')
-    expect(generated.phases[0]?.tasks[0]?.systemPrompt).toContain('let the runtime discover, acquire, or create and register one')
+    expect(generated.phases[0]?.tasks[0]?.systemPrompt).not.toMatch(/\btool\b|\bprovider\b|\bapi\b/i)
     expect(generated.phases[0]?.tasks[0]?.systemPrompt).not.toContain('messaging service created in')
     expect(generated.phases[0]?.tasks[0]?.systemPrompt).not.toContain('tool output')
-    expect(generated.summary).toBe('Send the message using available capabilities')
+    expect(generated.summary).toBe('Send the message')
   })
 
   it('converts preparation and capability-artifact plans into actual action tasks', async () => {
@@ -135,11 +133,93 @@ describe('generateValidPlan', () => {
 
     expect(tasks).toHaveLength(2)
     expect(tasks.map((task) => task.title)).toEqual(['Send text', 'Send email'])
-    expect(tasks.every((task) => task.expectedArtifacts.length === 0)).toBe(true)
+    expect(tasks.every((task) => (task.expectedArtifacts || []).length === 0)).toBe(true)
     expect(tasks.every((task) => (task.dependsOnTaskIds || []).length === 0)).toBe(true)
-    expect(tasks.every((task) => task.systemPrompt.includes('let the runtime discover, acquire, or create and register one'))).toBe(true)
+    expect(tasks.every((task) => !/\btool\b|\bprovider\b|\bapi\b/i.test(task.systemPrompt))).toBe(true)
     expect(tasks.every((task) => task.systemPrompt.includes('Watson, come here.'))).toBe(true)
     expect(tasks.some((task) => /create (?:text|email) service/i.test(task.title))).toBe(false)
+  })
+
+  it('converts invented delivery-plan artifacts into the requested external actions', async () => {
+    const plan = validPlan(2)
+    plan.phases[0]!.tasks[0] = {
+      ...plan.phases[0]!.tasks[0]!,
+      title: 'Plan text message delivery',
+      description: 'Plan text message delivery.',
+      systemPrompt: 'Create a text_message_delivery_plan.md artifact.',
+      expectedArtifacts: ['text_message_delivery_plan.md'],
+    }
+    plan.phases[1]!.tasks[0] = {
+      ...plan.phases[1]!.tasks[0]!,
+      title: 'Plan email delivery',
+      description: 'Plan email delivery.',
+      systemPrompt: 'Create an email_delivery_plan.md artifact.',
+      expectedArtifacts: ['email_delivery_plan.md'],
+    }
+    const complete = jest.fn(async (): Promise<string> => JSON.stringify(plan))
+    const missionGoal =
+      'Send a text to 347-772-8389 that reads "Watson, come here." You do not have text services or tools yet - you will need to create them. Send the same message as an email to chris@pravetz.net.'
+
+    const generated = await generateValidPlan(missionGoal, {}, 'mission-delivery-plan-artifacts', complete)
+    const tasks = generated.phases.flatMap((phase) => phase.tasks)
+
+    expect(tasks.map((task) => task.title)).toEqual(['Send text message', 'Send email'])
+    expect(tasks.every((task) => (task.expectedArtifacts || []).length === 0)).toBe(true)
+    expect(tasks.map((task) => task.requiredActions)).toEqual([[], []])
+    expect(tasks.every((task) => task.systemPrompt.includes('347-772-8389'))).toBe(true)
+    expect(tasks.every((task) => task.systemPrompt.includes('chris@pravetz.net'))).toBe(true)
+    expect(tasks.every((task) => !/\btool\b|\bprovider\b|\bapi\b/i.test(task.systemPrompt))).toBe(true)
+  })
+
+  it('does not require incidental message IDs for action-only tasks', async () => {
+    const plan = validPlan(1)
+    plan.phases[0]!.tasks[0]!.title = 'Send the SMS'
+    plan.phases[0]!.tasks[0]!.expectedArtifacts = ['sms_message_id', 'sms_message_status']
+    const complete = jest.fn(async (): Promise<string> => JSON.stringify(plan))
+
+    const generated = await generateValidPlan(
+      'Send a text message to 347-772-8389.',
+      {},
+      'mission-incidental-sms-evidence',
+      complete,
+    )
+
+    expect(generated.phases[0]?.tasks[0]?.expectedArtifacts).toEqual([])
+    expect(generated.phases[0]?.tasks[0]?.requiredActions).toEqual([])
+  })
+
+  it('converts service design plans without artifact declarations into outcome tasks', async () => {
+    const plan = validPlan(4)
+    const makeTask = (id: string, title: string) => ({
+      id,
+      title,
+      description: title,
+      agentRole: 'System',
+      systemPrompt: title,
+      dependsOnTaskIds: [],
+      expectedArtifacts: [],
+      requiredActions: [],
+      status: 'pending' as const,
+      artifacts: [],
+    })
+    plan.summary = 'Create text and email services'
+    plan.phases[0]!.tasks = [makeTask('text-design', 'Design Text Service')]
+    plan.phases[1]!.tasks = [makeTask('text-create', 'Create Text Service')]
+    plan.phases[2]!.tasks = [makeTask('email-design', 'Design Email Service')]
+    plan.phases[3]!.tasks = [makeTask('email-create', 'Create Email Service')]
+    const complete = jest.fn(async (): Promise<string> => JSON.stringify(plan))
+
+    const generated = await generateValidPlan(
+      'Send a text to 347-882-8389 that reads "Watson, come here." You do not have text services or tools yet - you will need to create them. Send the same message as an email to chris@pravetz.net.',
+      {},
+      'mission-capability-setup-no-artifacts',
+      complete,
+    )
+    const tasks = generated.phases.flatMap((phase) => phase.tasks)
+
+    expect(tasks.map((task) => task.title)).toEqual(['Send Text', 'Send Email'])
+    expect(tasks.every((task) => (task.requiredActions || []).length === 0)).toBe(true)
+    expect(tasks.every((task) => (task.expectedArtifacts || []).length === 0)).toBe(true)
   })
 
   it('preserves a capability setup task when the user explicitly requests a reusable deliverable', async () => {
@@ -204,30 +284,26 @@ describe('generateValidPlan', () => {
 
     expect(plan.summary).toBe('A goal-specific execution plan')
     expect(reportValidation).toHaveBeenCalledTimes(1)
-    expect(reportValidation).toHaveBeenCalledWith(expect.stringContaining('Estimated duration') || expect.stringContaining('estimatedDuration'))
+    expect(reportValidation).toHaveBeenCalledWith(expect.stringContaining('Phases are required'))
     expect(requests).toHaveLength(2)
     expect(requests[0]?.maxTokens).toBe(8192)
     expect(requests[1]?.prompt).toContain('Make only these')
     expect(requests[1]?.prompt).toContain('correction(s) to the plan below')
-    expect(requests[1]?.prompt).toContain('Estimated duration')
+    expect(requests[1]?.prompt).toContain('Phases are required')
     expect(requests[1]?.prompt).toContain('Plan:')
     expect(requests[1]?.prompt).toContain('incomplete')
     expect(requests[1]?.prompt).not.toContain('Create a plan to achieve this goal')
     expect(requests[1]?.systemPrompt).toContain('editing an existing mission plan')
   })
 
-  it('repairs malformed nested values with focused value-only requests', async () => {
+  it('repairs malformed deliverable values and ignores action metadata', async () => {
     const invalidPlan = validPlan(1)
     const task = invalidPlan.phases[0]!.tasks[0]!
     task.expectedArtifacts = [{ name: 'sent-message.txt' }] as any
     task.requiredActions = ['textMessageSentConfirmation'] as any
     task.systemPrompt = 'Call textMessageSentConfirmation to send the requested message.'
     const requests: PlannerCompletionRequest[] = []
-    const responses = [
-      JSON.stringify(invalidPlan),
-      JSON.stringify('sent-message.txt'),
-      JSON.stringify({ toolId: 'textMessageSentConfirmation', outcome: 'success' }),
-    ]
+    const responses = [JSON.stringify(invalidPlan), JSON.stringify('sent-message.txt')]
     const complete = async (request: PlannerCompletionRequest): Promise<string> => {
       requests.push(request)
       return responses[request.attempt - 1]!
@@ -236,31 +312,47 @@ describe('generateValidPlan', () => {
     const plan = await generateValidPlan('Send the requested message', {}, 'mission-focused-value-repair', complete)
 
     expect(plan.phases[0]?.tasks[0]?.expectedArtifacts).toEqual(['sent-message.txt'])
-    expect(plan.phases[0]?.tasks[0]?.requiredActions).toEqual([
-      { toolId: 'textMessageSentConfirmation', outcome: 'success' },
-    ])
-    expect(requests).toHaveLength(3)
+    expect(plan.phases[0]?.tasks[0]?.requiredActions).toEqual([])
+    expect(requests).toHaveLength(2)
     expect(requests[1]?.prompt).toContain('phases[0].tasks[0].expectedArtifacts[0]')
     expect(requests[1]?.prompt).toContain('Return only the replacement value as valid JSON')
     expect(requests[1]?.prompt).not.toContain('Plan:')
     expect(requests[1]?.prompt).not.toContain('"phases"')
-    expect(requests[2]?.prompt).toContain('phases[0].tasks[0].requiredActions[0]')
-    expect(requests[2]?.prompt).toContain('"toolId"')
-    expect(requests[2]?.prompt).not.toContain('Plan:')
-    expect(requests[2]?.systemPrompt).toContain('Do not return or describe the plan')
+  })
+
+  it('discards required action metadata from the plan', async () => {
+    const invalidPlan = validPlan(1)
+    const task = invalidPlan.phases[0]!.tasks[0]!
+    task.systemPrompt = 'Call sendMessage to send the requested message.'
+    task.requiredActions = [{ toolId: 'sendMessage' }] as any
+    const complete = jest.fn(async (): Promise<string> => JSON.stringify(invalidPlan))
+    const plan = await generateValidPlan('Send the requested message', {}, 'mission-missing-action-outcome', complete)
+
+    expect(plan.phases[0]?.tasks[0]?.requiredActions).toEqual([])
+    expect(complete).toHaveBeenCalledTimes(1)
+  })
+
+  it('ignores malformed required action outcome values without replacing the plan', async () => {
+    const invalidPlan = validPlan(1)
+    const task = invalidPlan.phases[0]!.tasks[0]!
+    task.systemPrompt = 'Call sendMessage to send the requested message.'
+    task.requiredActions = [{ toolId: 'sendMessage', outcome: 'completed' }] as any
+    const complete = jest.fn(async (): Promise<string> => JSON.stringify(invalidPlan))
+    const plan = await generateValidPlan('Send the requested message', {}, 'mission-invalid-action-outcome', complete)
+
+    expect(plan.phases[0]?.tasks[0]?.requiredActions).toEqual([])
+    expect(complete).toHaveBeenCalledTimes(1)
   })
 
   it('stops after repeated failed plan repairs', async () => {
     const invalidPlan = validPlan(1)
-    invalidPlan.phases[0]!.tasks[0]!.requiredActions = ['textMessageSentConfirmation'] as any
-    invalidPlan.phases[0]!.tasks[0]!.systemPrompt =
-      'Call textMessageSentConfirmation to send the requested message.'
+    invalidPlan.phases[0]!.tasks[0]!.expectedArtifacts = [{ name: 'result.md' }] as any
     const requests: PlannerCompletionRequest[] = []
     const complete = async (request: PlannerCompletionRequest): Promise<string> => {
       requests.push(request)
       return request.attempt === 1
         ? JSON.stringify(invalidPlan)
-        : JSON.stringify('still not an object')
+        : 'not valid JSON'
     }
 
     await expect(generateValidPlan('Send the requested message', {}, 'mission-bounded-repair', complete))
@@ -287,51 +379,36 @@ describe('generateValidPlan', () => {
     expect(requests[1]?.systemPrompt).toContain('editing an existing mission plan')
   })
 
-  it('repairs explicit tool and child-Agent instructions that omit action receipts', async () => {
+  it('does not make the planner specify tools or delegation for an outcome task', async () => {
     const invalidPlan = validPlan(1)
     const task = invalidPlan.phases[0]!.tasks[0]!
     task.description = 'Delegate a child Agent to compute 29 multiplied by 41.'
     task.systemPrompt =
       'Use the calculate tool to compute 31 multiplied by 37. Also delegate a child Agent to compute 29 multiplied by 41 using the calculate tool.'
     task.requiredActions = []
-    const correctedPlan = JSON.parse(JSON.stringify(invalidPlan)) as Plan
-    correctedPlan.phases[0]!.tasks[0]!.requiredActions = [
-      { toolId: '__delegate', outcome: 'success' },
-      { toolId: 'calculate', outcome: 'success' },
-    ]
     const requests: PlannerCompletionRequest[] = []
-    const responses = [JSON.stringify(invalidPlan), JSON.stringify(correctedPlan)]
     const complete = async (request: PlannerCompletionRequest): Promise<string> => {
       requests.push(request)
-      return responses[request.attempt - 1]!
+      return JSON.stringify(invalidPlan)
     }
 
     const plan = await generateValidPlan('Delegate and calculate', {}, 'mission-action-contract', complete)
 
-    expect(plan.phases[0]?.tasks[0]?.requiredActions).toEqual(correctedPlan.phases[0]?.tasks[0]?.requiredActions)
-    expect(requests[1]?.prompt).toContain('explicitly instructs child-Agent delegation')
+    expect(plan.phases[0]?.tasks[0]?.requiredActions).toEqual([])
+    expect(requests).toHaveLength(1)
   })
 
-  it('repairs a required tool receipt by adding its exact instruction to the task prompt', async () => {
+  it('removes tool receipts from plans even when the goal mentions a generated tool', async () => {
     const invalidPlan = validPlan(1)
     invalidPlan.phases[0]!.tasks[0]!.requiredActions = [
       { toolId: '__list_tools', outcome: 'success' },
     ]
-    const correctedPlan = JSON.parse(JSON.stringify(invalidPlan)) as Plan
-    correctedPlan.phases[0]!.tasks[0]!.systemPrompt =
-      'Call the exact tool __list_tools to verify the generated tool is registered.'
-    const requests: PlannerCompletionRequest[] = []
-    const responses = [JSON.stringify(invalidPlan), JSON.stringify(correctedPlan)]
-    const complete = async (request: PlannerCompletionRequest): Promise<string> => {
-      requests.push(request)
-      return responses[request.attempt - 1]!
-    }
+    const complete = jest.fn(async (): Promise<string> => JSON.stringify(invalidPlan))
 
     const plan = await generateValidPlan('Create and verify a generated tool', {}, 'mission-tool-instruction-repair', complete)
 
-    expect(plan.phases[0]?.tasks[0]?.systemPrompt).toContain('Call the exact tool __list_tools')
-    expect(requests[1]?.prompt).toContain('For a missing tool instruction')
-    expect(requests[1]?.prompt).toContain('names the exact tool ID')
+    expect(plan.phases[0]?.tasks[0]?.requiredActions).toEqual([])
+    expect(complete).toHaveBeenCalledTimes(1)
   })
 
   it('keeps task planning outcome-focused for work that may need a tool', async () => {
@@ -567,9 +644,7 @@ describe('generateValidPlan', () => {
       complete,
     )
 
-    expect(generated.phases[0]?.tasks[1]?.requiredActions).toEqual([
-      { toolId: 'calculate', outcome: 'success' },
-    ])
+    expect(generated.phases[0]?.tasks[1]?.requiredActions).toEqual([])
     expect(generated.phases[0]?.tasks[1]?.dependsOnTaskIds).toEqual(['phase-1-task-1'])
     expect(requests).toHaveLength(1)
   })

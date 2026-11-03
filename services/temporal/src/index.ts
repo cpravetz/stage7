@@ -2,7 +2,6 @@ import express from 'express';
 import missionRoutes, { temporalClient } from './routes/missions';
 import { startWatchScheduler } from './scheduler';
 import { startMissionScheduler } from './schedules/missionScheduler';
-import { runTemporalWorker } from './temporalWorker';
 import { logger } from '@stage7-nextgen/shared';
 
 export { TemporalClient } from './client/TemporalClient';
@@ -37,39 +36,25 @@ if (require.main === module) {
     stopMissionScheduler();
   });
 
-  if (client.isConnected()) {
-    runTemporalWorker().catch((error) => {
-      logger.fatal(
+  let recoveryScanInProgress = false;
+  const recoverMissions = async () => {
+    if (recoveryScanInProgress) return;
+    recoveryScanInProgress = true;
+    try {
+      await client.recoverInFlightMissions();
+    } catch (error) {
+      logger.error(
         { error: error instanceof Error ? error.message : String(error) },
-        'Temporal worker stopped unexpectedly',
+        'In-flight mission recovery scan failed',
       );
-      stopWatchScheduler();
-      stopMissionScheduler();
-      server.close();
-      server.closeAllConnections();
-      process.exitCode = 1;
-    });
-  } else {
-    let recoveryScanInProgress = false;
-    const recoverMissions = async () => {
-      if (recoveryScanInProgress) return;
-      recoveryScanInProgress = true;
-      try {
-        await client.recoverInFlightMissions();
-      } catch (error) {
-        logger.error(
-          { error: error instanceof Error ? error.message : String(error) },
-          'In-flight mission recovery scan failed',
-        );
-      } finally {
-        recoveryScanInProgress = false;
-      }
-    };
-    const recoveryScan = setInterval(() => void recoverMissions(), 30_000);
-    recoveryScan.unref();
-    server.on('close', () => clearInterval(recoveryScan));
-    void recoverMissions();
-  }
+    } finally {
+      recoveryScanInProgress = false;
+    }
+  };
+  const recoveryScan = setInterval(() => void recoverMissions(), 30_000);
+  recoveryScan.unref();
+  server.on('close', () => clearInterval(recoveryScan));
+  void recoverMissions();
 }
 
 export { app };

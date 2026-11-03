@@ -9,6 +9,7 @@ describe('mission resume progress', () => {
       estimatedCost: 'low',
       requiresClarification: false,
       clarificationQuestions: [],
+      clarificationAnswers: [],
       phases: [
         {
           id: 'phase-1',

@@ -93,3 +93,35 @@ export interface AgentLearning {
 }
 
 export type AgentLearningInput = Omit<AgentLearning, 'id' | 'tenantId' | 'agentId' | 'createdAt'>
+
+
+export type TaskState = 'open' | 'active' | 'waiting' | 'done' | 'failed' | 'blocked';
+
+export interface AgentTaskLedgerEntry {
+  id: string;
+  ownerAgentId: string;
+  requesterAgentId?: string;
+  parentTaskId?: string;
+  missionId: string;
+  goal: string;
+  doneWhen?: string;
+  needs?: string[];
+  produces?: string[];
+  state: TaskState;
+  waitingOn?: string[];
+  result?: unknown;
+  evidence?: unknown;
+  requiresApproval?: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AgentInboxMessage {
+  id: string;
+  toAgentId: string;
+  fromAgentId: string;
+  kind: 'task_assigned' | 'progress' | 'blocker' | 'result' | 'user_answer' | 'cancel';
+  taskId?: string;
+  body: unknown;
+  createdAt: string;
+}

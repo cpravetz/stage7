@@ -92,6 +92,74 @@ router.get('/secrets/:id/decrypt', asyncHandler(async (req, res) => {
   res.json({ plaintext });
 }));
 
+router.get('/secrets/name/:name', asyncHandler(async (req, res) => {
+  const { name } = req.params;
+  const tenantId = typeof req.query.tenantId === 'string' ? req.query.tenantId : undefined;
+  const secret = await (secretStore as any).getSecretByName(name, tenantId);
+
+  if (!secret) {
+    throw VaultError.notFound('Secret not found');
+  }
+
+  res.json({
+    id: secret.id,
+    name: secret.name,
+    tenantId: secret.tenantId,
+    createdAt: secret.createdAt,
+    updatedAt: secret.updatedAt,
+  });
+}));
+
+router.get('/secrets/name/:name/decrypt', asyncHandler(async (req, res) => {
+  const { name } = req.params;
+  const tenantId = typeof req.query.tenantId === 'string' ? req.query.tenantId : undefined;
+  const secret = await (secretStore as any).getSecretByName(name, tenantId);
+
+  if (!secret) {
+    throw VaultError.notFound('Secret not found');
+  }
+
+  const plaintext = await secretStore.decryptSecret(secret.id);
+
+  if (plaintext === undefined) {
+    throw VaultError.notFound('Secret not found');
+  }
+
+  res.json({ plaintext, id: secret.id });
+}));
+
+router.post('/secrets/ensure', asyncHandler(async (req, res) => {
+  const { name, plaintext, tenantId } = req.body;
+
+  if (!name || typeof name !== 'string') {
+    throw VaultError.badRequest('Missing or invalid name');
+  }
+
+  if (!tenantId || typeof tenantId !== 'string') {
+    throw VaultError.badRequest('Missing or invalid tenantId');
+  }
+
+  const existing = await (secretStore as any).getSecretByName(name, tenantId);
+  if (existing) {
+    res.json({
+      id: existing.id,
+      name: existing.name,
+      tenantId: existing.tenantId,
+      createdAt: existing.createdAt,
+      updatedAt: existing.updatedAt,
+      existed: true,
+    });
+    return;
+  }
+
+  if (typeof plaintext !== 'string') {
+    throw VaultError.badRequest('Missing or invalid plaintext');
+  }
+
+  const secret = await secretStore.createSecret(name, plaintext, tenantId);
+  res.status(201).json({ ...secret, existed: false });
+}));
+
 router.delete('/secrets/:id', asyncHandler(async (req, res) => {
   const {id} = req.params;
   const deleted = await secretStore.deleteSecret(id);

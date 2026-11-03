@@ -88,6 +88,37 @@ body {
   overflow: hidden;
 }
 
+.mission-input-alert {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  padding: 10px 24px;
+  color: #fff7ed;
+  background: #9a3412;
+  border-bottom: 1px solid #fb923c;
+  box-shadow: 0 4px 12px #0004;
+}
+
+.mission-input-alert .close-btn {
+  position: absolute;
+  top: 10px;
+  right: 24px;
+}
+
+.mission-input-alert-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 6px;
+}
+
+.mission-input-alert a {
+  color: #fff;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 .header {
   background: #1e293b;
   border-bottom: 1px solid #334155;

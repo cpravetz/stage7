@@ -129,8 +129,11 @@ describe('OpenAICompatibleProvider.listModels metadata parsing', () => {
           supports_image_generation: true,
         }],
       }).listModels();
+      // supports_image_generation maps to the image_generation capability,
+      // not creative: creative is only inferred from the model id. A model
+      // that generates images is a media model, not a creative-text model.
       expect(models[0].capabilities).toEqual(
-        expect.arrayContaining(['chat', 'reasoning', 'vision', 'creative']),
+        expect.arrayContaining(['chat', 'reasoning', 'vision', 'image_generation']),
       );
     });
 
@@ -320,6 +323,135 @@ describe('OpenAICompatibleProvider completion endpoint discovery', () => {
   beforeEach(() => mockFetchProvider.mockReset());
 
   const completion = { choices: [{ message: { content: 'hello' } }], usage: { completion_tokens: 3, prompt_tokens: 4 } };
+
+  it('omits input_format/output_format when the model does not advertise them', async () => {
+    // Mistral and other gateways reject unknown body fields with 422
+    // "extra inputs are not permitted", so formats must only be sent when the
+    // model's own catalog entry says it supports them.
+    mockFetchProvider.mockImplementation(async (url: string, init: any) => {
+      if (url.endsWith('/models')) {
+        return { ok: true, status: 200, json: async () => ({ data: [{ id: 'mistral-large-latest', capabilities: { completion_chat: true } }] }) };
+      }
+      const body = JSON.parse(init.body);
+      expect(body.input_format).toBeUndefined();
+      expect(body.output_format).toBeUndefined();
+      return { ok: true, status: 200, json: async () => completion };
+    });
+
+    const provider = new OpenAICompatibleProvider({
+      id: 'mistral',
+      name: 'Mistral',
+      apiBase: 'https://example.test/v1',
+      apiKey: 'key',
+      defaultModels: [],
+      listModelsPath: '/models',
+    });
+
+    await provider.complete({
+      model: 'mistral-large-latest',
+      messages: [{ role: 'user', content: 'hi' }],
+      maxTokens: 16,
+      temperature: 0,
+      inputFormat: 'json',
+      outputFormat: 'json',
+    });
+  });
+
+  it('sends input_format/output_format only when the model advertises support', async () => {
+    mockFetchProvider.mockImplementation(async (url: string, init: any) => {
+      if (url.endsWith('/models')) {
+        return { ok: true, status: 200, json: async () => ({ data: [{
+          id: 'json-model',
+          input_format: ['json', 'text'],
+          output_format: ['json', 'text'],
+        }] }) };
+      }
+      const body = JSON.parse(init.body);
+      expect(body.input_format).toBe('json');
+      expect(body.output_format).toBe('json');
+      return { ok: true, status: 200, json: async () => completion };
+    });
+
+    const provider = new OpenAICompatibleProvider({
+      id: 'gateway',
+      name: 'Gateway',
+      apiBase: 'https://example.test/v1',
+      apiKey: 'key',
+      defaultModels: [],
+      listModelsPath: '/models',
+    });
+
+    await provider.complete({
+      model: 'json-model',
+      messages: [{ role: 'user', content: 'hi' }],
+      maxTokens: 16,
+      temperature: 0,
+      inputFormat: 'json',
+      outputFormat: 'json',
+    });
+  });
+
+  it('omits a format the model does not advertise even when other formats are supported', async () => {
+    mockFetchProvider.mockImplementation(async (url: string, init: any) => {
+      if (url.endsWith('/models')) {
+        return { ok: true, status: 200, json: async () => ({ data: [{ id: 'partial-model', output_format: ['json'] }] }) };
+      }
+      const body = JSON.parse(init.body);
+      expect(body.input_format).toBeUndefined();
+      expect(body.output_format).toBe('json');
+      return { ok: true, status: 200, json: async () => completion };
+    });
+
+    const provider = new OpenAICompatibleProvider({
+      id: 'gateway',
+      name: 'Gateway',
+      apiBase: 'https://example.test/v1',
+      apiKey: 'key',
+      defaultModels: [],
+      listModelsPath: '/models',
+    });
+
+    await provider.complete({
+      model: 'partial-model',
+      messages: [{ role: 'user', content: 'hi' }],
+      maxTokens: 16,
+      temperature: 0,
+      inputFormat: 'json',
+      outputFormat: 'json',
+    });
+  });
+
+  it('omits formats entirely when the catalog is unknown (defaults fallback)', async () => {
+    // listModelsPath returns a non-OK response, so the provider falls back to
+    // defaultModels, which carry no format metadata. Formats must still be
+    // omitted rather than sent blindly.
+    mockFetchProvider.mockImplementation(async (url: string, init: any) => {
+      if (url.includes('/models')) {
+        return { ok: false, status: 500, text: async () => 'boom' };
+      }
+      const body = JSON.parse(init.body);
+      expect(body.input_format).toBeUndefined();
+      expect(body.output_format).toBeUndefined();
+      return { ok: true, status: 200, json: async () => completion };
+    });
+
+    const provider = new OpenAICompatibleProvider({
+      id: 'mistral',
+      name: 'Mistral',
+      apiBase: 'https://example.test/v1',
+      apiKey: 'key',
+      defaultModels: [{ id: 'mistral-large-latest', capabilities: ['chat'], maxTokens: 8192, costPer1kTokens: 0 }],
+    });
+
+    await provider.complete({
+      model: 'mistral-large-latest',
+      messages: [{ role: 'user', content: 'hi' }],
+      maxTokens: 16,
+      temperature: 0,
+      inputFormat: 'json',
+      outputFormat: 'json',
+    });
+  });
 
   it('keeps provider reasoning separate from the answer content', async () => {
     const result = await providerWith({

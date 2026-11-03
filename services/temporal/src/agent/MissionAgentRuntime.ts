@@ -16,46 +16,60 @@ import {
   httpRequest,
 } from '@stage7-nextgen/shared';
 import { Plan, Phase, Task } from '@stage7-nextgen/shared';
-import type { CompletedTaskSummary, MissionCredentialRequest, MissionPendingInteraction } from '../types/workflow';
+import { z } from 'zod';
+import { BrainClient, BrainValidationError } from '../brain/BrainClient';
+import { parseInterruption as parseTaskInterruption } from './TaskInterruption';
+import { applyRuntimeTaskRequirements } from './TaskRequirements';
+import { buildTaskPrompt } from './TaskPromptBuilder';
+import type { CompletedTaskSummary, MissionPendingInteraction } from '../types/workflow';
 import {
   PlannerCompletionRequest,
   PlannerProgressReporter,
   PLANNER_EXECUTION_POLICY,
   PLANNER_SYSTEM_PROMPT,
   generateValidPlan,
-  missionTaskActionIssues,
   missionTaskDependencyIssues,
 } from '../planner/MissionPlanner';
 
 const TASK_SELECTOR_SYSTEM_PROMPT = `You are the mission task selector. Select the single best next task from the supplied ready tasks, using the mission goal, phase goal, and completed task IDs. You may not select a task that is not listed as ready, add tasks, or change task instructions. Return only JSON in the form {"taskId":"<ready-task-id>"}.`;
 const TASK_SELECTOR_EXECUTION_POLICY: AgentExecutionPolicy = {
   ...DEFAULT_AGENT_EXECUTION_POLICY,
+  maxBrainCalls: 2,
   maxActions: 0,
   maxCompletionTokens: 512,
   maxCompletionTokensPerCall: 256,
   maxDelegations: 0,
 };
-const PHASE_REVIEW_SYSTEM_PROMPT = `You are a critical phase reviewer. Compare completed task outputs and artifacts with the mission goal and phase goal. Only observed results and artifacts count as evidence; plans, proposed tool actions, and claims that a tool was used are not evidence that it ran. Treat system-action-receipts.json as the record of actual tool results: every required action must have a matching receipt with its required outcome, failed receipts do not support success, and claimed results that contradict receipts are gaps. Do not mark a phase complete just because its tasks ran. If the phase goal is satisfied, return {"satisfied":true,"gaps":[],"followUpTask":null}. Otherwise identify concrete gaps and propose exactly one focused follow-up task that can address a gap, returning {"satisfied":false,"gaps":["..."],"followUpTask":{"title":"...","description":"...","agentRole":"...","systemPrompt":"...","expectedArtifacts":[],"requiredActions":[]}}. Every explicit tool call in systemPrompt must have a requiredActions receipt using the exact tool ID. Child-Agent delegation uses toolId "__delegate", never "delegate"; denial attempts require outcome "denied"; recovery from a tool error requires both "failure" and "success" receipts. Explicitly instruct the Agent to make each required action. Never repeat a successfully completed side-effect action or change a requested identifier; when verification is missing, propose a safe read-only verification task. The follow-up systemPrompt must name each prerequisite task ID and identify the specific output, artifact, or receipt it consumes. Do not propose tasks that repeat completed work. Return exactly one JSON object with this shape; do not include explanations, task metadata, plans, tool actions, or Markdown fences.`;
+const PHASE_REVIEW_SYSTEM_PROMPT = `You are a critical phase reviewer. Compare completed task outputs and artifacts with the mission goal and phase goal. Only observed results and artifacts count as evidence; plans and proposed actions are not evidence that work occurred. Do not mark a phase complete just because its tasks ran. If the phase goal is satisfied, return {"satisfied":true,"gaps":[],"followUpTask":null}. Otherwise identify concrete unmet outcomes and propose exactly one focused follow-up task that can address a gap. Describe only the outcome the Agent must achieve; never prescribe tools, providers, integrations, credentials, implementation steps, or user questions. Do not repeat successfully completed side effects or change a requested identifier. The follow-up systemPrompt must name each prerequisite task ID and identify the specific output, artifact, or receipt it consumes. Return exactly one JSON object; do not include explanations, plans, tool actions, or Markdown fences.`;
 const PHASE_REVIEW_EXECUTION_POLICY: AgentExecutionPolicy = {
   ...DEFAULT_AGENT_EXECUTION_POLICY,
+  maxBrainCalls: 4,
   maxActions: 0,
-  maxCompletionTokens: 2_048,
+  maxCompletionTokens: 4_096,
+  maxCompletionTokensPerCall: 2_048,
+  maxDelegations: 0,
+};
+const MISSION_COMPLETION_REVIEWER_SYSTEM_PROMPT = `You are an objective mission-completion reviewer. Determine whether the observed task outputs and artifacts satisfy the original mission goal. Treat each task's requiredActions and requiresExternalAction flag as evidence requirements; system-action-receipts.json is the record of actual tool results. Every required action must have a matching receipt with its required outcome, and an external operation requires a successful receipt from an actual tool invocation. Failed receipts do not support success, and claimed results that contradict receipts are gaps. A receipt whose toolId is "__list_tools" proves only that the tool catalog was inspected; a tool name appearing in its content does not prove that tool was invoked or that its action succeeded. For every unmet requirement, name the exact task ID, state the missing/failed requirement, and cite observed receipt or artifact evidence, not prior Agent claims. Never use generic gaps or repeat the mission goal as the reason. Return exactly one JSON object with {"satisfied":true,"gaps":[]} or {"satisfied":false,"gaps":["task-specific explanation"]}. Never infer success from a task merely being marked complete. Do not include explanations, Markdown fences, or any text outside the JSON object.`;
+const MISSION_COMPLETION_REVIEW_EXECUTION_POLICY: AgentExecutionPolicy = {
+  ...DEFAULT_AGENT_EXECUTION_POLICY,
+  maxBrainCalls: 3,
+  maxActions: 0,
+  maxCompletionTokens: 3_072,
   maxCompletionTokensPerCall: 1_024,
   maxDelegations: 0,
 };
-const MISSION_COMPLETION_REVIEWER_SYSTEM_PROMPT = `You are an objective mission-completion reviewer. Determine whether the observed task outputs and artifacts satisfy the mission goal. Treat each task's requiredActions as explicit action obligations and system-action-receipts.json as the record of actual tool results: every required action must have a matching receipt with its required outcome, failed receipts do not support success, and claimed results that contradict receipts are gaps. For every unmet requirement, name the exact task ID, state the missing/failed requirement, and cite the observed evidence explaining why it is unmet. Never use generic gaps such as "concrete unmet requirement" or repeat the mission goal as the reason. Return exactly one JSON object with {"satisfied":true,"gaps":[]} or {"satisfied":false,"gaps":["task-specific explanation"]}. Never infer success from a task merely being marked complete. Do not include explanations, Markdown fences, or any text outside the JSON object.`;
-const MISSION_COMPLETION_REVIEW_EXECUTION_POLICY: AgentExecutionPolicy = {
+export const MISSION_TASK_EXECUTION_POLICY: AgentExecutionPolicy = {
   ...DEFAULT_AGENT_EXECUTION_POLICY,
-  maxActions: 0,
-  maxCompletionTokens: 1_024,
-  maxCompletionTokensPerCall: 512,
-  maxDelegations: 0,
+  maxBrainCalls: 24,
+  maxActions: 16,
+  maxCompletionTokens: 16_384,
+  maxCompletionTokensPerCall: 2_048,
+  maxDelegations: 3,
 };
 const MAX_SAFE_AGENT_TASK_RETRIES = 1;
-const MAX_TASK_SELECTION_ATTEMPTS = 10;
-const MAX_PHASE_REVIEW_ATTEMPTS = 10;
+const MAX_TASK_SELECTION_ATTEMPTS = 3;
+const MAX_PHASE_REVIEW_ATTEMPTS = 3;
 const MAX_COMPLETION_REVIEW_ATTEMPTS = 3;
-const ASK_USER_MARKER = '__ASK_USER__:';
 const MAX_ACTION_RECEIPTS = 50;
 const INTERNAL_ACTION_RECEIPT_ARTIFACT = 'system-action-receipts.json';
 
@@ -137,7 +151,7 @@ export function applyPhaseReview(
   }
 
   const normalize = (value: string) => value.trim().replace(/\s+/g, ' ').toLowerCase();
-  const expectedArtifacts = (artifacts: string[]) => artifacts.map(normalize).sort();
+  const expectedArtifacts = (artifacts: string[] | undefined) => (artifacts || []).map(normalize).sort();
   const repeatedTask = phase.tasks.find((task) =>
     normalize(task.title) === normalize(followUpTask.title)
     && normalize(task.description) === normalize(followUpTask.description)
@@ -188,7 +202,7 @@ export function applyPhaseReview(
 
   const dependencyInstructions = phase.tasks.map((task) => {
     const evidenceNames = [...new Set([
-      ...task.expectedArtifacts,
+      ...(task.expectedArtifacts || []),
       ...task.artifacts.map((artifact) => artifact.name),
     ])];
     const evidence = evidenceNames.length > 0 ? `, including ${evidenceNames.join(', ')}` : '';
@@ -198,7 +212,7 @@ export function applyPhaseReview(
     id: taskId,
     ...followUpTask,
     systemPrompt: `${followUpTask.systemPrompt.trim()}\n\n${dependencyInstructions.join('. ')} as authoritative phase context, and do not repeat completed work.`,
-    requiredActions: followUpTask.requiredActions || [],
+    requiredActions: [],
     dependsOnTaskIds: dependencies,
     status: 'pending',
     artifacts: [],
@@ -208,10 +222,7 @@ export function applyPhaseReview(
       .map((existingTaskId) => existingTaskId.toLowerCase()),
   );
   const taskPath = `phase follow-up "${amendment.title}"`;
-  const contractIssues = [
-    ...missionTaskActionIssues(amendment, taskPath, allTaskIds),
-    ...missionTaskDependencyIssues(amendment, allTaskIds, taskPath),
-  ];
+  const contractIssues = missionTaskDependencyIssues(amendment, allTaskIds, taskPath);
   if (contractIssues.length > 0) {
     throw new Error(`Phase reviewer proposed an invalid follow-up task: ${contractIssues.join('; ')}`);
   }
@@ -325,6 +336,7 @@ export interface PromptTaskRequest {
   phaseId?: string;
   expectedArtifacts?: string[];
   requiredActions?: NonNullable<Task['requiredActions']>;
+  requiresExternalAction?: boolean;
   context?: Record<string, unknown>;
   requireCompletedReceipt?: boolean;
   executionPolicy?: AgentExecutionPolicy;
@@ -349,6 +361,7 @@ export class MissionAgentRuntime {
   private assistantId?: string;
   private agentCache: Map<string, string> = new Map(); // agentRole -> agentId
   private taskAgentMap: Map<string, string> = new Map(); // taskId -> agentId
+  private brainClient: BrainClient;
 
   constructor(config: MissionAgentConfig) {
     this.missionId = config.missionId;
@@ -366,6 +379,7 @@ export class MissionAgentRuntime {
       throw new Error('metadata.retryCount must be a non-negative safe integer');
     }
     this.missionRetryCount = typeof retryCount === 'number' ? retryCount : 0;
+    this.brainClient = new BrainClient(this.createBrainAdapter());
   }
 
   private async api<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -441,6 +455,10 @@ export class MissionAgentRuntime {
     }
   }
 
+  /**
+   * @deprecated Brain is stateless cognition on demand; prefer BrainClient directly.
+   * Planner is a mode of thinking, not a separate agent.
+   */
   async registerPlannerAgent(systemPrompt: string): Promise<string> {
     const retryScope = this.missionRetryCount > 0 ? `-retry-${this.missionRetryCount}` : '';
     const agentId = `agent-${this.missionId}-planner${retryScope}`;
@@ -621,19 +639,23 @@ export class MissionAgentRuntime {
       missionGoal,
       planSummary: plan.summary,
       phase: { id: phase.id, name: phase.name, goal: phase.goal },
-      tasks: phase.tasks.map(({ id, title, description, expectedArtifacts, requiredActions }) => ({
+      tasks: phase.tasks.map(({ id, title, description, expectedArtifacts, requiredActions, requiresExternalAction }) => ({
         id,
         title,
         description,
         expectedArtifacts,
-        requiredActions: requiredActions || [],
+        requiredActions: (requiredActions || []).filter((action) => action.toolId !== '__external_action__'),
+        requiresExternalAction: requiresExternalAction
+          || (requiredActions || []).some((action) => action.toolId === '__external_action__'),
       })),
       completedTaskSummaries: completedTaskSummaries.map((summary) => ({
         taskId: summary.taskId,
         output: summary.output.slice(0, 1_200),
         artifactNames: summary.artifactNames,
         artifacts: (summary.artifacts || []).map((a: any) => ({ name: a.name, type: a.type, content: (a.content || '').split(/\n\s*\n/)[0].split(/\s+/).slice(0, 100).join(' ') })),
-        requiredActions: summary.requiredActions || [],
+        requiredActions: (summary.requiredActions || []).filter((action) => action.toolId !== '__external_action__'),
+        requiresExternalAction: summary.requiresExternalAction
+          || (summary.requiredActions || []).some((action) => action.toolId === '__external_action__'),
       })),
     });
     let previousResponse = '';
@@ -720,62 +742,33 @@ export class MissionAgentRuntime {
       }
 
       const followUpTask = review.followUpTask;
-      if (!followUpTask || typeof followUpTask !== 'object' || Array.isArray(followUpTask)) {
-        validationIssue = 'followUpTask must be supplied when the phase is incomplete';
-        await this.reportBrainComplaint(
-          responseRequestId,
-          `Mission phase-review validation failed: ${validationIssue}`,
-        );
-        continue;
-      }
-      const proposal = followUpTask as Record<string, unknown>;
-      if (
-        !['title', 'description', 'agentRole', 'systemPrompt'].every((key) =>
-          typeof proposal[key] === 'string' && (proposal[key] as string).trim().length > 0,
-        )
-        || !Array.isArray(proposal.expectedArtifacts)
-        || !proposal.expectedArtifacts.every((artifact) =>
+      const proposal = followUpTask && typeof followUpTask === 'object' && !Array.isArray(followUpTask)
+        ? followUpTask as Record<string, unknown>
+        : {};
+      const gapText = (review.gaps as string[]).map((gap) => gap.trim()).filter(Boolean).join('; ')
+        || `The phase "${phase.name}" has not yet been verified as complete.`;
+      const textOr = (key: string, fallback: string) =>
+        typeof proposal[key] === 'string' && (proposal[key] as string).trim()
+          ? (proposal[key] as string).trim()
+          : fallback;
+      const expectedArtifacts = Array.isArray(proposal.expectedArtifacts)
+        ? proposal.expectedArtifacts.filter((artifact): artifact is string =>
           typeof artifact === 'string' && artifact.trim().length > 0 && artifact.length <= 200,
-        )
-        || !Array.isArray(proposal.requiredActions)
-        || !proposal.requiredActions.every((action) =>
-          action !== null
-          && typeof action === 'object'
-          && !Array.isArray(action)
-          && typeof (action as Record<string, unknown>).toolId === 'string'
-          && ((action as Record<string, unknown>).toolId as string).trim().length > 0
-          && ['success', 'failure', 'denied'].includes(String((action as Record<string, unknown>).outcome)),
-        )
-      ) {
-        validationIssue = 'followUpTask must contain non-empty title, description, agentRole, systemPrompt, expectedArtifacts, and valid requiredActions';
-        await this.reportBrainComplaint(
-          responseRequestId,
-          `Mission phase-review validation failed: ${validationIssue}`,
-        );
-        continue;
-      }
-      const proposedActionIssues = missionTaskActionIssues({
-        systemPrompt: proposal.systemPrompt as string,
-        requiredActions: proposal.requiredActions as NonNullable<Task['requiredActions']>,
-      }, `followUpTask "${(proposal.title as string).trim()}"`);
-      if (proposedActionIssues.length > 0) {
-        validationIssue = `followUpTask action contract is invalid: ${proposedActionIssues.join('; ')}`;
-        await this.reportBrainComplaint(
-          responseRequestId,
-          `Mission phase-review validation failed: ${validationIssue}`,
-        );
-        continue;
-      }
+        ).map((artifact) => artifact.trim())
+        : [];
       const candidateReview: MissionPhaseReview = {
         satisfied: false,
         gaps: review.gaps as string[],
         followUpTask: {
-          title: (proposal.title as string).trim(),
-          description: (proposal.description as string).trim(),
-          agentRole: (proposal.agentRole as string).trim(),
-          systemPrompt: (proposal.systemPrompt as string).trim(),
-          expectedArtifacts: (proposal.expectedArtifacts as string[]).map((artifact) => artifact.trim()),
-          requiredActions: proposal.requiredActions as NonNullable<Task['requiredActions']>,
+          title: textOr('title', `Resolve phase gap: ${gapText.slice(0, 100)}`),
+          description: textOr('description', `Address the unmet phase outcome: ${gapText}`),
+          agentRole: textOr('agentRole', 'assistant'),
+          systemPrompt: textOr(
+            'systemPrompt',
+            `Resolve the following phase gap using available context and capabilities: ${gapText}. Do not repeat successfully completed side effects. Prerequisite task evidence: ${phase.tasks.map((task) => task.id).join(', ')}.`,
+          ),
+          expectedArtifacts,
+          requiredActions: [],
         },
       };
       try {
@@ -799,9 +792,19 @@ export class MissionAgentRuntime {
       }
       return candidateReview;
     }
-    throw new Error(
-      `Mission phase review for ${phase.id} did not return a valid review after ${MAX_PHASE_REVIEW_ATTEMPTS} attempts. Last validation issue: ${validationIssue}`,
-    );
+    const gap = `Phase review could not produce a valid assessment after ${MAX_PHASE_REVIEW_ATTEMPTS} attempts: ${validationIssue || 'invalid response'}`;
+    return {
+      satisfied: false,
+      gaps: [gap],
+      followUpTask: {
+        title: `Regroup and resolve phase gap: ${phase.name}`,
+        description: gap,
+        agentRole: 'assistant',
+        systemPrompt: `Reassess and resolve the phase outcome using the mission goal, phase goal, and outputs from prerequisite tasks ${phase.tasks.map((task) => task.id).join(', ')}. Do not repeat successfully completed side effects. The phase remains unverified because: ${gap}`,
+        expectedArtifacts: [],
+        requiredActions: [],
+      },
+    };
   }
 
   async reviewMissionCompletion(
@@ -817,7 +820,12 @@ export class MissionAgentRuntime {
     const reviewContext = JSON.stringify({
       missionGoal,
       planSummary,
-      completedTaskSummaries,
+      completedTaskSummaries: completedTaskSummaries.map((summary) => ({
+        ...summary,
+        requiredActions: (summary.requiredActions || []).filter((action) => action.toolId !== '__external_action__'),
+        requiresExternalAction: summary.requiresExternalAction
+          || (summary.requiredActions || []).some((action) => action.toolId === '__external_action__'),
+      })),
     });
     let previousResponse = '';
     let validationIssue = '';
@@ -1038,6 +1046,7 @@ export class MissionAgentRuntime {
     retryGuidance?: string,
     continuation?: { response: string; pendingInteraction: MissionPendingInteraction },
   ): Promise<TaskExecutionResult> {
+    applyRuntimeTaskRequirements(task);
     const dependencyIds = task.dependsOnTaskIds || [];
     const completedById = new Map(completedTaskSummaries.map((summary) => [summary.taskId, summary]));
     const completedDependencies: CompletedTaskSummary[] = [];
@@ -1052,7 +1061,7 @@ export class MissionAgentRuntime {
         `Cannot execute task "${task.id}": completed dependency results are missing for: ${missingDependencies.join(', ')}`,
       );
     }
-    const basePrompt = this.buildTaskPrompt(task, phase, plan, completedDependencies);
+    const basePrompt = buildTaskPrompt(task, phase, plan, completedDependencies);
     const continuationPrompt = continuation
       ? [
         `This task is resuming after a ${continuation.pendingInteraction.kind === 'user_input' ? 'user question' : 'tool permission'} interruption.`,
@@ -1075,8 +1084,9 @@ export class MissionAgentRuntime {
       type: task.agentRole,
       prompt: taskPrompt,
       phaseId: phase.id,
-      expectedArtifacts: task.expectedArtifacts,
+      expectedArtifacts: task.expectedArtifacts || [],
       requiredActions: task.requiredActions || [],
+      requiresExternalAction: task.requiresExternalAction === true,
       context: {
         [BRAIN_ROUTING_SESSION_CONTEXT_KEY]: `${this.missionId}:task:${phase.id}:${task.id}`,
         ...(continuation?.pendingInteraction.actionReceipts
@@ -1102,6 +1112,7 @@ export class MissionAgentRuntime {
           taskId: request.taskId,
           expectedArtifacts: request.expectedArtifacts || [],
           requiredActions: request.requiredActions || [],
+          requiresExternalAction: request.requiresExternalAction === true,
           ...(request.executionPolicy ? { executionPolicy: request.executionPolicy } : {}),
         },
       },
@@ -1174,10 +1185,11 @@ export class MissionAgentRuntime {
 
     const interruption = this.parseInterruption(output);
     if (interruption) {
+      const actionReceipts = this.parseActionReceipts(result?.actionReceipts, submitted.taskId);
       return {
         output,
-        artifacts: [],
-        actionReceipts: this.parseActionReceipts(result?.actionReceipts, submitted.taskId),
+        artifacts: this.withActionReceiptArtifact([], actionReceipts, submitted.taskId),
+        actionReceipts,
         interruption,
         tokensUsed: 0,
         model,
@@ -1215,100 +1227,7 @@ export class MissionAgentRuntime {
   private parseInterruption(
     output: string,
   ): TaskExecutionResult['interruption'] | undefined {
-    if (output.startsWith(ASK_USER_MARKER)) {
-      const payload = output.slice(ASK_USER_MARKER.length);
-      let question = payload;
-      let credentialRequest: MissionCredentialRequest | undefined;
-      try {
-        const parsed = JSON.parse(payload) as { question?: unknown; credentialRequest?: unknown };
-        if (typeof parsed.question === 'string') question = parsed.question;
-        if (parsed.credentialRequest && typeof parsed.credentialRequest === 'object' && !Array.isArray(parsed.credentialRequest)) {
-          const candidate = parsed.credentialRequest as Record<string, unknown>;
-          const missingCredentials = Array.isArray(candidate.missingCredentials)
-            ? candidate.missingCredentials.filter((credential): credential is { key: string; label: string } =>
-              Boolean(credential)
-              && typeof credential === 'object'
-              && !Array.isArray(credential)
-              && typeof (credential as Record<string, unknown>).key === 'string'
-              && typeof (credential as Record<string, unknown>).label === 'string',
-            )
-            : [];
-          if (
-            typeof candidate.executionId === 'string'
-            && typeof candidate.toolId === 'string'
-            && typeof candidate.toolName === 'string'
-            && missingCredentials.length > 0
-          ) {
-            credentialRequest = {
-              executionId: candidate.executionId,
-              toolId: candidate.toolId,
-              toolName: candidate.toolName,
-              missingCredentials,
-            };
-          }
-        }
-      } catch {
-        // Plain-text question markers remain supported.
-      }
-      if (!question.trim()) throw new Error('Agent asked the user an empty question');
-      return {
-        kind: 'user_input',
-        question: question.trim(),
-        ...(credentialRequest ? { credentialRequest } : {}),
-      };
-    }
-
-    const permissionMarker = '__MISSION_PERMISSION__:';
-    if (!output.startsWith(permissionMarker)) return undefined;
-    let payload: Record<string, unknown>;
-    try {
-      const parsed = JSON.parse(output.slice(permissionMarker.length)) as unknown;
-      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        throw new Error('invalid permission request');
-      }
-      payload = parsed as Record<string, unknown>;
-    } catch (error) {
-      throw new Error(`Agent returned an invalid MCP permission request: ${error instanceof Error ? error.message : String(error)}`);
-    }
-    const request = payload.request && typeof payload.request === 'object'
-      ? payload.request as Record<string, unknown>
-      : {};
-    const candidate = payload.candidate && typeof payload.candidate === 'object'
-      ? payload.candidate as Record<string, unknown>
-      : request.candidate && typeof request.candidate === 'object'
-        ? request.candidate as Record<string, unknown>
-        : {};
-    const requestId = typeof request.id === 'string' ? request.id : '';
-    const asStrings = (value: unknown) =>
-      Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
-    if (!requestId || typeof candidate.name !== 'string') {
-      throw new Error('Agent returned an MCP permission request without a request id or tool name');
-    }
-    const credentials = request.credentials && typeof request.credentials === 'object'
-      ? request.credentials as Record<string, unknown>
-      : {};
-    const expiration = request.expiresAt;
-    const expiresAt = typeof expiration === 'string' && Number.isFinite(Date.parse(expiration))
-      ? new Date(expiration).toISOString()
-      : undefined;
-    const permission = {
-      toolName: candidate.name,
-      ...(typeof candidate.description === 'string' ? { toolDescription: candidate.description } : {}),
-      ...(typeof candidate.publisher === 'string' ? { publisher: candidate.publisher } : {}),
-      ...(typeof candidate.tier === 'string' ? { trustTier: candidate.tier } : {}),
-      ...(typeof request.sideEffectClass === 'string' ? { sideEffectClass: request.sideEffectClass } : {}),
-      dataClasses: asStrings(request.dataClasses),
-      credentials: {
-        needed: credentials.needed === true,
-        ...(typeof credentials.source === 'string' ? { source: credentials.source } : {}),
-        keys: asStrings(credentials.keys),
-      },
-      defaultScope: typeof request.defaultScope === 'string' ? request.defaultScope : 'task',
-      availableScopes: asStrings(request.availableScopes),
-      ...(expiresAt ? { expiresAt } : {}),
-      explanation: typeof payload.prompt === 'string' ? payload.prompt : 'This discovered MCP tool requires your permission before it can be used.',
-    };
-    return { kind: 'mcp_permission', requestId, permission };
+    return parseTaskInterruption(output);
   }
 
   private async markTaskCompleted(taskId: string, result: unknown): Promise<void> {
@@ -1341,31 +1260,6 @@ export class MissionAgentRuntime {
     } catch (err) {
       logger.warn({ taskId, err: err instanceof Error ? err.message : String(err) }, 'Failed to mark task failed in agent-runtime');
     }
-  }
-
-  private buildTaskPrompt(
-    task: Task,
-    phase: Phase,
-    plan: Plan,
-    completedDependencies: CompletedTaskSummary[],
-  ): string {
-    const artifactOutputContract = task.expectedArtifacts.length > 0
-      ? `Report verified results for each expected artifact (${task.expectedArtifacts.join(', ')}). Include each artifact's actual result under a clear heading using its exact name. If the work cannot be completed with available tools or context, state the specific blocker instead — do not fabricate results or claim actions that were not executed.`
-      : 'Return only the verified result for this task. Unless the user requested a formatted document, use plain text without Markdown headings, lists, or code fences. For email and text-message tasks, report the exact requested message and verified delivery status; do not invent samples or placeholders.';
-    return (
-      `Task: ${task.title}\n\n` +
-      `Description: ${task.description}\n\n` +
-      `Task Instructions: ${task.systemPrompt}\n\n` +
-      (completedDependencies.length > 0
-        ? `Completed dependency results (authoritative persisted outputs and artifacts; do not infer results from task IDs): ${JSON.stringify(completedDependencies)}\n\n`
-        : '') +
-      `Phase: ${phase.name} (${phase.goal})\n` +
-      `Plan Summary: ${plan.summary}\n` +
-      `Expected Artifacts: ${task.expectedArtifacts.join(', ')}\n` +
-      `Required Actions: ${JSON.stringify(task.requiredActions || [])}\n` +
-      `Output contract: ${artifactOutputContract} Use only actual system-tool results and completed dependency results; do not infer values or include results from future mission steps.\n\n` +
-      'Execute this task now and return completed results for its expected artifacts. Do not return a plan, future-tense promises, or placeholders. If the work cannot be completed with available tools or context, state the specific blocker instead.'
-    );
   }
 
   private async waitForTaskCompletion(agentId: string, taskId: string, maxWaitMs = 900000): Promise<TaskExecutionResult> {
@@ -1455,21 +1349,24 @@ export class MissionAgentRuntime {
       return this.extractArtifacts(output, expected);
     }
     if (!Array.isArray(value)) {
-      throw new Error(`Agent task ${taskId} returned invalid artifacts`);
+      logger.warn({ taskId }, 'Ignoring malformed Agent artifact metadata and preserving textual task output');
+      return this.extractArtifacts(output, expected);
     }
-    return value.map((candidate) => {
+    return value.flatMap((candidate) => {
       if (
         !candidate
         || typeof candidate !== 'object'
         || Array.isArray(candidate)
       ) {
-        throw new Error(`Agent task ${taskId} returned an invalid artifact`);
+        logger.warn({ taskId }, 'Ignoring an invalid Agent artifact entry');
+        return [];
       }
       const parsed = MissionArtifactSchema.safeParse(candidate);
       if (!parsed.success) {
-        throw new Error(`Agent task ${taskId} returned an invalid artifact`);
+        logger.warn({ taskId, issues: parsed.error.issues }, 'Ignoring an invalid Agent artifact entry');
+        return [];
       }
-      return parsed.data;
+      return [parsed.data];
     });
   }
 
@@ -1487,18 +1384,12 @@ export class MissionAgentRuntime {
       }
       return artifact.url === undefined && artifact.data === undefined;
     });
-    if (missing.length === 0) return;
-
-    const blocker = artifacts.find((artifact) =>
-      typeof artifact.content === 'string'
-      && isExecutionOutcomeReport(artifact.content),
-    );
-    const reason = typeof blocker?.content === 'string'
-      ? ` The task reported: ${blocker.content.trim().slice(0, 500)}`
-      : '';
-    throw new Error(
-      `Task "${taskId}" did not produce expected artifact${missing.length === 1 ? '' : 's'}: ${missing.join(', ')}.${reason}`,
-    );
+    if (missing.length > 0) {
+      logger.warn(
+        { taskId, missingArtifacts: missing },
+        'Task completed without all planned deliverable artifacts; preserving its output for phase review and recovery',
+      );
+    }
   }
 
   private parseActionReceipts(
@@ -1506,10 +1397,14 @@ export class MissionAgentRuntime {
     taskId: string,
   ): NonNullable<TaskExecutionResult['actionReceipts']> {
     if (value === undefined) return [];
-    if (!Array.isArray(value) || value.length > MAX_ACTION_RECEIPTS) {
-      throw new Error(`Agent task ${taskId} returned invalid action receipts`);
+    if (!Array.isArray(value)) {
+      logger.warn({ taskId }, 'Ignoring malformed action-receipt metadata; task output remains available for review');
+      return [];
     }
-    return value.map((candidate) => {
+    if (value.length > MAX_ACTION_RECEIPTS) {
+      logger.warn({ taskId, receiptCount: value.length }, 'Truncating oversized action-receipt metadata');
+    }
+    return value.slice(0, MAX_ACTION_RECEIPTS).flatMap((candidate) => {
       if (
         !candidate
         || typeof candidate !== 'object'
@@ -1523,9 +1418,10 @@ export class MissionAgentRuntime {
         || (candidate.resolvedToolId !== undefined && (typeof candidate.resolvedToolId !== 'string' || !candidate.resolvedToolId.trim()))
         || (candidate.outcome !== undefined && !['success', 'failure', 'denied', 'question_asked', 'permission_required'].includes(String(candidate.outcome)))
       ) {
-        throw new Error(`Agent task ${taskId} returned an invalid action receipt`);
+        logger.warn({ taskId }, 'Ignoring an invalid action-receipt entry');
+        return [];
       }
-      return {
+      return [{
         toolId: candidate.toolId,
         isError: candidate.isError,
         content: candidate.content.slice(0, 2_048),
@@ -1534,7 +1430,7 @@ export class MissionAgentRuntime {
         ...(typeof candidate.actionKey === 'string' ? { actionKey: candidate.actionKey } : {}),
         ...(typeof candidate.fallbackForToolId === 'string' ? { fallbackForToolId: candidate.fallbackForToolId } : {}),
         ...(typeof candidate.resolvedToolId === 'string' ? { resolvedToolId: candidate.resolvedToolId } : {}),
-      };
+      }];
     });
   }
 
@@ -1545,11 +1441,12 @@ export class MissionAgentRuntime {
   ): MissionArtifact[] {
     if (actionReceipts.length === 0) return artifacts;
     const name = 'system-action-receipts.json';
-    if (artifacts.some((artifact) => artifact.name.toLocaleLowerCase() === name)) {
-      throw new Error(`Agent task ${taskId} returned a reserved action receipt artifact name`);
+    const deliverables = artifacts.filter((artifact) => artifact.name.toLocaleLowerCase() !== name);
+    if (deliverables.length !== artifacts.length) {
+      logger.warn({ taskId }, 'Discarded an Agent artifact that collided with the reserved action-receipt name');
     }
     return [
-      ...artifacts,
+      ...deliverables,
       { name, type: 'evidence', content: JSON.stringify(actionReceipts), purpose: 'execution-outcome', visibility: 'internal' },
     ];
   }
@@ -1607,6 +1504,41 @@ export class MissionAgentRuntime {
       if (error instanceof MissionAgentRuntimeApiError && error.status === 404) return;
       throw error;
     }
+  }
+
+
+  private createBrainAdapter() {
+    return {
+      complete: async (request: {
+        prompt: string;
+        systemPrompt: string;
+        maxTokens: number;
+        temperature: number;
+        missionId?: string;
+        routingSessionId?: string;
+        attempt: number;
+      }) => {
+        const agentId = await this.getOrCreateAgent('brain', request.systemPrompt.slice(0, 200));
+        const result = await this.executePromptTask(agentId, {
+          taskId: `${this.missionId}:brain:${request.routingSessionId || 'default'}:attempt-${request.attempt}`,
+          type: 'brain',
+          prompt: request.prompt,
+          phaseId: 'brain',
+          context: {
+            ...(request.routingSessionId ? { [BRAIN_ROUTING_SESSION_CONTEXT_KEY]: request.routingSessionId } : {}),
+          },
+          executionPolicy: {
+            ...DEFAULT_AGENT_EXECUTION_POLICY,
+            maxActions: 0,
+            maxBrainCalls: 1,
+            maxCompletionTokens: request.maxTokens,
+            maxCompletionTokensPerCall: request.maxTokens,
+            maxDelegations: 0,
+          },
+        });
+        return result.output;
+      },
+    };
   }
 
   async stopAllAgents(): Promise<void> {

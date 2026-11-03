@@ -7,7 +7,12 @@ import {
   Task,
 } from '@stage7-nextgen/shared';
 import { logger } from '@stage7-nextgen/shared';
-import { MissionAgentRuntime, MissionAgentConfig, TaskExecutionResult } from '../agent/MissionAgentRuntime';
+import {
+  MissionAgentRuntime,
+  MissionAgentConfig,
+  MISSION_TASK_EXECUTION_POLICY,
+  TaskExecutionResult,
+} from '../agent/MissionAgentRuntime';
 import { applyPhaseReview, MissionPhaseReview } from '../agent/MissionAgentRuntime';
 import { isHumanAgentRole } from '../planner/MissionPlanner';
 import { MissionOrchestrator } from '../planner/MissionOrchestrator';
@@ -23,6 +28,10 @@ export interface MissionTaskActivityInput {
   phase: Phase;
   task: Task;
   completedTaskSummaries?: CompletedTaskSummary[];
+}
+
+export interface MissionUserInputActivityInput extends MissionTaskActivityInput {
+  question: string;
 }
 
 export interface MissionTaskSelectionActivityInput {
@@ -297,9 +306,11 @@ export async function selectNextMissionTaskActivity({
 }: MissionTaskSelectionActivityInput): Promise<string> {
   const humanTask = phase.tasks.find((task) => isHumanAgentRole(task.agentRole));
   if (humanTask) {
-    throw new Error(
-      `Mission phase "${phase.id}" contains task "${humanTask.id}" with human agentRole "${humanTask.agentRole}"; use requiresApproval or requiresClarification instead. Refusing to send the phase to the task selector.`,
+    logger.warn(
+      { missionId: input.missionId, phaseId: phase.id, taskId: humanTask.id, agentRole: humanTask.agentRole },
+      'Replacing a human task role with the autonomous assistant role; missions do not pause for user input',
     );
+    humanTask.agentRole = 'assistant';
   }
   const activityContext = Context.current();
   const heartbeatTimer = setInterval(() => {
@@ -404,17 +415,19 @@ export async function executeMissionTaskActivity({
     agentRuntimeUrl: process.env.AGENT_RUNTIME_URL,
     broadcast: createRuntimeBroadcast(input),
   });
+  if (isHumanAgentRole(task.agentRole)) {
+    logger.warn(
+      { missionId: input.missionId, phaseId: phase.id, taskId: task.id, agentRole: task.agentRole },
+      'Replacing a human task role with the autonomous assistant role; missions do not pause for user input',
+    );
+    task.agentRole = 'assistant';
+  }
   let agentId = agentRuntime.getAgentIdForRole(task.agentRole);
   const heartbeatTimer = setInterval(() => {
     activityContext.heartbeat({ missionId: input.missionId, phaseId: phase.id, taskId: task.id });
   }, 30_000);
 
   try {
-    if (isHumanAgentRole(task.agentRole)) {
-      throw new Error(
-        `Mission task "${task.id}" cannot be executed with human agentRole "${task.agentRole}"; represent human decisions with requiresApproval or requiresClarification.`,
-      );
-    }
     await persistUpdate(input, 'tasks', task.id, {
       phaseId: phase.id,
       status: 'in_progress',
@@ -444,7 +457,7 @@ export async function executeMissionTaskActivity({
       phase,
       plan,
       retrying,
-      DEFAULT_AGENT_EXECUTION_POLICY,
+      MISSION_TASK_EXECUTION_POLICY,
       completedTaskSummaries,
     ] as const;
     const result = retryGuidance
@@ -466,8 +479,10 @@ export async function executeMissionTaskActivity({
           taskTitle: task.title,
           agentRole: task.agentRole,
           ...(result.interruption.question ? { question: result.interruption.question } : {}),
+          ...(result.interruption.credentialRequest ? { credentialRequest: result.interruption.credentialRequest } : {}),
           ...(result.interruption.requestId ? { requestId: result.interruption.requestId } : {}),
           ...(result.interruption.permission ? { permission: result.interruption.permission } : {}),
+          actionReceipts: result.actionReceipts || [],
         },
       });
       return result;
@@ -557,6 +572,27 @@ export async function finishMissionPhaseActivity({
       phaseId: phase.id,
       phaseName: phase.name,
       artifacts: tasks.flatMap((task) => task.artifacts),
+    },
+  });
+}
+
+export async function requestMissionUserInputActivity({
+  input,
+  phase,
+  task,
+  question,
+}: MissionUserInputActivityInput): Promise<void> {
+  await persistUpdate(input, 'tasks', task.id, { status: 'pending', output: question });
+  await broadcast(input, {
+    type: 'question_asked',
+    missionId: input.missionId,
+    timestamp: Date.now(),
+    data: {
+      phaseId: phase.id,
+      taskId: task.id,
+      taskTitle: task.title,
+      agentRole: task.agentRole,
+      question,
     },
   });
 }

@@ -110,6 +110,9 @@ describe('ModelRouter performance outcomes', () => {
   });
 
   it('does not let performance outcomes bypass free-only or task-capability eligibility', () => {
+    // Fresh router: the describe-scoped router accumulates models across
+    // tests, and a leftover free chat model would wrongly satisfy freeOnly.
+    const router = new ModelRouter();
     router.registerModel(model('paid-best', 0.1));
     router.registerModel({ ...model('free-code', 0), capabilities: ['code'] });
     router.setPerformanceMetrics(new Map([

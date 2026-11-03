@@ -48,10 +48,32 @@ const HEALING_SYSTEM_PROMPT = `You are a senior engineer debugging a failed code
 const MAX_HEALING_ATTEMPTS = 2;
 const MAX_NESTING_DEPTH = 4;
 
+function generatedToolUsesProcessEnvironment(language: unknown, sourceCode: string): boolean {
+  return language === 'javascript'
+    ? /\bprocess\s*(?:\.\s*env\b|\[\s*['"`]env['"`]\s*\])/.test(sourceCode)
+    : /\bos\s*\.\s*(?:environ\b|getenv\s*\()|\bgetenv\s*\(|\bfrom\s+os\s+import\s+[^;\n]*\b(?:environ|getenv)\b/.test(sourceCode);
+}
+
 function schemaRecord(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
     : undefined;
+}
+
+function toolFailureMessage(value: unknown, depth = 0): string | undefined {
+  if (depth > 4) return undefined;
+  const parsed = typeof value === 'string' ? parseToolOutputJson(value) : value;
+  const payload = schemaRecord(parsed);
+  if (!payload) return undefined;
+  if (typeof payload.error === 'string' && payload.error.trim()) return payload.error.trim();
+  if (payload.success === false || payload.isError === true || payload.status === 'failed') {
+    return 'Tool returned an explicit failure result';
+  }
+  for (const key of ['output', 'data', 'result']) {
+    const message = toolFailureMessage(payload[key], depth + 1);
+    if (message) return message;
+  }
+  return undefined;
 }
 
 function isVaultSecretProperty(schema: Record<string, unknown>): boolean {
@@ -568,7 +590,7 @@ export class ToolExecutor {
     try {
       this.enforceConfirmation(tool, input, executionId);
       this.validateSameContext(tool, input);
-      const configResult = this.validateConfigSchema(tool, input, executionId);
+      const configResult = await this.validateConfigSchema(tool, input, executionId);
       if (configResult) {
         this.dispatchOutcomeEvent(
           tool, 'aborted', 'invalid or incomplete configuration', opts?.workspaceId, opts?.assistantId, executionId,
@@ -581,9 +603,10 @@ export class ToolExecutor {
       const storedOutput = await this.storeSecretOutputs(tool, rawOutput, opts?.context?.tenantId, secretValues);
       const output = redactSecrets(storedOutput, secretValues) as typeof rawOutput;
       this.pendingCredentialOverrides.delete(tool.id);
+      const executionFailed = Boolean(output && output.error !== undefined);
       // `dispatch` reports failure as `{ error }` rather than throwing, so a
       // tool that "succeeded" with an error payload must not emit its event.
-      if (!output || output.error === undefined) {
+      if (!executionFailed) {
         this.dispatchUpstreamEvents(
           tool, output, opts?.workspaceId, opts?.assistantId, executionId, input,
           (output as { storeWrites?: StoreWrite[] } | undefined)?.storeWrites,
@@ -595,15 +618,19 @@ export class ToolExecutor {
       }
       const completedAt = new Date();
 
-      logger.info({ executionId, toolId: tool.id, status: 'completed' }, 'Tool execution completed');
-      this.transitionTo(executionId, 'executed');
+      logger.info(
+        { executionId, toolId: tool.id, status: executionFailed ? 'failed' : 'completed' },
+        executionFailed ? 'Tool execution returned a failure result' : 'Tool execution completed',
+      );
+      if (!executionFailed) this.transitionTo(executionId, 'executed');
 
       const result: ToolExecution = {
         executionId,
         toolId: tool.id,
         input,
         output,
-        status: 'completed',
+        ...(executionFailed ? { error: String(output?.error) } : {}),
+        status: executionFailed ? 'failed' : 'completed',
         workflowState: this.getWorkflowState(executionId),
         startedAt,
         completedAt,
@@ -687,7 +714,7 @@ export class ToolExecutor {
     try {
       this.enforceConfirmation(tool, input, executionId);
       this.validateSameContext(tool, input);
-      const configResult = this.validateConfigSchema(tool, input, executionId);
+      const configResult = await this.validateConfigSchema(tool, input, executionId);
       if (configResult) {
         this.dispatchOutcomeEvent(
           tool, 'aborted', 'invalid or incomplete configuration', opts?.workspaceId, opts?.assistantId, executionId,
@@ -700,9 +727,10 @@ export class ToolExecutor {
       const storedOutput = await this.storeSecretOutputs(tool, rawOutput, opts?.context?.tenantId, secretValues);
       const output = redactSecrets(storedOutput, secretValues) as typeof rawOutput;
       this.pendingCredentialOverrides.delete(tool.id);
+      const executionFailed = Boolean(output && output.error !== undefined);
       // `dispatch` reports failure as `{ error }` rather than throwing, so a
       // tool that "succeeded" with an error payload must not emit its event.
-      if (!output || output.error === undefined) {
+      if (!executionFailed) {
         this.dispatchUpstreamEvents(
           tool, output, opts?.workspaceId, opts?.assistantId, executionId, input,
           (output as { storeWrites?: StoreWrite[] } | undefined)?.storeWrites,
@@ -714,15 +742,19 @@ export class ToolExecutor {
       }
       const completedAt = new Date();
 
-      logger.info({ executionId, toolId: tool.id, status: 'completed' }, 'Tool execution completed');
-      this.transitionTo(executionId, 'executed');
+      logger.info(
+        { executionId, toolId: tool.id, status: executionFailed ? 'failed' : 'completed' },
+        executionFailed ? 'Tool execution returned a failure result' : 'Tool execution completed',
+      );
+      if (!executionFailed) this.transitionTo(executionId, 'executed');
 
       const result: ToolExecution = {
         executionId,
         toolId: tool.id,
         input,
         output,
-        status: 'completed',
+        ...(executionFailed ? { error: String(output?.error) } : {}),
+        status: executionFailed ? 'failed' : 'completed',
         workflowState: this.getWorkflowState(executionId),
         startedAt,
         completedAt,
@@ -1248,6 +1280,39 @@ return this.executeOrRequestCredentials(pending.tool, pending.input);
     return value !== undefined && value !== null && value !== '';
   }
 
+  private async tryResolveFromVault(tool: Tool, field: string, input?: Record<string, unknown>): Promise<unknown> {
+    try {
+      const tenantId = (tool as any)?.tenantId || (input as any)?.tenantId || 'system';
+      const secretName = `tool:${tool.id}:${field}`;
+      const vaultUrl = process.env.VAULT_URL || 'http://vault:4000';
+      try {
+        const res = await fetch(`${vaultUrl}/api/vault/secrets/name/${encodeURIComponent(secretName)}/decrypt?tenantId=${encodeURIComponent(tenantId)}`);
+        if (res.ok) {
+          const data = await res.json() as { plaintext?: string };
+          if (data.plaintext && data.plaintext.trim().length > 0) {
+            return data.plaintext;
+          }
+        } else if (res.status === 404) {
+          // Try to ensure/create empty secret
+          try {
+            await fetch(`${vaultUrl}/api/vault/secrets/ensure`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name: secretName, plaintext: '', tenantId }),
+            });
+          } catch (err) {
+            logger.warn({ err, toolId: tool.id, field }, 'Failed to ensure secret for tool');
+          }
+        }
+      } catch (err) {
+        logger.warn({ err, toolId: tool.id, field }, 'Failed to resolve tool secret from vault');
+      }
+    } catch (err) {
+      logger.warn({ err, toolId: tool.id, field }, 'Failed to resolve tool secret from vault');
+    }
+    return undefined;
+  }
+
   private isCredentialField(field: string): boolean {
     return ['token', 'accessToken', 'apiKey', 'api_key', 'username', 'password', 'secret', 'clientSecret'].includes(field);
   }
@@ -1259,7 +1324,7 @@ return this.executeOrRequestCredentials(pending.tool, pending.input);
     }, config);
   }
 
-  private isConfigured(tool: Tool, field: string, input: Record<string, unknown>): boolean {
+  private async isConfigured(tool: Tool, field: string, input: Record<string, unknown>): Promise<boolean> {
     if (field === 'confirmBeforeSend') return true;
 
     const manifest = tool.manifest as Record<string, unknown> | undefined;
@@ -1267,6 +1332,13 @@ return this.executeOrRequestCredentials(pending.tool, pending.input);
     const manifestConfig = manifest?.config as Record<string, unknown> | undefined;
     const directValue = input[field] ?? externalConfig?.[field] ?? manifestConfig?.[field] ?? manifest?.[field];
     if (this.hasValue(directValue)) return true;
+
+    // Try to resolve from vault using tool schema variable name
+    const vaultValue = await this.tryResolveFromVault(tool, field, input);
+    if (this.hasValue(vaultValue)) {
+      (input as any)[field] = vaultValue;
+      return true;
+    }
 
     if (field === 'baseUrl' || field === 'endpoint' || field === 'endpointUrl') {
       const endpoint = manifest?.endpoint as Record<string, unknown> | undefined;
@@ -1276,11 +1348,18 @@ return this.executeOrRequestCredentials(pending.tool, pending.input);
       const configEndpoint = typeof endpointConfigKey === 'string'
         ? this.getNestedValue(externalConfig, endpointConfigKey)
         : undefined;
-      return this.hasValue(endpoint?.url)
+      const val = this.hasValue(endpoint?.url)
         || this.hasValue(endpoint?.path)
         || this.hasValue(configEndpoint)
         || this.hasValue(input.endpointUrl)
         || this.hasValue(input.baseUrl);
+      if (val) return true;
+      const vaultValue2 = await this.tryResolveFromVault(tool, field, input);
+      if (this.hasValue(vaultValue2)) {
+        (input as any)[field] = vaultValue2;
+        return true;
+      }
+      return false;
     }
 
     if (this.isCredentialField(field)) {
@@ -1290,13 +1369,24 @@ return this.executeOrRequestCredentials(pending.tool, pending.input);
       // is still honoured; a config field is not backed by a guessed env var name.
       const envValue = source?.envVar ? process.env[source.envVar] : undefined;
       const configValue = source?.configKey ? this.getNestedValue(externalConfig, source.configKey) : undefined;
-      return this.hasValue(envValue) || this.hasValue(configValue);
+      if (this.hasValue(envValue) || this.hasValue(configValue)) return true;
+      const vaultValue3 = await this.tryResolveFromVault(tool, field, input);
+      if (this.hasValue(vaultValue3)) {
+        (input as any)[field] = vaultValue3;
+        return true;
+      }
+      return false;
     }
 
     // No environment fallback: a required config field counts as configured only
     // when it is actually present in input, the Skill's external configuration,
     // or its manifest config. Deriving an env var name from the field name would
     // make a field silently satisfiable by an unrelated deployment variable.
+    const vaultValue4 = await this.tryResolveFromVault(tool, field, input);
+    if (this.hasValue(vaultValue4)) {
+      (input as any)[field] = vaultValue4;
+      return true;
+    }
     return false;
   }
 
@@ -1318,13 +1408,24 @@ return this.executeOrRequestCredentials(pending.tool, pending.input);
       || this.hasValue(externalConfig?.baseUrl);
   }
 
-  private validateConfigSchema(tool: Tool, input: Record<string, unknown>, executionId: string): ToolExecution | null {
+  private async validateConfigSchema(tool: Tool, input: Record<string, unknown>, executionId: string): Promise<ToolExecution | null> {
     const configSchema = tool.configSchema || (tool.manifest?.configSchema as SchemaRecord | undefined);
+    const credentialSource = tool.manifest?.credentialSource as Record<string, { configKey?: string }> | undefined;
+    const credentialBackedFields = new Set(
+      Object.values(credentialSource || {})
+        .map((source) => source?.configKey)
+        .filter((key): key is string => typeof key === 'string'),
+    );
     const isExternalAction = (tool.manifest?.system !== undefined && tool.manifest?.action !== undefined);
     const required = Array.isArray(configSchema?.required)
       ? configSchema.required.filter((field): field is string => typeof field === 'string')
       : [];
-    const missing = required.filter((field) => !this.isConfigured(tool, field, input));
+    const missing: string[] = [];
+    for (const field of required) {
+      if (credentialBackedFields.has(field)) continue;
+      const ok = await this.isConfigured(tool, field, input);
+      if (!ok) missing.push(field);
+    }
 
     if (isExternalAction && !this.hasEndpoint(tool, input) && !missing.includes('endpoint')) {
       missing.push('endpoint');
@@ -1332,12 +1433,39 @@ return this.executeOrRequestCredentials(pending.tool, pending.input);
 
     if (missing.length === 0) return null;
 
+    // Ensure secrets exist in vault for missing config schema fields
+    const tenantId = (input as any)?.tenantId || (tool as any)?.tenantId || 'system';
+    const createdSecrets: string[] = [];
+    const vaultUrl = process.env.VAULT_URL || 'http://vault:4000';
+    for (const field of missing) {
+      try {
+        const secretName = `tool:${tool.id}:${field}`;
+        const ensureRes = await fetch(`${vaultUrl}/api/vault/secrets/ensure`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: secretName, plaintext: '', tenantId }),
+        });
+        if (ensureRes.ok) {
+          const data = await ensureRes.json() as { existed?: boolean; name?: string };
+          if (!data.existed) {
+            createdSecrets.push(data.name || secretName);
+          }
+        }
+      } catch (err) {
+        logger.warn({ err, toolId: tool.id, field }, 'Failed to ensure secret for tool config');
+      }
+    }
+
     const prefix = isExternalAction ? 'Not connected' : 'Missing required config';
+    let errorMsg = `${prefix}: required config fields missing: ${missing.join(', ')}`;
+    if (createdSecrets.length > 0) {
+      errorMsg += `. Created empty secrets in vault: ${createdSecrets.join(', ')}. Please edit them in the Vault with the correct values.`;
+    }
     return {
       executionId,
       toolId: tool.id,
       input,
-      error: `${prefix}: required config fields missing: ${missing.join(', ')}`,
+      error: errorMsg,
       status: 'failed',
       startedAt: new Date(),
       completedAt: new Date(),
@@ -1385,13 +1513,13 @@ const manifest = tool.manifest as Record<string, unknown> | undefined;
 // A credential declared with `configKey` resolves against the Skill's own
 // configuration, so the provider needs the resolved values.
 const configuredValues = this.resolveSkillConfig(tool, _input);
-const credentialSources: Array<{ logicalKey: string; label?: string; required: boolean; source: { vaultSecretId?: string; envVar?: string; configKey?: string } }> = [];
+const credentialSources: Array<{ logicalKey: string; label?: string; required: boolean; source: { vaultSecretId?: string; envVar?: string; configKey?: string; sensitive?: boolean } }> = [];
 
 if (manifest?.credentialSource && typeof manifest.credentialSource === 'object') {
-const cs = manifest.credentialSource as Record<string, { vaultSecretId?: string; envVar?: string; configKey?: string; label?: string; required?: boolean }>;
+const cs = manifest.credentialSource as Record<string, { vaultSecretId?: string; envVar?: string; configKey?: string; label?: string; required?: boolean; sensitive?: boolean }>;
 for (const [logicalKey, source] of Object.entries(cs)) {
 if (source && typeof source === 'object') {
-const s = source as { vaultSecretId?: string; envVar?: string; configKey?: string; label?: string; required?: boolean };
+const s = source as { vaultSecretId?: string; envVar?: string; configKey?: string; label?: string; required?: boolean; sensitive?: boolean };
 // A declared `label` is what the operator sees when a credential is missing, so
 // it should say where the value goes rather than repeating the logical key.
 // `required` defaults to true: declaring a credential has always meant the
@@ -1407,6 +1535,7 @@ logicalKey: c.logicalKey,
 vaultSecretId: c.source.vaultSecretId,
 envVar: c.source.envVar,
 configKey: c.source.configKey,
+sensitive: c.source.sensitive,
 }));
 const resolved = await credentialProvider.resolveAll(namedSources, configuredValues);
 
@@ -1686,6 +1815,15 @@ const capabilities = Array.isArray(manifest?.capabilities) ? manifest.capabiliti
 if (tool.type === 'code' || manifest?.language) {
 const language = (manifest?.language as string) || 'javascript';
 const sourceCode = (manifest?.sourceCode as string) || '';
+const validation = manifest?.validation as Record<string, unknown> | undefined;
+if (
+  validation?.method === 'isolated-contract-tests'
+  && generatedToolUsesProcessEnvironment(language, sourceCode)
+) {
+  return {
+    error: 'Generated tool depends on process environment variables, which cannot be configured at runtime. Recreate it using declared runtime configuration instead.',
+  };
+}
 //const entrypoint = (manifest?.entrypoint as string) || 'index.js';
 
 if (!sourceCode) {
@@ -1718,6 +1856,10 @@ logger.error(
 { toolId: tool.id, issues: schemaIssues },
 'Tool result does not match its declared outputSchema',
 );
+}
+const failureMessage = toolFailureMessage(result.output);
+if (failureMessage) {
+  return { error: failureMessage, output: result.output };
 }
 return {
 output: result.output,

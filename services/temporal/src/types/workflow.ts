@@ -5,7 +5,6 @@ export interface WorkflowInput {
   tenantId: string;
   assistantId: string;
   prompt: string;
-  cronSchedule?: string;
   contextChunks?: Array<{ content: string; tokens: number; priority: number }>;
   metadata?: Record<string, unknown>;
   // Resume support: skip already-completed phases/tasks
@@ -71,6 +70,7 @@ export interface CompletedTaskSummary {
   artifacts?: MissionArtifact[];
   expectedArtifacts?: string[];
   requiredActions?: NonNullable<Task['requiredActions']>;
+  requiresExternalAction?: boolean;
 }
 
 export interface MissionPhaseEvidence {
@@ -83,6 +83,40 @@ export interface MissionPhaseEvidence {
     output?: string;
   }>;
 }
+
+export function recoveryGapFingerprint(gaps: string[]): string {
+  return [...new Set(gaps.map((gap) =>
+    gap
+      .toLocaleLowerCase()
+      .replace(/\b(?:attempt|review)\s+\d+\b/g, '')
+      .replace(/\bphase-[\w-]+\b/g, '<phase>')
+      .replace(/\btask-[\w-]+\b/g, '<task>')
+      .replace(/\s+/g, ' ')
+      .trim(),
+  ))]
+    .sort()
+    .join('|');
+}
+
+export function isConfigurationBlocker(evidence: string[]): boolean {
+  return /\b(?:missing|no|unavailable|invalid|not configured|not registered|not in (?:the )?(?:live )?system catalog)\b.{0,100}\b(?:tool|provider|service|credential|configuration|api key|endpoint|account|smtp|token)\b/i
+    .test(evidence.join('\n'))
+    || /\b(?:tool|provider|service|credential|configuration|api key|endpoint|account|smtp|token)\b.{0,100}\b(?:missing|unavailable|invalid|not configured|not registered|not in (?:the )?(?:live )?system catalog)\b/i
+      .test(evidence.join('\n'));
+}
+
+export function missionConfigurationQuestion(missionGoal: string): string {
+  if (/\b(?:sms|text message|email|e-mail)\b/i.test(missionGoal)) {
+    return 'I could not verify a working delivery path for the requested message. Which authorized provider should I configure to continue: SMTP or an email API for email, and an SMS provider or approved email-to-SMS gateway for text messages? Please provide the provider configuration through the secure credential fields when prompted; do not send secrets in chat. I will not claim delivery without a successful tool receipt.';
+  }
+  return `I could not proceed because the available evidence indicates a required service or configuration is missing for this outcome: "${missionGoal}". Which authorized service or provider should I use? I will request any secret values only through secure credential fields.`;
+}
+
+const NON_ACTION_RECEIPT_TOOL_IDS = new Set([
+  '__list_tools',
+  '__create_tool',
+  '__delegate',
+]);
 
 export function missionExecutionEvidenceGaps(plan: Plan, phases: MissionPhaseEvidence[]): string[] {
   const gaps: string[] = [];
@@ -117,7 +151,10 @@ export function missionExecutionEvidenceGaps(plan: Plan, phases: MissionPhaseEvi
         gaps.push(`Task "${plannedTask.title}" (${plannedTask.id}) has no execution result in phase "${plannedPhase.name}".`);
         continue;
       }
-      if (task.status !== 'completed') {
+      if (
+        task.status !== 'completed'
+        && !phase.tasks.some((phaseTask) => phaseTask.taskId !== task.taskId && phaseTask.status === 'completed')
+      ) {
         const detail = task.output?.trim();
         gaps.push(
           `Task "${plannedTask.title}" (${plannedTask.id}) is ${task.status}, not completed.`
@@ -126,7 +163,7 @@ export function missionExecutionEvidenceGaps(plan: Plan, phases: MissionPhaseEvi
         continue;
       }
 
-      const artifacts = task.artifacts || [];
+      const artifacts = phase.tasks.flatMap((phaseTask) => phaseTask.artifacts || []);
       const receiptArtifact = artifacts.find((artifact) =>
         artifact.name.toLocaleLowerCase() === 'system-action-receipts.json',
       );
@@ -154,19 +191,22 @@ export function missionExecutionEvidenceGaps(plan: Plan, phases: MissionPhaseEvi
       }
 
       const availableReceipts = [...receipts];
-      for (const required of plannedTask.requiredActions || []) {
+      for (const required of (plannedTask.requiredActions || []).filter(
+        (action) => action.toolId !== '__external_action__',
+      )) {
         const receiptIndex = availableReceipts.findIndex((receipt) =>
           (receipt.toolId === required.toolId
             || (receipt.toolId !== '__create_tool'
-              && required.outcome === 'success'
-              && receipt.outcome === 'success'
-              && receipt.fallbackForToolId === required.toolId))
+            && required.outcome === 'success'
+            && receipt.outcome === 'success'
+            && receipt.fallbackForToolId === required.toolId))
           && receipt.outcome === required.outcome,
         );
         if (receiptIndex >= 0) {
           availableReceipts.splice(receiptIndex, 1);
           continue;
         }
+
         const failed = receipts.find((receipt) =>
           receipt.toolId === required.toolId && receipt.outcome !== required.outcome,
         ) || receipts.find((receipt) =>
@@ -180,8 +220,24 @@ export function missionExecutionEvidenceGaps(plan: Plan, phases: MissionPhaseEvi
         );
       }
 
+      if (plannedTask.requiresExternalAction
+        || plannedTask.requiredActions?.some((action) => action.toolId === '__external_action__')) {
+        const externalActionReceipt = receipts.find((receipt) =>
+          receipt.outcome === 'success'
+          && !NON_ACTION_RECEIPT_TOOL_IDS.has(receipt.toolId)
+          && receipt.toolId !== '__external_action__',
+        );
+        if (!externalActionReceipt) {
+          gaps.push(
+            `Task "${plannedTask.title}" (${plannedTask.id}) did not perform a verified external action. Tool discovery, tool creation, and delegation are not action evidence.`
+            + ` No matching action receipt was recorded. Recorded tool IDs: ${receipts.map((receipt) => receipt.toolId).join(', ') || 'none'}.`,
+          );
+        }
+      }
+
       const normalize = (value: string) => value.trim().toLocaleLowerCase();
-      for (const expectedName of plannedTask.expectedArtifacts) {
+      const expectedArtifactsList = Array.isArray((plannedTask as any).expectedArtifacts) ? (plannedTask as any).expectedArtifacts as string[] : [];
+      for (const expectedName of expectedArtifactsList) {
         if (normalize(expectedName) === 'system-action-receipts.json') continue;
         const artifact = artifacts.find((candidate) => normalize(candidate.name) === normalize(expectedName));
         const artifactContent = typeof artifact?.content === 'string' ? artifact.content.trim() : '';
@@ -216,8 +272,14 @@ export function createCompletedTaskSummary(
   output: string,
   artifacts: MissionArtifact[],
   requiredActions?: NonNullable<Task['requiredActions']>,
+  requiresExternalAction = false,
   expectedArtifacts?: string[],
 ): CompletedTaskSummary {
+  const externalActionRequired = requiresExternalAction
+    || (requiredActions || []).some((action) => action.toolId === '__external_action__');
+  const normalizedRequiredActions = requiredActions?.filter(
+    (action) => action.toolId !== '__external_action__',
+  );
   const textLimit = 1_200;
   const receiptLimit = 16_000;
   const artifactLimit = 5;
@@ -261,7 +323,8 @@ export function createCompletedTaskSummary(
       }
       return artifact;
     }),
-    ...(requiredActions ? { requiredActions } : {}),
+    ...(normalizedRequiredActions ? { requiredActions: normalizedRequiredActions } : {}),
+    ...(externalActionRequired ? { requiresExternalAction: true } : {}),
   };
 }
 

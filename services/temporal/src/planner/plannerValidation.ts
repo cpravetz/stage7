@@ -1,0 +1,250 @@
+import { Task } from '@stage7-nextgen/shared';
+
+export function containsIdentifier(text: string, identifier: string) {
+  const escaped = identifier.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?:^|[^a-z0-9_-])${escaped}(?=$|[^a-z0-9_-])`, 'i').test(text);
+}
+
+export function isNegatedActionAt(text: string, actionIndex: number) {
+  const prefix = text.slice(0, actionIndex);
+  const conjunctions = [...prefix.matchAll(/\b(?:and|but|while|then)\b/gi)];
+  const lastConjunction = conjunctions.at(-1);
+  const localPrefix = prefix.slice(lastConjunction ? lastConjunction.index! + lastConjunction[0].length : 0);
+  return /\b(?:do not|don't|never|avoid|without)\b[^.!?;\n]{0,60}$/i.test(localPrefix);
+}
+
+const TASK_OUTPUT_TERMS =
+  '(?:outputs?|results?|artifacts?|values?|answers?|products?|calculations?|receipts?|evidence|failures?|errors?|outcomes?|statuses?|findings?|conclusions?|recommendations?|reports?|summaries?|records?|observations?)';
+const TASK_CONSUMER_VERBS =
+  '(?:use|uses|using|consume|consumes|consumed|consuming|read|reads|reading|retrieve|retrieves|retrieved|retrieving|load|loads|loaded|loading|derive|derives|derived|deriving|calculate|calculates|calculated|calculating|compute|computes|computed|computing|compare|compares|compared|comparing|validate|validates|validated|validating|inspect|inspects|inspected|inspecting|review|reviews|reviewed|reviewing|check|checks|checked|checking|take|takes|taken|taking|synthesize|synthesizes|synthesized|synthesizing|combine|combines|combined|combining|integrate|integrates|integrated|integrating|incorporate|incorporates|incorporated|incorporating|aggregate|aggregates|aggregated|aggregating|based|built|drawing|starting|rooted)';
+const PRIOR_OUTPUT_REFERENCE = /\b(?:previous|prior|earlier|upstream|completed)\b[^.!?;\n]{0,80}\b(?:result|output|artifact|value|answer|calculation|product)\b|\b(?:initial|final)\b[^.!?;\n]{0,80}\b(?:calculated|computed|derived)\s+(?:result|output|artifact|value|answer|calculation|product)s?\b/i;
+
+const ACTION_TOOL_TARGET = /(?<![a-z0-9_-])(?:use|using|call|calling|invoke|invoking|execute|executing|run|running|attempt|attempting|request|requesting|retry|retrying)\s+(?:(?:the|registered|available|exact|specific|permitted|disallowed|unavailable|new|existing|only|special)\s+)*(?:tool\s+)?(?:[`"']([a-z_][a-z0-9_-]{0,119})[`"']|([a-z_][a-z0-9_-]{0,119}))(?=\s+(?:tool|action|with|on|for|to|once|twice|exactly)\b|[.,;:!?]|$)/gi;
+const NAMED_TOOL_ACTION = /\b([a-z_][a-z0-9_-]{0,119})\s+tool\s+(?:to|for)\s+(?:calculate|compute|derive|search|retrieve|fetch|read|write|create|update|delete|analyze|validate|inspect|review|compare|convert|format|summarize|translate|generate|execute|run|send|query|look up)\b/gi;
+const GENERIC_TOOL_TOKENS = new Set([
+  'a',
+  'an',
+  'actual',
+  'agent',
+  'allowed',
+  'answer',
+  'any',
+  'artifact',
+  'available',
+  'around',
+  'child',
+  'data',
+  'deficient',
+  'disallowed',
+  'error',
+  'evidence',
+  'exact',
+  'exactly',
+  'failure',
+  'failed',
+  'fails',
+  'input',
+  'instruction',
+  'instructions',
+  'missing',
+  'new',
+  'once',
+  'only',
+  'output',
+  'outputs',
+  'parent',
+  'policy',
+  'raw',
+  'receipt',
+  'receipts',
+  'registered',
+  'request',
+  'response',
+  'result',
+  'results',
+  'review',
+  'specific',
+  'succeeds',
+  'success',
+  'successful',
+  'task',
+  'that',
+  'the',
+  'this',
+  'tool',
+  'twice',
+  'value',
+  'work',
+]);
+
+export function taskOutputReferences(instructions: string, taskIds: string[]): Set<string> {
+  const referencedTaskIds = new Set<string>();
+  const taskIdAlternation = [...taskIds]
+    .sort((left, right) => right.length - left.length)
+    .map((taskId) => taskId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('|');
+  for (const taskId of taskIds) {
+    const escapedId = taskId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const taskReference = `(?:task\\s+)?${escapedId}`;
+    const patterns = [
+      new RegExp(
+        `\\b${TASK_CONSUMER_VERBS}\\b[^.!?;\\n]{0,240}\\b${TASK_OUTPUT_TERMS}\\b[^.!?;\\n]{0,80}\\b(?:from|of|produced by|provided by)\\s+${taskReference}\\b`,
+        'gi',
+      ),
+      new RegExp(`\\b${TASK_CONSUMER_VERBS}\\b[^.!?;\\n]{0,120}\\b${taskReference}\\b[^.!?;\\n]{0,60}\\b${TASK_OUTPUT_TERMS}\\b`, 'gi'),
+      new RegExp(`\\b(?:verify|review|check|inspect|validate)\\b[^.!?;\\n]{0,80}\\b${taskReference}\\b[^.!?;\\n]{0,80}\\b${TASK_OUTPUT_TERMS}\\b`, 'gi'),
+      new RegExp(`\\b(?:following|after|upon|once|when)\\b[^.!?;\\n]{0,80}\\b(?:failure|error|outcome|status)\\b[^.!?;\\n]{0,40}\\b${taskReference}\\b`, 'gi'),
+    ];
+    for (const pattern of patterns) {
+      for (const match of instructions.matchAll(pattern)) {
+        if (!isNegatedActionAt(instructions, match.index ?? 0)) referencedTaskIds.add(taskId);
+      }
+    }
+  }
+  if (taskIdAlternation) {
+    const listedTaskOutputs = new RegExp(
+      `\\b${TASK_CONSUMER_VERBS}\\b[^.!?;\\n]{0,240}\\b${TASK_OUTPUT_TERMS}\\b[^.!?;\\n]{0,80}\\b(?:from|of|produced by|provided by|generated by|recorded by|returned by)\\s+(?:(?:tasks?)\\s+)?(?:${taskIdAlternation})(?:(?:\\s*,\\s*(?:(?:and|or)\\s+)?|\\s+(?:and|or)\\s+)(?:(?:tasks?)\\s+)?(?:${taskIdAlternation}))*`,
+      'gi',
+    );
+    for (const match of instructions.matchAll(listedTaskOutputs)) {
+      if (isNegatedActionAt(instructions, match.index ?? 0)) continue;
+      for (const taskId of taskIds) {
+        if (containsIdentifier(match[0], taskId)) referencedTaskIds.add(taskId);
+      }
+    }
+  }
+  return referencedTaskIds;
+}
+
+export function hasPositivePriorOutputReference(instructions: string) {
+  return instructions.split(/[.!?;,\n]+|\b(?:but|while|then)\b/i).some((clause) => {
+    const match = PRIOR_OUTPUT_REFERENCE.exec(clause);
+    return (
+      Boolean(match) &&
+      !/\b(?:do not|don't|never|avoid|without)\b[^.!?;\n]{0,60}\b(?:use|consume|read|retrieve|load|derive|calculate|compute|compare|validate|inspect|review|check|take)\b/i.test(
+        clause.slice(0, match?.index ?? 0),
+      )
+    );
+  });
+}
+
+export function explicitToolIds(instructions: string, taskIds: Set<string>): Set<string> {
+  const toolIds = new Set<string>();
+  const segments = instructions.split(/[.!?;,\n]+|\b(?:but|while|then)\b/i);
+  for (const segment of segments) {
+    const candidates: { toolId: string; index: number }[] = [];
+    for (const match of segment.matchAll(ACTION_TOOL_TARGET)) {
+      candidates.push({ toolId: (match[1] || match[2] || '').toLowerCase(), index: match.index ?? 0 });
+    }
+    for (const match of segment.matchAll(NAMED_TOOL_ACTION)) {
+      const toolId = match[1].toLowerCase();
+      candidates.push({ toolId, index: (match.index ?? 0) + match[0].indexOf(match[1]) });
+    }
+    for (const candidate of candidates) {
+      if (!candidate.toolId || isNegatedActionAt(segment, candidate.index)) continue;
+      if (GENERIC_TOOL_TOKENS.has(candidate.toolId) || taskIds.has(candidate.toolId)) continue;
+      const instructionPrefix = segment.slice(0, candidate.index);
+      const lastClauseBoundary = Math.max(instructionPrefix.lastIndexOf(':'), instructionPrefix.lastIndexOf(','));
+      const recipientContext = instructionPrefix.slice(lastClauseBoundary + 1);
+      if (/\b(?:child\s+agent|sub[- ]?agent|subagent)\b/i.test(recipientContext)) continue;
+      toolIds.add(candidate.toolId);
+    }
+  }
+  return toolIds;
+}
+
+export function explicitlyRequiresDelegation(instructions: string) {
+  return instructions.split(/[.!?;\n]+/).some((segment: any) => {
+    if (
+      /\b(?:do not|don't|never|avoid|without)\s+(?:delegate|delegating|delegation)\b/i.test(segment) ||
+      /\b(?:do not|don't|never|avoid|without)\s+(?:use|call|invoke|execute|run)\s+__delegate\b/i.test(segment)
+    )
+      return false;
+    return (
+      (/\b(?:delegate|delegating|delegation)\b/i.test(segment) || containsIdentifier(segment, '__delegate')) &&
+      /\b(?:child\s+agent|sub[- ]?agent|subagent)\b/i.test(segment)
+    );
+  });
+}
+
+export function isHumanAgentRole(agentRole: string): boolean {
+  const normalizedRole = agentRole
+    .trim()
+    .toLowerCase()
+    .replace(/[-_]+/g, ' ')
+    .replace(/\s+/g, ' ');
+  return /^(human|user|person|requester|customer)(\s+(approver|reviewer|operator|decision maker|in the loop))?$/.test(
+    normalizedRole,
+  );
+}
+
+export function missionTaskActionIssues(
+  task: Pick<Task, 'systemPrompt' | 'requiredActions'>,
+  taskPath = 'task',
+  allTaskIds = new Set<string>(),
+) {
+  // The planner defines WHAT must be done, not HOW. Tool IDs are a runtime
+  // concern; validating them here only blocks plans and aborts missions that
+  // the runtime could otherwise remediate. Delegation and receipt contracts
+  // are enforced at execution time, not in the plan.
+  void taskPath;
+  void allTaskIds;
+  return [];
+}
+
+function looseArtifactPattern(artifactName: string): RegExp | null {
+  const parts = artifactName.split(/[^a-z0-9]+/i).filter((part) => part.length > 0);
+  if (parts.length === 0) return null;
+  if (parts.join('').length < 4) return null;
+  const source = parts
+    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+    .join('[^a-z0-9]{0,3}');
+  return new RegExp(source, 'i');
+}
+
+export function namesProducerArtifact(
+  instructions: string,
+  dependencyId: string,
+  producerArtifactsByTaskId?: Map<string, string[]>,
+) {
+  if (!producerArtifactsByTaskId) return false;
+  const artifacts = producerArtifactsByTaskId.get(dependencyId.toLowerCase()) || [];
+  for (const artifact of artifacts) {
+    const pattern = looseArtifactPattern(artifact);
+    if (!pattern) continue;
+    const match = pattern.exec(instructions);
+    if (match && !isNegatedActionAt(instructions, match.index)) return true;
+  }
+  return false;
+}
+
+export function missionTaskDependencyIssues(
+  task: Task,
+  allTaskIds: Set<string>,
+  taskPath = `task "${task.id}"`,
+  producerArtifactsByTaskId?: Map<string, string[]>,
+) {
+  const issues: string[] = [];
+  const instructions = task.systemPrompt;
+  const dependencies = task.dependsOnTaskIds || [];
+  const consumedTaskIds = taskOutputReferences(instructions, [...allTaskIds]);
+  if (hasPositivePriorOutputReference(instructions) && dependencies.length === 0 && consumedTaskIds.size === 0) {
+    issues.push(`${taskPath} refers to a prior task result or value but has no dependency on its producer task`);
+  }
+  for (const dependencyId of dependencies) {
+    if (!containsIdentifier(instructions, dependencyId)) {
+      issues.push(`${taskPath} depends on "${dependencyId}" but systemPrompt must name that producer task and its consumed output`);
+    } else if (
+      !consumedTaskIds.has(dependencyId) &&
+      !namesProducerArtifact(instructions, dependencyId, producerArtifactsByTaskId)
+    ) {
+      issues.push(`${taskPath} depends on "${dependencyId}" but systemPrompt must identify the output consumed from that producer task`);
+    }
+  }
+  for (const referencedTaskId of consumedTaskIds) {
+    if (!dependencies.includes(referencedTaskId)) {
+      issues.push(`${taskPath} consumes output from task "${referencedTaskId}" but does not declare it in dependsOnTaskIds`);
+    }
+  }
+  return issues;
+}

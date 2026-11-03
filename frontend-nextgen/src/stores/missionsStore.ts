@@ -42,7 +42,6 @@ export interface MissionDetail {
       status?: string;
       phaseId?: string;
       reason?: string;
-      resumeSupported?: boolean;
       pendingInteraction?: {
         kind: 'user_input' | 'mcp_permission';
         phaseId: string;
@@ -138,6 +137,9 @@ const STATUS_EVENT_MAP: Record<string, string> = {
   mission_started: 'running',
   mission_paused: 'paused',
   mission_resumed: 'running',
+  question_asked: 'awaiting_review',
+  permission_required: 'awaiting_review',
+  user_input_resolved: 'running',
   mission_completed: 'completed',
   mission_failed: 'failed',
   mission_canceled: 'canceled',
@@ -158,6 +160,9 @@ const LIFECYCLE_EVENTS = new Set([
   'phase_rejected',
   'approval_approved',
   'approval_rejected',
+  'question_asked',
+  'permission_required',
+  'user_input_resolved',
   'task_completed',
   'task_failed',
 ]);
@@ -244,14 +249,29 @@ function processFeedEvents(newEvents: FeedEvent[]) {
     if (!eventMissionId) continue;
 
     const detailKey = findDetailKey(eventMissionId);
-    if (!detailKey) continue;
+    if (!detailKey) {
+      if (evt.type === 'question_asked' || evt.type === 'permission_required') {
+        const workflowId = eventMissionId.startsWith('mission-')
+          ? eventMissionId
+          : `mission-${eventMissionId}`;
+        void useMissionsStore.getState().fetchMissionDetail(workflowId);
+      }
+      continue;
+    }
 
     const lastRefresh = lastRefreshByMission.get(detailKey) || 0;
-    if (evt.type !== 'approval_requested' && now - lastRefresh < REFRESH_DEBOUNCE) continue;
+    const isInteractionEvent = evt.type === 'question_asked'
+      || evt.type === 'permission_required'
+      || evt.type === 'user_input_resolved';
+    if (
+      evt.type !== 'approval_requested'
+      && !isInteractionEvent
+      && now - lastRefresh < REFRESH_DEBOUNCE
+    ) continue;
     lastRefreshByMission.set(detailKey, now);
 
     const loading = store.detailLoading[detailKey];
-    if (loading) continue;
+    if (loading && !isInteractionEvent) continue;
 
     void useMissionsStore.getState().refreshDetail(detailKey);
   }
@@ -365,6 +385,11 @@ export const useMissionsStore = create<MissionsState>((set, get) => ({
         missionsLoading: false,
       });
       useFeedStore.getState().ensureConnected();
+      for (const mission of missions) {
+        if (mission.status === 'awaiting_review' && !get().details[mission.workflowId]) {
+          void get().fetchMissionDetail(mission.workflowId);
+        }
+      }
     } catch (err) {
       set({
         missionsError:

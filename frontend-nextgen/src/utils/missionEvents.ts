@@ -355,7 +355,7 @@ export function buildMissionEvents(options: {
   } else if (detail?.status === 'incomplete') {
     const completedAt = toTimestamp(detail.completedAt) ?? startedAt + 1000;
     if (!hasLive(['mission_incomplete'])) {
-      const gaps = detail.output?.outputs?.gaps || [];
+      const gaps = Array.from(new Set(detail.output?.outputs?.gaps || []));
       const reason = gaps.join('; ');
       derived.push({
         id: `derived-mission-incomplete-${completedAt}`,

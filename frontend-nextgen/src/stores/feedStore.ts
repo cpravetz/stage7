@@ -26,6 +26,9 @@ export type FeedEventType =
   | 'approval_requested'
   | 'approval_approved'
   | 'approval_rejected'
+  | 'question_asked'
+  | 'permission_required'
+  | 'user_input_resolved'
   | 'task_started'
   | 'task_completed'
   | 'task_failed'
@@ -150,6 +153,12 @@ export function normalize(raw: unknown): FeedEvent | null {
         message = `Approval requested: ${(data.phaseName as string) || (data.phaseId as string) || ''}`;
         if (data.question) message += ` — ${(data.question as string)}`;
         break;
+      case 'question_asked':
+        message = `Agent needs your input${typeof data.question === 'string' ? `: ${data.question.replace(/^\s*\[secret:[a-z0-9_-]+\]\s*/i, '')}` : ''}`;
+        break;
+      case 'permission_required':
+        message = `Agent requests permission${typeof data.permission === 'object' && data.permission && typeof (data.permission as Record<string, unknown>).toolName === 'string' ? ` to use ${(data.permission as Record<string, unknown>).toolName}` : ''}`;
+        break;
       case 'approval_approved':
         message = `Phase approved: ${(data.phaseId as string) || ''}`;
         break;
@@ -194,7 +203,7 @@ export function normalize(raw: unknown): FeedEvent | null {
         const reason = typeof data.reason === 'string'
           ? data.reason
           : Array.isArray(data.gaps)
-            ? data.gaps.filter((gap): gap is string => typeof gap === 'string').join('; ')
+            ? Array.from(new Set(data.gaps.filter((gap): gap is string => typeof gap === 'string'))).join('; ')
             : '';
         message = reason
           ? `Mission incomplete: ${reason} — retry this mission to address the unmet requirements.`

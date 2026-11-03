@@ -152,6 +152,7 @@ const MAX_BRAIN_REQUEST_BYTES = 192 * 1024
 const MAX_AGENT_CHECKPOINT_BYTES = 512 * 1024
 const MAX_ACTION_RESULT_CHARS = 12_000
 const MAX_COMPLETION_TOKENS_PER_CALL = 8_192
+const DEFAULT_COMPLETION_TOKENS_PER_CALL = 2_048
 const DEFAULT_BRAIN_PROVIDER_ATTEMPT_TIMEOUT_MS = 310_000
 const DEFAULT_BRAIN_COMPLETION_DEADLINE_MS = 900_000
 const BRAIN_RESPONSE_GRACE_MS = 30_000
@@ -195,6 +196,7 @@ function describeTools(tools: ToolDescriptor[]): Array<{
   name: string;
   description: string;
   type: string;
+  capabilities: string[];
   inputs: string;
   inputSchema: unknown;
   configSchema: unknown;
@@ -219,6 +221,9 @@ function describeTools(tools: ToolDescriptor[]): Array<{
       name,
       description: description.slice(0, MAX_TOOL_DESCRIPTION_LENGTH),
       type,
+      capabilities: Array.isArray(manifest?.capabilities)
+        ? manifest.capabilities.filter((value): value is string => typeof value === 'string').slice(0, 20)
+        : [],
       inputs,
       inputSchema: boundSchemaDescriptions(inputSchema || { type: 'object', properties: {} }),
       configSchema: boundSchemaDescriptions(configSchema || asRecord(manifest?.configSchema) || { type: 'object', properties: {} }),
@@ -254,7 +259,8 @@ function compactHistoryForBrainRequest(
   return [first, ...rest.slice(rest.length - keepCount)]
 }
 
-function isToolFailurePayload(value: unknown): boolean {
+function isToolFailurePayload(value: unknown, depth = 0): boolean {
+  if (depth > 4) return false
   let payload = asRecord(value)
   if (!payload && typeof value === 'string') {
     try {
@@ -264,10 +270,12 @@ function isToolFailurePayload(value: unknown): boolean {
     }
   }
   if (!payload) return false
-  return payload.success === false
+  const failed = payload.success === false
     || payload.isError === true
     || payload.status === 'failed'
     || (typeof payload.error === 'string' && payload.error.trim().length > 0)
+  if (failed) return true
+  return ['output', 'data', 'result'].some((key) => isToolFailurePayload(payload[key], depth + 1))
 }
 
 function parseActionReceipts(value: unknown): AgentActionReceipt[] {
@@ -342,7 +350,9 @@ function missingRequiredActions(
   const remainingReceipts = [...receipts]
   return requiredActions.filter((required) => {
     const matchingIndex = remainingReceipts.findIndex((receipt) =>
-      (receipt.toolId === required.toolId
+      ((required.toolId === '__external_action__'
+        ? ![LIST_TOOLS_ACTION, CREATE_TOOL_ACTION, DELEGATE_ACTION].includes(receipt.toolId)
+        : receipt.toolId === required.toolId)
         || (receipt.toolId !== CREATE_TOOL_ACTION
           && required.outcome === 'success'
           && receipt.outcome === 'success'
@@ -355,8 +365,29 @@ function missingRequiredActions(
   })
 }
 
-function requiredActionCorrection(actions: RequiredAction[]): string {
-  return `Before finalizing, execute each required action and provide a matching action receipt with its expected outcome: ${JSON.stringify(actions)}. For outcome "denied", make the actual action request even when the tool is absent from your available-tool list; only an explicit policy or catalog denial receipt satisfies that requirement. Never claim an action occurred without its receipt. If a required action needs a missing user-provided value or credential, do not guess or repeat the failed call; pause with __ASK_USER__:{"question":"..."} and prefix secret questions with [secret:<key>]. If an error reports a missing runtime module or package, do not try to install it in the mission environment or treat it as a credential; the runtime attempts one alternative-capability lookup automatically when policy and action budget allow. If unavailable, use another visible capability or report the exact blocker.`
+const NON_EXTERNAL_ACTION_TOOL_IDS = new Set([
+  LIST_TOOLS_ACTION,
+  CREATE_TOOL_ACTION,
+  DELEGATE_ACTION,
+]);
+
+function hasExternalActionReceipt(receipts: AgentActionReceipt[]): boolean {
+  return receipts.some((receipt) =>
+    receipt.outcome === 'success'
+    && !receipt.isError
+    && !NON_EXTERNAL_ACTION_TOOL_IDS.has(receipt.toolId)
+    && receipt.toolId !== '__external_action__',
+  )
+}
+
+function requiredActionCorrection(
+  actions: RequiredAction[],
+  requiresExternalAction = false,
+): string {
+  const externalAction = requiresExternalAction
+    ? 'The task also requires a verified external operation. Tool discovery, tool creation, delegation, drafting, or proposed steps are not evidence; use a registered capability that performs the requested operation and rely on its actual successful result.'
+    : '';
+  return `Before finalizing, execute each required action and provide a matching action receipt with its expected outcome: ${JSON.stringify(actions)}. ${externalAction} For outcome "denied", make the actual action request even when the tool is absent from your available-tool list; only an explicit policy or catalog denial receipt satisfies that requirement. Never claim an action occurred without its receipt. If a required value or credential is unavailable, first check authorized existing configuration and alternatives. Do not guess or repeat a failed call. If no safe alternative can complete the user's request, ask one focused question for the exact missing value using __ASK_USER__:{"question":"..."}; mark secret values with [secret:<key>] so the application can save them to Vault without exposing the Agent. If an error reports a missing runtime module or package, do not try to install it in the mission environment or treat it as a credential; the runtime attempts one alternative-capability lookup automatically when policy and action budget allow.`;
 }
 
 function parseExpectedArtifacts(value: unknown): string[] {
@@ -639,9 +670,21 @@ export class AgentExecutor {
     const taskInput = asRecord(task.input) || {}
     const taskContext = asRecord(taskInput.context) || {}
     const expectedArtifacts = parseExpectedArtifacts(taskContext.expectedArtifacts)
-    const requiredActions = parseRequiredActions(taskContext.requiredActions)
+    const rawRequiredActions = parseRequiredActions(taskContext.requiredActions)
+    const legacyExternalAction = rawRequiredActions.some((action) => action.toolId === '__external_action__')
+    const requiredActions = rawRequiredActions.filter((action) => action.toolId !== '__external_action__')
+    const requiresExternalAction = taskContext.requiresExternalAction === true || legacyExternalAction
     const prompt = typeof taskInput.prompt === 'string' ? taskInput.prompt : JSON.stringify(taskInput)
-    const { agentLearnings: rawAgentLearnings, ...publicTaskContext } = taskContext
+    const {
+      agentLearnings: rawAgentLearnings,
+      requiredActions: _unfilteredRequiredActions,
+      ...publicTaskContextFields
+    } = taskContext
+    const publicTaskContext = {
+      ...publicTaskContextFields,
+      requiredActions,
+      ...(requiresExternalAction ? { requiresExternalAction: true } : {}),
+    }
     const agentLearnings = Array.isArray(rawAgentLearnings)
       ? rawAgentLearnings.slice(0, 5).flatMap((value) => {
         const learning = asRecord(value)
@@ -776,8 +819,9 @@ export class AgentExecutor {
 
     if (finalOutput !== undefined) {
       const missingActions = missingRequiredActions(requiredActions, actionReceipts)
+      const missingExternalAction = requiresExternalAction && !hasExternalActionReceipt(actionReceipts)
       const missingArtifacts = missingExpectedArtifactSections(finalOutput, expectedArtifacts)
-      if (missingActions.length === 0 && missingArtifacts.length === 0) {
+      if (missingActions.length === 0 && !missingExternalAction && missingArtifacts.length === 0) {
         return {
           output: finalOutput,
           tokensUsed,
@@ -796,6 +840,13 @@ export class AgentExecutor {
           context.missionId,
         )
       }
+      if (missingExternalAction) {
+        await this.reportBrainComplaint(
+          lastRequestId,
+          'Agent response validation failed: no successful external-operation receipt was recorded.',
+          context.missionId,
+        )
+      }
       if (missingArtifacts.length > 0) {
         await this.reportBrainComplaint(
           lastRequestId,
@@ -806,7 +857,9 @@ export class AgentExecutor {
       history.push({
         role: 'user',
         content: [
-          ...(missingActions.length > 0 ? [requiredActionCorrection(missingActions)] : []),
+          ...(missingActions.length > 0 || missingExternalAction
+            ? [requiredActionCorrection(missingActions, missingExternalAction)]
+            : []),
           ...(missingArtifacts.length > 0 ? [expectedArtifactCorrection(missingArtifacts)] : []),
         ].join('\n\n'),
       })
@@ -851,6 +904,7 @@ export class AgentExecutor {
         definition.systemPrompt,
         tools,
         requiredActions,
+        requiresExternalAction,
         context.delegationDepth,
         policy,
         brainCallLimit - brainCalls,
@@ -863,7 +917,7 @@ export class AgentExecutor {
       // Brain request body stays within service limits and the model has a bounded budget.
       const maxTokens = Math.min(
         policy.maxCompletionTokensPerCall === Number.MAX_SAFE_INTEGER
-          ? MAX_COMPLETION_TOKENS_PER_CALL
+          ? DEFAULT_COMPLETION_TOKENS_PER_CALL
           : policy.maxCompletionTokensPerCall,
         remainingCompletionTokens === Number.MAX_SAFE_INTEGER
           ? MAX_COMPLETION_TOKENS_PER_CALL
@@ -953,7 +1007,6 @@ export class AgentExecutor {
       }
       if (!action) {
         if (content.startsWith('__ASK_USER__:')) {
-          finalOutput = content
           if (saveCheckpoint) await saveCheckpoint()
           return {
             output: content,
@@ -976,7 +1029,18 @@ export class AgentExecutor {
           if (history.some((message) => message.role === 'user' && message.content === correction)) {
             const reason = 'Agent response validation failed: Brain returned another non-executable tool-action response after receiving a format correction.'
             await this.reportBrainComplaint(completion.requestId, reason, context.missionId)
-            throw new Error(reason)
+            finalOutput = content
+            if (saveCheckpoint) await saveCheckpoint()
+            return {
+              output: finalOutput,
+              tokensUsed,
+              toolCalls,
+              brainCalls,
+              completionTokensReserved,
+              actionReceipts,
+              requestId: lastRequestId,
+              reasoning,
+            }
           }
           history.push({
             role: 'user',
@@ -986,8 +1050,9 @@ export class AgentExecutor {
           continue
         }
         const missingActions = missingRequiredActions(requiredActions, actionReceipts)
+        const missingExternalAction = requiresExternalAction && !hasExternalActionReceipt(actionReceipts)
         const missingArtifacts = missingExpectedArtifactSections(content, expectedArtifacts)
-        if (missingActions.length > 0 || missingArtifacts.length > 0) {
+        if (missingActions.length > 0 || missingExternalAction || missingArtifacts.length > 0) {
           const blockedRequiredAction = missingActions.some((required) =>
             actionReceipts.some((receipt) =>
               receipt.toolId === required.toolId
@@ -1016,6 +1081,13 @@ export class AgentExecutor {
               context.missionId,
             )
           }
+          if (missingExternalAction) {
+            await this.reportBrainComplaint(
+              completion.requestId,
+              'Agent response validation failed: no successful external-operation receipt was recorded.',
+              context.missionId,
+            )
+          }
           if (missingArtifacts.length > 0) {
             await this.reportBrainComplaint(
               completion.requestId,
@@ -1024,16 +1096,20 @@ export class AgentExecutor {
             )
           }
           const correction = [
-            ...(missingActions.length > 0 ? [requiredActionCorrection(missingActions)] : []),
+            ...(missingActions.length > 0 || missingExternalAction
+              ? [requiredActionCorrection(missingActions, missingExternalAction)]
+              : []),
             ...(missingArtifacts.length > 0 ? [expectedArtifactCorrection(missingArtifacts)] : []),
           ].join('\n\n')
           if (history.some((message) => message.role === 'user' && message.content === correction)) {
             const reason = `Agent response validation failed after one correction: still missing ${[
               ...missingActions.map((required) => `required action receipt ${required.toolId}:${required.outcome}`),
+              ...(missingExternalAction ? ['verified external-operation receipt'] : []),
               ...missingArtifacts.map((artifact) => `artifact section "${artifact}"`),
             ].join(' and ')}.`
             await this.reportBrainComplaint(completion.requestId, reason, context.missionId)
-            throw new Error(reason)
+            finalOutput = `Task output is incomplete: ${reason} The phase reviewer should evaluate this evidence and add a focused recovery task.`
+            break
           }
           history.push({
             role: 'user',
@@ -1054,6 +1130,17 @@ export class AgentExecutor {
           requestId: lastRequestId,
           reasoning,
         }
+      }
+      if (
+        action.tool === DELEGATE_ACTION
+        && (delegations >= policy.maxDelegations || context.delegationDepth >= this.maxDelegationDepth)
+      ) {
+        history.push({
+          role: 'user',
+          content: 'The delegation budget exhausted for this execution. Do not delegate; complete the task directly or explain the blocker.',
+        })
+        if (saveCheckpoint) await saveCheckpoint()
+        continue
       }
       const alreadySatisfiedRequiredAction = requiredActions.some(
         (required) => required.toolId === action.tool && required.outcome === 'success',
@@ -1133,8 +1220,8 @@ export class AgentExecutor {
             fallbackForToolId: failedTool?.id || action.tool,
             ...(resolution.resolvedToolId ? { resolvedToolId: resolution.resolvedToolId } : {}),
           })
-          if (resolution.outcome === 'permission_required') {
-            finalOutput = resolution.content
+          if (resolution.outcome === 'permission_required' || resolution.outcome === 'question_asked') {
+            if (resolution.outcome !== 'question_asked') finalOutput = resolution.content
             if (saveCheckpoint) await saveCheckpoint()
             return {
               output: resolution.content,
@@ -1162,7 +1249,8 @@ export class AgentExecutor {
             ? ` Automatic capability resolution failed: ${resolution.content}`
             : ' Automatic capability resolution did not register a usable tool.'
           await this.reportBrainComplaint(completion.requestId, `${reason}.${resolutionFailure}`, context.missionId)
-          throw new Error(`${reason}.${resolutionFailure}`)
+          finalOutput = `${reason}.${resolutionFailure} The phase reviewer should use this blocker to regroup the task.`
+          break
         }
         const resolutionReceipt = capabilityResolutionAttempted
           ? [...actionReceipts].reverse().find((receipt) =>
@@ -1184,7 +1272,8 @@ export class AgentExecutor {
           : ''
         const detailedReason = `${reason}.${failureDetail}${resolutionDetail}${blockedResolutionDetail}`
         await this.reportBrainComplaint(completion.requestId, detailedReason, context.missionId)
-        throw new Error(detailedReason)
+        finalOutput = `${detailedReason} The phase reviewer should use this blocker to regroup the task.`
+        break
       }
       if (priorActionKeys.has(actionKey)) {
         const previousReceipt = priorActionReceipts.find((receipt) => receipt.actionKey === actionKey)
@@ -1217,7 +1306,8 @@ export class AgentExecutor {
         const reason = `Tool '${selectedToolId}' already failed and generic capability resolution was already attempted. Original failure: ${earlierToolFailure.content.slice(0, 400)} Resolution result: ${earlierResolution.content.slice(0, 400)}`
         if (alreadyBlocked) {
           await this.reportBrainComplaint(completion.requestId, reason, context.missionId)
-          throw new Error(reason)
+          finalOutput = `${reason} The phase reviewer should use this blocker to regroup the task.`
+          break
         }
         actionReceipts.push({
           toolId: action.tool,
@@ -1239,7 +1329,8 @@ export class AgentExecutor {
       if (toolCalls >= policy.maxActions) {
         const reason = `Agent ${definition.id} exhausted its ${policy.maxActions}-action execution budget before executing '${action.tool}'.`
         await this.reportBrainComplaint(completion.requestId, reason, context.missionId)
-        throw new Error(reason)
+        finalOutput = `${reason} The phase reviewer should use this blocker to regroup the task.`
+        break
       }
 
       toolCalls++
@@ -1300,7 +1391,7 @@ export class AgentExecutor {
       ) {
         const taskGoal = typeof task.input.prompt === 'string' ? task.input.prompt.trim().slice(0, 1_000) : ''
         const capabilitySource = failedTool
-          ? `${failedTool.name} ${failedTool.description}`.slice(0, 1_500)
+          ? `${taskGoal} ${failedTool.name} ${failedTool.description}`.slice(0, 1_500)
           : capabilityDescription
         const capability = capabilitySource
           .match(/[a-z0-9]+/gi)
@@ -1347,8 +1438,8 @@ export class AgentExecutor {
           fallbackToolIds.set(resolution.resolvedToolId, failedTool?.id || action.tool)
         }
         priorActionKeys.add(resolutionActionKey)
-        if (resolution.outcome === 'permission_required') {
-          finalOutput = resolution.content
+        if (resolution.outcome === 'permission_required' || resolution.outcome === 'question_asked') {
+          if (resolution.outcome !== 'question_asked') finalOutput = resolution.content
           if (saveCheckpoint) await saveCheckpoint()
           return {
             output: resolution.content,
@@ -1368,22 +1459,8 @@ export class AgentExecutor {
             : `The original tool was unavailable or failed. ${resolution.content}`,
         }
       }
-      if (result.outcome === 'permission_required') {
-        finalOutput = result.content
-        if (saveCheckpoint) await saveCheckpoint()
-        return {
-          output: result.content,
-          tokensUsed,
-          toolCalls,
-          brainCalls,
-          completionTokensReserved,
-          actionReceipts,
-          requestId: lastRequestId,
-          reasoning,
-        }
-      }
-      if (result.outcome === 'question_asked') {
-        finalOutput = result.content
+      if (result.outcome === 'permission_required' || result.outcome === 'question_asked') {
+        if (result.outcome !== 'question_asked') finalOutput = result.content
         if (saveCheckpoint) await saveCheckpoint()
         return {
           output: result.content,
@@ -1406,28 +1483,35 @@ export class AgentExecutor {
         {
           role: 'user',
           content: result.isError
-            ? `${ignoredNarration}Action failed: ${boundedActionResult(result.content)}\nIf this is missing user-provided configuration or a credential, ask the user with __ASK_USER__ (use [secret:<key>] for secrets). If this is a missing runtime module, do not attempt installation; the runtime attempts one alternative-capability lookup when policy and action budget allow. If unavailable, use another visible capability or explain the exact blocker. Otherwise choose a safe correction or explain the exact blocker.`
+            ? `${ignoredNarration}Action failed: ${boundedActionResult(result.content)}\nDo not guess or repeat the failed call. First check authorized existing configuration and alternatives. If no safe alternative can complete the user's request, ask one focused question for the exact missing value using __ASK_USER__:{"question":"..."}; mark secret values with [secret:<key>] so the application can save them to Vault without exposing them to the Agent. If this is a missing runtime module, do not attempt installation; the runtime attempts one alternative-capability lookup when policy and action budget allow.`
             : `${ignoredNarration}Action result: ${boundedActionResult(result.content)}\nContinue toward the task goal. If complete, return the final answer as plain text.`,
         },
       )
       if (saveCheckpoint) await saveCheckpoint()
     }
 
-    const missingActions = missingRequiredActions(requiredActions, actionReceipts)
-    const missingArtifacts = finalOutput === undefined
-      ? expectedArtifacts
-      : missingExpectedArtifactSections(finalOutput, expectedArtifacts)
-    const unmetRequirements = [
-      ...missingActions.map((required) => `action ${required.toolId}:${required.outcome}`),
-      ...missingArtifacts.map((artifact) => `artifact section "${artifact}"`),
-      ...(finalOutput === undefined && missingActions.length === 0 && missingArtifacts.length === 0
-        ? ['a final task response']
-        : []),
-    ]
-    throw new Error(
-      `Agent ${definition.id} exhausted its ${brainCallLimit}-call Brain execution budget without completing the task`
-      + (unmetRequirements.length > 0 ? `; unmet requirements: ${unmetRequirements.join(', ')}` : ''),
+    const output = finalOutput
+      || `Agent ${definition.id} exhausted its ${brainCallLimit}-call Brain execution budget before completing the task. The phase reviewer should use this evidence to regroup.`
+    logger.warn(
+      {
+        agentId: definition.id,
+        missionId: context.missionId,
+        missingActions: missingRequiredActions(requiredActions, actionReceipts).map((action) => `${action.toolId}:${action.outcome}`),
+        missingExternalAction: requiresExternalAction && !hasExternalActionReceipt(actionReceipts),
+        missingArtifacts: missingExpectedArtifactSections(output, expectedArtifacts),
+      },
+      'Returning an incomplete task result for phase-level recovery instead of failing the mission',
     )
+    return {
+      output,
+      tokensUsed,
+      toolCalls,
+      brainCalls,
+      completionTokensReserved,
+      actionReceipts,
+      requestId: lastRequestId,
+      reasoning,
+    }
   }
 
   private resolvePolicy(policy?: AgentExecutionPolicy): AgentExecutionPolicy {
@@ -1466,6 +1550,7 @@ export class AgentExecutor {
     base: string,
     tools: ToolDescriptor[],
     requiredActions: RequiredAction[],
+    requiresExternalAction: boolean,
     delegationDepth: number,
     policy: AgentExecutionPolicy,
     remainingBrainCalls: number,
@@ -1483,9 +1568,8 @@ export class AgentExecutor {
       ? [
         'To execute a registered system tool, respond with exactly one raw JSON object: {"tool":"<tool-id>","args":{...}}. Never quote, fence, nest, or describe a tool action; only a sole JSON action object is executed. Do not claim an action succeeded until you receive its result.',
         `Available system tools (${toolPolicy.mode === 'allowlist' ? 'restricted to this Agent allowlist' : 'the live catalog; generated tools appear after registration'}): ${JSON.stringify(catalog)}`,
-        `To inspect the current visible tool catalog, respond with {"tool":"${LIST_TOOLS_ACTION}","args":{"query":"<capability>"}}. A query returns matching tool IDs, names, and short descriptions; omit it for a compact list of visible tool IDs.`,
-        'Use each tool’s full inputSchema, configSchema, and outputSchema when preparing arguments. For inputs marked "x-stage7-secret": true (or sensitive password fields), provide only the supplied vault:// reference; never ask an LLM to handle or echo the secret value. If a required value is unavailable in task inputs or prior task outputs, ask the user through the mission conversation instead of guessing. Never expose a vault:// reference in user-facing text.',
-        'To pause this mission for a missing user-provided value, return exactly __ASK_USER__:{"question":"..."} as your final response. For secrets, prefix the question text with [secret:<lowercase-key>] so the Mission Room saves the answer directly to Vault.',
+        `To inspect the current visible tool catalog, respond with {"tool":"${LIST_TOOLS_ACTION}","args":{"query":"<operation and input fields>"}}. Search by the requested capability and expected input fields, not by a guessed tool name. Results include matching schemas and are ranked by relevance; omit the query for a compact list of visible tool IDs.`,
+        'Use each tool’s full inputSchema, configSchema, and outputSchema when preparing arguments. For inputs marked "x-stage7-secret": true (or sensitive password fields), provide only an already-supplied vault:// reference; never ask an LLM to handle or echo the secret value. Never expose a vault:// reference in user-facing content. If required configuration or user input is genuinely unavailable, check authorized alternatives first, then ask one focused question using __ASK_USER__:{"question":"..."}; prefix secret questions with [secret:<key>] so the application can save the value to Vault without exposing it to you. Do not guess, ask for broad advice, or claim the task completed while blocked.',
         toolPolicy.mode === 'allowlist'
           ? 'Tool creation is disabled for this Agent. Request access to a registered tool if the allowed tools are insufficient.'
           : `If no available tool can satisfy a concrete capability need, ask ToolExecutor to resolve it with {"tool":"${CREATE_TOOL_ACTION}","args":{"description":"...","requirements":["..."]}}. Describe the capability and constraints, not implementation details. ToolExecutor checks registered native tools, discovers suitable MCP tools and handles their permission flow, then creates, validates, registers, and persists a reusable plugin only if no suitable tool can be used. Never write tool code yourself or claim resolution succeeded unless the returned tool is registered and available.`,
@@ -1503,10 +1587,13 @@ export class AgentExecutor {
       ...(requiredActions.length > 0
         ? [`Required action receipts before completion: ${JSON.stringify(requiredActions)}. Execute each required action and verify its actual result. For an expected denial, make the action request even if it is not listed among available tools.`]
         : []),
+      ...(requiresExternalAction
+        ? ['This task requires an actual external operation. Do not treat tool discovery, tool creation, delegation, drafting, or a proposed action as completion evidence. Use a registered tool whose schemas show it performs the requested operation, execute it with the task’s actual values, and rely on the returned result.']
+        : []),
       ...actionInstructions,
       delegation,
       'Treat each system-tool result as authoritative. Report the returned value rather than recalculating or replacing it, and never claim a tool succeeded unless its actual result supports that claim.',
-      'When a tool fails because its endpoint, provider, or credentials are not configured, do not guess values or repeat that tool. A missing credential response will pause the mission for user input; other failures may trigger one generic capability resolution attempt. If no safe path exists, return a concise explicit blocker naming the missing configuration.',
+      'Preserve every user-supplied literal (recipient, identifier, message, amount, and other requested value) exactly. Do not continue the conversation by inventing user turns or changing the request. When a tool fails because its endpoint, provider, permission, or credentials are not configured, do not guess values or repeat that tool. Check authorized alternatives first; if a specific missing value is still required, ask one focused question with __ASK_USER__:{"question":"..."} and prefix secret questions with [secret:<key>] so the application can save the value to Vault without exposing it to you.',
       'Generated tools that need user-provided secrets must mark those input properties with "x-stage7-secret": true, "format": "password", and "writeOnly": true. The tool receives the plaintext only during execution; generated acceptance tests must use non-secret fixtures and must never request or embed real credentials.',
       'Tool errors are evidence; do not claim success when an action failed. Stop after the task is complete or explain a blocker.',
     ].join('\n\n')
@@ -1679,19 +1766,34 @@ export class AgentExecutor {
     requestId?: string,
   ): Promise<ToolResult> {
     if (action.tool === LIST_TOOLS_ACTION) {
-      const query = typeof action.args.query === 'string' ? action.args.query.trim().toLocaleLowerCase() : ''
-      const queryTerms = query.split(/[^a-z0-9]+/).filter((term) => term.length > 1)
+      const query = typeof action.args.query === 'string'
+        ? action.args.query.trim().slice(0, 300).toLocaleLowerCase()
+        : ''
+      const queryTerms = [...new Set(query.split(/[^a-z0-9]+/).filter((term) => term.length > 1))]
+      const rankedTools = tools.map((tool) => {
+        const searchable = [
+          tool.id,
+          tool.name,
+          tool.description,
+          JSON.stringify(tool.manifest?.capabilities || ''),
+          JSON.stringify(tool.inputSchema || {}),
+          JSON.stringify(tool.configSchema || {}),
+          JSON.stringify(tool.outputSchema || {}),
+        ].join(' ').toLocaleLowerCase()
+        return {
+          tool,
+          score: queryTerms.reduce((score, term) => score + Number(searchable.includes(term)), 0),
+        }
+      })
       const matchingTools = queryTerms.length === 0
         ? tools
-        : tools.filter((tool) => {
-          const searchable = `${tool.id} ${tool.name} ${tool.description}`.toLocaleLowerCase()
-          return queryTerms.some((term) => searchable.includes(term))
-        })
+        : rankedTools
+          .filter(({ score }) => score > 0)
+          .sort((left, right) => right.score - left.score)
+          .map(({ tool }) => tool)
       const content = queryTerms.length === 0
         ? matchingTools.map((tool) => tool.id).join('\n')
-        : matchingTools.slice(0, 25).map((tool) =>
-          `${tool.id} | ${tool.name}: ${tool.description.slice(0, 160)}`,
-        ).join('\n')
+        : JSON.stringify(describeTools(matchingTools.slice(0, 8)))
       return {
         isError: false,
         content: content || (query ? 'No visible tools matched the requested query.' : 'No visible tools.'),
@@ -1762,33 +1864,23 @@ export class AgentExecutor {
         && Array.isArray(credentialRequest.missingCredentials)
       ) {
         const missingCredentials = credentialRequest.missingCredentials.filter(
-          (credential): credential is { key: string; label?: string; source?: { vaultSecretId?: string; envVar?: string; configKey?: string } } =>
+          (credential): credential is { key: string; label?: string; source?: { vaultSecretId?: string; envVar?: string; configKey?: string; sensitive?: boolean } } =>
             typeof credential?.key === 'string' && credential.key.trim().length > 0,
         )
         if (missingCredentials.length > 0) {
-          const requiresSecret = missingCredentials.some(
-            (credential) => Boolean(credential.source?.vaultSecretId || credential.source?.envVar),
-          )
-          const fields = missingCredentials.map((credential) =>
-            `${credential.label || credential.key} (key: ${credential.key})`,
-          )
-          const answerFormat = missingCredentials.length === 1
-            ? `Provide the value for ${fields[0]}.`
-            : `Provide a JSON object with a string value for each exact key: ${missingCredentials.map((credential) => `"${credential.key}"`).join(', ')}.`
-          const question = [
-            requiresSecret ? '[secret:tool-credentials] ' : '',
-            `${credentialRequest.toolName} needs user-provided configuration before it can run. ${answerFormat}`,
-          ].join('')
-          const safeRequest = {
-            executionId: credentialRequest.executionId,
-            toolId: credentialRequest.toolId,
-            toolName: credentialRequest.toolName,
-            missingCredentials: missingCredentials.map(({ key, label }) => ({ key, label: label || key })),
-          }
+          const question = `[secret:tool-credentials] Enter the required configuration for ${credentialRequest.toolName}: ${missingCredentials.map(({ label, key }) => label || key).join(', ')}. The value will be saved securely and supplied directly to the tool.`;
           return {
             isError: true,
             outcome: 'question_asked',
-            content: `__ASK_USER__:${JSON.stringify({ question, credentialRequest: safeRequest })}`,
+            content: `__ASK_USER__:${JSON.stringify({
+              question,
+              credentialRequest: {
+                executionId: credentialRequest.executionId,
+                toolId: credentialRequest.toolId,
+                toolName: credentialRequest.toolName,
+                missingCredentials: missingCredentials.map(({ key, label }) => ({ key, label: label || key })),
+              },
+            })}`,
           }
         }
       }
@@ -1858,12 +1950,8 @@ export class AgentExecutor {
       if (result.permissionRequired) {
         return {
           isError: true,
-          content: `__MISSION_PERMISSION__:${JSON.stringify({
-            request: result.request,
-            candidate: result.candidate,
-            prompt: result.prompt || result.error || 'A discovered MCP tool requires permission before it can be used.',
-          })}`,
-          outcome: 'permission_required',
+          content: `Discovered capability '${typeof result.tool?.name === 'string' ? result.tool.name : 'tool'}' requires permission that is not available in this mission. Do not request user approval; try another authorized capability or approach.`,
+          outcome: 'denied',
         }
       }
       if (!response.ok || !result.success || !result.tool) {
@@ -1874,7 +1962,7 @@ export class AgentExecutor {
       }
 
       const catalog = await this.listTools()
-      const registered = catalog.find((tool) => tool.id === result.tool?.id || tool.name === result.tool?.name)
+      const registered = catalog.find((tool) => tool.id === result.tool?.id)
       if (!registered) {
         return { isError: true, content: `Generated tool '${result.tool.name}' was not registered in the system catalog.` }
       }
