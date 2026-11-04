@@ -1410,11 +1410,15 @@ return this.executeOrRequestCredentials(pending.tool, pending.input);
 
   private async validateConfigSchema(tool: Tool, input: Record<string, unknown>, executionId: string): Promise<ToolExecution | null> {
     const configSchema = tool.configSchema || (tool.manifest?.configSchema as SchemaRecord | undefined);
-    const credentialSource = tool.manifest?.credentialSource as Record<string, { configKey?: string }> | undefined;
+    const credentialSource = tool.manifest?.credentialSource as Record<string, { configKey?: string; vaultSecretId?: string }> | undefined;
+    // A field whose value is supplied through `credentialSource` (configKey or
+    // vaultSecretId) is resolved at execution time, so it must not be treated as
+    // a missing static config value here. Only fields with no declared credential
+    // source are validated against input/externalConfig.
     const credentialBackedFields = new Set(
-      Object.values(credentialSource || {})
-        .map((source) => source?.configKey)
-        .filter((key): key is string => typeof key === 'string'),
+      Object.entries(credentialSource || {})
+        .filter(([, source]) => source && (typeof source.configKey === 'string' || typeof source.vaultSecretId === 'string'))
+        .map(([field]) => field),
     );
     const isExternalAction = (tool.manifest?.system !== undefined && tool.manifest?.action !== undefined);
     const required = Array.isArray(configSchema?.required)

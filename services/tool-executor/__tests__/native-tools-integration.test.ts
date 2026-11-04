@@ -396,8 +396,18 @@ describe('native tool integration: every advertised tool is reachable', () => {
   // Group 4 - credential-gated tools fail honestly
   // -------------------------------------------------------------------------
 
+  it('email_sender requests SMTP credentials instead of silently failing', async () => {
+    const tool = byId('email_sender');
+    const executor = new ToolExecutor();
+    const result = await executor.executeOrRequestCredentials(tool, { to: 'someone@example.org', subject: 'hi' });
+    expect(result).toBeInstanceOf(CredentialRequiredError);
+    const credRequest = (result as CredentialRequiredError).request;
+    expect(credRequest.toolId).toBe('email_sender');
+    const keys = credRequest.missingCredentials.map((c) => c.key).sort();
+    expect(keys).toEqual(['smtp_host', 'smtp_pass', 'smtp_user']);
+  });
+
   it.each([
-    ['email_sender', { to: 'someone@example.org', subject: 'hi' }, /Missing SMTP credentials/i],
     ['jira_issue_track', { operation: 'query_issues' }, /^Missing jira credentials: baseUrl and apiToken are required$/],
     ['confluence_docs', { operation: 'search' }, /^Missing confluence credentials: baseUrl and apiToken are required$/],
     ['slack_messaging', { operation: 'list_channels' }, /^Missing slack credentials: baseUrl and apiToken are required$/],
