@@ -3,6 +3,7 @@ import { MissionContext } from '../src/planner/MissionOrchestrator'
 import { Plan } from '@stage7-nextgen/shared'
 import { MISSION_TASK_EXECUTION_POLICY, MissionAgentRuntime } from '../src/agent/MissionAgentRuntime'
 import type { MissionActivityCheckpoint } from '../src/types/workflow'
+import { completedTaskIdsWithSummaries } from '../src/types/workflow'
 
 function jsonResponse(body: unknown = {}): Response {
   return {
@@ -17,6 +18,13 @@ function jsonResponse(body: unknown = {}): Response {
 describe('MissionOrchestrator checkpoint recovery', () => {
   afterEach(() => {
     jest.restoreAllMocks()
+  })
+
+  it('only makes recovery tasks depend on task results that are available', () => {
+    expect(completedTaskIdsWithSummaries(
+      ['task-complete', 'task-pending', 'task-failed-without-output'],
+      [{ taskId: 'task-complete' }],
+    )).toEqual(['task-complete'])
   })
 
   it('returns a concrete gap when completed phase results do not cover the plan', async () => {

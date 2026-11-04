@@ -271,6 +271,7 @@ router.post(
     const workflowId = req.params.workflowId as string;
     const clarificationAnswers = req.body?.clarificationAnswers;
     const interactionResponse = req.body?.interactionResponse;
+    const useConfiguredCredentials = req.body?.useConfiguredCredentials;
     const permissionDecision = req.body?.permissionDecision;
     const permissionScope = req.body?.permissionScope;
     if (
@@ -284,6 +285,9 @@ router.post(
     if (interactionResponse !== undefined && (typeof interactionResponse !== 'string' || !interactionResponse.trim())) {
       throw NextGenError.badRequest('interactionResponse must be a non-empty string');
     }
+    if (useConfiguredCredentials !== undefined && typeof useConfiguredCredentials !== 'boolean') {
+      throw NextGenError.badRequest('useConfiguredCredentials must be a boolean');
+    }
     if (permissionDecision !== undefined && permissionDecision !== 'granted' && permissionDecision !== 'denied') {
       throw NextGenError.badRequest('permissionDecision must be granted or denied');
     }
@@ -293,6 +297,7 @@ router.post(
     const status = await client.resumeMission(workflowId, {
       ...(clarificationAnswers ? { clarificationAnswers } : {}),
       ...(interactionResponse ? { interactionResponse } : {}),
+      ...(useConfiguredCredentials !== undefined ? { useConfiguredCredentials } : {}),
       ...(permissionDecision ? { permissionDecision } : {}),
       ...(permissionScope ? { permissionScope } : {}),
     });

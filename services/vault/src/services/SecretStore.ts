@@ -69,6 +69,24 @@ export class SecretStore {
     return this.toMetadata(secret);
   }
 
+  async updateSecret(id: string, plaintext: string): Promise<SecretMetadata | undefined> {
+    const existing = await this.getSecret(id);
+    if (!existing) return undefined;
+    const updated: StoredSecret = {
+      ...existing,
+      encrypted: this.encryption.encrypt(plaintext),
+      updatedAt: new Date().toISOString(),
+    };
+
+    await this.ensureMongo();
+    if (this.mongoStore) {
+      if (!await this.mongoStore.updateSecret(updated)) return undefined;
+    } else {
+      this.secrets.set(id, updated);
+    }
+    return this.toMetadata(updated);
+  }
+
   async getSecret(id: string): Promise<StoredSecret | undefined> {
     await this.ensureMongo();
     if (this.mongoStore) {

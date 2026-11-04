@@ -418,7 +418,7 @@ describe('TemporalClient mission start', () => {
     )
   })
 
-  it('submits Vault-backed tool credentials and resumes with the completed action receipt', async () => {
+  it('resumes a running mission using tool credentials configured in Vault', async () => {
     delete process.env.TEMPORAL_ADDRESS
     process.env.ARTIFACTS_URL = 'http://artifacts'
     process.env.TOOL_EXECUTOR_URL = 'http://tool-executor:3500'
@@ -446,12 +446,15 @@ describe('TemporalClient mission start', () => {
       taskId: 'task-1',
       taskTitle: 'Protected operation',
       agentRole: 'worker',
-      question: '[secret:tool-credentials] Provide the API token.',
+      question: 'Provide the SMTP host and username.',
       credentialRequest: {
         executionId: 'exec-pending-credential',
         toolId: 'protected-api',
         toolName: 'Protected API',
-        missingCredentials: [{ key: 'apiToken', label: 'API token' }],
+        missingCredentials: [
+          { key: 'smtp_host', label: 'SMTP host' },
+          { key: 'smtp_user', label: 'SMTP username' },
+        ],
       },
       actionReceipts: [{
         toolId: 'protected-api',
@@ -477,7 +480,8 @@ describe('TemporalClient mission start', () => {
           status: 200,
           json: async () => ({
             missionId: input.missionId,
-            status: 'awaiting_review',
+            status: 'running',
+            controlState: 'running',
             input,
             output: { outputs: { status: 'awaiting_user_input', pendingInteraction } },
           }),
@@ -488,6 +492,14 @@ describe('TemporalClient mission start', () => {
       }
       if (requestUrl.endsWith(`/api/artifacts/missions/${input.missionId}/recovery-lease`)) {
         return { ok: true, status: 200, json: async () => ({ claimed: true }) } as Response
+      }
+      if (requestUrl.includes('/api/vault/secrets/name/')) {
+        const secretName = decodeURIComponent(new URL(requestUrl).pathname.split('/').at(-1) || '');
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ id: secretName.endsWith('smtp_host') ? 'secret-host' : 'secret-user' }),
+        } as Response
       }
       if (requestUrl.endsWith('/api/tool-executor/executions/exec-pending-credential/credentials')) {
         return {
@@ -504,11 +516,16 @@ describe('TemporalClient mission start', () => {
     })
 
     await expect(client.resumeMission(`mission-${input.missionId}`, {
-      interactionResponse: '[secret-ref:tool-credentials] Provide the API token.\nVault reference: vault://secret-credential-1',
+      useConfiguredCredentials: true,
     })).resolves.toBe('resuming')
 
     const credentialCall = calls.find((call) => call.url.endsWith('/credentials'))
-    expect(credentialCall?.body).toContain('"apiToken":"vault://secret-credential-1"')
+    expect(JSON.parse(credentialCall?.body || '{}')).toEqual({
+      credentials: {
+        smtp_host: 'vault://secret-host',
+        smtp_user: 'vault://secret-user',
+      },
+    })
     const resumed = (client.startMission as jest.Mock).mock.calls[0] as [
       Record<string, unknown>,
       { pendingInteraction?: { actionReceipts?: Array<Record<string, unknown>> } },

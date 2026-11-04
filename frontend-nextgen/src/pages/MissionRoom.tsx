@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useFeedStore, FeedEvent } from '../stores/feedStore';
 import AgentOutputsPanel from '../components/AgentOutputsPanel';
-import { useMissionsStore } from '../stores/missionsStore';
+import { MissionDetail, useMissionsStore } from '../stores/missionsStore';
 import { postFormData, postJSON } from '../utils/api';
 import MissionArtifactContent from '../components/MissionArtifactContent';
 import {
@@ -63,6 +63,23 @@ interface PhaseOutput {
 }
 
 type Tab = 'conversation' | 'timeline' | 'plan' | 'artifacts' | 'agents';
+type PendingInteraction = NonNullable<
+  NonNullable<NonNullable<MissionDetail['output']>['outputs']>['pendingInteraction']
+>;
+
+function secretKeysForInteraction(pending: PendingInteraction): string[] {
+  const requestedKeys = pending.credentialRequest?.missingCredentials.map(({ key }) => key) || [];
+  const taggedKeys = Array.from(
+    pending.question?.matchAll(/\[secret:([a-z0-9_-]+)\]/gi) || [],
+    (match) => match[1],
+  ).filter((key): key is string => Boolean(key));
+  return [...new Set([...requestedKeys, ...taggedKeys])];
+}
+
+function secretLabelForInteraction(pending: PendingInteraction, key: string): string {
+  return pending.credentialRequest?.missingCredentials.find((credential) => credential.key === key)?.label
+    || key.replace(/[_-]/g, ' ');
+}
 
 const STATUS_BADGE: Record<string, string> = {
   running: 'running',
@@ -327,6 +344,8 @@ const MissionRoom = () => {
   const [clarificationSubmitting, setClarificationSubmitting] = useState(false);
   const [interactionAnswer, setInteractionAnswer] = useState('');
   const [interactionSubmitting, setInteractionSubmitting] = useState(false);
+  const [interactionAccepted, setInteractionAccepted] = useState(false);
+  const [interactionConfigurationReady, setInteractionConfigurationReady] = useState(false);
   const [permissionScope, setPermissionScope] = useState('');
   const [now, setNow] = useState(Date.now());
   const transcriptRef = useRef<HTMLDivElement>(null);
@@ -337,6 +356,13 @@ const MissionRoom = () => {
   useEffect(() => {
     ensureConnected();
   }, [ensureConnected]);
+
+  const pendingInteraction = detail?.output?.outputs?.pendingInteraction;
+  useEffect(() => {
+    setInteractionAccepted(false);
+    setInteractionAnswer('');
+    setInteractionConfigurationReady(false);
+  }, [pendingInteraction?.taskId, pendingInteraction?.question, pendingInteraction?.requestId]);
 
   useEffect(() => {
     if (workflowId) {
@@ -569,7 +595,10 @@ const MissionRoom = () => {
   const handleMissionInteractionSubmit = async (decision?: 'granted' | 'denied') => {
     const pending = detail?.output?.outputs?.pendingInteraction;
     if (!pending || interactionSubmitting) return;
-    if (pending.kind === 'user_input' && !interactionAnswer.trim()) return;
+    const secretKeys = pending.kind === 'user_input' ? secretKeysForInteraction(pending) : [];
+    const configureInSettings = pending.kind === 'user_input'
+      && secretKeys.length > 0;
+    if (configureInSettings && !interactionConfigurationReady) return;
     setInteractionSubmitting(true);
     setControlError(null);
     try {
@@ -584,23 +613,24 @@ const MissionRoom = () => {
         );
         updateMissionStatus(workflowId, result.status);
       } else {
-        let safeResponse = interactionAnswer.trim();
-        const secretQuestion = pending.question?.match(/^\s*\[secret:([a-z0-9_-]+)\]\s*(.*)$/i);
-        if (secretQuestion) {
-          const [, key, prompt] = secretQuestion;
-          const secret = await postJSON<{ id: string }>('/api/vault/secrets', {
-            name: `mission-${missionId}-${key}`,
-            plaintext: safeResponse,
-            tenantId: detail?.input?.tenantId || 'tenant-1',
-          });
-          safeResponse = `[secret-ref:${key}] ${prompt.trim()}\nVault reference: vault://${secret.id}`;
+        if (configureInSettings && pending.credentialRequest) {
+          const result = await postJSON<{ status: string }>(
+            `/api/temporal/missions/${encodeURIComponent(workflowId)}/start`,
+            { useConfiguredCredentials: true },
+          );
+          updateMissionStatus(workflowId, result.status);
+        } else {
+          const safeResponse = configureInSettings
+            ? `The required configuration values (${secretKeys.join(', ')}) have been saved in Tools or Vault. Retry the mission using those configured values; do not request the secrets in chat.`
+            : interactionAnswer.trim() || 'continue';
+          const result = await postJSON<{ status: string }>(
+            `/api/temporal/missions/${encodeURIComponent(workflowId)}/start`,
+            { interactionResponse: safeResponse },
+          );
+          updateMissionStatus(workflowId, result.status);
         }
-        const result = await postJSON<{ status: string }>(
-          `/api/temporal/missions/${encodeURIComponent(workflowId)}/start`,
-          { interactionResponse: safeResponse },
-        );
-        updateMissionStatus(workflowId, result.status);
       }
+      setInteractionAccepted(true);
       setInteractionAnswer('');
       setPermissionScope('');
       await refreshDetail(workflowId);
@@ -773,11 +803,23 @@ const MissionRoom = () => {
         </div>
       )}
 
-      {detail?.output?.outputs?.pendingInteraction && (() => {
+      {detail?.output?.outputs?.pendingInteraction && !(interactionSubmitting || interactionAccepted) && (() => {
         const pending = detail.output.outputs.pendingInteraction;
+        const secretKeys = pending.kind === 'user_input' ? secretKeysForInteraction(pending) : [];
         const secretQuestion = pending.kind === 'user_input'
           ? pending.question?.match(/^\s*\[secret:([a-z0-9_-]+)\]\s*(.*)$/i)
           : null;
+        const configureInSettings = pending.kind === 'user_input'
+          && secretKeys.length > 0;
+        const hasSmtpCredentials = secretKeys.some((key) => key.startsWith('smtp_'));
+        const configureToolId = pending.credentialRequest?.toolId
+          || (hasSmtpCredentials ? 'email_sender' : undefined);
+        const configureToolLabel = pending.credentialRequest?.toolName
+          || (hasSmtpCredentials ? 'Email Sender' : 'tool');
+        const credentialToolId = pending.credentialRequest?.toolId;
+        const toolSettingsUrl = configureToolId
+          ? `/tools?tool=${encodeURIComponent(configureToolId)}&tab=configure`
+          : '/tools';
         const permission = pending.permission;
         return (
           <section className="error-banner" style={{ background: 'rgba(245,158,11,0.15)' }}>
@@ -790,19 +832,66 @@ const MissionRoom = () => {
               Task: {pending.taskTitle} · {pending.agentRole}
             </div>
             {pending.kind === 'user_input' && (
-              <label style={{ display: 'block', marginTop: 10 }}>
+              <div style={{ marginTop: 10 }}>
                 {secretQuestion ? secretQuestion[2] : pending.question}
-                <input
-                  type={secretQuestion ? 'password' : 'text'}
-                  autoComplete={secretQuestion ? 'new-password' : undefined}
-                  value={interactionAnswer}
-                  onChange={(event) => setInteractionAnswer(event.target.value)}
-                  style={{ display: 'block', width: '100%', marginTop: 4, boxSizing: 'border-box' }}
-                />
-                {secretQuestion && (
-                  <span className="muted">Saved directly to Vault; only its reference is sent to the Agent.</span>
+                {configureInSettings ? (
+                  <>
+                    <p className="muted" style={{ margin: '8px 0' }}>
+                      Configure these values in Tools or Vault, then return here. Secret values are not collected in mission chat.
+                    </p>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                      {configureToolId && (
+                        <Link
+                          to={toolSettingsUrl}
+                          rel="noreferrer"
+                          className="link-button"
+                        >
+                          Configure {configureToolLabel}
+                        </Link>
+                      )}
+                      {!configureToolId && (
+                        <Link to={toolSettingsUrl} target="_blank" rel="noreferrer" className="link-button">
+                          Browse tool settings
+                        </Link>
+                      )}
+                      <Link to="/vault" target="_blank" rel="noreferrer" className="link-button">
+                        Open Vault secrets
+                      </Link>
+                    </div>
+                    {credentialToolId && (
+                      <ul style={{ margin: '8px 0', paddingLeft: 20 }}>
+                        {secretKeys.map((key) => (
+                          <li key={key}>
+                            <Link
+                              to={`/vault?name=${encodeURIComponent(`tool:${credentialToolId}:${key}`)}`}
+                              rel="noreferrer"
+                            >
+                              Configure {secretLabelForInteraction(pending, key)} in Vault
+                            </Link>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    <label style={{ display: 'block', marginTop: 10 }}>
+                      <input
+                        type="checkbox"
+                        checked={interactionConfigurationReady}
+                        onChange={(event) => setInteractionConfigurationReady(event.target.checked)}
+                      />
+                      {' '}I saved the required configuration and am ready to continue.
+                    </label>
+                  </>
+                ) : secretKeys.length > 0 ? (
+                  <p className="muted">Configure the listed values in Tools or Vault before continuing.</p>
+                ) : (
+                  <input
+                    type="text"
+                    value={interactionAnswer}
+                    onChange={(event) => setInteractionAnswer(event.target.value)}
+                    style={{ display: 'block', width: '100%', marginTop: 4, boxSizing: 'border-box' }}
+                  />
                 )}
-              </label>
+              </div>
             )}
             {pending.kind === 'mcp_permission' && permission && (
               <div style={{ marginTop: 10 }}>
@@ -843,9 +932,17 @@ const MissionRoom = () => {
               {pending.kind === 'user_input' ? (
                 <button
                   onClick={() => void handleMissionInteractionSubmit()}
-                  disabled={interactionSubmitting || !interactionAnswer.trim()}
+                  disabled={
+                    interactionSubmitting
+                    || interactionAccepted
+                    || (configureInSettings && !interactionConfigurationReady)
+                  }
                 >
-                  {interactionSubmitting ? 'Continuing...' : 'Continue mission'}
+                  {interactionSubmitting || interactionAccepted
+                    ? 'Continuing...'
+                    : configureInSettings
+                      ? 'Continue after configuration'
+                      : 'Continue mission'}
                 </button>
               ) : (
                 <>

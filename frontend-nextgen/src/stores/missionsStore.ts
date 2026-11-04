@@ -49,6 +49,12 @@ export interface MissionDetail {
         taskTitle: string;
         agentRole: string;
         question?: string;
+        credentialRequest?: {
+          executionId: string;
+          toolId: string;
+          toolName: string;
+          missingCredentials: Array<{ key: string; label: string }>;
+        };
         requestId?: string;
         permission?: {
           toolName: string;

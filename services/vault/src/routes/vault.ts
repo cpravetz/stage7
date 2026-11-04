@@ -64,6 +64,29 @@ router.post('/secrets', asyncHandler(async (req, res) => {
   res.status(201).json(secret);
 }));
 
+router.put('/secrets/name/:name', asyncHandler(async (req, res) => {
+  const { name } = req.params;
+  const { plaintext, tenantId } = req.body;
+
+  if (!name) throw VaultError.badRequest('Missing or invalid name');
+  if (typeof plaintext !== 'string' || !plaintext) {
+    throw VaultError.badRequest('Missing or invalid plaintext');
+  }
+  if (!tenantId || typeof tenantId !== 'string') {
+    throw VaultError.badRequest('Missing or invalid tenantId');
+  }
+
+  const existing = await secretStore.getSecretByName(name, tenantId);
+  if (existing) {
+    const updated = await secretStore.updateSecret(existing.id, plaintext);
+    if (!updated) throw VaultError.notFound('Secret not found');
+    res.json(updated);
+    return;
+  }
+
+  res.status(201).json(await secretStore.createSecret(name, plaintext, tenantId));
+}));
+
 router.get('/secrets/:id', asyncHandler(async (req, res) => {
   const { id } = req.params;
   const secret = await secretStore.getSecret(id);

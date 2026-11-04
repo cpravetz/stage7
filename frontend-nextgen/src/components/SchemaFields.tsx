@@ -372,7 +372,7 @@ const SfReferencePicker = ({ fieldId, schema, multiple, value, onChange }: SfRef
               onChange={() => toggle(item.value)}
             />
             {item.url ? (
-              <a href={item.url} target="_blank" rel="noopener noreferrer">
+              <a href={item.url} rel="noopener noreferrer">
                 {item.label}
               </a>
             ) : (

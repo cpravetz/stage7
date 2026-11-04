@@ -10,6 +10,7 @@ import {
   MissionTaskCheckpoint,
   WorkflowInput,
   WorkflowResult,
+  completedTaskIdsWithSummaries,
   isConfigurationBlocker,
   missionConfigurationQuestion,
   recoveryGapFingerprint,
@@ -724,7 +725,10 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
       ));
       const expectedArtifacts = [...new Set(recoveryPhase.tasks.flatMap((task) => task.expectedArtifacts || []))]
         .filter((name) => !availableArtifacts.has(name.toLocaleLowerCase()));
-      const taskIds = recoveryPhase.tasks.map((task) => task.id);
+      const taskIds = completedTaskIdsWithSummaries(
+        recoveryPhase.tasks.map((task) => task.id),
+        completedTaskSummaries.values(),
+      );
       const recoveryTask: any = {
         id: `${recoveryPhase.id}-mission-recovery-${recoveryIndex}`,
         title: `Resolve mission completion gaps (attempt ${recoveryIndex})`,

@@ -42,6 +42,15 @@ export class MongoSecretStore {
     return secret;
   }
 
+  async updateSecret(secret: StoredSecret): Promise<boolean> {
+    if (!this.secrets) await this.connect();
+    const result = await this.secrets!.updateOne(
+      { id: secret.id } as any,
+      { $set: { encrypted: secret.encrypted, updatedAt: secret.updatedAt } },
+    );
+    return result.matchedCount > 0;
+  }
+
   async getSecret(id: string): Promise<StoredSecret | undefined> {
     if (!this.secrets) await this.connect();
     const result = await this.secrets!.findOne({ id } as any);

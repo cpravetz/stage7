@@ -36,6 +36,24 @@ function credentialValuesFromResponse(
   response: string,
   missingCredentials: Array<{ key: string; label: string }>,
 ): Record<string, string> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(response);
+  } catch {
+    parsed = undefined;
+  }
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    const values: Record<string, string> = {};
+    for (const { key } of missingCredentials) {
+      const value = (parsed as Record<string, unknown>)[key];
+      if (typeof value !== 'string' || !value.trim()) {
+        throw new Error(`The credential response is missing a non-empty string value for "${key}"`);
+      }
+      values[key] = value;
+    }
+    return values;
+  }
+
   if (question?.match(/^\s*\[secret:tool-credentials\]/i)) {
     const vaultReference = response.match(/Vault reference:\s*(vault:\/\/[a-zA-Z0-9._-]+)/i)?.[1];
     if (!vaultReference) {
@@ -48,24 +66,40 @@ function credentialValuesFromResponse(
     return { [missingCredentials[0].key]: response };
   }
 
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(response);
-  } catch {
-    throw new Error('This tool requires multiple credential values; provide them as a JSON object using the listed keys');
-  }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('This tool requires multiple credential values; provide them as a JSON object using the listed keys');
-  }
-  const values: Record<string, string> = {};
+  throw new Error('This tool requires multiple credential values; configure them in Tools or Vault before continuing');
+}
+
+async function configuredCredentialReferences(
+  toolId: string,
+  missingCredentials: Array<{ key: string; label: string }>,
+): Promise<Record<string, string>> {
+  const vaultUrl = (process.env.VAULT_URL || 'http://vault:4000').replace(/\/+$/, '');
+  const references: Record<string, string> = {};
+  const missing: string[] = [];
+
   for (const { key } of missingCredentials) {
-    const value = (parsed as Record<string, unknown>)[key];
-    if (typeof value !== 'string' || !value.trim()) {
-      throw new Error(`The credential response is missing a non-empty string value for "${key}"`);
+    const secretName = `tool:${toolId}:${key}`;
+    const url = new URL(
+      `/api/vault/secrets/name/${encodeURIComponent(secretName)}?tenantId=system`,
+      vaultUrl,
+    );
+    const response = await fetch(url);
+    if (!response.ok) {
+      missing.push(key);
+      continue;
     }
-    values[key] = value;
+    const secret = await response.json() as { id?: unknown };
+    if (typeof secret.id !== 'string' || !/^[a-zA-Z0-9._-]+$/.test(secret.id)) {
+      missing.push(key);
+      continue;
+    }
+    references[key] = `vault://${secret.id}`;
   }
-  return values;
+
+  if (missing.length > 0) {
+    throw new Error(`Configure these Vault values before continuing: ${missing.join(', ')}`);
+  }
+  return references;
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
@@ -529,6 +563,7 @@ export class TemporalClient {
     continuation: {
       clarificationAnswers?: string[];
       interactionResponse?: string;
+      useConfiguredCredentials?: boolean;
       permissionDecision?: 'granted' | 'denied';
       permissionScope?: string;
     } = {},
@@ -539,7 +574,13 @@ export class TemporalClient {
     if (record.controlState === 'terminate_requested' || record.controlState === 'terminated') {
       throw new Error(`Cannot resume mission ${missionId} while termination is pending`);
     }
-    if (record.status === 'running' && record.controlState !== 'pause_requested' && record.controlState !== 'paused') {
+    let pendingInteraction = record.output?.outputs?.pendingInteraction;
+    if (
+      record.status === 'running'
+      && !pendingInteraction
+      && record.controlState !== 'pause_requested'
+      && record.controlState !== 'paused'
+    ) {
       return 'running';
     }
     if (
@@ -548,6 +589,7 @@ export class TemporalClient {
       record.status !== 'paused'
       &&
       record.status !== 'awaiting_review'
+      && !(record.status === 'running' && pendingInteraction)
       && record.controlState !== 'pause_requested'
       && record.controlState !== 'paused'
     ) {
@@ -555,6 +597,9 @@ export class TemporalClient {
     }
 
     if (this.directMissionRuns.has(missionId)) {
+      if (pendingInteraction) {
+        throw new Error(`Cannot resume mission ${missionId}: the pending interaction is still being finalized; retry shortly`);
+      }
       await this.updatePersistedMissionControl(missionId, 'running', 'running');
       return 'running';
     }
@@ -568,18 +613,27 @@ export class TemporalClient {
     ) {
       throw new Error(`Cannot resume mission ${missionId}: persisted workflow input is invalid`);
     }
-    let pendingInteraction = record.output?.outputs?.pendingInteraction;
     let interactionResponse = continuation.interactionResponse?.trim();
-    if (pendingInteraction?.kind === 'user_input' && !interactionResponse) {
+    if (
+      pendingInteraction?.kind === 'user_input'
+      && !interactionResponse
+      && !(continuation.useConfiguredCredentials && pendingInteraction.credentialRequest)
+    ) {
       throw new Error('A non-empty response is required for the pending mission question');
     }
-    if (pendingInteraction?.kind === 'user_input' && pendingInteraction.credentialRequest && interactionResponse) {
+    if (
+      pendingInteraction?.kind === 'user_input'
+      && pendingInteraction.credentialRequest
+      && (interactionResponse || continuation.useConfiguredCredentials)
+    ) {
       const credentialRequest = pendingInteraction.credentialRequest;
-      const credentials = credentialValuesFromResponse(
-        pendingInteraction.question,
-        interactionResponse,
-        credentialRequest.missingCredentials,
-      );
+      const credentials = continuation.useConfiguredCredentials
+        ? await configuredCredentialReferences(credentialRequest.toolId, credentialRequest.missingCredentials)
+        : credentialValuesFromResponse(
+          pendingInteraction.question,
+          interactionResponse || '',
+          credentialRequest.missingCredentials,
+        );
       const toolExecutorUrl = (process.env.TOOL_EXECUTOR_URL || 'http://tool-executor:3500').replace(/\/+$/, '');
       const response = await fetch(
         `${toolExecutorUrl}/api/tool-executor/executions/${encodeURIComponent(credentialRequest.executionId)}/credentials`,

@@ -73,6 +73,14 @@ export interface CompletedTaskSummary {
   requiresExternalAction?: boolean;
 }
 
+export function completedTaskIdsWithSummaries(
+  taskIds: string[],
+  summaries: Iterable<Pick<CompletedTaskSummary, 'taskId'>>,
+): string[] {
+  const summarizedTaskIds = new Set(Array.from(summaries, (summary) => summary.taskId));
+  return taskIds.filter((taskId) => summarizedTaskIds.has(taskId));
+}
+
 export interface MissionPhaseEvidence {
   phaseId: string;
   status: string;

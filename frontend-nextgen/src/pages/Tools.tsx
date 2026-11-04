@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { fetchJSON, postJSON, putJSON, deleteResource } from '../utils/api';
 import { SchemaFields } from '../components/SchemaFields';
 import OutputTemplate from '../components/OutputTemplate';
@@ -90,6 +91,7 @@ const safeParseJsonAny = (text: string): { ok: true; value: unknown } | { ok: fa
 };
 
 const Tools = () => {
+  const [searchParams] = useSearchParams();
   const [tools, setTools] = useState<Tool[]>([]);
   const [assistants, setAssistants] = useState<AssistantWithTools[]>([]);
   const [assignSelection, setAssignSelection] = useState<Record<string, string>>({});
@@ -136,6 +138,8 @@ const Tools = () => {
     error?: string;
     [key: string]: unknown;
   } | null>(null);
+  const requestedToolId = searchParams.get('tool');
+  const requestedTab = searchParams.get('tab');
 
   const loadTools = async () => {
     setLoading(true);
@@ -164,6 +168,14 @@ const Tools = () => {
     };
     loadAssistants();
   }, []);
+
+  useEffect(() => {
+    if (!requestedToolId || loading || selectedTool) return;
+    const requestedTool = tools.find((tool) => tool.id === requestedToolId);
+    if (!requestedTool) return;
+    setActiveTab(requestedTab === 'configure' ? 'configure' : 'details');
+    setSelectedTool(requestedTool);
+  }, [loading, requestedTab, requestedToolId, selectedTool, tools]);
 
   useEffect(() => {
     if (!selectedTool) return;
@@ -439,11 +451,12 @@ const Tools = () => {
       for (const field of required) {
         const name = `tool:${tool.id}:${field}`;
         const value = configValues[field] || '';
-        await fetch(`${vaultUrl}/api/vault/secrets/ensure`, {
-          method: 'POST',
+        const response = await fetch(`${vaultUrl}/api/vault/secrets/name/${encodeURIComponent(name)}`, {
+          method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name, plaintext: value, tenantId: 'system' }),
+          body: JSON.stringify({ plaintext: value, tenantId: 'system' }),
         });
+        if (!response.ok) throw new Error(`Failed to save Vault setting "${field}" (${response.status})`);
       }
       setConfigSuccess('Configuration saved to Vault');
     } catch (err: any) {

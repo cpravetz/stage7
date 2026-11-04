@@ -20,6 +20,7 @@ import {
   MissionActivityCheckpoint,
   MissionPendingInteraction,
   MissionTaskCheckpoint,
+  completedTaskIdsWithSummaries,
   isConfigurationBlocker,
   missionConfigurationQuestion,
   missionExecutionEvidenceGaps,
@@ -1007,7 +1008,10 @@ export class MissionOrchestrator {
       ));
       const expectedArtifacts = [...new Set(recoveryPhase.tasks.flatMap((task) => task.expectedArtifacts || []))]
         .filter((name) => !availableArtifacts.has(name.toLocaleLowerCase()));
-      const taskIds = recoveryPhase.tasks.map((task) => task.id);
+      const taskIds = completedTaskIdsWithSummaries(
+        recoveryPhase.tasks.map((task) => task.id),
+        completedTaskSummaries.values(),
+      );
       let taskId = `${recoveryPhase.id}-mission-recovery-${recoveryIndex}`;
       const existingTaskIds = new Set(plan.phases.flatMap((phase) => phase.tasks.map((task) => task.id)));
       while (existingTaskIds.has(taskId)) taskId = `${taskId}-${recoveryIndex}`;

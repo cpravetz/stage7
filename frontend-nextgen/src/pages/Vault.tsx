@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { postJSON, fetchJSON, deleteResource } from '../utils/api';
+import { useSearchParams } from 'react-router-dom';
+import { putJSON, fetchJSON, deleteResource } from '../utils/api';
 
 interface Secret {
   id: string;
@@ -13,12 +14,14 @@ interface DecryptedSecret {
 }
 
 const Vault = () => {
+  const [searchParams] = useSearchParams();
   const [secrets, setSecrets] = useState<Secret[]>([]);
   const [name, setName] = useState('');
   const [plaintext, setPlaintext] = useState('');
   const [loading, setLoading] = useState(false);
   const [revealedSecret, setRevealedSecret] = useState<{ id: string; plaintext: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const requestedName = searchParams.get('name');
 
   const loadSecrets = async () => {
     try {
@@ -33,12 +36,16 @@ const Vault = () => {
     loadSecrets();
   }, []);
 
+  useEffect(() => {
+    if (requestedName) setName(requestedName);
+  }, [requestedName]);
+
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
     try {
-      await postJSON('/api/vault/secrets', { name, plaintext });
+      await putJSON(`/api/vault/secrets/name/${encodeURIComponent(name)}`, { plaintext, tenantId: 'system' });
       setName('');
       setPlaintext('');
       await loadSecrets();
@@ -83,7 +90,7 @@ const Vault = () => {
 
       <div className="grid two-col">
         <div className="card">
-          <h3>Create Secret</h3>
+          <h3>Create or Update Secret</h3>
           <form onSubmit={handleCreate} className="form">
             <input
               type="text"
@@ -100,7 +107,7 @@ const Vault = () => {
               rows={8}
             />
             <button type="submit" disabled={loading}>
-              {loading ? 'Creating…' : 'Create Secret'}
+              {loading ? 'Saving…' : 'Save Secret'}
             </button>
           </form>
         </div>
