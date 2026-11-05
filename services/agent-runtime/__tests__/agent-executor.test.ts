@@ -210,7 +210,7 @@ describe('AgentExecutor', () => {
     ])
   })
 
-  it('requires non-empty exact sections for expected artifacts before completing a task', async () => {
+  it('requires non-empty exact sections for expected deliverables before completing a task', async () => {
     const prompts: string[] = []
     const complaints: Array<{ requestId: string; reason: string; missionId: string }> = []
     let brainTurn = 0
@@ -323,17 +323,19 @@ describe('AgentExecutor', () => {
       }),
     ])
     expect(toolExecutions).toBe(1)
-    expect(prompts[0]).toContain('Required action receipts before completion')
+    expect(prompts[0]).toContain('Required completed steps before finishing')
     expect(prompts[1]).toContain('Before finalizing, execute each required action')
     expect(complaints).toEqual([
       expect.objectContaining({
         requestId: 'required-action-1',
-        reason: expect.stringContaining('missing required action receipt'),
+        reason: expect.stringContaining('missing required step record'),
+
       }),
     ])
   })
 
-  it('requires a real external-action receipt instead of accepting delivery narration', async () => {
+  it('requires a real external-action record instead of accepting delivery narration', async () => {
+
     const prompts: string[] = []
     let brainTurn = 0
     let toolExecutions = 0
@@ -595,7 +597,8 @@ describe('AgentExecutor', () => {
     expect(toolExecutions).toBe(2)
   })
 
-  it('corrects a persisted action receipt whose payload records a semantic failure', async () => {
+  it('corrects a saved step record whose payload shows a failure', async () => {
+
     const finalOutput = [
       '## calculate-invalid-failure-receipt',
       '{"error":"Unexpected end of expression"}',
@@ -1070,7 +1073,8 @@ describe('AgentExecutor', () => {
     expect(brainCalls).toBe(2)
     expect(toolExecutions).toBe(0)
     expect(complaints).toBe(1)
-    expect(prompts[0]).toContain('A single bounded checkpoint-resume allowance is available for this task.')
+    expect(prompts[0]).toContain('You may continue from the work saved so far one more time for this task.')
+
     expect(prompts[1]).toContain('the repeated action was not executed')
   })
 
@@ -1177,7 +1181,8 @@ describe('AgentExecutor', () => {
           content: '{"tool":"__list_tools","args":{}}',
         },
         { role: 'user', content: 'Action result: "plugin-id-1234". Verify uniqueness.' },
-        { role: 'user', content: 'A single bounded checkpoint-resume allowance is available for this task.' },
+        { role: 'user', content: 'You may continue from the work saved so far one more time for this task.' },
+
       ],
       tokensUsed: 0,
       toolCalls: 1,

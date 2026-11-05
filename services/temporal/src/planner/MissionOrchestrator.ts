@@ -421,7 +421,8 @@ export class MissionOrchestrator {
             );
             const retryGuidance = [
               `The previous attempt failed: ${firstError}`,
-              'Continue from the persisted safe checkpoint and action receipts.',
+              'Continue from the work saved so far.',
+
               'Do not repeat external actions whose outcome is already recorded or uncertain.',
             ].join(' ');
             result = continuation

@@ -221,10 +221,10 @@ export function missionExecutionEvidenceGaps(plan: Plan, phases: MissionPhaseEvi
           receipt.fallbackForToolId === required.toolId && receipt.outcome !== 'success',
         ) || receipts.find((receipt) => receipt.outcome === 'failure');
         gaps.push(
-          `Task "${plannedTask.title}" (${plannedTask.id}) did not satisfy required action "${required.toolId}" with outcome "${required.outcome}".`
+          `Task "${plannedTask.title}" (${plannedTask.id}) did not complete the required step "${required.toolId}" with the expected result (${required.outcome}).`
           + (failed
-            ? ` Tool "${failed.toolId}" recorded ${failed.outcome}${failed.content ? `: ${failed.content.slice(0, 500)}` : '.'}`
-            : ` No matching action receipt was recorded. Recorded tool IDs: ${receipts.map((receipt) => receipt.toolId).join(', ') || 'none'}.`),
+            ? ` The step "${failed.toolId}" finished with result ${failed.outcome}${failed.content ? `: ${failed.content.slice(0, 500)}` : '.'}`
+            : ` No record of that step was found. Steps that ran: ${receipts.map((receipt) => receipt.toolId).join(', ') || 'none'}.`),
         );
       }
 
@@ -237,8 +237,8 @@ export function missionExecutionEvidenceGaps(plan: Plan, phases: MissionPhaseEvi
         );
         if (!externalActionReceipt) {
           gaps.push(
-            `Task "${plannedTask.title}" (${plannedTask.id}) did not perform a verified external action. Tool discovery, tool creation, and delegation are not action evidence.`
-            + ` No matching action receipt was recorded. Recorded tool IDs: ${receipts.map((receipt) => receipt.toolId).join(', ') || 'none'}.`,
+            `Task "${plannedTask.title}" (${plannedTask.id}) did not complete a verified action outside the system. Looking up tools, creating tools, or handing work off to another agent does not count as completing that action.`
+            + ` No record of a completed action was found. Steps that ran: ${receipts.map((receipt) => receipt.toolId).join(', ') || 'none'}.`,
           );
         }
       }

@@ -58,7 +58,7 @@ export function buildTaskPrompt(
 ): string {
   const expectedArtifacts = task.expectedArtifacts || [];
   const artifactOutputContract = expectedArtifacts.length > 0
-    ? `Report verified results for each expected artifact (${expectedArtifacts.join(', ')}). Include each artifact's actual result under a clear heading using its exact name. If the work cannot be completed with available tools or context, state the specific blocker instead — do not fabricate results or claim actions that were not executed.`
+    ? `Report verified results for each expected deliverable (${expectedArtifacts.join(', ')}). Include each deliverable's actual result under a clear heading using its exact name. If the work cannot be completed with available tools or context, explain the specific blocker instead — do not fabricate results or claim actions that were not completed.`
     : 'Return only the verified result for this task. Unless the user requested a formatted document, use plain text without Markdown headings, lists, or code fences. For email and text-message tasks, report the exact requested message and verified delivery status; do not invent samples or placeholders.';
   return (
     `Task: ${visibleTaskText(task.title)}\n\n` +
@@ -69,12 +69,15 @@ export function buildTaskPrompt(
       : '') +
     `Phase: ${phase.name} (${phase.goal})\n` +
     `Plan Summary: ${plan.summary}\n` +
-  `Expected Artifacts: ${expectedArtifacts.join(', ')}\n` +
+  `Expected deliverables: ${expectedArtifacts.join(', ')}\n` +
+
     `Required Actions: ${JSON.stringify(visibleRequiredActions(task))}\n` +
     (task.requiresExternalAction
-      ? 'External action required: use an actual registered tool that performs the requested operation. Tool discovery, tool creation, delegation, drafting, or a proposed action are not completion evidence.\n'
+      ? 'This task requires completing a real action outside the system. Use a registered tool that actually performs that action. Looking up tools, creating tools, handing work off, drafting, or proposing an action does not count as completion.\n'
       : '') +
+
     `Output contract: ${artifactOutputContract} Use only actual system-tool results and completed dependency results; do not infer values or include results from future mission steps.\n\n` +
-    'Execute this task now and return completed results for its expected artifacts. Do not return a plan, future-tense promises, or placeholders. If the work cannot be completed with available tools or context, state the specific blocker instead.'
+    'Complete this task now and report the results for its expected deliverables. Do not return a plan, future promises, or placeholders. If the work cannot be completed with the available tools or information, explain the specific blocker.'
+
   );
 }

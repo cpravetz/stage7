@@ -406,7 +406,8 @@ export async function executeMissionTaskActivity({
   const activityContext = Context.current();
   const retrying = activityContext.info.attempt > 1;
   const retryGuidance = retrying
-    ? input.retryGuidance || 'Resume from the persisted safe checkpoint and action receipts. Do not repeat external actions whose outcome is already recorded or uncertain.'
+    ? input.retryGuidance || 'Continue from the work saved so far. Do not repeat actions outside the system when their outcome is already recorded or uncertain.'
+
     : input.retryGuidance;
   const agentRuntime = new MissionAgentRuntime({
     missionId: input.missionId,

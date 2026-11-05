@@ -452,7 +452,7 @@ export class TemporalClient {
         .catch(async (err: unknown) => {
           if (err instanceof MissionTerminationRequestedError) {
             const error = err.message;
-            logger.info({ missionId: input.missionId }, 'Mission stopped at a task checkpoint');
+            logger.info({ missionId: input.missionId }, 'Mission stopped after the current step finished safely');
             const pendingDeletion = await this.isMissionPendingDeletion(input.missionId);
             await this.persistMissionState({
               missionId: input.missionId,
@@ -684,7 +684,7 @@ export class TemporalClient {
           completedReceipt,
         ],
       };
-      interactionResponse = `The required credentials were securely supplied. Tool Executor completed "${credentialRequest.toolName}". Use its verified action receipt and do not repeat the action.`;
+      interactionResponse = `The required credentials were securely supplied. Tool Executor completed "${credentialRequest.toolName}". Use that verified result and do not repeat the action.`;
     } else if (pendingInteraction?.kind === 'mcp_permission') {
       const decision = continuation.permissionDecision;
       if (!decision || !pendingInteraction.requestId) {

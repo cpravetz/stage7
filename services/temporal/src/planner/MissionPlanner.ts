@@ -273,7 +273,8 @@ export function missionTaskActionIssues(
         if (toolId === '__delegate' || toolId === '__create_tool' || toolId === '__external_action__' || namedToolIds.has(toolId)) {
             continue;
         }
-        issues.push(`${taskPath} requires an action receipt for "${toolId}", but the systemPrompt does not instruct the Agent to call it directly. For a missing tool instruction, the systemPrompt must include a direct instruction that names the exact tool ID "${toolId}" and explains the intended call.`);
+        issues.push(`${taskPath} needs a record showing that "${toolId}" completed, but the systemPrompt does not tell the Agent to call it directly. Add a direct instruction that names the exact tool ID "${toolId}" and explains how to call it.`);
+
     }
     return issues;
 }
@@ -618,13 +619,15 @@ function planStandardIssues(plan: any): string[] {
         for (const [taskIndex, task] of Array.from((((ph as any).tasks) as any[]).entries()) as [number, any][]) {  
             const taskPath = `task "${task.id}" (phase ${phaseIndex + 1}, task ${taskIndex + 1})`;
             if (!Array.isArray(task.requiredActions)) {
-                issues.push(`${taskPath}.requiredActions must be provided; use [] when no action receipt is required`);
+                issues.push(`${taskPath}.requiredActions must be provided; use [] when no specific step record is required`);
+
             }
             if (Array.isArray(task.expectedArtifacts) && task.expectedArtifacts.some(
                 (artifact: unknown) => typeof artifact === 'string'
                     && artifact.trim().toLocaleLowerCase() === 'system-action-receipts.json',
             )) {
-                issues.push(`${taskPath}.expectedArtifacts must not include system-action-receipts.json; action receipts are internal runtime evidence`);
+                issues.push(`${taskPath}.expectedArtifacts must not include system-action-receipts.json; that file is internal system data`);
+
             }
             if (isHumanAgentRole(task.agentRole)) {
                 issues.push(`${taskPath}.agentRole "${task.agentRole}" is not executable; assign an autonomous software Agent and represent human decisions with requiresApproval or requiresClarification`);
@@ -719,7 +722,8 @@ function formatSchemaIssues(issues: Array<{ path: PropertyKey[]; message: string
             if (s === 'description') { parts.push('description'); continue; }
             if (s === 'title') { parts.push('title'); continue; }
             if (s === 'id') { parts.push('id'); continue; }
-            if (s === 'expectedArtifacts') { parts.push('expected artifacts'); continue; }
+            if (s === 'expectedArtifacts') { parts.push('expected deliverables'); continue; }
+
             if (s === 'status') { parts.push('status'); continue; }
             parts.push(s);
         }

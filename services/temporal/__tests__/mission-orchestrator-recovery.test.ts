@@ -398,7 +398,7 @@ describe('MissionOrchestrator checkpoint recovery', () => {
 
     expect(result.outputs.status).toBe('completed')
     expect(executeTask).toHaveBeenCalledTimes(2)
-    expect(executeTask.mock.calls[1]?.[7]).toContain('persisted safe checkpoint and action receipts')
+    expect(executeTask.mock.calls[1]?.[7]).toContain('work saved so far')
   })
 
   it('pauses on an Agent input request and resumes the task after the user responds', async () => {

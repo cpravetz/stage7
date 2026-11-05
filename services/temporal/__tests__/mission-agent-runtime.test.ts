@@ -144,7 +144,7 @@ describe('MissionAgentRuntime', () => {
       true,
       DEFAULT_AGENT_EXECUTION_POLICY,
       [dependencySummary],
-      'Use the existing action receipts; do not repeat completed side effects.',
+      'Use the steps already completed; do not repeat actions with side effects.',
     )
 
     expect(result.output).toBe('## research.md\nResearch complete.')
@@ -183,8 +183,9 @@ describe('MissionAgentRuntime', () => {
     expect(requests.find((request) => request.url.endsWith('/tasks'))?.body?.taskId).toBe('mission-1:phase-1:task-1')
     expect(requests.find((request) => request.url.endsWith('/tasks/mission-1:phase-1:task-1/execute'))?.body)
       .toMatchObject({
-        retryGuidance: 'Use the existing action receipts; do not repeat completed side effects.',
+        retryGuidance: 'Use the steps already completed; do not repeat actions with side effects.',
       })
+
     const submittedInput = requests.find((request) => request.url.endsWith('/tasks'))?.body?.input as Record<string, unknown>
     expect(submittedInput.prompt).toContain(`Task Instructions: ${task.systemPrompt}`)
     expect(submittedInput.prompt).toContain('Completed dependency results')
@@ -201,8 +202,9 @@ describe('MissionAgentRuntime', () => {
     expect(requests.find((request) => request.url.endsWith('/tasks/mission-1:phase-1:task-1/execute'))?.body)
       .toEqual({
         requireCompletedReceipt: true,
-        retryGuidance: 'Use the existing action receipts; do not repeat completed side effects.',
+        retryGuidance: 'Use the steps already completed; do not repeat actions with side effects.',
       })
+
     expect(fetchMock).toHaveBeenCalledTimes(4)
   })
 

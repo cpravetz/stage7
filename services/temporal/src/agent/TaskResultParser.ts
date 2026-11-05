@@ -14,7 +14,7 @@ export function isExecutionOutcomeReport(content: string): boolean {
 export function parseExpectedArtifacts(value: unknown, taskId: string): string[] {
   if (value === undefined) return [];
   if (!Array.isArray(value) || !value.every((name) => typeof name === 'string' && name.trim())) {
-    throw new Error(`Agent task ${taskId} returned invalid expected artifact names`);
+    throw new Error(`Agent task ${taskId} returned invalid expected deliverable names`);
   }
   return value.filter((name) => name.toLocaleLowerCase() !== INTERNAL_ACTION_RECEIPT_ARTIFACT);
 }
@@ -71,7 +71,7 @@ export function assertExpectedArtifacts(
     ? ` The task reported: ${blocker.content.trim().slice(0, 500)}`
     : '';
   throw new Error(
-    `Task "${taskId}" did not produce expected artifact${missing.length === 1 ? '' : 's'}: ${missing.join(', ')}.${reason}`,
+    `Task "${taskId}" did not produce the expected deliverable${missing.length === 1 ? '' : 's'}: ${missing.join(', ')}.${reason}`,
   );
 }
 
@@ -81,7 +81,7 @@ export function parseActionReceipts(
 ): NonNullable<TaskExecutionResult['actionReceipts']> {
   if (value === undefined) return [];
   if (!Array.isArray(value) || value.length > MAX_ACTION_RECEIPTS) {
-    throw new Error(`Agent task ${taskId} returned invalid action receipts`);
+    throw new Error(`Agent task ${taskId} returned invalid step records`);
   }
   return value.map((candidate) => {
     if (
@@ -97,7 +97,7 @@ export function parseActionReceipts(
       || (candidate.resolvedToolId !== undefined && (typeof candidate.resolvedToolId !== 'string' || !candidate.resolvedToolId.trim()))
       || (candidate.outcome !== undefined && !['success', 'failure', 'denied', 'question_asked', 'permission_required'].includes(String(candidate.outcome)))
     ) {
-      throw new Error(`Agent task ${taskId} returned an invalid action receipt`);
+      throw new Error(`Agent task ${taskId} returned an invalid step record`);
     }
     return {
       toolId: candidate.toolId,
@@ -120,7 +120,7 @@ export function withActionReceiptArtifact(
   if (actionReceipts.length === 0) return artifacts;
   const name = 'system-action-receipts.json';
   if (artifacts.some((artifact) => artifact.name.toLocaleLowerCase() === name)) {
-    throw new Error(`Agent task ${taskId} returned a reserved action receipt artifact name`);
+    throw new Error(`Agent task ${taskId} returned a reserved step-record artifact name`);
   }
   return [
     ...artifacts,

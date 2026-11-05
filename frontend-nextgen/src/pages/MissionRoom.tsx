@@ -728,7 +728,7 @@ const MissionRoom = () => {
                )}
                {['running', 'pausing', 'paused'].includes(status) && (
                  <button className="danger" onClick={async () => {
-                   if (!confirm('Stop mission after the current Agent task reaches a safe checkpoint?')) return;
+                   if (!confirm('Stop this mission after the current step finishes safely?')) return;
                    setControlError(null);
                    try {
                      const result = await postJSON<{ status: string }>(
@@ -1370,7 +1370,7 @@ const MissionRoom = () => {
                                      !taskArtifacts.some((produced) => produced.name === artifact),
                                    ).map((artifact) => (
                                      <span key={`expected-${artifact}`} className="badge expected">
-                                       Expected: {artifact}
+                                       Needed: {artifact}
                                      </span>
                                    ))}
                                     {taskArtifacts.map((artifact) => (

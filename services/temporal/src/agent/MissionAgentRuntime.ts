@@ -840,7 +840,8 @@ export class MissionAgentRuntime {
         result = await this.executePromptTask(agentId, {
           taskId: `${this.missionId}:review:completion${retryScope}:attempt-${attempt}`,
           type: 'mission-completion-review',
-          prompt: `Evaluate whether these observed mission results satisfy the mission goal. Check actual results and action receipts; failed receipts are not evidence of successful work, and claims that contradict receipts are unmet requirements. Return exactly one JSON object with the required completion-review shape.\n\n${reviewContext}${repair}`,
+          prompt: `Evaluate whether these observed mission results satisfy the mission goal. Check the actual results and the steps that ran; failed steps are not evidence of successful work, and claims that contradict what happened are unmet requirements. Return exactly one JSON object with the required completion-review shape.\n\n${reviewContext}${repair}`,
+
           phaseId: 'mission-review',
           context: {
             reviewAttempt: attempt,
@@ -1067,7 +1068,8 @@ export class MissionAgentRuntime {
         `This task is resuming after a ${continuation.pendingInteraction.kind === 'user_input' ? 'user question' : 'tool permission'} interruption.`,
         `The user's response or permission decision is: ${continuation.response}`,
         continuation.pendingInteraction.actionReceipts?.length
-          ? `Verified action receipts from before the interruption (do not repeat successful or uncertain side effects): ${JSON.stringify(continuation.pendingInteraction.actionReceipts)}`
+          ? `Steps completed before the interruption (do not repeat actions that already succeeded or may have had side effects): ${JSON.stringify(continuation.pendingInteraction.actionReceipts)}`
+
           : '',
         'Continue the same task from this evidence. Do not repeat completed actions.',
       ].filter(Boolean).join('\n')
@@ -1162,7 +1164,8 @@ export class MissionAgentRuntime {
         }
         logger.warn(
           { missionId: this.missionId, agentId, taskId: submitted.taskId, status: error.status },
-          'Retrying failed Agent task once from its persisted checkpoint',
+          'Retrying failed Agent task once from saved progress',
+
         );
       }
     }
@@ -1334,7 +1337,7 @@ export class MissionAgentRuntime {
   private parseExpectedArtifacts(value: unknown, taskId: string): string[] {
     if (value === undefined) return [];
     if (!Array.isArray(value) || !value.every((name) => typeof name === 'string' && name.trim())) {
-      throw new Error(`Agent task ${taskId} returned invalid expected artifact names`);
+      throw new Error(`Agent task ${taskId} returned invalid expected deliverable names`);
     }
     return value.filter((name) => name.toLocaleLowerCase() !== INTERNAL_ACTION_RECEIPT_ARTIFACT);
   }

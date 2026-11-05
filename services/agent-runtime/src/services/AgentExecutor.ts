@@ -144,6 +144,8 @@ interface ToolResult {
   resolvedToolId?: string
 }
 
+const ASK_USER_MARKER = '__ASK_USER__:'
+const ASK_USER_NAME = '__ASK_USER__'
 const CREATE_TOOL_ACTION = '__create_tool'
 const DELEGATE_ACTION = '__delegate'
 const LIST_TOOLS_ACTION = '__list_tools'
@@ -159,7 +161,7 @@ const BRAIN_RESPONSE_GRACE_MS = 30_000
 const MAX_BRAIN_REQUEST_TIMEOUT_MS = 2_147_483_647
 const MAX_ACTION_RECEIPT_CHARS = 2_048
 const RESUME_COMPLETION_TOKEN_BONUS = 8_192
-const RESUME_BUDGET_MARKER = 'A single bounded checkpoint-resume allowance is available for this task.'
+const RESUME_BUDGET_MARKER = 'You may continue from the work saved so far one more time for this task.'
 
 function brainRequestTimeoutFromEnvironment(): number {
   const configuredDeadline = Number(process.env.BRAIN_COMPLETION_DEADLINE_MS)
@@ -238,27 +240,6 @@ function boundedActionResult(content: string): string {
   return `${content.slice(0, MAX_ACTION_RESULT_CHARS - marker.length)}${marker}`
 }
 
-
-function compactHistoryForBrainRequest(
-  history: Array<{ role: 'user' | 'assistant'; content: string }>,
-  maxBytes: number,
-): Array<{ role: 'user' | 'assistant'; content: string }> {
-  if (history.length === 0) return history
-  const first = history[0]
-  const rest = history.slice(1)
-  const estimate = (h: Array<{ role: 'user' | 'assistant'; content: string }>) =>
-    h.reduce((sum, m) => sum + Buffer.byteLength(m.content, 'utf8') + 12, 0)
-  if (estimate(history) <= maxBytes) return history
-  // Keep the first user prompt and the most recent turns; drop the oldest middle turns.
-  let keepCount = 0
-  for (let i = rest.length - 1; i >= 0; i--) {
-    const candidate = [first, ...rest.slice(i)]
-    if (estimate(candidate) > maxBytes) break
-    keepCount = rest.length - i
-  }
-  return [first, ...rest.slice(rest.length - keepCount)]
-}
-
 function isToolFailurePayload(value: unknown, depth = 0): boolean {
   if (depth > 4) return false
   let payload = asRecord(value)
@@ -281,7 +262,7 @@ function isToolFailurePayload(value: unknown, depth = 0): boolean {
 function parseActionReceipts(value: unknown): AgentActionReceipt[] {
   if (value === undefined) return []
   if (!Array.isArray(value)) {
-    throw new Error('Agent execution checkpoint contains invalid action receipts')
+    throw new Error('The saved progress for this task includes invalid step records')
   }
   return value.map((candidate) => {
     const receipt = asRecord(candidate)
@@ -296,7 +277,7 @@ function parseActionReceipts(value: unknown): AgentActionReceipt[] {
       || (receipt.resolvedToolId !== undefined && (typeof receipt.resolvedToolId !== 'string' || !receipt.resolvedToolId.trim()))
       || (receipt.outcome !== undefined && !['success', 'failure', 'denied', 'question_asked', 'permission_required'].includes(String(receipt.outcome)))
     ) {
-      throw new Error('Agent execution checkpoint contains an invalid action receipt')
+      throw new Error('The saved progress for this task includes an invalid step record')
     }
     const semanticFailure = isToolFailurePayload(receipt.content)
     const outcome = receipt.outcome === 'denied'
@@ -387,7 +368,7 @@ function requiredActionCorrection(
   const externalAction = requiresExternalAction
     ? 'The task also requires a verified external operation. Tool discovery, tool creation, delegation, drafting, or proposed steps are not evidence; use a registered capability that performs the requested operation and rely on its actual successful result.'
     : '';
-  return `Before finalizing, execute each required action and provide a matching action receipt with its expected outcome: ${JSON.stringify(actions)}. ${externalAction} For outcome "denied", make the actual action request even when the tool is absent from your available-tool list; only an explicit policy or catalog denial receipt satisfies that requirement. Never claim an action occurred without its receipt. If a required value or credential is unavailable, first check authorized existing configuration and alternatives. Do not guess or repeat a failed call. If no safe alternative can complete the user's request, ask one focused question for the exact missing value using __ASK_USER__:{"question":"..."}; mark secret values with [secret:<key>] so the application can save them to Vault without exposing the Agent. If an error reports a missing runtime module or package, do not try to install it in the mission environment or treat it as a credential; the runtime attempts one alternative-capability lookup automatically when policy and action budget allow.`;
+  return `Before finalizing, execute each required action and provide a matching action receipt with its expected outcome: ${JSON.stringify(actions)}. ${externalAction} For outcome "denied", make the actual action request even when the tool is absent from your available-tool list; only an explicit policy or catalog denial receipt satisfies that requirement. Never claim an action occurred without its receipt. If a required value or credential is unavailable, first check authorized existing configuration and alternatives. Do not guess or repeat a failed call. If no safe alternative can complete the user's request, ask one focused question for the exact missing value using ${ASK_USER_MARKER}{"question":"..."}; mark secret values with [secret:<key>] so the application can save them to Vault without exposing the Agent. If an error reports a missing runtime module or package, do not try to install it in the mission environment or treat it as a credential; the runtime attempts one alternative-capability lookup automatically when policy and action budget allow.`;
 }
 
 function parseExpectedArtifacts(value: unknown): string[] {
@@ -457,7 +438,7 @@ export function parseAgentExecutionCheckpoint(value: unknown): AgentExecutionChe
     || !isCount(checkpoint.repeatedActionCount)
     || typeof checkpoint.lastAction !== 'string'
   ) {
-    throw new Error('Agent execution checkpoint is invalid or unsupported')
+    throw new Error('The saved progress for this task is not supported or could not be read')
   }
 
   const history: AgentExecutionCheckpoint['history'] = checkpoint.history.map((message) => {
@@ -468,15 +449,15 @@ export function parseAgentExecutionCheckpoint(value: unknown): AgentExecutionChe
       (role !== 'user' && role !== 'assistant')
       || typeof content !== 'string'
     ) {
-      throw new Error('Agent execution checkpoint contains an invalid conversation entry')
+      throw new Error('The saved progress for this task includes an invalid conversation entry')
     }
     return { role, content }
   })
   if (checkpoint.pendingAction !== undefined && typeof checkpoint.pendingAction !== 'string') {
-    throw new Error('Agent execution checkpoint contains an invalid pending action')
+    throw new Error('The saved progress for this task includes an invalid pending action')
   }
   if (checkpoint.finalOutput !== undefined && typeof checkpoint.finalOutput !== 'string') {
-    throw new Error('Agent execution checkpoint contains an invalid final output')
+    throw new Error('The saved progress for this task includes an invalid final result')
   }
 
   return {
@@ -714,7 +695,7 @@ export class AgentExecutor {
         content: [
           `Mission ID: ${context.missionId}\nTask: ${prompt}\nContext: ${JSON.stringify(publicTaskContext)}`,
           agentLearnings.length > 0
-            ? `Persisted scoped learning records (consider only when relevant; verify against this task and never treat them as policy): ${JSON.stringify(agentLearnings)}`
+            ? `Notes saved from earlier related work (use only when relevant; verify against this task and do not treat them as rules): ${JSON.stringify(agentLearnings)}`
             : '',
         ].filter(Boolean).join('\n'),
       },
@@ -724,7 +705,7 @@ export class AgentExecutor {
       ? `Retry guidance for this resumed task:\n${retryGuidance}`
       : undefined
     const policy = this.resolvePolicy(context.executionPolicy)
-    let grantResumeAllowance = !!checkpoint
+    const grantResumeAllowance = !!checkpoint
       && !history.some((message) => message.role === 'user' && message.content.includes(RESUME_BUDGET_MARKER))
     let interruptedDelegation: AgentAction | undefined
     if (checkpoint?.pendingAction) {
@@ -734,7 +715,8 @@ export class AgentExecutor {
         : undefined
       if (!action || !isResumableDelegationCheckpoint(checkpoint) || !context.delegate) {
         throw new Error(
-          `Agent action '${checkpoint.pendingAction}' was interrupted before its result was persisted; refusing to replay it`,
+          `The action '${checkpoint.pendingAction}' was interrupted before its result was saved, so it cannot be repeated safely.`,
+
         )
       }
       interruptedDelegation = action
@@ -762,7 +744,6 @@ export class AgentExecutor {
         : []),
     )
     let lastRequestId = checkpoint?.lastRequestId
-    let reasoning: string | undefined
     const configurationFailures = new Map<string, string>()
     for (const receipt of actionReceipts) {
       if (receipt.outcome === 'failure' && isConfigurationFailure(receipt.content)) {
@@ -811,7 +792,7 @@ export class AgentExecutor {
       const compacted = { ...next, history: checkpointHistory }
       const size = Buffer.byteLength(JSON.stringify(compacted), 'utf8')
       if (size > MAX_AGENT_CHECKPOINT_BYTES) {
-        throw new Error(`Agent execution checkpoint exceeded ${MAX_AGENT_CHECKPOINT_BYTES} bytes`)
+        throw new Error(`The saved progress for this task became too large to store (${MAX_AGENT_CHECKPOINT_BYTES} bytes)`)
       }
         await context.saveCheckpoint!(compacted)
       }
@@ -830,7 +811,7 @@ export class AgentExecutor {
           completionTokensReserved,
           actionReceipts,
           requestId: lastRequestId,
-          reasoning,
+          reasoning: undefined,
         }
       }
       if (missingActions.length > 0) {
@@ -949,6 +930,7 @@ export class AgentExecutor {
           ) {
             throw new Error(
               `Brain model routing made no progress after ${modelSelectionRetries} retry request(s): ${message}`,
+              { cause: error },
             )
           }
           previousRemainingModelCount = remainingModelCount
@@ -1006,7 +988,7 @@ export class AgentExecutor {
         history[history.length - 1] = { role: 'assistant', content: JSON.stringify(action) }
       }
       if (!action) {
-        if (content.startsWith('__ASK_USER__:')) {
+        if (content.startsWith(ASK_USER_MARKER)) {
           if (saveCheckpoint) await saveCheckpoint()
           return {
             output: content,
@@ -1483,7 +1465,7 @@ export class AgentExecutor {
         {
           role: 'user',
           content: result.isError
-            ? `${ignoredNarration}Action failed: ${boundedActionResult(result.content)}\nDo not guess or repeat the failed call. First check authorized existing configuration and alternatives. If no safe alternative can complete the user's request, ask one focused question for the exact missing value using __ASK_USER__:{"question":"..."}; mark secret values with [secret:<key>] so the application can save them to Vault without exposing them to the Agent. If this is a missing runtime module, do not attempt installation; the runtime attempts one alternative-capability lookup when policy and action budget allow.`
+            ? `${ignoredNarration}Action failed: ${boundedActionResult(result.content)}\nDo not guess or repeat the failed call. First check authorized existing configuration and alternatives. If no safe alternative can complete the user's request, ask one focused question for the exact missing value using ${ASK_USER_MARKER}{"question":"..."}; mark secret values with [secret:<key>] so the application can save them to Vault without exposing them to the Agent. If this is a missing runtime module, do not attempt installation; the runtime attempts one alternative-capability lookup when policy and action budget allow.`
             : `${ignoredNarration}Action result: ${boundedActionResult(result.content)}\nContinue toward the task goal. If complete, return the final answer as plain text.`,
         },
       )
@@ -1509,9 +1491,9 @@ export class AgentExecutor {
       brainCalls,
       completionTokensReserved,
       actionReceipts,
-      requestId: lastRequestId,
-      reasoning,
-    }
+          requestId: lastRequestId,
+          reasoning: undefined,
+        }
   }
 
   private resolvePolicy(policy?: AgentExecutionPolicy): AgentExecutionPolicy {
@@ -1569,7 +1551,7 @@ export class AgentExecutor {
         'To execute a registered system tool, respond with exactly one raw JSON object: {"tool":"<tool-id>","args":{...}}. Never quote, fence, nest, or describe a tool action; only a sole JSON action object is executed. Do not claim an action succeeded until you receive its result.',
         `Available system tools (${toolPolicy.mode === 'allowlist' ? 'restricted to this Agent allowlist' : 'the live catalog; generated tools appear after registration'}): ${JSON.stringify(catalog)}`,
         `To inspect the current visible tool catalog, respond with {"tool":"${LIST_TOOLS_ACTION}","args":{"query":"<operation and input fields>"}}. Search by the requested capability and expected input fields, not by a guessed tool name. Results include matching schemas and are ranked by relevance; omit the query for a compact list of visible tool IDs.`,
-        'Use each tool’s full inputSchema, configSchema, and outputSchema when preparing arguments. For inputs marked "x-stage7-secret": true (or sensitive password fields), provide only an already-supplied vault:// reference; never ask an LLM to handle or echo the secret value. Never expose a vault:// reference in user-facing content. If required configuration or user input is genuinely unavailable, check authorized alternatives first, then ask one focused question using __ASK_USER__:{"question":"..."}; prefix secret questions with [secret:<key>] so the application can save the value to Vault without exposing it to you. Do not guess, ask for broad advice, or claim the task completed while blocked.',
+        'Use each tool’s full inputSchema, configSchema, and outputSchema when preparing arguments. For inputs marked "x-stage7-secret": true (or sensitive password fields), provide only an already-supplied vault:// reference; never ask an LLM to handle or echo the secret value. Never expose a vault:// reference in user-facing content. IMPORTANT: ' + ASK_USER_NAME + ' is NOT a tool and does NOT need to be in the tool catalog. It is a native text marker you output directly as your response (e.g. ' + ASK_USER_MARKER + '{"question":"..."}). Use it to ask the user a focused question when a required value or credential is unavailable. Prefix secret questions with [secret:<key>] so the application can save the value to Vault. Do not guess, ask for broad advice, or claim the task completed while blocked.',
         toolPolicy.mode === 'allowlist'
           ? 'Tool creation is disabled for this Agent. Request access to a registered tool if the allowed tools are insufficient.'
           : `If no available tool can satisfy a concrete capability need, ask ToolExecutor to resolve it with {"tool":"${CREATE_TOOL_ACTION}","args":{"description":"...","requirements":["..."]}}. Describe the capability and constraints, not implementation details. ToolExecutor checks registered native tools, discovers suitable MCP tools and handles their permission flow, then creates, validates, registers, and persists a reusable plugin only if no suitable tool can be used. Never write tool code yourself or claim resolution succeeded unless the returned tool is registered and available.`,
@@ -1585,7 +1567,8 @@ export class AgentExecutor {
       `Execution policy caps: ${policy.maxBrainCalls} Brain calls, ${policy.maxActions} tool/delegation actions, ${policy.maxCompletionTokens} total generated completion tokens, ${policy.maxCompletionTokensPerCall} tokens per completion, and ${policy.maxDelegations} delegated subtasks.`,
       `Remaining budget: ${remainingBrainCalls} Brain calls, ${remainingActions} actions, ${remainingCompletionTokens} generated completion tokens, and ${remainingDelegations} delegations.`,
       ...(requiredActions.length > 0
-        ? [`Required action receipts before completion: ${JSON.stringify(requiredActions)}. Execute each required action and verify its actual result. For an expected denial, make the action request even if it is not listed among available tools.`]
+        ? [`Required completed steps before finishing: ${JSON.stringify(requiredActions)}. Complete each required step and verify its actual result. For an expected denial, make the request even if it is not listed among available tools.`]
+
         : []),
       ...(requiresExternalAction
         ? ['This task requires an actual external operation. Do not treat tool discovery, tool creation, delegation, drafting, or a proposed action as completion evidence. Use a registered tool whose schemas show it performs the requested operation, execute it with the task’s actual values, and rely on the returned result.']
@@ -1593,7 +1576,7 @@ export class AgentExecutor {
       ...actionInstructions,
       delegation,
       'Treat each system-tool result as authoritative. Report the returned value rather than recalculating or replacing it, and never claim a tool succeeded unless its actual result supports that claim.',
-      'Preserve every user-supplied literal (recipient, identifier, message, amount, and other requested value) exactly. Do not continue the conversation by inventing user turns or changing the request. When a tool fails because its endpoint, provider, permission, or credentials are not configured, do not guess values or repeat that tool. Check authorized alternatives first; if a specific missing value is still required, ask one focused question with __ASK_USER__:{"question":"..."} and prefix secret questions with [secret:<key>] so the application can save the value to Vault without exposing it to you.',
+      'Preserve every user-supplied literal (recipient, identifier, message, amount, and other requested value) exactly. Do not continue the conversation by inventing user turns or changing the request. When a tool fails because its endpoint, provider, permission, or credentials are not configured, do not guess values or repeat that tool. Check authorized alternatives first; if a specific missing value is still required, ask one focused question with ' + ASK_USER_MARKER + '{"question":"..."} and prefix secret questions with [secret:<key>] so the application can save the value to Vault without exposing it to you.',
       'Generated tools that need user-provided secrets must mark those input properties with "x-stage7-secret": true, "format": "password", and "writeOnly": true. The tool receives the plaintext only during execution; generated acceptance tests must use non-secret fixtures and must never request or embed real credentials.',
       'Tool errors are evidence; do not claim success when an action failed. Stop after the task is complete or explain a blocker.',
     ].join('\n\n')
@@ -1609,7 +1592,7 @@ export class AgentExecutor {
   ): Promise<BrainResponse> {
     const buildRequestBody = (candidateHistory: Array<{ role: 'user' | 'assistant'; content: string }>) =>
       JSON.stringify({
-        prompt: candidateHistory.map((message) => `${message.role === 'user' ? 'User' : 'Agent'}: ${message.content}`).join('\n\n'),
+        prompt: candidateHistory.map((message) => `${message.role === 'assistant' ? 'Agent' : 'System'}: ${message.content}`).join('\n\n'),
         systemPrompt,
         options: { optimizeFor: 'accuracy' },
         maxTokens,
@@ -1656,7 +1639,7 @@ export class AgentExecutor {
     } catch (error) {
       if (controller.signal.aborted) {
         const cause = error instanceof Error ? `: ${error.message}` : '';
-        throw new Error(`Brain request timed out after ${this.brainRequestTimeoutMs}ms${cause}`)
+        throw new Error(`Brain request timed out after ${this.brainRequestTimeoutMs}ms${cause}`, { cause: error })
       }
       throw error
     } finally {
@@ -1872,7 +1855,7 @@ export class AgentExecutor {
           return {
             isError: true,
             outcome: 'question_asked',
-            content: `__ASK_USER__:${JSON.stringify({
+            content: `${ASK_USER_MARKER}${JSON.stringify({
               question,
               credentialRequest: {
                 executionId: credentialRequest.executionId,

@@ -399,7 +399,7 @@ describe('missionWorkflow activity boundary', () => {
     }]
 
     expect(missionExecutionEvidenceGaps(plan, phases)).toContain(
-      'Task "Send the requested message" (task-1) did not perform a verified external action. Tool discovery, tool creation, and delegation are not action evidence. No matching action receipt was recorded. Recorded tool IDs: __list_tools.',
+      'Task "Send the requested message" (task-1) did not complete a verified action outside the system. Looking up tools, creating tools, or handing work off to another agent does not count as completing that action. No record of a completed action was found. Steps that ran: __list_tools.',
     )
 
     phases[0].tasks[0].artifacts[0].content = JSON.stringify([{
@@ -463,7 +463,8 @@ describe('missionWorkflow activity boundary', () => {
       true,
       expect.any(Object),
       [],
-      expect.stringContaining('persisted safe checkpoint and action receipts'),
+      expect.stringContaining('work saved so far'),
+
     )
     expect(fetchMock).toHaveBeenCalled()
   })
