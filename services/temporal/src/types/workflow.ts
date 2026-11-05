@@ -114,9 +114,6 @@ export function isConfigurationBlocker(evidence: string[]): boolean {
 }
 
 export function missionConfigurationQuestion(missionGoal: string): string {
-  if (/\b(?:sms|text message|email|e-mail)\b/i.test(missionGoal)) {
-    return 'I could not verify a working delivery path for the requested message. Which authorized provider should I configure to continue: SMTP or an email API for email, and an SMS provider or approved email-to-SMS gateway for text messages? Please provide the provider configuration through the secure credential fields when prompted; do not send secrets in chat. I will not claim delivery without a successful tool receipt.';
-  }
   return `I could not proceed because the available evidence indicates a required service or configuration is missing for this outcome: "${missionGoal}". Which authorized service or provider should I use? I will request any secret values only through secure credential fields.`;
 }
 

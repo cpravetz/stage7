@@ -11,8 +11,12 @@ interface PendingInputAlert {
   question: string;
 }
 
+function normalizeMissionId(missionId: string): string {
+  return missionId.replace(/^mission-/, '');
+}
+
 function interactionKey(missionId: string, taskId?: string): string {
-  return `${missionId}:${taskId || ''}`;
+  return `${normalizeMissionId(missionId)}:${taskId || ''}`;
 }
 
 function questionFromEvent(event: FeedEvent): PendingInputAlert | undefined {
@@ -27,7 +31,7 @@ function questionFromEvent(event: FeedEvent): PendingInputAlert | undefined {
       : 'An Agent needs information to continue.';
   return {
     key: interactionKey(event.missionId, taskId),
-    missionId: event.missionId,
+    missionId: normalizeMissionId(event.missionId),
     taskId,
     title: event.type === 'permission_required' ? 'Tool permission requested' : 'Mission needs your input',
     question: rawQuestion.replace(/^\s*\[secret:[a-z0-9_-]+\]\s*/i, ''),
@@ -43,7 +47,7 @@ function questionFromDetail(workflowId: string, detail: MissionDetail): PendingI
     || 'An Agent needs information to continue.';
   return {
     key: interactionKey(detail.missionId || workflowId, taskId),
-    missionId: detail.missionId || workflowId,
+    missionId: normalizeMissionId(detail.missionId || workflowId),
     taskId,
     title: pending.kind === 'mcp_permission' ? 'Tool permission requested' : 'Mission needs your input',
     question: rawQuestion.replace(/^\s*\[secret:[a-z0-9_-]+\]\s*/i, ''),
@@ -79,7 +83,11 @@ function getPendingInputAlerts(events: FeedEvent[], details: Record<string, Miss
     if (alert && !resolved.has(alert.key)) pending.set(alert.key, alert);
   }
 
-  return [...pending.values()];
+  const byMission = new Map<string, PendingInputAlert>();
+  for (const alert of pending.values()) {
+    if (!byMission.has(alert.missionId)) byMission.set(alert.missionId, alert);
+  }
+  return [...byMission.values()];
 }
 
 export default function MissionInputAlert() {

@@ -881,16 +881,11 @@ const MissionRoom = () => {
                       {' '}I saved the required configuration and am ready to continue.
                     </label>
                   </>
-                ) : secretKeys.length > 0 ? (
-                  <p className="muted">Configure the listed values in Tools or Vault before continuing.</p>
-                ) : (
-                  <input
-                    type="text"
-                    value={interactionAnswer}
-                    onChange={(event) => setInteractionAnswer(event.target.value)}
-                    style={{ display: 'block', width: '100%', marginTop: 4, boxSizing: 'border-box' }}
-                  />
-                )}
+                 ) : secretKeys.length > 0 ? (
+                   <p className="muted">Configure the listed values in Tools or Vault before continuing.</p>
+                 ) : (
+                   <p className="muted">Address the requested configuration in Tools or Vault, then return here. No values are collected in mission chat.</p>
+                 )}
               </div>
             )}
             {pending.kind === 'mcp_permission' && permission && (
