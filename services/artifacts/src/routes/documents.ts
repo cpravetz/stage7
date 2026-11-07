@@ -16,11 +16,11 @@ const CreateDocumentSchema = z.object({
   id: z.string().optional(),
   tenantId: z.string(),
   collection: z.string(),
-  data: z.record(z.unknown()),
+  data: z.record(z.string(), z.unknown()),
 });
 
 const UpdateDocumentSchema = z.object({
-  data: z.record(z.unknown()).optional(),
+  data: z.record(z.string(), z.unknown()).optional(),
 });
 
 router.post('/', asyncHandler(async (req, res) => {

@@ -1,10 +1,13 @@
 import { logger } from '@stage7-nextgen/shared';
-import { ToolCredentials, CredentialProvider } from '../services/CredentialProvider';
+import { ToolCredentials } from '../services/CredentialProvider';
 
 export interface VendorApiOptions {
   vendor: 'jira' | 'confluence' | 'slack' | 'github';
   operation: string;
   input: Record<string, unknown>;
+  idempotencyKey?: string;
+  executionId?: string;
+  lookupUrl?: string;
 }
 
 export interface VendorApiResult {
@@ -12,14 +15,37 @@ export interface VendorApiResult {
   data?: unknown;
   error?: string;
   durationMs?: number;
+  idempotencyKey?: string;
+  providerRequestId?: string;
+  outcomeKnown?: boolean;
+  reconciliation?: Record<string, unknown>;
 }
 
 export class VendorApiExecutor {
-  private credentialProvider = CredentialProvider;
-
   async execute(options: VendorApiOptions, credentials: ToolCredentials): Promise<VendorApiResult> {
     const startTime = Date.now();
     const { vendor, operation, input } = options;
+    const idempotencyKey = options.idempotencyKey || options.executionId || (input.idempotencyKey as string | undefined);
+
+    if (options.lookupUrl) {
+      try {
+        const res = await fetch(options.lookupUrl, { method: 'GET', headers: { Accept: 'application/json', ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}) } });
+        const text = await res.text().catch(() => '');
+        let data: unknown = text;
+        try { data = text ? JSON.parse(text) : text; } catch {}
+        return {
+          success: res.ok,
+          data,
+          error: res.ok ? undefined : `Vendor lookup failed (${res.status})`,
+          durationMs: Date.now() - startTime,
+          idempotencyKey,
+          outcomeKnown: res.ok,
+          reconciliation: { provider: vendor, lookupAttempted: true, lookupStatus: String(res.status), outcomeKnown: res.ok, note: res.ok ? 'Vendor lookup completed.' : 'Vendor lookup attempted but did not confirm outcome.' },
+        };
+      } catch (err) {
+        return { success: false, error: `Vendor lookup error: ${err instanceof Error ? err.message : String(err)}`, durationMs: Date.now() - startTime, idempotencyKey, outcomeKnown: false, reconciliation: { provider: vendor, lookupAttempted: true, outcomeKnown: false, note: 'Vendor lookup failed; outcome unknown.' } };
+      }
+    }
 
     const baseUrl = this.resolveBaseUrl(vendor, credentials);
     const token = this.resolveToken(vendor, credentials);
@@ -29,6 +55,9 @@ export class VendorApiExecutor {
         success: false,
         error: `Missing ${vendor} credentials: baseUrl and apiToken are required`,
         durationMs: Date.now() - startTime,
+        idempotencyKey,
+        outcomeKnown: false,
+        reconciliation: { provider: vendor, outcomeKnown: false, note: 'Cannot execute or reconcile without vendor credentials.' },
       };
     }
 
@@ -36,29 +65,62 @@ export class VendorApiExecutor {
       let result: unknown;
       switch (vendor) {
         case 'jira':
-          result = await this.executeJira(baseUrl, token, operation, input);
+          result = await this.executeJira(baseUrl, token, operation, input, idempotencyKey);
           break;
         case 'confluence':
-          result = await this.executeConfluence(baseUrl, token, operation, input);
+          result = await this.executeConfluence(baseUrl, token, operation, input, idempotencyKey);
           break;
         case 'slack':
-          result = await this.executeSlack(token, operation, input);
+          result = await this.executeSlack(token, operation, input, idempotencyKey);
           break;
         case 'github':
-          result = await this.executeGithub(token, operation, input);
+          result = await this.executeGithub(token, operation, input, idempotencyKey);
           break;
         default:
-          return { success: false, error: `Unsupported vendor: ${vendor}`, durationMs: Date.now() - startTime };
+          return { success: false, error: `Unsupported vendor: ${vendor}`, durationMs: Date.now() - startTime, idempotencyKey, outcomeKnown: false };
       }
 
-      return { success: true, data: result, durationMs: Date.now() - startTime };
+      const providerRequestId = this.extractProviderRequestId(vendor, result);
+      return {
+        success: true,
+        data: result,
+        durationMs: Date.now() - startTime,
+        idempotencyKey,
+        providerRequestId,
+        outcomeKnown: true,
+        reconciliation: {
+          provider: vendor,
+          outcomeKnown: true,
+          providerRequestId,
+          note: this.reconciliationNote(vendor),
+        },
+      };
     } catch (err) {
       return {
         success: false,
         error: err instanceof Error ? err.message : String(err),
         durationMs: Date.now() - startTime,
+        idempotencyKey,
+        outcomeKnown: false,
+        reconciliation: { provider: vendor, outcomeKnown: false, note: 'Vendor request failed or response was ambiguous. If a prior response was lost after provider acceptance, outcome may be unknown without provider-specific lookup.' },
       };
     }
+  }
+
+  private reconciliationNote(vendor: string): string {
+    if (vendor === 'github') return 'GitHub accepted the request. Some GitHub operations support idempotent behavior by resource identity; no universal idempotency header was assumed.';
+    if (vendor === 'slack') return 'Slack accepted the request. Slack chat.postMessage is not automatically deduped by this header; callers should use provider-specific dedup/lookup when retry safety matters.';
+    return 'Vendor accepted the request. Idempotency/dedup behavior is provider/operation specific; if a response is lost, use lookupUrl or provider status APIs before retrying when available.';
+  }
+
+  private extractProviderRequestId(vendor: string, result: unknown): string | undefined {
+    if (!result || typeof result !== 'object') return undefined;
+    const r = result as any;
+    if (vendor === 'jira') return r.key || r.id;
+    if (vendor === 'github') return String(r.id || r.number || r.node_id || '') || undefined;
+    if (vendor === 'slack') return r.ts || r.channel || undefined;
+    if (vendor === 'confluence') return r.id || r._links?.webui || undefined;
+    return undefined;
   }
 
   private resolveBaseUrl(vendor: string, credentials: ToolCredentials): string {
@@ -71,10 +133,11 @@ export class VendorApiExecutor {
     return (credentials as any)[key] || (credentials as any)[`${vendor}_token`] || credentials.apiToken || credentials.token || '';
   }
 
-  private async executeJira(baseUrl: string, token: string, operation: string, input: Record<string, unknown>): Promise<unknown> {
-    const headers = {
+  private async executeJira(baseUrl: string, token: string, operation: string, input: Record<string, unknown>, idempotencyKey?: string): Promise<unknown> {
+    const headers: Record<string, string> = {
       'Authorization': `Basic ${Buffer.from(`${token}:x`.trim()).toString('base64')}`,
       'Content-Type': 'application/json',
+      ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
     };
 
     if (operation === 'create_issue') {
@@ -114,16 +177,17 @@ export class VendorApiExecutor {
         body: JSON.stringify({ transition: { name: input.transitionName } }),
       });
       if (!res.ok) throw new Error(`Jira transition failed: ${res.status}`);
-      return { success: true };
+      return { success: true, issueKey };
     }
 
     throw new Error(`Unsupported Jira operation: ${operation}`);
   }
 
-  private async executeConfluence(baseUrl: string, token: string, operation: string, input: Record<string, unknown>): Promise<unknown> {
-    const headers = {
+  private async executeConfluence(baseUrl: string, token: string, operation: string, input: Record<string, unknown>, idempotencyKey?: string): Promise<unknown> {
+    const headers: Record<string, string> = {
       'Authorization': `Basic ${Buffer.from(`${token}:x`.trim()).toString('base64')}`,
       'Content-Type': 'application/json',
+      ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
     };
 
     if (operation === 'create_page') {
@@ -152,10 +216,11 @@ export class VendorApiExecutor {
     throw new Error(`Unsupported Confluence operation: ${operation}`);
   }
 
-  private async executeSlack(token: string, operation: string, input: Record<string, unknown>): Promise<unknown> {
-    const headers = {
+  private async executeSlack(token: string, operation: string, input: Record<string, unknown>, idempotencyKey?: string): Promise<unknown> {
+    const headers: Record<string, string> = {
       'Authorization': `Bearer ${token}`,
       'Content-Type': 'application/json',
+      ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
     };
 
     if (operation === 'post_message') {
@@ -168,7 +233,7 @@ export class VendorApiExecutor {
           blocks: input.blocks,
         }),
       });
-      const data = await res.json() as { ok: boolean; error?: string };
+      const data = await res.json() as { ok: boolean; error?: string; ts?: string; channel?: string };
       if (!data.ok) throw new Error(`Slack post failed: ${data.error}`);
       return data;
     }
@@ -180,30 +245,15 @@ export class VendorApiExecutor {
       return { channels: data.channels };
     }
 
-    if (operation === 'upload_file') {
-      const FormData = (await import('form-data')).default;
-      const form = new FormData();
-      form.append('channels', input.channel as string);
-      form.append('file', Buffer.from((input.content as string) || ''), { filename: (input.filename as string) || 'file.txt' });
-
-      const res = await fetch('https://slack.com/api/files.upload', {
-        method: 'POST',
-        headers: { ...headers, ...(form as any).getHeaders() },
-        body: form as any,
-      });
-      const data = await res.json() as { ok: boolean; error?: string };
-      if (!data.ok) throw new Error(`Slack upload failed: ${data.error}`);
-      return data;
-    }
-
     throw new Error(`Unsupported Slack operation: ${operation}`);
   }
 
-  private async executeGithub(token: string, operation: string, input: Record<string, unknown>): Promise<unknown> {
-    const headers = {
+  private async executeGithub(token: string, operation: string, input: Record<string, unknown>, idempotencyKey?: string): Promise<unknown> {
+    const headers: Record<string, string> = {
       'Authorization': `Bearer ${token}`,
       'Content-Type': 'application/json',
       'Accept': 'application/vnd.github+json',
+      ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
     };
 
     if (operation === 'create_issue') {
@@ -211,12 +261,7 @@ export class VendorApiExecutor {
       const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/issues`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({
-          title: input.title,
-          body: input.body,
-          labels: input.labels,
-          assignees: input.assignees,
-        }),
+        body: JSON.stringify({ title: input.title, body: input.body, labels: input.labels, assignees: input.assignees }),
       });
       if (!res.ok) throw new Error(`GitHub issue creation failed: ${res.status}`);
       return await res.json();
@@ -234,12 +279,7 @@ export class VendorApiExecutor {
       const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/pulls`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({
-          title: input.title,
-          head: input.head,
-          base: input.base,
-          body: input.body,
-        }),
+        body: JSON.stringify({ title: input.title, head: input.head, base: input.base, body: input.body }),
       });
       if (!res.ok) throw new Error(`GitHub PR creation failed: ${res.status}`);
       return await res.json();

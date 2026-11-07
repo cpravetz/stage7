@@ -78,7 +78,7 @@ export interface MissionPhaseOutput {
   status: 'completed' | 'incomplete';
   tasks: Array<{
     taskId: string;
-    status: 'completed' | 'failed' | 'pending';
+    status: 'completed' | 'incomplete' | 'failed' | 'pending';
     artifacts: TaskExecutionResult['artifacts'];
     output?: string;
   }>;
@@ -306,11 +306,9 @@ export async function selectNextMissionTaskActivity({
 }: MissionTaskSelectionActivityInput): Promise<string> {
   const humanTask = phase.tasks.find((task) => isHumanAgentRole(task.agentRole));
   if (humanTask) {
-    logger.warn(
-      { missionId: input.missionId, phaseId: phase.id, taskId: humanTask.id, agentRole: humanTask.agentRole },
-      'Replacing a human task role with the autonomous assistant role; missions do not pause for user input',
+    throw new Error(
+      `Mission phase "${phase.id}" contains task "${humanTask.id}" with human agentRole "${humanTask.agentRole}"; use requiresApproval or requiresClarification instead. Refusing to send the phase to the task selector.`,
     );
-    humanTask.agentRole = 'assistant';
   }
   const activityContext = Context.current();
   const heartbeatTimer = setInterval(() => {
@@ -416,19 +414,17 @@ export async function executeMissionTaskActivity({
     agentRuntimeUrl: process.env.AGENT_RUNTIME_URL,
     broadcast: createRuntimeBroadcast(input),
   });
-  if (isHumanAgentRole(task.agentRole)) {
-    logger.warn(
-      { missionId: input.missionId, phaseId: phase.id, taskId: task.id, agentRole: task.agentRole },
-      'Replacing a human task role with the autonomous assistant role; missions do not pause for user input',
-    );
-    task.agentRole = 'assistant';
-  }
   let agentId = agentRuntime.getAgentIdForRole(task.agentRole);
   const heartbeatTimer = setInterval(() => {
     activityContext.heartbeat({ missionId: input.missionId, phaseId: phase.id, taskId: task.id });
   }, 30_000);
 
   try {
+    if (isHumanAgentRole(task.agentRole)) {
+      throw new Error(
+        `Mission task "${task.id}" cannot be executed with human agentRole "${task.agentRole}"; represent human decisions with requiresApproval or requiresClarification.`,
+      );
+    }
     await persistUpdate(input, 'tasks', task.id, {
       phaseId: phase.id,
       status: 'in_progress',
@@ -462,8 +458,8 @@ export async function executeMissionTaskActivity({
       completedTaskSummaries,
     ] as const;
     const result = retryGuidance
-      ? await agentRuntime.executeTask(...executionArgs, retryGuidance)
-      : await agentRuntime.executeTask(...executionArgs);
+      ? await agentRuntime.executeTask(...executionArgs, retryGuidance, undefined, input.prompt)
+      : await agentRuntime.executeTask(...executionArgs, undefined, undefined, input.prompt);
     if (result.interruption) {
       await persistUpdate(input, 'tasks', task.id, {
         phaseId: phase.id,
@@ -488,15 +484,16 @@ export async function executeMissionTaskActivity({
       });
       return result;
     }
+    const taskStatus = result.incompleteReason ? 'incomplete' : 'completed';
     await persistUpdate(input, 'tasks', task.id, {
       phaseId: phase.id,
-      status: 'completed',
+      status: taskStatus,
       completedAt: Date.now(),
       output: result.output,
       artifacts: result.artifacts,
     });
     await broadcast(input, {
-      type: 'task_completed',
+      type: taskStatus === 'completed' ? 'task_completed' : 'task_incomplete',
       missionId: input.missionId,
       timestamp: Date.now(),
       data: {
@@ -508,6 +505,7 @@ export async function executeMissionTaskActivity({
         agentRole: task.agentRole,
         artifacts: result.artifacts,
         output: result.output.slice(0, 4_000),
+        ...(result.incompleteReason ? { error: result.incompleteReason } : {}),
         tokensUsed: result.tokensUsed,
       },
     });
@@ -705,6 +703,7 @@ export async function completeMissionActivity({
           artifacts,
           expectedArtifacts: plannedTasks.get(JSON.stringify([phase.phaseId, task.taskId]))?.expectedArtifacts || [],
           requiredActions: plannedTasks.get(JSON.stringify([phase.phaseId, task.taskId]))?.requiredActions || [],
+          requiresExternalAction: plannedTasks.get(JSON.stringify([phase.phaseId, task.taskId]))?.requiresExternalAction,
         };
       }),
     );

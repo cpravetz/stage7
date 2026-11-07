@@ -1,0 +1,35 @@
+{
+  "id": "math",
+  "name": "Math",
+  "description": "Evaluate mathematical expressions and perform list operations",
+  "type": "native",
+  "manifest": {
+    "executor": "math",
+    "codeFile": "math.js",
+    "configSchema": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    },
+    "credentialSource": {}
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "expression": { "type": "string", "description": "Mathematical expression to evaluate" },
+      "values": { "type": "array", "items": { "type": "number" } },
+      "operation": { "type": "string", "enum": ["sum", "mean", "median", "min", "max", "stddev"] }
+    }
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "success": { "type": "boolean" },
+      "result": { "type": "number" },
+      "expression": { "type": "string" },
+      "error": { "type": "string" }
+    },
+    "required": ["success"]
+  },
+  "isSkill": false
+}

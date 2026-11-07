@@ -7,6 +7,7 @@ import {
 } from '../src/activities/missionWorkflowActivities';
 import { WorkflowInput } from '../src/types/workflow';
 import { Plan } from '@stage7-nextgen/shared';
+import { MISSION_TASK_EXECUTION_POLICY } from '../src/agent/MissionAgentRuntime';
 
 jest.mock('@temporalio/activity', () => ({
   Context: { current: jest.fn() },
@@ -130,8 +131,11 @@ describe('mission task activity retry safety', () => {
       phase,
       plan,
       false,
-      expect.objectContaining({ maxBrainCalls: Number.MAX_SAFE_INTEGER }),
+      MISSION_TASK_EXECUTION_POLICY,
       [],
+      undefined,
+      undefined,
+      input.prompt,
     );
     const createdAgentRequest = (global.fetch as jest.Mock).mock.calls.find(
       ([url, options]) =>
@@ -169,9 +173,11 @@ describe('mission task activity retry safety', () => {
       phase,
       plan,
       true,
-      expect.objectContaining({ maxBrainCalls: Number.MAX_SAFE_INTEGER }),
+      MISSION_TASK_EXECUTION_POLICY,
       [],
       'Continue from the work saved so far. Do not repeat actions outside the system when their outcome is already recorded or uncertain.',
+      undefined,
+      input.prompt,
 
     );
     const persistedEvents = (global.fetch as jest.Mock).mock.calls

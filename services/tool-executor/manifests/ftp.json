@@ -1,0 +1,46 @@
+{
+  "id": "ftp",
+  "name": "FTP",
+  "description": "List, upload, download, delete, and create directories on an FTP server",
+  "type": "native",
+  "manifest": {
+    "executor": "ftp",
+    "codeFile": "ftp.js",
+    "configSchema": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    },
+    "credentialSource": {
+      "host": { "configKey": "ftp.host" },
+      "port": { "configKey": "ftp.port" },
+      "username": { "configKey": "ftp.username" },
+      "password": { "configKey": "ftp.password" }
+    }
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "host": { "type": "string" },
+      "port": { "type": "integer", "default": 21 },
+      "username": { "type": "string" },
+      "password": { "type": "string" },
+      "operation": { "type": "string", "enum": ["list", "upload", "download", "delete", "mkdir"], "default": "list" },
+      "remotePath": { "type": "string" },
+      "localPath": { "type": "string" },
+      "content": { "type": "string" }
+    },
+    "required": ["host", "username", "password", "operation"]
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "success": { "type": "boolean" },
+      "output": { "type": "string" },
+      "error": { "type": "string" },
+      "durationMs": { "type": "number" }
+    },
+    "required": ["success"]
+  },
+  "isSkill": false
+}

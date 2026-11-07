@@ -399,11 +399,21 @@ const Tools = () => {
     navigator.clipboard.writeText(text).catch(() => {});
   };
 
+  const getConfigFields = (tool: Tool | null): { fields: string[]; required: string[]; properties: Record<string, any> } => {
+    if (!tool) return { fields: [], required: [], properties: {} };
+    const schema = (tool.configSchema || (tool.manifest?.configSchema as any) || {}) as any;
+    const properties = schema?.properties && typeof schema.properties === 'object' ? schema.properties : {};
+    const required = Array.isArray(schema?.required) ? schema.required.filter((v: unknown): v is string => typeof v === 'string') : [];
+    const fields = Object.keys(properties);
+    // Keep backward compatibility for schemas that only define required.
+    for (const field of required) if (!fields.includes(field)) fields.push(field);
+    return { fields, required, properties };
+  };
+
   const loadConfigValues = async (tool: Tool | null) => {
     if (!tool) return;
-    const schema = tool.configSchema || (tool.manifest?.configSchema as any);
-    const required = schema?.required || [];
-    if (!Array.isArray(required) || required.length === 0) {
+    const { fields } = getConfigFields(tool);
+    if (fields.length === 0) {
       setConfigValues({});
       return;
     }
@@ -413,7 +423,7 @@ const Tools = () => {
     const newValues: Record<string, string> = {};
     try {
       const vaultUrl = (import.meta as any).env?.VITE_VAULT_URL || 'http://localhost:4000';
-      for (const field of required) {
+      for (const field of fields) {
         const name = `tool:${tool.id}:${field}`;
         try {
           const res = await fetch(`${vaultUrl}/api/vault/secrets/name/${encodeURIComponent(name)}/decrypt?tenantId=system`);
@@ -437,9 +447,8 @@ const Tools = () => {
 
   const saveConfigValues = async (tool: Tool | null) => {
     if (!tool) return;
-    const schema = tool.configSchema || (tool.manifest?.configSchema as any);
-    const required = schema?.required || [];
-    if (!Array.isArray(required) || required.length === 0) {
+    const { fields } = getConfigFields(tool);
+    if (fields.length === 0) {
       setConfigSuccess('No configuration fields');
       return;
     }
@@ -448,9 +457,9 @@ const Tools = () => {
     setConfigSuccess(null);
     try {
       const vaultUrl = (import.meta as any).env?.VITE_VAULT_URL || 'http://localhost:4000';
-      for (const field of required) {
+      for (const field of fields) {
         const name = `tool:${tool.id}:${field}`;
-        const value = configValues[field] || '';
+        const value = configValues[field] ?? '';
         const response = await fetch(`${vaultUrl}/api/vault/secrets/name/${encodeURIComponent(name)}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
@@ -947,23 +956,23 @@ const Tools = () => {
               {activeTab === 'configure' && (
                 <div>
                   <p className="muted" style={{ marginBottom: 12 }}>
-                    Configure secrets for this tool's configSchema variables. Values are stored in the Vault.
+                    Configure values for this tool's configSchema. Values are stored in the Vault.
                   </p>
                   {(() => {
-                    const schema = selectedTool.configSchema || (selectedTool.manifest?.configSchema as any);
-                    const required = schema?.required || [];
-                    const properties = schema?.properties || {};
-                    if (!Array.isArray(required) || required.length === 0) {
+                    const { fields, required, properties } = getConfigFields(selectedTool);
+                    if (fields.length === 0) {
                       return <p className="muted">No configuration variables defined.</p>;
                     }
+                    const requiredSet = new Set(required);
                     return (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                        {required.map((field: string) => (
+                        {fields.map((field) => (
                           <ConfigFieldRow
                             key={field}
                             field={field}
                             description={properties[field]?.description}
-                            value={configValues[field] || ''}
+                            required={requiredSet.has(field)}
+                            value={configValues[field] ?? ''}
                             onChange={(val) => setConfigValues((prev) => ({ ...prev, [field]: val }))}
                           />
                         ))}
@@ -1051,11 +1060,14 @@ const Tools = () => {
   );
 };
 
-const ConfigFieldRow = ({ field, description, value, onChange }: { field: string; description?: string; value: string; onChange: (val: string) => void }) => {
+const ConfigFieldRow = ({ field, description, value, required, onChange }: { field: string; description?: string; value: string; required?: boolean; onChange: (val: string) => void }) => {
   const [show, setShow] = useState(false);
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      <label style={{ fontWeight: 600 }}>{field}</label>
+      <label style={{ fontWeight: 600 }}>
+        {field}
+        {required ? <span style={{ color: '#f87171', marginLeft: 4 }}>*</span> : null}
+      </label>
       {description && <span className="muted" style={{ fontSize: 12 }}>{description}</span>}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <input

@@ -9,7 +9,7 @@ import type {
 import { createCodeSkill } from '../code-skill-factory';
 import type { Tool } from '../../types';
 
-const fieldSchema = z.record(z.enum(['string', 'number', 'boolean', 'array', 'object']));
+const fieldSchema = z.record(z.string(), z.enum(['string', 'number', 'boolean', 'array', 'object']));
 const synthesisSchema = z.object({
   skillName: z.string().regex(/^[a-z0-9-]{1,64}$/),
   description: z.string().min(1).max(500),

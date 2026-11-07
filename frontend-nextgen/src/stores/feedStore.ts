@@ -31,6 +31,7 @@ export type FeedEventType =
   | 'user_input_resolved'
   | 'task_started'
   | 'task_completed'
+  | 'task_incomplete'
   | 'task_failed'
   | 'cost_estimate'
   | 'assistant'
@@ -170,6 +171,9 @@ export function normalize(raw: unknown): FeedEvent | null {
         break;
       case 'task_completed':
         message = `Task completed: ${(data.taskTitle as string) || (data.taskId as string) || ''}`.trim();
+        break;
+      case 'task_incomplete':
+        message = `Task incomplete: ${(data.taskTitle as string) || (data.taskId as string) || ''} — ${(data.error as string) || ''}`.trim();
         break;
       case 'task_failed':
         message = `Task failed: ${(data.taskTitle as string) || (data.taskId as string) || ''} — ${(data.error as string) || ''}`.trim();

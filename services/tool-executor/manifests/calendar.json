@@ -1,0 +1,50 @@
+{
+  "id": "calendar",
+  "name": "Calendar",
+  "description": "Create, update, list, delete calendar events and check availability",
+  "type": "native",
+  "manifest": {
+    "executor": "calendar",
+    "codeFile": "calendar.js",
+    "configSchema": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    },
+    "credentialSource": {
+      "apiKey": { "envVar": "CALENDAR_API_KEY" },
+      "calendarPath": { "configKey": "calendar.path" }
+    }
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "action": { "type": "string", "enum": ["create", "update", "list", "delete", "check_availability", "export"] },
+      "calendarPath": { "type": "string" },
+      "summary": { "type": "string" },
+      "start": { "type": "string" },
+      "end": { "type": "string" },
+      "durationMinutes": { "type": "integer" },
+      "attendees": { "type": "array" },
+      "uid": { "type": "string" },
+      "rangeStart": { "type": "string" },
+      "rangeEnd": { "type": "string" },
+      "windowStart": { "type": "string" },
+      "windowEnd": { "type": "string" },
+      "slotMinutes": { "type": "integer" },
+      "busy": { "type": "array" }
+    },
+    "required": ["action"]
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "success": { "type": "boolean" },
+      "events": { "type": "array" },
+      "error": { "type": "string" },
+      "durationMs": { "type": "number" }
+    },
+    "required": ["success"]
+  },
+  "isSkill": false
+}

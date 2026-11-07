@@ -114,30 +114,6 @@ function getMissionStatusLabel(status: string): string {
   }
 }
 
-function isMissionComplete(plan: Plan | null, phaseOutputs: PhaseOutput[], missionEvents: FeedEvent[]): boolean {
-  if (!plan || !plan.phases || plan.phases.length === 0) return false;
-  const allPhasesComplete = plan.phases.every((phase) => {
-    const output = phaseOutputs.find((p) => p.phaseId === phase.id);
-    if (output && output.status === 'completed') return true;
-    // check tasks
-    const tasks = phase.tasks || [];
-    if (tasks.length === 0) return false;
-    const allTasksDone = tasks.every((task) => {
-      const taskOut = output?.tasks?.find((t) => t.taskId === task.id);
-      if (taskOut?.status === 'completed' || taskOut?.status === 'failed') {
-        // failed might count as done? but instruction says "all plan phases have all tasks completed"
-        return taskOut.status === 'completed';
-      }
-      // check events
-      const te = missionEvents.find((e) => e.metadata?.phaseId === phase.id && e.metadata?.taskId === task.id && (e.type === 'task_completed' || e.type === 'task_failed'));
-      if (te?.type === 'task_completed') return true;
-      return false;
-    });
-    return allTasksDone;
-  });
-  return allPhasesComplete;
-}
-
 export function derivePhaseStatus(phase: PlanPhase, phaseOutputs: PhaseOutput[], missionEvents: FeedEvent[], missionStatus?: string): string | undefined {
   const output = phaseOutputs.find((p) => p.phaseId === phase.id);
   if (output?.status) {
@@ -165,13 +141,15 @@ export function derivePhaseStatus(phase: PlanPhase, phaseOutputs: PhaseOutput[],
 
 
 function iconForType(type: string): string {
-  if (type.startsWith('task_')) return type === 'task_failed' ? '❌' : '✅';
+  if (type.startsWith('task_')) return type === 'task_failed' ? '❌' : type === 'task_incomplete' ? '⚠️' : '✅';
   if (type.startsWith('phase_')) return '📦';
   if (type.startsWith('approval_')) return type === 'approval_approved' ? '✅' : type === 'approval_rejected' ? '❌' : '⏸️';
   if (type.startsWith('plan_') || type.startsWith('planner_')) return '🧭';
   if (type === 'tool') return '🔧';
   if (type === 'monologue') return '💭';
-  if (type === 'user' || type === 'user_message') return '🧑';
+  if (type === 'user' || type === 'user_message' || type === 'user_input_resolved') return '🧑';
+  if (type === 'question_asked') return '❓';
+  if (type === 'permission_required') return '🔐';
   if (type === 'mission_completed') return '🏁';
   if (type === 'mission_failed') return '💥';
   if (type === 'mission_incomplete') return '⚠️';
@@ -302,13 +280,13 @@ export function getTaskStatus(
   const taskEvents = events
     .filter((event) => event.metadata?.phaseId === phaseId
       && event.metadata?.taskId === task.id
-      && ['task_started', 'task_completed', 'task_failed'].includes(event.type))
+      && ['task_started', 'task_completed', 'task_incomplete', 'task_failed'].includes(event.type))
     .sort((left, right) => left.timestamp - right.timestamp);
   const latestTaskEvent = taskEvents[taskEvents.length - 1];
   if (latestTaskEvent) {
     return latestTaskEvent.type === 'task_started'
       ? 'in_progress'
-      : latestTaskEvent.type === 'task_failed' ? 'failed' : 'completed';
+      : latestTaskEvent.type === 'task_failed' ? 'failed' : latestTaskEvent.type === 'task_incomplete' ? 'incomplete' : 'completed';
   }
   const outputStatus = phaseOutputs
     .find((phase) => phase.phaseId === phaseId)
@@ -336,20 +314,20 @@ const MissionRoom = () => {
   const retryMission = useMissionsStore((s) => s.retryMission);
 
   const [tab, setTab] = useState<Tab>('conversation');
-  const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [controlError, setControlError] = useState<string | null>(null);
-  const [clarificationAnswers, setClarificationAnswers] = useState<Record<number, string>>({});
   const [clarificationSubmitting, setClarificationSubmitting] = useState(false);
-  const [interactionAnswer, setInteractionAnswer] = useState('');
   const [interactionSubmitting, setInteractionSubmitting] = useState(false);
   const [interactionAccepted, setInteractionAccepted] = useState(false);
   const [interactionConfigurationReady, setInteractionConfigurationReady] = useState(false);
+  const [interactionResponse, setInteractionResponse] = useState('');
   const [permissionScope, setPermissionScope] = useState('');
-  const [now, setNow] = useState(Date.now());
   const transcriptRef = useRef<HTMLDivElement>(null);
-  const [retryGuidance, setRetryGuidance] = useState('');
+  const transcriptSticksToBottom = useRef(true);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const clarificationInputs = useRef(new Map<number, HTMLInputElement>());
+  const retryGuidanceRef = useRef<HTMLTextAreaElement>(null);
   const [showRetryDialog, setShowRetryDialog] = useState(false);
   const [retrying, setRetrying] = useState(false);
 
@@ -360,8 +338,8 @@ const MissionRoom = () => {
   const pendingInteraction = detail?.output?.outputs?.pendingInteraction;
   useEffect(() => {
     setInteractionAccepted(false);
-    setInteractionAnswer('');
     setInteractionConfigurationReady(false);
+    setInteractionResponse('');
   }, [pendingInteraction?.taskId, pendingInteraction?.question, pendingInteraction?.requestId]);
 
   useEffect(() => {
@@ -369,12 +347,6 @@ const MissionRoom = () => {
       fetchMissionDetail(workflowId);
     }
   }, [workflowId, fetchMissionDetail]);
-
-  useEffect(() => {
-    if (detail?.status !== 'running') return;
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, [detail?.status]);
 
   const plan = useMemo(() => {
     const persistedPlan = (detail?.output?.plan as Plan | undefined) ?? null;
@@ -399,18 +371,12 @@ const MissionRoom = () => {
   }, [detail?.output?.outputs?.phases]);
 
   const missionEvents = useMemo<FeedEvent[]>(() => {
-    let effectiveStatus = detail?.status || 'unknown';
-    if (detail && (detail.status === 'running' || detail.status === 'started')) {
-      if (isMissionComplete(plan, phaseOutputs, [])) {
-        effectiveStatus = 'completed';
-      }
-    }
     return buildMissionEvents({
       missionId,
       liveEvents: events,
       detail: detail
         ? {
-            status: effectiveStatus,
+            status: detail.status,
             error: detail.error,
             startedAt: detail.startedAt,
             completedAt: detail.completedAt,
@@ -425,19 +391,6 @@ const MissionRoom = () => {
 
   const modelUsage = useMemo(() => summarizeModelUsage(missionEvents), [missionEvents]);
   const totalEstimatedCost = modelUsage.estimatedCost;
-
-  const missionDuration = useMemo(() => {
-    if (!detail?.startedAt) return null;
-    const start = new Date(detail.startedAt).getTime();
-    const end = detail.completedAt ? new Date(detail.completedAt).getTime() : now;
-    const ms = Math.max(0, end - start);
-    const hours = Math.floor(ms / 3_600_000);
-    const minutes = Math.floor(ms / 60_000) % 60;
-    const seconds = Math.floor(ms / 1000) % 60;
-    if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
-    if (minutes > 0) return `${minutes}m ${seconds}s`;
-    return `${seconds}s`;
-  }, [detail?.startedAt, detail?.completedAt, now]);
 
   const conversationEvents = useMemo(
     () => missionEvents.filter((e) => CONVERSATION_EVENT_TYPES.has(e.type as string)),
@@ -548,26 +501,31 @@ const MissionRoom = () => {
     setRetrying(true);
     setSendError(null);
     try {
-      const result = await retryMission(workflowId, retryGuidance);
+      const result = await retryMission(workflowId, retryGuidanceRef.current?.value || '');
       window.location.href = `/missions/${encodeURIComponent(result.workflowId)}`;
     } catch (err) {
       setSendError(err instanceof Error ? err.message : 'Retry failed');
     } finally {
       setRetrying(false);
       setShowRetryDialog(false);
-      setRetryGuidance('');
+      if (retryGuidanceRef.current) retryGuidanceRef.current.value = '';
     }
   };
 
   const handleClarificationSubmit = async () => {
     const questions = plan?.clarificationQuestions || [];
-    if (clarificationSubmitting || questions.some((_, index) => !clarificationAnswers[index]?.trim())) return;
+    const answers = questions.map((_, index) => clarificationInputs.current.get(index)?.value.trim() || '');
+    if (clarificationSubmitting) return;
+    if (answers.some((answer) => !answer)) {
+      setControlError('Please answer each question before continuing.');
+      return;
+    }
     setClarificationSubmitting(true);
     setControlError(null);
     try {
       const tenantId = detail?.input?.tenantId || 'tenant-1';
       const safeAnswers = await Promise.all(questions.map(async (question, index) => {
-        const answer = clarificationAnswers[index].trim();
+        const answer = answers[index];
         const secretQuestion = question.match(/^\s*\[secret:([a-z0-9_-]+)\]\s*(.*)$/i);
         if (!secretQuestion) return `${question}\nAnswer: ${answer}`;
         const [, key, prompt] = secretQuestion;
@@ -583,7 +541,8 @@ const MissionRoom = () => {
         { clarificationAnswers: safeAnswers },
       );
       updateMissionStatus(workflowId, result.status);
-      setClarificationAnswers({});
+      clarificationInputs.current.forEach((input) => { input.value = ''; });
+      clarificationInputs.current.clear();
       await refreshDetail(workflowId);
     } catch (error) {
       setControlError(error instanceof Error ? error.message : 'Failed to submit clarification');
@@ -598,6 +557,11 @@ const MissionRoom = () => {
     const secretKeys = pending.kind === 'user_input' ? secretKeysForInteraction(pending) : [];
     const configureInSettings = pending.kind === 'user_input'
       && secretKeys.length > 0;
+    const responseText = interactionResponse.trim();
+    if (pending.kind === 'user_input' && !configureInSettings && !responseText) {
+      setControlError('Enter a response before continuing.');
+      return;
+    }
     if (configureInSettings && !interactionConfigurationReady) return;
     setInteractionSubmitting(true);
     setControlError(null);
@@ -622,7 +586,7 @@ const MissionRoom = () => {
         } else {
           const safeResponse = configureInSettings
             ? `The required configuration values (${secretKeys.join(', ')}) have been saved in Tools or Vault. Retry the mission using those configured values; do not request the secrets in chat.`
-            : interactionAnswer.trim() || 'continue';
+            : responseText;
           const result = await postJSON<{ status: string }>(
             `/api/temporal/missions/${encodeURIComponent(workflowId)}/start`,
             { interactionResponse: safeResponse },
@@ -631,7 +595,7 @@ const MissionRoom = () => {
         }
       }
       setInteractionAccepted(true);
-      setInteractionAnswer('');
+      setInteractionResponse('');
       setPermissionScope('');
       await refreshDetail(workflowId);
     } catch (error) {
@@ -642,11 +606,14 @@ const MissionRoom = () => {
   };
 
   useEffect(() => {
-    transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight });
+    const transcript = transcriptRef.current;
+    if (transcript && transcriptSticksToBottom.current) {
+      transcript.scrollTo({ top: transcript.scrollHeight });
+    }
   }, [transcript.length]);
 
   const sendMessage = async () => {
-    const text = input.trim();
+    const text = inputRef.current?.value.trim() || '';
     if (!text || sending) return;
     setSending(true);
     setSendError(null);
@@ -655,7 +622,7 @@ const MissionRoom = () => {
         `/api/temporal/missions/${encodeURIComponent(workflowId)}/messages`,
         { missionId, content: text, role: 'user' },
       );
-      setInput('');
+      if (inputRef.current) inputRef.current.value = '';
     } catch (err) {
       setSendError(err instanceof Error ? err.message : 'Failed to send message');
     } finally {
@@ -664,22 +631,10 @@ const MissionRoom = () => {
   };
 
   const rawStatus = detail?.status || 'unknown';
-  let effectiveStatus = rawStatus;
-  if ((rawStatus === 'running' || rawStatus === 'started') && isMissionComplete(plan, phaseOutputs, missionEvents)) {
-    effectiveStatus = 'completed';
-  }
-  const status = effectiveStatus;
+  const status = rawStatus;
   const badge = STATUS_BADGE[status] || status;
   const artifactCount = artifactItems.length;
-  const startedAtMs = detail?.startedAt ? new Date(detail.startedAt).getTime() : undefined;
-  const completedAtMs = detail?.completedAt ? new Date(detail.completedAt).getTime() : undefined;
-  const wallClockMs =
-    startedAtMs && completedAtMs
-      ? completedAtMs - startedAtMs
-      : startedAtMs && (rawStatus === 'running' || rawStatus === 'started' || !completedAtMs)
-        ? now - startedAtMs
-        : null;
-  const wallClockLabel = wallClockMs != null ? formatDuration(wallClockMs) : null;
+  const missionIsRunning = rawStatus === 'running' || rawStatus === 'started';
 
   return (
     <div className="page mission-room">
@@ -774,13 +729,13 @@ const MissionRoom = () => {
                     <label style={{ display: 'block' }}>
                       {label}
                       <input
+                        key={`${workflowId}-${index}-${question}`}
                         type={secretQuestion ? 'password' : 'text'}
                         autoComplete={secretQuestion ? 'new-password' : undefined}
-                        value={clarificationAnswers[index] || ''}
-                        onChange={(event) => setClarificationAnswers((previous) => ({
-                          ...previous,
-                          [index]: event.target.value,
-                        }))}
+                        ref={(element) => {
+                          if (element) clarificationInputs.current.set(index, element);
+                          else clarificationInputs.current.delete(index);
+                        }}
                         style={{ display: 'block', width: '100%', marginTop: 4, boxSizing: 'border-box' }}
                       />
                       {secretQuestion && (
@@ -794,7 +749,7 @@ const MissionRoom = () => {
           )}
           <button
             onClick={handleClarificationSubmit}
-            disabled={clarificationSubmitting || (plan.clarificationQuestions || []).some((_, index) => !clarificationAnswers[index]?.trim())}
+            disabled={clarificationSubmitting}
             style={{ marginTop: 8 }}
           >
             {clarificationSubmitting ? 'Continuing...' : 'Continue mission'}
@@ -811,6 +766,9 @@ const MissionRoom = () => {
           : null;
         const configureInSettings = pending.kind === 'user_input'
           && secretKeys.length > 0;
+        const freeTextInput = pending.kind === 'user_input'
+          && !configureInSettings
+          && !secretQuestion;
         const hasSmtpCredentials = secretKeys.some((key) => key.startsWith('smtp_'));
         const configureToolId = pending.credentialRequest?.toolId
           || (hasSmtpCredentials ? 'email_sender' : undefined);
@@ -833,7 +791,9 @@ const MissionRoom = () => {
             </div>
             {pending.kind === 'user_input' && (
               <div style={{ marginTop: 10 }}>
-                {secretQuestion ? secretQuestion[2] : pending.question}
+                <div style={{ whiteSpace: 'pre-wrap' }}>
+                  {secretQuestion ? secretQuestion[2] : pending.question}
+                </div>
                 {configureInSettings ? (
                   <>
                     <p className="muted" style={{ margin: '8px 0' }}>
@@ -850,11 +810,11 @@ const MissionRoom = () => {
                         </Link>
                       )}
                       {!configureToolId && (
-                        <Link to={toolSettingsUrl} target="_blank" rel="noreferrer" className="link-button">
+                        <Link to={toolSettingsUrl} rel="noreferrer" className="link-button">
                           Browse tool settings
                         </Link>
                       )}
-                      <Link to="/vault" target="_blank" rel="noreferrer" className="link-button">
+                      <Link to="/vault" rel="noreferrer" className="link-button">
                         Open Vault secrets
                       </Link>
                     </div>
@@ -881,11 +841,35 @@ const MissionRoom = () => {
                       {' '}I saved the required configuration and am ready to continue.
                     </label>
                   </>
-                 ) : secretKeys.length > 0 ? (
-                   <p className="muted">Configure the listed values in Tools or Vault before continuing.</p>
-                 ) : (
-                   <p className="muted">Address the requested configuration in Tools or Vault, then return here. No values are collected in mission chat.</p>
-                 )}
+                ) : secretQuestion ? (
+                  <p className="muted" style={{ marginTop: 8 }}>
+                    Provide this value in Tools or Vault before continuing.
+                  </p>
+                ) : (
+                  <>
+                    <p className="muted" style={{ margin: '8px 0' }}>
+                      Reply to the Agent below. If this requires service configuration, use Tools or Vault and explain what changed in your response.
+                    </p>
+                    <textarea
+                      value={interactionResponse}
+                      onChange={(event) => setInteractionResponse(event.target.value)}
+                      placeholder="Type your response to the Agent..."
+                      rows={3}
+                      disabled={interactionSubmitting || interactionAccepted}
+                      style={{ display: 'block', width: '100%', marginTop: 8, boxSizing: 'border-box' }}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+                          event.preventDefault();
+                          void handleMissionInteractionSubmit();
+                        }
+                      }}
+                    />
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
+                      <Link to="/tools" className="link-button">Open Tools configuration</Link>
+                      <Link to="/vault" className="link-button">Open Vault secrets</Link>
+                    </div>
+                  </>
+                )}
               </div>
             )}
             {pending.kind === 'mcp_permission' && permission && (
@@ -923,7 +907,7 @@ const MissionRoom = () => {
                 )}
               </div>
             )}
-            <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+            <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
               {pending.kind === 'user_input' ? (
                 <button
                   onClick={() => void handleMissionInteractionSubmit()}
@@ -931,13 +915,14 @@ const MissionRoom = () => {
                     interactionSubmitting
                     || interactionAccepted
                     || (configureInSettings && !interactionConfigurationReady)
+                    || (freeTextInput && !interactionResponse.trim())
                   }
                 >
                   {interactionSubmitting || interactionAccepted
                     ? 'Continuing...'
                     : configureInSettings
                       ? 'Continue after configuration'
-                      : 'Continue mission'}
+                      : 'Send response'}
                 </button>
               ) : (
                 <>
@@ -971,8 +956,7 @@ const MissionRoom = () => {
           </div>
           <textarea
             placeholder="e.g., 'Focus on the API integration tests, skip the UI components' or 'Use the v2 API endpoints instead of v1'"
-            value={retryGuidance}
-            onChange={(e) => setRetryGuidance(e.target.value)}
+            ref={retryGuidanceRef}
             rows={3}
             style={{ width: '100%', marginTop: 8, marginBottom: 8 }}
           />
@@ -980,7 +964,10 @@ const MissionRoom = () => {
             <button onClick={handleRetry} disabled={retrying}>
               {retrying ? 'Retrying...' : 'Retry Mission'}
             </button>
-            <button className="secondary" onClick={() => { setShowRetryDialog(false); setRetryGuidance(''); }}>
+            <button className="secondary" onClick={() => {
+              setShowRetryDialog(false);
+              if (retryGuidanceRef.current) retryGuidanceRef.current.value = '';
+            }}>
               Cancel
             </button>
           </div>
@@ -1096,10 +1083,8 @@ const MissionRoom = () => {
             </p>
           </details>
         )}
-        {wallClockLabel && (
-          <span>
-            <strong>Duration:</strong> {wallClockLabel}
-          </span>
+        {detail?.startedAt && (
+          <MissionDuration startedAt={detail.startedAt} completedAt={detail.completedAt} active={missionIsRunning} />
         )}
         {plan && <span><strong>Phases:</strong> {plan.phases.length}</span>}
         {modelUsage.calls > 0 && (
@@ -1152,7 +1137,15 @@ const MissionRoom = () => {
         <div className="card mission-conversation">
           <div style={{ display: 'flex', gap: 12 }}>
             <div style={{ flex: 1 }}>
-              <div className="transcript" ref={transcriptRef}>
+              <div
+                className="transcript"
+                ref={transcriptRef}
+                onScroll={(event) => {
+                  const element = event.currentTarget;
+                  transcriptSticksToBottom.current =
+                    element.scrollHeight - element.scrollTop - element.clientHeight < 48;
+                }}
+              >
             {detailLoading && !detail ? (
               <div className="loading">Loading mission...</div>
             ) : transcript.length === 0 ? (
@@ -1197,9 +1190,8 @@ const MissionRoom = () => {
           <div className="composer">
             {sendError && <div className="error-banner">{sendError}</div>}
             <textarea
+              ref={inputRef}
               placeholder="Send messages to the mission (agent outputs stream here)..."
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
                   e.preventDefault();
@@ -1210,7 +1202,7 @@ const MissionRoom = () => {
             />
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span className="muted">Cmd/Ctrl+Enter to send</span>
-              <button onClick={sendMessage} disabled={sending || !input.trim()}>
+              <button onClick={sendMessage} disabled={sending}>
                 {sending ? 'Sending...' : 'Send'}
               </button>
             </div>
@@ -1281,10 +1273,13 @@ const MissionRoom = () => {
                 <p className="plan-summary">{plan.summary}</p>
               )}
               <div className="plan-meta">
-                {missionDuration && (
-                  <span>
-                    <strong>Duration:</strong> {missionDuration}
-                  </span>
+                {detail?.startedAt && (
+                  <MissionDuration
+                    startedAt={detail.startedAt}
+                    completedAt={detail.completedAt}
+                    active={missionIsRunning}
+                    precise
+                  />
                 )}
                 {totalEstimatedCost > 0 && (
                   <span>
@@ -1640,6 +1635,51 @@ function formatDuration(ms: number): string {
   const h = Math.floor(m / 60);
   const rm = m % 60;
   return rm ? `${h}h ${rm}m` : `${h}h`;
+}
+
+function MissionDuration({
+  startedAt,
+  completedAt,
+  active,
+  precise = false,
+}: {
+  startedAt: string | number;
+  completedAt?: string | number;
+  active: boolean;
+  precise?: boolean;
+}) {
+  const [now, setNow] = useState(Date.now());
+
+  useEffect(() => {
+    if (!active || completedAt) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [active, completedAt]);
+
+  const startMs = typeof startedAt === 'number' ? startedAt : new Date(startedAt).getTime();
+  if (!Number.isFinite(startMs)) return null;
+  const endMs = completedAt !== undefined
+    ? (typeof completedAt === 'number' ? completedAt : new Date(completedAt).getTime())
+    : now;
+  const elapsed = Math.max(0, (Number.isFinite(endMs) ? endMs : now) - startMs);
+  let label = formatDuration(elapsed);
+  if (precise) {
+    const seconds = Math.floor(elapsed / 1000);
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor(seconds / 60) % 60;
+    const remainingSeconds = seconds % 60;
+    label = hours > 0
+      ? `${hours}h ${minutes}m ${remainingSeconds}s`
+      : minutes > 0
+        ? `${minutes}m ${remainingSeconds}s`
+        : `${remainingSeconds}s`;
+  }
+
+  return (
+    <span>
+      <strong>Duration:</strong> {label}
+    </span>
+  );
 }
 
 export default MissionRoom;

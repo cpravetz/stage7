@@ -26,7 +26,7 @@ const router: Router = Router();
 
 const probeSchema = z.object({
   probeId: z.string().min(1),
-  files: z.record(z.string()).optional(),
+  files: z.record(z.string(), z.string()).optional(),
   timeoutMs: z.number().int().positive().max(60000).optional(),
   productionRoots: z.array(z.string()).optional(),
   network: z.enum(['off', 'on']).optional(),
@@ -45,8 +45,8 @@ const candidateSchema = z.object({
     'sub-agent',
   ]),
   rationale: z.string().min(1),
-  patch: z.record(z.any()).optional(),
-  harness: z.record(z.any()).optional(),
+  patch: z.record(z.string(), z.any()).optional(),
+  harness: z.record(z.string(), z.any()).optional(),
   affectedSkillIds: z.array(z.string()).optional(),
   probeId: z.string().optional(),
   confidence: z.number().optional(),
@@ -55,21 +55,21 @@ const candidateSchema = z.object({
 const evolveSchema = z.object({
   assistantId: z.string().min(1),
   tenantId: z.string().optional(),
-  harness: z.record(z.any()),
-  metadata: z.record(z.any()).optional(),
+  harness: z.record(z.string(), z.any()),
+  metadata: z.record(z.string(), z.any()).optional(),
   candidates: z.array(candidateSchema).default([]),
   skills: z
     .array(
       z.object({
         id: z.string().min(1),
         tier: z.enum(['advise', 'aid', 'represent']).optional(),
-        manifest: z.record(z.any()).optional(),
+        manifest: z.record(z.string(), z.any()).optional(),
       }),
     )
     .optional(),
   confirmation: z.boolean().optional(),
   productionRoots: z.array(z.string()).optional(),
-  fixtures: z.record(z.string()).optional(),
+  fixtures: z.record(z.string(), z.string()).optional(),
 });
 
 router.post(

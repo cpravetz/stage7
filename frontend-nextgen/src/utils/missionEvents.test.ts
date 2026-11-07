@@ -204,7 +204,24 @@ describe('buildMissionEvents', () => {
     });
 
     const incomplete = events.find((event) => event.type === 'mission_incomplete');
-    expect(incomplete?.message).toBe('Mission incomplete: A planned task did not complete. — retry this mission to address the unmet requirements.');
+    expect(incomplete?.message).toBe('Mission not finished yet. Resume it to continue working through the remaining steps.');
+  });
+
+  it('replaces an incorrect completion event when the mission needs review', () => {
+    const events = buildMissionEvents({
+      missionId: MISSION_ID,
+      liveEvents: [feedEvent({ id: 'incorrect-completion', type: 'mission_completed', timestamp: 3 })],
+      detail: {
+        status: 'awaiting_review',
+        startedAt: 1,
+        completedAt: 3,
+        output: { outputs: { gaps: ['The email was not sent.'] } },
+      },
+    });
+
+    expect(events.some((event) => event.type === 'mission_completed')).toBe(false);
+    expect(events.find((event) => event.type === 'mission_needs_review')?.message)
+      .toContain('The email was not sent.');
   });
 });
 
@@ -278,6 +295,76 @@ describe('mission conversation', () => {
     expect(amended?.message).toContain('Delivery API unavailable');
   });
 
+  it('keeps internal JSON receipts and validation jargon out of the conversation', () => {
+    const taskEvent = feedEvent({
+      id: 'internal-output',
+      type: 'task_completed',
+      message: 'Task output is incomplete: Agent response validation failed after one correction.',
+      metadata: {
+        agentName: 'Messaging Agent',
+        output: 'The service could not be found.\n[{"toolId":"__list_tools","outcome":"success","content":"..."}]',
+      },
+    });
+    const transcript = buildTranscript([taskEvent]);
+
+    expect(transcript[0]?.lines[0]?.text).toBe(
+      'I could not verify this step yet, so I am checking another approved way to finish it.',
+    );
+    expect(transcript[0]?.lines[1]?.text).toBe('The service could not be found.');
+    expect(JSON.stringify(transcript)).not.toContain('__list_tools');
+    expect(JSON.stringify(transcript)).not.toContain('validation failed');
+  });
+
+  it('strips escaped internal receipt JSON and keeps posts in chronological order', () => {
+    const transcript = buildTranscript([
+      feedEvent({
+        id: 'later-post',
+        type: 'task_completed',
+        timestamp: 30,
+        metadata: { agentName: 'Email Agent', output: 'Email could not be sent.' },
+      }),
+      feedEvent({
+        id: 'earlier-post',
+        type: 'task_completed',
+        timestamp: 10,
+        metadata: {
+          agentName: 'Text Agent',
+          output: 'The service could not be found.\n[{\\"toolId\\":\\"__list_tools\\",\\"outcome\\":\\"success\\"}]',
+        },
+      }),
+      feedEvent({
+        id: 'interleaved-post',
+        type: 'task_completed',
+        timestamp: 20,
+        metadata: { agentName: 'Email Agent', output: 'Checking the mail service.' },
+      }),
+    ]);
+
+    expect(transcript.map((turn) => turn.label)).toEqual(['Text Agent', 'Email Agent', 'Email Agent']);
+    expect(transcript.map((turn) => turn.timestamp)).toEqual([10, 20, 30]);
+    expect(transcript[0]?.lines.at(-1)?.text).toBe('The service could not be found.');
+    expect(JSON.stringify(transcript)).not.toContain('__list_tools');
+  });
+
+  it('summarizes internal tool protocol messages in plain language', () => {
+    const transcript = buildTranscript([
+      feedEvent({
+        id: 'tool-search',
+        type: 'tool',
+        message: '{"tool":"__list_tools","args":{"query":"send SMS"}}',
+      }),
+      feedEvent({
+        id: 'agent-reasoning',
+        type: 'monologue',
+        message: 'We need to review whether a verified external-operation receipt exists: {"toolId":"__list_tools"}.',
+      }),
+    ]);
+
+    expect(transcript[0]?.lines[0]?.text).toBe('Checking which services are available.');
+    expect(transcript[1]?.lines[0]?.text).toBe('I am checking the results before continuing.');
+    expect(JSON.stringify(transcript)).not.toContain('__list_tools');
+  });
+
   it('tells the user what happened to a mission that failed while planning', () => {
     const liveEvents: FeedEvent[] = [
       feedEvent({ id: 'e1', type: 'mission_started', timestamp: 1, message: 'Mission started' }),
@@ -321,8 +408,9 @@ describe('mission conversation', () => {
     ];
 
     const turns = buildTranscript(liveEvents);
-    const plannerTurn = turns.find((turn) => turn.label === 'Planner');
-    const progressLines = plannerTurn?.lines.filter((line) => line.type === 'planner_progress') ?? [];
+    const progressLines = turns.flatMap((turn) =>
+      turn.lines.filter((line) => line.type === 'planner_progress'),
+    );
 
     expect(progressLines).toHaveLength(13);
     expect(progressLines[0]?.text).toContain('6 earlier planning updates');
@@ -355,6 +443,21 @@ describe('task status', () => {
       feedEvent({ id: 'e2', type: 'task_completed', timestamp: 2, metadata: { phaseId, taskId: 'task-1' } }),
     ];
     expect(getTaskStatus(task as any, phaseId, [], events)).toBe('completed');
+  });
+
+  it('marks an uncompleted task incomplete rather than failed or completed', () => {
+    const events: FeedEvent[] = [
+      feedEvent({ id: 'e1', type: 'task_started', timestamp: 1, metadata: { phaseId, taskId: 'task-1' } }),
+      feedEvent({ id: 'e2', type: 'task_incomplete', timestamp: 2, metadata: { phaseId, taskId: 'task-1' } }),
+    ];
+    expect(getTaskStatus(task as any, phaseId, [], events)).toBe('incomplete');
+    const displayed = buildMissionEvents({
+      missionId: MISSION_ID,
+      liveEvents: events,
+      detail: { status: 'awaiting_review', startedAt: 1, completedAt: 3 },
+    });
+    expect(displayed.some((event) => event.type === 'task_incomplete')).toBe(true);
+    expect(displayed.some((event) => event.type === 'task_completed' || event.type === 'task_failed')).toBe(false);
   });
 
   it('marks a task running when the mission is running and the plan task is in_progress', () => {

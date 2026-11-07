@@ -106,16 +106,16 @@ const pluginTestContractSchema = z.object({
   description: z.string().trim().min(1).max(1_000),
   cases: z.array(z.object({
     name: z.string().trim().min(1).max(120),
-    input: z.record(z.unknown()),
-    expectedOutput: z.record(z.unknown()),
+    input: z.record(z.string(), z.unknown()),
+    expectedOutput: z.record(z.string(), z.unknown()),
     httpMocks: z.array(z.object({
       method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']),
       urlPattern: z.string().trim().min(1).max(512)
         .refine((value) => /^https?:\/\/[^\s]+$/i.test(value), 'must be an HTTP(S) URL pattern'),
       expectedRequestBody: z.string().max(16_384).optional(),
       responseStatus: z.number().int().min(100).max(599),
-      responseHeaders: z.record(z.string()).optional(),
-      responseBody: z.record(z.unknown()),
+      responseHeaders: z.record(z.string(), z.string()).optional(),
+      responseBody: z.record(z.string(), z.unknown()),
     }).strict()).max(5).optional(),
   }).strict()).min(1).max(5),
 }).strict();
@@ -135,15 +135,15 @@ const generatedPluginSchema = z.object({
   entrypoint: z.enum(['index.js', 'main.py']),
   sourceCode: z.string().min(1),
   requirements: z.array(z.string().trim().min(1)).max(0, 'Generated plugins cannot declare uninstalled dependencies'),
-  configSchema: z.record(z.unknown()),
-  credentialSource: z.record(z.object({
+  configSchema: z.record(z.string(), z.unknown()),
+  credentialSource: z.record(z.string(), z.object({
     configKey: z.string().trim().min(1),
     label: z.string().trim().min(1).optional(),
     required: z.boolean().optional(),
     sensitive: z.boolean().optional(),
   }).strict()).optional(),
-  inputs: z.record(z.unknown()),
-  outputs: z.record(z.unknown()),
+  inputs: z.record(z.string(), z.unknown()),
+  outputs: z.record(z.string(), z.unknown()),
 }).strict().superRefine((plugin, context) => {
   if (Buffer.byteLength(plugin.sourceCode, 'utf8') > MAX_PLUGIN_SOURCE_BYTES) {
     context.addIssue({

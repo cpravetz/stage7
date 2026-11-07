@@ -9,6 +9,8 @@ import { TriggerScheduler } from '../services/TriggerScheduler';
 import { createTriggerRecordStore } from '../services/TriggerRecordStore';
 import { createEventLog } from '../services/EventLog';
 import { HarnessEditService } from '../services/HarnessEditService';
+import { ToolManifestLoader } from '../services/ToolManifestLoader';
+import logger from '../utils/logger';
 import { allWorkflows } from '../data/skills';
 import type { MissionScheduleDispatch } from '../services/TriggerScheduler';
 
@@ -25,6 +27,18 @@ export const harnessEditService = new HarnessEditService({ registry: toolRegistr
 pluginGenerator.setRegistry(toolRegistry);
 mcpToolExecutive.setRegistry(toolRegistry);
 setToolRegistry(toolRegistry);
+
+/**
+ * Load native tool manifests from the manifests folder and register them as
+ * built-in defaults. Tools are defined by JSON manifests that reference JS/Python
+ * code files in the codes folder — no TypeScript build step required to add tools.
+ */
+export const toolManifestLoader = new ToolManifestLoader();
+const loadedTools = toolManifestLoader.loadAll();
+for (const { tool } of loadedTools) {
+  toolRegistry.registerDefault(tool);
+}
+logger.info({ count: loadedTools.length }, 'Native tool manifests loaded');
 
 const TEMPORAL_HTTP_URL = process.env.TEMPORAL_HTTP_URL || 'http://temporal:4100';
 

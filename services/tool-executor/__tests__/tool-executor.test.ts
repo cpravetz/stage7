@@ -549,7 +549,7 @@ describe('ToolExecutor', () => {
     const execution = await executor.execute(externalTool, { action: 'test' });
     expect(execution.status).toBe('failed');
     expect(execution.error).toContain('Not connected');
-    expect(execution.error).toContain('required config fields missing');
+    expect(execution.error).toContain('not configured');
     expect(execution.error).toContain('apiKey');
     expect(execution.error).toContain('baseUrl');
   });
@@ -1051,8 +1051,8 @@ print(json.dumps({"sum": os.environ.get("PROVIDER_API_KEY", "")}))`;
         .toContain('independently derive a deterministic acceptance contract');
       expect(completionRequests[2]?.body?.prompt)
         .toContain('previous generated code was rejected');
-      expect(completionRequests[2]?.body?.prompt)
-        .toContain('configSchema Required');
+      expect(String(completionRequests[2]?.body?.prompt)).toMatch(/configSchema/i);
+      expect(String(completionRequests[2]?.body?.prompt)).toMatch(/required|expected/i);
       expect(completionRequests[1]?.body?.systemPrompt)
         .toContain('senior engineer generating production-ready plugins');
       expect(requests.find(({ url }) => url.endsWith('/api/brain/complete'))?.body?.missionId)

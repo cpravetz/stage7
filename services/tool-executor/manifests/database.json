@@ -1,0 +1,52 @@
+{
+  "id": "database",
+  "name": "Database",
+  "description": "Execute SQL queries against SQLite, PostgreSQL, or MySQL databases",
+  "type": "native",
+  "manifest": {
+    "executor": "database",
+    "codeFile": "database.js",
+    "configSchema": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    },
+    "credentialSource": {
+      "host": { "configKey": "db.host" },
+      "port": { "configKey": "db.port" },
+      "database": { "configKey": "db.database" },
+      "username": { "configKey": "db.username" },
+      "password": { "configKey": "db.password" },
+      "connectionString": { "configKey": "db.connectionString" }
+    }
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "engine": { "type": "string", "enum": ["sqlite", "postgres", "mysql"], "default": "sqlite" },
+      "connectionString": { "type": "string" },
+      "host": { "type": "string" },
+      "port": { "type": "integer" },
+      "database": { "type": "string" },
+      "username": { "type": "string" },
+      "password": { "type": "string" },
+      "query": { "type": "string" },
+      "params": { "type": "array" },
+      "timeoutMs": { "type": "integer", "default": 30000 }
+    },
+    "required": ["query"]
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "success": { "type": "boolean" },
+      "rows": { "type": "array" },
+      "columns": { "type": "array" },
+      "rowCount": { "type": "integer" },
+      "error": { "type": "string" },
+      "durationMs": { "type": "number" }
+    },
+    "required": ["success"]
+  },
+  "isSkill": false
+}

@@ -119,6 +119,10 @@ describe('planner progress reporting', () => {
         return { ...validPlan(), requiresClarification: true, clarificationQuestions: ['Which market?'] }
       },
     )
+    jest.spyOn(MissionAgentRuntime.prototype, 'getOrCreateAgent').mockResolvedValue('agent-worker')
+    jest.spyOn(MissionAgentRuntime.prototype, 'executeTask').mockResolvedValue({ output: 'done', artifacts: [], tokensUsed: 0 })
+    jest.spyOn(MissionAgentRuntime.prototype, 'reviewPhase').mockResolvedValue({ satisfied: true, gaps: [] })
+    jest.spyOn(MissionAgentRuntime.prototype, 'selectNextTask').mockResolvedValue({ id: 'phase-1-task-1' } as any)
 
     const context: MissionContext = {
       missionId: 'mission-progress',
@@ -158,6 +162,10 @@ describe('planner progress reporting', () => {
         return { ...validPlan(), requiresClarification: true, clarificationQuestions: ['Which market?'] }
       },
     )
+    jest.spyOn(MissionAgentRuntime.prototype, 'getOrCreateAgent').mockResolvedValue('agent-worker')
+    jest.spyOn(MissionAgentRuntime.prototype, 'executeTask').mockResolvedValue({ output: 'done', artifacts: [], tokensUsed: 0 })
+    jest.spyOn(MissionAgentRuntime.prototype, 'reviewPhase').mockResolvedValue({ satisfied: true, gaps: [] })
+    jest.spyOn(MissionAgentRuntime.prototype, 'selectNextTask').mockResolvedValue({ id: 'phase-1-task-1' } as any)
 
     const context: MissionContext = {
       missionId: 'mission-progress',

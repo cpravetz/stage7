@@ -1,7 +1,65 @@
-import { TemporalClient } from '../src/client/TemporalClient'
+import { missionStatus, TemporalClient } from '../src/client/TemporalClient'
 import * as missionActivity from '../src/activities/missionActivity'
 
 describe('TemporalClient mission start', () => {
+  it('only treats explicitly completed output as completed', () => {
+    expect(missionStatus({ outputs: { status: 'awaiting_review' } })).toBe('awaiting_review')
+    expect(missionStatus({ outputs: { status: 'incomplete' } })).toBe('incomplete')
+    expect(missionStatus({ outputs: { status: 'completed' } })).toBe('completed')
+    expect(missionStatus({ outputs: { status: 'unexpected' } })).toBe('incomplete')
+    expect(missionStatus({})).toBe('incomplete')
+  })
+
+  it('exposes an older falsely completed record as needing review', async () => {
+    process.env.ARTIFACTS_URL = 'http://artifacts'
+    const record = {
+      missionId: 'old-incorrect-status',
+      status: 'completed',
+      output: { outputs: { status: 'awaiting_review', gaps: ['The email was not sent.'] } },
+    }
+    jest.spyOn(global, 'fetch').mockImplementation(async (url) => ({
+      ok: true,
+      json: async () => String(url).endsWith('/missions') ? { missions: [record] } : record,
+    }) as Response)
+    const client = new TemporalClient()
+
+    expect(await client.getMissionResult('mission-old-incorrect-status')).toMatchObject({ status: 'awaiting_review' })
+    expect(await client.listMissions()).toEqual([expect.objectContaining({ status: 'awaiting_review' })])
+  })
+
+  it('persists and broadcasts review instead of completion for a direct run', async () => {
+    process.env.ARTIFACTS_URL = 'http://artifacts'
+    delete process.env.GATEWAY_URL
+    const writes: Array<Record<string, unknown>> = []
+    const events: Array<Record<string, unknown>> = []
+    let finish!: () => void
+    const finished = new Promise<void>((resolve) => { finish = resolve })
+    jest.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
+      const requestUrl = String(url)
+      const method = init?.method || 'GET'
+      const body = init?.body ? JSON.parse(String(init.body)) : undefined
+      if (requestUrl.endsWith('/recovery-lease')) {
+        return { ok: true, status: 200, json: async () => ({ claimed: true, released: true }) } as Response
+      }
+      if (requestUrl.endsWith('/events') && method === 'POST') {
+        events.push(body)
+        if (body.type === 'mission_needs_review') finish()
+      }
+      if (requestUrl.endsWith('/api/artifacts/missions') && method === 'POST') writes.push(body)
+      if (method === 'GET') return {
+        ok: true, status: 200, json: async () => ({ missionId: 'review-test', status: 'running', controlState: 'running' }),
+      } as Response
+      return { ok: true, status: 200, json: async () => ({}) } as Response
+    })
+    const runner = jest.fn(async () => ({ outputs: { status: 'awaiting_review', gaps: ['No send receipt.'] } }))
+    const client = new TemporalClient('default', runner)
+    await client.startMission({ missionId: 'review-test', tenantId: 'tenant-1', assistantId: '', prompt: 'Send it.' })
+    await finished
+    expect(writes).toContainEqual(expect.objectContaining({ status: 'awaiting_review' }))
+    expect(events).toContainEqual(expect.objectContaining({ type: 'mission_needs_review' }))
+    expect(events.some((event) => event.type === 'mission_completed')).toBe(false)
+  })
+
   const originalTemporalAddress = process.env.TEMPORAL_ADDRESS
   const originalTemporalBackend = process.env.TEMPORAL_BACKEND
   const originalArtifactsUrl = process.env.ARTIFACTS_URL

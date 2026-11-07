@@ -1,0 +1,42 @@
+{
+  "id": "vendor",
+  "name": "Vendor API",
+  "description": "Integrate with external SaaS systems: Jira, Confluence, Slack, GitHub",
+  "type": "native",
+  "manifest": {
+    "executor": "vendor",
+    "codeFile": "vendor.js",
+    "configSchema": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    },
+    "credentialSource": {
+      "apiKey": { "envVar": "VENDOR_API_KEY" },
+      "token": { "envVar": "VENDOR_TOKEN" }
+    }
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "vendor": { "type": "string", "enum": ["jira", "confluence", "slack", "github"] },
+      "operation": { "type": "string", "default": "query" },
+      "input": { "type": "object" },
+      "idempotencyKey": { "type": "string" },
+      "lookupUrl": { "type": "string" }
+    },
+    "required": ["vendor", "operation"]
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "success": { "type": "boolean" },
+      "data": { "type": "object" },
+      "error": { "type": "string" },
+      "durationMs": { "type": "number" },
+      "idempotencyKey": { "type": "string" }
+    },
+    "required": ["success"]
+  },
+  "isSkill": false
+}

@@ -1,0 +1,35 @@
+{
+  "id": "weather",
+  "name": "Weather",
+  "description": "Get current weather and forecast for a location using Open-Meteo",
+  "type": "native",
+  "manifest": {
+    "executor": "weather",
+    "codeFile": "weather.js",
+    "configSchema": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    },
+    "credentialSource": {}
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "location": { "type": "string", "description": "City or place name" },
+      "units": { "type": "string", "enum": ["metric", "imperial"], "default": "metric" },
+      "forecastDays": { "type": "integer", "minimum": 1, "maximum": 7 }
+    },
+    "required": ["location"]
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "success": { "type": "boolean" },
+      "weather": { "type": "object" },
+      "error": { "type": "string" }
+    },
+    "required": ["success"]
+  },
+  "isSkill": false
+}

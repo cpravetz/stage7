@@ -170,6 +170,7 @@ const LIFECYCLE_EVENTS = new Set([
   'permission_required',
   'user_input_resolved',
   'task_completed',
+  'task_incomplete',
   'task_failed',
 ]);
 

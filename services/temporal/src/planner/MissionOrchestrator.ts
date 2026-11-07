@@ -25,6 +25,11 @@ import {
   missionConfigurationQuestion,
   missionExecutionEvidenceGaps,
   recoveryGapFingerprint,
+  recoveryProgressSignature,
+  hasRecoveryProgress,
+  MAX_PHASE_RECOVERY_ROUNDS_SAFETY,
+  MAX_MISSION_RECOVERY_ROUNDS_SAFETY,
+  MAX_NO_PROGRESS_RECOVERY_ATTEMPTS,
 } from '../types/workflow';
 import { PlannerProgress } from './MissionPlanner';
 import type { MissionPhaseOutput } from '../activities/missionWorkflowActivities';
@@ -58,8 +63,9 @@ function isFatalServiceError(error: unknown): boolean {
  * A burst of identical provider failures is one piece of news, not many.
  */
 const PLANNER_PROGRESS_MIN_INTERVAL_MS = 60_000;
-const MAX_PHASE_RECOVERY_ROUNDS = 5;
-const MAX_MISSION_RECOVERY_ROUNDS = 5;
+// Replaced fixed cutoffs with progress-aware limits + hard safety ceilings (Task 3).
+const MAX_PHASE_RECOVERY_ROUNDS = MAX_PHASE_RECOVERY_ROUNDS_SAFETY;
+const MAX_MISSION_RECOVERY_ROUNDS = MAX_MISSION_RECOVERY_ROUNDS_SAFETY;
 
 class MissionUserInterruptionError extends Error {
   constructor(readonly result: { plan: Plan; outputs: any; compensations: Array<{ phaseId: string; action: string }> }) {
@@ -201,7 +207,7 @@ export class MissionOrchestrator {
       phase.approvalQuestion = undefined;
       for (const task of phase.tasks) {
         task.requiredActions = [];
-        applyRuntimeTaskRequirements(task);
+        applyRuntimeTaskRequirements(task, ctx.prompt);
         if (!/\b(?:message|delivery)[-_ ]?(?:message[-_ ]?)?(?:id|status)\b/i.test(ctx.prompt)) {
           task.expectedArtifacts = (task.expectedArtifacts || []).filter((artifact) =>
             !/\b(?:sms|text|email|message|delivery)[-_ ]?(?:message[-_ ]?)?(?:id|status)\b/i.test(
@@ -408,10 +414,10 @@ export class MissionOrchestrator {
           const taskRetryGuidance = savedTask ? ctx.retryGuidance : undefined;
           try {
             result = taskRetryGuidance
-              ? await agentRuntime.executeTask(...executionArgs, taskRetryGuidance, continuation)
+              ? await agentRuntime.executeTask(...executionArgs, taskRetryGuidance, continuation, ctx.prompt)
               : continuation
-                ? await agentRuntime.executeTask(...executionArgs, undefined, continuation)
-                : await agentRuntime.executeTask(...executionArgs);
+                ? await agentRuntime.executeTask(...executionArgs, undefined, continuation, ctx.prompt)
+                : await agentRuntime.executeTask(...executionArgs, undefined, undefined, ctx.prompt);
           } catch (err) {
             if (savedTask) throw err;
             const firstError = err instanceof Error ? err.message : String(err);
@@ -426,14 +432,18 @@ export class MissionOrchestrator {
               'Do not repeat external actions whose outcome is already recorded or uncertain.',
             ].join(' ');
             result = continuation
-              ? await agentRuntime.executeTask(...executionArgs, retryGuidance, continuation)
-              : await agentRuntime.executeTask(...executionArgs, retryGuidance);
+              ? await agentRuntime.executeTask(...executionArgs, retryGuidance, continuation, ctx.prompt)
+              : await agentRuntime.executeTask(...executionArgs, retryGuidance, undefined, ctx.prompt);
           }
         } catch (err) {
           if (err instanceof MissionUserInterruptionError) throw err;
           if (isFatalServiceError(err)) throw err;
           if (!savedTask) {
             const error = err instanceof Error ? err.message : String(err);
+            if (isConfigurationBlocker([error])) {
+              await pauseForConfiguration(phase, task, phaseOutput);
+              return;
+            }
             const completedAt = Date.now();
             try {
               await this.updateTask(ctx, phase.id, task.id, { status: 'failed', completedAt, output: error });
@@ -548,7 +558,13 @@ export class MissionOrchestrator {
             type: 'user_input_resolved',
             missionId: ctx.missionId,
             timestamp: Date.now(),
-            data: { phaseId: phase.id, taskId: task.id },
+            data: {
+              phaseId: phase.id,
+              taskId: task.id,
+              response: continuation.response.length > 2000
+                ? `${continuation.response.slice(0, 1997)}...`
+                : continuation.response,
+            },
           });
           pendingInteraction = undefined;
         }
@@ -558,19 +574,20 @@ export class MissionOrchestrator {
         }
 
         const completedAt = Date.now();
+        const taskStatus = result.incompleteReason ? 'incomplete' : 'completed';
         await this.updateTask(ctx, phase.id, task.id, {
-          status: 'completed',
+          status: taskStatus,
           completedAt,
           output: result.output,
           artifacts: result.artifacts,
         });
-        task.status = 'completed';
+        task.status = taskStatus;
         task.completedAt = completedAt;
         task.output = result.output;
         task.artifacts = result.artifacts;
         if (!savedTask) {
           await ctx.broadcast({
-            type: 'task_completed',
+            type: taskStatus === 'completed' ? 'task_completed' : 'task_incomplete',
             missionId: ctx.missionId,
             timestamp: Date.now(),
             data: {
@@ -582,11 +599,12 @@ export class MissionOrchestrator {
               agentRole: task.agentRole,
               artifacts: result.artifacts,
               output: result.output.slice(0, 4_000),
+              ...(result.incompleteReason ? { error: result.incompleteReason } : {}),
               tokensUsed: result.tokensUsed,
             },
           });
         }
-        phaseOutput.tasks.push({ taskId: task.id, status: 'completed', artifacts: result.artifacts });
+        phaseOutput.tasks.push({ taskId: task.id, status: taskStatus, artifacts: result.artifacts, output: result.output });
         compensations.push({ phaseId: phase.id, action: `revert-phase-${phase.id}` });
         completedInPhase.add(task.id);
         completedTaskSummaries.set(
@@ -759,7 +777,8 @@ export class MissionOrchestrator {
         const existingAmendmentCount = phase.tasks.filter((task) =>
           task.id.startsWith(`${phase.id}-amendment-`),
         ).length;
-        const reviewGapCounts = new Map<string, number>();
+        let lastReviewSignature: string | undefined;
+        let noProgressCount = 0;
         for (
           let reviewIndex = existingAmendmentCount + 1;
           reviewIndex <= existingAmendmentCount + MAX_PHASE_RECOVERY_ROUNDS;
@@ -785,13 +804,17 @@ export class MissionOrchestrator {
               ...applied.gaps,
               ...[...completedTaskSummaries.values()].map((summary) => summary.output),
             ];
-            const fingerprint = recoveryGapFingerprint(applied.gaps);
-            const repeatedGapCount = (reviewGapCounts.get(fingerprint) || 0) + 1;
-            reviewGapCounts.set(fingerprint, repeatedGapCount);
-            if (
-              isConfigurationBlocker(reviewEvidence)
-              && (repeatedGapCount >= 2 || reviewIndex === existingAmendmentCount + MAX_PHASE_RECOVERY_ROUNDS)
-            ) {
+            const reviewSignature = recoveryProgressSignature({
+              gaps: applied.gaps,
+              completedTaskIds: phase.tasks.filter((t) => t.status === 'completed').map((t) => t.id),
+              completedTaskStatuses: phase.tasks.map((t) => `${t.id}:${t.status}`),
+              artifactNames: phase.tasks.flatMap((t) => (t.artifacts || []).map((a) => a.name)),
+              outputs: [...completedTaskSummaries.values()].map((s) => s.output),
+            });
+            const madeProgress = hasRecoveryProgress(lastReviewSignature, reviewSignature);
+            lastReviewSignature = reviewSignature;
+            noProgressCount = madeProgress ? 0 : noProgressCount + 1;
+            if (isConfigurationBlocker(reviewEvidence) && noProgressCount >= 1) {
               let awaitingTask = applied.amendment?.status === 'pending'
                 ? applied.amendment
                 : phase.tasks.find((candidate) => candidate.status === 'pending');
@@ -802,6 +825,21 @@ export class MissionOrchestrator {
               }
               await pauseForConfiguration(phase, awaitingTask, phaseOutput);
             }
+            if (!madeProgress && noProgressCount >= MAX_NO_PROGRESS_RECOVERY_ATTEMPTS) {
+              logger.error(
+                { missionId: ctx.missionId, phaseId: phase.id, gaps: applied.gaps, noProgressCount },
+                'Mission phase review made no observable progress after approach changes; pausing for review (safety ceiling)',
+              );
+              break;
+            }
+            const noProgressGuidance = !madeProgress
+              ? ' Previous attempts made no observable progress on the same gaps; use a different authorized approach and do not repeat the same recovery steps. If a required value or authorization is missing, ask the user for it and wait.'
+              : '';
+            if (applied.amendment && noProgressGuidance) {
+              applied.amendment.systemPrompt = `${applied.amendment.systemPrompt}
+${noProgressGuidance}`;
+              plan = { ...plan, phases: plan.phases.map((p) => p.id === phase.id ? { ...phase, tasks: [...phase.tasks] } : p) };
+            }
             if (!applied.amendment) {
               logger.error({ missionId: ctx.missionId, phaseId: phase.id, gaps: applied.gaps }, 'Mission phase remains incomplete and reviewer provided no actionable follow-up task');
               const amendmentIndex = phase.tasks.filter((t: any) => t.id.startsWith(`${phase.id}-amendment-`)).length + 1;
@@ -810,14 +848,14 @@ export class MissionOrchestrator {
                 title: `Address phase gaps (review ${reviewIndex})`,
                 description: `Address remaining gaps: ${(applied.gaps || []).join('; ') || 'unspecified gaps'}`,
                 agentRole: 'engineer',
-                systemPrompt: `Resolve the following gaps for phase ${phase.name}: ${(applied.gaps || []).join('; ')}. Use available context and produce concrete artifacts.`,
+                systemPrompt: `Resolve the following gaps for phase ${phase.name}: ${(applied.gaps || []).join('; ')}. Use available context and produce concrete artifacts.${noProgressGuidance}`,
                 dependsOnTaskIds: phase.tasks.map((t: any) => t.id),
                 expectedArtifacts: [],
                 requiredActions: [],
                 status: 'pending',
                 artifacts: [],
               } as Task;
-              applyRuntimeTaskRequirements(amendmentTask);
+              applyRuntimeTaskRequirements(amendmentTask, ctx.prompt);
               phase.tasks.push(amendmentTask);
               plan.phases = plan.phases.map((p: any) => p.id === phase.id ? phase : p);
               activePlan = plan;
@@ -949,7 +987,8 @@ export class MissionOrchestrator {
     }
 
     await ctx.controlCheckpoint?.();
-    const completionGapCounts = new Map<string, number>();
+    let lastCompletionSignature: string | undefined;
+    let completionNoProgress = 0;
     let completionVerified = false;
     for (let recoveryIndex = 1; recoveryIndex <= MAX_MISSION_RECOVERY_ROUNDS; recoveryIndex++) {
       const completionReview = await this.evaluateMissionCompletion(ctx, plan, outputs);
@@ -961,14 +1000,20 @@ export class MissionOrchestrator {
       const gaps = completionReview.gaps.length
         ? completionReview.gaps
         : ['Mission completion has not been verified from the recorded task evidence.'];
-      const gapFingerprint = recoveryGapFingerprint(gaps);
-      const repeatedGapCount = (completionGapCounts.get(gapFingerprint) || 0) + 1;
-      completionGapCounts.set(gapFingerprint, repeatedGapCount);
+      const allEvidenceTasks = (outputs.phases as MissionPhaseOutput[]).flatMap((output) => output.tasks);
+      const completionSignature = recoveryProgressSignature({
+        gaps,
+        completedTaskIds: allEvidenceTasks.filter((t) => t.status === 'completed').map((t) => t.taskId),
+        completedTaskStatuses: allEvidenceTasks.map((t) => `${t.taskId}:${t.status}`),
+        artifactNames: allEvidenceTasks.flatMap((t) => (t.artifacts || []).map((a) => a.name)),
+        outputs: allEvidenceTasks.map((t) => t.output || ''),
+      });
+      const madeProgress = hasRecoveryProgress(lastCompletionSignature, completionSignature);
+      lastCompletionSignature = completionSignature;
+      completionNoProgress = madeProgress ? 0 : completionNoProgress + 1;
       const recoveryEvidence = [
         ...gaps,
-        ...(outputs.phases as MissionPhaseOutput[]).flatMap((output) =>
-          output.tasks.map((task) => task.output || ''),
-        ),
+        ...allEvidenceTasks.map((task) => task.output || ''),
       ];
       const recoveryPhase = plan.phases.find((phase) =>
         gaps.some((gap) =>
@@ -994,15 +1039,34 @@ export class MissionOrchestrator {
         phaseOutput = { phaseId: recoveryPhase.id, name: recoveryPhase.name, status: 'completed', tasks: [] };
         (outputs.phases as MissionPhaseOutput[]).push(phaseOutput);
       }
-      if (
-        isConfigurationBlocker(recoveryEvidence)
-        && (repeatedGapCount >= 2 || recoveryIndex === MAX_MISSION_RECOVERY_ROUNDS)
-      ) {
+      // Task 7 linkage: identify original unmet requirements (planned tasks referenced by gaps)
+      // so recovery work/evidence is credited against the original requirement.
+      const targetTaskIds = [...new Set(
+        recoveryPhase.tasks
+          .filter((task) => !task.id.includes('-mission-recovery-') && gaps.some((gap) => gap.includes(task.id) || gap.includes(task.title)))
+          .map((task) => task.id),
+      )];
+
+      if (isConfigurationBlocker(recoveryEvidence) && completionNoProgress >= 1) {
         const requestTask = createConfigurationTask(recoveryPhase);
         recoveryPhase.tasks.push(requestTask);
         plan.phases = plan.phases.map((candidate) => candidate.id === recoveryPhase.id ? recoveryPhase : candidate);
         await pauseForConfiguration(recoveryPhase, requestTask, phaseOutput);
       }
+      if (!madeProgress && completionNoProgress >= MAX_NO_PROGRESS_RECOVERY_ATTEMPTS) {
+        logger.error(
+          { missionId: ctx.missionId, gaps, completionNoProgress },
+          'Mission completion recovery made no observable progress after approach changes; pausing for review (safety ceiling)',
+        );
+        return {
+          plan,
+          outputs: { ...outputs, status: 'awaiting_review', gaps },
+          compensations,
+        };
+      }
+      const noProgressGuidance = !madeProgress
+        ? ' Previous attempts made no observable progress on the same gaps; use a different authorized approach and do not repeat the same recovery steps. If a required value or authorization is missing, ask the user for it and wait.'
+        : '';
 
       const availableArtifacts = new Set(phaseOutput.tasks.flatMap((task) =>
         task.artifacts.map((artifact) => artifact.name.toLocaleLowerCase()),
@@ -1021,14 +1085,14 @@ export class MissionOrchestrator {
         title: `Resolve mission completion gaps (attempt ${recoveryIndex})`,
         description: `Address the remaining mission completion gaps: ${gaps.join('; ')}`,
         agentRole: 'assistant',
-        systemPrompt: `Resolve the mission completion gaps below for the mission goal "${ctx.prompt}" and phase "${recoveryPhase.name}". Use the recorded outputs from tasks ${taskIds.join(', ') || 'none'} as authoritative context. Produce any missing deliverables named ${expectedArtifacts.join(', ') || 'by the gaps'} and return concrete evidence that the mission outcome is satisfied. Do not repeat successfully completed or uncertain side effects; use another authorized approach if one path is blocked. If a specific required user value is unavailable and no safe alternative can complete the outcome, ask one focused question for it.\n\nGaps:\n${gaps.join('\n')}`,
+        systemPrompt: `Resolve the mission completion gaps below for the mission goal "${ctx.prompt}" and phase "${recoveryPhase.name}". Use the recorded outputs from tasks ${taskIds.join(', ') || 'none'} as authoritative context. Produce any missing user deliverables named ${expectedArtifacts.join(', ') || 'by the gaps'} and return concrete evidence that the mission outcome is satisfied. Never create a receipt or evidence document to stand in for an action; actual tool results are recorded internally. Check the live tool catalog, execute a suitable tool, and use capability resolution to find or create one when permitted. If required credentials or configuration are missing, ask the user to provide them through the secure tool configuration form and wait. If required input from an earlier task is missing, ask that task's Agent to provide the artifact or rerun the source task. Do not repeat successfully completed or uncertain side effects; use another authorized approach if one path is blocked.\n\nGaps:\n${gaps.join('\n')}`,
         dependsOnTaskIds: taskIds,
         expectedArtifacts,
         requiredActions: [],
         status: 'pending',
         artifacts: [],
       };
-      applyRuntimeTaskRequirements(recoveryTask);
+      applyRuntimeTaskRequirements(recoveryTask, ctx.prompt);
       recoveryPhase.tasks.push(recoveryTask);
       recoveryPhase.status = 'in_progress';
       completedPhases.delete(recoveryPhase.id);
@@ -1077,13 +1141,15 @@ export class MissionOrchestrator {
           [...completedTaskSummaries.values()],
         ];
         try {
-          result = await agentRuntime.executeTask(...args);
+          result = await agentRuntime.executeTask(...args, undefined, undefined, ctx.prompt);
         } catch (error) {
           if (isFatalServiceError(error)) throw error;
           const firstError = error instanceof Error ? error.message : String(error);
           result = await agentRuntime.executeTask(
             ...args,
             `The previous attempt failed: ${firstError}. Continue from recorded outputs, do not repeat successful or uncertain side effects, and use another authorized approach.`,
+            undefined,
+            ctx.prompt,
           );
         };
       } catch (error) {
@@ -1146,7 +1212,7 @@ export class MissionOrchestrator {
       }
 
       const completedAt = Date.now();
-      recoveryTask.status = result ? 'completed' : 'failed';
+      recoveryTask.status = result ? (result.incompleteReason ? 'incomplete' : 'completed') : 'failed';
       recoveryTask.completedAt = completedAt;
       recoveryTask.output = result?.output || failure;
       recoveryTask.artifacts = result?.artifacts || [];
@@ -1175,6 +1241,8 @@ export class MissionOrchestrator {
           recoveryTask.artifacts,
           recoveryTask.requiredActions,
           recoveryTask.requiresExternalAction,
+          undefined,
+          { taskIds: targetTaskIds, gaps },
         ),
       );
       recoveryPhase.status = 'completed';
@@ -1183,7 +1251,7 @@ export class MissionOrchestrator {
       saveCheckpoint();
       await this.updatePhase(ctx, recoveryPhase.id, { status: 'completed' });
       await ctx.broadcast({
-        type: result ? 'task_completed' : 'task_failed',
+        type: recoveryTask.status === 'completed' ? 'task_completed' : recoveryTask.status === 'incomplete' ? 'task_incomplete' : 'task_failed',
         missionId: ctx.missionId,
         timestamp: completedAt,
         data: {
@@ -1194,11 +1262,23 @@ export class MissionOrchestrator {
           agentName: 'Mission Recovery Agent',
           agentRole: 'assistant',
           ...(result
-            ? { artifacts: result.artifacts, output: result.output.slice(0, 4_000), tokensUsed: result.tokensUsed }
+            ? { artifacts: result.artifacts, output: result.output.slice(0, 4_000), tokensUsed: result.tokensUsed, ...(result.incompleteReason ? { error: result.incompleteReason } : {}) }
             : { error: failure }),
         },
       });
       await ctx.controlCheckpoint?.();
+      if (recoveryTask.status !== 'completed') {
+        const review = await this.evaluateMissionCompletion(ctx, plan, outputs);
+        return {
+          plan,
+          outputs: {
+            ...outputs,
+            status: 'awaiting_review',
+            gaps: review.gaps.length ? review.gaps : ['Mission recovery did not complete successfully.'],
+          },
+          compensations,
+        };
+      }
     }
 
     if (!completionVerified) {
@@ -1493,6 +1573,7 @@ export class MissionOrchestrator {
           artifacts,
           expectedArtifacts: plannedTasks.get(JSON.stringify([phase.phaseId, taskId]))?.expectedArtifacts || [],
           requiredActions: plannedTasks.get(JSON.stringify([phase.phaseId, taskId]))?.requiredActions || [],
+          requiresExternalAction: plannedTasks.get(JSON.stringify([phase.phaseId, taskId]))?.requiresExternalAction,
         };
       }),
     );

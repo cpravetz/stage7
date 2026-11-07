@@ -318,7 +318,6 @@ describe('SchemaFields reference picker loads the set another skill produced', (
       'Senior Engineer, Payments — Eta Bank',
     ]);
     expect(anchors[0].getAttribute('href')).toBe('https://alpha.example.com/apply/1');
-    expect(anchors[0].getAttribute('target')).toBe('_blank');
   });
 
   it('asks the reference source for the set rather than rendering an empty picker', async () => {

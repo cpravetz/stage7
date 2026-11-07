@@ -1,4 +1,13 @@
-import { MissionArtifact, Plan, Task } from '@stage7-nextgen/shared';
+import {
+  MissionArtifact,
+  Plan,
+  Task,
+  extractReceiptBinding,
+  receiptMatchesRequiredAction,
+  describeRequiredAction,
+  type ActionReceiptLike,
+  type RequiredActionLike,
+} from '@stage7-nextgen/shared';
 
 export interface WorkflowInput {
   missionId: string;
@@ -51,8 +60,7 @@ export interface MissionPendingInteraction {
     expiresAt?: string;
     explanation: string;
   };
-  actionReceipts?: Array<{
-    toolId: string;
+  actionReceipts?: Array<ActionReceiptLike & {
     isError: boolean;
     content: string;
     outcome: 'success' | 'failure' | 'denied' | 'question_asked' | 'permission_required';
@@ -71,6 +79,9 @@ export interface CompletedTaskSummary {
   expectedArtifacts?: string[];
   requiredActions?: NonNullable<Task['requiredActions']>;
   requiresExternalAction?: boolean;
+  /** Task 7: original unmet requirement(s) this recovery work/evidence targets. */
+  resolvesTaskIds?: string[];
+  resolvesGaps?: string[];
 }
 
 export function completedTaskIdsWithSummaries(
@@ -105,6 +116,45 @@ export function recoveryGapFingerprint(gaps: string[]): string {
     .sort()
     .join('|');
 }
+function normalizeEvidenceToken(value: string): string {
+  return value.toLocaleLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+export interface RecoveryProgressObservation {
+  gaps: string[];
+  completedTaskIds?: string[];
+  completedTaskStatuses?: string[];
+  artifactNames?: string[];
+  receiptOps?: string[];
+  outputs?: string[];
+}
+
+export function recoveryProgressSignature(obs: RecoveryProgressObservation): string {
+  const gapFp = recoveryGapFingerprint(obs.gaps);
+  // Exclude recovery/amendment/config scaffolding so adding a recovery task that
+  // doesn't resolve anything is not misread as progress. Include only resolution
+  // evidence state (non-scaffold task outcomes + artifacts/receipts), not free-form
+  // recovery outputs which can vary without resolving the gap.
+  const isScaffold = (id: string) =>
+    /-mission-recovery-\d+|-amendment-\d+|-configuration-request-\d+/i.test(id);
+  const state = [
+    ...(obs.completedTaskIds || []).filter((v) => !isScaffold(v)).map((v) => `t:${normalizeEvidenceToken(v)}`),
+    ...(obs.completedTaskStatuses || []).filter((v) => !isScaffold(v)).map((v) => `s:${normalizeEvidenceToken(v)}`),
+    ...(obs.artifactNames || []).map((v) => `a:${normalizeEvidenceToken(v)}`),
+    ...(obs.receiptOps || []).map((v) => `r:${normalizeEvidenceToken(v)}`),
+  ].sort().join('|');
+  return `${gapFp}::${state}`;
+}
+
+export function hasRecoveryProgress(previous: string | undefined, current: string): boolean {
+  return !previous || previous !== current;
+}
+
+// Hard safety ceilings (anti-runaway). Blind count cutoffs replaced by progress-aware logic + ceilings.
+export const MAX_PHASE_RECOVERY_ROUNDS_SAFETY = 12;
+export const MAX_MISSION_RECOVERY_ROUNDS_SAFETY = 12;
+export const MAX_NO_PROGRESS_RECOVERY_ATTEMPTS = 3;
+
 
 export function isConfigurationBlocker(evidence: string[]): boolean {
   return /\b(?:missing|no|unavailable|invalid|not configured|not registered|not in (?:the )?(?:live )?system catalog)\b.{0,100}\b(?:tool|provider|service|credential|configuration|api key|endpoint|account|smtp|token)\b/i
@@ -114,7 +164,7 @@ export function isConfigurationBlocker(evidence: string[]): boolean {
 }
 
 export function missionConfigurationQuestion(missionGoal: string): string {
-  return `I could not proceed because the available evidence indicates a required service or configuration is missing for this outcome: "${missionGoal}". Which authorized service or provider should I use? I will request any secret values only through secure credential fields.`;
+  return `I could not complete this yet because a service or configuration is missing for: "${missionGoal}". Please open Tools configuration, choose an authorized service, and add the settings it needs. Any passwords or API keys will be requested through a secure form. I will continue after you save the configuration.`;
 }
 
 const NON_ACTION_RECEIPT_TOOL_IDS = new Set([
@@ -123,6 +173,60 @@ const NON_ACTION_RECEIPT_TOOL_IDS = new Set([
   '__delegate',
 ]);
 
+function isActionReceiptLike(value: unknown): value is ActionReceiptLike {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const receipt = value as Record<string, unknown>;
+  return typeof receipt.toolId === 'string' && typeof receipt.outcome === 'string';
+}
+
+function receiptChannelAlignsWithTask(receipt: ActionReceiptLike, plannedTask: Task): boolean {
+  const binding = extractReceiptBinding(receipt);
+  const op = (binding.operation || receipt.toolId || '').toLowerCase();
+  const taskText = `${plannedTask.title}\n${plannedTask.description}`.toLowerCase();
+  const taskEmail = /\bemail\b/.test(taskText);
+  const taskSms = /\b(sms|text message|\btext\b)\b/.test(taskText);
+  const receiptEmail = /email/.test(op) || /email/.test(receipt.toolId.toLowerCase());
+  const receiptSms = /sms|twilio|text/.test(op) || /sms|twilio|text/.test(receipt.toolId.toLowerCase());
+  if (taskEmail && !taskSms) return receiptEmail && !receiptSms;
+  if (taskSms && !taskEmail) return receiptSms && !receiptEmail;
+  return true; // non-comm or ambiguous: rely on explicit binding matching
+}
+
+function receiptHasSpecificExternalBinding(receipt: ActionReceiptLike, plannedTask: Task): boolean {
+  const binding = extractReceiptBinding(receipt);
+  const hasRecipient = !!(binding.recipients && binding.recipients.length > 0);
+  const hasMessage = !!(binding.subject || binding.body || binding.message);
+  const hasProviderOrExecution = !!(binding.providerRequestId || binding.executionId);
+  const op = (binding.operation || '').toLowerCase();
+  const hasOperation = /(send|deliver|transmit|publish|post|submit|execute|email|sms|text|message)/.test(op);
+  const taskText = `${plannedTask.title}\n${plannedTask.description}`.toLowerCase();
+  const isCommunicationTask = /\b(email|sms|text message|text)\b/.test(taskText) || ['email','sms'].includes(op) || /email|sms|text/.test(receipt.toolId.toLowerCase());
+  if (isCommunicationTask) {
+    // Communication evidence must bind operation + destination/message + authoritative provider/execution signal.
+    return hasOperation && hasRecipient && hasMessage && hasProviderOrExecution && receiptChannelAlignsWithTask(receipt, plannedTask);
+  }
+  return hasOperation && (hasRecipient || hasMessage || hasProviderOrExecution);
+}
+
+function receiptsFromArtifact(artifact?: MissionArtifact): ActionReceiptLike[] {
+  if (typeof artifact?.content !== 'string') return [];
+  try {
+    const parsed: unknown = JSON.parse(artifact.content);
+    return Array.isArray(parsed) ? parsed.filter(isActionReceiptLike) : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Binding-aware, recovery-aware evidence gaps (Task 6/7).
+ * - Planned task statuses are checked per task (no sibling success masking).
+ * - Required/external actions: satisfied by an authoritative matching receipt produced
+ *   by the task itself OR by any recovery/amendment/completed task whose evidence
+ *   satisfies the same binding-specific requirement (links recovery to original unmet requirement).
+ * - Deliverables: phase-pooled, plus global fallback for recovery-produced artifacts.
+ * - Authoritative binding checks are preserved (op/recipient/message/provider; comms strict).
+ */
 export function missionExecutionEvidenceGaps(plan: Plan, phases: MissionPhaseEvidence[]): string[] {
   const gaps: string[] = [];
   const phaseById = new Map(phases.map((phase) => [phase.phaseId, phase]));
@@ -133,15 +237,28 @@ export function missionExecutionEvidenceGaps(plan: Plan, phases: MissionPhaseEvi
     }
   }
 
+  // Global pools for recovery linkage (Task 7): evidence from any task can satisfy a
+  // binding-specific requirement of an incomplete original task.
+  const globalReceipts: ActionReceiptLike[] = phases.flatMap((phase) =>
+    phase.tasks.flatMap((task) =>
+      receiptsFromArtifact((task.artifacts || []).find((a) => a.name.toLocaleLowerCase() === 'system-action-receipts.json')),
+    ),
+  );
+  const globalArtifacts: MissionArtifact[] = phases.flatMap((phase) =>
+    phase.tasks.flatMap((task) => task.artifacts || []),
+  );
+
   for (const plannedPhase of plan.phases) {
     const phase = phaseById.get(plannedPhase.id);
     if (!phase) {
       gaps.push(`Phase "${plannedPhase.name}" (${plannedPhase.id}) has no execution result.`);
       continue;
     }
-    if (phase.status !== 'completed') {
-      gaps.push(`Phase "${plannedPhase.name}" (${plannedPhase.id}) is ${phase.status}, not completed.`);
-    }
+    // The phase "not completed" gap is only reported when the phase has at least one
+    // unresolved task. A phase whose requirements are all satisfied - including by
+    // recovery evidence produced for an incomplete original task (Task 7) - is treated
+    // as resolved even if its persisted status is still in_progress.
+    let phaseHadTaskGap = false;
 
     const tasksById = new Map(phase.tasks.map((task) => [task.taskId, task]));
     const plannedTaskIds = new Set(plannedPhase.tasks.map((task) => task.id));
@@ -153,89 +270,93 @@ export function missionExecutionEvidenceGaps(plan: Plan, phases: MissionPhaseEvi
     for (const plannedTask of plannedPhase.tasks) {
       const task = tasksById.get(plannedTask.id);
       if (!task) {
+        phaseHadTaskGap = true;
         gaps.push(`Task "${plannedTask.title}" (${plannedTask.id}) has no execution result in phase "${plannedPhase.name}".`);
         continue;
       }
-      if (
-        task.status !== 'completed'
-        && !phase.tasks.some((phaseTask) => phaseTask.taskId !== task.taskId && phaseTask.status === 'completed')
-      ) {
-        const detail = task.output?.trim();
-        gaps.push(
-          `Task "${plannedTask.title}" (${plannedTask.id}) is ${task.status}, not completed.`
-          + (detail ? ` Reason: ${detail.slice(0, 500)}` : ''),
-        );
-        continue;
-      }
 
-      const artifacts = phase.tasks.flatMap((phaseTask) => phaseTask.artifacts || []);
-      const receiptArtifact = artifacts.find((artifact) =>
+      const phaseArtifacts = phase.tasks.flatMap((phaseTask) => phaseTask.artifacts || []);
+      const ownReceiptArtifact = (task.artifacts || []).find((artifact) =>
         artifact.name.toLocaleLowerCase() === 'system-action-receipts.json',
       );
-      let receipts: Array<{ toolId: string; outcome: string; content?: string; fallbackForToolId?: string }> = [];
-      if (typeof receiptArtifact?.content === 'string') {
-        try {
-          const parsed: unknown = JSON.parse(receiptArtifact.content);
-          if (Array.isArray(parsed)) {
-            receipts = parsed.filter((receipt): receipt is { toolId: string; outcome: string; content?: string; fallbackForToolId?: string } =>
-              Boolean(receipt)
-              && typeof receipt === 'object'
-              && typeof (receipt as Record<string, unknown>).toolId === 'string'
-              && typeof (receipt as Record<string, unknown>).outcome === 'string'
-              && ((receipt as Record<string, unknown>).fallbackForToolId === undefined
-                || typeof (receipt as Record<string, unknown>).fallbackForToolId === 'string')
-              && ((receipt as Record<string, unknown>).content === undefined
-                || typeof (receipt as Record<string, unknown>).content === 'string'),
-            );
-          }
-        } catch {
-          gaps.push(
-            `Task "${plannedTask.title}" (${plannedTask.id}) has an unreadable action-receipt record; required actions cannot be verified.`,
-          );
-        }
+      const unreadableOwnReceipt = typeof ownReceiptArtifact?.content === 'string' && (() => {
+        try { JSON.parse(ownReceiptArtifact.content); return false; } catch { return true; }
+      })();
+      const ownReceipts = receiptsFromArtifact(ownReceiptArtifact);
+
+      // Task 7: a later recovery task may have satisfied this original requirement with
+      // authoritative evidence. Accept only binding-matching authoritative receipts.
+      const crossTaskReceipts = globalReceipts.filter((r) => !ownReceipts.includes(r) && receiptChannelAlignsWithTask(r, plannedTask));
+      const evidenceReceipts = [...ownReceipts, ...crossTaskReceipts];
+
+      const requirementGaps: string[] = [];
+      if (unreadableOwnReceipt) {
+        requirementGaps.push(
+          `Task "${plannedTask.title}" (${plannedTask.id}) has an unreadable action-receipt record; required actions cannot be verified.`,
+        );
       }
 
-      const availableReceipts = [...receipts];
-      for (const required of (plannedTask.requiredActions || []).filter(
+      const availableReceipts = [...evidenceReceipts];
+      for (const required of ((plannedTask.requiredActions || []) as RequiredActionLike[]).filter(
         (action) => action.toolId !== '__external_action__',
       )) {
         const receiptIndex = availableReceipts.findIndex((receipt) =>
-          (receipt.toolId === required.toolId
-            || (receipt.toolId !== '__create_tool'
-            && required.outcome === 'success'
-            && receipt.outcome === 'success'
-            && receipt.fallbackForToolId === required.toolId))
-          && receipt.outcome === required.outcome,
+          receiptMatchesRequiredAction(receipt, required),
         );
         if (receiptIndex >= 0) {
           availableReceipts.splice(receiptIndex, 1);
           continue;
         }
 
-        const failed = receipts.find((receipt) =>
-          receipt.toolId === required.toolId && receipt.outcome !== required.outcome,
-        ) || receipts.find((receipt) =>
-          receipt.fallbackForToolId === required.toolId && receipt.outcome !== 'success',
-        ) || receipts.find((receipt) => receipt.outcome === 'failure');
-        gaps.push(
-          `Task "${plannedTask.title}" (${plannedTask.id}) did not complete the required step "${required.toolId}" with the expected result (${required.outcome}).`
+        const toolMatched = evidenceReceipts.filter((receipt) =>
+          receipt.toolId === required.toolId || receipt.fallbackForToolId === required.toolId,
+        );
+        const failed = toolMatched.find((receipt) => receipt.outcome !== required.outcome)
+          || evidenceReceipts.find((receipt) => receipt.outcome === 'failure');
+        const bindingHint = toolMatched.length > 0 && required.outcome === 'success'
+          ? ` A receipt for "${required.toolId}" exists but did not match the required operation/recipient/message binding.`
+          : '';
+        requirementGaps.push(
+          `Task "${plannedTask.title}" (${plannedTask.id}) did not complete the required step "${describeRequiredAction(required)}" with the expected result (${required.outcome}).`
+          + bindingHint
           + (failed
             ? ` The step "${failed.toolId}" finished with result ${failed.outcome}${failed.content ? `: ${failed.content.slice(0, 500)}` : '.'}`
-            : ` No record of that step was found. Steps that ran: ${receipts.map((receipt) => receipt.toolId).join(', ') || 'none'}.`),
+            : ` No matching receipt was found. Steps that ran: ${evidenceReceipts.map((receipt) => receipt.toolId).join(', ') || 'none'}.`),
         );
       }
 
-      if (plannedTask.requiresExternalAction
-        || plannedTask.requiredActions?.some((action) => action.toolId === '__external_action__')) {
-        const externalActionReceipt = receipts.find((receipt) =>
-          receipt.outcome === 'success'
-          && !NON_ACTION_RECEIPT_TOOL_IDS.has(receipt.toolId)
-          && receipt.toolId !== '__external_action__',
-        );
-        if (!externalActionReceipt) {
-          gaps.push(
+      const externalActionRequired = plannedTask.requiresExternalAction
+        || plannedTask.requiredActions?.some((action) => action.toolId === '__external_action__');
+      if (externalActionRequired) {
+        const requiredExternalActions = ((plannedTask.requiredActions || []) as RequiredActionLike[])
+          .filter((action) => action.toolId === '__external_action__' && action.outcome === 'success');
+        let externalSatisfied = false;
+        // Explicit binding requirements: own task evidence + channel-aligned cross-task receipts
+        // are eligible (Task 7 recovery linkage) but only if binding matches. A receipt with
+        // no binding fields cannot satisfy an explicit binding requirement via cross-task credit.
+        const externalPool = evidenceReceipts;
+        if (requiredExternalActions.length > 0) {
+          externalSatisfied = requiredExternalActions.every((required) =>
+            externalPool.some((receipt) =>
+              receipt.outcome === 'success'
+              && !NON_ACTION_RECEIPT_TOOL_IDS.has(receipt.toolId)
+              && receiptMatchesRequiredAction(receipt, required)
+              && receiptHasSpecificExternalBinding(receipt, plannedTask),
+            ),
+          );
+        } else {
+          // Generic external action: allow recovery linkage via channel-aligned receipts.
+          externalSatisfied = externalPool.some((receipt) =>
+            receipt.outcome === 'success'
+            && !NON_ACTION_RECEIPT_TOOL_IDS.has(receipt.toolId)
+            && receipt.toolId !== '__external_action__'
+            && receiptHasSpecificExternalBinding(receipt, plannedTask),
+          );
+        }
+        if (!externalSatisfied) {
+          requirementGaps.push(
             `Task "${plannedTask.title}" (${plannedTask.id}) did not complete a verified action outside the system. Looking up tools, creating tools, or handing work off to another agent does not count as completing that action.`
-            + ` No record of a completed action was found. Steps that ran: ${receipts.map((receipt) => receipt.toolId).join(', ') || 'none'}.`,
+            + ` No matching authoritative action receipt was found. Steps that ran: ${evidenceReceipts.map((receipt) => receipt.toolId).join(', ') || 'none'}.`,
           );
         }
       }
@@ -244,7 +365,7 @@ export function missionExecutionEvidenceGaps(plan: Plan, phases: MissionPhaseEvi
       const expectedArtifactsList = Array.isArray((plannedTask as any).expectedArtifacts) ? (plannedTask as any).expectedArtifacts as string[] : [];
       for (const expectedName of expectedArtifactsList) {
         if (normalize(expectedName) === 'system-action-receipts.json') continue;
-        const artifact = artifacts.find((candidate) => normalize(candidate.name) === normalize(expectedName));
+        const artifact = [...phaseArtifacts, ...globalArtifacts].find((candidate) => normalize(candidate.name) === normalize(expectedName));
         const artifactContent = typeof artifact?.content === 'string' ? artifact.content.trim() : '';
         const isBlocker = artifactContent.length > 0
           && (
@@ -263,10 +384,37 @@ export function missionExecutionEvidenceGaps(plan: Plan, phases: MissionPhaseEvi
           : artifact?.purpose === 'execution-outcome'
             ? ` The matching record is an execution outcome, not the requested artifact${artifactContent ? `: ${artifactContent.slice(0, 500)}` : '.'}`
             : ' No non-empty deliverable content or file reference was recorded.';
-        gaps.push(
+        requirementGaps.push(
           `Task "${plannedTask.title}" (${plannedTask.id}) is missing expected artifact "${expectedName}".${reason}`,
         );
       }
+
+      // Compute whether this task had verifiable requirements that recovery evidence can satisfy.
+      const hasVerifiableRequirements = ((plannedTask.requiredActions || []).length > 0)
+        || !!(plannedTask.requiresExternalAction || plannedTask.requiredActions?.some((a) => a.toolId === '__external_action__'))
+        || ((plannedTask as any).expectedArtifacts || []).some((n: string) => n.toLocaleLowerCase() !== 'system-action-receipts.json');
+
+      if (requirementGaps.length === 0) {
+        // Task 7: if binding/deliverable requirements are satisfied (possibly by recovery
+        // evidence), credit resolution even when the original task record is incomplete.
+        // A completed task with satisfied requirements also passes.
+        if (task.status === 'completed' || hasVerifiableRequirements) continue;
+      }
+
+      // Not resolved: report status and requirement detail.
+      phaseHadTaskGap = true;
+      if (task.status !== 'completed') {
+        const detail = task.output?.trim();
+        gaps.push(
+          `Task "${plannedTask.title}" (${plannedTask.id}) is ${task.status}, not completed.`
+          + (detail ? ` Reason: ${detail.slice(0, 500)}` : ''),
+        );
+      }
+      gaps.push(...requirementGaps);
+    }
+
+    if (phase.status !== 'completed' && phaseHadTaskGap) {
+      gaps.push(`Phase "${plannedPhase.name}" (${plannedPhase.id}) is ${phase.status}, not completed.`);
     }
   }
   return [...new Set(gaps)];
@@ -279,6 +427,7 @@ export function createCompletedTaskSummary(
   requiredActions?: NonNullable<Task['requiredActions']>,
   requiresExternalAction = false,
   expectedArtifacts?: string[],
+  resolves?: { taskIds?: string[]; gaps?: string[] },
 ): CompletedTaskSummary {
   const externalActionRequired = requiresExternalAction
     || (requiredActions || []).some((action) => action.toolId === '__external_action__');
@@ -330,6 +479,8 @@ export function createCompletedTaskSummary(
     }),
     ...(normalizedRequiredActions ? { requiredActions: normalizedRequiredActions } : {}),
     ...(externalActionRequired ? { requiresExternalAction: true } : {}),
+    ...(resolves?.taskIds?.length ? { resolvesTaskIds: resolves.taskIds } : {}),
+    ...(resolves?.gaps?.length ? { resolvesGaps: resolves.gaps.slice(0, 20) } : {}),
   };
 }
 

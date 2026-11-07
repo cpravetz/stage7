@@ -1,0 +1,45 @@
+{
+  "id": "webhook",
+  "name": "Webhook",
+  "description": "Send HTTP webhooks with retries, secret validation, and response tracking",
+  "type": "native",
+  "manifest": {
+    "executor": "webhook",
+    "codeFile": "webhook.js",
+    "configSchema": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    },
+    "credentialSource": {
+      "secret": { "envVar": "WEBHOOK_SECRET" }
+    }
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "url": { "type": "string" },
+      "method": { "type": "string", "default": "POST" },
+      "headers": { "type": "object" },
+      "body": { "type": "object" },
+      "secret": { "type": "string" },
+      "event": { "type": "string" },
+      "retries": { "type": "integer", "default": 3 },
+      "timeoutMs": { "type": "integer", "default": 10000 },
+      "idempotencyKey": { "type": "string" },
+      "lookupUrl": { "type": "string" }
+    },
+    "required": ["url"]
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "statusCode": { "type": "integer" },
+      "response": { "type": "object" },
+      "durationMs": { "type": "number" },
+      "idempotencyKey": { "type": "string" },
+      "error": { "type": "string" }
+    }
+  },
+  "isSkill": false
+}

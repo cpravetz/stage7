@@ -55,6 +55,7 @@ export function buildTaskPrompt(
   phase: Phase,
   plan: Plan,
   completedDependencies: CompletedTaskSummary[],
+  missionGoal?: string,
 ): string {
   const expectedArtifacts = task.expectedArtifacts || [];
   const artifactOutputContract = expectedArtifacts.length > 0
@@ -64,6 +65,7 @@ export function buildTaskPrompt(
     `Task: ${visibleTaskText(task.title)}\n\n` +
     `Description: ${visibleTaskText(task.description)}\n\n` +
     `Task Instructions: ${visibleTaskText(task.systemPrompt)}\n\n` +
+    (missionGoal ? `Original mission goal: ${missionGoal}\n\n` : '') +
     (completedDependencies.length > 0
     ? `Completed dependency results (authoritative persisted outputs and artifacts; do not infer results from task IDs): ${JSON.stringify(compactDependencySummaries(task, completedDependencies))}\n\n`
       : '') +
@@ -73,11 +75,12 @@ export function buildTaskPrompt(
 
     `Required Actions: ${JSON.stringify(visibleRequiredActions(task))}\n` +
     (task.requiresExternalAction
-      ? 'This task requires completing a real action outside the system. Use a registered tool that actually performs that action. Looking up tools, creating tools, handing work off, drafting, or proposing an action does not count as completion.\n'
+      ? 'This task requires completing a real action outside the system. Check the live tool catalog, then invoke an actual registered tool that performs the requested operation and verify its result. If no suitable tool exists, use capability resolution to find or create one when permitted. Do not stop after listing tools, creating a tool, handing work off, drafting, or proposing an action. If required credentials or configuration are missing, ask the user to provide them through the secure tool configuration form and wait.\n'
       : '') +
-
-    `Output contract: ${artifactOutputContract} Use only actual system-tool results and completed dependency results; do not infer values or include results from future mission steps.\n\n` +
-    'Complete this task now and report the results for its expected deliverables. Do not return a plan, future promises, or placeholders. If the work cannot be completed with the available tools or information, explain the specific blocker.'
+    'If required input from an earlier task is missing, identify the source task and request its Agent to provide the artifact or rerun that task. Never fabricate missing input or treat a recoverable missing input as mission failure.\n' +
+    'If you must ask the user to choose a tool, service, or configuration, include the concrete options/values in the question; never ask the user to select from a list that is not shown.\n' +
+    `Output contract: ${artifactOutputContract} Use only actual system-tool results and completed dependency results; do not infer values or include results from future mission steps. Keep the final response in clear, concise language. Do not expose internal JSON, action receipts, validation errors, or implementation jargon unless the user specifically requested them.\n\n` +
+    'Complete this task now and report the results for its expected deliverables. Do not return a plan, future-tense promises, or placeholders. If the work cannot be completed with the available tools or information, explain the specific blocker.'
 
   );
 }

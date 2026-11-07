@@ -3,6 +3,7 @@ import type { MissionPendingInteraction } from '../types/workflow';
 
 export interface TaskExecutionResult {
   output: string;
+  incompleteReason?: string;
   artifacts: MissionArtifact[];
   actionReceipts?: Array<{
     toolId: string;

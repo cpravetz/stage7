@@ -21,6 +21,7 @@ import { BrainClient, BrainValidationError } from '../brain/BrainClient';
 import { parseInterruption as parseTaskInterruption } from './TaskInterruption';
 import { applyRuntimeTaskRequirements } from './TaskRequirements';
 import { buildTaskPrompt } from './TaskPromptBuilder';
+import { missionExecutionEvidenceGaps } from '../types/workflow';
 import type { CompletedTaskSummary, MissionPendingInteraction } from '../types/workflow';
 import {
   PlannerCompletionRequest,
@@ -40,7 +41,7 @@ const TASK_SELECTOR_EXECUTION_POLICY: AgentExecutionPolicy = {
   maxCompletionTokensPerCall: 256,
   maxDelegations: 0,
 };
-const PHASE_REVIEW_SYSTEM_PROMPT = `You are a critical phase reviewer. Compare completed task outputs and artifacts with the mission goal and phase goal. Only observed results and artifacts count as evidence; plans and proposed actions are not evidence that work occurred. Do not mark a phase complete just because its tasks ran. If the phase goal is satisfied, return {"satisfied":true,"gaps":[],"followUpTask":null}. Otherwise identify concrete unmet outcomes and propose exactly one focused follow-up task that can address a gap. Describe only the outcome the Agent must achieve; never prescribe tools, providers, integrations, credentials, implementation steps, or user questions. Do not repeat successfully completed side effects or change a requested identifier. The follow-up systemPrompt must name each prerequisite task ID and identify the specific output, artifact, or receipt it consumes. Return exactly one JSON object; do not include explanations, plans, tool actions, or Markdown fences.`;
+const PHASE_REVIEW_SYSTEM_PROMPT = `You are a critical phase reviewer. Compare completed task outputs and artifacts with the mission goal and phase goal. Only observed results and artifacts count as evidence; plans and proposed actions are not evidence that work occurred. Do not mark a phase complete just because its tasks ran. If the phase goal is satisfied, return {"satisfied":true,"gaps":[],"followUpTask":null}. Otherwise identify concrete unmet outcomes and propose exactly one focused follow-up task that can address a gap. Describe only the outcome the Agent must achieve; never prescribe tools, providers, integrations, credentials, implementation steps, or user questions. Do not repeat successfully completed side effects or change a requested identifier. Never request a fabricated receipt or evidence artifact to stand in for an action; actual tool results are recorded internally as system-action-receipts.json. If a required input from an earlier task is missing, make the follow-up retrieve it from that task's Agent or redo the source task. The follow-up systemPrompt must name each prerequisite task ID and identify the specific output, artifact, or receipt it consumes. Return exactly one JSON object; do not include explanations, plans, tool actions, or Markdown fences.`;
 const PHASE_REVIEW_EXECUTION_POLICY: AgentExecutionPolicy = {
   ...DEFAULT_AGENT_EXECUTION_POLICY,
   maxBrainCalls: 4,
@@ -49,7 +50,7 @@ const PHASE_REVIEW_EXECUTION_POLICY: AgentExecutionPolicy = {
   maxCompletionTokensPerCall: 2_048,
   maxDelegations: 0,
 };
-const MISSION_COMPLETION_REVIEWER_SYSTEM_PROMPT = `You are an objective mission-completion reviewer. Determine whether the observed task outputs and artifacts satisfy the original mission goal. Treat each task's requiredActions and requiresExternalAction flag as evidence requirements; system-action-receipts.json is the record of actual tool results. Every required action must have a matching receipt with its required outcome, and an external operation requires a successful receipt from an actual tool invocation. Failed receipts do not support success, and claimed results that contradict receipts are gaps. A receipt whose toolId is "__list_tools" proves only that the tool catalog was inspected; a tool name appearing in its content does not prove that tool was invoked or that its action succeeded. For every unmet requirement, name the exact task ID, state the missing/failed requirement, and cite observed receipt or artifact evidence, not prior Agent claims. Never use generic gaps or repeat the mission goal as the reason. Return exactly one JSON object with {"satisfied":true,"gaps":[]} or {"satisfied":false,"gaps":["task-specific explanation"]}. Never infer success from a task merely being marked complete. Do not include explanations, Markdown fences, or any text outside the JSON object.`;
+const MISSION_COMPLETION_REVIEWER_SYSTEM_PROMPT = `You are an objective mission-completion reviewer. Determine whether the observed task outputs and artifacts satisfy the original mission goal. Treat each task's requiredActions and requiresExternalAction flag as evidence requirements; system-action-receipts.json is the internal record of actual tool results and is not a user deliverable. Every required action must have a matching receipt with its required outcome, and an external operation requires a successful receipt from an actual tool invocation. Failed receipts do not support success, and claimed results that contradict receipts are gaps. A receipt whose toolId is "__list_tools" proves only that the tool catalog was inspected; a tool name appearing in its content does not prove that tool was invoked or that its action succeeded. For every unmet requirement, name the exact task ID, state the missing/failed requirement, and cite observed receipt or artifact evidence, not prior Agent claims. Never ask an Agent to fabricate a receipt artifact to stand in for a missing tool result. Never use generic gaps or repeat the mission goal as the reason. Return exactly one JSON object with {"satisfied":true,"gaps":[]} or {"satisfied":false,"gaps":["task-specific explanation"]}. Never infer success from a task merely being marked complete. Do not include explanations, Markdown fences, or any text outside the JSON object.`;
 const MISSION_COMPLETION_REVIEW_EXECUTION_POLICY: AgentExecutionPolicy = {
   ...DEFAULT_AGENT_EXECUTION_POLICY,
   maxBrainCalls: 3,
@@ -62,7 +63,7 @@ export const MISSION_TASK_EXECUTION_POLICY: AgentExecutionPolicy = {
   ...DEFAULT_AGENT_EXECUTION_POLICY,
   maxBrainCalls: 24,
   maxActions: 16,
-  maxCompletionTokens: 16_384,
+  maxCompletionTokens: 49_152,
   maxCompletionTokensPerCall: 2_048,
   maxDelegations: 3,
 };
@@ -313,6 +314,7 @@ function parseMissionAgentToolPolicies(value: unknown): Map<string, MissionAgent
 
 export interface TaskExecutionResult {
   output: string;
+  incompleteReason?: string;
   artifacts: MissionArtifact[];
   actionReceipts?: Array<{
     toolId: string;
@@ -320,6 +322,15 @@ export interface TaskExecutionResult {
     content: string;
     outcome: 'success' | 'failure' | 'denied' | 'question_asked' | 'permission_required';
     actionKey?: string;
+    executionId?: string;
+    operation?: string;
+    providerRequestId?: string;
+    binding?: Record<string, unknown>;
+    fallbackForToolId?: string;
+    resolvedToolId?: string;
+    reconciliation?: Record<string, unknown>;
+    outcomeKnown?: boolean;
+    [key: string]: unknown;
   }>;
   interruption?: Pick<MissionPendingInteraction, 'kind' | 'question' | 'credentialRequest' | 'requestId' | 'permission'>;
   tokensUsed: number;
@@ -1046,8 +1057,9 @@ export class MissionAgentRuntime {
     completedTaskSummaries: CompletedTaskSummary[] = [],
     retryGuidance?: string,
     continuation?: { response: string; pendingInteraction: MissionPendingInteraction },
+    missionGoal?: string,
   ): Promise<TaskExecutionResult> {
-    applyRuntimeTaskRequirements(task);
+    applyRuntimeTaskRequirements(task, missionGoal);
     const dependencyIds = task.dependsOnTaskIds || [];
     const completedById = new Map(completedTaskSummaries.map((summary) => [summary.taskId, summary]));
     const completedDependencies: CompletedTaskSummary[] = [];
@@ -1062,7 +1074,7 @@ export class MissionAgentRuntime {
         `Cannot execute task "${task.id}": completed dependency results are missing for: ${missingDependencies.join(', ')}`,
       );
     }
-    const basePrompt = buildTaskPrompt(task, phase, plan, completedDependencies);
+    const basePrompt = buildTaskPrompt(task, phase, plan, completedDependencies, missionGoal);
     const continuationPrompt = continuation
       ? [
         `This task is resuming after a ${continuation.pendingInteraction.kind === 'user_input' ? 'user question' : 'tool permission'} interruption.`,
@@ -1079,7 +1091,7 @@ export class MissionAgentRuntime {
       ...(retryGuidance ? [`Retry guidance for remaining work:\n${retryGuidance}`] : []),
       ...(continuationPrompt ? [continuationPrompt] : []),
     ].join('\n\n');
-    return this.executePromptTask(agentId, {
+    const result = await this.executePromptTask(agentId, {
       taskId: continuation
         ? `${this.missionId}:${phase.id}:${task.id}:resume-${continuation.pendingInteraction.resumeCount + 1}`
         : `${this.missionId}:${phase.id}:${task.id}`,
@@ -1099,6 +1111,14 @@ export class MissionAgentRuntime {
       executionPolicy,
       retryGuidance,
     });
+    if (result.interruption) return result;
+    const evidenceGaps = missionExecutionEvidenceGaps(
+      { ...plan, phases: [{ ...phase, tasks: [task] }] },
+      [{ phaseId: phase.id, status: 'completed', tasks: [{ taskId: task.id, status: 'completed', artifacts: result.artifacts, output: result.output }] }],
+    );
+    return evidenceGaps.length > 0
+      ? { ...result, incompleteReason: [result.incompleteReason, ...evidenceGaps].filter(Boolean).join(' ') }
+      : result;
   }
 
   async executePromptTask(agentId: string, request: PromptTaskRequest): Promise<TaskExecutionResult> {
@@ -1126,6 +1146,7 @@ export class MissionAgentRuntime {
       this.missionAgentPath(agentId, 'tasks'),
       { method: 'POST', body: JSON.stringify(taskData) }
     );
+    this.taskAgentMap.set(submitted.taskId, agentId);
 
     const executePath = this.missionAgentPath(agentId, 'tasks', submitted.taskId, 'execute');
     let completed: AgentTask | undefined;
@@ -1217,6 +1238,7 @@ export class MissionAgentRuntime {
     }
     return {
       output,
+      ...(result?.incompleteReason ? { incompleteReason: result.incompleteReason } : {}),
       artifacts: this.withActionReceiptArtifact(artifacts, actionReceipts, submitted.taskId),
       actionReceipts,
       tokensUsed,
@@ -1291,7 +1313,7 @@ export class MissionAgentRuntime {
   }
 
   private parseTaskResult(task: AgentTask): TaskExecutionResult {
-    const result = task.result as { output?: unknown; artifacts?: unknown; actionReceipts?: unknown; tokensUsed?: unknown; model?: unknown; provider?: unknown; requestId?: unknown; reasoning?: unknown } | null;
+    const result = task.result as { output?: unknown; incompleteReason?: unknown; artifacts?: unknown; actionReceipts?: unknown; tokensUsed?: unknown; model?: unknown; provider?: unknown; requestId?: unknown; reasoning?: unknown } | null;
     const output = String(result?.output || JSON.stringify(result || {}));
     const input = task.input && typeof task.input === 'object' && !Array.isArray(task.input)
       ? task.input as Record<string, unknown>
@@ -1324,6 +1346,7 @@ export class MissionAgentRuntime {
     }
     return {
       output,
+      ...(typeof result?.incompleteReason === 'string' ? { incompleteReason: result.incompleteReason } : {}),
       artifacts: this.withActionReceiptArtifact(artifacts, actionReceipts, task.taskId),
       actionReceipts,
       tokensUsed: Number(tokensUsed) || 0,
@@ -1412,27 +1435,47 @@ export class MissionAgentRuntime {
         !candidate
         || typeof candidate !== 'object'
         || Array.isArray(candidate)
-        || typeof candidate.toolId !== 'string'
-        || !candidate.toolId.trim()
-        || typeof candidate.isError !== 'boolean'
-        || typeof candidate.content !== 'string'
-        || (candidate.actionKey !== undefined && (typeof candidate.actionKey !== 'string' || !/^[a-f0-9]{64}$/i.test(candidate.actionKey)))
-        || (candidate.fallbackForToolId !== undefined && (typeof candidate.fallbackForToolId !== 'string' || !candidate.fallbackForToolId.trim()))
-        || (candidate.resolvedToolId !== undefined && (typeof candidate.resolvedToolId !== 'string' || !candidate.resolvedToolId.trim()))
-        || (candidate.outcome !== undefined && !['success', 'failure', 'denied', 'question_asked', 'permission_required'].includes(String(candidate.outcome)))
       ) {
         logger.warn({ taskId }, 'Ignoring an invalid action-receipt entry');
         return [];
       }
+      const c = candidate as Record<string, unknown>;
+      if (
+        typeof c.toolId !== 'string'
+        || !c.toolId.trim()
+        || typeof c.isError !== 'boolean'
+        || typeof c.content !== 'string'
+        || (c.actionKey !== undefined && (typeof c.actionKey !== 'string' || !/^[a-f0-9]{64}$/i.test(c.actionKey)))
+        || (c.fallbackForToolId !== undefined && (typeof c.fallbackForToolId !== 'string' || !c.fallbackForToolId.trim()))
+        || (c.resolvedToolId !== undefined && (typeof c.resolvedToolId !== 'string' || !c.resolvedToolId.trim()))
+        || (c.executionId !== undefined && (typeof c.executionId !== 'string' || !c.executionId.trim()))
+        || (c.operation !== undefined && (typeof c.operation !== 'string' || !c.operation.trim()))
+        || (c.providerRequestId !== undefined && (typeof c.providerRequestId !== 'string' || !c.providerRequestId.trim()))
+        || (c.outcomeKnown !== undefined && typeof c.outcomeKnown !== 'boolean')
+        || (c.binding !== undefined && (typeof c.binding !== 'object' || !c.binding || Array.isArray(c.binding)))
+        || (c.reconciliation !== undefined && (typeof c.reconciliation !== 'object' || !c.reconciliation || Array.isArray(c.reconciliation)))
+        || (c.outcome !== undefined && !['success', 'failure', 'denied', 'question_asked', 'permission_required'].includes(String(c.outcome)))
+      ) {
+        logger.warn({ taskId }, 'Ignoring an invalid action-receipt entry');
+        return [];
+      }
+      const content = c.content.slice(0, 4_096);
+      const outcome = (c.outcome as NonNullable<TaskExecutionResult['actionReceipts']>[number]['outcome'] | undefined)
+        || (c.isError ? 'failure' : 'success');
       return [{
-        toolId: candidate.toolId,
-        isError: candidate.isError,
-        content: candidate.content.slice(0, 2_048),
-        outcome: (candidate.outcome as NonNullable<TaskExecutionResult['actionReceipts']>[number]['outcome'] | undefined)
-          || (candidate.isError ? 'failure' : 'success'),
-        ...(typeof candidate.actionKey === 'string' ? { actionKey: candidate.actionKey } : {}),
-        ...(typeof candidate.fallbackForToolId === 'string' ? { fallbackForToolId: candidate.fallbackForToolId } : {}),
-        ...(typeof candidate.resolvedToolId === 'string' ? { resolvedToolId: candidate.resolvedToolId } : {}),
+        toolId: c.toolId,
+        isError: c.isError,
+        content,
+        outcome,
+        ...(typeof c.actionKey === 'string' ? { actionKey: c.actionKey } : {}),
+        ...(typeof c.executionId === 'string' ? { executionId: c.executionId } : {}),
+        ...(typeof c.operation === 'string' ? { operation: c.operation } : {}),
+        ...(typeof c.providerRequestId === 'string' ? { providerRequestId: c.providerRequestId } : {}),
+        ...(typeof c.outcomeKnown === 'boolean' ? { outcomeKnown: c.outcomeKnown } : {}),
+        ...(c.binding && typeof c.binding === 'object' && !Array.isArray(c.binding) ? { binding: c.binding as Record<string, unknown> } : {}),
+        ...(c.reconciliation && typeof c.reconciliation === 'object' && !Array.isArray(c.reconciliation) ? { reconciliation: c.reconciliation as Record<string, unknown> } : {}),
+        ...(typeof c.fallbackForToolId === 'string' ? { fallbackForToolId: c.fallbackForToolId } : {}),
+        ...(typeof c.resolvedToolId === 'string' ? { resolvedToolId: c.resolvedToolId } : {}),
       }];
     });
   }

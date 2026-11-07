@@ -84,7 +84,7 @@ describe('HarnessEditService', () => {
     });
 
     expect(result.applied).toBe(true);
-    expect(result.accepted ?? result.evidence.length).toBeDefined();
+    expect(result.evidence.length).toBeGreaterThan(0);
     expect(result.harness.systemPrompt).toBe('You are a helpful assistant for engineers.');
     expect(result.evidence[0].ok).toBe(true);
   });

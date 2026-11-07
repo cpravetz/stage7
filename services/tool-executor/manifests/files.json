@@ -1,0 +1,37 @@
+{
+  "id": "files",
+  "name": "File Storage",
+  "description": "Read, write, list, delete, and check existence of files and directories",
+  "type": "native",
+  "manifest": {
+    "executor": "files",
+    "codeFile": "files.js",
+    "configSchema": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    },
+    "credentialSource": {}
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "operation": { "type": "string", "enum": ["read", "write", "list", "delete", "exists", "mkdir"], "default": "read" },
+      "path": { "type": "string" },
+      "content": { "type": "string" },
+      "bucket": { "type": "string" }
+    },
+    "required": ["operation", "path"]
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "success": { "type": "boolean" },
+      "data": { "type": "object" },
+      "error": { "type": "string" },
+      "durationMs": { "type": "number" }
+    },
+    "required": ["success"]
+  },
+  "isSkill": false
+}

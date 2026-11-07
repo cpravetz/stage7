@@ -109,7 +109,7 @@ describe('TemporalClient mission deletion', () => {
 
   it('removes the artifacts once the runner finalizes a mission that was deleted while running', async () => {
     const { requests, state } = installArtifacts({
-      missionId: 'mission-finalized',
+      missionId: 'finalized',
       status: 'running',
       controlState: 'running',
     })
@@ -125,7 +125,7 @@ describe('TemporalClient mission deletion', () => {
     const client = new TemporalClient('default', directRun as never)
 
     await client.startMission({
-      missionId: 'mission-finalized',
+      missionId: 'finalized',
       tenantId: 'tenant-1',
       assistantId: 'assistant-1',
       prompt: 'Do the work',
@@ -137,7 +137,7 @@ describe('TemporalClient mission deletion', () => {
     await new Promise((resolve) => setTimeout(resolve, 50))
 
     expect(deletes(requests).map((request) => request.url)).toEqual([
-      'http://artifacts/api/artifacts/missions/mission-finalized',
+      'http://artifacts/api/artifacts/missions/finalized',
     ])
   })
 })

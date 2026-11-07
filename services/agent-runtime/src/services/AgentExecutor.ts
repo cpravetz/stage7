@@ -3,6 +3,9 @@ import {
   BRAIN_MODEL_SELECTION_RETRY,
   BRAIN_ROUTING_SESSION_CONTEXT_KEY,
   logger,
+  receiptMatchesRequiredAction,
+  describeRequiredAction,
+  extractReceiptBinding,
 } from '@stage7-nextgen/shared'
 import { createHash } from 'node:crypto'
 import {
@@ -45,10 +48,15 @@ interface ToolExecutionResponse {
   status?: string
   output?: unknown
   error?: string
+  outcomeKnown?: boolean
+  reconciliation?: Record<string, unknown>
   request?: {
     executionId?: string
     toolId?: string
     toolName?: string
+    operation?: string
+    providerRequestId?: string
+    binding?: Record<string, unknown>
     missingCredentials?: Array<{
       key?: string
       label?: string
@@ -94,8 +102,15 @@ export interface AgentActionReceipt {
   content: string
   outcome: AgentActionOutcome
   actionKey?: string
+  executionId?: string
+  operation?: string
+  providerRequestId?: string
+  outcomeKnown?: boolean
+  binding?: Record<string, unknown>
+  reconciliation?: Record<string, unknown>
   fallbackForToolId?: string
   resolvedToolId?: string
+  [key: string]: unknown
 }
 
 export type AgentActionOutcome = 'success' | 'failure' | 'denied' | 'question_asked' | 'permission_required'
@@ -103,6 +118,15 @@ export type AgentActionOutcome = 'success' | 'failure' | 'denied' | 'question_as
 interface RequiredAction {
   toolId: string
   outcome: AgentActionOutcome
+  operation?: string
+  operations?: string[]
+  recipient?: string
+  recipients?: string[]
+  message?: string
+  subject?: string
+  body?: string
+  binding?: Record<string, unknown>
+  [key: string]: unknown
 }
 
 export interface AgentExecutionCheckpoint {
@@ -118,11 +142,13 @@ export interface AgentExecutionCheckpoint {
   actionReceipts?: AgentActionReceipt[]
   pendingAction?: string
   finalOutput?: string
+  incompleteReason?: string
   lastRequestId?: string
 }
 
 export interface AgentExecutionResult {
   output: string
+  incompleteReason?: string
   tokensUsed: number
   toolCalls: number
   brainCalls: number
@@ -141,6 +167,12 @@ interface ToolResult {
   isError: boolean
   content: string
   outcome?: AgentActionOutcome
+  executionId?: string
+  operation?: string
+  providerRequestId?: string
+  outcomeKnown?: boolean
+  binding?: Record<string, unknown>
+  reconciliation?: Record<string, unknown>
   resolvedToolId?: string
 }
 
@@ -159,7 +191,7 @@ const DEFAULT_BRAIN_PROVIDER_ATTEMPT_TIMEOUT_MS = 310_000
 const DEFAULT_BRAIN_COMPLETION_DEADLINE_MS = 900_000
 const BRAIN_RESPONSE_GRACE_MS = 30_000
 const MAX_BRAIN_REQUEST_TIMEOUT_MS = 2_147_483_647
-const MAX_ACTION_RECEIPT_CHARS = 2_048
+const MAX_ACTION_RECEIPT_CHARS = 4_096
 const RESUME_COMPLETION_TOKEN_BONUS = 8_192
 const RESUME_BUDGET_MARKER = 'You may continue from the work saved so far one more time for this task.'
 
@@ -259,6 +291,17 @@ function isToolFailurePayload(value: unknown, depth = 0): boolean {
   return ['output', 'data', 'result'].some((key) => isToolFailurePayload(payload[key], depth + 1))
 }
 
+
+function enrichReceipt(receipt: AgentActionReceipt): AgentActionReceipt {
+  const binding = extractReceiptBinding(receipt as any) as any
+  return {
+    ...receipt,
+    ...(binding.operation && !receipt.operation ? { operation: binding.operation } : {}),
+    ...(binding.providerRequestId && !receipt.providerRequestId ? { providerRequestId: binding.providerRequestId } : {}),
+    ...(typeof binding.outcomeKnown === 'boolean' && receipt.outcomeKnown === undefined ? { outcomeKnown: binding.outcomeKnown } : {}),
+    ...(Object.keys(binding).length > 0 ? { binding: { ...(receipt.binding || {}), ...binding } } : {}),
+  }
+}
 function parseActionReceipts(value: unknown): AgentActionReceipt[] {
   if (value === undefined) return []
   if (!Array.isArray(value)) {
@@ -275,6 +318,12 @@ function parseActionReceipts(value: unknown): AgentActionReceipt[] {
       || (receipt.actionKey !== undefined && (typeof receipt.actionKey !== 'string' || !/^[a-f0-9]{64}$/i.test(receipt.actionKey)))
       || (receipt.fallbackForToolId !== undefined && (typeof receipt.fallbackForToolId !== 'string' || !receipt.fallbackForToolId.trim()))
       || (receipt.resolvedToolId !== undefined && (typeof receipt.resolvedToolId !== 'string' || !receipt.resolvedToolId.trim()))
+      || (receipt.executionId !== undefined && (typeof receipt.executionId !== 'string' || !receipt.executionId.trim()))
+      || (receipt.operation !== undefined && (typeof receipt.operation !== 'string' || !receipt.operation.trim()))
+      || (receipt.providerRequestId !== undefined && (typeof receipt.providerRequestId !== 'string' || !receipt.providerRequestId.trim()))
+      || (receipt.outcomeKnown !== undefined && typeof receipt.outcomeKnown !== 'boolean')
+      || (receipt.reconciliation !== undefined && (typeof receipt.reconciliation !== 'object' || !receipt.reconciliation || Array.isArray(receipt.reconciliation)))
+      || (receipt.binding !== undefined && (typeof receipt.binding !== 'object' || !receipt.binding || Array.isArray(receipt.binding)))
       || (receipt.outcome !== undefined && !['success', 'failure', 'denied', 'question_asked', 'permission_required'].includes(String(receipt.outcome)))
     ) {
       throw new Error('The saved progress for this task includes an invalid step record')
@@ -290,7 +339,7 @@ function parseActionReceipts(value: unknown): AgentActionReceipt[] {
         ? 'failure'
         : (receipt.outcome as AgentActionOutcome | undefined)
           || (receipt.isError ? 'failure' : 'success')
-    return {
+    const base: AgentActionReceipt = {
       toolId: receipt.toolId,
       isError: receipt.isError || semanticFailure || outcome === 'failure' || outcome === 'permission_required',
       content: receipt.content.slice(0, MAX_ACTION_RECEIPT_CHARS),
@@ -298,6 +347,19 @@ function parseActionReceipts(value: unknown): AgentActionReceipt[] {
       ...(typeof receipt.actionKey === 'string' ? { actionKey: receipt.actionKey } : {}),
       ...(typeof receipt.fallbackForToolId === 'string' ? { fallbackForToolId: receipt.fallbackForToolId } : {}),
       ...(typeof receipt.resolvedToolId === 'string' ? { resolvedToolId: receipt.resolvedToolId } : {}),
+      ...(typeof receipt.executionId === 'string' ? { executionId: receipt.executionId } : {}),
+      ...(typeof receipt.operation === 'string' ? { operation: receipt.operation } : {}),
+      ...(typeof receipt.providerRequestId === 'string' ? { providerRequestId: receipt.providerRequestId } : {}),
+      ...(typeof receipt.outcomeKnown === 'boolean' ? { outcomeKnown: receipt.outcomeKnown } : {}),
+      ...(receipt.reconciliation && typeof receipt.reconciliation === 'object' && !Array.isArray(receipt.reconciliation) ? { reconciliation: receipt.reconciliation as Record<string, unknown> } : {}),
+      ...(receipt.binding && typeof receipt.binding === 'object' && !Array.isArray(receipt.binding) ? { binding: receipt.binding as Record<string, unknown> } : {}),
+    }
+    const binding = extractReceiptBinding(base as any) as any
+    return {
+      ...base,
+      ...(binding.operation && !base.operation ? { operation: binding.operation } : {}),
+      ...(binding.providerRequestId && !base.providerRequestId ? { providerRequestId: binding.providerRequestId } : {}),
+      ...(Object.keys(binding).length > 0 ? { binding } : {}),
     }
   })
 }
@@ -352,7 +414,9 @@ const NON_EXTERNAL_ACTION_TOOL_IDS = new Set([
   DELEGATE_ACTION,
 ]);
 
-function hasExternalActionReceipt(receipts: AgentActionReceipt[]): boolean {
+function hasExternalActionReceipt(receipts: AgentActionReceipt[], requiredActions: RequiredAction[] = []): boolean {
+  const specific = requiredActions.filter((r) => r.toolId === '__external_action__' && r.outcome === 'success')
+  if (specific.length > 0) return specific.every((r) => receipts.some((receipt) => receiptMatchesRequiredAction(receipt as any, r as any)))
   return receipts.some((receipt) =>
     receipt.outcome === 'success'
     && !receipt.isError
@@ -393,16 +457,35 @@ function parseExpectedArtifacts(value: unknown): string[] {
   return deliverables
 }
 
+function rewriteUnanswerableToolSelectionQuestion(question: string, catalog: ToolDescriptor[]): string | null {
+  const text = question.trim()
+  if (!text) return null
+  const asksToChooseFromList = /\b(?:choose|select|pick)\b.{0,80}\b(?:from (?:the )?(?:list|available|following)\b|most appropriate)\b.{0,40}\btool\b/i.test(text)
+    || /\b(?:following|available)\s+tools?\b.{0,120}\b(?:choose|select|pick)\b/i.test(text)
+  if (!asksToChooseFromList) return null
+
+  const names = catalog.map((tool) => tool.id).filter(Boolean)
+  if (names.some((name) => new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(text))) {
+    return null
+  }
+
+  const relevant = catalog
+    .filter((tool) => /\b(?:sms|text|message|messaging|twilio|email|smtp|send)\b/i.test(`${tool.id} ${tool.name} ${tool.description}`))
+    .slice(0, 8)
+  const choices = (relevant.length > 0 ? relevant : catalog.slice(0, 8))
+    .map((tool) => `- ${tool.id}${tool.name && tool.name !== tool.id ? ` (${tool.name})` : ''}${tool.description ? `: ${tool.description}` : ''}`)
+  if (choices.length === 0) {
+    return 'I could not find any registered tools for this task. Reply with the tool/service you want me to use, or tell me if I should create or authorize one in Tools configuration.'
+  }
+  return `I need to choose a tool for this task. Reply with the tool ID to use, or tell me if I should discover/create a different tool.\n\nAvailable tools:\n${choices.join('\n')}`
+}
+
 function isConfigurationFailure(content: string): boolean {
   return /\b(?:not configured|no .{1,80} configured|missing (?:the )?.{1,80}credential|requires? (?:the )?.{1,80}credential|credential .{1,80} missing)\b/i.test(content)
 }
 
 function getMissingRuntimeModule(content: string): string | undefined {
   return content.match(/Cannot find (?:module|package)\s+['"]?([@a-z0-9._/-]+)['"]?/i)?.[1]
-}
-
-function isExplicitBlocker(content: string): boolean {
-  return /\b(?:blocked|cannot complete|unable to complete|could not complete|missing (?:configuration|credentials?|endpoint)|not configured|no safe alternative|requires? (?:user input|credentials?|configuration))\b/i.test(content)
 }
 
 function missingExpectedArtifactSections(content: string, expected: string[]): string[] {
@@ -459,6 +542,9 @@ export function parseAgentExecutionCheckpoint(value: unknown): AgentExecutionChe
   if (checkpoint.finalOutput !== undefined && typeof checkpoint.finalOutput !== 'string') {
     throw new Error('The saved progress for this task includes an invalid final result')
   }
+  if (checkpoint.incompleteReason !== undefined && typeof checkpoint.incompleteReason !== 'string') {
+    throw new Error('The saved progress for this task includes an invalid incomplete reason')
+  }
 
   return {
     version: checkpoint.version,
@@ -473,6 +559,7 @@ export function parseAgentExecutionCheckpoint(value: unknown): AgentExecutionChe
     actionReceipts: parseActionReceipts(checkpoint.actionReceipts),
     ...(typeof checkpoint.pendingAction === 'string' ? { pendingAction: checkpoint.pendingAction } : {}),
     ...(typeof checkpoint.finalOutput === 'string' ? { finalOutput: checkpoint.finalOutput } : {}),
+    ...(typeof checkpoint.incompleteReason === 'string' ? { incompleteReason: checkpoint.incompleteReason } : {}),
     ...(typeof checkpoint.lastRequestId === 'string' ? { lastRequestId: checkpoint.lastRequestId } : {}),
   }
 }
@@ -731,6 +818,7 @@ export class AgentExecutor {
     let lastAction = checkpoint?.lastAction || ''
     let repeatedActionCount = checkpoint?.repeatedActionCount || 0
     let finalOutput = checkpoint?.finalOutput
+    let incompleteReason = checkpoint?.incompleteReason
     const priorActionReceipts = parseActionReceipts(taskContext.priorActionReceipts)
     const priorActionKeys = new Set(
       priorActionReceipts.flatMap((receipt) => receipt.actionKey ? [receipt.actionKey] : []),
@@ -774,6 +862,7 @@ export class AgentExecutor {
         lastRequestId,
         ...(pendingAction ? { pendingAction } : {}),
         ...(finalOutput !== undefined ? { finalOutput } : {}),
+        ...(incompleteReason !== undefined ? { incompleteReason } : {}),
       }
       // Compact the persisted history when it grows large: keep the first user prompt,
       // the most recent turns, and all action receipts, dropping the oldest middle turns.
@@ -799,8 +888,20 @@ export class AgentExecutor {
       : undefined;
 
     if (finalOutput !== undefined) {
+      if (incompleteReason) {
+        return {
+          output: finalOutput,
+          incompleteReason,
+          tokensUsed,
+          toolCalls,
+          brainCalls,
+          completionTokensReserved,
+          actionReceipts,
+          requestId: lastRequestId,
+        }
+      }
       const missingActions = missingRequiredActions(requiredActions, actionReceipts)
-      const missingExternalAction = requiresExternalAction && !hasExternalActionReceipt(actionReceipts)
+      const missingExternalAction = requiresExternalAction && !hasExternalActionReceipt(actionReceipts as any, requiredActions as any)
       const missingArtifacts = missingExpectedArtifactSections(finalOutput, expectedArtifacts)
       if (missingActions.length === 0 && !missingExternalAction && missingArtifacts.length === 0) {
         return {
@@ -849,7 +950,7 @@ export class AgentExecutor {
     if (saveCheckpoint) await saveCheckpoint()
     if (interruptedDelegation) {
       const result = await this.executeAction(interruptedDelegation, [], definition, context, toolPolicy)
-      actionReceipts.push({
+      actionReceipts.push(enrichReceipt({
         toolId: interruptedDelegation.tool,
         isError: result.isError,
         content: result.content.slice(0, MAX_ACTION_RECEIPT_CHARS),
@@ -857,7 +958,7 @@ export class AgentExecutor {
         actionKey: createHash('sha256')
           .update(`${interruptedDelegation.tool}:${JSON.stringify(interruptedDelegation.args)}`)
           .digest('hex'),
-      })
+      }))
       history.push({
         role: 'user',
         content: result.isError
@@ -875,7 +976,7 @@ export class AgentExecutor {
       history.push({ role: 'user', content: retryGuidanceMessage })
     }
 
-    while (brainCalls < brainCallLimit) {
+    while (brainCalls < brainCallLimit && completionTokensReserved < completionTokenLimit) {
       const catalog = policy.maxActions > 0 ? await this.listTools() : []
       const tools = toolPolicy.mode === 'allowlist'
         ? catalog.filter((tool) => definition.tools.includes(tool.id))
@@ -987,11 +1088,14 @@ export class AgentExecutor {
         )
         history[history.length - 1] = { role: 'assistant', content: JSON.stringify(action) }
       }
+
       if (!action) {
         if (content.startsWith(ASK_USER_MARKER)) {
+          const rewritten = rewriteUnanswerableToolSelectionQuestion(content.slice(ASK_USER_MARKER.length), catalog)
+          const output = rewritten ? `${ASK_USER_MARKER}${JSON.stringify({ question: rewritten })}` : content
           if (saveCheckpoint) await saveCheckpoint()
           return {
-            output: content,
+            output,
             tokensUsed,
             toolCalls,
             brainCalls,
@@ -1008,54 +1112,17 @@ export class AgentExecutor {
             'Agent response validation failed: tool-action-shaped content was not a single valid executable action.',
             context.missionId,
           )
-          if (history.some((message) => message.role === 'user' && message.content === correction)) {
-            const reason = 'Agent response validation failed: Brain returned another non-executable tool-action response after receiving a format correction.'
-            await this.reportBrainComplaint(completion.requestId, reason, context.missionId)
-            finalOutput = content
-            if (saveCheckpoint) await saveCheckpoint()
-            return {
-              output: finalOutput,
-              tokensUsed,
-              toolCalls,
-              brainCalls,
-              completionTokensReserved,
-              actionReceipts,
-              requestId: lastRequestId,
-              reasoning,
-            }
-          }
           history.push({
             role: 'user',
-            content: correction,
+            content: `${correction} No proposed action in the previous response was executed. Select the next single action needed for the original task and return only that action; after receiving its result, continue with the remaining work.`,
           })
           if (saveCheckpoint) await saveCheckpoint()
           continue
         }
         const missingActions = missingRequiredActions(requiredActions, actionReceipts)
-        const missingExternalAction = requiresExternalAction && !hasExternalActionReceipt(actionReceipts)
+        const missingExternalAction = requiresExternalAction && !hasExternalActionReceipt(actionReceipts as any, requiredActions as any)
         const missingArtifacts = missingExpectedArtifactSections(content, expectedArtifacts)
         if (missingActions.length > 0 || missingExternalAction || missingArtifacts.length > 0) {
-          const blockedRequiredAction = missingActions.some((required) =>
-            actionReceipts.some((receipt) =>
-              receipt.toolId === required.toolId
-              && receipt.outcome !== 'success'
-              && isConfigurationFailure(receipt.content),
-            ),
-          )
-          if (blockedRequiredAction && missingArtifacts.length === 0 && isExplicitBlocker(content)) {
-            finalOutput = content
-            if (saveCheckpoint) await saveCheckpoint()
-            return {
-              output: content,
-              tokensUsed,
-              toolCalls,
-              brainCalls,
-              completionTokensReserved,
-              actionReceipts,
-              requestId: lastRequestId,
-              reasoning,
-            }
-          }
           if (missingActions.length > 0) {
             await this.reportBrainComplaint(
               completion.requestId,
@@ -1083,16 +1150,6 @@ export class AgentExecutor {
               : []),
             ...(missingArtifacts.length > 0 ? [expectedArtifactCorrection(missingArtifacts)] : []),
           ].join('\n\n')
-          if (history.some((message) => message.role === 'user' && message.content === correction)) {
-            const reason = `Agent response validation failed after one correction: still missing ${[
-              ...missingActions.map((required) => `required action receipt ${required.toolId}:${required.outcome}`),
-              ...(missingExternalAction ? ['verified external-operation receipt'] : []),
-              ...missingArtifacts.map((artifact) => `artifact section "${artifact}"`),
-            ].join(' and ')}.`
-            await this.reportBrainComplaint(completion.requestId, reason, context.missionId)
-            finalOutput = `Task output is incomplete: ${reason} The phase reviewer should evaluate this evidence and add a focused recovery task.`
-            break
-          }
           history.push({
             role: 'user',
             content: correction,
@@ -1132,12 +1189,12 @@ export class AgentExecutor {
       if (alreadySatisfiedRequiredAction) {
         const reason = `Agent response validation failed: action "${action.tool}" already has a successful persisted receipt; the repeated action was not executed.`
         await this.reportBrainComplaint(completion.requestId, reason, context.missionId)
-        actionReceipts.push({
+        actionReceipts.push(enrichReceipt({
           toolId: action.tool,
           isError: true,
           content: reason,
           outcome: 'denied',
-        })
+        }))
         history.push({
           role: 'user',
           content: `${reason} The previous action result is already in the conversation. Return the required task artifacts using the already-completed action results without repeating any side-effect action.`,
@@ -1193,7 +1250,7 @@ export class AgentExecutor {
             toolPolicy,
             completion.requestId,
           )
-          actionReceipts.push({
+          actionReceipts.push(enrichReceipt({
             toolId: CREATE_TOOL_ACTION,
             isError: resolution.isError,
             content: resolution.content.slice(0, MAX_ACTION_RECEIPT_CHARS),
@@ -1201,7 +1258,7 @@ export class AgentExecutor {
             actionKey: resolutionActionKey,
             fallbackForToolId: failedTool?.id || action.tool,
             ...(resolution.resolvedToolId ? { resolvedToolId: resolution.resolvedToolId } : {}),
-          })
+          }))
           if (resolution.outcome === 'permission_required' || resolution.outcome === 'question_asked') {
             if (resolution.outcome !== 'question_asked') finalOutput = resolution.content
             if (saveCheckpoint) await saveCheckpoint()
@@ -1291,13 +1348,13 @@ export class AgentExecutor {
           finalOutput = `${reason} The phase reviewer should use this blocker to regroup the task.`
           break
         }
-        actionReceipts.push({
+        actionReceipts.push(enrichReceipt({
           toolId: action.tool,
           isError: true,
           content: reason,
           outcome: 'failure',
           actionKey,
-        })
+        }))
         history.push({
           role: 'user',
           content: `${reason} Do not call this tool again. Use the registered alternative if one was resolved, or report the exact remaining blocker.`,
@@ -1326,14 +1383,14 @@ export class AgentExecutor {
           content: `Tool '${action.tool}' was already blocked by missing configuration: ${previousConfigurationFailure}. Do not retry it or invent credentials; use another capability or report the blocker.`,
         }
         : await this.executeAction(action, tools, definition, context, toolPolicy, completion.requestId)
-      actionReceipts.push({
+      actionReceipts.push(enrichReceipt({
         toolId: action.tool,
         isError: result.isError,
         content: result.content.slice(0, MAX_ACTION_RECEIPT_CHARS),
         outcome: result.outcome || (result.isError ? 'failure' : 'success'),
         actionKey,
         ...(fallbackToolIds.has(action.tool) ? { fallbackForToolId: fallbackToolIds.get(action.tool) } : {}),
-      })
+      }))
       const missingModule = result.isError ? getMissingRuntimeModule(result.content) : undefined
       const failedTool = tools.find((tool) => tool.id === action.tool || tool.name === action.tool)
       const failedToolId = failedTool?.id || action.tool
@@ -1407,7 +1464,7 @@ export class AgentExecutor {
           toolPolicy,
           completion.requestId,
         )
-        actionReceipts.push({
+        actionReceipts.push(enrichReceipt({
           toolId: CREATE_TOOL_ACTION,
           isError: resolution.isError,
           content: resolution.content.slice(0, MAX_ACTION_RECEIPT_CHARS),
@@ -1415,7 +1472,7 @@ export class AgentExecutor {
           actionKey: resolutionActionKey,
           fallbackForToolId: failedTool?.id || action.tool,
           ...(resolution.resolvedToolId ? { resolvedToolId: resolution.resolvedToolId } : {}),
-        })
+        }))
         if (!resolution.isError && resolution.resolvedToolId) {
           fallbackToolIds.set(resolution.resolvedToolId, failedTool?.id || action.tool)
         }
@@ -1465,27 +1522,34 @@ export class AgentExecutor {
         {
           role: 'user',
           content: result.isError
-            ? `${ignoredNarration}Action failed: ${boundedActionResult(result.content)}\nDo not guess or repeat the failed call. First check authorized existing configuration and alternatives. If no safe alternative can complete the user's request, ask one focused question for the exact missing value using ${ASK_USER_MARKER}{"question":"..."}; mark secret values with [secret:<key>] so the application can save them to Vault without exposing them to the Agent. If this is a missing runtime module, do not attempt installation; the runtime attempts one alternative-capability lookup when policy and action budget allow.`
+            ? `${ignoredNarration}Action failed: ${boundedActionResult(result.content)}\nDo not guess or repeat the failed call. First check authorized existing configuration and alternatives. If no safe alternative can complete the user's request, ask one focused question for the exact missing value using ${ASK_USER_MARKER}{"question":"..."} and include the specific choice or value needed (never ask the user to choose from a list you did not include); mark secret values with [secret:<key>] so the application can save them to Vault without exposing them to the Agent. If this is a missing runtime module, do not attempt installation; the runtime attempts one alternative-capability lookup when policy and action budget allow.`
             : `${ignoredNarration}Action result: ${boundedActionResult(result.content)}\nContinue toward the task goal. If complete, return the final answer as plain text.`,
         },
       )
       if (saveCheckpoint) await saveCheckpoint()
     }
 
+    const exhaustedBudget = brainCalls >= brainCallLimit
+      ? `${brainCallLimit}-call Brain execution budget`
+      : `${completionTokenLimit}-token Brain completion budget`
     const output = finalOutput
-      || `Agent ${definition.id} exhausted its ${brainCallLimit}-call Brain execution budget before completing the task. The phase reviewer should use this evidence to regroup.`
+      || `Agent ${definition.id} exhausted its ${exhaustedBudget} before completing the task. The phase reviewer should use the recorded results to continue the remaining work.`
+    finalOutput = output
+    incompleteReason = 'The agent could not verify all required task results.'
+    if (saveCheckpoint) await saveCheckpoint()
     logger.warn(
       {
         agentId: definition.id,
         missionId: context.missionId,
         missingActions: missingRequiredActions(requiredActions, actionReceipts).map((action) => `${action.toolId}:${action.outcome}`),
-        missingExternalAction: requiresExternalAction && !hasExternalActionReceipt(actionReceipts),
+        missingExternalAction: requiresExternalAction && !hasExternalActionReceipt(actionReceipts as any, requiredActions as any),
         missingArtifacts: missingExpectedArtifactSections(output, expectedArtifacts),
       },
       'Returning an incomplete task result for phase-level recovery instead of failing the mission',
     )
     return {
       output,
+      incompleteReason,
       tokensUsed,
       toolCalls,
       brainCalls,
@@ -1550,8 +1614,8 @@ export class AgentExecutor {
       ? [
         'To execute a registered system tool, respond with exactly one raw JSON object: {"tool":"<tool-id>","args":{...}}. Never quote, fence, nest, or describe a tool action; only a sole JSON action object is executed. Do not claim an action succeeded until you receive its result.',
         `Available system tools (${toolPolicy.mode === 'allowlist' ? 'restricted to this Agent allowlist' : 'the live catalog; generated tools appear after registration'}): ${JSON.stringify(catalog)}`,
-        `To inspect the current visible tool catalog, respond with {"tool":"${LIST_TOOLS_ACTION}","args":{"query":"<operation and input fields>"}}. Search by the requested capability and expected input fields, not by a guessed tool name. Results include matching schemas and are ranked by relevance; omit the query for a compact list of visible tool IDs.`,
-        'Use each tool’s full inputSchema, configSchema, and outputSchema when preparing arguments. For inputs marked "x-stage7-secret": true (or sensitive password fields), provide only an already-supplied vault:// reference; never ask an LLM to handle or echo the secret value. Never expose a vault:// reference in user-facing content. IMPORTANT: ' + ASK_USER_NAME + ' is NOT a tool and does NOT need to be in the tool catalog. It is a native text marker you output directly as your response (e.g. ' + ASK_USER_MARKER + '{"question":"..."}). Use it to ask the user a focused question when a required value or credential is unavailable. Prefix secret questions with [secret:<key>] so the application can save the value to Vault. Do not guess, ask for broad advice, or claim the task completed while blocked.',
+        `First inspect the current visible tool catalog with {"tool":"${LIST_TOOLS_ACTION}","args":{"query":"<operation and input fields>"}}. Search by the requested capability and expected input fields, not by a guessed tool name. If a matching tool is listed, invoke it with the requested values and verify its result; do not stop after discovery or treat a catalog listing as completion.`,
+        'Use each tool’s full inputSchema, configSchema, and outputSchema when preparing arguments. Tool configuration is supplied by the system, not by you: invoke the matching tool with the required non-secret task inputs first, without requesting or inventing credentials. The system will request missing credentials securely if necessary. For inputs marked "x-stage7-secret": true (or sensitive password fields), provide only an already-supplied vault:// reference; never ask an LLM to handle or echo the secret value. Never expose a vault:// reference in user-facing content. IMPORTANT: ' + ASK_USER_NAME + ' is NOT a tool and does NOT need to be in the tool catalog. It is a native text marker you output directly as your response (e.g. ' + ASK_USER_MARKER + '{"question":"..."}). Use it to ask the user a focused question when a required value or credential is unavailable. Prefix secret questions with [secret:<key>] so the application can save the value to Vault. Do not guess, ask for broad advice, or claim the task completed while blocked.',
         toolPolicy.mode === 'allowlist'
           ? 'Tool creation is disabled for this Agent. Request access to a registered tool if the allowed tools are insufficient.'
           : `If no available tool can satisfy a concrete capability need, ask ToolExecutor to resolve it with {"tool":"${CREATE_TOOL_ACTION}","args":{"description":"...","requirements":["..."]}}. Describe the capability and constraints, not implementation details. ToolExecutor checks registered native tools, discovers suitable MCP tools and handles their permission flow, then creates, validates, registers, and persists a reusable plugin only if no suitable tool can be used. Never write tool code yourself or claim resolution succeeded unless the returned tool is registered and available.`,
@@ -1576,7 +1640,8 @@ export class AgentExecutor {
       ...actionInstructions,
       delegation,
       'Treat each system-tool result as authoritative. Report the returned value rather than recalculating or replacing it, and never claim a tool succeeded unless its actual result supports that claim.',
-      'Preserve every user-supplied literal (recipient, identifier, message, amount, and other requested value) exactly. Do not continue the conversation by inventing user turns or changing the request. When a tool fails because its endpoint, provider, permission, or credentials are not configured, do not guess values or repeat that tool. Check authorized alternatives first; if a specific missing value is still required, ask one focused question with ' + ASK_USER_MARKER + '{"question":"..."} and prefix secret questions with [secret:<key>] so the application can save the value to Vault without exposing it to you.',
+      'Preserve every user-supplied literal (recipient, identifier, message, amount, and other requested value) exactly. Do not continue the conversation by inventing user turns or changing the request. If you think a needed tool is missing, search the live catalog first; if no suitable tool exists and this Agent may create tools, use capability resolution to find or create one and then execute it. If the Agent is not authorized to add a tool, ask the user to authorize a provider in Tools configuration. When a tool lacks credentials or configuration, ask the user to supply them through the secure configuration form and wait; never guess values or repeat an action with uncertain side effects. Ask one focused question with ' + ASK_USER_MARKER + '{"question":"..."} only when configuration cannot be supplied directly through the tool form.',
+      'When asking the user a question, put the actual question or requested choice in the marker payload; never ask the user to choose from a list you did not include. For credential/configuration needs, mark secret values with [secret:<key>] or trigger the tool credential flow instead of asking the user to pick a tool/configuration generically. If a tool list is relevant, inspect it with ' + LIST_TOOLS_ACTION + ' and include the specific tool names/IDs in the question text.',
       'Generated tools that need user-provided secrets must mark those input properties with "x-stage7-secret": true, "format": "password", and "writeOnly": true. The tool receives the plaintext only during execution; generated acceptance tests must use non-secret fixtures and must never request or embed real credentials.',
       'Tool errors are evidence; do not claim success when an action failed. Stop after the task is complete or explain a blocker.',
     ].join('\n\n')
@@ -1753,6 +1818,17 @@ export class AgentExecutor {
         ? action.args.query.trim().slice(0, 300).toLocaleLowerCase()
         : ''
       const queryTerms = [...new Set(query.split(/[^a-z0-9]+/).filter((term) => term.length > 1))]
+      const ACTION_INTENT_TERMS = new Set([
+        'send', 'publish', 'submit', 'deliver', 'dispatch', 'transmit', 'post',
+        'notify', 'alert', 'execute', 'invoke', 'trigger', 'run', 'call',
+        'create', 'write', 'upload', 'emit', 'broadcast', 'message', 'email',
+        'sms', 'reply', 'respond',
+      ])
+      const PASSIVE_INTENT_TERMS = new Set([
+        'sync', 'draft', 'record', 'store', 'save', 'log', 'queue', 'cache',
+        'buffer', 'stage', 'index', 'archive', 'persist', 'collect', 'track',
+      ])
+      const queryHasActionIntent = queryTerms.some((term) => ACTION_INTENT_TERMS.has(term))
       const rankedTools = tools.map((tool) => {
         const searchable = [
           tool.id,
@@ -1763,16 +1839,30 @@ export class AgentExecutor {
           JSON.stringify(tool.configSchema || {}),
           JSON.stringify(tool.outputSchema || {}),
         ].join(' ').toLocaleLowerCase()
-        return {
-          tool,
-          score: queryTerms.reduce((score, term) => score + Number(searchable.includes(term)), 0),
+        const metadataTerms = new Set([
+          tool.id,
+          tool.name,
+          tool.description,
+          ...(Array.isArray(tool.manifest?.capabilities) ? tool.manifest.capabilities : []),
+        ].join(' ').toLocaleLowerCase().split(/[^a-z0-9]+/).filter((term) => term.length > 1))
+        let score = queryTerms.reduce((total, term) => total + Number(searchable.includes(term)), 0)
+        if (queryHasActionIntent && score > 0) {
+          let actionSignal = 0
+          let passiveSignal = 0
+          for (const term of metadataTerms) {
+            if (ACTION_INTENT_TERMS.has(term)) actionSignal++
+            if (PASSIVE_INTENT_TERMS.has(term)) passiveSignal++
+          }
+          score += Math.min(actionSignal, 3) * 0.35
+          score -= Math.min(passiveSignal, 3) * 0.25
         }
+        return { tool, score }
       })
       const matchingTools = queryTerms.length === 0
         ? tools
         : rankedTools
           .filter(({ score }) => score > 0)
-          .sort((left, right) => right.score - left.score)
+          .sort((left, right) => right.score - left.score || left.tool.id.localeCompare(right.tool.id))
           .map(({ tool }) => tool)
       const content = queryTerms.length === 0
         ? matchingTools.map((tool) => tool.id).join('\n')
@@ -1791,7 +1881,7 @@ export class AgentExecutor {
         )
         return {
           isError: true,
-          content: 'Tool creation is disabled for Agents with an allowlist policy.',
+          content: 'Tool creation is disabled for Agents with an allowlist policy. Ask the user to authorize an approved provider in Tools configuration.',
           outcome: 'denied',
         }
       }
@@ -1820,9 +1910,15 @@ export class AgentExecutor {
         `Agent action validation failed: requested tool '${action.tool}' is absent from the live tool catalog.`,
         context.missionId,
       )
-      return { isError: true, content: `Tool '${action.tool}' is not in the live system catalog.` }
+      const requestedTool = typeof action.tool === 'string' && action.tool.trim().length > 0 ? action.tool.trim() : 'the requested capability'
+      return {
+        isError: true,
+        content: `Tool '${requestedTool}' is not in the live system catalog. Check the current catalog and resolve or create a suitable capability before asking the user for configuration.`,
+        outcome: 'failure',
+      }
     }
 
+    const executionId = (action as { executionId?: string }).executionId || `${context.missionId}:${definition.id}:${createHash('sha256').update(`${action.tool}:${JSON.stringify(action.args)}`).digest('hex').slice(0, 16)}-${Date.now()}`
     try {
       const response = await this.fetcher(`${this.toolExecutorUrl}/api/tool-executor/tools/execute`, {
         method: 'POST',
@@ -1834,7 +1930,8 @@ export class AgentExecutor {
           manifest: {},
           input: action.args,
           agentId: definition.id,
-          context: { missionId: context.missionId, agentId: definition.id, tenantId: definition.tenantId },
+          executionId,
+          context: { missionId: context.missionId, agentId: definition.id, tenantId: definition.tenantId, executionId },
         }),
       })
       const result = await response.json() as ToolExecutionResponse
@@ -1851,7 +1948,7 @@ export class AgentExecutor {
             typeof credential?.key === 'string' && credential.key.trim().length > 0,
         )
         if (missingCredentials.length > 0) {
-          const question = `[secret:tool-credentials] Enter the required configuration for ${credentialRequest.toolName}: ${missingCredentials.map(({ label, key }) => label || key).join(', ')}. The value will be saved securely and supplied directly to the tool.`;
+          const question = `To continue, provide the missing credentials for ${credentialRequest.toolName} using the secure form below.`;
           return {
             isError: true,
             outcome: 'question_asked',
@@ -1882,18 +1979,124 @@ export class AgentExecutor {
         }
       }
       const output = result.output ?? {}
+      const outputRecord = (output && typeof output === 'object' && !Array.isArray(output)) ? output as Record<string, unknown> : undefined
+      const reconciliation = (result.reconciliation && typeof result.reconciliation === 'object' && !Array.isArray(result.reconciliation))
+        ? result.reconciliation
+        : (outputRecord?.reconciliation && typeof outputRecord.reconciliation === 'object' && !Array.isArray(outputRecord.reconciliation))
+          ? outputRecord.reconciliation as Record<string, unknown>
+          : undefined
+      const outcomeKnown = typeof result.outcomeKnown === 'boolean'
+        ? result.outcomeKnown
+        : typeof outputRecord?.outcomeKnown === 'boolean'
+          ? outputRecord.outcomeKnown
+          : typeof reconciliation?.outcomeKnown === 'boolean'
+            ? reconciliation.outcomeKnown as boolean
+            : undefined
       const semanticFailure = isToolFailurePayload(output)
+      const resolvedExecutionId = (typeof result.request?.executionId === 'string' ? result.request.executionId : executionId)
+      if (outcomeKnown === false) {
+        const binding = extractReceiptBinding({ toolId: tool.id, isError: true, content: JSON.stringify(output), outcome: 'failure', executionId: resolvedExecutionId, binding: reconciliation })
+        return {
+          isError: true,
+          content: JSON.stringify({ outcomeUnknown: true, outcomeKnown: false, executionId: resolvedExecutionId, ...(reconciliation ? { reconciliation } : {}), output }),
+          executionId: resolvedExecutionId,
+          outcomeKnown: false,
+          ...(reconciliation ? { reconciliation } : {}),
+          ...(binding.operation ? { operation: binding.operation } : {}),
+          ...(binding.providerRequestId ? { providerRequestId: binding.providerRequestId } : {}),
+          ...(Object.keys(binding).length > 0 ? { binding } : {}),
+          outcome: 'failure',
+        }
+      }
+      const binding = extractReceiptBinding({
+        toolId: tool.id,
+        isError: semanticFailure,
+        content: JSON.stringify(output),
+        outcome: semanticFailure ? 'failure' : 'success',
+        executionId: resolvedExecutionId,
+        ...(result.request?.operation ? { operation: result.request.operation } : {}),
+        ...(result.request?.providerRequestId ? { providerRequestId: result.request.providerRequestId } : {}),
+        ...(result.request?.binding ? { binding: result.request.binding } : {}),
+      })
       return {
         isError: semanticFailure,
         content: JSON.stringify(output),
+        executionId: resolvedExecutionId,
+        ...(typeof outcomeKnown === 'boolean' ? { outcomeKnown } : {}),
+        ...(reconciliation ? { reconciliation } : {}),
+        ...(binding.operation ? { operation: binding.operation } : {}),
+        ...(binding.providerRequestId ? { providerRequestId: binding.providerRequestId } : {}),
+        ...(Object.keys(binding).length > 0 ? { binding } : {}),
         ...(semanticFailure ? { outcome: 'failure' as const } : {}),
       }
     } catch (error) {
+      // Lost response / ambiguous result: attempt to retrieve by stable execution ID.
+      // 1A/1B alignment: completed+outcomeKnown may be success; outcomeKnown:false, in_progress,
+      // pending_credentials, or missing record are explicit unverifiable/unknown — never success,
+      // never blind side-effect retry.
+      try {
+        const retrieveResponse = await this.fetcher(`${this.toolExecutorUrl}/api/tool-executor/executions/${encodeURIComponent(executionId)}`)
+        if (retrieveResponse.ok) {
+          const retrieved = await retrieveResponse.json() as ToolExecutionResponse & Record<string, unknown>
+          const status = typeof retrieved.status === 'string' ? retrieved.status : ''
+          const output = retrieved.output ?? {}
+          const outRec = (output && typeof output === 'object' && !Array.isArray(output)) ? output as Record<string, unknown> : undefined
+          const reconciliation = (retrieved.reconciliation && typeof retrieved.reconciliation === 'object' && !Array.isArray(retrieved.reconciliation))
+            ? retrieved.reconciliation
+            : (outRec?.reconciliation && typeof outRec.reconciliation === 'object' && !Array.isArray(outRec.reconciliation))
+              ? outRec.reconciliation as Record<string, unknown>
+              : undefined
+          const outcomeKnown = typeof retrieved.outcomeKnown === 'boolean'
+            ? retrieved.outcomeKnown
+            : typeof outRec?.outcomeKnown === 'boolean'
+              ? outRec.outcomeKnown
+              : typeof reconciliation?.outcomeKnown === 'boolean'
+                ? reconciliation.outcomeKnown as boolean
+                : undefined
+          if (status === 'completed' && outcomeKnown !== false) {
+            const semanticFailure = isToolFailurePayload(output)
+            const binding = extractReceiptBinding({ toolId: tool.id, isError: semanticFailure, content: JSON.stringify(output), outcome: semanticFailure ? 'failure' : 'success', executionId, binding: reconciliation })
+            return {
+              isError: semanticFailure,
+              content: JSON.stringify(output),
+              executionId,
+              ...(typeof outcomeKnown === 'boolean' ? { outcomeKnown } : {}),
+              ...(reconciliation ? { reconciliation } : {}),
+              ...(binding.operation ? { operation: binding.operation } : {}),
+              ...(binding.providerRequestId ? { providerRequestId: binding.providerRequestId } : {}),
+              ...(Object.keys(binding).length > 0 ? { binding } : {}),
+              ...(semanticFailure ? { outcome: 'failure' as const } : {}),
+            }
+          }
+          if (status === 'failed') {
+            return { isError: true, content: JSON.stringify({ executionId, status, error: retrieved.error || 'Execution failed', ...(reconciliation ? { reconciliation } : {}), output }), executionId, outcomeKnown, ...(reconciliation ? { reconciliation } : {}), outcome: 'failure' }
+          }
+          // completed+outcomeKnown:false, in_progress, pending_credentials, or other non-terminal/ambiguous states
+          return {
+            isError: true,
+            content: JSON.stringify({ outcomeUnknown: true, executionId, status: status || 'unknown', outcomeKnown, ...(reconciliation ? { reconciliation } : {}), note: 'Execution outcome is not verifiably known; do not retry side-effect actions.' }),
+            executionId,
+            ...(typeof outcomeKnown === 'boolean' ? { outcomeKnown } : {}),
+            ...(reconciliation ? { reconciliation } : {}),
+            outcome: 'failure',
+          }
+        }
+        if (retrieveResponse.status === 404) {
+          return { isError: true, content: JSON.stringify({ outcomeUnknown: true, executionId, status: 'not_found', note: 'No execution record found after lost response; outcome is unknown. Do not retry side-effect actions.' }), executionId, outcome: 'failure' }
+        }
+      } catch {
+        // ignore retrieval errors
+      }
       logger.warn(
-        { agentId: definition.id, toolId: tool.id, error: error instanceof Error ? error.message : String(error) },
-        'Agent tool call failed',
+        { agentId: definition.id, toolId: tool.id, executionId, error: error instanceof Error ? error.message : String(error) },
+        'Agent tool call failed with unknowable outcome',
       )
-      return { isError: true, content: error instanceof Error ? error.message : String(error) }
+      return {
+        isError: true,
+        content: JSON.stringify({ outcomeUnknown: true, executionId, note: `Tool '${tool.id}' did not return a readable execution result and outcome could not be retrieved; outcome is unknown. Do not retry side-effect actions.`, error: error instanceof Error ? error.message : String(error) }),
+        executionId,
+        outcome: 'failure',
+      }
     }
   }
 
@@ -1933,7 +2136,7 @@ export class AgentExecutor {
       if (result.permissionRequired) {
         return {
           isError: true,
-          content: `Discovered capability '${typeof result.tool?.name === 'string' ? result.tool.name : 'tool'}' requires permission that is not available in this mission. Do not request user approval; try another authorized capability or approach.`,
+          content: `The discovered service is not authorized for this mission. Try another authorized provider.`,
           outcome: 'denied',
         }
       }

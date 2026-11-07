@@ -14,10 +14,15 @@ import {
   isConfigurationBlocker,
   missionConfigurationQuestion,
   recoveryGapFingerprint,
+  recoveryProgressSignature,
+  hasRecoveryProgress,
+  MAX_PHASE_RECOVERY_ROUNDS_SAFETY,
+  MAX_MISSION_RECOVERY_ROUNDS_SAFETY,
+  MAX_NO_PROGRESS_RECOVERY_ATTEMPTS,
 } from '../types/workflow';
 
-const MAX_PHASE_RECOVERY_ROUNDS = 5;
-const MAX_MISSION_RECOVERY_ROUNDS = 5;
+const MAX_PHASE_RECOVERY_ROUNDS = MAX_PHASE_RECOVERY_ROUNDS_SAFETY;
+const MAX_MISSION_RECOVERY_ROUNDS = MAX_MISSION_RECOVERY_ROUNDS_SAFETY;
 
 function isFatalServiceError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
@@ -161,7 +166,7 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
       phase.approvalQuestion = undefined;
       for (const task of phase.tasks) {
         task.requiredActions = [];
-        applyRuntimeTaskRequirements(task);
+        applyRuntimeTaskRequirements(task, input.prompt);
         if (!/\b(?:message|delivery)[-_ ]?(?:message[-_ ]?)?(?:id|status)\b/i.test(input.prompt)) {
           task.expectedArtifacts = (task.expectedArtifacts || []).filter((artifact) =>
             !/\b(?:sms|text|email|message|delivery)[-_ ]?(?:message[-_ ]?)?(?:id|status)\b/i.test(
@@ -329,7 +334,7 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
           }
           try {
             if (!task) break;
-            applyRuntimeTaskRequirements(task);
+            applyRuntimeTaskRequirements(task, input.prompt);
             const result = await taskActivities.executeMissionTaskActivity({
               input,
               plan,
@@ -363,12 +368,13 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
               completedInPhase.add(task.id);
               break;
             }
-            task.status = 'completed';
+            const taskStatus = result.incompleteReason ? 'incomplete' : 'completed';
+            task.status = taskStatus;
             task.output = result.output;
             task.artifacts = result.artifacts;
             phaseOutput.tasks.push({
               taskId: task.id,
-              status: 'completed',
+              status: taskStatus,
               artifacts: result.artifacts,
               output: result.output,
             });
@@ -430,7 +436,8 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
       let phaseReviewSatisfied = !useAgentPhaseAmendments
         && phaseOutput.tasks.every((task) => task.status === 'completed');
       if (useAgentPhaseAmendments) {
-        const reviewGapCounts = new Map<string, number>();
+        let lastReviewSignature: string | undefined;
+        let noProgressCount = 0;
         for (let reviewIndex = 1; reviewIndex <= MAX_PHASE_RECOVERY_ROUNDS; reviewIndex++) {
           try {
             const review = await phaseReviewActivities.reviewAndAmendMissionPhaseActivity({
@@ -442,7 +449,7 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
             });
             plan = review.plan;
             phase = review.phase;
-            for (const amendedTask of phase.tasks) applyRuntimeTaskRequirements(amendedTask);
+            for (const amendedTask of phase.tasks) applyRuntimeTaskRequirements(amendedTask, input.prompt);
             if (review.satisfied) {
               phaseReviewSatisfied = true;
               break;
@@ -451,13 +458,20 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
               ...review.gaps,
               ...[...completedTaskSummaries.values()].map((summary) => summary.output),
             ];
-            const fingerprint = recoveryGapFingerprint(review.gaps);
-            const repeatedGapCount = (reviewGapCounts.get(fingerprint) || 0) + 1;
-            reviewGapCounts.set(fingerprint, repeatedGapCount);
-            if (
-              isConfigurationBlocker(reviewEvidence)
-              && (repeatedGapCount >= 2 || reviewIndex === MAX_PHASE_RECOVERY_ROUNDS)
-            ) {
+            const reviewSignature = recoveryProgressSignature({
+              gaps: review.gaps,
+              completedTaskIds: phase.tasks.filter((t) => t.status === 'completed').map((t) => t.id),
+              completedTaskStatuses: phase.tasks.map((t) => `${t.id}:${t.status}`),
+              artifactNames: phase.tasks.flatMap((t) => (t.artifacts || []).map((a) => a.name)),
+              outputs: [...completedTaskSummaries.values()].map((s) => s.output),
+            });
+            const madeProgress = hasRecoveryProgress(lastReviewSignature, reviewSignature);
+            lastReviewSignature = reviewSignature;
+            noProgressCount = madeProgress ? 0 : noProgressCount + 1;
+            const noProgressGuidance = !madeProgress
+              ? ' Previous attempts made no observable progress on the same gaps; use a different authorized approach and do not repeat the same recovery steps. If a required value or authorization is missing, ask the user for it and wait.'
+              : '';
+            if (isConfigurationBlocker(reviewEvidence) && noProgressCount >= 1) {
               const awaitingTask = review.amendment || phase.tasks.at(-1);
               if (awaitingTask) {
                 const question = missionConfigurationQuestion(input.prompt);
@@ -511,6 +525,17 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
                 };
               }
             }
+            if (!madeProgress && noProgressCount >= MAX_NO_PROGRESS_RECOVERY_ATTEMPTS) {
+              logger.error(
+                { missionId: input.missionId, phaseId: phase.id, gaps: review.gaps, noProgressCount },
+                'Mission phase review made no observable progress after approach changes; pausing for review (safety ceiling)',
+              );
+              break;
+            }
+            if (review.amendment && noProgressGuidance) {
+              review.amendment.systemPrompt = `${review.amendment.systemPrompt}
+${noProgressGuidance}`;
+            }
             if (!review.amendment) {
               logger.error({ missionId: input.missionId, phaseId: phase.id, gaps: review.gaps }, 'Mission phase remains incomplete and reviewer provided no actionable follow-up task');
               // Try to create a simple follow-up task for remaining gaps
@@ -520,14 +545,14 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
                 title: `Address phase gaps (review ${reviewIndex})`,
                 description: `Address remaining gaps: ${(review.gaps || []).join('; ') || 'unspecified gaps'}`,
                 agentRole: 'engineer',
-                systemPrompt: `Resolve the following gaps for phase ${phase.name}: ${(review.gaps || []).join('; ')}. Use available context and produce concrete artifacts.`,
+                systemPrompt: `Resolve the following gaps for phase ${phase.name}: ${(review.gaps || []).join('; ')}. Use available context and produce concrete artifacts.${noProgressGuidance}`,
                 dependsOnTaskIds: phase.tasks.map((t: any) => t.id),
                 expectedArtifacts: [],
                 requiredActions: [],
                 status: 'pending',
                 artifacts: [],
               };
-              applyRuntimeTaskRequirements(amendmentTask);
+              applyRuntimeTaskRequirements(amendmentTask, input.prompt);
               phase.tasks.push(amendmentTask);
               plan.phases = plan.phases.map((p: any) => p.id === phase.id ? phase : p);
             }
@@ -598,7 +623,8 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
       phases,
       compensations,
     });
-    const completionGapCounts = new Map<string, number>();
+    let lastCompletionSignature: string | undefined;
+    let completionNoProgress = 0;
     let completionVerified = false;
     for (let recoveryIndex = 1; recoveryIndex <= MAX_MISSION_RECOVERY_ROUNDS; recoveryIndex++) {
       if (recoveryIndex > 1) {
@@ -621,8 +647,17 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
         ? result.outputs.gaps
         : ['Mission completion has not been verified from the recorded task evidence.'];
       const gapFingerprint = recoveryGapFingerprint(gaps);
-      const repeatedGapCount = (completionGapCounts.get(gapFingerprint) || 0) + 1;
-      completionGapCounts.set(gapFingerprint, repeatedGapCount);
+      const completionSignature = recoveryProgressSignature({
+        gaps,
+        completedTaskIds: phases.flatMap((p) => p.tasks.filter((t) => t.status === 'completed').map((t) => t.taskId)),
+        completedTaskStatuses: phases.flatMap((p) => p.tasks.map((t) => `${t.taskId}:${t.status}`)),
+        artifactNames: phases.flatMap((p) => p.tasks.flatMap((t) => (t.artifacts || []).map((a) => a.name))),
+        outputs: phases.flatMap((p) => p.tasks.map((t) => t.output || '')),
+      });
+      const stagnantGap = gapFingerprint === (lastCompletionSignature?.split('::')[0] || '') && !!lastCompletionSignature;
+      const madeProgress = hasRecoveryProgress(lastCompletionSignature, completionSignature);
+      lastCompletionSignature = completionSignature;
+      completionNoProgress = madeProgress && !stagnantGap ? 0 : completionNoProgress + 1;
       const recoveryEvidence = [
         ...gaps,
         ...phases.flatMap((phase) => phase.tasks.map((task) => task.output || '')),
@@ -660,10 +695,14 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
         };
         phases.push(phaseOutput);
       }
-      if (
-        isConfigurationBlocker(recoveryEvidence)
-        && (repeatedGapCount >= 2 || recoveryIndex === MAX_MISSION_RECOVERY_ROUNDS)
-      ) {
+      // Task 7: link recovery evidence to original unmet requirement(s)
+      const targetTaskIds = [...new Set(
+        recoveryPhase.tasks
+          .filter((task) => !task.id.includes('-mission-recovery-') && gaps.some((gap) => gap.includes(task.id) || gap.includes(task.title)))
+          .map((task) => task.id),
+      )];
+
+      if (isConfigurationBlocker(recoveryEvidence) && completionNoProgress >= 1) {
         const question = missionConfigurationQuestion(input.prompt);
         const requestTask: any = {
           id: `${recoveryPhase.id}-configuration-request-${recoveryIndex}`,
@@ -719,6 +758,25 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
           completedAt: Date.now(),
         };
       }
+      if (!madeProgress && completionNoProgress >= MAX_NO_PROGRESS_RECOVERY_ATTEMPTS) {
+        logger.error(
+          { missionId: input.missionId, gaps, completionNoProgress },
+          'Mission completion recovery made no observable progress after approach changes; pausing for review (safety ceiling)',
+        );
+        return {
+          missionId: input.missionId,
+          status: 'awaiting_review',
+          output: {
+            ...result,
+            outputs: { ...result.outputs, status: 'awaiting_review', gaps },
+          },
+          startedAt,
+          completedAt: Date.now(),
+        };
+      }
+      const noProgressGuidance = !madeProgress
+        ? ' Previous attempts made no observable progress on the same gaps; use a different authorized approach and do not repeat the same recovery steps. If a required value or authorization is missing, ask the user for it and wait.'
+        : '';
 
       const availableArtifacts = new Set(phaseOutput.tasks.flatMap((task) =>
         task.artifacts.map((artifact) => artifact.name.toLocaleLowerCase()),
@@ -734,14 +792,14 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
         title: `Resolve mission completion gaps (attempt ${recoveryIndex})`,
         description: `Address the remaining mission completion gaps: ${gaps.join('; ')}`,
         agentRole: 'assistant',
-        systemPrompt: `Resolve the mission completion gaps below for the mission goal "${input.prompt}" and phase "${recoveryPhase.name}". Use the recorded outputs from tasks ${taskIds.join(', ') || 'none'} as authoritative context. Produce any missing deliverables named ${expectedArtifacts.join(', ') || 'by the gaps'} and return concrete evidence that the mission outcome is satisfied. Do not repeat successfully completed or uncertain side effects; use another authorized approach if one is blocked. If a specific required user value is unavailable and no safe alternative can complete the outcome, ask one focused question for it.\n\nGaps:\n${gaps.join('\n')}`,
+        systemPrompt: `Resolve the mission completion gaps below for the mission goal "${input.prompt}" and phase "${recoveryPhase.name}". Use the recorded outputs from tasks ${taskIds.join(', ') || 'none'} as authoritative context. Produce any missing user deliverables named ${expectedArtifacts.join(', ') || 'by the gaps'} and return concrete evidence that the mission outcome is satisfied. Never create a receipt or evidence document to stand in for an action; actual tool results are recorded internally. Check the live tool catalog, execute a suitable tool, and use capability resolution to find or create one when permitted. If required credentials or configuration are missing, ask the user to provide them through the secure tool configuration form and wait. If required input from an earlier task is missing, ask that task's Agent to provide the artifact or rerun the source task. Do not repeat successfully completed or uncertain side effects; use another authorized approach if one is blocked.${noProgressGuidance}\n\nOriginal unmet requirements to resolve (link evidence to these): ${targetTaskIds.join(', ') || 'see gaps'}\n\nGaps:\n${gaps.join('\n')}`,
         expectedArtifacts,
         requiredActions: [],
         dependsOnTaskIds: taskIds,
         status: 'pending',
         artifacts: [],
       };
-      applyRuntimeTaskRequirements(recoveryTask);
+      applyRuntimeTaskRequirements(recoveryTask, input.prompt);
       recoveryPhase.tasks.push(recoveryTask);
       recoveryPhase.status = 'in_progress';
       phaseOutput.status = 'incomplete';
@@ -749,7 +807,7 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
 
       let output: string;
       let artifacts: any[] = [];
-      let taskStatus: 'completed' | 'failed' | 'pending' = 'completed';
+      let taskStatus: 'completed' | 'incomplete' | 'failed' | 'pending' = 'completed';
       let recoveryInterruption: MissionPendingInteraction | undefined;
       try {
         const recovery = await taskActivities.executeMissionTaskActivity({
@@ -761,6 +819,7 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
         });
         output = recovery.output;
         artifacts = recovery.artifacts;
+        if (recovery.incompleteReason) taskStatus = 'incomplete';
         if (recovery.interruption) {
           const interruption = recovery.interruption;
           recoveryInterruption = {
@@ -823,7 +882,7 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
       completedTaskIds.add(recoveryTask.id);
       completedTaskSummaries.set(
         recoveryTask.id,
-        createCompletedTaskSummary(recoveryTask.id, output, artifacts, recoveryTask.requiredActions, recoveryTask.requiresExternalAction),
+        createCompletedTaskSummary(recoveryTask.id, output, artifacts, recoveryTask.requiredActions, recoveryTask.requiresExternalAction, undefined, { taskIds: targetTaskIds, gaps }),
       );
       recoveryPhase.status = 'completed';
       phaseOutput.status = 'completed';
@@ -832,6 +891,27 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
         phase: recoveryPhase,
         tasks: phaseOutput.tasks,
       });
+      if (taskStatus !== 'completed') {
+        const incompleteResult = await completionActivities.completeMissionActivity({
+          input, plan, phases, compensations,
+        });
+        return {
+          missionId: input.missionId,
+          status: 'awaiting_review',
+          output: {
+            ...incompleteResult,
+            outputs: {
+              ...incompleteResult.outputs,
+              status: 'awaiting_review',
+              gaps: incompleteResult.outputs.gaps?.length
+                ? incompleteResult.outputs.gaps
+                : ['Mission recovery did not complete successfully.'],
+            },
+          },
+          startedAt,
+          completedAt: Date.now(),
+        };
+      }
       await sleep(Math.min(60_000, 1_000 * 2 ** Math.min(recoveryIndex - 1, 6)));
     }
     if (!completionVerified) {
@@ -885,10 +965,20 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     logger.error('Mission workflow failed', { missionId: input.missionId, error: message });
+    const fatal = isFatalServiceError(error);
     return {
       missionId: input.missionId,
-      status: 'failed',
-      error: message,
+      status: fatal ? 'failed' : 'incomplete',
+      ...(fatal
+        ? { error: message }
+        : {
+          output: {
+            outputs: {
+              status: 'incomplete',
+              gaps: ['A recoverable issue stopped this attempt before the mission was complete. Resume the mission to continue.'],
+            },
+          },
+        }),
       startedAt,
       completedAt: Date.now(),
     };

@@ -1,0 +1,39 @@
+{
+  "id": "data_analysis",
+  "name": "Data Analysis",
+  "description": "Perform summary, trend, correlation, and distribution analysis on datasets",
+  "type": "native",
+  "manifest": {
+    "executor": "data_analysis",
+    "codeFile": "data_analysis.js",
+    "configSchema": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    },
+    "credentialSource": {}
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "dataset": { "type": "string" },
+      "analysisType": { "type": "string", "enum": ["summary", "trend", "correlation", "distribution"], "default": "summary" },
+      "xColumn": { "type": "string" },
+      "yColumn": { "type": "string" },
+      "targetColumn": { "type": "string" },
+      "topValuesLimit": { "type": "integer", "default": 10 }
+    },
+    "required": ["dataset"]
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "success": { "type": "boolean" },
+      "analysis": { "type": "object" },
+      "error": { "type": "string" },
+      "durationMs": { "type": "number" }
+    },
+    "required": ["success"]
+  },
+  "isSkill": false
+}

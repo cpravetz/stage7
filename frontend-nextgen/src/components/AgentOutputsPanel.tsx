@@ -134,6 +134,7 @@ function extractAgentsFromEvents(events: Array<{ type: string; missionId?: strin
     const status = (e.metadata?.status as string | undefined) || (
       e.type === 'planner_started' || e.type === 'task_started' ? 'running' :
       e.type === 'task_failed' ? 'failed' :
+      e.type === 'task_incomplete' ? 'incomplete' :
       e.type === 'plan_generated' || e.type === 'task_completed' ? 'completed' :
       'planned'
     );
@@ -155,7 +156,7 @@ function extractAgentsFromEvents(events: Array<{ type: string; missionId?: strin
 const SYSTEM_ROLES = new Set(['mission-evaluator', 'phase-review', 'brain']);
 
 const LIFECYCLE_EVENT_TYPES = new Set([
-  'task_started', 'task_completed', 'task_failed',
+  'task_started', 'task_completed', 'task_incomplete', 'task_failed',
   'planner_started', 'plan_generated', 'planner_progress',
   'phase_started', 'phase_completed', 'phase_approved', 'phase_rejected', 'phase_plan_amended',
   'approval_requested', 'approval_approved', 'approval_rejected',
@@ -435,7 +436,7 @@ const AgentOutputsPanel = ({ missionId, missionStatus, plan }: AgentOutputsPanel
                 {(() => {
                   const evs = eventsByAgent.get(a.id) || eventsByAgent.get(a.role || '') || [];
                   const completedTasks = evs
-                    .filter((event) => event.type === 'task_completed' || event.type === 'task_failed')
+                    .filter((event) => event.type === 'task_completed' || event.type === 'task_incomplete' || event.type === 'task_failed')
                     .map((event) => ({ event, title: getCompletedTaskTitle(event) }))
                     .filter((item): item is { event: typeof evs[number]; title: string } => !!item.title)
                     .slice(-4);
@@ -445,7 +446,7 @@ const AgentOutputsPanel = ({ missionId, missionStatus, plan }: AgentOutputsPanel
                   return completedTasks.map(({ event, title }) => (
                     <div key={`${event.timestamp}-${title}`} className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
                       <span style={{ marginRight: 6 }}>[{new Date(event.timestamp || Date.now()).toLocaleTimeString()}]</span>
-                      <span>{event.type === 'task_failed' ? 'Failed' : 'Completed'}: {title}</span>
+                      <span>{event.type === 'task_failed' ? 'Failed' : event.type === 'task_incomplete' ? 'Incomplete' : 'Completed'}: {title}</span>
                     </div>
                   ));
                 })()}
@@ -473,7 +474,7 @@ const AgentOutputsPanel = ({ missionId, missionStatus, plan }: AgentOutputsPanel
                 {((eventsByAgent.get(a.id) || eventsByAgent.get(a.role || '') || [])
                   .filter((ev) => (
                     (!isReasoningEvent(ev) && !LIFECYCLE_EVENT_TYPES.has(ev.type))
-                    || (ev.type === 'task_completed' && typeof ev.metadata?.output === 'string')
+                    || ((ev.type === 'task_completed' || ev.type === 'task_incomplete') && typeof ev.metadata?.output === 'string')
                   ))
                   .slice(-4)).map((ev, i) => (
                   <div key={i} className="muted" style={{ fontSize: 12, marginBottom: 8, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
@@ -484,7 +485,7 @@ const AgentOutputsPanel = ({ missionId, missionStatus, plan }: AgentOutputsPanel
                 {((eventsByAgent.get(a.id) || eventsByAgent.get(a.role || '') || [])
                   .filter((ev) => (
                     (!isReasoningEvent(ev) && !LIFECYCLE_EVENT_TYPES.has(ev.type))
-                    || (ev.type === 'task_completed' && typeof ev.metadata?.output === 'string')
+                    || ((ev.type === 'task_completed' || ev.type === 'task_incomplete') && typeof ev.metadata?.output === 'string')
                   )).length === 0) && (
                   <div className="muted" style={{ fontSize: 12 }}>No recent outputs</div>
                 )}

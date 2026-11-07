@@ -140,8 +140,9 @@ describe('events are emitted by real shipped Skills', () => {
     const log = createInMemoryEventLog();
     const executor = executorFor([target], log);
 
-    // `dispatch` reports failure as `{ error }` instead of throwing, so a tool
-    // that "succeeded" with an error payload must not announce a change.
+    // `dispatch` reports failure as `{ error }` instead of throwing. The
+    // execution lifecycle must reflect that failure (no fabricated success) and
+    // must not announce the declared business change, because it did not happen.
     (executor as unknown as Record<string, unknown>).dispatch = async () => ({
       error: 'deliberate failure',
     });
@@ -149,10 +150,9 @@ describe('events are emitted by real shipped Skills', () => {
     const result = await executor.execute(target, confirmedInput, { assistantId });
     await eventsEventually(log, 1);
 
-    // The run is still reported `completed`, because that is how `dispatch`
-    // signals failure. What stops the false event is the error check on the
-    // output, not the status — so this asserts both, deliberately.
-    expect(result.status).toBe('completed');
+    // Lifecycle is failed (no fabricated success); output still carries the error.
+    expect(result.status).toBe('failed');
+    expect(result.error).toBe('deliberate failure');
 
     const events = await log.recent();
     // Exactly one event: the failure. No completion, and above all not the

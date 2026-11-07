@@ -203,6 +203,9 @@ describe('MissionOrchestrator checkpoint recovery', () => {
       true,
       MISSION_TASK_EXECUTION_POLICY,
       [],
+      undefined,
+      undefined,
+      'Write an answer',
     )
     expect(onCheckpoint).toHaveBeenCalledWith(expect.objectContaining({
       completedTasks: [{ phaseId: 'phase-1', taskId: 'task-1' }],
@@ -491,5 +494,87 @@ describe('MissionOrchestrator checkpoint recovery', () => {
       response: 'The commercial account.',
       pendingInteraction: expect.objectContaining({ taskId: 'task-1' }),
     })
+  })
+
+
+  it('completes the mission when recovery evidence satisfies the original unmet requirement (successful recovery)', async () => {
+    jest.spyOn(MissionAgentRuntime.prototype, 'reviewMissionCompletion').mockResolvedValue({ satisfied: true, gaps: [] })
+    const plan: Plan = {
+      summary: 'Send an SMS',
+      estimatedDuration: 'short',
+      estimatedCost: 'low',
+      requiresClarification: false,
+      clarificationQuestions: [],
+      clarificationAnswers: [],
+      phases: [{
+        id: 'phase-1',
+        name: 'Send',
+        goal: 'Send an SMS',
+        requiresApproval: false,
+        status: 'in_progress',
+        tasks: [{
+          id: 'task-1',
+          title: 'Send the SMS',
+          description: 'Send an SMS to +15551234567',
+          agentRole: 'assistant',
+          systemPrompt: 'Send the SMS.',
+          dependsOnTaskIds: [],
+          expectedArtifacts: [],
+          requiredActions: [{ toolId: '__external_action__', outcome: 'success' }],
+          requiresExternalAction: true,
+          status: 'incomplete',
+          artifacts: [],
+          output: 'No verified send.',
+        }, {
+          id: 'phase-1-mission-recovery-1',
+          title: 'Recovery send',
+          description: 'Recovery send evidence',
+          agentRole: 'assistant',
+          systemPrompt: 'Produce recovery evidence.',
+          dependsOnTaskIds: ['task-1'],
+          expectedArtifacts: [],
+          requiredActions: [],
+          requiresExternalAction: false,
+          status: 'completed',
+          artifacts: [],
+        }],
+      }],
+    }
+    const result = await new MissionOrchestrator().evaluateMissionCompletion(
+      { missionId: 'mission-recovery', prompt: 'Send an SMS', tenantId: 'tenant-1', metadata: {}, agentRuntimeUrl: 'http://agent-runtime' },
+      plan,
+      {
+        phases: [{
+          phaseId: 'phase-1',
+          status: 'in_progress',
+          tasks: [
+            { taskId: 'task-1', status: 'incomplete', artifacts: [], output: 'No verified send.' },
+            {
+              taskId: 'phase-1-mission-recovery-1',
+              status: 'completed',
+              artifacts: [{
+                name: 'system-action-receipts.json',
+                type: 'json',
+                content: JSON.stringify([{
+                  toolId: 'text-service-twilio-sms',
+                  outcome: 'success',
+                  binding: { operation: 'send_sms', recipients: ['+15551234567'], message: 'Hello', executionId: 'sms-exec-1' },
+                }]),
+              }],
+            },
+          ],
+        }],
+      },
+    )
+    expect(result.satisfied).toBe(true)
+    expect(result.gaps).toEqual([])
+  })
+
+  it('treats only completed tasks as satisfied dependencies; independent tasks can progress', () => {
+    const summaries = [{ taskId: 'task-independent' }]
+    expect(completedTaskIdsWithSummaries(
+      ['task-independent', 'task-dependent'],
+      summaries,
+    )).toEqual(['task-independent'])
   })
 })

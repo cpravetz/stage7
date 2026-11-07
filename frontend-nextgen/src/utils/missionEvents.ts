@@ -38,6 +38,9 @@ export const CONVERSATION_EVENT_TYPES = new Set([
   'planner_progress',
   'plan_generated',
   'clarification_needed',
+  'question_asked',
+  'permission_required',
+  'user_input_resolved',
   'phase_started',
   'phase_completed',
   'phase_approved',
@@ -45,6 +48,7 @@ export const CONVERSATION_EVENT_TYPES = new Set([
   'phase_plan_amended',
   'task_started',
   'task_completed',
+  'task_incomplete',
   'task_failed',
   'mission_started',
   'mission_completed',
@@ -71,6 +75,9 @@ export const TIMELINE_EVENT_TYPES = new Set([
   'planner_started',
   'planner_progress',
   'plan_generated',
+  'question_asked',
+  'permission_required',
+  'user_input_resolved',
   'phase_started',
   'phase_completed',
   'phase_plan_amended',
@@ -78,6 +85,7 @@ export const TIMELINE_EVENT_TYPES = new Set([
   'phase_rejected',
   'task_started',
   'task_completed',
+  'task_incomplete',
   'task_failed',
   'approval_requested',
   'approval_approved',
@@ -287,11 +295,13 @@ export function buildMissionEvents(options: {
     for (const task of phase.tasks || []) {
       const taskCompletedAt = toTimestamp((task as { completedAt?: string | number }).completedAt) ?? taskCursor;
       const hasLiveTask = hasLive(
-        ['task_started', 'task_completed', 'task_failed'],
+        ['task_started', 'task_completed', 'task_incomplete', 'task_failed'],
         (event) => eventPhaseId(event) === phase.phaseId && eventTaskId(event) === task.taskId,
       );
       const derivedTaskType = task.status === 'completed'
         ? 'task_completed'
+        : task.status === 'incomplete'
+          ? 'task_incomplete'
         : task.status === 'failed'
           ? 'task_failed'
           : task.status === 'in_progress'
@@ -302,7 +312,7 @@ export function buildMissionEvents(options: {
           id: `derived-task-${phase.phaseId}-${task.taskId}`,
           type: derivedTaskType,
           source: 'orchestrator',
-          message: `${derivedTaskType === 'task_failed' ? 'Task failed' : derivedTaskType === 'task_started' ? 'Task started' : 'Task completed'}: ${taskLabel(task.taskId)}`,
+          message: `${derivedTaskType === 'task_failed' ? 'Task failed' : derivedTaskType === 'task_incomplete' ? 'Task incomplete' : derivedTaskType === 'task_started' ? 'Task started' : 'Task completed'}: ${taskLabel(task.taskId)}`,
           timestamp: taskCompletedAt,
           missionId,
           metadata: { phaseId: phase.phaseId, taskId: task.taskId, output: task.output },
@@ -352,21 +362,34 @@ export function buildMissionEvents(options: {
         metadata: { error: detail.error },
       });
     }
+  } else if (detail?.status === 'awaiting_review') {
+    const completedAt = toTimestamp(detail.completedAt) ?? startedAt + 1000;
+    if (!hasLive(['mission_needs_review'])) {
+      const gaps = Array.from(new Set(detail.output?.outputs?.gaps || []));
+      derived.push({
+        id: `derived-mission-needs-review-${completedAt}`,
+        type: 'mission_needs_review',
+        source: 'orchestrator',
+        message: gaps.length > 0
+          ? `Mission needs review: ${gaps.join('; ')}`
+          : 'Mission needs review before it can be completed.',
+        timestamp: completedAt,
+        missionId,
+        metadata: gaps.length > 0 ? { gaps } : undefined,
+      });
+    }
   } else if (detail?.status === 'incomplete') {
     const completedAt = toTimestamp(detail.completedAt) ?? startedAt + 1000;
     if (!hasLive(['mission_incomplete'])) {
       const gaps = Array.from(new Set(detail.output?.outputs?.gaps || []));
-      const reason = gaps.join('; ');
       derived.push({
         id: `derived-mission-incomplete-${completedAt}`,
         type: 'mission_incomplete',
         source: 'orchestrator',
-        message: reason
-          ? `Mission incomplete: ${reason} — retry this mission to address the unmet requirements.`
-          : 'Mission incomplete',
+        message: 'Mission not finished yet. Resume it to continue working through the remaining steps.',
         timestamp: completedAt,
         missionId,
-        metadata: gaps.length > 0 ? { reason, gaps } : undefined,
+        metadata: gaps.length > 0 ? { gaps } : undefined,
       });
     }
   }
@@ -404,26 +427,21 @@ export function buildMissionEvents(options: {
  * Deduplicate task_completed/task_failed events by phaseId+taskId keeping the latest timestamp.
  */
 function dedupeTaskEvents(events: FeedEvent[]): FeedEvent[] {
-  const taskTypes = new Set(['task_completed', 'task_failed']);
-  const latest = new Map<string, FeedEvent>();
-  const others: FeedEvent[] = [];
-  for (const event of events) {
+  const taskTypes = new Set(['task_completed', 'task_incomplete', 'task_failed']);
+  const latest = new Map<string, { event: FeedEvent; index: number }>();
+  events.forEach((event, index) => {
     const type = String(event.type);
-    if (taskTypes.has(type)) {
-      const phaseId = eventPhaseId(event) || '';
-      const taskId = eventTaskId(event) || '';
-      const key = `${type}|${phaseId}|${taskId}`;
-      const existing = latest.get(key);
-      if (!existing || event.timestamp >= existing.timestamp) {
-        latest.set(key, event);
-      }
-      continue;
-    }
-    others.push(event);
-  }
-  const result = [...others, ...Array.from(latest.values())];
-  result.sort((left, right) => left.timestamp - right.timestamp);
-  return result;
+    if (!taskTypes.has(type)) return;
+    const phaseId = eventPhaseId(event) || '';
+    const taskId = eventTaskId(event) || '';
+    const key = `${type}|${phaseId}|${taskId}`;
+    const existing = latest.get(key);
+    if (!existing || event.timestamp >= existing.event.timestamp) latest.set(key, { event, index });
+  });
+  const retainedIndexes = new Set(Array.from(latest.values(), ({ index }) => index));
+  return events.filter((event, index) =>
+    !taskTypes.has(String(event.type)) || retainedIndexes.has(index),
+  );
 }
 
 /**
@@ -456,6 +474,8 @@ function dedupeTerminalAndApprovalEvents(events: FeedEvent[], status?: string): 
       ? (status === 'canceled' ? 'mission_canceled' : 'mission_failed')
       : status === 'incomplete'
         ? 'mission_incomplete'
+        : status === 'awaiting_review'
+          ? 'mission_needs_review'
         : null;
 
   const seenApprovalPhases = new Set<string>();
@@ -623,30 +643,117 @@ export interface TranscriptTurn {
 
 const MAX_PLANNER_PROGRESS_LINES = 12;
 
-function collapsePlannerProgress(lines: TranscriptLine[]): TranscriptLine[] {
-  const progressIndexes: number[] = [];
-  lines.forEach((line, index) => {
-    if (line.type === 'planner_progress') progressIndexes.push(index);
-  });
-  if (progressIndexes.length <= MAX_PLANNER_PROGRESS_LINES) return lines;
+function isMachineReadable(value: string): boolean {
+  return /^\s*[\[{]/.test(value);
+}
+
+function friendlyTaskMessage(value: string): string {
+  if (/Agent response validation failed|verified external[- ]operation receipt|artifact section|missing (?:expected )?(?:artifact|receipt)/i.test(value)) {
+    return 'I could not verify this step yet, so I am checking another approved way to finish it.';
+  }
+  return value;
+}
+
+function friendlyMonologueMessage(value: string): string {
+  if (/\b(?:missing|unavailable|not configured)\b.{0,80}\b(?:tool|service|credential|configuration)\b/i.test(value)) {
+    return 'I am checking whether an approved service or setup is available.';
+  }
+  if (/\b(?:review|verify|evidence|receipt|artifact)\b/i.test(value)) {
+    return 'I am checking the results before continuing.';
+  }
+  return 'Working on the requested task.';
+}
+
+function friendlyTaskOutput(value: string): string {
+  const trimmed = value.trim();
+  if (/^\s*Task output is incomplete:\s*Agent response validation failed/i.test(trimmed)) {
+    return 'I could not verify this step yet, so I am checking another approved way to finish it.';
+  }
+  if (/^\s*\{\s*"satisfied"\s*:/i.test(trimmed)) {
+    return 'I reviewed the completed work and am addressing the remaining gap.';
+  }
+  const receiptStart = trimmed.search(/\n?\s*\[\s*\{\s*\\?"toolId\\?"\s*:/);
+  const readable = receiptStart >= 0 ? trimmed.slice(0, receiptStart).trim() : trimmed;
+  return readable || 'The task is still in progress.';
+}
+
+function friendlyToolMessage(value: string): string {
+  if (!isMachineReadable(value)) return value;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const tool = (parsed as Record<string, unknown>).tool;
+      if (tool === '__list_tools') return 'Checking which services are available.';
+      if (tool === '__create_tool') return 'Setting up a service for this task.';
+      if (typeof tool === 'string' && tool.trim()) return 'Using a configured service to complete the requested step.';
+    }
+  } catch {
+    return 'Working on the requested task.';
+  }
+  return 'Working on the requested task.';
+}
+
+function friendlyPlanMessage(type: string, value: string): string {
+  if (
+    type === 'phase_plan_amended'
+    && /verified external[- ]operation receipt|system-action-receipts|artifact section|did not complete a verified action/i.test(value)
+  ) {
+    return 'I could not confirm that the requested action was completed, so I am checking another approved way to finish it.';
+  }
+  return value;
+}
+
+function collapsePlannerProgress(turns: TranscriptTurn[]): TranscriptTurn[] {
+  const progressIndexes = turns.flatMap((turn, index) =>
+    turn.label === 'Planner' && turn.lines.some((line) => line.type === 'planner_progress')
+      ? [index]
+      : [],
+  );
+  if (progressIndexes.length <= MAX_PLANNER_PROGRESS_LINES) return turns;
 
   const collapsed = progressIndexes.slice(0, progressIndexes.length - MAX_PLANNER_PROGRESS_LINES);
   const dropped = collapsed.length;
-  const summary: TranscriptLine = {
-    kind: 'text',
-    type: 'planner_progress',
-    text: `${dropped} earlier planning update${dropped === 1 ? '' : 's'}`,
+  const firstTurn = turns[collapsed[0]];
+  const summaryTurn: TranscriptTurn = {
+    ...firstTurn,
+    id: `${firstTurn.id}-collapsed`,
+    lines: [{
+      kind: 'text',
+      type: 'planner_progress',
+      text: `${dropped} earlier planning update${dropped === 1 ? '' : 's'}`,
+    }],
   };
-  return [
-    ...lines.slice(0, collapsed[0]),
-    summary,
-    ...lines.slice(collapsed[collapsed.length - 1] + 1),
-  ];
+  const collapsedIndexes = new Set(collapsed);
+  return turns.flatMap((turn, index) =>
+    index === collapsed[0]
+      ? [summaryTurn]
+      : collapsedIndexes.has(index)
+        ? []
+        : [turn],
+  );
+}
+
+function interactionQuestionText(event: FeedEvent): string {
+  const data = event.metadata || {};
+  if (typeof data.question === 'string' && data.question.trim()) return data.question.trim();
+  if (typeof event.message === 'string' && event.message.trim()) return event.message.trim();
+  if (event.type === 'permission_required') {
+    const permission = data.permission;
+    if (permission && typeof permission === 'object' && typeof (permission as { explanation?: unknown }).explanation === 'string') {
+      return String((permission as { explanation: string }).explanation).trim();
+    }
+    return 'An Agent is waiting for permission to use a tool.';
+  }
+  return 'An Agent needs information to continue.';
 }
 
 export function buildTranscript(events: FeedEvent[]): TranscriptTurn[] {
   const turns: TranscriptTurn[] = [];
   let current: TranscriptTurn | null = null;
+  const orderedEvents = events
+    .map((event, index) => ({ event, index }))
+    .sort((left, right) => left.event.timestamp - right.event.timestamp || left.index - right.index)
+    .map(({ event }) => event);
 
   const startTurn = (
     role: TranscriptTurn['role'],
@@ -665,13 +772,29 @@ export function buildTranscript(events: FeedEvent[]): TranscriptTurn[] {
     return t;
   };
 
-  for (const evt of events) {
+  for (const evt of orderedEvents) {
     const type = String(evt.type);
     const ts = evt.timestamp || Date.now();
     const data = evt.metadata || {};
     if (type === 'user' || type === 'user_message') {
       current = startTurn('user', 'You', ts, evt.id);
       current.lines.push({ kind: 'text', type, text: evt.message });
+      continue;
+    }
+    if (type === 'question_asked' || type === 'permission_required') {
+      const label = agentLabel(data) || (type === 'permission_required' ? 'Mission' : 'Agent');
+      current = startTurn('assistant', label, ts, evt.id);
+      current.lines.push({ kind: 'text', type, text: interactionQuestionText(evt) });
+      continue;
+    }
+    if (type === 'user_input_resolved') {
+      const response = typeof data.response === 'string' && data.response.trim()
+        ? data.response.trim()
+        : typeof evt.message === 'string' && evt.message.trim()
+          ? evt.message.trim()
+          : 'Input provided.';
+      current = startTurn('user', 'You', ts, evt.id);
+      current.lines.push({ kind: 'text', type, text: response });
       continue;
     }
     if (
@@ -688,39 +811,31 @@ export function buildTranscript(events: FeedEvent[]): TranscriptTurn[] {
       const label = type === 'planner_started' || type === 'planner_progress' || type === 'plan_generated'
         ? 'Planner'
         : agentLabel(data) || 'Orchestrator';
-      if (
-        !current ||
-        current.role !== 'assistant' ||
-        current.label !== label
-      ) {
-        current = startTurn('assistant', label, ts, evt.id);
-      }
-      current.lines.push({ kind: 'plan', type, text: evt.message });
+      current = startTurn('assistant', label, ts, evt.id);
+      current.lines.push({ kind: 'plan', type, text: friendlyPlanMessage(type, evt.message) });
       continue;
     }
     if (type.startsWith('task_')) {
       const label = agentLabel(data) || 'Agent';
-      if (!current || current.role !== 'assistant' || current.label !== label) {
-        current = startTurn('assistant', label, ts, evt.id);
-      }
-      current.lines.push({ kind: 'task', type, text: evt.message });
-      if (type === 'task_completed' && typeof data.output === 'string' && data.output.trim()) {
+      current = startTurn('assistant', label, ts, evt.id);
+      current.lines.push({ kind: 'task', type, text: friendlyTaskMessage(evt.message) });
+      if ((type === 'task_completed' || type === 'task_incomplete') && typeof data.output === 'string' && data.output.trim()) {
         current.lines.push({
           kind: 'text',
           type: 'task_output',
-          text: data.output.slice(0, 8_000),
+          text: friendlyTaskOutput(data.output).slice(0, 8_000),
         });
       }
       continue;
     }
     if (type === 'tool' || type === 'monologue') {
-      if (!current || current.role !== 'assistant') {
-        current = startTurn('assistant', 'Agent', ts, evt.id);
-      }
+      current = startTurn('assistant', agentLabel(data) || 'Agent', ts, evt.id);
       current.lines.push({
         kind: type === 'tool' ? 'tool' : 'text',
         type,
-        text: evt.message,
+        text: type === 'tool'
+          ? friendlyToolMessage(evt.message)
+          : friendlyMonologueMessage(evt.message),
       });
       continue;
     }
@@ -748,15 +863,11 @@ export function buildTranscript(events: FeedEvent[]): TranscriptTurn[] {
       current.lines.push(line);
       continue;
     }
-    if (!current) current = startTurn('system', 'Mission', ts, evt.id);
+    current = startTurn(type === 'assistant' ? 'assistant' : 'system', type === 'assistant' ? agentLabel(data) || 'Assistant' : 'Mission', ts, evt.id);
     current.lines.push({ kind: 'text', type, text: evt.message });
   }
 
-  for (const turn of turns) {
-    turn.lines = collapsePlannerProgress(turn.lines);
-  }
-
-  return turns;
+  return collapsePlannerProgress(turns);
 }
 
 export interface ModelUsageSummary {

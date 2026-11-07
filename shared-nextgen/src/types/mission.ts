@@ -29,6 +29,33 @@ export const MissionArtifactSchema = z.object({
   taskStatus: z.string().optional(),
 }).passthrough();
 
+export const RequiredActionBindingSchema = z.object({
+  operation: z.string().trim().min(1).max(120).optional(),
+  operations: z.array(z.string().trim().min(1).max(120)).max(20).optional(),
+  recipient: z.string().trim().min(1).max(500).optional(),
+  recipients: z.array(z.string().trim().min(1).max(500)).max(50).optional(),
+  message: z.string().trim().min(1).max(4000).optional(),
+  subject: z.string().trim().min(1).max(1000).optional(),
+  body: z.string().trim().min(1).max(4000).optional(),
+}).passthrough();
+
+export const RequiredActionSchema = z.object({
+  toolId: z.string().trim().min(1).max(120),
+  outcome: z.enum(['success', 'failure', 'denied']),
+}).merge(RequiredActionBindingSchema).extend({
+  binding: RequiredActionBindingSchema.optional(),
+}).passthrough();
+
+export const ActionReceiptBindingSchema = z.object({
+  operation: z.string().optional(),
+  recipients: z.array(z.string()).optional(),
+  message: z.string().optional(),
+  subject: z.string().optional(),
+  body: z.string().optional(),
+  providerRequestId: z.string().optional(),
+  executionId: z.string().optional(),
+}).passthrough();
+
 export const TaskSchema = z.object({
   id: z.string(),
   title: z.string(),
@@ -38,11 +65,8 @@ export const TaskSchema = z.object({
   dependsOnTaskIds: z.array(z.string()).optional(),
   expectedArtifacts: z.array(z.string()).optional(),
   requiresExternalAction: z.boolean().optional(),
-  requiredActions: z.array(z.object({
-    toolId: z.string().trim().min(1).max(120),
-    outcome: z.enum(['success', 'failure', 'denied']),
-  }).passthrough()).max(50).optional(),
-  status: z.enum(['pending', 'in_progress', 'awaiting_approval', 'completed', 'failed', 'skipped']),
+  requiredActions: z.array(RequiredActionSchema).max(50).optional(),
+  status: z.enum(['pending', 'in_progress', 'awaiting_approval', 'completed', 'incomplete', 'failed', 'skipped']),
   output: z.string().optional(),
   artifacts: z.array(MissionArtifactSchema).default([]),
   startedAt: z.number().optional(),
@@ -72,6 +96,9 @@ export const PlanSchema = z.object({
   phases: z.array(PhaseSchema),
 });
 
+export type RequiredActionBinding = z.infer<typeof RequiredActionBindingSchema>;
+export type RequiredAction = z.infer<typeof RequiredActionSchema>;
+export type ActionReceiptBinding = z.infer<typeof ActionReceiptBindingSchema>;
 export type Task = z.infer<typeof TaskSchema>;
 export type MissionArtifact = z.infer<typeof MissionArtifactSchema>;
 export type Phase = z.infer<typeof PhaseSchema>;

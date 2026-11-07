@@ -1,0 +1,49 @@
+{
+  "id": "email",
+  "name": "Email",
+  "description": "Send email messages with optional HTML, attachments, and idempotency",
+  "type": "native",
+  "manifest": {
+    "executor": "email",
+    "codeFile": "email.js",
+    "configSchema": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    },
+    "credentialSource": {
+      "host": { "configKey": "email.host" },
+      "port": { "configKey": "email.port" },
+      "username": { "configKey": "email.username" },
+      "password": { "configKey": "email.password" },
+      "from": { "configKey": "email.from" }
+    }
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "to": { "type": "string" },
+      "subject": { "type": "string" },
+      "body": { "type": "string" },
+      "html": { "type": "string" },
+      "from": { "type": "string" },
+      "attachments": { "type": "array" },
+      "idempotencyKey": { "type": "string" },
+      "lookupUrl": { "type": "string" },
+      "lookupRequestId": { "type": "string" }
+    },
+    "required": ["to", "subject"]
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "success": { "type": "boolean" },
+      "messageId": { "type": "string" },
+      "status": { "type": "string" },
+      "error": { "type": "string" },
+      "idempotencyKey": { "type": "string" }
+    },
+    "required": ["success"]
+  },
+  "isSkill": false
+}

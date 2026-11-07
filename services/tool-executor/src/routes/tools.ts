@@ -21,8 +21,14 @@ const pluginGenerationSchema = z.object({
   description: z.string(),
   requirements: z.array(z.string()).optional(),
   excludeToolIds: z.array(z.string().min(1)).max(20).optional(),
-  context: z.record(z.any()).optional(),
+  context: z.record(z.string(), z.any()).optional(),
 })
+
+function getRequestedExecutionId(req: Request, body: Record<string, unknown>): string | undefined {
+  const header = (req.header('x-execution-id') || req.header('x-idempotency-key') || req.header('idempotency-key'))?.trim();
+  const bodyId = (body.executionId as string | undefined) || (body.idempotencyKey as string | undefined) || (body.requestId as string | undefined);
+  return (header || bodyId || undefined) as string | undefined;
+}
 
 router.post(
   '/tools',
@@ -82,6 +88,7 @@ router.post(
     }
 
     try {
+      const executionId = getRequestedExecutionId(req, req.body || {});
       const execution = await executor.executeOrRequestCredentials(
         tool,
         req.body.input || {},
@@ -90,6 +97,9 @@ router.post(
           workspaceId: req.body.workspaceId,
           assistantId: req.body.assistantId || req.header('x-assistant-id'),
           context: req.body.context,
+          executionId,
+          idempotencyKey: executionId,
+          requestId: executionId,
         }
       )
 
@@ -182,6 +192,7 @@ router.post(
     }
 
     try {
+      const executionId = getRequestedExecutionId(req, body);
       const execution = await executor.executeOrRequestCredentials(
         fullTool,
         input,
@@ -190,6 +201,9 @@ router.post(
           workspaceId: req.body.workspaceId,
           assistantId: req.body.assistantId || req.header('x-assistant-id'),
           context: req.body.context,
+          executionId,
+          idempotencyKey: executionId,
+          requestId: executionId,
         }
       )
 
@@ -329,15 +343,28 @@ router.post(
 )
 
 const credentialSubmissionSchema = z.object({
-  credentials: z.record(z.string()),
+  credentials: z.record(z.string(), z.string()),
   storeInVault: z.boolean().optional(),
   vaultSecretId: z.string().optional(),
+  idempotencyKey: z.string().optional(),
+  executionId: z.string().optional(),
 })
+
+router.get(
+  '/executions/:executionId',
+  asyncHandler(async (req: Request, res: Response) => {
+    const execution = await executor.getExecutionRecord(req.params.executionId)
+    if (!execution) {
+      throw new ToolNotFoundError(req.params.executionId)
+    }
+    res.json(execution)
+  })
+)
 
 router.get(
   '/executions/:executionId/credential-request',
   asyncHandler(async (req: Request, res: Response) => {
-    const request = executor.getCredentialRequest(req.params.executionId)
+    const request = await executor.getCredentialRequest(req.params.executionId)
     if (!request) {
       throw new ToolNotFoundError('credential request')
     }
@@ -401,7 +428,6 @@ router.get(
       return
     }
 
-    // Resume Template Manager: read templates store
     if (safeSourceId === 'career-resume-template-manager') {
       const templatePaths = [
         join(careerHome, 'templates.json'),
@@ -414,7 +440,7 @@ router.get(
           const fileContent = await readFile(tp, 'utf-8')
           const data = JSON.parse(fileContent)
           if (Array.isArray(data)) templates = data
-          else if (data && typeof data === 'object') templates = data.templates || data.items || []
+          else if (data && typeof data === 'object') templates = (data as any).templates || (data as any).items || []
           if (templates.length > 0) break
         } catch (err) {
           if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
@@ -422,7 +448,6 @@ router.get(
           }
         }
       }
-      // Apply type filter if present (e.g., ?filter=type=resume)
       const filter = req.query.filter as string | undefined
       let filtered = templates
       if (filter && filter.startsWith('type=')) {
@@ -430,10 +455,9 @@ router.get(
         if (!/^[a-zA-Z0-9_-]+$/.test(filterType)) {
           logger.warn({ filterType }, 'Invalid filter type')
         } else {
-          filtered = templates.filter((t) => t && typeof t === 'object' && ((t as any).type === filterType || (t as any).kind === filterType))
+          filtered = templates.filter((t) => t && typeof t === 'object' && (((t as any).type === filterType) || ((t as any).kind === filterType)))
         }
       }
-      // Map to reference item format
       const listings = filtered.map((t) => ({
         value: (t as any).id || (t as any).name,
         label: (t as any).name || (t as any).id,
@@ -460,7 +484,7 @@ router.get(
         if (Array.isArray(data)) {
           listings = data
         } else if (data && typeof data === 'object') {
-          listings = data.listings || data.items || data.ranked || data.results || data.data || []
+          listings = (data as any).listings || (data as any).items || (data as any).ranked || (data as any).results || (data as any).data || []
         }
         if (Array.isArray(listings) && listings.length > 0) {
           break

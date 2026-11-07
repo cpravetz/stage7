@@ -28,6 +28,10 @@ function missionIdFromWorkflowId(workflowId: string): string {
 function visibleMissionStatus(record: PersistedMissionControlRecord): string {
   if (record.controlState === 'pause_requested') return 'pausing';
   if (record.controlState === 'terminate_requested') return 'canceling';
+  if (record.status === 'completed' && record.output?.outputs?.status
+    && record.output.outputs.status !== 'completed') {
+    return missionStatus(record.output);
+  }
   return record.status || 'unknown';
 }
 
@@ -120,19 +124,20 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
  * every poll spawn another in-process loop, so a single watch accumulated one non-durable runner per
  * minute, forever, each firing the watch independently.
  */
-function missionStatus(result: unknown): WorkflowResult['status'] {
+export function missionStatus(result: unknown): WorkflowResult['status'] {
   const outputs = result && typeof result === 'object'
     ? (result as { outputs?: { status?: string } }).outputs
     : undefined;
   if (
-    outputs?.status === 'awaiting_clarification'
+    outputs?.status === 'awaiting_review'
+    || outputs?.status === 'awaiting_clarification'
     || outputs?.status === 'awaiting_user_input'
     || outputs?.status === 'awaiting_permission'
     || outputs?.status === 'rejected_at_phase'
   ) {
     return 'awaiting_review';
   }
-  return outputs?.status === 'incomplete' ? 'incomplete' : 'completed';
+  return outputs?.status === 'completed' ? 'completed' : 'incomplete';
 }
 
 interface SingleWatchOutcome {
@@ -684,7 +689,9 @@ export class TemporalClient {
           completedReceipt,
         ],
       };
-      interactionResponse = `The required credentials were securely supplied. Tool Executor completed "${credentialRequest.toolName}". Use that verified result and do not repeat the action.`;
+      interactionResponse = continuation.useConfiguredCredentials
+        ? `The required credentials were securely supplied. Tool Executor completed "${credentialRequest.toolName}". Use that verified result and do not repeat the action.`
+        : `The required credentials were securely supplied in Tools/Vault. Tool Executor completed "${credentialRequest.toolName}". Use that verified result and do not repeat the action.`;
     } else if (pendingInteraction?.kind === 'mcp_permission') {
       const decision = continuation.permissionDecision;
       if (!decision || !pendingInteraction.requestId) {
@@ -744,6 +751,11 @@ export class TemporalClient {
       throw error;
     }
     await this.startMission(resumeInput, checkpoint, leaseClaimed === true, true);
+    const responsePreview = interactionResponse
+      ? interactionResponse.length > 2000
+        ? `${interactionResponse.slice(0, 1997)}...`
+        : interactionResponse
+      : undefined;
     if (pendingInteraction) {
       await this.broadcastMissionUpdate({
         type: 'user_input_resolved',
@@ -754,6 +766,7 @@ export class TemporalClient {
         data: {
           phaseId: pendingInteraction.phaseId,
           taskId: pendingInteraction.taskId,
+          ...(responsePreview ? { response: responsePreview } : {}),
         },
       });
     }

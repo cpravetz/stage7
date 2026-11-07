@@ -132,8 +132,8 @@ const mcpServerSchema = z
     url: z.string().url().optional(),
     command: z.string().min(1).optional(),
     args: z.array(z.string()).optional(),
-    env: z.record(z.string()).optional(),
-    headers: z.record(z.string()).optional(),
+    env: z.record(z.string(), z.string()).optional(),
+    headers: z.record(z.string(), z.string()).optional(),
   })
   .refine((data) => Boolean(data.url) || Boolean(data.command), {
     message: 'Either "url" (http transport) or "command" (stdio transport) is required',

@@ -1,0 +1,42 @@
+{
+  "id": "search",
+  "name": "Search",
+  "description": "Search the web using Google Custom Search, LangSearch, DuckDuckGo, or SearxNG",
+  "type": "native",
+  "manifest": {
+    "executor": "search",
+    "codeFile": "search.js",
+    "configSchema": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    },
+    "credentialSource": {
+      "google_api_key": { "envVar": "GOOGLE_API_KEY" },
+      "google_search_engine_id": { "envVar": "GOOGLE_SEARCH_ENGINE_ID" },
+      "langsearch_api_key": { "envVar": "LANGSEARCH_API_KEY" },
+      "searxng_url": { "envVar": "SEARXNG_URL" }
+    }
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "query": { "type": "string" },
+      "maxResults": { "type": "integer", "default": 10 },
+      "searchType": { "type": "string", "enum": ["web", "images", "news"], "default": "web" },
+      "freshness": { "type": "string", "enum": ["day", "week", "month", "year"] }
+    },
+    "required": ["query"]
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "success": { "type": "boolean" },
+      "results": { "type": "array" },
+      "count": { "type": "integer" },
+      "error": { "type": "string" }
+    },
+    "required": ["success"]
+  },
+  "isSkill": false
+}

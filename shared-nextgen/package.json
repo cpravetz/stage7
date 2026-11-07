@@ -10,7 +10,7 @@
     "lint": "echo 'lint not configured'"
   },
   "dependencies": {
-    "zod": "^3.22.4",
+    "zod": "^4.6.6",
     "pino": "^8.16.2",
     "express": "^4.18.2",
     "undici": "^6.21.3"

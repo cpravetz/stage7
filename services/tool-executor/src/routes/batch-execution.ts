@@ -9,7 +9,7 @@ import asyncHandler from '../utils/asyncHandler';
 
 const jsonSchema = z.object({
   type: z.literal('object'),
-  properties: z.record(z.unknown()),
+  properties: z.record(z.string(), z.unknown()),
   required: z.array(z.string()).optional(),
   additionalProperties: z.boolean().optional(),
 }).passthrough();
@@ -19,7 +19,7 @@ const batchRequestSchema = z.object({
   steps: z.array(z.object({
     id: z.string().regex(/^[A-Za-z0-9_-]{1,80}$/),
     toolId: z.string().min(1).max(200),
-    input: z.record(z.unknown()).default({}),
+    input: z.record(z.string(), z.unknown()).default({}),
     includePreviousOutput: z.boolean().default(false),
   })).min(1).max(20),
   outputSchema: jsonSchema,

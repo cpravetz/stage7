@@ -36,7 +36,7 @@
     "uuid": "^11.0.0",
     "tar": "^7.5.0",
     "qs": "^6.16.0",
-    "markdown-it": "^14.3.1",
+    "markdown-it": "^14.3.3",
     "fast-uri": "^4.1.5",
     "smol-toml": "^1.6.1",
     "@svgr/webpack": "^8.1.0",
@@ -59,7 +59,7 @@
     "@mui/x-charts": "^8.24.0",
     "@mui/x-date-pickers": "^8.24.0",
     "@types/node-cron": "^3.0.11",
-    "axios": "^1.13.2",
+    "axios": "^1.21.0",
     "dayjs": "^1.11.19",
     "express": "^4.18.2",
     "isolated-vm": "^5.0.4",
@@ -67,5 +67,11 @@
     "node-cron": "^4.2.1",
     "supertest": "^7.2.2",
     "ws": "^8.18.2"
+  },
+  "allowScripts": {
+    "protobufjs@7.6.6": true,
+    "protobufjs@8.8.1": true,
+    "@parcel/watcher@2.6.0": true,
+    "isolated-vm@5.0.4": true
   }
 }

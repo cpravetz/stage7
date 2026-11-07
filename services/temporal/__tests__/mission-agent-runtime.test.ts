@@ -67,6 +67,33 @@ describe('MissionAgentRuntime', () => {
     jest.restoreAllMocks()
   })
 
+  it.each([false, true])('preserves incomplete results and receipts after recovery=%s', async (recover) => {
+    const receipt = { toolId: 'email_sender', isError: false, outcome: 'success', content: '{"id":"email-1"}' }
+    const completed = {
+      taskId: 'mission-1:phase-1:task-1',
+      status: 'completed',
+      result: { output: 'The other action could not be completed.', incompleteReason: 'Missing SMS receipt.', actionReceipts: [receipt] },
+    }
+    jest.spyOn(global, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/execute')) return recover ? jsonResponse({ error: 'Task is already running' }, 500) : jsonResponse(completed)
+      if (url.endsWith('/tasks') && init?.method === 'POST') return jsonResponse({ taskId: completed.taskId })
+      if (url.endsWith(`/tasks/${completed.taskId}`)) return jsonResponse(completed)
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    const runtime = new MissionAgentRuntime({ missionId: 'mission-1', tenantId: 'tenant-1', agentRuntimeUrl: 'http://agent-runtime:3400' })
+    const result = await runtime.executePromptTask(agent.id, {
+      taskId: completed.taskId,
+      type: 'researcher',
+      prompt: 'Continue the task.',
+    })
+    expect(result.incompleteReason).toBe('Missing SMS receipt.')
+    expect(result.actionReceipts).toEqual([receipt])
+    const receiptArtifact = result.artifacts.find((artifact) => artifact.name === 'system-action-receipts.json')
+    expect(receiptArtifact).toBeDefined()
+    expect(JSON.parse(receiptArtifact!.content as string)).toEqual([receipt])
+  })
+
   it('executes the mission task through the mission Agent Runtime without Assistant execution', async () => {
     const requests: Array<{ url: string; method: string; body?: Record<string, unknown> }> = []
     const fetchMock = jest.spyOn(global, 'fetch').mockImplementation(async (input, init) => {
@@ -145,6 +172,8 @@ describe('MissionAgentRuntime', () => {
       DEFAULT_AGENT_EXECUTION_POLICY,
       [dependencySummary],
       'Use the steps already completed; do not repeat actions with side effects.',
+      undefined,
+      'Research the topic and produce research.md.',
     )
 
     expect(result.output).toBe('## research.md\nResearch complete.')
@@ -188,6 +217,7 @@ describe('MissionAgentRuntime', () => {
 
     const submittedInput = requests.find((request) => request.url.endsWith('/tasks'))?.body?.input as Record<string, unknown>
     expect(submittedInput.prompt).toContain(`Task Instructions: ${task.systemPrompt}`)
+    expect(submittedInput.prompt).toContain('Original mission goal: Research the topic and produce research.md.')
     expect(submittedInput.prompt).toContain('Completed dependency results')
     expect(submittedInput.prompt).toContain('The source task calculated 42.')
     expect(submittedInput.prompt).toContain('answer.json')
@@ -408,9 +438,10 @@ describe('MissionAgentRuntime', () => {
     const completionInput = submittedTask!.input as Record<string, unknown>
     const completionContext = completionInput.context as Record<string, unknown>
     expect(completionContext.executionPolicy).toMatchObject({
-      maxBrainCalls: Number.MAX_SAFE_INTEGER,
-      maxCompletionTokens: 1_024,
-      maxCompletionTokensPerCall: 512,
+      maxBrainCalls: 3,
+      maxCompletionTokens: 3_072,
+      maxCompletionTokensPerCall: 1_024,
+      maxDelegations: 0,
     })
     expect(complaints).toEqual([
       {
@@ -826,7 +857,7 @@ describe('MissionAgentRuntime', () => {
         return jsonResponse({
           status: 'completed',
           result: {
-            output: selectionAttempts < 6 ? '{"taskId":"not-ready"}' : '{"taskId":"task-3"}',
+            output: selectionAttempts < 3 ? '{"taskId":"not-ready"}' : '{"taskId":"task-3"}',
             artifacts: [],
             tokensUsed: 0,
             requestId: `selection-${selectionAttempts}`,
@@ -857,9 +888,9 @@ describe('MissionAgentRuntime', () => {
     expect(taskInput.prompt).toContain('"id":"task-3"')
     expect(taskInput.prompt).not.toContain('"id":"task-1"')
     expect(taskInput.prompt).toContain('Complete the full mission')
-    expect(selectionAttempts).toBe(6)
+    expect(selectionAttempts).toBe(3)
     expect(requests.filter(({ url }) => url.endsWith('/tasks')).at(-1)?.body?.taskId)
-      .toBe('mission-1:phase-1:selector-2:attempt-6')
+      .toBe('mission-1:phase-1:selector-2:attempt-3')
   })
 
   it('keeps adding follow-up tasks while gaps remain, without an amendment or phase-size cap', () => {
@@ -1088,10 +1119,11 @@ describe('MissionAgentRuntime', () => {
     expect(firstTaskInput.prompt).toContain('"taskId":"review-summary-11"')
     expect(firstTaskInput.prompt).toContain('Judge only actual task outputs and artifacts')
     expect(firstTaskInput.context.executionPolicy).toEqual(expect.objectContaining({
-      maxBrainCalls: Number.MAX_SAFE_INTEGER,
+      maxBrainCalls: 4,
       maxActions: 0,
-      maxCompletionTokens: 2_048,
-      maxCompletionTokensPerCall: 1_024,
+      maxCompletionTokens: 4_096,
+      maxCompletionTokensPerCall: 2_048,
+      maxDelegations: 0,
     }))
     expect(firstTaskInput.context[BRAIN_ROUTING_SESSION_CONTEXT_KEY])
       .toBe('mission-1:phase-review:phase-1:1')

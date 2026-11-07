@@ -37,11 +37,11 @@ const CreateWatchSchema = z.object({
   // working; when absent the runner falls back to the legacy default and says so.
   skill: z.string().optional(),
   assistantId: z.string().optional(),
-  arguments: z.record(z.unknown()).optional(),
+  arguments: z.record(z.string(), z.unknown()).optional(),
 })
 
 const UpdateWatchSchema = z.object({
-  data: z.record(z.unknown()).optional(),
+  data: z.record(z.string(), z.unknown()).optional(),
 })
 
 router.post('/', asyncHandler(async (req: Request, res: Response) => {

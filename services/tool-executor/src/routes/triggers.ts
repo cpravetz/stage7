@@ -20,7 +20,7 @@ const CreateScheduleSchema = z.object({
   skillId: z.string().min(1),
   assistantId: z.string().min(1),
   cron: z.string().min(1),
-  input: z.record(z.unknown()).optional(),
+  input: z.record(z.string(), z.unknown()).optional(),
   origin: z.string().optional(),
 });
 
@@ -34,7 +34,7 @@ const CreateMissionScheduleSchema = z.object({
   assistantId: z.string().min(1),
   prompt: z.string().min(1),
   cron: z.string().min(1),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
   contextChunks: z.array(z.object({
     content: z.string(),
     tokens: z.number(),

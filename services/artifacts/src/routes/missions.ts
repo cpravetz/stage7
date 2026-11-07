@@ -684,7 +684,7 @@ function deriveEventsFromMissionState(state: any): Array<{ type: string; timesta
       for (const task of phase.tasks || []) {
         cursor += 500;
         events.push({
-          type: task.status === 'failed' ? 'task_failed' : 'task_completed',
+          type: task.status === 'failed' ? 'task_failed' : task.status === 'incomplete' ? 'task_incomplete' : task.status === 'completed' ? 'task_completed' : 'task_started',
           timestamp: cursor,
           data: { phaseId: phase.phaseId, taskId: task.taskId, output: task.output },
         });

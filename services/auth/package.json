@@ -14,7 +14,7 @@
     "jsonwebtoken": "^9.0.2",
     "mongodb": "^6.3.0",
     "pino": "^8.16.2",
-    "zod": "^3.22.4",
+    "zod": "^4.6.6",
     "bcryptjs": "^2.4.3"
   },
   "devDependencies": {

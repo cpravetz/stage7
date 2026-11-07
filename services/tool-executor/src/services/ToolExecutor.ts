@@ -1,96 +1,24 @@
 import { createContextPolicy } from '../adk';
 import {
   Tool, ToolExecution, WorkflowState, CredentialRequest, CredentialRequiredError, ConfirmationRequiredError,
-  CrossObjectHandoffError, SchemaRecord, ApprovalSummary, HandoffRequest, RuntimeWorkflow, RuntimeWorkflowAction,
+  CrossObjectHandoffError, ApprovalSummary, HandoffRequest, RuntimeWorkflow, RuntimeWorkflowAction,
+  ExecutionRecord, ExecutionReconciliation,
 } from '../types';
 import logger from '../utils/logger';
 import { ErrorHandler } from '../utils/ErrorHandler';
-import { EmailExecutor } from '../executors/EmailExecutor';
-import { SearchExecutor } from '../executors/SearchExecutor';
-import type { CodeExecutorCredentials } from '../executors/CodeExecutor';
-import { DockerLocalDriver } from '../runners/DockerLocalDriver';
-import type { SandboxExecutionDriver } from '../runners/SandboxExecutionDriver';
-import { FtpExecutor, FtpExecutionOptions } from '../executors/FtpExecutor';
-import { WebhookExecutor, WebhookDispatchOptions } from '../executors/WebhookExecutor';
-import { DatabaseExecutor, DatabaseQueryOptions } from '../executors/DatabaseExecutor';
-import { FileStorageExecutor, FileStorageOptions } from '../executors/FileStorageExecutor';
-import { VendorApiExecutor } from '../executors/VendorApiExecutor';
-import { credentialProvider, NamedCredentialSource } from '../services/CredentialProvider';
-import { ReasoningExecutor } from '../executors/ReasoningExecutor';
-import { WeatherExecutor, WeatherOptions } from '../executors/WeatherExecutor';
-import { MathExecutor, MathOptions } from '../executors/MathExecutor';
-import { ApiClientExecutor } from '../executors/ApiClientExecutor';
-import { DataAnalysisExecutor } from '../executors/DataAnalysisExecutor';
-import { CalendarExecutor } from '../executors/CalendarExecutor';
-import { NativeExecutorKey } from '../types';
-import { PluginGenerator } from '../services/PluginGenerator';
-import { ToolDiscovery } from '../services/ToolDiscovery';
+import { credentialProvider } from '../services/CredentialProvider';
 import { MCPClient, MCPHTTPClient, MCPServerConfig } from '../services/MCPClient';
 import { allWorkflows } from '../data/skills';
 import type { AssistantWorkflow } from '../adk/workflow-common';
 import { AssistantWorkspaceManager } from './AssistantWorkspaceManager';
-import { TriggerExecutionEngine } from './TriggerExecutionEngine';
-import {
-  announcedEventIds,
-  buildCompletionEvents,
-  buildOutcomeEvent,
-  completionEventId,
-  declaredEventIds,
-  isDryRun,
-  type StoreWrite,
-} from '../adk/events';
+import type { StoreWrite } from '../adk/events';
 import { createInMemoryEventLog, type EventLog } from './EventLog';
-import { SkillTrigger } from '../types';
-import { validateAgainstOutputSchema, parseToolOutputJson } from '../utils/schemaValidator';
+import { createExecutionRecordStore, type ExecutionRecordStore } from './ExecutionRecordStore';
+import { ToolConfigResolver, redactSecrets } from './ToolConfig';
+import { ToolDispatcher } from './ToolDispatcher';
+import { ToolEventDispatcher } from './ToolEventDispatcher';
 
-const BRAIN_URL = process.env.BRAIN_URL || 'http://brain:3100';
-const HEALING_SYSTEM_PROMPT = `You are a senior engineer debugging a failed code execution. Given the error message, source code, and input that caused the failure, provide a corrected version of the code. Output ONLY a single JSON object with this exact shape: { "sourceCode": "corrected code string", "explanation": "brief explanation of the fix" }`;
-const MAX_HEALING_ATTEMPTS = 2;
 const MAX_NESTING_DEPTH = 4;
-
-function generatedToolUsesProcessEnvironment(language: unknown, sourceCode: string): boolean {
-  return language === 'javascript'
-    ? /\bprocess\s*(?:\.\s*env\b|\[\s*['"`]env['"`]\s*\])/.test(sourceCode)
-    : /\bos\s*\.\s*(?:environ\b|getenv\s*\()|\bgetenv\s*\(|\bfrom\s+os\s+import\s+[^;\n]*\b(?:environ|getenv)\b/.test(sourceCode);
-}
-
-function schemaRecord(value: unknown): Record<string, unknown> | undefined {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : undefined;
-}
-
-function toolFailureMessage(value: unknown, depth = 0): string | undefined {
-  if (depth > 4) return undefined;
-  const parsed = typeof value === 'string' ? parseToolOutputJson(value) : value;
-  const payload = schemaRecord(parsed);
-  if (!payload) return undefined;
-  if (typeof payload.error === 'string' && payload.error.trim()) return payload.error.trim();
-  if (payload.success === false || payload.isError === true || payload.status === 'failed') {
-    return 'Tool returned an explicit failure result';
-  }
-  for (const key of ['output', 'data', 'result']) {
-    const message = toolFailureMessage(payload[key], depth + 1);
-    if (message) return message;
-  }
-  return undefined;
-}
-
-function isVaultSecretProperty(schema: Record<string, unknown>): boolean {
-  return schema['x-stage7-secret'] === true
-    || (schema.sensitive === true && schema.format === 'password');
-}
-
-function redactSecrets(value: unknown, secrets: string[]): unknown {
-  if (typeof value === 'string') {
-    return secrets.reduce((redacted, secret) => redacted.split(secret).join('[REDACTED]'), value);
-  }
-  if (Array.isArray(value)) return value.map((item) => redactSecrets(item, secrets));
-  const record = schemaRecord(value);
-  return record
-    ? Object.fromEntries(Object.entries(record).map(([key, item]) => [key, redactSecrets(item, secrets)]))
-    : value;
-}
 
 /**
  * Object-continuity keys, expressed as an ADK context policy so the guard and
@@ -138,7 +66,8 @@ function normalizeNestedPayload(output: unknown): Record<string, unknown> {
   // Already an envelope (a code skill that emitted one, or a payload that
   // carries its own success flag): pass it through untouched.
   if ('success' in raw) return raw;
-  const failed = raw.isError === true || (raw.error !== undefined && raw.error !== null && raw.error !== '');
+  const nestedError = (raw as { output?: { error?: unknown } })?.output?.error;
+  const failed = raw.isError === true || (raw.error !== undefined && raw.error !== null && raw.error !== '') || (nestedError !== undefined && nestedError !== null && String(nestedError) !== '');
   return {
     ...raw,
     success: !failed,
@@ -146,7 +75,7 @@ function normalizeNestedPayload(output: unknown): Record<string, unknown> {
     // lifecycle word; only supply a status when the callee did not.
     status: 'status' in raw ? raw.status : (failed ? 'failed' : 'ok'),
     data: 'data' in raw ? raw.data : raw,
-    error: 'error' in raw ? raw.error : null,
+    error: raw.error !== undefined ? raw.error : (nestedError !== undefined ? String(nestedError) : null),
   };
 }
 
@@ -164,26 +93,10 @@ tool: Tool;
 input: Record<string, unknown>;
 request: CredentialRequest;
   credentials: Record<string, string | undefined>;
-  opts?: { workspaceId?: string; assistantId?: string; context?: Record<string, unknown> };
+  opts?: { workspaceId?: string; assistantId?: string; context?: Record<string, unknown>; executionId?: string; idempotencyKey?: string; requestId?: string; [key: string]: unknown };
 }
 
 export class ToolExecutor {
-  private emailExecutor = new EmailExecutor();
-  private searchExecutor = new SearchExecutor();
-  private sandboxDriver: SandboxExecutionDriver = new DockerLocalDriver();
-  private pluginGenerator = new PluginGenerator();
-  private toolDiscovery = new ToolDiscovery();
-  private ftpExecutor = new FtpExecutor();
-  private webhookExecutor = new WebhookExecutor();
-  private databaseExecutor = new DatabaseExecutor();
-  private fileStorageExecutor = new FileStorageExecutor();
-  private vendorApiExecutor = new VendorApiExecutor();
-  private reasoningExecutor = new ReasoningExecutor();
-  private weatherExecutor = new WeatherExecutor();
-  private mathExecutor = new MathExecutor();
-  private apiClientExecutor = new ApiClientExecutor();
-  private dataAnalysisExecutor = new DataAnalysisExecutor();
-  private calendarExecutor = new CalendarExecutor();
   private mcpClients = new Map<string, MCPClient | MCPHTTPClient>();
   private mcpServerConfigs = new Map<string, MCPServerConfig>();
   private pendingCredentialRequests = new Map<string, PendingCredentialRequest>();
@@ -196,269 +109,34 @@ export class ToolExecutor {
   private handoffRequests = new Map<string, HandoffRequest>();
   private executionContexts = new Map<string, { workspaceId?: string; assistantId?: string; context?: Record<string, unknown> }>();
   private workspaceManager: AssistantWorkspaceManager | null = null;
-  /**
-   * Event-dispatch runtime. Built lazily because the registry is a mutable Map
-   * that the constructor may never receive (tools are registered after boot) —
-   * sharing the Map by reference keeps the engine's view current either way.
-   */
-  private triggerEngine: TriggerExecutionEngine | null = null;
-  /** Payload of the most recent emit per event id, so an engine-driven dispatch has something to pass downstream. */
-  private recentEventPayloads: Map<string, unknown> = new Map();
-  /** Guards against an emit loop: A emits e, B listens to e and re-emits e, A listens to e... */
-  private eventDispatchChain: Set<string> = new Set();
-  /**
-   * Where completed runs are recorded.
-   *
-   * Injected rather than constructed inline so a test can read back what a run
-   * announced, and so the append stays best-effort: a log outage must not be able
-   * to fail a run that already changed data.
-   */
-  private readonly eventLog: EventLog;
-  /** Skill id to owning assistant, built on first event and reused thereafter. */
-  private skillOwners: Map<string, string> | null = null;
+  private readonly config: ToolConfigResolver;
+  private readonly dispatcher: ToolDispatcher;
+  private readonly events: ToolEventDispatcher;
+  private readonly executionRecordStore: ExecutionRecordStore;
 
   constructor(
     toolRegistry?: Map<string, Tool>,
     workspaceManager?: AssistantWorkspaceManager,
     eventLog: EventLog = createInMemoryEventLog(),
+    executionRecordStore: ExecutionRecordStore = createExecutionRecordStore(),
   ) {
     this.toolRegistry = toolRegistry || null;
     this.workspaceManager = workspaceManager || null;
-    this.eventLog = eventLog;
-    this.getTriggerEngine();
+    this.executionRecordStore = executionRecordStore;
+    // Collaborators share the registry / MCP map / override map by reference, so
+    // tools registered after construction stay visible to all of them.
+    const nestedExecutor = this.nestedExecutorCallback();
+    this.config = new ToolConfigResolver(this.pendingCredentialOverrides);
+    this.dispatcher = new ToolDispatcher(this.toolRegistry, this.mcpClients, this.config, nestedExecutor);
+    this.events = new ToolEventDispatcher(this.toolRegistry, eventLog, nestedExecutor);
   }
 
-  private getTriggerEngine(): TriggerExecutionEngine {
-    if (!this.triggerEngine) {
-      // Same Map instance as toolRegistry when present, so tools registered
-      // later are visible without rebuilding the engine.
-      this.triggerEngine = new TriggerExecutionEngine(this.toolRegistry || new Map<string, Tool>());
-      this.triggerEngine.registerConsumer('event', (toolId, trigger) => this.onEventTrigger(toolId, trigger));
-    }
-    return this.triggerEngine;
-  }
-
-  /**
-   * Consumer for `kind: 'event'` triggers. Reached via TriggerExecutionEngine so
-   * the declared trigger metadata (not the raw emit call) decides what runs, and
-   * the engine's validation still applies.
-   */
-  private async onEventTrigger(toolId: string, trigger: SkillTrigger): Promise<void> {
-    const tool = this.toolRegistry?.get(toolId);
-    if (!tool) return;
-    const eventId = trigger.kind === 'event' ? trigger.eventId : undefined;
-    const payload = eventId ? this.recentEventPayloads.get(eventId) : undefined;
-    await this.dispatchEventTrigger(tool, payload);
-  }
-
-  /** Every event id a tool announces on completion. Never empty: a run with no
-   * declared id still announces the derived completion event for its assistant. */
-  private getEmitEventIds(tool: Tool, assistantId?: string): string[] {
-    const declared = declaredEventIds(tool);
-    return declared.length > 0 ? declared : [completionEventId(assistantId ?? '', tool.id)];
-  }
-
-  /**
-   * Every tool that subscribes to `eventId` with a machine-readable `eventId` on
-   * its trigger. Skills that declare `kind: 'event'` with only prose `on:` text
-   * are deliberately excluded: there is no way to match prose to an emit.
-   */
   findDownstreamEventTriggers(eventId: string, emitterId?: string): Tool[] {
-    if (!this.toolRegistry || !eventId) return [];
-    const downstream: Tool[] = [];
-    for (const tool of this.toolRegistry.values()) {
-      // Never route an event back to the Skill that announced it. A self
-      // subscription is a real hazard rather than a theoretical one: it makes
-      // the Skill run a second time for a single user action, which for a
-      // `represent` Skill means sending the message or filing the application
-      // twice.
-      if (emitterId !== undefined && tool.id === emitterId) continue;
-      const triggers = tool.triggers || [];
-      const subscribed = triggers.some(
-        (trigger) => trigger.kind === 'event' && trigger.eventId === eventId,
-      );
-      if (subscribed) downstream.push(tool);
-    }
-    return downstream;
+    return this.events.findDownstreamEventTriggers(eventId, emitterId);
   }
 
-  /**
-   * Run a downstream skill with the upstream result as its input. Resolves
-   * rather than rejects on failure: a downstream skill that breaks must not
-   * fail the upstream one that triggered it.
-   */
-  async dispatchEventTrigger(tool: Tool, upstreamData: unknown, workspaceId?: string): Promise<void> {
-    // Keyed on the tool alone: a nested re-entry of the same Skill is a cycle
-    // whatever ids are involved.
-    const chainKey = tool.id;
-    if (this.eventDispatchChain.has(chainKey)) {
-      logger.warn({ toolId: tool.id }, 'Skipping event dispatch: cycle already in progress');
-      return;
-    }
-
-    this.eventDispatchChain.add(chainKey);
-    try {
-      const result = await this.nestedExecutorCallback()(tool.id, { upstreamData, workspaceId });
-      if (result && result.success === false) {
-        logger.warn(
-          { toolId: tool.id, error: result.error },
-          'Downstream event-triggered skill reported failure',
-        );
-      }
-    } catch (err) {
-      logger.error({ toolId: tool.id, err: err instanceof Error ? err.message : String(err) }, 'Downstream event dispatch threw');
-    } finally {
-      this.eventDispatchChain.delete(chainKey);
-    }
-  }
-
-  /**
-   * Announce a run that did not complete, so a failure is not silent.
-   *
-   * `failed` means the run was attempted and broke. `aborted` means it never got
-   * that far — awaiting confirmation, missing credentials, invalid config. Both
-   * are dispatched to subscribers exactly like a completion, so an Assistant can
-   * react to a Skill that did not deliver rather than discovering it downstream.
-   */
-  private dispatchOutcomeEvent(
-    tool: Tool,
-    status: 'failed' | 'aborted',
-    error: string,
-    workspaceId?: string,
-    assistantId?: string,
-    executionId?: string,
-  ): void {
-    const owningAssistant = this.owningAssistantId(tool, assistantId);
-    const event = buildOutcomeEvent({
-      tool,
-      assistantId: owningAssistant,
-      status,
-      error,
-      ...(executionId ? { executionId } : {}),
-      ...(workspaceId ? { workspaceId } : {}),
-      emittedAt: new Date(),
-    });
-
-    void this.eventLog.append(event).catch((err) => {
-      logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Outcome event log append failed');
-    });
-
-    const downstream = this.findDownstreamEventTriggers(event.id, tool.id);
-    if (downstream.length === 0) {
-      logger.debug({ toolId: tool.id, status, eventId: event.id }, 'No downstream subscribers for outcome event');
-      return;
-    }
-
-    logger.info(
-      { toolId: tool.id, status, eventId: event.id, downstream: downstream.map((t) => t.id) },
-      'Dispatching outcome event to downstream skills',
-    );
-    for (const target of downstream) {
-      void this.dispatchEventTrigger(target, { status, error, skillId: tool.id }, workspaceId);
-    }
-  }
-
-  /**
-   * Announce a completed run and fire every downstream subscriber of each outcome.
-   *
-   * A run announces one event per declared outcome, not one per run. A Skill that
-   * books an appointment and sends a confirmation has two changes, and announcing
-   * only the first leaves the second invisible to everything watching for it. All
-   * events from one run share an `executionId`, so a consumer can tell they came
-   * from a single execution.
-   *
-   * A dry run announces only the derived completion event. It did finish, but the
-   * change its declared ids name did not happen, and announcing that anyway is how
-   * `finance.report.published` came to fire for reports that were never delivered.
-   *
-   * Dispatch is fire-and-forget by design: the upstream result is already resolved
-   * and the caller must not wait on (or inherit failures from) the chain it just
-   * triggered. The same is true of the log write.
-   */
-  private dispatchUpstreamEvents(
-    tool: Tool,
-    output: unknown,
-    workspaceId?: string,
-    assistantId?: string,
-    executionId?: string,
-    input?: Record<string, unknown>,
-    writes?: StoreWrite[],
-  ): void {
-    const owningAssistant = this.owningAssistantId(tool, assistantId);
-    const dryRun = isDryRun(input, output);
-    // `writes` is only ever set on a successful run, so a Skill that wrote records
-    // and then failed announces nothing. A declared id still wins inside
-    // `announcedEventIds`, so curating an event never yields a second, derived one
-    // for the same change.
-    const { ids, rejected } = announcedEventIds(tool, owningAssistant, output, writes);
-    for (const id of rejected) {
-      logger.warn(
-        { toolId: tool.id, eventId: id },
-        'Run reported an emittedEvent the Skill does not declare; dropped so the event graph stays checkable',
-      );
-    }
-
-    const events = buildCompletionEvents({
-      tool,
-      assistantId: owningAssistant,
-      ...(executionId ? { executionId } : {}),
-      ...(workspaceId ? { workspaceId } : {}),
-      data: output,
-      emittedAt: new Date(),
-      derivedOnly: dryRun,
-      // A dry run announces completion only, so it must not narrow to the ids.
-      ...(dryRun ? {} : { ids }),
-    });
-
-    const dispatched = new Set<string>();
-    for (const event of events) {
-      // Kept for the in-process path: a downstream Skill reads its upstream payload
-      // synchronously, right after the upstream finishes.
-      this.recentEventPayloads.set(event.id, output);
-
-      void this.eventLog.append(event).catch((err) => {
-        logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Event log append failed');
-      });
-
-      const downstream = this.findDownstreamEventTriggers(event.id, tool.id);
-      if (downstream.length === 0) {
-        logger.debug({ toolId: tool.id, eventId: event.id }, 'Event emitted with no downstream subscribers');
-        continue;
-      }
-
-      logger.info(
-        { toolId: tool.id, eventId: event.id, downstream: downstream.map((t) => t.id) },
-        'Dispatching event to downstream skills',
-      );
-      for (const target of downstream) {
-        // Two declared ids can share a subscriber; run it once for this execution.
-        if (dispatched.has(target.id)) continue;
-        dispatched.add(target.id);
-        void this.dispatchEventTrigger(target, output, workspaceId);
-      }
-    }
-  }
-
-  /**
-   * The assistant a Skill belongs to, used to namespace its derived event id.
-   *
-   * Ownership, not the assistant that happened to run it: the same Skill can be
-   * executed by the watch runner, a scheduled tick, or a user, and a derived event
-   * id that changed with the caller would be a different event every time. So the
-   * owning workflow is looked up first and the run's assistant id is only a
-   * fallback for a Skill that belongs to none.
-   */
-  private owningAssistantId(tool: Tool, runAssistantId?: string): string {
-    if (!this.skillOwners) {
-      const owners = new Map<string, string>();
-      for (const workflow of allWorkflows) {
-        for (const skill of workflow.skills ?? []) {
-          if (!owners.has(skill.id)) owners.set(skill.id, workflow.assistant.trim().toLowerCase());
-        }
-      }
-      this.skillOwners = owners;
-    }
-    return this.skillOwners.get(tool.id) ?? runAssistantId ?? 'unassigned';
+  dispatchEventTrigger(tool: Tool, upstreamData: unknown, workspaceId?: string): Promise<void> {
+    return this.events.dispatchEventTrigger(tool, upstreamData, workspaceId);
   }
 
   private normalizeAssistantId(assistantId?: string): string {
@@ -568,9 +246,241 @@ export class ToolExecutor {
     }
   }
 
-  async execute(tool: Tool, input: Record<string, unknown>, opts?: { workspaceId?: string; assistantId?: string; context?: Record<string, unknown> }): Promise<ToolExecution> {
-    const executionId = `exec_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+  private normalizeExecutionId(requested?: string | null): string | undefined {
+    if (typeof requested !== 'string') return undefined;
+    const trimmed = requested.trim();
+    if (!trimmed || trimmed.length > 200) return undefined;
+    if (!/^[A-Za-z0-9._:-]+$/.test(trimmed)) return undefined;
+    return trimmed;
+  }
+
+
+  private isCredentialRequiredError(error: unknown): error is CredentialRequiredError & { request: CredentialRequest } {
+    if (error instanceof CredentialRequiredError) return true;
+    if (!error || typeof error !== 'object') return false;
+    const e: any = error;
+    return e.name === 'CredentialRequiredError' || (e.request && Array.isArray(e.request.missingCredentials));
+  }
+
+  private requestedExecutionId(input: Record<string, unknown>, opts?: { executionId?: string; idempotencyKey?: string; requestId?: string; context?: Record<string, unknown> }): string | undefined {
+    const ctx = (opts?.context || {}) as Record<string, unknown>;
+    return this.normalizeExecutionId(
+      opts?.executionId || opts?.idempotencyKey || opts?.requestId ||
+      (input.executionId as string) || (input.idempotencyKey as string) || (input.requestId as string) ||
+      (ctx.executionId as string) || (ctx.idempotencyKey as string) || (ctx.requestId as string)
+    );
+  }
+
+  private isTerminalLifecycle(status?: string): boolean {
+    return status === 'completed' || status === 'failed';
+  }
+
+  private async loadExecutionRecord(executionId: string): Promise<ExecutionRecord | null> {
+    try { return await this.executionRecordStore.get(executionId); } catch (err) {
+      logger.warn({ executionId, err: err instanceof Error ? err.message : String(err) }, 'Execution record load failed');
+      return null;
+    }
+  }
+
+  private async saveExecutionRecord(record: ExecutionRecord): Promise<void> {
+    try {
+      await this.executionRecordStore.save({ ...record, updatedAt: new Date(), version: (record.version || 0) + 1 });
+    } catch (err) {
+      logger.warn({ executionId: record.executionId, err: err instanceof Error ? err.message : String(err) }, 'Execution record save failed');
+    }
+  }
+
+  private executionFromRecord(record: ExecutionRecord): ToolExecution {
+    return {
+      executionId: record.executionId,
+      idempotencyKey: record.idempotencyKey || record.executionId,
+      toolId: record.toolId,
+      toolName: record.toolName,
+      input: record.input || {},
+      output: record.output,
+      error: record.error,
+      status: record.status,
+      workflowState: record.workflowState,
+      startedAt: record.startedAt ? new Date(record.startedAt) : new Date(),
+      completedAt: record.completedAt ? new Date(record.completedAt) : undefined,
+      workspaceId: record.workspaceId,
+      assistantId: record.assistantId,
+      context: record.context,
+      runtimeWorkflow: record.runtimeWorkflow,
+      metadata: record.metadata,
+      reconciliation: record.reconciliation,
+      updatedAt: record.updatedAt ? new Date(record.updatedAt) : undefined,
+    };
+  }
+
+  private mergeExecutionReconciliation(output: unknown, reconciliation?: ExecutionReconciliation): unknown {
+    if (!reconciliation) return output;
+    const out: Record<string, unknown> = (output && typeof output === 'object' && !Array.isArray(output))
+      ? { ...(output as Record<string, unknown>) }
+      : { value: output };
+    const existing = (out.reconciliation && typeof out.reconciliation === 'object' && !Array.isArray(out.reconciliation))
+      ? (out.reconciliation as Record<string, unknown>)
+      : {};
+    out.reconciliation = { ...existing, ...reconciliation };
+    if (reconciliation.idempotencyKey && out.idempotencyKey === undefined) out.idempotencyKey = reconciliation.idempotencyKey;
+    if (reconciliation.providerRequestId && out.providerRequestId === undefined) out.providerRequestId = reconciliation.providerRequestId;
+    if (reconciliation.outcomeKnown !== undefined && out.outcomeKnown === undefined) out.outcomeKnown = reconciliation.outcomeKnown;
+    return out;
+  }
+
+  async getExecutionRecord(executionId: string): Promise<ExecutionRecord | null> {
+    const key = this.normalizeExecutionId(executionId) || executionId;
+    const stored = await this.loadExecutionRecord(key);
+    if (stored) {
+      if (stored.status === 'pending_credentials' && stored.pendingCredentialRequest) {
+        this.restorePendingCredentialRequest(stored);
+      }
+      return stored;
+    }
+    const pending = this.pendingCredentialRequests.get(key);
+    if (pending) {
+      return {
+        executionId: key,
+        idempotencyKey: key,
+        toolId: pending.toolId,
+        toolName: pending.toolName,
+        input: pending.input,
+        status: 'pending_credentials',
+        startedAt: new Date(),
+        pendingCredentialRequest: pending.request,
+        context: pending.opts?.context,
+        workspaceId: pending.opts?.workspaceId,
+        assistantId: pending.opts?.assistantId,
+        version: 1,
+      };
+    }
+    return null;
+  }
+
+  private restorePendingCredentialRequest(record: ExecutionRecord): void {
+    if (!record.pendingCredentialRequest) return;
+    if (this.pendingCredentialRequests.has(record.executionId)) return;
+    const tool = this.resolveNestedTool(record.toolId) || ({ id: record.toolId, name: record.toolName || record.toolId } as Tool);
+    this.pendingCredentialRequests.set(record.executionId, {
+      executionId: record.executionId,
+      toolId: record.toolId,
+      toolName: record.toolName || tool.name || record.toolId,
+      tool,
+      input: record.input || {},
+      request: record.pendingCredentialRequest,
+      credentials: {},
+      opts: { workspaceId: record.workspaceId, assistantId: record.assistantId, context: record.context },
+    });
+  }
+
+  private providerCapability(tool: Tool): 'email' | 'webhook' | 'api_client' | 'vendor' | 'unknown' {
+    const key = (tool.manifest as any)?.executor;
+    if (key === 'email') return 'email';
+    if (key === 'webhook') return 'webhook';
+    if (key === 'api_client') return 'api_client';
+    if (key === 'vendor') return 'vendor';
+    const name = (tool.name || '').toLowerCase();
+    if (name.includes('email')) return 'email';
+    if (name.includes('webhook')) return 'webhook';
+    if (name.includes('api')) return 'api_client';
+    return 'unknown';
+  }
+
+  private async reconcileExternalExecution(tool: Tool, input: Record<string, unknown>, idempotencyKey: string, prior?: ExecutionRecord | null): Promise<ExecutionReconciliation | null> {
+    const capability = this.providerCapability(tool);
+    if (capability === 'unknown') return null;
+    const base: ExecutionReconciliation = {
+      idempotencyKey,
+      provider: capability,
+      lookupAttempted: false,
+      outcomeKnown: false,
+      note: 'No provider outcome lookup available for this executor; do not retry automatically when a prior response was lost.',
+    };
+    if (capability === 'email') {
+      // SMTP/nodemailer has no portable post-send status lookup by client key.
+      // Nodemailer accepts `headers` but providers vary; callers should use a provider-specific integration for delivery tracking.
+      return {
+        ...base,
+        note: 'SMTP email delivery outcome cannot be determined by tool-executor after a lost response. Provider accepted requests may or may not have been delivered; use a provider-specific message/status API and pass providerRequestId when available. Automatic retry was avoided for repeated idempotent requests.',
+      };
+    }
+    if (capability === 'webhook' || capability === 'api_client' || capability === 'vendor') {
+      // Generic HTTP/provider hooks: support caller-supplied idempotency headers/keys and explicit status lookup URL when available.
+      const lookupUrl = (input.reconciliationLookupUrl || input.statusLookupUrl || input.lookupUrl) as string | undefined;
+      if (lookupUrl && typeof lookupUrl === 'string') {
+        try {
+          const res = await fetch(lookupUrl, { method: 'GET', headers: { 'Accept': 'application/json' } });
+          const text = await res.text().catch(() => '');
+          let body: any = text;
+          try { body = text ? JSON.parse(text) : text; } catch {}
+          return {
+            ...base,
+            lookupAttempted: true,
+            lookupStatus: String(res.status),
+            outcomeKnown: res.ok,
+            lookupOutcome: typeof body === 'string' ? body.slice(0, 500) : JSON.stringify(body).slice(0, 500),
+            note: res.ok ? 'Provider/status lookup completed.' : 'Provider/status lookup attempted but did not confirm outcome.',
+          };
+        } catch (err) {
+          return { ...base, lookupAttempted: true, outcomeKnown: false, note: `Provider/status lookup failed: ${err instanceof Error ? err.message : String(err)}` };
+        }
+      }
+      return {
+        ...base,
+        note: prior ? 'Prior execution exists but provider outcome is unknown (no lookup URL/capability configured). Do not assume success or blindly retry.' : 'Provider may accept idempotency headers when supplied, but no outcome lookup was configured. If response is lost, outcome may be unknown.',
+      };
+    }
+    return base;
+  }
+
+
+  async execute(tool: Tool, input: Record<string, unknown>, opts?: { workspaceId?: string; assistantId?: string; context?: Record<string, unknown>; executionId?: string; idempotencyKey?: string; requestId?: string; [key: string]: unknown }): Promise<ToolExecution> {
+    const requestedId = this.requestedExecutionId(input, opts);
+    const executionId = requestedId || `exec_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const startedAt = new Date();
+
+    if (requestedId) {
+      const existing = await this.loadExecutionRecord(executionId);
+      if (existing) {
+        if (existing.status === 'in_progress' && !(opts as any)?.resumePending) {
+          return this.executionFromRecord(existing);
+        }
+        if (this.isTerminalLifecycle(existing.status)) {
+          return this.executionFromRecord({
+            ...existing,
+            reconciliation: {
+              ...(existing.reconciliation || {}),
+              idempotencyKey: executionId,
+              duplicatePrevented: true,
+              outcomeKnown: existing.reconciliation?.outcomeKnown ?? true,
+              note: existing.reconciliation?.note || 'Returned existing execution record for repeated idempotent request.',
+            },
+          });
+        }
+        if (existing.status === 'pending_credentials' && existing.pendingCredentialRequest) {
+          this.restorePendingCredentialRequest(existing);
+          return this.executionFromRecord(existing);
+        }
+      }
+      const reconciliation = await this.reconcileExternalExecution(tool, input, executionId, existing);
+      (opts as any).__reconciliation = reconciliation;
+    }
+
+    await this.saveExecutionRecord({
+      executionId,
+      idempotencyKey: executionId,
+      toolId: tool.id,
+      toolName: tool.name,
+      input,
+      status: 'in_progress',
+      startedAt,
+      workspaceId: opts?.workspaceId,
+      assistantId: opts?.assistantId,
+      context: opts?.context,
+      reconciliation: (opts as any)?.__reconciliation,
+      version: 0,
+    });
 
     if (opts?.workspaceId || opts?.assistantId || opts?.context) {
       this.executionContexts.set(executionId, {
@@ -584,35 +494,35 @@ export class ToolExecutor {
     if (workspace.workspaceId) opts = { ...opts, workspaceId: workspace.workspaceId };
     const workflow = workspace.workflow;
 
-    logger.info({ executionId, toolId: tool.id, toolName: tool.name, toolType: tool.type, workspaceId: opts?.workspaceId, assistantId: opts?.assistantId }, 'Tool execution started');
+    logger.info({ executionId, idempotencyKey: executionId, toolId: tool.id, toolName: tool.name, toolType: tool.type, workspaceId: opts?.workspaceId, assistantId: opts?.assistantId }, 'Tool execution started');
 
     const secretValues: string[] = [];
     try {
       this.enforceConfirmation(tool, input, executionId);
       this.validateSameContext(tool, input);
-      const configResult = await this.validateConfigSchema(tool, input, executionId);
+      const configResult = await this.config.validateConfigSchema(tool, input, executionId);
       if (configResult) {
-        this.dispatchOutcomeEvent(
+        this.events.dispatchOutcomeEvent(
           tool, 'aborted', 'invalid or incomplete configuration', opts?.workspaceId, opts?.assistantId, executionId,
         );
         return configResult;
       }
-      const { resolved, sources } = await this.resolveCredentials(tool, input);
-      const hydratedInput = await this.hydrateSecretInputs(tool, input, secretValues);
-      const rawOutput = await this.dispatch(tool, hydratedInput, { resolved, sources });
-      const storedOutput = await this.storeSecretOutputs(tool, rawOutput, opts?.context?.tenantId, secretValues);
+      const { resolved, sources } = await this.config.resolveCredentials(tool, input, executionId);
+      const hydratedInput = await this.config.hydrateSecretInputs(tool, { ...input, executionId, idempotencyKey: executionId }, secretValues);
+      const rawOutput = await this.dispatcher.dispatch(tool, hydratedInput, { resolved, sources });
+      const storedOutput = await this.config.storeSecretOutputs(tool, rawOutput, opts?.context?.tenantId, secretValues);
       const output = redactSecrets(storedOutput, secretValues) as typeof rawOutput;
       this.pendingCredentialOverrides.delete(tool.id);
       const executionFailed = Boolean(output && output.error !== undefined);
       // `dispatch` reports failure as `{ error }` rather than throwing, so a
       // tool that "succeeded" with an error payload must not emit its event.
       if (!executionFailed) {
-        this.dispatchUpstreamEvents(
+        this.events.dispatchUpstreamEvents(
           tool, output, opts?.workspaceId, opts?.assistantId, executionId, input,
           (output as { storeWrites?: StoreWrite[] } | undefined)?.storeWrites,
         );
       } else {
-        this.dispatchOutcomeEvent(
+        this.events.dispatchOutcomeEvent(
           tool, 'failed', String(output.error), opts?.workspaceId, opts?.assistantId, executionId,
         );
       }
@@ -624,12 +534,24 @@ export class ToolExecutor {
       );
       if (!executionFailed) this.transitionTo(executionId, 'executed');
 
+      const executorError = typeof output === 'object' && output !== null
+        ? (output as { output?: { error?: string } })?.output?.error
+        : undefined;
+
+      const reconciliation = (opts as any)?.__reconciliation as ExecutionReconciliation | undefined;
+      const mergedOutput = this.mergeExecutionReconciliation(output, reconciliation);
       const result: ToolExecution = {
         executionId,
+        idempotencyKey: executionId,
         toolId: tool.id,
+        toolName: tool.name,
         input,
-        output,
-        ...(executionFailed ? { error: String(output?.error) } : {}),
+        output: mergedOutput as any,
+        ...(executionFailed
+          ? { error: String((mergedOutput as any)?.error ?? output?.error) }
+          : executorError !== undefined
+            ? { error: String(executorError) }
+            : {}),
         status: executionFailed ? 'failed' : 'completed',
         workflowState: this.getWorkflowState(executionId),
         startedAt,
@@ -644,12 +566,14 @@ export class ToolExecutor {
           assistantId: opts?.assistantId,
           context: opts?.context,
         }) : undefined,
+        reconciliation,
       };
       this.recordWorkspaceExecution(result, tool, opts, workflow);
+      await this.saveExecutionRecord({ ...(result as any), version: 0, pendingCredentialRequest: undefined });
       return result;
     } catch (error) {
       if (error instanceof ConfirmationRequiredError) {
-        this.dispatchOutcomeEvent(
+        this.events.dispatchOutcomeEvent(
           tool, 'aborted', 'awaiting user confirmation', opts?.workspaceId, opts?.assistantId, executionId,
         );
         throw error;
@@ -657,7 +581,7 @@ export class ToolExecutor {
 
       const completedAt = new Date();
       const errorMessage = String(redactSecrets(error instanceof Error ? error.message : 'Unknown error', secretValues));
-      this.dispatchOutcomeEvent(
+      this.events.dispatchOutcomeEvent(
         tool, 'failed', errorMessage, opts?.workspaceId, opts?.assistantId, executionId,
       );
 
@@ -665,7 +589,9 @@ export class ToolExecutor {
 
       const result: ToolExecution = {
         executionId,
+        idempotencyKey: executionId,
         toolId: tool.id,
+        toolName: tool.name,
         input,
         error: errorMessage,
         status: 'failed',
@@ -682,15 +608,55 @@ export class ToolExecutor {
           assistantId: opts?.assistantId,
           context: opts?.context,
         }) : undefined,
+        reconciliation: (opts as any)?.__reconciliation,
       };
       this.recordWorkspaceExecution(result, tool, opts, workflow);
+      await this.saveExecutionRecord({ ...(result as any), version: 0, pendingCredentialRequest: undefined });
       return result;
     }
   }
 
-  async executeOrRequestCredentials(tool: Tool, input: Record<string, unknown>, providedCredentials?: Record<string, string>, opts?: { workspaceId?: string; assistantId?: string; context?: Record<string, unknown> }): Promise<ToolExecution | CredentialRequiredError> {
-    const executionId = `exec_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  async executeOrRequestCredentials(tool: Tool, input: Record<string, unknown>, providedCredentials?: Record<string, string>, opts?: { workspaceId?: string; assistantId?: string; context?: Record<string, unknown>; executionId?: string; idempotencyKey?: string; requestId?: string; [key: string]: unknown }): Promise<ToolExecution | CredentialRequiredError> {
+    const requestedId = this.requestedExecutionId(input, opts);
+    const executionId = requestedId || `exec_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const startedAt = new Date();
+
+    if (requestedId) {
+      const existing = await this.loadExecutionRecord(executionId);
+      if (existing?.status === 'in_progress' && !(opts as any)?.resumePending) return this.executionFromRecord(existing);
+      if (existing && this.isTerminalLifecycle(existing.status)) {
+        const reconciliation = { ...(existing.reconciliation || {}), idempotencyKey: executionId, duplicatePrevented: true, outcomeKnown: existing.reconciliation?.outcomeKnown ?? true, note: existing.reconciliation?.note || 'Returned existing execution record for repeated idempotent request.' };
+        return this.executionFromRecord({ ...existing, reconciliation });
+      }
+      if (existing?.status === 'pending_credentials' && existing.pendingCredentialRequest && !(providedCredentials && Object.keys(providedCredentials).length > 0)) {
+        this.restorePendingCredentialRequest(existing);
+        return new CredentialRequiredError(existing.pendingCredentialRequest);
+      }
+      if (existing?.status === 'pending_credentials' && providedCredentials && Object.keys(providedCredentials).length > 0) {
+        this.restorePendingCredentialRequest(existing);
+        this.pendingCredentialOverrides.set(tool.id, providedCredentials);
+        const resumed = await this.submitCredentials(executionId, { credentials: providedCredentials });
+        if (this.isCredentialRequiredError(resumed)) return resumed instanceof CredentialRequiredError ? resumed : new CredentialRequiredError((resumed as any).request);
+        return resumed;
+      }
+      const reconciliation = await this.reconcileExternalExecution(tool, input, executionId, existing);
+      (opts as any) = { ...(opts || {}), __reconciliation: reconciliation };
+    }
+
+    await this.saveExecutionRecord({
+      executionId,
+      idempotencyKey: executionId,
+      toolId: tool.id,
+      toolName: tool.name,
+      input,
+      status: 'in_progress',
+      startedAt,
+      workspaceId: opts?.workspaceId,
+      assistantId: opts?.assistantId,
+      context: opts?.context,
+      reconciliation: (opts as any)?.__reconciliation,
+      version: 0,
+    });
 
     if (opts?.workspaceId || opts?.assistantId || opts?.context) {
       this.executionContexts.set(executionId, {
@@ -704,7 +670,7 @@ export class ToolExecutor {
     if (workspace.workspaceId) opts = { ...opts, workspaceId: workspace.workspaceId };
     const workflow = workspace.workflow;
 
-    logger.info({ executionId, toolId: tool.id, toolName: tool.name, toolType: tool.type, workspaceId: opts?.workspaceId, assistantId: opts?.assistantId }, 'Tool execution started');
+    logger.info({ executionId, idempotencyKey: executionId, toolId: tool.id, toolName: tool.name, toolType: tool.type, workspaceId: opts?.workspaceId, assistantId: opts?.assistantId }, 'Tool execution started');
 
     if (providedCredentials && Object.keys(providedCredentials).length > 0) {
       this.pendingCredentialOverrides.set(tool.id, providedCredentials);
@@ -714,29 +680,29 @@ export class ToolExecutor {
     try {
       this.enforceConfirmation(tool, input, executionId);
       this.validateSameContext(tool, input);
-      const configResult = await this.validateConfigSchema(tool, input, executionId);
+      const configResult = await this.config.validateConfigSchema(tool, input, executionId);
       if (configResult) {
-        this.dispatchOutcomeEvent(
+        this.events.dispatchOutcomeEvent(
           tool, 'aborted', 'invalid or incomplete configuration', opts?.workspaceId, opts?.assistantId, executionId,
         );
         return configResult;
       }
-      const { resolved, sources } = await this.resolveCredentials(tool, input);
-      const hydratedInput = await this.hydrateSecretInputs(tool, input, secretValues);
-      const rawOutput = await this.dispatch(tool, hydratedInput, { resolved, sources });
-      const storedOutput = await this.storeSecretOutputs(tool, rawOutput, opts?.context?.tenantId, secretValues);
+      const { resolved, sources } = await this.config.resolveCredentials(tool, input, executionId);
+      const hydratedInput = await this.config.hydrateSecretInputs(tool, { ...input, executionId, idempotencyKey: executionId }, secretValues);
+      const rawOutput = await this.dispatcher.dispatch(tool, hydratedInput, { resolved, sources });
+      const storedOutput = await this.config.storeSecretOutputs(tool, rawOutput, opts?.context?.tenantId, secretValues);
       const output = redactSecrets(storedOutput, secretValues) as typeof rawOutput;
       this.pendingCredentialOverrides.delete(tool.id);
       const executionFailed = Boolean(output && output.error !== undefined);
       // `dispatch` reports failure as `{ error }` rather than throwing, so a
       // tool that "succeeded" with an error payload must not emit its event.
       if (!executionFailed) {
-        this.dispatchUpstreamEvents(
+        this.events.dispatchUpstreamEvents(
           tool, output, opts?.workspaceId, opts?.assistantId, executionId, input,
           (output as { storeWrites?: StoreWrite[] } | undefined)?.storeWrites,
         );
       } else {
-        this.dispatchOutcomeEvent(
+        this.events.dispatchOutcomeEvent(
           tool, 'failed', String(output.error), opts?.workspaceId, opts?.assistantId, executionId,
         );
       }
@@ -748,12 +714,24 @@ export class ToolExecutor {
       );
       if (!executionFailed) this.transitionTo(executionId, 'executed');
 
+      const executorError = typeof output === 'object' && output !== null
+        ? (output as { output?: { error?: string } })?.output?.error
+        : undefined;
+
+      const reconciliation = (opts as any)?.__reconciliation as ExecutionReconciliation | undefined;
+      const mergedOutput = this.mergeExecutionReconciliation(output, reconciliation);
       const result: ToolExecution = {
         executionId,
+        idempotencyKey: executionId,
         toolId: tool.id,
+        toolName: tool.name,
         input,
-        output,
-        ...(executionFailed ? { error: String(output?.error) } : {}),
+        output: mergedOutput as any,
+        ...(executionFailed
+          ? { error: String((mergedOutput as any)?.error ?? output?.error) }
+          : executorError !== undefined
+            ? { error: String(executorError) }
+            : {}),
         status: executionFailed ? 'failed' : 'completed',
         workflowState: this.getWorkflowState(executionId),
         startedAt,
@@ -768,32 +746,53 @@ export class ToolExecutor {
           assistantId: opts?.assistantId,
           context: opts?.context,
         }) : undefined,
+        reconciliation,
       };
       this.recordWorkspaceExecution(result, tool, opts, workflow);
+      await this.saveExecutionRecord({ ...(result as any), version: 0, pendingCredentialRequest: undefined });
       return result;
     } catch (error) {
       const completedAt = new Date();
 
-      if (error instanceof CredentialRequiredError) {
-        this.dispatchOutcomeEvent(
+      if (this.isCredentialRequiredError(error)) {
+        this.events.dispatchOutcomeEvent(
           tool, 'aborted', 'missing credentials', opts?.workspaceId, opts?.assistantId, executionId,
         );
-        (error.request as CredentialRequest).workspaceId = opts?.workspaceId;
-        (error.request as CredentialRequest).assistantId = opts?.assistantId;
-        (error.request as CredentialRequest).context = opts?.context;
-        this.pendingCredentialRequests.set(error.request.executionId, {
-          executionId: error.request.executionId,
-          toolId: error.request.toolId,
-          toolName: error.request.toolName,
+        const request = (error as any).request as CredentialRequest;
+        request.executionId = executionId;
+        request.idempotencyKey = executionId;
+        request.workspaceId = opts?.workspaceId;
+        request.assistantId = opts?.assistantId;
+        request.context = opts?.context;
+        this.pendingCredentialRequests.set(executionId, {
+          executionId,
+          toolId: tool.id,
+          toolName: tool.name,
           tool,
           input,
-          request: error.request,
-          credentials: error.request.missingCredentials.reduce((acc, mc) => ({ ...acc, [mc.key]: undefined }), {}),
+          request,
+          credentials: request.missingCredentials.reduce((acc, mc) => ({ ...acc, [mc.key]: undefined }), {}),
+          opts,
         });
-        return error;
+        await this.saveExecutionRecord({
+          executionId,
+          idempotencyKey: executionId,
+          toolId: tool.id,
+          toolName: tool.name,
+          input,
+          status: 'pending_credentials',
+          startedAt,
+          workspaceId: opts?.workspaceId,
+          assistantId: opts?.assistantId,
+          context: opts?.context,
+          pendingCredentialRequest: request,
+          reconciliation: (opts as any)?.__reconciliation,
+          version: 0,
+        });
+        return new CredentialRequiredError(request);
       }
       if (error instanceof ConfirmationRequiredError) {
-        this.dispatchOutcomeEvent(
+        this.events.dispatchOutcomeEvent(
           tool, 'aborted', 'awaiting user confirmation', opts?.workspaceId, opts?.assistantId, executionId,
         );
         this.recordWorkspaceApproval(tool, input, executionId, opts);
@@ -801,14 +800,16 @@ export class ToolExecutor {
       }
 
       const errorMessage = String(redactSecrets(error instanceof Error ? error.message : 'Unknown error', secretValues));
-      this.dispatchOutcomeEvent(
+      this.events.dispatchOutcomeEvent(
         tool, 'failed', errorMessage, opts?.workspaceId, opts?.assistantId, executionId,
       );
       logger.error({ executionId, toolId: tool.id, error: errorMessage }, 'Tool execution failed');
 
       const result: ToolExecution = {
         executionId,
+        idempotencyKey: executionId,
         toolId: tool.id,
+        toolName: tool.name,
         input,
         error: errorMessage,
         status: 'failed',
@@ -825,61 +826,21 @@ export class ToolExecutor {
           assistantId: opts?.assistantId,
           context: opts?.context,
         }) : undefined,
+        reconciliation: (opts as any)?.__reconciliation,
       };
       this.recordWorkspaceExecution(result, tool, opts, workflow);
+      await this.saveExecutionRecord({ ...(result as any), version: 0, pendingCredentialRequest: undefined });
       return result;
     }
   }
 
-async generatePlugin(request: { description: string; requirements?: string[]; context?: Record<string, unknown> }): Promise<{ success: boolean; tool?: Tool; error?: string }> {
-return this.pluginGenerator.generate(request);
-}
+  async generatePlugin(request: { description: string; requirements?: string[]; context?: Record<string, unknown> }): Promise<{ success: boolean; tool?: Tool; error?: string }> {
+    return this.dispatcher.generatePlugin(request);
+  }
 
-async healCodeTool(tool: Tool, input: Record<string, unknown>, errorMessage: string): Promise<{ success: boolean; fixedSourceCode?: string; error?: string }> {
-const manifest = tool.manifest as Record<string, unknown> | undefined;
-const sourceCode = (manifest?.sourceCode as string) || '';
-if (!sourceCode) {
-return { success: false, error: 'No sourceCode to heal' };
-}
-
-const userPrompt = `ERROR: ${errorMessage}\n\nINPUT: ${JSON.stringify(input, null, 2)}\n\nCODE:\n${sourceCode}\n\nProvide the corrected code.`;
-
-try {
-const response = await fetch(`${BRAIN_URL}/api/brain/complete`, {
-method: 'POST',
-headers: { 'Content-Type': 'application/json' },
-body: JSON.stringify({
-prompt: userPrompt,
-systemPrompt: HEALING_SYSTEM_PROMPT,
-options: { temperature: 0.2, maxTokens: 4096 },
-}),
-});
-
-if (!response.ok) {
-const text = await response.text();
-return { success: false, error: `Brain returned ${response.status}: ${text.slice(0, 200)}` };
-}
-
-const data = await response.json() as { content: string };
-const jsonMatch = data.content.match(/\{[\s\S]*\}/);
-if (!jsonMatch) {
-return { success: false, error: 'LLM response did not contain valid JSON' };
-}
-
-const parsed = JSON.parse(jsonMatch[0]);
-const fixedSourceCode = parsed.sourceCode as string;
-if (!fixedSourceCode || typeof fixedSourceCode !== 'string') {
-return { success: false, error: 'LLM response missing sourceCode' };
-}
-
-logger.info({ toolId: tool.id, healing: true }, 'Code tool healed by Brain');
-return { success: true, fixedSourceCode };
-} catch (err) {
-const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-logger.error({ toolId: tool.id, error: errorMessage }, 'Code healing failed');
-return { success: false, error: errorMessage };
-}
-}
+  async healCodeTool(tool: Tool, input: Record<string, unknown>, errorMessage: string): Promise<{ success: boolean; fixedSourceCode?: string; error?: string }> {
+    return this.dispatcher.healCodeTool(tool, input, errorMessage);
+  }
 
 registerMCPServer(config: MCPServerConfig): void {
 this.mcpServerConfigs.set(config.id, config);
@@ -900,16 +861,27 @@ this.mcpClients.delete(id);
 this.mcpServerConfigs.delete(id);
 }
 
-getCredentialRequest(executionId: string): CredentialRequest | undefined {
-const pending = this.pendingCredentialRequests.get(executionId);
-return pending?.request;
+async getCredentialRequest(executionId: string): Promise<CredentialRequest | undefined> {
+  const key = this.normalizeExecutionId(executionId) || executionId;
+  const pending = this.pendingCredentialRequests.get(key);
+  if (pending?.request) return pending.request;
+  const record = await this.getExecutionRecord(key);
+  return record?.pendingCredentialRequest;
 }
 
-async submitCredentials(executionId: string, submission: { credentials: Record<string, string>; storeInVault?: boolean; vaultSecretId?: string }): Promise<ToolExecution | CredentialRequiredError> {
-const pending = this.pendingCredentialRequests.get(executionId);
-if (!pending) {
-throw new Error(`No pending credential request for execution ${executionId}`);
-}
+async submitCredentials(executionId: string, submission: { credentials: Record<string, string>; storeInVault?: boolean; vaultSecretId?: string; idempotencyKey?: string }): Promise<ToolExecution | CredentialRequiredError> {
+  const key = this.normalizeExecutionId(executionId) || executionId;
+  let pending = this.pendingCredentialRequests.get(key);
+  if (!pending) {
+    const record = await this.getExecutionRecord(key);
+    if (record?.pendingCredentialRequest) this.restorePendingCredentialRequest(record);
+    pending = this.pendingCredentialRequests.get(key);
+  }
+  if (!pending) {
+    const existing = await this.getExecutionRecord(key);
+    if (existing && this.isTerminalLifecycle(existing.status)) return this.executionFromRecord(existing);
+    throw new Error(`No pending credential request for execution ${key}`);
+  }
 
 const resolvedCredentials: Record<string, string> = {};
 for (const [key, submittedValue] of Object.entries(submission.credentials)) {
@@ -960,19 +932,39 @@ logger.warn({ executionId, err: err instanceof Error ? err.message : String(err)
 }
 }
 
-this.pendingCredentialRequests.delete(executionId);
-
-return this.executeOrRequestCredentials(pending.tool, pending.input);
+  this.pendingCredentialRequests.delete(key);
+  await this.saveExecutionRecord({
+    executionId: key,
+    idempotencyKey: key,
+    toolId: pending.toolId,
+    toolName: pending.toolName,
+    input: pending.input,
+    status: 'in_progress',
+    startedAt: new Date(),
+    workspaceId: pending.opts?.workspaceId,
+    assistantId: pending.opts?.assistantId,
+    context: pending.opts?.context,
+    version: 0,
+  });
+  return this.executeOrRequestCredentials(pending.tool, pending.input, undefined, { ...(pending.opts || {}), executionId: key, idempotencyKey: key, resumePending: true });
 }
 
 async retryExecution(executionId: string): Promise<ToolExecution | CredentialRequiredError> {
-const pending = this.pendingCredentialRequests.get(executionId);
-if (!pending) {
-throw new Error(`No pending execution to retry for ${executionId}`);
-}
-
-this.pendingCredentialRequests.delete(executionId);
-return this.executeOrRequestCredentials(pending.tool, pending.input);
+  const key = this.normalizeExecutionId(executionId) || executionId;
+  let pending = this.pendingCredentialRequests.get(key);
+  if (!pending) {
+    const record = await this.getExecutionRecord(key);
+    if (record?.pendingCredentialRequest) this.restorePendingCredentialRequest(record);
+    pending = this.pendingCredentialRequests.get(key);
+  }
+  if (!pending) throw new Error(`No pending execution to retry for ${key}`);
+  this.pendingCredentialRequests.delete(key);
+  await this.saveExecutionRecord({
+    executionId: key, idempotencyKey: key, toolId: pending.toolId, toolName: pending.toolName, input: pending.input,
+    status: 'in_progress', startedAt: new Date(), workspaceId: pending.opts?.workspaceId, assistantId: pending.opts?.assistantId,
+    context: pending.opts?.context, version: 0,
+  });
+  return this.executeOrRequestCredentials(pending.tool, pending.input, undefined, { ...(pending.opts || {}), executionId: key, idempotencyKey: key, resumePending: true });
 }
 
   private enforceConfirmation(tool: Tool, input: Record<string, unknown>, executionId: string): void {
@@ -1229,11 +1221,12 @@ return this.executeOrRequestCredentials(pending.tool, pending.input);
       this.nestedExecutionDepth++;
       try {
         const result = await this.executeOrRequestCredentials(callee, calleeInput);
-        if (result instanceof CredentialRequiredError) {
+        if (this.isCredentialRequiredError(result)) {
           return { success: false, error: `Credentials required for nested tool: ${callee.name}` };
         }
-        if (result.status === 'completed') {
-          const output = result.output;
+        const execResult = result as ToolExecution;
+        if (execResult.status === 'completed') {
+          const output = execResult.output;
           if (output && typeof output.output === 'string') {
             try {
               const parsed = JSON.parse(output.output);
@@ -1246,12 +1239,12 @@ return this.executeOrRequestCredentials(pending.tool, pending.input);
           }
           return normalizeNestedPayload(output);
         }
-        if (result.status === 'failed') {
-          return { success: false, error: result.error || 'Nested tool execution failed' };
+        if (execResult.status === 'failed') {
+          return { success: false, error: execResult.error || 'Nested tool execution failed' };
         }
-        return { success: false, error: `Nested tool execution returned unexpected status: ${result.status}` };
+        return { success: false, error: `Nested tool execution returned unexpected status: ${execResult.status}` };
       } catch (error) {
-        if (error instanceof CredentialRequiredError) {
+        if (this.isCredentialRequiredError(error)) {
           return { success: false, error: `Credentials required for nested tool: ${callee.name}` };
         }
         if (error instanceof ConfirmationRequiredError) {
@@ -1274,208 +1267,6 @@ return this.executeOrRequestCredentials(pending.tool, pending.input);
       if (tool.name === toolId) return tool;
     }
     return undefined;
-  }
-
-  private hasValue(value: unknown): boolean {
-    return value !== undefined && value !== null && value !== '';
-  }
-
-  private async tryResolveFromVault(tool: Tool, field: string, input?: Record<string, unknown>): Promise<unknown> {
-    try {
-      const tenantId = (tool as any)?.tenantId || (input as any)?.tenantId || 'system';
-      const secretName = `tool:${tool.id}:${field}`;
-      const vaultUrl = process.env.VAULT_URL || 'http://vault:4000';
-      try {
-        const res = await fetch(`${vaultUrl}/api/vault/secrets/name/${encodeURIComponent(secretName)}/decrypt?tenantId=${encodeURIComponent(tenantId)}`);
-        if (res.ok) {
-          const data = await res.json() as { plaintext?: string };
-          if (data.plaintext && data.plaintext.trim().length > 0) {
-            return data.plaintext;
-          }
-        } else if (res.status === 404) {
-          // Try to ensure/create empty secret
-          try {
-            await fetch(`${vaultUrl}/api/vault/secrets/ensure`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ name: secretName, plaintext: '', tenantId }),
-            });
-          } catch (err) {
-            logger.warn({ err, toolId: tool.id, field }, 'Failed to ensure secret for tool');
-          }
-        }
-      } catch (err) {
-        logger.warn({ err, toolId: tool.id, field }, 'Failed to resolve tool secret from vault');
-      }
-    } catch (err) {
-      logger.warn({ err, toolId: tool.id, field }, 'Failed to resolve tool secret from vault');
-    }
-    return undefined;
-  }
-
-  private isCredentialField(field: string): boolean {
-    return ['token', 'accessToken', 'apiKey', 'api_key', 'username', 'password', 'secret', 'clientSecret'].includes(field);
-  }
-
-  private getNestedValue(config: Record<string, unknown> | undefined, path: string): unknown {
-    return path.split('.').reduce<unknown>((value, key) => {
-      if (!value || typeof value !== 'object') return undefined;
-      return (value as Record<string, unknown>)[key];
-    }, config);
-  }
-
-  private async isConfigured(tool: Tool, field: string, input: Record<string, unknown>): Promise<boolean> {
-    if (field === 'confirmBeforeSend') return true;
-
-    const manifest = tool.manifest as Record<string, unknown> | undefined;
-    const externalConfig = tool.externalConfig as Record<string, unknown> | undefined;
-    const manifestConfig = manifest?.config as Record<string, unknown> | undefined;
-    const directValue = input[field] ?? externalConfig?.[field] ?? manifestConfig?.[field] ?? manifest?.[field];
-    if (this.hasValue(directValue)) return true;
-
-    // Try to resolve from vault using tool schema variable name
-    const vaultValue = await this.tryResolveFromVault(tool, field, input);
-    if (this.hasValue(vaultValue)) {
-      (input as any)[field] = vaultValue;
-      return true;
-    }
-
-    if (field === 'baseUrl' || field === 'endpoint' || field === 'endpointUrl') {
-      const endpoint = manifest?.endpoint as Record<string, unknown> | undefined;
-      // The endpoint config field is named by the Skill, so it is resolved from
-      // configuration rather than guessed from an environment variable name.
-      const endpointConfigKey = manifest?.endpointConfigKey;
-      const configEndpoint = typeof endpointConfigKey === 'string'
-        ? this.getNestedValue(externalConfig, endpointConfigKey)
-        : undefined;
-      const val = this.hasValue(endpoint?.url)
-        || this.hasValue(endpoint?.path)
-        || this.hasValue(configEndpoint)
-        || this.hasValue(input.endpointUrl)
-        || this.hasValue(input.baseUrl);
-      if (val) return true;
-      const vaultValue2 = await this.tryResolveFromVault(tool, field, input);
-      if (this.hasValue(vaultValue2)) {
-        (input as any)[field] = vaultValue2;
-        return true;
-      }
-      return false;
-    }
-
-    if (this.isCredentialField(field)) {
-      const credentialSource = manifest?.credentialSource as Record<string, { envVar?: string; configKey?: string; vaultSecretId?: string }> | undefined;
-      const source = credentialSource?.[field];
-      // An `envVar` credential source is a deliberate deployment-level binding and
-      // is still honoured; a config field is not backed by a guessed env var name.
-      const envValue = source?.envVar ? process.env[source.envVar] : undefined;
-      const configValue = source?.configKey ? this.getNestedValue(externalConfig, source.configKey) : undefined;
-      if (this.hasValue(envValue) || this.hasValue(configValue)) return true;
-      const vaultValue3 = await this.tryResolveFromVault(tool, field, input);
-      if (this.hasValue(vaultValue3)) {
-        (input as any)[field] = vaultValue3;
-        return true;
-      }
-      return false;
-    }
-
-    // No environment fallback: a required config field counts as configured only
-    // when it is actually present in input, the Skill's external configuration,
-    // or its manifest config. Deriving an env var name from the field name would
-    // make a field silently satisfiable by an unrelated deployment variable.
-    const vaultValue4 = await this.tryResolveFromVault(tool, field, input);
-    if (this.hasValue(vaultValue4)) {
-      (input as any)[field] = vaultValue4;
-      return true;
-    }
-    return false;
-  }
-
-  private hasEndpoint(tool: Tool, input: Record<string, unknown>): boolean {
-    const manifest = tool.manifest as Record<string, unknown> | undefined;
-    const endpoint = manifest?.endpoint as Record<string, unknown> | undefined;
-    const externalConfig = tool.externalConfig as Record<string, unknown> | undefined;
-    const endpointConfigKey = manifest?.endpointConfigKey;
-    // Which config field holds the endpoint is declared by the Skill, so it is
-    // looked up by name instead of derived from a process environment variable.
-    const configEndpoint = typeof endpointConfigKey === 'string'
-      ? this.getNestedValue(externalConfig, endpointConfigKey)
-      : undefined;
-    return this.hasValue(endpoint?.url)
-      || this.hasValue(endpoint?.path)
-      || this.hasValue(configEndpoint)
-      || this.hasValue(input.endpointUrl)
-      || this.hasValue(input.baseUrl)
-      || this.hasValue(externalConfig?.baseUrl);
-  }
-
-  private async validateConfigSchema(tool: Tool, input: Record<string, unknown>, executionId: string): Promise<ToolExecution | null> {
-    const configSchema = tool.configSchema || (tool.manifest?.configSchema as SchemaRecord | undefined);
-    const credentialSource = tool.manifest?.credentialSource as Record<string, { configKey?: string; vaultSecretId?: string }> | undefined;
-    // A field whose value is supplied through `credentialSource` (configKey or
-    // vaultSecretId) is resolved at execution time, so it must not be treated as
-    // a missing static config value here. Only fields with no declared credential
-    // source are validated against input/externalConfig.
-    const credentialBackedFields = new Set(
-      Object.entries(credentialSource || {})
-        .filter(([, source]) => source && (typeof source.configKey === 'string' || typeof source.vaultSecretId === 'string'))
-        .map(([field]) => field),
-    );
-    const isExternalAction = (tool.manifest?.system !== undefined && tool.manifest?.action !== undefined);
-    const required = Array.isArray(configSchema?.required)
-      ? configSchema.required.filter((field): field is string => typeof field === 'string')
-      : [];
-    const missing: string[] = [];
-    for (const field of required) {
-      if (credentialBackedFields.has(field)) continue;
-      const ok = await this.isConfigured(tool, field, input);
-      if (!ok) missing.push(field);
-    }
-
-    if (isExternalAction && !this.hasEndpoint(tool, input) && !missing.includes('endpoint')) {
-      missing.push('endpoint');
-    }
-
-    if (missing.length === 0) return null;
-
-    // Ensure secrets exist in vault for missing config schema fields
-    const tenantId = (input as any)?.tenantId || (tool as any)?.tenantId || 'system';
-    const createdSecrets: string[] = [];
-    const vaultUrl = process.env.VAULT_URL || 'http://vault:4000';
-    for (const field of missing) {
-      try {
-        const secretName = `tool:${tool.id}:${field}`;
-        const ensureRes = await fetch(`${vaultUrl}/api/vault/secrets/ensure`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: secretName, plaintext: '', tenantId }),
-        });
-        if (ensureRes.ok) {
-          const data = await ensureRes.json() as { existed?: boolean; name?: string };
-          if (!data.existed) {
-            createdSecrets.push(data.name || secretName);
-          }
-        }
-      } catch (err) {
-        logger.warn({ err, toolId: tool.id, field }, 'Failed to ensure secret for tool config');
-      }
-    }
-
-    const prefix = isExternalAction ? 'Not connected' : 'Missing required configuration';
-    let errorMsg = `${prefix}: ${missing.join(', ')} are not configured for tool '${tool.name}' (${tool.id}).`;
-    if (createdSecrets.length > 0) {
-      errorMsg += ` Empty secret entries were created in the Vault as 'tool:${tool.id}:<field>'. Go to Tools → ${tool.name} → Configure and set values for: ${missing.join(', ')} (or edit the corresponding secrets in the Vault).`;
-    } else {
-      errorMsg += ` Go to Tools → ${tool.name} → Configure to set values for: ${missing.join(', ')} (stored in Vault).`;
-    }
-    return {
-      executionId,
-      toolId: tool.id,
-      input,
-      error: errorMsg,
-      status: 'failed',
-      startedAt: new Date(),
-      completedAt: new Date(),
-    };
   }
 
 async discoverMCPTools(serverId?: string): Promise<Map<string, { tool: Tool; serverId: string }>> {
@@ -1512,759 +1303,6 @@ logger.error({ serverId: sid, err: (err as Error).message }, 'MCP tool discovery
 }
 
 return discovered;
-}
-
-private async resolveCredentials(tool: Tool, _input: Record<string, unknown>): Promise<{ resolved: Record<string, string | undefined>; sources: NamedCredentialSource[] }> {
-const manifest = tool.manifest as Record<string, unknown> | undefined;
-// A credential declared with `configKey` resolves against the Skill's own
-// configuration, so the provider needs the resolved values.
-const configuredValues = this.resolveSkillConfig(tool, _input);
-const credentialSources: Array<{ logicalKey: string; label?: string; required: boolean; source: { vaultSecretId?: string; envVar?: string; configKey?: string; sensitive?: boolean } }> = [];
-
-if (manifest?.credentialSource && typeof manifest.credentialSource === 'object') {
-const cs = manifest.credentialSource as Record<string, { vaultSecretId?: string; envVar?: string; configKey?: string; label?: string; required?: boolean; sensitive?: boolean }>;
-for (const [logicalKey, source] of Object.entries(cs)) {
-if (source && typeof source === 'object') {
-const s = source as { vaultSecretId?: string; envVar?: string; configKey?: string; label?: string; required?: boolean; sensitive?: boolean };
-// A declared `label` is what the operator sees when a credential is missing, so
-// it should say where the value goes rather than repeating the logical key.
-// `required` defaults to true: declaring a credential has always meant the
-        // Skill cannot run without it, and only Skills that can genuinely degrade
-        // should opt out.
-        credentialSources.push({ logicalKey, label: s.label || logicalKey, required: s.required !== false, source: s });
-}
-}
-}
-
-const namedSources: NamedCredentialSource[] = credentialSources.map(c => ({
-logicalKey: c.logicalKey,
-vaultSecretId: c.source.vaultSecretId,
-envVar: c.source.envVar,
-configKey: c.source.configKey,
-sensitive: c.source.sensitive,
-}));
-const resolved = await credentialProvider.resolveAll(namedSources, configuredValues);
-
-const overrides = this.pendingCredentialOverrides.get(tool.id) || {};
-const merged = { ...resolved, ...overrides };
-
-const missing = credentialSources
-.filter((c) => c.required && !merged[c.logicalKey])
-.map((c) => ({
-key: c.logicalKey,
-label: c.label || c.logicalKey,
-source: c.source,
-}));
-
-if (missing.length > 0) {
-const request: CredentialRequest = {
-executionId: `exec_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-toolId: tool.id,
-toolName: tool.name,
-missingCredentials: missing,
-message: `Tool "${tool.name}" requires credentials: ${missing.map((m) => m.label).join(', ')}`,
-};
-throw new CredentialRequiredError(request);
-}
-
-return { resolved: merged, sources: namedSources };
-}
-
-private async hydrateSecretInputs(
-  tool: Tool,
-  input: Record<string, unknown>,
-  resolvedValues: string[],
-): Promise<Record<string, unknown>> {
-  const hydrate = async (value: unknown, schemaValue: unknown, path: string): Promise<unknown> => {
-    const schema = schemaRecord(schemaValue);
-    if (!schema) return value;
-    if (isVaultSecretProperty(schema)) {
-      if (value === undefined || value === null || value === '') return value;
-      if (typeof value !== 'string' || !value.startsWith('vault://')) {
-        throw new Error(`Secret input "${path}" must contain a Vault reference`);
-      }
-      const secretId = value.slice('vault://'.length);
-      const plaintext = await credentialProvider.resolve({ vaultSecretId: secretId });
-      if (plaintext === undefined) {
-        throw new Error(`Vault secret for input "${path}" could not be resolved`);
-      }
-      resolvedValues.push(plaintext);
-      return plaintext;
-    }
-
-    if (Array.isArray(value) && schema.items) {
-      return Promise.all(value.map((item, index) => hydrate(item, schema.items, `${path}[${index}]`)));
-    }
-    const valueRecord = schemaRecord(value);
-    const properties = schemaRecord(schema.properties);
-    if (!valueRecord || !properties) return value;
-    const hydrated: Record<string, unknown> = { ...valueRecord };
-    for (const [key, propertySchema] of Object.entries(properties)) {
-      if (Object.prototype.hasOwnProperty.call(valueRecord, key)) {
-        hydrated[key] = await hydrate(valueRecord[key], propertySchema, path ? `${path}.${key}` : key);
-      }
-    }
-    return hydrated;
-  };
-
-  const schema = schemaRecord(tool.inputSchema);
-  const properties = schemaRecord(schema?.properties);
-  if (!properties) return input;
-  const hydrated: Record<string, unknown> = { ...input };
-  for (const [key, propertySchema] of Object.entries(properties)) {
-    if (Object.prototype.hasOwnProperty.call(input, key)) {
-      hydrated[key] = await hydrate(input[key], propertySchema, key);
-    }
-  }
-  return hydrated;
-}
-
-private async storeSecretOutputs(
-  tool: Tool,
-  output: unknown,
-  tenantId: unknown,
-  resolvedValues: string[],
-): Promise<unknown> {
-  const store = async (value: unknown, schemaValue: unknown, path: string): Promise<unknown> => {
-    const schema = schemaRecord(schemaValue);
-    if (!schema) return value;
-    if (isVaultSecretProperty(schema)) {
-      if (value === undefined || value === null || value === '') return value;
-      if (typeof value !== 'string' || typeof tenantId !== 'string' || !tenantId) {
-        throw new Error(`Secret output "${path}" must be a string and the execution must include a tenantId`);
-      }
-      resolvedValues.push(value);
-      return credentialProvider.storeInVault(value, tenantId, `tool-${tool.id}-${path.replace(/[^a-zA-Z0-9_-]/g, '-')}`);
-    }
-
-    if (Array.isArray(value) && schema.items) {
-      return Promise.all(value.map((item, index) => store(item, schema.items, `${path}[${index}]`)));
-    }
-    const valueRecord = schemaRecord(value);
-    const properties = schemaRecord(schema.properties);
-    if (!valueRecord || !properties) return value;
-    const redacted: Record<string, unknown> = { ...valueRecord };
-    for (const [key, propertySchema] of Object.entries(properties)) {
-      if (Object.prototype.hasOwnProperty.call(valueRecord, key)) {
-        redacted[key] = await store(valueRecord[key], propertySchema, path ? `${path}.${key}` : key);
-      }
-    }
-    return redacted;
-  };
-
-  const schema = schemaRecord(tool.outputSchema);
-  const execution = schemaRecord(output);
-  if (execution && typeof execution.output === 'string') {
-    const parsedOutput = parseToolOutputJson(execution.output);
-    if (parsedOutput !== undefined) {
-      const storedOutput = await store(parsedOutput, schema, '');
-      return { ...execution, output: JSON.stringify(storedOutput) };
-    }
-  }
-  return store(output, schema, '');
-}
-
-/**
-   * Resolved Skill configuration, using the same precedence as `isConfigured` so
-   * the gate and the value a handler reads can never disagree.
-   *
-   * configSchema used to be a presence check only: the values were validated for
-   * existence and then dropped, so a scheduled Skill could declare a required
-   * selector (e.g. which genres to monitor) and have no way to read it. That made
-   * configSchema indistinguishable from the "schema demands a value the handler
-   * never reads" defect. Values declared per-run in `input` still win, because
-   * that is how a one-off override has always been expressed.
-   */
-  private resolveSkillConfig(tool: Tool, input: Record<string, unknown>): Record<string, unknown> {
-    const manifest = tool.manifest as Record<string, unknown> | undefined;
-    const sources: Array<Record<string, unknown> | undefined> = [
-      tool.externalConfig as Record<string, unknown> | undefined,
-      manifest?.config as Record<string, unknown> | undefined,
-    ];
-    const config: Record<string, unknown> = {};
-    for (const source of sources) {
-      if (!source || typeof source !== 'object') continue;
-      for (const [key, value] of Object.entries(source)) config[key] = value;
-    }
-    // A declared credentialSource maps a logical config key to a nested path.
-    const credentialSource = manifest?.credentialSource as { [k: string]: { configKey?: string } } | undefined;
-    if (credentialSource && typeof credentialSource === 'object') {
-      for (const spec of Object.values(credentialSource)) {
-        if (!spec?.configKey) continue;
-        const nested = this.getNestedValue(tool.externalConfig as Record<string, unknown> | undefined, spec.configKey);
-        if (nested !== undefined && config[spec.configKey.split('.').pop() as string] === undefined) {
-          config[spec.configKey.split('.').pop() as string] = nested;
-        }
-      }
-    }
-    // Per-run input fills gaps only. A key the operator declared in configSchema
-    // stays operator-owned: input is caller-supplied, so letting it win would let
-    // any API caller replace the selector or endpoint that scoped the job. This
-    // matches the rule the runtime documents for why config is a separate object
-    // from input at all.
-    const declared = new Set(Object.keys((manifest?.configSchema as { properties?: Record<string, unknown> } | undefined)?.properties ?? {}));
-    for (const [key, value] of Object.entries(input)) {
-      if (value === undefined) continue;
-      if (declared.has(key)) continue;
-      config[key] = value;
-    }
-    return config;
-  }
-
-  /**
-   * MCP Tool Discovery hook (§3). When a tool is not registered, ask the MCP
-   * Tool Executive to search approved MCP library sources. If a candidate
-   * needs user permission, throw MCPToolDiscoveryRequiredError so the caller
-   * can present the permission request. If pre-approved or already granted,
-   * integrate and retry with the new tool. Otherwise fall through so the
-   * existing dispatch fallback (plugin generation, discovery) still applies.
-   */
-  private async dispatch(tool: Tool, input: Record<string, unknown>, credentials: { resolved: Record<string, string | undefined>; sources: NamedCredentialSource[] }): Promise<Record<string, unknown>> {
-const { resolved, sources } = credentials;
-const name = tool.name.toLowerCase();
-const manifest = tool.manifest as Record<string, unknown> | undefined;
-const capabilities = Array.isArray(manifest?.capabilities) ? manifest.capabilities as string[] : [];
-
-
-  // === Explicit native executor binding (checked BEFORE name heuristics) ===
-  const executorKey = manifest?.executor as NativeExecutorKey | undefined;
-  if (executorKey) {
-    // Input normalization: shallow-copy input and add camelCase aliases for snake_case keys
-    const normalizedInput: Record<string, unknown> = { ...input };
-    for (const key of Object.keys(input)) {
-      if (key.includes('_')) {
-        const camelKey = key.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
-        if (camelKey !== key) {
-          normalizedInput[camelKey] = input[key];
-        }
-      }
-    }
-
-    try {
-      let result: { success: boolean; error?: string; durationMs?: number } | undefined;
-      switch (executorKey) {
-        case 'weather': {
-          result = await this.weatherExecutor.execute(normalizedInput as unknown as WeatherOptions, resolved);
-          break;
-        }
-        case 'math': {
-          result = await this.mathExecutor.execute(normalizedInput as MathOptions, resolved);
-          break;
-        }
-        case 'search': {
-          result = await this.searchExecutor.execute(normalizedInput as { query: string; maxResults?: number; searchType?: 'web' | 'images' | 'news'; freshness?: 'day' | 'week' | 'month' | 'year' }, resolved);
-          break;
-        }
-        case 'files': {
-          result = await this.fileStorageExecutor.execute(normalizedInput as { operation: 'read' | 'write' | 'list' | 'delete' | 'exists' | 'mkdir'; path: string; content?: string; bucket?: string }, resolved);
-          break;
-        }
-        case 'ftp': {
-          result = await this.ftpExecutor.execute(normalizedInput as { host: string; port: number; username: string; password: string; operation: 'list' | 'upload' | 'download' | 'delete' | 'mkdir'; remotePath?: string; localPath?: string; content?: string }, resolved);
-          break;
-        }
-        case 'webhook': {
-          result = await this.webhookExecutor.execute(normalizedInput as { url: string; method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'; headers?: Record<string, string>; body?: Record<string, unknown>; secret?: string; event?: string; retries?: number; timeoutMs?: number }, resolved);
-          break;
-        }
-        case 'database': {
-          result = await this.databaseExecutor.execute(normalizedInput as { engine: 'sqlite' | 'postgres' | 'mysql'; connectionString?: string; host?: string; port?: number; database?: string; username?: string; password?: string; query: string; params?: unknown[]; timeoutMs?: number }, resolved);
-          break;
-        }
-        case 'email': {
-          result = await this.emailExecutor.execute(normalizedInput as { to: string | string[]; subject: string; text?: string; html?: string; from?: string; attachments?: Array<{ filename?: string; content?: string | Buffer; path?: string }> }, resolved);
-          break;
-        }
-        case 'vendor': {
-          const vendor = manifest?.vendor as 'jira' | 'confluence' | 'slack' | 'github' | undefined;
-          if (!vendor) {
-            return { error: 'vendor executor requires manifest.vendor to be one of: jira, confluence, slack, github' };
-          }
-          result = await this.vendorApiExecutor.execute(
-            { vendor, operation: (normalizedInput.operation as string) || 'query', input: normalizedInput },
-            resolved,
-          );
-          break;
-        }
-        case 'data_analysis': {
-          result = await this.dataAnalysisExecutor.execute(normalizedInput as { dataset: string | Array<Record<string, unknown>>; analysisType?: 'summary' | 'trend' | 'correlation' | 'distribution'; xColumn?: string; yColumn?: string; targetColumn?: string; topValuesLimit?: number }, resolved);
-          break;
-        }
-        case 'calendar': {
-          result = await this.calendarExecutor.execute(normalizedInput as { action: 'create' | 'update' | 'list' | 'delete' | 'check_availability' | 'export'; calendarPath?: string; summary?: string; start?: string; end?: string; durationMinutes?: number; attendees?: Array<{ email: string; name?: string }>; uid?: string; rangeStart?: string; rangeEnd?: string; windowStart?: string; windowEnd?: string; slotMinutes?: number; busy?: Array<{ attendee?: string; start: string; end: string }> }, resolved);
-          break;
-        }
-        case 'api_client': {
-          result = await this.apiClientExecutor.execute(normalizedInput as { path: string; method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | 'OPTIONS'; query?: Record<string, string | number | boolean>; headers?: Record<string, string>; body?: unknown; timeoutMs?: number; auth?: 'none' | 'bearer' | 'basic' | 'apiKeyHeader'; acceptErrorResponses?: boolean }, resolved);
-          break;
-        }
-        default: {
-          // Unknown executor key - fall through to legacy heuristics
-        }
-      }
-
-      if (result && typeof result === 'object' && 'success' in result) {
-        if (!result.success) {
-          return { error: result.error };
-        }
-        // Return success result with data fields and durationMs where available
-        const { success, error, durationMs, ...data } = result;
-        return { ...data, ...(durationMs !== undefined ? { durationMs } : {}) };
-      }
-    } catch (err) {
-      const error = err instanceof Error ? err.message : String(err);
-      logger.error({ toolId: tool.id, executorKey, error }, 'Native executor failed');
-      return { error };
-    }
-  }
-  // If no executorKey, fall through to existing heuristic-based dispatch
-if (tool.type === 'code' || manifest?.language) {
-const language = (manifest?.language as string) || 'javascript';
-const sourceCode = (manifest?.sourceCode as string) || '';
-const validation = manifest?.validation as Record<string, unknown> | undefined;
-if (
-  validation?.method === 'isolated-contract-tests'
-  && generatedToolUsesProcessEnvironment(language, sourceCode)
-) {
-  return {
-    error: 'Generated tool depends on process environment variables, which cannot be configured at runtime. Recreate it using declared runtime configuration instead.',
-  };
-}
-//const entrypoint = (manifest?.entrypoint as string) || 'index.js';
-
-if (!sourceCode) {
-return { error: 'Code tool is missing sourceCode in manifest' };
-}
-
-let codeToRun = sourceCode;
-let healingAttempts = 0;
-let lastError: string | undefined;
-
-while (healingAttempts <= MAX_HEALING_ATTEMPTS) {
-  const result = await this.sandboxDriver.execute(
-        { language: language as 'javascript' | 'typescript' | 'python', code: codeToRun, input, config: this.resolveSkillConfig(tool, input), credentials: credentials.resolved, executorCallback: this.nestedExecutorCallback(), timeoutMs: (manifest && typeof manifest === 'object' && (manifest as Record<string, unknown>).timeoutMs) as number | undefined, persistenceEnvVar: (manifest && typeof manifest === 'object' ? (manifest as Record<string, unknown>).persistenceEnvVar : undefined) as string | undefined },
-        { resolved, sources } as CodeExecutorCredentials,
-      );
-
-if (result.success) {
-if (healingAttempts > 0 && manifest && typeof manifest === 'object') {
-(manifest as Record<string, unknown>).sourceCode = codeToRun;
-logger.info({ toolId: tool.id, healingAttempts }, 'Healed code persisted to tool manifest');
-}
-// Hold code tools to their declared outputSchema. A skill that promises a contract and emits
-// something else was previously indistinguishable from one that kept it.
-const schemaIssues = validateAgainstOutputSchema(
-parseToolOutputJson(result.output),
-tool.outputSchema,
-);
-if (schemaIssues.length > 0) {
-logger.error(
-{ toolId: tool.id, issues: schemaIssues },
-'Tool result does not match its declared outputSchema',
-);
-}
-const failureMessage = toolFailureMessage(result.output);
-if (failureMessage) {
-  return { error: failureMessage, output: result.output };
-}
-return {
-output: result.output,
-exitCode: result.exitCode ?? 0,
-durationMs: result.durationMs,
-...(result.storeWrites ? { storeWrites: result.storeWrites } : {}),
-...(schemaIssues.length > 0 ? { outputSchemaIssues: schemaIssues } : {}),
-};
-}
-
-lastError = result.error;
-    if (healingAttempts >= MAX_HEALING_ATTEMPTS) break;
-
-    // Classify the error — if it's a code execution error, try healing.
-    // If it's a timeout or transient error, also try healing.
-    const classified = ErrorHandler.classify(lastError, tool.id);
-
-    if (ErrorHandler.isCodeExecutionError(classified)) {
-      const healing = await this.healCodeTool(tool, input, lastError || 'Unknown execution error');
-      if (!healing.success || !healing.fixedSourceCode) {
-        logger.warn({ toolId: tool.id, healingError: healing.error, classified: classified.category }, 'Healing failed, aborting retries');
-        break;
-      }
-
-      codeToRun = healing.fixedSourceCode;
-      healingAttempts++;
-      logger.info({ toolId: tool.id, attempt: healingAttempts, category: classified.category }, 'Retrying with healed code');
-      continue;
-    }
-
-    // Non-code-execution error — don't heal, return classified error
-    logger.warn({ toolId: tool.id, classified: classified.category, severity: classified.severity }, 'Non-healable error, returning classified result');
-    return ErrorHandler.formatResult(classified);
-  }
-
-  // All healing attempts exhausted — return classified error
-  const finalClassified = ErrorHandler.classify(lastError, tool.id);
-  logger.warn({ toolId: tool.id, attempts: healingAttempts, classified: finalClassified.category }, 'Healing exhausted, returning classified error');
-  return ErrorHandler.formatResult(finalClassified);
-}
-
-switch (tool.type) {
-case 'openapi': {
-if (!manifest?.urlTemplate) break;
-const urlTemplate = manifest.urlTemplate as string;
-const method = ((manifest?.method as string) || 'GET').toUpperCase();
-const url = urlTemplate.replace(/\{(\w+)\}/g, (_, key) => encodeURIComponent((input[key] as string) || key));
-
-// SSRF guard: validate the resolved URL
-let targetUrl: URL;
-try {
-  targetUrl = new URL(url);
-} catch {
-  return { error: `Invalid URL template: ${urlTemplate}` };
-}
-if (targetUrl.protocol !== 'http:' && targetUrl.protocol !== 'https:') {
-  return { error: `URL must use http or https, got ${targetUrl.protocol}` };
-}
-if (targetUrl.username || targetUrl.password) {
-  return { error: 'URL must not embed credentials' };
-}
-const hostname = targetUrl.hostname.toLowerCase();
-if (hostname === 'localhost' || hostname.endsWith('.localhost') || hostname.endsWith('.local') || hostname.endsWith('.internal')) {
-  return { error: 'Requests to localhost/internal hosts are not allowed' };
-}
-if (/^\d{1,3}(\.\d{1,3}){3}$/.test(hostname)) {
-  const parts = hostname.split('.').map(Number);
-  if (parts.some((p) => p > 255)) return { error: 'Invalid IP address' };
-  if (parts[0] === 10 || parts[0] === 127 || parts[0] === 0) return { error: 'Requests to private IP ranges are not allowed' };
-  if (parts[0] === 192 && parts[1] === 168) return { error: 'Requests to private IP ranges are not allowed' };
-  if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return { error: 'Requests to private IP ranges are not allowed' };
-  if (parts[0] === 169 && parts[1] === 254) return { error: 'Requests to link-local addresses are not allowed' };
-}
-
-const fetchOptions: RequestInit = {
-method,
-headers: {
-'Content-Type': 'application/json',
-...(resolved.Authorization ? { Authorization: resolved.Authorization } : {}),
-...(resolved['api-key'] ? { 'api-key': resolved['api-key'] } : {}),
-...(manifest.headers as Record<string, string> || {}),
-},
-};
-
-if (method !== 'GET' && method !== 'HEAD' && input.body !== undefined) {
-fetchOptions.body = JSON.stringify(input.body);
-}
-
-let response: Response | null = null;
-let data: any;
-try {
-// Manual redirect handling to prevent SSRF via redirect
-let currentUrl = url;
-const maxRedirects = 5;
-for (let redirectCount = 0; redirectCount <= maxRedirects; redirectCount++) {
-  response = await fetch(currentUrl, {
-    ...fetchOptions,
-    redirect: 'manual',
-  });
-
-  if (response.status >= 300 && response.status < 400) {
-    const location = response.headers.get('location');
-    if (!location || redirectCount >= maxRedirects) {
-      break;
-    }
-    let nextUrl: URL;
-    try {
-      nextUrl = new URL(location, currentUrl);
-    } catch {
-      break;
-    }
-    // SSRF guard: redirect must not go to private/internal addresses
-    const nextHostname = nextUrl.hostname.toLowerCase();
-    if (nextHostname === 'localhost' || nextHostname.endsWith('.localhost') || nextHostname.endsWith('.local') || nextHostname.endsWith('.internal')) {
-      logger.warn({ from: currentUrl, to: nextUrl.toString() }, 'OpenAPI redirect rejected: localhost/internal host');
-      return { error: 'Redirect to localhost/internal host not allowed' };
-    }
-    if (/^\d{1,3}(\.\d{1,3}){3}$/.test(nextHostname)) {
-      const parts = nextHostname.split('.').map(Number);
-      if (parts[0] === 10 || parts[0] === 127 || parts[0] === 0 || (parts[0] === 192 && parts[1] === 168) || (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) || (parts[0] === 169 && parts[1] === 254)) {
-        logger.warn({ from: currentUrl, to: nextUrl.toString() }, 'OpenAPI redirect rejected: private IP range');
-        return { error: 'Redirect to private IP range not allowed' };
-      }
-    }
-    currentUrl = nextUrl.toString();
-    continue;
-  }
-  break;
-}
-} catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      logger.error({ url, err: errMsg }, 'OpenAPI fetch failed');
-      return { error: `Request failed: ${errMsg}` };
-    }
-
-    try {
-      if (!response) {
-        data = { text: '' };
-      } else if ((response as any).bodyUsed) {
-        try {
-          const txt = await (response as any).text();
-          try {
-            data = JSON.parse(txt);
-          } catch {
-            data = { text: txt };
-          }
-        } catch {
-          data = { text: '' };
-        }
-      } else {
-        try {
-          data = await response.json();
-        } catch (jsonErr) {
-          try {
-            const txt = await response.text();
-            try {
-              data = JSON.parse(txt);
-            } catch {
-              data = { text: txt };
-            }
-          } catch {
-            data = { text: '' };
-          }
-        }
-      }
-      return { status: response ? response.status : 0, data };
-    } catch {
-      data = { text: await (response ? response.text() : Promise.resolve('')) };
-      return { status: response ? response.status : 0, data };
-    }
-  }
-
-  case 'mcp': {
-if (!manifest?.server) break;
-const serverId = manifest.server as string;
-const client = this.mcpClients.get(serverId);
-if (!client) {
-return { error: `MCP server '${serverId}' not configured. Register it via registerMCPServer().` };
-}
-
-try {
-const result = await client.callTool(tool.name, input);
-return {
-content: result.content,
-isError: result.isError,
-};
-} catch (err) {
-return { error: `MCP tool execution failed: ${(err as Error).message}` };
-}
-}
-case 'reasoning': {
-const result = await this.reasoningExecutor.execute(tool, input);
-return result;
-}
-default:
-break;
-}
-
-if (name.includes('ftp')) {
-const result = await this.ftpExecutor.execute(
-{
-host: (input.host as string) || '',
-port: (input.port as number) || 21,
-username: (input.username as string) || '',
-password: (input.password as string) || '',
-operation: (input.operation as FtpExecutionOptions['operation']) || 'list',
-remotePath: input.remotePath as string,
-localPath: input.localPath as string,
-content: input.content as string,
-},
-resolved,
-);
-
-if (!result.success) {
-return { error: result.error };
-}
-
-return { output: result.output, durationMs: result.durationMs };
-}
-
-if (name.includes('webhook')) {
-const result = await this.webhookExecutor.execute(
-{
-url: (input.url as string) || '',
-method: (input.method as WebhookDispatchOptions['method']) || 'POST',
-headers: input.headers as Record<string, string>,
-body: input.body as Record<string, unknown>,
-secret: input.secret as string,
-event: input.event as string,
-retries: (input.retries as number) || 3,
-timeoutMs: (input.timeoutMs as number) || 10000,
-},
-resolved,
-);
-
-if (!result.success) {
-return { error: result.error };
-}
-
-return { statusCode: result.statusCode, response: result.response, durationMs: result.durationMs };
-}
-
-if (name.includes('database') || name.includes('db') || capabilities.includes('query')) {
-const result = await this.databaseExecutor.execute(
-{
-engine: (input.engine as DatabaseQueryOptions['engine']) || 'sqlite',
-connectionString: input.connectionString as string,
-host: input.host as string,
-port: input.port as number,
-database: input.database as string,
-username: input.username as string,
-password: input.password as string,
-query: (input.query as string) || '',
-params: input.params as unknown[],
-timeoutMs: (input.timeoutMs as number) || 30000,
-},
-resolved,
-);
-
-if (!result.success) {
-return { error: result.error };
-}
-
-return { rows: result.rows, columns: result.columns, rowCount: result.rowCount, durationMs: result.durationMs };
-}
-
-if (name.includes('file') || name.includes('storage') || capabilities.includes('read') || capabilities.includes('write')) {
-const result = await this.fileStorageExecutor.execute(
-{
-operation: (input.operation as FileStorageOptions['operation']) || 'read',
-path: (input.path as string) || '',
-content: input.content as string,
-bucket: input.bucket as string,
-},
-resolved,
-);
-
-if (!result.success) {
-return { error: result.error };
-}
-
-return { data: result.data, durationMs: result.durationMs };
-}
-
-if (name.includes('jira') || name.includes('confluence') || name.includes('slack') || name.includes('github')) {
-const vendor = name.includes('jira') ? 'jira' :
- name.includes('confluence') ? 'confluence' :
- name.includes('slack') ? 'slack' : 'github';
-
-const result = await this.vendorApiExecutor.execute(
-{
-vendor,
-operation: (input.operation as string) || 'query',
-input,
-},
-resolved,
-);
-
-if (!result.success) {
-return { error: result.error };
-}
-
-return { data: result.data, durationMs: result.durationMs };
-}
-
-if (name.includes('email') || manifest?.server === 'email-mcp' || capabilities.includes('send')) {
-const result = await this.emailExecutor.execute(
-{
-to: (input.to as string | string[]) || '',
-subject: (input.subject as string) || '',
-text: (input.body as string) || (input.text as string),
-html: (input.html as string),
-from: (input.from as string),
-attachments: (input.attachments as Array<{ filename?: string; content?: string | Buffer; path?: string }>) || [],
-},
-resolved,
-);
-
-if (!result.success) {
-return { error: result.error };
-}
-
-return { messageId: result.messageId, status: 'sent' };
-}
-
-if (name.includes('search') || name.includes('query') || capabilities.includes('search')) {
-const result = await this.searchExecutor.execute(
-{
-query: (input.query as string) || (input.q as string) || '',
-maxResults: (input.maxResults as number) || (input.max_results as number) || 10,
-searchType: (input.searchType as 'web' | 'images' | 'news') || 'web',
-    freshness: (input.freshness as 'day' | 'week' | 'month' | 'year') || undefined,
-},
-resolved,
-);
-
-if (!result.success) {
-return { error: result.error };
-}
-
-return { results: result.results, count: result.results?.length ?? 0 };
-}
-
-const discovered = await this.toolDiscovery.discoverAndRegister(tool.name + ' ' + tool.description, {
-register: (t: Tool) => {
-if (this.toolRegistry) {
-this.toolRegistry.set(t.id, t);
-}
-},
-});
-
-if (discovered) {
-logger.info({ toolId: discovered.id, source: (discovered.manifest as Record<string, unknown>)?.source }, 'External tool discovered');
-return {
-status: 'discovered',
-toolId: discovered.id,
-source: (discovered.manifest as Record<string, unknown>)?.source as string,
-packageName: (discovered.manifest as Record<string, unknown>)?.packageName as string,
-installCommand: (discovered.manifest as Record<string, unknown>)?.installCommand as string,
-message: `Discovered external tool: ${discovered.name}. Install it to use this capability.`,
-requiresInstallation: true,
-};
-}
-
-const generated = await this.pluginGenerator.generate({
-description: tool.description || `Tool: ${tool.name}`,
-requirements: [],
-context: { toolName: tool.name, input },
-});
-
-if (generated.success && generated.tool) {
-try {
-const deployed = await this.pluginGenerator.deploy(generated.tool);
-if (deployed.success) {
-logger.info({ toolId: generated.tool.id, deployPath: deployed.deployPath }, 'Auto-generated plugin deployed');
-  const retryResult = await this.sandboxDriver.execute(
-        { language: 'javascript', code: (generated.tool.manifest as Record<string, unknown>)?.sourceCode as string || '', input, executorCallback: this.nestedExecutorCallback(), timeoutMs: (generated.tool.manifest as Record<string, unknown>) && (generated.tool.manifest as Record<string, unknown>).timeoutMs as number | undefined, persistenceEnvVar: (generated.tool.manifest as Record<string, unknown>)?.persistenceEnvVar as string | undefined },
-        { resolved, sources } as CodeExecutorCredentials,
-      );
-if (retryResult.success) {
-return {
-output: retryResult.output,
-exitCode: retryResult.exitCode ?? 0,
-durationMs: retryResult.durationMs,
-autoGenerated: true,
-...(retryResult.storeWrites ? { storeWrites: retryResult.storeWrites } : {}),
-};
-}
-return { error: retryResult.error, exitCode: -1, autoGenerated: true };
-}
-} catch (deployErr) {
-logger.warn({ toolId: generated.tool.id, err: deployErr instanceof Error ? deployErr.message : String(deployErr) }, 'Auto-deployment failed');
-}
-}
-
-return {
-    error: `Unsupported tool type: ${tool.type}. Register a real executor or MCP server for this tool.`,
-    toolName: tool.name,
-  };
 }
 
   /**

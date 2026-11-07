@@ -1,0 +1,43 @@
+{
+  "id": "api_client",
+  "name": "API Client",
+  "description": "Make generic HTTP requests to external REST APIs with authentication",
+  "type": "native",
+  "manifest": {
+    "executor": "api_client",
+    "codeFile": "api_client.js",
+    "configSchema": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    },
+    "credentialSource": {
+      "apiKey": { "envVar": "API_CLIENT_API_KEY" },
+      "token": { "envVar": "API_CLIENT_TOKEN" }
+    }
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "url": { "type": "string" },
+      "method": { "type": "string", "default": "GET" },
+      "headers": { "type": "object" },
+      "body": { "type": "object" },
+      "idempotencyKey": { "type": "string" }
+    },
+    "required": ["url"]
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "success": { "type": "boolean" },
+      "status": { "type": "integer" },
+      "data": { "type": "object" },
+      "error": { "type": "string" },
+      "durationMs": { "type": "number" },
+      "idempotencyKey": { "type": "string" }
+    },
+    "required": ["success"]
+  },
+  "isSkill": false
+}

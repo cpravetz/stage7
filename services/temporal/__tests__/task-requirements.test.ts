@@ -50,12 +50,27 @@ describe('runtime task requirements', () => {
     expect(isConfigurationBlocker(['The output file has not been produced.'])).toBe(false)
   })
 
-  it('asks for secure provider configuration rather than general advice for delivery missions', () => {
+  it('directs the user to configure a service and wait for secure credential prompts', () => {
     const question = missionConfigurationQuestion('Send an SMS and email.')
 
-    expect(question).toContain('SMTP or an email API')
-    expect(question).toContain('secure credential fields')
-    expect(question).not.toContain('App Password')
+    expect(question).toContain('Tools configuration')
+    expect(question).toContain('secure form')
+    expect(question).toContain('continue after you save')
+  })
+
+  it('gives task agents a recovery path for missing tools, configuration, and dependency inputs', () => {
+    const externalTask = {
+      ...task,
+      requiresExternalAction: true,
+      dependsOnTaskIds: ['source-task'],
+    }
+    const prompt = buildTaskPrompt(externalTask, phase, plan, [])
+
+    expect(prompt).toContain('Check the live tool catalog')
+    expect(prompt).toContain('use capability resolution to find or create one')
+    expect(prompt).toContain('secure tool configuration form and wait')
+    expect(prompt).toContain("request its Agent to provide the artifact or rerun that task")
+    expect(prompt).toContain('Do not expose internal JSON')
   })
 
   it('requires verified external action evidence for communication delivery tasks', () => {
@@ -70,6 +85,24 @@ describe('runtime task requirements', () => {
     expect(deliveryTask.requiresExternalAction).toBe(true)
     applyRuntimeTaskRequirements(deliveryTask)
     expect(deliveryTask.requiredActions).toHaveLength(1)
+  })
+
+  it('uses the original mission goal to identify generic communication tasks', () => {
+    const plannedTask = {
+      ...task,
+      title: 'perform the requested operation using available capabilities',
+      description: 'Perform the requested operation.',
+      agentRole: 'TextMessageSender',
+    }
+
+    applyRuntimeTaskRequirements(
+      plannedTask,
+      'Send a text to 347-772-8389 that reads "Watson, come here."',
+    )
+
+    expect(plannedTask.requiresExternalAction).toBe(true)
+    expect(buildTaskPrompt(plannedTask, phase, plan, [], 'Send the requested text message.'))
+      .toContain('Original mission goal: Send the requested text message.')
   })
 
   it('migrates the former synthetic tool requirement without exposing it as an action', () => {
@@ -127,3 +160,14 @@ describe('runtime task requirements', () => {
     expect(prompt).not.toContain('"taskId":"task-mission-recovery-0"')
   })
 })
+
+describe('progress/no-progress recovery helpers', () => {
+  it('no-progress changes approach signal; progress allows continuation', async () => {
+    const { recoveryProgressSignature, hasRecoveryProgress } = await import('../src/types/workflow');
+    const a = recoveryProgressSignature({ gaps: ['gap'], completedTaskStatuses: ['t:failed'], artifactNames: [] });
+    const b = recoveryProgressSignature({ gaps: ['gap'], completedTaskStatuses: ['t:failed'], artifactNames: [] });
+    const c = recoveryProgressSignature({ gaps: ['gap'], completedTaskStatuses: ['t:incomplete','t2:completed'], artifactNames: ['x.txt'] });
+    expect(hasRecoveryProgress(a, b)).toBe(false);
+    expect(hasRecoveryProgress(a, c)).toBe(true);
+  });
+});

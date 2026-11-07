@@ -92,7 +92,8 @@ export type NativeExecutorKey =
   | 'vendor'
   | 'data_analysis'
   | 'calendar'
-  | 'api_client';
+  | 'api_client'
+  | 'sms';
 
 export interface ToolManifest {
   /**
@@ -187,13 +188,36 @@ export interface WorkflowStateContract {
   initial: WorkflowState;
 }
 
+export type ExecutionLifecycleState =
+  | 'not_started'
+  | 'in_progress'
+  | 'completed'
+  | 'failed'
+  | 'pending_credentials';
+
+export interface ExecutionReconciliation {
+  idempotencyKey?: string;
+  providerRequestId?: string;
+  outcomeKnown?: boolean;
+  lookupAttempted?: boolean;
+  lookupStatus?: string;
+  lookupOutcome?: string;
+  duplicatePrevented?: boolean;
+  provider?: string;
+  note?: string;
+  [key: string]: unknown;
+}
+
 export interface ToolExecution {
   executionId: string;
+  /** Stable client-supplied idempotency key when provided; defaults to executionId. */
+  idempotencyKey?: string;
   toolId: string;
+  toolName?: string;
   input: Record<string, unknown>;
   output?: Record<string, unknown>;
   error?: string;
-  status: 'pending' | 'running' | 'completed' | 'failed';
+  status: ExecutionLifecycleState;
   workflowState?: WorkflowState;
   startedAt: Date;
   completedAt?: Date;
@@ -201,6 +225,15 @@ export interface ToolExecution {
   assistantId?: string;
   context?: Record<string, unknown>;
   runtimeWorkflow?: RuntimeWorkflow;
+  metadata?: Record<string, unknown>;
+  reconciliation?: ExecutionReconciliation;
+  updatedAt?: Date;
+}
+
+/** Durable execution record used for retrieval/idempotency/credential resume across restarts. */
+export interface ExecutionRecord extends ToolExecution {
+  version: number;
+  pendingCredentialRequest?: CredentialRequest;
 }
 
 export interface ToolRegistry {
@@ -221,6 +254,7 @@ export interface PluginGenerationResult {
 
 export interface CredentialRequest {
   executionId: string;
+  idempotencyKey?: string;
   toolId: string;
   toolName: string;
   missingCredentials: Array<{
@@ -240,6 +274,7 @@ export interface CredentialSubmission {
   credentials: Record<string, string>;
   storeInVault?: boolean;
   vaultSecretId?: string;
+  idempotencyKey?: string;
 }
 
 export class CredentialRequiredError extends Error {
@@ -267,9 +302,10 @@ export interface ApprovalSummary {
 
 export interface ExecutionResult {
   executionId: string;
+  idempotencyKey?: string;
   toolId: string;
   toolName?: string;
-  status: 'completed' | 'failed' | 'pending_credentials';
+  status: ExecutionLifecycleState;
   output?: unknown;
   error?: string;
   startedAt: Date;
@@ -278,6 +314,7 @@ export interface ExecutionResult {
   workspaceId?: string;
   assistantId?: string;
   context?: Record<string, unknown>;
+  reconciliation?: ExecutionReconciliation;
 }
 
 export interface ExecutionRequest {
@@ -291,6 +328,10 @@ export interface ExecutionRequest {
   isSkill?: boolean;
   workspaceId?: string;
   assistantId?: string;
+  /** Stable client-supplied idempotency/execution key for dedup + retrieval. */
+  executionId?: string;
+  idempotencyKey?: string;
+  requestId?: string;
 }
 
 export interface RuntimeWorkflowAction {
