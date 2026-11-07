@@ -780,7 +780,7 @@ const MissionRoom = () => {
           : '/tools';
         const permission = pending.permission;
         return (
-          <section className="error-banner" style={{ background: 'rgba(245,158,11,0.15)' }}>
+          <section className="warning-banner" style={{ background: '#000000', color: '#ffeb3b', border: '2px solid #ef4444', borderRadius: '6px', padding: '10px 12px', fontSize: '14px' }}>
             <strong>
               {pending.kind === 'user_input'
                 ? 'The Agent needs your input to continue.'

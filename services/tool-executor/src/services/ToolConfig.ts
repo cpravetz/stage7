@@ -287,7 +287,6 @@ export class ToolConfigResolver {
 
     const overrides = this.pendingCredentialOverrides.get(tool.id) || {};
     const merged = { ...resolved, ...overrides };
-Tooldispatcher
     const missing = credentialSources
       .filter((c) => c.required && !merged[c.logicalKey])
       .map((c) => ({

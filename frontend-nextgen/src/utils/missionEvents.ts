@@ -405,6 +405,7 @@ export function buildMissionEvents(options: {
   events = dedupeTaskEvents(events);
   events = dedupePlannerProgress(events);
   events = dedupePlannerAndReasoningEvents(events);
+  events = dedupeQuestionAsked(events);
   events = listMilestonesOnce(events);
   events = dedupeTerminalAndApprovalEvents(events, detail?.status);
 
@@ -518,6 +519,22 @@ function dedupePlannerAndReasoningEvents(events: FeedEvent[]): FeedEvent[] {
       if (seen.has(key)) return false;
       seen.add(key);
     }
+    return true;
+  });
+}
+
+/**
+ * Dedupe question_asked events by question text so a repeated ask for the
+ * same missing value doesn't flood the conversation.
+ */
+function dedupeQuestionAsked(events: FeedEvent[]): FeedEvent[] {
+  const seen = new Set<string>();
+  return events.filter((event) => {
+    if (String(event.type) !== 'question_asked') return true;
+    const question = interactionQuestionText(event);
+    const key = `question_asked|${event.metadata?.missionId ?? ''}|${question}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
     return true;
   });
 }
@@ -733,14 +750,33 @@ function collapsePlannerProgress(turns: TranscriptTurn[]): TranscriptTurn[] {
   );
 }
 
+const ASK_USER_MARKER = '__ASK_USER__:';
+
+function stripAskUserMarker(text: string): string {
+  if (!text.startsWith(ASK_USER_MARKER)) return text;
+  try {
+    const parsed = JSON.parse(text.slice(ASK_USER_MARKER.length));
+    if (parsed && typeof parsed === 'object' && typeof (parsed as { question?: unknown }).question === 'string') {
+      return String((parsed as { question: string }).question);
+    }
+  } catch {
+    // fall through to plain-text strip below
+  }
+  return text.slice(ASK_USER_MARKER.length);
+}
+
+function stripSecretPrefix(text: string): string {
+  return text.replace(/^\s*\[secret:[a-z0-9_-]+\]\s*/i, '');
+}
+
 function interactionQuestionText(event: FeedEvent): string {
   const data = event.metadata || {};
-  if (typeof data.question === 'string' && data.question.trim()) return data.question.trim();
-  if (typeof event.message === 'string' && event.message.trim()) return event.message.trim();
+  if (typeof data.question === 'string' && data.question.trim()) return stripSecretPrefix(data.question.trim());
+  if (typeof event.message === 'string' && event.message.trim()) return stripSecretPrefix(stripAskUserMarker(event.message.trim()));
   if (event.type === 'permission_required') {
     const permission = data.permission;
     if (permission && typeof permission === 'object' && typeof (permission as { explanation?: unknown }).explanation === 'string') {
-      return String((permission as { explanation: string }).explanation).trim();
+      return stripSecretPrefix(String((permission as { explanation: string }).explanation).trim());
     }
     return 'An Agent is waiting for permission to use a tool.';
   }
@@ -864,7 +900,9 @@ export function buildTranscript(events: FeedEvent[]): TranscriptTurn[] {
       continue;
     }
     current = startTurn(type === 'assistant' ? 'assistant' : 'system', type === 'assistant' ? agentLabel(data) || 'Assistant' : 'Mission', ts, evt.id);
-    current.lines.push({ kind: 'text', type, text: evt.message });
+    let text = typeof evt.message === 'string' ? evt.message : String(evt.message ?? '');
+    text = stripSecretPrefix(stripAskUserMarker(text));
+    current.lines.push({ kind: 'text', type, text });
   }
 
   return collapsePlannerProgress(turns);
