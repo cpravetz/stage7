@@ -169,6 +169,25 @@ describe('AgentRuntime', () => {
     expect(completed?.error).toBeUndefined()
   })
 
+  it('notifies task subscribers with the current state and subsequent terminal updates', () => {
+    runtime.registerAgent(agent)
+    const task = runtime.submitTask('agent-1', {
+      type: 'code',
+      input: { prompt: 'write code' },
+      priority: 1,
+      status: 'running',
+    })
+    const updates: AgentTask[] = []
+    const unsubscribe = runtime.subscribeToTaskUpdates(task.taskId, (update) => updates.push({ ...update }))
+
+    runtime.completeTask(task.taskId, { output: 'done' })
+    unsubscribe()
+    runtime.failTask(task.taskId, 'late failure')
+
+    expect(updates.map((update) => update.status)).toEqual(['running', 'completed'])
+    expect(updates[1]?.result).toEqual({ output: 'done' })
+  })
+
   it('clears stale errors when restoring a completed task', () => {
     runtime.registerAgent(agent)
     const restored = runtime.submitTask('agent-1', {
@@ -305,6 +324,16 @@ describe('REST endpoints', () => {
       .get(`/api/agent-runtime/missions/${missionId}/agents/${agentId}/tasks/${taskId}`)
       .expect(200)
     expect(task.body).toMatchObject({ agentId, taskId, status: 'pending' })
+    const taskEvents = request(app)
+      .get(`/api/agent-runtime/missions/${missionId}/agents/${agentId}/tasks/${taskId}/events`)
+      .then((response) => response)
+    await request(app)
+      .post(`/api/agent-runtime/missions/${missionId}/agents/${agentId}/tasks/${taskId}/complete`)
+      .send({ result: { output: 'Task completed.' } })
+      .expect(200)
+    const eventResponse = await taskEvents
+    expect(eventResponse.headers['content-type']).toContain('text/event-stream')
+    expect(eventResponse.text).toContain('"status":"completed"')
     await request(app)
       .get(`/api/agent-runtime/missions/${otherMissionId}/agents/${agentId}/tasks/${taskId}`)
       .expect(404)

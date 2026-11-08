@@ -136,13 +136,19 @@ async function broadcast(
   event: { type: string; missionId: string; timestamp: number; data?: unknown },
 ): Promise<void> {
   const persistenceUrl = serviceUrl('ARTIFACTS_URL', 'http://artifacts:4200');
+  let broadcastEvent: any = event;
   try {
     const response = await fetch(`${persistenceUrl}/api/artifacts/missions/${input.missionId}/events`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(event),
     });
-    if (!response.ok) {
+    if (response.ok) {
+      try {
+        const persisted: any = await response.json();
+        if (persisted && persisted.id) broadcastEvent = persisted;
+      } catch {}
+    } else {
       logger.warn({ missionId: input.missionId, status: response.status }, 'Mission event persistence failed');
     }
   } catch (error) {
@@ -155,7 +161,7 @@ async function broadcast(
     const response = await fetch(`${gatewayUrl}/api/gateway/broadcast/mission/${input.missionId}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(event),
+      body: JSON.stringify(broadcastEvent),
     });
     if (!response.ok) {
       logger.warn({ missionId: input.missionId, status: response.status }, 'Mission event broadcast failed');

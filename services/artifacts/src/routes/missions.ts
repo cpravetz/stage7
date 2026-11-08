@@ -181,9 +181,14 @@ router.put('/:missionId/tasks/:taskId', asyncHandler(async (req, res) => {
 router.get('/:missionId/events', asyncHandler(async (req, res) => {
   const missionId = req.params.missionId as string;
   let events = await service.listMissionEvents(missionId);
+  const storedKeys = new Set(events.map((e: any) => `${e.type}|${e.data?.phaseId || ''}|${e.data?.taskId || ''}`));
+  const state = await service.getMissionState(missionId);
   if (events.length === 0) {
-    const state = await service.getMissionState(missionId);
     events = deriveEventsFromMissionState(state);
+  } else {
+    const derived = deriveEventsFromMissionState(state);
+    const missing = derived.filter((d: any) => !storedKeys.has(`${d.type}|${d.data?.phaseId || ''}|${d.data?.taskId || ''}`));
+    events = [...events, ...missing];
   }
   res.json({ events });
 }));

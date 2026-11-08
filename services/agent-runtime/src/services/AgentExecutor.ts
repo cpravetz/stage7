@@ -838,14 +838,14 @@ export class AgentExecutor {
         configurationFailures.set(receipt.toolId, receipt.content)
       }
     }
-    const brainCallLimit = Math.min(
-      this.maxIterations,
+    const brainCallLimit =
       policy.maxBrainCalls === Number.MAX_SAFE_INTEGER
-        ? this.maxIterations
-        : policy.maxBrainCalls + Number(grantResumeAllowance),
-    )
-    const completionTokenLimit = policy.maxCompletionTokens
-      + (grantResumeAllowance ? RESUME_COMPLETION_TOKEN_BONUS : 0)
+        ? Number.MAX_SAFE_INTEGER
+        : Math.min(this.maxIterations, policy.maxBrainCalls + Number(grantResumeAllowance))
+    const completionTokenLimit =
+      policy.maxBrainCalls === Number.MAX_SAFE_INTEGER
+        ? Number.MAX_SAFE_INTEGER
+        : policy.maxCompletionTokens + (grantResumeAllowance ? RESUME_COMPLETION_TOKEN_BONUS : 0)
     const saveCheckpoint = context.saveCheckpoint
       ? async (pendingAction?: string) => {
       const next: AgentExecutionCheckpoint = {

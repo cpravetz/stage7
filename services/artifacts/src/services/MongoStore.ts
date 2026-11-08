@@ -515,7 +515,8 @@ export class MongoStore {
   }
 
   async appendMissionEvent(missionId: string, event: any): Promise<any> {
-    const e = { ...event, timestamp: event.timestamp || Date.now(), missionId };
+    const id = event.id || `event:${missionId}|${event.type}|${event.data?.phaseId || ''}|${event.data?.taskId || ''}|${event.timestamp || Date.now()}`;
+    const e = { ...event, id, timestamp: event.timestamp || Date.now(), missionId };
     await this.missionEvents.insertOne(e);
     return e;
   }

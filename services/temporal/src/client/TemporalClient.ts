@@ -1386,14 +1386,14 @@ export class TemporalClient {
     }
   }
 
-  async appendMissionEvent(missionId: string, event: { type: string; timestamp?: number; data?: Record<string, unknown>; [key: string]: unknown }): Promise<void> {
+  async appendMissionEvent(missionId: string, event: { type: string; timestamp?: number; data?: Record<string, unknown>; [key: string]: unknown }): Promise<any> {
     const persistenceUrl = process.env.ARTIFACTS_URL;
     if (!persistenceUrl) {
       logger.warn('ARTIFACTS_URL not set, skipping event append');
       return;
     }
     try {
-      await fetch(`${persistenceUrl}/api/artifacts/missions/${missionId}/events`, {
+      const response = await fetch(`${persistenceUrl}/api/artifacts/missions/${missionId}/events`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1403,8 +1403,13 @@ export class TemporalClient {
           data: event.data || {},
         }),
       });
+      if (response.ok) {
+        try { return await response.json(); } catch { return null; }
+      }
+      return null;
     } catch (err) {
       logger.warn({ err: (err as Error).message }, 'Failed to append mission event');
+      return null;
     }
   }
 
@@ -1419,12 +1424,15 @@ export class TemporalClient {
       // repeated in the event. Everything else, including the failure reason,
       // is persisted so a reloaded mission still explains what happened.
       const { output: _output, ...rest } = event;
-      await this.appendMissionEvent(missionId, {
+      const persisted: any = await this.appendMissionEvent(missionId, {
         ...rest,
         type: event.type as string,
         timestamp: (event.timestamp as number) || Date.now(),
         data: (event.data as Record<string, unknown>) || {},
       });
+      if (persisted && persisted.id) {
+        event = { ...persisted, ...(event.output !== undefined ? { output: event.output } : {}) };
+      }
     }
 
     // Broadcast to WebSocket clients via gateway

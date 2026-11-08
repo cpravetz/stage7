@@ -448,7 +448,7 @@ const Missions = () => {
                 ) : (
                   <>
 {filtered.map((m) => (
-                        <tr key={m.workflowId} style={(m.status === 'awaiting_review' || pendingApprovals.some((p) => p.missionId === m.missionId)) ? { backgroundColor: '#fefce8', borderLeft: '3px solid #f59e0b' } : undefined}>
+                        <tr key={m.workflowId} style={(m.status === 'awaiting_review' || pendingApprovals.some((p) => p.missionId === m.missionId)) ? { backgroundColor: 'darkslategray', borderLeft: '3px solid #f59e0b' } : undefined}>
                           <td>
                             <input
                               type="checkbox"

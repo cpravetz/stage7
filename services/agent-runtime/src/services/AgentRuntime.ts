@@ -71,6 +71,7 @@ export class AgentRuntime {
   private missionAgents: Map<string, Map<string, AgentDefinition>> = new Map()
   private states: Map<string, AgentState> = new Map()
   private tasks: Map<string, AgentTask> = new Map()
+  private taskUpdateListeners: Map<string, Set<(task: AgentTask) => void>> = new Map()
   private collaborations: Map<string, AgentCollaboration> = new Map()
   private specializations: Map<string, AgentSpecialization[]> = new Map()
   private activeExecutions: Set<string> = new Set()
@@ -310,6 +311,33 @@ export class AgentRuntime {
     return this.tasks.get(taskId)
   }
 
+  subscribeToTaskUpdates(taskId: string, listener: (task: AgentTask) => void): () => void {
+    const listeners = this.taskUpdateListeners.get(taskId) || new Set<(task: AgentTask) => void>()
+    listeners.add(listener)
+    this.taskUpdateListeners.set(taskId, listeners)
+
+    const task = this.tasks.get(taskId)
+    if (task) listener(task)
+
+    return () => {
+      listeners.delete(listener)
+      if (listeners.size === 0) this.taskUpdateListeners.delete(taskId)
+    }
+  }
+
+  private publishTaskUpdate(task: AgentTask): void {
+    for (const listener of this.taskUpdateListeners.get(task.taskId) || []) {
+      try {
+        listener(task)
+      } catch (error) {
+        logger.warn(
+          { taskId: task.taskId, error: error instanceof Error ? error.message : String(error) },
+          'Agent task update listener failed',
+        )
+      }
+    }
+  }
+
   restoreTask(task: AgentTask): void {
     if (!this.agents.has(task.agentId)) {
       throw new Error(`Agent ${task.agentId} must be registered before restoring task ${task.taskId}`)
@@ -415,6 +443,7 @@ export class AgentRuntime {
       this.states.set(agentId, state)
       await this.persistAgentState?.(state)
       logger.info({ agentId, taskId, toolCalls: result.toolCalls }, 'Agent task completed')
+      this.publishTaskUpdate(task)
       return task
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -447,6 +476,7 @@ export class AgentRuntime {
       this.states.set(agentId, state)
       await this.persistAgentState?.(state)
       logger.error({ agentId, taskId, error: message }, 'Agent task failed')
+      this.publishTaskUpdate(task)
       throw error
     } finally {
       this.activeExecutions.delete(taskId)
@@ -545,6 +575,7 @@ export class AgentRuntime {
     delete task.error
     this.tasks.set(taskId, task)
     logger.info({ taskId }, 'Task completed')
+    this.publishTaskUpdate(task)
     return task
   }
 
@@ -567,6 +598,7 @@ export class AgentRuntime {
     }
     this.tasks.set(taskId, task)
     logger.error({ taskId, error }, 'Task failed')
+    this.publishTaskUpdate(task)
     return task
   }
 

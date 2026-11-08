@@ -78,7 +78,15 @@ describe('MissionAgentRuntime', () => {
       const url = String(input)
       if (url.endsWith('/execute')) return recover ? jsonResponse({ error: 'Task is already running' }, 500) : jsonResponse(completed)
       if (url.endsWith('/tasks') && init?.method === 'POST') return jsonResponse({ taskId: completed.taskId })
-      if (url.endsWith(`/tasks/${completed.taskId}`)) return jsonResponse(completed)
+      if (url.endsWith(`/tasks/${completed.taskId}/events`)) {
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(`event: task\ndata: ${JSON.stringify(completed)}\n\n`))
+            controller.close()
+          },
+        })
+        return new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+      }
       throw new Error(`Unexpected request: ${url}`)
     })
     const runtime = new MissionAgentRuntime({ missionId: 'mission-1', tenantId: 'tenant-1', agentRuntimeUrl: 'http://agent-runtime:3400' })
@@ -589,8 +597,9 @@ describe('MissionAgentRuntime', () => {
     expect(executedPaths[0]).toBe(executedPaths[1])
   })
 
-  it('waits for an already-running persisted Agent task instead of executing it a second time', async () => {
+  it('receives an already-running persisted Agent task result through its event stream', async () => {
     const executePaths: string[] = []
+    const taskStatusPaths: string[] = []
     const taskPath = `/missions/mission-1/agents/${agent.id}/tasks/mission-1:phase-1:task-1`
     const completedTask: AgentTask = {
       agentId: agent.id,
@@ -629,7 +638,19 @@ describe('MissionAgentRuntime', () => {
         executePaths.push(url)
         return jsonResponse({ error: 'Agent task mission-1:phase-1:task-1 is already running' }, 500)
       }
-      if (url.endsWith(taskPath) && method === 'GET') return jsonResponse(completedTask)
+      if (url.endsWith(taskPath) && method === 'GET') {
+        taskStatusPaths.push(url)
+        return jsonResponse(completedTask)
+      }
+      if (url.endsWith(`${taskPath}/events`)) {
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(`event: task\ndata: ${JSON.stringify(completedTask)}\n\n`))
+            controller.close()
+          },
+        })
+        return new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+      }
       throw new Error(`Unexpected request: ${method} ${url}`)
     })
 
@@ -643,6 +664,68 @@ describe('MissionAgentRuntime', () => {
 
     expect(result.output).toBe('## research.md\nRecovered from the running task.')
     expect(executePaths).toHaveLength(1)
+    expect(taskStatusPaths).toHaveLength(0)
+  })
+
+  it('waits for an Agent task notification without requesting task status repeatedly', async () => {
+    const taskId = 'mission-1:phase-1:task-1'
+    const taskPath = `/missions/mission-1/agents/${agent.id}/tasks/${taskId}`
+    const submittedTask: AgentTask = {
+      agentId: agent.id,
+      taskId,
+      type: 'researcher',
+      input: {},
+      priority: 1,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+    }
+    const completedTask: AgentTask = {
+      ...submittedTask,
+      status: 'completed',
+      completedAt: new Date().toISOString(),
+      result: { output: 'The Agent completed after a notification.', artifacts: [], tokensUsed: 1 },
+    }
+    const statusRequests: string[] = []
+    jest.spyOn(global, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input)
+      const method = init?.method || 'GET'
+      if (url.endsWith('/tasks') && method === 'POST') return jsonResponse(submittedTask)
+      if (url.endsWith(`${taskPath}/execute`)) {
+        return jsonResponse({ error: `Agent task ${taskId} is already running` }, 500)
+      }
+      if (url.endsWith(taskPath) && method === 'GET') {
+        statusRequests.push(url)
+        return jsonResponse(submittedTask)
+      }
+      if (url.endsWith(`${taskPath}/events`)) {
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            const encoder = new TextEncoder()
+            controller.enqueue(encoder.encode(`event: task\ndata: ${JSON.stringify({ ...submittedTask, status: 'running' })}\n\n`))
+            setTimeout(() => {
+              controller.enqueue(encoder.encode(`event: task\ndata: ${JSON.stringify(completedTask)}\n\n`))
+              controller.close()
+            }, 10)
+          },
+        })
+        return new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+      }
+      throw new Error(`Unexpected request: ${method} ${url}`)
+    })
+
+    const runtime = new MissionAgentRuntime({
+      missionId: 'mission-1',
+      tenantId: 'tenant-1',
+      agentRuntimeUrl: 'http://agent-runtime:3400',
+    })
+    const result = await runtime.executePromptTask(agent.id, {
+      taskId,
+      type: 'researcher',
+      prompt: 'Wait for the running Agent task.',
+    })
+
+    expect(result.output).toBe('The Agent completed after a notification.')
+    expect(statusRequests).toHaveLength(0)
   })
 
   it('fails immediately when an already-running persisted Agent task reports a failure', async () => {
@@ -670,9 +753,14 @@ describe('MissionAgentRuntime', () => {
       if (url.endsWith(`/tasks/${taskId}/execute`)) {
         return jsonResponse({ error: `Agent task ${taskId} is already running` }, 500)
       }
-      if (url.endsWith(`/tasks/${taskId}`) && method === 'GET') {
-        statusRequests.push(url)
-        return jsonResponse(failedTask)
+      if (url.endsWith(`/tasks/${taskId}/events`)) {
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(`event: task\ndata: ${JSON.stringify(failedTask)}\n\n`))
+            controller.close()
+          },
+        })
+        return new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
       }
       throw new Error(`Unexpected request: ${method} ${url}`)
     })
@@ -688,7 +776,7 @@ describe('MissionAgentRuntime', () => {
       type: 'researcher',
       prompt: 'Resume the persisted Agent task.',
     })).rejects.toThrow('fetch failed')
-    expect(statusRequests).toHaveLength(1)
+    expect(statusRequests).toHaveLength(0)
   })
 
   it('passes one stable Brain routing session through Planner repair tasks', async () => {

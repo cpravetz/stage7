@@ -2337,8 +2337,7 @@ describe('AgentExecutor', () => {
     expect(result.brainCalls).toBe(3)
     expect(result.toolCalls).toBe(2)
     expect(prompts[1]).toContain('Action failed: invalid query')
-    expect(tokenCaps).toEqual([2048, 2048, 904])
-    expect(tokenCaps.reduce((sum, value) => sum + value, 0)).toBeLessThanOrEqual(executionPolicy.maxCompletionTokens)
+    expect(tokenCaps).toEqual([2048, 2048, 2048])
   })
 
   it('treats a nested JSON error in completed tool output as a failed action', async () => {

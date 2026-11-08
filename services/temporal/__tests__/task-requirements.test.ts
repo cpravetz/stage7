@@ -69,7 +69,9 @@ describe('runtime task requirements', () => {
     expect(prompt).toContain('Check the live tool catalog')
     expect(prompt).toContain('use capability resolution to find or create one')
     expect(prompt).toContain('secure tool configuration form and wait')
-    expect(prompt).toContain("request its Agent to provide the artifact or rerun that task")
+    expect(prompt).toContain('never ask the user to retrieve or provide them')
+    expect(prompt).toContain('name its task ID as an internal blocker')
+    expect(prompt).not.toContain('request its Agent to provide the artifact')
     expect(prompt).toContain('Do not expose internal JSON')
   })
 

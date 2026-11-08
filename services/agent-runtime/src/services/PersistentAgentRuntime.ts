@@ -232,6 +232,10 @@ export class PersistentAgentRuntime {
     return this.runtime.getTask(taskId);
   }
 
+  subscribeToTaskUpdates(taskId: string, listener: (task: AgentTask) => void): () => void {
+    return this.runtime.subscribeToTaskUpdates(taskId, listener)
+  }
+
   async completeTask(taskId: string, result?: unknown): Promise<AgentTask | undefined> {
     const task = this.runtime.completeTask(taskId, result);
     if (task) {

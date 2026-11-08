@@ -214,6 +214,35 @@ router.get('/missions/:missionId/agents/:id/tasks/:taskId', asyncHandler((req: R
   res.json(requireMissionTask(id, taskId))
 }))
 
+router.get('/missions/:missionId/agents/:id/tasks/:taskId/events', (req: Request, res: Response) => {
+  const { missionId, id, taskId } = req.params as { missionId: string; id: string; taskId: string }
+  requireMissionAgent(missionId, id)
+  requireMissionTask(id, taskId)
+
+  res.status(200).set({
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  }).flushHeaders()
+
+  let unsubscribe = () => {}
+  const heartbeat = setInterval(() => {
+    if (!res.destroyed && !res.writableEnded) res.write(': keep-alive\n\n')
+  }, 15_000)
+  const cleanup = () => {
+    clearInterval(heartbeat)
+    unsubscribe()
+  }
+  res.on('close', cleanup)
+  res.on('finish', cleanup)
+  unsubscribe = runtime.subscribeToTaskUpdates(taskId, (task) => {
+    if (res.destroyed || res.writableEnded) return
+    res.write(`event: task\ndata: ${JSON.stringify(task)}\n\n`)
+    if (task.status === 'completed' || task.status === 'failed') res.end()
+  })
+})
+
 router.post('/missions/:missionId/agents/:id/tasks/:taskId/execute', asyncHandler(async (req: Request, res: Response) => {
   const { missionId, id, taskId } = req.params as { missionId: string; id: string; taskId: string }
   requireMissionAgent(missionId, id)

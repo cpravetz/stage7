@@ -61,7 +61,7 @@ const MISSION_COMPLETION_REVIEW_EXECUTION_POLICY: AgentExecutionPolicy = {
 };
 export const MISSION_TASK_EXECUTION_POLICY: AgentExecutionPolicy = {
   ...DEFAULT_AGENT_EXECUTION_POLICY,
-  maxBrainCalls: 24,
+  maxBrainCalls: Number.MAX_SAFE_INTEGER,
   maxActions: 16,
   maxCompletionTokens: 49_152,
   maxCompletionTokensPerCall: 2_048,
@@ -72,6 +72,7 @@ const MAX_TASK_SELECTION_ATTEMPTS = 3;
 const MAX_PHASE_REVIEW_ATTEMPTS = 3;
 const MAX_COMPLETION_REVIEW_ATTEMPTS = 3;
 const MAX_ACTION_RECEIPTS = 50;
+const MAX_AGENT_TASK_WAIT_MS = 2 * 60 * 60 * 1_000;
 const INTERNAL_ACTION_RECEIPT_ARTIFACT = 'system-action-receipts.json';
 
 function isExecutionOutcomeReport(content: string): boolean {
@@ -1287,29 +1288,95 @@ export class MissionAgentRuntime {
     }
   }
 
-  private async waitForTaskCompletion(agentId: string, taskId: string, maxWaitMs = 900000): Promise<TaskExecutionResult> {
-    const startTime = Date.now();
-    const pollInterval = 2000;
-
-    while (Date.now() - startTime < maxWaitMs) {
-      await new Promise((r) => setTimeout(r, pollInterval));
-      let task: AgentTask;
-      try {
-        task = await this.api<AgentTask>(this.missionAgentPath(agentId, 'tasks', taskId));
-      } catch (err) {
-        if (!(err instanceof MissionAgentRuntimeApiError) || err.status < 500) throw err;
-        logger.warn(
-          { missionId: this.missionId, agentId, taskId, status: err.status },
-          'Agent task status polling failed; retrying after a transient API error',
-        );
-        continue;
+  private async waitForTaskCompletion(
+    agentId: string,
+    taskId: string,
+    maxWaitMs = MAX_AGENT_TASK_WAIT_MS,
+  ): Promise<TaskExecutionResult> {
+    const path = `${this.missionAgentPath(agentId, 'tasks', taskId)}/events`;
+    const deadline = Date.now() + maxWaitMs;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), maxWaitMs);
+    try {
+      while (Date.now() < deadline) {
+        let taskUpdate: AgentTask | undefined;
+        try {
+          const response = await fetch(`${this.agentRuntimeUrl}/api/agent-runtime${path}`, {
+            headers: { Accept: 'text/event-stream' },
+            signal: controller.signal,
+          });
+          if (!response.ok) {
+            const details = await response.text();
+            if (response.status < 500) throw new MissionAgentRuntimeApiError(path, response.status, details);
+            logger.warn(
+              { missionId: this.missionId, agentId, taskId, status: response.status },
+              'Agent task event stream returned a transient error; reconnecting',
+            );
+          } else {
+            taskUpdate = await this.readTaskEventStream(response);
+          }
+        } catch (error) {
+          if (controller.signal.aborted) break;
+          if (error instanceof MissionAgentRuntimeApiError) throw error;
+          logger.warn(
+            { missionId: this.missionId, agentId, taskId, error: error instanceof Error ? error.message : String(error) },
+            'Agent task event stream disconnected; reconnecting',
+          );
+        }
+        if (taskUpdate?.status === 'completed') return this.parseTaskResult(taskUpdate);
+        if (taskUpdate?.status === 'failed') throw new Error(taskUpdate.error || `Agent task ${taskId} failed`);
+        await new Promise((resolve) => setTimeout(resolve, Math.min(1_000, Math.max(0, deadline - Date.now()))));
       }
-      if (task.status === 'completed') return this.parseTaskResult(task);
-      if (task.status === 'failed') {
-        throw new Error(task.error || `Agent task ${taskId} failed`);
-      }
+      throw new Error(`Task ${taskId} timed out after ${maxWaitMs}ms while waiting for an Agent Runtime notification`);
+    } finally {
+      clearTimeout(timeout);
     }
-    throw new Error(`Task ${taskId} timed out after ${maxWaitMs}ms`);
+  }
+
+  private async readTaskEventStream(response: Response): Promise<AgentTask | undefined> {
+    if (!response.body) throw new Error('Agent task event stream returned no response body');
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let dataLines: string[] = [];
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) return undefined;
+        buffer += decoder.decode(value, { stream: true });
+
+        let lineEnd = buffer.indexOf('\n');
+        while (lineEnd !== -1) {
+          const line = buffer.slice(0, lineEnd).replace(/\r$/, '');
+          buffer = buffer.slice(lineEnd + 1);
+          if (line === '') {
+            if (dataLines.length > 0) {
+              const parsed: unknown = JSON.parse(dataLines.join('\n'));
+              if (
+                !parsed
+                || typeof parsed !== 'object'
+                || typeof (parsed as Record<string, unknown>).taskId !== 'string'
+                || typeof (parsed as Record<string, unknown>).status !== 'string'
+              ) {
+                throw new Error('Agent task event stream returned an invalid task update');
+              }
+              const task = parsed as AgentTask;
+              if (task.status === 'completed' || task.status === 'failed') {
+                await reader.cancel();
+                return task;
+              }
+              dataLines = [];
+            }
+          } else if (line.startsWith('data:')) {
+            dataLines.push(line.slice('data:'.length).replace(/^ /, ''));
+          }
+          lineEnd = buffer.indexOf('\n');
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
   }
 
   private parseTaskResult(task: AgentTask): TaskExecutionResult {
