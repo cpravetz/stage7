@@ -3046,4 +3046,101 @@ describe('AgentExecutor', () => {
     })
     expect(childBrainCalls).toBe(1)
   })
+
+  it('compacts verbose receipt reconciliation metadata so a checkpoint stays under the storage limit', async () => {
+    // Each receipt carries a full reconciliation object (provider, lookupOutcome
+    // up to 500 chars, notes, lookupStatus, etc.). Across many failed task
+    // retries those grow without bound and previously pushed the saved
+    // checkpoint past the byte limit, failing the task with "too large to
+    // store". The persisted form must keep only the durable fields a resumed
+    // run consumes (provider/outcomeKnown/providerRequestId) while still
+    // preserving the action identity and outcome.
+    const bigOutcome = 'x'.repeat(480)
+    const receipts = Array.from({ length: 40 }, (_, i) => ({
+      toolId: `tool-${i}`,
+      isError: false,
+      content: `Action ${i} result`,
+      outcome: 'success' as const,
+      actionKey: createHash('sha256').update(`key-${i}`).digest('hex'),
+      providerRequestId: `req-${i}`,
+      reconciliation: {
+        provider: 'vendor',
+        providerRequestId: `req-${i}`,
+        lookupAttempted: true,
+        lookupStatus: '200',
+        lookupOutcome: bigOutcome,
+        outcomeKnown: true,
+        note: `A verbose note for action ${i} that is not needed at resume time.`,
+      },
+      binding: { operation: `op-${i}`, providerRequestId: `req-${i}` },
+    }))
+    const checkpoint: AgentExecutionCheckpoint = {
+      version: 2,
+      history: [
+        { role: 'user', content: 'Do the work.' },
+        { role: 'assistant', content: '{"tool":"__list_tools","args":{}}' },
+        { role: 'user', content: 'Action result: catalog' },
+      ],
+      tokensUsed: 100,
+      toolCalls: 40,
+      brainCalls: 40,
+      completionTokensReserved: 16_384,
+      delegations: 0,
+      lastAction: 'tool-39',
+      repeatedActionCount: 0,
+      actionReceipts: receipts,
+    }
+    let saved: AgentExecutionCheckpoint | undefined
+    const fetcher: typeof fetch = async (input) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) return jsonResponse({ tools: [] })
+      if (url.endsWith('/api/brain/complete')) {
+        return jsonResponse({ content: 'Done.' })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+
+    const result = await new AgentExecutor({ fetcher }).execute(definition, task() as AgentTask, {
+      missionId: 'mission-1',
+      delegationDepth: 0,
+      resumeCheckpoint: checkpoint,
+      saveCheckpoint: async (value) => { saved = value },
+    })
+
+    expect(saved).toBeDefined()
+    const serialized = JSON.stringify(saved)
+    // The raw receipts alone were well over half a megabyte before compaction.
+    expect(Buffer.byteLength(serialized, 'utf8')).toBeLessThan(200 * 1024)
+    // Durable fields survive the compaction.
+    expect(saved!.actionReceipts).toHaveLength(40)
+    const persistedReceipt = (saved!.actionReceipts as Array<{
+      toolId: string
+      outcome: string
+      providerRequestId?: string
+      actionKey?: string
+      reconciliation?: Record<string, unknown>
+      binding?: Record<string, unknown>
+    }>)[0]
+    expect(persistedReceipt).toMatchObject({
+      toolId: 'tool-0',
+      outcome: 'success',
+      providerRequestId: 'req-0',
+      actionKey: expect.any(String),
+    })
+    expect(persistedReceipt.reconciliation).toMatchObject({
+      provider: 'vendor',
+      outcomeKnown: true,
+      providerRequestId: 'req-0',
+    })
+    // Transient verbose metadata is dropped.
+    expect(persistedReceipt.reconciliation).not.toHaveProperty('lookupOutcome')
+    expect(persistedReceipt.reconciliation).not.toHaveProperty('lookupStatus')
+    expect(persistedReceipt.reconciliation).not.toHaveProperty('lookupAttempted')
+    expect(persistedReceipt.reconciliation).not.toHaveProperty('note')
+    // `binding` is trimmed to the durable fields only (operation/providerRequestId);
+    // the verbose transient fields are gone.
+    expect(persistedReceipt.binding).toMatchObject({ operation: 'op-0', providerRequestId: 'req-0' })
+    expect(persistedReceipt.binding).not.toHaveProperty('lookupOutcome')
+    expect(result.actionReceipts.at(-1)).toMatchObject({ toolId: 'tool-39', outcome: 'success' })
+  })
 })

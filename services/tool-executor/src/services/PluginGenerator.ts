@@ -94,14 +94,52 @@ const PLUGIN_SYSTEM_PROMPT = `You are a senior engineer generating production-re
   - If the tool must return a secret value, mark that output property with
     "x-stage7-secret": true. ToolExecutor stores it in Vault and returns only a
     vault:// reference to the Agent; never include real secret values in acceptance tests.
-  - Do NOT include markdown fences or explanation text outside the JSON.`;
+  - Do NOT include markdown fences or explanation text outside the JSON.
+
+  EXAMPLE — Twilio SMS sender (the exact shape a generated tool must take):
+  {
+    "id": "sms-send",
+    "name": "Send SMS",
+    "description": "Send an SMS via Twilio. Requires Twilio credentials resolved through the credential provider.",
+    "type": "code",
+    "language": "javascript",
+    "entrypoint": "index.js",
+    "sourceCode": "const accountSid = __getCredential('twilio_account_sid');\nconst authToken = __getCredential('twilio_auth_token');\nconst fromNumber = __getCredential('twilio_from_number');\nconst to = __tool_input.to;\nconst body = __tool_input.body;\nif (!accountSid || !authToken || !fromNumber) { console.log(JSON.stringify({ success: false, error: 'Missing Twilio credentials. The user must supply twilio_account_sid, twilio_auth_token, and twilio_from_number via Vault.' })); return; }\nconst auth = 'Basic ' + Buffer.from(accountSid + ':' + authToken).toString('base64');\nconst params = new URLSearchParams();\nparams.set('From', fromNumber);\nparams.set('To', to);\nparams.set('Body', body);\nfetch('https://api.twilio.com/2010-04-01/Accounts/' + accountSid + '/Messages.json', { method: 'POST', headers: { Authorization: auth, 'Content-Type': 'application/x-www-form-urlencoded' }, body: params.toString() }).then(async (res) => {\n  const text = await res.text();\n  let data = text;\n  try { data = JSON.parse(text); } catch {}\n  if (res.ok && data && data.sid) { console.log(JSON.stringify({ success: true, messageId: data.sid, providerRequestId: data.sid })); }\n  else { console.log(JSON.stringify({ success: false, error: (data && data.message) || ('Twilio rejected the request (' + res.status + ')') })); }\n}).catch((err) => { console.log(JSON.stringify({ success: false, error: err.message || String(err) })); });",
+    "requirements": [],
+    "configSchema": { "type": "object", "properties": {} },
+    "credentialSource": {
+      "twilio_account_sid": { "configKey": "twilio_account_sid", "label": "Twilio Account SID" },
+      "twilio_auth_token": { "configKey": "twilio_auth_token", "label": "Twilio Auth Token", "sensitive": true },
+      "twilio_from_number": { "configKey": "twilio_from_number", "label": "Twilio From Number" }
+    },
+    "inputs": {
+      "type": "object",
+      "properties": {
+        "to": { "type": "string", "description": "Recipient phone number in E.164 format" },
+        "body": { "type": "string", "description": "Message body text" }
+      },
+      "required": ["to", "body"]
+    },
+    "outputs": {
+      "type": "object",
+      "properties": {
+        "success": { "type": "boolean" },
+        "messageId": { "type": "string" },
+        "error": { "type": "string" }
+      },
+      "required": ["success"]
+    }
+  }
+  In that example, every persistent credential is declared in credentialSource and read with
+  __getCredential('logicalKey') — never with process.env, os.environ, or getenv. If a credential
+  is missing, the tool must return a clear error telling the user which Vault secrets to supply.`;
 
 const PLUGIN_DEPLOY_DIR = process.env.PLUGIN_DEPLOY_DIR || '/tmp/stage7-plugins';
 const MAX_PLUGIN_SOURCE_BYTES = 128 * 1024;
 const MAX_TEST_CONTRACT_BYTES = 32 * 1024;
 const PLUGIN_TEST_TIMEOUT_MS = 10_000;
 const PLUGIN_SYNTAX_CHECK_TIMEOUT_MS = 10_000;
-const MAX_PLUGIN_GENERATION_ATTEMPTS = 2;
+const MAX_PLUGIN_GENERATION_ATTEMPTS = 4;
 const pluginTestContractSchema = z.object({
   description: z.string().trim().min(1).max(1_000),
   cases: z.array(z.object({
@@ -112,7 +150,7 @@ const pluginTestContractSchema = z.object({
       method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']),
       urlPattern: z.string().trim().min(1).max(512)
         .refine((value) => /^https?:\/\/[^\s]+$/i.test(value), 'must be an HTTP(S) URL pattern'),
-      expectedRequestBody: z.string().max(16_384).optional(),
+      expectedRequestBody: z.union([z.string().max(16_384), z.record(z.string(), z.unknown())]).optional(),
       responseStatus: z.number().int().min(100).max(599),
       responseHeaders: z.record(z.string(), z.string()).optional(),
       responseBody: z.record(z.string(), z.unknown()),
@@ -193,6 +231,57 @@ function safePluginId(id: unknown): id is string {
 function expectedEntrypoint(language: unknown): 'index.js' | 'main.py' | undefined {
   if (language === 'javascript') return 'index.js';
   if (language === 'python') return 'main.py';
+  return undefined;
+}
+
+function extractFirstJsonObject(content: string): unknown | undefined {
+  // Some models wrap the JSON in prose or markdown fences. Pull the first
+  // balanced top-level object out of the content so a single JSON object can be
+  // parsed even when the model adds conversational text around it.
+  const start = content.indexOf('{');
+  if (start < 0) return undefined;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < content.length; i++) {
+    const ch = content[i];
+    if (escaped) { escaped = false; continue; }
+    if (ch === '\\') { escaped = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) {
+        const candidate = content.slice(start, i + 1);
+        try { return JSON.parse(candidate); } catch { return undefined; }
+      }
+    }
+  }
+  return undefined;
+}
+
+function extractFirstJsonArray(content: string): unknown | undefined {
+  const start = content.indexOf('[');
+  if (start < 0) return undefined;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < content.length; i++) {
+    const ch = content[i];
+    if (escaped) { escaped = false; continue; }
+    if (ch === '\\') { escaped = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === '[') depth++;
+    else if (ch === ']') {
+      depth--;
+      if (depth === 0) {
+        const candidate = content.slice(start, i + 1);
+        try { return JSON.parse(candidate); } catch { return undefined; }
+      }
+    }
+  }
   return undefined;
 }
 
@@ -283,9 +372,10 @@ export class PluginGenerator {
     const maxAttempts = options.maxAttempts || MAX_PLUGIN_GENERATION_ATTEMPTS;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      const nonce = `plugin-gen-${attempt}-${Date.now()}`;
       const prompt = repairFeedback
-        ? `${basePrompt}\n\nThe previous generated code was rejected. Fix this specific issue without changing the contract:\n${repairFeedback}`
-        : basePrompt;
+        ? `${basePrompt}\n\nThe previous generated code was rejected. Fix this specific issue without changing the contract:\n${repairFeedback}\nRetry nonce: ${nonce}`
+        : `${basePrompt}\nRetry nonce: ${nonce}`;
       const response = await fetch(`${brainUrl}/api/brain/complete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -309,10 +399,20 @@ export class PluginGenerator {
       if (typeof data.content !== 'string' || Buffer.byteLength(data.content, 'utf8') > MAX_PLUGIN_SOURCE_BYTES * 2) {
         validationError = 'LLM plugin response content is missing or exceeds the response size limit';
       } else {
-        try {
-          rawPlugin = JSON.parse(data.content);
-        } catch (error) {
-          validationError = `LLM plugin response must be a single JSON object: ${error instanceof Error ? error.message : String(error)}`;
+        // Models frequently wrap the JSON in prose or markdown fences. Pull the
+        // first balanced top-level object out of the content before parsing so
+        // a single JSON object survives conversational wrappers.
+        rawPlugin = extractFirstJsonObject(data.content);
+        if (rawPlugin === undefined) {
+          // Some models answer in pure prose with no JSON at all. Ask for a
+          // JSON-only retry before giving up, so a conversational wrapper does
+          // not abort generation on the first attempt.
+          if (attempt < maxAttempts) {
+            const retryNonce = `plugin-json-retry-${attempt}-${Date.now()}`;
+            repairFeedback = `Your response must be a single JSON object and nothing else. Do not include markdown fences, prose, or explanation. Output only the JSON object described in the system prompt.\nRetry nonce: ${retryNonce}`;
+            continue;
+          }
+          validationError = 'LLM plugin response did not contain a single JSON object';
         }
       }
 
@@ -325,7 +425,22 @@ export class PluginGenerator {
       if (validationError || !validation?.success) {
         const reason = validationError || 'Generated plugin response could not be validated';
         await this.reportBrainComplaint(data.requestId, reason, missionId);
-        repairFeedback = reason;
+        // Give the model the exact required JSON shape so a schema-shaped
+        // rejection can be self-corrected instead of retried blindly.
+        repairFeedback = `${reason}\n\nYour response must be a single JSON object with EXACTLY this shape and nothing else (no markdown fences, no prose, no explanation):\n${JSON.stringify({
+          id: 'string (lowercase, safe identifier)',
+          name: 'string',
+          description: 'string',
+          type: 'code',
+          language: 'javascript | python',
+          entrypoint: 'index.js | main.py',
+          sourceCode: 'complete runnable code reading __tool_input and printing one JSON result',
+          requirements: [],
+          configSchema: { type: 'object', properties: {} },
+          credentialSource: { logicalKey: { configKey: 'field', label: 'Human-readable name', sensitive: true } },
+          inputs: { type: 'object', properties: {} },
+          outputs: { type: 'object', properties: {} },
+        })}`;
         continue;
       }
 
@@ -361,6 +476,15 @@ export class PluginGenerator {
       };
 
       const failedCases: string[] = [];
+      const dummyCredentials: Record<string, string> = {};
+      for (const logicalKey of Object.keys(parsed.credentialSource || {})) {
+        // Isolated tests cannot receive real credentials (they are rejected by
+        // the executor). Provide dummy values so a generated tool that gates on
+        // `__getCredential` still proceeds to the mocked HTTP call and the
+        // acceptance contract can validate behavior. Real secrets never appear
+        // in test fixtures.
+        dummyCredentials[logicalKey] = `test-${logicalKey}`;
+      }
       for (const testCase of testContract.cases) {
         const execution = await this.codeExecutor.execute({
           language: parsed.language,
@@ -369,7 +493,8 @@ export class PluginGenerator {
           httpMocks: testCase.httpMocks,
           timeoutMs: PLUGIN_TEST_TIMEOUT_MS,
           isolated: true,
-        });
+          testCredentials: dummyCredentials,
+        }, dummyCredentials);
         if (!execution.success) {
           failedCases.push(`${testCase.name}: execution failed: ${(execution.error || 'unknown error').slice(0, 300)}`);
           continue;
@@ -440,11 +565,12 @@ export class PluginGenerator {
       const missionId = typeof request.context?.missionId === 'string'
         ? request.context.missionId
         : undefined;
+      const contractNonce = `contract-gen-${Date.now()}`;
       const contractResponse = await fetch(`${brainUrl}/api/brain/complete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          prompt: `Define deterministic acceptance tests for this capability:\n${request.description}\nRequirements: ${(request.requirements || []).join(', ')}`,
+          prompt: `Define deterministic acceptance tests for this capability:\n${request.description}\nRequirements: ${(request.requirements || []).join(', ')}\nRetry nonce: ${contractNonce}`,
           systemPrompt: TEST_CONTRACT_SYSTEM_PROMPT,
           options: { temperature: 0.1, maxTokens: 2048 },
           missionId,
@@ -454,7 +580,7 @@ export class PluginGenerator {
         const text = await contractResponse.text();
         return { success: false, error: `Acceptance contract request failed with ${contractResponse.status}: ${text.slice(0, 200)}` };
       }
-      const contractData = await contractResponse.json() as { content?: unknown; requestId?: unknown };
+      let contractData: { content?: unknown; requestId?: unknown } = await contractResponse.json() as { content?: unknown; requestId?: unknown };
       if (typeof contractData.content !== 'string'
         || Buffer.byteLength(contractData.content, 'utf8') > MAX_TEST_CONTRACT_BYTES) {
         const error = 'Acceptance contract is missing or exceeds the test contract size limit';
@@ -462,10 +588,33 @@ export class PluginGenerator {
         return { success: false, error };
       }
       let rawContract: unknown;
-      try {
-        rawContract = JSON.parse(contractData.content);
-      } catch (error) {
-        const reason = `Acceptance contract must be a single JSON object: ${error instanceof Error ? error.message : String(error)}`;
+      let contractRepairFeedback = '';
+      for (let contractAttempt = 1; contractAttempt <= MAX_PLUGIN_GENERATION_ATTEMPTS; contractAttempt++) {
+        const contractContent = typeof contractData.content === 'string' ? contractData.content : '';
+        rawContract = extractFirstJsonObject(contractContent);
+        if (rawContract !== undefined) break;
+        if (contractAttempt < MAX_PLUGIN_GENERATION_ATTEMPTS) {
+          contractRepairFeedback = 'Your response must be a single JSON object and nothing else. Do not include markdown fences, prose, or explanation. Output only the JSON object described in the system prompt.';
+          const retryNonce = `contract-retry-${contractAttempt}-${Date.now()}`;
+          const retryResponse = await fetch(`${brainUrl}/api/brain/complete`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              prompt: `Define deterministic acceptance tests for this capability:\n${request.description}\nRequirements: ${(request.requirements || []).join(', ')}\n\nThe previous response was not a single JSON object. ${contractRepairFeedback}\nRetry nonce: ${retryNonce}`,
+              systemPrompt: TEST_CONTRACT_SYSTEM_PROMPT,
+              options: { temperature: 0.1, maxTokens: 2048 },
+              missionId,
+            }),
+          });
+          if (retryResponse.ok) {
+            contractData = await retryResponse.json() as { content?: unknown; requestId?: unknown };
+          } else {
+            break;
+          }
+        }
+      }
+      if (rawContract === undefined) {
+        const reason = 'Acceptance contract must be a single JSON object: response did not contain a JSON object';
         await this.reportBrainComplaint(contractData.requestId, reason, missionId);
         return { success: false, error: reason };
       }
@@ -502,7 +651,8 @@ export class PluginGenerator {
           : { success: false, error: `${reason}; bounded repair failed: ${repaired.error || 'unknown error'}` };
       };
 
-      const userPrompt = `Generate an executable plugin for this capability:\n${request.description}\nRequirements: ${(request.requirements || []).join(', ')}\nContext: ${JSON.stringify(request.context || {})}\n\nIndependent acceptance contract to implement exactly:\n${JSON.stringify(testContract)}`;
+      const userPromptNonce = `plugin-user-${Date.now()}`;
+      const userPrompt = `Generate an executable plugin for this capability:\n${request.description}\nRequirements: ${(request.requirements || []).join(', ')}\nContext: ${JSON.stringify(request.context || {})}\n\nIndependent acceptance contract to implement exactly:\n${JSON.stringify(testContract)}\nRetry nonce: ${userPromptNonce}`;
 
       const response = await fetch(`${brainUrl}/api/brain/complete`, {
         method: 'POST',
@@ -521,17 +671,40 @@ export class PluginGenerator {
         return { success: false, error: `LLM returned ${response.status}: ${text.slice(0, 200)}` };
       }
 
-      const data = await response.json() as { content?: unknown; requestId?: unknown };
+      let data: { content?: unknown; requestId?: unknown } = await response.json() as { content?: unknown; requestId?: unknown };
       if (typeof data.content !== 'string' || Buffer.byteLength(data.content, 'utf8') > MAX_PLUGIN_SOURCE_BYTES * 2) {
         const error = 'LLM plugin response content is missing or exceeds the response size limit';
         await this.reportBrainComplaint(data.requestId, error, missionId);
         return await repairRejectedPlugin(error);
       }
       let rawPlugin: unknown;
-      try {
-        rawPlugin = JSON.parse(data.content);
-      } catch (error) {
-        const reason = `LLM plugin response must be a single JSON object: ${error instanceof Error ? error.message : String(error)}`;
+      let pluginRepairFeedback = '';
+      for (let pluginAttempt = 1; pluginAttempt <= MAX_PLUGIN_GENERATION_ATTEMPTS; pluginAttempt++) {
+        const pluginContent = typeof data.content === 'string' ? data.content : '';
+        rawPlugin = extractFirstJsonObject(pluginContent);
+        if (rawPlugin !== undefined) break;
+        if (pluginAttempt < MAX_PLUGIN_GENERATION_ATTEMPTS) {
+          pluginRepairFeedback = 'Your response must be a single JSON object and nothing else. Do not include markdown fences, prose, or explanation. Output only the JSON object described in the system prompt.';
+          const pluginRetryNonce = `plugin-retry-${pluginAttempt}-${Date.now()}`;
+          const retryResponse = await fetch(`${brainUrl}/api/brain/complete`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              prompt: `${userPrompt}\n\nThe previous response was not a single JSON object. ${pluginRepairFeedback}\nRetry nonce: ${pluginRetryNonce}`,
+              systemPrompt: PLUGIN_SYSTEM_PROMPT,
+              options: { temperature: 0.2, maxTokens: 4096 },
+              missionId,
+            }),
+          });
+          if (retryResponse.ok) {
+            data = await retryResponse.json() as { content?: unknown; requestId?: unknown };
+          } else {
+            break;
+          }
+        }
+      }
+      if (rawPlugin === undefined) {
+        const reason = 'LLM plugin response must be a single JSON object: response did not contain a JSON object';
         await this.reportBrainComplaint(data.requestId, reason, missionId);
         return await repairRejectedPlugin(reason);
       }
@@ -602,6 +775,7 @@ export class PluginGenerator {
       }
       if (failedCases.length > 0) {
         const reason = `Generated plugin failed isolated acceptance tests: ${failedCases.join('; ')}`;
+        logger.error({ toolId: tool.id, toolName: tool.name, sourceCode: parsed.sourceCode.slice(0, 2_000), testContract, failedCases }, 'Plugin generation failed isolated acceptance tests');
         await this.reportBrainComplaint(data.requestId, reason, missionId);
         return await repairRejectedPlugin(reason);
       }

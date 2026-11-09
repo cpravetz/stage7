@@ -167,7 +167,7 @@ export class ToolDispatcher {
       files: 'files.js',
       ftp: 'ftp.js',
       webhook: 'webhook.js',
-      database: 'database.js',
+database: 'database.js',
       email: 'email.js',
       vendor: 'vendor.js',
       data_analysis: 'data_analysis.js',

@@ -92,8 +92,7 @@ export type NativeExecutorKey =
   | 'vendor'
   | 'data_analysis'
   | 'calendar'
-  | 'api_client'
-  | 'sms';
+  | 'api_client';
 
 export interface ToolManifest {
   /**
@@ -128,7 +127,8 @@ export interface ToolManifest {
     | 'salesforce'
     | 'servicenow'
     | 'google_workspace'
-    | 'microsoft_365';
+    | 'microsoft_365'
+    | 'twilio';
   type?: 'mcp' | 'openapi' | 'code' | 'reasoning' | 'native';
   language?: string;
   sourceCode?: string;

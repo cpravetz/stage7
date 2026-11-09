@@ -302,6 +302,48 @@ function enrichReceipt(receipt: AgentActionReceipt): AgentActionReceipt {
     ...(Object.keys(binding).length > 0 ? { binding: { ...(receipt.binding || {}), ...binding } } : {}),
   }
 }
+
+/**
+ * Produces the minimal durable form of a receipt for checkpoint persistence.
+ *
+ * Receipts are kept intact during an active run because the executor reads
+ * `fallbackForToolId`/`resolvedToolId`/`binding` to dedupe in-flight actions.
+ * Once a checkpoint is saved for later resume, those transient fields are no
+ * longer needed — what matters for resume is the identity of the action
+ * (`actionKey`), what it did (`toolId`/`outcome`/`content`), and the provider
+ * reference (`providerRequestId`) so a follow-up can look the same thing up.
+ *
+ * The full reconciliation object is the main bloat vector: each one carries a
+ * `lookupOutcome` string (up to 500 chars), a `note`, and a `lookupStatus`.
+ * Keeping those intact across dozens of failed task retries is what pushed
+ * checkpoints past the storage limit, so the durable form keeps only the fields
+ * a resumed run actually consumes.
+ */
+function compactReceiptForPersistence(receipt: AgentActionReceipt): AgentActionReceipt {
+  // `fallbackForToolId`/`resolvedToolId` are read back at resume time to rebuild
+  // the tool-creation dedup map, so they survive compaction even though they are
+  // transient during an active run.
+  const keepToolLink = receipt.fallbackForToolId || receipt.resolvedToolId
+  const trimmedReconciliation = receipt.reconciliation
+    ? {
+      ...(receipt.reconciliation.provider !== undefined ? { provider: receipt.reconciliation.provider } : {}),
+      ...(receipt.reconciliation.outcomeKnown !== undefined ? { outcomeKnown: receipt.reconciliation.outcomeKnown } : {}),
+      ...(receipt.reconciliation.providerRequestId !== undefined ? { providerRequestId: receipt.reconciliation.providerRequestId } : {}),
+    }
+    : undefined
+  const trimmedBinding = receipt.binding
+    ? {
+      ...(receipt.binding.operation !== undefined ? { operation: receipt.binding.operation } : {}),
+      ...(receipt.binding.providerRequestId !== undefined ? { providerRequestId: receipt.binding.providerRequestId } : {}),
+    }
+    : undefined
+  return {
+    ...receipt,
+    ...(keepToolLink ? {} : { fallbackForToolId: undefined, resolvedToolId: undefined }),
+    ...(trimmedReconciliation ? { reconciliation: trimmedReconciliation } : {}),
+    ...(trimmedBinding ? { binding: trimmedBinding } : {}),
+  }
+}
 function parseActionReceipts(value: unknown): AgentActionReceipt[] {
   if (value === undefined) return []
   if (!Array.isArray(value)) {
@@ -864,11 +906,15 @@ export class AgentExecutor {
         ...(finalOutput !== undefined ? { finalOutput } : {}),
         ...(incompleteReason !== undefined ? { incompleteReason } : {}),
       }
-      // Compact the persisted history when it grows large: keep the first user prompt,
-      // the most recent turns, and all action receipts, dropping the oldest middle turns.
-      // Receipts are kept intact because they are the durable evidence of executed actions.
+      // Compact the persisted checkpoint when it grows large: keep the first user
+      // prompt, the most recent turns, and all action receipts, dropping the
+      // oldest middle turns. Receipts are reduced to their durable form first —
+      // the full reconciliation/binding objects are transient runtime metadata
+      // that only the active executor needs, and they were the vector that pushed
+      // checkpoints past the storage limit across repeated failed task retries.
+      const compactedReceipts = actionReceipts.map(compactReceiptForPersistence)
       let checkpointHistory = next.history
-      const receiptsBudget = Buffer.byteLength(JSON.stringify(next.actionReceipts), 'utf8')
+      const receiptsBudget = Buffer.byteLength(JSON.stringify(compactedReceipts), 'utf8')
       const overhead = Buffer.byteLength(JSON.stringify({ ...next, history: [], actionReceipts: [] }), 'utf8')
       const historyBudget = Math.max(0, MAX_AGENT_CHECKPOINT_BYTES - receiptsBudget - overhead - 256)
       let currentSize = checkpointHistory.reduce((sum, m) => sum + Buffer.byteLength(m.content, 'utf8') + 12, 0)
@@ -878,7 +924,7 @@ export class AgentExecutor {
         currentSize -= Buffer.byteLength(dropped.content, 'utf8') + 12
         checkpointHistory = [checkpointHistory[0], ...checkpointHistory.slice(dropIndex + 1)]
       }
-      const compacted = { ...next, history: checkpointHistory }
+      const compacted = { ...next, history: checkpointHistory, actionReceipts: compactedReceipts }
       const size = Buffer.byteLength(JSON.stringify(compacted), 'utf8')
       if (size > MAX_AGENT_CHECKPOINT_BYTES) {
         throw new Error(`The saved progress for this task became too large to store (${MAX_AGENT_CHECKPOINT_BYTES} bytes)`)
