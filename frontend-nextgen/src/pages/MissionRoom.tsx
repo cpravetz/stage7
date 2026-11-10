@@ -351,6 +351,29 @@ const MissionRoom = () => {
   const [interactionConfigurationReady, setInteractionConfigurationReady] = useState(false);
   const [interactionResponse, setInteractionResponse] = useState('');
   const [permissionScope, setPermissionScope] = useState('');
+
+  const getRespondedInteractions = (): Set<string> => {
+    try {
+      const stored = sessionStorage.getItem(`mission-responded-interactions:${workflowId}`);
+      return stored ? new Set(JSON.parse(stored)) : new Set();
+    } catch {
+      return new Set();
+    }
+  };
+
+  const markInteractionResponded = (interactionId: string) => {
+    try {
+      const responded = getRespondedInteractions();
+      responded.add(interactionId);
+      sessionStorage.setItem(`mission-responded-interactions:${workflowId}`, JSON.stringify([...responded]));
+    } catch {
+      // Ignore storage errors
+    }
+  };
+
+  const getInteractionId = (pending: NonNullable<typeof pendingInteraction>): string => {
+    return pending.requestId || `${pending.phaseId}:${pending.taskId}`;
+  };
   const [messageText, setMessageText] = useState('');
   const transcriptRef = useRef<HTMLDivElement>(null);
   const transcriptSticksToBottom = useRef(true);
@@ -564,6 +587,33 @@ const MissionRoom = () => {
     }
   };
 
+  // Renders a user response in the conversation immediately, before the
+  // backend echoes the persisted copy back over the websocket. The feed store
+  // reconciles the persisted copy with this optimistic placeholder so the
+  // response is listed once instead of duplicated.
+  const appendOptimisticUserResponse = (
+    message: string,
+    type: 'user' | 'user_input_resolved' = 'user',
+    phaseId?: string,
+    taskId?: string,
+  ) => {
+    useFeedStore.getState().addEvent({
+      id: `optimistic-${type}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      type,
+      source: 'user',
+      message,
+      timestamp: Date.now(),
+      missionId,
+      metadata: {
+        content: message,
+        role: 'user',
+        optimistic: true,
+        ...(phaseId ? { phaseId } : {}),
+        ...(taskId ? { taskId } : {}),
+      },
+    });
+  };
+
   const handleClarificationSubmit = async () => {
     const questions = plan?.clarificationQuestions || [];
     const answers = questions.map((_, index) => clarificationInputs.current.get(index)?.value.trim() || '');
@@ -588,6 +638,9 @@ const MissionRoom = () => {
         });
         return `[secret-ref:${key}] ${prompt.trim()}\nVault reference: vault://${secret.id}`;
       }));
+      appendOptimisticUserResponse(
+        `Clarification answers:\n${safeAnswers.map((a, i) => `${i + 1}. ${a}`).join('\n')}`,
+      );
       const result = await postJSON<{ status: string }>(
         `/api/temporal/missions/${encodeURIComponent(workflowId)}/start`,
         { clarificationAnswers: safeAnswers },
@@ -615,8 +668,14 @@ const MissionRoom = () => {
       return;
     }
     if (configureInSettings && !interactionConfigurationReady) return;
+    const responseMessage = pending.kind === 'mcp_permission'
+      ? `Permission ${decision === 'granted' ? 'granted' : 'denied'}`
+      : configureInSettings
+        ? `The required configuration values (${secretKeys.join(', ')}) have been saved in Tools or Vault. Retry the mission using those configured values; do not request the secrets in chat.`
+        : responseText;
     setInteractionSubmitting(true);
     setControlError(null);
+    appendOptimisticUserResponse(responseMessage, 'user', pending.phaseId, pending.taskId);
     try {
       if (pending.kind === 'mcp_permission') {
         if (!decision) return;
@@ -636,12 +695,9 @@ const MissionRoom = () => {
           );
           updateMissionStatus(workflowId, result.status);
         } else {
-          const safeResponse = configureInSettings
-            ? `The required configuration values (${secretKeys.join(', ')}) have been saved in Tools or Vault. Retry the mission using those configured values; do not request the secrets in chat.`
-            : responseText;
           const result = await postJSON<{ status: string }>(
             `/api/temporal/missions/${encodeURIComponent(workflowId)}/start`,
-            { interactionResponse: safeResponse },
+            { interactionResponse: responseMessage },
           );
           updateMissionStatus(workflowId, result.status);
         }
@@ -649,6 +705,9 @@ const MissionRoom = () => {
       setInteractionAccepted(true);
       setInteractionResponse('');
       setPermissionScope('');
+      if (pending.requestId || (pending.phaseId && pending.taskId)) {
+        markInteractionResponded(getInteractionId(pending));
+      }
       await refreshDetail(workflowId);
     } catch (error) {
       setControlError(error instanceof Error ? error.message : 'Failed to resume the mission');
@@ -669,6 +728,9 @@ const MissionRoom = () => {
     if (!text || sending) return;
     setSending(true);
     setSendError(null);
+
+    const pending = detail?.output?.outputs?.pendingInteraction;
+    const interactionId = pending ? getInteractionId(pending) : null;
 
     // Optimistically render the user's message immediately instead of waiting
     // for the backend round-trip and websocket broadcast. The backend echoes
@@ -694,6 +756,9 @@ const MissionRoom = () => {
         setSendError(result.error);
       } else {
         setMessageText('');
+        if (interactionId) {
+          markInteractionResponded(interactionId);
+        }
       }
     } catch (err) {
       setSendError(err instanceof Error ? err.message : 'Failed to send message');
@@ -723,23 +788,26 @@ const MissionRoom = () => {
         </div>
 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <div style={{ display: 'flex', gap: 8 }}>
-                {['paused', 'pending', 'awaiting_review'].includes(status) && (
-                 <button onClick={async () => {
-                    setControlError(null);
-                    try {
-                      const pending = detail?.output?.outputs?.pendingInteraction;
-                      const hasCredentialRequest = pending?.kind === 'user_input' && Boolean(pending.credentialRequest);
-                      const result = await postJSON<{ status: string }>(
-                        `/api/temporal/missions/${encodeURIComponent(workflowId)}/start`,
-                        hasCredentialRequest ? { useConfiguredCredentials: true } : {},
-                      );
-                      updateMissionStatus(workflowId, result.status);
-                      await refreshDetail(workflowId);
-                    } catch (error) {
-                      setControlError(error instanceof Error ? error.message : 'Failed to resume mission');
-                    }
-                  }}>Resume</button>
-               )}
+{['paused', 'pending', 'awaiting_review'].includes(status) && (
+                  <button onClick={async () => {
+                     setControlError(null);
+                     try {
+                       const pending = detail?.output?.outputs?.pendingInteraction;
+                       const hasCredentialRequest = pending?.kind === 'user_input' && Boolean(pending.credentialRequest);
+                       const result = await postJSON<{ status: string }>(
+                         `/api/temporal/missions/${encodeURIComponent(workflowId)}/start`,
+                         hasCredentialRequest ? { useConfiguredCredentials: true } : {},
+                       );
+                       updateMissionStatus(workflowId, result.status);
+                       if (pending && (pending.requestId || (pending.phaseId && pending.taskId))) {
+                         markInteractionResponded(getInteractionId(pending));
+                       }
+                       await refreshDetail(workflowId);
+                     } catch (error) {
+                       setControlError(error instanceof Error ? error.message : 'Failed to resume mission');
+                     }
+                   }}>Resume</button>
+                )}
                {status === 'running' && (
                  <button onClick={async () => {
                    setControlError(null);
@@ -834,6 +902,11 @@ const MissionRoom = () => {
 
       {detail?.output?.outputs?.pendingInteraction && !(interactionSubmitting || interactionAccepted) && (() => {
         const pending = detail.output.outputs.pendingInteraction;
+        const interactionId = getInteractionId(pending);
+        const respondedInteractions = getRespondedInteractions();
+        if (respondedInteractions.has(interactionId)) {
+          return null;
+        }
         const secretKeys = pending.kind === 'user_input' ? secretKeysForInteraction(pending) : [];
         const secretQuestion = pending.kind === 'user_input'
           ? pending.question?.match(/^\s*\[secret:([a-z0-9_-]+)\]\s*(.*)$/i)

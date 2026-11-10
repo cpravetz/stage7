@@ -436,6 +436,80 @@ button:disabled {
   background: #0f172a;
 }
 
+.vault-page {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 120px);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.vault-fixed {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.vault-form {
+  gap: 10px;
+}
+
+.vault-form-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.vault-form-row input {
+  flex: 1;
+}
+
+.vault-search {
+  width: 100%;
+}
+
+.vault-table-card {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.vault-table-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.vault-table th:last-child,
+.vault-table td:last-child {
+  width: 220px;
+}
+
+.vault-name-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.vault-secret-value {
+  margin-top: 0;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.vault-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.muted {
+  color: #94a3b8;
+}
+
 .login-card {
   background: #1e293b;
   border: 1px solid #334155;

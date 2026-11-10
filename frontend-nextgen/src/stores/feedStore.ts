@@ -241,6 +241,55 @@ export function normalize(raw: unknown): FeedEvent | null {
   };
 }
 
+// User-facing response types that the frontend may render optimistically
+// before the backend echoes the persisted copy back over the websocket.
+const USER_RESPONSE_TYPES = new Set(['user', 'user_message', 'user_input_resolved']);
+
+/**
+ * Removes optimistic placeholders that a persisted user response now replaces,
+ * so the user's input is listed once instead of duplicated. An optimistic
+ * placeholder matches when it is flagged optimistic, shares the response type
+ * and mission, and either has the same rendered message or resolves the same
+ * pending interaction (phaseId/taskId) — the backend may synthesize the
+ * response text for credential or permission resolutions.
+ *
+ * Optimistic placeholders are also dropped when the mission lifecycle advances
+ * (started/resumed), because a resume means the pending interaction was
+ * consumed even if the backend does not echo a matching user response event
+ * (e.g. clarification answers).
+ */
+function reconcileOptimisticPlaceholders(events: FeedEvent[]): FeedEvent[] {
+  const persistedResponses = events.filter(
+    (e) => e.metadata?.optimistic !== true && USER_RESPONSE_TYPES.has(String(e.type)),
+  );
+  const lifecycleAdvanced = events.some((e) =>
+    e.metadata?.optimistic !== true
+    && (e.type === 'mission_started' || e.type === 'mission_resumed')
+    && Boolean(e.missionId),
+  );
+  if (persistedResponses.length === 0 && !lifecycleAdvanced) return events;
+  const interactionKey = (e: FeedEvent) =>
+    `${e.metadata?.phaseId ?? ''}|${e.metadata?.taskId ?? ''}`;
+  return events.filter((e) => {
+    if (e.metadata?.optimistic !== true) return true;
+    if (lifecycleAdvanced && e.missionId) {
+      const advanced = events.some((p) =>
+        p.metadata?.optimistic !== true
+        && (p.type === 'mission_started' || p.type === 'mission_resumed')
+        && p.missionId === e.missionId,
+      );
+      if (advanced) return false;
+    }
+    return !persistedResponses.some((persisted) => {
+      if (persisted.type !== e.type || persisted.missionId !== e.missionId) return false;
+      if (persisted.message === e.message) return true;
+      const a = interactionKey(persisted);
+      const b = interactionKey(e);
+      return a.length > 0 && a === b;
+    });
+  });
+}
+
 export const useFeedStore = create<FeedState>((set, get) => ({
   events: [],
   connected: false,
@@ -287,7 +336,10 @@ export const useFeedStore = create<FeedState>((set, get) => ({
         }
         const normalized = normalize(payload);
         if (!normalized) return;
-        set((state) => ({ events: [normalized, ...state.events].slice(0, 500) }));
+        set((state) => {
+          const reconciled = reconcileOptimisticPlaceholders([normalized, ...state.events]);
+          return { events: reconciled.slice(0, 500) };
+        });
       };
       ws.onclose = () => {
         set({ connected: false, ws: null });
@@ -319,22 +371,8 @@ export const useFeedStore = create<FeedState>((set, get) => ({
   addEvent: (event: FeedEvent) =>
     set((state) => {
       if (state.events.some((e) => e.id === event.id)) return state;
-      // When a persisted (non-optimistic) user message arrives, drop any
-      // optimistic placeholder that matches its mission and content so the
-      // user's sent message is not listed twice.
-      const isPersistedUserMessage =
-        event.metadata?.optimistic !== true && (event.type === 'user' || event.type === 'user_message');
-      if (isPersistedUserMessage) {
-        const remaining = state.events.filter((e) => {
-          if (e.metadata?.optimistic !== true) return true;
-          if (e.type !== event.type || e.missionId !== event.missionId) return true;
-          return e.message !== event.message;
-        });
-        if (remaining.length !== state.events.length) {
-          return { events: [event, ...remaining].slice(0, 500) };
-        }
-      }
-      return { events: [event, ...state.events].slice(0, 500) };
+      const reconciled = reconcileOptimisticPlaceholders([event, ...state.events]);
+      return { events: reconciled.slice(0, 500) };
     }),
   addEvents: (newEvents: FeedEvent[]) => {
     if (newEvents.length === 0) return;
@@ -342,24 +380,8 @@ export const useFeedStore = create<FeedState>((set, get) => ({
       const existing = new Set(state.events.map((e) => e.id));
       const filtered = newEvents.filter((e) => !existing.has(e.id));
       if (filtered.length === 0) return state;
-      // Drop optimistic placeholders that a persisted user message now replaces.
-      const persistedUserMessages = filtered.filter(
-        (e) => e.metadata?.optimistic !== true && (e.type === 'user' || e.type === 'user_message'),
-      );
-      let remaining = state.events;
-      if (persistedUserMessages.length > 0) {
-        remaining = state.events.filter((e) => {
-          if (e.metadata?.optimistic !== true) return true;
-          return !persistedUserMessages.some((persisted) =>
-            persisted.type === e.type
-            && persisted.missionId === e.missionId
-            && persisted.message === e.message,
-          );
-        });
-      }
-      return {
-        events: [...filtered, ...remaining].slice(0, 500),
-      };
+      const reconciled = reconcileOptimisticPlaceholders([...filtered, ...state.events]);
+      return { events: reconciled.slice(0, 500) };
     });
   },
   clear: () => set({ events: [] }),
