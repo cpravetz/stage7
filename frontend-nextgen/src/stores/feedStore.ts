@@ -319,6 +319,21 @@ export const useFeedStore = create<FeedState>((set, get) => ({
   addEvent: (event: FeedEvent) =>
     set((state) => {
       if (state.events.some((e) => e.id === event.id)) return state;
+      // When a persisted (non-optimistic) user message arrives, drop any
+      // optimistic placeholder that matches its mission and content so the
+      // user's sent message is not listed twice.
+      const isPersistedUserMessage =
+        event.metadata?.optimistic !== true && (event.type === 'user' || event.type === 'user_message');
+      if (isPersistedUserMessage) {
+        const remaining = state.events.filter((e) => {
+          if (e.metadata?.optimistic !== true) return true;
+          if (e.type !== event.type || e.missionId !== event.missionId) return true;
+          return e.message !== event.message;
+        });
+        if (remaining.length !== state.events.length) {
+          return { events: [event, ...remaining].slice(0, 500) };
+        }
+      }
       return { events: [event, ...state.events].slice(0, 500) };
     }),
   addEvents: (newEvents: FeedEvent[]) => {
@@ -327,8 +342,23 @@ export const useFeedStore = create<FeedState>((set, get) => ({
       const existing = new Set(state.events.map((e) => e.id));
       const filtered = newEvents.filter((e) => !existing.has(e.id));
       if (filtered.length === 0) return state;
+      // Drop optimistic placeholders that a persisted user message now replaces.
+      const persistedUserMessages = filtered.filter(
+        (e) => e.metadata?.optimistic !== true && (e.type === 'user' || e.type === 'user_message'),
+      );
+      let remaining = state.events;
+      if (persistedUserMessages.length > 0) {
+        remaining = state.events.filter((e) => {
+          if (e.metadata?.optimistic !== true) return true;
+          return !persistedUserMessages.some((persisted) =>
+            persisted.type === e.type
+            && persisted.missionId === e.missionId
+            && persisted.message === e.message,
+          );
+        });
+      }
       return {
-        events: [...filtered, ...state.events].slice(0, 500),
+        events: [...filtered, ...remaining].slice(0, 500),
       };
     });
   },

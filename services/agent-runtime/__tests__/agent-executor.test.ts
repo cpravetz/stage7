@@ -1780,6 +1780,28 @@ describe('AgentExecutor', () => {
     expect(result.brainCalls).toBe(1)
   })
 
+  it('handles an agent that mistakenly calls ask_user as a tool instead of using the native marker', async () => {
+    const fetcher: typeof fetch = async (input) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) return jsonResponse({ tools: [] })
+      if (url.endsWith('/api/brain/complete')) {
+        return jsonResponse({ content: '{"tool":"ask_user","args":{"question":"Which option should I choose?"}}' })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+
+    const result = await new AgentExecutor({ fetcher }).execute(definition, task() as AgentTask, {
+      missionId: 'mission-1',
+      delegationDepth: 0,
+    })
+
+    expect(result.output).toBe('__ASK_USER__:{"question":"Which option should I choose?"}')
+    expect(result.brainCalls).toBe(1)
+    expect(result.actionReceipts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ toolId: 'ask_user', outcome: 'question_asked', isError: false }),
+    ]))
+  })
+
   it('turns missing tool credentials into a structured secret-safe user question', async () => {
     const fetcher: typeof fetch = async (input, init) => {
       const url = String(input)

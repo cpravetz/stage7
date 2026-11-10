@@ -1937,6 +1937,17 @@ export class AgentExecutor {
       return this.delegate(action.args, context)
     }
 
+    if (action.tool === ASK_USER_NAME || action.tool === 'ask_user') {
+      const question = typeof action.args?.question === 'string' && action.args.question.trim().length > 0
+        ? action.args.question.trim()
+        : 'I need more information to continue. Please provide the missing value.'
+      return {
+        isError: false,
+        outcome: 'question_asked',
+        content: `${ASK_USER_MARKER}${JSON.stringify({ question })}`,
+      }
+    }
+
     const tool = tools.find((candidate) => candidate.id === action.tool || candidate.name === action.tool)
     if (!tool) {
       if (toolPolicy.mode === 'allowlist' && !definition.tools.includes(action.tool)) {

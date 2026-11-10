@@ -180,6 +180,9 @@ export class MissionOrchestrator {
     const completedPhases = new Set(ctx.resumeCheckpoint?.completedPhases || []);
     plan.requiresClarification = false;
     plan.clarificationQuestions = [];
+
+    const sharedMissionAgentId = await agentRuntime.getOrCreateAgent('assistant', `You are a mission execution agent. Complete each assigned task sequentially to achieve the mission goal: ${ctx.prompt}. Do not invent missing information. Try authorized alternatives first; if a specific required value is unavailable and no safe alternative can complete the outcome, ask one focused question for that value.`);
+
     if (plan.phases.length === 0) {
       plan.summary = plan.summary.trim() || ctx.prompt;
       plan.phases = [{
@@ -352,7 +355,7 @@ export class MissionOrchestrator {
           : [],
       };
       const completedInPhase = new Set<string>();
-      const executeTask = async (task: Task, savedTask: MissionTaskCheckpoint | undefined) => {
+const executeTask = async (task: Task, savedTask: MissionTaskCheckpoint | undefined) => {
         ctx.heartbeat?.();
         const taskKey = JSON.stringify([phase.id, task.id]);
         if (!savedTask) {
@@ -365,9 +368,9 @@ export class MissionOrchestrator {
               phaseId: phase.id,
               taskId: task.id,
               taskTitle: task.title,
-              agentId: agentRuntime.getAgentIdForRole(task.agentRole),
-              agentName: `${task.agentRole.replace(/\s+Agent$/i, '')} Agent`,
-              agentRole: task.agentRole,
+              agentId: sharedMissionAgentId,
+              agentName: 'Mission Agent',
+              agentRole: 'assistant',
             },
           });
           await this.updateTask(ctx, phase.id, task.id, { status: 'in_progress', startedAt });
@@ -379,11 +382,11 @@ export class MissionOrchestrator {
         const previousInteraction = ctx.resumeCheckpoint?.pendingInteraction;
         const continuationInteraction = previousInteraction
           ? {
-            ...previousInteraction,
-            actionReceipts: previousInteraction.actionReceipts?.filter((receipt) =>
-              !(receipt.toolId === '__create_tool' && receipt.outcome === 'permission_required'),
-            ),
-          }
+              ...previousInteraction,
+              actionReceipts: previousInteraction.actionReceipts?.filter((receipt) =>
+                !(receipt.toolId === '__create_tool' && receipt.outcome === 'permission_required'),
+              ),
+            }
           : undefined;
         const continuation = previousInteraction
           && continuationInteraction
@@ -393,7 +396,7 @@ export class MissionOrchestrator {
           ? { response: ctx.interactionResponse, pendingInteraction: continuationInteraction }
           : undefined;
         try {
-          const agentId = await agentRuntime.getOrCreateAgent(task.agentRole, task.systemPrompt);
+          const agentId = sharedMissionAgentId;
           const executionArgs: [
             string,
             Task,
@@ -481,9 +484,9 @@ export class MissionOrchestrator {
                 phaseId: phase.id,
                 taskId: task.id,
                 taskTitle: task.title,
-                agentId: agentRuntime.getAgentIdForRole(task.agentRole),
-                agentName: `${task.agentRole.replace(/\s+Agent$/i, '')} Agent`,
-                agentRole: task.agentRole,
+                agentId: sharedMissionAgentId,
+                agentName: 'Mission Agent',
+                agentRole: 'assistant',
                 error,
               },
             });
@@ -614,9 +617,9 @@ export class MissionOrchestrator {
               phaseId: phase.id,
               taskId: task.id,
               taskTitle: task.title,
-              agentId: agentRuntime.getAgentIdForRole(task.agentRole),
-              agentName: `${task.agentRole.replace(/\s+Agent$/i, '')} Agent`,
-              agentRole: task.agentRole,
+              agentId: sharedMissionAgentId,
+              agentName: 'Mission Agent',
+              agentRole: 'assistant',
               artifacts: result.artifacts,
               output: result.output.slice(0, 4_000),
               ...(result.incompleteReason ? { error: result.incompleteReason } : {}),
@@ -665,9 +668,9 @@ export class MissionOrchestrator {
                   phaseId: phase.id,
                   taskId: pendingTask.id,
                   taskTitle: pendingTask.title,
-                  agentId: agentRuntime.getAgentIdForRole(pendingTask.agentRole),
-                  agentName: `${pendingTask.agentRole.replace(/\s+Agent$/i, '')} Agent`,
-                  agentRole: pendingTask.agentRole,
+                  agentId: sharedMissionAgentId,
+                  agentName: 'Mission Agent',
+                  agentRole: 'assistant',
                   error: 'No dependency-ready task available',
                 },
               });
@@ -731,9 +734,9 @@ export class MissionOrchestrator {
                     phaseId: phase.id,
                     taskId: pendingTask.id,
                     taskTitle: pendingTask.title,
-                    agentId: agentRuntime.getAgentIdForRole(pendingTask.agentRole),
-                    agentName: `${pendingTask.agentRole.replace(/\s+Agent$/i, '')} Agent`,
-                    agentRole: pendingTask.agentRole,
+                    agentId: sharedMissionAgentId,
+                    agentName: 'Mission Agent',
+                    agentRole: 'assistant',
                     error: 'Task selector invalid',
                   },
                 });
@@ -771,9 +774,9 @@ export class MissionOrchestrator {
               phaseId: phase.id,
               taskId: task.id,
               taskTitle: task.title,
-              agentId: agentRuntime.getAgentIdForRole(task.agentRole),
-              agentName: `${task.agentRole.replace(/\s+Agent$/i, '')} Agent`,
-              agentRole: task.agentRole,
+              agentId: sharedMissionAgentId,
+              agentName: 'Mission Agent',
+              agentRole: 'assistant',
               error,
             },
           });
@@ -1131,8 +1134,8 @@ ${noProgressGuidance}`;
           gaps,
           task: recoveryTask,
           plan,
-          agentId: agentRuntime.getAgentIdForRole('assistant'),
-          agentName: 'Mission Recovery Agent',
+          agentId: sharedMissionAgentId,
+          agentName: 'Mission Agent',
           agentRole: 'assistant',
         },
       });
@@ -1142,7 +1145,7 @@ ${noProgressGuidance}`;
       let result: TaskExecutionResult | undefined;
       let failure = '';
       try {
-        const agentId = await agentRuntime.getOrCreateAgent('assistant', recoveryTask.systemPrompt);
+        const agentId = sharedMissionAgentId;
         const args: [
           string,
           Task,
@@ -1278,8 +1281,8 @@ ${noProgressGuidance}`;
           phaseId: recoveryPhase.id,
           taskId: recoveryTask.id,
           taskTitle: recoveryTask.title,
-          agentId: agentRuntime.getAgentIdForRole('assistant'),
-          agentName: 'Mission Recovery Agent',
+          agentId: sharedMissionAgentId,
+          agentName: 'Mission Agent',
           agentRole: 'assistant',
           ...(result
             ? { artifacts: result.artifacts, output: result.output.slice(0, 4_000), tokensUsed: result.tokensUsed, ...(result.incompleteReason ? { error: result.incompleteReason } : {}) }

@@ -351,6 +351,7 @@ const MissionRoom = () => {
   const [interactionConfigurationReady, setInteractionConfigurationReady] = useState(false);
   const [interactionResponse, setInteractionResponse] = useState('');
   const [permissionScope, setPermissionScope] = useState('');
+  const [messageText, setMessageText] = useState('');
   const transcriptRef = useRef<HTMLDivElement>(null);
   const transcriptSticksToBottom = useRef(true);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -358,6 +359,29 @@ const MissionRoom = () => {
   const retryGuidanceRef = useRef<HTMLTextAreaElement>(null);
   const [showRetryDialog, setShowRetryDialog] = useState(false);
   const [retrying, setRetrying] = useState(false);
+
+  // Persist unsent draft text so navigating away and back (or reloading the
+  // page) does not wipe what the user typed. The draft is scoped to the
+  // mission so switching missions does not carry text across contexts.
+  const draftKey = `mission-draft:${workflowId || 'unknown'}`;
+  useEffect(() => {
+    if (!workflowId) return;
+    try {
+      const saved = window.sessionStorage.getItem(draftKey);
+      if (saved !== null) setMessageText(saved);
+    } catch {
+      // sessionStorage unavailable (private mode, quota, etc.): fall back to in-memory state only.
+    }
+  }, [draftKey, workflowId]);
+
+  useEffect(() => {
+    if (!workflowId) return;
+    try {
+      window.sessionStorage.setItem(draftKey, messageText);
+    } catch {
+      // Ignore persistence failures; the in-memory state still holds the draft.
+    }
+  }, [draftKey, messageText]);
 
   useEffect(() => {
     ensureConnected();
@@ -641,10 +665,26 @@ const MissionRoom = () => {
   }, [transcript.length]);
 
   const sendMessage = async () => {
-    const text = inputRef.current?.value.trim() || '';
+    const text = messageText.trim();
     if (!text || sending) return;
     setSending(true);
     setSendError(null);
+
+    // Optimistically render the user's message immediately instead of waiting
+    // for the backend round-trip and websocket broadcast. The backend echoes
+    // the same event back; the feed store reconciles the persisted copy with
+    // this optimistic placeholder so the sent message is not listed twice.
+    const optimisticEvent: FeedEvent = {
+      id: `optimistic-user-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      type: 'user',
+      source: 'user',
+      message: text,
+      timestamp: Date.now(),
+      missionId,
+      metadata: { content: text, role: 'user', optimistic: true },
+    };
+    useFeedStore.getState().addEvent(optimisticEvent);
+
     try {
       const result = await postJSON<{ status: string; error?: string }>(
         `/api/temporal/missions/${encodeURIComponent(workflowId)}/messages`,
@@ -652,8 +692,8 @@ const MissionRoom = () => {
       );
       if (result?.error) {
         setSendError(result.error);
-      } else if (inputRef.current) {
-        inputRef.current.value = '';
+      } else {
+        setMessageText('');
       }
     } catch (err) {
       setSendError(err instanceof Error ? err.message : 'Failed to send message');
@@ -1225,6 +1265,8 @@ const MissionRoom = () => {
             {sendError && <div className="error-banner">{sendError}</div>}
             <textarea
               ref={inputRef}
+              value={messageText}
+              onChange={(e) => setMessageText(e.target.value)}
               placeholder="Send messages to the mission (agent outputs stream here)..."
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
