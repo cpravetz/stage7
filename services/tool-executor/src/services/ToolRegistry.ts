@@ -1,5 +1,9 @@
 import { Tool } from '../types'
 import { ToolStore } from './ToolStore'
+import fs from 'fs'
+import path from 'path'
+
+const PLUGIN_DEPLOY_DIR = process.env.PLUGIN_DEPLOY_DIR || '/tmp/stage7-plugins'
 
 export class ToolRegistry {
   private tools: Map<string, Tool> = new Map()
@@ -96,6 +100,14 @@ export class ToolRegistry {
     const removed = this.tools.delete(id)
     if (removed && this.store) {
       this.store.remove(id)
+    }
+    if (removed) {
+      try {
+        const pluginDir = path.resolve(PLUGIN_DEPLOY_DIR, id)
+        fs.rmSync(pluginDir, { recursive: true, force: true })
+      } catch {
+        // Best-effort undeploy; a missing directory is not a deletion failure.
+      }
     }
     return removed
   }
