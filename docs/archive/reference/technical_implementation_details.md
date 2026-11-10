@@ -525,7 +525,7 @@ export class ModelManager {
     "@mui/material": "^5.13.7",
     "@mui/system": "^5.13.7",
     "ajv": "^8.17.1",
-    "axios": "^1.21.0",
+    "axios": "^1.21.1",
     "buffer": "^6.0.3",
     "cross-spawn": "^7.0.6",
     "framer-motion": "^11.0.20",

@@ -86,3 +86,41 @@ export interface MissionRecoveryLease {
   ownerId: string;
   expiresAt: Date;
 }
+
+export type AgentActionOutcome = 'success' | 'failure' | 'denied' | 'question_asked' | 'permission_required';
+
+export interface AgentActionReceipt {
+  toolId: string;
+  isError: boolean;
+  content: string;
+  outcome: AgentActionOutcome;
+  actionKey?: string;
+  executionId?: string;
+  operation?: string;
+  providerRequestId?: string;
+  outcomeKnown?: boolean;
+  binding?: Record<string, unknown>;
+  reconciliation?: Record<string, unknown>;
+  fallbackForToolId?: string;
+  resolvedToolId?: string;
+  [key: string]: unknown;
+}
+
+export interface AgentExecutionCheckpoint {
+  agentId: string;
+  taskId: string;
+  version: 1 | 2;
+  history: Array<{ role: 'user' | 'assistant'; content: string }>;
+  tokensUsed: number;
+  toolCalls: number;
+  brainCalls: number;
+  completionTokensReserved: number;
+  delegations: number;
+  lastAction: string;
+  repeatedActionCount: number;
+  actionReceipts?: AgentActionReceipt[];
+  pendingAction?: string;
+  finalOutput?: string;
+  incompleteReason?: string;
+  lastRequestId?: string;
+}

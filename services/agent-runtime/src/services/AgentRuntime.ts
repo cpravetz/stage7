@@ -77,6 +77,7 @@ export class AgentRuntime {
   private activeExecutions: Set<string> = new Set()
   private executor: AgentExecutor
   private persistAgentState?: (state: AgentState) => Promise<void>
+  private saveExecutionCheckpoint?: (agentId: string, taskId: string, checkpoint: AgentExecutionCheckpoint) => Promise<void>
   private startDelegatedAgent?: (agentId: string, missionId: string) => Promise<AgentState>
   private executeDelegatedTask?: (
     agentId: string,
@@ -87,11 +88,13 @@ export class AgentRuntime {
   constructor(
     executor: AgentExecutor = new AgentExecutor(),
     persistAgentState?: (state: AgentState) => Promise<void>,
+    saveExecutionCheckpoint?: (agentId: string, taskId: string, checkpoint: AgentExecutionCheckpoint) => Promise<void>,
     startDelegatedAgent?: (agentId: string, missionId: string) => Promise<AgentState>,
     executeDelegatedTask?: (agentId: string, taskId: string, delegationDepth: number) => Promise<AgentTask>,
   ) {
     this.executor = executor
     this.persistAgentState = persistAgentState
+    this.saveExecutionCheckpoint = saveExecutionCheckpoint
     this.startDelegatedAgent = startDelegatedAgent
     this.executeDelegatedTask = executeDelegatedTask
   }
@@ -351,6 +354,7 @@ export class AgentRuntime {
     taskId: string,
     delegationDepth = 0,
     retryGuidance?: string,
+    resumeCheckpoint?: AgentExecutionCheckpoint,
   ): Promise<AgentTask> {
     const agent = this.agents.get(agentId)
     if (!agent) throw new Error(`Agent ${agentId} not found`)
@@ -387,26 +391,23 @@ export class AgentRuntime {
         ? input.context as Record<string, unknown>
         : {}
       const executionPolicy = readExecutionPolicy(taskContext.executionPolicy)
-      const checkpoints = state.context.executionCheckpoints
-      if (checkpoints !== undefined && (!checkpoints || typeof checkpoints !== 'object' || Array.isArray(checkpoints))) {
-        throw new Error(`Agent ${agentId} has invalid persisted execution checkpoints`)
-      }
-      const resumeCheckpoint = parseAgentExecutionCheckpoint(
-        checkpoints ? (checkpoints as Record<string, unknown>)[taskId] : undefined,
-      )
       const missionId = state.missionId
-      const saveCheckpoint = this.persistAgentState
+      const saveCheckpoint = this.saveExecutionCheckpoint
         ? async (checkpoint: AgentExecutionCheckpoint) => {
-          const current = state.context.executionCheckpoints;
-          const currentCheckpoints = current && typeof current === 'object' && !Array.isArray(current)
-            ? current as Record<string, unknown>
-            : {};
-          state.context = {
-            ...state.context,
-            executionCheckpoints: { ...currentCheckpoints, [taskId]: checkpoint },
-          };
-          await this.persistAgentState?.(state);
-        }
+            await this.saveExecutionCheckpoint!(agentId, taskId, checkpoint);
+          }
+        : this.persistAgentState
+        ? async (checkpoint: AgentExecutionCheckpoint) => {
+            const current = state.context.executionCheckpoints;
+            const currentCheckpoints = current && typeof current === 'object' && !Array.isArray(current)
+              ? current as Record<string, unknown>
+              : {};
+            state.context = {
+              ...state.context,
+              executionCheckpoints: { ...currentCheckpoints, [taskId]: checkpoint },
+            };
+            await this.persistAgentState?.(state);
+          }
         : undefined;
       const result = await this.executor.execute(agent, task, {
         missionId,

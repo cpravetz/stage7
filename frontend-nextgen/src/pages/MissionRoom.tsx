@@ -21,6 +21,34 @@ import {
   TIMELINE_EVENT_TYPES,
 } from '../utils/missionEvents';
 
+function renderTextWithLinks(text: string) {
+  const parts: React.ReactNode[] = [];
+  const regex = /\[([^\]]+)\]\(([^)]+)\)/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(text.slice(lastIndex, match.index));
+    }
+    parts.push(
+      <Link
+        key={`link-${match.index}`}
+        to={match[2]}
+        rel="noreferrer"
+        style={{ color: 'inherit', textDecoration: 'underline' }}
+      >
+        {match[1]}
+      </Link>
+    );
+    lastIndex = regex.lastIndex;
+  }
+  if (lastIndex < text.length) {
+    parts.push(text.slice(lastIndex));
+  }
+  return parts.length > 0 ? parts : text;
+}
+
 interface Plan {
   summary?: string;
   estimatedDuration?: string;
@@ -618,11 +646,15 @@ const MissionRoom = () => {
     setSending(true);
     setSendError(null);
     try {
-      await postJSON<{ status: string }>(
+      const result = await postJSON<{ status: string; error?: string }>(
         `/api/temporal/missions/${encodeURIComponent(workflowId)}/messages`,
         { missionId, content: text, role: 'user' },
       );
-      if (inputRef.current) inputRef.current.value = '';
+      if (result?.error) {
+        setSendError(result.error);
+      } else if (inputRef.current) {
+        inputRef.current.value = '';
+      }
     } catch (err) {
       setSendError(err instanceof Error ? err.message : 'Failed to send message');
     } finally {
@@ -651,20 +683,22 @@ const MissionRoom = () => {
         </div>
 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <div style={{ display: 'flex', gap: 8 }}>
-                {['paused', 'pending'].includes(status) && (
+                {['paused', 'pending', 'awaiting_review'].includes(status) && (
                  <button onClick={async () => {
-                   setControlError(null);
-                   try {
-                     const result = await postJSON<{ status: string }>(
-                       `/api/temporal/missions/${encodeURIComponent(workflowId)}/start`,
-                       {},
-                     );
-                     updateMissionStatus(workflowId, result.status);
-                     await refreshDetail(workflowId);
-                   } catch (error) {
-                     setControlError(error instanceof Error ? error.message : 'Failed to resume mission');
-                   }
-                 }}>Start</button>
+                    setControlError(null);
+                    try {
+                      const pending = detail?.output?.outputs?.pendingInteraction;
+                      const hasCredentialRequest = pending?.kind === 'user_input' && Boolean(pending.credentialRequest);
+                      const result = await postJSON<{ status: string }>(
+                        `/api/temporal/missions/${encodeURIComponent(workflowId)}/start`,
+                        hasCredentialRequest ? { useConfiguredCredentials: true } : {},
+                      );
+                      updateMissionStatus(workflowId, result.status);
+                      await refreshDetail(workflowId);
+                    } catch (error) {
+                      setControlError(error instanceof Error ? error.message : 'Failed to resume mission');
+                    }
+                  }}>Resume</button>
                )}
                {status === 'running' && (
                  <button onClick={async () => {
@@ -1166,7 +1200,7 @@ const MissionRoom = () => {
                     {turn.lines.map((line, idx) => (
                       <div key={idx} className={`turn-line ${line.kind}`}>
                         <span className="turn-icon">{iconForType(line.type)}</span>
-                        <span className="turn-line-text">{line.text}</span>
+                        <span className="turn-line-text">{renderTextWithLinks(line.text)}</span>
                         {line.approval && pendingApproval?.phaseId === line.approval.phaseId && (
                           <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
                             <button

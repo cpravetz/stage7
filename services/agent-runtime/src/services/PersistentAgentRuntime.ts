@@ -16,6 +16,7 @@ import {
   AgentExecutor,
   isResumableDelegationCheckpoint,
   parseAgentExecutionCheckpoint,
+  AgentExecutionCheckpoint,
 } from './AgentExecutor';
 
 export class PersistentAgentRuntime {
@@ -27,6 +28,7 @@ export class PersistentAgentRuntime {
     this.runtime = new AgentRuntime(
       executor,
       (state) => this.persistState(state),
+      (agentId, taskId, checkpoint) => this.persistence.saveExecutionCheckpoint({ ...checkpoint, agentId, taskId }),
       (agentId, missionId) => this.startAgent(agentId, missionId),
       (agentId, taskId, delegationDepth) => this.executeTask(agentId, taskId, false, delegationDepth),
     );
@@ -113,6 +115,10 @@ export class PersistentAgentRuntime {
     return this.runtime.getAgentState(agentId);
   }
 
+  async getExecutionCheckpoint(agentId: string, taskId: string): Promise<AgentExecutionCheckpoint | undefined> {
+    return this.persistence.getExecutionCheckpoint(agentId, taskId);
+  }
+
   async submitTask(
     agentId: string,
     task: Omit<AgentTask, 'agentId' | 'taskId' | 'createdAt'> & { taskId?: string },
@@ -143,13 +149,9 @@ export class PersistentAgentRuntime {
     if (!task || task.agentId !== agentId) throw new Error(`Task ${taskId} not found for agent ${agentId}`);
 
     if (task.status === 'running') throw new Error(`Agent task ${taskId} is already running`);
-    const checkpoints = state.context.executionCheckpoints;
-    if (checkpoints !== undefined && (!checkpoints || typeof checkpoints !== 'object' || Array.isArray(checkpoints))) {
-      throw new Error(`Agent ${agentId} has invalid persisted execution checkpoints`);
-    }
-    const executionCheckpoint = parseAgentExecutionCheckpoint(
-      checkpoints ? (checkpoints as Record<string, unknown>)[taskId] : undefined,
-    );
+    // Load execution checkpoint from separate storage
+    const executionCheckpoint = await this.persistence.getExecutionCheckpoint(agentId, taskId);
+    
     if (requireCompletedReceipt && receipt?.status !== 'completed') {
       const reason = receipt?.status === 'failed'
         ? `Agent task ${taskId} has a failed receipt: ${receipt.error || 'unknown failure'}`
@@ -179,12 +181,8 @@ export class PersistentAgentRuntime {
     const activeTaskId = state.context.activeTaskId;
     if (typeof activeTaskId === 'string' && activeTaskId !== taskId) {
       const activeReceipt = receipts[activeTaskId];
-      const activeCheckpoints = state.context.executionCheckpoints;
-      const activeCheckpoint = parseAgentExecutionCheckpoint(
-        activeCheckpoints && typeof activeCheckpoints === 'object' && !Array.isArray(activeCheckpoints)
-          ? (activeCheckpoints as Record<string, unknown>)[activeTaskId]
-          : undefined,
-      );
+      // Load active task checkpoint from separate storage
+      const activeCheckpoint = await this.persistence.getExecutionCheckpoint(agentId, activeTaskId);
       if (activeReceipt?.status !== 'failed' || activeCheckpoint?.pendingAction) {
         throw new Error(
           `Agent task ${activeTaskId} was interrupted before its outcome was safely persisted; refusing to start ${taskId}`,
@@ -225,7 +223,7 @@ export class PersistentAgentRuntime {
       state.status = 'running';
       await this.persistState(state);
     }
-    return this.runtime.executeTask(agentId, taskId, delegationDepth, retryGuidance);
+    return this.runtime.executeTask(agentId, taskId, delegationDepth, retryGuidance, executionCheckpoint);
   }
 
   getTask(taskId: string): AgentTask | undefined {
@@ -241,6 +239,8 @@ export class PersistentAgentRuntime {
     if (task) {
       const state = this.runtime.getAgentState(task.agentId);
       if (state) await this.persistState(state);
+      // Clean up execution checkpoint
+      await this.persistence.deleteExecutionCheckpoint(task.agentId, taskId);
     }
     return task;
   }
@@ -250,6 +250,8 @@ export class PersistentAgentRuntime {
     if (task) {
       const state = this.runtime.getAgentState(task.agentId);
       if (state) await this.persistState(state);
+      // Clean up execution checkpoint
+      await this.persistence.deleteExecutionCheckpoint(task.agentId, taskId);
     }
     return task;
   }

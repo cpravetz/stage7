@@ -9,6 +9,7 @@ import {
   VectorSearchResult,
   MissionState,
   AgentState,
+  AgentExecutionCheckpoint,
 } from '../types';
 import { AssistantDefinition, AssistantTemplate, AssistantRuntimeConfig } from '@stage7-nextgen/shared';
 import { logger } from '@stage7-nextgen/shared';
@@ -177,6 +178,18 @@ export class ArtifactsService {
 
   async listAgentStates(tenantId?: string): Promise<AgentState[]> {
     return this.useStore((store) => store.listAgentStates(tenantId));
+  }
+
+  async saveExecutionCheckpoint(checkpoint: AgentExecutionCheckpoint): Promise<void> {
+    return this.useStore((store) => store.saveExecutionCheckpoint(checkpoint));
+  }
+
+  async getExecutionCheckpoint(agentId: string, taskId: string): Promise<AgentExecutionCheckpoint | undefined> {
+    return this.useStore((store) => store.getExecutionCheckpoint(agentId, taskId));
+  }
+
+  async deleteExecutionCheckpoint(agentId: string, taskId: string): Promise<void> {
+    return this.useStore((store) => store.deleteExecutionCheckpoint(agentId, taskId));
   }
 
   async saveAssistant(definition: AssistantDefinition): Promise<AssistantDefinition> {

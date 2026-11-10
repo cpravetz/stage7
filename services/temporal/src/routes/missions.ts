@@ -373,6 +373,40 @@ router.post(
       }
     }
 
+    // A user message to a mission that is awaiting review (e.g. missing Vault /
+    // credential entries) must always restore the mission to running. Any
+    // non-empty user entry to the conversation triggers resumption — no exact
+    // string is required. The resumed mission interprets the message; if it
+    // resolves the pending problem the mission proceeds to plan, otherwise the
+    // agent requests further assistance.
+    if (role === 'user') {
+      try {
+        const result = await client.getMissionResult(workflowId);
+        const pendingInteraction = (result?.output as { outputs?: { pendingInteraction?: { kind?: string; credentialRequest?: { toolId?: string; missingCredentials?: Array<{ key?: string; label?: string }> } | undefined } | undefined } | undefined } | undefined)?.outputs?.pendingInteraction;
+        const hasCredentialRequest = Boolean(pendingInteraction?.credentialRequest);
+        const isAwaitingInput = result?.status === 'awaiting_review' && pendingInteraction?.kind === 'user_input';
+
+        if (isAwaitingInput) {
+          await client.resumeMission(workflowId, {
+            ...(hasCredentialRequest ? { useConfiguredCredentials: true } : { interactionResponse: content }),
+          });
+          res.status(202).json({ status: 'resuming' });
+          return;
+        }
+        // Even when the persisted status is not yet awaiting_review, a user
+        // message is still treated as a resume signal. resumeMission validates
+        // state and throws if the mission cannot be resumed.
+        await client.resumeMission(workflowId, { interactionResponse: content });
+        res.status(202).json({ status: 'resuming' });
+        return;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        logger.error({ missionId, workflowId, error: message }, 'Failed to resume mission from user message');
+        res.status(202).json({ status: 'accepted', error: message });
+        return;
+      }
+    }
+
     res.status(202).json({ status: 'accepted' });
   }),
 );

@@ -97,16 +97,30 @@ export function buildScheduledTriggers(
     const key = blueprintKey(candidate.skillId);
     if (!candidate.cron && !candidate.cadence) continue;
 
-    // A declared cron wins; `cadence` is the shorthand, and only the unambiguous
-    // part of it. Anything else becomes an issue rather than a guess.
-    const schedule = candidate.cron ? parseCron(candidate.cron) : parseCadence(candidate.cadence as string);
-    const expression = candidate.cron ?? (schedule.valid ? schedule.expression : candidate.cadence ?? '');
+    // An explicit cron declaration always creates a live schedule. A cadence-only
+    // trigger never auto-schedules from the blueprint — schedules are created by
+    // the user or assistant through the API, never automatically.
+    if (!candidate.cron) {
+      const schedule = parseCadence(candidate.cadence as string);
+      if (!schedule.valid) {
+        issues.push({
+          key,
+          skillId: candidate.skillId,
+          message: `schedule trigger cannot be scheduled: ${schedule.error ?? 'invalid expression'} (${candidate.cadence})`,
+        });
+      }
+      // When parseCadence accepts the cadence (e.g. "daily", "hourly", "Every 15 minutes")
+      // it is silently skipped: no schedule is created and no issue is reported. The
+      // validator agrees — only cadences parseCadence rejects are reported as issues.
+      continue;
+    }
 
+    const schedule = parseCron(candidate.cron);
     if (!schedule.valid) {
       issues.push({
         key,
         skillId: candidate.skillId,
-        message: `schedule trigger cannot be scheduled: ${schedule.error ?? 'invalid expression'} (${expression})`,
+        message: `schedule trigger cannot be scheduled: ${schedule.error ?? 'invalid expression'} (${candidate.cron})`,
       });
       continue;
     }

@@ -435,6 +435,26 @@ export class MissionOrchestrator {
               ? await agentRuntime.executeTask(...executionArgs, retryGuidance, continuation, ctx.prompt)
               : await agentRuntime.executeTask(...executionArgs, retryGuidance, undefined, ctx.prompt);
           }
+
+          // Agent owns the task outcome: if the agent could not accomplish the
+          // task within its execution budget, give it one bounded recovery turn
+          // framed as its responsibility to retry differently, ask for help, or
+          // delegate — instead of the overseer marking the task failed and moving on.
+          if (result.incompleteReason && !savedTask) {
+            const agentRecoveryGuidance = [
+              `You did not accomplish this task: ${result.incompleteReason}`,
+              'Retry the task with a different approach, ask for help, or delegate to another agent.',
+              'Do not repeat actions whose outcome is already recorded or uncertain.',
+            ].join(' ');
+            try {
+              result = await agentRuntime.executeTask(...executionArgs, agentRecoveryGuidance, undefined, ctx.prompt);
+            } catch (recoveryErr) {
+              if (recoveryErr instanceof MissionUserInterruptionError) throw recoveryErr;
+              if (isFatalServiceError(recoveryErr)) throw recoveryErr;
+              // The recovery turn did not produce a completion; record the outcome below.
+            }
+          }
+
         } catch (err) {
           if (err instanceof MissionUserInterruptionError) throw err;
           if (isFatalServiceError(err)) throw err;

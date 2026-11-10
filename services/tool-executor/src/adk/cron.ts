@@ -273,8 +273,13 @@ export function parseCadence(cadence: string): CronSchedule {
     return schedule.valid ? schedule : rejected('could not be turned into a cron expression');
   }
 
-  // "hourly" is the one named period with a single interpretation: on the hour.
+  // Bare named periods with sensible defaults: hourly on the hour, daily at 9 AM,
+  // weekly on Mondays at 9 AM, monthly on the 1st at 9 AM. Only an exact word match
+  // is accepted — anything with extra words is prose the scheduler must refuse.
   if (text === 'hourly' || text === 'every hour') return parseCron('0 * * * *');
+  if (text === 'daily') return parseCron('0 9 * * *');
+  if (text === 'weekly') return parseCron('0 9 * * 1');
+  if (text === 'monthly') return parseCron('0 9 1 * *');
 
   return rejected(
     'does not say when it should run. Named periods (daily, weekly, monthly) leave the time open, ' +

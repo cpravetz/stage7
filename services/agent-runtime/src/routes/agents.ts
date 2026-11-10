@@ -95,12 +95,12 @@ router.post('/missions/:missionId/agents', asyncHandler(async (req: Request, res
   res.status(201).json(created)
 }))
 
-router.get('/missions/:missionId/agents', asyncHandler((req: Request, res: Response) => {
+router.get('/missions/:missionId/agents', asyncHandler(async (req: Request, res: Response) => {
   const { missionId } = req.params as { missionId: string }
   const tenantId = req.query.tenantId as string | undefined
   let agents = runtime.listAgentsForMission(missionId)
   if (tenantId) agents = agents.filter((a) => a.tenantId === tenantId)
-  const agentsWithState = agents.map((agent) => {
+  const agentsWithState = await Promise.all(agents.map(async (agent) => {
     const state = runtime.getAgentState(agent.id)
     const context = state?.context || {}
     const activeTaskId = typeof context.currentTaskId === 'string'
@@ -108,15 +108,8 @@ router.get('/missions/:missionId/agents', asyncHandler((req: Request, res: Respo
       : typeof context.activeTaskId === 'string'
         ? context.activeTaskId
         : undefined
-    const checkpoints = context.executionCheckpoints
-    const checkpointMap = checkpoints && typeof checkpoints === 'object' && !Array.isArray(checkpoints)
-      ? checkpoints as Record<string, unknown>
-      : {}
     const activeCheckpoint = activeTaskId
-      && checkpointMap[activeTaskId]
-      && typeof checkpointMap[activeTaskId] === 'object'
-      && !Array.isArray(checkpointMap[activeTaskId])
-      ? checkpointMap[activeTaskId] as Record<string, unknown>
+      ? await runtime.getExecutionCheckpoint(agent.id, activeTaskId)
       : undefined
     return {
       ...agent,
@@ -133,7 +126,7 @@ router.get('/missions/:missionId/agents', asyncHandler((req: Request, res: Respo
       } : {}),
       ...(typeof context.lastError === 'string' ? { lastError: context.lastError } : {}),
     }
-  })
+  }))
   res.json({ agents: agentsWithState })
 }))
 

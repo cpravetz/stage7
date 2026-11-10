@@ -104,7 +104,7 @@ const EntityWorkspace = () => {
       setTransactionGuidanceEntries(selectedEntity.transactionGuidance || []);
       setMetadataConfig(selectedEntity.metadata || {});
     }
-  }, []);
+  }, [selectedEntity]);
 
   // Hydrate the mission list so missions started via this assistant (or any other
   // source) are reflected in the assistant's Missions tab, not just in the global

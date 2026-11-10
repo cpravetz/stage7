@@ -173,10 +173,10 @@ export function normalize(raw: unknown): FeedEvent | null {
         message = `Task completed: ${(data.taskTitle as string) || (data.taskId as string) || ''}`.trim();
         break;
       case 'task_incomplete':
-        message = `Task incomplete: ${(data.taskTitle as string) || (data.taskId as string) || ''} — ${(data.error as string) || ''}`.trim();
+        message = `Task incomplete: ${(data.taskTitle as string) || (data.taskId as string) || ''} — ${friendlyMissionError((data.error as string) || '')}`.trim();
         break;
       case 'task_failed':
-        message = `Task failed: ${(data.taskTitle as string) || (data.taskId as string) || ''} — ${(data.error as string) || ''}`.trim();
+        message = `Task failed: ${(data.taskTitle as string) || (data.taskId as string) || ''} — ${friendlyMissionError((data.error as string) || '')}`.trim();
         break;
       case 'user':
       case 'user_message':

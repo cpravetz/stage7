@@ -10,6 +10,7 @@ import {
   MissionState,
   MissionRecoveryLease,
   AgentState,
+  AgentExecutionCheckpoint,
 } from '../types';
 import { AssistantDefinition, AssistantTemplate, AssistantRuntimeConfig } from '@stage7-nextgen/shared';
 import { logger } from '@stage7-nextgen/shared';
@@ -37,6 +38,7 @@ export class MongoStore {
   private missions!: Collection<MissionState & { _id?: string }>;
   private missionRecoveryLeases!: Collection<MissionRecoveryLease & { _id?: string }>;
   private agents!: Collection<AgentState & { _id?: string }>;
+  private executionCheckpoints!: Collection<AgentExecutionCheckpoint & { _id?: string }>;
   private vectors!: Collection<VectorDoc>;
   private assistants!: Collection<AssistantDefinition & { _id?: string }>;
   private assistantRuntimes!: Collection<AssistantRuntimeConfig & { _id?: string }>;
@@ -62,6 +64,7 @@ export class MongoStore {
       this.missions = this.db.collection<MissionState & { _id?: string }>('missions');
       this.missionRecoveryLeases = this.db.collection<MissionRecoveryLease & { _id?: string }>('missionRecoveryLeases');
       this.agents = this.db.collection<AgentState & { _id?: string }>('agents');
+      this.executionCheckpoints = this.db.collection<AgentExecutionCheckpoint & { _id?: string }>('executionCheckpoints');
       this.vectors = this.db.collection<VectorDoc>('vectors');
       this.assistants = this.db.collection<AssistantDefinition & { _id?: string }>('assistants');
       this.assistantRuntimes = this.db.collection<AssistantRuntimeConfig & { _id?: string }>('assistantRuntimes');
@@ -76,6 +79,7 @@ export class MongoStore {
       await this.missions.createIndex({ missionId: 1 }, { unique: true });
       await this.missionRecoveryLeases.createIndex({ missionId: 1 }, { unique: true });
       await this.agents.createIndex({ agentId: 1 }, { unique: true });
+      await this.executionCheckpoints.createIndex({ agentId: 1, taskId: 1 }, { unique: true });
       await this.assistants.createIndex({ id: 1 }, { unique: true });
       await this.assistantTemplates.createIndex({ id: 1 }, { unique: true });
       await this.missionPlans.createIndex({ missionId: 1 }, { unique: true });
@@ -358,6 +362,27 @@ export class MongoStore {
       const { _id, ...rest } = r;
       return rest;
     });
+  }
+
+  async saveExecutionCheckpoint(checkpoint: AgentExecutionCheckpoint): Promise<void> {
+    const id = `${checkpoint.agentId}:${checkpoint.taskId}`;
+    const doc = { ...checkpoint, _id: id } as any;
+    await this.executionCheckpoints.replaceOne({ _id: id } as any, doc, { upsert: true });
+    logger.debug({ agentId: checkpoint.agentId, taskId: checkpoint.taskId }, 'Execution checkpoint saved');
+  }
+
+  async getExecutionCheckpoint(agentId: string, taskId: string): Promise<AgentExecutionCheckpoint | undefined> {
+    const id = `${agentId}:${taskId}`;
+    const result = await this.executionCheckpoints.findOne({ _id: id } as any);
+    if (!result) return undefined;
+    const { _id, ...rest } = result as any;
+    return rest;
+  }
+
+  async deleteExecutionCheckpoint(agentId: string, taskId: string): Promise<void> {
+    const id = `${agentId}:${taskId}`;
+    await this.executionCheckpoints.deleteOne({ _id: id } as any );
+    logger.debug({ agentId, taskId }, 'Execution checkpoint deleted');
   }
 
   async saveAssistant(definition: AssistantDefinition): Promise<AssistantDefinition> {

@@ -41,9 +41,7 @@ const RESPONSE_DRAFTING_NOTIFIER = createDeclarativeCodeSkill({
     required: ['eventTypes'],
     additionalProperties: false,
   },
-  triggers: [
-    { kind: 'schedule', cadence: 'Every 15 minutes' },
-  ],
+  triggers: [],
   isSkill: true,
   manifest: {},
   handler: async function handler(input, ctx) {

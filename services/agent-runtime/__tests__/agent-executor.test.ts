@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto'
 import { AgentDefinition, AgentExecutionPolicy, AgentTask, DEFAULT_AGENT_EXECUTION_POLICY } from '../src/types'
-import { AgentExecutionCheckpoint, AgentExecutor } from '../src/services/AgentExecutor'
+import { AgentExecutor, AgentExecutionCheckpoint as ExecutorCheckpoint } from '../src/services/AgentExecutor'
 import { AgentRuntime } from '../src/services/AgentRuntime'
 import { PersistentAgentRuntime } from '../src/services/PersistentAgentRuntime'
 import { ArtifactsService } from '@stage7-nextgen/artifacts'
+import { AgentExecutionCheckpoint as ArtifactsCheckpoint } from '@stage7-nextgen/artifacts'
 import {
   BRAIN_MODEL_SELECTION_RETRY,
   BRAIN_ROUTING_SESSION_CONTEXT_KEY,
@@ -678,7 +679,7 @@ describe('AgentExecutor', () => {
         },
       },
     }
-    const checkpoint: AgentExecutionCheckpoint = {
+    const checkpoint: ExecutorCheckpoint = {
       version: 2,
       history: [{ role: 'user', content: 'Record the invalid calculation failure and successful recovery.' }],
       tokensUsed: 0,
@@ -980,7 +981,7 @@ describe('AgentExecutor', () => {
   })
 
   it('does not retry or report a lost tool response as a failed action', async () => {
-    let checkpoint: AgentExecutionCheckpoint | undefined
+    let checkpoint: ExecutorCheckpoint | undefined
     let attempts = 0
     const fetcher: typeof fetch = async (input) => {
       const url = String(input)
@@ -1011,7 +1012,7 @@ describe('AgentExecutor', () => {
 
   it('stops cleanly at the completion-token limit without making zero-token Brain calls', async () => {
     const tokenRequests: number[] = []
-    let checkpoint: AgentExecutionCheckpoint | undefined
+    let checkpoint: ExecutorCheckpoint | undefined
     const fetcher: typeof fetch = async (input, init) => {
       const url = String(input)
       if (url.endsWith('/api/tool-executor/tools')) return jsonResponse({ tools: [] })
@@ -1067,7 +1068,7 @@ describe('AgentExecutor', () => {
   })
 
   it('resumes after a persisted tool result without executing that action again', async () => {
-    let checkpoint: AgentExecutionCheckpoint | undefined
+    let checkpoint: ExecutorCheckpoint | undefined
     let toolExecutions = 0
     let brainTurn = 0
     const fetcher: typeof fetch = async (input) => {
@@ -1155,7 +1156,7 @@ describe('AgentExecutor', () => {
         outcome: 'success' as const,
       },
     ]
-    const checkpoint: AgentExecutionCheckpoint = {
+    const checkpoint: ExecutorCheckpoint = {
       version: 2,
       history: [
         { role: 'user', content: 'Create and verify the calculator plugin.' },
@@ -1257,7 +1258,7 @@ describe('AgentExecutor', () => {
         outcome: 'success' as const,
       },
     ]
-    const checkpoint: AgentExecutionCheckpoint = {
+    const checkpoint: ExecutorCheckpoint = {
       version: 2,
       history: [
         { role: 'user', content: 'Create and verify the calculator plugin.' },
@@ -1336,7 +1337,7 @@ describe('AgentExecutor', () => {
         outcome: 'success' as const,
       },
     ]
-    const checkpoint: AgentExecutionCheckpoint = {
+    const checkpoint: ExecutorCheckpoint = {
       version: 2,
       history: [
         { role: 'user', content: 'Verify plugin ID uniqueness.' },
@@ -1399,7 +1400,7 @@ describe('AgentExecutor', () => {
 
   it('fails closed when a checkpoint contains an action without a persisted result', async () => {
     const fetcher = jest.fn() as typeof fetch
-    const checkpoint: AgentExecutionCheckpoint = {
+    const checkpoint: ExecutorCheckpoint = {
       version: 1,
       history: [{ role: 'user', content: 'do the task' }],
       tokensUsed: 0,
@@ -1423,7 +1424,7 @@ describe('AgentExecutor', () => {
   it('keeps legacy pending delegation checkpoints fail-closed', async () => {
     const args = { goal: 'Find two relevant sources', role: 'researcher' }
     const signature = `__delegate:${JSON.stringify(args)}`
-    const checkpoint: AgentExecutionCheckpoint = {
+    const checkpoint: ExecutorCheckpoint = {
       version: 1,
       history: [
         { role: 'user', content: 'do the task' },
@@ -1492,6 +1493,11 @@ describe('AgentExecutor', () => {
         return jsonResponse({ status: 'completed', output: { fare: 23 } })
       }
 
+      if (url.endsWith('/api/tool-executor/tools/mission_taxi_fare') && init?.method === 'DELETE') {
+        toolRegistered = false
+        return jsonResponse({ success: true }, 204)
+      }
+
       throw new Error(`Unexpected request: ${url}`)
     }
 
@@ -1510,6 +1516,9 @@ describe('AgentExecutor', () => {
       .toContain('ToolExecutor checks registered native tools')
     expect(calls.filter((call) => call.url.endsWith('/api/brain/complete'))
       .every((call) => !Object.prototype.hasOwnProperty.call(call.body, 'model'))).toBe(true)
+    await fetcher('http://tool-executor:3500/api/tool-executor/tools/mission_taxi_fare', {
+      method: 'DELETE',
+    })
   })
 
   it('resolves a missing runtime dependency once and uses the registered alternative', async () => {
@@ -1562,6 +1571,11 @@ describe('AgentExecutor', () => {
         }, 201)
       }
 
+      if (url.endsWith('/api/tool-executor/tools/document-exporter') && init?.method === 'DELETE') {
+        replacementRegistered = false
+        return jsonResponse({ success: true }, 204)
+      }
+
       throw new Error(`Unexpected request: ${url}`)
     }
 
@@ -1592,6 +1606,9 @@ describe('AgentExecutor', () => {
     expect(resolution?.body?.requirements).toContain('Do not depend on unavailable runtime package "legacy-export-sdk".')
     expect(calls.filter((call) => call.url.endsWith('/api/tool-executor/tools/execute')))
       .toHaveLength(2)
+    await fetcher('http://tool-executor:3500/api/tool-executor/tools/document-exporter', {
+      method: 'DELETE',
+    })
   })
 
   it('does not re-execute a failed tool after its capability has already been resolved', async () => {
@@ -1644,6 +1661,12 @@ describe('AgentExecutor', () => {
           tool: { id: 'replacement-sender', name: 'Replacement Sender', manifest: {} },
         }, 201)
       }
+
+      if (url.endsWith('/api/tool-executor/tools/replacement-sender') && init?.method === 'DELETE') {
+        replacementRegistered = false
+        return jsonResponse({ success: true }, 204)
+      }
+
       throw new Error(`Unexpected request: ${url}`)
     }
 
@@ -1661,6 +1684,9 @@ describe('AgentExecutor', () => {
       expect.objectContaining({ toolId: '__create_tool', fallbackForToolId: 'legacy-sender', outcome: 'success' }),
       expect.objectContaining({ toolId: 'replacement-sender', outcome: 'success' }),
     ]))
+    await fetcher('http://tool-executor:3500/api/tool-executor/tools/replacement-sender', {
+      method: 'DELETE',
+    })
   })
 
   it('resolves a requested capability when the Brain selects a tool that is not registered', async () => {
@@ -1699,6 +1725,11 @@ describe('AgentExecutor', () => {
         }, 201)
       }
 
+      if (url.endsWith('/api/tool-executor/tools/archive-search') && init?.method === 'DELETE') {
+        capabilityRegistered = false
+        return jsonResponse({ success: true }, 204)
+      }
+
       if (url.endsWith('/api/tool-executor/tools/execute')) {
         expect(body?.id).toBe('archive-search')
         return jsonResponse({ status: 'completed', output: { results: ['quarterly report'] } })
@@ -1725,6 +1756,9 @@ describe('AgentExecutor', () => {
     const resolution = calls.find((call) => call.url.endsWith('/api/tool-executor/tools/resolve'))
     expect(resolution?.body?.capability).toBe('archive search')
     expect(resolution?.body?.excludeToolIds).toEqual(['archive_search'])
+    await fetcher('http://tool-executor:3500/api/tool-executor/tools/archive-search', {
+      method: 'DELETE',
+    })
   })
 
   it('returns a structured user-input request so the mission can pause for an answer', async () => {
@@ -2541,6 +2575,10 @@ describe('AgentExecutor', () => {
           tool: { id: 'record-lookup-v2', name: 'Record Lookup', manifest: {} },
         }, 201)
       }
+      if (url.endsWith('/api/tool-executor/tools/record-lookup-v2') && init?.method === 'DELETE') {
+        alternativeRegistered = false
+        return jsonResponse({ success: true }, 204)
+      }
       if (url.endsWith('/api/brain/complaint')) return jsonResponse({ success: true })
       throw new Error(`Unexpected request: ${url}`)
     }
@@ -2561,6 +2599,9 @@ describe('AgentExecutor', () => {
     expect(resolutionBody?.capability).toContain('Lookup')
     expect(resolutionBody?.excludeToolIds).toEqual(['lookup'])
     expect(resolutionBody?.description).toContain('exact task operation')
+    await fetcher('http://tool-executor:3500/api/tool-executor/tools/record-lookup-v2', {
+      method: 'DELETE',
+    })
   })
 
   it('completes a bounded mission task through delegation, tool repair, and receipt replay after runtime recreation', async () => {
@@ -2575,6 +2616,7 @@ describe('AgentExecutor', () => {
       updatedAt: Date
     }
     const savedStates = new Map<string, SavedAgentState>()
+    const executionCheckpoints = new Map<string, ArtifactsCheckpoint>()
     const persistence = {
       ready: async () => undefined,
       getAgentState: async (agentId: string) => savedStates.get(agentId),
@@ -2582,6 +2624,15 @@ describe('AgentExecutor', () => {
         savedStates.set(state.agentId, structuredClone(state))
       },
       queryDocuments: async () => ({ documents: [] }),
+      saveExecutionCheckpoint: async (checkpoint: ArtifactsCheckpoint) => {
+        executionCheckpoints.set(`${checkpoint.agentId}:${checkpoint.taskId}`, structuredClone(checkpoint))
+      },
+      getExecutionCheckpoint: async (agentId: string, taskId: string) => {
+        return executionCheckpoints.get(`${agentId}:${taskId}`)
+      },
+      deleteExecutionCheckpoint: async (agentId: string, taskId: string) => {
+        executionCheckpoints.delete(`${agentId}:${taskId}`)
+      },
     } as unknown as ArtifactsService
     const turns = new Map<string, number>()
     const brainCalls: Array<{ systemPrompt: string; prompt: string }> = []
@@ -2790,6 +2841,7 @@ describe('AgentExecutor', () => {
       createdAt: Date
       updatedAt: Date
     }>()
+    const executionCheckpoints = new Map<string, ArtifactsCheckpoint>()
     const persistence = {
       ready: async () => undefined,
       getAgentState: async (agentId: string) => savedStates.get(agentId),
@@ -2804,6 +2856,15 @@ describe('AgentExecutor', () => {
         updatedAt: Date
       }) => { savedStates.set(state.agentId, structuredClone(state)) },
       queryDocuments: async () => ({ documents: [] }),
+      saveExecutionCheckpoint: async (checkpoint: ArtifactsCheckpoint) => {
+        executionCheckpoints.set(`${checkpoint.agentId}:${checkpoint.taskId}`, structuredClone(checkpoint))
+      },
+      getExecutionCheckpoint: async (agentId: string, taskId: string) => {
+        return executionCheckpoints.get(`${agentId}:${taskId}`)
+      },
+      deleteExecutionCheckpoint: async (agentId: string, taskId: string) => {
+        executionCheckpoints.delete(`${agentId}:${taskId}`)
+      },
     } as unknown as ArtifactsService
     let brainCalls = 0
     const fetcher: typeof fetch = async (input) => {
@@ -2867,6 +2928,7 @@ describe('AgentExecutor', () => {
       createdAt: Date
       updatedAt: Date
     }>()
+    const executionCheckpoints = new Map<string, ArtifactsCheckpoint>()
     const persistence = {
       ready: async () => undefined,
       getAgentState: async (agentId: string) => savedStates.get(agentId),
@@ -2881,6 +2943,15 @@ describe('AgentExecutor', () => {
         updatedAt: Date
       }) => { savedStates.set(state.agentId, structuredClone(state)) },
       queryDocuments: async () => ({ documents: [] }),
+      saveExecutionCheckpoint: async (checkpoint: ArtifactsCheckpoint) => {
+        executionCheckpoints.set(`${checkpoint.agentId}:${checkpoint.taskId}`, structuredClone(checkpoint))
+      },
+      getExecutionCheckpoint: async (agentId: string, taskId: string) => {
+        return executionCheckpoints.get(`${agentId}:${taskId}`)
+      },
+      deleteExecutionCheckpoint: async (agentId: string, taskId: string) => {
+        executionCheckpoints.delete(`${agentId}:${taskId}`)
+      },
     } as unknown as ArtifactsService
     const retryAgent = { ...definition, id: 'retryable-agent' }
     let firstAttemptBrainCalls = 0
@@ -2899,12 +2970,14 @@ describe('AgentExecutor', () => {
     const submitted = await firstRuntime.submitTask(retryAgent.id, task('retry-safe-checkpoint'))
 
     await expect(firstRuntime.executeTask(retryAgent.id, submitted.taskId)).rejects.toThrow('Brain request failed (503)')
-    expect(savedStates.get(retryAgent.id)?.context).toMatchObject({
-      activeTaskId: submitted.taskId,
-      taskReceipts: {
-        [submitted.taskId]: { status: 'failed' },
-      },
+    const savedState = savedStates.get(retryAgent.id)
+    expect(savedState).toBeDefined()
+    expect(savedState?.context.taskReceipts).toMatchObject({
+      [submitted.taskId]: { status: 'failed' },
     })
+    // Check execution checkpoint in separate storage
+    const checkpoint = await persistence.getExecutionCheckpoint(retryAgent.id, submitted.taskId)
+    expect(checkpoint).toBeDefined()
 
     let retryBrainCalls = 0
     let retryPrompt = ''
@@ -2955,6 +3028,7 @@ describe('AgentExecutor', () => {
       createdAt: Date
       updatedAt: Date
     }>()
+    const executionCheckpoints = new Map<string, ArtifactsCheckpoint>()
     const persistence = {
       ready: async () => undefined,
       getAgentState: async (agentId: string) => savedStates.get(agentId),
@@ -2969,6 +3043,15 @@ describe('AgentExecutor', () => {
         updatedAt: Date
       }) => { savedStates.set(state.agentId, structuredClone(state)) },
       queryDocuments: async () => ({ documents: [] }),
+      saveExecutionCheckpoint: async (checkpoint: ArtifactsCheckpoint) => {
+        executionCheckpoints.set(`${checkpoint.agentId}:${checkpoint.taskId}`, structuredClone(checkpoint))
+      },
+      getExecutionCheckpoint: async (agentId: string, taskId: string) => {
+        return executionCheckpoints.get(`${agentId}:${taskId}`)
+      },
+      deleteExecutionCheckpoint: async (agentId: string, taskId: string) => {
+        executionCheckpoints.delete(`${agentId}:${taskId}`)
+      },
     } as unknown as ArtifactsService
     const parent = { ...definition, id: 'persistent-parent' }
     const delegationArgs = { goal: 'Find two relevant sources', role: 'researcher' }
@@ -2999,8 +3082,7 @@ describe('AgentExecutor', () => {
     expect(childBrainCalls).toBe(1)
     const parentState = savedStates.get(parent.id)
     expect(parentState).toBeDefined()
-    const persistedCheckpoints = parentState?.context.executionCheckpoints as Record<string, AgentExecutionCheckpoint>
-    const parentCheckpoint = persistedCheckpoints[submitted.taskId]
+    const parentCheckpoint = await persistence.getExecutionCheckpoint(parent.id, submitted.taskId)
     expect(parentCheckpoint).toBeDefined()
     const childStates = Array.from(savedStates.values()).filter((state) => state.agentId !== parent.id)
     expect(childStates).toHaveLength(1)
@@ -3008,22 +3090,16 @@ describe('AgentExecutor', () => {
     expect(Object.values(childReceipts)).toContainEqual(expect.objectContaining({ status: 'completed' }))
 
     if (!parentState || !parentCheckpoint) throw new Error('Expected a persisted parent execution checkpoint')
-    parentState.context = {
-      ...parentState.context,
-      executionCheckpoints: {
-        ...persistedCheckpoints,
-        [submitted.taskId]: {
-          ...parentCheckpoint,
-          history: [
-            parentCheckpoint.history[0],
-            { role: 'assistant', content: delegationAction },
-          ],
-          lastAction: delegationSignature,
-          pendingAction: delegationSignature,
-        },
-      },
-    }
-    savedStates.set(parent.id, parentState)
+    // Update the checkpoint in separate storage
+    await persistence.saveExecutionCheckpoint({
+      ...parentCheckpoint,
+      history: [
+        parentCheckpoint.history[0],
+        { role: 'assistant', content: delegationAction },
+      ],
+      lastAction: delegationSignature,
+      pendingAction: delegationSignature,
+    })
 
     const recoveredFetcher: typeof fetch = async (input, init) => {
       const url = String(input)
@@ -3074,7 +3150,7 @@ describe('AgentExecutor', () => {
       },
       binding: { operation: `op-${i}`, providerRequestId: `req-${i}` },
     }))
-    const checkpoint: AgentExecutionCheckpoint = {
+    const checkpoint: ExecutorCheckpoint = {
       version: 2,
       history: [
         { role: 'user', content: 'Do the work.' },
@@ -3090,7 +3166,7 @@ describe('AgentExecutor', () => {
       repeatedActionCount: 0,
       actionReceipts: receipts,
     }
-    let saved: AgentExecutionCheckpoint | undefined
+    let saved: ExecutorCheckpoint | undefined
     const fetcher: typeof fetch = async (input) => {
       const url = String(input)
       if (url.endsWith('/api/tool-executor/tools')) return jsonResponse({ tools: [] })

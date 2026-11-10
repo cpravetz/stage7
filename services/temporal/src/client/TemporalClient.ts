@@ -7,6 +7,7 @@ import { logger, Plan, PlanSchema } from '@stage7-nextgen/shared';
 import { MissionActivityCheckpoint, MissionPendingInteraction, WorkflowInput, WorkflowResult } from '../types/workflow';
 import { getMissionResumeProgress } from '../recovery/missionProgress';
 import { MissionTerminationRequestedError } from '../types/missionControl';
+import { MissionOrchestrator } from '../planner/MissionOrchestrator';
 
 const DIRECT_RECOVERY_LEASE_DURATION_MS = 90_000;
 const DIRECT_RECOVERY_LEASE_RENEWAL_MS = 30_000;
@@ -82,28 +83,61 @@ async function configuredCredentialReferences(
   const missing: string[] = [];
 
   for (const { key } of missingCredentials) {
-    const secretName = `tool:${toolId}:${key}`;
-    const url = new URL(
-      `/api/vault/secrets/name/${encodeURIComponent(secretName)}?tenantId=system`,
-      vaultUrl,
-    );
-    const response = await fetch(url);
-    if (!response.ok) {
-      missing.push(key);
-      continue;
+    const candidates = [
+      `tool:${toolId}:${key}`,
+      `secret:${key}`,
+      key,
+    ];
+    let found = false;
+    for (const secretName of candidates) {
+      let secret: { id?: unknown } | undefined;
+      for (const tenantQuery of ['', '?tenantId=system']) {
+        const url = new URL(
+          `/api/vault/secrets/name/${encodeURIComponent(secretName)}${tenantQuery}`,
+          vaultUrl,
+        );
+        const response = await fetch(url);
+        if (!response.ok) continue;
+        secret = await response.json() as { id?: unknown };
+        break;
+      }
+      if (!secret) continue;
+      if (typeof secret.id !== 'string' || !/^[a-zA-Z0-9._-]+$/.test(secret.id)) continue;
+      references[key] = `vault://${secret.id}`;
+      found = true;
+      break;
     }
-    const secret = await response.json() as { id?: unknown };
-    if (typeof secret.id !== 'string' || !/^[a-zA-Z0-9._-]+$/.test(secret.id)) {
-      missing.push(key);
-      continue;
-    }
-    references[key] = `vault://${secret.id}`;
+    if (!found) missing.push(key);
   }
 
   if (missing.length > 0) {
     throw new Error(`Configure these Vault values before continuing: ${missing.join(', ')}`);
   }
   return references;
+}
+
+function sanitizeActionReceipts(value: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(value)) return [];
+  const sanitized: Record<string, unknown>[] = [];
+  for (const receipt of value) {
+    if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt)) continue;
+    const r = receipt as Record<string, unknown>;
+    if (typeof r.toolId !== 'string' || !r.toolId.trim()) continue;
+    if (typeof r.isError !== 'boolean') continue;
+    if (typeof r.content !== 'string') continue;
+    if (r.actionKey !== undefined && (typeof r.actionKey !== 'string' || !/^[a-f0-9]{64}$/i.test(r.actionKey))) continue;
+    if (r.fallbackForToolId !== undefined && (typeof r.fallbackForToolId !== 'string' || !r.fallbackForToolId.trim())) continue;
+    if (r.resolvedToolId !== undefined && (typeof r.resolvedToolId !== 'string' || !r.resolvedToolId.trim())) continue;
+    if (r.executionId !== undefined && (typeof r.executionId !== 'string' || !r.executionId.trim())) continue;
+    if (r.operation !== undefined && (typeof r.operation !== 'string' || !r.operation.trim())) continue;
+    if (r.providerRequestId !== undefined && (typeof r.providerRequestId !== 'string' || !r.providerRequestId.trim())) continue;
+    if (r.outcomeKnown !== undefined && typeof r.outcomeKnown !== 'boolean') continue;
+    if (r.reconciliation !== undefined && (typeof r.reconciliation !== 'object' || !r.reconciliation || Array.isArray(r.reconciliation))) continue;
+    if (r.binding !== undefined && (typeof r.binding !== 'object' || !r.binding || Array.isArray(r.binding))) continue;
+    if (r.outcome !== undefined && !['success', 'failure', 'denied', 'question_asked', 'permission_required'].includes(String(r.outcome))) continue;
+    sanitized.push(r);
+  }
+  return sanitized;
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
@@ -580,6 +614,12 @@ export class TemporalClient {
       throw new Error(`Cannot resume mission ${missionId} while termination is pending`);
     }
     let pendingInteraction = record.output?.outputs?.pendingInteraction;
+    if (pendingInteraction?.actionReceipts) {
+      pendingInteraction = {
+        ...pendingInteraction,
+        actionReceipts: sanitizeActionReceipts(pendingInteraction.actionReceipts) as typeof pendingInteraction.actionReceipts,
+      };
+    }
     if (
       record.status === 'running'
       && !pendingInteraction
@@ -594,6 +634,10 @@ export class TemporalClient {
       record.status !== 'paused'
       &&
       record.status !== 'awaiting_review'
+      &&
+      record.status !== 'failed'
+      &&
+      record.status !== 'incomplete'
       && !(record.status === 'running' && pendingInteraction)
       && record.controlState !== 'pause_requested'
       && record.controlState !== 'paused'
@@ -602,11 +646,17 @@ export class TemporalClient {
     }
 
     if (this.directMissionRuns.has(missionId)) {
-      if (pendingInteraction) {
-        throw new Error(`Cannot resume mission ${missionId}: the pending interaction is still being finalized; retry shortly`);
+      const orchestratorActive = MissionOrchestrator.getActive(missionId);
+      if (orchestratorActive) {
+        if (pendingInteraction) {
+          throw new Error(`Cannot resume mission ${missionId}: the pending interaction is still being finalized; retry shortly`);
+        }
+        await this.updatePersistedMissionControl(missionId, 'running', 'running');
+        return 'running';
       }
-      await this.updatePersistedMissionControl(missionId, 'running', 'running');
-      return 'running';
+      // Orchestrator has finished (e.g. after a user interruption) but the
+      // direct-run set has not been cleaned up yet; clear it so resume can proceed.
+      this.directMissionRuns.delete(missionId);
     }
 
     const input = record.input;
@@ -619,6 +669,14 @@ export class TemporalClient {
       throw new Error(`Cannot resume mission ${missionId}: persisted workflow input is invalid`);
     }
     let interactionResponse = continuation.interactionResponse?.trim();
+    if (
+      pendingInteraction?.kind === 'user_input'
+      && pendingInteraction.credentialRequest
+      && !interactionResponse
+      && !continuation.useConfiguredCredentials
+    ) {
+      continuation.useConfiguredCredentials = true;
+    }
     if (
       pendingInteraction?.kind === 'user_input'
       && !interactionResponse
@@ -670,7 +728,7 @@ export class TemporalClient {
           : '';
         throw new Error(`${execution.error || `Credential submission failed (${response.status})`}${detail}`);
       }
-      const actionReceipt = pendingInteraction.actionReceipts?.find(
+      const actionReceipt = (pendingInteraction.actionReceipts || []).find(
         (receipt) => receipt.toolId === credentialRequest.toolId && receipt.outcome === 'question_asked',
       );
       const completedReceipt = {
@@ -682,12 +740,12 @@ export class TemporalClient {
       };
       pendingInteraction = {
         ...pendingInteraction,
-        actionReceipts: [
+        actionReceipts: sanitizeActionReceipts([
           ...(pendingInteraction.actionReceipts || []).filter(
             (receipt) => !(receipt.toolId === credentialRequest.toolId && receipt.outcome === 'question_asked'),
           ),
           completedReceipt,
-        ],
+        ]) as typeof pendingInteraction.actionReceipts,
       };
       interactionResponse = continuation.useConfiguredCredentials
         ? `The required credentials were securely supplied. Tool Executor completed "${credentialRequest.toolName}". Use that verified result and do not repeat the action.`

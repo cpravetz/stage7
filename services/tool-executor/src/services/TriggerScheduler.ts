@@ -350,6 +350,10 @@ export class TriggerScheduler {
       const now = this.options.now();
       const { triggers, issues } = this.plan();
       for (const issue of issues) {
+        // Cadence rejections (prose cadences that need an exact cron expression)
+        // are authoring-time concerns already surfaced by the validator and the
+        // /triggers list endpoint. Do not log them as warnings on every tick.
+        if (issue.message.includes('cadence')) continue;
         logger.warn({ skillId: issue.skillId, key: issue.key }, issue.message);
       }
 

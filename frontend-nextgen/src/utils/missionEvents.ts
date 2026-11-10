@@ -97,6 +97,8 @@ const FAILURE_LIFECYCLE_TYPES = new Set([
   'mission_canceled',
   'mission_incomplete',
   'mission_needs_review',
+  'task_failed',
+  'task_incomplete',
 ]);
 
 /**
@@ -118,6 +120,8 @@ const FAILURE_LABELS: Record<string, string> = {
   mission_canceled: 'Mission canceled',
   mission_incomplete: 'Mission incomplete',
   mission_needs_review: 'Mission needs review',
+  task_failed: 'Task failed',
+  task_incomplete: 'Task incomplete',
 };
 
 function toTimestamp(value: string | number | undefined): number | undefined {
@@ -356,7 +360,7 @@ export function buildMissionEvents(options: {
         id: `derived-mission-failed-${failedAt}`,
         type: 'mission_failed',
         source: 'orchestrator',
-        message: `Mission ${detail.status}: ${detail.error || ''}`.trim(),
+        message: `Mission ${detail.status}: ${friendlyMissionError(detail.error || '')}`.trim(),
         timestamp: failedAt,
         missionId,
         metadata: { error: detail.error },

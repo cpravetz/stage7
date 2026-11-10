@@ -467,8 +467,33 @@ describe('MissionAgentRuntime', () => {
     expect(prompts[2]).toContain('Do not return generic gap text')
   })
 
-  it('refuses to execute a dependent task when its completed output is unavailable', async () => {
-    const fetchMock = jest.spyOn(global, 'fetch')
+  it('executes a dependent task and instructs recovery when completed dependency output is unavailable', async () => {
+    let submittedPrompt = ''
+    const fetchMock = jest.spyOn(global, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input)
+      const method = init?.method || 'GET'
+      if (method === 'POST' && url.endsWith('/tasks')) {
+        const body = JSON.parse(String(init?.body || '{}'))
+        submittedPrompt = body?.input?.prompt || ''
+        return jsonResponse({ taskId: 'agent-task-1', status: 'pending' }, 201)
+      }
+      if (method === 'POST' && url.endsWith('/tasks/agent-task-1/execute')) {
+        return jsonResponse({
+          taskId: 'agent-task-1',
+          status: 'completed',
+          result: { output: 'Recovered missing dependency and completed task.', artifacts: [] },
+        }, 200)
+      }
+      if (method === 'GET' && url.endsWith('/tasks/agent-task-1')) {
+        return jsonResponse({
+          taskId: 'agent-task-1',
+          status: 'completed',
+          result: { output: 'Recovered missing dependency and completed task.', artifacts: [] },
+        }, 200)
+      }
+      throw new Error(`Unexpected request: ${method} ${url}`)
+    })
+
     const runtime = new MissionAgentRuntime({
       missionId: 'mission-1',
       tenantId: 'tenant-1',
@@ -477,11 +502,17 @@ describe('MissionAgentRuntime', () => {
 
     await expect(runtime.executeTask(
       agent.id,
-      { ...task, dependsOnTaskIds: ['missing-source'] },
+      { ...task, dependsOnTaskIds: ['missing-source'], expectedArtifacts: [] },
       phase,
       plan,
-    )).rejects.toThrow('completed dependency results are missing for: missing-source')
-    expect(fetchMock).not.toHaveBeenCalled()
+    )).resolves.toEqual(expect.objectContaining({
+      output: 'Recovered missing dependency and completed task.',
+    }))
+
+    expect(fetchMock).toHaveBeenCalled()
+    expect(submittedPrompt).toContain('missing-source')
+    expect(submittedPrompt).toContain('Missing completed dependency results for task ID(s): missing-source')
+    expect(submittedPrompt).toContain('Do not treat this as mission failure')
   })
 
   it('creates and starts an agent only when lookup returns 404', async () => {

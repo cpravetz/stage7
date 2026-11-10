@@ -187,12 +187,28 @@ describe('parseCadence', () => {
     expect(parseCadence('hourly').expression).toBe('0 * * * *');
   });
 
-  it('refuses a named period, because none of them says when', () => {
-    for (const cadence of ['daily', 'weekly', 'monthly', 'Daily obligation review']) {
+  it('refuses a named period without a time qualifier', () => {
+    // A bare named period is accepted with a default time (9 AM UTC).
+    // Only qualified prose (which adds conditions) is refused.
+    for (const cadence of ['daily obligation review', 'weekly editorial queue', 'monthly genre report']) {
       const schedule = parseCadence(cadence);
       expect(schedule.valid).toBe(false);
       expect(schedule.error).toContain('does not say when it should run');
     }
+  });
+
+  it('accepts a bare named period with a default time', () => {
+    expect(parseCadence('daily').expression).toBe('0 9 * * *');
+    expect(parseCadence('weekly').expression).toBe('0 9 * * 1');
+    expect(parseCadence('monthly').expression).toBe('0 9 1 * *');
+    expect(parseCadence('hourly').expression).toBe('0 * * * *');
+  });
+
+  it('accepts an interval that fully determines its own times', () => {
+    expect(parseCadence('Every 15 minutes').expression).toBe('*/15 * * * *');
+    expect(parseCadence('every 5 minutes').expression).toBe('*/5 * * * *');
+    expect(parseCadence('every 2 hours').expression).toBe('0 */2 * * *');
+    expect(parseCadence('hourly').expression).toBe('0 * * * *');
   });
 
   it('refuses a conditional cadence rather than running it unconditionally', () => {
@@ -207,7 +223,7 @@ describe('parseCadence', () => {
   });
 
   it('always tells the author what to write instead', () => {
-    expect(parseCadence('Daily shift prep list generation').error).toContain(
+    expect(parseCadence('Daily obligation review').error).toContain(
       'declare cron with an exact expression',
     );
   });

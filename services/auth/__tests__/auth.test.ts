@@ -20,7 +20,7 @@ describe('Auth', () => {
         id: 'user-1',
         tenantId: 'tenant-1',
         orgId: 'org-1',
-        email: 'test@example.com',
+        email: 'spammail@pravetz.net',
         name: 'Test User',
         roles: ['admin'],
         permissions: ['read'],

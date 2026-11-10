@@ -9,6 +9,7 @@ import {
   MissionState,
   MissionRecoveryLease,
   AgentState,
+  AgentExecutionCheckpoint,
 } from '../src/types';
 import { AssistantDefinition, AssistantTemplate, AssistantRuntimeConfig } from '@stage7-nextgen/shared';
 import { logger } from '@stage7-nextgen/shared';
@@ -21,6 +22,7 @@ export class InMemoryStore {
   private missions: Map<string, MissionState> = new Map();
   private missionRecoveryLeases: Map<string, MissionRecoveryLease> = new Map();
   private agents: Map<string, AgentState> = new Map();
+  private executionCheckpoints: Map<string, AgentExecutionCheckpoint> = new Map();
   private vectors: Map<string, number[]> = new Map();
   private assistants: Map<string, AssistantDefinition> = new Map();
   private assistantRuntimes: Map<string, AssistantRuntimeConfig> = new Map();
@@ -221,6 +223,25 @@ export class InMemoryStore {
     const all = Array.from(this.agents.values());
     if (!tenantId) return Promise.resolve(all);
     return Promise.resolve(all.filter((a) => a.tenantId === tenantId));
+  }
+
+  saveExecutionCheckpoint(checkpoint: AgentExecutionCheckpoint): Promise<void> {
+    const id = `${checkpoint.agentId}:${checkpoint.taskId}`;
+    this.executionCheckpoints.set(id, checkpoint);
+    logger.debug({ agentId: checkpoint.agentId, taskId: checkpoint.taskId }, 'Execution checkpoint saved');
+    return Promise.resolve();
+  }
+
+  getExecutionCheckpoint(agentId: string, taskId: string): Promise<AgentExecutionCheckpoint | undefined> {
+    const id = `${agentId}:${taskId}`;
+    return Promise.resolve(this.executionCheckpoints.get(id));
+  }
+
+  deleteExecutionCheckpoint(agentId: string, taskId: string): Promise<void> {
+    const id = `${agentId}:${taskId}`;
+    this.executionCheckpoints.delete(id);
+    logger.debug({ agentId, taskId }, 'Execution checkpoint deleted');
+    return Promise.resolve();
   }
 
   saveAssistant(definition: AssistantDefinition): Promise<AssistantDefinition> {

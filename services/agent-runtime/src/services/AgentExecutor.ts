@@ -1994,7 +1994,7 @@ export class AgentExecutor {
             typeof credential?.key === 'string' && credential.key.trim().length > 0,
         )
         if (missingCredentials.length > 0) {
-          const question = `To continue, provide the missing credentials for ${credentialRequest.toolName} using the secure form below.`;
+          const question = `To continue, configure the missing credentials for ${credentialRequest.toolName} in [Tools](/tools) or [Vault](/vault), then continue the mission.`;
           return {
             isError: true,
             outcome: 'question_asked',

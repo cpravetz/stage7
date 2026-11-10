@@ -1071,8 +1071,9 @@ export class MissionAgentRuntime {
       else missingDependencies.push(dependencyId);
     }
     if (missingDependencies.length > 0) {
-      throw new Error(
-        `Cannot execute task "${task.id}": completed dependency results are missing for: ${missingDependencies.join(', ')}`,
+      logger.warn(
+        { missionId: this.missionId, taskId: task.id, missingDependencies },
+        'Executing task with unavailable completed dependency results; agent must recover or report internal blocker',
       );
     }
     const basePrompt = buildTaskPrompt(task, phase, plan, completedDependencies, missionGoal);
@@ -1089,6 +1090,9 @@ export class MissionAgentRuntime {
       : '';
     const taskPrompt = [
       basePrompt,
+      ...(missingDependencies.length > 0
+        ? [`Missing completed dependency results for task ID(s): ${missingDependencies.join(', ')}. Do not treat this as mission failure. Ask the responsible agent/task to provide or recreate the missing artifact or result, or locate it if it exists under a different name; report an internal blocker only if it cannot be recovered after that coordination.`]
+        : []),
       ...(retryGuidance ? [`Retry guidance for remaining work:\n${retryGuidance}`] : []),
       ...(continuationPrompt ? [continuationPrompt] : []),
     ].join('\n\n');

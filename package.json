@@ -59,7 +59,7 @@
     "@mui/x-charts": "^8.24.0",
     "@mui/x-date-pickers": "^8.24.0",
     "@types/node-cron": "^3.0.11",
-    "axios": "^1.21.0",
+    "axios": "^1.21.1",
     "dayjs": "^1.11.19",
     "express": "^4.18.2",
     "isolated-vm": "^5.0.4",

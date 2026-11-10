@@ -472,9 +472,9 @@ const Missions = () => {
                           <td>{formatDuration(m)}</td>
                           <td>
                             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                              {['paused', 'pending'].includes(m.status.toLowerCase()) && (
+                              {['paused', 'pending', 'awaiting_review'].includes(m.status.toLowerCase()) && (
                                 <button className="small" onClick={() => handleMissionAction(m.workflowId, 'start')} title="Start mission">
-                                  Start
+                                  Resume
                                 </button>
                               )}
                               {m.status.toLowerCase() === 'running' && (
