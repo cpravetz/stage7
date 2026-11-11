@@ -476,7 +476,11 @@ describe('TemporalClient mission start', () => {
     )
   })
 
-  it('resumes a running mission using tool credentials configured in Vault', async () => {
+  it.each([
+    ['successful', { updated: true }, undefined, 'success', false],
+    ['failed', { output: '{"success":false,"error":"provider rejected request"}' }, undefined, 'failure', true],
+    ['unknown', { updated: true }, false, 'failure', true],
+  ])('resumes with %s tool outcome after credentials are provided', async (_label, output, outcomeKnown, outcome, isError) => {
     delete process.env.TEMPORAL_ADDRESS
     process.env.ARTIFACTS_URL = 'http://artifacts'
     process.env.TOOL_EXECUTOR_URL = 'http://tool-executor:3500'
@@ -566,7 +570,8 @@ describe('TemporalClient mission start', () => {
           text: async () => JSON.stringify({
             status: 'completed',
             toolId: 'protected-api',
-            output: { updated: true },
+            output,
+            ...(outcomeKnown === undefined ? {} : { outcomeKnown }),
           }),
         } as Response
       }
@@ -592,10 +597,10 @@ describe('TemporalClient mission start', () => {
     expect(resumed[1].pendingInteraction?.actionReceipts).toEqual([
       expect.objectContaining({
         toolId: 'protected-api',
-        isError: false,
-        outcome: 'success',
+        isError,
+        outcome,
         actionKey,
-        content: '{"updated":true}',
+        content: JSON.stringify(output),
       }),
     ])
   })

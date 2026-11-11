@@ -22,8 +22,6 @@ import {
   MissionPendingInteraction,
   MissionTaskCheckpoint,
   completedTaskIdsWithSummaries,
-  isConfigurationBlocker,
-  missionConfigurationQuestion,
   missionExecutionEvidenceGaps,
   recoveryGapFingerprint,
   recoveryProgressSignature,
@@ -292,77 +290,6 @@ export class MissionOrchestrator {
     }
 
     const outputs: any = { phases: [] };
-    let configurationRequestIndex = 0;
-    const createConfigurationTask = (phase: Phase): Task => {
-      let id = `${phase.id}-configuration-request-${++configurationRequestIndex}`;
-      const taskIds = new Set(plan.phases.flatMap((candidate) => candidate.tasks.map((task) => task.id)));
-      while (taskIds.has(id)) id = `${phase.id}-configuration-request-${++configurationRequestIndex}`;
-      return {
-        id,
-        title: 'Provide required user credentials',
-        description: 'Provide the user credentials or API keys needed to continue after automatic tool resolution was attempted.',
-        agentRole: 'assistant',
-        systemPrompt: `Continue the original mission after receiving the user's missing credentials or API keys: ${ctx.prompt}. I have already attempted to resolve or create the needed tools automatically. Do not repeat successful or uncertain side effects.`,
-        dependsOnTaskIds: phase.tasks.map((task) => task.id),
-        expectedArtifacts: [],
-        requiredActions: [],
-        status: 'pending',
-        artifacts: [],
-      };
-    };
-    const pauseForConfiguration = async (
-      phase: Phase,
-      task: Task,
-      phaseOutput: MissionPhaseOutput,
-    ): Promise<never> => {
-      const question = missionConfigurationQuestion(ctx.prompt);
-      pendingInteraction = {
-        kind: 'user_input',
-        phaseId: phase.id,
-        taskId: task.id,
-        taskTitle: task.title,
-        agentRole: task.agentRole,
-        question,
-        resumeCount: 0,
-      };
-      task.status = 'pending';
-      task.output = question;
-      phase.status = 'in_progress';
-      phaseOutput.status = 'incomplete';
-      if (!phaseOutput.tasks.some((phaseTask) => phaseTask.taskId === task.id)) {
-        phaseOutput.tasks.push({
-          taskId: task.id,
-          status: 'pending',
-          artifacts: task.artifacts || [],
-          output: question,
-        });
-      } else {
-        const phaseTask = phaseOutput.tasks.find((candidate) => candidate.taskId === task.id)!;
-        phaseTask.status = 'pending';
-        phaseTask.output = question;
-      }
-      if (!outputs.phases.includes(phaseOutput)) outputs.phases.push(phaseOutput);
-      await this.updateTask(ctx, phase.id, task.id, { status: 'pending', output: question });
-      await this.updatePhase(ctx, phase.id, { status: 'in_progress' });
-      saveCheckpoint();
-      await ctx.broadcast({
-        type: 'question_asked',
-        missionId: ctx.missionId,
-        timestamp: Date.now(),
-        data: {
-          phaseId: phase.id,
-          taskId: task.id,
-          taskTitle: task.title,
-          agentRole: task.agentRole,
-          question,
-        },
-      });
-      throw new MissionUserInterruptionError({
-        plan,
-        outputs: { ...outputs, status: 'awaiting_user_input', pendingInteraction },
-        compensations,
-      });
-    };
     for (let phaseIndex = 0; phaseIndex < plan.phases.length; phaseIndex++) {
       let phase = plan.phases[phaseIndex]!;
       let phaseIsComplete = completedPhases.has(phase.id);
@@ -502,10 +429,6 @@ const executeTask = async (task: Task, savedTask: MissionTaskCheckpoint | undefi
           if (isFatalServiceError(err)) throw err;
           if (!savedTask) {
             const error = err instanceof Error ? err.message : String(err);
-            if (isConfigurationBlocker([error])) {
-              await pauseForConfiguration(phase, task, phaseOutput);
-              return;
-            }
             const completedAt = Date.now();
             try {
               await this.updateTask(ctx, phase.id, task.id, { status: 'failed', completedAt, output: error });
@@ -914,10 +837,6 @@ const executeTask = async (task: Task, savedTask: MissionTaskCheckpoint | undefi
               phaseReviewSatisfied = true;
               break;
             }
-            const reviewEvidence = [
-              ...applied.gaps,
-              ...[...completedTaskSummaries.values()].map((summary) => summary.output),
-            ];
             const reviewSignature = recoveryProgressSignature({
               gaps: applied.gaps,
               completedTaskIds: phase.tasks.filter((t) => t.status === 'completed').map((t) => t.id),
@@ -928,17 +847,6 @@ const executeTask = async (task: Task, savedTask: MissionTaskCheckpoint | undefi
             const madeProgress = hasRecoveryProgress(lastReviewSignature, reviewSignature);
             lastReviewSignature = reviewSignature;
             noProgressCount = madeProgress ? 0 : noProgressCount + 1;
-            if (isConfigurationBlocker(reviewEvidence) && noProgressCount >= 1) {
-              let awaitingTask = applied.amendment?.status === 'pending'
-                ? applied.amendment
-                : phase.tasks.find((candidate) => candidate.status === 'pending');
-              if (!awaitingTask) {
-                awaitingTask = createConfigurationTask(phase);
-                phase.tasks.push(awaitingTask);
-                plan.phases = plan.phases.map((candidate) => candidate.id === phase.id ? phase : candidate);
-              }
-              await pauseForConfiguration(phase, awaitingTask, phaseOutput);
-            }
             if (!madeProgress && noProgressCount >= MAX_NO_PROGRESS_RECOVERY_ATTEMPTS) {
               logger.error(
                 { missionId: ctx.missionId, phaseId: phase.id, gaps: applied.gaps, noProgressCount },
@@ -978,8 +886,8 @@ ${noProgressGuidance}`;
                 id: `${phase.id}-amendment-${amendmentIndex}`,
                 title: `Address phase gaps (review ${reviewIndex})`,
                 description: `Address remaining gaps: ${(applied.gaps || []).join('; ') || 'unspecified gaps'}`,
-                agentRole: 'engineer',
-                systemPrompt: `Resolve the following gaps for phase ${phase.name}: ${(applied.gaps || []).join('; ')}. Use available context and produce concrete artifacts.${noProgressGuidance}`,
+                agentRole: 'assistant',
+                systemPrompt: `Mission goal: ${ctx.prompt}\nPhase goal: ${phase.name} — ${phase.goal}\nResolve the following gaps using the available context and recorded task outputs: ${(applied.gaps || []).join('; ') || 'unspecified gaps'}. Focus only on accomplishing the requested mission outcome or reporting a concrete blocker. Do not invent unrelated work, and do not create or request design documents, plans, or substitute artifacts unless the mission goal explicitly requires them as deliverables.${noProgressGuidance}`,
                 dependsOnTaskIds: phase.tasks.map((t: any) => t.id),
                 expectedArtifacts: [],
                 requiredActions: [],
@@ -1185,10 +1093,6 @@ ${noProgressGuidance}`;
       const madeProgress = hasRecoveryProgress(lastCompletionSignature, completionSignature);
       lastCompletionSignature = completionSignature;
       completionNoProgress = madeProgress ? 0 : completionNoProgress + 1;
-      const recoveryEvidence = [
-        ...gaps,
-        ...allEvidenceTasks.map((task) => task.output || ''),
-      ];
       const recoveryPhase = plan.phases.find((phase) =>
         gaps.some((gap) =>
           gap.includes(phase.id)
@@ -1227,12 +1131,6 @@ ${noProgressGuidance}`;
           .map((task) => task.id),
       )];
 
-      if (isConfigurationBlocker(recoveryEvidence) && completionNoProgress >= 1) {
-        const requestTask = createConfigurationTask(recoveryPhase);
-        recoveryPhase.tasks.push(requestTask);
-        plan.phases = plan.phases.map((candidate) => candidate.id === recoveryPhase.id ? recoveryPhase : candidate);
-        await pauseForConfiguration(recoveryPhase, requestTask, phaseOutput);
-      }
       if (!madeProgress && completionNoProgress >= MAX_NO_PROGRESS_RECOVERY_ATTEMPTS) {
         await agentRuntime.emitMonologue({
           agentRole: 'mission-director',
@@ -1280,7 +1178,7 @@ ${noProgressGuidance}`;
         title: `Resolve mission completion gaps (attempt ${recoveryIndex})`,
         description: `Address the remaining mission completion gaps: ${gaps.join('; ')}`,
         agentRole: 'assistant',
-        systemPrompt: `Resolve the mission completion gaps below for the mission goal "${ctx.prompt}" and phase "${recoveryPhase.name}". Use the recorded outputs from tasks ${taskIds.join(', ') || 'none'} as authoritative context. Produce any missing user deliverables named ${expectedArtifacts.join(', ') || 'by the gaps'} and return concrete evidence that the mission outcome is satisfied. Never create a receipt or evidence document to stand in for an action; actual tool results are recorded internally. Check the live tool catalog, execute a suitable tool, and use capability resolution to find or create one when permitted. If required credentials or configuration are missing, ask the user to provide them through the secure tool configuration form and wait. If required input from an earlier task is missing, ask that task's Agent to provide the artifact or rerun the source task. Do not repeat successfully completed or uncertain side effects; use another authorized approach if one path is blocked.\n\nGaps:\n${gaps.join('\n')}`,
+        systemPrompt: `Resolve the mission completion gaps below for the mission goal "${ctx.prompt}" and phase "${recoveryPhase.name}". Use the recorded outputs from tasks ${taskIds.join(', ') || 'none'} as authoritative context. Focus only on accomplishing the requested mission outcome and return concrete evidence that the mission outcome is satisfied. Produce only deliverable files explicitly required by the mission goal${expectedArtifacts.length ? ` (${expectedArtifacts.join(', ')})` : ''}; if no such deliverables were requested, do not create design documents, plans, or substitute artifacts. Never create a receipt or evidence document to stand in for an action; actual tool results are recorded internally. Check the live tool catalog, execute a suitable tool, and use capability resolution to find or create one when permitted. If required credentials or configuration are missing, ask the user to provide them through the secure tool configuration form and wait. If required input from an earlier task is missing, ask that task's Agent to provide the needed result or rerun the source task. Do not repeat successfully completed or uncertain side effects; use another authorized approach if one path is blocked. If an execution or system error occurred, treat it as a blocker to resolve or report accurately, not as a request to produce unrelated documentation.${noProgressGuidance}\n\nGaps:\n${gaps.join('\n')}`,
         dependsOnTaskIds: taskIds,
         expectedArtifacts,
         requiredActions: [],

@@ -175,7 +175,7 @@ export class ToolConfigResolver {
     const credentialBackedFields = new Set(
       Object.entries(credentialSource || {})
         .filter(([, source]) => source && (typeof source.configKey === 'string' || typeof source.vaultSecretId === 'string'))
-        .map(([field]) => field),
+        .flatMap(([field, source]) => [field, ...(source.configKey ? [source.configKey] : [])]),
     );
     const isExternalAction = tool.manifest?.system !== undefined && tool.manifest?.action !== undefined;
     const required = Array.isArray(configSchema?.required)
@@ -284,6 +284,12 @@ export class ToolConfigResolver {
       sensitive: c.source.sensitive,
     }));
     const resolved = await credentialProvider.resolveAll(namedSources, configuredValues);
+    for (const credential of credentialSources) {
+      if (!resolved[credential.logicalKey] && credential.source.configKey) {
+        const value = await this.tryResolveFromVault(tool, credential.logicalKey, _input);
+        if (typeof value === 'string' && value.trim()) resolved[credential.logicalKey] = value;
+      }
+    }
 
     const overrides = this.pendingCredentialOverrides.get(tool.id) || {};
     const merged = { ...resolved, ...overrides };

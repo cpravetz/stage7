@@ -12,6 +12,14 @@ function visibleTaskText(value: string): string {
   return value.replaceAll(INTERNAL_ACTION_REQUIREMENT, 'an actual registered tool');
 }
 
+function taskInstructions(task: Task, plan: Plan): string {
+  const taskIds = new Set(plan.phases.flatMap((phase) => phase.tasks.map((candidate) => candidate.id)));
+  return task.systemPrompt.replace(
+    /\b(?:consume|use)\s+(?:the\s+)?output\s+from\s+task\s+([a-z0-9_-]+)\s*\([^)]*(?:service|tool|plugin|connector|integration)[^)]*\)[^.!?\n]*[.!?]?/gi,
+    (sentence, taskId: string) => taskIds.has(taskId) ? sentence : '',
+  ).trim();
+}
+
 function compactDependencySummaries(
   task: Task,
   summaries: CompletedTaskSummary[],
@@ -64,7 +72,7 @@ export function buildTaskPrompt(
   return (
     `Task: ${visibleTaskText(task.title)}\n\n` +
     `Description: ${visibleTaskText(task.description)}\n\n` +
-    `Task Instructions: ${visibleTaskText(task.systemPrompt)}\n\n` +
+    `Task Instructions: ${visibleTaskText(taskInstructions(task, plan))}\n\n` +
     (missionGoal ? `Original mission goal: ${missionGoal}\n\n` : '') +
     (completedDependencies.length > 0
     ? `Completed dependency results (authoritative persisted outputs and artifacts; do not infer results from task IDs): ${JSON.stringify(compactDependencySummaries(task, completedDependencies))}\n\n`
@@ -77,10 +85,10 @@ export function buildTaskPrompt(
     (task.requiresExternalAction
       ? 'This task requires completing a real action outside the system. Check the live tool catalog, then invoke an actual registered tool that performs the requested operation and verify its result. If no suitable tool exists, use capability resolution to find or create one when permitted. Do not stop after listing tools, creating a tool, handing work off, drafting, or proposing an action. If required credentials or configuration are missing, ask the user to provide them through the secure tool configuration form and wait.\n'
       : '') +
-    'Mission task outputs, artifacts, receipts, and logs are internal execution data: never ask the user to retrieve or provide them. Use the completed dependency results supplied here. If a required result from another task is missing, name its task ID as an internal blocker in your task result so the mission orchestrator can retrieve or rerun that task; continue any safe independent work. Ask the user only for information, credentials, or authorization that only the user can provide. Never fabricate missing input or treat a recoverable missing input as mission failure.\n' +
+    'The original mission goal is authoritative: disregard unrelated examples, unrelated tasks, and references to removed tool-setup tasks. Stay strictly within the mission goal and this task; do not introduce unrelated domains, analysis, or documents the user did not request. Extract the requested recipients, message and other values directly from the mission goal. Mission task outputs, artifacts, receipts, and logs are internal execution data: never ask the user to retrieve or provide them. Use the completed dependency results supplied here. If a required result from another task is missing, name its task ID as an internal blocker in your task result so the mission orchestrator can retrieve or rerun that task; continue any safe independent work. Ask the user only for information, credentials, or authorization that only the user can provide. Never fabricate missing input or treat a recoverable missing input as mission failure.\n' +
     'If you must ask the user to choose a tool, service, or configuration, include the concrete options/values in the question; never ask the user to select from a list that is not shown.\n' +
     `Output contract: ${artifactOutputContract} Use only actual system-tool results and completed dependency results; do not infer values or include results from future mission steps. Keep the final response in clear, concise language. Do not expose internal JSON, action receipts, validation errors, or implementation jargon unless the user specifically requested them.\n\n` +
-    'Complete this task now and report the results for its expected deliverables. Do not return a plan, future-tense promises, or placeholders. If the work cannot be completed with the available tools or information, explain the specific blocker.'
+    'Complete this task now and report the verified results. Do not return a plan, future-tense promises, placeholders, or substitute design/specification documents. If the work cannot be completed with the available tools or information, explain the specific blocker accurately.'
 
   );
 }

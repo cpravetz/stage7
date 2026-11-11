@@ -249,7 +249,7 @@ describe('AgentExecutor', () => {
 
     expect(result.output).toBe('## answer.json\n{"answer":4}')
     expect(prompts).toHaveLength(2)
-    expect(prompts[1]).toContain('missing required, non-empty Markdown artifact section(s): ## answer.json')
+    expect(prompts[1]).toContain('missing required deliverable section(s): ## answer.json')
     expect(complaints).toEqual([
       expect.objectContaining({
         requestId: 'brain-response-1',
@@ -1739,6 +1739,7 @@ describe('AgentExecutor', () => {
     }
 
     const requestedTask = task() as AgentTask
+    requestedTask.input.prompt = 'Search the archive for quarterly report'
     requestedTask.input.context = {
       requiredActions: [{ toolId: 'archive_search', outcome: 'success' }],
     }
@@ -1754,7 +1755,7 @@ describe('AgentExecutor', () => {
       outcome: 'success',
     })
     const resolution = calls.find((call) => call.url.endsWith('/api/tool-executor/tools/resolve'))
-    expect(resolution?.body?.capability).toBe('archive search')
+    expect(resolution?.body?.capability).toBe('Search the archive for quarterly report')
     expect(resolution?.body?.excludeToolIds).toEqual(['archive_search'])
     await fetcher('http://tool-executor:3500/api/tool-executor/tools/archive-search', {
       method: 'DELETE',
@@ -1884,7 +1885,7 @@ describe('AgentExecutor', () => {
     ]))
   })
 
-  it('treats unavailable MCP permissions as a denial and does not ask the user', async () => {
+  it('pauses for an MCP permission decision and preserves the request', async () => {
     const brainPrompts: string[] = []
     let resolveCalls = 0
     const fetcher: typeof fetch = async (input, init) => {
@@ -1915,13 +1916,97 @@ describe('AgentExecutor', () => {
       delegationDepth: 0,
     })
 
-    expect(result.output).not.toContain('__MISSION_PERMISSION__')
+    expect(result.output).toContain('__MISSION_PERMISSION__:')
+    expect(JSON.parse(result.output.slice('__MISSION_PERMISSION__:'.length))).toMatchObject({
+      request: { id: 'perm-mission-test' },
+      candidate: { name: 'SMS via MCP' },
+    })
     expect(result.actionReceipts).toEqual(expect.arrayContaining([
-      expect.objectContaining({ outcome: 'denied', isError: true }),
+      expect.objectContaining({ outcome: 'permission_required', isError: false }),
     ]))
-    expect(resolveCalls).toBeGreaterThan(0)
-    expect(brainPrompts.length).toBeGreaterThan(1)
+    expect(resolveCalls).toBe(1)
+    expect(brainPrompts.length).toBe(1)
     expect(brainPrompts[0]).not.toContain('The user must approve this tool.')
+  })
+
+  it.each([
+    '__ASK_USER__:The multi-channel-publishing skill is not registered. Please register it to proceed.',
+    '{"tool":"ask_user","args":{"question":"Please install the missing tool."}}',
+  ])('redirects operational requests back to the agent: %s', async (firstResponse) => {
+    let turn = 0
+    const prompts: string[] = []
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) return jsonResponse({ tools: [] })
+      if (url.endsWith('/api/brain/complete')) {
+        prompts.push(String((JSON.parse(String(init?.body)) as { prompt: string }).prompt))
+        return jsonResponse({ content: turn++ === 0 ? firstResponse : '__ASK_USER__:Which SMS provider account should I use?' })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+    const result = await new AgentExecutor({ fetcher }).execute(definition, task() as AgentTask, {
+      missionId: 'mission-1',
+      delegationDepth: 0,
+    })
+    expect(result.output).toContain('Which SMS provider account')
+    expect(prompts[1]).toContain('Do not ask the user')
+  })
+
+  it('executes the requested email and resolves SMS without losing mission values', async () => {
+    let turn = 0
+    let smsRegistered = false
+    const calls: Array<{ url: string; body: Record<string, unknown> }> = []
+    const responses = [
+      '{"tool":"__list_tools","args":{"query":"send email"}}',
+      '{"tool":"email_sender","args":{"to":"chris@pravetz.net","subject":"","text":"Watson, come here."}}',
+      '{"tool":"__create_tool","args":{"capability":"send SMS","description":"Send an SMS to the requested phone number","requirements":[]}}',
+      '{"tool":"sms_sender","args":{"to":"347-772-8389","body":"Watson, come here."}}',
+    ]
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input)
+      const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : {}
+      calls.push({ url, body })
+      if (url.endsWith('/api/tool-executor/tools')) return jsonResponse({
+        tools: [
+          { id: 'email_sender', name: 'Email Sender', description: 'Send email', type: 'native' },
+          ...(smsRegistered ? [{ id: 'sms_sender', name: 'SMS Sender', description: 'Send SMS', type: 'code' }] : []),
+        ],
+      })
+      if (url.endsWith('/api/brain/complete')) return jsonResponse({ content: responses[turn++] })
+      if (url.endsWith('/api/tool-executor/tools/resolve')) {
+        smsRegistered = true
+        return jsonResponse({ success: true, tool: { id: 'sms_sender', name: 'SMS Sender', manifest: {} } })
+      }
+      if (url.endsWith('/api/tool-executor/tools/execute') && body.id === 'email_sender') {
+        return jsonResponse({ status: 'completed', output: { success: true, messageId: 'email-1' } })
+      }
+      if (url.endsWith('/api/tool-executor/tools/execute') && body.id === 'sms_sender') {
+        return jsonResponse({
+          request: {
+            executionId: 'sms-exec', toolId: 'sms_sender', toolName: 'SMS Sender',
+            missingCredentials: [{ key: 'account', label: 'SMS account' }, { key: 'token', label: 'SMS token' }],
+          },
+        }, 428)
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+    const missionTask = task() as AgentTask
+    missionTask.input = {
+      prompt: 'Send a text to 347-772-8389 that reads "Watson, come here." Send the same message as an email to chris@pravetz.net.',
+      context: { requiresExternalAction: true },
+    }
+    const result = await new AgentExecutor({ fetcher }).execute(definition, missionTask, {
+      missionId: 'mission-1', delegationDepth: 0,
+    })
+    const executions = calls.filter((call) => call.url.endsWith('/tools/execute'))
+    expect(executions[0].body.input).toMatchObject({ to: 'chris@pravetz.net', text: 'Watson, come here.' })
+    expect(executions[1].body.input).toEqual({ to: '347-772-8389', body: 'Watson, come here.' })
+    expect(result.output).toContain('SMS account, SMS token')
+    expect(result.output).not.toContain('multi-channel')
+    expect(result.actionReceipts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ toolId: 'email_sender', outcome: 'success' }),
+      expect.objectContaining({ toolId: 'sms_sender', outcome: 'question_asked' }),
+    ]))
   })
 
   it('does not replay a successful action already recorded before a mission interruption', async () => {

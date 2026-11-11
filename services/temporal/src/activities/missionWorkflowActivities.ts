@@ -446,6 +446,20 @@ export async function reviewAndAmendMissionPhaseActivity({
           agentRole: 'mission-director',
         },
       });
+    } else if (!applied.satisfied && applied.gaps.length > 0) {
+      await broadcast(input, {
+        type: 'phase_plan_amended',
+        missionId: input.missionId,
+        timestamp: Date.now(),
+        data: {
+          phaseId: phase.id,
+          reviewIndex,
+          gaps: applied.gaps,
+          agentId: agentRuntime.getAgentIdForRole('mission-director'),
+          agentName: 'Mission Director',
+          agentRole: 'mission-director',
+        },
+      });
     }
     return applied;
   } finally {

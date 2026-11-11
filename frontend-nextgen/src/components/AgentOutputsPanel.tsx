@@ -505,7 +505,7 @@ const AgentOutputsPanel = ({ missionId, missionStatus, plan }: AgentOutputsPanel
               <div>
                 <strong>{displayAgentName(a.name, a.id)}</strong>
                 {(() => {
-                  const canonical = canonicalRole(String(a.role || ''));
+                  //const canonical = canonicalRole(String(a.role || ''));
                   const icon = getOversightRoleIcon(a.role || '');
                   const label = getOversightRoleLabel(a.role || '');
                   if (icon && label) {

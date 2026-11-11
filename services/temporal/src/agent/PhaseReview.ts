@@ -97,7 +97,7 @@ export function applyPhaseReview(
   const amendment: Task = {
     id: taskId,
     ...followUpTask,
-    systemPrompt: `${followUpTask.systemPrompt.trim()}\n\n${dependencyInstructions.join('. ')} as authoritative phase context, and do not repeat completed work.`,
+    systemPrompt: `${followUpTask.systemPrompt.trim()}\n\n${dependencyInstructions.join('. ')} as authoritative phase context, and do not repeat completed work. Stay within the stated mission and phase goals: do not invent unrelated work or create design/specification documents or substitute artifacts unless explicitly requested as deliverables.`,
     requiredActions: [],
     dependsOnTaskIds: dependencies,
     status: 'pending',

@@ -11,8 +11,6 @@ import {
   WorkflowInput,
   WorkflowResult,
   completedTaskIdsWithSummaries,
-  isConfigurationBlocker,
-  missionConfigurationQuestion,
   recoveryGapFingerprint,
   recoveryProgressSignature,
   hasRecoveryProgress,
@@ -454,10 +452,6 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
               phaseReviewSatisfied = true;
               break;
             }
-            const reviewEvidence = [
-              ...review.gaps,
-              ...[...completedTaskSummaries.values()].map((summary) => summary.output),
-            ];
             const reviewSignature = recoveryProgressSignature({
               gaps: review.gaps,
               completedTaskIds: phase.tasks.filter((t) => t.status === 'completed').map((t) => t.id),
@@ -471,60 +465,6 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
             const noProgressGuidance = !madeProgress
               ? ' Previous attempts made no observable progress on the same gaps; use a different authorized approach and do not repeat the same recovery steps. If a required value or authorization is missing, ask the user for it and wait.'
               : '';
-            if (isConfigurationBlocker(reviewEvidence) && noProgressCount >= 1) {
-              const awaitingTask = review.amendment || phase.tasks.at(-1);
-              if (awaitingTask) {
-                const question = missionConfigurationQuestion(input.prompt);
-                awaitingTask.status = 'pending';
-                awaitingTask.output = question;
-                pendingInteraction = {
-                  kind: 'user_input',
-                  phaseId: phase.id,
-                  taskId: awaitingTask.id,
-                  taskTitle: awaitingTask.title,
-                  agentRole: awaitingTask.agentRole,
-                  question,
-                  resumeCount: 0,
-                };
-                phaseOutput.status = 'incomplete';
-                phase.status = 'in_progress';
-                const priorTaskResult = phaseOutput.tasks.find((task) => task.taskId === awaitingTask.id);
-                if (priorTaskResult) {
-                  priorTaskResult.status = 'pending';
-                  priorTaskResult.output = question;
-                } else {
-                  phaseOutput.tasks.push({
-                    taskId: awaitingTask.id,
-                    status: 'pending',
-                    artifacts: awaitingTask.artifacts || [],
-                    output: question,
-                  });
-                }
-                await phaseActivities.requestMissionUserInputActivity({
-                  input,
-                  plan,
-                  phase,
-                  task: awaitingTask,
-                  question,
-                });
-                await phaseActivities.finishMissionPhaseActivity({
-                  input,
-                  phase,
-                  tasks: phaseOutput.tasks,
-                });
-                phases.push(phaseOutput);
-                return {
-                  missionId: input.missionId,
-                  status: 'awaiting_review',
-                  output: {
-                    plan,
-                    outputs: { phases, status: 'awaiting_user_input', pendingInteraction },
-                  },
-                  startedAt,
-                  completedAt: Date.now(),
-                };
-              }
-            }
             if (!madeProgress && noProgressCount >= MAX_NO_PROGRESS_RECOVERY_ATTEMPTS) {
               logger.error(
                 { missionId: input.missionId, phaseId: phase.id, gaps: review.gaps, noProgressCount },
@@ -544,8 +484,8 @@ ${noProgressGuidance}`;
                 id: `${phase.id}-amendment-${amendmentIndex}`,
                 title: `Address phase gaps (review ${reviewIndex})`,
                 description: `Address remaining gaps: ${(review.gaps || []).join('; ') || 'unspecified gaps'}`,
-                agentRole: 'engineer',
-                systemPrompt: `Resolve the following gaps for phase ${phase.name}: ${(review.gaps || []).join('; ')}. Use available context and produce concrete artifacts.${noProgressGuidance}`,
+                agentRole: 'assistant',
+                systemPrompt: `Mission goal: ${input.prompt}\nPhase goal: ${phase.name} — ${phase.goal}\nResolve the following gaps using the available context and recorded task outputs: ${(review.gaps || []).join('; ') || 'unspecified gaps'}. Focus only on accomplishing the requested mission outcome or reporting a concrete blocker. Do not invent unrelated work, and do not create or request design documents, plans, or substitute artifacts unless the mission goal explicitly requires them as deliverables.${noProgressGuidance}`,
                 dependsOnTaskIds: phase.tasks.map((t: any) => t.id),
                 expectedArtifacts: [],
                 requiredActions: [],
@@ -658,10 +598,6 @@ ${noProgressGuidance}`;
       const madeProgress = hasRecoveryProgress(lastCompletionSignature, completionSignature);
       lastCompletionSignature = completionSignature;
       completionNoProgress = madeProgress && !stagnantGap ? 0 : completionNoProgress + 1;
-      const recoveryEvidence = [
-        ...gaps,
-        ...phases.flatMap((phase) => phase.tasks.map((task) => task.output || '')),
-      ];
       const recoveryPhase = plan.phases.find((candidate) =>
         gaps.some((gap) =>
           gap.includes(candidate.id)
@@ -702,62 +638,6 @@ ${noProgressGuidance}`;
           .map((task) => task.id),
       )];
 
-      if (isConfigurationBlocker(recoveryEvidence) && completionNoProgress >= 1) {
-        const question = missionConfigurationQuestion(input.prompt);
-        const requestTask: any = {
-          id: `${recoveryPhase.id}-configuration-request-${recoveryIndex}`,
-          title: 'Provide required user credentials',
-          description: 'Provide the user credentials or API keys needed to continue after automatic tool resolution was attempted.',
-          agentRole: 'assistant',
-          systemPrompt: `Continue the original mission after receiving the user's missing credentials or API keys: ${input.prompt}. I have already attempted to resolve or create the needed tools automatically. Do not repeat successful or uncertain side effects.`,
-          expectedArtifacts: [],
-          requiredActions: [],
-          dependsOnTaskIds: recoveryPhase.tasks.map((task) => task.id),
-          status: 'pending',
-          artifacts: [],
-          output: question,
-        };
-        recoveryPhase.tasks.push(requestTask);
-        recoveryPhase.status = 'in_progress';
-        phaseOutput.status = 'incomplete';
-        pendingInteraction = {
-          kind: 'user_input',
-          phaseId: recoveryPhase.id,
-          taskId: requestTask.id,
-          taskTitle: requestTask.title,
-          agentRole: requestTask.agentRole,
-          question,
-          resumeCount: 0,
-        };
-        phaseOutput.tasks.push({
-          taskId: requestTask.id,
-          status: 'pending',
-          artifacts: [],
-          output: question,
-        });
-        await phaseActivities.requestMissionUserInputActivity({
-          input,
-          plan,
-          phase: recoveryPhase,
-          task: requestTask,
-          question,
-        });
-        await phaseActivities.finishMissionPhaseActivity({
-          input,
-          phase: recoveryPhase,
-          tasks: phaseOutput.tasks,
-        });
-        return {
-          missionId: input.missionId,
-          status: 'awaiting_review',
-          output: {
-            plan,
-            outputs: { phases, status: 'awaiting_user_input', pendingInteraction },
-          },
-          startedAt,
-          completedAt: Date.now(),
-        };
-      }
       if (!madeProgress && completionNoProgress >= MAX_NO_PROGRESS_RECOVERY_ATTEMPTS) {
         logger.error(
           { missionId: input.missionId, gaps, completionNoProgress },

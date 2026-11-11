@@ -36,6 +36,22 @@ function visibleMissionStatus(record: PersistedMissionControlRecord): string {
   return record.status || 'unknown';
 }
 
+function failedToolOutput(value: unknown, depth = 0): boolean {
+  if (depth > 4) return false;
+  if (typeof value === 'string') {
+    try {
+      return failedToolOutput(JSON.parse(value), depth + 1);
+    } catch {
+      return false;
+    }
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const output = value as Record<string, unknown>;
+  return output.success === false || output.isError === true || output.status === 'failed'
+    || (typeof output.error === 'string' && output.error.trim().length > 0)
+    || ['output', 'data', 'result'].some((key) => failedToolOutput(output[key], depth + 1));
+}
+
 function credentialValuesFromResponse(
   question: string | undefined,
   response: string,
@@ -712,6 +728,8 @@ export class TemporalClient {
         toolId?: string;
         output?: unknown;
         error?: string;
+        outcomeKnown?: boolean;
+        reconciliation?: { outcomeKnown?: boolean };
         request?: { missingCredentials?: Array<{ label?: string; key?: string }> };
       };
       try {
@@ -731,11 +749,14 @@ export class TemporalClient {
       const actionReceipt = (pendingInteraction.actionReceipts || []).find(
         (receipt) => receipt.toolId === credentialRequest.toolId && receipt.outcome === 'question_asked',
       );
+      const outcomeUnknown = execution.outcomeKnown === false || execution.reconciliation?.outcomeKnown === false;
+      const failed = outcomeUnknown || failedToolOutput(execution.output);
       const completedReceipt = {
         toolId: credentialRequest.toolId,
-        isError: false,
+        isError: failed,
         content: JSON.stringify(execution.output ?? { status: execution.status, toolId: credentialRequest.toolId }),
-        outcome: 'success' as const,
+        outcome: failed ? 'failure' as const : 'success' as const,
+        ...(outcomeUnknown ? { outcomeKnown: false } : {}),
         ...(actionReceipt?.actionKey ? { actionKey: actionReceipt.actionKey } : {}),
       };
       pendingInteraction = {
@@ -747,9 +768,11 @@ export class TemporalClient {
           completedReceipt,
         ]) as typeof pendingInteraction.actionReceipts,
       };
-      interactionResponse = continuation.useConfiguredCredentials
-        ? `The required credentials were securely supplied. Tool Executor completed "${credentialRequest.toolName}". Use that verified result and do not repeat the action.`
-        : `The required credentials were securely supplied in Tools/Vault. Tool Executor completed "${credentialRequest.toolName}". Use that verified result and do not repeat the action.`;
+      interactionResponse = outcomeUnknown
+        ? `The requested values were securely supplied, but the outcome of "${credentialRequest.toolName}" is unknown. Do not repeat the action; investigate its result.`
+        : failed
+          ? `The requested values were securely supplied, but "${credentialRequest.toolName}" returned a failure. Examine the recorded result and continue with a safe alternative.`
+          : `The requested values were securely supplied. Tool Executor completed "${credentialRequest.toolName}". Use that verified result and do not repeat the action.`;
     } else if (pendingInteraction?.kind === 'mcp_permission') {
       const decision = continuation.permissionDecision;
       if (!decision || !pendingInteraction.requestId) {

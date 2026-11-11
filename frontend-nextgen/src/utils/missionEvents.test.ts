@@ -261,7 +261,7 @@ describe('mission conversation', () => {
       },
     });
 
-    expect(amended?.message).toContain('Phase review found: SMTP configuration is missing.');
+    expect(amended?.message).toContain('Review noted: SMTP configuration is missing.');
     expect(amended?.message).toContain('Follow-up task added: Collect email service configuration.');
     expect(buildTranscript([amended!])[0]?.label).toBe('Phase Reviewer Agent');
   });

@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import { useFeedStore, FeedEvent } from '../stores/feedStore';
 import AgentOutputsPanel from '../components/AgentOutputsPanel';
 import { MissionDetail, useMissionsStore } from '../stores/missionsStore';
-import { postFormData, postJSON } from '../utils/api';
+import { postFormData, postJSON, putJSON } from '../utils/api';
 import MissionArtifactContent from '../components/MissionArtifactContent';
 import {
   getArtifactMediaCategory,
@@ -130,7 +130,7 @@ function displayInteractionQuestion(pending: PendingInteraction): string {
     if (pending.kind === 'user_input') {
       const missing = pending.credentialRequest?.missingCredentials?.map((c) => c.label || c.key).filter(Boolean);
       if (missing && missing.length > 0) {
-        return `Configuration needed for ${pending.credentialRequest?.toolName || 'a tool'}: ${missing.join(', ')}. Configure the required values in Tools or Vault, then continue.`;
+        return `Please provide ${missing.join(', ')} for ${pending.credentialRequest?.toolName || 'this tool'} in the secure form below.`;
       }
       return 'The agent needs specific information to continue. Review the task details and provide the requested value or configuration.';
     }
@@ -379,6 +379,7 @@ const MissionRoom = () => {
   const [interactionSubmitting, setInteractionSubmitting] = useState(false);
   const [interactionAccepted, setInteractionAccepted] = useState(false);
   const [interactionConfigurationReady, setInteractionConfigurationReady] = useState(false);
+  const [interactionCredentials, setInteractionCredentials] = useState<Record<string, string>>({});
   const [interactionResponse, setInteractionResponse] = useState('');
   const [permissionScope, setPermissionScope] = useState('');
 
@@ -444,6 +445,7 @@ const MissionRoom = () => {
   useEffect(() => {
     setInteractionAccepted(false);
     setInteractionConfigurationReady(false);
+    setInteractionCredentials({});
     setInteractionResponse('');
   }, [pendingInteraction?.taskId, pendingInteraction?.question, pendingInteraction?.requestId]);
 
@@ -692,16 +694,19 @@ const MissionRoom = () => {
     const secretKeys = pending.kind === 'user_input' ? secretKeysForInteraction(pending) : [];
     const configureInSettings = pending.kind === 'user_input'
       && secretKeys.length > 0;
+    const credentialRequest = pending.kind === 'user_input' ? pending.credentialRequest : undefined;
+    const hasProvidedCredentials = Boolean(credentialRequest)
+      && secretKeys.every((key) => interactionCredentials[key]?.trim());
     const responseText = interactionResponse.trim();
     if (pending.kind === 'user_input' && !configureInSettings && !responseText) {
       setControlError('Enter a response before continuing.');
       return;
     }
-    if (configureInSettings && !interactionConfigurationReady) return;
+    if (configureInSettings && !interactionConfigurationReady && !hasProvidedCredentials) return;
     const responseMessage = pending.kind === 'mcp_permission'
       ? `Permission ${decision === 'granted' ? 'granted' : 'denied'}`
       : configureInSettings
-        ? `The required configuration values (${secretKeys.join(', ')}) have been saved in Tools or Vault. Retry the mission using those configured values; do not request the secrets in chat.`
+        ? 'The requested values were provided securely.'
         : responseText;
     setInteractionSubmitting(true);
     setControlError(null);
@@ -718,7 +723,15 @@ const MissionRoom = () => {
         );
         updateMissionStatus(workflowId, result.status);
       } else {
-        if (configureInSettings && pending.credentialRequest) {
+        if (configureInSettings && credentialRequest) {
+          if (!interactionConfigurationReady) {
+            for (const key of secretKeys) {
+              await putJSON(`/api/vault/secrets/name/${encodeURIComponent(`tool:${credentialRequest.toolId}:${key}`)}`, {
+                plaintext: interactionCredentials[key],
+                tenantId: 'system',
+              });
+            }
+          }
           const result = await postJSON<{ status: string }>(
             `/api/temporal/missions/${encodeURIComponent(workflowId)}/start`,
             { useConfiguredCredentials: true },
@@ -734,6 +747,7 @@ const MissionRoom = () => {
       }
       setInteractionAccepted(true);
       setInteractionResponse('');
+      setInteractionCredentials({});
       setPermissionScope('');
       if (pending.requestId || (pending.phaseId && pending.taskId)) {
         markInteractionResponded(getInteractionId(pending));
@@ -948,6 +962,8 @@ const MissionRoom = () => {
         const freeTextInput = pending.kind === 'user_input'
           && !configureInSettings
           && !secretQuestion;
+        const hasProvidedCredentials = Boolean(pending.credentialRequest)
+          && secretKeys.every((key) => interactionCredentials[key]?.trim());
         const hasSmtpCredentials = secretKeys.some((key) => key.startsWith('smtp_'));
         const configureToolId = pending.credentialRequest?.toolId
           || (hasSmtpCredentials ? 'email_sender' : undefined);
@@ -975,9 +991,26 @@ const MissionRoom = () => {
                 </div>
                 {configureInSettings ? (
                   <>
-                    <p className="muted" style={{ margin: '8px 0' }}>
-                      Configure these values in Tools or Vault, then return here. Secret values are not collected in mission chat.
-                    </p>
+                    {pending.credentialRequest && (
+                      <>
+                        <p className="muted" style={{ margin: '8px 0' }}>
+                          Values are saved securely in Vault and are not sent in mission chat.
+                        </p>
+                        {secretKeys.map((key) => (
+                          <label key={key} style={{ display: 'block', marginTop: 8 }}>
+                            {secretLabelForInteraction(pending, key)}
+                            <input
+                              type="password"
+                              autoComplete="new-password"
+                              value={interactionCredentials[key] || ''}
+                              onChange={(event) => setInteractionCredentials((values) => ({ ...values, [key]: event.target.value }))}
+                              disabled={interactionConfigurationReady || interactionSubmitting || interactionAccepted}
+                              style={{ display: 'block', width: '100%', marginTop: 4 }}
+                            />
+                          </label>
+                        ))}
+                      </>
+                    )}
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                       {configureToolId && (
                         <Link
@@ -1017,7 +1050,7 @@ const MissionRoom = () => {
                         checked={interactionConfigurationReady}
                         onChange={(event) => setInteractionConfigurationReady(event.target.checked)}
                       />
-                      {' '}I saved the required configuration and am ready to continue.
+                      {' '}Use values already saved in Vault.
                     </label>
                   </>
                 ) : secretQuestion ? (
@@ -1093,14 +1126,14 @@ const MissionRoom = () => {
                   disabled={
                     interactionSubmitting
                     || interactionAccepted
-                    || (configureInSettings && !interactionConfigurationReady)
+                    || (configureInSettings && !interactionConfigurationReady && !hasProvidedCredentials)
                     || (freeTextInput && !interactionResponse.trim())
                   }
                 >
                   {interactionSubmitting || interactionAccepted
                     ? 'Continuing...'
                     : configureInSettings
-                      ? 'Continue after configuration'
+                      ? 'Save values and continue'
                       : 'Send response'}
                 </button>
               ) : (

@@ -11,11 +11,12 @@ import { z } from 'zod';
 
 const TEST_CONTRACT_SYSTEM_PROMPT = `You independently derive a deterministic acceptance contract for a requested tool capability.
 Do not write or assume an implementation. Return only one JSON object with this shape:
-{"description":"...","cases":[{"name":"...","input":{},"expectedOutput":{},"httpMocks":[{"method":"POST","urlPattern":"https://api.example.test/path","expectedRequestBody":"...","responseStatus":200,"responseHeaders":{},"responseBody":{}}]}]}
+{"description":"...","cases":[{"name":"...","input":{},"credentials":{},"expectedOutput":{},"httpMocks":[{"method":"POST","urlPattern":"https://api.example.test/path","expectedRequestBody":"...","responseStatus":200,"responseHeaders":{},"responseBody":{}}]}]}
 Requirements:
 - Provide 1-5 small, deterministic input/output examples that directly verify the stated capability.
 - Every input and expectedOutput must be a JSON object; do not include secrets, real personal data, live network endpoints, or side effects.
 - When a capability needs HTTP, include a local HTTP fixture for each expected request, with its method, URL pattern, optional exact request body, and fixed response. Use a reserved .test hostname; requests are intercepted in-process and unmatched requests are blocked.
+- When a request uses persistent configuration such as an API endpoint or account ID, include dummy string values in the case's credentials object keyed by logical credential key. Use a .test endpoint matching the HTTP fixture. Never include real credentials.
 - Expected outputs must be exact JSON values, not prose, descriptions, or wildcards.
 - If the requested capability cannot be tested with deterministic inputs and outputs, return {"description":"...","cases":[]} so the tool is not deployed without a verifiable contract.
 - Return no markdown fences or text outside the JSON object.`;
@@ -77,9 +78,12 @@ const PLUGIN_SYSTEM_PROMPT = `You are a senior engineer generating production-re
     the user supplies it. Do not put run-specific values in configSchema.
   - Declare persistent settings as properties in configSchema.properties, with accurate
     types and useful descriptions. Put every mandatory persistent setting in
-    configSchema.required. Read ordinary, non-secret persistent settings from
-    __skill_config["propertyName"] in JavaScript or __skill_config["property_name"] in
-    Python. Never substitute environment-variable lookups for declared config properties.
+    configSchema.required. Every required config property must also have a
+    credentialSource entry whose configKey names that property; read its resolved
+    value using __getCredential in JavaScript or __get_credential in Python.
+    This applies to non-secret settings as well, so missing values can be requested.
+    Optional non-secret settings may be read from __skill_config["propertyName"] in
+    JavaScript or __skill_config["property_name"] in Python.
   - Declare per-execution values in inputs and read them from __tool_input. For a
     per-execution secret, mark the input property with "x-stage7-secret": true,
     "format": "password", and "writeOnly": true; do not make it persistent configuration.
@@ -96,43 +100,8 @@ const PLUGIN_SYSTEM_PROMPT = `You are a senior engineer generating production-re
     vault:// reference to the Agent; never include real secret values in acceptance tests.
   - Do NOT include markdown fences or explanation text outside the JSON.
 
-  EXAMPLE — Twilio SMS sender (the exact shape a generated tool must take):
-  {
-    "id": "sms-send",
-    "name": "Send SMS",
-    "description": "Send an SMS via Twilio. Requires Twilio credentials resolved through the credential provider.",
-    "type": "code",
-    "language": "javascript",
-    "entrypoint": "index.js",
-    "sourceCode": "const accountSid = __getCredential('twilio_account_sid');\nconst authToken = __getCredential('twilio_auth_token');\nconst fromNumber = __getCredential('twilio_from_number');\nconst to = __tool_input.to;\nconst body = __tool_input.body;\nif (!accountSid || !authToken || !fromNumber) { console.log(JSON.stringify({ success: false, error: 'Missing Twilio credentials. The user must supply twilio_account_sid, twilio_auth_token, and twilio_from_number via Vault.' })); return; }\nconst auth = 'Basic ' + Buffer.from(accountSid + ':' + authToken).toString('base64');\nconst params = new URLSearchParams();\nparams.set('From', fromNumber);\nparams.set('To', to);\nparams.set('Body', body);\nfetch('https://api.twilio.com/2010-04-01/Accounts/' + accountSid + '/Messages.json', { method: 'POST', headers: { Authorization: auth, 'Content-Type': 'application/x-www-form-urlencoded' }, body: params.toString() }).then(async (res) => {\n  const text = await res.text();\n  let data = text;\n  try { data = JSON.parse(text); } catch {}\n  if (res.ok && data && data.sid) { console.log(JSON.stringify({ success: true, messageId: data.sid, providerRequestId: data.sid })); }\n  else { console.log(JSON.stringify({ success: false, error: (data && data.message) || ('Twilio rejected the request (' + res.status + ')') })); }\n}).catch((err) => { console.log(JSON.stringify({ success: false, error: err.message || String(err) })); });",
-    "requirements": [],
-    "configSchema": { "type": "object", "properties": {} },
-    "credentialSource": {
-      "twilio_account_sid": { "configKey": "twilio_account_sid", "label": "Twilio Account SID" },
-      "twilio_auth_token": { "configKey": "twilio_auth_token", "label": "Twilio Auth Token", "sensitive": true },
-      "twilio_from_number": { "configKey": "twilio_from_number", "label": "Twilio From Number" }
-    },
-    "inputs": {
-      "type": "object",
-      "properties": {
-        "to": { "type": "string", "description": "Recipient phone number in E.164 format" },
-        "body": { "type": "string", "description": "Message body text" }
-      },
-      "required": ["to", "body"]
-    },
-    "outputs": {
-      "type": "object",
-      "properties": {
-        "success": { "type": "boolean" },
-        "messageId": { "type": "string" },
-        "error": { "type": "string" }
-      },
-      "required": ["success"]
-    }
-  }
-  In that example, every persistent credential is declared in credentialSource and read with
-  __getCredential('logicalKey') — never with process.env, os.environ, or getenv. If a credential
-  is missing, the tool must return a clear error telling the user which Vault secrets to supply.`;
+  Declare only the provider and configuration actually needed for the requested capability.
+  Never invent a provider, default account, sender, credential, or successful result.`;
 
 const PLUGIN_DEPLOY_DIR = process.env.PLUGIN_DEPLOY_DIR || '/tmp/stage7-plugins';
 const MAX_PLUGIN_SOURCE_BYTES = 128 * 1024;
@@ -145,6 +114,7 @@ const pluginTestContractSchema = z.object({
   cases: z.array(z.object({
     name: z.string().trim().min(1).max(120),
     input: z.record(z.string(), z.unknown()),
+    credentials: z.record(z.string(), z.string()).optional(),
     expectedOutput: z.record(z.string(), z.unknown()),
     httpMocks: z.array(z.object({
       method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']),
@@ -486,6 +456,7 @@ export class PluginGenerator {
         dummyCredentials[logicalKey] = `test-${logicalKey}`;
       }
       for (const testCase of testContract.cases) {
+        const testCredentials = { ...dummyCredentials, ...testCase.credentials };
         const execution = await this.codeExecutor.execute({
           language: parsed.language,
           code: parsed.sourceCode,
@@ -493,8 +464,8 @@ export class PluginGenerator {
           httpMocks: testCase.httpMocks,
           timeoutMs: PLUGIN_TEST_TIMEOUT_MS,
           isolated: true,
-          testCredentials: dummyCredentials,
-        }, dummyCredentials);
+          testCredentials,
+        }, testCredentials);
         if (!execution.success) {
           failedCases.push(`${testCase.name}: execution failed: ${(execution.error || 'unknown error').slice(0, 300)}`);
           continue;
@@ -745,7 +716,11 @@ export class PluginGenerator {
       };
 
       const failedCases: string[] = [];
+      const dummyCredentials = Object.fromEntries(
+        Object.keys(parsed.credentialSource || {}).map((key) => [key, `test-${key}`]),
+      );
       for (const testCase of testContract.cases) {
+        const testCredentials = { ...dummyCredentials, ...testCase.credentials };
         const execution = await this.codeExecutor.execute({
           language: parsed.language,
           code: parsed.sourceCode,
@@ -753,7 +728,8 @@ export class PluginGenerator {
           httpMocks: testCase.httpMocks,
           timeoutMs: PLUGIN_TEST_TIMEOUT_MS,
           isolated: true,
-        });
+          testCredentials,
+        }, testCredentials);
         if (!execution.success) {
           failedCases.push(`${testCase.name}: execution failed: ${(execution.error || 'unknown error').slice(0, 300)}`);
           continue;

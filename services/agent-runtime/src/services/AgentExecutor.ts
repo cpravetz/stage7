@@ -499,27 +499,10 @@ function parseExpectedArtifacts(value: unknown): string[] {
   return deliverables
 }
 
-function rewriteUnanswerableToolSelectionQuestion(question: string, catalog: ToolDescriptor[]): string | null {
-  const text = question.trim()
-  if (!text) return null
-  const asksToChooseFromList = /\b(?:choose|select|pick)\b.{0,80}\b(?:from (?:the )?(?:list|available|following)\b|most appropriate)\b.{0,40}\btool\b/i.test(text)
-    || /\b(?:following|available)\s+tools?\b.{0,120}\b(?:choose|select|pick)\b/i.test(text)
-  if (!asksToChooseFromList) return null
-
-  const names = catalog.map((tool) => tool.id).filter(Boolean)
-  if (names.some((name) => new RegExp(`\\b${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(text))) {
-    return null
-  }
-
-  const relevant = catalog
-    .filter((tool) => /\b(?:sms|text|message|messaging|twilio|email|smtp|send)\b/i.test(`${tool.id} ${tool.name} ${tool.description}`))
-    .slice(0, 8)
-  const choices = (relevant.length > 0 ? relevant : catalog.slice(0, 8))
-    .map((tool) => `- ${tool.id}${tool.name && tool.name !== tool.id ? ` (${tool.name})` : ''}${tool.description ? `: ${tool.description}` : ''}`)
-  if (choices.length === 0) {
-    return 'I could not find any registered tools for this task. Reply with the tool/service you want me to use, or tell me if I should create or authorize one in Tools configuration.'
-  }
-  return `I need to choose a tool for this task. Reply with the tool ID to use, or tell me if I should discover/create a different tool.\n\nAvailable tools:\n${choices.join('\n')}`
+function asksUserToManageTools(question: string): boolean {
+  return /\b(?:please\s+)?(?:register|install|create|build|develop|configure|set up|enable)\b.{0,100}\b(?:tool|skill|plugin|integration|mcp|service)\b/i.test(question)
+    || /\b(?:tool|skill|plugin|integration|mcp)\b.{0,100}\b(?:register|install|create|configure|set up)\s+(?:it|the tool|the skill)\b/i.test(question)
+    || /\b(?:choose|select|pick)\b.{0,100}\b(?:tool id|tools? from (?:the )?list|from (?:the )?(?:list|available|following).{0,30}tools?)\b/i.test(question)
 }
 
 function isConfigurationFailure(content: string): boolean {
@@ -543,8 +526,12 @@ function missingExpectedArtifactSections(content: string, expected: string[]): s
   return expected.filter((name) => !sectionNames.has(name.toLocaleLowerCase()))
 }
 
-function expectedArtifactCorrection(missing: string[]): string {
-  return `Your final response is missing required, non-empty Markdown artifact section(s): ${missing.map((name) => `## ${name}`).join(', ')}. Return the complete corrected result with each exact heading and only verified results under it, drawing on the action results already obtained in this conversation. Do not invent results or claim actions that were not executed.`
+function expectedArtifactCorrection(missing: string[], missionGoal?: string): string {
+  const headings = missing.map((name) => `## ${name}`).join(', ')
+  const goalReminder = missionGoal?.trim()
+    ? ` The content under each heading must directly satisfy the original mission/task goal: ${missionGoal.trim().slice(0, 400)}`
+    : ''
+  return `Your response is missing required deliverable section(s): ${headings}. Return the complete corrected response using a Markdown heading exactly matching each name on its own line (for example, ${missing[0] ? `\`## ${missing[0]}\`` : '`## artifact-name`'}) followed by that deliverable's verified content. Do not put the required heading inside a code fence.${goalReminder} Only include verified results; if a result cannot be produced, state the specific blocker under that heading instead of inventing content.`
 }
 
 export function parseAgentExecutionCheckpoint(value: unknown): AgentExecutionCheckpoint | undefined {
@@ -888,6 +875,9 @@ export class AgentExecutor {
       policy.maxBrainCalls === Number.MAX_SAFE_INTEGER
         ? Number.MAX_SAFE_INTEGER
         : policy.maxCompletionTokens + (grantResumeAllowance ? RESUME_COMPLETION_TOKEN_BONUS : 0)
+    const missionGoalText = typeof taskInput.prompt === 'string' ? taskInput.prompt : undefined
+    let artifactCorrectionAttempts = 0
+    const MAX_ARTIFACT_CORRECTION_ATTEMPTS = 2
     const saveCheckpoint = context.saveCheckpoint
       ? async (pendingAction?: string) => {
       const next: AgentExecutionCheckpoint = {
@@ -982,13 +972,31 @@ export class AgentExecutor {
           context.missionId,
         )
       }
+      artifactCorrectionAttempts++
+      if (missingArtifacts.length > 0 && artifactCorrectionAttempts > MAX_ARTIFACT_CORRECTION_ATTEMPTS) {
+        const blocker = `Could not produce required deliverable section(s) in the expected format after ${MAX_ARTIFACT_CORRECTION_ATTEMPTS} correction attempts: ${missingArtifacts.join(', ')}.`
+        return {
+          output: finalOutput || blocker,
+          incompleteReason: blocker,
+          tokensUsed,
+          toolCalls,
+          brainCalls,
+          completionTokensReserved,
+          actionReceipts,
+          requestId: lastRequestId,
+        }
+      }
+      // Drop the invalid final response before retrying so corrections don't accumulate prior bad outputs.
+      if (missingArtifacts.length > 0 && history[history.length - 1]?.role === 'assistant') {
+        history = history.slice(0, -1)
+      }
       history.push({
         role: 'user',
         content: [
           ...(missingActions.length > 0 || missingExternalAction
             ? [requiredActionCorrection(missingActions, missingExternalAction)]
             : []),
-          ...(missingArtifacts.length > 0 ? [expectedArtifactCorrection(missingArtifacts)] : []),
+          ...(missingArtifacts.length > 0 ? [expectedArtifactCorrection(missingArtifacts, missionGoalText)] : []),
         ].join('\n\n'),
       })
       finalOutput = undefined
@@ -1142,8 +1150,15 @@ export class AgentExecutor {
           const afterFirst = content.slice(firstIdx)
           const nextIdx = afterFirst.indexOf(ASK_USER_MARKER, ASK_USER_MARKER.length)
           const relevant = nextIdx >= 0 ? afterFirst.slice(0, nextIdx) : afterFirst
-          const rewritten = rewriteUnanswerableToolSelectionQuestion(relevant.slice(ASK_USER_MARKER.length), catalog)
-          const output = rewritten ? `${ASK_USER_MARKER}${JSON.stringify({ question: rewritten })}` : relevant
+          if (asksUserToManageTools(relevant.slice(ASK_USER_MARKER.length))) {
+            history.push({
+              role: 'user',
+              content: 'Do not ask the user to register, install, create, or configure a tool, or select a tool ID. You are responsible for discovery and capability resolution. Re-read the original mission, complete independent work, and use the live catalog and __create_tool for missing capabilities. Ask only for a specific missing value or an actual authorization or service decision.',
+            })
+            if (saveCheckpoint) await saveCheckpoint()
+            continue
+          }
+          const output = relevant
           if (saveCheckpoint) await saveCheckpoint()
           return {
             output,
@@ -1195,11 +1210,34 @@ export class AgentExecutor {
               context.missionId,
             )
           }
+          artifactCorrectionAttempts++
+          if (missingArtifacts.length > 0 && missingActions.length === 0 && !missingExternalAction && artifactCorrectionAttempts > MAX_ARTIFACT_CORRECTION_ATTEMPTS) {
+            const blocker = `Could not produce required deliverable section(s) in the expected format after ${MAX_ARTIFACT_CORRECTION_ATTEMPTS} correction attempts: ${missingArtifacts.join(', ')}.`
+            finalOutput = content
+            incompleteReason = blocker
+            if (saveCheckpoint) await saveCheckpoint()
+            return {
+              output: content,
+              incompleteReason: blocker,
+              tokensUsed,
+              toolCalls,
+              brainCalls,
+              completionTokensReserved,
+              actionReceipts,
+              requestId: lastRequestId,
+              reasoning,
+            }
+          }
+          // For artifact-only format corrections, drop the invalid assistant response to avoid
+          // prompt bloat and prevent the model from copying its previous malformed output.
+          if (missingArtifacts.length > 0 && missingActions.length === 0 && !missingExternalAction) {
+            history = history.slice(0, -1)
+          }
           const correction = [
             ...(missingActions.length > 0 || missingExternalAction
               ? [requiredActionCorrection(missingActions, missingExternalAction)]
               : []),
-            ...(missingArtifacts.length > 0 ? [expectedArtifactCorrection(missingArtifacts)] : []),
+            ...(missingArtifacts.length > 0 ? [expectedArtifactCorrection(missingArtifacts, missionGoalText)] : []),
           ].join('\n\n')
           history.push({
             role: 'user',
@@ -1208,6 +1246,7 @@ export class AgentExecutor {
           if (saveCheckpoint) await saveCheckpoint()
           continue
         }
+        artifactCorrectionAttempts = 0
         finalOutput = content
         if (saveCheckpoint) await saveCheckpoint()
         return {
@@ -1220,6 +1259,16 @@ export class AgentExecutor {
           requestId: lastRequestId,
           reasoning,
         }
+      }
+      if ((action.tool === ASK_USER_NAME || action.tool === 'ask_user')
+        && typeof action.args.question === 'string'
+        && asksUserToManageTools(action.args.question)) {
+        history.push({
+          role: 'user',
+          content: 'Do not ask the user to manage or select tools. Inspect the catalog and resolve missing capabilities yourself; ask only for specific information or a necessary decision.',
+        })
+        if (saveCheckpoint) await saveCheckpoint()
+        continue
       }
       if (
         action.tool === DELEGATE_ACTION
@@ -1311,7 +1360,6 @@ export class AgentExecutor {
             ...(resolution.resolvedToolId ? { resolvedToolId: resolution.resolvedToolId } : {}),
           }))
           if (resolution.outcome === 'permission_required' || resolution.outcome === 'question_asked') {
-            if (resolution.outcome !== 'question_asked') finalOutput = resolution.content
             if (saveCheckpoint) await saveCheckpoint()
             return {
               output: resolution.content,
@@ -1482,7 +1530,7 @@ export class AgentExecutor {
         const taskGoal = typeof task.input.prompt === 'string' ? task.input.prompt.trim().slice(0, 1_000) : ''
         const capabilitySource = failedTool
           ? `${taskGoal} ${failedTool.name} ${failedTool.description}`.slice(0, 1_500)
-          : capabilityDescription
+          : taskGoal || capabilityDescription
         const capability = capabilitySource
           .match(/[a-z0-9]+/gi)
           ?.join(' ')
@@ -1493,7 +1541,7 @@ export class AgentExecutor {
             `Resolve the capability "${capability}".`,
             failedTool
               ? `The available tool "${failedTool.name}" (${failedTool.id}) failed${missingModule ? ` because runtime package "${missingModule}" is unavailable` : repeatedToolFailure ? ' repeatedly without progress' : ''}.`
-              : `The requested tool identifier "${action.tool}" is not registered.`,
+              : 'A guessed tool identifier was not registered; derive the capability from the task goal rather than that identifier.',
             taskGoal ? `Task goal: "${taskGoal}".` : '',
             'Check registered and approved integrations first; create a compatible implementation only if none is suitable. The replacement must perform the exact task operation, not a similarly named draft, queue, or storage operation.',
             'Do not install unavailable runtime packages or claim success without verified execution.',
@@ -1529,7 +1577,6 @@ export class AgentExecutor {
         }
         priorActionKeys.add(resolutionActionKey)
         if (resolution.outcome === 'permission_required' || resolution.outcome === 'question_asked') {
-          if (resolution.outcome !== 'question_asked') finalOutput = resolution.content
           if (saveCheckpoint) await saveCheckpoint()
           return {
             output: resolution.content,
@@ -1550,7 +1597,6 @@ export class AgentExecutor {
         }
       }
       if (result.outcome === 'permission_required' || result.outcome === 'question_asked') {
-        if (result.outcome !== 'question_asked') finalOutput = result.content
         if (saveCheckpoint) await saveCheckpoint()
         return {
           output: result.content,
@@ -2010,7 +2056,8 @@ export class AgentExecutor {
             typeof credential?.key === 'string' && credential.key.trim().length > 0,
         )
         if (missingCredentials.length > 0) {
-          const question = `To continue, configure the missing credentials for ${credentialRequest.toolName} in [Tools](/tools) or [Vault](/vault), then continue the mission.`;
+          const labels = missingCredentials.map(({ key, label }) => label || key).join(', ')
+          const question = `Please provide ${labels} for ${credentialRequest.toolName} in the secure form below so I can continue.`;
           return {
             isError: true,
             outcome: 'question_asked',
@@ -2196,10 +2243,13 @@ export class AgentExecutor {
         candidate?: unknown
       }
       if (result.permissionRequired) {
+        if (!asRecord(result.request) || !asRecord(result.candidate)) {
+          return { isError: true, content: 'Tool Executor returned an invalid MCP permission request.' }
+        }
         return {
-          isError: true,
-          content: `The discovered service is not authorized for this mission. Try another authorized provider.`,
-          outcome: 'denied',
+          isError: false,
+          content: `__MISSION_PERMISSION__:${JSON.stringify({ request: result.request, candidate: result.candidate, prompt: result.prompt })}`,
+          outcome: 'permission_required',
         }
       }
       if (!response.ok || !result.success || !result.tool) {

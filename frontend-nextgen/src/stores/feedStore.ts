@@ -130,12 +130,12 @@ export function normalize(raw: unknown): FeedEvent | null {
             ? data.task as Record<string, unknown>
             : undefined;
           const taskTitle = typeof task?.title === 'string' ? task.title.trim() : '';
+          const gapText = gaps.length > 0 ? gaps.join('; ').slice(0, 240) : '';
           message = `Phase plan amended: ${(data.phaseId as string) || ''}`
-            + (gaps.length > 0 ? ` — Phase review found: ${gaps.join('; ').slice(0, 240)}.` : '')
+            + (gapText ? ` — Review noted: ${gapText}.` : '')
             + (taskTitle ? ` Follow-up task added: ${taskTitle}.` : '');
           break;
         }
-        break;
       case 'cost_estimate':
         message = `Model call: ${(data.model as string) || 'unknown model'}${data.tokensUsed ? ` (${String(data.tokensUsed)} tokens)` : ''}`;
         break;

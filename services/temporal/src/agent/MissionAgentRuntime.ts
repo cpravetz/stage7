@@ -60,7 +60,7 @@ const TASK_SELECTOR_EXECUTION_POLICY: AgentExecutionPolicy = {
   maxCompletionTokensPerCall: 256,
   maxDelegations: 0,
 };
-const PHASE_REVIEW_SYSTEM_PROMPT = `You are a critical phase reviewer. Compare completed task outputs and artifacts with the mission goal and phase goal. Only observed results and artifacts count as evidence; plans and proposed actions are not evidence that work occurred. Do not mark a phase complete just because its tasks ran. If the phase goal is satisfied, return {"satisfied":true,"gaps":[],"followUpTask":null}. Otherwise identify concrete unmet outcomes and propose exactly one focused follow-up task that can address a gap. Describe only the outcome the Agent must achieve; never prescribe tools, providers, integrations, credentials, implementation steps, or user questions. Do not repeat successfully completed side effects or change a requested identifier. Never request a fabricated receipt or evidence artifact to stand in for an action; actual tool results are recorded internally as system-action-receipts.json. If a required input from an earlier task is missing, make the follow-up retrieve it from that task's Agent or redo the source task. The follow-up systemPrompt must name each prerequisite task ID and identify the specific output, artifact, or receipt it consumes. Return exactly one JSON object; do not include explanations, plans, tool actions, or Markdown fences.`;
+const PHASE_REVIEW_SYSTEM_PROMPT = `You are a critical phase reviewer. Compare completed task outputs and artifacts with the mission goal and phase goal. Only observed results and artifacts count as evidence; plans and proposed actions are not evidence that work occurred. Do not mark a phase complete just because its tasks ran. If the phase goal is satisfied, return {"satisfied":true,"gaps":[],"followUpTask":null}. Otherwise identify concrete unmet outcomes and propose exactly one focused follow-up task that can address a gap. Describe only the outcome the Agent must achieve; never prescribe tools, providers, integrations, credentials, implementation steps, or user questions. Do not repeat successfully completed side effects or change a requested identifier. Never request a fabricated receipt or evidence artifact to stand in for an action; actual tool results are recorded internally as system-action-receipts.json. If a required input from an earlier task is missing, make the follow-up retrieve it from that task's Agent or redo the source task. The follow-up systemPrompt must name each prerequisite task ID and identify the specific output, artifact, or receipt it consumes. Keep the follow-up strictly within the stated mission goal and phase goal: do not introduce unrelated domains, analysis, or requirements the user did not request. Do not propose creating or redesigning design documents, specifications, plans, or substitute artifacts to recover from an execution or system failure; if an action failed or a system/tool error occurred, the gap must describe the failed outcome or blocker and the follow-up must focus on accomplishing the requested outcome or obtaining a concrete verification, with expectedArtifacts=[] unless the mission goal explicitly requires a deliverable file that is still missing. Return exactly one JSON object; do not include explanations, plans, tool actions, or Markdown fences.`;
 const PHASE_REVIEW_EXECUTION_POLICY: AgentExecutionPolicy = {
   ...DEFAULT_AGENT_EXECUTION_POLICY,
   maxBrainCalls: 4,
@@ -232,7 +232,7 @@ export function applyPhaseReview(
   const amendment: Task = {
     id: taskId,
     ...followUpTask,
-    systemPrompt: `${followUpTask.systemPrompt.trim()}\n\n${dependencyInstructions.join('. ')} as authoritative phase context, and do not repeat completed work.`,
+    systemPrompt: `${followUpTask.systemPrompt.trim()}\n\n${dependencyInstructions.join('. ')} as authoritative phase context, and do not repeat completed work. Stay within the stated mission and phase goals: do not invent unrelated work or create design/specification documents or substitute artifacts unless explicitly requested as deliverables.`,
     requiredActions: [],
     dependsOnTaskIds: dependencies,
     status: 'pending',
@@ -979,7 +979,7 @@ export class MissionAgentRuntime {
         title: `Regroup and resolve phase gap: ${phase.name}`,
         description: gap,
         agentRole: 'assistant',
-        systemPrompt: `Reassess and resolve the phase outcome using the mission goal, phase goal, and outputs from prerequisite tasks ${phase.tasks.map((task) => task.id).join(', ')}. Do not repeat successfully completed side effects. The phase remains unverified because: ${gap}`,
+        systemPrompt: `Mission goal: ${missionGoal}\nPhase goal: ${phase.name} — ${phase.goal}\nReassess and resolve the phase outcome using the recorded outputs from prerequisite tasks ${phase.tasks.map((task) => task.id).join(', ')}. Do not repeat successfully completed side effects. Stay strictly within the stated mission and phase goals, and do not create or request design documents, plans, or substitute artifacts unless the mission goal explicitly requires them as deliverables. The phase remains unverified because: ${gap}`,
         expectedArtifacts: [],
         requiredActions: [],
       },
