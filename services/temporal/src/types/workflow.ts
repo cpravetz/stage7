@@ -170,7 +170,7 @@ export function isConfigurationBlocker(evidence: string[]): boolean {
 }
 
 export function missionConfigurationQuestion(missionGoal: string): string {
-  return `I could not complete this yet because required user credentials or secrets are missing for: "${missionGoal}". I have already tried to resolve or create the needed tools automatically through capability resolution. Please provide the missing credentials or API keys through the secure tool configuration form. I will continue after you save the configuration.`;
+  return `I could not complete "${missionGoal}" because specific credentials or configuration required by the needed tool/service are missing. I have already tried to discover, resolve, or create the needed tools automatically. Please configure the required credentials or settings for the relevant tool in Tools or Vault (use the exact fields shown for that tool), then reply here to continue.`;
 }
 
 const NON_ACTION_RECEIPT_TOOL_IDS = new Set([

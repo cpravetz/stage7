@@ -161,9 +161,13 @@ export function normalize(raw: unknown): FeedEvent | null {
         message = `Approval requested: ${(data.phaseName as string) || (data.phaseId as string) || ''}`;
         if (data.question) message += ` — ${(data.question as string)}`;
         break;
-      case 'question_asked':
-        message = `Agent needs your input${typeof data.question === 'string' ? `: ${data.question.replace(/^\s*\[secret:[a-z0-9_-]+\]\s*/i, '')}` : ''}`;
+      case 'question_asked': {
+        let q = typeof data.question === 'string' ? data.question : '';
+        try { const p = JSON.parse(q); if (p && typeof p.question === 'string') q = p.question; } catch {}
+        q = q.replace(/^\s*\[secret:[a-z0-9_-]+\]\s*/i, '').replace(/__ASK_USER__:\s*/g, '').replace(/\{[\s\S]*\.\.\.[\s\S]*\}/g, '').replace(/[{}]/g, ' ').replace(/\s+/g, ' ').trim();
+        message = q ? `Agent needs your input: ${q}` : 'Agent needs your input';
         break;
+      }
       case 'permission_required':
         message = `Agent requests permission${typeof data.permission === 'object' && data.permission && typeof (data.permission as Record<string, unknown>).toolName === 'string' ? ` to use ${(data.permission as Record<string, unknown>).toolName}` : ''}`;
         break;

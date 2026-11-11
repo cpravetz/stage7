@@ -8,16 +8,28 @@ const ASK_USER_MARKER = '__ASK_USER__:';
 const PERMISSION_MARKER = '__MISSION_PERMISSION__:';
 
 function sanitizeQuestionText(question: string): string {
-  let cleaned = question;
-  // Remove any repeated ASK_USER markers or JSON fragments
+  let cleaned = String(question ?? '');
+  // Unwrap common JSON payload shapes if present
+  try {
+    const parsed = JSON.parse(cleaned.trim());
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const q = (parsed as Record<string, unknown>).question;
+      if (typeof q === 'string') cleaned = q;
+    }
+  } catch {
+    // not JSON; continue
+  }
+  // Remove markers, JSON-looking wrappers, and fences
   cleaned = cleaned.replace(/__ASK_USER__:\s*/g, '\n');
   cleaned = cleaned.replace(/__MISSION_PERMISSION__:\s*/g, '\n');
-  // If there are multiple JSON objects concatenated, try to extract just the first clean question
-  // Remove anything that looks like JSON arrays/objects after first question
-  cleaned = cleaned.replace(/\n\s*\{[\s\S]*$/s, '');
-  // Remove code fences
-  cleaned = cleaned.replace(/```[\s\S]*```/g, '');
-  cleaned = cleaned.trim();
+  cleaned = cleaned.replace(/```[\s\S]*?```/g, ' ');
+  // Strip leading/trailing or embedded JSON object fragments like {"question":"..."}
+  cleaned = cleaned.replace(/\{[\s\S]*?"question"\s*:\s*"(?:[^"\\]|\\.)*"\s*\}/gi, ' ');
+  cleaned = cleaned.replace(/\{[\s\S]*?"question"\s*:\s*\.\.\.[\s\S]*?\}/gi, ' ');
+  cleaned = cleaned.replace(/^\s*\{[\s\S]*$/m, (m) => (/"question"|"\.\.\."/.test(m) ? ' ' : m));
+  cleaned = cleaned.replace(/"\s*question"\s*:\s*"?(?:\.\.\.|[^"\n}]*)"?,?/gi, ' ');
+  cleaned = cleaned.replace(/[\{\}"]/g, (ch) => (ch === '"' ? '' : ' '));
+  cleaned = cleaned.replace(/\s+/g, ' ').trim();
   return cleaned;
 }
 

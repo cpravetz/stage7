@@ -19,22 +19,42 @@ function interactionKey(missionId: string, taskId?: string): string {
   return `${normalizeMissionId(missionId)}:${taskId || ''}`;
 }
 
+function cleanQuestionText(raw: unknown): string {
+  let text = typeof raw === 'string' ? raw : '';
+  if (!text) return '';
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === 'object' && typeof (parsed as Record<string, unknown>).question === 'string') {
+      text = (parsed as Record<string, unknown>).question as string;
+    }
+  } catch {
+    // ignore
+  }
+  text = text.replace(/^\s*\[secret:[a-z0-9_-]+\]\s*/i, '');
+  text = text.replace(/__ASK_USER__:\s*/g, '');
+  text = text.replace(/\{[\s\S]*?"question"\s*:\s*"((?:[^"\\]|\\.)*)"\s*\}/gi, '$1');
+  text = text.replace(/"\s*question"\s*:\s*"\.\.\."?/gi, '');
+  text = text.replace(/\{[\s\S]*\.\.\.[\s\S]*\}/g, '');
+  text = text.replace(/[{}]/g, ' ').replace(/\s+/g, ' ').trim();
+  return text;
+}
+
 function questionFromEvent(event: FeedEvent): PendingInputAlert | undefined {
   if (!event.missionId || (event.type !== 'question_asked' && event.type !== 'permission_required')) {
     return undefined;
   }
   const taskId = typeof event.metadata?.taskId === 'string' ? event.metadata.taskId : undefined;
-  const rawQuestion = typeof event.metadata?.question === 'string'
-    ? event.metadata.question
-    : event.type === 'permission_required'
+  const cleaned = cleanQuestionText(event.metadata?.question);
+  const rawQuestion = cleaned
+    || (event.type === 'permission_required'
       ? 'An Agent is waiting for permission to use a tool.'
-      : 'An Agent needs information to continue.';
+      : 'An Agent needs specific information to continue. Open the mission for details.');
   return {
     key: interactionKey(event.missionId, taskId),
     missionId: normalizeMissionId(event.missionId),
     taskId,
     title: event.type === 'permission_required' ? 'Tool permission requested' : 'Mission needs your input',
-    question: rawQuestion.replace(/^\s*\[secret:[a-z0-9_-]+\]\s*/i, ''),
+    question: rawQuestion,
   };
 }
 
@@ -42,15 +62,16 @@ function questionFromDetail(workflowId: string, detail: MissionDetail): PendingI
   const pending = detail.output?.outputs?.pendingInteraction;
   if (!pending) return undefined;
   const taskId = pending.taskId;
-  const rawQuestion = pending.question
+  const cleaned = cleanQuestionText(pending.question);
+  const rawQuestion = cleaned
     || pending.permission?.explanation
-    || 'An Agent needs information to continue.';
+    || 'An Agent needs specific information to continue. Open the mission for details.';
   return {
     key: interactionKey(detail.missionId || workflowId, taskId),
     missionId: normalizeMissionId(detail.missionId || workflowId),
     taskId,
     title: pending.kind === 'mcp_permission' ? 'Tool permission requested' : 'Mission needs your input',
-    question: rawQuestion.replace(/^\s*\[secret:[a-z0-9_-]+\]\s*/i, ''),
+    question: rawQuestion,
   };
 }
 

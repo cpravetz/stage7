@@ -109,6 +109,36 @@ function secretLabelForInteraction(pending: PendingInteraction, key: string): st
     || key.replace(/[_-]/g, ' ');
 }
 
+function displayInteractionQuestion(pending: PendingInteraction): string {
+  let text = pending.question || '';
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === 'object' && typeof (parsed as Record<string, unknown>).question === 'string') {
+      text = (parsed as Record<string, unknown>).question as string;
+    }
+  } catch {
+    // not JSON
+  }
+  const secret = text.match(/^\s*\[secret:([a-z0-9_-]+)\]\s*(.*)$/i);
+  if (secret) text = secret[2] || text;
+  text = text.replace(/__ASK_USER__:\s*/g, '');
+  text = text.replace(/\{[\s\S]*?"question"\s*:\s*"((?:[^"\\]|\\.)*)"\s*\}/gi, '$1');
+  text = text.replace(/"\s*question"\s*:\s*"\.\.\."?/gi, '');
+  text = text.replace(/\{[\s\S]*\.\.\.[\s\S]*\}/g, '');
+  text = text.replace(/[{}]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!text) {
+    if (pending.kind === 'user_input') {
+      const missing = pending.credentialRequest?.missingCredentials?.map((c) => c.label || c.key).filter(Boolean);
+      if (missing && missing.length > 0) {
+        return `Configuration needed for ${pending.credentialRequest?.toolName || 'a tool'}: ${missing.join(', ')}. Configure the required values in Tools or Vault, then continue.`;
+      }
+      return 'The agent needs specific information to continue. Review the task details and provide the requested value or configuration.';
+    }
+    return pending.permission?.explanation || 'The agent is waiting for input.';
+  }
+  return text;
+}
+
 const STATUS_BADGE: Record<string, string> = {
   running: 'running',
   pausing: 'running',
@@ -865,7 +895,9 @@ const MissionRoom = () => {
             <ol style={{ margin: '8px 0', paddingLeft: 22 }}>
               {plan.clarificationQuestions.map((question, index) => {
                 const secretQuestion = question.match(/^\s*\[secret:([a-z0-9_-]+)\]\s*(.*)$/i);
-                const label = secretQuestion ? secretQuestion[2] : question;
+                let label = secretQuestion ? secretQuestion[2] : question;
+                try { const p = JSON.parse(label); if (p && typeof p.question === 'string') label = p.question; } catch {}
+                label = label.replace(/__ASK_USER__:\s*/g, '').replace(/\{[\s\S]*\.\.\.[\s\S]*\}/g, '').replace(/[{}]/g, ' ').replace(/\s+/g, ' ').trim() || 'Provide the requested information.';
                 return (
                   <li key={index} style={{ marginBottom: 8 }}>
                     <label style={{ display: 'block' }}>
@@ -939,7 +971,7 @@ const MissionRoom = () => {
             {pending.kind === 'user_input' && (
               <div style={{ marginTop: 10 }}>
                 <div style={{ whiteSpace: 'pre-wrap' }}>
-                  {secretQuestion ? secretQuestion[2] : pending.question}
+                  {secretQuestion ? secretQuestion[2] : displayInteractionQuestion(pending)}
                 </div>
                 {configureInSettings ? (
                   <>
@@ -995,12 +1027,12 @@ const MissionRoom = () => {
                 ) : (
                   <>
                     <p className="muted" style={{ margin: '8px 0' }}>
-                      Reply to the Agent below. If this requires service configuration, use Tools or Vault and explain what changed in your response.
+                      Reply with the specific information requested above. If this requires tool or service configuration, configure it in Tools or Vault, then explain what you changed so the agent can continue.
                     </p>
                     <textarea
                       value={interactionResponse}
                       onChange={(event) => setInteractionResponse(event.target.value)}
-                      placeholder="Type your response to the Agent..."
+                      placeholder="Provide the specific information or configuration details the agent requested..."
                       rows={3}
                       disabled={interactionSubmitting || interactionAccepted}
                       style={{ display: 'block', width: '100%', marginTop: 8, boxSizing: 'border-box' }}
