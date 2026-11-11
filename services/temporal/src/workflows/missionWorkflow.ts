@@ -706,10 +706,10 @@ ${noProgressGuidance}`;
         const question = missionConfigurationQuestion(input.prompt);
         const requestTask: any = {
           id: `${recoveryPhase.id}-configuration-request-${recoveryIndex}`,
-          title: 'Provide required service configuration',
-          description: 'Provide the configuration needed to continue using an authorized service.',
+          title: 'Provide required user credentials',
+          description: 'Provide the user credentials or API keys needed to continue after automatic tool resolution was attempted.',
           agentRole: 'assistant',
-          systemPrompt: `Continue the original mission after receiving the user's provider configuration: ${input.prompt}. Do not repeat successful or uncertain side effects.`,
+          systemPrompt: `Continue the original mission after receiving the user's missing credentials or API keys: ${input.prompt}. I have already attempted to resolve or create the needed tools automatically. Do not repeat successful or uncertain side effects.`,
           expectedArtifacts: [],
           requiredActions: [],
           dependsOnTaskIds: recoveryPhase.tasks.map((task) => task.id),

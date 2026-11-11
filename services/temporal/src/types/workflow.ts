@@ -157,14 +157,20 @@ export const MAX_NO_PROGRESS_RECOVERY_ATTEMPTS = 3;
 
 
 export function isConfigurationBlocker(evidence: string[]): boolean {
-  return /\b(?:missing|no|unavailable|invalid|not configured|not registered|not in (?:the )?(?:live )?system catalog)\b.{0,100}\b(?:tool|provider|service|credential|configuration|api key|endpoint|account|smtp|token)\b/i
-    .test(evidence.join('\n'))
-    || /\b(?:tool|provider|service|credential|configuration|api key|endpoint|account|smtp|token)\b.{0,100}\b(?:missing|unavailable|invalid|not configured|not registered|not in (?:the )?(?:live )?system catalog)\b/i
-      .test(evidence.join('\n'));
+  const text = evidence.join('\n');
+  // Only explicit missing user-provided credentials/secrets that cannot be
+  // resolved by capability resolution (__create_tool) should trigger a
+  // user-configuration pause. Missing/unregistered/unavailable tools or
+  // services alone are NOT blockers — the agent must try capability
+  // resolution first.
+  return /\b(?:missing|required|needed|not provided|not supplied)\b.{0,120}\b(?:api ?key|access ?key|secret|token|password|credential|authentication|authorization|account ?credential)\b/i.test(text)
+    || /\b(?:api ?key|access ?key|secret|token|password|credential|authentication|authorization)\b.{0,120}\b(?:missing|required|needed|not provided|not supplied)\b/i.test(text)
+    || /\bcredential[s]?\s+(?:missing|required|needed|not provided|not supplied)\b/i.test(text)
+    || /\b(?:no|missing)\s+(?:valid\s+)?(?:api ?key|access ?key|secret|token|password|credential)\b/i.test(text);
 }
 
 export function missionConfigurationQuestion(missionGoal: string): string {
-  return `I could not complete this yet because a service or configuration is missing for: "${missionGoal}". Please open Tools configuration, choose an authorized service, and add the settings it needs. Any passwords or API keys will be requested through a secure form. I will continue after you save the configuration.`;
+  return `I could not complete this yet because required user credentials or secrets are missing for: "${missionGoal}". I have already tried to resolve or create the needed tools automatically through capability resolution. Please provide the missing credentials or API keys through the secure tool configuration form. I will continue after you save the configuration.`;
 }
 
 const NON_ACTION_RECEIPT_TOOL_IDS = new Set([

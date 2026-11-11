@@ -4,8 +4,10 @@ import { createWorkflow, AssistantWorkflow } from '../../adk/workflow-common';
 import { lyricProsodyEvaluator, musicalCoCreation } from './skills/songwriter-skills';
 import { leadSheetDemoDispatcher } from './skills/songwriting_lead_sheet_demo_dispatcher';
 import { songwriterGenreTrendEvaluator } from './skills/songwriter-genre-trend-evaluator';
+import { SONGWRITING_LYRIC_CO_CREATION } from './tools/songwriting-lower-order-tools';
 
 export { lyricProsodyEvaluator, musicalCoCreation, leadSheetDemoDispatcher, songwriterGenreTrendEvaluator };
+export { SONGWRITING_LYRIC_CO_CREATION };
 
 /**
  * All four songwriting capabilities are user-facing, so all four mount an
@@ -20,7 +22,7 @@ export const songwritingCanonicalSkills: Tool[] = [
   songwriterGenreTrendEvaluator,
 ];
 
-export const songwritingLowerOrderTools: Tool[] = [];
+export const songwritingLowerOrderTools: Tool[] = [SONGWRITING_LYRIC_CO_CREATION];
 
 export const songwritingSkills: Tool[] = [...songwritingCanonicalSkills, ...songwritingLowerOrderTools];
 

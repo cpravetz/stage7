@@ -7,15 +7,34 @@ import type { TaskExecutionResult } from './TaskExecutionResult';
 const ASK_USER_MARKER = '__ASK_USER__:';
 const PERMISSION_MARKER = '__MISSION_PERMISSION__:';
 
+function sanitizeQuestionText(question: string): string {
+  let cleaned = question;
+  // Remove any repeated ASK_USER markers or JSON fragments
+  cleaned = cleaned.replace(/__ASK_USER__:\s*/g, '\n');
+  cleaned = cleaned.replace(/__MISSION_PERMISSION__:\s*/g, '\n');
+  // If there are multiple JSON objects concatenated, try to extract just the first clean question
+  // Remove anything that looks like JSON arrays/objects after first question
+  cleaned = cleaned.replace(/\n\s*\{[\s\S]*$/s, '');
+  // Remove code fences
+  cleaned = cleaned.replace(/```[\s\S]*```/g, '');
+  cleaned = cleaned.trim();
+  return cleaned;
+}
+
 export function parseInterruption(
   output: string,
 ): TaskExecutionResult['interruption'] | undefined {
-  if (output.startsWith(ASK_USER_MARKER)) {
-    const payload = output.slice(ASK_USER_MARKER.length);
+  if (output.includes(ASK_USER_MARKER)) {
+    // Extract only the first ASK_USER marker and its payload
+    const firstMarkerIndex = output.indexOf(ASK_USER_MARKER);
+    // Find where next marker starts or end of relevant content
+    const afterFirst = output.slice(firstMarkerIndex);
+    const nextMarkerIndex = afterFirst.indexOf(ASK_USER_MARKER, ASK_USER_MARKER.length);
+    const payload = nextMarkerIndex >= 0 ? afterFirst.slice(ASK_USER_MARKER.length, nextMarkerIndex) : afterFirst.slice(ASK_USER_MARKER.length);
     let question = payload;
     let credentialRequest: MissionCredentialRequest | undefined;
     try {
-      const parsed = JSON.parse(payload) as { question?: unknown; credentialRequest?: unknown };
+      const parsed = JSON.parse(payload.trim()) as { question?: unknown; credentialRequest?: unknown };
       if (typeof parsed.question === 'string') question = parsed.question;
       if (parsed.credentialRequest && typeof parsed.credentialRequest === 'object' && !Array.isArray(parsed.credentialRequest)) {
         const candidate = parsed.credentialRequest as Record<string, unknown>;
@@ -45,6 +64,7 @@ export function parseInterruption(
     } catch {
       // Plain-text question markers remain supported.
     }
+    question = sanitizeQuestionText(question);
     if (!question.trim()) throw new Error('Agent asked the user an empty question');
     return {
       kind: 'user_input',

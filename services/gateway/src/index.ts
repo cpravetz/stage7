@@ -29,8 +29,8 @@ NEXTGEN_SERVICES.forEach((svc) => {
   logger.info({ serviceId: svc.id, baseUrl: svc.baseUrl }, 'Registered NextGen service');
 });
 
-app.use('/api/gateway', express.json(), gatewayRoutes);
-app.use('/api/gateway', express.json(), messagingRoutes);
+app.use('/api/gateway', express.json({ limit: '50mb' }), gatewayRoutes);
+app.use('/api/gateway', express.json({ limit: '50mb' }), messagingRoutes);
 // Keep worker proxy request bodies intact. The workers router parses JSON only
 // for its direct assistant-registration endpoint before proxying other calls.
 app.use('/api/workers', workersRoutes);

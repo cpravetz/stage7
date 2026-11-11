@@ -13,6 +13,7 @@ import { MARKETING_SEO } from './skills/marketing-seo';
 import { MARKETING_SOCIAL_MEDIA } from './tools/marketing-social-media';
 import { PLAN_CAMPAIGN } from './skills/plan-campaign';
 import { MARKETING_DOMAIN_KNOWLEDGE } from './marketing-contract';
+import { MARKETING_CAMPAIGN_PLANNER } from './tools/marketing-lower-order-tools';
 
 const MARKETING_SKILLS: Tool[] = [PLAN_CAMPAIGN, ANALYZE_PERFORMANCE];
 
@@ -34,7 +35,11 @@ for (const s of [...MARKETING_SKILLS, ...MARKETING_EXTERNAL_SKILLS]) {
 
 MARKETING_SKILLS.push(MARKETING_CENTER, MARKETING_REPORTS_SCHEDULED);
 
-export const marketingSkills = [...MARKETING_SKILLS, ...MARKETING_EXTERNAL_SKILLS];
+export const marketingLowerOrderTools: Tool[] = [MARKETING_CAMPAIGN_PLANNER];
+
+export { MARKETING_CAMPAIGN_PLANNER };
+
+export const marketingSkills = [...MARKETING_SKILLS, ...MARKETING_EXTERNAL_SKILLS, ...marketingLowerOrderTools];
 
 // The former `marketingCenter` alias is gone: it named a Skill id that no
 // longer exists after the Class 4 decomposition, and nothing imported it.

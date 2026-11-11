@@ -35,7 +35,11 @@ export type FeedEventType =
   | 'task_failed'
   | 'cost_estimate'
   | 'assistant'
-  | 'user';
+  | 'user'
+  | 'agent_delegation'
+  | 'agent_acknowledgement'
+  | 'agent_response'
+  | 'agent_error';
 
 export interface FeedEvent {
   id: string;
@@ -106,12 +110,12 @@ export function normalize(raw: unknown): FeedEvent | null {
   if (!message) {
     switch (type) {
       case 'planner_started':
-        message = `Planning mission...`;
+        message = (typeof data.reason === 'string' && data.reason.trim()) || (typeof data.thought === 'string' && data.thought.trim()) || `Planning mission...`;
         break;
       case 'planner_progress': {
         const attempt = data.attempt !== undefined ? ` (attempt ${String(data.attempt)})` : '';
-        const reason = String(data.reason || '').trim();
-        message = `Planning update${attempt}${reason ? `: ${reason.slice(0, 200)}` : ''}`;
+        const reason = String(data.reason || data.thought || data.text || '').trim();
+        message = reason ? `Planning update${attempt}: ${reason.slice(0, 200)}` : `Planning update${attempt}`;
         break;
       }
       case 'clarification_needed':
@@ -135,9 +139,12 @@ export function normalize(raw: unknown): FeedEvent | null {
       case 'cost_estimate':
         message = `Model call: ${(data.model as string) || 'unknown model'}${data.tokensUsed ? ` (${String(data.tokensUsed)} tokens)` : ''}`;
         break;
-      case 'plan_generated':
-        message = 'Plan generated';
+      case 'plan_generated': {
+        const planSource = typeof data.planSource === 'string' ? data.planSource : (typeof (data.data as Record<string, unknown> | undefined)?.planSource === 'string' ? String((data.data as Record<string, unknown>).planSource) : '');
+        const reason = typeof data.reason === 'string' ? data.reason.trim() : '';
+        message = reason || (planSource === 'loaded' ? 'Plan loaded' : 'Plan generated');
         break;
+      }
       case 'phase_started':
         message = `Phase started: ${(data.phaseName as string) || (data.phaseId as string) || ''}`.trim();
         break;
@@ -214,6 +221,27 @@ export function normalize(raw: unknown): FeedEvent | null {
           : 'Mission incomplete';
         break;
       }
+      case 'agent_delegation': {
+        const to = typeof data.to === 'string' ? data.to : typeof data.agentId === 'string' ? data.agentId : '';
+        const content = typeof data.content === 'string' ? data.content : typeof data.message === 'string' ? data.message : '';
+        message = content || (to ? `Delegated to ${to}` : 'Delegated user request');
+        break;
+      }
+      case 'agent_acknowledgement': {
+        const content = typeof data.content === 'string' ? data.content : typeof data.message === 'string' ? data.message : typeof data.text === 'string' ? data.text : '';
+        message = content || 'Acknowledged';
+        break;
+      }
+      case 'agent_response': {
+        const content = typeof data.content === 'string' ? data.content : typeof data.response === 'string' ? data.response : typeof data.message === 'string' ? data.message : '';
+        message = content || 'Agent response';
+        break;
+      }
+      case 'agent_error': {
+        const err = typeof data.error === 'string' ? data.error : typeof data.message === 'string' ? data.message : '';
+        message = err ? `Agent error: ${friendlyMissionError(err)}` : 'Agent error';
+        break;
+      }
       case 'tool':
         message = (data.tool as string) || (data.name as string) || 'Tool call';
         break;
@@ -230,6 +258,15 @@ export function normalize(raw: unknown): FeedEvent | null {
     }
   }
 
+  const normalizedMeta: Record<string, unknown> = data && Object.keys(data).length ? { ...data } : {};
+  const nested = normalizedMeta.data as Record<string, unknown> | undefined;
+  if (typeof normalizedMeta.thought !== 'string' && nested && typeof nested.thought === 'string') normalizedMeta.thought = nested.thought;
+  if (typeof normalizedMeta.reason !== 'string' && nested && typeof nested.reason === 'string') normalizedMeta.reason = nested.reason;
+  if (typeof normalizedMeta.text !== 'string' && nested && typeof nested.text === 'string') normalizedMeta.text = nested.text;
+  if (type === 'planner_progress' && typeof normalizedMeta.thought !== 'string' && typeof normalizedMeta.reason === 'string') {
+    normalizedMeta.thought = normalizedMeta.reason;
+  }
+
   return {
     id: (r.id as string) || stableId(type, timestamp, data),
     type,
@@ -237,7 +274,7 @@ export function normalize(raw: unknown): FeedEvent | null {
     message,
     timestamp,
     missionId,
-    metadata: data && Object.keys(data).length ? data : undefined,
+    metadata: Object.keys(normalizedMeta).length ? normalizedMeta : undefined,
   };
 }
 

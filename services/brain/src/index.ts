@@ -12,7 +12,7 @@ export * from './services/DistillationService';
 export * from './services/DistillationOrchestrator';
 
 const app: Application = express();
-app.use(express.json({ limit: "256kb" }));
+app.use(express.json({ limit: '50mb' }));
 
 setTimeout(() => {
   const providers = brain.listProviders();

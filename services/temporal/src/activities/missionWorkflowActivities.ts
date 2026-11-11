@@ -211,21 +211,63 @@ async function persistMissionPlan(input: WorkflowInput, plan: Plan): Promise<voi
 }
 
 export async function prepareMissionActivity(input: WorkflowInput): Promise<Plan> {
-  if (input.metadata?.retriedFrom) {
-    const persistenceUrl = serviceUrl('ARTIFACTS_URL', 'http://artifacts:4200');
-    const response = await fetch(
-      `${persistenceUrl}/api/artifacts/missions/${encodeURIComponent(input.missionId)}/plan`,
-    );
-    if (response.status !== 404 && !response.ok) {
-      const details = (await response.text()).slice(0, 1000);
-      throw new Error(`Could not load persisted plan for mission retry (${response.status}): ${details}`);
+  const persistenceUrl = serviceUrl('ARTIFACTS_URL', 'http://artifacts:4200');
+  const isRetry = !!input.metadata?.retriedFrom;
+  let persistedPlan: Plan | null = null;
+  let planSource: 'loaded' | 'generated' = 'generated';
+
+  // The Mission Planner owns the load-vs-generate decision. Never silently
+  // reuse a persisted plan; evaluate it and emit the reasoning as a monologue.
+  const plannerRuntime = new MissionAgentRuntime({
+    missionId: input.missionId,
+    tenantId: input.tenantId || 'tenant-1',
+    metadata: agentMemoryMetadata(input),
+    agentRuntimeUrl: process.env.AGENT_RUNTIME_URL,
+    broadcast: createRuntimeBroadcast(input),
+  });
+
+  if (isRetry || input.completedTasks?.length || input.completedPhases?.length) {
+    try {
+      const response = await fetch(
+        `${persistenceUrl}/api/artifacts/missions/${encodeURIComponent(input.missionId)}/plan`,
+      );
+      if (response.status !== 404 && !response.ok) {
+        const details = (await response.text()).slice(0, 1000);
+        throw new Error(`Could not load persisted plan for mission retry (${response.status}): ${details}`);
+      }
+      if (response.ok) {
+        persistedPlan = PlanSchema.parse(await response.json());
+      }
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith('Could not load persisted plan')) throw err;
+      logger.warn({ missionId: input.missionId, err: err instanceof Error ? err.message : String(err) }, 'Failed to load persisted plan for planner evaluation');
     }
-    if (response.ok) {
-      const plan = PlanSchema.parse(await response.json());
-      logger.info({ missionId: input.missionId }, 'Reusing persisted plan for mission retry');
-      return plan;
-    }
-    logger.info({ missionId: input.missionId }, 'No persisted plan for mission retry; generating a new plan');
+  }
+
+  const evaluation = await plannerRuntime.evaluatePlanLoad({
+    missionId: input.missionId,
+    prompt: input.prompt,
+    context: input.metadata,
+    existingPlan: persistedPlan,
+    isRetry,
+    isResume: !!input.completedTasks?.length || !!input.completedPhases?.length,
+  });
+  if (evaluation.loadExisting && evaluation.plan) {
+    await persistMissionPlan(input, evaluation.plan);
+    await broadcast(input, {
+      type: 'plan_generated',
+      missionId: input.missionId,
+      timestamp: Date.now(),
+      data: {
+        plan: evaluation.plan,
+        agentId: plannerAgentId(input),
+        agentName: 'Mission Planner',
+        agentRole: 'planner',
+        status: 'completed',
+        source: 'loaded',
+      },
+    });
+    return evaluation.plan;
   }
 
   await broadcast(input, {
@@ -241,13 +283,6 @@ export async function prepareMissionActivity(input: WorkflowInput): Promise<Plan
     },
   });
 
-  const plannerRuntime = new MissionAgentRuntime({
-    missionId: input.missionId,
-    tenantId: input.tenantId || 'tenant-1',
-    metadata: agentMemoryMetadata(input),
-    agentRuntimeUrl: process.env.AGENT_RUNTIME_URL,
-    broadcast: createRuntimeBroadcast(input),
-  });
   const plan = await plannerRuntime.generatePlan(input.prompt, input.metadata, async (progress) => {
     if (!shouldReportPlannerProgress(input.missionId, progress.status, progress.reason)) return;
     await broadcast(input, {
@@ -265,6 +300,7 @@ export async function prepareMissionActivity(input: WorkflowInput): Promise<Plan
       },
     });
   });
+  planSource = 'generated';
   await persistMissionPlan(input, plan);
 
   await broadcast(input, {
@@ -277,6 +313,7 @@ export async function prepareMissionActivity(input: WorkflowInput): Promise<Plan
       agentName: 'Mission Planner',
       agentRole: 'planner',
       status: 'completed',
+      source: planSource,
     },
   });
   if (plan.requiresClarification && plan.clarificationQuestions.length > 0) {
@@ -375,9 +412,25 @@ export async function reviewAndAmendMissionPhaseActivity({
       completedTaskSummaries,
       reviewIndex,
     );
+    // Director decision monologue before applying review (mirrors orchestrator)
+    await agentRuntime.emitMonologue({
+      agentRole: 'mission-director',
+      phaseId: phase.id,
+      thought: `Phase review ${reviewIndex} for "${phase.name}" returned ${review.satisfied ? 'satisfied' : 'not satisfied'}. The Phase Reviewer identified ${review.gaps.length} gap(s): ${review.gaps.slice(0, 5).join('; ')}. I will apply this review to the plan${review.followUpTask ? ` and adopt the proposed follow-up task "${review.followUpTask.title}"` : ''}.`,
+      text: `Phase review ${reviewIndex}: ${review.satisfied ? 'satisfied' : `${review.gaps.length} gap(s) found`}.`,
+      data: { reviewIndex, satisfied: review.satisfied, gaps: review.gaps, followUpTaskTitle: review.followUpTask?.title },
+    });
     const applied = applyPhaseReview(plan, phase.id, review);
     if (applied.amendment) {
       await persistMissionPlan(input, applied.plan);
+      // Director decision: adopt reviewer's proposed amendment
+      await agentRuntime.emitMonologue({
+        agentRole: 'mission-director',
+        phaseId: phase.id,
+        thought: `The Phase Reviewer proposed an actionable follow-up task "${applied.amendment.title}" for review ${reviewIndex}. I am adopting this amendment and scheduling it to address the identified gaps: ${applied.gaps.slice(0, 5).join('; ')}.`,
+        text: `Adopting reviewer's follow-up task "${applied.amendment.title}".`,
+        data: { reviewIndex, amendmentId: applied.amendment.id, amendmentTitle: applied.amendment.title, gaps: applied.gaps, reason: 'reviewer_followup_adopted' },
+      });
       await broadcast(input, {
         type: 'phase_plan_amended',
         missionId: input.missionId,
@@ -388,9 +441,9 @@ export async function reviewAndAmendMissionPhaseActivity({
           gaps: applied.gaps,
           task: applied.amendment,
           plan: applied.plan,
-          agentId: agentRuntime.getAgentIdForRole('phase-reviewer'),
-          agentName: 'Phase Reviewer Agent',
-          agentRole: 'phase-reviewer',
+          agentId: agentRuntime.getAgentIdForRole('mission-director'),
+          agentName: 'Mission Director',
+          agentRole: 'mission-director',
         },
       });
     }
@@ -695,6 +748,14 @@ export async function completeMissionActivity({
   const gaps: string[] = [];
   gaps.push(...missionExecutionEvidenceGaps(plan, phases));
 
+  const agentRuntime = new MissionAgentRuntime({
+    missionId: input.missionId,
+    tenantId: input.tenantId || 'tenant-1',
+    metadata: agentMemoryMetadata(input),
+    agentRuntimeUrl: process.env.AGENT_RUNTIME_URL,
+    broadcast: createRuntimeBroadcast(input),
+  });
+
   if (gaps.length === 0) {
     const plannedTasks = new Map(plan.phases.flatMap((phase) =>
       phase.tasks.map((task) => [JSON.stringify([phase.id, task.id]), task] as const),
@@ -713,19 +774,13 @@ export async function completeMissionActivity({
         };
       }),
     );
-    const agentRuntime = new MissionAgentRuntime({
-      missionId: input.missionId,
-      tenantId: input.tenantId || 'tenant-1',
-      metadata: agentMemoryMetadata(input),
-      agentRuntimeUrl: process.env.AGENT_RUNTIME_URL,
-      broadcast: createRuntimeBroadcast(input),
-    });
     const review = await agentRuntime.reviewMissionCompletion(
       input.prompt,
       plan.summary || '',
       completedTaskSummaries,
     );
     if (!review.satisfied) gaps.push(...review.gaps);
+    // reviewMissionCompletion now emits the mission-evaluator attributed monologue
   }
 
   const outputs: { phases: MissionPhaseOutput[]; status: 'completed' | 'incomplete'; gaps?: string[] } = {
@@ -733,6 +788,22 @@ export async function completeMissionActivity({
     status: gaps.length === 0 ? 'completed' : 'incomplete',
     ...(gaps.length > 0 ? { gaps } : {}),
   };
+  // The Mission Director owns the terminal completion decision; emit an
+  // attributed monologue explaining whether the mission completes or stays
+  // incomplete, with the reasoning visible in the UI.
+  await agentRuntime.emitMonologue({
+    agentRole: 'mission-director',
+    thought: gaps.length === 0
+      ? `All planned task evidence is present and the completion review found every requirement satisfied against the mission goal "${input.prompt.slice(0, 120)}". I am marking the mission status as completed.`
+      : `Mission completion is blocked by ${gaps.length} unmet requirement(s): ${gaps.join('; ')}. I am not marking the mission complete; these gaps must be resolved before the mission can finish.`,
+    text: gaps.length === 0
+      ? 'Mission completed: all completion criteria met.'
+      : `Mission incomplete: ${gaps.length} unmet requirement(s).`,
+    data: {
+      decision: gaps.length === 0 ? 'mission_completed' : 'mission_incomplete',
+      ...(gaps.length > 0 ? { gaps } : {}),
+    },
+  });
   if (gaps.length > 0) {
     logger.warn({ missionId: input.missionId, gaps }, 'Temporal mission completion review found unmet requirements');
   }

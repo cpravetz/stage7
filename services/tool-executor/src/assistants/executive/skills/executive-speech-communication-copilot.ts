@@ -50,11 +50,12 @@ export const SPEECH_COMMUNICATION_COPILOT = createDeclarativeCodeSkill({
   isSkill: true,
   manifest: {
     configSchema: SPEECH_CONFIG,
-    ui: { view: 'speech-communication-copilot' }
+    ui: { view: 'speech-communication-copilot' },
+    lowerOrderTools: ['executive-communication-drafter'],
   },
   handler: async function handler(input, ctx) {
       const NL = '\n';
-      const SAFETY = "Executive communication advisory only: drafts are for review and editing; do not send without human approval.";
+      const SAFETY = SAFETY_BOUNDARY;
 
       function fail(status, message, title, extra) {
         const base = { success: false, status: status, error: message, data: null, present: [{ id: 'notice', title: title, kind: 'text', body: message + NL + NL + SAFETY }] };
@@ -75,209 +76,208 @@ export const SPEECH_COMMUNICATION_COPILOT = createDeclarativeCodeSkill({
         return fail('not-connected', 'Not connected: provide at least occasion, audience, or key messages', 'Input required');
       }
 
-      let store = ctx.store.load('speech-communication-copilot', []);
+      const store = ctx.store.load('speech-communication-copilot', []);
 
-      let structuredOutput;
-      let presentBody;
+      const DELEGATED_TIMEOUT_MS = Number(ctx.config?.delegatedTimeoutMs) > 0
+        ? Number(ctx.config?.delegatedTimeoutMs)
+        : 24000;
 
-      switch (format) {
-        case 'speech': {
-          const wordTarget = length === 'short' ? '300-500' : length === 'medium' ? '600-1000' : '1200-2000';
-          const lines = [
-            'Executive Speech Draft',
-            '======================',
-            '',
-            'Occasion: ' + (occasion || 'unspecified'),
-            'Audience: ' + (audience || 'unspecified'),
-            'Tone: ' + tone,
-            'Target length: ' + wordTarget + ' words',
-            'Format: Speech / Keynote',
-            '',
-            'Key messages (' + keyMessages.length + '):',
-          ];
-
-          keyMessages.forEach(function(msg, i) {
-            lines.push('  ' + (i + 1) + '. ' + String(msg));
-          });
-
-          if (constraints.length > 0) {
-            lines.push('');
-            lines.push('Constraints:');
-            constraints.forEach(function(c) { lines.push('  - ' + String(c)); });
+      function unwrapDelegated(res) {
+        if (!res || typeof res !== 'object') return null;
+        if (res.status === 'failed') return null;
+        if (res.success === false) return null;
+        if (res.success === true) {
+          const data = res.data;
+          if (data && typeof data === 'object') return data;
+          return data != null ? { summary: data } : null;
+        }
+        if (res.status === 'completed') {
+          const out = res.output;
+          if (out && typeof out === 'object') {
+            if (out.success === false) return null;
+            return (out.data && typeof out.data === 'object') ? out.data : out;
           }
-
-          lines.push('');
-          lines.push('Context: ' + (context || 'not provided'));
-          lines.push('');
-          lines.push('--- DRAFT STRUCTURE ---');
-          lines.push('');
-          lines.push('1. Opening (hook + purpose): [1-2 paragraphs]');
-          lines.push('2. Key Message 1: ' + (keyMessages[0] || '[message 1]') + ' [supporting story/data]');
-          if (keyMessages.length > 1) lines.push('3. Key Message 2: ' + (keyMessages[1] || '[message 2]') + ' [supporting story/data]');
-          if (keyMessages.length > 2) lines.push('4. Key Message 3: ' + (keyMessages[2] || '[message 3]') + ' [supporting story/data]');
-          lines.push('');
-          lines.push('5. Transition to close: [bridge to call-to-action]');
-          lines.push('6. Closing (call-to-action + vision): [1-2 paragraphs]');
-          lines.push('');
-          lines.push('--- NOTES FOR SPEAKER ---');
-          lines.push('- Practice opening and close aloud');
-          lines.push('- Mark pauses and emphasis points');
-          lines.push('- Time your delivery; adjust for ' + wordTarget + ' word target');
-          if (tone === 'inspirational') lines.push('- Use rhetorical devices: anaphora, triads, contrast');
-          if (tone === 'authoritative') lines.push('- Lead with conclusions; use definitive language');
-          if (tone === 'conversational') lines.push('- Use inclusive language (we, our); invite dialogue');
-          lines.push('');
-          lines.push(SAFETY);
-
-          structuredOutput = { format: 'speech', occasion, audience, tone, length, keyMessages, constraints, context };
-          presentBody = lines.join(NL);
-          break;
+          if (typeof out === 'string' && out.trim()) return { summary: out };
         }
-
-        case 'board-comm': {
-          const lines = [
-            'Board Communication Draft',
-            '=========================',
-            '',
-            'Subject: ' + (input.subject || occasion || 'Board Communication'),
-            'Audience: ' + (audience || 'Board of Directors'),
-            'Tone: ' + tone,
-            'Priority: ' + (input.priority || 'standard'),
-            '',
-            'Key messages (' + keyMessages.length + '):',
-          ];
-
-          keyMessages.forEach(function(msg, i) {
-            lines.push('  ' + (i + 1) + '. ' + String(msg));
-          });
-
-          if (constraints.length > 0) {
-            lines.push('');
-            lines.push('Constraints / Compliance:');
-            constraints.forEach(function(c) { lines.push('  - ' + String(c)); });
-          }
-
-          lines.push('');
-          lines.push('Context: ' + (context || 'not provided'));
-          lines.push('');
-          lines.push('--- DRAFT STRUCTURE ---');
-          lines.push('');
-          lines.push('1. Executive Summary (2-3 sentences): [the bottom line up front]');
-          lines.push('2. Context / Background: [why this matters now]');
-          lines.push('3. Analysis / Options: [key data, tradeoffs, recommendation]');
-          lines.push('4. Decision Requested: [specific ask of the board]');
-          lines.push('5. Risks & Mitigation: [top 3 risks]');
-          lines.push('6. Appendix: [supporting data, available on request]');
-          lines.push('');
-          lines.push(SAFETY);
-
-          structuredOutput = { format: 'board-comm', occasion, audience, tone, keyMessages, constraints, context, priority: input.priority };
-          presentBody = lines.join(NL);
-          break;
-        }
-
-        case 'stakeholder-message': {
-          const channel = input.channel || 'email';
-          const lines = [
-            'Stakeholder Message Draft',
-            '=========================',
-            '',
-            'Occasion: ' + (occasion || 'unspecified'),
-            'Audience: ' + (audience || 'unspecified'),
-            'Channel: ' + channel,
-            'Tone: ' + tone,
-            '',
-            'Key messages (' + keyMessages.length + '):',
-          ];
-
-          keyMessages.forEach(function(msg, i) {
-            lines.push('  ' + (i + 1) + '. ' + String(msg));
-          });
-
-          lines.push('');
-          lines.push('Context: ' + (context || 'not provided'));
-          lines.push('');
-          lines.push('--- DRAFT STRUCTURE ---');
-          lines.push('');
-          lines.push('Subject Line: [clear, specific, ' + (channel === 'email' ? 'under 50 chars' : 'concise') + ']');
-          lines.push('');
-          lines.push('Opening: [acknowledge context, state purpose in 1-2 sentences]');
-          lines.push('');
-          lines.push('Body:');
-          keyMessages.forEach(function(msg, i) {
-            lines.push('  ' + (i + 1) + '. ' + String(msg) + ' [expand with context, data, or story]');
-          });
-          lines.push('');
-          lines.push('Call to Action: [specific next step for recipient]');
-          lines.push('');
-          lines.push('Closing: [professional sign-off appropriate to ' + tone + ' tone]');
-          lines.push('');
-          lines.push(SAFETY);
-
-          structuredOutput = { format: 'stakeholder-message', occasion, audience, channel, tone, keyMessages, constraints, context };
-          presentBody = lines.join(NL);
-          break;
-        }
-
-        case 'crisis-statement': {
-          const lines = [
-            'Crisis / Sensitive Communication Draft',
-            '======================================',
-            '',
-            'Occasion: ' + (occasion || 'Crisis response'),
-            'Audience: ' + (audience || 'all stakeholders'),
-            'Tone: ' + (tone || 'empathetic-authoritative'),
-            'Urgency: ' + (input.urgency || 'immediate'),
-            '',
-            'Key messages (' + keyMessages.length + '):',
-          ];
-
-          keyMessages.forEach(function(msg, i) {
-            lines.push('  ' + (i + 1) + '. ' + String(msg));
-          });
-
-          lines.push('');
-          lines.push('Constraints / Legal:');
-          constraints.forEach(function(c) { lines.push('  - ' + String(c)); });
-          if (constraints.length === 0) lines.push('  [Legal review required before release]');
-
-          lines.push('');
-          lines.push('Context: ' + (context || 'not provided'));
-          lines.push('');
-          lines.push('--- DRAFT STRUCTURE ---');
-          lines.push('');
-          lines.push('1. Acknowledgment: [what happened, direct and factual]');
-          lines.push('2. Impact: [who is affected, how]');
-          lines.push('3. Action: [what we are doing right now]');
-          lines.push('4. Commitment: [what we will do, by when]');
-          lines.push('5. Contact: [how affected parties can reach us]');
-          lines.push('');
-          lines.push('--- CRISIS COMMUNICATION PRINCIPLES ---');
-          lines.push('- Be first, be right, be credible');
-          lines.push('- Express genuine empathy before facts');
-          lines.push('- Avoid speculation; state only confirmed information');
-          lines.push('- Commit to transparency and timeline for updates');
-          lines.push('');
-          lines.push(SAFETY);
-
-          structuredOutput = { format: 'crisis-statement', occasion, audience, tone, urgency: input.urgency, keyMessages, constraints, context };
-          presentBody = lines.join(NL);
-          break;
-        }
-
-        default:
-          return fail('error', 'Unknown format: ' + format, 'Invalid format');
+        return null;
       }
 
-      const result = { ...structuredOutput, draft: presentBody };
+      function delegatedText(payload) {
+        if (!payload) return null;
+        if (typeof payload === 'string') return cleanDelegatedText(payload);
+        if (typeof payload !== 'object') return null;
+        if (typeof payload.summary === 'string' && payload.summary.trim()) return cleanDelegatedText(payload.summary);
+        if (typeof payload._raw === 'string' && payload._raw.trim()) return cleanDelegatedText(payload._raw);
+        return null;
+      }
+
+      function cleanDelegatedText(text) {
+        if (!text) return null;
+        let body = text;
+        const thinkingIdx = body.indexOf('Thinking Process:');
+        if (thinkingIdx >= 0) {
+          const nextSection = body.indexOf('\n\n', thinkingIdx);
+          if (nextSection < 0) return null;
+          body = body.slice(nextSection + 2);
+        }
+        const selfCheckIdx = body.indexOf('Self-Check:');
+        if (selfCheckIdx >= 0) body = body.slice(0, selfCheckIdx);
+        const hallucinationIdx = body.indexOf('Hallucination');
+        if (hallucinationIdx >= 0 && /hallucinat/i.test(body.slice(hallucinationIdx))) {
+          body = body.slice(0, hallucinationIdx);
+        }
+        body = body.trim();
+        return body ? body : null;
+      }
+
+      function brainBaseUrl() {
+        return String(ctx.config?.brainEndpoint || 'http://brain:3100').trim();
+      }
+
+      async function callBrain(prompt) {
+        const base = brainBaseUrl();
+        if (!base) return null;
+        try {
+          const res = await fetch(base + '/api/brain/complete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              systemPrompt: 'You are an executive communication drafter. Return only the finished JSON object, no prose or fences.',
+              prompt: prompt,
+              options: { temperature: 0.4, maxTokens: 4096 },
+            }),
+          });
+          if (!res.ok) return null;
+          const data = await res.json();
+          return data.content || data.summary || null;
+        } catch (e) {
+          return null;
+        }
+      }
+
+      function withDeadline(promise, ms) {
+        return new Promise(function (resolve) {
+          let done = false;
+          const timer = setTimeout(function () { if (!done) { done = true; resolve(null); } }, ms);
+          Promise.resolve(promise).then(
+            function (v) { if (!done) { done = true; clearTimeout(timer); resolve(v); } },
+            function () { if (!done) { done = true; clearTimeout(timer); resolve(null); } }
+          );
+        });
+      }
+
+      const toolInput = {
+        format,
+        occasion,
+        audience,
+        keyMessages,
+        tone,
+        length,
+        context,
+        constraints,
+        subject: input.subject || null,
+        channel: input.channel || null,
+        priority: input.priority || null,
+        urgency: input.urgency || null,
+      };
+
+      const brainPrompt =
+        'You are drafting an executive communication from the details supplied below. ' +
+        'Return ONLY a single JSON object — no prose, no preamble, no markdown fences. ' +
+        'The JSON must have exactly this shape:\n' +
+        '{\n' +
+        '  "format": "<speech | board-comm | stakeholder-message | crisis-statement>",\n' +
+        '  "occasion": "<occasion>",\n' +
+        '  "audience": "<audience>",\n' +
+        '  "tone": "<tone>",\n' +
+        '  "length": "<short | medium | long>",\n' +
+        '  "keyMessages": ["<key message>"],\n' +
+        '  "constraints": ["<constraint>"],\n' +
+        '  "context": "<additional context>",\n' +
+        '  "subject": "<subject line or null>",\n' +
+        '  "channel": "<delivery channel or null>",\n' +
+        '  "priority": "<priority or null>",\n' +
+        '  "urgency": "<urgency or null>",\n' +
+        '  "draft": "<the fully-written communication text appropriate to the format>"\n' +
+        '}\n\n' +
+        'Rules — follow every one of them:\n' +
+        '1. "draft" must be the complete, fully-written communication (speech body, board memo, stakeholder message, or crisis statement) appropriate to the requested format, occasion, audience, key messages, tone, length, context, and constraints.\n' +
+        '2. Write the actual prose from the supplied details. Never emit a structure template, outline skeleton, or any text with [placeholder] brackets.\n' +
+        '3. Include every supplied key message meaningfully in the draft. Reflect the requested tone, length, and any supplied constraints.\n' +
+        '4. Echo back format, occasion, audience, tone, length, keyMessages, constraints, context, subject, channel, priority, and urgency from the input (use null for fields not supplied).\n' +
+        '5. Return JSON only.\n\n' +
+        'Input:\n' + JSON.stringify(toolInput, null, 2);
+
+      function parseDraft(value) {
+        if (!value) return null;
+        if (typeof value === 'object' && typeof value.draft === 'string') return value;
+        const text = delegatedText(value);
+        if (!text) return null;
+        try {
+          const parsed = JSON.parse(text);
+          if (parsed && typeof parsed === 'object' && typeof parsed.draft === 'string') return parsed;
+        } catch {}
+        const match = text.match(/\{[\s\S]*\}/);
+        if (match) {
+          try {
+            const parsed = JSON.parse(match[0]);
+            if (parsed && typeof parsed === 'object' && typeof parsed.draft === 'string') return parsed;
+          } catch {}
+        }
+        return null;
+      }
+
+      let parsed = null;
+      try {
+        const raw = await withDeadline(ctx.delegate('executive-communication-drafter', toolInput), DELEGATED_TIMEOUT_MS);
+        const payload = unwrapDelegated(raw);
+        parsed = parseDraft(payload);
+      } catch (e) {
+        parsed = null;
+      }
+
+      let via = parsed ? 'delegated' : null;
+      if (!parsed) {
+        const direct = await callBrain(brainPrompt);
+        parsed = parseDraft(direct);
+        via = parsed ? 'brain' : null;
+      }
+
+      if (!parsed || typeof parsed.draft !== 'string' || !parsed.draft.trim()) {
+        return fail('not-connected', 'Not connected: the assistant model did not return a usable executive communication draft. Retry, or check the Brain activity log.', 'No draft available');
+      }
+
+      const draftText = String(parsed.draft).trim();
+      const result = {
+        format: parsed.format || format,
+        occasion: parsed.occasion || occasion,
+        audience: parsed.audience || audience,
+        tone: parsed.tone || tone,
+        length: parsed.length || length,
+        keyMessages: Array.isArray(parsed.keyMessages) ? parsed.keyMessages : keyMessages,
+        constraints: Array.isArray(parsed.constraints) ? parsed.constraints : constraints,
+        context: parsed.context || context,
+        subject: parsed.subject != null ? parsed.subject : (input.subject || null),
+        channel: parsed.channel != null ? parsed.channel : (input.channel || null),
+        priority: parsed.priority != null ? parsed.priority : (input.priority || null),
+        urgency: parsed.urgency != null ? parsed.urgency : (input.urgency || null),
+        draft: draftText,
+        source: via || 'brain',
+      };
+
       store.push(result);
       ctx.store.save('speech-communication-copilot', store);
 
-      return { success: true, status: 'ok', data: result, error: null, present: [{ id: 'speech-draft', title: 'Executive Communication Draft', kind: 'text', body: presentBody }] };
+      const body = draftText + NL + NL + (via ? 'Generated via ' + via + ' call.' + NL + NL : '') + SAFETY;
+      return {
+        success: true,
+        status: 'ok',
+        data: result,
+        error: null,
+        present: [{ id: 'speech-draft', title: 'Executive Communication Draft', kind: 'text', body: body }],
+      };
     }
   });
-SPEECH_COMMUNICATION_COPILOT.configSchema = SPEECH_CONFIG;
-
 SPEECH_COMMUNICATION_COPILOT.configSchema = SPEECH_CONFIG;
 withUxMetadata(SPEECH_COMMUNICATION_COPILOT.inputSchema as SchemaRecord);
 if (SPEECH_COMMUNICATION_COPILOT.configSchema) withUxMetadata(SPEECH_COMMUNICATION_COPILOT.configSchema);

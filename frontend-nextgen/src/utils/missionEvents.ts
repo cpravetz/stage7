@@ -61,6 +61,10 @@ export const CONVERSATION_EVENT_TYPES = new Set([
   'approval_requested',
   'approval_approved',
   'approval_rejected',
+  'agent_delegation',
+  'agent_acknowledgement',
+  'agent_response',
+  'agent_error',
 ]);
 
 export const TIMELINE_EVENT_TYPES = new Set([
@@ -90,6 +94,10 @@ export const TIMELINE_EVENT_TYPES = new Set([
   'approval_requested',
   'approval_approved',
   'approval_rejected',
+  'agent_delegation',
+  'agent_acknowledgement',
+  'agent_response',
+  'agent_error',
 ]);
 
 const FAILURE_LIFECYCLE_TYPES = new Set([
@@ -145,7 +153,13 @@ function agentLabel(metadata: Record<string, unknown>): string | undefined {
     return metadata.agentName.trim();
   }
   if (typeof metadata.agentRole === 'string' && metadata.agentRole.trim()) {
-    const role = metadata.agentRole.trim().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ');
+    const raw = metadata.agentRole.trim();
+    const norm = raw.toLowerCase().replace(/[_\s]+/g, '-');
+    if (norm === 'planner') return 'Mission Planner';
+    if (norm === 'mission-director' || norm === 'director') return 'Mission Director';
+    if (norm === 'phase-reviewer' || norm === 'phase-review') return 'Phase Reviewer';
+    if (norm === 'mission-evaluator') return 'Mission Evaluator';
+    const role = raw.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ');
     return `${role.replace(/\b\w/g, (letter) => letter.toLocaleUpperCase())} Agent`;
   }
   return undefined;
@@ -308,9 +322,9 @@ export function buildMissionEvents(options: {
           ? 'task_incomplete'
         : task.status === 'failed'
           ? 'task_failed'
-          : task.status === 'in_progress'
-            ? 'task_started'
-            : undefined;
+        : task.status === 'in_progress'
+          ? 'task_started'
+          : undefined;
       if (!hasLiveTask && derivedTaskType) {
         derived.push({
           id: `derived-task-${phase.phaseId}-${task.taskId}`,
@@ -460,7 +474,7 @@ function dedupePlannerProgress(events: FeedEvent[]): FeedEvent[] {
     const event = events[i];
     if (String(event.type) !== 'planner_progress') continue;
     const data = event.metadata || {};
-    const key = String(data.status || '') + '|' + String(data.reason || '').replace(/\\d+/g, '#');
+    const key = String(data.status || '') + '|' + String(data.reason || '').replace(/\d+/g, '#');
     lastByKey.set(key, i);
   }
   const keep = new Set(Array.from(lastByKey.values()));
@@ -477,11 +491,11 @@ function dedupeTerminalAndApprovalEvents(events: FeedEvent[], status?: string): 
     ? 'mission_completed'
     : status === 'failed' || status === 'canceled'
       ? (status === 'canceled' ? 'mission_canceled' : 'mission_failed')
-      : status === 'incomplete'
-        ? 'mission_incomplete'
-        : status === 'awaiting_review'
-          ? 'mission_needs_review'
-        : null;
+    : status === 'incomplete'
+      ? 'mission_incomplete'
+    : status === 'awaiting_review'
+      ? 'mission_needs_review'
+    : null;
 
   const seenApprovalPhases = new Set<string>();
   const result: FeedEvent[] = [];
@@ -513,15 +527,40 @@ function dedupeTerminalAndApprovalEvents(events: FeedEvent[], status?: string): 
  * mission, and the first occurrence of each distinct monologue message. This
  * prevents a mission that is re-fetched or recovered from flooding the
  * conversation with duplicated planning and reasoning announcements.
+ *
+ * Dedupe key includes agent identity/role, phase/task context, kind/decision/id
+ * from metadata when available, with stable timestamp bucket as fallback.
  */
 function dedupePlannerAndReasoningEvents(events: FeedEvent[]): FeedEvent[] {
   const seen = new Set<string>();
   return events.filter((event) => {
     const type = String(event.type);
     if (type === 'planner_started' || type === 'plan_generated' || type === 'monologue') {
-      const key = type === 'monologue' ? `${type}|${event.message}` : type;
-      if (seen.has(key)) return false;
-      seen.add(key);
+      const data = event.metadata || {};
+      const nested = data.data && typeof data.data === 'object' && !Array.isArray(data.data)
+        ? (data.data as Record<string, unknown>)
+        : undefined;
+      const planSource = typeof data.planSource === 'string'
+        ? data.planSource
+        : (typeof nested?.planSource === 'string' ? String(nested.planSource) : '');
+      if (type === 'monologue') {
+        const agentId = typeof data.agentId === 'string' ? data.agentId : (typeof event.source === 'string' ? event.source : '');
+        const agentRole = typeof data.agentRole === 'string' ? data.agentRole : '';
+        const phaseId = typeof data.phaseId === 'string' ? data.phaseId : (typeof nested?.phaseId === 'string' ? String(nested.phaseId) : '');
+        const taskId = typeof data.taskId === 'string' ? data.taskId : (typeof nested?.taskId === 'string' ? String(nested.taskId) : '');
+        const kind = typeof data.kind === 'string' ? data.kind : (typeof nested?.kind === 'string' ? String(nested.kind) : '');
+        const decision = typeof data.decision === 'string' ? data.decision : (typeof nested?.decision === 'string' ? String(nested.decision) : '');
+        const stableId = typeof event.id === 'string' && event.id
+          ? event.id
+          : (typeof data.id === 'string' ? data.id : `${Math.floor((event.timestamp || 0) / 1000)}`);
+        const key = `${type}|${agentId}|${agentRole}|${phaseId}|${taskId}|${kind}|${decision}|${stableId}|${event.message}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+      } else {
+        const key = `${type}|${planSource}|${event.message}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+      }
     }
     return true;
   });
@@ -850,9 +889,15 @@ export function buildTranscript(events: FeedEvent[]): TranscriptTurn[] {
     ) {
       const label = type === 'planner_started' || type === 'planner_progress' || type === 'plan_generated'
         ? 'Planner'
-        : agentLabel(data) || 'Orchestrator';
+        : agentLabel(data) || 'Mission Director';
       current = startTurn('assistant', label, ts, evt.id);
       current.lines.push({ kind: 'plan', type, text: friendlyPlanMessage(type, evt.message) });
+      const nested = data.data as Record<string, unknown> | undefined;
+      const thought = [data.thought, nested?.thought, data.reason, nested?.reason, data.text, nested?.text]
+        .find((v): v is string => typeof v === 'string' && v.trim().length > 0);
+      if (thought && thought.trim() !== evt.message.trim()) {
+        current.lines.push({ kind: 'text', type: `${type}_thought`, text: thought.trim() });
+      }
       continue;
     }
     if (type.startsWith('task_')) {
@@ -877,6 +922,24 @@ export function buildTranscript(events: FeedEvent[]): TranscriptTurn[] {
           ? friendlyToolMessage(evt.message)
           : friendlyMonologueMessage(evt.message),
       });
+      continue;
+    }
+    if (
+      type === 'agent_delegation'
+      || type === 'agent_acknowledgement'
+      || type === 'agent_response'
+      || type === 'agent_error'
+    ) {
+      const label = agentLabel(data) || (type === 'agent_delegation' ? 'Mission Director' : 'Agent');
+      current = startTurn('assistant', label, ts, evt.id);
+      const text = stripSecretPrefix(stripAskUserMarker(String(evt.message || '').trim()));
+      current.lines.push({ kind: 'text', type, text: text || type.replace(/^agent_/, 'Agent ') });
+      const nested = data.data as Record<string, unknown> | undefined;
+      const thought = [data.thought, nested?.thought, data.reason, nested?.reason, data.text, nested?.text]
+        .find((v): v is string => typeof v === 'string' && v.trim().length > 0);
+      if (thought && thought.trim() !== text) {
+        current.lines.push({ kind: 'text', type: `${type}_thought`, text: thought.trim() });
+      }
       continue;
     }
     if (

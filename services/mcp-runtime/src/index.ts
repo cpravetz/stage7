@@ -5,7 +5,7 @@ import { logger } from './utils/logger';
 import { legacyGeneralTools } from './data/generalTools';
 
 const app: express.Application = express();
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
 
 const TOOL_EXECUTOR_URL = process.env.TOOL_EXECUTOR_URL || 'http://tool-executor:3500';
 

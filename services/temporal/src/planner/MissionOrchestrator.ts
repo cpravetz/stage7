@@ -12,6 +12,7 @@ import {
   MissionAgentRuntime,
   MISSION_TASK_EXECUTION_POLICY,
   TaskExecutionResult,
+  resolveAgentIdentity,
 } from '../agent/MissionAgentRuntime';
 import { applyRuntimeTaskRequirements } from '../agent/TaskRequirements';
 import {
@@ -63,6 +64,21 @@ function isFatalServiceError(error: unknown): boolean {
  * A burst of identical provider failures is one piece of news, not many.
  */
 const PLANNER_PROGRESS_MIN_INTERVAL_MS = 60_000;
+
+/**
+ * Derive the broadcast agent identity for a task's planned role, consistent
+ * with resolveAgentIdentity / getAgentIdForRole in MissionAgentRuntime and
+ * with executeMissionTaskActivity attribution.
+ */
+function agentIdentityForRole(agentRuntime: MissionAgentRuntime, role: string): { agentId: string; agentName: string; agentRole: string } {
+  const identity = resolveAgentIdentity(role);
+  return {
+    agentId: agentRuntime.getAgentIdForRole(role),
+    agentName: identity.agentName,
+    agentRole: identity.agentRole,
+  };
+}
+
 // Replaced fixed cutoffs with progress-aware limits + hard safety ceilings (Task 3).
 const MAX_PHASE_RECOVERY_ROUNDS = MAX_PHASE_RECOVERY_ROUNDS_SAFETY;
 const MAX_MISSION_RECOVERY_ROUNDS = MAX_MISSION_RECOVERY_ROUNDS_SAFETY;
@@ -149,7 +165,23 @@ export class MissionOrchestrator {
       },
     });
 
-    let plan = ctx.resumePlan || ctx.resumeCheckpoint?.plan || await this.generatePlan(ctx);
+    // The Mission Planner owns the plan-or-load decision. Never silently reuse
+    // a persisted/resume/checkpoint plan; evaluate it and emit the reasoning.
+    let planSource: 'loaded' | 'generated' = 'generated';
+    let plan: Plan;
+    const evaluation = await this.agentRuntime!.evaluatePlanLoad({
+      missionId: ctx.missionId,
+      prompt: ctx.prompt,
+      context: ctx.metadata,
+      existingPlan: ctx.resumePlan || ctx.resumeCheckpoint?.plan,
+      isResume: !!(ctx.resumePlan || ctx.resumeCheckpoint?.plan),
+    });
+    if (evaluation.loadExisting && evaluation.plan) {
+      plan = evaluation.plan;
+      planSource = 'loaded';
+    } else {
+      plan = await this.generatePlan(ctx);
+    }
     activePlan = plan;
     const completedTasks = new Map<string, MissionTaskCheckpoint>(
       (ctx.resumeCheckpoint?.completedTasks || []).map((checkpoint) => [
@@ -178,6 +210,14 @@ export class MissionOrchestrator {
       }
     }
     const completedPhases = new Set(ctx.resumeCheckpoint?.completedPhases || []);
+    // The Mission Director owns the decision to normalize an adopted plan for
+    // execution. This is visible reasoning, not silent surgery.
+    await agentRuntime.emitMonologue({
+      agentRole: 'mission-director',
+      thought: `The plan for mission "${ctx.missionId}" has been adopted (${plan.phases.length} phase(s), source ${planSource}). Before execution I normalize per-run execution state without changing the adopted plan's intent: I clear plan-level requiresClarification/clarificationQuestions, reset every phase's requiresApproval/approvalQuestion, clear each task's requiredActions and re-apply runtime task requirements, and strip message/delivery-status expected artifacts only when the mission goal does not reference messages or deliveries. These are execution-state resets so stale pending-interaction or approval markers from a prior run do not block execution; the phase/task goals, ordering, and artifacts are preserved.`,
+      text: `Normalizing adopted plan for execution (clearing clarification/approval markers and stale required actions).`,
+      data: { source: planSource, phaseCount: plan.phases.length, normalization: 'execution_state_reset' },
+    });
     plan.requiresClarification = false;
     plan.clarificationQuestions = [];
 
@@ -239,6 +279,7 @@ export class MissionOrchestrator {
         agentName: 'Mission Planner',
         agentRole: 'planner',
         status: 'completed',
+        source: planSource,
       },
     });
 
@@ -258,10 +299,10 @@ export class MissionOrchestrator {
       while (taskIds.has(id)) id = `${phase.id}-configuration-request-${++configurationRequestIndex}`;
       return {
         id,
-        title: 'Provide required service configuration',
-        description: 'Provide the configuration needed to continue using an authorized service.',
+        title: 'Provide required user credentials',
+        description: 'Provide the user credentials or API keys needed to continue after automatic tool resolution was attempted.',
         agentRole: 'assistant',
-        systemPrompt: `Continue the original mission after receiving the user's provider configuration: ${ctx.prompt}. Do not repeat successful or uncertain side effects.`,
+        systemPrompt: `Continue the original mission after receiving the user's missing credentials or API keys: ${ctx.prompt}. I have already attempted to resolve or create the needed tools automatically. Do not repeat successful or uncertain side effects.`,
         dependsOnTaskIds: phase.tasks.map((task) => task.id),
         expectedArtifacts: [],
         requiredActions: [],
@@ -368,9 +409,7 @@ const executeTask = async (task: Task, savedTask: MissionTaskCheckpoint | undefi
               phaseId: phase.id,
               taskId: task.id,
               taskTitle: task.title,
-              agentId: sharedMissionAgentId,
-              agentName: 'Mission Agent',
-              agentRole: 'assistant',
+              ...agentIdentityForRole(agentRuntime, task.agentRole),
             },
           });
           await this.updateTask(ctx, phase.id, task.id, { status: 'in_progress', startedAt });
@@ -484,9 +523,7 @@ const executeTask = async (task: Task, savedTask: MissionTaskCheckpoint | undefi
                 phaseId: phase.id,
                 taskId: task.id,
                 taskTitle: task.title,
-                agentId: sharedMissionAgentId,
-                agentName: 'Mission Agent',
-                agentRole: 'assistant',
+                ...agentIdentityForRole(agentRuntime, task.agentRole),
                 error,
               },
             });
@@ -617,9 +654,7 @@ const executeTask = async (task: Task, savedTask: MissionTaskCheckpoint | undefi
               phaseId: phase.id,
               taskId: task.id,
               taskTitle: task.title,
-              agentId: sharedMissionAgentId,
-              agentName: 'Mission Agent',
-              agentRole: 'assistant',
+              ...agentIdentityForRole(agentRuntime, task.agentRole),
               artifacts: result.artifacts,
               output: result.output.slice(0, 4_000),
               ...(result.incompleteReason ? { error: result.incompleteReason } : {}),
@@ -668,9 +703,7 @@ const executeTask = async (task: Task, savedTask: MissionTaskCheckpoint | undefi
                   phaseId: phase.id,
                   taskId: pendingTask.id,
                   taskTitle: pendingTask.title,
-                  agentId: sharedMissionAgentId,
-                  agentName: 'Mission Agent',
-                  agentRole: 'assistant',
+                  ...agentIdentityForRole(agentRuntime, pendingTask.agentRole),
                   error: 'No dependency-ready task available',
                 },
               });
@@ -691,27 +724,80 @@ const executeTask = async (task: Task, savedTask: MissionTaskCheckpoint | undefi
         if (pendingInteraction?.phaseId === phase.id) {
           task = readyTasks.find((candidate) => candidate.id === pendingInteraction?.taskId);
           if (!task) {
-            logger.warn(
-              { missionId: ctx.missionId, phaseId: phase.id, taskId: pendingInteraction.taskId },
-              'Interrupted task is waiting on prerequisites; executing another ready task first',
-            );
-            task = readyTasks[0];
+            // The interrupted task is not yet dependency-ready. The Mission
+            // Director decides to run another ready task first; emit a single
+            // consolidated monologue for this scheduling decision.
+            if (readyTasks.length === 1) {
+              task = readyTasks[0]!;
+              await agentRuntime.emitMonologue({
+                agentRole: 'mission-director',
+                phaseId: phase.id,
+                thought: `The interrupted task "${pendingInteraction?.taskId}" is waiting on prerequisites. Only one task is dependency-ready: "${task.id}" (${task.title}). I am selecting it to make progress while the interrupted task becomes ready.`,
+                text: `Interrupted task not ready; selecting sole ready task "${task.title}".`,
+                data: { interruptedTaskId: pendingInteraction?.taskId, selectedTaskId: task.id, selectedTaskTitle: task.title, reason: 'interrupted_not_ready_sole_task' },
+              });
+            } else {
+              try {
+                task = await agentRuntime.selectNextTask(
+                  ctx.prompt,
+                  plan,
+                  phase,
+                  completedTaskIds,
+                  [...completedTaskSummaries.values()].slice(-10),
+                );
+                // selectNextTask emits its own monologue; no additional trace needed here
+              } catch (err) {
+                if (isFatalServiceError(err)) throw err;
+                // Director owns the fallback decision with visible reasoning.
+                const fallback = readyTasks.find((candidate) => !completedInPhase.has(candidate.id));
+                if (!fallback) throw err;
+                await agentRuntime.emitMonologue({
+                  agentRole: 'mission-director',
+                  phaseId: phase.id,
+                  thought: `The interrupted task "${pendingInteraction?.taskId}" is waiting on prerequisites. Task selection failed: ${err instanceof Error ? err.message : String(err)}. I am falling back to the first dependency-ready task "${fallback.id}" (${fallback.title}) to avoid stalling the phase.`,
+                  text: `Task selection failed; falling back to "${fallback.title}".`,
+                  data: { interruptedTaskId: pendingInteraction?.taskId, selectedTaskId: fallback.id, selectedTaskTitle: fallback.title, reason: 'selector_failure_fallback', error: err instanceof Error ? err.message : String(err) },
+                });
+                task = fallback;
+              }
+            }
           }
         } else {
-          try {
-            task = readyTasks.length === 1
-              ? readyTasks[0]!
-              : await agentRuntime.selectNextTask(
+          if (readyTasks.length === 1) {
+            task = readyTasks[0]!;
+            // Single ready task: emit a concise selection monologue (selectNextTask
+            // would also emit one, but we avoid the round-trip for the trivial case).
+            await agentRuntime.emitMonologue({
+              agentRole: 'mission-director',
+              phaseId: phase.id,
+              thought: `Only one task is dependency-ready in phase "${phase.name}": "${task.id}" (${task.title}). Selecting it to keep the phase moving.`,
+              text: `Selecting sole ready task "${task.title}".`,
+              data: { selectedTaskId: task.id, selectedTaskTitle: task.title, reason: 'sole_ready_task' },
+            });
+          } else {
+            try {
+              task = await agentRuntime.selectNextTask(
                 ctx.prompt,
                 plan,
                 phase,
                 completedTaskIds,
                 [...completedTaskSummaries.values()].slice(-10),
               );
-          } catch (err) {
-            if (isFatalServiceError(err)) throw err;
-            logger.error({ missionId: ctx.missionId, phaseId: phase.id, err: err instanceof Error ? err.message : String(err) }, 'Task selection failed');
-            task = readyTasks[0];
+              // selectNextTask emits its own monologue; no additional trace needed here
+            } catch (err) {
+              if (isFatalServiceError(err)) throw err;
+              // Director owns the fallback decision with visible reasoning.
+              const fallback = readyTasks.find((candidate) => !completedInPhase.has(candidate.id));
+              if (!fallback) throw err;
+              await agentRuntime.emitMonologue({
+                agentRole: 'mission-director',
+                phaseId: phase.id,
+                thought: `Task selection failed: ${err instanceof Error ? err.message : String(err)}. I could not get a reasoned selection from the director selector, so I am falling back to the first dependency-ready task "${fallback.id}" (${fallback.title}) to avoid stalling the phase.`,
+                text: `Task selection failed; falling back to "${fallback.title}".`,
+                data: { selectedTaskId: fallback.id, selectedTaskTitle: fallback.title, reason: 'selector_failure_fallback', error: err instanceof Error ? err.message : String(err) },
+              });
+              task = fallback;
+            }
           }
         }
         if (!task || !readyTasks.some((candidate) => candidate.id === task!.id)) {
@@ -734,9 +820,7 @@ const executeTask = async (task: Task, savedTask: MissionTaskCheckpoint | undefi
                     phaseId: phase.id,
                     taskId: pendingTask.id,
                     taskTitle: pendingTask.title,
-                    agentId: sharedMissionAgentId,
-                    agentName: 'Mission Agent',
-                    agentRole: 'assistant',
+                    ...agentIdentityForRole(agentRuntime, pendingTask.agentRole),
                     error: 'Task selector invalid',
                   },
                 });
@@ -774,9 +858,7 @@ const executeTask = async (task: Task, savedTask: MissionTaskCheckpoint | undefi
               phaseId: phase.id,
               taskId: task.id,
               taskTitle: task.title,
-              agentId: sharedMissionAgentId,
-              agentName: 'Mission Agent',
-              agentRole: 'assistant',
+              ...agentIdentityForRole(agentRuntime, task.agentRole),
               error,
             },
           });
@@ -815,6 +897,15 @@ const executeTask = async (task: Task, savedTask: MissionTaskCheckpoint | undefi
               [...completedTaskSummaries.values()],
               reviewIndex,
             );
+            // The Mission Director owns how phase-review results are applied.
+            // Emit decision BEFORE applying mutations.
+            await agentRuntime.emitMonologue({
+              agentRole: 'mission-director',
+              phaseId: phase.id,
+              thought: `Phase review ${reviewIndex} for "${phase.name}" returned ${review.satisfied ? 'satisfied' : 'not satisfied'}. The Phase Reviewer identified ${review.gaps.length} gap(s): ${review.gaps.slice(0, 5).join('; ')}. I will apply this review to the plan${review.followUpTask ? ` and adopt the proposed follow-up task "${review.followUpTask.title}"` : ''}.`,
+              text: `Phase review ${reviewIndex}: ${review.satisfied ? 'satisfied' : `${review.gaps.length} gap(s) found`}.`,
+              data: { reviewIndex, satisfied: review.satisfied, gaps: review.gaps, followUpTaskTitle: review.followUpTask?.title },
+            });
             const applied = applyPhaseReview(plan, phase.id, review);
             plan = applied.plan;
                   activePlan = plan;
@@ -859,11 +950,28 @@ const executeTask = async (task: Task, savedTask: MissionTaskCheckpoint | undefi
               ? ' Previous attempts made no observable progress on the same gaps; use a different authorized approach and do not repeat the same recovery steps. If a required value or authorization is missing, ask the user for it and wait.'
               : '';
             if (applied.amendment && noProgressGuidance) {
+              // Director decision: amend system prompt with no-progress guidance
+              await agentRuntime.emitMonologue({
+                agentRole: 'mission-director',
+                phaseId: phase.id,
+                thought: `No observable progress was made on the same gaps in review ${reviewIndex}. I am updating the recovery task's system prompt with no-progress guidance to require a different authorized approach.`,
+                text: `Adding no-progress guidance to recovery task.`,
+                data: { reviewIndex, gaps: applied.gaps, reason: 'no_progress_guidance' },
+              });
               applied.amendment.systemPrompt = `${applied.amendment.systemPrompt}
 ${noProgressGuidance}`;
               plan = { ...plan, phases: plan.phases.map((p) => p.id === phase.id ? { ...phase, tasks: [...phase.tasks] } : p) };
             }
             if (!applied.amendment) {
+              // The Mission Director creates a recovery task when the Phase
+              // Reviewer did not propose one, with visible rationale.
+              await agentRuntime.emitMonologue({
+                agentRole: 'mission-director',
+                phaseId: phase.id,
+                thought: `The Phase Reviewer reported ${applied.gaps.length} gap(s) for phase "${phase.name}" but did not propose an actionable follow-up task. I am creating a recovery task to address the gaps: ${applied.gaps.slice(0, 5).join('; ')}.`,
+                text: `Creating recovery task for unresolved phase gaps.`,
+                data: { reviewIndex, gaps: applied.gaps, reason: 'reviewer_no_followup' },
+              });
               logger.error({ missionId: ctx.missionId, phaseId: phase.id, gaps: applied.gaps }, 'Mission phase remains incomplete and reviewer provided no actionable follow-up task');
               const amendmentIndex = phase.tasks.filter((t: any) => t.id.startsWith(`${phase.id}-amendment-`)).length + 1;
               const amendmentTask: Task = {
@@ -899,9 +1007,9 @@ ${noProgressGuidance}`;
                   gaps: applied.gaps,
                   task: amendmentTask,
                   plan,
-                  agentId: agentRuntime.getAgentIdForRole('phase-reviewer'),
-                  agentName: 'Phase Reviewer Agent',
-                  agentRole: 'phase-reviewer',
+                  agentId: agentRuntime.getAgentIdForRole('mission-director'),
+                  agentName: 'Mission Director',
+                  agentRole: 'mission-director',
                 },
               });
               await executePendingTasks();
@@ -915,6 +1023,14 @@ ${noProgressGuidance}`;
               if (isFatalServiceError(err)) throw err;
               logger.error({ missionId: ctx.missionId, err: err instanceof Error ? err.message : String(err) }, 'Failed to persist amended plan');
             }
+            // Director decision: adopt reviewer's proposed amendment
+            await agentRuntime.emitMonologue({
+              agentRole: 'mission-director',
+              phaseId: phase.id,
+              thought: `The Phase Reviewer proposed an actionable follow-up task "${applied.amendment.title}" for review ${reviewIndex}. I am adopting this amendment and scheduling it to address the identified gaps: ${applied.gaps.slice(0, 5).join('; ')}.`,
+              text: `Adopting reviewer's follow-up task "${applied.amendment.title}".`,
+              data: { reviewIndex, amendmentId: applied.amendment.id, amendmentTitle: applied.amendment.title, gaps: applied.gaps, reason: 'reviewer_followup_adopted' },
+            });
             await ctx.broadcast({
               type: 'phase_plan_amended',
               missionId: ctx.missionId,
@@ -925,9 +1041,9 @@ ${noProgressGuidance}`;
                 gaps: applied.gaps,
                 task: applied.amendment,
                 plan,
-                agentId: agentRuntime.getAgentIdForRole('phase-reviewer'),
-                agentName: 'Phase Reviewer Agent',
-                agentRole: 'phase-reviewer',
+                agentId: agentRuntime.getAgentIdForRole('mission-director'),
+                agentName: 'Mission Director',
+                agentRole: 'mission-director',
               },
             });
             await executePendingTasks();
@@ -954,6 +1070,13 @@ ${noProgressGuidance}`;
       }
 
       if (!phaseIsComplete) {
+        await agentRuntime.emitMonologue({
+          agentRole: 'mission-director',
+          phaseId: phase.id,
+          thought: `Phase "${phase.name}" review is satisfied: its tasks are completed and the phase reviewer confirmed the phase goal. The phase is complete. I am marking it awaiting_approval so the completion is persisted before the mission continues to the next phase.`,
+          text: `Phase "${phase.name}" is complete; moving to awaiting_approval.`,
+          data: { phaseId: phase.id, phaseName: phase.name, decision: 'phase_complete_awaiting_approval' },
+        });
         await this.updatePhase(ctx, phase.id, { status: 'awaiting_approval' });
         phase.status = 'awaiting_approval';
         await ctx.broadcast({ type: 'phase_completed', missionId: ctx.missionId, timestamp: Date.now(), data: { phaseId: phase.id, phaseName: phase.name, artifacts: phaseOutput.tasks.flatMap((t: any) => t.artifacts) } });
@@ -972,6 +1095,13 @@ ${noProgressGuidance}`;
       if (phase.requiresApproval) {
         const question = phase.approvalQuestion || `Phase "${phase.name}" complete. Approve to continue?`;
         const approvalId = `approval-${ctx.missionId}-${phase.id}-${Date.now()}`;
+        await agentRuntime.emitMonologue({
+          agentRole: 'mission-director',
+          phaseId: phase.id,
+          thought: `Phase "${phase.name}" is complete and its plan requires explicit approval before the mission continues. I am requesting approval with question: "${question}". The mission will pause here until the user approves or rejects.`,
+          text: `Requesting approval for phase "${phase.name}".`,
+          data: { phaseId: phase.id, phaseName: phase.name, decision: 'approval_requested' },
+        });
         await this.updatePhase(ctx, phase.id, { approvalQuestion: question });
         phase.approvalQuestion = question;
         await ctx.broadcast({
@@ -982,17 +1112,38 @@ ${noProgressGuidance}`;
         });
         const decision = await ctx.waitForApproval(phase.id, question);
         if (!decision.approved) {
+          await agentRuntime.emitMonologue({
+            agentRole: 'mission-director',
+            phaseId: phase.id,
+            thought: `The user rejected phase "${phase.name}": ${decision.reason}. I am halting the mission at this phase with status rejected_at_phase; no further phases will execute.`,
+            text: `Phase "${phase.name}" rejected by user; mission halted.`,
+            data: { phaseId: phase.id, reason: decision.reason, decision: 'approval_rejected' },
+          });
           await this.updatePhase(ctx, phase.id, { status: 'rejected', rejectionReason: decision.reason });
           phase.status = 'rejected';
           phase.rejectionReason = decision.reason;
           await ctx.broadcast({ type: 'approval_rejected', missionId: ctx.missionId, timestamp: Date.now(), data: { phaseId: phase.id, reason: decision.reason } });
           return { plan, outputs: { ...outputs, status: 'rejected_at_phase', phaseId: phase.id, reason: decision.reason }, compensations };
         }
+        await agentRuntime.emitMonologue({
+          agentRole: 'mission-director',
+          phaseId: phase.id,
+          thought: `The user approved phase "${phase.name}". I am marking the phase approved and the mission will continue to the next phase.`,
+          text: `Phase "${phase.name}" approved by user.`,
+          data: { phaseId: phase.id, decision: 'approval_approved' },
+        });
         await this.updatePhase(ctx, phase.id, { status: 'approved', approvedAt: Date.now(), approvedBy: 'user' });
         phase.status = 'approved';
         phase.approvedBy = 'user';
         await ctx.broadcast({ type: 'approval_approved', missionId: ctx.missionId, timestamp: Date.now(), data: { phaseId: phase.id } });
       } else {
+        await agentRuntime.emitMonologue({
+          agentRole: 'mission-director',
+          phaseId: phase.id,
+          thought: `Phase "${phase.name}" is complete and does not require separate approval. I am marking it completed and the mission will continue to the next phase.`,
+          text: `Phase "${phase.name}" marked completed (no approval required).`,
+          data: { phaseId: phase.id, decision: 'phase_auto_completed' },
+        });
         await this.updatePhase(ctx, phase.id, { status: 'completed' });
         phase.status = 'completed';
       }
@@ -1046,6 +1197,12 @@ ${noProgressGuidance}`;
         ),
       ) || plan.phases.at(-1);
       if (!recoveryPhase) {
+        await agentRuntime.emitMonologue({
+          agentRole: 'mission-director',
+          thought: `Mission completion could not be routed to a recovery phase: no phase matched the unmet requirements (${gaps.join('; ')}) and there is no fallback phase. I am returning the mission with status awaiting_review so the gaps can be reviewed rather than falsely marking the mission complete.`,
+          text: `Mission awaiting review: no recovery phase for unmet requirements.`,
+          data: { decision: 'mission_awaiting_review', gaps, reason: 'no_recovery_phase' },
+        });
         return {
           plan,
           outputs: {
@@ -1077,6 +1234,12 @@ ${noProgressGuidance}`;
         await pauseForConfiguration(recoveryPhase, requestTask, phaseOutput);
       }
       if (!madeProgress && completionNoProgress >= MAX_NO_PROGRESS_RECOVERY_ATTEMPTS) {
+        await agentRuntime.emitMonologue({
+          agentRole: 'mission-director',
+          thought: `Mission completion recovery reached the safety ceiling (${MAX_NO_PROGRESS_RECOVERY_ATTEMPTS} attempts with no observable progress) for gaps: ${gaps.join('; ')}. I am returning the mission with status awaiting_review rather than continuing to spin; these gaps require user or backend attention.`,
+          text: `Mission awaiting review: recovery safety ceiling reached.`,
+          data: { decision: 'mission_awaiting_review', gaps, reason: 'no_progress_ceiling' },
+        });
         logger.error(
           { missionId: ctx.missionId, gaps, completionNoProgress },
           'Mission completion recovery made no observable progress after approach changes; pausing for review (safety ceiling)',
@@ -1103,6 +1266,15 @@ ${noProgressGuidance}`;
       let taskId = `${recoveryPhase.id}-mission-recovery-${recoveryIndex}`;
       const existingTaskIds = new Set(plan.phases.flatMap((phase) => phase.tasks.map((task) => task.id)));
       while (existingTaskIds.has(taskId)) taskId = `${taskId}-${recoveryIndex}`;
+      // The Mission Director decides to create a recovery task with visible
+      // rationale: the Mission Evaluator reported unmet requirements.
+      await agentRuntime.emitMonologue({
+        agentRole: 'mission-director',
+        phaseId: recoveryPhase.id,
+        thought: `The Mission Evaluator reported ${gaps.length} unmet mission completion requirement(s) in phase "${recoveryPhase.name}": ${gaps.slice(0, 5).join('; ')}. I am creating a recovery task (attempt ${recoveryIndex}) to resolve these gaps before the mission can complete.`,
+        text: `Creating mission recovery task (attempt ${recoveryIndex}) for ${gaps.length} gap(s).`,
+        data: { recoveryIndex, gaps, targetTaskIds, reason: 'completion_gaps' },
+      });
       const recoveryTask: Task = {
         id: taskId,
         title: `Resolve mission completion gaps (attempt ${recoveryIndex})`,
@@ -1134,9 +1306,9 @@ ${noProgressGuidance}`;
           gaps,
           task: recoveryTask,
           plan,
-          agentId: sharedMissionAgentId,
-          agentName: 'Mission Agent',
-          agentRole: 'assistant',
+          agentId: agentRuntime.getAgentIdForRole('mission-director'),
+          agentName: 'Mission Director',
+          agentRole: 'mission-director',
         },
       });
 
@@ -1281,9 +1453,7 @@ ${noProgressGuidance}`;
           phaseId: recoveryPhase.id,
           taskId: recoveryTask.id,
           taskTitle: recoveryTask.title,
-          agentId: sharedMissionAgentId,
-          agentName: 'Mission Agent',
-          agentRole: 'assistant',
+          ...agentIdentityForRole(agentRuntime, recoveryTask.agentRole),
           ...(result
             ? { artifacts: result.artifacts, output: result.output.slice(0, 4_000), tokensUsed: result.tokensUsed, ...(result.incompleteReason ? { error: result.incompleteReason } : {}) }
             : { error: failure }),
@@ -1292,6 +1462,12 @@ ${noProgressGuidance}`;
       await ctx.controlCheckpoint?.();
       if (recoveryTask.status !== 'completed') {
         const review = await this.evaluateMissionCompletion(ctx, plan, outputs);
+        await agentRuntime.emitMonologue({
+          agentRole: 'mission-director',
+          thought: `The mission recovery task "${recoveryTask.id}" did not complete successfully (status: ${recoveryTask.status}). The final completion review found ${review.gaps.length} unmet requirement(s): ${review.gaps.join('; ')}. I am returning the mission with status awaiting_review because recovery did not resolve the completion gaps.`,
+          text: `Mission awaiting review: recovery task did not complete.`,
+          data: { decision: 'mission_awaiting_review', gaps: review.gaps, reason: 'recovery_failed', recoveryTaskId: recoveryTask.id },
+        });
         return {
           plan,
           outputs: {
@@ -1307,6 +1483,12 @@ ${noProgressGuidance}`;
     if (!completionVerified) {
       const finalCompletionReview = await this.evaluateMissionCompletion(ctx, plan, outputs);
       if (!finalCompletionReview.satisfied) {
+        await agentRuntime.emitMonologue({
+          agentRole: 'mission-director',
+          thought: `The final mission completion review is not satisfied: ${finalCompletionReview.gaps.length} unmet requirement(s) remain: ${finalCompletionReview.gaps.join('; ')}. I am returning the mission with status awaiting_review rather than marking it complete.`,
+          text: `Mission awaiting review: final completion review not satisfied.`,
+          data: { decision: 'mission_awaiting_review', gaps: finalCompletionReview.gaps, reason: 'final_review_not_satisfied' },
+        });
         return {
           plan,
           outputs: { ...outputs, status: 'awaiting_review', gaps: finalCompletionReview.gaps },
@@ -1314,6 +1496,12 @@ ${noProgressGuidance}`;
         };
       }
     }
+    await agentRuntime.emitMonologue({
+      agentRole: 'mission-director',
+      thought: `Mission completion is verified: all completion criteria are met and no gaps remain. I am marking the mission status as completed.`,
+      text: `Mission completed: all criteria met.`,
+      data: { decision: 'mission_completed' },
+    });
     outputs.status = 'completed';
     await new MissionCompletedListener().onMissionCompleted(
       workflowInput,
@@ -1491,6 +1679,14 @@ ${noProgressGuidance}`;
       this.agentRuntime = rt;
     }
     const agentRuntime = this.agentRuntime!;
+    const directorAgentId = agentRuntime.getAgentIdForRole('mission-director');
+    const directorIdentity = { agentId: directorAgentId, agentName: 'Mission Director', agentRole: 'mission-director' };
+    await agentRuntime.emitMonologue({
+      agentRole: 'mission-director',
+      thought: `A user message arrived during the mission: "${content.slice(0, 200)}". I need to understand the intent, decide whether to forward it to another agent, and formulate a brief acknowledgement and helpful response.`,
+      text: `Processing user message: ${content.slice(0, 120)}${content.length > 120 ? '...' : ''}`,
+      data: { content: content.slice(0, 500) },
+    });
     const agentId = await agentRuntime.getOrCreateAgent('mission-director', 'You are the mission primary agent. Process user messages during a mission: understand intent, forward to another agent if needed by describing the delegation, formulate a brief acknowledgement, and provide a real helpful response. Return JSON {"acknowledgement":"...","response":"...","forwardTo":"..."}.');
     let result: { output: string };
     try {
@@ -1503,7 +1699,7 @@ ${noProgressGuidance}`;
         executionPolicy: { ...DEFAULT_AGENT_EXECUTION_POLICY, maxActions: 0, maxCompletionTokens: 1024, maxCompletionTokensPerCall: 512, maxDelegations: 0 },
       });
     } catch (err) {
-      await ctx.broadcast({ type: 'agent_error', missionId: ctx.missionId, timestamp: Date.now(), data: { error: err instanceof Error ? err.message : String(err) } });
+      await ctx.broadcast({ type: 'agent_error', missionId: ctx.missionId, timestamp: Date.now(), data: { error: err instanceof Error ? err.message : String(err), ...directorIdentity, thought: 'Error processing user message; returning fallback acknowledgement.' } });
       return { acknowledgement: 'Message received.', response: 'I received your message but could not process it right now.' };
     }
     let acknowledgement = 'Message received.';
@@ -1517,10 +1713,23 @@ ${noProgressGuidance}`;
     } catch {}
     if (!response.trim()) response = 'I received your message.';
     if (forwardTo) {
-      await ctx.broadcast({ type: 'agent_delegation', missionId: ctx.missionId, timestamp: Date.now(), data: { from: 'mission-director', to: forwardTo, content } });
+      await agentRuntime.emitMonologue({
+        agentRole: 'mission-director',
+        thought: `I am forwarding the user message to "${forwardTo}" because the intent requires that agent's expertise or action.`,
+        text: `Forwarding message to "${forwardTo}".`,
+        data: { forwardTo, content: content.slice(0, 500) },
+      });
+      await ctx.broadcast({ type: 'agent_delegation', missionId: ctx.missionId, timestamp: Date.now(), data: { from: 'mission-director', to: forwardTo, content, ...directorIdentity, thought: `Delegating user message to ${forwardTo}.` } });
+    } else {
+      await agentRuntime.emitMonologue({
+        agentRole: 'mission-director',
+        thought: `I have processed the user message and formulated a direct response without delegation.`,
+        text: `Responding directly to the user.`,
+        data: { response: response.slice(0, 500) },
+      });
     }
-    await ctx.broadcast({ type: 'agent_acknowledgement', missionId: ctx.missionId, timestamp: Date.now(), data: { content: acknowledgement } });
-    await ctx.broadcast({ type: 'agent_response', missionId: ctx.missionId, timestamp: Date.now(), data: { content: response } });
+    await ctx.broadcast({ type: 'agent_acknowledgement', missionId: ctx.missionId, timestamp: Date.now(), data: { content: acknowledgement, ...directorIdentity, thought: 'Acknowledging user message.' } });
+    await ctx.broadcast({ type: 'agent_response', missionId: ctx.missionId, timestamp: Date.now(), data: { content: response, ...directorIdentity, thought: 'Responding to user message.' } });
     return { acknowledgement, response };
   }
 
@@ -1605,6 +1814,23 @@ ${noProgressGuidance}`;
       plan.summary || '',
       completedTaskSummaries,
     );
+    // The Mission Evaluator owns the completion-review decision; broadcast it
+    // as an attributed monologue so the reasoning is visible in the UI.
+    try {
+      await agentRuntime.emitMonologue({
+        agentRole: 'mission-evaluator',
+        thought: review.satisfied
+          ? `Mission completion review: I evaluated the observed task outputs and artifacts against the mission goal "${ctx.prompt.slice(0, 120)}" and found all requirements satisfied. The mission may complete.`
+          : `Mission completion review: I evaluated the observed task outputs and artifacts against the mission goal "${ctx.prompt.slice(0, 120)}" and found ${review.gaps.length} unmet requirement(s): ${review.gaps.join('; ')}. The mission must not be marked complete.`,
+        text: review.satisfied
+          ? 'Mission completion review: all requirements satisfied.'
+          : `Mission completion review: ${review.gaps.length} unmet requirement(s) found.`,
+        kind: 'completion-review',
+        data: { satisfied: review.satisfied, gaps: review.gaps },
+      });
+    } catch (err) {
+      logger.warn({ missionId: ctx.missionId, err: err instanceof Error ? err.message : String(err) }, 'Failed to emit completion-review monologue');
+    }
     if (!review.satisfied) {
       logger.warn(
         { missionId: ctx.missionId, gaps: review.gaps },

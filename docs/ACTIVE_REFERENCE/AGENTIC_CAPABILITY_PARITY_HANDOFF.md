@@ -42,12 +42,16 @@ This handoff was prepared from checkpoint 025, not a fresh service query. Refres
 - Do not send executable tasks with `Human`/`User` roles to Brain as if they were agent roles; human decisions must be represented as explicit clarification/approval.
 - Preserve complaint records for semantically invalid content even when the underlying LLM/API call succeeded.
 - Preserve the existing worktree changes; no broad cleanup, reset, or unrelated refactoring.
+- **All mission activities (planning, directing, doing) must belong to an agent with ability to evaluate, reflect, and redirect.** No planning, directing, or doing may occur without agent oversight. The Mission Planner and Mission Director are distinct overseeing agents; orchestration code is substrate (persistence/transport/checkpoints/timers) invoked under agent decisions, not source of unowned planning/direction.
+- **"Load existing plan?" is an explicit agent thought/decision** ("can I load an existing plan or do I need to create a new one?") — no silent code-only reuse. This is implemented and verified in live missions.
+- **Control decisions are visible, attributed agent traces.** Planning/directing/control actions (plan load/create/adopt, task selection/dispatch, phase review/amend/recovery, phase completion/approval routing, mission completion/terminal routing, user-message routing by the Director) are recorded as monologues/events with thought/metadata attributed to the acting agent role. This is implemented and verified in live missions.
+- **Plan normalization/mutation is attributable.** Mutations performed under agent direction are traceable; silent code-only plan mutations are not permitted.
 
 ## Key files
 
 - `docs/ACTIVE_REFERENCE/AGENTIC_CAPABILITY_PARITY.md` — source of truth and live acceptance record.
 - `services/temporal/src/agent/MissionAgentRuntime.ts` — Agent task/review execution, complaint reporting, semantic validation, safe follow-ups.
-- `services/temporal/src/planner/MissionOrchestrator.ts` and `services/temporal/src/routes/missions.ts` — mission retry and persisted-checkpoint behavior.
+- `services/temporal/src/planner/MissionOrchestrator.ts` and `services/temporal/src/routes/missions.ts` — mission retry and persisted-checkpoint behavior (agent-owned control implemented; planner load-vs-create decision and Director directing traces are active).
 - `services/brain/src/services/ModelRouter.ts` — response-time and complaint-based provider ranking.
 - `services/brain/src/__tests__/model-router.test.ts` — regression coverage for ranking behavior (not live acceptance).
 
@@ -57,4 +61,5 @@ This handoff was prepared from checkpoint 025, not a fresh service query. Refres
 - **Correction messages improved:** `expectedArtifactCorrection` and the `alreadySatisfiedRequiredAction` message now reference action results already in the conversation, helping the agent populate required artifact sections from completed action receipts.
 - **Tests:** 36/36 AgentExecutor tests pass, including a new test for resume-without-retry-guidance with exhausted brain-call budget.
 - **Brain latency ranking:** `ModelRouter.ts` lines 261-264 contain the tested formula `80 / (1 + avgLatencyMs / 30000) - 40`. Code is in place; deployment status is unverified at this checkpoint.
+- **Agent-owned control architecture active:** Mission Planner load-vs-create decisions with visible reasoning and Mission Director directing/control decisions with attributed monologues/events are implemented and verified in live missions (`agentic-parity-live-20261015-02`, `agentic-plugin-execute-20261014-02`).
 - **Pending runtime verification:** Live re-run of the creator mission and Brain deployment are required for end-to-end acceptance. The worktree preserves all prior changes; no unrelated resets were performed.

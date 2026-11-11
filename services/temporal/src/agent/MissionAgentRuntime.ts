@@ -32,6 +32,25 @@ import {
   missionTaskDependencyIssues,
 } from '../planner/MissionPlanner';
 
+/**
+ * Stable agent identities used across all mission control activities.
+ * Each role has a human-readable name, a stable agentId prefix, and a role key.
+ */
+export const MISSION_AGENT_ROLES = {
+  planner: { agentIdPrefix: 'planner', agentName: 'Mission Planner', agentRole: 'planner' },
+  'mission-director': { agentIdPrefix: 'mission-director', agentName: 'Mission Director', agentRole: 'mission-director' },
+  'phase-reviewer': { agentIdPrefix: 'phase-reviewer', agentName: 'Phase Reviewer', agentRole: 'phase-reviewer' },
+  'mission-evaluator': { agentIdPrefix: 'mission-evaluator', agentName: 'Mission Evaluator', agentRole: 'mission-evaluator' },
+  executor: { agentIdPrefix: 'assistant', agentName: 'Mission Agent', agentRole: 'assistant' },
+} as const;
+
+export type MissionAgentRoleKey = keyof typeof MISSION_AGENT_ROLES;
+
+export function resolveAgentIdentity(role: string): { agentIdPrefix: string; agentName: string; agentRole: string } {
+  const key = role.trim().toLowerCase().replace(/[_-]+/g, '-') as MissionAgentRoleKey;
+  return MISSION_AGENT_ROLES[key] || { agentIdPrefix: key, agentName: role, agentRole: role };
+}
+
 const TASK_SELECTOR_SYSTEM_PROMPT = `You are the mission task selector. Select the single best next task from the supplied ready tasks, using the mission goal, phase goal, and completed task IDs. You may not select a task that is not listed as ready, add tasks, or change task instructions. Return only JSON in the form {"taskId":"<ready-task-id>"}.`;
 const TASK_SELECTOR_EXECUTION_POLICY: AgentExecutionPolicy = {
   ...DEFAULT_AGENT_EXECUTION_POLICY,
@@ -375,6 +394,41 @@ export class MissionAgentRuntime {
   private taskAgentMap: Map<string, string> = new Map(); // taskId -> agentId
   private brainClient: BrainClient;
 
+  /**
+   * Emit an agent-attributed monologue/thought event so every control decision
+   * (planning, directing, reviewing, recovering, completing) is visible in the
+   * mission reasoning trace instead of being a silent orchestration decision.
+   */
+  async emitMonologue(params: {
+    agentRole: string;
+    thought: string;
+    text?: string;
+    taskId?: string;
+    phaseId?: string;
+    kind?: string;
+    data?: Record<string, unknown>;
+  }): Promise<void> {
+    if (!this.broadcast) return;
+    const identity = resolveAgentIdentity(params.agentRole);
+    await this.broadcast({
+      type: 'monologue',
+      missionId: this.missionId,
+      timestamp: Date.now(),
+      data: {
+        agentId: this.getAgentIdForRole(params.agentRole),
+        agentName: identity.agentName,
+        agentRole: identity.agentRole,
+        ...(params.phaseId ? { phaseId: params.phaseId } : {}),
+        ...(params.taskId ? { taskId: params.taskId } : {}),
+        thought: params.thought,
+        text: params.text || params.thought,
+        ...(params.kind ? { kind: params.kind } : {}),
+        ...(params.data || {}),
+      },
+    });
+  }
+
+
   constructor(config: MissionAgentConfig) {
     this.missionId = config.missionId;
     this.tenantId = config.tenantId;
@@ -491,16 +545,17 @@ export class MissionAgentRuntime {
     }
 
     const toolAccess = this.resolveToolAccess('planner');
+    const identity = resolveAgentIdentity('planner');
     const definition: AgentDefinition = {
       id: agentId,
       tenantId: this.tenantId,
-      name: 'Mission Planner',
+      name: identity.agentName,
       description: `Planner agent for mission ${this.missionId}`,
-      type: 'planner',
+      type: identity.agentRole,
       systemPrompt,
       tools: toolAccess.tools,
       ...(toolAccess.policy ? { toolPolicy: toolAccess.policy } : {}),
-      metadata: { missionId: this.missionId, agentRole: 'planner' },
+      metadata: { missionId: this.missionId, agentRole: identity.agentRole },
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -510,6 +565,47 @@ export class MissionAgentRuntime {
     return agentId;
   }
 
+  /**
+   * The Mission Planner evaluates whether an existing persisted plan can be
+   * loaded/reused for this mission, retry, or resume. This is an explicit agent
+   * thought: "Can I load an existing plan or do I need to create a new one?"
+   * The decision and its reasoning are broadcast as an attributed monologue so
+   * the UI can render the planner's rationale instead of a silent reuse.
+   */
+  async evaluatePlanLoad(params: {
+    missionId: string;
+    prompt: string;
+    context?: Record<string, unknown>;
+    existingPlan?: Plan | null;
+    isRetry?: boolean;
+    isResume?: boolean;
+    checkpointPlan?: Plan | null;
+  }): Promise<{ loadExisting: boolean; plan?: Plan; reason: string }> {
+    const { existingPlan, isRetry, isResume, checkpointPlan } = params;
+    const candidate = existingPlan || checkpointPlan;
+    if (candidate && Array.isArray(candidate.phases) && candidate.phases.length > 0) {
+      const hasTasks = candidate.phases.some((phase) => (phase.tasks || []).length > 0);
+      if (hasTasks) {
+        await this.emitMonologue({
+          agentRole: 'planner',
+          phaseId: 'planning',
+          thought: `Can I load an existing plan or do I need to create a new one? I found a persisted plan for mission ${params.missionId} with ${candidate.phases.length} phase(s). The plan is non-empty and structurally valid, and this run is${isRetry ? ' a retry' : ''}${isResume ? ' a resume' : ''}. I will load and adopt the existing plan rather than regenerate it.`,
+          text: `Loading existing persisted plan for mission ${params.missionId}.`,
+          data: { decision: 'load_existing', reason: 'persisted plan present and valid', phaseCount: candidate.phases.length },
+        });
+        return { loadExisting: true, plan: candidate, reason: 'persisted plan present and valid' };
+      }
+    }
+    await this.emitMonologue({
+      agentRole: 'planner',
+      phaseId: 'planning',
+      thought: `Can I load an existing plan or do I need to create a new one? No valid persisted plan exists for mission ${params.missionId}${isRetry ? ' (retry)' : ''}${isResume ? ' (resume)' : ''}. I will generate a new plan from the goal.`,
+      text: `No existing plan found; generating a new plan for mission ${params.missionId}.`,
+      data: { decision: 'create_new', reason: 'no persisted plan' },
+    });
+    return { loadExisting: false, reason: 'no persisted plan' };
+  }
+
   async generatePlan(
     prompt: string,
     context?: Record<string, unknown>,
@@ -517,6 +613,12 @@ export class MissionAgentRuntime {
   ): Promise<Plan> {
     const agentId = await this.registerPlannerAgent(PLANNER_SYSTEM_PROMPT);
     let responseRequestId: string | undefined;
+    await this.emitMonologue({
+      agentRole: 'planner',
+      phaseId: 'planning',
+      thought: `Planning mission: ${prompt.slice(0, 200)}. I will generate a new plan for this goal.`,
+      text: `Planning mission: ${prompt.slice(0, 200)}. I will generate a new plan for this goal.`,
+    });
     return generateValidPlan(prompt, context, this.missionId, async (request: PlannerCompletionRequest) => {
       const result = await this.executePromptTask(agentId, {
         taskId: `${this.missionId}:planner${this.missionRetryCount > 0 ? `:retry-${this.missionRetryCount}` : ''}:attempt-${request.attempt}`,
@@ -532,13 +634,37 @@ export class MissionAgentRuntime {
         executionPolicy: PLANNER_EXECUTION_POLICY,
       });
       responseRequestId = result.requestId;
+      if (result.reasoning) {
+        await this.emitMonologue({
+          agentRole: 'planner',
+          phaseId: 'planning',
+          taskId: request.attempt ? `${this.missionId}:planner:attempt-${request.attempt}` : undefined,
+          thought: result.reasoning,
+          text: result.reasoning,
+        });
+      }
       return result.output;
     }, async (reason) => {
       await this.reportBrainComplaint(
         responseRequestId,
         `Mission planner validation failed: ${reason}`,
       );
-    }, onProgress);
+      await this.emitMonologue({
+        agentRole: 'planner',
+        phaseId: 'planning',
+        thought: `Planner validation rejected an attempt: ${reason}. I will request a corrected plan.`,
+        text: `Planner validation rejected an attempt: ${reason}. I will request a corrected plan.`,
+      });
+    }, async (progress) => {
+      await onProgress?.(progress);
+      await this.emitMonologue({
+        agentRole: 'planner',
+        phaseId: 'planning',
+        thought: `Planner attempt ${progress.attempt} ${progress.status}: ${progress.reason}`,
+        text: `Planner attempt ${progress.attempt} ${progress.status}: ${progress.reason}`,
+        data: { attempt: progress.attempt, status: progress.status, reason: progress.reason, transient: progress.transient },
+      });
+    });
   }
 
   async selectNextTask(
@@ -561,6 +687,13 @@ export class MissionAgentRuntime {
     const selectionIndex = completedInPhase + 1;
     const routingSessionId = `${this.missionId}:task-selection:${phase.id}:${selectionIndex}`;
     const agentId = await this.getOrCreateAgent('mission-director', TASK_SELECTOR_SYSTEM_PROMPT);
+    await this.emitMonologue({
+      agentRole: 'mission-director',
+      phaseId: phase.id,
+      thought: `Which task should run next in phase "${phase.name}"? ${readyTasks.length} task(s) are dependency-ready: ${readyTasks.map((t) => t.id).join(', ')}. I will ask the task selector to choose the single best next task using the mission goal, phase goal, and completed task outputs.`,
+      text: `Selecting next task for phase "${phase.name}" from ${readyTasks.length} ready task(s).`,
+      data: { readyTaskIds: readyTasks.map((t) => t.id) },
+    });
     const selectionContext = JSON.stringify({
       missionGoal,
       planSummary: plan.summary,
@@ -622,7 +755,16 @@ export class MissionAgentRuntime {
         const selectedTask = typeof parsed.taskId === 'string'
           ? readyTasks.find((task) => task.id === parsed.taskId)
           : undefined;
-        if (selectedTask) return selectedTask;
+        if (selectedTask) {
+          await this.emitMonologue({
+            agentRole: 'mission-director',
+            phaseId: phase.id,
+            thought: `Task selection complete. I chose "${selectedTask.id}" (${selectedTask.title}) to run next in phase "${phase.name}". The selector picked this task because it is dependency-ready and best advances the phase goal given the completed task outputs.`,
+            text: `Selected task "${selectedTask.title}" to run next.`,
+            data: { selectedTaskId: selectedTask.id, selectedTaskTitle: selectedTask.title },
+          });
+          return selectedTask;
+        }
         validationIssue = 'taskId must identify one of the ready tasks provided';
       } catch (error) {
         validationIssue = `response must be valid JSON: ${error instanceof Error ? error.message : String(error)}`;
@@ -750,6 +892,14 @@ export class MissionAgentRuntime {
           );
           continue;
         }
+        // Phase Reviewer emits attributed monologue for satisfied review
+        await this.emitMonologue({
+          agentRole: 'phase-reviewer',
+          phaseId: phase.id,
+          thought: `Phase review ${reviewIndex} for "${phase.name}": I evaluated the completed task outputs and artifacts against the phase goal and found all requirements satisfied. The phase may be marked complete.`,
+          text: `Phase review ${reviewIndex}: phase "${phase.name}" satisfied.`,
+          data: { reviewIndex, satisfied: true, gaps: [], phaseId: phase.id, phaseName: phase.name },
+        });
         return { satisfied: true, gaps: review.gaps as string[] };
       }
 
@@ -802,9 +952,26 @@ export class MissionAgentRuntime {
         );
         continue;
       }
+      // Phase Reviewer emits attributed monologue for review with gaps and follow-up task
+      const followUpTitle = candidateReview.followUpTask?.title || 'unknown';
+      await this.emitMonologue({
+        agentRole: 'phase-reviewer',
+        phaseId: phase.id,
+        thought: `Phase review ${reviewIndex} for "${phase.name}": I identified ${candidateReview.gaps.length} unmet requirement(s): ${candidateReview.gaps.slice(0, 5).join('; ')}. I am proposing a follow-up task "${followUpTitle}" to address these gaps.`,
+        text: `Phase review ${reviewIndex}: ${candidateReview.gaps.length} gap(s) found; proposing follow-up task.`,
+        data: { reviewIndex, satisfied: false, gaps: candidateReview.gaps, followUpTaskTitle: followUpTitle, phaseId: phase.id, phaseName: phase.name },
+      });
       return candidateReview;
     }
     const gap = `Phase review could not produce a valid assessment after ${MAX_PHASE_REVIEW_ATTEMPTS} attempts: ${validationIssue || 'invalid response'}`;
+    // Phase Reviewer emits attributed monologue for failed review after max attempts
+    await this.emitMonologue({
+      agentRole: 'phase-reviewer',
+      phaseId: phase.id,
+      thought: `Phase review ${reviewIndex} for "${phase.name}": I could not produce a valid assessment after ${MAX_PHASE_REVIEW_ATTEMPTS} attempts. The phase remains unverified: ${gap}.`,
+      text: `Phase review ${reviewIndex}: unable to produce valid assessment after ${MAX_PHASE_REVIEW_ATTEMPTS} attempts.`,
+      data: { reviewIndex, satisfied: false, gaps: [gap], phaseId: phase.id, phaseName: phase.name, reason: 'max_attempts_exceeded' },
+    });
     return {
       satisfied: false,
       gaps: [gap],
@@ -925,16 +1092,37 @@ export class MissionAgentRuntime {
         );
         continue;
       }
+      // Mission Evaluator emits attributed monologue for completion review
+      await this.emitMonologue({
+        agentRole: 'mission-evaluator',
+        phaseId: 'mission-review',
+        thought: review.satisfied
+          ? `Mission completion review: I evaluated the observed task outputs and artifacts against the mission goal and found all requirements satisfied. The mission may complete.`
+          : `Mission completion review: I evaluated the observed task outputs and artifacts against the mission goal and found ${review.gaps.length} unmet requirement(s): ${review.gaps.join('; ')}. The mission must not be marked complete.`,
+        text: review.satisfied
+          ? 'Mission completion review: all requirements satisfied.'
+          : `Mission completion review: ${review.gaps.length} unmet requirement(s) found.`,
+        kind: 'completion-review',
+        data: { satisfied: review.satisfied, gaps: review.gaps },
+      });
       return { satisfied: review.satisfied, gaps: review.gaps as string[] };
     }
     const taskEvidence = completedTaskSummaries
       .map((summary) => `${summary.taskId} (${summary.expectedArtifacts?.join(', ') || summary.artifactNames.join(', ') || 'no named deliverable'})`)
       .join('; ');
+    const fallbackGap = `Mission completion could not be verified: the reviewer did not identify a task-specific unmet requirement after ${MAX_COMPLETION_REVIEW_ATTEMPTS} attempts. Check task evidence: ${taskEvidence || 'no completed task evidence was available'}.`;
+    // Mission Evaluator emits attributed monologue for failed completion review after max attempts
+    await this.emitMonologue({
+      agentRole: 'mission-evaluator',
+      phaseId: 'mission-review',
+      thought: `Mission completion review: I could not produce a valid assessment after ${MAX_COMPLETION_REVIEW_ATTEMPTS} attempts. The mission remains unverified: ${fallbackGap}.`,
+      text: `Mission completion review: unable to produce valid assessment after ${MAX_COMPLETION_REVIEW_ATTEMPTS} attempts.`,
+      kind: 'completion-review',
+      data: { satisfied: false, gaps: [fallbackGap], reason: 'max_attempts_exceeded' },
+    });
     return {
       satisfied: false,
-      gaps: [
-        `Mission completion could not be verified: the reviewer did not identify a task-specific unmet requirement after ${MAX_COMPLETION_REVIEW_ATTEMPTS} attempts. Check task evidence: ${taskEvidence || 'no completed task evidence was available'}.`,
-      ],
+      gaps: [fallbackGap],
     };
   }
 

@@ -12,6 +12,11 @@ import { OPERATIONAL_ANALYTICS } from './tools/healthcare-operational-analytics'
 import { PATIENT_COMMUNICATION } from './tools/healthcare-patient-communication';
 import { RECORDS_SCHEDULING_OPS } from './tools/healthcare-records-scheduling-ops';
 import { RESOURCE_COORDINATION } from './tools/healthcare-resource-coordination';
+import { HEALTHCARE_CARE_PLAN_DRAFTER } from './tools/healthcare-care-plan-drafter';
+
+export { HEALTHCARE_CARE_PLAN_DRAFTER } from './tools/healthcare-care-plan-drafter';
+
+export const healthcareLowerOrderTools: Tool[] = [HEALTHCARE_CARE_PLAN_DRAFTER];
 
 export const healthcareSkills: Tool[] = [
   { ...CLINICAL_DECISION_SUPPORT, isSkill: false },
@@ -19,6 +24,7 @@ export const healthcareSkills: Tool[] = [
   { ...PATIENT_COMMUNICATION, isSkill: false },
   { ...RESOURCE_COORDINATION, isSkill: false },
   { ...OPERATIONAL_ANALYTICS, isSkill: false },
+  ...healthcareLowerOrderTools,
   { ...healthcareClinicalPracticeWorkflowEvaluator, isSkill: true },
   { ...healthcareClinicalDecisionSupportEvaluator, isSkill: true },
   { ...healthcarePatientCarePlanEducationalBriefingCopilot, isSkill: true },

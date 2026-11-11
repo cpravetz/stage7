@@ -27,20 +27,20 @@ export const lyricProsodyEvaluator = createDeclarativeCodeSkill({
     properties: {
       success: { type: 'boolean', description: 'Whether the evaluation completed successfully' },
       data: { type: 'object', description: 'Prosody metrics, rhyme pairs, refrain lines, per-line metrics, theme signals, recommendations, and a formatted report' },
-        present: {
-      type: 'array',
-      description: 'Pre-formatted, user-facing text blocks. This is how a skill controls its own layout without the renderer needing any knowledge of the skill.',
-      items: {
-        type: 'object',
-        properties: {
-          id: { type: 'string', description: 'Stable identifier for the block' },
-          title: { type: 'string', description: 'Optional heading shown above the block' },
-          kind: { type: 'string', description: "How to interpret the body. Defaults to 'text'." },
-          body: { type: 'string', description: 'Pre-formatted plain text, rendered verbatim with line breaks preserved' },
+      present: {
+        type: 'array',
+        description: 'Pre-formatted, user-facing text blocks. This is how a skill controls its own layout without the renderer needing any knowledge of the skill.',
+        items: {
+          type: 'object',
+          properties: {
+            id: { type: 'string', description: 'Stable identifier for the block' },
+            title: { type: 'string', description: 'Optional heading shown above the block' },
+            kind: { type: 'string', description: "How to interpret the body. Defaults to 'text'." },
+            body: { type: 'string', description: 'Pre-formatted plain text, rendered verbatim with line breaks preserved' },
+          },
+          required: ['id', 'body'],
         },
-        required: ['id', 'body'],
       },
-    },
       error: { type: 'string', description: 'Validation or execution error message' },
     },
     required: ['success', 'present'],
@@ -271,7 +271,7 @@ export const musicalCoCreation = createDeclarativeCodeSkill({
       sectionCount: SchemaProps.number({ title: 'Section Count', description: 'Number of sections to generate, from 2 to 12', order: 6, minimum: 2, maximum: 12, hint: 'Controls how many sections the engine produces from the template' }),
       seed: SchemaProps.integer({ title: 'Seed', description: 'Optional deterministic seed for repeatable variations', order: 7, minimum: 0, hint: 'Enter a number for reproducible drafts across runs' }),
       existingContent: SchemaProps.textarea({ title: 'Existing Content', description: 'Optional existing lyric or brief to preserve while generating a revision', order: 8, hint: 'Paste existing material to build upon or revise' }),
-      save: SchemaProps.boolean({ title: 'Save', description: 'Persist the generated draft in the songwriter workspace', order: 9, default: true, hint: 'Writes the draft to ASSISTANT_HOME/drafts.json when true' }),
+      save: SchemaProps.boolean({ title: 'Save', description: 'Persist the generated draft in the songwriter workspace', order: 9, default: true, hint: 'Writes the draft to SONGWRITING_HOME/drafts.json when true' }),
     },
     required: ['theme'],
   },
@@ -290,403 +290,283 @@ export const musicalCoCreation = createDeclarativeCodeSkill({
   isSkill: true,
   manifest: {},
   handler: async function handler(input, ctx) {
-      const theme = String(input.theme || '').trim();
-      const genre = String(input.genre || 'pop').toLowerCase();
-      const mood = String(input.mood || 'hopeful').toLowerCase();
-      const structure = String(input.structure || 'verse-chorus');
-      const topic = String(input.topic || theme || 'Untitled song');
-      const seed = Math.abs(parseInt(input.seed, 10) || 0);
-
-      if (!theme) {
-        return {
-          success: false,
-          error: 'A theme is required before a draft can be generated.',
-          present: [{ id: 'message', title: 'Not completed', kind: 'text', body: 'A theme is required before a draft can be generated.' }],
-        };
-      }
-
-      // ---- Theme material --------------------------------------------------------------
-      // Each theme carries real rhyme families, so generated couplets actually rhyme instead of
-      // merely repeating one sentence shape.
-      const THEMES = {
-        love: {
-          nouns: ['the heart', 'the promise', 'the silence', 'the window', 'the kitchen light'],
-          verbs: ['waited', 'held on', 'let go', 'came back'],
-          places: ['the front steps', 'the kitchen light', 'the long way round', 'the open window'],
-          times: ['the morning', 'the evening', 'the winter', 'the summer', 'the small hours'],
-          rhyme: [
-            ['home', 'alone', 'gone', 'known', 'own'],
-            ['night', 'light', 'sight', 'bright', 'right'],
-            ['heart', 'apart', 'start', 'dark', 'chart'],
-            ['hold', 'gold', 'cold', 'told', 'sold'],
-            ['street', 'meet', 'feet', 'complete', 'heat'],
-          ],
-        },
-        loss: {
-          nouns: ['the ashes', 'the silence', 'the last winter', 'the empty chair', 'the old photograph'],
-          verbs: ['let go', 'kept waiting', 'folded up', 'moved on'],
-          places: ['the empty room', 'the train platform', 'the old address', 'the harbour road'],
-          times: ['the autumn', 'the last winter', 'the slow morning', 'the late hour'],
-          rhyme: [
-            ['gone', 'alone', 'known', 'own', 'stone'],
-            ['rain', 'again', 'pain', 'chain', 'gain'],
-            ['cold', 'old', 'gold', 'hold', 'told'],
-            ['night', 'light', 'right', 'sight', 'white'],
-            ['away', 'day', 'stay', 'grey', 'say'],
-          ],
-        },
-        triumph: {
-          nouns: ['the summit', 'the starting line', 'the red ribbon', 'the open road', 'the morning'],
-          verbs: ['climbed', 'earned', 'refused', 'held on', 'kept going'],
-          places: ['the top of the hill', 'the starting line', 'the open road', 'the last mile'],
-          times: ['the first light', 'the late summer', 'day one', 'this morning'],
-          rhyme: [
-            ['fire', 'higher', 'wire', 'desire', 'inspire'],
-            ['rise', 'prize', 'eyes', 'surprise', 'wise'],
-            ['gold', 'bold', 'hold', 'told', 'cold'],
-            ['run', 'sun', 'done', 'won', 'one'],
-            ['road', 'load', 'code', 'owed', 'showed'],
-          ],
-        },
-        journey: {
-          nouns: ['the highway', 'the ticket', 'the border', 'the compass', 'the first mile'],
-          verbs: ['drove', 'left', 'counted', 'kept walking', 'turned back'],
-          places: ['the county line', 'the old highway', 'the train car', 'the first mile'],
-          times: ['the daylight', 'day one', 'the late autumn', 'some morning'],
-          rhyme: [
-            ['away', 'day', 'way', 'stay', 'grey'],
-            ['road', 'load', 'home', 'alone', 'known'],
-            ['open', 'broken', 'spoken', 'chosen', 'olden'],
-            ['horizon', 'rising', 'surprise', 'realise', 'promised'],
-            ['free', 'sea', 'three', 'key', 'me'],
-          ],
-        },
-        rebellion: {
-          nouns: ['the quiet', 'the red paint', 'the locked gate', 'the paperwork', 'the old rules'],
-          verbs: ['refused', 'signed', 'spoke up', 'broke', 'answered'],
-          places: ['the city hall', 'the front steps', 'the kitchen table', 'the locked gate'],
-          times: ['day one', 'the last night', 'the monday morning', 'this week'],
-          rhyme: [
-            ['fire', 'higher', 'wire', 'desire', 'choir'],
-            ['fall', 'all', 'wall', 'call', 'tall'],
-            ['free', 'me', 'see', 'three', 'be'],
-            ['out', 'shout', 'about', 'doubt', 'mouth'],
-            ['break', 'wake', 'take', 'make', 'shake'],
-          ],
-        },
-        nostalgia: {
-          nouns: ['the summer', 'the kitchen', 'the old radio', 'the photograph', 'the back seat'],
-          verbs: ['remembered', 'kept', 'drove past', 'played again', 'left'],
-          places: ['the old house', 'the back steps', 'the drive-in', 'the kitchen window'],
-          times: ['the summer', 'the august', 'that september', 'the last sunday'],
-          rhyme: [
-            ['summer', 'under', 'thunder', 'wonder', 'number'],
-            ['gold', 'old', 'told', 'hold', 'cold'],
-            ['again', 'then', 'when', 'rain', 'home'],
-            ['blue', 'true', 'you', 'through', 'new'],
-            ['highway', 'yesterday', 'always', 'someday', 'friday'],
-          ],
-        },
+    const theme = String(input.theme || '').trim();
+    const topic = String(input.topic || theme || 'Untitled song');
+    if (!theme) {
+      return {
+        success: false,
+        error: 'A theme is required before a draft can be generated.',
+        present: [{ id: 'message', title: 'Not completed', kind: 'text', body: 'A theme is required before a draft can be generated.' }],
       };
-      const bank = THEMES[theme.toLowerCase()] || THEMES.love;
+    }
 
-      // ---- Musical material -----------------------------------------------------------
-      const GENRE_MUSIC = {
-        pop:     { key: 'C major', meter: '4/4', tempo: 'mid-tempo', progressions: [['I', 'V', 'vi', 'IV'], ['vi', 'IV', 'I', 'V'], ['I', 'iii', 'IV', 'V']], linesPerSection: 4 },
-        rock:    { key: 'E minor', meter: '4/4', tempo: 'driving', progressions: [['i', 'VII', 'VI', 'VII'], ['i', 'III', 'VII', 'i']], linesPerSection: 4 },
-        country: { key: 'G major', meter: '4/4', tempo: 'steady', progressions: [['I', 'IV', 'V', 'I'], ['I', 'V', 'vi', 'IV']], linesPerSection: 4 },
-        folk:    { key: 'D major', meter: '4/4', tempo: 'unhurried', progressions: [['I', 'V', 'vi', 'IV'], ['I', 'iii', 'vi', 'IV']], linesPerSection: 4 },
-        edm:     { key: 'A minor', meter: '4/4', tempo: 'build', progressions: [['i', 'VI', 'III', 'VII'], ['i', 'VII', 'VI', 'VII']], linesPerSection: 4 },
-        rnb:     { key: 'F major', meter: '4/4', tempo: 'slow', progressions: [['ii', 'V', 'Imaj7', 'vi'], ['Imaj7', 'vi', 'ii', 'V']], linesPerSection: 4 },
-        hiphop:  { key: 'B minor', meter: '4/4', tempo: 'steady 90', progressions: [['i', 'VII', 'VI', 'VII'], ['i', 'VI', 'III', 'VII']], linesPerSection: 4 },
-      };
-      const music = GENRE_MUSIC[genre] || GENRE_MUSIC.pop;
-
-      // ---- Structure ------------------------------------------------------------------
-      const STRUCTURES = {
-        standard: ['verse 1', 'chorus', 'verse 2', 'chorus', 'bridge', 'chorus'],
-        'verse-chorus': ['verse 1', 'chorus', 'verse 2', 'chorus', 'bridge', 'chorus'],
-        aaba: ['verse 1', 'verse 2', 'bridge', 'verse 3'],
-        simple: ['verse 1', 'chorus', 'verse 2', 'chorus'],
-        rap: ['intro', 'verse 1', 'chorus', 'verse 2', 'chorus', 'verse 3', 'outro'],
-      };
-      const templateNames = (STRUCTURES[structure] || STRUCTURES.standard).slice();
-      const sectionCount = Math.max(2, Math.min(12, Number(input.sectionCount || 0) || templateNames.length));
-      let sectionNames = templateNames.slice(0, sectionCount);
-      while (sectionNames.length < sectionCount) {
-        const verseNumber = sectionNames.filter(function (s) { return s.indexOf('verse') === 0; }).length + 1;
-        sectionNames.splice(Math.max(1, sectionNames.length - 1), 0, 'verse ' + verseNumber);
+    function unwrapDelegated(res) {
+      if (!res || typeof res !== 'object') return null;
+      if (res.status === 'failed') return null;
+      if (res.success === false) return null;
+      if (res.success === true) {
+        const data = res.data;
+        if (data && typeof data === 'object') return data;
+        return data != null ? { summary: data } : null;
       }
-
-      function roleOf(name) {
-        const n = name.toLowerCase();
-        if (n.indexOf('chorus') === 0) return 'chorus';
-        if (n.indexOf('verse') === 0) return 'verse';
-        if (n.indexOf('bridge') === 0) return 'bridge';
-        if (n.indexOf('intro') === 0) return 'intro';
-        if (n.indexOf('outro') === 0) return 'outro';
-        return 'verse';
+      if (res.status === 'completed') {
+        const out = res.output;
+        if (out && typeof out === 'object') {
+          if (out.success === false) return null;
+          return (out.data && typeof out.data === 'object') ? out.data : out;
+        }
+        if (typeof out === 'string' && out.trim()) return { summary: out };
       }
+      return null;
+    }
 
-      const ROLE_PURPOSE = {
-        chorus: 'The hook. States the central promise in the most repeatable form in the song; every chorus sings these exact words.',
-        verse: 'Narration. Moves the story forward and earns the emotional turn the chorus pays off.',
-        bridge: 'Contrast. Changes angle or texture so the return to the chorus lands as a release.',
-        intro: 'Establishes the key, tempo and mood before the first line lands.',
-        outro: 'Lets the last chord ring out and closes the loop opened by the intro.',
-      };
-
-      // ---- Lyric construction ---------------------------------------------------------
-      let cursor = seed;
-      function pick(list) {
-        const value = list[cursor % list.length];
-        cursor += 1;
-        return value;
+    function cleanDelegatedText(text) {
+      if (!text) return null;
+      let body = String(text);
+      const thinkingIdx = body.indexOf('Thinking Process:');
+      if (thinkingIdx >= 0) {
+        const nextSection = body.indexOf('\n\n', thinkingIdx);
+        if (nextSection < 0) return null;
+        body = body.slice(nextSection + 2);
       }
-      function rhymeWord(index) {
-        const family = bank.rhyme[index % bank.rhyme.length];
-        return family[cursor % family.length];
+      const selfCheckIdx = body.indexOf('Self-Check:');
+      if (selfCheckIdx >= 0) body = body.slice(0, selfCheckIdx);
+      const hallucinationIdx = body.indexOf('Hallucination');
+      if (hallucinationIdx >= 0 && /hallucinat/i.test(body.slice(hallucinationIdx))) {
+        body = body.slice(0, hallucinationIdx);
       }
+      body = body.trim();
+      return body ? body : null;
+    }
 
-      // Slots are filled from the theme bank so lines read as English. {{r}} resolves to the rhyming
-      // word for the current couplet, so the end words actually rhyme.
-      // Nouns, places and times carry their own determiner so a template never has to guess whether it
-      // needs one. That is what stops generated lines reading as "the an open window".
-      const VERSE_A = [
-        'I {{v}} by {{p}} till {{t}} went quiet',
-        'I told myself {{n}} would hold this time',
-        'I kept {{n}} where you could see it from the street',
-        'I let {{t}} do the talking, which is worse than lying',
-        'I counted the hours like they were mine to spend',
-        'I said I was fine, which is a kind of lie',
-      ];
-      const VERSE_B = [
-        'You said {{n}} would hold, and I believed you then',
-        'I {{v}} until {{p}} gave up and I did too',
-        'I am still out here, out of reach of {{p}}',
-        '{{n}} is still here, and {{t}} is the proof',
-        'Nothing in the world was ever going to be enough',
-        'Every road out of {{p}} was a reason to {{r}}',
-      ];
-      const CHORUS_SETS = [
-        ['Take me back to {{p}}', 'I am still your {{r}}, coming home'],
-        ['Hold {{n}} a little longer', 'I am not done, I am not done'],
-        ['If I had one more night', 'I would spend every one of them on you'],
-        ['Do not let {{t}} decide', 'Follow me to {{p}}, I will get you through'],
-      ];
-      const BRIDGE_LINES = [
-        'And if {{n}} is gone and the road is shut behind you,',
-        'I will still be the one who kept the door open,',
-        'So tell me honestly what it is you want',
-        'Because I am not doing this halfway',
-      ];
-      const INTRO_LINES = ['One more before the day starts', 'Say it now, before the lights come up'];
-      const OUTRO_LINES = ['And that is how {{n}} ended up on the shelf', 'Same as before, same as now, nothing left but myself'];
+    function delegatedText(payload) {
+      if (!payload) return null;
+      if (typeof payload === 'string') return cleanDelegatedText(payload);
+      if (typeof payload !== 'object') return null;
+      if (typeof payload.summary === 'string' && payload.summary.trim()) return cleanDelegatedText(payload.summary);
+      if (typeof payload._raw === 'string' && payload._raw.trim()) return cleanDelegatedText(payload._raw);
+      return null;
+    }
 
-      function syllables(text) {
-        const words = String(text).toLowerCase().replace(/[^a-z']/g, ' ').split(/\s+/).filter(Boolean);
-        return words.reduce(function (sum, w) {
-          const groups = w.match(/[aeiouy]+/g);
-          let c = groups ? groups.length : 1;
-          if (w.endsWith('e') && !w.endsWith('le') && c > 1) c -= 1;
-          return sum + Math.max(1, c);
-        }, 0);
-      }
+    function brainBaseUrl() {
+      return String(ctx.config?.brainEndpoint || 'http://brain:3100').trim();
+    }
 
-      function fill(template, rhyme) {
-        return template.replace(/\{\{(\w+)\}\}/g, function (_, slot) {
-          if (slot === 'r') return rhyme;
-          if (slot === 'n') return pick(bank.nouns);
-          if (slot === 'v') return pick(bank.verbs);
-          if (slot === 'p') return pick(bank.places);
-          if (slot === 't') return pick(bank.times);
-          return slot;
+    async function callBrain(prompt) {
+      const base = brainBaseUrl();
+      if (!base) return null;
+      try {
+        const res = await fetch(base + '/api/brain/complete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            systemPrompt: 'Reply with the finished deliverable only. Never include your reasoning, chain of thought, planning notes, scratch work, or self-critique in the reply.',
+            prompt: prompt,
+            options: { temperature: 0.7, maxTokens: 4096 },
+          }),
         });
+        if (!res.ok) return null;
+        const data = await res.json();
+        return data.content || data.summary || null;
+      } catch (e) {
+        return null;
       }
+    }
 
-      function endWord(line) {
-        const words = String(line).split(/\s+/).filter(Boolean);
-        return words.length ? words[words.length - 1].toLowerCase() : '';
+    function extractJsonObject(text) {
+      if (!text || typeof text !== 'string') return null;
+      const trimmed = text.trim();
+      try {
+        return JSON.parse(trimmed);
+      } catch (e) {
+        // try to extract fenced or embedded object
       }
-
-      function rhymeKey(word) {
-        const clean = String(word).toLowerCase().replace(/[^a-z]/g, '');
-        return clean.length >= 2 ? clean.slice(-2) : clean;
+      const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+      if (fenced && fenced[1]) {
+        try { return JSON.parse(fenced[1].trim()); } catch (e) {}
       }
-
-      function schemeFor(lines) {
-        const map = {};
-        const letters = 'ABCDEFGH';
-        return lines.map(function (line) {
-          const key = rhymeKey(endWord(line));
-          if (key.length < 2) return '-';
-          if (map[key] === undefined) {
-            map[key] = letters[Object.keys(map).length % letters.length];
-          }
-          return map[key];
-        }).join(' ');
+      const first = trimmed.indexOf('{');
+      const last = trimmed.lastIndexOf('}');
+      if (first >= 0 && last > first) {
+        try { return JSON.parse(trimmed.slice(first, last + 1)); } catch (e) {}
       }
+      return null;
+    }
 
-      // The chorus is written once and repeated verbatim, which is what a hook is.
-      const chorusSetIndex = seed % CHORUS_SETS.length;
-      const chorusRhymes = [rhymeWord(0), rhymeWord(1)];
-      const chorusLines = [
-        fill(CHORUS_SETS[chorusSetIndex][0], chorusRhymes[0]),
-        fill(CHORUS_SETS[chorusSetIndex][1], chorusRhymes[1]),
-      ];
-
-      const verseCounter = { verse: 0, bridge: 0 };
-
-      // A verse line that has already been used is never reused, so verses do not echo each other.
-      const usedLines = {};
-      function uniqueLine(make) {
-        for (let attempt = 0; attempt < 12; attempt += 1) {
-          const line = make(attempt);
-          if (!usedLines[line]) {
-            usedLines[line] = true;
-            return line;
-          }
-        }
-        const fallback = make(12) + ' ' + (Object.keys(usedLines).length % 2 === 0 ? 'again' : 'still');
-        usedLines[fallback] = true;
-        return fallback;
-      }
-
-      function buildVerse() {
-        verseCounter.verse += 1;
-        const r = rhymeWord(verseCounter.verse);
-        const lines = [
-          uniqueLine(function (a) { return fill(VERSE_A[(verseCounter.verse - 1 + a) % VERSE_A.length], r); }),
-          uniqueLine(function (a) { return fill(VERSE_B[(verseCounter.verse - 1 + a) % VERSE_B.length], r); }),
-        ];
-        if (music.linesPerSection >= 4) {
-          const r2 = rhymeWord(verseCounter.verse + 2);
-          lines.push(uniqueLine(function (a) { return fill(VERSE_A[(verseCounter.verse + a) % VERSE_A.length], r2); }));
-          lines.push(uniqueLine(function (a) { return fill(VERSE_B[(verseCounter.verse + a) % VERSE_B.length], r2); }));
-        }
-        return lines;
-      }
-
-      const sections = sectionNames.map(function (name, index) {
-        const role = roleOf(name);
-        const progression = pick(music.progressions);
-        let lines;
-        if (role === 'chorus') {
-          lines = chorusLines.slice();
-        } else if (role === 'bridge') {
-          verseCounter.bridge += 1;
-          const r = rhymeWord(verseCounter.bridge + 3);
-          lines = [
-            fill(BRIDGE_LINES[(verseCounter.bridge - 1) % BRIDGE_LINES.length], r),
-            fill(BRIDGE_LINES[((verseCounter.bridge - 1) + 1) % BRIDGE_LINES.length], r),
-          ];
-        } else if (role === 'intro') {
-          lines = [fill(INTRO_LINES[0], ''), fill(INTRO_LINES[1], '')];
-        } else if (role === 'outro') {
-          lines = [fill(OUTRO_LINES[0], ''), fill(OUTRO_LINES[1], '')];
-        } else {
-          lines = buildVerse();
-        }
-
+    function toSongModel(parsed) {
+      const model = parsed && typeof parsed === 'object' ? parsed : {};
+      const sections = Array.isArray(model.sections) ? model.sections : [];
+      const normalizedSections = sections.map(function (s, idx) {
+        const sec = s && typeof s === 'object' ? s : {};
+        const lines = Array.isArray(sec.lines) ? sec.lines.map(function (l) { return String(l); }) : [];
+        const chords = Array.isArray(sec.chordProgression) ? sec.chordProgression.map(function (c) { return String(c); }) : [];
         return {
-          order: index + 1,
-          section: name,
-          role: role,
-          purpose: ROLE_PURPOSE[role],
-          chordProgression: progression,
+          order: Number(sec.order || idx + 1),
+          section: String(sec.section || ('Section ' + (idx + 1))),
+          role: String(sec.role || 'verse'),
+          purpose: String(sec.purpose || ''),
+          chordProgression: chords,
           lines: lines,
-          rhymeScheme: schemeFor(lines),
-          endWords: lines.map(endWord),
-          averageSyllablesPerLine: Math.round((lines.reduce(function (s, l) { return s + syllables(l); }, 0) / lines.length) * 10) / 10,
-          transition: index === 0
-            ? 'Open cold on the first downbeat, no count-in.'
-            : role === 'chorus'
-              ? 'Lift the final bar and cut straight into the next section.'
-              : 'Two-bar lift into the next section.',
+          rhymeScheme: String(sec.rhymeScheme || ''),
+          endWords: Array.isArray(sec.endWords) ? sec.endWords.map(function (w) { return String(w); }) : [],
+          averageSyllablesPerLine: Number(sec.averageSyllablesPerLine || 0),
+          transition: String(sec.transition || ''),
         };
       });
-
-      const fullText = sections.map(function (section) {
-        const chordLine = section.chordProgression.map(function (c, i) { return (i === 0 ? '' : '        ') + c; }).join('  ');
-        return '[' + section.section.toUpperCase() + ']   ' + chordLine + '\n' + section.lines.join('\n');
-      }).join('\n\n');
-
-      const beatSheet = sections.map(function (s) {
+      const beatSheet = Array.isArray(model.beatSheet) ? model.beatSheet : normalizedSections.map(function (s) {
         return {
           order: s.order,
           section: s.section,
           role: s.role,
           musicalFocus: s.purpose,
-          chordProgression: s.chordProgression.join(' - '),
-          lineCount: s.lines.length,
+          chordProgression: (s.chordProgression || []).join(' - '),
+          lineCount: (s.lines || []).length,
           rhymeScheme: s.rhymeScheme,
         };
       });
+      const chordVocabulary = Array.isArray(model.chordVocabulary) ? model.chordVocabulary.map(String) : [];
+      const syllableProfile = Array.isArray(model.syllableProfile) ? model.syllableProfile : [];
+      const fullText = model.lyrics && typeof model.lyrics.fullText === 'string'
+        ? model.lyrics.fullText
+        : normalizedSections.map(function (s) {
+            return '[' + String(s.section).toUpperCase() + ']  ' + (s.chordProgression || []).join(' - ') + '\n' + (s.lines || []).join('\n');
+          }).join('\n\n');
 
-      const chordVocabulary = [];
-      sections.forEach(function (s) {
-        s.chordProgression.forEach(function (c) { if (chordVocabulary.indexOf(c) === -1) chordVocabulary.push(c); });
-      });
-
-      const verseSections = sections.filter(function (s) { return s.role === 'verse'; });
-      const distinctVerseLines = {};
-      verseSections.forEach(function (s) { s.lines.forEach(function (l) { distinctVerseLines[l] = true; }); });
-      const totalVerseLines = verseSections.reduce(function (sum, s) { return sum + s.lines.length; }, 0);
-
-      const header = [
-        'Theme: ' + theme + '  |  Genre: ' + genre + '  |  Mood: ' + mood + '  |  Structure: ' + structure,
-        'Key: ' + music.key + '  |  Meter: ' + music.meter + '  |  Tempo feel: ' + music.tempo,
-        'Chord vocabulary: ' + chordVocabulary.join(', '),
-      ].join('\n');
-
-      const formattedSong = header + '\n\n--- LYRICS & CHORDS ---\n\n' + fullText + '\n\n--- BEAT SHEET ---\n'
-        + beatSheet.map(function (b) { return b.order + '. ' + b.section.toUpperCase() + ' [' + b.role + '] ' + b.chordProgression + ' - ' + b.musicalFocus; }).join('\n');
-
-      const syllableProfile = [];
-      sections.forEach(function (s) {
-        s.lines.forEach(function (l, i) {
-          syllableProfile.push({ section: s.section, line: i + 1, text: l, syllables: syllables(l) });
-        });
-      });
-
-      const draft = {
-        id: 'song_' + Date.now(),
-        format: 'song',
-        title: topic,
-        theme: theme,
-        genre: genre,
-        mood: mood,
-        topic: topic,
-        structure: structure,
-        key: music.key,
-        meter: music.meter,
-        tempoFeel: music.tempo,
-        sections: sections,
-        sectionCount: sections.length,
-        verseCount: verseSections.length,
-        chorusCount: sections.filter(function (s) { return s.role === 'chorus'; }).length,
-        totalVerseLines: totalVerseLines,
-        distinctVerseLines: Object.keys(distinctVerseLines).length,
-        verseLinesAreDistinct: Object.keys(distinctVerseLines).length >= totalVerseLines,
-        lyrics: { sections: sections, fullText: fullText },
+      return {
+        title: String(model.title || topic),
+        theme: String(model.theme || theme),
+        genre: String(model.genre || input.genre || 'pop'),
+        mood: String(model.mood || input.mood || 'hopeful'),
+        structure: String(model.structure || input.structure || 'verse-chorus'),
+        key: String(model.key || ''),
+        meter: String(model.meter || ''),
+        tempoFeel: String(model.tempoFeel || ''),
+        sections: normalizedSections,
         beatSheet: beatSheet,
         chordVocabulary: chordVocabulary,
         syllableProfile: syllableProfile,
-        revision: input.existingContent
-          ? { basedOn: 'existingContent', changes: ['Kept the supplied direction as the topic and theme', 'Regenerated section-level chord progressions and rhyme-matched lyric lines'] }
-          : null,
-        source: 'local',
-        createdAt: new Date().toISOString(),
+        lyrics: { fullText: fullText },
       };
-
-      const result = { success: true, data: { draft: draft }, present: [{ id: 'song', title: topic, kind: 'text', body: formattedSong }] };
-      if (input.save !== false) {
-        const store = ctx.store.load('drafts', []);
-        store.push(draft);
-        ctx.store.save('drafts', store);
-        result.data.storePath = ctx.store.getFilePath('drafts');
-      }
-
-      return result;
     }
-  });
+
+    const toolInput = {
+      theme: theme,
+      topic: topic,
+      genre: String(input.genre || 'pop'),
+      mood: String(input.mood || 'hopeful'),
+      structure: String(input.structure || 'verse-chorus'),
+      sectionCount: input.sectionCount,
+      seed: input.seed,
+      existingContent: input.existingContent,
+    };
+
+    let song = null;
+    let delegatedRaw = null;
+    try {
+      delegatedRaw = await ctx.delegate('songwriting-lyric-co-creation', toolInput);
+    } catch (e) {
+      delegatedRaw = null;
+    }
+    const delegatedPayload = unwrapDelegated(delegatedRaw);
+    let text = delegatedText(delegatedPayload);
+    // ReasoningExecutor may put parsed JSON on the payload itself when outputFormat is json.
+    if (!song && delegatedPayload && typeof delegatedPayload === 'object' && (Array.isArray(delegatedPayload.sections) || (delegatedPayload.lyrics && typeof delegatedPayload.lyrics === 'object'))) {
+      song = toSongModel(delegatedPayload);
+    }
+    if (!song) {
+      song = extractJsonObject(text) ? toSongModel(extractJsonObject(text)) : null;
+    }
+    if (!song) {
+      const prompt = 'Create a complete, original song draft as JSON (no markdown fences) for this request: ' + JSON.stringify(toolInput) + '. Return shape: { title, theme, genre, mood, structure, key, meter, tempoFeel, sections: [{ order, section, role, purpose, chordProgression: string[], lines: string[], rhymeScheme, endWords, averageSyllablesPerLine, transition }], beatSheet, chordVocabulary, syllableProfile, lyrics: { fullText } }.';
+      const direct = await callBrain(prompt);
+      const cleaned = cleanDelegatedText(direct);
+      song = extractJsonObject(cleaned || direct) ? toSongModel(extractJsonObject(cleaned || direct)) : null;
+    }
+
+    if (!song) {
+      return {
+        success: false,
+        status: 'not-connected',
+        data: null,
+        error: 'Song generation is unavailable; ensure the assistant model (brain) is reachable.',
+        present: [{ id: 'error', title: 'Not Connected', kind: 'text', body: 'Song generation requires a configured assistant model. Contact your administrator to verify Brain/model availability.' }],
+      };
+    }
+
+    const headerLines = [];
+    headerLines.push('Theme: ' + song.theme + '  |  Genre: ' + song.genre + '  |  Mood: ' + song.mood + '  |  Structure: ' + song.structure);
+    headerLines.push('Key: ' + (song.key || 'n/a') + '  |  Meter: ' + (song.meter || 'n/a') + '  |  Tempo feel: ' + (song.tempoFeel || 'n/a'));
+    headerLines.push('Chord vocabulary: ' + ((song.chordVocabulary && song.chordVocabulary.length) ? song.chordVocabulary.join(', ') : 'n/a'));
+
+    const sectionBlocks = (song.sections || []).map(function (s) {
+      const chordLine = (s.chordProgression && s.chordProgression.length) ? s.chordProgression.join('  |  ') : '';
+      const body = chordLine ? (chordLine + '\n' + (s.lines || []).join('\n')) : (s.lines || []).join('\n');
+      return '[' + String(s.section || '').toUpperCase() + ']' + (s.role ? ' (' + s.role + ')' : '') + '\n' + body;
+    }).join('\n\n');
+
+    const beatSheetLines = (song.beatSheet || []).map(function (b) {
+      const order = b.order != null ? b.order : '';
+      const sec = b.section || '';
+      const role = b.role ? ' [' + b.role + ']' : '';
+      const chords = b.chordProgression || '';
+      const focus = b.musicalFocus || '';
+      return String(order) + '. ' + String(sec).toUpperCase() + role + (chords ? '  ' + chords : '') + (focus ? ' - ' + focus : '');
+    });
+
+    const formattedSong = headerLines.join('\n')
+      + '\n\n--- LYRICS & CHORDS ---\n\n'
+      + (sectionBlocks || song.lyrics.fullText || '')
+      + '\n\n--- BEAT SHEET ---\n'
+      + (beatSheetLines.length ? beatSheetLines.join('\n') : '(none)');
+
+    const syllableLines = (song.syllableProfile || []).map(function (p) {
+      return String(p.section || '') + ' / line ' + String(p.line || '') + ': ' + String(p.syllables || 0) + ' syl  -  ' + String(p.text || '');
+    });
+    const syllableBody = syllableLines.length ? syllableLines.join('\n') : 'No syllable profile returned.';
+
+    const draft = {
+      id: 'song_' + Date.now(),
+      format: 'song',
+      title: song.title || topic,
+      theme: song.theme,
+      genre: song.genre,
+      mood: song.mood,
+      topic: topic,
+      structure: song.structure,
+      key: song.key,
+      meter: song.meter,
+      tempoFeel: song.tempoFeel,
+      sections: song.sections,
+      sectionCount: (song.sections || []).length,
+      verseCount: (song.sections || []).filter(function (s) { return s.role === 'verse'; }).length,
+      chorusCount: (song.sections || []).filter(function (s) { return s.role === 'chorus'; }).length,
+      lyrics: song.lyrics,
+      beatSheet: song.beatSheet,
+      chordVocabulary: song.chordVocabulary,
+      syllableProfile: song.syllableProfile,
+      revision: input.existingContent
+        ? { basedOn: 'existingContent', changes: ['Preserved supplied direction and regenerated draft via songwriting-lyric-co-creation'] }
+        : null,
+      source: 'llm',
+      createdAt: new Date().toISOString(),
+    };
+
+    const result = {
+      success: true,
+      data: { draft: draft },
+      present: [
+        { id: 'song', title: draft.title || topic, kind: 'text', body: formattedSong },
+        { id: 'syllable-profile', title: 'Syllable Profile', kind: 'text', body: syllableBody },
+      ],
+    };
+
+    if (input.save !== false) {
+      const store = ctx.store.load('drafts', []);
+      store.push(draft);
+      ctx.store.save('drafts', store);
+      result.data.storePath = ctx.store.getFilePath('drafts');
+    }
+
+    return result;
+  }
+});

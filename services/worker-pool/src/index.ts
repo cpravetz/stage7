@@ -9,7 +9,7 @@ import { logger } from './utils/logger';
 import { registerAssistantTools } from './shared/mcp';
 
 const app: express.Application = express();
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
 
 /**
  * Publishes each assistant's authored knowledge from its file into the shared

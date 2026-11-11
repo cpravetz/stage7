@@ -4,7 +4,7 @@ import { runtime } from './utils/sharedInstance'
 
 const app: express.Express = express()
 
-app.use(express.json())
+app.use(express.json({ limit: '50mb' }))
 
 app.get('/api/agent-runtime/health', (_req, res) => {
   res.json({ status: 'ok', service: 'agent-runtime', agents: runtime.listAgents().length });

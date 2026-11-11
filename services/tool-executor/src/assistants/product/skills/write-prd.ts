@@ -39,191 +39,226 @@ export const WRITE_PRD = createDeclarativeCodeSkill({
     },
     triggers: [{ kind: 'user', phrase_examples: ["Write a PRD", "Update requirements", "Review requirements"] }],
     manifest: {
-      // Filing a written PRD is the whole point of this Skill, so the write
-      // happens here, behind the tier, rather than as an orphan tool that a
-      // live caller can reach with nothing above it.
       lowerOrderTools: ['product-jira', 'product-confluence', 'product-markdown-parsing'],
     },
     handler: async function handler(input, ctx) {
-        function round2(n) { return Math.round(n * 100) / 100; }
-        const title = input.title || 'Untitled PRD';
-        const problem = input.problem || '';
-        const scope = input.scope || '';
-        const goals = Array.isArray(input.goals) ? input.goals : [];
-        const successMetrics = Array.isArray(input.successMetrics) ? input.successMetrics : [];
-        const nonGoals = Array.isArray(input.nonGoals) ? input.nonGoals : [];
-        const openQuestions = Array.isArray(input.openQuestions) ? input.openQuestions : [];
-        const targetUsers = Array.isArray(input.targetUsers) ? input.targetUsers : [];
-        const userStories = Array.isArray(input.userStories) ? input.userStories : [];
-        const constraints = Array.isArray(input.constraints) ? input.constraints : [];
-        const assumptions = Array.isArray(input.assumptions) ? input.assumptions : [];
-        const risks = Array.isArray(input.risks) ? input.risks : [];
+        const NL = '\n';
 
-        const storyCount = Math.max(3, Math.min(15, userStories.length >= 3 ? userStories.length : Math.ceil(problem.length / 40) + 2));
-        const generatedStories = [];
-        const storyTemplates = [
-          'As a [user type], I want [action] so that [benefit]',
-          'As a [stakeholder], I need [capability] so that [outcome]',
-          'As a [role], I wish to [task] so that [value]'
-        ];
-        const userTypes = targetUsers.length > 0 ? targetUsers : ['end user', 'administrator', 'viewer'];
+        const DELEGATED_TIMEOUT_MS = Number(ctx.config?.delegatedTimeoutMs) > 0
+          ? Number(ctx.config?.delegatedTimeoutMs)
+          : 24000;
 
-        const problemKeywords = problem.split(/[\s,.!?]+/).filter(w => w.length > 3);
-        const verbPatterns = {
-          discover: 'find and explore relevant information',
-          manage: 'create, update, and organize items',
-          track: 'monitor progress and receive updates',
-          analyze: 'view insights and generate reports',
-          collaborate: 'work together with team members',
-          automate: 'reduce manual effort through automation',
-          configure: 'customize settings and preferences',
-          integrate: 'connect with existing tools and services'
-        };
-
-        for (let i = 0; i < storyCount; i++) {
-          const userType = userTypes[i % userTypes.length];
-          let storyText;
-          if (userStories[i]) {
-            storyText = userStories[i];
-          } else {
-            const pattern = storyTemplates[i % storyTemplates.length];
-            const keywords = problemKeywords.slice(i, i + 3);
-            const action = keywords.length > 0 ? keywords.join(' and ') : ' accomplish tasks efficiently';
-            const benefit = problem.length > 50 ? 'solve the core problem effectively' : 'improve the overall experience';
-            storyText = pattern.replace('[user type]', userType).replace('[action]', action).replace('[benefit]', benefit).replace('[stakeholder]', userType).replace('[capability]', action).replace('[outcome]', benefit).replace('[role]', userType).replace('[task]', action).replace('[value]', benefit);
+        function unwrapDelegated(res) {
+        if (!res || typeof res !== 'object') return null;
+        if (res.status === 'failed') return null;
+        if (res.success === false) return null;
+        if (res.success === true) {
+          const data = res.data;
+          if (data && typeof data === 'object') return data;
+          return data != null ? { summary: data } : null;
+        }
+        if (res.status === 'completed') {
+          const out = res.output;
+          if (out && typeof out === 'object') {
+            if (out.success === false) return null;
+            return (out.data && typeof out.data === 'object') ? out.data : out;
           }
-
-          const words = storyText.split(/\s+/);
-          const isSmall = words.length <= 25;
-          const isTestable = /(can|should|must|will|able to)/i.test(storyText);
-          const isValuable = /(so that|benefit|improve|enable|reduce|increase)/i.test(storyText);
-          const investScore = ((isSmall ? 1 : 0) + (isTestable ? 1 : 0) + (isValuable ? 1 : 0)) / 3;
-
-          const givenParts = ['Given the user is on the main interface', 'Given the system is initialized', 'Given valid input data is provided'];
-          const whenParts = ['When the user performs the primary action', 'When the user triggers the feature', 'When the system processes the request'];
-          const thenParts = ['Then the expected result is displayed', 'Then the data is persisted correctly', 'Then appropriate feedback is shown to the user'];
-
-          const acceptanceCriteria = [];
-          for (let j = 0; j < 3; j++) {
-            acceptanceCriteria.push({
-              id: 'ac_' + i + '_' + j,
-              storyIndex: i,
-              format: 'Given/When/Then',
-              given: givenParts[j],
-              when: whenParts[j],
-              then: thenParts[j],
-              passed: false,
-              priority: j === 0 ? 'must' : 'should'
-            });
-          }
-
-          generatedStories.push({
-            id: 'story_' + (i + 1),
-            text: storyText,
-            userType: userTypes[i % userTypes.length],
-            invest: {
-              independent: true,
-              negotiable: true,
-              valuable: isValuable,
-              estimable: true,
-              small: isSmall,
-              testable: isTestable,
-              score: round2(investScore * 100) + '%'
-            },
-            acceptanceCriteria,
-            definitionOfDone: 'Code reviewed, all acceptance criteria pass, unit tests written and passing, documentation updated'
-          });
+          if (typeof out === 'string' && out.trim()) return { summary: out };
+        }
+        return null;
         }
 
-        const functionalRequirements = [
-          { id: 'fr_1', category: 'authentication', description: 'System must authenticate users via secure authentication mechanism', priority: 'must', type: 'functional' },
-          { id: 'fr_2', category: 'authorization', description: 'System must enforce role-based access control per user permissions', priority: 'must', type: 'functional' },
-          { id: 'fr_3', category: 'data_persistence', description: 'All user actions and data changes must be persisted with timestamps', priority: 'must', type: 'functional' },
-          { id: 'fr_4', category: 'search', description: 'System must provide search with filtering and sorting capabilities', priority: 'should', type: 'functional' },
-          { id: 'fr_5', category: 'notifications', description: 'System must notify users of relevant state changes and updates', priority: 'should', type: 'functional' },
-          { id: 'fr_6', category: 'audit', description: 'All critical operations must be logged for audit trail purposes', priority: 'must', type: 'functional' },
-        ];
+        function delegatedText(payload) {
+        if (!payload) return null;
+        if (typeof payload === 'string') return cleanDelegatedText(payload);
+        if (typeof payload !== 'object') return null;
+        if (typeof payload.summary === 'string' && payload.summary.trim()) return cleanDelegatedText(payload.summary);
+        if (typeof payload._raw === 'string' && payload._raw.trim()) return cleanDelegatedText(payload._raw);
+        return null;
+        }
 
-        const nonFunctionalRequirements = [
-          { id: 'nfr_1', category: 'performance', description: 'Page load time must be under 2 seconds for 95th percentile of users', priority: 'must', type: 'non-functional' },
-          { id: 'nfr_2', category: 'availability', description: 'System uptime must be 99.9% during business hours', priority: 'must', type: 'non-functional' },
-          { id: 'nfr_3', category: 'scalability', description: 'System must support 10x current user load with horizontal scaling', priority: 'should', type: 'non-functional' },
-          { id: 'nfr_4', category: 'security', description: 'All data transmission must use TLS 1.2+ encryption', priority: 'must', type: 'non-functional' },
-          { id: 'nfr_5', category: 'accessibility', description: 'UI must meet WCAG 2.1 AA compliance standards', priority: 'must', type: 'non-functional' },
-          { id: 'nfr_6', category: 'compatibility', description: 'Must support latest 2 versions of Chrome, Firefox, Safari, Edge', priority: 'should', type: 'non-functional' },
-        ];
+        function cleanDelegatedText(text) {
+        if (!text) return null;
+        let body = text;
+        const thinkingIdx = body.indexOf('Thinking Process:');
+        if (thinkingIdx >= 0) {
+          const nextSection = body.indexOf('\n\n', thinkingIdx);
+          if (nextSection < 0) return null;
+          body = body.slice(nextSection + 2);
+        }
+        const selfCheckIdx = body.indexOf('Self-Check:');
+        if (selfCheckIdx >= 0) body = body.slice(0, selfCheckIdx);
+        const hallucinationIdx = body.indexOf('Hallucination');
+        if (hallucinationIdx >= 0 && /hallucinat/i.test(body.slice(hallucinationIdx))) {
+          body = body.slice(0, hallucinationIdx);
+        }
+        body = body.trim();
+        return body ? body : null;
+        }
 
-        const entityDefinitions = [
-          { id: 'entity_user', name: 'User', attributes: [{ name: 'id', type: 'UUID', required: true, unique: true }, { name: 'email', type: 'string', required: true, unique: true }, { name: 'name', type: 'string', required: true }, { name: 'role', type: 'enum', required: true }, { name: 'createdAt', type: 'timestamp', required: true } ], privacy: 'PII', retention: 'active_period' },
-          { id: 'entity_entity', name: 'Primary Entity', attributes: [{ name: 'id', type: 'UUID', required: true, unique: true }, { name: 'ownerId', type: 'UUID', required: true, foreignKey: 'user.id' }, { name: 'name', type: 'string', required: true }, { name: 'status', type: 'enum', required: true }, { name: 'metadata', type: 'json', required: false } ], privacy: 'business', retention: 'active_period' },
-          { id: 'entity_action', name: 'Action Log', attributes: [{ name: 'id', type: 'UUID', required: true, unique: true }, { name: 'entityId', type: 'UUID', required: true, foreignKey: 'entity.id' }, { name: 'userId', type: 'UUID', required: true, foreignKey: 'user.id' }, { name: 'action', type: 'string', required: true }, { name: 'timestamp', type: 'timestamp', required: true } ], privacy: 'audit', retention: '7_years' },
-        ];
-        const relationships = [
-          { id: 'rel_1', from: 'entity_user', to: 'entity_entity', type: 'one-to-many', description: 'User owns many entities' },
-          { id: 'rel_2', from: 'entity_entity', to: 'entity_action', type: 'one-to-many', description: 'Entity has many action logs' },
-          { id: 'rel_3', from: 'entity_user', to: 'entity_action', type: 'one-to-many', description: 'User performs many actions' },
-        ];
-        const dataRequirements = { entities: entityDefinitions, relationships, privacy: { piiFields: ['user.email', 'user.name'], encryption: 'at_rest_and_transit', retentionPolicy: 'per_entity_retention', anonymization: 'automatic_after_retention' } };
+        function brainBaseUrl() {
+        return String(ctx.config?.brainEndpoint || 'http://brain:3100').trim();
+        }
 
-        const userFlows = [
-          { id: 'flow_1', name: 'Primary User Flow', entryPoint: 'Application entry point', steps: ['Authenticate', 'Access main interface', 'Perform primary action', 'Review results', 'Save or discard'], exitPoint: 'Logged out or session expired', errorHandling: 'Display error message with recovery option', states: ['idle', 'loading', 'success', 'error', 'authenticated'] },
-          { id: 'flow_2', name: 'Secondary Flow', entryPoint: 'Navigation menu', steps: ['Select section', 'Review data', 'Apply filters', 'Export or share'], exitPoint: 'Return to main interface', errorHandling: 'Show validation errors inline', states: ['idle', 'loading', 'editing', 'viewing'] },
-        ];
+        async function callBrain(prompt) {
+        const base = brainBaseUrl();
+        if (!base) return null;
+        try {
+          const res = await fetch(base + '/api/brain/complete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              systemPrompt: 'You are a senior product manager. Return only the finished PRD JSON, no prose or fences.',
+              prompt: prompt,
+              options: { temperature: 0.3, maxTokens: 8192 },
+            }),
+          });
+          if (!res.ok) return null;
+          const data = await res.json();
+          return data.content || data.summary || null;
+        } catch (e) {
+          return null;
+        }
+        }
 
-        const uiRequirements = [
-          { id: 'ui_1', component: 'Main Dashboard', description: 'Display key metrics and quick actions', accessibility: 'WCAG 2.1 AA', states: ['loading', 'empty', 'populated', 'error'], responsive: true },
-          { id: 'ui_2', component: 'Data Table', description: 'Display sortable and filterable data with pagination', accessibility: 'WCAG 2.1 AA', states: ['loading', 'empty', 'populated', 'editing'], responsive: true },
-          { id: 'ui_3', component: 'Settings Panel', description: 'Allow user to configure preferences', accessibility: 'WCAG 2.1 AA', states: ['viewing', 'editing', 'saving', 'saved'], responsive: false },
-        ];
+        function withDeadline(promise, ms) {
+        return new Promise(function (resolve) {
+          let done = false;
+          const timer = setTimeout(function () { if (!done) { done = true; resolve(null); } }, ms);
+          Promise.resolve(promise).then(
+            function (v) { if (!done) { done = true; clearTimeout(timer); resolve(v); } },
+            function () { if (!done) { done = true; clearTimeout(timer); resolve(null); } }
+          );
+        });
+        }
 
-        const rolloutPhases = [
-          { id: 'phase_1', name: 'Alpha', targetUsers: 'Internal team', featureFlags: ['prd_core_v1'], criteria: 'All acceptance criteria pass, internal beta tested', duration: '2 weeks', rollback: 'Disable prd_core_v1 flag' },
-          { id: 'phase_2', name: 'Beta', targetUsers: 'Limited external users (5-10%)', featureFlags: ['prd_core_v1', 'prd_analytics_v1'], criteria: '95% acceptance criteria pass, no P0 bugs', duration: '4 weeks', rollback: 'Disable prd_analytics_v1 flag, notify beta users' },
-          { id: 'phase_3', name: 'General Availability', targetUsers: 'All users', featureFlags: ['prd_core_v1', 'prd_analytics_v1', 'prd_notifications_v1'], criteria: 'All acceptance criteria pass, monitoring dashboards active', duration: 'Ongoing', rollback: 'Disable all feature flags, deploy previous version' },
-        ];
+        const NOT_CONNECTED_BODY = [{ id: 'error', title: 'Not Connected', kind: 'text', body: 'PRD generation requires a configured assistant model. Contact your administrator to set brainEndpoint in this Skill\'s configuration and verify model availability.' }];
+        const NOT_CONNECTED_ERROR = 'PRD generation is unavailable; set brainEndpoint in this Skill configuration and ensure the assistant model is reachable';
 
-        const internalDependencies = [
-          { id: 'int_dep_1', type: 'service', description: 'Authentication service must be available', status: 'required' },
-          { id: 'int_dep_2', type: 'data', description: 'User data schema must be migrated', status: 'required' },
-          { id: 'int_dep_3', type: 'api', description: 'Core API endpoints must be deployed', status: 'required' },
-        ];
-        const externalDependencies = [
-          { id: 'ext_dep_1', type: 'third_party', description: 'Identity provider integration', status: 'pending', impact: 'blocks' },
-          { id: 'ext_dep_2', type: 'infrastructure', description: 'Cloud infrastructure provisioning', status: 'pending', impact: 'blocks' },
-        ];
-
-        const prd = {
-          id: 'prd_' + Date.now(),
-          title,
-          structure: {
-            problem: problem,
-            scope: scope,
-            solution: { summary: 'Solution derived from problem statement and user stories', approaches: generatedStories.map(s => s.text) },
-            requirements: { functional: functionalRequirements, nonFunctional: nonFunctionalRequirements },
-            metrics: successMetrics.map((m, i) => ({ id: 'metric_' + (i + 1), text: m, target: 'Defined during sprint planning', baseline: 'Current state measurement' })),
-            risks: risks.map((r, i) => ({ id: 'risk_' + (i + 1), text: r, mitigation: 'TBD - risk assessment during planning', severity: 'medium' }))
-          },
-          userStories: generatedStories,
-          acceptanceCriteria: generatedStories.flatMap(s => s.acceptanceCriteria),
-          technicalRequirements: { functional: functionalRequirements, nonFunctional: nonFunctionalRequirements },
-          dataRequirements: dataRequirements,
-          uxRequirements: { flows: userFlows, uiComponents: uiRequirements, accessibility: 'WCAG 2.1 AA', states: userFlows.flatMap(f => f.states) },
-          releaseCriteria: { definitionOfDone: 'All acceptance criteria pass, code reviewed, tested, documented, and deployed to production with monitoring', featureFlags: rolloutPhases[rolloutPhases.length - 1].featureFlags },
-          dependencies: { internal: internalDependencies, external: externalDependencies },
-          rolloutPlan: {
-            phases: rolloutPhases,
-            strategy: 'Phased rollout with feature flags for gradual exposure and easy rollback',
-            rollbackPlan: 'Disable relevant feature flags and redeploy previous version',
-            criteriaPerPhase: rolloutPhases.map(p => ({ phase: p.name, criteria: p.criteria }))
-          },
-          assumptions: assumptions.map((a, i) => ({ id: 'assumption_' + (i + 1), text: a, validated: false })),
-          nonGoals: nonGoals.map((n, i) => ({ id: 'nongoal_' + (i + 1), text: n })),
-          openQuestions: openQuestions.map((q, i) => ({ id: 'question_' + (i + 1), text: q, status: 'open', resolution: null })),
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          source: 'algorithmic'
+        const toolInput = {
+          title: input.title || '',
+          problem: input.problem || '',
+          scope: input.scope || '',
+          goals: Array.isArray(input.goals) ? input.goals : [],
+          successMetrics: Array.isArray(input.successMetrics) ? input.successMetrics : [],
+          nonGoals: Array.isArray(input.nonGoals) ? input.nonGoals : [],
+          openQuestions: Array.isArray(input.openQuestions) ? input.openQuestions : [],
+          targetUsers: Array.isArray(input.targetUsers) ? input.targetUsers : [],
+          userStories: Array.isArray(input.userStories) ? input.userStories : [],
+          constraints: Array.isArray(input.constraints) ? input.constraints : [],
+          assumptions: Array.isArray(input.assumptions) ? input.assumptions : [],
+          risks: Array.isArray(input.risks) ? input.risks : [],
         };
 
-        return prd;
+        const brainPrompt =
+          'You are a senior product manager. Generate a complete product requirements document as a single JSON object — no prose, no preamble, no markdown fences. ' +
+          'Return only the finished PRD JSON.\n\n' +
+          'Input:\n' + JSON.stringify(toolInput, null, 2);
+
+        function parsePrd(value) {
+        if (!value) return null;
+        if (typeof value === 'object' && value.title) return value;
+        const text = delegatedText(value);
+        if (!text) return null;
+        try { return JSON.parse(text); } catch {}
+        const match = text.match(/\{[\s\S]*\}/);
+        if (match) { try { return JSON.parse(match[0]); } catch {} }
+        return null;
+        }
+
+        let parsed = null;
+        let via = null;
+        try {
+          const raw = await withDeadline(ctx.delegate('product-prd-generator', toolInput), DELEGATED_TIMEOUT_MS);
+          const payload = unwrapDelegated(raw);
+          parsed = parsePrd(payload);
+          via = parsed ? 'delegated' : null;
+        } catch (e) {
+          parsed = null;
+        }
+
+        if (!parsed) {
+          const direct = await callBrain(brainPrompt);
+          parsed = parsePrd(direct);
+          via = parsed ? 'brain' : null;
+        }
+
+        if (!parsed) {
+          return {
+            success: false,
+            status: 'not-connected',
+            data: null,
+            error: NOT_CONNECTED_ERROR,
+            present: NOT_CONNECTED_BODY,
+          };
+        }
+
+        const prd = parsed;
+        const title = prd.title || input.title || 'Untitled PRD';
+        const userStories = Array.isArray(prd.userStories) ? prd.userStories : [];
+        const acceptanceCriteria = userStories.flatMap((s) => Array.isArray(s.acceptanceCriteria) ? s.acceptanceCriteria : []);
+        const techReq = prd.technicalRequirements || {};
+        const functional = Array.isArray(techReq.functional) ? techReq.functional : [];
+        const nonFunctional = Array.isArray(techReq.nonFunctional) ? techReq.nonFunctional : [];
+        const dataReq = prd.dataRequirements || {};
+        const entities = Array.isArray(dataReq.entities) ? dataReq.entities : [];
+        const uxReq = prd.uxRequirements || {};
+        const flows = Array.isArray(uxReq.flows) ? uxReq.flows : [];
+        const uiComponents = Array.isArray(uxReq.uiComponents) ? uxReq.uiComponents : [];
+        const rolloutPlan = prd.rolloutPlan || {};
+        const phases = Array.isArray(rolloutPlan.phases) ? rolloutPlan.phases : [];
+
+        const present = [];
+        present.push({ id: 'prd-overview', title: 'PRD Overview', kind: 'text', body: title + '\n\nProblem: ' + (prd.problem || '(none provided)') + '\n\nScope: ' + (prd.scope || '(none provided)') });
+        if (prd.goals && prd.goals.length) {
+          present.push({ id: 'prd-goals', title: 'Goals', kind: 'text', body: prd.goals.map(function (g) { return '- ' + g; }).join(NL) });
+        }
+        if (prd.successMetrics && prd.successMetrics.length) {
+          present.push({ id: 'prd-metrics', title: 'Success Metrics', kind: 'text', body: prd.successMetrics.map(function (m) { return '- ' + m; }).join(NL) });
+        }
+        if (userStories.length) {
+          present.push({ id: 'prd-user-stories', title: 'User Stories', kind: 'text', body: userStories.map(function (s) { return '- [' + s.id + '] ' + s.text + ' (' + s.userType + ')'; }).join(NL) });
+        }
+        if (acceptanceCriteria.length) {
+          present.push({ id: 'prd-acceptance-criteria', title: 'Acceptance Criteria', kind: 'text', body: acceptanceCriteria.map(function (ac) { return '- ' + ac.given + ' | ' + ac.when + ' | ' + ac.then + ' [' + ac.priority + ']'; }).join(NL) });
+        }
+        if (functional.length || nonFunctional.length) {
+          present.push({ id: 'prd-tech-reqs', title: 'Technical Requirements', kind: 'text', body: 'Functional:\n' + functional.map(function (f) { return '- ' + f.category + ': ' + f.description + ' [' + f.priority + ']'; }).join(NL) + '\n\nNon-Functional:\n' + nonFunctional.map(function (nf) { return '- ' + nf.category + ': ' + nf.description + ' [' + nf.priority + ']'; }).join(NL) });
+        }
+        if (entities.length) {
+          present.push({ id: 'prd-data-reqs', title: 'Data Requirements', kind: 'text', body: entities.map(function (e) { return '- ' + e.name + ': ' + (Array.isArray(e.attributes) ? e.attributes.map(function (a) { return a.name + ' (' + a.type + ')'; }).join(', ') : ''); }).join(NL) });
+        }
+        if (flows.length || uiComponents.length) {
+          present.push({ id: 'prd-ux', title: 'UX Requirements', kind: 'text', body: 'Flows:\n' + flows.map(function (f) { return '- ' + (f.name || 'Flow'); }).join(NL) + '\n\nUI Components:\n' + uiComponents.map(function (c) { return '- ' + (c.component || 'Component'); }).join(NL) });
+        }
+        if (phases.length) {
+          present.push({ id: 'prd-rollout', title: 'Rollout Plan', kind: 'text', body: phases.map(function (p) { return '- ' + (p.name || 'Phase') + ': ' + (p.criteria || ''); }).join(NL) });
+        }
+        if (via) {
+          present.push({ id: 'prd-source', title: 'Source', kind: 'text', body: 'Generated via ' + via + ' call.' });
+        }
+
+        const record = {
+          id: 'prd_' + Date.now(),
+          title,
+          source: 'llm',
+          generatedAt: new Date().toISOString(),
+          prd,
+        };
+
+        return {
+          success: true,
+          status: 'ok',
+          data: {
+            prd: prd,
+            userStories: userStories,
+            acceptanceCriteria: acceptanceCriteria,
+            rolloutPlan: rolloutPlan,
+            source: 'llm',
+            record: record,
+          },
+          error: null,
+          present: present,
+        };
       }
     });
