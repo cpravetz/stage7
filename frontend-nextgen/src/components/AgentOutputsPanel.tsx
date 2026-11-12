@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFeedStore } from '../stores/feedStore';
+import { interactionQuestionText } from '../utils/missionEvents';
 
 interface AgentInfo {
   id: string;
@@ -224,7 +225,7 @@ const LIFECYCLE_EVENT_TYPES = new Set([
   'approval_requested', 'approval_approved', 'approval_rejected',
   'mission_started', 'mission_completed', 'mission_failed', 'mission_canceled',
   'mission_paused', 'mission_resumed', 'mission_incomplete', 'mission_needs_review',
-  'clarification_needed', 'cost_estimate',
+  'clarification_needed', 'question_asked', 'cost_estimate',
 ]);
 
 function isReasoningEvent(e: { type: string; message: string; metadata?: Record<string, unknown> }): boolean {
@@ -541,6 +542,7 @@ const AgentOutputsPanel = ({ missionId, missionStatus, plan }: AgentOutputsPanel
                     || event.type === 'phase_plan_amended' || event.type === 'phase_completed' || event.type === 'phase_approved' || event.type === 'phase_rejected'
                     || event.type === 'approval_requested' || event.type === 'approval_approved' || event.type === 'approval_rejected'
                     || event.type === 'task_started' || event.type === 'clarification_needed'
+                    || event.type === 'question_asked'
                     || event.type === 'agent_delegation' || event.type === 'agent_acknowledgement' || event.type === 'agent_response' || event.type === 'agent_error'
                   ).slice(-6);
                   if (completedTasks.length === 0 && decisionEvents.length === 0) {
@@ -569,7 +571,7 @@ const AgentOutputsPanel = ({ missionId, missionStatus, plan }: AgentOutputsPanel
                             return deduped.map((event, idx) => (
                               <div key={`decision-${String((event as { id?: string }).id || event.timestamp || idx)}-${idx}`} className="muted" style={{ fontSize: 12, marginBottom: 8, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
                                 <span style={{ marginRight: 6 }}>[{new Date(event.timestamp || Date.now()).toLocaleTimeString()}]</span>
-                                <span>{getThought(event) || event.message}</span>
+                                <span>{event.type === 'question_asked' ? interactionQuestionText(event) : getThought(event) || event.message}</span>
                               </div>
                             ));
                           })()}

@@ -812,10 +812,35 @@ function stripSecretPrefix(text: string): string {
   return text.replace(/^\s*\[secret:[a-z0-9_-]+\]\s*/i, '');
 }
 
-function interactionQuestionText(event: FeedEvent): string {
+export function interactionQuestionText(event: Pick<FeedEvent, 'type' | 'message' | 'metadata'>): string {
   const data = event.metadata || {};
-  if (typeof data.question === 'string' && data.question.trim()) return stripSecretPrefix(data.question.trim());
-  if (typeof event.message === 'string' && event.message.trim()) return stripSecretPrefix(stripAskUserMarker(event.message.trim()));
+  const rawQuestion = typeof data.question === 'string' && data.question.trim()
+    ? data.question.trim()
+    : typeof event.message === 'string' && event.message.trim()
+      ? event.message.trim()
+      : '';
+  if (rawQuestion) {
+    let question = stripAskUserMarker(rawQuestion).trim();
+    const payloadStart = question.indexOf('{');
+    const candidates = [question, ...(payloadStart >= 0 ? [question.slice(payloadStart)] : [])];
+    for (const candidate of candidates) {
+      try {
+        const parsed: unknown = JSON.parse(candidate);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          const value = (parsed as Record<string, unknown>).question;
+          if (typeof value === 'string' && value.trim()) {
+            question = value.trim();
+            break;
+          }
+        }
+      } catch {
+        // Plain-text questions are supported alongside structured question payloads.
+      }
+    }
+    if (/"question"\s*:/.test(question)) question = '';
+    question = stripSecretPrefix(question).replace(/\s+/g, ' ').trim();
+    if (question && !/^(?:\{|\[)/.test(question)) return question;
+  }
   if (event.type === 'permission_required') {
     const permission = data.permission;
     if (permission && typeof permission === 'object' && typeof (permission as { explanation?: unknown }).explanation === 'string') {

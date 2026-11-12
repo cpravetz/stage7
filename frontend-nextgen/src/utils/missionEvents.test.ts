@@ -295,6 +295,32 @@ describe('mission conversation', () => {
     expect(amended?.message).toContain('Delivery API unavailable');
   });
 
+  it('renders JSON-wrapped input requests as plain questions in the conversation', () => {
+    const transcript = buildTranscript([
+      feedEvent({
+        id: 'question-asked',
+        type: 'question_asked',
+        message: 'Agent needs your input',
+        metadata: {
+          question: '__ASK_USER__:{"question":"Which account should I use?","format":"text"}',
+        },
+      }),
+    ]);
+
+    expect(transcript[0]?.lines[0]?.text).toBe('Which account should I use?');
+    expect(JSON.stringify(transcript)).not.toContain('__ASK_USER__');
+    expect(JSON.stringify(transcript)).not.toContain('"format"');
+
+    const embeddedQuestion = buildTranscript([
+      feedEvent({
+        id: 'embedded-question',
+        type: 'question_asked',
+        message: 'Agent needs your input: {"question":"Which region should I target?"}',
+      }),
+    ]);
+    expect(embeddedQuestion[0]?.lines[0]?.text).toBe('Which region should I target?');
+  });
+
   it('keeps internal JSON receipts and validation jargon out of the conversation', () => {
     const taskEvent = feedEvent({
       id: 'internal-output',

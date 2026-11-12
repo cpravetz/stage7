@@ -920,8 +920,8 @@ this.pendingCredentialOverrides.set(pending.tool.id, resolvedCredentials);
 
 if (submission.storeInVault && submission.vaultSecretId) {
 try {
-const vaultUrl = process.env.VAULT_URL || 'http://vault:4000';
-await fetch(`${vaultUrl}/secrets/${submission.vaultSecretId}/encrypt`, {
+    const vaultUrl = process.env.VAULT_URL || 'http://vault:4000';
+    await fetch(`${vaultUrl}/secrets/${submission.vaultSecretId}/encrypt`, {
 method: 'POST',
 headers: { 'Content-Type': 'application/json' },
 body: JSON.stringify({ plaintext: JSON.stringify(submission.credentials) }),
