@@ -41,12 +41,15 @@ export const CTO_ENGINEERING_ACTION_IAC_DRIFT_REMEDIATION = createDeclarativeCod
       lowerOrderTools: ['cto-engineering-actions'],
       configSchema: createSchemaRecord({
         endpointUrl: SchemaProps.url({ description: 'Configured engineering or IaC remediation endpoint' }),
+        // The bearer token is a secret, so it is resolved from the vault or from
+        // this Skill's configuration rather than asked for on the Run form.
+        token: {
+          type: 'string',
+          description: 'Remediation endpoint access token (set it in this Skill configuration, or a vault secret)',
+          configKey: 'token',
+          label: 'remediation endpoint access token',
+        },
       }, { required: ['endpointUrl'] }),
-      // The bearer token is a secret, so it is resolved from the vault or from
-      // operator configuration rather than asked for on the Run form.
-      credentialSource: {
-        token: { configKey: 'token', required: false, label: 'remediation endpoint access token (set it in this Skill configuration, or a vault secret)' },
-      }
     },
     handler: async function handler(input, ctx) {
         // The endpoint is operator configuration and the token a declared

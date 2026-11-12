@@ -8,12 +8,26 @@
     "codeFile": "calendar.js",
     "configSchema": {
       "type": "object",
-      "properties": {},
+      "properties": {
+        "apiKey": {
+          "type": "string",
+          "title": "API Key",
+          "description": "Calendar API key",
+          "sensitive": true,
+          "required": false,
+          "envVar": "CALENDAR_API_KEY",
+          "label": "API Key"
+        },
+        "calendarPath": {
+          "type": "string",
+          "title": "Calendar Path",
+          "description": "Path to calendar file",
+          "required": false,
+          "configKey": "calendar.path",
+          "label": "Calendar Path"
+        }
+      },
       "required": []
-    },
-    "credentialSource": {
-      "apiKey": { "envVar": "CALENDAR_API_KEY" },
-      "calendarPath": { "configKey": "calendar.path" }
     }
   },
   "inputSchema": {

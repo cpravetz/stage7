@@ -37,7 +37,7 @@ export class ToolConfigResolver {
 
   /**
    * Standard vault secret naming: secret:<credential_key>
-   * Credential keys are the logical keys from the tool's credentialSource manifest
+   * Credential keys are the logical keys from the tool's configSchema.properties
    * (e.g., "apiKey", "token", "accessToken"). This allows multiple tools to share
    * the same secret without tying it to a specific tool ID.
    */
@@ -91,6 +91,28 @@ export class ToolConfigResolver {
     }, config);
   }
 
+  /**
+   * Returns the credential source spec for a configSchema property, if any.
+   * Credential sources are now declared inline on each configSchema property
+   * (vaultSecretId / envVar / configKey).
+   */
+  private getCredentialSourceForProperty(
+    manifest: Record<string, unknown> | undefined,
+    field: string,
+  ): { envVar?: string; configKey?: string; vaultSecretId?: string } | undefined {
+    const configSchema = manifest?.configSchema as { properties?: Record<string, Record<string, unknown>> } | undefined;
+    const properties = configSchema?.properties ?? {};
+    const property = properties[field];
+    if (!property || typeof property !== 'object') return undefined;
+    const hasCredentialSource = property.vaultSecretId || property.envVar || property.configKey;
+    if (!hasCredentialSource) return undefined;
+    return {
+      vaultSecretId: property.vaultSecretId as string | undefined,
+      envVar: property.envVar as string | undefined,
+      configKey: property.configKey as string | undefined,
+    };
+  }
+
   private async isConfigured(tool: Tool, field: string, input: Record<string, unknown>): Promise<boolean> {
     if (field === 'confirmBeforeSend') return true;
 
@@ -129,9 +151,7 @@ export class ToolConfigResolver {
     }
 
     if (this.isCredentialField(field)) {
-      const credentialSource = manifest?.credentialSource as
-        Record<string, { envVar?: string; configKey?: string; vaultSecretId?: string }> | undefined;
-      const source = credentialSource?.[field];
+      const source = this.getCredentialSourceForProperty(manifest, field);
       // An `envVar` credential source is a deliberate deployment-level binding and
       // is still honoured; a config field is not backed by a guessed env var name.
       const envValue = source?.envVar ? process.env[source.envVar] : undefined;
@@ -177,15 +197,16 @@ export class ToolConfigResolver {
 
   async validateConfigSchema(tool: Tool, input: Record<string, unknown>, executionId: string): Promise<ToolExecution | null> {
     const configSchema = tool.configSchema || (tool.manifest?.configSchema as SchemaRecord | undefined);
-    const credentialSource = tool.manifest?.credentialSource as Record<string, { configKey?: string; vaultSecretId?: string }> | undefined;
-    // A field whose value is supplied through `credentialSource` (configKey or
-    // vaultSecretId) is resolved at execution time, so it must not be treated as
-    // a missing static config value here. Only fields with no declared credential
-    // source are validated against input/externalConfig.
+    // Credential sources are now declared inline on each configSchema property
+    // (vaultSecretId / envVar / configKey). A field whose value is supplied
+    // through a credential source is resolved at execution time, so it must not
+    // be treated as a missing static config value here. Only fields with no
+    // declared credential source are validated against input/externalConfig.
+    const configProperties = (configSchema?.properties as Record<string, Record<string, unknown>> | undefined) ?? {};
     const credentialBackedFields = new Set(
-      Object.entries(credentialSource || {})
-        .filter(([, source]) => source && (typeof source.configKey === 'string' || typeof source.vaultSecretId === 'string'))
-        .flatMap(([field, source]) => [field, ...(source.configKey ? [source.configKey] : [])]),
+      Object.entries(configProperties)
+        .filter(([, schema]) => schema && (schema.vaultSecretId || schema.envVar || schema.configKey))
+        .map(([field]) => field),
     );
     const isExternalAction = tool.manifest?.system !== undefined && tool.manifest?.action !== undefined;
     const required = Array.isArray(configSchema?.required)
@@ -254,39 +275,41 @@ export class ToolConfigResolver {
     // A credential declared with `configKey` resolves against the Skill's own
     // configuration, so the provider needs the resolved values.
     const configuredValues = this.resolveSkillConfig(tool, _input);
-    const credentialSources: Array<{
+    // Credential sources are now declared inside configSchema.properties. Each
+    // property entry carries the vaultSecretId / envVar / configKey / sensitive /
+    // label metadata declared inline. `required` is the
+    // standard JSON Schema `required` array at the schema root, not a per-property
+    // flag — so a tool can declare some credentials required and leave others
+    // optional without forcing every field to be filled before Save.
+    const credentialEntries: Array<{
       logicalKey: string;
       label?: string;
       required: boolean;
       source: { vaultSecretId?: string; envVar?: string; configKey?: string; sensitive?: boolean };
     }> = [];
-
-    if (manifest?.credentialSource && typeof manifest.credentialSource === 'object') {
-      const cs = manifest.credentialSource as Record<
-        string,
-        { vaultSecretId?: string; envVar?: string; configKey?: string; label?: string; required?: boolean; sensitive?: boolean }
-      >;
-      for (const [logicalKey, source] of Object.entries(cs)) {
-        if (source && typeof source === 'object') {
-          const s = source as {
-            vaultSecretId?: string;
-            envVar?: string;
-            configKey?: string;
-            label?: string;
-            required?: boolean;
-            sensitive?: boolean;
-          };
-          // A declared `label` is what the operator sees when a credential is missing, so
-          // it should say where the value goes rather than repeating the logical key.
-          // `required` defaults to true: declaring a credential has always meant the
-          // Skill cannot run without it, and only Skills that can genuinely degrade
-          // should opt out.
-          credentialSources.push({ logicalKey, label: s.label || logicalKey, required: s.required !== false, source: s });
-        }
-      }
+    const configSchema = manifest?.configSchema as { properties?: Record<string, Record<string, unknown>>; required?: string[] } | undefined;
+    const properties = configSchema?.properties ?? {};
+    const requiredSet = new Set(Array.isArray(configSchema?.required) ? configSchema.required : []);
+    for (const [logicalKey, propertySchema] of Object.entries(properties)) {
+      const schema = propertySchema || {};
+      // Only properties that declare a vaultSecretId, envVar, or configKey are
+      // credentials; the rest are plain operator config.
+      const hasCredentialSource = schema.vaultSecretId || schema.envVar || schema.configKey;
+      if (!hasCredentialSource) continue;
+      credentialEntries.push({
+        logicalKey,
+        label: (schema.label as string) || logicalKey,
+        required: requiredSet.has(logicalKey),
+        source: {
+          vaultSecretId: schema.vaultSecretId as string | undefined,
+          envVar: schema.envVar as string | undefined,
+          configKey: schema.configKey as string | undefined,
+          sensitive: schema.sensitive as boolean | undefined,
+        },
+      });
     }
 
-    const namedSources: NamedCredentialSource[] = credentialSources.map((c) => ({
+    const namedSources: NamedCredentialSource[] = credentialEntries.map((c) => ({
       logicalKey: c.logicalKey,
       vaultSecretId: c.source.vaultSecretId,
       envVar: c.source.envVar,
@@ -294,7 +317,7 @@ export class ToolConfigResolver {
       sensitive: c.source.sensitive,
     }));
     const resolved = await credentialProvider.resolveAll(namedSources, configuredValues);
-    for (const credential of credentialSources) {
+    for (const credential of credentialEntries) {
       if (!resolved[credential.logicalKey] && credential.source.configKey) {
         const value = await this.tryResolveFromVault(tool, credential.logicalKey, _input);
         if (typeof value === 'string' && value.trim()) resolved[credential.logicalKey] = value;
@@ -303,7 +326,7 @@ export class ToolConfigResolver {
 
     const overrides = this.pendingCredentialOverrides.get(tool.id) || {};
     const merged = { ...resolved, ...overrides };
-    const missing = credentialSources
+    const missing = credentialEntries
       .filter((c) => c.required && !merged[c.logicalKey])
       .map((c) => ({
         key: c.logicalKey,
@@ -433,15 +456,18 @@ export class ToolConfigResolver {
       if (!source || typeof source !== 'object') continue;
       for (const [key, value] of Object.entries(source)) config[key] = value;
     }
-    // A declared credentialSource maps a logical config key to a nested path.
-    const credentialSource = manifest?.credentialSource as { [k: string]: { configKey?: string } } | undefined;
-    if (credentialSource && typeof credentialSource === 'object') {
-      for (const spec of Object.values(credentialSource)) {
-        if (!spec?.configKey) continue;
-        const nested = this.getNestedValue(tool.externalConfig as Record<string, unknown> | undefined, spec.configKey);
-        if (nested !== undefined && config[spec.configKey.split('.').pop() as string] === undefined) {
-          config[spec.configKey.split('.').pop() as string] = nested;
-        }
+    // Credential config keys are now declared inside configSchema.properties with
+    // a `configKey` pointing at a nested path in externalConfig. Read those the
+    // same way the credential provider does, so the resolved config matches what
+    // the handler will receive.
+    const configSchema = manifest?.configSchema as { properties?: Record<string, { configKey?: string }> } | undefined;
+    const properties = configSchema?.properties ?? {};
+    for (const [logicalKey, propertySchema] of Object.entries(properties)) {
+      const spec = propertySchema || {};
+      if (!spec?.configKey) continue;
+      const nested = this.getNestedValue(tool.externalConfig as Record<string, unknown> | undefined, spec.configKey);
+      if (nested !== undefined && config[spec.configKey.split('.').pop() as string] === undefined) {
+        config[spec.configKey.split('.').pop() as string] = nested;
       }
     }
     // Per-run input fills gaps only. A key the operator declared in configSchema

@@ -88,19 +88,11 @@ const CALCULATE_DORA = createDeclarativeCodeSkill({
         // the provider itself configures this.
         githubToken: {
           type: 'string',
-          description: 'Source system token, when the caller fetches records itself',
-        },
+          description: 'Source system token, when the caller fetches records itself', configKey: 'githubToken', label: 'source system token (set in this tool configuration, or a vault secret)' },
         perfBands: {
           type: 'object',
           description: 'Overrides for the performance band boundaries',
         },
-      },
-    },
-    credentialSource: {
-      githubToken: {
-        configKey: 'githubToken',
-        required: false,
-        label: 'source system token (set in this tool configuration, or a vault secret)',
       },
     },
     lowerOrderTools: [],

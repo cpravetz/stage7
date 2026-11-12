@@ -99,10 +99,11 @@ async function execute(skill: Tool, input: Record<string, unknown>): Promise<Exe
 
 describe('Secrets are never run inputs', () => {
   /**
-   * A secret belongs to credentialSource and is resolved by the credential
-   * provider. Exposing it in inputSchema put it on the Run form -- prompting the
-   * user for a value they cannot know -- and let any API caller substitute their
-   * own key for the resolved one.
+   * A secret belongs to a credential source declared inline on a configSchema
+   * property and is resolved by the credential provider. Exposing it in
+   * inputSchema put it on the Run form -- prompting the user for a value they
+   * cannot know -- and let any API caller substitute their own key for the
+   * resolved one.
    */
   const SECRET_FIELDS = /^(apiKey|api_key|token|accessToken|password|secret|clientSecret|credential|bearerToken)$/;
 
@@ -125,7 +126,12 @@ describe('Secrets are never run inputs', () => {
       // Match a *call*, not the bare identifier: the generated wrapper defines
       // getCredential on ctx for every Skill, so testing for the name alone
       // matches all of them and says nothing.
-      if (/ctx\.getCredential\(/.test(source) && !skill.manifest?.credentialSource) {
+      if (!/ctx\.getCredential\(/.test(source)) continue;
+      const properties = (skill.manifest?.configSchema as { properties?: Record<string, Record<string, unknown>> } | undefined)?.properties ?? {};
+      const declaresCredentialSource = Object.values(properties).some((property) =>
+        Boolean(property && (property.vaultSecretId || property.envVar || property.configKey)),
+      );
+      if (!declaresCredentialSource) {
         undeclared.push(skill.id);
       }
     }

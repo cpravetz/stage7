@@ -20,14 +20,11 @@ export const RESOURCE_COORDINATION = createExternalActionSkill({
     type: 'bearer',
     credentialEnvKeyMap: { token: 'HEALTHCARE_RESOURCE_ACCESS_TOKEN' },
   },
-  credentialSource: {
-    token: { envVar: 'HEALTHCARE_RESOURCE_ACCESS_TOKEN', configKey: 'resource.token' },
-  },
   configSchema: {
     type: 'object',
     properties: {
       baseUrl: { type: 'string', description: 'Resource management system base URL' },
-      token: { type: 'string', description: 'Resource management bearer token' },
+      token: { type: 'string', description: 'Resource management bearer token', envVar: 'HEALTHCARE_RESOURCE_ACCESS_TOKEN', configKey: 'resource.token' },
       provider: { type: 'string', enum: ['teletracking', 'central-logic', 'awarepoint', 'referral-md', 'kyruus', 'custom'], description: 'System provider' },
       defaultFacility: { type: 'string', description: 'Default facility identifier' },
       enableMatching: { type: 'boolean', description: 'Enable patient-resource matching algorithms' },

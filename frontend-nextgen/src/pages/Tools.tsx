@@ -42,19 +42,24 @@ type CredentialSource = {
 };
 
 function getToolCredentialSources(tool: Tool): Array<{ key: string; label: string; source: string }> {
-  const rawSources = tool.manifest?.credentialSource;
-  if (!rawSources || typeof rawSources !== 'object' || Array.isArray(rawSources)) return [];
-  return Object.entries(rawSources).flatMap(([key, rawSource]) => {
+  // Credential sources are now declared inside configSchema.properties. Each
+  // property entry carries the vaultSecretId / envVar / configKey metadata
+  // inline.
+  const rawSchema = tool.manifest?.configSchema as
+    | { properties?: Record<string, Record<string, unknown>> }
+    | undefined;
+  const properties = rawSchema?.properties ?? {};
+  return Object.entries(properties).flatMap(([key, rawSource]) => {
     if (!rawSource || typeof rawSource !== 'object') return [];
-    const source = rawSource as CredentialSource;
-    const sourceLabel = source.envVar
-      ? `environment variable ${source.envVar}`
-      : source.vaultSecretId
-        ? `Vault secret ${source.vaultSecretId}`
-        : source.configKey
-          ? `tool configuration ${source.configKey}`
+    const schema = rawSource as CredentialSource;
+    const sourceLabel = schema.envVar
+      ? `environment variable ${schema.envVar}`
+      : schema.vaultSecretId
+        ? `Vault secret ${schema.vaultSecretId}`
+        : schema.configKey
+          ? `tool configuration ${schema.configKey}`
           : 'no configured source';
-    return [{ key, label: source.label || key, source: sourceLabel }];
+    return [{ key, label: (schema.label as string) || key, source: sourceLabel }];
   });
 }
 

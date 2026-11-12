@@ -9,21 +9,57 @@
     "configSchema": {
       "type": "object",
       "properties": {
-        "smtp_host": { "type": "string", "description": "SMTP server hostname" },
-        "smtp_port": { "type": "integer", "description": "SMTP server port (default 587)", "default": 587 },
-        "smtp_user": { "type": "string", "description": "SMTP username/email" },
-        "smtp_pass": { "type": "string", "description": "SMTP password" },
-        "from_address": { "type": "string", "description": "Default sender email address" },
-        "secure": { "type": "boolean", "description": "Use SSL/TLS (true for port 465)", "default": false }
+        "smtp_host": {
+          "type": "string",
+          "title": "SMTP Host",
+          "description": "SMTP server hostname",
+          "required": true,
+          "vaultSecretId": "tool:email_sender:smtp_host",
+          "label": "SMTP host"
+        },
+        "smtp_port": {
+          "type": "integer",
+          "title": "SMTP Port",
+          "description": "SMTP server port (default 587)",
+          "default": 587,
+          "required": false,
+          "vaultSecretId": "tool:email_sender:smtp_port",
+          "label": "SMTP port"
+        },
+        "smtp_user": {
+          "type": "string",
+          "title": "SMTP User",
+          "description": "SMTP username/email",
+          "required": true,
+          "vaultSecretId": "tool:email_sender:smtp_user",
+          "label": "SMTP username/email"
+        },
+        "smtp_pass": {
+          "type": "string",
+          "title": "SMTP Password",
+          "description": "SMTP password",
+          "sensitive": true,
+          "required": true,
+          "vaultSecretId": "tool:email_sender:smtp_pass",
+          "label": "SMTP password"
+        },
+        "from_address": {
+          "type": "string",
+          "title": "From Address",
+          "description": "Default sender email address",
+          "required": false,
+          "vaultSecretId": "tool:email_sender:from_address",
+          "label": "Default from address"
+        },
+        "secure": {
+          "type": "boolean",
+          "title": "Secure",
+          "description": "Use SSL/TLS (true for port 465)",
+          "default": false,
+          "required": false
+        }
       },
-      "required": []
-    },
-    "credentialSource": {
-      "smtp_host": { "vaultSecretId": "tool:email_sender:smtp_host", "label": "SMTP host" },
-      "smtp_port": { "vaultSecretId": "tool:email_sender:smtp_port", "label": "SMTP port" },
-      "smtp_user": { "vaultSecretId": "tool:email_sender:smtp_user", "label": "SMTP username/email" },
-      "smtp_pass": { "vaultSecretId": "tool:email_sender:smtp_pass", "label": "SMTP password", "sensitive": true },
-      "from_address": { "vaultSecretId": "tool:email_sender:from_address", "label": "Default from address" }
+      "required": ["smtp_host", "smtp_user", "smtp_pass"]
     }
   },
   "inputSchema": {

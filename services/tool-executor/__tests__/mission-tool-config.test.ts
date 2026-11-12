@@ -12,12 +12,14 @@ describe('mission tool configuration', () => {
     type: 'code',
     configSchema: {
       type: 'object',
-      properties: { account: { type: 'string' } },
-      required: ['account'],
+      properties: { account_id: { type: 'string', configKey: 'account', label: 'Account ID' } },
+      required: ['account_id'],
     },
     manifest: {
-      credentialSource: {
-        account_id: { configKey: 'account', label: 'Account ID' },
+      configSchema: {
+        type: 'object',
+        properties: { account_id: { type: 'string', configKey: 'account', label: 'Account ID' } },
+        required: ['account_id'],
       },
     },
     createdAt: new Date(),
@@ -50,8 +52,14 @@ describe('mission tool configuration', () => {
       const plugin = {
         id: 'sms-probe', name: 'SMS probe', description: 'Send SMS', type: 'code',
         language: 'python', entrypoint: 'main.py', sourceCode: 'print("{}")', requirements: [],
-        configSchema: { type: 'object', properties: { endpoint: { type: 'string' }, token: { type: 'string' } }, required: ['endpoint', 'token'] },
-        credentialSource: { endpoint: { configKey: 'endpoint' }, token: { configKey: 'token', sensitive: true } },
+        configSchema: {
+          type: 'object',
+          properties: {
+            endpoint: { type: 'string', configKey: 'endpoint' },
+            token: { type: 'string', configKey: 'token', sensitive: true },
+          },
+          required: ['endpoint', 'token'],
+        },
         inputs: { type: 'object', properties: {} }, outputs: { type: 'object', properties: {} },
       };
       let brainCall = 0;

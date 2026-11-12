@@ -8,11 +8,18 @@
     "codeFile": "webhook.js",
     "configSchema": {
       "type": "object",
-      "properties": {},
+      "properties": {
+        "secret": {
+          "type": "string",
+          "title": "Secret",
+          "description": "Webhook secret for signing",
+          "sensitive": true,
+          "required": false,
+          "envVar": "WEBHOOK_SECRET",
+          "label": "Webhook Secret"
+        }
+      },
       "required": []
-    },
-    "credentialSource": {
-      "secret": { "envVar": "WEBHOOK_SECRET" }
     }
   },
   "inputSchema": {

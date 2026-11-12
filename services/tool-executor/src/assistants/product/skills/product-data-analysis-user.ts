@@ -22,7 +22,7 @@ export const PRODUCT_DATA_ANALYSIS_USER = createExternalActionSkill({
       type: 'object',
       properties: {
         baseUrl: { type: 'string', description: 'Analytics service base URL' },
-        apiToken: { type: 'string', format: 'password', description: 'Bearer token for analytics API (prefer a vault-backed credential source)' },
+        apiToken: { type: 'string', format: 'password', description: 'Bearer token for analytics API (prefer a vault-backed credential source)', configKey: 'apiToken', label: 'analytics API token (set in this Skill configuration, or a vault secret)' },
         dataset: { type: 'string', description: 'Default dataset or table' },
         cohortDefinitions: { type: 'object', description: 'Cohort analysis definitions' },
         retentionModels: { type: 'object', description: 'Retention model configurations' },
@@ -34,11 +34,6 @@ export const PRODUCT_DATA_ANALYSIS_USER = createExternalActionSkill({
       // fields were missing. Left required, an operator with nothing configured
       // got a bare executor error and no rendered output at all.
       required: [],
-    },
-    credentialSource: {
-      // Optional: the Skill's not-connected branch explains what to set, which is
-      // more useful to an operator than a refusal with no output.
-      token: { configKey: 'apiToken', required: false, label: 'analytics API token (set in this Skill configuration, or a vault secret)' },
     },
     inputSchema: {
       type: 'object',

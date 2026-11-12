@@ -13,8 +13,10 @@ const DEFAULT_SOURCES: MCPLibrarySource[] = [
   {
     id: 'stage7-curated',
     name: 'Stage7 Curated MCP Library',
-    transport: 'local',
-    config: { command: 'stage7-mcp-curated', args: [] },
+    transport: 'remote',
+    config: {
+      url: process.env.MCP_RUNTIME_URL || 'http://mcp-runtime:3300/mcp',
+    },
     tier: 'curated',
     enabled: true,
   },

@@ -20,14 +20,11 @@ export const MARKETING_SOCIAL_MEDIA = createExternalActionSkill({
       type: 'bearer',
       credentialEnvKeyMap: { token: 'MARKETING_SOCIAL_ACCESS_TOKEN' },
     },
-    credentialSource: {
-      token: { envVar: 'MARKETING_SOCIAL_ACCESS_TOKEN', configKey: 'social.token' },
-    },
     configSchema: {
       type: 'object',
       properties: {
         baseUrl: { type: 'string', description: 'Social publishing system base URL' },
-        token: { type: 'string', description: 'Social platform access token' },
+        token: { type: 'string', description: 'Social platform access token', envVar: 'MARKETING_SOCIAL_ACCESS_TOKEN', configKey: 'social.token' },
         provider: { type: 'string', enum: ['linkedin', 'x', 'facebook', 'instagram', 'tiktok', 'custom'] },
         defaultAccount: { type: 'string' },
         platformConfigs: { type: 'object', description: 'Platform-specific configurations' },

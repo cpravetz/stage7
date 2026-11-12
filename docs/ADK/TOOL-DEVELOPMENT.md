@@ -281,8 +281,7 @@ higher-order Skill's planning or user interaction.
 | `persistenceEnvVar` | `string`                                      | Env var (e.g. `SALES_HOME`) the runtime uses for storage       |
 | `emitEvent`         | `string`                                      | Event id emitted on completion; auto-adds an event trigger     |
 | `endpointEnvVar`    | `string`                                      | Env var holding the external API endpoint URL                  |
-| `credentialSource`  | `Record<string, { vaultSecretId?, envVar?, configKey?, sensitive? }>` | Maps logical keys to Vault or runtime configuration; `envVar` is legacy and deployment-managed only |
-| `configSchema`      | `SchemaRecord`                                | Documents the operator-supplied configuration                  |
+| `configSchema`      | `SchemaRecord`                                | Documents the operator-supplied configuration; credential sources are declared inline on each property (`vaultSecretId`, `envVar`, `configKey`, `label`, `sensitive`) |
 | `confirmBeforeSend` | `boolean`                                     | Requires user confirmation before the skill runs               |
 | `tier`              | `'advise' \| 'aid' \| 'represent'`            | Action tier metadata used by the existing runtime              |
 | `domainKnowledge`   | `string`                                      | Domain guidance handed to the model                            |
@@ -397,32 +396,38 @@ createSchemaRecord({
 
 ### 3. Runtime configuration, never hardcoded or read from Skill environment variables
 
-```ts
-configSchema: {
-  type: 'object',
-  properties: {
-    apiKey: { type: 'string', sensitive: true },
-    baseUrl: { type: 'string' },
-  },
-  required: ['apiKey', 'baseUrl'],
-},
-credentialSource: {
-  apiKey: { configKey: 'apiKey', label: 'Provider API key', sensitive: true },
-  baseUrl: { configKey: 'baseUrl', label: 'Provider endpoint' },
-};
+  Credential sources are declared inline on each `configSchema` property. A property
+  that declares `vaultSecretId`, `envVar`, or `configKey` is resolved by the runtime
+  and is requested from the operator when missing; the rest are plain config values.
 
-// In a Skill handler, read the configured values through the runtime context.
-const apiKey = ctx.getCredential('apiKey');
-const baseUrl = ctx.getCredential('baseUrl');
-```
+  ```ts
+  configSchema: {
+    type: 'object',
+    properties: {
+      apiKey: { type: 'string', sensitive: true, vaultSecretId: 'tool:provider:apiKey', label: 'Provider API key' },
+      baseUrl: { type: 'string', configKey: 'provider.baseUrl', label: 'Provider endpoint' },
+    },
+    required: ['apiKey', 'baseUrl'],
+  };
+  ```
 
-Required `configSchema` fields mapped through `credentialSource.configKey` are requested
-from the user when they are not already configured. Mark secrets as `sensitive: true`
-so the runtime presents them as secret input. Do not read provider settings or credentials
-from `process.env`, `os.environ`, or `os.getenv`; environment variables are for deployment
-settings controlled by the operator, not values that a mission can request or change.
-Legacy `envVar` mappings remain only for deployment-managed integrations while they are
-migrated to runtime configuration.
+  In a Skill handler, read the configured values through the runtime context.
+  `ctx.getCredential('apiKey')` returns the resolved credential, while
+  `ctx.config['baseUrl']` returns the resolved config value.
+
+  ```ts
+  const apiKey = ctx.getCredential('apiKey');
+  const baseUrl = ctx.getCredential('baseUrl');
+  ```
+
+  Required `configSchema` fields that declare a credential source are requested
+  from the user when they are not already configured. Mark secrets as
+  `sensitive: true` so the runtime presents them as secret input. Do not read
+  provider settings or credentials from `process.env`, `os.environ`, or
+  `os.getenv`; environment variables are for deployment settings controlled by
+  the operator, not values that a mission can request or change.
+  Legacy `envVar` mappings remain only for deployment-managed integrations while
+  they are migrated to runtime configuration.
 
 ### 4. Stateless handlers
 

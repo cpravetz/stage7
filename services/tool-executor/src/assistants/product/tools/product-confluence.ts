@@ -27,8 +27,8 @@ export const PRODUCT_CONFLUENCE = createExternalActionSkill({
       type: 'object',
       properties: {
         baseUrl: { type: 'string', description: 'Confluence base URL' },
-        email: { type: 'string', description: 'Confluence user email' },
-        apiToken: { type: 'string', description: 'Confluence API token' },
+        email: { type: 'string', description: 'Confluence user email', envVar: 'CONFLUENCE_EMAIL' },
+        apiToken: { type: 'string', description: 'Confluence API token', envVar: 'CONFLUENCE_API_TOKEN' },
         spaceKey: { type: 'string', description: 'Default space key' },
         ancestorId: { type: 'string', description: 'Parent page ID' },
         pageTemplates: { type: 'object', description: 'Confluence page templates' },
@@ -37,10 +37,6 @@ export const PRODUCT_CONFLUENCE = createExternalActionSkill({
         spacePermissions: { type: 'object', description: 'Space permission rules' },
       },
       required: ['baseUrl', 'email', 'apiToken'],
-    },
-    credentialSource: {
-      username: { envVar: 'CONFLUENCE_EMAIL' },
-      password: { envVar: 'CONFLUENCE_API_TOKEN' },
     },
     inputSchema: {
       type: 'object',

@@ -8,6 +8,14 @@ const SONGWRITER_DISPATCH_CONFIG_SCHEMA = {
     endpointUrl: SchemaProps.url({ title: 'Endpoint URL', description: 'Lead-sheet, demo-asset, or registration endpoint URL', order: 1, hint: 'Provider endpoint for live dispatch of lead sheets, demo metadata, or registration records' }),
     provider: SchemaProps.select(['custom', 'daw', 'registration-portal'], { title: 'Provider', description: 'Configured asset or registration provider', order: 3, default: 'custom', hint: 'Select the service that will receive dispatched assets' }),
     defaultFormat: SchemaProps.select(['lead-sheet', 'demo-metadata', 'registration'], { title: 'Default Format', description: 'Default dispatch artifact format', order: 4, default: 'lead-sheet', hint: 'Default artifact type when none is specified at dispatch time' }),
+    apiKey: SchemaProps.password({
+      title: 'API Key',
+      description: 'Upstream service API key (set in this Skill configuration, or a vault secret)',
+      order: 5,
+      hint: 'Set the provider API key in this Skill configuration, or as a vault secret',
+      configKey: 'apiKey',
+      label: 'upstream service API key',
+    }),
   },
 };
 
@@ -82,11 +90,6 @@ export const leadSheetDemoDispatcher = createDeclarativeCodeSkill({
     // aid/represent mismatch visible to `adk:validate` instead of hiding it.
     system: 'songwriting-provider',
     action: 'dispatch-demo-asset',
-    // Declared as a credential, not a plain config field, so the key can come from
-    // the vault via `vault:<id>` and is never echoed back into emitted output.
-    credentialSource: {
-      apiKey: { configKey: 'apiKey', required: false, label: "upstream service API key (set in this Skill configuration, or a vault secret)" },
-    },
     configSchema: SONGWRITER_DISPATCH_CONFIG_SCHEMA,
     endpointConfigKey: 'endpointUrl',
   },

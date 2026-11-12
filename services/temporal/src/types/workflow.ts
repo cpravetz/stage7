@@ -16,6 +16,7 @@ export interface WorkflowInput {
   prompt: string;
   contextChunks?: Array<{ content: string; tokens: number; priority: number }>;
   metadata?: Record<string, unknown>;
+  startedAt?: number;
   // Resume support: skip already-completed phases/tasks
   resumeFromPhaseId?: string;
   resumeFromTaskId?: string;

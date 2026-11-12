@@ -186,11 +186,9 @@ describe('Songwriter Creative — Batch A', () => {
       const configProps = (dispatcher.manifest.configSchema as Record<string, unknown>).properties as Record<string, unknown>;
       expect(configProps).toBeDefined();
       expect(configProps.endpointUrl).toBeDefined();
-      // apiKey is a declared credential, not a config field, so it never renders as
-      // something the user is asked to supply on the Run form.
-      const credentialSource = dispatcher.manifest.credentialSource as Record<string, unknown>;
-      expect(credentialSource?.apiKey).toBeDefined();
-      expect(configProps.apiKey).toBeUndefined();
+      // apiKey is declared inline on its configSchema property, so the credential
+      // provider resolves it rather than the Run form asking for it.
+      expect(configProps.apiKey).toBeDefined();
       expect(configProps.provider).toBeDefined();
       expect(configProps.defaultFormat).toBeDefined();
       // Configuration may not switch the runtime gate off.

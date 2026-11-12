@@ -120,7 +120,7 @@ function shouldSkipTask(taskId: string, phaseId: string, completedTasks: Mission
 }
 
 export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowResult> {
-  const startedAt = Date.now();
+  const startedAt = input.startedAt || Date.now();
   const isResume = !!input.resumeFromPhaseId || !!input.completedPhases?.length || !!input.completedTasks?.length;
 
   if (isResume) {

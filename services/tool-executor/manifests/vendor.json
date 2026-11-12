@@ -8,12 +8,27 @@
     "codeFile": "vendor.js",
     "configSchema": {
       "type": "object",
-      "properties": {},
+      "properties": {
+        "apiKey": {
+          "type": "string",
+          "title": "API Key",
+          "description": "Vendor API key",
+          "sensitive": true,
+          "required": false,
+          "envVar": "VENDOR_API_KEY",
+          "label": "API Key"
+        },
+        "token": {
+          "type": "string",
+          "title": "Token",
+          "description": "Vendor authentication token",
+          "sensitive": true,
+          "required": false,
+          "envVar": "VENDOR_TOKEN",
+          "label": "Token"
+        }
+      },
       "required": []
-    },
-    "credentialSource": {
-      "apiKey": { "envVar": "VENDOR_API_KEY" },
-      "token": { "envVar": "VENDOR_TOKEN" }
     }
   },
   "inputSchema": {

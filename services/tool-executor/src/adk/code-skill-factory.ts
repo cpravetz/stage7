@@ -7,7 +7,6 @@ export interface CodeSkillManifest {
   entrypoint: string
   sourceCode: string
   configSchema?: SchemaRecord
-  credentialSource?: Record<string, { vaultSecretId?: string; envVar?: string; configKey?: string }>
   [key: string]: unknown
 }
 
@@ -42,17 +41,12 @@ export function createCodeSkill(options: CreateCodeSkillOptions): Tool {
     manifest.configSchema = options.manifest.configSchema
   }
 
-  if (options.manifest.credentialSource !== undefined) {
-    manifest.credentialSource = options.manifest.credentialSource
-  }
-
   for (const [key, value] of Object.entries(options.manifest)) {
     if (
       key !== 'language' &&
       key !== 'entrypoint' &&
       key !== 'sourceCode' &&
-      key !== 'configSchema' &&
-      key !== 'credentialSource'
+      key !== 'configSchema'
     ) {
       manifest[key] = value
     }
@@ -101,6 +95,10 @@ export interface CredentialSourceEntry {
    * replace a truthful explanation with a refusal.
    */
   required?: boolean
+  /**
+   * Whether the value is a secret and must not be echoed back into output.
+   */
+  sensitive?: boolean
 }
 
 export type CredentialEnvKeyMapValue = string | CredentialSourceEntry
@@ -137,7 +135,6 @@ export interface ExternalActionSkillOptions {
   inputSchema?: SchemaRecord
   outputSchema?: SchemaRecord
   configSchema?: SchemaRecord
-  credentialSource?: Record<string, CredentialSourceEntry>
   bodyField?: 'body' | 'payload' | 'record' | string
   triggers?: SkillTrigger[]
   timeoutMs?: number
@@ -255,7 +252,6 @@ export function createExternalActionSkill(options: ExternalActionSkillOptions): 
     inputSchema,
     outputSchema,
     configSchema,
-    credentialSource,
     bodyField,
     timeoutMs,
     tier,
@@ -271,7 +267,7 @@ export function createExternalActionSkill(options: ExternalActionSkillOptions): 
   const endpointConfigKey = endpoint?.configKey ?? null
   const authConfig = buildAuthConfig(auth, auth?.credentialEnvKeyMap)
   const authConfigStr = JSON.stringify(authConfig)
-  const resolvedCredentialSource = credentialSource || buildCredentialSource(auth, auth?.credentialEnvKeyMap)
+  const resolvedCredentialSource = buildCredentialSource(auth, auth?.credentialEnvKeyMap)
 
   const timeoutMsValue = timeoutMs !== undefined ? timeoutMs : undefined
   const timeoutCode = timeoutMsValue !== undefined
@@ -434,12 +430,31 @@ export function createExternalActionSkill(options: ExternalActionSkillOptions): 
     manifest.auth = authConfig
   }
 
-  if (configSchema !== undefined) {
-    manifest.configSchema = configSchema
-  }
-
-  if (Object.keys(resolvedCredentialSource).length > 0) {
-    manifest.credentialSource = resolvedCredentialSource
+  // Credential sources are now declared inline on each configSchema property
+  // (vaultSecretId / envVar / configKey). Merge the resolved credential sources
+  // into the configSchema properties so the executor can read them from one place.
+  if (configSchema !== undefined || Object.keys(resolvedCredentialSource).length > 0) {
+    const mergedConfigSchema: SchemaRecord = {
+      type: 'object',
+      properties: { ...(configSchema?.properties || {}) },
+      required: Array.isArray(configSchema?.required) ? [...configSchema.required] : undefined,
+    }
+    for (const [logicalKey, sourceEntry] of Object.entries(resolvedCredentialSource)) {
+      const existing = (mergedConfigSchema.properties as Record<string, SchemaProperty>)[logicalKey] || {}
+      mergedConfigSchema.properties = {
+        ...mergedConfigSchema.properties,
+        [logicalKey]: {
+          ...existing,
+          type: 'string',
+          vaultSecretId: existing.vaultSecretId ?? sourceEntry.vaultSecretId,
+          envVar: existing.envVar ?? sourceEntry.envVar,
+          configKey: existing.configKey ?? sourceEntry.configKey,
+          label: existing.label ?? sourceEntry.label,
+          sensitive: existing.sensitive ?? sourceEntry.sensitive,
+        },
+      }
+    }
+    manifest.configSchema = mergedConfigSchema
   }
 
   if (timeoutMs !== undefined) {
@@ -585,12 +600,11 @@ export interface DeclarativeSkillOptions {
   /**
    * Operator-supplied configuration, carried onto the manifest verbatim so the
    * executor can resolve credentials and the endpoint before the skill runs.
-   * `configSchema` documents it, `credentialSource` maps logical keys onto
-   * vault secrets / env vars / config keys, and `endpointConfigKey` names the
-   * config field holding the external endpoint URL.
+   * `configSchema` documents it and declares credential sources inline on each
+   * property (vaultSecretId / envVar / configKey), and `endpointConfigKey`
+   * names the config field holding the external endpoint URL.
    */
   configSchema?: SchemaRecord
-  credentialSource?: Record<string, CredentialSourceEntry>
   /** Config field holding the external endpoint URL for this Skill. */
   endpointConfigKey?: string
   inputSchema: SchemaRecord
@@ -1308,7 +1322,6 @@ export function createDeclarativeCodeSkill(options: DeclarativeSkillOptions): To
       ...(resolveActionLabel(options.name, (options.manifest as { actionLabel?: string } | undefined)?.actionLabel)),
       ...(options.emitEvent ? { emitEvent: options.emitEvent } : {}),
       ...(options.configSchema ? { configSchema: options.configSchema } : {}),
-      ...(options.credentialSource ? { credentialSource: options.credentialSource } : {}),
       ...(options.endpointConfigKey ? { endpointConfigKey: options.endpointConfigKey } : {}),
     },
     configSchema: options.configSchema,

@@ -164,7 +164,11 @@ export class MCPHTTPClient {
     }
 
     const data = await response.json() as any;
-    return (data?.result?.tools || []) as MCPTool[];
+    // Tolerate both response shapes: a strict JSON-RPC envelope
+    // ({ result: { tools } }) and the raw shape the Stage7 mcp-runtime
+    // HttpTransport returns directly ({ tools }).
+    const tools = data?.result?.tools ?? data?.tools;
+    return (tools || []) as MCPTool[];
   }
 
   async callTool(name: string, args: Record<string, unknown>): Promise<MCPToolCallResult> {

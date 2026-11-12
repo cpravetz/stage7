@@ -20,14 +20,11 @@ export const RECORDS_SCHEDULING_OPS = createExternalActionSkill({
     type: 'bearer',
     credentialEnvKeyMap: { token: 'HEALTHCARE_OPS_ACCESS_TOKEN' },
   },
-  credentialSource: {
-    token: { envVar: 'HEALTHCARE_OPS_ACCESS_TOKEN', configKey: 'ops.token' },
-  },
   configSchema: {
     type: 'object',
     properties: {
       baseUrl: { type: 'string', description: 'Healthcare operations system base URL' },
-      token: { type: 'string', description: 'Healthcare operations system bearer token' },
+      token: { type: 'string', description: 'Healthcare operations system bearer token', envVar: 'HEALTHCARE_OPS_ACCESS_TOKEN', configKey: 'ops.token' },
       provider: { type: 'string', enum: ['epic', 'cerner', 'allscripts', 'athenahealth', 'custom'], description: 'System provider' },
       defaultFacility: { type: 'string', description: 'Default facility identifier' },
       defaultTimezone: { type: 'string', description: 'Default timezone for scheduling operations' },

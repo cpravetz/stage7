@@ -21,14 +21,11 @@ export const MARKETING_AUDIENCE_INSIGHTS = createExternalActionSkill({
       header: 'X-API-Key',
       credentialEnvKeyMap: { apiKey: 'MARKETING_AUDIENCE_INSIGHTS_API_KEY' },
     },
-    credentialSource: {
-      apiKey: { envVar: 'MARKETING_AUDIENCE_INSIGHTS_API_KEY', configKey: 'audienceInsights.apiKey' },
-    },
     configSchema: {
       type: 'object',
       properties: {
         baseUrl: { type: 'string', description: 'Audience insights platform base URL' },
-        apiKey: { type: 'string', description: 'Audience insights API key' },
+        apiKey: { type: 'string', description: 'Audience insights API key', envVar: 'MARKETING_AUDIENCE_INSIGHTS_API_KEY', configKey: 'audienceInsights.apiKey' },
         provider: { type: 'string', enum: ['google-analytics', 'segment', 'salesforce', 'custom'] },
         defaultSegment: { type: 'string' },
         segmentationModels: { type: 'array', items: { type: 'string' }, description: 'Available segmentation models' },

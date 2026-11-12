@@ -54,10 +54,8 @@ const reportingDataOpsSkill = createDeclarativeCodeSkill({
   ],
   isSkill: true,
   manifest: {
-  credentialSource: {
-    apiKey: { configKey: 'apiKey', required: false, label: "reporting service API key, needed only for a live write (set in this Skill configuration, or a vault secret)" },
-  },
     configSchema: createSchemaRecord({
+      apiKey: { type: 'string', description: 'reporting service API key, needed only for a live write (set in this Skill configuration, or a vault secret)', configKey: 'apiKey', label: "reporting service API key, needed only for a live write (set in this Skill configuration, or a vault secret)" },
       endpointUrl: SchemaProps.url({ description: 'Reporting endpoint URL; may also be supplied at runtime through ' + REPORTING_ENDPOINT_ENV }),
       channel: SchemaProps.select(['email', 'portal', 'api', 'file'], { description: 'Default delivery channel for published reports' }),
       system: SchemaProps.select(['netsuite', 'quickbooks', 'xero', 'custom'], { description: 'Reporting store the report is written to' }),
@@ -233,7 +231,7 @@ const reportingDataOpsSkill = createDeclarativeCodeSkill({
 
       const headers = { 'Content-Type': 'application/json' };
             // Secrets arrive through ctx.credentials, resolved from this Skill's
-      // credentialSource, never from the process environment.
+      // credential sources declared inline on configSchema properties, never from the process environment.
       const apiKey = String((ctx.getCredential ? ctx.getCredential('apiKey') : undefined) || '').trim();
       if (apiKey) headers['Authorization'] = 'Bearer ' + apiKey;
       const body = JSON.stringify({ operation: 'reporting-data-ops', report: report, recipients: input.recipients || [], format: input.format || 'markdown' });

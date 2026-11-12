@@ -51,10 +51,8 @@ const budgetTrackingSkill = createDeclarativeCodeSkill({
   ],
   isSkill: true,
   manifest: {
-  credentialSource: {
-    apiKey: { configKey: 'apiKey', required: false, label: "ERP service API key, needed only for a live write (set in this Skill configuration, or a vault secret)" },
-  },
     configSchema: createSchemaRecord({
+      apiKey: { type: 'string', description: 'ERP service API key, needed only for a live write (set in this Skill configuration, or a vault secret)', configKey: 'apiKey', label: "ERP service API key, needed only for a live write (set in this Skill configuration, or a vault secret)" },
       endpointUrl: SchemaProps.url({ description: 'Accounting ERP endpoint URL; may also be supplied at runtime through ' + BUDGET_LEDGER_ENV }),
       system: SchemaProps.select(['netsuite', 'quickbooks', 'xero', 'custom'], { description: 'Accounting system the budget ledger belongs to' }),
       defaultDryRun: SchemaProps.boolean({ description: 'Default budget tracking to dry-run', default: true }),
@@ -241,7 +239,7 @@ const budgetTrackingSkill = createDeclarativeCodeSkill({
 
       const headers = { 'Content-Type': 'application/json' };
             // Secrets arrive through ctx.credentials, resolved from this Skill's
-      // credentialSource, never from the process environment.
+      // credential sources declared inline on configSchema properties, never from the process environment.
       const apiKey = String((ctx.getCredential ? ctx.getCredential('apiKey') : undefined) || '').trim();
       if (apiKey) headers['Authorization'] = 'Bearer ' + apiKey;
       const body = JSON.stringify({ operation: 'budget-tracking', entity: input.entity || null, period: input.period || null, analysis: analysis });

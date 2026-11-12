@@ -11,14 +11,11 @@ const MATTER_DOCUMENT_OPS = createExternalActionSkill({
     type: 'bearer',
     credentialEnvKeyMap: { accessToken: 'MATTER_DOCUMENT_OPS_TOKEN' },
   },
-  credentialSource: {
-    accessToken: { envVar: 'MATTER_DOCUMENT_OPS_TOKEN', configKey: 'matterDocumentOps.token' },
-  },
   configSchema: {
     type: 'object',
     properties: {
       baseUrl: { type: 'string', description: 'Matter & Document Ops system base URL' },
-      accessToken: { type: 'string', description: 'Bearer access token' },
+      accessToken: { type: 'string', description: 'Bearer access token', envVar: 'MATTER_DOCUMENT_OPS_TOKEN', configKey: 'matterDocumentOps.token' },
       workspaceId: { type: 'string', description: 'Default workspace or firm identifier' },
     },
     required: ['baseUrl', 'accessToken'],

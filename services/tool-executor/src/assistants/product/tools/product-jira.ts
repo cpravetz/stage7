@@ -26,8 +26,8 @@ export const PRODUCT_JIRA = createExternalActionSkill({
       properties: {
     endpoint: SchemaProps.url({ description: 'Analytics platform base URL for this Skill' }),
         baseUrl: { type: 'string', description: 'Jira base URL' },
-        email: { type: 'string', description: 'Jira user email' },
-        apiToken: { type: 'string', description: 'Jira API token' },
+        email: { type: 'string', description: 'Jira user email', envVar: 'JIRA_EMAIL' },
+        apiToken: { type: 'string', description: 'Jira API token', envVar: 'JIRA_API_TOKEN' },
         projectKey: { type: 'string', description: 'Default project key' },
         issueType: { type: 'string', description: 'Default issue type' },
         workflowSchemes: { type: 'object', description: 'Jira workflow scheme mappings' },
@@ -36,10 +36,6 @@ export const PRODUCT_JIRA = createExternalActionSkill({
         permissionSchemes: { type: 'object', description: 'Permission scheme assignments' },
       },
       required: ['baseUrl', 'email', 'apiToken'],
-    },
-    credentialSource: {
-      username: { envVar: 'JIRA_EMAIL' },
-      password: { envVar: 'JIRA_API_TOKEN' },
     },
     inputSchema: {
       type: 'object',

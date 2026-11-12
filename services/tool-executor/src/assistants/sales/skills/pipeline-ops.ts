@@ -62,10 +62,8 @@ const pipelineOps = createDeclarativeCodeSkill({
   manifest: {
     lowerOrderTools: ['sales-crm-sync'],
     actionLabel: 'Review pipeline',
-  credentialSource: {
-    apiKey: { configKey: 'apiKey', required: false, label: "pipeline service API key, needed only for a live write (set in this Skill configuration, or a vault secret)" },
-  },
     configSchema: createSchemaRecord({
+      apiKey: { type: 'string', description: 'pipeline service API key, needed only for a live write (set in this Skill configuration, or a vault secret)', configKey: 'apiKey', label: "pipeline service API key, needed only for a live write (set in this Skill configuration, or a vault secret)" },
       endpointUrl: SchemaProps.url({ description: 'Pipeline endpoint URL; may also be supplied at runtime through ' + PIPELINE_ENDPOINT_ENV }),
       defaultDryRun: SchemaProps.boolean({ description: 'Default pipeline operations to dry-run', default: true }),
       crmProvider: SchemaProps.select(['salesforce', 'hubspot', 'pipedrive', 'custom'], { description: 'Default CRM provider' }),
@@ -92,7 +90,7 @@ const pipelineOps = createDeclarativeCodeSkill({
 
       const endpoint = String(input.endpointUrl || input.endpoint || ctx.config?.endpointUrl || '').trim();
             // Secrets arrive through ctx.credentials, resolved from this Skill's
-      // credentialSource, never from the process environment.
+      // credential sources declared inline on configSchema properties, never from the process environment.
       const apiKey = String((ctx.getCredential ? ctx.getCredential('apiKey') : undefined) || '').trim();
 
       // Dry run is the default and is checked first, before anything is sent. The shared external

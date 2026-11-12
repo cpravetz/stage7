@@ -13,6 +13,12 @@ const marketDataConfigSchema = {
     rateLimitPerSecond: { type: 'number', description: 'Maximum requests per second' },
     timeoutMs: { type: 'number', description: 'Request timeout in milliseconds' },
     endpoint: { type: 'string', format: 'uri', description: 'Market data API base URL' },
+    apiKey: {
+      type: 'string',
+      description: 'Upstream service API key (set in this Skill configuration, or a vault secret)',
+      configKey: 'apiKey',
+      label: 'upstream service API key',
+    },
   },
 };
 
@@ -52,11 +58,6 @@ const INVESTMENT_MARKET_DATA = createDeclarativeCodeSkill({
   ],
   isSkill: true,
   manifest: {
-    // Declared as a credential, not a plain config field, so the key can come from
-    // the vault via `vault:<id>` and is never echoed back into emitted output.
-    credentialSource: {
-      apiKey: { configKey: 'apiKey', required: false, label: "upstream service API key (set in this Skill configuration, or a vault secret)" },
-    },
     configSchema: marketDataConfigSchema,
     endpointConfigKey: 'endpoint',
     timeoutMs: 15000

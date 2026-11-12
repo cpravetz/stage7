@@ -32,14 +32,11 @@ export const MARKETING_SEO = createExternalActionSkill({
       header: 'X-API-Key',
       credentialEnvKeyMap: { apiKey: 'MARKETING_SEO_API_KEY' },
     },
-    credentialSource: {
-      apiKey: { envVar: 'MARKETING_SEO_API_KEY', configKey: 'seo.apiKey' },
-    },
     configSchema: {
       type: 'object',
       properties: {
         baseUrl: { type: 'string', description: 'SEO platform base URL' },
-        apiKey: { type: 'string', description: 'SEO platform API key' },
+        apiKey: { type: 'string', description: 'SEO platform API key', envVar: 'MARKETING_SEO_API_KEY', configKey: 'seo.apiKey' },
         provider: { type: 'string', enum: ['semrush', 'ahrefs', 'google-search-console', 'custom'] },
         defaultMarket: { type: 'string' },
         keywordDatabase: { type: 'object', description: 'Keyword database configuration' },

@@ -281,6 +281,7 @@ export class TemporalClient {
       prompt: input.prompt || "",
       contextChunks: input.contextChunks || [],
       metadata: input.metadata || {},
+      startedAt: input.startedAt || startedAt,
       resumeFromPhaseId: input.resumeFromPhaseId || undefined,
       resumeFromTaskId: input.resumeFromTaskId || undefined,
       completedPhases: input.completedPhases || [],
@@ -418,6 +419,8 @@ export class TemporalClient {
       // cannot overwrite the active owner's mission timestamps or history.
       const existingRecord = await this.getPersistedMissionControlRecord(input.missionId).catch(() => null);
       const alreadyStarted = existingRecord?.status === 'running';
+      const startTime = (existingRecord as any)?.startedAt ?? input.startedAt ?? Date.now();
+      if (!input.startedAt) input.startedAt = startTime;
       if (!recoveryLeaseAlreadyClaimed && !alreadyStarted) await this.persistRunningState(input);
 
       // Broadcast the mission-started event to connected WebSocket clients.
@@ -434,7 +437,6 @@ export class TemporalClient {
       }
 
       // Resume from the persisted Artifacts checkpoint and execute in this service.
-      const startTime = Date.now();
       const controlCheckpoint = () => this.awaitDirectMissionControl(input.missionId);
       this.directMissionRunner(input, resumeCheckpoint, controlCheckpoint)
         .then((output) => ({

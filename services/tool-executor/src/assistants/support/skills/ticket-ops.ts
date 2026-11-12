@@ -14,13 +14,12 @@ export const TICKET_OPS = createExternalActionSkill({
     properties: {
       dryRun: SchemaProps.boolean({ description: 'Validate without executing; defaults to true', default: true }),
       baseUrl: SchemaProps.text({ description: 'Service base URL' }),
-      apiKey: SchemaProps.text({ description: 'API key for authentication' }),
+      apiKey: SchemaProps.text({ description: 'API key for authentication', envVar: 'SUPPORT_OPS_API_KEY', configKey: 'ops.apiKey' }),
       defaultPriority: SchemaProps.select(['low', 'medium', 'high', 'critical'], { description: 'Default ticket priority' }),
       rateLimitPerMinute: SchemaProps.number({ description: 'Rate limit per minute', default: 60 }),
     },
     required: ['baseUrl', 'apiKey'],
   },
-  credentialSource: { apiKey: { envVar: 'SUPPORT_OPS_API_KEY', configKey: 'ops.apiKey' } },
   inputSchema: {
     type: 'object',
     properties: {

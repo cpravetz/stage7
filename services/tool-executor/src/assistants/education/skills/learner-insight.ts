@@ -44,7 +44,7 @@ export const LEARNER_INSIGHT = createExternalActionSkill({
     type: 'object',
     properties: {
       baseUrl: { type: 'string', description: 'LMS/analytics platform base URL' },
-      token: { type: 'string', description: 'LMS bearer token' },
+      token: { type: 'string', description: 'LMS bearer token', envVar: 'EDUCATION_LMS_ACCESS_TOKEN', configKey: 'education.lms.token' },
       provider: { type: 'string', enum: ['canvas', 'google-classroom', 'schoology', 'brightspace', 'powerschool', 'infinite-campus', 'custom'], description: 'LMS provider' },
       defaultCourseId: { type: 'string', description: 'Default course context' },
       dataSources: { type: 'array', items: { type: 'string' }, description: 'Enabled data sources: assignments, grades, attendance, discussions, logins, assessments' },
@@ -52,9 +52,6 @@ export const LEARNER_INSIGHT = createExternalActionSkill({
       gradebookMapping: { type: 'object', description: 'Gradebook category mapping' },
     },
     required: ['baseUrl', 'token', 'provider'],
-  },
-  credentialSource: {
-    token: { envVar: 'EDUCATION_LMS_ACCESS_TOKEN', configKey: 'education.lms.token' },
   },
   inputSchema: {
     type: 'object',

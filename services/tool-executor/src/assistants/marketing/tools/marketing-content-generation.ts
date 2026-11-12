@@ -27,14 +27,11 @@ export const MARKETING_CONTENT_GENERATION = createExternalActionSkill({
       header: 'X-API-Key',
       credentialEnvKeyMap: { apiKey: 'MARKETING_CMS_API_KEY' },
     },
-    credentialSource: {
-      apiKey: { envVar: 'MARKETING_CMS_API_KEY', configKey: 'cms.apiKey' },
-    },
     configSchema: {
       type: 'object',
       properties: {
         baseUrl: { type: 'string', description: 'CMS base URL' },
-        apiKey: { type: 'string', description: 'CMS API key' },
+        apiKey: { type: 'string', description: 'CMS API key', envVar: 'MARKETING_CMS_API_KEY', configKey: 'cms.apiKey' },
         provider: { type: 'string', enum: ['contentful', 'sanity', 'wordpress', 'custom'] },
         defaultLocale: { type: 'string' },
         contentModels: { type: 'array', items: { type: 'string' }, description: 'Available content models/fields' },

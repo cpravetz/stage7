@@ -8,14 +8,42 @@
     "codeFile": "ftp.js",
     "configSchema": {
       "type": "object",
-      "properties": {},
+      "properties": {
+        "host": {
+          "type": "string",
+          "title": "Host",
+          "description": "FTP server host",
+          "required": false,
+          "configKey": "ftp.host",
+          "label": "Host"
+        },
+        "port": {
+          "type": "integer",
+          "title": "Port",
+          "description": "FTP server port",
+          "required": false,
+          "configKey": "ftp.port",
+          "label": "Port"
+        },
+        "username": {
+          "type": "string",
+          "title": "Username",
+          "description": "FTP username",
+          "required": false,
+          "configKey": "ftp.username",
+          "label": "Username"
+        },
+        "password": {
+          "type": "string",
+          "title": "Password",
+          "description": "FTP password",
+          "sensitive": true,
+          "required": false,
+          "configKey": "ftp.password",
+          "label": "Password"
+        }
+      },
       "required": []
-    },
-    "credentialSource": {
-      "host": { "configKey": "ftp.host" },
-      "port": { "configKey": "ftp.port" },
-      "username": { "configKey": "ftp.username" },
-      "password": { "configKey": "ftp.password" }
     }
   },
   "inputSchema": {

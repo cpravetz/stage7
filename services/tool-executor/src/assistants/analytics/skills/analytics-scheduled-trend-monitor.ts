@@ -19,11 +19,6 @@ export const ANALYTICS_SCHEDULED_TREND_MONITOR = createDeclarativeCodeSkill({
   ],
   manifest: {
     configSchema: ANALYTICS_CONFIG_SCHEMA,
-    credentialSource: {
-      // Config/vault only: the Skill declares its own not-connected branch, and
-      // gating on a required credential would make that branch unreachable.
-      apiKey: { configKey: 'analytics.warehouse.apiKey', required: false, label: 'warehouse API key (set analytics.warehouse.apiKey in this Skill configuration, or a vault secret)' },
-    },
     timeoutMs: 120000
   },
   handler: async function handler(input, ctx) {

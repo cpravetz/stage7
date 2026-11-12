@@ -20,14 +20,11 @@ export const MARKETING_MARKET_RESEARCH = createExternalActionSkill({
       type: 'bearer',
       credentialEnvKeyMap: { accessToken: 'MARKETING_RESEARCH_ACCESS_TOKEN' },
     },
-    credentialSource: {
-      accessToken: { envVar: 'MARKETING_RESEARCH_ACCESS_TOKEN', configKey: 'research.accessToken' },
-    },
     configSchema: {
       type: 'object',
       properties: {
         baseUrl: { type: 'string', description: 'Market research system base URL' },
-        accessToken: { type: 'string', description: 'Research provider access token' },
+        accessToken: { type: 'string', description: 'Research provider access token', envVar: 'MARKETING_RESEARCH_ACCESS_TOKEN', configKey: 'research.accessToken' },
         providers: { type: 'array', items: { type: 'string' } },
         defaultMarkets: { type: 'array', items: { type: 'string' } },
         researchMethodologies: { type: 'array', items: { type: 'string' }, description: 'Available research methodologies' },

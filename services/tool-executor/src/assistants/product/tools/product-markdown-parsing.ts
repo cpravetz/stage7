@@ -24,7 +24,7 @@ export const PRODUCT_MARKDOWN_PARSING = createExternalActionSkill({
       type: 'object',
       properties: {
         apiUrl: { type: 'string', description: 'Parser service base URL' },
-        apiKey: { type: 'string', description: 'API key for parser service' },
+        apiKey: { type: 'string', description: 'API key for parser service', envVar: 'MARKDOWN_PARSER_API_KEY' },
         format: { type: 'string', description: 'Output format: json, yaml, html' },
         parserPlugins: { type: 'array', items: { type: 'string' }, description: 'Parser plugin names' },
         outputSchemas: { type: 'object', description: 'Output schema definitions' },
@@ -32,9 +32,6 @@ export const PRODUCT_MARKDOWN_PARSING = createExternalActionSkill({
         linkResolvers: { type: 'object', description: 'Link resolution configurations' },
       },
       required: ['apiUrl'],
-    },
-    credentialSource: {
-      apiKey: { envVar: 'MARKDOWN_PARSER_API_KEY' },
     },
     inputSchema: {
       type: 'object',
