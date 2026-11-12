@@ -18,6 +18,7 @@ import {
 import { Plan, Phase, Task } from '@stage7-nextgen/shared';
 import { z } from 'zod';
 import { BrainClient, BrainValidationError } from '../brain/BrainClient';
+import { extractArtifacts } from './TaskResultParser';
 import { parseInterruption as parseTaskInterruption } from './TaskInterruption';
 import { applyRuntimeTaskRequirements } from './TaskRequirements';
 import { buildTaskPrompt } from './TaskPromptBuilder';
@@ -1631,11 +1632,11 @@ export class MissionAgentRuntime {
     taskId: string,
   ): MissionArtifact[] {
     if (value === undefined || (Array.isArray(value) && value.length === 0)) {
-      return this.extractArtifacts(output, expected);
+      return extractArtifacts(output, expected);
     }
     if (!Array.isArray(value)) {
       logger.warn({ taskId }, 'Ignoring malformed Agent artifact metadata and preserving textual task output');
-      return this.extractArtifacts(output, expected);
+      return extractArtifacts(output, expected);
     }
     return value.flatMap((candidate) => {
       if (
@@ -1752,33 +1753,8 @@ export class MissionAgentRuntime {
     }
     return [
       ...deliverables,
-      { name, type: 'evidence', content: JSON.stringify(actionReceipts), purpose: 'execution-outcome', visibility: 'internal' },
+      { id: `artifact-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`, name, type: 'evidence', content: JSON.stringify(actionReceipts), purpose: 'execution-outcome', visibility: 'internal' },
     ];
-  }
-
-  private extractArtifacts(content: string, expected: string[]): MissionArtifact[] {
-    if (expected.length === 0) return [];
-    const artifacts: MissionArtifact[] = [];
-    const headings = [...content.matchAll(/^##[ \t]+(.+?)[ \t]*$/gm)];
-    const normalize = (name: string) => name.trim().toLocaleLowerCase();
-    for (const [index, heading] of headings.entries()) {
-      const name = heading[1]?.trim();
-      if (!name) continue;
-      const start = (heading.index ?? 0) + heading[0].length;
-      const end = headings[index + 1]?.index ?? content.length;
-      const section = content.slice(start, end).trim();
-      if (!section) continue;
-      const matched = expected.find((artifactName) => normalize(artifactName) === normalize(name));
-      if (expected.length > 0 && !matched) continue;
-      artifacts.push({
-        name: matched || `${name.replace(/[^a-z0-9-]/gi, '-').toLowerCase()}.md`,
-        type: this.inferType(section),
-        content: section,
-        purpose: 'deliverable',
-        isDeliverable: true,
-      });
-    }
-    return artifacts;
   }
 
   private inferType(content: string): string {

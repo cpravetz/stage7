@@ -254,7 +254,7 @@ router.get('/:missionId/artifacts', asyncHandler(async (req, res) => {
           }
         : {},
       ...needsCanonicalLineage
-        ? { artifactId: artifactLineageId, lineageId: artifactLineageId }
+        ? { artifactId: artifactLineageId }
         : {},
       ...isBlocker || artifact.purpose === 'execution-outcome'
         ? {
@@ -286,15 +286,6 @@ router.get('/:missionId/artifacts', asyncHandler(async (req, res) => {
       ? JSON.stringify([
           'artifact',
           enriched.artifactId,
-          enriched.phaseId || '',
-          enriched.taskId || '',
-          enriched.version ?? '',
-          enriched.version === undefined ? enriched.url ?? '' : '',
-        ])
-      : typeof enriched.lineageId === 'string' && enriched.lineageId
-      ? JSON.stringify([
-          'lineage',
-          enriched.lineageId,
           enriched.phaseId || '',
           enriched.taskId || '',
           enriched.version ?? '',
@@ -484,7 +475,6 @@ router.get('/:missionId/artifacts', asyncHandler(async (req, res) => {
       Number(artifacts[candidate].version) > Number(artifacts[latest].version) ? candidate : latest,
     indexes[0]);
     artifacts[latestIndex].isLatest = true;
-    artifacts[latestIndex].lineageId = lineageId;
   }
 
   res.json({ artifacts });
@@ -500,7 +490,8 @@ router.get('/:missionId/artifacts/:artifactId', asyncHandler(async (req, res) =>
     const phases = (plan as any).phases || [];
     for (const phase of phases) {
       for (const artifact of phase.artifacts || []) {
-        if (artifact && typeof artifact === 'object' && String((artifact as any).id) === artifactId) {
+        const a = artifact as any;
+        if (artifact && typeof artifact === 'object' && String(a.id) === artifactId) {
           found = { phaseId: phase.id, ...(artifact as Record<string, unknown>) };
           break;
         }
@@ -508,7 +499,8 @@ router.get('/:missionId/artifacts/:artifactId', asyncHandler(async (req, res) =>
       if (found) break;
       for (const task of phase.tasks || []) {
         for (const artifact of task.artifacts || []) {
-          if (artifact && typeof artifact === 'object' && String((artifact as any).id) === artifactId) {
+          const a = artifact as any;
+          if (artifact && typeof artifact === 'object' && String(a.id) === artifactId) {
             found = { phaseId: phase.id, taskId: task.id, ...(artifact as Record<string, unknown>) };
             break;
           }
@@ -516,7 +508,8 @@ router.get('/:missionId/artifacts/:artifactId', asyncHandler(async (req, res) =>
         if (!found) {
           const storedTask = await service.getMissionTask(missionId, task.id);
           for (const artifact of storedTask?.artifacts || []) {
-            if (artifact && typeof artifact === 'object' && String((artifact as any).id) === artifactId) {
+            const a = artifact as any;
+            if (artifact && typeof artifact === 'object' && String(a.id) === artifactId) {
               found = { phaseId: phase.id, taskId: task.id, ...(artifact as Record<string, unknown>) };
               break;
             }
@@ -533,7 +526,8 @@ router.get('/:missionId/artifacts/:artifactId', asyncHandler(async (req, res) =>
     for (const phase of phases) {
       for (const task of phase.tasks || []) {
         for (const artifact of task.artifacts || []) {
-          if (artifact && typeof artifact === 'object' && String((artifact as any).id) === artifactId) {
+          const a = artifact as any;
+          if (artifact && typeof artifact === 'object' && String(a.id) === artifactId) {
             found = { phaseId: phase.phaseId, taskId: task.taskId, ...(artifact as Record<string, unknown>) };
             break;
           }
@@ -545,6 +539,71 @@ router.get('/:missionId/artifacts/:artifactId', asyncHandler(async (req, res) =>
   }
   if (!found) throw NextGenError.notFound('Artifact not found');
   res.json({ artifact: found });
+}));
+
+router.delete('/:missionId/artifacts/:artifactId', asyncHandler(async (req, res) => {
+  const { missionId, artifactId } = req.params;
+  let deleted = false;
+
+  const plan = await service.getMissionPlan(missionId);
+  if (plan && Array.isArray(plan.artifacts)) {
+    const initialLength = plan.artifacts.length;
+    plan.artifacts = plan.artifacts.filter((a: any) => String(a.id) !== artifactId);
+    if (plan.artifacts.length !== initialLength) {
+      await service.saveMissionPlan(missionId, plan);
+      deleted = true;
+    }
+  }
+
+  if (!deleted) {
+    const phases = (plan as any)?.phases || [];
+    for (const phase of phases) {
+      if (Array.isArray(phase.artifacts)) {
+        const initialLength = phase.artifacts.length;
+        phase.artifacts = phase.artifacts.filter((a: any) => String(a.id) !== artifactId);
+        if (phase.artifacts.length !== initialLength) {
+          await service.updateMissionPhase(missionId, phase.id, { artifacts: phase.artifacts });
+          deleted = true;
+          break;
+        }
+      }
+      if (Array.isArray(phase.tasks)) {
+        for (const task of phase.tasks) {
+          const taskData = await service.getMissionTask(missionId, task.id);
+          if (taskData && Array.isArray(taskData.artifacts)) {
+            const initialLength = taskData.artifacts.length;
+            taskData.artifacts = taskData.artifacts.filter((a: any) => String(a.id) !== artifactId);
+            if (taskData.artifacts.length !== initialLength) {
+              await service.updateMissionTask(missionId, task.id, { artifacts: taskData.artifacts });
+              deleted = true;
+              break;
+            }
+          }
+        }
+        if (deleted) break;
+      }
+    }
+  }
+
+  if (!deleted) {
+    const missionEvents = await service.listMissionEvents(missionId);
+    for (const event of missionEvents) {
+      if (event.type === 'task_completed' && Array.isArray(event.data?.artifacts)) {
+        const initialLength = event.data.artifacts.length;
+        event.data.artifacts = event.data.artifacts.filter((a: any) => String(a.id) !== artifactId);
+        if (event.data.artifacts.length !== initialLength) {
+          deleted = true;
+          break;
+        }
+      }
+    }
+  }
+
+  if (!deleted) {
+    throw NextGenError.notFound('Artifact not found');
+  }
+
+  res.status(204).send();
 }));
 
 // Attach an artifact to a mission (phase-level or task-level)

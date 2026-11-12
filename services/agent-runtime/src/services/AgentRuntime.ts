@@ -13,12 +13,44 @@ import {
 import { BadRequestError, ConflictError } from '../utils/errors'
 import {
   AgentExecutionCheckpoint,
+  AgentExecutionResult,
   AgentExecutor,
   AgentDelegateRequest,
   parseAgentExecutionCheckpoint,
 } from './AgentExecutor'
 
 const MAX_AGENTS_PER_MISSION = 16
+
+/**
+ * Transient service errors indicate the backend (Brain / tool executor) is not
+ * yet ready after a restart. These should be retried with a short delay instead
+ * of immediately failing the mission task.
+ */
+const MAX_TRANSIENT_RETRIES = 3
+const TRANSIENT_RETRY_BASE_DELAY_MS = 3000
+
+function isTransientServiceError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false
+  const message = (error.message || String(error)).toLowerCase()
+  // 500 Internal Server Error, 503 Service Unavailable, 504 Gateway Timeout
+  if (/(?:^|[^\d])(?:500|503|504)(?:[^\d]|$)/.test(message)) return true
+  // Connection / network errors that indicate the backend is not yet ready
+  if (
+    message.includes('econnrefused')
+    || message.includes('enotfound')
+    || message.includes('fetch failed')
+    || message.includes('connection')
+    || message.includes('unavailable')
+    || message.includes('timeout')
+  ) {
+    return true
+  }
+  return false
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
 
 function readExecutionPolicy(value: unknown): AgentExecutionPolicy | undefined {
   if (value === undefined) return undefined
@@ -409,15 +441,34 @@ export class AgentRuntime {
             await this.persistAgentState?.(state);
           }
         : undefined;
-      const result = await this.executor.execute(agent, task, {
-        missionId,
-        delegationDepth,
-        ...(retryGuidance ? { retryGuidance } : {}),
-        ...(executionPolicy ? { executionPolicy } : {}),
-        delegate: (request) => this.delegateTask(agent, task, request, delegationDepth + 1),
-        ...(resumeCheckpoint ? { resumeCheckpoint } : {}),
-        ...(saveCheckpoint ? { saveCheckpoint } : {}),
-      })
+      let result: AgentExecutionResult | undefined
+      let lastTransientError: unknown
+      for (let attempt = 0; attempt <= MAX_TRANSIENT_RETRIES; attempt++) {
+        try {
+          result = await this.executor.execute(agent, task, {
+            missionId,
+            delegationDepth,
+            ...(retryGuidance ? { retryGuidance } : {}),
+            ...(executionPolicy ? { executionPolicy } : {}),
+            delegate: (request) => this.delegateTask(agent, task, request, delegationDepth + 1),
+            ...(resumeCheckpoint ? { resumeCheckpoint } : {}),
+            ...(saveCheckpoint ? { saveCheckpoint } : {}),
+          })
+          break
+        } catch (error) {
+          lastTransientError = error
+          if (attempt < MAX_TRANSIENT_RETRIES && isTransientServiceError(error)) {
+            logger.warn(
+              { agentId, taskId, attempt, error: error instanceof Error ? error.message : String(error) },
+              'Transient service error during task execution; retrying after delay',
+            )
+            await sleep(TRANSIENT_RETRY_BASE_DELAY_MS * (attempt + 1))
+            continue
+          }
+          throw error
+        }
+      }
+      if (result === undefined) throw lastTransientError
 
       task.status = 'completed'
       task.completedAt = new Date().toISOString()
