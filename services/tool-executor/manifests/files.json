@@ -10,8 +10,7 @@
       "type": "object",
       "properties": {},
       "required": []
-    },
-    "credentialSource": {}
+    }
   },
   "inputSchema": {
     "type": "object",

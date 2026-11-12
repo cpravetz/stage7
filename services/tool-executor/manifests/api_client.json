@@ -8,12 +8,27 @@
     "codeFile": "api_client.js",
     "configSchema": {
       "type": "object",
-      "properties": {},
+      "properties": {
+        "apiKey": {
+          "type": "string",
+          "title": "API Key",
+          "description": "API key for authentication",
+          "sensitive": true,
+          "required": false,
+          "envVar": "API_CLIENT_API_KEY",
+          "label": "API Key"
+        },
+        "token": {
+          "type": "string",
+          "title": "Token",
+          "description": "Authentication token",
+          "sensitive": true,
+          "required": false,
+          "envVar": "API_CLIENT_TOKEN",
+          "label": "Token"
+        }
+      },
       "required": []
-    },
-    "credentialSource": {
-      "apiKey": { "envVar": "API_CLIENT_API_KEY" },
-      "token": { "envVar": "API_CLIENT_TOKEN" }
     }
   },
   "inputSchema": {

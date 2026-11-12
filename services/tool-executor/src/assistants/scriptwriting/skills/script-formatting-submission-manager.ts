@@ -61,10 +61,17 @@ export const SCRIPT_FORMATTING_SUBMISSION_MANAGER = createDeclarativeCodeSkill({
   domainKnowledge: 'Screenplay formatting standards (Master Scene Heading style), script submission platforms, industry formatting guidelines',
   isSkill: true,
   manifest: {
-    // Declared as a credential, not a plain config field, so the key can come from
-    // the vault via `vault:<id>` and is never echoed back into emitted output.
-    credentialSource: {
-      apiKey: { configKey: 'apiKey', required: false, label: "upstream service API key (set in this Skill configuration, or a vault secret)" },
+    configSchema: {
+      type: 'object',
+      properties: {
+        apiKey: {
+          type: 'string',
+          description: 'Upstream service API key (set in this Skill configuration, or a vault secret)',
+          configKey: 'apiKey',
+          label: 'upstream service API key',
+        },
+      },
+      required: [],
     },
     endpointConfigKey: 'submissionEndpointUrl'
   },

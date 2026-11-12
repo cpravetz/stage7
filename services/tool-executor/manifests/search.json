@@ -1,30 +1,59 @@
 {
   "id": "search",
   "name": "Search",
-  "description": "Search the web using Google Custom Search, LangSearch, DuckDuckGo, or SearxNG",
+  "description": "Search the internet using multiple providers (Google, LangSearch, DuckDuckGo, SearxNG)",
   "type": "native",
   "manifest": {
     "executor": "search",
     "codeFile": "search.js",
     "configSchema": {
       "type": "object",
-      "properties": {},
-      "required": []
-    },
-    "credentialSource": {
-      "google_api_key": { "envVar": "GOOGLE_API_KEY" },
-      "google_search_engine_id": { "envVar": "GOOGLE_SEARCH_ENGINE_ID" },
-      "langsearch_api_key": { "envVar": "LANGSEARCH_API_KEY" },
-      "searxng_url": { "envVar": "SEARXNG_URL" }
+      "properties": {
+        "google_api_key": {
+          "type": "string",
+          "title": "Google API Key",
+          "description": "Google API Key for Custom Search API",
+          "sensitive": true,
+          "required": true,
+          "envVar": "GOOGLE_API_KEY",
+          "label": "Google API Key"
+        },
+        "google_search_engine_id": {
+          "type": "string",
+          "title": "Google Search Engine ID",
+          "description": "Google Custom Search Engine ID (CX)",
+          "required": true,
+          "envVar": "GOOGLE_SEARCH_ENGINE_ID",
+          "label": "Google Search Engine ID"
+        },
+        "langsearch_api_key": {
+          "type": "string",
+          "title": "LangSearch API Key",
+          "description": "LangSearch API key",
+          "sensitive": true,
+          "required": true,
+          "envVar": "LANGSEARCH_API_KEY",
+          "label": "LangSearch API Key"
+        },
+        "searxng_url": {
+          "type": "string",
+          "title": "SearxNG URL",
+          "description": "SearxNG instance URL",
+          "required": false,
+          "envVar": "SEARXNG_URL",
+          "label": "SearxNG URL"
+        }
+      },
+      "required": ["google_api_key", "google_search_engine_id", "langsearch_api_key"]
     }
   },
   "inputSchema": {
     "type": "object",
     "properties": {
-      "query": { "type": "string" },
-      "maxResults": { "type": "integer", "default": 10 },
-      "searchType": { "type": "string", "enum": ["web", "images", "news"], "default": "web" },
-      "freshness": { "type": "string", "enum": ["day", "week", "month", "year"] }
+      "query": { "type": "string", "description": "Search query string" },
+      "maxResults": { "type": "integer", "minimum": 1, "maximum": 50, "default": 5, "description": "Maximum number of results to return (default: 5)" },
+      "searchType": { "type": "string", "enum": ["web", "images", "news"], "default": "web", "description": "Type of search to perform (default: web)" },
+      "freshness": { "type": "string", "enum": ["day", "week", "month", "year"], "description": "Filter results by recency" }
     },
     "required": ["query"]
   },
@@ -32,7 +61,17 @@
     "type": "object",
     "properties": {
       "success": { "type": "boolean" },
-      "results": { "type": "array" },
+      "results": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "title": { "type": "string" },
+            "url": { "type": "string" },
+            "snippet": { "type": "string" }
+          }
+        }
+      },
       "count": { "type": "integer" },
       "error": { "type": "string" }
     },

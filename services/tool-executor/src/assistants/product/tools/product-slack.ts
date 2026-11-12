@@ -23,7 +23,7 @@ export const PRODUCT_SLACK = createExternalActionSkill({
     configSchema: {
       type: 'object',
       properties: {
-        botToken: { type: 'string', description: 'Slack bot token (xoxb-...)' },
+        botToken: { type: 'string', description: 'Slack bot token (xoxb-...)', envVar: 'SLACK_BOT_TOKEN' },
         channel: { type: 'string', description: 'Default channel ID or name' },
         botScopes: { type: 'array', items: { type: 'string' }, description: 'Bot scope permissions' },
         channelTemplates: { type: 'object', description: 'Channel template configurations' },
@@ -31,9 +31,6 @@ export const PRODUCT_SLACK = createExternalActionSkill({
         commandRegistry: { type: 'object', description: 'Slash command registry' },
       },
       required: ['botToken'],
-    },
-    credentialSource: {
-      token: { envVar: 'SLACK_BOT_TOKEN' },
     },
     inputSchema: {
       type: 'object',

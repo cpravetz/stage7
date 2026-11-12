@@ -13,10 +13,10 @@ declare const __execute_tool: any;
 /** Resolved Skill configuration, injected by the executor next to __tool_input. */
 declare const __skill_config: any;
 /**
- * Resolved credentials, keyed by the logical key the Skill's manifest declares in
- * `credentialSource`. Injected by the executor so a handler never reads
- * process.env: secrets arrive through the credential provider (vault, or the
- * Skill's own configuration), not through the process environment.
+ * Resolved credentials, keyed by the logical key whose configSchema property
+ * declares the credential source inline. Injected by the executor so a handler
+ * never reads process.env: secrets arrive through the credential provider
+ * (vault, or the Skill's own configuration), not through the process environment.
  */
 declare const __skill_credentials: any;
 

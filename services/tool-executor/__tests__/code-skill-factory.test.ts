@@ -38,22 +38,21 @@ describe('createCodeSkill', () => {
     expect(skill.manifest.entrypoint).toBe('main.ts')
   })
 
-  it('includes configSchema and credentialSource in manifest', () => {
+  it('includes configSchema with credential sources declared inline on properties', () => {
     const skill = createCodeSkill({
       id: 'test-3',
       name: 'Test Skill',
       description: 'A test skill',
       manifest: {
         sourceCode: 'console.log("hello")',
-        configSchema: { type: 'object', properties: { apiKey: { type: 'string' } } },
-        credentialSource: { apiKey: { envVar: 'MY_API_KEY' } },
+        configSchema: { type: 'object', properties: { apiKey: { type: 'string', envVar: 'MY_API_KEY' } } },
       },
       inputSchema: { type: 'object', properties: {} },
       outputSchema: { type: 'object', properties: {} },
     })
 
-    expect(skill.manifest.configSchema).toEqual({ type: 'object', properties: { apiKey: { type: 'string' } } })
-    expect(skill.manifest.credentialSource).toEqual({ apiKey: { envVar: 'MY_API_KEY' } })
+    expect(skill.manifest.configSchema).toEqual({ type: 'object', properties: { apiKey: { type: 'string', envVar: 'MY_API_KEY' } } })
+    expect(skill.manifest.credentialSource).toBeUndefined()
   })
 
   it('copies extra manifest properties', () => {
@@ -170,8 +169,8 @@ describe('createExternalActionSkill', () => {
         type: 'bearer',
         token: '${CUSTOM_TOKEN_ENV}',
       })
-      expect(skill.manifest.credentialSource).toEqual({
-        token: { envVar: 'CUSTOM_TOKEN_ENV', configKey: 'tokenConfig', vaultSecretId: 'vault/token' },
+      expect((skill.manifest.configSchema as any).properties.token).toMatchObject({
+        envVar: 'CUSTOM_TOKEN_ENV', configKey: 'tokenConfig', vaultSecretId: 'vault/token',
       })
     })
 
@@ -195,9 +194,11 @@ describe('createExternalActionSkill', () => {
         username: '${BASIC_USER}',
         password: '${BASIC_PASS}',
       })
-      expect(skill.manifest.credentialSource).toEqual({
-        username: { envVar: 'BASIC_USER', configKey: 'userConfig' },
-        password: { envVar: 'BASIC_PASS', vaultSecretId: 'vault/pass' },
+      expect((skill.manifest.configSchema as any).properties.username).toMatchObject({
+        envVar: 'BASIC_USER', configKey: 'userConfig',
+      })
+      expect((skill.manifest.configSchema as any).properties.password).toMatchObject({
+        envVar: 'BASIC_PASS', vaultSecretId: 'vault/pass',
       })
     })
 
@@ -220,8 +221,8 @@ describe('createExternalActionSkill', () => {
         header: 'X-Custom-Key',
         value: '${API_KEY_ENV}',
       })
-      expect(skill.manifest.credentialSource).toEqual({
-        apiKey: { envVar: 'API_KEY_ENV', configKey: 'apiKeyConfig', vaultSecretId: 'vault/apikey' },
+      expect((skill.manifest.configSchema as any).properties.apiKey).toMatchObject({
+        envVar: 'API_KEY_ENV', configKey: 'apiKeyConfig', vaultSecretId: 'vault/apikey',
       })
     })
 
@@ -239,12 +240,12 @@ describe('createExternalActionSkill', () => {
         type: 'bearer',
         token: '${AUTH_TOKEN}',
       })
-      expect(skill.manifest.credentialSource).toEqual({
-        token: { envVar: 'AUTH_TOKEN' },
+      expect((skill.manifest.configSchema as any).properties.token).toMatchObject({
+        envVar: 'AUTH_TOKEN',
       })
     })
 
-    it('uses explicit credentialSource over credentialEnvKeyMap', () => {
+    it('prefers credential sources declared inline on configSchema properties', () => {
       const skill = createExternalActionSkill({
         ...baseOptions,
         endpoint: { url: 'https://api.example.com', method: 'POST' },
@@ -255,13 +256,16 @@ describe('createExternalActionSkill', () => {
             token: { envVar: 'FROM_MAP' },
           },
         },
-        credentialSource: {
-          token: { envVar: 'EXPLICIT_ENV', configKey: 'explicitConfig' },
+        configSchema: {
+          type: 'object',
+          properties: {
+            token: { type: 'string', envVar: 'EXPLICIT_ENV', configKey: 'explicitConfig' },
+          },
         },
       })
 
-      expect(skill.manifest.credentialSource).toEqual({
-        token: { envVar: 'EXPLICIT_ENV', configKey: 'explicitConfig' },
+      expect((skill.manifest.configSchema as any).properties.token).toMatchObject({
+        envVar: 'EXPLICIT_ENV', configKey: 'explicitConfig',
       })
     })
 
@@ -273,7 +277,7 @@ describe('createExternalActionSkill', () => {
       })
 
       expect(skill.manifest.auth).toBeUndefined()
-      expect(skill.manifest.credentialSource).toBeUndefined()
+      expect(skill.manifest.configSchema).toBeUndefined()
     })
   })
 

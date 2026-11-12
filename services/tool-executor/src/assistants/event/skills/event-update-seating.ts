@@ -20,14 +20,11 @@ const UPDATE_SEATING = createExternalActionSkill({
     type: 'bearer',
     credentialEnvKeyMap: { token: 'EVENT_FLOORPLAN_ACCESS_TOKEN' },
   },
-  credentialSource: {
-    token: { envVar: 'EVENT_FLOORPLAN_ACCESS_TOKEN', configKey: 'event.floorplan.token' },
-  },
   configSchema: {
     type: 'object',
     properties: {
       baseUrl: { type: 'string', description: 'Floorplan platform base URL' },
-      token: { type: 'string', description: 'Platform bearer token' },
+      token: { type: 'string', description: 'Platform bearer token', envVar: 'EVENT_FLOORPLAN_ACCESS_TOKEN', configKey: 'event.floorplan.token' },
       autoOptimize: {
         type: 'boolean',
         description: 'Let the platform pick a table when the target has no capacity',

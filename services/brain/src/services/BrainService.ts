@@ -301,6 +301,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
       const routingOptions = {
         task: prompt,
         maxTokens: options.maxTokens ?? 1024,
+        estimatedPromptTokens: Math.ceil(((systemPrompt?.length ?? 0) + prompt.length) / 3.5),
         budget: options.budget,
         freeOnly: settings?.freeModelsOnly,
         optimizeFor: options.optimizeFor,

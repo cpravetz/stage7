@@ -91,7 +91,7 @@ Encryption is an addressable implementation specification under 164.312(a)(2)(iv
 
 ## Credential handling
 
-Upstream credentials are declared as `credentialSource` entries rather than ordinary configuration fields, so the runtime resolves them from the secret store and never echoes them into an output block. The pattern holds across the blueprint:
+Upstream credentials are declared inline on `configSchema` properties (via `vaultSecretId`, `envVar`, or `configKey`) rather than as ordinary configuration fields, so the runtime resolves them from the secret store and never echoes them into an output block. The pattern holds across the blueprint:
 
 - Records and scheduling ops, and resource coordination: bearer token under a `token` key.
 - Patient communication: API key under an `apiKey` key, sent as a request header.

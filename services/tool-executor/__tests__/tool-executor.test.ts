@@ -281,9 +281,12 @@ describe('ToolExecutor', () => {
         language: 'javascript',
         entrypoint: 'index.js',
         sourceCode: 'console.log("test");',
-        credentialSource: {
-          apiToken: { envVar: 'TEST_API_TOKEN' },
-          apiKey: { envVar: 'TEST_API_KEY' },
+        configSchema: {
+          type: 'object',
+          properties: {
+            apiToken: { type: 'string', envVar: 'TEST_API_TOKEN' },
+            apiKey: { type: 'string', envVar: 'TEST_API_KEY' },
+          },
         },
       },
       createdAt: new Date(),
@@ -313,8 +316,11 @@ describe('ToolExecutor', () => {
         language: 'javascript',
         entrypoint: 'index.js',
         sourceCode: 'console.log("test");',
-        credentialSource: {
-          apiToken: { envVar: 'OVERRIDE_TEST_TOKEN' },
+        configSchema: {
+          type: 'object',
+          properties: {
+            apiToken: { type: 'string', envVar: 'OVERRIDE_TEST_TOKEN' },
+          },
         },
       },
       createdAt: new Date(),
@@ -598,10 +604,14 @@ describe('ToolExecutor', () => {
       manifest: {
         language: 'javascript',
         sourceCode: 'console.log(JSON.stringify({ ok: true }));',
-        configSchema: { type: 'object', properties: { apiKey: { type: 'string' } }, required: ['apiKey'] },
-        credentialSource: { apiKey: { configKey: 'apiKey', label: 'Provider API key', sensitive: true } },
+        configSchema: {
+          type: 'object',
+          properties: {
+            apiKey: { type: 'string', configKey: 'apiKey', label: 'Provider API key', sensitive: true },
+          },
+          required: ['apiKey'],
+        },
       },
-      configSchema: { type: 'object', properties: { apiKey: { type: 'string' } }, required: ['apiKey'] },
       createdAt: new Date(),
       updatedAt: new Date(),
     };
@@ -855,7 +865,7 @@ describe('PluginGenerator', () => {
     expect(generatedPluginSystemPrompts[0]).toContain('__skill_config["propertyName"]')
     expect(generatedPluginSystemPrompts[0]).toContain('Never read configuration, credentials, or secrets from process.env, os.environ')
     expect(generatedPluginSystemPrompts[0]).toContain('For a secret that is intentionally persistent across runs')
-    expect(generatedPluginSystemPrompts[0]).toContain('Do not map per-execution secrets through credentialSource')
+    expect(generatedPluginSystemPrompts[0]).toContain('secrets through inline credential source declarations on configSchema properties')
     expect(manifest).toMatchObject({
       validation: { method: 'isolated-contract-tests', passed: true, testCount: 1 },
       testContract: { cases: [{ name: 'adds two integers', expectedOutput: { sum: 42 } }] },
@@ -1340,8 +1350,12 @@ describe('REST endpoints', () => {
       description: 'Jira integration',
       type: 'mcp',
       manifest: {
-        credentialSource: {
-          jiraToken: { vaultSecretId: 'jira-token', envVar: 'JIRA_TOKEN' },
+        configSchema: {
+          type: 'object',
+          properties: {
+            jiraToken: { type: 'string', vaultSecretId: 'jira-token', envVar: 'JIRA_TOKEN' },
+          },
+          required: ['jiraToken'],
         },
       },
       createdAt: new Date(),
@@ -1366,8 +1380,12 @@ describe('REST endpoints', () => {
       description: 'Slack integration',
       type: 'mcp',
       manifest: {
-        credentialSource: {
-          slackToken: { vaultSecretId: 'slack-token', envVar: 'SLACK_TOKEN' },
+        configSchema: {
+          type: 'object',
+          properties: {
+            slackToken: { type: 'string', vaultSecretId: 'slack-token', envVar: 'SLACK_TOKEN' },
+          },
+          required: ['slackToken'],
         },
       },
       createdAt: new Date(),
@@ -1659,9 +1677,13 @@ console.log(JSON.stringify({ success: true, data: cfg }));`,
             const key = process.env.TEST_PROPAGATE_KEY || '';
             console.log(JSON.stringify({ hasToken: !!token, hasKey: !!key }));
           `,
-          credentialSource: {
-            token: { envVar: 'TEST_PROPAGATE_TOKEN' },
-            key: { envVar: 'TEST_PROPAGATE_KEY' },
+          configSchema: {
+            type: 'object',
+            properties: {
+              token: { type: 'string', envVar: 'TEST_PROPAGATE_TOKEN' },
+              key: { type: 'string', envVar: 'TEST_PROPAGATE_KEY' },
+            },
+            required: ['token', 'key'],
           },
         },
         createdAt: new Date(),
@@ -1702,8 +1724,12 @@ console.log(JSON.stringify({ success: true, data: cfg }));`,
             const resolved = await __resolveAuth(auth);
             console.log(JSON.stringify({ hasAuth: !!resolved.headers.Authorization }));
           `,
-          credentialSource: {
-            token: { envVar: 'AUTH_TEST_TOKEN' },
+          configSchema: {
+            type: 'object',
+            properties: {
+              token: { type: 'string', envVar: 'AUTH_TEST_TOKEN' },
+            },
+            required: ['token'],
           },
         },
         createdAt: new Date(),
@@ -1736,8 +1762,12 @@ console.log(JSON.stringify({ success: true, data: cfg }));`,
           language: 'javascript',
           entrypoint: 'index.js',
           sourceCode: 'console.log("test");',
-          credentialSource: {
-            missingToken: { envVar: 'MISSING_TOKEN_VAR' },
+          configSchema: {
+            type: 'object',
+            properties: {
+              missingToken: { type: 'string', envVar: 'MISSING_TOKEN_VAR' },
+            },
+            required: ['missingToken'],
           },
         },
         createdAt: new Date(),
@@ -1782,9 +1812,13 @@ console.log(JSON.stringify({ success: true, data: cfg }));`,
             };
             console.log(JSON.stringify(result));
           `,
-          credentialSource: {
-            token: { envVar: 'BUNDLE_TEST_TOKEN' },
-            endpoint: { envVar: 'BUNDLE_TEST_ENDPOINT' },
+          configSchema: {
+            type: 'object',
+            properties: {
+              token: { type: 'string', envVar: 'BUNDLE_TEST_TOKEN' },
+              endpoint: { type: 'string', envVar: 'BUNDLE_TEST_ENDPOINT' },
+            },
+            required: ['token', 'endpoint'],
           },
         },
         createdAt: new Date(),
@@ -1836,20 +1870,16 @@ console.log(JSON.stringify({ success: true, data: cfg }));`,
   });
 
   describe('Event skill credential alignment', () => {
-    it('should have credentialSource envVar matching auth token envVar for event skills', () => {
-      // This test validates the event skill definitions
-      
+    it('should have a configSchema token envVar matching the auth token envVar for event skills', () => {
       for (const skill of eventSkills) {
-        if (skill.manifest?.credentialSource && skill.manifest?.auth) {
-          const credSource = skill.manifest.credentialSource as Record<string, { envVar?: string }>;
-          const auth = skill.manifest.auth as Record<string, unknown>;
-          const authCredentialEnvKeyMap = auth.credentialEnvKeyMap as Record<string, { envVar?: string }> | undefined;
-          
-          if (authCredentialEnvKeyMap?.token?.envVar) {
-            const expectedEnvVar = authCredentialEnvKeyMap.token.envVar;
-            const actualEnvVar = credSource.token?.envVar;
-            expect(actualEnvVar).toBe(expectedEnvVar);
-          }
+        const auth = skill.manifest?.auth as Record<string, unknown> | undefined;
+        const authCredentialEnvKeyMap = auth?.credentialEnvKeyMap as Record<string, { envVar?: string }> | undefined;
+        const expectedEnvVar = authCredentialEnvKeyMap?.token?.envVar;
+        if (!expectedEnvVar) continue;
+        const properties = (skill.manifest?.configSchema as { properties?: Record<string, { envVar?: string }> } | undefined)?.properties ?? {};
+        const tokenProperty = properties.token;
+        if (tokenProperty) {
+          expect(tokenProperty.envVar).toBe(expectedEnvVar);
         }
       }
     });

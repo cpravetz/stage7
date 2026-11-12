@@ -185,11 +185,12 @@ describe('ctoSkills', () => {
       expect(skill.manifest.configSchema).toBeDefined();
       expect((skill.manifest.configSchema as any).properties).toBeDefined();
       expect((skill.manifest.configSchema as any).properties!.endpointUrl).toBeDefined();
-      // The token is a secret, so it is a declared credential rather than a plain
-      // config field the Run form would ask the user to type.
-      const credentialSource = (skill.manifest as any).credentialSource as Record<string, unknown>;
-      expect(credentialSource?.token).toBeDefined();
-      expect((skill.manifest.configSchema as any).properties!.token).toBeUndefined();
+      // The token is a secret declared inline on its configSchema property, so the
+      // credential provider resolves it rather than the Run form asking for it.
+      expect((skill.manifest.configSchema as any).properties!.token).toMatchObject({
+        configKey: 'token',
+      });
+      expect((skill.manifest as any).credentialSource).toBeUndefined();
     });
 
     it('remediation source has dryRun gate', () => {

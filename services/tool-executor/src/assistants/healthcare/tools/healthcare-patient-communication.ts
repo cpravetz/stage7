@@ -21,14 +21,11 @@ export const PATIENT_COMMUNICATION = createExternalActionSkill({
     header: 'X-API-Key',
     credentialEnvKeyMap: { apiKey: 'HEALTHCARE_COMM_API_KEY' },
   },
-  credentialSource: {
-    apiKey: { envVar: 'HEALTHCARE_COMM_API_KEY', configKey: 'communication.apiKey' },
-  },
   configSchema: {
     type: 'object',
     properties: {
       baseUrl: { type: 'string', description: 'Communication system base URL' },
-      apiKey: { type: 'string', description: 'Communication system API key' },
+      apiKey: { type: 'string', description: 'Communication system API key', envVar: 'HEALTHCARE_COMM_API_KEY', configKey: 'communication.apiKey' },
       provider: { type: 'string', enum: ['twilio', 'sendgrid', 'mailgun', 'patient-portal', 'custom'], description: 'Communication provider' },
       defaultChannel: { type: 'string', enum: ['email', 'sms', 'portal', 'voice'], description: 'Default communication channel' },
       templateEngine: { type: 'string', enum: ['handlebars', 'nunjucks', 'mustache', 'custom'], description: 'Template engine' },

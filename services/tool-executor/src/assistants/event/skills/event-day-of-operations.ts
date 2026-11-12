@@ -42,7 +42,7 @@ const DAY_OF_OPERATIONS = createExternalActionSkill({
     type: 'object',
     properties: {
       baseUrl: { type: 'string', description: 'Event operations platform base URL' },
-      token: { type: 'string', description: 'Platform bearer token' },
+      token: { type: 'string', description: 'Platform bearer token', envVar: 'EVENT_OPERATIONS_ACCESS_TOKEN', configKey: 'event.operations.token' },
       provider: { type: 'string', enum: ['cvent', 'eventbrite', 'bizzabo', 'hopin', 'whova', 'attendify', 'custom'], description: 'Event platform provider' },
       checkInMethods: { type: 'array', items: { type: 'string' }, enum: ['qr-code', 'badge-scan', 'manual', 'facial-recognition', 'rfid'], description: 'Enabled check-in methods' },
       seatingEngine: { type: 'boolean', description: 'Automated seating optimization', default: true },
@@ -50,9 +50,6 @@ const DAY_OF_OPERATIONS = createExternalActionSkill({
       communicationChannels: { type: 'array', items: { type: 'string' }, enum: ['slack', 'teams', 'sms', 'radio', 'app-push'], description: 'Staff communication channels' },
     },
     required: ['baseUrl', 'token', 'provider'],
-  },
-  credentialSource: {
-    token: { envVar: 'EVENT_OPERATIONS_ACCESS_TOKEN', configKey: 'event.operations.token' },
   },
   inputSchema: {
     type: 'object',

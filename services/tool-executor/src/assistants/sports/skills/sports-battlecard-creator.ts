@@ -53,14 +53,11 @@ export const BATTLECARD_CREATOR = createDeclarativeCodeSkill({
     // plain config field: the executor resolves it and hands the handler a value via
     // ctx.credentials. Declare `configKey: 'vault:...'` in configuration to source it
     // from the vault instead.
-    credentialSource: {
-      statsApiKey: { configKey: 'statsApiKey', required: false, label: "stats provider API key (set in this Skill configuration, or a vault secret)" },
-    },
     configSchema: {
       type: 'object',
       properties: {
         statsEndpoint: SchemaProps.url({ description: 'Stats provider base URL for this Skill' }),
-        statsApiKey: SchemaProps.text({ description: 'Stats provider API key' }),
+        statsApiKey: SchemaProps.text({ description: 'Stats provider API key', configKey: 'statsApiKey', label: "stats provider API key (set in this Skill configuration, or a vault secret)" }),
         requestTimeoutMs: SchemaProps.number({ description: 'Request timeout in milliseconds', default: 10000 }),
         dataProvider: SchemaProps.select(['statsperform', 'opta', 'both'], { description: 'Primary data provider', default: 'both' }),
         dryRun: SchemaProps.boolean({ description: 'Validate without executing', default: true }),

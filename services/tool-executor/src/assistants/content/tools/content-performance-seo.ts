@@ -24,7 +24,7 @@ export const CONTENT_PERFORMANCE_SEO = createExternalActionSkill({
     type: 'object',
     properties: {
       baseUrl: { type: 'string', description: 'Content intelligence platform base URL' },
-      apiKey: { type: 'string', description: 'Content intelligence API key' },
+      apiKey: { type: 'string', description: 'Content intelligence API key', envVar: 'CONTENT_INTELLIGENCE_API_KEY', configKey: 'content.intelligence.apiKey' },
       provider: { type: 'string', enum: ['google-analytics', 'matomo', 'mixpanel', 'amplitude', 'semrush', 'ahrefs', 'search-console', 'custom'], description: 'Primary analytics/SEO provider' },
       secondaryProviders: { type: 'array', items: { type: 'string' }, description: 'Additional connected providers' },
       defaultDateRange: { type: 'string', description: 'Default analysis period' },
@@ -34,9 +34,6 @@ export const CONTENT_PERFORMANCE_SEO = createExternalActionSkill({
       defaultMarket: { type: 'string', description: 'Default market/region' },
     },
     required: ['baseUrl', 'apiKey', 'provider'],
-  },
-  credentialSource: {
-    apiKey: { envVar: 'CONTENT_INTELLIGENCE_API_KEY', configKey: 'content.intelligence.apiKey' },
   },
   inputSchema: {
     type: 'object',

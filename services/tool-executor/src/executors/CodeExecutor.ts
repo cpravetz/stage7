@@ -30,9 +30,9 @@ export interface CodeExecutionOptions {
   config?: Record<string, unknown>;
   /**
    * Credentials the executor's provider already resolved for this run, keyed by
-   * the logical key the Skill declared in `manifest.credentialSource`. Injected so
-   * a handler reads secrets from the credential provider rather than from
-   * process.env.
+   * the logical key whose configSchema property declares the credential source.
+   * Injected so a handler reads secrets from the credential provider rather than
+   * from process.env.
    */
   credentials?: Record<string, string | undefined>;
   // Optional environment variable name that tools use to persist state (e.g. 'ASSISTANT_HOME')

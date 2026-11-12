@@ -467,14 +467,28 @@ function hasExternalActionReceipt(receipts: AgentActionReceipt[], requiredAction
   )
 }
 
+// Turn labels like "Agent:"/"System:" read as a script the model continues, which makes it
+// write both sides of the conversation. Use tagged turns and end with an explicit cue.
+function renderBrainTranscript(history: Array<{ role: 'user' | 'assistant'; content: string }>): string {
+  const turns = history.map((message, index) => {
+    if (index === 0 && message.role === 'user') return `<task>\n${message.content}\n</task>`
+    return message.role === 'assistant'
+      ? `<your_previous_reply>\n${message.content}\n</your_previous_reply>`
+      : `<system_feedback>\n${message.content}\n</system_feedback>`
+  })
+  return `${turns.join('\n\n')}\n\nWrite only your next reply: one JSON action, or your final answer.`
+}
+
 function requiredActionCorrection(
   actions: RequiredAction[],
   requiresExternalAction = false,
 ): string {
-  const externalAction = requiresExternalAction
-    ? 'The task also requires a verified external operation. Tool discovery, tool creation, delegation, drafting, or proposed steps are not evidence; use a registered capability that performs the requested operation and rely on its actual successful result.'
-    : '';
-  return `Before finalizing, execute each required action and provide a matching action receipt with its expected outcome: ${JSON.stringify(actions)}. ${externalAction} For outcome "denied", make the actual action request even when the tool is absent from your available-tool list; only an explicit policy or catalog denial receipt satisfies that requirement. Never claim an action occurred without its receipt. If a required value or credential is unavailable, first check authorized existing configuration and alternatives, inspect the tool catalog, and use capability resolution to find or create a suitable tool when permitted. Do not guess or repeat a failed call. Ask the user only when a specific required value genuinely cannot be obtained or configured by you; if you must ask, respond with ${ASK_USER_MARKER} followed by one clear, specific plain-text question that states exactly what is needed, which tool or service needs it, and why. Do not emit JSON. Mark secret values with [secret:<key>] so the application can save them to Vault without exposing the Agent. If an error reports a missing runtime module or package, do not try to install it in the mission environment or treat it as a credential; the runtime attempts one alternative-capability lookup automatically when policy and action budget allow.`;
+  const pending = actions.map((action) => `${action.toolId} (${action.outcome})`)
+  const parts = [
+    ...(pending.length > 0 ? [`Still required: ${pending.join(', ')}.`] : []),
+    ...(requiresExternalAction ? ['A verified external operation has not been performed; discovery, tool creation, delegation and drafting do not count.'] : []),
+  ]
+  return `${parts.join(' ')} Reply with the single next JSON action that makes progress.`
 }
 
 function parseExpectedArtifacts(value: unknown): string[] {
@@ -503,6 +517,30 @@ function asksUserToManageTools(question: string): boolean {
   return /\b(?:please\s+)?(?:register|install|create|build|develop|configure|set up|enable)\b.{0,100}\b(?:tool|skill|plugin|integration|mcp|service)\b/i.test(question)
     || /\b(?:tool|skill|plugin|integration|mcp)\b.{0,100}\b(?:register|install|create|configure|set up)\s+(?:it|the tool|the skill)\b/i.test(question)
     || /\b(?:choose|select|pick)\b.{0,100}\b(?:tool id|tools? from (?:the )?list|from (?:the )?(?:list|available|following).{0,30}tools?)\b/i.test(question)
+}
+
+const MAX_ASK_USER_QUESTION_LENGTH = 400
+
+// Models sometimes echo the system instructions or their own reasoning after the marker.
+// Return only a genuine, concise question, or undefined when none can be recovered.
+function extractAskUserQuestion(content: string): string | undefined {
+  let from = 0
+  for (;;) {
+    const idx = content.indexOf(ASK_USER_MARKER, from)
+    if (idx < 0) return undefined
+    from = idx + ASK_USER_MARKER.length
+    let candidate = content.slice(from)
+    const cut = candidate.search(/\n\s*\n|\n\s*(?:Agent|System|User|Assistant)\s*:|\[action_receipt|\n\s*(?:```|\{)/i)
+    if (cut >= 0) candidate = candidate.slice(0, cut)
+    candidate = candidate.replace(/\s+/g, ' ').trim()
+    if (candidate.startsWith('{')) return `${ASK_USER_MARKER}${content.slice(from).trim()}`
+    if (candidate.length < 8 || /^followed by\b|^<question>|\bmark secret values with\b|\bDo not emit JSON\b/i.test(candidate)) continue
+    if (candidate.length > MAX_ASK_USER_QUESTION_LENGTH) {
+      const sentenceEnd = candidate.slice(0, MAX_ASK_USER_QUESTION_LENGTH).search(/[?.!](?!.*[?.!])/)
+      candidate = sentenceEnd > 0 ? candidate.slice(0, sentenceEnd + 1) : `${candidate.slice(0, MAX_ASK_USER_QUESTION_LENGTH - 1)}…`
+    }
+    return `${ASK_USER_MARKER}${candidate}`
+  }
 }
 
 function isConfigurationFailure(content: string): boolean {
@@ -1145,11 +1183,15 @@ export class AgentExecutor {
 
       if (!action) {
         if (content.includes(ASK_USER_MARKER)) {
-          // Extract only the first ASK_USER marker to prevent repeated/unparsed questions
-          const firstIdx = content.indexOf(ASK_USER_MARKER)
-          const afterFirst = content.slice(firstIdx)
-          const nextIdx = afterFirst.indexOf(ASK_USER_MARKER, ASK_USER_MARKER.length)
-          const relevant = nextIdx >= 0 ? afterFirst.slice(0, nextIdx) : afterFirst
+          const relevant = extractAskUserQuestion(content)
+          if (!relevant) {
+            history.push({
+              role: 'user',
+              content: `Your response contained no usable question. If you are blocked, reply with exactly one line: ${ASK_USER_MARKER} <your question about one specific missing value>. Otherwise continue the task with a single JSON action. Do not repeat instructions or write your own receipts.`,
+            })
+            if (saveCheckpoint) await saveCheckpoint()
+            continue
+          }
           if (asksUserToManageTools(relevant.slice(ASK_USER_MARKER.length))) {
             history.push({
               role: 'user',
@@ -1619,7 +1661,7 @@ export class AgentExecutor {
         {
           role: 'user',
           content: result.isError
-            ? `${ignoredNarration}Action failed: ${boundedActionResult(result.content)}\nDo not guess or repeat the failed call. Re-read the mission for provided values, check authorized existing configuration and alternatives, inspect the tool catalog, and use capability resolution to find or create a suitable tool when permitted. If a runtime module is missing, do not attempt installation and do not treat it as a credential; the runtime attempts one alternative-capability lookup when policy and action budget allow. Ask the user only as a last resort for a specific missing value you cannot obtain or configure; if you must ask, respond with ${ASK_USER_MARKER} followed by one clear plain-text question naming the exact value, the tool/service that needs it, and why. Do not emit JSON or vague requests.`
+            ? `${ignoredNarration}Action failed: ${boundedActionResult(result.content)}\nDo not repeat the failed call. Re-read the mission for provided values, then check existing configuration, the tool catalog and capability resolution. A missing runtime module is not a credential and must not be installed. Only as a last resort, reply with one line: ${ASK_USER_MARKER} <question naming the exact value, the tool needing it, and why>.`
             : `${ignoredNarration}Action result: ${boundedActionResult(result.content)}\nContinue toward the task goal. If complete, return the final answer as plain text.`,
         },
       )
@@ -1712,7 +1754,7 @@ export class AgentExecutor {
         'To execute a registered system tool, respond with exactly one raw JSON object: {"tool":"<tool-id>","args":{...}}. Never quote, fence, nest, or describe a tool action; only a sole JSON action object is executed. Do not claim an action succeeded until you receive its result.',
         `Available system tools (${toolPolicy.mode === 'allowlist' ? 'restricted to this Agent allowlist' : 'the live catalog; generated tools appear after registration'}): ${JSON.stringify(catalog)}`,
         `First inspect the current visible tool catalog with {"tool":"${LIST_TOOLS_ACTION}","args":{"query":"<operation and input fields>"}}. Search by the requested capability and expected input fields, not by a guessed tool name. If a matching tool is listed, invoke it with the requested values and verify its result; do not stop after discovery or treat a catalog listing as completion.`,
-        'Use each tool’s full inputSchema, configSchema, and outputSchema when preparing arguments. Tool configuration is supplied by the system, not by you: invoke the matching tool with the required non-secret task inputs first, without requesting or inventing credentials. The system will request missing credentials securely if necessary. For inputs marked "x-stage7-secret": true (or sensitive password fields), provide only an already-supplied vault:// reference; never ask an LLM to handle or echo the secret value. Never expose a vault:// reference in user-facing content. IMPORTANT: ' + ASK_USER_NAME + ' is NOT a tool and does not belong in the tool catalog. It is a native text marker for a last-resort user question: output ' + ASK_USER_MARKER + ' followed by one clear, specific plain-text question (never JSON). Use it only when a required value or credential is genuinely unavailable after you have extracted all mission-provided values, inspected tools with ' + LIST_TOOLS_ACTION + ', tried suitable tools, and used capability resolution to find or create tools when permitted. State exactly what is missing, which tool/service needs it, and why alternatives failed. Mark secret values with [secret:<key>] so the application can save them to Vault. Do not guess, ask vague questions, or claim completion while blocked.',
+        'Prepare arguments from each tool’s inputSchema, configSchema and outputSchema. Tool configuration and stored credentials are supplied by the system, not by you: call the matching tool with the task inputs and the system will resolve configured secrets or request missing ones securely. Never request, invent or echo secret values. For inputs marked "x-stage7-secret": true, pass only an already-supplied vault:// reference, and never show a vault:// reference to the user.',
         toolPolicy.mode === 'allowlist'
           ? 'Tool creation is disabled for this Agent. Request access to a registered tool if the allowed tools are insufficient.'
           : `If no available tool can satisfy a concrete capability need, ask ToolExecutor to resolve it with {"tool":"${CREATE_TOOL_ACTION}","args":{"description":"...","requirements":["..."]}}. Describe the capability and constraints, not implementation details. ToolExecutor checks registered native tools, discovers suitable MCP tools and handles their permission flow, then creates, validates, registers, and persists a reusable plugin only if no suitable tool can be used. Never write tool code yourself or claim resolution succeeded unless the returned tool is registered and available.`,
@@ -1737,8 +1779,8 @@ export class AgentExecutor {
       ...actionInstructions,
       delegation,
       'Treat each system-tool result as authoritative. Report the returned value rather than recalculating or replacing it, and never claim a tool succeeded unless its actual result supports that claim.',
-      'Preserve every user-supplied literal (recipient, identifier, message, amount, and other requested value) exactly. Do not continue the conversation by inventing user turns or changing the request. Act autonomously: extract all information from the mission/task, inspect the live catalog with ' + LIST_TOOLS_ACTION + ', try suitable tools, and use capability resolution to find or create tools when needed before asking for help. If a tool lacks credentials or configuration, attempt configuration via available tool flows when possible; if a specific secret or value is still required, ask only once with ' + ASK_USER_MARKER + ' followed by one clear plain-text question naming the exact missing field/key, the tool/provider, and why it is needed. Never emit JSON, never ask vague or generic questions, never ask to choose from options you did not list with specific IDs/names, and never ask for values already present in the mission. Do not guess values or repeat actions with uncertain side effects.',
-      'When you must ask the user, be specific and actionable: state the exact missing value/field, the relevant tool or service (by name/ID), and why it is required. Never ask generic questions like \'provide more information\'. Never emit JSON or marker payload objects. For secret values, mark with [secret:<key>]. Prefer resolving with available tools and configuration over asking.',
+      'Preserve every user-supplied literal (recipient, identifier, message, amount) exactly. Act autonomously: take values from the mission, inspect the live catalog with ' + LIST_TOOLS_ACTION + ', try suitable tools, and use capability resolution to create a tool when none exists, before asking for help. Never invent user turns, never write action receipts yourself (the system records them), and do not repeat actions with uncertain side effects.',
+      'Ask only as a last resort, for one specific value that you cannot obtain from the mission, configuration, or tools. Output a single line: ' + ASK_USER_MARKER + ' <one plain-text question naming the exact value, the tool or service that needs it, and why>. The Agent runtime will pause execution and present this question to the user. A missing runtime module is not a credential. Mark secret values with [secret:<key>].',
       'Generated tools that need user-provided secrets must mark those input properties with "x-stage7-secret": true, "format": "password", and "writeOnly": true. The tool receives the plaintext only during execution; generated acceptance tests must use non-secret fixtures and must never request or embed real credentials.',
       'Tool errors are evidence; do not claim success when an action failed. Stop after the task is complete or explain a blocker.',
     ].join('\n\n')
@@ -1754,7 +1796,7 @@ export class AgentExecutor {
   ): Promise<BrainResponse> {
     const buildRequestBody = (candidateHistory: Array<{ role: 'user' | 'assistant'; content: string }>) =>
       JSON.stringify({
-        prompt: candidateHistory.map((message) => `${message.role === 'assistant' ? 'Agent' : 'System'}: ${message.content}`).join('\n\n'),
+        prompt: renderBrainTranscript(candidateHistory),
         systemPrompt,
         options: { optimizeFor: 'accuracy' },
         maxTokens,

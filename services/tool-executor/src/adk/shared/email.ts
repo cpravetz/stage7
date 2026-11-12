@@ -56,26 +56,26 @@ export const emailIntegrationSkill = createExternalActionSkill({
     type: 'object',
     properties: {
       // IMAP Configuration
-      imapHost: { type: 'string', description: 'IMAP server hostname (e.g., imap.gmail.com)' },
-      imapPort: { type: 'integer', description: 'IMAP server port (typically 993 for SSL)', default: 993 },
+      imapHost: { type: 'string', description: 'IMAP server hostname (e.g., imap.gmail.com)', envVar: 'EMAIL_IMAP_HOST', configKey: 'email.imap.host' },
+      imapPort: { type: 'integer', description: 'IMAP server port (typically 993 for SSL)', default: 993, envVar: 'EMAIL_IMAP_PORT', configKey: 'email.imap.port' },
       imapTls: { type: 'boolean', description: 'Use TLS/SSL for IMAP', default: true },
-      imapUser: { type: 'string', description: 'IMAP username/email' },
-      imapPassword: { type: 'string', description: 'IMAP password or app-specific password' },
+      imapUser: { type: 'string', description: 'IMAP username/email', envVar: 'EMAIL_IMAP_USER', configKey: 'email.imap.user' },
+      imapPassword: { type: 'string', description: 'IMAP password or app-specific password', envVar: 'EMAIL_IMAP_PASSWORD', configKey: 'email.imap.password', sensitive: true },
       
       // SMTP Configuration
-      smtpHost: { type: 'string', description: 'SMTP server hostname (e.g., smtp.gmail.com)' },
-      smtpPort: { type: 'integer', description: 'SMTP server port (typically 465 for SSL, 587 for STARTTLS)', default: 465 },
+      smtpHost: { type: 'string', description: 'SMTP server hostname (e.g., smtp.gmail.com)', envVar: 'EMAIL_SMTP_HOST', configKey: 'email.smtp.host' },
+      smtpPort: { type: 'integer', description: 'SMTP server port (typically 465 for SSL, 587 for STARTTLS)', default: 465, envVar: 'EMAIL_SMTP_PORT', configKey: 'email.smtp.port' },
       smtpTls: { type: 'boolean', description: 'Use TLS/SSL for SMTP', default: true },
       smtpStartTls: { type: 'boolean', description: 'Use STARTTLS for SMTP (port 587)', default: false },
-      smtpUser: { type: 'string', description: 'SMTP username/email' },
-      smtpPassword: { type: 'string', description: 'SMTP password or app-specific password' },
+      smtpUser: { type: 'string', description: 'SMTP username/email', envVar: 'EMAIL_SMTP_USER', configKey: 'email.smtp.user' },
+      smtpPassword: { type: 'string', description: 'SMTP password or app-specific password', envVar: 'EMAIL_SMTP_PASSWORD', configKey: 'email.smtp.password', sensitive: true },
       
       // POP3 Configuration
-      pop3Host: { type: 'string', description: 'POP3 server hostname (e.g., pop.gmail.com)' },
-      pop3Port: { type: 'integer', description: 'POP3 server port (typically 995 for SSL)', default: 995 },
+      pop3Host: { type: 'string', description: 'POP3 server hostname (e.g., pop3.gmail.com)', envVar: 'EMAIL_POP3_HOST', configKey: 'email.pop3.host' },
+      pop3Port: { type: 'integer', description: 'POP3 server port (typically 995 for SSL)', default: 995, envVar: 'EMAIL_POP3_PORT', configKey: 'email.pop3.port' },
       pop3Tls: { type: 'boolean', description: 'Use TLS/SSL for POP3', default: true },
-      pop3User: { type: 'string', description: 'POP3 username/email' },
-      pop3Password: { type: 'string', description: 'POP3 password or app-specific password' },
+      pop3User: { type: 'string', description: 'POP3 username/email', envVar: 'EMAIL_POP3_USER', configKey: 'email.pop3.user' },
+      pop3Password: { type: 'string', description: 'POP3 password or app-specific password', envVar: 'EMAIL_POP3_PASSWORD', configKey: 'email.pop3.password', sensitive: true },
       
       // General
       defaultFolder: { type: 'string', description: 'Default IMAP folder/mailbox', default: 'INBOX' },
@@ -83,20 +83,6 @@ export const emailIntegrationSkill = createExternalActionSkill({
       dryRun: { type: 'boolean', description: 'Validate without executing; defaults to true', default: true },
     },
     required: [],
-  },
-  credentialSource: {
-    imapHost: { envVar: 'EMAIL_IMAP_HOST', configKey: 'email.imap.host' },
-    imapPort: { envVar: 'EMAIL_IMAP_PORT', configKey: 'email.imap.port' },
-    imapUser: { envVar: 'EMAIL_IMAP_USER', configKey: 'email.imap.user' },
-    imapPassword: { envVar: 'EMAIL_IMAP_PASSWORD', configKey: 'email.imap.password' },
-    smtpHost: { envVar: 'EMAIL_SMTP_HOST', configKey: 'email.smtp.host' },
-    smtpPort: { envVar: 'EMAIL_SMTP_PORT', configKey: 'email.smtp.port' },
-    smtpUser: { envVar: 'EMAIL_SMTP_USER', configKey: 'email.smtp.user' },
-    smtpPassword: { envVar: 'EMAIL_SMTP_PASSWORD', configKey: 'email.smtp.password' },
-    pop3Host: { envVar: 'EMAIL_POP3_HOST', configKey: 'email.pop3.host' },
-    pop3Port: { envVar: 'EMAIL_POP3_PORT', configKey: 'email.pop3.port' },
-    pop3User: { envVar: 'EMAIL_POP3_USER', configKey: 'email.pop3.user' },
-    pop3Password: { envVar: 'EMAIL_POP3_PASSWORD', configKey: 'email.pop3.password' },
   },
   inputSchema: {
     type: 'object',

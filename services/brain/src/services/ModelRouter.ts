@@ -20,6 +20,8 @@ export interface ProviderHealth {
 export interface RoutingOptions {
   task: string;
   maxTokens?: number;
+  /** Estimated prompt size; models whose context window cannot hold prompt plus completion are not candidates. */
+  estimatedPromptTokens?: number;
   budget?: number;
   freeOnly?: boolean;
   optimizeFor?: 'cost' | 'speed' | 'accuracy' | 'creativity' | 'balanced';
@@ -182,8 +184,14 @@ export class ModelRouter {
     for (const id of options.excludedModelIds || []) excluded.add(id);
     const isExcluded = (model: ModelDefinition) =>
       excluded.has(model.id) || excluded.has(`${model.provider}:${model.id}`);
-    const eligibleModels = Array.from(this.models.values()).filter((m) => {
-      if (options.maxTokens && m.maxTokens < options.maxTokens) return false;
+    const requiredContext = (options.estimatedPromptTokens ?? 0) + (options.maxTokens ?? 0);
+    const allModels = Array.from(this.models.values());
+    // A context window of 0 means unknown. If no model can hold the prompt, keep the
+    // previous completion-only check rather than failing the call outright.
+    const fitsContext = (m: ModelDefinition) => !m.maxTokens || m.maxTokens >= requiredContext;
+    const anyFits = allModels.some(fitsContext);
+    const eligibleModels = allModels.filter((m) => {
+      if (anyFits ? !fitsContext(m) : (options.maxTokens && m.maxTokens < options.maxTokens)) return false;
       if (options.budget !== undefined && m.costPer1kTokens > options.budget) return false;
       if (options.freeOnly) {
         if (!(m.costPer1kTokens === 0)) return false;

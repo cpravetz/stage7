@@ -26,7 +26,7 @@ const EXTERNAL_CONFIG_SCHEMA = createSchemaRecord({
     description: 'Hotel PMS base URL or local hotel service home',
     default: 'ASSISTANT_HOME',
   }),
-  apiToken: SchemaProps.password({ description: 'Bearer token for the hotel PMS' }),
+  apiToken: SchemaProps.password({ description: 'Bearer token for the hotel PMS', envVar: 'HOTEL_API_TOKEN', configKey: 'hotel.token', label: 'hotel PMS token' }),
   provider: SchemaProps.text({ description: 'PMS or channel manager provider, such as opera, mews, cloudbeds, or custom' }),
   apiVersion: SchemaProps.text({ description: 'Optional hotel API version' }),
 });
@@ -71,7 +71,6 @@ export const GUEST_EXPERIENCE_SKILL = createExternalActionSkill({
   action: 'guest-experience',
   endpoint: { configKey: 'hotelHome', method: 'POST' },
   auth: { type: 'bearer', credentialEnvKeyMap: { token: 'HOTEL_API_TOKEN' } },
-  credentialSource: { token: { envVar: 'HOTEL_API_TOKEN', configKey: 'hotel.token' } },
   inputSchema: GUEST_EXPERIENCE_INPUT_SCHEMA,
   outputSchema: EXTERNAL_OUTPUT_SCHEMA,
   configSchema: EXTERNAL_CONFIG_SCHEMA,

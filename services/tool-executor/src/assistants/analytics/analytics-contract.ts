@@ -48,5 +48,10 @@ export const ANALYTICS_CONFIG_SCHEMA = {
     queryTimeoutMs: SchemaProps.number({ description: 'Warehouse query timeout in milliseconds', default: 120000 }),
     metricsPath: SchemaProps.text({ description: 'Local metric cache path', default: '/tmp/analytics/metrics.json' }),
     warehouseConfigPath: SchemaProps.text({ description: 'Optional JSON connector configuration path', default: '/tmp/analytics/warehouse-config.json' }),
+    apiKey: SchemaProps.password({
+      description: 'Warehouse API key (set analytics.warehouse.apiKey in this Skill configuration, or a vault secret)',
+      configKey: 'analytics.warehouse.apiKey',
+      label: 'warehouse API key',
+    }),
   },
 };

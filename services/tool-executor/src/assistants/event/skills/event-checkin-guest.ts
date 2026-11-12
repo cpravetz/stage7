@@ -22,14 +22,11 @@ const CHECKIN_GUEST = createExternalActionSkill({
   },
   // The bearer token is a secret, so it is resolved from the vault or operator
   // configuration rather than asked for on the Run form.
-  credentialSource: {
-    token: { envVar: 'EVENT_TICKETING_ACCESS_TOKEN', configKey: 'event.ticketing.token' },
-  },
   configSchema: {
     type: 'object',
     properties: {
       baseUrl: { type: 'string', description: 'Ticketing platform base URL' },
-      token: { type: 'string', description: 'Platform bearer token' },
+      token: { type: 'string', description: 'Platform bearer token', envVar: 'EVENT_TICKETING_ACCESS_TOKEN', configKey: 'event.ticketing.token' },
       provider: {
         type: 'string',
         enum: ['cvent', 'eventbrite', 'bizzabo', 'hopin', 'whova', 'attendify', 'custom'],

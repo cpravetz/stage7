@@ -45,6 +45,13 @@ function buildSource(
   outputSchema: Record<string, unknown>,
 ): string {
   const identifier = `skill_${synthesis.skillName.replace(/[^a-zA-Z0-9_$]/g, '_')}`;
+  const configSchema = {
+    type: 'object',
+    properties: Object.fromEntries(
+      synthesis.requiredEnvVars.map((name) => [name, { type: 'string', description: `${name} credential`, envVar: name, configKey: name }]),
+    ),
+    required: synthesis.requiredEnvVars,
+  };
   return `import { createCodeSkill } from '../../../../adk/code-skill-factory';
 
 export const ${identifier} = createCodeSkill({
@@ -59,9 +66,7 @@ export const ${identifier} = createCodeSkill({
     generatedBy: 'mission-to-skill-compiler',
     authorAssistantId: ${JSON.stringify(assistantId)},
     generatedSkillCategory: ${JSON.stringify(category)},
-    credentialSource: ${JSON.stringify(Object.fromEntries(
-      synthesis.requiredEnvVars.map((name) => [name, { envVar: name, required: true }]),
-    ))},
+    configSchema: ${JSON.stringify(configSchema)},
     timeoutMs: 30000,
   },
   inputSchema: ${JSON.stringify(inputSchema)},
@@ -174,9 +179,13 @@ export class MissionToSkillCompiler {
         generatedBy: 'mission-to-skill-compiler',
         authorAssistantId: request.authorAssistantId,
         generatedSkillCategory: request.targetCategory,
-        credentialSource: Object.fromEntries(
-          synthesis.requiredEnvVars.map((name) => [name, { envVar: name, required: true }]),
-        ),
+        configSchema: {
+          type: 'object',
+          properties: Object.fromEntries(
+            synthesis.requiredEnvVars.map((name) => [name, { type: 'string', description: `${name} credential`, envVar: name, configKey: name }]),
+          ),
+          required: synthesis.requiredEnvVars,
+        },
         timeoutMs: 30_000,
       },
       inputSchema,

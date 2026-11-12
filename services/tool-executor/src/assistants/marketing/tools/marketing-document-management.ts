@@ -20,14 +20,11 @@ export const MARKETING_DOCUMENT_MANAGEMENT = createExternalActionSkill({
       type: 'bearer',
       credentialEnvKeyMap: { token: 'MARKETING_DOCUMENT_ACCESS_TOKEN' },
     },
-    credentialSource: {
-      token: { envVar: 'MARKETING_DOCUMENT_ACCESS_TOKEN', configKey: 'documentManagement.token' },
-    },
     configSchema: {
       type: 'object',
       properties: {
         baseUrl: { type: 'string', description: 'Document management system base URL' },
-        token: { type: 'string', description: 'Document system bearer token' },
+        token: { type: 'string', description: 'Document system bearer token', envVar: 'MARKETING_DOCUMENT_ACCESS_TOKEN', configKey: 'documentManagement.token' },
         provider: { type: 'string', enum: ['google-drive', 'sharepoint', 'dropbox', 'box', 'custom'] },
         defaultFolder: { type: 'string' },
         assetTaxonomy: { type: 'object', description: 'Asset classification taxonomy' },

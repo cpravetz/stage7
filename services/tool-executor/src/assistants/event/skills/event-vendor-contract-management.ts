@@ -42,7 +42,7 @@ const VENDOR_CONTRACT_MANAGEMENT = createExternalActionSkill({
     type: 'object',
     properties: {
       baseUrl: { type: 'string', description: 'Vendor management platform base URL' },
-      token: { type: 'string', description: 'Platform bearer token' },
+      token: { type: 'string', description: 'Platform bearer token', envVar: 'EVENT_VENDOR_ACCESS_TOKEN', configKey: 'event.vendor.token' },
       provider: { type: 'string', enum: ['honeybook', '17hats', 'dubsado', 'planning-pod', 'eventbrite', 'cvent', 'custom'], description: 'Vendor/platform provider' },
       paymentProviders: { type: 'object', description: 'Connected payment processors', properties: { stripe: { type: 'object' }, square: { type: 'object' }, paypal: { type: 'object' }, ach: { type: 'object' } } },
       contractTemplates: { type: 'object', description: 'Contract templates by vendor type' },
@@ -50,9 +50,6 @@ const VENDOR_CONTRACT_MANAGEMENT = createExternalActionSkill({
       approvalWorkflows: { type: 'object', description: 'Approval workflows for contracts/payments' },
     },
     required: ['baseUrl', 'token', 'provider'],
-  },
-  credentialSource: {
-    token: { envVar: 'EVENT_VENDOR_ACCESS_TOKEN', configKey: 'event.vendor.token' },
   },
   inputSchema: {
     type: 'object',

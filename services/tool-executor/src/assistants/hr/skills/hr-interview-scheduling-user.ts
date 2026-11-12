@@ -11,11 +11,6 @@ import { HR_DOMAIN_KNOWLEDGE, HR_EXTERNAL_OUTPUT_SCHEMA } from '../hr-contract';
 // ============================================================================
 
 export const HR_INTERVIEW_SCHEDULING_USER = createDeclarativeCodeSkill({
-  // Declared as a credential, not a plain config field, so the secret can be
-  // sourced from the vault via `vault:<id>` and is never echoed into output.
-  credentialSource: {
-    apiKey: { configKey: 'apiKey', required: false, label: "upstream service API key (set in this Skill configuration, or a vault secret)" },
-  },
   id: 'hr-interview-scheduling-user',
   name: 'Interview Scheduling',
   description: 'Coordinates with ATS, calendar, and email systems to book an interview you are scheduling by hand.',
@@ -23,6 +18,7 @@ export const HR_INTERVIEW_SCHEDULING_USER = createDeclarativeCodeSkill({
   configSchema: {
     type: 'object',
     properties: {
+      apiKey: { type: 'string', description: 'upstream service API key (set in this Skill configuration, or a vault secret)', configKey: 'apiKey', label: "upstream service API key (set in this Skill configuration, or a vault secret)" },
       dryRun: SchemaProps.boolean({ description: 'Validate without executing; defaults to true', default: true }),
       defaultSource: SchemaProps.text({ description: 'Default sourcing channel for job descriptions' }),
       apiVersion: SchemaProps.text({ description: 'API version for recruiting operations' }),

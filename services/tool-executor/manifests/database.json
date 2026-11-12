@@ -8,16 +8,58 @@
     "codeFile": "database.js",
     "configSchema": {
       "type": "object",
-      "properties": {},
+      "properties": {
+        "host": {
+          "type": "string",
+          "title": "Host",
+          "description": "Database host",
+          "required": false,
+          "configKey": "db.host",
+          "label": "Host"
+        },
+        "port": {
+          "type": "integer",
+          "title": "Port",
+          "description": "Database port",
+          "required": false,
+          "configKey": "db.port",
+          "label": "Port"
+        },
+        "database": {
+          "type": "string",
+          "title": "Database",
+          "description": "Database name",
+          "required": false,
+          "configKey": "db.database",
+          "label": "Database"
+        },
+        "username": {
+          "type": "string",
+          "title": "Username",
+          "description": "Database username",
+          "required": false,
+          "configKey": "db.username",
+          "label": "Username"
+        },
+        "password": {
+          "type": "string",
+          "title": "Password",
+          "description": "Database password",
+          "sensitive": true,
+          "required": false,
+          "configKey": "db.password",
+          "label": "Password"
+        },
+        "connectionString": {
+          "type": "string",
+          "title": "Connection String",
+          "description": "Full database connection string",
+          "required": false,
+          "configKey": "db.connectionString",
+          "label": "Connection String"
+        }
+      },
       "required": []
-    },
-    "credentialSource": {
-      "host": { "configKey": "db.host" },
-      "port": { "configKey": "db.port" },
-      "database": { "configKey": "db.database" },
-      "username": { "configKey": "db.username" },
-      "password": { "configKey": "db.password" },
-      "connectionString": { "configKey": "db.connectionString" }
     }
   },
   "inputSchema": {

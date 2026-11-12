@@ -44,7 +44,7 @@ export const RESOURCE_LIBRARY_OPS = createExternalActionSkill({
     type: 'object',
     properties: {
       baseUrl: { type: 'string', description: 'Resource repository base URL' },
-      token: { type: 'string', description: 'Repository bearer token' },
+      token: { type: 'string', description: 'Repository bearer token', envVar: 'EDUCATION_RESOURCE_ACCESS_TOKEN', configKey: 'education.resource.token' },
       provider: { type: 'string', enum: ['google-drive', 'sharepoint', 'canvas-commons', 'oer-commons', 'custom'], description: 'Repository provider' },
       defaultFolder: { type: 'string', description: 'Default folder/path' },
       taxonomy: { type: 'object', description: 'Tagging taxonomy: subjects, grades, standards, types, topics' },
@@ -54,9 +54,6 @@ export const RESOURCE_LIBRARY_OPS = createExternalActionSkill({
       versioning: { type: 'boolean', description: 'Enable version control', default: true },
     },
     required: ['baseUrl', 'token', 'provider'],
-  },
-  credentialSource: {
-    token: { envVar: 'EDUCATION_RESOURCE_ACCESS_TOKEN', configKey: 'education.resource.token' },
   },
   inputSchema: {
     type: 'object',

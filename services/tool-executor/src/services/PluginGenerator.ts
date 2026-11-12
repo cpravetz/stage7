@@ -39,7 +39,6 @@ const PLUGIN_SYSTEM_PROMPT = `You are a senior engineer generating production-re
     "sourceCode": "string",
     "requirements": ["string"],
     "configSchema": { "type": "object", "properties": {} },
-    "credentialSource": { "logicalKey": { "configKey": "field", "label": "Human-readable name", "sensitive": true } },
     "inputs": { "type": "object", "properties": {} },
     "outputs": { "type": "object", "properties": {} }
   }
@@ -78,21 +77,23 @@ const PLUGIN_SYSTEM_PROMPT = `You are a senior engineer generating production-re
     the user supplies it. Do not put run-specific values in configSchema.
   - Declare persistent settings as properties in configSchema.properties, with accurate
     types and useful descriptions. Put every mandatory persistent setting in
-    configSchema.required. Every required config property must also have a
-    credentialSource entry whose configKey names that property; read its resolved
-    value using __getCredential in JavaScript or __get_credential in Python.
-    This applies to non-secret settings as well, so missing values can be requested.
-    Optional non-secret settings may be read from __skill_config["propertyName"] in
-    JavaScript or __skill_config["property_name"] in Python.
+    configSchema.required. Every required config property must also declare its
+    credential source inline on the property: vaultSecretId for Vault-backed secrets,
+    envVar for deployment-managed environment variables, or configKey for nested
+    configuration paths. Read its resolved value using __getCredential in JavaScript
+    or __get_credential in Python. This applies to non-secret settings as well, so
+    missing values can be requested. Optional non-secret settings may be read from
+    __skill_config["propertyName"] in JavaScript or __skill_config["property_name"] in
+    Python.
   - Declare per-execution values in inputs and read them from __tool_input. For a
     per-execution secret, mark the input property with "x-stage7-secret": true,
     "format": "password", and "writeOnly": true; do not make it persistent configuration.
   - For a secret that is intentionally persistent across runs, declare its configSchema
-    property and map it in credentialSource using configKey and a human-readable label.
-    Mark it with "sensitive": true. Read mapped values with
-    __getCredential("logicalKey") in JavaScript or __get_credential("logical_key") in
-    Python. These values resolve from runtime configuration or are requested from the
-    user if missing. Do not map per-execution secrets through credentialSource.
+    property and mark it with "sensitive": true and a vaultSecretId or envVar. Read
+    mapped values with __getCredential("logicalKey") in JavaScript or
+    __get_credential("logical_key") in Python. These values resolve from runtime
+    configuration or are requested from the user if missing. Do not map per-execution
+    secrets through inline credential source declarations on configSchema properties.
   - Never put secrets in config defaults, source code, logs, outputs, or acceptance-test
     fixtures; acceptance tests must use dummy values and must not make live requests.
   - If the tool must return a secret value, mark that output property with
@@ -144,12 +145,6 @@ const generatedPluginSchema = z.object({
   sourceCode: z.string().min(1),
   requirements: z.array(z.string().trim().min(1)).max(0, 'Generated plugins cannot declare uninstalled dependencies'),
   configSchema: z.record(z.string(), z.unknown()),
-  credentialSource: z.record(z.string(), z.object({
-    configKey: z.string().trim().min(1),
-    label: z.string().trim().min(1).optional(),
-    required: z.boolean().optional(),
-    sensitive: z.boolean().optional(),
-  }).strict()).optional(),
   inputs: z.record(z.string(), z.unknown()),
   outputs: z.record(z.string(), z.unknown()),
 }).strict().superRefine((plugin, context) => {
@@ -171,14 +166,18 @@ const generatedPluginSchema = z.object({
   const requiredConfig = Array.isArray(plugin.configSchema.required)
     ? plugin.configSchema.required.filter((field): field is string => typeof field === 'string')
     : [];
+  // Credential sources are now declared inline on each configSchema property
+  // (vaultSecretId / envVar / configKey). Required config fields must declare a
+  // credential source so missing values can be requested at runtime.
+  const properties = (plugin.configSchema.properties as Record<string, Record<string, unknown>> | undefined) ?? {};
   for (const field of requiredConfig) {
-    if (!Object.values(plugin.credentialSource || {}).some(
-      (source) => source.configKey === field && source.required !== false,
-    )) {
+    const property = properties[field] || {};
+    const hasCredentialSource = property.vaultSecretId || property.envVar || property.configKey;
+    if (!hasCredentialSource) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ['credentialSource'],
-        message: `required config field "${field}" must be mapped to a runtime configuration request`,
+        path: ['configSchema', 'properties', field],
+        message: `required config field "${field}" must declare a credential source (vaultSecretId, envVar, or configKey)`,
       });
     }
   }
@@ -407,7 +406,6 @@ export class PluginGenerator {
           sourceCode: 'complete runnable code reading __tool_input and printing one JSON result',
           requirements: [],
           configSchema: { type: 'object', properties: {} },
-          credentialSource: { logicalKey: { configKey: 'field', label: 'Human-readable name', sensitive: true } },
           inputs: { type: 'object', properties: {} },
           outputs: { type: 'object', properties: {} },
         })}`;
@@ -433,7 +431,6 @@ export class PluginGenerator {
           sourceCode: parsed.sourceCode,
           requirements: parsed.requirements,
           configSchema: parsed.configSchema,
-          ...(parsed.credentialSource ? { credentialSource: parsed.credentialSource } : {}),
           inputs: parsed.inputs,
           outputs: parsed.outputs,
           testContract,
@@ -446,8 +443,15 @@ export class PluginGenerator {
       };
 
       const failedCases: string[] = [];
+      // Credential sources are now declared inline on each configSchema property
+      // (vaultSecretId / envVar / configKey). Collect the logical keys so the
+      // isolated test harness can supply dummy values.
+      const configProperties = (parsed.configSchema.properties as Record<string, Record<string, unknown>> | undefined) ?? {};
       const dummyCredentials: Record<string, string> = {};
-      for (const logicalKey of Object.keys(parsed.credentialSource || {})) {
+      for (const [logicalKey, propertySchema] of Object.entries(configProperties)) {
+        const schema = propertySchema || {};
+        const hasCredentialSource = schema.vaultSecretId || schema.envVar || schema.configKey;
+        if (!hasCredentialSource) continue;
         // Isolated tests cannot receive real credentials (they are rejected by
         // the executor). Provide dummy values so a generated tool that gates on
         // `__getCredential` still proceeds to the mocked HTTP call and the
@@ -701,23 +705,27 @@ export class PluginGenerator {
           entrypoint: parsed.entrypoint || 'index.js',
           sourceCode: parsed.sourceCode,
           requirements: parsed.requirements || [],
-          configSchema: parsed.configSchema || {},
-          credentialSource: parsed.credentialSource || {},
+          configSchema: parsed.configSchema || { type: 'object', properties: {} },
           inputs: parsed.inputs || {},
           outputs: parsed.outputs || {},
           testContract,
         },
         inputSchema: parsed.inputs || { type: 'object', properties: {} },
         configSchema: parsed.configSchema || { type: 'object', properties: {} },
-        ...(parsed.credentialSource ? { credentialSource: parsed.credentialSource } : {}),
         outputSchema: parsed.outputs || {},
         createdAt: new Date(),
         updatedAt: new Date(),
       };
 
       const failedCases: string[] = [];
+      // Credential sources are now declared inline on each configSchema property
+      // (vaultSecretId / envVar / configKey). Collect the logical keys so the
+      // isolated test harness can supply dummy values.
+      const configProperties = (parsed.configSchema?.properties as Record<string, Record<string, unknown>> | undefined) ?? {};
       const dummyCredentials = Object.fromEntries(
-        Object.keys(parsed.credentialSource || {}).map((key) => [key, `test-${key}`]),
+        Object.entries(configProperties)
+          .filter(([, schema]) => schema && (schema.vaultSecretId || schema.envVar || schema.configKey))
+          .map(([key]) => [key, `test-${key}`]),
       );
       for (const testCase of testContract.cases) {
         const testCredentials = { ...dummyCredentials, ...testCase.credentials };
@@ -786,7 +794,6 @@ export class PluginGenerator {
         sourceCode: manifest?.sourceCode,
         requirements: manifest?.requirements,
         configSchema: manifest?.configSchema,
-        credentialSource: manifest?.credentialSource,
         inputs: manifest?.inputs,
         outputs: manifest?.outputs,
       });
@@ -856,7 +863,7 @@ export class PluginGenerator {
         entrypoint,
         inputSchema: tool.inputSchema,
         outputSchema: tool.outputSchema,
-        credentialSource: manifest?.credentialSource,
+        configSchema: manifest?.configSchema,
         testContract: contractValidation.data,
         validation: testValidation.data,
         createdAt: tool.createdAt,

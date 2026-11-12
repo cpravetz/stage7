@@ -27,6 +27,16 @@ const triggers = [
 
 const intakeConfig = createSchemaRecord({
   endpointUrl: SchemaProps.url({ description: 'Healthcare intake endpoint URL; may also be supplied at runtime via configuration' }),
+  accessToken: SchemaProps.password({
+    description: 'Upstream access token (set in this Skill configuration, or a vault secret)',
+    configKey: 'accessToken',
+    label: 'upstream access token',
+  }),
+  token: SchemaProps.password({
+    description: 'Upstream API token (set in this Skill configuration, or a vault secret)',
+    configKey: 'token',
+    label: 'upstream API token',
+  }),
   defaultDryRun: SchemaProps.boolean({ description: 'Default intake execution to dry-run', default: true }),
 })
 
@@ -63,12 +73,6 @@ const intake = createDeclarativeCodeSkill({
   outputSchema: healthcareResultSchema('Intake payload, missing documentation, queue position, route, and response when dispatched'),
   triggers,
   manifest: {
-    // Declared as a credential, not a plain config field, so the secret can be
-    // sourced from the vault via `vault:<id>` and is never echoed into output.
-    credentialSource: {
-      accessToken: { configKey: 'accessToken', required: false, label: "upstream access token (set in this Skill configuration, or a vault secret)" },
-      token: { configKey: 'token', required: false, label: "upstream API token (set in this Skill configuration, or a vault secret)" },
-    },
     configSchema: intakeConfig,
     healthcareHome: 'ASSISTANT_HOME',
     endpointConfigKey: 'endpointUrl',

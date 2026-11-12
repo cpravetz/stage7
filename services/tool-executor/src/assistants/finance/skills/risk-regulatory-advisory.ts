@@ -25,7 +25,10 @@ const RISK_REGULATORY_ADVISORY_CONFIG_SCHEMA = {
   properties: {
     baseUrl: { type: 'string', format: 'uri', description: 'Base URL for the risk assessment service' },
     apiKey: {
-      isSecret: true, type: 'string', description: 'API key for the risk assessment service' },
+      isSecret: true, type: 'string', description: 'API key for the risk assessment service',
+      configKey: 'apiKey',
+      label: 'risk service API key',
+    },
     provider: { type: 'string', description: 'Provider identifier (e.g., bloomberg, refinitiv, custom)' },
   },
   required: ['baseUrl', 'apiKey', 'provider'],
@@ -42,11 +45,6 @@ const riskRegulatoryAdvisorySkill = createDeclarativeCodeSkill({
   outputSchema: riskRegulatoryAdvisoryOutputSchema,
   isSkill: true,
   manifest: {
-  // Declared as a credential so the key can come from the vault and is never
-  // read from, or echoed back out of, the process environment.
-  credentialSource: {
-    apiKey: { configKey: 'apiKey', required: false, label: "risk service API key (set in this Skill configuration, or a vault secret)" },
-  },
     configSchema: RISK_REGULATORY_ADVISORY_CONFIG_SCHEMA,
   },
   handler: async function handler(input, ctx) {

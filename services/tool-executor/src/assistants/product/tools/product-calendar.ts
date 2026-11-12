@@ -23,7 +23,7 @@ export const PRODUCT_CALENDAR = createExternalActionSkill({
     configSchema: {
       type: 'object',
       properties: {
-        accessToken: { type: 'string', description: 'OAuth access token' },
+        accessToken: { type: 'string', description: 'OAuth access token', envVar: 'CALENDAR_ACCESS_TOKEN' },
         refreshToken: { type: 'string', description: 'OAuth refresh token' },
         calendarId: { type: 'string', description: 'Default calendar ID' },
         recurrenceRules: { type: 'object', description: 'Recurrence rule definitions' },
@@ -32,9 +32,6 @@ export const PRODUCT_CALENDAR = createExternalActionSkill({
         syncProviders: { type: 'array', items: { type: 'string' }, description: 'Enabled sync providers' },
       },
       required: ['accessToken'],
-    },
-    credentialSource: {
-      accessToken: { envVar: 'CALENDAR_ACCESS_TOKEN' },
     },
     inputSchema: {
       type: 'object',

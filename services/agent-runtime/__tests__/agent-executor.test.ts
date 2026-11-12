@@ -325,7 +325,7 @@ describe('AgentExecutor', () => {
     ])
     expect(toolExecutions).toBe(1)
     expect(prompts[0]).toContain('Required completed steps before finishing')
-    expect(prompts[1]).toContain('Before finalizing, execute each required action')
+    expect(prompts[1]).toContain('Still required: ')
     expect(complaints).toEqual([
       expect.objectContaining({
         requestId: 'required-action-1',
@@ -364,7 +364,7 @@ describe('AgentExecutor', () => {
         input: { prompt: 'Email Hello to recipient@example.test.', context: { requiresExternalAction: true } } },
       { missionId: 'mission-1', delegationDepth: 0 },
     )
-    expect(systemPrompt).toContain('invoke the matching tool with the required non-secret task inputs first')
+    expect(systemPrompt).toContain('call the matching tool with the task inputs')
     expect(calls).toEqual([expect.objectContaining({ id: 'email_sender', input: { to: 'recipient@example.test', body: 'Hello' } })])
     expect(result.incompleteReason).toBeUndefined()
     expect(result.actionReceipts).toEqual([expect.objectContaining({ toolId: 'email_sender', outcome: 'success' })])
@@ -424,7 +424,7 @@ describe('AgentExecutor', () => {
       expect.objectContaining({ toolId: 'send_message', outcome: 'success' }),
     ])
     expect(prompts[0]).toContain('This task requires an actual external operation')
-    expect(prompts[1]).toContain('The task also requires a verified external operation')
+    expect(prompts[1]).toContain('A verified external operation has not been performed')
     expect(prompts.join('\n')).not.toContain('__external_action__')
   })
 

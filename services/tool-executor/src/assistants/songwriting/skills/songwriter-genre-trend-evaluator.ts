@@ -47,7 +47,7 @@ export const songwriterGenreTrendEvaluator = createExternalActionSkill({
     type: 'object',
     properties: {
       baseUrl: { type: 'string', description: 'Creative intelligence platform base URL' },
-      apiKey: { type: 'string', description: 'Creative intelligence API key' },
+      apiKey: { type: 'string', description: 'Creative intelligence API key', envVar: 'CREATIVE_INTELLIGENCE_API_KEY', configKey: 'creative.intelligence.apiKey' },
       provider: { type: 'string', enum: ['spotify', 'soundcharts', 'billboard', 'musixmatch', 'chartmetric', 'custom'], description: 'Music trend data provider' },
       defaultMarket: { type: 'string', description: 'Default market/region (e.g., US, global, UK)' },
       defaultGenre: { type: 'string', description: 'Default genre to monitor' },
@@ -55,9 +55,6 @@ export const songwriterGenreTrendEvaluator = createExternalActionSkill({
       updateCadence: { type: 'string', enum: ['daily', 'weekly', 'monthly'], description: 'Default trend update frequency', default: 'weekly' },
     },
     required: ['baseUrl', 'apiKey', 'provider'],
-  },
-  credentialSource: {
-    apiKey: { envVar: 'CREATIVE_INTELLIGENCE_API_KEY', configKey: 'creative.intelligence.apiKey' },
   },
   inputSchema: {
     type: 'object',

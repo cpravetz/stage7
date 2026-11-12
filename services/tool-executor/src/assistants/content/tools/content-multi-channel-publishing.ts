@@ -24,7 +24,7 @@ export const MULTI_CHANNEL_PUBLISHING = createExternalActionSkill({
     type: 'object',
     properties: {
       baseUrl: { type: 'string', description: 'Publishing platform base URL' },
-      token: { type: 'string', description: 'Publishing platform bearer token' },
+      token: { type: 'string', description: 'Publishing platform bearer token', envVar: 'CONTENT_PUBLISHING_ACCESS_TOKEN', configKey: 'content.publishing.token' },
       provider: { type: 'string', enum: ['wordpress', 'ghost', 'medium', 'substack', 'contentful', 'strapi', 'sanity', 'custom'], description: 'CMS/blog provider' },
       socialProviders: { type: 'object', description: 'Connected social accounts', properties: { linkedin: { type: 'object' }, twitter: { type: 'object' }, instagram: { type: 'object' }, facebook: { type: 'object' }, youtube: { type: 'object' }, tiktok: { type: 'object' } } },
       videoProviders: { type: 'object', description: 'Connected video platforms', properties: { youtube: { type: 'object' }, vimeo: { type: 'object' }, wistia: { type: 'object' }, mux: { type: 'object' } } },
@@ -34,9 +34,6 @@ export const MULTI_CHANNEL_PUBLISHING = createExternalActionSkill({
       defaultPrivacy: { type: 'string', enum: ['public', 'unlisted', 'private'], description: 'Default video privacy' },
     },
     required: ['baseUrl', 'token'],
-  },
-  credentialSource: {
-    token: { envVar: 'CONTENT_PUBLISHING_ACCESS_TOKEN', configKey: 'content.publishing.token' },
   },
   inputSchema: {
     type: 'object',

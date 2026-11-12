@@ -21,14 +21,11 @@ export const MARKETING_EMAIL = createExternalActionSkill({
       header: 'Authorization',
       credentialEnvKeyMap: { apiKey: 'MARKETING_EMAIL_API_KEY' },
     },
-    credentialSource: {
-      apiKey: { envVar: 'MARKETING_EMAIL_API_KEY', configKey: 'email.apiKey' },
-    },
     configSchema: {
       type: 'object',
       properties: {
         baseUrl: { type: 'string', description: 'Email platform base URL' },
-        apiKey: { type: 'string', description: 'Email platform API key' },
+        apiKey: { type: 'string', description: 'Email platform API key', envVar: 'MARKETING_EMAIL_API_KEY', configKey: 'email.apiKey' },
         provider: { type: 'string', enum: ['sendgrid', 'mailgun', 'ses', 'brevo', 'custom'] },
         fromAddress: { type: 'string' },
         templates: { type: 'object' },

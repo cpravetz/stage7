@@ -20,14 +20,11 @@ const LOG_INCIDENT = createExternalActionSkill({
     type: 'bearer',
     credentialEnvKeyMap: { token: 'EVENT_OPS_LOG_ACCESS_TOKEN' },
   },
-  credentialSource: {
-    token: { envVar: 'EVENT_OPS_LOG_ACCESS_TOKEN', configKey: 'event.opsLog.token' },
-  },
   configSchema: {
     type: 'object',
     properties: {
       baseUrl: { type: 'string', description: 'Operations log platform base URL' },
-      token: { type: 'string', description: 'Platform bearer token' },
+      token: { type: 'string', description: 'Platform bearer token', envVar: 'EVENT_OPS_LOG_ACCESS_TOKEN', configKey: 'event.opsLog.token' },
       severityEscalationMinutes: {
         type: 'object',
         description: 'Minutes before an unowned incident escalates, by severity',
