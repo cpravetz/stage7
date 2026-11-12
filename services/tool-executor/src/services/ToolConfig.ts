@@ -35,10 +35,20 @@ export class ToolConfigResolver {
     return value !== undefined && value !== null && value !== '';
   }
 
-  private async tryResolveFromVault(tool: Tool, field: string, input?: Record<string, unknown>): Promise<unknown> {
+  /**
+   * Standard vault secret naming: secret:<credential_key>
+   * Credential keys are the logical keys from the tool's credentialSource manifest
+   * (e.g., "apiKey", "token", "accessToken"). This allows multiple tools to share
+   * the same secret without tying it to a specific tool ID.
+   */
+  private static vaultSecretName(credentialKey: string): string {
+    return `secret:${credentialKey}`;
+  }
+
+  private async tryResolveFromVault(tool: Tool, credentialKey: string, input?: Record<string, unknown>): Promise<unknown> {
     try {
       const tenantId = (tool as any)?.tenantId || (input as any)?.tenantId || 'system';
-      const secretName = `tool:${tool.id}:${field}`;
+      const secretName = ToolConfigResolver.vaultSecretName(credentialKey);
       const vaultUrl = process.env.VAULT_URL || 'http://vault:4000';
       try {
         const res = await fetch(
@@ -58,14 +68,14 @@ export class ToolConfigResolver {
               body: JSON.stringify({ name: secretName, plaintext: '', tenantId }),
             });
           } catch (err) {
-            logger.warn({ err, toolId: tool.id, field }, 'Failed to ensure secret for tool');
+            logger.warn({ err, toolId: tool.id, credentialKey }, 'Failed to ensure secret for credential');
           }
         }
       } catch (err) {
-        logger.warn({ err, toolId: tool.id, field }, 'Failed to resolve tool secret from vault');
+        logger.warn({ err, toolId: tool.id, credentialKey }, 'Failed to resolve credential from vault');
       }
     } catch (err) {
-      logger.warn({ err, toolId: tool.id, field }, 'Failed to resolve tool secret from vault');
+      logger.warn({ err, toolId: tool.id, credentialKey }, 'Failed to resolve credential from vault');
     }
     return undefined;
   }
@@ -90,7 +100,7 @@ export class ToolConfigResolver {
     const directValue = input[field] ?? externalConfig?.[field] ?? manifestConfig?.[field] ?? manifest?.[field];
     if (this.hasValue(directValue)) return true;
 
-    // Try to resolve from vault using tool schema variable name
+    // Try to resolve from vault using the credential's logical key
     const vaultValue = await this.tryResolveFromVault(tool, field, input);
     if (this.hasValue(vaultValue)) {
       (input as any)[field] = vaultValue;
@@ -200,7 +210,7 @@ export class ToolConfigResolver {
     const vaultUrl = process.env.VAULT_URL || 'http://vault:4000';
     for (const field of missing) {
       try {
-        const secretName = `tool:${tool.id}:${field}`;
+        const secretName = ToolConfigResolver.vaultSecretName(field);
         const ensureRes = await fetch(`${vaultUrl}/api/vault/secrets/ensure`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -220,7 +230,7 @@ export class ToolConfigResolver {
     const prefix = isExternalAction ? 'Not connected' : 'Missing required configuration';
     let errorMsg = `${prefix}: ${missing.join(', ')} are not configured for tool '${tool.name}' (${tool.id}).`;
     if (createdSecrets.length > 0) {
-      errorMsg += ` Empty secret entries were created in the Vault as 'tool:${tool.id}:<field>'. Go to Tools → ${tool.name} → Configure and set values for: ${missing.join(', ')} (or edit the corresponding secrets in the Vault).`;
+      errorMsg += ` Empty secret entries were created in the Vault as '${createdSecrets.join(', ')}'. Go to Tools → ${tool.name} → Configure and set values for: ${missing.join(', ')} (or edit the corresponding secrets in the Vault).`;
     } else {
       errorMsg += ` Go to Tools → ${tool.name} → Configure to set values for: ${missing.join(', ')} (stored in Vault).`;
     }

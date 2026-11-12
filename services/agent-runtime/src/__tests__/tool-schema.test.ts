@@ -79,6 +79,6 @@ describe('Agent tool schema context', () => {
     expect(systemPrompt).toContain('"configSchema":{"type":"object"');
     expect(systemPrompt).toContain('"outputSchema":{"type":"object"');
     expect(systemPrompt).toContain('"x-stage7-secret":true');
-    expect(systemPrompt).toContain('Never expose a vault:// reference');
+    expect(systemPrompt).toContain('never show a vault:// reference');
   });
 });

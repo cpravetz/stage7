@@ -83,6 +83,6 @@ describe('mission tool configuration', () => {
     const config = new ToolConfigResolver(new Map());
     const result = await config.resolveCredentials(tool, {}, 'exec-2');
     expect(result.resolved.account_id).toBe('saved-account');
-    expect(String(fetcher.mock.calls[0][0])).toContain(encodeURIComponent('tool:sms-probe:account_id'));
+    expect(String(fetcher.mock.calls[0][0])).toContain(encodeURIComponent('secret:account_id'));
   });
 });

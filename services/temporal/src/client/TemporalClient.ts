@@ -100,7 +100,6 @@ async function configuredCredentialReferences(
 
   for (const { key } of missingCredentials) {
     const candidates = [
-      `tool:${toolId}:${key}`,
       `secret:${key}`,
       key,
     ];
