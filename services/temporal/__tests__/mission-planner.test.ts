@@ -435,8 +435,8 @@ describe('generateValidPlan', () => {
       },
       {
         systemPrompt:
-          "Actually invoke the 'search_web' tool exactly once. The Agent tool policy allows only 'calculate'. Record the denied receipt; do not retry search_web or work around the policy.",
-        requiredActions: [{ toolId: 'search_web', outcome: 'denied' }],
+          "Actually invoke the 'search' tool exactly once. The Agent tool policy allows only 'calculate'. Record the denied receipt; do not retry search or work around the policy.",
+        requiredActions: [{ toolId: 'search', outcome: 'denied' }],
       },
       {
         systemPrompt:

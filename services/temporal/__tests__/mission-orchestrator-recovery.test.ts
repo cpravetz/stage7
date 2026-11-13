@@ -77,6 +77,38 @@ describe('MissionOrchestrator checkpoint recovery', () => {
     const fetchMock = jest.spyOn(global, 'fetch').mockResolvedValue(jsonResponse())
     const onCheckpoint = jest.fn()
     jest.spyOn(MissionAgentRuntime.prototype, 'getOrCreateAgent').mockResolvedValue('agent-worker')
+    jest.spyOn(MissionAgentRuntime.prototype, 'executePromptTask').mockResolvedValue({
+      output: JSON.stringify({
+        summary: 'Deploy the application',
+        estimatedDuration: 'short',
+        estimatedCost: 'low',
+        requiresClarification: false,
+        clarificationQuestions: [],
+        clarificationAnswers: [],
+        phases: [{
+          id: 'phase-1',
+          name: 'Deploy',
+          goal: 'Deploy the application',
+          requiresApproval: false,
+          status: 'pending',
+          tasks: [{
+            id: 'phase-1-task-1',
+            title: 'Deploy the application',
+            description: 'Deploy the application.',
+            agentRole: 'assistant',
+            systemPrompt: 'Deploy the application.',
+            dependsOnTaskIds: [],
+            expectedArtifacts: [],
+            requiredActions: [],
+            status: 'pending',
+            artifacts: [],
+          }],
+        }],
+      }),
+      requestId: 'planner-request',
+      artifacts: [],
+      tokensUsed: 1,
+    })
     jest.spyOn(MissionAgentRuntime.prototype, 'executeTask').mockResolvedValue({
       output: 'The available context was used to complete the requested outcome.',
       artifacts: [],
@@ -108,7 +140,7 @@ describe('MissionOrchestrator checkpoint recovery', () => {
       completedPhases: ['phase-1'],
     }))
     expect(fetchMock).toHaveBeenCalled()
-    expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/missions/mission-recovery/plan')
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('/missions/mission-recovery/plan'))).toBe(true)
   })
 
   it('reuses completed task results from the activity checkpoint instead of executing them again', async () => {
@@ -183,7 +215,10 @@ describe('MissionOrchestrator checkpoint recovery', () => {
       output: taskResult.output,
       artifacts: taskResult.artifacts,
     })
-    expect(getAgent).toHaveBeenCalledWith('writer', plan.phases[0]!.tasks[0]!.systemPrompt)
+    // Missions execute with one shared Agent rather than a separate Agent per
+    // task role; the checkpoint reuses that Agent instead of re-registering one.
+    expect(getAgent).toHaveBeenCalledTimes(1)
+    expect(getAgent).toHaveBeenCalledWith('assistant', expect.stringContaining('mission execution agent'))
     expect(reviewPhase).toHaveBeenCalledTimes(1)
     expect(reviewMissionCompletion).toHaveBeenCalledWith(
       context.prompt,
@@ -206,6 +241,7 @@ describe('MissionOrchestrator checkpoint recovery', () => {
       undefined,
       undefined,
       'Write an answer',
+      undefined,
     )
     expect(onCheckpoint).toHaveBeenCalledWith(expect.objectContaining({
       completedTasks: [{ phaseId: 'phase-1', taskId: 'task-1' }],
@@ -324,6 +360,38 @@ describe('MissionOrchestrator checkpoint recovery', () => {
       }],
     }
     jest.spyOn(global, 'fetch').mockResolvedValue(jsonResponse())
+    // An empty resume plan is not reusable, so the planner regenerates it with
+    // the phase under test; reviewPhase then fails transiently once before the
+    // phase completes.
+    jest.spyOn(MissionAgentRuntime.prototype, 'executePromptTask').mockResolvedValue({
+      output: JSON.stringify({
+        ...plan,
+        phases: [{
+          ...plan.phases[0]!,
+          tasks: [{
+            id: 'phase-1-task-1',
+            title: 'Complete and verify the requested work',
+            description: 'Complete and verify the requested work.',
+            agentRole: 'assistant',
+            systemPrompt: 'Complete and verify the requested work.',
+            dependsOnTaskIds: [],
+            expectedArtifacts: [],
+            requiredActions: [],
+            status: 'pending' as const,
+            artifacts: [],
+          }],
+        }],
+      }),
+      requestId: 'planner-request',
+      artifacts: [],
+      tokensUsed: 1,
+    })
+    jest.spyOn(MissionAgentRuntime.prototype, 'getOrCreateAgent').mockResolvedValue('agent-assistant')
+    jest.spyOn(MissionAgentRuntime.prototype, 'executeTask').mockResolvedValue({
+      output: 'The work is complete.',
+      artifacts: [],
+      tokensUsed: 1,
+    })
     const reviewPhase = jest.spyOn(MissionAgentRuntime.prototype, 'reviewPhase')
       .mockRejectedValueOnce(new Error('review service unavailable'))
       .mockResolvedValue({ satisfied: true, gaps: [] })

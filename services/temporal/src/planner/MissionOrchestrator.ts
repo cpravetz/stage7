@@ -2,6 +2,7 @@ import {
   DEFAULT_AGENT_EXECUTION_POLICY,
   AgentExecutionPolicy,
   MissionArtifact,
+  sanitizeAgentMessage,
   Plan,
   Phase,
   Task,
@@ -1599,12 +1600,6 @@ ${noProgressGuidance}`;
     const agentRuntime = this.agentRuntime!;
     const directorAgentId = agentRuntime.getAgentIdForRole('mission-director');
     const directorIdentity = { agentId: directorAgentId, agentName: 'Mission Director', agentRole: 'mission-director' };
-    await agentRuntime.emitMonologue({
-      agentRole: 'mission-director',
-      thought: `A user message arrived during the mission: "${content.slice(0, 200)}". I need to understand the intent, decide whether to forward it to another agent, and formulate a brief acknowledgement and helpful response.`,
-      text: `Processing user message: ${content.slice(0, 120)}${content.length > 120 ? '...' : ''}`,
-      data: { content: content.slice(0, 500) },
-    });
     const agentId = await agentRuntime.getOrCreateAgent('mission-director', 'You are the mission primary agent. Process user messages during a mission. The message is available to subsequent mission tasks. Acknowledge it without claiming to have forwarded it to an agent or completed an action. Return JSON {"acknowledgement":"...","response":"..."}.');
     let result: { output: string };
     try {
@@ -1617,7 +1612,7 @@ ${noProgressGuidance}`;
         executionPolicy: { ...DEFAULT_AGENT_EXECUTION_POLICY, maxActions: 0, maxCompletionTokens: 1024, maxCompletionTokensPerCall: 512, maxDelegations: 0 },
       });
     } catch (err) {
-      await ctx.broadcast({ type: 'agent_error', missionId: ctx.missionId, timestamp: Date.now(), data: { error: err instanceof Error ? err.message : String(err), ...directorIdentity, thought: 'Error processing user message; returning fallback acknowledgement.' } });
+      await ctx.broadcast({ type: 'agent_error', missionId: ctx.missionId, timestamp: Date.now(), data: { error: err instanceof Error ? err.message : String(err), ...directorIdentity } });
       return { acknowledgement: 'Message received.', response: 'I received your message but could not process it right now.' };
     }
     let acknowledgement = 'Message received.';
@@ -1627,16 +1622,14 @@ ${noProgressGuidance}`;
       if (parsed.acknowledgement) acknowledgement = parsed.acknowledgement;
       if (parsed.response) response = parsed.response;
     } catch {}
+    // The director is asked for a short plain-text reply; anything else (raw
+    // tool manifests, execution receipts) is internal output, not conversation.
     if (!response.trim()) response = 'I received your message.';
-      await agentRuntime.emitMonologue({
-        agentRole: 'mission-director',
-        thought: `I have processed the user message and formulated a direct response without delegation.`,
-        text: `Responding directly to the user.`,
-        data: { response: response.slice(0, 500) },
-      });
-    await ctx.broadcast({ type: 'agent_acknowledgement', missionId: ctx.missionId, timestamp: Date.now(), data: { content: acknowledgement, ...directorIdentity, thought: 'Acknowledging user message.' } });
-    await ctx.broadcast({ type: 'agent_response', missionId: ctx.missionId, timestamp: Date.now(), data: { content: response, ...directorIdentity, thought: 'Responding to user message.' } });
-    return { acknowledgement, response };
+    const acknowledgementText = sanitizeAgentMessage(acknowledgement, 'Message received.').text;
+    const responseText = sanitizeAgentMessage(response, 'I received your message.').text;
+    await ctx.broadcast({ type: 'agent_acknowledgement', missionId: ctx.missionId, timestamp: Date.now(), data: { content: acknowledgementText, ...directorIdentity } });
+    await ctx.broadcast({ type: 'agent_response', missionId: ctx.missionId, timestamp: Date.now(), data: { content: responseText, ...directorIdentity } });
+    return { acknowledgement: acknowledgementText, response: responseText };
   }
 
   async evaluateMissionCompletion(

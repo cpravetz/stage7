@@ -47,7 +47,7 @@ router.post(
 router.get(
   '/tools',
   asyncHandler(async (_req: Request, res: Response) => {
-    const tools = registry.list();
+    const tools = registry.list().filter((t) => t.isSkill !== true);
     res.json({ tools });
   })
 )

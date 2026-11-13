@@ -12,6 +12,8 @@ import {
   DEFAULT_AGENT_EXECUTION_POLICY,
   MissionArtifact,
   MissionArtifactSchema,
+  sanitizeAgentMessage,
+  sanitizeAgentMessageList,
   describeRequestError,
   httpRequest,
 } from '@stage7-nextgen/shared';
@@ -411,6 +413,10 @@ export class MissionAgentRuntime {
   }): Promise<void> {
     if (!this.broadcast) return;
     const identity = resolveAgentIdentity(params.agentRole);
+    const text = sanitizeAgentMessage(
+      params.text || params.thought,
+      `${identity.agentName} is working on the mission.`,
+    ).text;
     await this.broadcast({
       type: 'monologue',
       missionId: this.missionId,
@@ -422,7 +428,7 @@ export class MissionAgentRuntime {
         ...(params.phaseId ? { phaseId: params.phaseId } : {}),
         ...(params.taskId ? { taskId: params.taskId } : {}),
         thought: params.thought,
-        text: params.text || params.thought,
+        text,
         ...(params.kind ? { kind: params.kind } : {}),
         ...(params.data || {}),
       },
@@ -884,6 +890,9 @@ export class MissionAgentRuntime {
         );
         continue;
       }
+      review.gaps = review.gaps
+        .map((gap) => sanitizeAgentMessage(gap, 'The phase evidence is incomplete.').text)
+        .filter(Boolean);
       if (review.satisfied) {
         if (review.followUpTask !== null && review.followUpTask !== undefined) {
           validationIssue = 'followUpTask must be null when satisfied is true';
@@ -1080,6 +1089,18 @@ export class MissionAgentRuntime {
         );
         continue;
       }
+      const reviewGaps = review.gaps
+        .map((gap) => sanitizeAgentMessage(gap, '').text)
+        .filter(Boolean);
+      if (reviewGaps.length !== review.gaps.length) {
+        validationIssue = 'every gap must be a user-facing explanation';
+        await this.reportBrainComplaint(
+          result.requestId,
+          `Mission completion-review validation failed: ${validationIssue}`,
+        );
+        continue;
+      }
+      review.gaps = reviewGaps;
       if (
         !review.satisfied
         && (review.gaps as string[]).some((gap) => !completedTaskSummaries.some((summary) =>
@@ -1099,14 +1120,14 @@ export class MissionAgentRuntime {
         phaseId: 'mission-review',
         thought: review.satisfied
           ? `Mission completion review: I evaluated the observed task outputs and artifacts against the mission goal and found all requirements satisfied. The mission may complete.`
-          : `Mission completion review: I evaluated the observed task outputs and artifacts against the mission goal and found ${review.gaps.length} unmet requirement(s): ${review.gaps.join('; ')}. The mission must not be marked complete.`,
+          : `Mission completion review: I evaluated the observed task outputs and artifacts against the mission goal and found ${reviewGaps.length} unmet requirement(s): ${sanitizeAgentMessageList(reviewGaps, 'the mission evidence is incomplete')}. The mission must not be marked complete.`,
         text: review.satisfied
           ? 'Mission completion review: all requirements satisfied.'
-          : `Mission completion review: ${review.gaps.length} unmet requirement(s) found.`,
+          : `Mission completion review: ${reviewGaps.length} unmet requirement(s) found.`,
         kind: 'completion-review',
-        data: { satisfied: review.satisfied, gaps: review.gaps },
+        data: { satisfied: review.satisfied, gaps: reviewGaps },
       });
-      return { satisfied: review.satisfied, gaps: review.gaps as string[] };
+      return { satisfied: review.satisfied, gaps: reviewGaps };
     }
     const taskEvidence = completedTaskSummaries
       .map((summary) => `${summary.taskId} (${summary.expectedArtifacts?.join(', ') || summary.artifactNames.join(', ') || 'no named deliverable'})`)
@@ -1431,7 +1452,13 @@ export class MissionAgentRuntime {
         type: 'monologue',
         missionId: this.missionId,
         timestamp: Date.now(),
-        data: { agentId, taskId: submitted.taskId, phaseId: request.phaseId, thought: reasoning, text: reasoning },
+        data: {
+          agentId,
+          taskId: submitted.taskId,
+          phaseId: request.phaseId,
+          thought: reasoning,
+          text: sanitizeAgentMessage(reasoning, 'An Agent reported progress on this task.').text,
+        },
       });
     }
     return {
@@ -1604,7 +1631,13 @@ export class MissionAgentRuntime {
           type: 'monologue',
           missionId: this.missionId,
           timestamp: Date.now(),
-          data: { agentId, taskId: task.taskId, phaseId, thought: reasoning, text: reasoning },
+          data: {
+            agentId,
+            taskId: task.taskId,
+            phaseId,
+            thought: reasoning,
+            text: sanitizeAgentMessage(reasoning, 'An Agent reported progress on this task.').text,
+          },
         }).catch((e) => logger.warn({ err: e instanceof Error ? e.message : String(e), taskId: task.taskId }, 'Failed to broadcast monologue for recovered task result'));
       }
     }

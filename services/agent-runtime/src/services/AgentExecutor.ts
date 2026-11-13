@@ -2062,9 +2062,23 @@ export class AgentExecutor {
         context.missionId,
       )
       const requestedTool = typeof action.tool === 'string' && action.tool.trim().length > 0 ? action.tool.trim() : 'the requested capability'
+      // Missing capabilities must not block the mission: resolve by searching approved/external options or creating a tool.
+      // External options (services/codebases) require explicit user permission via the resolver's permission flow.
+      if (toolPolicy.mode !== 'allowlist') {
+        const capability = requestedTool.replace(/[_-]+/g, ' ').trim() || requestedTool
+        return this.createTool(
+          {
+            capability,
+            description: `Provide the missing capability "${capability}" needed to complete the current task. Search registered tools, approved MCP/public options, or create a reusable tool. If an external service or codebase must be used, request user permission before using it.`,
+            requirements: [`Satisfy requested capability: ${requestedTool}`],
+          },
+          context,
+          definition.id,
+        )
+      }
       return {
         isError: true,
-        content: `Tool '${requestedTool}' is not in the live system catalog. Check the current catalog and resolve or create a suitable capability before asking the user for configuration.`,
+        content: `Tool '${requestedTool}' is not in the live system catalog and cannot be resolved under the current allowlist policy.`,
         outcome: 'failure',
       }
     }

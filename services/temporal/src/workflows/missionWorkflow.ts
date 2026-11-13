@@ -11,6 +11,8 @@ import {
   WorkflowInput,
   WorkflowResult,
   completedTaskIdsWithSummaries,
+  isConfigurationBlocker,
+  missionConfigurationQuestion,
   recoveryGapFingerprint,
   recoveryProgressSignature,
   hasRecoveryProgress,
@@ -471,6 +473,48 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
                 'Mission phase review made no observable progress after approach changes; pausing for review (safety ceiling)',
               );
               break;
+            }
+            // A repeated capability/configuration blocker cannot be resolved by
+            // replanning: the operator has to supply the missing service or
+            // configuration. Pause visibly instead of looping on the same gap.
+            if (!madeProgress && isConfigurationBlocker(review.gaps)) {
+              const blockingTask = review.amendment || phase.tasks.at(-1);
+              if (blockingTask) {
+                const question = missionConfigurationQuestion(input.prompt);
+                logger.warn(
+                  { missionId: input.missionId, phaseId: phase.id, taskId: blockingTask.id, gaps: review.gaps },
+                  'Mission phase is blocked on missing provider configuration; pausing for the user to configure it',
+                );
+                await phaseActivities.requestMissionUserInputActivity({ input, plan, phase, task: blockingTask, question });
+                const pendingInteraction: MissionPendingInteraction = {
+                  kind: 'user_input',
+                  phaseId: phase.id,
+                  taskId: blockingTask.id,
+                  taskTitle: blockingTask.title,
+                  agentRole: blockingTask.agentRole,
+                  question,
+                  actionReceipts: [],
+                  resumeCount: 0,
+                };
+                phaseOutput.status = 'incomplete';
+                phase.status = 'in_progress';
+                await phaseActivities.finishMissionPhaseActivity({ input, phase, tasks: phaseOutput.tasks });
+                phases.push(phaseOutput);
+                return {
+                  missionId: input.missionId,
+                  status: 'awaiting_review',
+                  output: {
+                    plan,
+                    outputs: {
+                      phases,
+                      status: 'awaiting_user_input',
+                      pendingInteraction,
+                    },
+                  },
+                  startedAt,
+                  completedAt: Date.now(),
+                };
+              }
             }
             if (review.amendment && noProgressGuidance) {
               review.amendment.systemPrompt = `${review.amendment.systemPrompt}

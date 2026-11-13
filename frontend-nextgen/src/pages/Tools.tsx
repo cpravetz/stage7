@@ -408,10 +408,13 @@ const Tools = () => {
     if (!tool) return { fields: [], required: [], properties: {} };
     const schema = (tool.configSchema || (tool.manifest?.configSchema as any) || {}) as any;
     const properties = schema?.properties && typeof schema.properties === 'object' ? schema.properties : {};
-    const required = Array.isArray(schema?.required) ? schema.required.filter((v: unknown): v is string => typeof v === 'string') : [];
+    // Required is declared per-property (required === true), not via a root
+    // required array. The root array was removed from all manifests to avoid
+    // conflicting state between the two declarations.
+    const required = Object.entries(properties)
+      .filter(([, schema]) => (schema as { required?: boolean })?.required === true)
+      .map(([field]) => field);
     const fields = Object.keys(properties);
-    // Keep backward compatibility for schemas that only define required.
-    for (const field of required) if (!fields.includes(field)) fields.push(field);
     return { fields, required, properties };
   };
 
@@ -465,6 +468,9 @@ const Tools = () => {
       for (const field of fields) {
         const name = `tool:${tool.id}:${field}`;
         const value = configValues[field] ?? '';
+        // Skip empty optional fields — the Vault rejects empty plaintext and
+        // optional credential fields are resolved at execution time, not save time.
+        if (value === '') continue;
         const response = await fetch(`${vaultUrl}/api/vault/secrets/name/${encodeURIComponent(name)}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },

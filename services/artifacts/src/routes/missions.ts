@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { artifactsService as service } from '../services/ArtifactsService';
 import multer from 'multer';
 import Storage from '../services/Storage';
-import { asyncHandler, NextGenError } from '@stage7-nextgen/shared';
+import { asyncHandler, NextGenError, sanitizeAgentMessage } from '@stage7-nextgen/shared';
 import { z } from 'zod';
 import { MissionState } from '../types';
 import path from 'path';
@@ -84,6 +84,46 @@ function isoDate(value: unknown): string | undefined {
   if (typeof value !== 'string' && typeof value !== 'number' && !(value instanceof Date)) return undefined;
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
+}
+
+function sanitizeMissionEventForConversation(event: any): any {
+  if (!event || typeof event !== 'object' || Array.isArray(event)) return event;
+  const type = typeof event.type === 'string' ? event.type : '';
+  const conversationText = (value: unknown): unknown =>
+    sanitizeAgentMessage(value, '').text;
+  const sanitizeRecord = (value: Record<string, unknown>): Record<string, unknown> => {
+    const next: Record<string, unknown> = { ...value };
+    for (const key of ['message', 'content', 'text', 'reason', 'question', 'error'] as const) {
+      if (typeof next[key] === 'string') next[key] = conversationText(next[key]);
+    }
+    if (Array.isArray(next.gaps)) {
+      next.gaps = next.gaps
+        .filter((gap): gap is string => typeof gap === 'string')
+        .map(conversationText)
+        .filter(Boolean);
+    }
+    return next;
+  };
+  if (type === 'monologue') {
+    const data = event.data && typeof event.data === 'object' && !Array.isArray(event.data)
+      ? event.data as Record<string, unknown>
+      : {};
+    if (typeof data.text === 'string') return { ...event, data: { ...data, text: conversationText(data.text) } };
+    return event;
+  }
+  if (type === 'task_completed' || type === 'task_incomplete') {
+    const data = event.data && typeof event.data === 'object' && !Array.isArray(event.data)
+      ? event.data as Record<string, unknown>
+      : {};
+    const { output: _output, ...safeData } = data;
+    return { ...event, data: sanitizeRecord(safeData) };
+  }
+  if (/^(?:agent_|question_|permission_|phase_plan_amended$|mission_(?:incomplete|needs_review|failed)$)/.test(type)) {
+    return { ...event, data: sanitizeRecord(event.data && typeof event.data === 'object' && !Array.isArray(event.data)
+      ? event.data as Record<string, unknown>
+      : {}) };
+  }
+  return event;
 }
 
 router.post('/:missionId/recovery-lease', asyncHandler(async (req, res) => {
@@ -190,7 +230,9 @@ router.get('/:missionId/events', asyncHandler(async (req, res) => {
     const missing = derived.filter((d: any) => !storedKeys.has(`${d.type}|${d.data?.phaseId || ''}|${d.data?.taskId || ''}`));
     events = [...events, ...missing];
   }
-  res.json({ events });
+  // Agent reasoning, raw tool manifests and execution receipts are internal
+  // state, not conversation: they are stripped from everything the feed shows.
+  res.json({ events: events.map(sanitizeMissionEventForConversation) });
 }));
 
 router.get('/:missionId/artifacts', asyncHandler(async (req, res) => {

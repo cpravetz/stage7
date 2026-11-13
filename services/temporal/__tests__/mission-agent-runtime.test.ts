@@ -206,7 +206,8 @@ describe('MissionAgentRuntime', () => {
       contentEncoding: 'base64',
       content: 'AAECAw==',
     })
-    expect(result.artifacts[2]).toEqual({
+    expect(result.artifacts[2]).toMatchObject({
+      id: expect.stringMatching(/^artifact-/),
       name: 'system-action-receipts.json',
       type: 'evidence',
       content: JSON.stringify([{ toolId: 'calculate', isError: false, content: '{"result":42}', outcome: 'success' }]),
@@ -241,7 +242,7 @@ describe('MissionAgentRuntime', () => {
     expect(submittedInput.prompt).toContain('Completed dependency results')
     expect(submittedInput.prompt).toContain('The source task calculated 42.')
     expect(submittedInput.prompt).toContain('answer.json')
-    expect(submittedInput.prompt).toContain('Do not return a plan, future-tense promises, or placeholders.')
+    expect(submittedInput.prompt).toContain('Do not return a plan, future-tense promises, placeholders, or substitute design/specification documents.')
     expect(
       (requests.find((request) => request.url.endsWith('/tasks'))?.body?.input as Record<string, unknown>)
         ?.context,

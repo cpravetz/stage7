@@ -405,6 +405,40 @@ describe('InMemoryStore', () => {
       );
     });
 
+    it('keeps raw tool payloads and execution traces out of the mission feed', async () => {
+      const app = express();
+      app.use(express.json());
+      app.use('/api/artifacts/missions', missionRoutes);
+      const base = '/api/artifacts/missions/mission-feed-sanitized';
+
+      await request(app).post(`${base}/events`).send({
+        type: 'task_incomplete',
+        timestamp: 1000,
+        data: {
+          phaseId: 'phase-1',
+          taskId: 'phase-1-task-1',
+          taskTitle: 'Send exact message payload',
+          error: 'Task "Send exact message payload" did not complete a verified action outside the system. Steps that ran: __list_tools, __create_tool.',
+          output: JSON.stringify({
+            id: 'sms_sender',
+            name: 'SMS Sender',
+            type: 'code',
+            entrypoint: 'index.js',
+            sourceCode: 'const input = __tool_input;',
+          }),
+        },
+      }).expect(201);
+
+      const response = await request(app).get(`${base}/events`).expect(200);
+      const event = response.body.events.find((entry: any) => entry.type === 'task_incomplete');
+      const serialized = JSON.stringify(event);
+
+      expect(serialized).not.toContain('sms_sender');
+      expect(serialized).not.toContain('sourceCode');
+      expect(serialized).not.toContain('Steps that ran');
+      expect(event.data.output).toBeUndefined();
+    });
+
     it('coordinates recovery leases and allows takeover after expiration', async () => {
       const store = new InMemoryStore();
       const now = new Date('2025-01-01T00:00:00Z');

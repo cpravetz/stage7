@@ -64,7 +64,7 @@ const RESEARCH_PLANNING = createDeclarativeCodeSkill({
   ],
   isSkill: true,
   manifest: {
-    lowerOrderTools: ['search_web']
+    lowerOrderTools: ['search']
   },
   handler: async function handler(input, ctx) {
       const NL = '\n';
@@ -77,7 +77,7 @@ const RESEARCH_PLANNING = createDeclarativeCodeSkill({
 
       const suppliedDocuments = Array.isArray(input.documents) ? input.documents : [];
 
-      const SEARCH_TOOL = 'search_web';
+      const SEARCH_TOOL = 'search';
       const SUPPLIED_SOURCE = 'supplied-input';
       const WEB_SOURCE = 'web-search';
 
@@ -177,7 +177,7 @@ const RESEARCH_PLANNING = createDeclarativeCodeSkill({
         const searchType = ['web', 'images', 'news'].indexOf(params.searchType) >= 0 ? String(params.searchType) : 'web';
         const freshness = ['day', 'week', 'month', 'year'].indexOf(params.freshness) >= 0 ? String(params.freshness) : null;
 
-        // search_web requires a query, so with no query there is nothing to retrieve. That
+        // search requires a query, so with no query there is nothing to retrieve. That
         // is reported as not-requested rather than as zero web results.
         const web = rawQuery
           ? await runWebSearch(rawQuery, maxResults, searchType, freshness)

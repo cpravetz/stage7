@@ -1,5 +1,99 @@
 import type { FeedEvent } from '../stores/feedStore';
 
+/**
+ * Agent runtime internals (tool manifests, execution receipts, reviewer
+ * instructions) are reasoning addressed to other agents, not conversation.
+ * The same policy lives in `shared-nextgen/src/utils/agentMessages.ts` for the
+ * services; the browser bundle keeps its own copy because the shared workspace
+ * is CommonJS and cannot be named-imported by the Vite build.
+ */
+const INTERNAL_REASONING_PATTERNS: RegExp[] = [
+  /\bthe phase reviewer\b/i,
+  /\bsteps that ran\b/i,
+  /\baction receipt\b/i,
+  /\bvalidation failed\b/i,
+  /\bcapability resolution\b/i,
+  /\bbounded repair\b/i,
+  /\boriginal failure\b/i,
+  /\bexecution failed\b/i,
+  /\btoolId\b/,
+  /\btraceback \(most recent call last\)/i,
+  /\bmoduleNotFoundError\b/i,
+  /\btask output is incomplete\b/i,
+];
+
+const STRUCTURED_PAYLOAD_KEYS = [
+  'tool',
+  'toolId',
+  'action',
+  'sourceCode',
+  'entrypoint',
+  'phases',
+  'tasks',
+  'artifacts',
+  'plan',
+  'satisfied',
+] as const;
+
+export function isJsonPayload(value: string): boolean {
+  const trimmed = (value || '').trim();
+  if (!trimmed || !/^[[{]/.test(trimmed)) return false;
+  try {
+    JSON.parse(trimmed);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function isInternalReasoning(value: string): boolean {
+  return INTERNAL_REASONING_PATTERNS.some((marker) => marker.test(value));
+}
+
+/**
+ * True for payloads that are only meaningful to an agent: tool manifests,
+ * actions, plans, receipts, and structured reviews.
+ */
+export function isAgentConversationPayload(value: string): boolean {
+  if (!isJsonPayload(value)) return false;
+  try {
+    const parsed = JSON.parse(value.trim()) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return true;
+    const record = parsed as Record<string, unknown>;
+    return STRUCTURED_PAYLOAD_KEYS.some((key) => key in record);
+  } catch {
+    return false;
+  }
+}
+
+export function stripInternalReasoning(value: string): string {
+  return (value || '')
+    .replace(/\n?\s*\[\s*\{?\s*\\?"toolId\\?"[\s\S]*$/i, '')
+    .replace(/\s*Looking up tools, creating tools, or handing work off to another agent does not count as completing that action\.?/gi, '')
+    .replace(/\s*Steps that ran:[\s\S]*$/i, '')
+    .replace(/\s*The phase reviewer should use this blocker to regroup the task\.?/gi, '')
+    .replace(/\s+—\s*$/, '')
+    .trim();
+}
+
+export interface SanitizedAgentMessage {
+  text: string;
+  suppressed: boolean;
+}
+
+export function sanitizeAgentMessage(
+  value: unknown,
+  fallback = 'An Agent completed a step without a user-facing message.',
+): SanitizedAgentMessage {
+  if (typeof value !== 'string') return { text: fallback, suppressed: true };
+  const trimmed = value.trim();
+  if (!trimmed) return { text: '', suppressed: false };
+  if (isAgentConversationPayload(trimmed)) return { text: fallback, suppressed: true };
+  const cleaned = stripInternalReasoning(trimmed);
+  if (!cleaned || isInternalReasoning(cleaned)) return { text: fallback, suppressed: true };
+  return { text: cleaned, suppressed: false };
+}
+
 export interface MissionEventPlanPhase {
   id: string;
   name?: string;
@@ -31,7 +125,6 @@ export interface MissionEventDetail {
 export const CONVERSATION_EVENT_TYPES = new Set([
   'user',
   'user_message',
-  'monologue',
   'tool',
   'assistant',
   'planner_started',
@@ -384,12 +477,13 @@ export function buildMissionEvents(options: {
     const completedAt = toTimestamp(detail.completedAt) ?? startedAt + 1000;
     if (!hasLive(['mission_needs_review'])) {
       const gaps = Array.from(new Set(detail.output?.outputs?.gaps || []));
+      const gapText = missionGapText(gaps);
       derived.push({
         id: `derived-mission-needs-review-${completedAt}`,
         type: 'mission_needs_review',
         source: 'orchestrator',
-        message: gaps.length > 0
-          ? `Mission needs review: ${gaps.join('; ')}`
+        message: gapText
+          ? `Mission needs review: ${gapText}`
           : 'Mission needs review before it can be completed.',
         timestamp: completedAt,
         missionId,
@@ -602,6 +696,22 @@ function listMilestonesOnce(events: FeedEvent[]): FeedEvent[] {
  * the event itself does not carry one.
  */
 export function friendlyMissionError(error: string): string {
+  return stripInternalReasoning(friendlyMissionErrorText(error));
+}
+
+/**
+ * Reduces the evidence gaps the evaluator reports to statements that make
+ * sense to a person, dropping the internal receipt/step detail that explains
+ * how the agents inspected the work.
+ */
+export function missionGapText(gaps: string[]): string {
+  return gaps
+    .map((gap) => sanitizeAgentMessage(gap, '').text)
+    .filter((gap) => gap.length > 0 && !isInternalReasoning(gap))
+    .join('; ');
+}
+
+function friendlyMissionErrorText(error: string): string {
   const trimmed = (error || '').trim();
   if (!trimmed) return 'Something went wrong. Please try again.';
 
@@ -708,10 +818,24 @@ function isMachineReadable(value: string): boolean {
 }
 
 function friendlyTaskMessage(value: string): string {
-  if (/Agent response validation failed|verified external[- ]operation receipt|artifact section|missing (?:expected )?(?:artifact|receipt)/i.test(value)) {
+  const cleaned = stripInternalReasoning(value);
+  if (!cleaned || isAgentConversationPayload(cleaned)) {
     return 'I could not verify this step yet, so I am checking another approved way to finish it.';
   }
-  return value;
+  const withReason = (reason: string): string => {
+    const separator = cleaned.indexOf(' — ');
+    return separator >= 0 ? `${cleaned.slice(0, separator)} — ${reason}` : reason;
+  };
+  if (/Agent response validation failed|verified external[- ]operation receipt|artifact section|missing (?:expected )?(?:artifact|receipt)/i.test(cleaned)) {
+    return withReason('I could not verify this step yet, so I am checking another approved way to finish it.');
+  }
+  if (/did not complete a verified action|could not verify all required task results/i.test(cleaned)) {
+    return withReason('I could not verify this step yet, so I am checking another approved way to finish it.');
+  }
+  if (isInternalReasoning(cleaned)) {
+    return withReason('I could not verify this step yet, so I am checking another approved way to finish it.');
+  }
+  return cleaned;
 }
 
 function friendlyMonologueMessage(value: string): string {
@@ -726,15 +850,16 @@ function friendlyMonologueMessage(value: string): string {
 
 function friendlyTaskOutput(value: string): string {
   const trimmed = value.trim();
-  if (/^\s*Task output is incomplete:\s*Agent response validation failed/i.test(trimmed)) {
+  if (!trimmed) return '';
+  if (/^Task output is incomplete:\s*Agent response validation failed/i.test(trimmed)) {
     return 'I could not verify this step yet, so I am checking another approved way to finish it.';
   }
   if (/^\s*\{\s*"satisfied"\s*:/i.test(trimmed)) {
     return 'I reviewed the completed work and am addressing the remaining gap.';
   }
-  const receiptStart = trimmed.search(/\n?\s*\[\s*\{\s*\\?"toolId\\?"\s*:/);
-  const readable = receiptStart >= 0 ? trimmed.slice(0, receiptStart).trim() : trimmed;
-  return readable || 'The task is still in progress.';
+  const readable = stripInternalReasoning(trimmed);
+  if (!readable || isJsonPayload(readable) || isAgentConversationPayload(readable) || isInternalReasoning(readable)) return '';
+  return readable;
 }
 
 function friendlyToolMessage(value: string): string {
@@ -917,24 +1042,21 @@ export function buildTranscript(events: FeedEvent[]): TranscriptTurn[] {
         : agentLabel(data) || 'Mission Director';
       current = startTurn('assistant', label, ts, evt.id);
       current.lines.push({ kind: 'plan', type, text: friendlyPlanMessage(type, evt.message) });
-      const nested = data.data as Record<string, unknown> | undefined;
-      const thought = [data.thought, nested?.thought, data.reason, nested?.reason, data.text, nested?.text]
-        .find((v): v is string => typeof v === 'string' && v.trim().length > 0);
-      if (thought && thought.trim() !== evt.message.trim()) {
-        current.lines.push({ kind: 'text', type: `${type}_thought`, text: thought.trim() });
-      }
       continue;
     }
     if (type.startsWith('task_')) {
       const label = agentLabel(data) || 'Agent';
       current = startTurn('assistant', label, ts, evt.id);
       current.lines.push({ kind: 'task', type, text: friendlyTaskMessage(evt.message) });
-      if ((type === 'task_completed' || type === 'task_incomplete') && typeof data.output === 'string' && data.output.trim()) {
-        current.lines.push({
-          kind: 'text',
-          type: 'task_output',
-          text: friendlyTaskOutput(data.output).slice(0, 8_000),
-        });
+      if ((type === 'task_completed' || type === 'task_incomplete') && typeof data.output === 'string') {
+        const outputText = friendlyTaskOutput(data.output);
+        if (outputText) {
+          current.lines.push({
+            kind: 'text',
+            type: 'task_output',
+            text: outputText.slice(0, 8_000),
+          });
+        }
       }
       continue;
     }
@@ -957,14 +1079,9 @@ export function buildTranscript(events: FeedEvent[]): TranscriptTurn[] {
     ) {
       const label = agentLabel(data) || (type === 'agent_delegation' ? 'Mission Director' : 'Agent');
       current = startTurn('assistant', label, ts, evt.id);
-      const text = stripSecretPrefix(stripAskUserMarker(String(evt.message || '').trim()));
+      const rawText = stripSecretPrefix(stripAskUserMarker(String(evt.message || '').trim()));
+      const text = isJsonPayload(rawText) ? '' : stripInternalReasoning(rawText);
       current.lines.push({ kind: 'text', type, text: text || type.replace(/^agent_/, 'Agent ') });
-      const nested = data.data as Record<string, unknown> | undefined;
-      const thought = [data.thought, nested?.thought, data.reason, nested?.reason, data.text, nested?.text]
-        .find((v): v is string => typeof v === 'string' && v.trim().length > 0);
-      if (thought && thought.trim() !== text) {
-        current.lines.push({ kind: 'text', type: `${type}_thought`, text: thought.trim() });
-      }
       continue;
     }
     if (
@@ -991,9 +1108,13 @@ export function buildTranscript(events: FeedEvent[]): TranscriptTurn[] {
       current.lines.push(line);
       continue;
     }
+    const rawText = stripSecretPrefix(stripAskUserMarker(
+      typeof evt.message === 'string' ? evt.message : String(evt.message ?? ''),
+    ));
+    if (isJsonPayload(rawText)) continue;
+    const text = stripInternalReasoning(rawText);
+    if (!text) continue;
     current = startTurn(type === 'assistant' ? 'assistant' : 'system', type === 'assistant' ? agentLabel(data) || 'Assistant' : 'Mission', ts, evt.id);
-    let text = typeof evt.message === 'string' ? evt.message : String(evt.message ?? '');
-    text = stripSecretPrefix(stripAskUserMarker(text));
     current.lines.push({ kind: 'text', type, text });
   }
 

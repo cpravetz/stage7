@@ -220,7 +220,7 @@ app.get('/api/tool-executor/health', (_req, res) => {
 });
 
 app.get('/api/tool-executor/tools', (_req, res) => {
-  res.json({ tools: toolRegistry.list() });
+  res.json({ tools: toolRegistry.list().filter((t) => t.isSkill !== true) });
 });
 
 app.use('/api/tool-executor', toolRoutes);

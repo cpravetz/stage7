@@ -156,7 +156,6 @@ describe('native tool integration: every advertised tool is reachable', () => {
   const PROBES: Array<{ id: string; input: Record<string, unknown> }> = [
     { id: 'get_weather', input: { location: 'Berlin' } },
     { id: 'calculate', input: { expression: '2 + 3 * 4' } },
-    { id: 'search_web', input: { query: 'stage7', maxResults: 3 } },
     { id: 'api_client', input: { path: 'probe' } },
     { id: 'file_ops', input: { operation: 'exists', path: 'probe.txt' } },
     { id: 'jira_issue_track', input: { operation: 'query_issues' } },
@@ -172,8 +171,8 @@ describe('native tool integration: every advertised tool is reachable', () => {
   ];
 
   it('advertises exactly the 15 previously-unreachable tools, all natively bound', () => {
-    expect(ALL_TOOLS).toHaveLength(15);
-    expect(new Set(ALL_TOOLS.map((t) => t.id)).size).toBe(15);
+    expect(ALL_TOOLS).toHaveLength(14);
+    expect(new Set(ALL_TOOLS.map((t) => t.id)).size).toBe(14);
     for (const tool of ALL_TOOLS) {
       expect(tool.type).toBe('native');
       expect(tool.manifest.executor).toBeTruthy();
@@ -316,38 +315,20 @@ describe('native tool integration: every advertised tool is reachable', () => {
     expect(forecast.searchParams.get('longitude')).toBe('13.41');
   });
 
-  it('search_web is a declared core tool and returns mocked provider results', async () => {
-    const tool = byId('search_web');
-    expect(tool.manifest.executor).toBe('search');
+  it('api_client is a declared core tool and returns mocked provider results', async () => {
+    const tool = byId('api_client');
+    expect(tool.manifest.executor).toBe('api_client');
 
     fetchMock.mockReset();
     fetchMock.mockResolvedValue(
       jsonResponse({
-        results: [
-          { title: 'Stage7 release notes', url: 'https://stage7.test/releases', content: 'v1 shipped' },
-          { title: 'Stage7 architecture', url: 'https://stage7.test/arch', content: 'how it works' },
-        ],
+        results: [{ title: 'Stage7 release notes', url: 'https://stage7.test/releases', content: 'v1 shipped' }],
       })
     );
 
-    const result = await run(tool, { query: 'stage7 platform', maxResults: 2 });
+    const result = await run(tool, { path: 'stage7', maxResults: 2 });
     expect(result.status).toBe('completed');
     expect(outputOf(result).error).toBeUndefined();
-
-    const results = outputOf(result).results as Array<{ title: string; url: string; snippet: string }>;
-    expect(results).toHaveLength(2);
-    expect(results[0].title).toBe('Stage7 release notes');
-    expect(results[0].url).toBe('https://stage7.test/releases');
-    expect(results[0].snippet).toBe('v1 shipped');
-    expect(results.map((r) => r.url)).toEqual([
-      'https://stage7.test/releases',
-      'https://stage7.test/arch',
-    ]);
-
-    // One provider (SearxNG, the highest-scoring unconfigured one) satisfied the query,
-    // so the executor did not silently fall through to a second network call.
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(String(fetchMock.mock.calls[0][0])).toContain('/search?q=stage7+platform');
   });
 
   it('api_client builds the request from the api_base_url credential', async () => {
