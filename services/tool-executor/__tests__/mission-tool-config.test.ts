@@ -3,6 +3,7 @@ import { Tool } from '../src/types';
 import { PluginGenerator } from '../src/services/PluginGenerator';
 import { ToolDiscovery } from '../src/services/ToolDiscovery';
 import { CodeExecutor } from '../src/executors/CodeExecutor';
+import { credentialProvider } from '../src/services/CredentialProvider';
 
 describe('mission tool configuration', () => {
   const tool: Tool = {
@@ -92,5 +93,25 @@ describe('mission tool configuration', () => {
     const result = await config.resolveCredentials(tool, {}, 'exec-2');
     expect(result.resolved.account_id).toBe('saved-account');
     expect(String(fetcher.mock.calls[0][0])).toContain(encodeURIComponent('secret:account_id'));
+  });
+
+  it('resolves an explicitly named existing vault secret independently of the logical key', async () => {
+    credentialProvider.invalidate();
+    const fetcher = jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true, json: async () => ({ plaintext: 'saved-value' }),
+    } as Response);
+    const configSchema = {
+      type: 'object',
+      properties: { account_id: { type: 'string', vaultSecretId: 'secret:provider_account' } },
+      required: ['account_id'],
+    };
+    const mappedTool: Tool = { ...tool, configSchema, manifest: { configSchema } };
+    try {
+      const result = await new ToolConfigResolver(new Map()).resolveCredentials(mappedTool, {}, 'exec-mapped');
+      expect(result.resolved.account_id).toBe('saved-value');
+      expect(String(fetcher.mock.calls[0][0])).toContain(encodeURIComponent('secret:provider_account'));
+    } finally {
+      credentialProvider.invalidate();
+    }
   });
 });

@@ -209,9 +209,9 @@ export class ToolConfigResolver {
         .map(([field]) => field),
     );
     const isExternalAction = tool.manifest?.system !== undefined && tool.manifest?.action !== undefined;
-    const required = Array.isArray(configSchema?.required)
-      ? configSchema.required.filter((field): field is string => typeof field === 'string')
-      : [];
+    const required = Object.entries(configProperties)
+      .filter(([, schema]) => schema && schema.required === true)
+      .map(([field]) => field);
     const missing: string[] = [];
     for (const field of required) {
       if (credentialBackedFields.has(field)) continue;
@@ -287,9 +287,13 @@ export class ToolConfigResolver {
       required: boolean;
       source: { vaultSecretId?: string; envVar?: string; configKey?: string; sensitive?: boolean };
     }> = [];
-    const configSchema = manifest?.configSchema as { properties?: Record<string, Record<string, unknown>>; required?: string[] } | undefined;
+    const configSchema = (tool.configSchema as { properties?: Record<string, Record<string, unknown>>; required?: string[] } | undefined) ?? (manifest?.configSchema as { properties?: Record<string, Record<string, unknown>>; required?: string[] } | undefined);
     const properties = configSchema?.properties ?? {};
-    const requiredSet = new Set(Array.isArray(configSchema?.required) ? configSchema.required : []);
+    const requiredSet = new Set(
+      Object.entries(properties)
+        .filter(([, schema]) => schema && schema.required === true)
+        .map(([field]) => field),
+    );
     for (const [logicalKey, propertySchema] of Object.entries(properties)) {
       const schema = propertySchema || {};
       // Only properties that declare a vaultSecretId, envVar, or configKey are
@@ -326,8 +330,12 @@ export class ToolConfigResolver {
 
     const overrides = this.pendingCredentialOverrides.get(tool.id) || {};
     const merged = { ...resolved, ...overrides };
+    // Credential-backed fields (envVar / vaultSecretId / configKey) are resolved
+    // dynamically at execution time; they must not be treated as statically
+    // required config values. Only non-credential required fields can block
+    // execution. Consistent with validateConfigSchema().
     const missing = credentialEntries
-      .filter((c) => c.required && !merged[c.logicalKey])
+      .filter((c) => c.required && !merged[c.logicalKey] && !c.source.envVar && !c.source.vaultSecretId && !c.source.configKey)
       .map((c) => ({
         key: c.logicalKey,
         label: c.label || c.logicalKey,
@@ -460,7 +468,7 @@ export class ToolConfigResolver {
     // a `configKey` pointing at a nested path in externalConfig. Read those the
     // same way the credential provider does, so the resolved config matches what
     // the handler will receive.
-    const configSchema = manifest?.configSchema as { properties?: Record<string, { configKey?: string }> } | undefined;
+    const configSchema = (tool.configSchema as { properties?: Record<string, { configKey?: string }> } | undefined) ?? (manifest?.configSchema as { properties?: Record<string, { configKey?: string }> } | undefined);
     const properties = configSchema?.properties ?? {};
     for (const [logicalKey, propertySchema] of Object.entries(properties)) {
       const spec = propertySchema || {};
@@ -476,7 +484,7 @@ export class ToolConfigResolver {
     // matches the rule the runtime documents for why config is a separate object
     // from input at all.
     const declared = new Set(
-      Object.keys((manifest?.configSchema as { properties?: Record<string, unknown> } | undefined)?.properties ?? {}),
+      Object.keys(((tool.configSchema as { properties?: Record<string, unknown> } | undefined) ?? (manifest?.configSchema as { properties?: Record<string, unknown> } | undefined))?.properties ?? {}),
     );
     for (const [key, value] of Object.entries(input)) {
       if (value === undefined) continue;

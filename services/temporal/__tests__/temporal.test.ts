@@ -11,6 +11,8 @@ jest.mock('../src/client/TemporalClient', () => {
     terminateMission: jest.fn(),
     listMissions: jest.fn(),
     isConnected: jest.fn(),
+    broadcastMissionUpdate: jest.fn(),
+    resumeMission: jest.fn(),
   };
   return {
     TemporalClient: jest.fn().mockImplementation(() => mocks),
@@ -62,6 +64,29 @@ describe('Temporal Routes', () => {
     expect(res.status).toBe(202);
     expect(res.body.workflowId).toBe('wf-1');
     expect(res.body.status).toBe('started');
+  });
+
+  it('passes a conversational answer to the agent during a credential request', async () => {
+    const temporalMocks = require('../src/client/TemporalClient') as {
+      broadcastMissionUpdate: jest.Mock; resumeMission: jest.Mock;
+    };
+    temporalMocks.broadcastMissionUpdate.mockResolvedValue(undefined);
+    temporalMocks.resumeMission.mockResolvedValue('resuming');
+    getMissionResult.mockResolvedValue({
+      status: 'awaiting_review',
+      output: { outputs: { pendingInteraction: { kind: 'user_input', credentialRequest: { toolId: 'service' } } } },
+    });
+    const res = await request(app)
+      .post('/api/temporal/missions/mission-test/messages')
+      .send({ role: 'user', content: 'Use the existing secret:service_key.' });
+    expect(res.status).toBe(202);
+    expect(temporalMocks.broadcastMissionUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'user' }), { requirePersistence: true },
+    );
+    expect(temporalMocks.resumeMission).toHaveBeenCalledWith('mission-test', {
+      interactionResponse: 'Use the existing secret:service_key.',
+      continueWithMessage: true,
+    });
   });
 
   it('should translate friendly recurrence options before starting a mission', async () => {

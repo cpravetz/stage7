@@ -67,6 +67,18 @@ describe('MissionAgentRuntime', () => {
     jest.restoreAllMocks()
   })
 
+  it('includes earlier user messages in the task prompt without replacing the original goal', async () => {
+    const runtime = new MissionAgentRuntime({ missionId: 'mission-1', tenantId: 'tenant-1' })
+    const execute = jest.spyOn(runtime, 'executePromptTask').mockResolvedValue({
+      output: 'Done', artifacts: [], tokensUsed: 1,
+    })
+    await runtime.executeTask(agent.id, task, phase, plan, false, undefined, [], undefined, undefined,
+      'Original goal', ['Use secret:service_key.', 'The setting is already configured.'])
+    expect(execute.mock.calls[0][1].prompt).toContain('Original mission goal: Original goal')
+    expect(execute.mock.calls[0][1].prompt).toContain('Use secret:service_key.')
+    expect(execute.mock.calls[0][1].prompt).toContain('The setting is already configured.')
+  })
+
   it.each([false, true])('preserves incomplete results and receipts after recovery=%s', async (recover) => {
     const receipt = { toolId: 'email_sender', isError: false, outcome: 'success', content: '{"id":"email-1"}' }
     const completed = {

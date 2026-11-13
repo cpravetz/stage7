@@ -25,6 +25,7 @@ export interface WorkflowInput {
   retryGuidance?: string;
   clarificationAnswers?: string[];
   interactionResponse?: string;
+  userMessages?: string[];
 }
 
 export interface MissionTaskCheckpoint {

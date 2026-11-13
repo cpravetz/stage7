@@ -436,8 +436,17 @@ describe('MissionOrchestrator checkpoint recovery', () => {
       .mockResolvedValueOnce({
         output: '__ASK_USER__:{"question":"Which account should be used?"}',
         artifacts: [],
-        actionReceipts: [{ toolId: 'lookup-account', isError: false, content: '{"found":false}', outcome: 'success' }],
-        interruption: { kind: 'user_input', question: 'Which account should be used?' },
+        actionReceipts: [
+          { toolId: 'lookup-account', isError: false, content: '{"found":false}', outcome: 'success' },
+          { toolId: 'protected-api', isError: true, content: 'credentials required', outcome: 'question_asked', actionKey: 'a'.repeat(64) },
+        ],
+        interruption: {
+          kind: 'user_input', question: 'Which account should be used?',
+          credentialRequest: {
+            executionId: 'exec-1', toolId: 'protected-api', toolName: 'Protected API',
+            missingCredentials: [{ key: 'account', label: 'Account' }],
+          },
+        },
         tokensUsed: 2,
       })
       .mockResolvedValueOnce({
@@ -481,19 +490,26 @@ describe('MissionOrchestrator checkpoint recovery', () => {
     }))
     const checkpoint = checkpoints.at(-1)!
     expect(checkpoint.pendingInteraction).toEqual(first.outputs.pendingInteraction)
+    const evaluatePlanLoad = jest.spyOn(MissionAgentRuntime.prototype, 'evaluatePlanLoad')
 
     const resumed = await new MissionOrchestrator().run({
       ...context,
       resumePlan: first.plan,
       resumeCheckpoint: checkpoints.at(-1)!,
       interactionResponse: 'The commercial account.',
+      userMessages: ['Use secret:account_key.', 'The commercial account.'],
     })
     expect(resumed.outputs.status).toBe('completed')
     expect(executeTask).toHaveBeenCalledTimes(2)
     expect(executeTask.mock.calls[1]?.[8]).toMatchObject({
       response: 'The commercial account.',
-      pendingInteraction: expect.objectContaining({ taskId: 'task-1' }),
+      pendingInteraction: expect.objectContaining({
+        taskId: 'task-1',
+        actionReceipts: [{ toolId: 'lookup-account', isError: false, content: '{"found":false}', outcome: 'success' }],
+      }),
     })
+    expect(executeTask.mock.calls[1]?.[10]).toEqual(['Use secret:account_key.', 'The commercial account.'])
+    expect(evaluatePlanLoad).not.toHaveBeenCalled()
   })
 
 

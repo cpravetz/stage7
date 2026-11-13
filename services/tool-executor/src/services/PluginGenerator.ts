@@ -94,6 +94,9 @@ const PLUGIN_SYSTEM_PROMPT = `You are a senior engineer generating production-re
     __get_credential("logical_key") in Python. These values resolve from runtime
     configuration or are requested from the user if missing. Do not map per-execution
     secrets through inline credential source declarations on configSchema properties.
+    When the capability request identifies an existing Vault secret by name, use that
+    exact name as vaultSecretId for the corresponding property; do not substitute a
+    guessed logical key or request the secret value.
   - Never put secrets in config defaults, source code, logs, outputs, or acceptance-test
     fixtures; acceptance tests must use dummy values and must not make live requests.
   - If the tool must return a secret value, mark that output property with
@@ -163,15 +166,13 @@ const generatedPluginSchema = z.object({
       message: `entrypoint must be ${expectedEntrypoint} for ${plugin.language}`,
     });
   }
-  const requiredConfig = Array.isArray(plugin.configSchema.required)
-    ? plugin.configSchema.required.filter((field): field is string => typeof field === 'string')
-    : [];
   // Credential sources are now declared inline on each configSchema property
   // (vaultSecretId / envVar / configKey). Required config fields must declare a
   // credential source so missing values can be requested at runtime.
   const properties = (plugin.configSchema.properties as Record<string, Record<string, unknown>> | undefined) ?? {};
-  for (const field of requiredConfig) {
-    const property = properties[field] || {};
+  for (const [field, propertySchema] of Object.entries(properties)) {
+    if (!propertySchema || propertySchema.required !== true) continue;
+    const property = propertySchema;
     const hasCredentialSource = property.vaultSecretId || property.envVar || property.configKey;
     if (!hasCredentialSource) {
       context.addIssue({

@@ -620,6 +620,7 @@ export class TemporalClient {
       clarificationAnswers?: string[];
       interactionResponse?: string;
       useConfiguredCredentials?: boolean;
+      continueWithMessage?: boolean;
       permissionDecision?: 'granted' | 'denied';
       permissionScope?: string;
     } = {},
@@ -704,6 +705,7 @@ export class TemporalClient {
     if (
       pendingInteraction?.kind === 'user_input'
       && pendingInteraction.credentialRequest
+      && !continuation.continueWithMessage
       && (interactionResponse || continuation.useConfiguredCredentials)
     ) {
       const credentialRequest = pendingInteraction.credentialRequest;
@@ -1498,7 +1500,7 @@ export class TemporalClient {
   /**
    * Broadcasts a mission event to WebSocket clients subscribed to the mission via the gateway.
    */
-  async broadcastMissionUpdate(event: Record<string, unknown>): Promise<void> {
+  async broadcastMissionUpdate(event: Record<string, unknown>, options?: { requirePersistence?: boolean }): Promise<void> {
     // Persist event to artifacts service
     const missionId = event.missionId as string | undefined;
     if (missionId) {
@@ -1512,8 +1514,14 @@ export class TemporalClient {
         timestamp: (event.timestamp as number) || Date.now(),
         data: (event.data as Record<string, unknown>) || {},
       });
+      if (options?.requirePersistence && !persisted) {
+        throw new Error('Could not persist the mission message in Artifacts');
+      }
       if (persisted && persisted.id) {
         event = { ...persisted, ...(event.output !== undefined ? { output: event.output } : {}) };
+      }
+      else if (options?.requirePersistence) {
+        throw new Error('Cannot persist a mission message without a mission ID');
       }
     }
 

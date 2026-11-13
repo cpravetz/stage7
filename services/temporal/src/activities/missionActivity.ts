@@ -219,6 +219,7 @@ const orchestrator = new MissionOrchestrator();
      ...(options.checkpoint ? { resumeCheckpoint: options.checkpoint } : {}),
      ...(input.clarificationAnswers && input.clarificationAnswers.length > 0 ? { clarificationAnswers: input.clarificationAnswers } : {}),
      ...(input.interactionResponse ? { interactionResponse: input.interactionResponse } : {}),
+     ...(input.userMessages ? { userMessages: [...input.userMessages] } : {}),
      onCheckpoint: saveCheckpoint,
      heartbeat,
      controlCheckpoint: options.controlCheckpoint,
@@ -242,7 +243,27 @@ export async function runMissionDirect(
   checkpoint?: MissionActivityCheckpoint,
   controlCheckpoint?: () => Promise<void>,
 ): Promise<any> {
-  return executeMissionActivity(input, { checkpoint, controlCheckpoint });
+  if (!checkpoint && !input.interactionResponse && !input.clarificationAnswers?.length) {
+    return executeMissionActivity(input, { checkpoint, controlCheckpoint });
+  }
+  const persistenceUrl = process.env.ARTIFACTS_URL || 'http://artifacts:4200';
+  const response = await fetch(`${persistenceUrl}/api/artifacts/missions/${encodeURIComponent(input.missionId)}/events`);
+  if (!response.ok) throw new Error(`Failed to load mission user messages from Artifacts (${response.status})`);
+  const body: unknown = await response.json();
+  if (!body || typeof body !== 'object' || !Array.isArray((body as { events?: unknown }).events)) {
+    throw new Error('Artifacts returned invalid mission events');
+  }
+  const userMessages = (body as { events: unknown[] }).events.flatMap((event) => {
+    if (!event || typeof event !== 'object') return [];
+    const entry = event as { type?: unknown; data?: { role?: unknown; content?: unknown } };
+    return (entry.type === 'user' || entry.type === 'user_message')
+      && entry.data?.role === 'user'
+      && typeof entry.data.content === 'string'
+      && entry.data.content.trim()
+      ? [entry.data.content]
+      : [];
+  });
+  return executeMissionActivity({ ...input, userMessages }, { checkpoint, controlCheckpoint });
 }
 
 async function notifyMissionCompletedActivity(

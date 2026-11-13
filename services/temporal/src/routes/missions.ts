@@ -360,7 +360,7 @@ router.post(
     };
 
     // The broadcast persists the event as well, so the message is recorded once.
-    await client.broadcastMissionUpdate(event);
+    await client.broadcastMissionUpdate(event, { requirePersistence: true });
 
     const active = MissionOrchestrator.getActive(missionId);
     if (active && role === 'user') {
@@ -369,7 +369,9 @@ router.post(
         res.status(202).json({ status: 'accepted', acknowledgement: result.acknowledgement, response: result.response });
         return;
       } catch (err) {
-        // fall through
+        logger.error({ missionId, error: err instanceof Error ? err.message : String(err) }, 'Failed to process active mission message');
+        res.status(500).json({ error: 'The mission received the message but could not process it.' });
+        return;
       }
     }
 
@@ -383,13 +385,10 @@ router.post(
       try {
         const result = await client.getMissionResult(workflowId);
         const pendingInteraction = (result?.output as { outputs?: { pendingInteraction?: { kind?: string; credentialRequest?: { toolId?: string; missingCredentials?: Array<{ key?: string; label?: string }> } | undefined } | undefined } | undefined } | undefined)?.outputs?.pendingInteraction;
-        const hasCredentialRequest = Boolean(pendingInteraction?.credentialRequest);
         const isAwaitingInput = result?.status === 'awaiting_review' && pendingInteraction?.kind === 'user_input';
 
         if (isAwaitingInput) {
-          await client.resumeMission(workflowId, {
-            ...(hasCredentialRequest ? { useConfiguredCredentials: true } : { interactionResponse: content }),
-          });
+          await client.resumeMission(workflowId, { interactionResponse: content, continueWithMessage: true });
           res.status(202).json({ status: 'resuming' });
           return;
         }
@@ -402,7 +401,7 @@ router.post(
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         logger.error({ missionId, workflowId, error: message }, 'Failed to resume mission from user message');
-        res.status(202).json({ status: 'accepted', error: message });
+        res.status(409).json({ status: 'not_resumed', error: message });
         return;
       }
     }

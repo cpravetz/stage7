@@ -155,10 +155,10 @@ configSchema: {
     apiEndpoint: SchemaProps.text({ description: 'External API base URL' }),
     apiKey: SchemaProps.text({
       description: 'Secret API Access Token',
-      isSecret: true // Directs storage to the stage7 Secrets Service
+      isSecret: true, // Directs storage to the stage7 Secrets Service
+      required: true,
     }),
   },
-  required: ['apiKey'],
 }
 ```
 

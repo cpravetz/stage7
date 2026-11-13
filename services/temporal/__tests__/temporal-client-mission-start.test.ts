@@ -536,6 +536,7 @@ describe('TemporalClient mission start', () => {
         method: init?.method,
         body: init?.body ? String(init.body) : undefined,
       })
+
       if (requestUrl.endsWith(`/api/artifacts/missions/${input.missionId}`) && !init?.method) {
         return {
           ok: true,
@@ -603,6 +604,50 @@ describe('TemporalClient mission start', () => {
         content: JSON.stringify(output),
       }),
     ])
+  })
+
+  it('resumes a credential interruption with a conversational message without submitting it as a secret', async () => {
+    process.env.ARTIFACTS_URL = 'http://artifacts'
+    delete process.env.GATEWAY_URL
+    const client = new TemporalClient()
+    const input = {
+      missionId: 'message-context', tenantId: 'tenant-1', assistantId: 'assistant-1',
+      prompt: 'Complete the protected operation',
+    }
+    const pendingInteraction = {
+      kind: 'user_input', phaseId: 'phase-1', taskId: 'task-1', taskTitle: 'Protected operation',
+      agentRole: 'worker', resumeCount: 0,
+      credentialRequest: { executionId: 'exec-1', toolId: 'service', toolName: 'Service', missingCredentials: [{ key: 'token', label: 'Token' }] },
+    }
+    jest.spyOn(client, 'startMission').mockResolvedValue('mission-message-context')
+    const fetcher = jest.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
+      const requestUrl = String(url)
+      if (requestUrl.endsWith('/api/artifacts/missions/message-context') && !init?.method) {
+        return { ok: true, status: 200, json: async () => ({
+          missionId: input.missionId, status: 'awaiting_review', controlState: 'running', input,
+          output: { outputs: { pendingInteraction } },
+        }) } as Response
+      }
+      if (requestUrl.endsWith('/plan')) {
+        return { ok: true, status: 200, json: async () => ({
+          summary: '', estimatedDuration: '', estimatedCost: '', requiresClarification: false,
+          clarificationQuestions: [], clarificationAnswers: [], phases: [],
+        }) } as Response
+      }
+      if (requestUrl.endsWith('/recovery-lease')) {
+        return { ok: true, status: 200, json: async () => ({ claimed: true }) } as Response
+      }
+      return { ok: true, status: 200, json: async () => ({}) } as Response
+    })
+    await client.resumeMission('mission-message-context', {
+      interactionResponse: 'Use secret:service_token.',
+      continueWithMessage: true,
+    })
+    expect(client.startMission).toHaveBeenCalledWith(
+      expect.objectContaining({ interactionResponse: 'Use secret:service_token.' }),
+      expect.objectContaining({ pendingInteraction }), true, true,
+    )
+    expect(fetcher.mock.calls.some(([url]) => String(url).includes('/credentials'))).toBe(false)
   })
 
   it('loads the persisted plan when retrying before any phase or task completed', async () => {

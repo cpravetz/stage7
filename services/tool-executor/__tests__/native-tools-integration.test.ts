@@ -396,15 +396,17 @@ describe('native tool integration: every advertised tool is reachable', () => {
   // Group 4 - credential-gated tools fail honestly
   // -------------------------------------------------------------------------
 
-  it('email_sender requests SMTP credentials instead of silently failing', async () => {
+  it('email_sender proceeds to execution when SMTP credentials have vault sources', async () => {
     const tool = byId('email_sender');
     const executor = new ToolExecutor();
     const result = await executor.executeOrRequestCredentials(tool, { to: 'someone@example.org', subject: 'hi' });
-    expect(result).toBeInstanceOf(CredentialRequiredError);
-    const credRequest = (result as CredentialRequiredError).request;
-    expect(credRequest.toolId).toBe('email_sender');
-    const keys = credRequest.missingCredentials.map((c) => c.key).sort();
-    expect(keys).toEqual(['smtp_host', 'smtp_pass', 'smtp_user']);
+    // Credential-backed fields (vaultSecretId) are resolved dynamically, not
+    // statically required. Execution proceeds and fails gracefully if credentials
+    // cannot be resolved (no vault in test environment).
+    expect(result).not.toBeInstanceOf(CredentialRequiredError);
+    const exec = result as { status: string; error?: string };
+    expect(exec.status).toBe('completed');
+    expect(exec.error).toContain('Missing SMTP credentials');
   });
 
   it.each([

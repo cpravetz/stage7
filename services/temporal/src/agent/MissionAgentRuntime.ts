@@ -1248,6 +1248,7 @@ export class MissionAgentRuntime {
     retryGuidance?: string,
     continuation?: { response: string; pendingInteraction: MissionPendingInteraction },
     missionGoal?: string,
+    userMessages?: string[],
   ): Promise<TaskExecutionResult> {
     applyRuntimeTaskRequirements(task, missionGoal);
     const dependencyIds = task.dependsOnTaskIds || [];
@@ -1279,6 +1280,9 @@ export class MissionAgentRuntime {
       : '';
     const taskPrompt = [
       basePrompt,
+      ...(userMessages?.length
+        ? [`Subsequent user messages (in order; use these as mission context and do not ask again for values already supplied): ${JSON.stringify(userMessages)}`]
+        : []),
       ...(missingDependencies.length > 0
         ? [`Missing completed dependency results for task ID(s): ${missingDependencies.join(', ')}. Do not treat this as mission failure. Ask the responsible agent/task to provide or recreate the missing artifact or result, or locate it if it exists under a different name; report an internal blocker only if it cannot be recovered after that coordination.`]
         : []),
