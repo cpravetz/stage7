@@ -184,7 +184,7 @@ describe('ToolExecutor', () => {
         output: JSON.stringify({ received: options.input?.token }),
       }),
     }
-    Object.defineProperty(testExecutor, 'sandboxDriver', { value: sandbox })
+    Object.defineProperty((testExecutor as any).dispatcher, 'sandboxDriver', { value: sandbox })
     const secretTool: Tool = {
       ...codeTool,
       inputSchema: {
@@ -223,7 +223,7 @@ describe('ToolExecutor', () => {
     const sandbox: SandboxExecutionDriver = {
       execute: async () => ({ success: true, output: JSON.stringify({ apiKey: 'generated-secret' }) }),
     }
-    Object.defineProperty(testExecutor, 'sandboxDriver', { value: sandbox })
+    Object.defineProperty((testExecutor as any).dispatcher, 'sandboxDriver', { value: sandbox })
     const secretOutputTool: Tool = {
       ...codeTool,
       outputSchema: {
@@ -1374,7 +1374,7 @@ describe('REST endpoints', () => {
     expect(res.status).not.toBe(428)
   })
 
-  it('should report unavailable MCP integration after providing credentials', async () => {
+  it('reports unavailable MCP integration honestly without a credential gate', async () => {
     const credentialTool = {
       id: 'cred-tool-2',
       name: 'Slack Tool',
@@ -1399,20 +1399,15 @@ describe('REST endpoints', () => {
       .post('/api/tools/cred-tool-2/execute')
       .send({ input: { channel: '#general', text: 'hello' } })
 
-    expect(execRes.status).toBe(428)
-    const executionId = execRes.body.request.executionId
-    expect(executionId).toBeDefined()
-
-    const credRes = await request(app)
-      .post(`/api/executions/${executionId}/credentials`)
-      .send({
-        credentials: { slackToken: 'xoxb-test' },
-        storeInVault: false,
-      })
-
-    expect(credRes.status).toBe(500)
-    expect(credRes.body.status).toBe('failed')
-    expect(credRes.body.error).toBeDefined()
+    // Credential-backed fields are resolved dynamically, so the run is not
+    // gated on them. With no MCP server behind the tool, execution must still
+    // report the integration as unavailable rather than fabricating a result.
+    expect(execRes.status).not.toBe(428)
+    // The native/MCP executor produced its own error payload; the run itself
+    // completed, so the failure is reported in `error` rather than as a
+    // rejected execution.
+    expect(execRes.body.status).toBe('completed')
+    expect(String(execRes.body.error ?? '')).toMatch(/credentials|missing|required|unavailable|not connected/i)
   })
 
   describe('POST /api/tools/execute - flat payload support', () => {

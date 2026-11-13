@@ -16,7 +16,7 @@ export const HR_DRAFT_JD_INTERVIEW_KIT = createDeclarativeCodeSkill({
   configSchema: {
     type: 'object',
     properties: {
-      apiKey: { type: 'string', description: 'upstream service API key (set in this Skill configuration, or a vault secret)', configKey: 'apiKey', label: "upstream service API key (set in this Skill configuration, or a vault secret)" },
+      apiKey: { type: 'string', description: 'upstream service API key (set in this Skill configuration, or a vault secret)', configKey: 'apiKey', label: "upstream service API key (set in this Skill configuration, or a vault secret)", isSecret: true },
       dryRun: SchemaProps.boolean({ description: 'Validate without executing; defaults to true', default: true }),
       defaultSource: SchemaProps.text({ description: 'Default sourcing channel for job descriptions' }),
       apiVersion: SchemaProps.text({ description: 'API version for recruiting operations' }),

@@ -52,6 +52,7 @@ export const ANALYTICS_CONFIG_SCHEMA = {
       description: 'Warehouse API key (set analytics.warehouse.apiKey in this Skill configuration, or a vault secret)',
       configKey: 'analytics.warehouse.apiKey',
       label: 'warehouse API key',
+      isSecret: true,
     }),
   },
 };

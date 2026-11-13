@@ -209,9 +209,14 @@ export class ToolConfigResolver {
         .map(([field]) => field),
     );
     const isExternalAction = tool.manifest?.system !== undefined && tool.manifest?.action !== undefined;
-    const required = Object.entries(configProperties)
-      .filter(([, schema]) => schema && schema.required === true)
-      .map(([field]) => field);
+    const required = Array.from(new Set([
+      ...(Array.isArray(configSchema?.required)
+        ? configSchema.required.filter((field): field is string => typeof field === 'string')
+        : []),
+      ...Object.entries(configProperties)
+        .filter(([, schema]) => schema && schema.required === true)
+        .map(([field]) => field),
+    ]));
     const missing: string[] = [];
     for (const field of required) {
       if (credentialBackedFields.has(field)) continue;
@@ -289,11 +294,14 @@ export class ToolConfigResolver {
     }> = [];
     const configSchema = (tool.configSchema as { properties?: Record<string, Record<string, unknown>>; required?: string[] } | undefined) ?? (manifest?.configSchema as { properties?: Record<string, Record<string, unknown>>; required?: string[] } | undefined);
     const properties = configSchema?.properties ?? {};
-    const requiredSet = new Set(
-      Object.entries(properties)
+    const requiredSet = new Set([
+      ...(Array.isArray(configSchema?.required)
+        ? configSchema.required.filter((field): field is string => typeof field === 'string')
+        : []),
+      ...Object.entries(properties)
         .filter(([, schema]) => schema && schema.required === true)
         .map(([field]) => field),
-    );
+    ]);
     for (const [logicalKey, propertySchema] of Object.entries(properties)) {
       const schema = propertySchema || {};
       // Only properties that declare a vaultSecretId, envVar, or configKey are
@@ -489,6 +497,10 @@ export class ToolConfigResolver {
     for (const [key, value] of Object.entries(input)) {
       if (value === undefined) continue;
       if (declared.has(key)) continue;
+      // Execution metadata is injected into the input before dispatch so the
+      // executors can read it. It is not Skill configuration, so it must not
+      // leak into ctx.config (a handler echoing config would otherwise see it).
+      if (key === 'executionId' || key === 'idempotencyKey' || key === 'requestId') continue;
       config[key] = value;
     }
     return config;

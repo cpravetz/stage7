@@ -235,17 +235,17 @@ def __stage7_mock_urlopen(request, *args, **kwargs):
         pattern = '^' + __import__('re').escape(fixture['urlPattern']).replace(r'\\*', '.*') + '$'
         if fixture['method'] != method or not __import__('re').match(pattern, url) or __stage7_http_mock_uses[index] > 0:
             continue
-expected = fixture.get('expectedRequestBody')
-    if expected is not None:
-        expectedStr = expected if isinstance(expected, str) else json.dumps(expected)
-        if body != expectedStr:
-            raise RuntimeError('HTTP request body did not match the test fixture for ' + method + ' ' + url)
-        __stage7_http_mock_uses[index] += 1
-        response_body = b'' if fixture['responseStatus'] == 204 else json.dumps(fixture['responseBody']).encode()
-        response = __Stage7MockResponse(response_body, fixture['responseStatus'], fixture.get('responseHeaders', {}))
-        if fixture['responseStatus'] >= 400:
-            raise urllib.error.HTTPError(url, fixture['responseStatus'], 'Mock HTTP error', response.headers, response)
-        return response
+        expected = fixture.get('expectedRequestBody')
+        if expected is not None:
+            expectedStr = expected if isinstance(expected, str) else json.dumps(expected)
+            if body != expectedStr:
+                raise RuntimeError('HTTP request body did not match the test fixture for ' + method + ' ' + url)
+            __stage7_http_mock_uses[index] += 1
+            response_body = b'' if fixture['responseStatus'] == 204 else json.dumps(fixture['responseBody']).encode()
+            response = __Stage7MockResponse(response_body, fixture['responseStatus'], fixture.get('responseHeaders', {}))
+            if fixture['responseStatus'] >= 400:
+                raise urllib.error.HTTPError(url, fixture['responseStatus'], 'Mock HTTP error', response.headers, response)
+            return response
     raise RuntimeError('Unmatched HTTP request blocked by the isolated test harness: ' + method + ' ' + url)
 
 urllib.request.urlopen = __stage7_mock_urlopen

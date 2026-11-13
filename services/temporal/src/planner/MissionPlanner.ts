@@ -46,9 +46,12 @@ function setValueAtPath(value: unknown, path: PropertyKey[], replacement: unknow
 }
 
 function findPlannerFieldRepair(issues: Array<{ path: PropertyKey[]; message: string }>, plan: unknown) {
-  for (const issue of issues) {
-    const mismatch = issue.message.match(/^Expected (.+), received (.+)$/);
-    if (!mismatch || issue.path.length < 2) continue;
+    for (const issue of issues) {
+        // Zod reports a wrong type as "Expected X, received Y" or, since v4,
+        // "Invalid input: expected X, received Y"; both describe a single field
+        // that can be repaired by asking for a replacement value.
+        const mismatch = issue.message.match(/expected\s+(.+?),\s+received\s+(.+)$/i);
+        if (!mismatch || issue.path.length < 2) continue;
     return {
       path: issue.path,
       expectedType: mismatch[1] as string,
@@ -729,8 +732,13 @@ function formatSchemaIssues(issues: Array<{ path: PropertyKey[]; message: string
             parts.push(s);
         }
         const desc = parts.join(' ');
+        // Zod reports an absent required value as "Invalid input: expected
+        // array, received undefined" (older versions used "Required"); both
+        // mean the same thing and should read naturally to the user.
+        const isMissingValue = issue.message === 'Required'
+            || /received undefined$/i.test(issue.message);
         // Clean up for common patterns
-        if (issue.message === 'Required') {
+        if (isMissingValue) {
             // Ensure it reads naturally
             if (desc.match(/^Phase \d+ goal$/)) return `${desc} is required`;
             if (desc.match(/^Phase \d+ name$/)) return `${desc} is required`;
@@ -854,6 +862,22 @@ export async function generateValidPlan(
             throw new Error(`Planner Agent request failed on attempt ${attempt}: ${message}`);
         }
         previousResponse = content;
+        if (typeof content !== 'string' || content.trim().length === 0) {
+            // A completion without content is not a plan. It has to count
+            // against the repair ceiling, otherwise a provider that keeps
+            // returning nothing retries forever without ever failing.
+            lastError = 'Planner returned a completion without content';
+            failedRepairAttempts += 1;
+            await (reportValidation === null || reportValidation === void 0 ? void 0 : reportValidation(lastError));
+            if (failedRepairAttempts >= MAX_PLAN_REPAIR_ATTEMPTS) {
+                throw new Error(
+                    `Planner could not produce a valid plan after ${failedRepairAttempts} attempts because the planner completion was empty. Last validation issue: ${lastError}`,
+                );
+            }
+            logger.warn({ missionId, attempt, reason: lastError }, 'Planner completion was empty; requesting the plan again');
+            await reportProgress?.({ attempt, status: 'retrying', reason: lastError, transient: true });
+            continue;
+        }
         try {
             if (activeFieldRepair) {
                 let replacement: unknown;

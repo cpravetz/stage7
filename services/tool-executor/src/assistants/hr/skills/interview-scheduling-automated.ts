@@ -20,7 +20,7 @@ const HR_INTERVIEW_SCHEDULING_AUTOMATED = createDeclarativeCodeSkill({
   configSchema: {
     type: 'object',
     properties: {
-      apiKey: { type: 'string', description: 'upstream service API key (set in this Skill configuration, or a vault secret)', configKey: 'apiKey', label: "upstream service API key (set in this Skill configuration, or a vault secret)" },
+      apiKey: { type: 'string', description: 'upstream service API key (set in this Skill configuration, or a vault secret)', configKey: 'apiKey', label: "upstream service API key (set in this Skill configuration, or a vault secret)", isSecret: true },
     endpoint: SchemaProps.url({ description: 'Applicant tracking system base URL' }),
       calendarId: SchemaProps.text({ description: 'Calendar the interviewer slots are booked on' }),
       roundTypes: SchemaProps.stringArray({ description: 'Interview rounds this Skill may book, e.g. screen, technical, onsite' }),

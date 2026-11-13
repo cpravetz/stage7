@@ -48,9 +48,19 @@ import type {
  * check registered tools and register integrated ones.
  */
 export class MCPToolExecutive {
-  private registry: { get(id: string): Tool | undefined; list(): Tool[] } | undefined;
+  private registry: {
+    get(id: string): Tool | undefined;
+    list(): Tool[];
+    registerOrReplace?(tool: Tool): void;
+    unregister?(id: string): boolean;
+  } | undefined;
 
-  setRegistry(registry: { get(id: string): Tool | undefined; list(): Tool[] }): void {
+  setRegistry(registry: {
+    get(id: string): Tool | undefined;
+    list(): Tool[];
+    registerOrReplace?(tool: Tool): void;
+    unregister?(id: string): boolean;
+  }): void {
     this.registry = registry;
   }
 

@@ -1,7 +1,7 @@
 console.log('missions route module loaded');
 import { MissionOrchestrator } from '../planner/MissionOrchestrator';
 import { Router, Request, Response } from 'express';
-import { TemporalClient } from '../client/TemporalClient';
+import { TemporalClient, isMissionAwaitingInputError } from '../client/TemporalClient';
 import { WorkflowInput, MissionTaskCheckpoint } from '../types/workflow';
 import { asyncHandler, NextGenError, PlanSchema, logger } from '@stage7-nextgen/shared';
 import { getMissionResumeProgress } from '../recovery/missionProgress';
@@ -294,13 +294,36 @@ router.post(
     if (permissionScope !== undefined && !['task', 'assistant', 'all_agents'].includes(permissionScope)) {
       throw NextGenError.badRequest('permissionScope must be task, assistant, or all_agents');
     }
-    const status = await client.resumeMission(workflowId, {
-      ...(clarificationAnswers ? { clarificationAnswers } : {}),
-      ...(interactionResponse ? { interactionResponse } : {}),
-      ...(useConfiguredCredentials !== undefined ? { useConfiguredCredentials } : {}),
-      ...(permissionDecision ? { permissionDecision } : {}),
-      ...(permissionScope ? { permissionScope } : {}),
-    });
+    let status: 'running' | 'resuming';
+    try {
+      status = await client.resumeMission(workflowId, {
+        ...(clarificationAnswers ? { clarificationAnswers } : {}),
+        ...(interactionResponse ? { interactionResponse } : {}),
+        ...(useConfiguredCredentials !== undefined ? { useConfiguredCredentials } : {}),
+        ...(permissionDecision ? { permissionDecision } : {}),
+        ...(permissionScope ? { permissionScope } : {}),
+      });
+    } catch (error) {
+      // The mission is waiting on an answer: that is the client's to resolve, not
+      // a server fault, so report it as a conflict with the pending question.
+      if (isMissionAwaitingInputError(error)) {
+        const question = error instanceof Error && 'question' in error
+          ? (error as { question?: string }).question
+          : undefined;
+        const pendingInteraction = (await client.getMissionResult(workflowId))?.output as
+          | { outputs?: { pendingInteraction?: { question?: string } } }
+          | undefined;
+        throw new NextGenError(
+          'A response is required before this mission can resume',
+          409,
+          {
+            status: 'awaiting_input',
+            question: question ?? pendingInteraction?.outputs?.pendingInteraction?.question,
+          },
+        );
+      }
+      throw error;
+    }
     res.status(202).json({ status });
   }),
 );

@@ -13,6 +13,8 @@ jest.mock('../src/client/TemporalClient', () => {
     isConnected: jest.fn(),
     broadcastMissionUpdate: jest.fn(),
     resumeMission: jest.fn(),
+    isMissionAwaitingInputError: (error: unknown) =>
+      error instanceof Error && error.name === 'MissionAwaitingInputError',
   };
   return {
     TemporalClient: jest.fn().mockImplementation(() => mocks),
@@ -86,6 +88,29 @@ describe('Temporal Routes', () => {
     expect(temporalMocks.resumeMission).toHaveBeenCalledWith('mission-test', {
       interactionResponse: 'Use the existing secret:service_key.',
       continueWithMessage: true,
+    });
+  });
+
+  it('reports a resume that needs an answer as a conflict instead of a server error', async () => {
+    const temporalMocks = require('../src/client/TemporalClient') as {
+      resumeMission: jest.Mock;
+    };
+    temporalMocks.resumeMission.mockRejectedValue(
+      Object.assign(new Error('A non-empty response is required for the pending mission question'), {
+        name: 'MissionAwaitingInputError',
+        question: 'A required service or configuration is missing.',
+      }),
+    );
+
+    const res = await request(app)
+      .post('/api/temporal/missions/mission-test/start')
+      .send({});
+
+    expect(res.status).toBe(409);
+    expect(res.body).toMatchObject({
+      success: false,
+      statusCode: 409,
+      details: { status: 'awaiting_input', question: 'A required service or configuration is missing.' },
     });
   });
 

@@ -13,7 +13,7 @@ const SPORTS_INGAME_PREDICTIVE_MODELING_SCHEDULED = createDeclarativeCodeSkill({
   id: 'sports-ingame-predictive-modeling-scheduled',
   name: 'In-Game Predictive Modeling (Scoped)',
   description: 'Watches the configured matches, teams, or sports and reports win-probability movement.',
-  persistenceEnvVar: 'ASSISTANT_HOME',
+  persistenceEnvVar: 'SPORTS_GROUP_B_HOME',
   tier: 'advise',
   domainKnowledge: 'Live sports predictive modeling, win probability estimation, momentum signal interpretation, and lineup impact analysis',
   inputSchema: {
@@ -47,7 +47,6 @@ const SPORTS_INGAME_PREDICTIVE_MODELING_SCHEDULED = createDeclarativeCodeSkill({
   isSkill: true,
   manifest: {},
   handler: async function handler(input, ctx) {
-      const _sgHome = process.env.SPORTS_GROUP_B_HOME;
     const sports = Array.isArray(ctx.config?.sports) ? (ctx.config!.sports as unknown[]).map(String) : [];
     const teams = Array.isArray(ctx.config?.teams) ? (ctx.config!.teams as unknown[]).map(String) : [];
     const matchIds = Array.isArray(ctx.config?.matchIds) ? (ctx.config!.matchIds as unknown[]).map(String) : [];

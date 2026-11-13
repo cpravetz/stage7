@@ -46,7 +46,10 @@ describe('generateValidPlan', () => {
   it('plans outcomes separately from actions without assuming a specific implementation capability', () => {
     expect(PLANNER_SYSTEM_PROMPT).toContain('Never choose, name, create, configure, or prescribe tools')
     expect(PLANNER_SYSTEM_PROMPT).toContain('separate those tasks and make the action depend on the output task')
-    expect(PLANNER_SYSTEM_PROMPT).toContain('create an artifact containing that output')
+    // Deliverables are planned only when the user asked for them; a requested
+    // outcome that is not a document must not gain an invented artifact.
+    expect(PLANNER_SYSTEM_PROMPT).toContain('Treat expectedArtifacts as user-requested deliverable files only')
+    expect(PLANNER_SYSTEM_PROMPT).toContain('do not create any expectedArtifacts')
     expect(PLANNER_SYSTEM_PROMPT).toContain('Always leave requiredActions=[]')
   })
 

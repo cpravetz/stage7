@@ -60,17 +60,28 @@ describe('tool-executor execution recovery/idempotency', () => {
     const exec = new ToolExecutor(new Map(), undefined, createInMemoryEventLog(), store);
     const tool = makeTool('webhook-test', 'webhook');
 
+    let calls = 0;
+    (exec as any).dispatcher.dispatch = async () => {
+      calls += 1;
+      return {
+        statusCode: 200,
+        response: { ok: true, call: calls },
+        outcomeKnown: true,
+        reconciliation: { provider: 'webhook', outcomeKnown: true, note: 'mock accepted' },
+      };
+    };
+
     const first = await exec.execute(tool, { url: 'https://example.test/hook', method: 'POST' }, { executionId: 'exec-stable-1' });
     expect(first.status).toBe('completed');
     expect(first.executionId).toBe('exec-stable-1');
     expect((first as any).idempotencyKey).toBe('exec-stable-1');
-    const callsAfterFirst = ((exec as any).webhookExecutor?.calls) || 0;
+    const callsAfterFirst = calls;
     expect(callsAfterFirst).toBe(1);
 
     const second = await exec.execute(tool, { url: 'https://example.test/hook', method: 'POST' }, { executionId: 'exec-stable-1' });
     expect(second.executionId).toBe('exec-stable-1');
     expect((second as any).reconciliation?.duplicatePrevented).toBe(true);
-    const callsAfterSecond = ((exec as any).webhookExecutor?.calls) || 0;
+    const callsAfterSecond = calls;
     expect(callsAfterSecond).toBe(1);
 
     const fresh = new ToolExecutor(new Map(), undefined, createInMemoryEventLog(), createExecutionRecordStore());
@@ -82,7 +93,7 @@ describe('tool-executor execution recovery/idempotency', () => {
   it('retrieves durable pending credential state and resumes after fresh executor instance', async () => {
     const store = createExecutionRecordStore();
     const exec = new ToolExecutor(new Map(), undefined, createInMemoryEventLog(), store);
-    (exec as any).resolveCredentials = jest.fn(async () => {
+    (exec as any).config.resolveCredentials = jest.fn(async () => {
       const { CredentialRequiredError } = jest.requireActual('../src/types');
       throw new CredentialRequiredError({
         executionId: 'ignored',
@@ -99,8 +110,8 @@ describe('tool-executor execution recovery/idempotency', () => {
 
     const fresh = new ToolExecutor(new Map([[tool.id, tool]]), undefined, createInMemoryEventLog(), createExecutionRecordStore());
     // bypass credential resolution and run webhook mock path on resume
-    (fresh as any).resolveCredentials = jest.fn(async () => ({ resolved: { api_key: 'x' }, sources: [] }));
-    (fresh as any).dispatch = jest.fn(async () => ({ statusCode: 200, response: { ok: true }, outcomeKnown: true, reconciliation: { provider: 'webhook', outcomeKnown: true } }));
+    (fresh as any).config.resolveCredentials = jest.fn(async () => ({ resolved: { api_key: 'x' }, sources: [] }));
+    (fresh as any).dispatcher.dispatch = jest.fn(async () => ({ statusCode: 200, response: { ok: true }, outcomeKnown: true, reconciliation: { provider: 'webhook', outcomeKnown: true } }));
     const record = await fresh.getExecutionRecord('exec-cred-1');
     expect(record?.status).toBe('pending_credentials');
     expect(record?.pendingCredentialRequest?.executionId).toBe('exec-cred-1');
@@ -176,7 +187,7 @@ describe('execution routes', () => {
   beforeAll(() => {
     toolRegistry.registerOrReplace(makeTool('route-test-tool', 'webhook'));
     // prevent real outbound side effects through shared executor dispatch
-    (sharedExecutor as any).dispatch = async () => ({ statusCode: 200, response: { ok: true }, outcomeKnown: true, reconciliation: { provider: 'webhook', outcomeKnown: true } });
+    (sharedExecutor as any).dispatcher.dispatch = async () => ({ statusCode: 200, response: { ok: true }, outcomeKnown: true, reconciliation: { provider: 'webhook', outcomeKnown: true } });
   });
 
   it('accepts client executionId and exposes GET /executions/:executionId', async () => {

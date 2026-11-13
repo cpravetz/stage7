@@ -464,7 +464,7 @@ export class ToolExecutor {
         }
       }
       const reconciliation = await this.reconcileExternalExecution(tool, input, executionId, existing);
-      (opts as any).__reconciliation = reconciliation;
+      opts = { ...(opts || {}), __reconciliation: reconciliation };
     }
 
     await this.saveExecutionRecord({

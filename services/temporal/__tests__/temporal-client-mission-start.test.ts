@@ -1,4 +1,4 @@
-import { missionStatus, TemporalClient } from '../src/client/TemporalClient'
+import { isMissionAwaitingInputError, missionStatus, TemporalClient } from '../src/client/TemporalClient'
 import * as missionActivity from '../src/activities/missionActivity'
 
 describe('TemporalClient mission start', () => {
@@ -777,5 +777,79 @@ describe('TemporalClient mission start', () => {
     await expect(client.startMission(input)).resolves.toBe(`mission-${input.missionId}`)
 
     expect(directRun).not.toHaveBeenCalled()
+  })
+
+  it('refuses to resume a paused mission without an answer, and resumes once the configuration is confirmed', async () => {
+    delete process.env.TEMPORAL_ADDRESS
+    process.env.ARTIFACTS_URL = 'http://artifacts'
+    delete process.env.GATEWAY_URL
+    const client = new TemporalClient()
+    const input = {
+      missionId: 'mission-awaiting-config',
+      tenantId: 'tenant-1',
+      assistantId: 'assistant-1',
+      prompt: 'Send the message',
+    }
+    const question = 'A required service or configuration is missing. Configure it in Tools configuration and continue after you save.'
+    jest.spyOn(client, 'startMission').mockResolvedValue(`mission-${input.missionId}`)
+    jest.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
+      const requestUrl = String(url)
+      if (requestUrl.endsWith(`/api/artifacts/missions/${input.missionId}`) && !init?.method) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            missionId: input.missionId,
+            status: 'awaiting_review',
+            controlState: 'running',
+            input,
+            output: { outputs: { status: 'awaiting_user_input', pendingInteraction: { kind: 'user_input', taskId: 'phase-1-task-1', question } } },
+          }),
+        } as Response
+      }
+      if (requestUrl.endsWith(`/api/artifacts/missions/${input.missionId}/plan`)) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            summary: 'Send the message',
+            estimatedDuration: 'short',
+            estimatedCost: 'low',
+            requiresClarification: false,
+            clarificationQuestions: [],
+            clarificationAnswers: [],
+            phases: [],
+          }),
+        } as Response
+      }
+      return { ok: true, status: 200, json: async () => ({ claimed: true }) } as Response
+    })
+
+    let caught: unknown
+    try {
+      await client.resumeMission(`mission-${input.missionId}`)
+    } catch (error) {
+      caught = error
+    }
+    expect(isMissionAwaitingInputError(caught)).toBe(true)
+    expect((caught as Error).message).toBe('A non-empty response is required for the pending mission question')
+    expect(client.startMission).not.toHaveBeenCalled()
+
+    await expect(
+      client.resumeMission(`mission-${input.missionId}`, { useConfiguredCredentials: true }),
+    ).resolves.toBe('resuming')
+
+    expect(client.startMission).toHaveBeenCalledWith(
+      expect.objectContaining({
+        missionId: input.missionId,
+        interactionResponse: expect.stringContaining('supplied the requested service or configuration'),
+      }),
+      expect.objectContaining({
+        plan: expect.objectContaining({ summary: 'Send the message' }),
+        pendingInteraction: expect.objectContaining({ kind: 'user_input' }),
+      }),
+      true,
+      true,
+    )
   })
 })

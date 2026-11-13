@@ -31,11 +31,13 @@ const intakeConfig = createSchemaRecord({
     description: 'Upstream access token (set in this Skill configuration, or a vault secret)',
     configKey: 'accessToken',
     label: 'upstream access token',
+    isSecret: true,
   }),
   token: SchemaProps.password({
     description: 'Upstream API token (set in this Skill configuration, or a vault secret)',
     configKey: 'token',
     label: 'upstream API token',
+    isSecret: true,
   }),
   defaultDryRun: SchemaProps.boolean({ description: 'Default intake execution to dry-run', default: true }),
 })

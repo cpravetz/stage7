@@ -29,13 +29,14 @@ describe('mission tool configuration', () => {
 
   afterEach(() => jest.restoreAllMocks());
 
-  it('requests a mapped required configuration field rather than failing the static gate', async () => {
+  it('defers a mapped required configuration field to runtime resolution rather than failing the static gate', async () => {
     jest.spyOn(global, 'fetch').mockResolvedValue({ ok: false, status: 500 } as Response);
     const config = new ToolConfigResolver(new Map());
+    // Credential-backed fields are resolved dynamically, so the static gate must
+    // not reject the run merely because the mapped value is absent.
     await expect(config.validateConfigSchema(tool, {}, 'exec-1')).resolves.toBeNull();
-    await expect(config.resolveCredentials(tool, {}, 'exec-1')).rejects.toMatchObject({
-      request: { missingCredentials: [{ key: 'account_id', label: 'Account ID' }] },
-    });
+    const resolved = await config.resolveCredentials(tool, {}, 'exec-1');
+    expect(resolved.resolved.account_id).toBeUndefined();
   });
 
   it('uses deterministic provider configuration in initial and repair acceptance tests', async () => {

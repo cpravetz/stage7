@@ -1,4 +1,3 @@
-
 import { createWorkflow, AssistantWorkflow } from '../../adk/workflow-common';
 import { Tool } from '../../types';
 
@@ -11,10 +10,9 @@ import { HR_INTERVIEW_SCHEDULING_USER } from './skills/hr-interview-scheduling-u
 import { HR_SCREEN_RESUME } from './skills/hr-screen-resume';
 import { HR_RESUME_SCREENER, HR_CANDIDATE_ASSESSOR } from './tools/hr-lower-order-tools';
 
-const hrLowerOrderTools: Tool[] = [HR_RESUME_SCREENER, HR_CANDIDATE_ASSESSOR];
+export const hrLowerOrderTools: Tool[] = [HR_RESUME_SCREENER, HR_CANDIDATE_ASSESSOR];
 
 const hrSkills = [
-  ...hrLowerOrderTools,
   HR_SCREEN_RESUME,
   HR_ASSESS_CANDIDATE,
   HR_DRAFT_JD_INTERVIEW_KIT,
@@ -32,5 +30,5 @@ export const hrWorkflow: AssistantWorkflow = createWorkflow({
   assistant: 'HR',
   productObject: 'applicant',
   flow: 'screening → interview → decision',
-  skills: hrSkills,
+  skills: [...hrSkills, ...hrLowerOrderTools],
 });

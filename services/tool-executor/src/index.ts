@@ -48,6 +48,7 @@ import {
   restaurantSkills,
   investmentSkills,
   songwritingSkills,
+  songwritingLowerOrderTools,
   scriptwritingSkills,
 } from './data/skills';
 import {
@@ -104,6 +105,7 @@ const domainSkillArrays = [
   restaurantSkills,
   investmentSkills,
   songwritingSkills,
+  songwritingLowerOrderTools,
   scriptwritingSkills,
 ];
 
@@ -264,7 +266,7 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
     });
   }
   logger.error({ err: err?.message || String(err) }, 'Unhandled error in tool-executor');
-  res.status(500).json({ success: false, error: err?.message || 'Internal server error', statusCode: 500 });
+  res.status(500).json({ success: false, error: err?.message || 'Tool Executor Internal server error', statusCode: 500 });
 });
 
 const PORT = process.env.PORT || 3500;

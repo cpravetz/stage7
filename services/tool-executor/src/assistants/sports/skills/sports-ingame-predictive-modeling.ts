@@ -41,7 +41,7 @@ export const SPORTS_PREDICTOR_AD_HOC = createDeclarativeCodeSkill({
   id: 'sports-predictor-ad-hoc',
   name: 'In-Game Predictor (Ad-hoc)',
   description: 'Predicts win probabilities and key in-game events from live play-by-play data, lineup information, and momentum signals during an active game.',
-  persistenceEnvVar: 'ASSISTANT_HOME',
+  persistenceEnvVar: 'SPORTS_GROUP_B_HOME',
   tier: 'advise',
   domainKnowledge: 'Live sports predictive modeling, win probability estimation, momentum signal interpretation, and lineup impact analysis',
   inputSchema: INGAME_PREDICTIVE_INPUT,
@@ -61,7 +61,6 @@ export const SPORTS_PREDICTOR_AD_HOC = createDeclarativeCodeSkill({
   isSkill: true,
   manifest: {},
   handler: async function handler(input, ctx) {
-      const _sgHome = process.env.SPORTS_GROUP_B_HOME;
       const eventId = input.event || input.gameId || '';
       const sport = input.sport || 'generic';
       const gameStatus = input.gameStatus || 'in-progress';

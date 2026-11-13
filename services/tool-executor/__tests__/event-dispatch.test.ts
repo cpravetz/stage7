@@ -54,7 +54,7 @@ describe('Phase 1b event dispatch wiring', () => {
     // trigger graph, but a subscription is also a dispatch edge, so declaring
     // `emitEvent` made a Skill re-run itself — for a `represent` Skill, one user
     // action performed twice. `emit-event-declared` in `src/adk/validate.ts` and
-    // `findDownstreamEventTriggers` in `src/services/ToolExecutor.ts` both guard
+    // `findDownstreamEventTriggers` in `src/services/ToolEventDispatcher.ts` both guard
     // this now.
     expect(tool.triggers ?? []).toEqual([]);
   });
@@ -62,8 +62,10 @@ describe('Phase 1b event dispatch wiring', () => {
   it('getEmitEventIds reads every emitEvent on the tool manifest', () => {
     const registry = new Map<string, Tool>();
     const executor = new ToolExecutor(registry);
-    const readEmitEvent = (executor as unknown as { getEmitEventIds(tool: Tool, assistantId?: string): string[] })
-      .getEmitEventIds.bind(executor);
+    const events = (executor as unknown as {
+      events: { getEmitEventIds(tool: Tool, assistantId?: string): string[] };
+    }).events;
+    const readEmitEvent = events.getEmitEventIds.bind(events);
 
     const fromManifest = createCodeSkill({
       id: 'manifest-emitter',

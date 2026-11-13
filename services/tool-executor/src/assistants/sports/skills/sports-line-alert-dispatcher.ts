@@ -31,7 +31,7 @@ export const LINE_ALERT_DISPATCHER = createDeclarativeCodeSkill({
   id: 'sports-line-alert-dispatcher',
   name: 'Line-Alert Dispatcher',
   description: 'Evaluates line movement significance relative to the user betting strategy and current bankroll exposure; determines whether movements warrant informational alerts or action recommendations by integrating with Bankroll Co-Pilot state; distinguishes genuine value signals from market noise using historical variance patterns; dispatches contextualized alerts when conditions are material. STRICTLY BARRED from ever placing wagers or accessing sportsbook accounts.',
-  persistenceEnvVar: 'ASSISTANT_HOME',
+  persistenceEnvVar: 'SPORTS_GROUP_B_HOME',
   inputSchema: LINE_ALERT_INPUT,
   outputSchema: sportsResultSchema('Line alert dispatch result'),
   tier: 'represent',
@@ -54,7 +54,6 @@ export const LINE_ALERT_DISPATCHER = createDeclarativeCodeSkill({
     }
   },
   handler: async function handler(input, ctx) {
-      const _sgHome = process.env.SPORTS_GROUP_B_HOME;
       const entity = input.entity || input.market || 'general';
       const sport = input.sport || 'generic';
       const dryRun = input.dryRun !== false;

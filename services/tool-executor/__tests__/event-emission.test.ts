@@ -65,11 +65,12 @@ describe('events are emitted by real shipped Skills', () => {
   /** An executor whose run reaches the emit path without needing credentials. */
   function executorFor(tools: Tool[], log: EventLog): ToolExecutor {
     const executor = new ToolExecutor(new Map(tools.map((tool) => [tool.id, tool])), undefined, log);
-    const stub = executor as unknown as Record<string, unknown>;
-    stub.validateConfigSchema = () => null;
-    stub.resolveCredentials = async () => ({ resolved: {}, sources: {} });
-    stub.ensureWorkspace = () => ({ workspaceId: 'ws-probe', workflow: undefined });
-    stub.dispatch = async () => ({ ok: true });
+    const config = (executor as unknown as { config: Record<string, unknown> }).config;
+    config.validateConfigSchema = () => null;
+    config.resolveCredentials = async () => ({ resolved: {}, sources: {} });
+    const dispatcher = (executor as unknown as { dispatcher: Record<string, unknown> }).dispatcher;
+    dispatcher.dispatch = async () => ({ ok: true });
+    (executor as unknown as Record<string, unknown>).ensureWorkspace = () => ({ workspaceId: 'ws-probe', workflow: undefined });
     return executor;
   }
 
@@ -122,10 +123,12 @@ describe('events are emitted by real shipped Skills', () => {
 
     const log = createInMemoryEventLog();
     const executor = executorFor([target, subscriber], log);
-    (executor as unknown as Record<string, unknown>).nestedExecutorCallback = () => async () => {
+    const nested = async () => {
       subscriberRan = true;
       return { success: true };
     };
+    (executor as unknown as { dispatcher: Record<string, unknown> }).dispatcher.nestedExecutor = nested;
+    (executor as unknown as { events: Record<string, unknown> }).events.nestedExecutor = nested;
 
     await executor.execute(target, confirmedInput, { assistantId });
     await eventsEventually(log, 1);
@@ -143,7 +146,7 @@ describe('events are emitted by real shipped Skills', () => {
     // `dispatch` reports failure as `{ error }` instead of throwing. The
     // execution lifecycle must reflect that failure (no fabricated success) and
     // must not announce the declared business change, because it did not happen.
-    (executor as unknown as Record<string, unknown>).dispatch = async () => ({
+    (executor as unknown as { dispatcher: Record<string, unknown> }).dispatcher.dispatch = async () => ({
       error: 'deliberate failure',
     });
 
@@ -185,11 +188,12 @@ describe('aborted runs announce themselves', () => {
 
   function executorFor(tools: Tool[], log: EventLog): ToolExecutor {
     const executor = new ToolExecutor(new Map(tools.map((tool) => [tool.id, tool])), undefined, log);
-    const stub = executor as unknown as Record<string, unknown>;
-    stub.validateConfigSchema = () => null;
-    stub.resolveCredentials = async () => ({ resolved: {}, sources: {} });
-    stub.ensureWorkspace = () => ({ workspaceId: 'ws-probe', workflow: undefined });
-    stub.dispatch = async () => ({ ok: true });
+    const config = (executor as unknown as { config: Record<string, unknown> }).config;
+    config.validateConfigSchema = () => null;
+    config.resolveCredentials = async () => ({ resolved: {}, sources: {} });
+    const dispatcher = (executor as unknown as { dispatcher: Record<string, unknown> }).dispatcher;
+    dispatcher.dispatch = async () => ({ ok: true });
+    (executor as unknown as Record<string, unknown>).ensureWorkspace = () => ({ workspaceId: 'ws-probe', workflow: undefined });
     return executor;
   }
 
@@ -224,9 +228,8 @@ describe('aborted runs announce themselves', () => {
 
     // No config stub here: this is the real config gate rejecting the run.
     const executor = new ToolExecutor(new Map([[needsConfig.id, needsConfig]]), undefined, log);
-    const stub = executor as unknown as Record<string, unknown>;
-    stub.ensureWorkspace = () => ({ workspaceId: 'ws-probe', workflow: undefined });
-    stub.dispatch = async () => ({ ok: true });
+    (executor as unknown as Record<string, unknown>).ensureWorkspace = () => ({ workspaceId: 'ws-probe', workflow: undefined });
+    (executor as unknown as { dispatcher: Record<string, unknown> }).dispatcher.dispatch = async () => ({ ok: true });
 
     await executor.execute(needsConfig, { confirmation: true }, { assistantId });
     await eventsEventually(log, 1);

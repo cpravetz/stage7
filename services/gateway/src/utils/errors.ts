@@ -18,7 +18,7 @@ export class GatewayError extends NextGenError {
     return new GatewayError(404, message, details);
   }
 
-  static internalError(message = 'Internal Server Error', details?: Record<string, unknown>): GatewayError {
+  static internalError(message = 'Gateway Internal Server Error', details?: Record<string, unknown>): GatewayError {
     return new GatewayError(500, message, details);
   }
 
