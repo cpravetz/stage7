@@ -173,6 +173,30 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
  * every poll spawn another in-process loop, so a single watch accumulated one non-durable runner per
  * minute, forever, each firing the watch independently.
  */
+/**
+ * Thrown when a mission is paused on a question and the caller neither answered
+ * it nor said that the requested configuration has been supplied. Callers turn
+ * this into a conflict response that carries the question back to the user.
+ */
+export class MissionAwaitingInputError extends Error {
+  constructor(readonly question?: string) {
+    super('A non-empty response is required for the pending mission question');
+    this.name = 'MissionAwaitingInputError';
+  }
+}
+
+export function isMissionAwaitingInputError(error: unknown): boolean {
+  return error instanceof MissionAwaitingInputError
+    || (error instanceof Error && error.name === 'MissionAwaitingInputError');
+}
+
+export function isWorkflowAlreadyStartedError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const candidate = error as { name?: unknown; message?: unknown };
+  if (candidate.name === 'WorkflowExecutionAlreadyStartedError') return true;
+  return typeof candidate.message === 'string' && /\balready started\b/i.test(candidate.message);
+}
+
 export function missionStatus(result: unknown): WorkflowResult['status'] {
   const outputs = result && typeof result === 'object'
     ? (result as { outputs?: { status?: string } }).outputs
@@ -239,6 +263,18 @@ export class TemporalClient {
    * second, third, and nth loop for the same watch and the watch would run once per loop per poll.
    */
   private watchFallbacks = new Map<string, Promise<unknown>>();
+
+  /**
+   * Optional durable Temporal client. When it is wired, watch workflows are
+   * started durably and this process only runs a fallback loop if Temporal
+   * genuinely cannot start the workflow. Without it the in-process runner is
+   * the only option.
+   */
+  private client?: {
+    workflow: {
+      start: (workflowType: string, options: Record<string, unknown>) => Promise<unknown>;
+    };
+  };
 
   /**
    * Missions for which mission_started has been broadcast in this process,
@@ -620,6 +656,7 @@ export class TemporalClient {
       clarificationAnswers?: string[];
       interactionResponse?: string;
       useConfiguredCredentials?: boolean;
+      continueWithMessage?: boolean;
       permissionDecision?: 'granted' | 'denied';
       permissionScope?: string;
     } = {},
@@ -697,13 +734,25 @@ export class TemporalClient {
     if (
       pendingInteraction?.kind === 'user_input'
       && !interactionResponse
-      && !(continuation.useConfiguredCredentials && pendingInteraction.credentialRequest)
+      && !continuation.useConfiguredCredentials
     ) {
-      throw new Error('A non-empty response is required for the pending mission question');
+      throw new MissionAwaitingInputError(pendingInteraction.question);
+    }
+    if (
+      pendingInteraction?.kind === 'user_input'
+      && !interactionResponse
+      && continuation.useConfiguredCredentials
+      && !pendingInteraction.credentialRequest
+    ) {
+      // The operator configured the missing service or capability outside the
+      // mission (Tools configuration, a re-run of the setup) and asked the
+      // mission to continue instead of answering a question.
+      interactionResponse = 'The user supplied the requested service or configuration outside the mission. Retry the blocked work and verify the result.';
     }
     if (
       pendingInteraction?.kind === 'user_input'
       && pendingInteraction.credentialRequest
+      && !continuation.continueWithMessage
       && (interactionResponse || continuation.useConfiguredCredentials)
     ) {
       const credentialRequest = pendingInteraction.credentialRequest;
@@ -1177,6 +1226,8 @@ export class TemporalClient {
     const workflowId = `watch-${watchId}`
     logger.info({ watchId }, 'Starting watch workflow');
 
+    if (await this.startDurableWatchWorkflow('WatchWorkflow', workflowId, watchId)) return workflowId;
+
     (async () => {
       const startTime = Date.now()
       try {
@@ -1197,6 +1248,10 @@ export class TemporalClient {
     // each poll is exactly what made the duplicate-loop defect hard to spot in the logs.
     logger.debug({ watchId }, 'Watch orchestrator poll');
 
+    // A watch that is already running durably is the steady state of a scheduler poll. Starting an
+    // in-process loop as well would add a second runner for the same watch.
+    if (await this.startDurableWatchWorkflow('WatchOrchestratorWorkflow', workflowId, watchId)) return workflowId;
+
     this.startWatchFallback(watchId, async () =>
       runWatchLoop(watchId, {
         fetchWatch: (id) => fetchWatchActivity({ watchId: id }),
@@ -1206,6 +1261,40 @@ export class TemporalClient {
     );
 
     return workflowId;
+  }
+
+  /**
+   * Starts the durable watch workflow. Returns true when Temporal owns the run,
+   * including the case where that workflow id is already running. Returns false
+   * when no durable client is configured or the start failed for another reason,
+   * which is the signal to use the in-process fallback.
+   */
+  private async startDurableWatchWorkflow(
+    workflowType: string,
+    workflowId: string,
+    watchId: string,
+  ): Promise<boolean> {
+    const start = this.client?.workflow?.start;
+    if (typeof start !== 'function') return false;
+    try {
+      await start.call(this.client!.workflow, workflowType, {
+        workflowId,
+        args: [watchId],
+        taskQueue: process.env.TEMPORAL_TASK_QUEUE || 'stage7-watch',
+      });
+      logger.info({ watchId, workflowId }, 'Watch workflow started durably');
+      return true;
+    } catch (error) {
+      if (isWorkflowAlreadyStartedError(error)) {
+        logger.debug({ watchId, workflowId }, 'Watch workflow already running durably');
+        return true;
+      }
+      logger.warn(
+        { watchId, workflowId, err: error instanceof Error ? error.message : String(error) },
+        'Watch workflow could not be started durably; using the in-process fallback',
+      );
+      return false;
+    }
   }
 
   /**
@@ -1498,7 +1587,7 @@ export class TemporalClient {
   /**
    * Broadcasts a mission event to WebSocket clients subscribed to the mission via the gateway.
    */
-  async broadcastMissionUpdate(event: Record<string, unknown>): Promise<void> {
+  async broadcastMissionUpdate(event: Record<string, unknown>, options?: { requirePersistence?: boolean }): Promise<void> {
     // Persist event to artifacts service
     const missionId = event.missionId as string | undefined;
     if (missionId) {
@@ -1512,8 +1601,14 @@ export class TemporalClient {
         timestamp: (event.timestamp as number) || Date.now(),
         data: (event.data as Record<string, unknown>) || {},
       });
+      if (options?.requirePersistence && !persisted) {
+        throw new Error('Could not persist the mission message in Artifacts');
+      }
       if (persisted && persisted.id) {
         event = { ...persisted, ...(event.output !== undefined ? { output: event.output } : {}) };
+      }
+      else if (options?.requirePersistence) {
+        throw new Error('Cannot persist a mission message without a mission ID');
       }
     }
 

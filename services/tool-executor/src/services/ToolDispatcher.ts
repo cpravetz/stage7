@@ -131,7 +131,7 @@ export class ToolDispatcher {
       logger.info({ toolId: tool.id, healing: true }, 'Code tool healed by Brain');
       return { success: true, fixedSourceCode };
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      const errorMessage = err instanceof Error ? err.message : String(err);
       logger.error({ toolId: tool.id, error: errorMessage }, 'Code healing failed');
       return { success: false, error: errorMessage };
     }
@@ -305,7 +305,7 @@ database: 'database.js',
       //const entrypoint = (manifest?.entrypoint as string) || 'index.js';
 
       if (!sourceCode) {
-        return { error: 'Code tool is missing sourceCode in manifest' };
+        return { output: { error: 'Code tool is missing sourceCode in manifest' } };
       }
 
       let codeToRun = sourceCode;
@@ -358,7 +358,7 @@ database: 'database.js',
 
         // Classify the error — if it's a code execution error, try healing.
         // If it's a timeout or transient error, also try healing.
-        const classified = ErrorHandler.classify(lastError, tool.id);
+        const classified = ErrorHandler.classify(lastError || 'Tool execution failed without a recorded error message.', tool.id);
 
         if (ErrorHandler.isCodeExecutionError(classified)) {
           const healing = await this.healCodeTool(tool, input, lastError || 'Unknown execution error');
@@ -385,7 +385,7 @@ database: 'database.js',
       }
 
       // All healing attempts exhausted — return classified error
-      const finalClassified = ErrorHandler.classify(lastError, tool.id);
+      const finalClassified = ErrorHandler.classify(lastError || 'Tool execution failed after exhausting healing attempts.', tool.id);
       logger.warn(
         { toolId: tool.id, attempts: healingAttempts, classified: finalClassified.category },
         'Healing exhausted, returning classified error',
@@ -541,7 +541,7 @@ database: 'database.js',
         const serverId = manifest.server as string;
         const client = this.mcpClients.get(serverId);
         if (!client) {
-          return { error: `MCP server '${serverId}' not configured. Register it via registerMCPServer().` };
+          return { output: { error: `MCP server '${serverId}' not configured. Register it via registerMCPServer().` } };
         }
 
         try {
@@ -685,7 +685,7 @@ database: 'database.js',
       };
     }
 
-    if (name.includes('jira') || name.includes('confluence') || name.includes('slack') || name.includes('github')) {
+    if (tool.type !== 'mcp' && (name.includes('jira') || name.includes('confluence') || name.includes('slack') || name.includes('github'))) {
       const codeFile = this.resolveCodeFile(tool);
       if (!codeFile) {
         return { output: { error: `No code file resolved for vendor tool '${tool.name}'` } };
@@ -722,6 +722,10 @@ database: 'database.js',
         outcomeKnown: (exec.data as any).outcomeKnown,
         reconciliation: (exec.data as any).reconciliation,
       };
+    }
+
+    if (tool.type === 'mcp' && !manifest?.server && manifest?.configSchema) {
+      return { output: { error: `MCP tool '${tool.name}' is missing MCP server configuration.` } };
     }
 
     if (name.includes('email') || manifest?.server === 'email-mcp' || capabilities.includes('send')) {
@@ -847,7 +851,7 @@ database: 'database.js',
     }
 
     return {
-      error: `Unsupported tool type: ${tool.type}. Register a real executor or MCP server for this tool.`,
+      output: { error: `Unsupported tool type: ${tool.type}. Register a real executor or MCP server for this tool.` },
       toolName: tool.name,
     };
   }

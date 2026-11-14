@@ -5,6 +5,7 @@ export const EDUCATION_ASSESSMENT_CONTENT_GENERATOR: Tool = {
   name: 'Education Assessment Content Generator',
   description: 'Generates grade-appropriate assessment questions and a complete answer key from a subject, topic, and learning context.',
   type: 'reasoning',
+  schemaVersion: 1,
   manifest: { type: 'reasoning' },
   inputSchema: {
     type: 'object',

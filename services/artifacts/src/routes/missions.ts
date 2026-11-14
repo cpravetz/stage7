@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { artifactsService as service } from '../services/ArtifactsService';
 import multer from 'multer';
 import Storage from '../services/Storage';
-import { asyncHandler, NextGenError } from '@stage7-nextgen/shared';
+import { asyncHandler, NextGenError, sanitizeAgentMessage } from '@stage7-nextgen/shared';
 import { z } from 'zod';
 import { MissionState } from '../types';
 import path from 'path';
@@ -84,6 +84,46 @@ function isoDate(value: unknown): string | undefined {
   if (typeof value !== 'string' && typeof value !== 'number' && !(value instanceof Date)) return undefined;
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
+}
+
+function sanitizeMissionEventForConversation(event: any): any {
+  if (!event || typeof event !== 'object' || Array.isArray(event)) return event;
+  const type = typeof event.type === 'string' ? event.type : '';
+  const conversationText = (value: unknown): unknown =>
+    sanitizeAgentMessage(value, '').text;
+  const sanitizeRecord = (value: Record<string, unknown>): Record<string, unknown> => {
+    const next: Record<string, unknown> = { ...value };
+    for (const key of ['message', 'content', 'text', 'reason', 'question', 'error'] as const) {
+      if (typeof next[key] === 'string') next[key] = conversationText(next[key]);
+    }
+    if (Array.isArray(next.gaps)) {
+      next.gaps = next.gaps
+        .filter((gap): gap is string => typeof gap === 'string')
+        .map(conversationText)
+        .filter(Boolean);
+    }
+    return next;
+  };
+  if (type === 'monologue') {
+    const data = event.data && typeof event.data === 'object' && !Array.isArray(event.data)
+      ? event.data as Record<string, unknown>
+      : {};
+    if (typeof data.text === 'string') return { ...event, data: { ...data, text: conversationText(data.text) } };
+    return event;
+  }
+  if (type === 'task_completed' || type === 'task_incomplete') {
+    const data = event.data && typeof event.data === 'object' && !Array.isArray(event.data)
+      ? event.data as Record<string, unknown>
+      : {};
+    const { output: _output, ...safeData } = data;
+    return { ...event, data: sanitizeRecord(safeData) };
+  }
+  if (/^(?:agent_|question_|permission_|phase_plan_amended$|mission_(?:incomplete|needs_review|failed)$)/.test(type)) {
+    return { ...event, data: sanitizeRecord(event.data && typeof event.data === 'object' && !Array.isArray(event.data)
+      ? event.data as Record<string, unknown>
+      : {}) };
+  }
+  return event;
 }
 
 router.post('/:missionId/recovery-lease', asyncHandler(async (req, res) => {
@@ -190,7 +230,9 @@ router.get('/:missionId/events', asyncHandler(async (req, res) => {
     const missing = derived.filter((d: any) => !storedKeys.has(`${d.type}|${d.data?.phaseId || ''}|${d.data?.taskId || ''}`));
     events = [...events, ...missing];
   }
-  res.json({ events });
+  // Agent reasoning, raw tool manifests and execution receipts are internal
+  // state, not conversation: they are stripped from everything the feed shows.
+  res.json({ events: events.map(sanitizeMissionEventForConversation) });
 }));
 
 router.get('/:missionId/artifacts', asyncHandler(async (req, res) => {
@@ -254,7 +296,7 @@ router.get('/:missionId/artifacts', asyncHandler(async (req, res) => {
           }
         : {},
       ...needsCanonicalLineage
-        ? { artifactId: artifactLineageId, lineageId: artifactLineageId }
+        ? { artifactId: artifactLineageId }
         : {},
       ...isBlocker || artifact.purpose === 'execution-outcome'
         ? {
@@ -286,15 +328,6 @@ router.get('/:missionId/artifacts', asyncHandler(async (req, res) => {
       ? JSON.stringify([
           'artifact',
           enriched.artifactId,
-          enriched.phaseId || '',
-          enriched.taskId || '',
-          enriched.version ?? '',
-          enriched.version === undefined ? enriched.url ?? '' : '',
-        ])
-      : typeof enriched.lineageId === 'string' && enriched.lineageId
-      ? JSON.stringify([
-          'lineage',
-          enriched.lineageId,
           enriched.phaseId || '',
           enriched.taskId || '',
           enriched.version ?? '',
@@ -484,7 +517,6 @@ router.get('/:missionId/artifacts', asyncHandler(async (req, res) => {
       Number(artifacts[candidate].version) > Number(artifacts[latest].version) ? candidate : latest,
     indexes[0]);
     artifacts[latestIndex].isLatest = true;
-    artifacts[latestIndex].lineageId = lineageId;
   }
 
   res.json({ artifacts });
@@ -500,7 +532,8 @@ router.get('/:missionId/artifacts/:artifactId', asyncHandler(async (req, res) =>
     const phases = (plan as any).phases || [];
     for (const phase of phases) {
       for (const artifact of phase.artifacts || []) {
-        if (artifact && typeof artifact === 'object' && String((artifact as any).id) === artifactId) {
+        const a = artifact as any;
+        if (artifact && typeof artifact === 'object' && String(a.id) === artifactId) {
           found = { phaseId: phase.id, ...(artifact as Record<string, unknown>) };
           break;
         }
@@ -508,7 +541,8 @@ router.get('/:missionId/artifacts/:artifactId', asyncHandler(async (req, res) =>
       if (found) break;
       for (const task of phase.tasks || []) {
         for (const artifact of task.artifacts || []) {
-          if (artifact && typeof artifact === 'object' && String((artifact as any).id) === artifactId) {
+          const a = artifact as any;
+          if (artifact && typeof artifact === 'object' && String(a.id) === artifactId) {
             found = { phaseId: phase.id, taskId: task.id, ...(artifact as Record<string, unknown>) };
             break;
           }
@@ -516,7 +550,8 @@ router.get('/:missionId/artifacts/:artifactId', asyncHandler(async (req, res) =>
         if (!found) {
           const storedTask = await service.getMissionTask(missionId, task.id);
           for (const artifact of storedTask?.artifacts || []) {
-            if (artifact && typeof artifact === 'object' && String((artifact as any).id) === artifactId) {
+            const a = artifact as any;
+            if (artifact && typeof artifact === 'object' && String(a.id) === artifactId) {
               found = { phaseId: phase.id, taskId: task.id, ...(artifact as Record<string, unknown>) };
               break;
             }
@@ -533,7 +568,8 @@ router.get('/:missionId/artifacts/:artifactId', asyncHandler(async (req, res) =>
     for (const phase of phases) {
       for (const task of phase.tasks || []) {
         for (const artifact of task.artifacts || []) {
-          if (artifact && typeof artifact === 'object' && String((artifact as any).id) === artifactId) {
+          const a = artifact as any;
+          if (artifact && typeof artifact === 'object' && String(a.id) === artifactId) {
             found = { phaseId: phase.phaseId, taskId: task.taskId, ...(artifact as Record<string, unknown>) };
             break;
           }
@@ -545,6 +581,71 @@ router.get('/:missionId/artifacts/:artifactId', asyncHandler(async (req, res) =>
   }
   if (!found) throw NextGenError.notFound('Artifact not found');
   res.json({ artifact: found });
+}));
+
+router.delete('/:missionId/artifacts/:artifactId', asyncHandler(async (req, res) => {
+  const { missionId, artifactId } = req.params;
+  let deleted = false;
+
+  const plan = await service.getMissionPlan(missionId);
+  if (plan && Array.isArray(plan.artifacts)) {
+    const initialLength = plan.artifacts.length;
+    plan.artifacts = plan.artifacts.filter((a: any) => String(a.id) !== artifactId);
+    if (plan.artifacts.length !== initialLength) {
+      await service.saveMissionPlan(missionId, plan);
+      deleted = true;
+    }
+  }
+
+  if (!deleted) {
+    const phases = (plan as any)?.phases || [];
+    for (const phase of phases) {
+      if (Array.isArray(phase.artifacts)) {
+        const initialLength = phase.artifacts.length;
+        phase.artifacts = phase.artifacts.filter((a: any) => String(a.id) !== artifactId);
+        if (phase.artifacts.length !== initialLength) {
+          await service.updateMissionPhase(missionId, phase.id, { artifacts: phase.artifacts });
+          deleted = true;
+          break;
+        }
+      }
+      if (Array.isArray(phase.tasks)) {
+        for (const task of phase.tasks) {
+          const taskData = await service.getMissionTask(missionId, task.id);
+          if (taskData && Array.isArray(taskData.artifacts)) {
+            const initialLength = taskData.artifacts.length;
+            taskData.artifacts = taskData.artifacts.filter((a: any) => String(a.id) !== artifactId);
+            if (taskData.artifacts.length !== initialLength) {
+              await service.updateMissionTask(missionId, task.id, { artifacts: taskData.artifacts });
+              deleted = true;
+              break;
+            }
+          }
+        }
+        if (deleted) break;
+      }
+    }
+  }
+
+  if (!deleted) {
+    const missionEvents = await service.listMissionEvents(missionId);
+    for (const event of missionEvents) {
+      if (event.type === 'task_completed' && Array.isArray(event.data?.artifacts)) {
+        const initialLength = event.data.artifacts.length;
+        event.data.artifacts = event.data.artifacts.filter((a: any) => String(a.id) !== artifactId);
+        if (event.data.artifacts.length !== initialLength) {
+          deleted = true;
+          break;
+        }
+      }
+    }
+  }
+
+  if (!deleted) {
+    throw NextGenError.notFound('Artifact not found');
+  }
+
+  res.status(204).send();
 }));
 
 // Attach an artifact to a mission (phase-level or task-level)

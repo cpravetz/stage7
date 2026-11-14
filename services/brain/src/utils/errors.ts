@@ -9,7 +9,7 @@ export class BrainError extends NextGenError {
     return new BrainError(message, 404, details);
   }
 
-  static internalError(message: string = 'Internal server error', details?: Record<string, unknown>) {
+  static internalError(message: string = 'Brain Internal server error', details?: Record<string, unknown>) {
     return new BrainError(message, 500, details);
   }
 

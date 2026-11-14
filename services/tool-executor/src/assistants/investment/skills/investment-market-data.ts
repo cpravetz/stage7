@@ -18,6 +18,7 @@ const marketDataConfigSchema = {
       description: 'Upstream service API key (set in this Skill configuration, or a vault secret)',
       configKey: 'apiKey',
       label: 'upstream service API key',
+      isSecret: true,
     },
   },
 };

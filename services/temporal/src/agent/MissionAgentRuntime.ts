@@ -12,12 +12,15 @@ import {
   DEFAULT_AGENT_EXECUTION_POLICY,
   MissionArtifact,
   MissionArtifactSchema,
+  sanitizeAgentMessage,
+  sanitizeAgentMessageList,
   describeRequestError,
   httpRequest,
 } from '@stage7-nextgen/shared';
 import { Plan, Phase, Task } from '@stage7-nextgen/shared';
 import { z } from 'zod';
 import { BrainClient, BrainValidationError } from '../brain/BrainClient';
+import { extractArtifacts } from './TaskResultParser';
 import { parseInterruption as parseTaskInterruption } from './TaskInterruption';
 import { applyRuntimeTaskRequirements } from './TaskRequirements';
 import { buildTaskPrompt } from './TaskPromptBuilder';
@@ -41,7 +44,7 @@ export const MISSION_AGENT_ROLES = {
   'mission-director': { agentIdPrefix: 'mission-director', agentName: 'Mission Director', agentRole: 'mission-director' },
   'phase-reviewer': { agentIdPrefix: 'phase-reviewer', agentName: 'Phase Reviewer', agentRole: 'phase-reviewer' },
   'mission-evaluator': { agentIdPrefix: 'mission-evaluator', agentName: 'Mission Evaluator', agentRole: 'mission-evaluator' },
-  executor: { agentIdPrefix: 'assistant', agentName: 'Mission Agent', agentRole: 'assistant' },
+  executor: { agentIdPrefix: 'mission-executor', agentName: 'Mission Executor', agentRole: 'mission-executor' },
 } as const;
 
 export type MissionAgentRoleKey = keyof typeof MISSION_AGENT_ROLES;
@@ -410,6 +413,10 @@ export class MissionAgentRuntime {
   }): Promise<void> {
     if (!this.broadcast) return;
     const identity = resolveAgentIdentity(params.agentRole);
+    const text = sanitizeAgentMessage(
+      params.text || params.thought,
+      `${identity.agentName} is working on the mission.`,
+    ).text;
     await this.broadcast({
       type: 'monologue',
       missionId: this.missionId,
@@ -421,7 +428,7 @@ export class MissionAgentRuntime {
         ...(params.phaseId ? { phaseId: params.phaseId } : {}),
         ...(params.taskId ? { taskId: params.taskId } : {}),
         thought: params.thought,
-        text: params.text || params.thought,
+        text,
         ...(params.kind ? { kind: params.kind } : {}),
         ...(params.data || {}),
       },
@@ -883,6 +890,9 @@ export class MissionAgentRuntime {
         );
         continue;
       }
+      review.gaps = review.gaps
+        .map((gap) => sanitizeAgentMessage(gap, 'The phase evidence is incomplete.').text)
+        .filter(Boolean);
       if (review.satisfied) {
         if (review.followUpTask !== null && review.followUpTask !== undefined) {
           validationIssue = 'followUpTask must be null when satisfied is true';
@@ -1079,6 +1089,18 @@ export class MissionAgentRuntime {
         );
         continue;
       }
+      const reviewGaps = review.gaps
+        .map((gap) => sanitizeAgentMessage(gap, '').text)
+        .filter(Boolean);
+      if (reviewGaps.length !== review.gaps.length) {
+        validationIssue = 'every gap must be a user-facing explanation';
+        await this.reportBrainComplaint(
+          result.requestId,
+          `Mission completion-review validation failed: ${validationIssue}`,
+        );
+        continue;
+      }
+      review.gaps = reviewGaps;
       if (
         !review.satisfied
         && (review.gaps as string[]).some((gap) => !completedTaskSummaries.some((summary) =>
@@ -1098,14 +1120,14 @@ export class MissionAgentRuntime {
         phaseId: 'mission-review',
         thought: review.satisfied
           ? `Mission completion review: I evaluated the observed task outputs and artifacts against the mission goal and found all requirements satisfied. The mission may complete.`
-          : `Mission completion review: I evaluated the observed task outputs and artifacts against the mission goal and found ${review.gaps.length} unmet requirement(s): ${review.gaps.join('; ')}. The mission must not be marked complete.`,
+          : `Mission completion review: I evaluated the observed task outputs and artifacts against the mission goal and found ${reviewGaps.length} unmet requirement(s): ${sanitizeAgentMessageList(reviewGaps, 'the mission evidence is incomplete')}. The mission must not be marked complete.`,
         text: review.satisfied
           ? 'Mission completion review: all requirements satisfied.'
-          : `Mission completion review: ${review.gaps.length} unmet requirement(s) found.`,
+          : `Mission completion review: ${reviewGaps.length} unmet requirement(s) found.`,
         kind: 'completion-review',
-        data: { satisfied: review.satisfied, gaps: review.gaps },
+        data: { satisfied: review.satisfied, gaps: reviewGaps },
       });
-      return { satisfied: review.satisfied, gaps: review.gaps as string[] };
+      return { satisfied: review.satisfied, gaps: reviewGaps };
     }
     const taskEvidence = completedTaskSummaries
       .map((summary) => `${summary.taskId} (${summary.expectedArtifacts?.join(', ') || summary.artifactNames.join(', ') || 'no named deliverable'})`)
@@ -1247,6 +1269,7 @@ export class MissionAgentRuntime {
     retryGuidance?: string,
     continuation?: { response: string; pendingInteraction: MissionPendingInteraction },
     missionGoal?: string,
+    userMessages?: string[],
   ): Promise<TaskExecutionResult> {
     applyRuntimeTaskRequirements(task, missionGoal);
     const dependencyIds = task.dependsOnTaskIds || [];
@@ -1278,6 +1301,9 @@ export class MissionAgentRuntime {
       : '';
     const taskPrompt = [
       basePrompt,
+      ...(userMessages?.length
+        ? [`Subsequent user messages (in order; use these as mission context and do not ask again for values already supplied): ${JSON.stringify(userMessages)}`]
+        : []),
       ...(missingDependencies.length > 0
         ? [`Missing completed dependency results for task ID(s): ${missingDependencies.join(', ')}. Do not treat this as mission failure. Ask the responsible agent/task to provide or recreate the missing artifact or result, or locate it if it exists under a different name; report an internal blocker only if it cannot be recovered after that coordination.`]
         : []),
@@ -1426,7 +1452,13 @@ export class MissionAgentRuntime {
         type: 'monologue',
         missionId: this.missionId,
         timestamp: Date.now(),
-        data: { agentId, taskId: submitted.taskId, phaseId: request.phaseId, thought: reasoning, text: reasoning },
+        data: {
+          agentId,
+          taskId: submitted.taskId,
+          phaseId: request.phaseId,
+          thought: reasoning,
+          text: sanitizeAgentMessage(reasoning, 'An Agent reported progress on this task.').text,
+        },
       });
     }
     return {
@@ -1599,7 +1631,13 @@ export class MissionAgentRuntime {
           type: 'monologue',
           missionId: this.missionId,
           timestamp: Date.now(),
-          data: { agentId, taskId: task.taskId, phaseId, thought: reasoning, text: reasoning },
+          data: {
+            agentId,
+            taskId: task.taskId,
+            phaseId,
+            thought: reasoning,
+            text: sanitizeAgentMessage(reasoning, 'An Agent reported progress on this task.').text,
+          },
         }).catch((e) => logger.warn({ err: e instanceof Error ? e.message : String(e), taskId: task.taskId }, 'Failed to broadcast monologue for recovered task result'));
       }
     }
@@ -1631,11 +1669,11 @@ export class MissionAgentRuntime {
     taskId: string,
   ): MissionArtifact[] {
     if (value === undefined || (Array.isArray(value) && value.length === 0)) {
-      return this.extractArtifacts(output, expected);
+      return extractArtifacts(output, expected);
     }
     if (!Array.isArray(value)) {
       logger.warn({ taskId }, 'Ignoring malformed Agent artifact metadata and preserving textual task output');
-      return this.extractArtifacts(output, expected);
+      return extractArtifacts(output, expected);
     }
     return value.flatMap((candidate) => {
       if (
@@ -1752,33 +1790,8 @@ export class MissionAgentRuntime {
     }
     return [
       ...deliverables,
-      { name, type: 'evidence', content: JSON.stringify(actionReceipts), purpose: 'execution-outcome', visibility: 'internal' },
+      { id: `artifact-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`, name, type: 'evidence', content: JSON.stringify(actionReceipts), purpose: 'execution-outcome', visibility: 'internal' },
     ];
-  }
-
-  private extractArtifacts(content: string, expected: string[]): MissionArtifact[] {
-    if (expected.length === 0) return [];
-    const artifacts: MissionArtifact[] = [];
-    const headings = [...content.matchAll(/^##[ \t]+(.+?)[ \t]*$/gm)];
-    const normalize = (name: string) => name.trim().toLocaleLowerCase();
-    for (const [index, heading] of headings.entries()) {
-      const name = heading[1]?.trim();
-      if (!name) continue;
-      const start = (heading.index ?? 0) + heading[0].length;
-      const end = headings[index + 1]?.index ?? content.length;
-      const section = content.slice(start, end).trim();
-      if (!section) continue;
-      const matched = expected.find((artifactName) => normalize(artifactName) === normalize(name));
-      if (expected.length > 0 && !matched) continue;
-      artifacts.push({
-        name: matched || `${name.replace(/[^a-z0-9-]/gi, '-').toLowerCase()}.md`,
-        type: this.inferType(section),
-        content: section,
-        purpose: 'deliverable',
-        isDeliverable: true,
-      });
-    }
-    return artifacts;
   }
 
   private inferType(content: string): string {

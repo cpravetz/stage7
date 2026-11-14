@@ -25,7 +25,7 @@ export class HttpTransport {
       } catch (error) {
         logger.error({ error }, 'HTTP transport error');
         res.status(500).json({
-          content: [{ type: 'text', text: 'Internal server error' }],
+          content: [{ type: 'text', text: 'Http transport Internal server error' }],
           isError: true,
         });
       }

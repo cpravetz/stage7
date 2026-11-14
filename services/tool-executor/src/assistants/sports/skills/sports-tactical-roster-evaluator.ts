@@ -32,7 +32,7 @@ export const TACTICAL_ROSTER_EVALUATOR = createDeclarativeCodeSkill({
   id: 'sports-tactical-roster-evaluator',
   name: 'Tactical & Roster Strategy Evaluator',
   description: 'Advises tactical adjustments and lineup optimizations by synthesizing player performance metrics, opponent match-up data, and game film trends. Computes synergy scores, weakness indices, and strategic recommendations.',
-  persistenceEnvVar: 'ASSISTANT_HOME',
+  persistenceEnvVar: 'SPORTS_GROUP_A_HOME',
   inputSchema: TACTICAL_ROSTER_EVALUATOR_INPUT,
   outputSchema: sportsResultSchema('Tactical evaluation result'),
   tier: 'advise',
@@ -58,7 +58,6 @@ export const TACTICAL_ROSTER_EVALUATOR = createDeclarativeCodeSkill({
     }
   },
   handler: async function handler(input, ctx) {
-      const _sgHome = process.env.SPORTS_GROUP_A_HOME;
       const entity = input.entity || input.teamId || input.playerId || '';
       const opponent = input.opponent || input.opponentId || '';
       const sport = input.sport || 'generic';

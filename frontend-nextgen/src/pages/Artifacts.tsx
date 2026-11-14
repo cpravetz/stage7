@@ -58,6 +58,10 @@ function getMissionStatusLabel(status: string): string {
   }
 }
 
+function isMissionFinished(status: string): boolean {
+  return ['completed', 'failed', 'canceled', 'incomplete'].includes(status);
+}
+
 function truncateJSON(obj: Record<string, unknown>, max = 60): string {
   let str = JSON.stringify(obj);
   if (str.length > max) {
@@ -176,6 +180,16 @@ const Persistence = () => {
     if (!window.confirm(`Delete document ${id}?`)) return;
     await deleteResource(`/api/artifacts/documents/${id}`);
     setDocuments(documents.filter((d) => d.id !== id));
+  };
+
+  const handleDeleteMissionArtifact = async (missionId: string, artifactId: string) => {
+    if (!window.confirm(`Delete artifact ${artifactId}?`)) return;
+    try {
+      await deleteResource(`/api/artifacts/missions/${encodeURIComponent(missionId)}/artifacts/${encodeURIComponent(artifactId)}`);
+      await loadMissionsWithArtifacts();
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Failed to delete artifact');
+    }
   };
 
   const uploadArtifactVersion = async (missionId: string, artifact: MissionArtifact) => {
@@ -390,6 +404,16 @@ const Persistence = () => {
                                       Upload new version
                                     </button>
                                   )}
+                                  {isMissionFinished(m.status) && group.latest.id && (
+                                    <button
+                                      type="button"
+                                      className="danger small"
+                                      onClick={() => handleDeleteMissionArtifact(m.missionId, group.latest.id!)}
+                                      aria-label={`Delete artifact ${group.latest.id}`}
+                                    >
+                                      Delete
+                                    </button>
+                                  )}
                                 </div>
                                 <MissionArtifactContent artifact={group.latest} />
                                 {group.artifacts.length > 1 && (
@@ -404,17 +428,27 @@ const Persistence = () => {
                                     <summary style={{ cursor: 'pointer' }}>
                                       {group.artifacts.length - 1} previous version{group.artifacts.length === 2 ? '' : 's'}
                                     </summary>
-                                    {historyOpen && oldVersions.map((artifact, index) => (
-                                      <article key={artifact.id || `${artifact.name}-${index}`} style={{ padding: '8px 0', borderTop: '1px solid #334155' }}>
-                                        <div className="artifact-header">
-                                          <strong>{artifact.name || artifact.id || 'Untitled artifact'}</strong>
-                                          <span className="badge">{getArtifactLabel(artifact, index, group.artifacts.length)}</span>
-                                          {artifact.status && <span className={`badge ${artifact.status}`}>{artifact.status.replace('_', ' ')}</span>}
-                                          {artifact.createdAt && <time className="muted">{new Date(artifact.createdAt).toLocaleString()}</time>}
-                                        </div>
-                                        <MissionArtifactContent artifact={artifact} />
-                                      </article>
-                                    ))}
+{historyOpen && oldVersions.map((artifact, index) => (
+                                        <article key={artifact.id || `${artifact.name}-${index}`} style={{ padding: '8px 0', borderTop: '1px solid #334155' }}>
+                                          <div className="artifact-header">
+                                            <strong>{artifact.name || artifact.id || 'Untitled artifact'}</strong>
+                                            <span className="badge">{getArtifactLabel(artifact, index, group.artifacts.length)}</span>
+                                            {artifact.status && <span className={`badge ${artifact.status}`}>{artifact.status.replace('_', ' ')}</span>}
+                                            {artifact.createdAt && <time className="muted">{new Date(artifact.createdAt).toLocaleString()}</time>}
+                                            {isMissionFinished(m.status) && artifact.id && (
+                                              <button
+                                                type="button"
+                                                className="danger small"
+                                                onClick={() => handleDeleteMissionArtifact(m.missionId, artifact.id!)}
+                                                aria-label={`Delete artifact ${artifact.id}`}
+                                              >
+                                                Delete
+                                              </button>
+                                            )}
+                                          </div>
+                                          <MissionArtifactContent artifact={artifact} />
+                                        </article>
+                                      ))}
                                   </details>
                                 )}
                               </article>

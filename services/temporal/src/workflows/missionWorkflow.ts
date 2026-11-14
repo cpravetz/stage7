@@ -11,6 +11,8 @@ import {
   WorkflowInput,
   WorkflowResult,
   completedTaskIdsWithSummaries,
+  isConfigurationBlocker,
+  missionConfigurationQuestion,
   recoveryGapFingerprint,
   recoveryProgressSignature,
   hasRecoveryProgress,
@@ -149,7 +151,7 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
           id: 'phase-1-task-1',
           title: 'Complete the requested outcome',
           description: input.prompt,
-          agentRole: 'assistant',
+agentRole: 'mission-executor',
           systemPrompt: `Achieve the requested outcome: ${input.prompt}. Do not invent missing information. Try authorized alternatives first; if a specific required value is unavailable and no safe alternative can complete the outcome, ask one focused question for that value.`,
           dependsOnTaskIds: [],
           expectedArtifacts: [],
@@ -472,6 +474,48 @@ export async function missionWorkflow(input: WorkflowInput): Promise<WorkflowRes
               );
               break;
             }
+            // A repeated capability/configuration blocker cannot be resolved by
+            // replanning: the operator has to supply the missing service or
+            // configuration. Pause visibly instead of looping on the same gap.
+            if (!madeProgress && isConfigurationBlocker(review.gaps)) {
+              const blockingTask = review.amendment || phase.tasks.at(-1);
+              if (blockingTask) {
+                const question = missionConfigurationQuestion(input.prompt);
+                logger.warn(
+                  { missionId: input.missionId, phaseId: phase.id, taskId: blockingTask.id, gaps: review.gaps },
+                  'Mission phase is blocked on missing provider configuration; pausing for the user to configure it',
+                );
+                await phaseActivities.requestMissionUserInputActivity({ input, plan, phase, task: blockingTask, question });
+                const pendingInteraction: MissionPendingInteraction = {
+                  kind: 'user_input',
+                  phaseId: phase.id,
+                  taskId: blockingTask.id,
+                  taskTitle: blockingTask.title,
+                  agentRole: blockingTask.agentRole,
+                  question,
+                  actionReceipts: [],
+                  resumeCount: 0,
+                };
+                phaseOutput.status = 'incomplete';
+                phase.status = 'in_progress';
+                await phaseActivities.finishMissionPhaseActivity({ input, phase, tasks: phaseOutput.tasks });
+                phases.push(phaseOutput);
+                return {
+                  missionId: input.missionId,
+                  status: 'awaiting_review',
+                  output: {
+                    plan,
+                    outputs: {
+                      phases,
+                      status: 'awaiting_user_input',
+                      pendingInteraction,
+                    },
+                  },
+                  startedAt,
+                  completedAt: Date.now(),
+                };
+              }
+            }
             if (review.amendment && noProgressGuidance) {
               review.amendment.systemPrompt = `${review.amendment.systemPrompt}
 ${noProgressGuidance}`;
@@ -484,7 +528,7 @@ ${noProgressGuidance}`;
                 id: `${phase.id}-amendment-${amendmentIndex}`,
                 title: `Address phase gaps (review ${reviewIndex})`,
                 description: `Address remaining gaps: ${(review.gaps || []).join('; ') || 'unspecified gaps'}`,
-                agentRole: 'assistant',
+agentRole: 'mission-executor',
                 systemPrompt: `Mission goal: ${input.prompt}\nPhase goal: ${phase.name} — ${phase.goal}\nResolve the following gaps using the available context and recorded task outputs: ${(review.gaps || []).join('; ') || 'unspecified gaps'}. Focus only on accomplishing the requested mission outcome or reporting a concrete blocker. Do not invent unrelated work, and do not create or request design documents, plans, or substitute artifacts unless the mission goal explicitly requires them as deliverables.${noProgressGuidance}`,
                 dependsOnTaskIds: phase.tasks.map((t: any) => t.id),
                 expectedArtifacts: [],

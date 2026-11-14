@@ -47,7 +47,7 @@ router.post(
 router.get(
   '/tools',
   asyncHandler(async (_req: Request, res: Response) => {
-    const tools = registry.list();
+    const tools = registry.list().filter((t) => t.isSkill !== true);
     res.json({ tools });
   })
 )
@@ -170,20 +170,31 @@ router.post(
         fullTool.externalConfig = { ...(registered.externalConfig ?? {}), ...incomingConfig };
       }
     } else {
-      fullTool = {
-        id: (tool.id as string) || `tool-${Date.now()}`,
+      // Ensure the tool is registered before execution so it appears in the
+      // tools catalog and can be configured via /tools before being used in a task.
+      const stableId = (typeof tool.id === 'string' && tool.id.trim().length > 0 && !/^tool-\d+$/.test(tool.id))
+        ? tool.id.trim()
+        : `tool-${String(tool.name || 'unknown').replace(/[^a-z0-9_-]/gi, '-').toLowerCase()}`;
+      const toolToRegister: Tool = {
+        id: stableId,
         name: tool.name as string,
         description: (tool.description as string) || '',
         type: tool.type as Tool['type'],
         manifest: (tool.manifest as Record<string, unknown>) || {},
         inputSchema: tool.inputSchema as Record<string, unknown> | undefined,
-        configSchema: tool.configSchema as Record<string, unknown> | undefined,
         outputSchema: tool.outputSchema as Record<string, unknown> | undefined,
+        configSchema: tool.configSchema as Record<string, unknown> | undefined,
         createdAt: new Date(),
         updatedAt: new Date(),
-        isSkill: tool.isSkill,
+        isSkill: tool.isSkill ?? false,
         externalConfig: incomingConfig,
       };
+      try {
+        registry.registerOrReplace(toolToRegister);
+      } catch (err) {
+        logger.warn({ toolId: stableId, err: err instanceof Error ? err.message : String(err) }, 'Failed to register tool before execution');
+      }
+      fullTool = registry.get(stableId) || toolToRegister;
     }
 
     // If the resolved tool is a skill, require assistant context header

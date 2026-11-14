@@ -14,7 +14,7 @@
           "title": "Google API Key",
           "description": "Google API Key for Custom Search API",
           "sensitive": true,
-          "required": true,
+          "required": false,
           "envVar": "GOOGLE_API_KEY",
           "label": "Google API Key"
         },
@@ -22,7 +22,7 @@
           "type": "string",
           "title": "Google Search Engine ID",
           "description": "Google Custom Search Engine ID (CX)",
-          "required": true,
+          "required": false,
           "envVar": "GOOGLE_SEARCH_ENGINE_ID",
           "label": "Google Search Engine ID"
         },
@@ -31,7 +31,7 @@
           "title": "LangSearch API Key",
           "description": "LangSearch API key",
           "sensitive": true,
-          "required": true,
+          "required": false,
           "envVar": "LANGSEARCH_API_KEY",
           "label": "LangSearch API Key"
         },
@@ -44,7 +44,7 @@
           "label": "SearxNG URL"
         }
       },
-      "required": ["google_api_key", "google_search_engine_id", "langsearch_api_key"]
+      "required": []
     }
   },
   "inputSchema": {

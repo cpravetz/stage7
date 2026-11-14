@@ -75,7 +75,10 @@ router.post('/workers/:workerId/fail', asyncHandler(async (req, res) => {
   if (!taskId) {
     throw WorkerPoolError.badRequest('Missing taskId');
   }
-  await pool.failTask(workerId, taskId, error || 'Unknown error');
+  if (!error || typeof error !== 'string' || !error.trim()) {
+    throw WorkerPoolError.badRequest('Missing error detail for failed task');
+  }
+  await pool.failTask(workerId, taskId, error.trim());
   res.json({ failed: true });
 }));
 

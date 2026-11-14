@@ -44,6 +44,7 @@ const Missions = () => {
   const deleteMission = useMissionsStore((s) => s.deleteMission);
   const deleteMissions = useMissionsStore((s) => s.deleteMissions);
   const updateMissionStatus = useMissionsStore((s) => s.updateMissionStatus);
+  const retryMission = useMissionsStore((s) => s.retryMission);
 
   const [showCreate, setShowCreate] = useState(false);
   const [missionId, setMissionId] = useState('');
@@ -135,7 +136,7 @@ const Missions = () => {
       updateMissionStatus(workflowId, result.status);
     } catch (err) {
       console.error(`Failed to ${action} mission:`, err);
-      alert(`Failed to ${action} mission: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      alert(`Failed to ${action} mission: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
@@ -488,7 +489,18 @@ const Missions = () => {
                                 </button>
                               )}
                               {['failed', 'incomplete', 'canceled'].includes(m.status.toLowerCase()) && (
-                                <button className="secondary small" onClick={() => window.location.href = `/missions/${encodeURIComponent(m.workflowId)}`} title="Retry mission with guidance">
+                                <button
+                                  className="secondary small"
+                                  onClick={async () => {
+                                    try {
+                                      const result = await retryMission(m.workflowId, '');
+                                      window.location.href = `/missions/${encodeURIComponent(result.workflowId)}`;
+                                    } catch (err) {
+                                      alert(`Retry failed: ${err instanceof Error ? err.message : String(err)}`);
+                                    }
+                                  }}
+                                  title="Retry mission"
+                                >
                                   Retry
                                 </button>
                               )}

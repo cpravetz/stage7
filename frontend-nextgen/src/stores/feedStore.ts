@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { friendlyMissionError } from '../utils/missionEvents';
+import { friendlyMissionError, missionGapText, sanitizeAgentMessage } from '../utils/missionEvents';
 
 export type FeedEventType =
   | 'log'
@@ -130,7 +130,7 @@ export function normalize(raw: unknown): FeedEvent | null {
             ? data.task as Record<string, unknown>
             : undefined;
           const taskTitle = typeof task?.title === 'string' ? task.title.trim() : '';
-          const gapText = gaps.length > 0 ? gaps.join('; ').slice(0, 240) : '';
+          const gapText = missionGapText(gaps).slice(0, 240);
           message = `Phase plan amended: ${(data.phaseId as string) || ''}`
             + (gapText ? ` — Review noted: ${gapText}.` : '')
             + (taskTitle ? ` Follow-up task added: ${taskTitle}.` : '');
@@ -218,7 +218,7 @@ export function normalize(raw: unknown): FeedEvent | null {
         const reason = typeof data.reason === 'string'
           ? data.reason
           : Array.isArray(data.gaps)
-            ? Array.from(new Set(data.gaps.filter((gap): gap is string => typeof gap === 'string'))).join('; ')
+            ? missionGapText(data.gaps.filter((gap): gap is string => typeof gap === 'string'))
             : '';
         message = reason
           ? `Mission incomplete: ${reason} — retry this mission to address the unmet requirements.`
@@ -260,6 +260,26 @@ export function normalize(raw: unknown): FeedEvent | null {
         else if (data.prompt) message = `Prompt: ${String(data.prompt).slice(0, 80)}`;
         else message = type;
     }
+  }
+
+  const isAgentAuthoredMessage = type === 'assistant'
+    || type === 'monologue'
+    || type === 'agent_delegation'
+    || type === 'agent_acknowledgement'
+    || type === 'agent_response'
+    || type === 'agent_error'
+    || type === 'task_completed'
+    || type === 'task_incomplete'
+    || type === 'task_failed';
+  if (isAgentAuthoredMessage) {
+    message = sanitizeAgentMessage(
+      message,
+      type === 'agent_error'
+        ? 'An Agent reported an error.'
+        : type.startsWith('task_')
+          ? 'An Agent completed a task step.'
+          : 'An Agent responded.',
+    ).text;
   }
 
   const normalizedMeta: Record<string, unknown> = data && Object.keys(data).length ? { ...data } : {};

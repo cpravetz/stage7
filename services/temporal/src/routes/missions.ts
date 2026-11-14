@@ -1,7 +1,7 @@
 console.log('missions route module loaded');
 import { MissionOrchestrator } from '../planner/MissionOrchestrator';
 import { Router, Request, Response } from 'express';
-import { TemporalClient } from '../client/TemporalClient';
+import { TemporalClient, isMissionAwaitingInputError } from '../client/TemporalClient';
 import { WorkflowInput, MissionTaskCheckpoint } from '../types/workflow';
 import { asyncHandler, NextGenError, PlanSchema, logger } from '@stage7-nextgen/shared';
 import { getMissionResumeProgress } from '../recovery/missionProgress';
@@ -294,13 +294,36 @@ router.post(
     if (permissionScope !== undefined && !['task', 'assistant', 'all_agents'].includes(permissionScope)) {
       throw NextGenError.badRequest('permissionScope must be task, assistant, or all_agents');
     }
-    const status = await client.resumeMission(workflowId, {
-      ...(clarificationAnswers ? { clarificationAnswers } : {}),
-      ...(interactionResponse ? { interactionResponse } : {}),
-      ...(useConfiguredCredentials !== undefined ? { useConfiguredCredentials } : {}),
-      ...(permissionDecision ? { permissionDecision } : {}),
-      ...(permissionScope ? { permissionScope } : {}),
-    });
+    let status: 'running' | 'resuming';
+    try {
+      status = await client.resumeMission(workflowId, {
+        ...(clarificationAnswers ? { clarificationAnswers } : {}),
+        ...(interactionResponse ? { interactionResponse } : {}),
+        ...(useConfiguredCredentials !== undefined ? { useConfiguredCredentials } : {}),
+        ...(permissionDecision ? { permissionDecision } : {}),
+        ...(permissionScope ? { permissionScope } : {}),
+      });
+    } catch (error) {
+      // The mission is waiting on an answer: that is the client's to resolve, not
+      // a server fault, so report it as a conflict with the pending question.
+      if (isMissionAwaitingInputError(error)) {
+        const question = error instanceof Error && 'question' in error
+          ? (error as { question?: string }).question
+          : undefined;
+        const pendingInteraction = (await client.getMissionResult(workflowId))?.output as
+          | { outputs?: { pendingInteraction?: { question?: string } } }
+          | undefined;
+        throw new NextGenError(
+          'A response is required before this mission can resume',
+          409,
+          {
+            status: 'awaiting_input',
+            question: question ?? pendingInteraction?.outputs?.pendingInteraction?.question,
+          },
+        );
+      }
+      throw error;
+    }
     res.status(202).json({ status });
   }),
 );
@@ -360,7 +383,7 @@ router.post(
     };
 
     // The broadcast persists the event as well, so the message is recorded once.
-    await client.broadcastMissionUpdate(event);
+    await client.broadcastMissionUpdate(event, { requirePersistence: true });
 
     const active = MissionOrchestrator.getActive(missionId);
     if (active && role === 'user') {
@@ -369,7 +392,9 @@ router.post(
         res.status(202).json({ status: 'accepted', acknowledgement: result.acknowledgement, response: result.response });
         return;
       } catch (err) {
-        // fall through
+        logger.error({ missionId, error: err instanceof Error ? err.message : String(err) }, 'Failed to process active mission message');
+        res.status(500).json({ error: 'The mission received the message but could not process it.' });
+        return;
       }
     }
 
@@ -383,13 +408,10 @@ router.post(
       try {
         const result = await client.getMissionResult(workflowId);
         const pendingInteraction = (result?.output as { outputs?: { pendingInteraction?: { kind?: string; credentialRequest?: { toolId?: string; missingCredentials?: Array<{ key?: string; label?: string }> } | undefined } | undefined } | undefined } | undefined)?.outputs?.pendingInteraction;
-        const hasCredentialRequest = Boolean(pendingInteraction?.credentialRequest);
         const isAwaitingInput = result?.status === 'awaiting_review' && pendingInteraction?.kind === 'user_input';
 
         if (isAwaitingInput) {
-          await client.resumeMission(workflowId, {
-            ...(hasCredentialRequest ? { useConfiguredCredentials: true } : { interactionResponse: content }),
-          });
+          await client.resumeMission(workflowId, { interactionResponse: content, continueWithMessage: true });
           res.status(202).json({ status: 'resuming' });
           return;
         }
@@ -402,7 +424,7 @@ router.post(
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         logger.error({ missionId, workflowId, error: message }, 'Failed to resume mission from user message');
-        res.status(202).json({ status: 'accepted', error: message });
+        res.status(409).json({ status: 'not_resumed', error: message });
         return;
       }
     }

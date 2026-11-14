@@ -17,6 +17,8 @@ export interface SearchResult {
 interface SearchProvider {
   name: string;
   performanceScore: number;
+  /** True when this provider's required configuration/credentials are present (or none are required). */
+  isConfigured(): boolean;
   search(query: string, options: SearchOptions): Promise<SearchResult[]>;
   searchWithRetry(query: string, options: SearchOptions): Promise<SearchResult[]>;
   updatePerformance(success: boolean): void;
@@ -44,6 +46,11 @@ abstract class BaseSearchProvider implements SearchProvider {
   constructor(name: string, initialScore: number) {
     this.name = name;
     this.performanceScore = initialScore;
+  }
+
+  /** Providers with no credential/config requirements are available by default. */
+  isConfigured(): boolean {
+    return true;
   }
 
   abstract search(query: string, options: SearchOptions): Promise<SearchResult[]>;
@@ -318,14 +325,23 @@ class DuckDuckGoProvider extends BaseSearchProvider {
 class SearxNGProvider extends BaseSearchProvider {
   private baseUrls: string[];
   private currentUrlIndex = 0;
+  private configured: boolean;
 
   constructor(credentials: ToolCredentials) {
     super('SearxNG', 90);
     const customUrl = credentials.searxng_url || process.env.SEARXNG_URL;
-    this.baseUrls = customUrl ? [customUrl] : ['http://searxng:8080'];
+    this.configured = Boolean(customUrl);
+    this.baseUrls = customUrl ? [customUrl] : [];
+  }
+
+  isConfigured(): boolean {
+    return this.configured;
   }
 
   async search(query: string, options: SearchOptions): Promise<SearchResult[]> {
+    if (!this.isConfigured() || this.baseUrls.length === 0) {
+      throw new Error('SearxNG URL not configured');
+    }
     const initialIndex = this.currentUrlIndex;
     let lastError: Error | undefined;
 
@@ -401,18 +417,19 @@ export class SearchExecutor {
       new SearxNGProvider(credentials),
     ];
 
-    const configuredProviders = providers.filter(p => {
-      if (p instanceof GoogleSearchProvider) return p.isConfigured();
-      if (p instanceof LangSearchProvider) return p.isConfigured();
-      if (p instanceof SearxNGProvider) return true;
-      return true;
-    });
+    // Only attempt providers whose required credentials/config are present (or that need none).
+    const configuredProviders = providers.filter(p => p.isConfigured());
+    const skippedProviders = providers.filter(p => !p.isConfigured()).map(p => p.name);
 
     if (configuredProviders.length === 0) {
       return {
         success: false,
-        error: 'No search providers configured. Provide Google API credentials, LangSearch API key, or SearxNG URL.',
+        error: 'Search paused: no search provider credentials are configured. Configure at least one provider (Google API key + Search Engine ID, LangSearch API key, or SearxNG URL) to continue.',
       };
+    }
+
+    if (skippedProviders.length > 0) {
+      logger.info({ skippedProviders }, 'Skipping search providers without configured credentials');
     }
 
     const sortedProviders = configuredProviders.sort((a, b) => b.performanceScore - a.performanceScore);

@@ -235,7 +235,13 @@ describe('Restaurant Operations skills emit presentation blocks', () => {
   it.each(CANONICAL_SKILLS.map((t) => [t.id, t] as const))(
     '%s emits a present block on its validation-failure path',
     async (_id, tool) => {
-      const { result } = await run(tool, failureInputFor(tool.id));
+      // The forecast evaluator declares dataSource as operator config, so the
+      // config gate rejects the run before the Skill's own validation can
+      // answer. Supply it so this exercises the Skill's failure path.
+      const config = tool.id === 'restaurant-financial-forecast-evaluator'
+        ? { dataSource: 'pos' }
+        : {};
+      const { result } = await run(tool, failureInputFor(tool.id), [], {}, config);
       expect(result.success).toBe(false);
       assertPresentClean(result);
     },

@@ -40,7 +40,6 @@ export const HR_HIRING_ANALYTICS = createDeclarativeCodeSkill({
   ],
   isSkill: true,
   async handler(input, ctx) {
-    const _hrHome = process.env.HR_HOME;
     function computeAnalytics(records: any[]) {
       const totalCandidates = records.length;
       const byStage: Record<string, number> = {};

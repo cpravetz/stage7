@@ -5,6 +5,7 @@ export const EDUCATION_ASSESSMENT_CONTENT_REVIEWER: Tool = {
   name: 'Education Assessment Content Reviewer',
   description: 'Independently verifies assessment questions, answer keys, rationales, and answerability.',
   type: 'reasoning',
+  schemaVersion: 1,
   manifest: { type: 'reasoning' },
   inputSchema: {
     type: 'object',

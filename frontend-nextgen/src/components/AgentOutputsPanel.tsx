@@ -280,12 +280,31 @@ const ReasoningBox = ({ events }: { events: Array<{ type: string; message: strin
   );
 };
 
+function agentsEqual(a: AgentInfo[], b: AgentInfo[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const a1 = a[i];
+    const a2 = b[i];
+    if (a1.id !== a2.id || a1.name !== a2.name || a1.role !== a2.role || a1.status !== a2.status ||
+        a1.lastError !== a2.lastError || a1.activeTaskId !== a2.activeTaskId) {
+      return false;
+    }
+    const p1 = a1.progress;
+    const p2 = a2.progress;
+    if ((p1?.brainCalls !== p2?.brainCalls) || (p1?.toolCalls !== p2?.toolCalls) || (p1?.lastAction !== p2?.lastAction)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 const AgentOutputsPanel = ({ missionId, missionStatus, plan }: AgentOutputsPanelProps) => {
   const events = useFeedStore((s) => s.events);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const eventsRef = useRef(events);
+  const agentsRef = useRef<AgentInfo[]>([]);
 
   useEffect(() => {
     eventsRef.current = events;
@@ -310,7 +329,11 @@ const AgentOutputsPanel = ({ missionId, missionStatus, plan }: AgentOutputsPanel
         if (!fallbackAgents.has(`agent-${missionId}-planner`)) fallbackAgents.set(`agent-${missionId}-planner`, { id: `agent-${missionId}-planner`, name: 'Mission Planner', role: 'planner', status: 'planning' });
         if (!fallbackAgents.has(`agent-${missionId}-mission-director`)) fallbackAgents.set(`agent-${missionId}-mission-director`, { id: `agent-${missionId}-mission-director`, name: 'Mission Director', role: 'mission-director', status: 'running' });
       }
-      setAgents(Array.from(fallbackAgents.values()));
+      const newAgents = Array.from(fallbackAgents.values());
+      if (!agentsEqual(newAgents, agentsRef.current)) {
+        agentsRef.current = newAgents;
+        setAgents(newAgents);
+      }
       setLoading(fallbackAgents.size === 0);
 
       const controller = new AbortController();
@@ -376,7 +399,11 @@ const AgentOutputsPanel = ({ missionId, missionStatus, plan }: AgentOutputsPanel
             else merged.set(id, { ...agent, status: agent.status === 'failed' ? 'failed' : 'completed' });
           }
         }
-        setAgents(Array.from(merged.values()));
+        const mergedAgents = Array.from(merged.values());
+        if (!agentsEqual(mergedAgents, agentsRef.current)) {
+          agentsRef.current = mergedAgents;
+          setAgents(mergedAgents);
+        }
       } catch (err) {
         if (!mounted) return;
         // Fallback to event-derived agents + plan agents
@@ -395,7 +422,11 @@ const AgentOutputsPanel = ({ missionId, missionStatus, plan }: AgentOutputsPanel
             else merged.set(id, { ...agent, status: agent.status === 'failed' ? 'failed' : 'completed' });
           }
         }
-        setAgents(Array.from(merged.values()));
+        const fallbackAgents = Array.from(merged.values());
+        if (!agentsEqual(fallbackAgents, agentsRef.current)) {
+          agentsRef.current = fallbackAgents;
+          setAgents(fallbackAgents);
+        }
         setError(timedOut
           ? 'Agent status request timed out after 8 seconds; showing agents from the plan and mission events.'
           : err instanceof Error ? err.message : String(err));
@@ -484,7 +515,11 @@ const AgentOutputsPanel = ({ missionId, missionStatus, plan }: AgentOutputsPanel
           else merged.set(id, { ...agent, status: agent.status === 'failed' ? 'failed' : 'completed' });
         }
       }
-      setAgents(Array.from(merged.values()));
+      const refreshedAgents = Array.from(merged.values());
+      if (!agentsEqual(refreshedAgents, agentsRef.current)) {
+        agentsRef.current = refreshedAgents;
+        setAgents(refreshedAgents);
+      }
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

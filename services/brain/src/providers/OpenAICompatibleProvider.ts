@@ -1,7 +1,7 @@
 import { LLMProvider, ProviderInfo, CompletionRequest, CompletionResponse, CompletionMessage, ProviderModel } from './Provider';
 import { fetchProvider, providerTimeoutMs } from '../utils/providerFetch';
 
-const FALLBACK_CONTEXT_WINDOW = 8192;
+const FALLBACK_CONTEXT_WINDOW = 0;
 
 /**
  * Routes a gateway may serve its OpenAI-compatible API on. They are probed in

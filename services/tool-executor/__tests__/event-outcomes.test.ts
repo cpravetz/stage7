@@ -30,12 +30,15 @@ const assistantOf = (toolId: string): string => {
 
 function executorFor(tools: Tool[], log: EventLog, run: (tool: Tool) => unknown): ToolExecutor {
   const executor = new ToolExecutor(new Map(tools.map((tool) => [tool.id, tool])), undefined, log);
-  const stub = executor as unknown as Record<string, unknown>;
-  stub.validateConfigSchema = () => null;
-  stub.resolveCredentials = async () => ({ resolved: {}, sources: {} });
-  stub.ensureWorkspace = () => ({ workspaceId: 'ws-probe', workflow: undefined });
-  stub.dispatch = async (tool: Tool) => run(tool);
-  stub.nestedExecutorCallback = () => async () => ({ success: true });
+  const config = (executor as unknown as { config: Record<string, unknown> }).config;
+  config.validateConfigSchema = () => null;
+  config.resolveCredentials = async () => ({ resolved: {}, sources: {} });
+  const dispatcher = (executor as unknown as { dispatcher: Record<string, unknown> }).dispatcher;
+  dispatcher.dispatch = async (tool: Tool) => run(tool);
+  const nested = async () => ({ success: true });
+  dispatcher.nestedExecutor = nested;
+  (executor as unknown as { events: Record<string, unknown> }).events.nestedExecutor = nested;
+  (executor as unknown as Record<string, unknown>).ensureWorkspace = () => ({ workspaceId: 'ws-probe', workflow: undefined });
   return executor;
 }
 
@@ -103,10 +106,12 @@ describe('a Skill may announce more than one outcome', () => {
     let runs = 0;
     const log = createInMemoryEventLog();
     const executor = executorFor([skill, subscriber], log, () => ({ ok: true }));
-    (executor as unknown as Record<string, unknown>).nestedExecutorCallback = () => async () => {
+    const nested = async () => {
       runs += 1;
       return { success: true };
     };
+    (executor as unknown as { dispatcher: Record<string, unknown> }).dispatcher.nestedExecutor = nested;
+    (executor as unknown as { events: Record<string, unknown> }).events.nestedExecutor = nested;
 
     await executor.execute(skill, confirmed, { assistantId: assistantOf(gated.id) });
     await eventsEventually(log, 2);

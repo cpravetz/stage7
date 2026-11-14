@@ -163,10 +163,10 @@ export function buildProviderRegistry(): LLMProvider[] {
       chatCompletionsPath: process.env.OPENWEB_CHAT_PATH || process.env.OPENWEBUI_CHAT_PATH || '/chat/completions',
       completionsPath: process.env.OPENWEB_COMPLETIONS_PATH || process.env.OPENWEBUI_COMPLETIONS_PATH || '/completions',
       defaultModels: [
-        { id: 'llama3.2', capabilities: ['chat'], maxTokens: 8192, costPer1kTokens: 0 },
-        { id: 'mistral', capabilities: ['chat'], maxTokens: 8192, costPer1kTokens: 0 },
-        { id: 'codellama', capabilities: ['chat', 'code'], maxTokens: 16384, costPer1kTokens: 0 },
-        { id: 'gemma2', capabilities: ['chat', 'reasoning'], maxTokens: 8192, costPer1kTokens: 0 },
+        { id: 'llama3.2', capabilities: ['chat'], maxTokens: 0, costPer1kTokens: 0 },
+        { id: 'mistral', capabilities: ['chat'], maxTokens: 0, costPer1kTokens: 0 },
+        { id: 'codellama', capabilities: ['chat', 'code'], maxTokens: 0, costPer1kTokens: 0 },
+        { id: 'gemma2', capabilities: ['chat', 'reasoning'], maxTokens: 0, costPer1kTokens: 0 },
       ],
     }));
   }
@@ -184,10 +184,10 @@ export function buildProviderRegistry(): LLMProvider[] {
       chatCompletionsPath: process.env.OLLAMA_CHAT_PATH || '/chat/completions',
       completionsPath: process.env.OLLAMA_COMPLETIONS_PATH || '/completions',
       defaultModels: [
-        { id: 'llama3.2', capabilities: ['chat'], maxTokens: 8192, costPer1kTokens: 0 },
-        { id: 'mistral', capabilities: ['chat'], maxTokens: 8192, costPer1kTokens: 0 },
-        { id: 'codellama', capabilities: ['chat', 'code'], maxTokens: 16384, costPer1kTokens: 0 },
-        { id: 'gemma2', capabilities: ['chat', 'reasoning'], maxTokens: 8192, costPer1kTokens: 0 },
+        { id: 'llama3.2', capabilities: ['chat'], maxTokens: 0, costPer1kTokens: 0 },
+        { id: 'mistral', capabilities: ['chat'], maxTokens: 0, costPer1kTokens: 0 },
+        { id: 'codellama', capabilities: ['chat', 'code'], maxTokens: 0, costPer1kTokens: 0 },
+        { id: 'gemma2', capabilities: ['chat', 'reasoning'], maxTokens: 0, costPer1kTokens: 0 },
       ],
     }));
   }

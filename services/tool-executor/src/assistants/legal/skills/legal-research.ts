@@ -63,7 +63,7 @@ const LEGAL_RESEARCH = createDeclarativeCodeSkill({
 
     let searchRes: any = null;
     try {
-      searchRes = await ctx.delegate('search_web', { query: `${query} ${jurisdiction} statute case law regulation` });
+      searchRes = await ctx.delegate('search', { query: `${query} ${jurisdiction} statute case law regulation` });
     } catch (e) {
       // Delegate search unavailable
     }

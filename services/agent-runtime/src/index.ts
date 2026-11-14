@@ -14,7 +14,7 @@ app.use('/api/agent-runtime', agentsRouter)
 
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   const status = err?.statusCode || 500
-  const message = err?.message || 'Internal server error'
+  const message = err?.message || 'Agent Runtime Internal server error'
   res.status(status).json({ success: false, error: message, statusCode: status })
 })
 

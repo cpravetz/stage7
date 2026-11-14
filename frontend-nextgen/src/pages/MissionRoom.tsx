@@ -688,24 +688,28 @@ const MissionRoom = () => {
     }
   };
 
-  const handleMissionInteractionSubmit = async (decision?: 'granted' | 'denied') => {
+  const handleMissionInteractionSubmit = async (
+    decision?: 'granted' | 'denied',
+    options: { configurationProvided?: boolean } = {},
+  ) => {
     const pending = detail?.output?.outputs?.pendingInteraction;
     if (!pending || interactionSubmitting) return;
     const secretKeys = pending.kind === 'user_input' ? secretKeysForInteraction(pending) : [];
     const configureInSettings = pending.kind === 'user_input'
       && secretKeys.length > 0;
+    const configurationProvided = pending.kind === 'user_input' && options.configurationProvided === true;
     const credentialRequest = pending.kind === 'user_input' ? pending.credentialRequest : undefined;
     const hasProvidedCredentials = Boolean(credentialRequest)
       && secretKeys.every((key) => interactionCredentials[key]?.trim());
     const responseText = interactionResponse.trim();
-    if (pending.kind === 'user_input' && !configureInSettings && !responseText) {
+    if (pending.kind === 'user_input' && !configureInSettings && !responseText && !configurationProvided) {
       setControlError('Enter a response before continuing.');
       return;
     }
     if (configureInSettings && !interactionConfigurationReady && !hasProvidedCredentials) return;
     const responseMessage = pending.kind === 'mcp_permission'
       ? `Permission ${decision === 'granted' ? 'granted' : 'denied'}`
-      : configureInSettings
+      : configureInSettings || configurationProvided
         ? 'The requested values were provided securely.'
         : responseText;
     setInteractionSubmitting(true);
@@ -723,8 +727,8 @@ const MissionRoom = () => {
         );
         updateMissionStatus(workflowId, result.status);
       } else {
-        if (configureInSettings && credentialRequest) {
-          if (!interactionConfigurationReady) {
+        if ((configureInSettings && credentialRequest) || configurationProvided) {
+          if (!interactionConfigurationReady && credentialRequest) {
             for (const key of secretKeys) {
               await putJSON(`/api/vault/secrets/name/${encodeURIComponent(`tool:${credentialRequest.toolId}:${key}`)}`, {
                 plaintext: interactionCredentials[key],
@@ -837,10 +841,13 @@ const MissionRoom = () => {
                      setControlError(null);
                      try {
                        const pending = detail?.output?.outputs?.pendingInteraction;
-                       const hasCredentialRequest = pending?.kind === 'user_input' && Boolean(pending.credentialRequest);
+                       const awaitsUserInput = pending?.kind === 'user_input';
                        const result = await postJSON<{ status: string }>(
                          `/api/temporal/missions/${encodeURIComponent(workflowId)}/start`,
-                         hasCredentialRequest ? { useConfiguredCredentials: true } : {},
+                         // A mission paused on a question can only be resumed by
+                         // answering it or by saying the requested configuration
+                         // was supplied outside the mission.
+                         awaitsUserInput ? { useConfiguredCredentials: true } : {},
                        );
                        updateMissionStatus(workflowId, result.status);
                        if (pending && (pending.requestId || (pending.phaseId && pending.taskId))) {
@@ -1121,6 +1128,7 @@ const MissionRoom = () => {
             )}
             <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
               {pending.kind === 'user_input' ? (
+                <>
                 <button
                   onClick={() => void handleMissionInteractionSubmit()}
                   disabled={
@@ -1136,6 +1144,16 @@ const MissionRoom = () => {
                       ? 'Save values and continue'
                       : 'Send response'}
                 </button>
+                {freeTextInput && (
+                  <button
+                    onClick={() => void handleMissionInteractionSubmit(undefined, { configurationProvided: true })}
+                    disabled={interactionSubmitting || interactionAccepted}
+                    title="Use when the requested service or configuration was supplied in Tools or Vault"
+                  >
+                    I configured it — continue
+                  </button>
+                )}
+                </>
               ) : (
                 <>
                   <button
@@ -1157,35 +1175,6 @@ const MissionRoom = () => {
           </section>
         );
       })()}
-
-      {showRetryDialog && (
-        <div className="error-banner" style={{ background: 'rgba(56,189,248,0.15)' }}>
-          <div>
-            <strong style={{ color: '#38bdf8' }}>Retry Mission</strong>
-            <p className="muted" style={{ margin: '4px 0' }}>
-              Provide guidance to help the agents succeed on retry. This will create a new mission with your guidance appended to the original prompt.
-            </p>
-          </div>
-          <textarea
-            placeholder="e.g., 'Focus on the API integration tests, skip the UI components' or 'Use the v2 API endpoints instead of v1'"
-            ref={retryGuidanceRef}
-            rows={3}
-            style={{ width: '100%', marginTop: 8, marginBottom: 8 }}
-          />
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={handleRetry} disabled={retrying}>
-              {retrying ? 'Retrying...' : 'Retry Mission'}
-            </button>
-            <button className="secondary" onClick={() => {
-              setShowRetryDialog(false);
-              if (retryGuidanceRef.current) retryGuidanceRef.current.value = '';
-            }}>
-              Cancel
-            </button>
-          </div>
-          {sendError && <span className="muted" style={{ color: '#ef4444', marginTop: 8 }}>{sendError}</span>}
-        </div>
-      )}
 
       {pendingApproval && (
         <div

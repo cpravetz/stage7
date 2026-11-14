@@ -1,4 +1,4 @@
-import { missionStatus, TemporalClient } from '../src/client/TemporalClient'
+import { isMissionAwaitingInputError, missionStatus, TemporalClient } from '../src/client/TemporalClient'
 import * as missionActivity from '../src/activities/missionActivity'
 
 describe('TemporalClient mission start', () => {
@@ -536,6 +536,7 @@ describe('TemporalClient mission start', () => {
         method: init?.method,
         body: init?.body ? String(init.body) : undefined,
       })
+
       if (requestUrl.endsWith(`/api/artifacts/missions/${input.missionId}`) && !init?.method) {
         return {
           ok: true,
@@ -603,6 +604,50 @@ describe('TemporalClient mission start', () => {
         content: JSON.stringify(output),
       }),
     ])
+  })
+
+  it('resumes a credential interruption with a conversational message without submitting it as a secret', async () => {
+    process.env.ARTIFACTS_URL = 'http://artifacts'
+    delete process.env.GATEWAY_URL
+    const client = new TemporalClient()
+    const input = {
+      missionId: 'message-context', tenantId: 'tenant-1', assistantId: 'assistant-1',
+      prompt: 'Complete the protected operation',
+    }
+    const pendingInteraction = {
+      kind: 'user_input', phaseId: 'phase-1', taskId: 'task-1', taskTitle: 'Protected operation',
+      agentRole: 'worker', resumeCount: 0,
+      credentialRequest: { executionId: 'exec-1', toolId: 'service', toolName: 'Service', missingCredentials: [{ key: 'token', label: 'Token' }] },
+    }
+    jest.spyOn(client, 'startMission').mockResolvedValue('mission-message-context')
+    const fetcher = jest.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
+      const requestUrl = String(url)
+      if (requestUrl.endsWith('/api/artifacts/missions/message-context') && !init?.method) {
+        return { ok: true, status: 200, json: async () => ({
+          missionId: input.missionId, status: 'awaiting_review', controlState: 'running', input,
+          output: { outputs: { pendingInteraction } },
+        }) } as Response
+      }
+      if (requestUrl.endsWith('/plan')) {
+        return { ok: true, status: 200, json: async () => ({
+          summary: '', estimatedDuration: '', estimatedCost: '', requiresClarification: false,
+          clarificationQuestions: [], clarificationAnswers: [], phases: [],
+        }) } as Response
+      }
+      if (requestUrl.endsWith('/recovery-lease')) {
+        return { ok: true, status: 200, json: async () => ({ claimed: true }) } as Response
+      }
+      return { ok: true, status: 200, json: async () => ({}) } as Response
+    })
+    await client.resumeMission('mission-message-context', {
+      interactionResponse: 'Use secret:service_token.',
+      continueWithMessage: true,
+    })
+    expect(client.startMission).toHaveBeenCalledWith(
+      expect.objectContaining({ interactionResponse: 'Use secret:service_token.' }),
+      expect.objectContaining({ pendingInteraction }), true, true,
+    )
+    expect(fetcher.mock.calls.some(([url]) => String(url).includes('/credentials'))).toBe(false)
   })
 
   it('loads the persisted plan when retrying before any phase or task completed', async () => {
@@ -732,5 +777,79 @@ describe('TemporalClient mission start', () => {
     await expect(client.startMission(input)).resolves.toBe(`mission-${input.missionId}`)
 
     expect(directRun).not.toHaveBeenCalled()
+  })
+
+  it('refuses to resume a paused mission without an answer, and resumes once the configuration is confirmed', async () => {
+    delete process.env.TEMPORAL_ADDRESS
+    process.env.ARTIFACTS_URL = 'http://artifacts'
+    delete process.env.GATEWAY_URL
+    const client = new TemporalClient()
+    const input = {
+      missionId: 'mission-awaiting-config',
+      tenantId: 'tenant-1',
+      assistantId: 'assistant-1',
+      prompt: 'Send the message',
+    }
+    const question = 'A required service or configuration is missing. Configure it in Tools configuration and continue after you save.'
+    jest.spyOn(client, 'startMission').mockResolvedValue(`mission-${input.missionId}`)
+    jest.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
+      const requestUrl = String(url)
+      if (requestUrl.endsWith(`/api/artifacts/missions/${input.missionId}`) && !init?.method) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            missionId: input.missionId,
+            status: 'awaiting_review',
+            controlState: 'running',
+            input,
+            output: { outputs: { status: 'awaiting_user_input', pendingInteraction: { kind: 'user_input', taskId: 'phase-1-task-1', question } } },
+          }),
+        } as Response
+      }
+      if (requestUrl.endsWith(`/api/artifacts/missions/${input.missionId}/plan`)) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            summary: 'Send the message',
+            estimatedDuration: 'short',
+            estimatedCost: 'low',
+            requiresClarification: false,
+            clarificationQuestions: [],
+            clarificationAnswers: [],
+            phases: [],
+          }),
+        } as Response
+      }
+      return { ok: true, status: 200, json: async () => ({ claimed: true }) } as Response
+    })
+
+    let caught: unknown
+    try {
+      await client.resumeMission(`mission-${input.missionId}`)
+    } catch (error) {
+      caught = error
+    }
+    expect(isMissionAwaitingInputError(caught)).toBe(true)
+    expect((caught as Error).message).toBe('A non-empty response is required for the pending mission question')
+    expect(client.startMission).not.toHaveBeenCalled()
+
+    await expect(
+      client.resumeMission(`mission-${input.missionId}`, { useConfiguredCredentials: true }),
+    ).resolves.toBe('resuming')
+
+    expect(client.startMission).toHaveBeenCalledWith(
+      expect.objectContaining({
+        missionId: input.missionId,
+        interactionResponse: expect.stringContaining('supplied the requested service or configuration'),
+      }),
+      expect.objectContaining({
+        plan: expect.objectContaining({ summary: 'Send the message' }),
+        pendingInteraction: expect.objectContaining({ kind: 'user_input' }),
+      }),
+      true,
+      true,
+    )
   })
 })

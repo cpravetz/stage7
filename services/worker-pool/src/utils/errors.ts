@@ -26,7 +26,7 @@ export class WorkerPoolError extends NextGenError {
     return new WorkerPoolError(404, message);
   }
 
-  static internalError(message = 'Internal Server Error', details?: any): WorkerPoolError {
+  static internalError(message = 'Worker pool Internal Server Error', details?: any): WorkerPoolError {
     return new WorkerPoolError(500, message, details);
   }
 

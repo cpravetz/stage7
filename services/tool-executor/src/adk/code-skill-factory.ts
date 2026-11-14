@@ -437,7 +437,12 @@ export function createExternalActionSkill(options: ExternalActionSkillOptions): 
     const mergedConfigSchema: SchemaRecord = {
       type: 'object',
       properties: { ...(configSchema?.properties || {}) },
-      required: Array.isArray(configSchema?.required) ? [...configSchema.required] : undefined,
+    }
+    const requiredFields = Object.entries(configSchema?.properties ?? {})
+      .filter(([, schema]) => (schema as { required?: boolean })?.required === true)
+      .map(([field]) => field)
+    if (requiredFields.length > 0) {
+      mergedConfigSchema.required = requiredFields
     }
     for (const [logicalKey, sourceEntry] of Object.entries(resolvedCredentialSource)) {
       const existing = (mergedConfigSchema.properties as Record<string, SchemaProperty>)[logicalKey] || {}

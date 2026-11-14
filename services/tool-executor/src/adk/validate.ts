@@ -276,7 +276,9 @@ export function validateBlueprint(
       add('explicit-isSkill', 'error', sourceFile, 'does not declare isSkill explicitly');
     }
 
-    if (!isGovernanceTier(skill.tier)) {
+    // Governance tier is a property of a user-facing higher-order Skill. A
+    // lower-order tool is reached by delegation and does not carry one.
+    if (skill.isSkill === true && !isGovernanceTier(skill.tier)) {
       add(
         'single-tier',
         'error',

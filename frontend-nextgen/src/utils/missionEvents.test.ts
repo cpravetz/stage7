@@ -391,6 +391,84 @@ describe('mission conversation', () => {
     expect(JSON.stringify(transcript)).not.toContain('__list_tools');
   });
 
+  it('never publishes raw tool manifests as conversation output', () => {
+    const manifest = JSON.stringify({
+      id: 'sms_sender',
+      name: 'SMS Sender',
+      type: 'code',
+      language: 'javascript',
+      entrypoint: 'index.js',
+      sourceCode: 'const input = __tool_input;',
+    });
+    const transcript = buildTranscript([
+      feedEvent({
+        id: 'json-output',
+        type: 'task_completed',
+        message: 'Task completed: Send exact message payload',
+        metadata: {
+          agentName: 'Action Agent',
+          phaseId: 'phase-1',
+          taskId: 'task-1',
+          output: manifest,
+        },
+      }),
+    ]);
+
+    expect(transcript[0]?.lines).toHaveLength(1);
+    expect(JSON.stringify(transcript)).not.toContain('sms_sender');
+    expect(JSON.stringify(transcript)).not.toContain('sourceCode');
+  });
+
+  it('keeps agent-to-agent reasoning out of the conversation', () => {
+    const transcript = buildTranscript([
+      feedEvent({
+        id: 'internal-blocker',
+        type: 'task_incomplete',
+        message: 'Task incomplete: Send exact message payload — Task "Send exact message payload" (phase-1-task-1) did not complete a verified action outside the system. Steps that ran: __list_tools, __create_tool, email_sender.',
+        metadata: {
+          agentName: 'Action Agent',
+          phaseId: 'phase-1',
+          taskId: 'task-1',
+          output: "Tool 'sms_sender' already failed and generic capability resolution was already attempted. Original failure: not in the live system catalog. bounded repair failed: execution failed. The phase reviewer should use this blocker to regroup the task.",
+        },
+      }),
+    ]);
+
+    const serialized = JSON.stringify(transcript);
+    expect(serialized).not.toContain('Steps that ran');
+    expect(serialized).not.toContain('phase reviewer');
+    expect(serialized).not.toContain('__list_tools');
+    expect(serialized).not.toContain('bounded repair');
+    expect(transcript[0]?.lines[0]?.text).toBe(
+      'Task incomplete: Send exact message payload — I could not verify this step yet, so I am checking another approved way to finish it.',
+    );
+  });
+
+  it('does not render agent reasoning or raw JSON agent replies', () => {
+    const transcript = buildTranscript([
+      feedEvent({
+        id: 'agent-json',
+        type: 'agent_response',
+        message: '{"id":"sms_sender","name":"SMS Sender","type":"code"}',
+        metadata: { agentName: 'Mission Director', agentRole: 'mission-director' },
+      }),
+      feedEvent({
+        id: 'agent-thought',
+        type: 'agent_acknowledgement',
+        message: 'Message received.',
+        metadata: {
+          agentName: 'Mission Director',
+          agentRole: 'mission-director',
+          thought: 'A user message arrived during the mission. I need to decide whether to forward it.',
+        },
+      }),
+    ]);
+
+    expect(JSON.stringify(transcript)).not.toContain('sms_sender');
+    expect(JSON.stringify(transcript)).not.toContain('A user message arrived');
+    expect(CONVERSATION_EVENT_TYPES.has('monologue')).toBe(false);
+  });
+
   it('tells the user what happened to a mission that failed while planning', () => {
     const liveEvents: FeedEvent[] = [
       feedEvent({ id: 'e1', type: 'mission_started', timestamp: 1, message: 'Mission started' }),

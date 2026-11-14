@@ -25,6 +25,7 @@ export interface WorkflowInput {
   retryGuidance?: string;
   clarificationAnswers?: string[];
   interactionResponse?: string;
+  userMessages?: string[];
 }
 
 export interface MissionTaskCheckpoint {
@@ -159,19 +160,18 @@ export const MAX_NO_PROGRESS_RECOVERY_ATTEMPTS = 3;
 
 export function isConfigurationBlocker(evidence: string[]): boolean {
   const text = evidence.join('\n');
-  // Only explicit missing user-provided credentials/secrets that cannot be
-  // resolved by capability resolution (__create_tool) should trigger a
-  // user-configuration pause. Missing/unregistered/unavailable tools or
-  // services alone are NOT blockers — the agent must try capability
-  // resolution first.
-  return /\b(?:missing|required|needed|not provided|not supplied)\b.{0,120}\b(?:api ?key|access ?key|secret|token|password|credential|authentication|authorization|account ?credential)\b/i.test(text)
-    || /\b(?:api ?key|access ?key|secret|token|password|credential|authentication|authorization)\b.{0,120}\b(?:missing|required|needed|not provided|not supplied)\b/i.test(text)
-    || /\bcredential[s]?\s+(?:missing|required|needed|not provided|not supplied)\b/i.test(text)
-    || /\b(?:no|missing)\s+(?:valid\s+)?(?:api ?key|access ?key|secret|token|password|credential)\b/i.test(text);
+  // A blocker is a configuration blocker when the evidence says something the
+  // operator has to supply is absent (credentials, configuration, or a
+  // capability that is not available in the live catalog). Missing deliverables
+  // or task outputs are execution failures, not configuration blockers, so the
+  // subject has to be a capability/service/configuration term.
+  const missingSignal = /\b(?:missing|required|needed|not provided|not supplied|unavailable|not found|not registered|not configured|not available|isn't available|isn't configured)\b|\bnot in the live system catalog\b/i;
+  const subjectSignal = /\b(?:api ?key|access ?key|secret|token|password|credential|authentication|authorization|service|configuration|provider|tool|catalog|capability|integration|connector|plugin|subscription|license|account)\b/i;
+  return missingSignal.test(text) && subjectSignal.test(text);
 }
 
 export function missionConfigurationQuestion(missionGoal: string): string {
-  return `I could not complete "${missionGoal}" because specific credentials or configuration required by the needed tool/service are missing. I have already tried to discover, resolve, or create the needed tools automatically. Please configure the required credentials or settings for the relevant tool in Tools or Vault (use the exact fields shown for that tool), then reply here to continue.`;
+  return `I could not complete "${missionGoal}" because a required service or configuration is missing. I have already tried to discover, resolve, or create the needed capability automatically. Open Tools configuration, fill in the secure form for the relevant tool or provider, and continue after you save — then reply here so I can resume.`;
 }
 
 const NON_ACTION_RECEIPT_TOOL_IDS = new Set([

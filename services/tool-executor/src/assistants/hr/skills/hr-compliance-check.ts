@@ -40,7 +40,6 @@ export const HR_COMPLIANCE_CHECK = createDeclarativeCodeSkill({
   ],
   isSkill: true,
   async handler(input, ctx) {
-    const _hrHome = process.env.HR_HOME;
     function checkCompliance(records: any[]) {
       const findings: any[] = [];
       records.forEach((r) => {

@@ -164,9 +164,10 @@ describe('ToolExecutor event emission', () => {
   function emitter(log: ReturnType<typeof createInMemoryEventLog>, tools: Tool[] = []) {
     const registry = new Map<string, Tool>(tools.map((entry) => [entry.id, entry]));
     const executor = new ToolExecutor(registry, undefined, log);
-    const emit = (executor as unknown as {
-      dispatchUpstreamEvents: (t: Tool, o: unknown, w?: string, a?: string, e?: string) => void;
-    }).dispatchUpstreamEvents.bind(executor);
+    const events = (executor as unknown as {
+      events: { dispatchUpstreamEvents: (t: Tool, o: unknown, w?: string, a?: string, e?: string) => void };
+    }).events;
+    const emit = events.dispatchUpstreamEvents.bind(events);
     // Emission is fire-and-forget, so let the queued append land before asserting.
     return async (target: Tool, output: unknown, workspaceId?: string, assistantId?: string, executionId?: string) => {
       emit(target, output, workspaceId, assistantId, executionId);

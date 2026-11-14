@@ -3,6 +3,7 @@ import { Tool } from '../src/types';
 import { PluginGenerator } from '../src/services/PluginGenerator';
 import { ToolDiscovery } from '../src/services/ToolDiscovery';
 import { CodeExecutor } from '../src/executors/CodeExecutor';
+import { credentialProvider } from '../src/services/CredentialProvider';
 
 describe('mission tool configuration', () => {
   const tool: Tool = {
@@ -28,13 +29,14 @@ describe('mission tool configuration', () => {
 
   afterEach(() => jest.restoreAllMocks());
 
-  it('requests a mapped required configuration field rather than failing the static gate', async () => {
+  it('defers a mapped required configuration field to runtime resolution rather than failing the static gate', async () => {
     jest.spyOn(global, 'fetch').mockResolvedValue({ ok: false, status: 500 } as Response);
     const config = new ToolConfigResolver(new Map());
+    // Credential-backed fields are resolved dynamically, so the static gate must
+    // not reject the run merely because the mapped value is absent.
     await expect(config.validateConfigSchema(tool, {}, 'exec-1')).resolves.toBeNull();
-    await expect(config.resolveCredentials(tool, {}, 'exec-1')).rejects.toMatchObject({
-      request: { missingCredentials: [{ key: 'account_id', label: 'Account ID' }] },
-    });
+    const resolved = await config.resolveCredentials(tool, {}, 'exec-1');
+    expect(resolved.resolved.account_id).toBeUndefined();
   });
 
   it('uses deterministic provider configuration in initial and repair acceptance tests', async () => {
@@ -92,5 +94,25 @@ describe('mission tool configuration', () => {
     const result = await config.resolveCredentials(tool, {}, 'exec-2');
     expect(result.resolved.account_id).toBe('saved-account');
     expect(String(fetcher.mock.calls[0][0])).toContain(encodeURIComponent('secret:account_id'));
+  });
+
+  it('resolves an explicitly named existing vault secret independently of the logical key', async () => {
+    credentialProvider.invalidate();
+    const fetcher = jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true, json: async () => ({ plaintext: 'saved-value' }),
+    } as Response);
+    const configSchema = {
+      type: 'object',
+      properties: { account_id: { type: 'string', vaultSecretId: 'secret:provider_account' } },
+      required: ['account_id'],
+    };
+    const mappedTool: Tool = { ...tool, configSchema, manifest: { configSchema } };
+    try {
+      const result = await new ToolConfigResolver(new Map()).resolveCredentials(mappedTool, {}, 'exec-mapped');
+      expect(result.resolved.account_id).toBe('saved-value');
+      expect(String(fetcher.mock.calls[0][0])).toContain(encodeURIComponent('secret:provider_account'));
+    } finally {
+      credentialProvider.invalidate();
+    }
   });
 });

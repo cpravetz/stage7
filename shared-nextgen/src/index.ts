@@ -8,6 +8,7 @@ export * from './types/auth';
 export * from './constants/brainRouting';
 export * from './utils/logger';
 export * from './utils/httpClient';
+export * from './utils/agentMessages';
 export * from './errors';
 export * from './middleware/asyncHandler';
 export * from './utils/actionReceiptVerifier';

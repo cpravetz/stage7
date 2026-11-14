@@ -108,7 +108,7 @@ describe('OpenAICompatibleProvider.listModels metadata parsing', () => {
       const models = await providerWith({
         data: [{ id: 'c', context_window: 0 }],
       }).listModels();
-      expect(models[0].maxTokens).toBe(8192);
+      expect(models[0].maxTokens).toBe(0);
     });
 
     it('prefers an explicit context_length over context_window', async () => {

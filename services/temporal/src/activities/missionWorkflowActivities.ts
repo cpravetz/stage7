@@ -5,6 +5,8 @@ import {
   PlanSchema,
   Phase,
   Task,
+  sanitizeAgentMessage,
+  sanitizeAgentMessageList,
 } from '@stage7-nextgen/shared';
 import { logger } from '@stage7-nextgen/shared';
 import {
@@ -413,23 +415,29 @@ export async function reviewAndAmendMissionPhaseActivity({
       reviewIndex,
     );
     // Director decision monologue before applying review (mirrors orchestrator)
+    const reviewGaps = review.gaps
+      .map((gap) => sanitizeAgentMessage(gap, '').text)
+      .filter(Boolean);
     await agentRuntime.emitMonologue({
       agentRole: 'mission-director',
       phaseId: phase.id,
-      thought: `Phase review ${reviewIndex} for "${phase.name}" returned ${review.satisfied ? 'satisfied' : 'not satisfied'}. The Phase Reviewer identified ${review.gaps.length} gap(s): ${review.gaps.slice(0, 5).join('; ')}. I will apply this review to the plan${review.followUpTask ? ` and adopt the proposed follow-up task "${review.followUpTask.title}"` : ''}.`,
+      thought: `Phase review ${reviewIndex} for "${phase.name}" returned ${review.satisfied ? 'satisfied' : 'not satisfied'}. The Phase Reviewer identified ${reviewGaps.length} gap(s): ${sanitizeAgentMessageList(reviewGaps, 'the phase evidence is incomplete')}. I will apply this review to the plan${review.followUpTask ? ` and adopt the proposed follow-up task "${sanitizeAgentMessage(review.followUpTask.title, 'Follow-up work').text}"` : ''}.`,
       text: `Phase review ${reviewIndex}: ${review.satisfied ? 'satisfied' : `${review.gaps.length} gap(s) found`}.`,
-      data: { reviewIndex, satisfied: review.satisfied, gaps: review.gaps, followUpTaskTitle: review.followUpTask?.title },
+      data: { reviewIndex, satisfied: review.satisfied, gaps: reviewGaps, followUpTaskTitle: review.followUpTask?.title },
     });
     const applied = applyPhaseReview(plan, phase.id, review);
     if (applied.amendment) {
       await persistMissionPlan(input, applied.plan);
-      // Director decision: adopt reviewer's proposed amendment
+      const amendmentGaps = applied.gaps
+        .map((gap) => sanitizeAgentMessage(gap, '').text)
+        .filter(Boolean);
+      const amendmentTitle = sanitizeAgentMessage(applied.amendment.title, 'Follow-up work').text;
       await agentRuntime.emitMonologue({
         agentRole: 'mission-director',
         phaseId: phase.id,
-        thought: `The Phase Reviewer proposed an actionable follow-up task "${applied.amendment.title}" for review ${reviewIndex}. I am adopting this amendment and scheduling it to address the identified gaps: ${applied.gaps.slice(0, 5).join('; ')}.`,
-        text: `Adopting reviewer's follow-up task "${applied.amendment.title}".`,
-        data: { reviewIndex, amendmentId: applied.amendment.id, amendmentTitle: applied.amendment.title, gaps: applied.gaps, reason: 'reviewer_followup_adopted' },
+        thought: `The Phase Reviewer proposed an actionable follow-up task "${amendmentTitle}" for review ${reviewIndex}. I am adopting this amendment and scheduling it to address the identified gaps: ${sanitizeAgentMessageList(amendmentGaps, 'the phase evidence is incomplete')}.`,
+        text: `Adopting reviewer's follow-up task "${amendmentTitle}".`,
+        data: { reviewIndex, amendmentId: applied.amendment.id, amendmentTitle, gaps: amendmentGaps, reason: 'reviewer_followup_adopted' },
       });
       await broadcast(input, {
         type: 'phase_plan_amended',
@@ -438,7 +446,7 @@ export async function reviewAndAmendMissionPhaseActivity({
         data: {
           phaseId: phase.id,
           reviewIndex,
-          gaps: applied.gaps,
+          gaps: amendmentGaps,
           task: applied.amendment,
           plan: applied.plan,
           agentId: agentRuntime.getAgentIdForRole('mission-director'),
@@ -447,6 +455,9 @@ export async function reviewAndAmendMissionPhaseActivity({
         },
       });
     } else if (!applied.satisfied && applied.gaps.length > 0) {
+      const remainingGaps = applied.gaps
+        .map((gap) => sanitizeAgentMessage(gap, '').text)
+        .filter(Boolean);
       await broadcast(input, {
         type: 'phase_plan_amended',
         missionId: input.missionId,
@@ -454,7 +465,7 @@ export async function reviewAndAmendMissionPhaseActivity({
         data: {
           phaseId: phase.id,
           reviewIndex,
-          gaps: applied.gaps,
+          gaps: remainingGaps,
           agentId: agentRuntime.getAgentIdForRole('mission-director'),
           agentName: 'Mission Director',
           agentRole: 'mission-director',
@@ -558,6 +569,9 @@ export async function executeMissionTaskActivity({
       return result;
     }
     const taskStatus = result.incompleteReason ? 'incomplete' : 'completed';
+    // The mission room is a conversation: raw JSON task results (tool manifests,
+    // receipts, plans) are agent reasoning and are not published as output.
+    const conversationOutput = sanitizeAgentMessage(result.output, '').text;
     await persistUpdate(input, 'tasks', task.id, {
       phaseId: phase.id,
       status: taskStatus,
@@ -577,7 +591,7 @@ export async function executeMissionTaskActivity({
         agentName: `${task.agentRole.replace(/\s+Agent$/i, '')} Agent`,
         agentRole: task.agentRole,
         artifacts: result.artifacts,
-        output: result.output.slice(0, 4_000),
+        ...(conversationOutput ? { output: conversationOutput.slice(0, 4_000) } : {}),
         ...(result.incompleteReason ? { error: result.incompleteReason } : {}),
         tokensUsed: result.tokensUsed,
       },
@@ -793,14 +807,20 @@ export async function completeMissionActivity({
       plan.summary || '',
       completedTaskSummaries,
     );
-    if (!review.satisfied) gaps.push(...review.gaps);
+    if (!review.satisfied) {
+      gaps.push(...review.gaps
+        .map((gap) => sanitizeAgentMessage(gap, '').text)
+        .filter(Boolean));
+    }
     // reviewMissionCompletion now emits the mission-evaluator attributed monologue
   }
-
+  const userFacingGaps = gaps
+    .map((gap) => sanitizeAgentMessage(gap, '').text)
+    .filter(Boolean);
   const outputs: { phases: MissionPhaseOutput[]; status: 'completed' | 'incomplete'; gaps?: string[] } = {
     phases,
     status: gaps.length === 0 ? 'completed' : 'incomplete',
-    ...(gaps.length > 0 ? { gaps } : {}),
+    ...(userFacingGaps.length > 0 ? { gaps: userFacingGaps } : {}),
   };
   // The Mission Director owns the terminal completion decision; emit an
   // attributed monologue explaining whether the mission completes or stays
@@ -809,7 +829,7 @@ export async function completeMissionActivity({
     agentRole: 'mission-director',
     thought: gaps.length === 0
       ? `All planned task evidence is present and the completion review found every requirement satisfied against the mission goal "${input.prompt.slice(0, 120)}". I am marking the mission status as completed.`
-      : `Mission completion is blocked by ${gaps.length} unmet requirement(s): ${gaps.join('; ')}. I am not marking the mission complete; these gaps must be resolved before the mission can finish.`,
+      : `Mission completion is blocked by ${userFacingGaps.length} unmet requirement(s): ${sanitizeAgentMessageList(userFacingGaps, 'the mission evidence is incomplete')}. I am not marking the mission complete; these gaps must be resolved before the mission can finish.`,
     text: gaps.length === 0
       ? 'Mission completed: all completion criteria met.'
       : `Mission incomplete: ${gaps.length} unmet requirement(s).`,

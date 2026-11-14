@@ -23,7 +23,7 @@ export { executiveSkills, executiveWorkflow } from '../../assistants/executive';
 export { financeSkills, financeWorkflow } from '../../assistants/finance';
 export { healthcareCanonicalSkills, healthcareSkills, healthcareWorkflow } from '../../assistants/healthcare';
 export { hotelSkills, hotelWorkflow } from '../../assistants/hotel';
-export { hrCanonicalSkills, hrSkills, hrWorkflow } from '../../assistants/hr';
+export { hrCanonicalSkills, hrLowerOrderTools, hrSkills, hrWorkflow } from '../../assistants/hr';
 export { investmentSkills, investmentWorkflow } from '../../assistants/investment';
 export { legalSkills, legalWorkflow } from '../../assistants/legal';
 export { marketingSkills, marketingWorkflow } from '../../assistants/marketing';
@@ -31,7 +31,7 @@ export { productSkills, productWorkflow } from '../../assistants/product';
 export { restaurantCanonicalSkills, restaurantSkills, restaurantWorkflow } from '../../assistants/restaurant';
 export { salesSkills, salesWorkflow } from '../../assistants/sales';
 export { scriptwritingSkills, scriptwritingWorkflow } from '../../assistants/scriptwriting';
-export { songwritingSkills, songwritingWorkflow } from '../../assistants/songwriting';
+export { songwritingLowerOrderTools, songwritingSkills, songwritingWorkflow } from '../../assistants/songwriting';
 export { sportsSkills, sportsWorkflow } from '../../assistants/sports';
 export { supportSkills, supportWorkflow } from '../../assistants/support';
 

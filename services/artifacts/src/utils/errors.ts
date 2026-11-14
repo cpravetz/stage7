@@ -14,7 +14,7 @@ export class ArtifactsError extends NextGenError {
     return new ArtifactsError(400, message);
   }
 
-  static internalError(message = 'Internal Server Error'): ArtifactsError {
+  static internalError(message = 'Artifacts Internal Server Error'): ArtifactsError {
     return new ArtifactsError(500, message);
   }
 }

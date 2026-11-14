@@ -26,7 +26,7 @@ export const SCOUTING_ALERT_DISPATCHER = createDeclarativeCodeSkill({
   id: 'sports-scouting-alert-dispatcher',
   name: 'Automated Scouting & Alert Dispatcher',
   description: 'Represents tactical alerts to staff — tracks player health, performance anomalies, and transfer market updates. Dry-run only with confirmation required. Connects to Wearable Telemetry feeds.',
-  persistenceEnvVar: 'ASSISTANT_HOME',
+  persistenceEnvVar: 'SPORTS_GROUP_A_HOME',
   inputSchema: SCOUTING_ALERT_INPUT,
   outputSchema: sportsResultSchema('Scouting alert dispatch result'),
   tier: 'represent',
@@ -49,7 +49,6 @@ export const SCOUTING_ALERT_DISPATCHER = createDeclarativeCodeSkill({
     }
   },
   handler: async function handler(input, ctx) {
-      const _sgHome = process.env.SPORTS_GROUP_A_HOME;
       const entity = input.entity || input.playerId || input.teamId || '';
       const alertType = input.alertType || 'scouting';
       const sport = input.sport || 'generic';

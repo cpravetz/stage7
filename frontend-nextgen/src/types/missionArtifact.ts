@@ -128,7 +128,7 @@ export function getArtifactMimeType(artifact: MissionArtifact): string {
 }
 
 export function getArtifactLineageId(artifact: MissionArtifact): string | undefined {
-  return artifact.artifactId || artifact.logicalId || artifact.lineageId || artifact.versionOf;
+  return artifact.artifactId;
 }
 
 export function getArtifactLabel(artifact: MissionArtifact, index: number, versionCount: number): string {

@@ -2,6 +2,7 @@ import {
   DEFAULT_AGENT_EXECUTION_POLICY,
   AgentExecutionPolicy,
   MissionArtifact,
+  sanitizeAgentMessage,
   Plan,
   Phase,
   Task,
@@ -105,10 +106,18 @@ export interface MissionContext {
   resumeCheckpoint?: MissionActivityCheckpoint;
   clarificationAnswers?: string[];
   interactionResponse?: string;
+  userMessages?: string[];
   executionPolicy?: AgentExecutionPolicy;
   onCheckpoint?: (checkpoint: MissionActivityCheckpoint) => void;
   heartbeat?: () => void;
   controlCheckpoint?: () => Promise<void>;
+}
+
+function missionPromptWithMessages(ctx: Pick<MissionContext, 'prompt' | 'userMessages'>): string {
+  const messages = ctx.userMessages || [];
+  return messages.length
+    ? `${ctx.prompt}\n\nSubsequent user messages (in order):\n${JSON.stringify(messages)}`
+    : ctx.prompt;
 }
 
 export class MissionOrchestrator {
@@ -167,18 +176,24 @@ export class MissionOrchestrator {
     // a persisted/resume/checkpoint plan; evaluate it and emit the reasoning.
     let planSource: 'loaded' | 'generated' = 'generated';
     let plan: Plan;
-    const evaluation = await this.agentRuntime!.evaluatePlanLoad({
-      missionId: ctx.missionId,
-      prompt: ctx.prompt,
-      context: ctx.metadata,
-      existingPlan: ctx.resumePlan || ctx.resumeCheckpoint?.plan,
-      isResume: !!(ctx.resumePlan || ctx.resumeCheckpoint?.plan),
-    });
-    if (evaluation.loadExisting && evaluation.plan) {
-      plan = evaluation.plan;
+    if (pendingInteraction && ctx.resumeCheckpoint?.plan) {
+      // The pending task and its receipts must survive until its response is consumed.
+      plan = ctx.resumeCheckpoint.plan;
       planSource = 'loaded';
     } else {
-      plan = await this.generatePlan(ctx);
+      const evaluation = await this.agentRuntime!.evaluatePlanLoad({
+        missionId: ctx.missionId,
+        prompt: missionPromptWithMessages(ctx),
+        context: ctx.metadata,
+        existingPlan: ctx.resumePlan || ctx.resumeCheckpoint?.plan,
+        isResume: !!(ctx.resumePlan || ctx.resumeCheckpoint?.plan),
+      });
+      if (evaluation.loadExisting && evaluation.plan) {
+        plan = evaluation.plan;
+        planSource = 'loaded';
+      } else {
+        plan = await this.generatePlan(ctx);
+      }
     }
     activePlan = plan;
     const completedTasks = new Map<string, MissionTaskCheckpoint>(
@@ -219,7 +234,7 @@ export class MissionOrchestrator {
     plan.requiresClarification = false;
     plan.clarificationQuestions = [];
 
-    const sharedMissionAgentId = await agentRuntime.getOrCreateAgent('assistant', `You are a mission execution agent. Complete each assigned task sequentially to achieve the mission goal: ${ctx.prompt}. Do not invent missing information. Try authorized alternatives first; if a specific required value is unavailable and no safe alternative can complete the outcome, ask one focused question for that value.`);
+    const sharedMissionAgentId = await agentRuntime.getOrCreateAgent('mission-executor', `You are a mission execution agent. Complete each assigned task sequentially to achieve the mission goal: ${ctx.prompt}. Do not invent missing information. Try authorized alternatives first; if a specific required value is unavailable and no safe alternative can complete the outcome, ask one focused question for that value.`);
 
     if (plan.phases.length === 0) {
       plan.summary = plan.summary.trim() || ctx.prompt;
@@ -233,7 +248,7 @@ export class MissionOrchestrator {
           id: 'phase-1-task-1',
           title: 'Complete the requested outcome',
           description: ctx.prompt,
-          agentRole: 'assistant',
+agentRole: 'mission-executor',
           systemPrompt: `Achieve the requested outcome: ${ctx.prompt}. Do not invent missing information. Try authorized alternatives first; if a specific required value is unavailable and no safe alternative can complete the outcome, ask one focused question for that value.`,
           dependsOnTaskIds: [],
           expectedArtifacts: [],
@@ -350,7 +365,10 @@ const executeTask = async (task: Task, savedTask: MissionTaskCheckpoint | undefi
           ? {
               ...previousInteraction,
               actionReceipts: previousInteraction.actionReceipts?.filter((receipt) =>
-                !(receipt.toolId === '__create_tool' && receipt.outcome === 'permission_required'),
+                !(receipt.toolId === '__create_tool' && receipt.outcome === 'permission_required')
+                && !(previousInteraction.credentialRequest
+                  && receipt.toolId === previousInteraction.credentialRequest.toolId
+                  && receipt.outcome === 'question_asked'),
               ),
             }
           : undefined;
@@ -383,10 +401,10 @@ const executeTask = async (task: Task, savedTask: MissionTaskCheckpoint | undefi
           const taskRetryGuidance = savedTask ? ctx.retryGuidance : undefined;
           try {
             result = taskRetryGuidance
-              ? await agentRuntime.executeTask(...executionArgs, taskRetryGuidance, continuation, ctx.prompt)
+              ? await agentRuntime.executeTask(...executionArgs, taskRetryGuidance, continuation, ctx.prompt, ctx.userMessages)
               : continuation
-                ? await agentRuntime.executeTask(...executionArgs, undefined, continuation, ctx.prompt)
-                : await agentRuntime.executeTask(...executionArgs, undefined, undefined, ctx.prompt);
+                ? await agentRuntime.executeTask(...executionArgs, undefined, continuation, ctx.prompt, ctx.userMessages)
+                : await agentRuntime.executeTask(...executionArgs, undefined, undefined, ctx.prompt, ctx.userMessages);
           } catch (err) {
             if (savedTask) throw err;
             const firstError = err instanceof Error ? err.message : String(err);
@@ -401,8 +419,8 @@ const executeTask = async (task: Task, savedTask: MissionTaskCheckpoint | undefi
               'Do not repeat external actions whose outcome is already recorded or uncertain.',
             ].join(' ');
             result = continuation
-              ? await agentRuntime.executeTask(...executionArgs, retryGuidance, continuation, ctx.prompt)
-              : await agentRuntime.executeTask(...executionArgs, retryGuidance, undefined, ctx.prompt);
+              ? await agentRuntime.executeTask(...executionArgs, retryGuidance, continuation, ctx.prompt, ctx.userMessages)
+              : await agentRuntime.executeTask(...executionArgs, retryGuidance, undefined, ctx.prompt, ctx.userMessages);
           }
 
           // Agent owns the task outcome: if the agent could not accomplish the
@@ -416,7 +434,7 @@ const executeTask = async (task: Task, savedTask: MissionTaskCheckpoint | undefi
               'Do not repeat actions whose outcome is already recorded or uncertain.',
             ].join(' ');
             try {
-              result = await agentRuntime.executeTask(...executionArgs, agentRecoveryGuidance, undefined, ctx.prompt);
+              result = await agentRuntime.executeTask(...executionArgs, agentRecoveryGuidance, undefined, ctx.prompt, ctx.userMessages);
             } catch (recoveryErr) {
               if (recoveryErr instanceof MissionUserInterruptionError) throw recoveryErr;
               if (isFatalServiceError(recoveryErr)) throw recoveryErr;
@@ -662,7 +680,7 @@ const executeTask = async (task: Task, savedTask: MissionTaskCheckpoint | undefi
             } else {
               try {
                 task = await agentRuntime.selectNextTask(
-                  ctx.prompt,
+                  missionPromptWithMessages(ctx),
                   plan,
                   phase,
                   completedTaskIds,
@@ -700,7 +718,7 @@ const executeTask = async (task: Task, savedTask: MissionTaskCheckpoint | undefi
           } else {
             try {
               task = await agentRuntime.selectNextTask(
-                ctx.prompt,
+                missionPromptWithMessages(ctx),
                 plan,
                 phase,
                 completedTaskIds,
@@ -814,7 +832,7 @@ const executeTask = async (task: Task, savedTask: MissionTaskCheckpoint | undefi
         ) {
           try {
             const review = await agentRuntime.reviewPhase(
-              ctx.prompt,
+              missionPromptWithMessages(ctx),
               plan,
               phase,
               [...completedTaskSummaries.values()],
@@ -886,7 +904,7 @@ ${noProgressGuidance}`;
                 id: `${phase.id}-amendment-${amendmentIndex}`,
                 title: `Address phase gaps (review ${reviewIndex})`,
                 description: `Address remaining gaps: ${(applied.gaps || []).join('; ') || 'unspecified gaps'}`,
-                agentRole: 'assistant',
+agentRole: 'mission-executor',
                 systemPrompt: `Mission goal: ${ctx.prompt}\nPhase goal: ${phase.name} — ${phase.goal}\nResolve the following gaps using the available context and recorded task outputs: ${(applied.gaps || []).join('; ') || 'unspecified gaps'}. Focus only on accomplishing the requested mission outcome or reporting a concrete blocker. Do not invent unrelated work, and do not create or request design documents, plans, or substitute artifacts unless the mission goal explicitly requires them as deliverables.${noProgressGuidance}`,
                 dependsOnTaskIds: phase.tasks.map((t: any) => t.id),
                 expectedArtifacts: [],
@@ -1234,7 +1252,7 @@ ${noProgressGuidance}`;
           [...completedTaskSummaries.values()],
         ];
         try {
-          result = await agentRuntime.executeTask(...args, undefined, undefined, ctx.prompt);
+          result = await agentRuntime.executeTask(...args, undefined, undefined, ctx.prompt, ctx.userMessages);
         } catch (error) {
           if (isFatalServiceError(error)) throw error;
           const firstError = error instanceof Error ? error.message : String(error);
@@ -1243,6 +1261,7 @@ ${noProgressGuidance}`;
             `The previous attempt failed: ${firstError}. Continue from recorded outputs, do not repeat successful or uncertain side effects, and use another authorized approach.`,
             undefined,
             ctx.prompt,
+            ctx.userMessages,
           );
         };
       } catch (error) {
@@ -1436,9 +1455,10 @@ ${noProgressGuidance}`;
     if (!this.agentRuntime) {
       throw new Error(`Mission Agent Runtime is not initialized for mission ${ctx.missionId}`);
     }
+    const missionPrompt = missionPromptWithMessages(ctx);
     const prompt = ctx.clarificationAnswers && ctx.clarificationAnswers.length > 0
-      ? `${ctx.prompt}\n\nClarification answers:\n${ctx.clarificationAnswers.map((a, i) => `${i + 1}. ${a}`).join('\n')}`
-      : ctx.prompt;
+      ? `${missionPrompt}\n\nClarification answers:\n${ctx.clarificationAnswers.map((a, i) => `${i + 1}. ${a}`).join('\n')}`
+      : missionPrompt;
     return this.agentRuntime.generatePlan(prompt, ctx.metadata, async (progress) => {
       await this.reportPlannerProgress(ctx, progress);
     });
@@ -1566,6 +1586,7 @@ ${noProgressGuidance}`;
   }
 
   async handleUserMessage(ctx: MissionContext, content: string): Promise<{ acknowledgement: string; response: string }> {
+    (ctx.userMessages ||= []).push(content);
     if (!this.agentRuntime) {
       const rt = new MissionAgentRuntime({
         missionId: ctx.missionId,
@@ -1579,13 +1600,7 @@ ${noProgressGuidance}`;
     const agentRuntime = this.agentRuntime!;
     const directorAgentId = agentRuntime.getAgentIdForRole('mission-director');
     const directorIdentity = { agentId: directorAgentId, agentName: 'Mission Director', agentRole: 'mission-director' };
-    await agentRuntime.emitMonologue({
-      agentRole: 'mission-director',
-      thought: `A user message arrived during the mission: "${content.slice(0, 200)}". I need to understand the intent, decide whether to forward it to another agent, and formulate a brief acknowledgement and helpful response.`,
-      text: `Processing user message: ${content.slice(0, 120)}${content.length > 120 ? '...' : ''}`,
-      data: { content: content.slice(0, 500) },
-    });
-    const agentId = await agentRuntime.getOrCreateAgent('mission-director', 'You are the mission primary agent. Process user messages during a mission: understand intent, forward to another agent if needed by describing the delegation, formulate a brief acknowledgement, and provide a real helpful response. Return JSON {"acknowledgement":"...","response":"...","forwardTo":"..."}.');
+    const agentId = await agentRuntime.getOrCreateAgent('mission-director', 'You are the mission primary agent. Process user messages during a mission. The message is available to subsequent mission tasks. Acknowledge it without claiming to have forwarded it to an agent or completed an action. Return JSON {"acknowledgement":"...","response":"..."}.');
     let result: { output: string };
     try {
       result = await agentRuntime.executePromptTask(agentId, {
@@ -1597,42 +1612,28 @@ ${noProgressGuidance}`;
         executionPolicy: { ...DEFAULT_AGENT_EXECUTION_POLICY, maxActions: 0, maxCompletionTokens: 1024, maxCompletionTokensPerCall: 512, maxDelegations: 0 },
       });
     } catch (err) {
-      await ctx.broadcast({ type: 'agent_error', missionId: ctx.missionId, timestamp: Date.now(), data: { error: err instanceof Error ? err.message : String(err), ...directorIdentity, thought: 'Error processing user message; returning fallback acknowledgement.' } });
+      await ctx.broadcast({ type: 'agent_error', missionId: ctx.missionId, timestamp: Date.now(), data: { error: err instanceof Error ? err.message : String(err), ...directorIdentity } });
       return { acknowledgement: 'Message received.', response: 'I received your message but could not process it right now.' };
     }
     let acknowledgement = 'Message received.';
     let response = result.output || 'I received your message.';
-    let forwardTo: string | undefined;
     try {
       const parsed = JSON.parse(result.output.trim().replace(/^```(?:json)?\s*/i,'').replace(/\s*```$/,''));
       if (parsed.acknowledgement) acknowledgement = parsed.acknowledgement;
       if (parsed.response) response = parsed.response;
-      if (parsed.forwardTo) forwardTo = String(parsed.forwardTo);
     } catch {}
+    // The director is asked for a short plain-text reply; anything else (raw
+    // tool manifests, execution receipts) is internal output, not conversation.
     if (!response.trim()) response = 'I received your message.';
-    if (forwardTo) {
-      await agentRuntime.emitMonologue({
-        agentRole: 'mission-director',
-        thought: `I am forwarding the user message to "${forwardTo}" because the intent requires that agent's expertise or action.`,
-        text: `Forwarding message to "${forwardTo}".`,
-        data: { forwardTo, content: content.slice(0, 500) },
-      });
-      await ctx.broadcast({ type: 'agent_delegation', missionId: ctx.missionId, timestamp: Date.now(), data: { from: 'mission-director', to: forwardTo, content, ...directorIdentity, thought: `Delegating user message to ${forwardTo}.` } });
-    } else {
-      await agentRuntime.emitMonologue({
-        agentRole: 'mission-director',
-        thought: `I have processed the user message and formulated a direct response without delegation.`,
-        text: `Responding directly to the user.`,
-        data: { response: response.slice(0, 500) },
-      });
-    }
-    await ctx.broadcast({ type: 'agent_acknowledgement', missionId: ctx.missionId, timestamp: Date.now(), data: { content: acknowledgement, ...directorIdentity, thought: 'Acknowledging user message.' } });
-    await ctx.broadcast({ type: 'agent_response', missionId: ctx.missionId, timestamp: Date.now(), data: { content: response, ...directorIdentity, thought: 'Responding to user message.' } });
-    return { acknowledgement, response };
+    const acknowledgementText = sanitizeAgentMessage(acknowledgement, 'Message received.').text;
+    const responseText = sanitizeAgentMessage(response, 'I received your message.').text;
+    await ctx.broadcast({ type: 'agent_acknowledgement', missionId: ctx.missionId, timestamp: Date.now(), data: { content: acknowledgementText, ...directorIdentity } });
+    await ctx.broadcast({ type: 'agent_response', missionId: ctx.missionId, timestamp: Date.now(), data: { content: responseText, ...directorIdentity } });
+    return { acknowledgement: acknowledgementText, response: responseText };
   }
 
   async evaluateMissionCompletion(
-    ctx: Pick<MissionContext, 'missionId' | 'prompt' | 'tenantId' | 'metadata' | 'agentRuntimeUrl'>,
+    ctx: Pick<MissionContext, 'missionId' | 'prompt' | 'tenantId' | 'metadata' | 'agentRuntimeUrl' | 'userMessages'>,
     plan: Plan,
     outputs: {
       phases?: Array<{
@@ -1708,7 +1709,7 @@ ${noProgressGuidance}`;
       }),
     );
     const review = await agentRuntime.reviewMissionCompletion(
-      ctx.prompt,
+      missionPromptWithMessages(ctx),
       plan.summary || '',
       completedTaskSummaries,
     );

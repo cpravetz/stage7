@@ -1,6 +1,7 @@
 import { TriggerScheduler } from '../src/services/TriggerScheduler';
 import { createInMemoryTriggerRecordStore } from '../src/services/TriggerRecordStore';
 import { allWorkflows } from '../src/data/skills';
+import { parseCadence } from '../src/adk/cron';
 import type { Tool, ToolExecution } from '../src/types';
 
 /**
@@ -52,14 +53,44 @@ describe('shipped schedule triggers', () => {
     expect(declared.length).toBeGreaterThan(0);
   });
 
-  it('schedules the unambiguous ones and reports the prose ones instead of guessing', () => {
+  it('schedules explicit cron declarations and reports prose cadences instead of guessing', () => {
     const { schedules, issues } = scheduler.list();
-    const declared = catalogueTools().filter((tool) =>
-      (tool.triggers ?? []).some((trigger) => trigger.kind === 'schedule'),
-    ).length;
+    const scheduleTriggers = (tool: Tool) =>
+      (tool.triggers ?? []).filter((trigger) => trigger.kind === 'schedule');
+    const declared = catalogueTools().filter((tool) => scheduleTriggers(tool).length > 0);
 
-    expect(schedules.length + issues.length).toBe(declared);
-    expect(schedules.length).toBeGreaterThan(0);
+    // An explicit cron always becomes a live schedule. Cadence-only shorthand
+    // (daily/weekly/monthly/hourly/every N) is deliberately not auto-scheduled;
+    // prose cadences are reported so the author writes an exact expression.
+    const withCron = declared.filter((tool) =>
+      scheduleTriggers(tool).some((trigger) => Boolean(trigger.cron)),
+    );
+    const reported = new Set([
+      ...schedules.map((schedule) => schedule.skillId),
+      ...issues.map((issue) => issue.skillId),
+    ]);
+    for (const tool of withCron) {
+      expect(reported.has(tool.id)).toBe(true);
+    }
+
+    const cadenceOnly = declared.filter(
+      (tool) => !scheduleTriggers(tool).some((trigger) => Boolean(trigger.cron)),
+    );
+    for (const tool of cadenceOnly) {
+      const accepted = scheduleTriggers(tool).some(
+        (trigger) => trigger.cadence && parseCadence(trigger.cadence).valid,
+      );
+      if (accepted) {
+        // A cadence with one interpretation is not invented as a schedule and
+        // is not an error either.
+        expect(schedules.some((schedule) => schedule.skillId === tool.id)).toBe(false);
+        expect(issues.some((issue) => issue.skillId === tool.id)).toBe(false);
+      } else {
+        expect(issues.some((issue) => issue.skillId === tool.id)).toBe(true);
+      }
+    }
+
+    expect(issues.length).toBeGreaterThan(0);
   });
 
   it('reports every cadence it could not schedule, naming the cron to write', () => {
@@ -71,14 +102,29 @@ describe('shipped schedule triggers', () => {
   });
 
   it('never invents a frequency from a cadence that does not say when', () => {
-    // "Every 5 minutes during configured windows" is conditional. Scheduling it
-    // every five minutes unconditionally would fire a Skill the author meant to
-    // hold back, so it has to be reported rather than run.
     const { schedules } = schedulerFor().list();
     const crons = schedules.map((schedule) => schedule.cron);
-    expect(crons).not.toContain('*/5 * * * *');
-    // "daily" does not say when in the day, so it is not a schedule either.
-    expect(crons).not.toContain('0 0 * * *');
+
+    // A conditional cadence must not be turned into a live schedule. "Every 5
+    // minutes during configured windows" is held back, not fired unconditionally.
+    const conditional = catalogueTools().find(
+      (tool) => tool.id === 'sports-ingame-predictive-modeling-scheduled',
+    );
+    expect(conditional).toBeDefined();
+    expect(schedules.some((schedule) => schedule.skillId === conditional!.id)).toBe(false);
+
+    // The scheduler may only run a cron the catalogue actually declares. A
+    // cadence with no single reading ("daily", prose) is never promoted to one.
+    const declaredCrons = new Set(
+      catalogueTools().flatMap((tool) =>
+        (tool.triggers ?? []).flatMap((trigger) =>
+          trigger.kind === 'schedule' && trigger.cron ? [trigger.cron] : [],
+        ),
+      ),
+    );
+    for (const cron of crons) {
+      expect(declaredCrons.has(cron)).toBe(true);
+    }
   });
 
   it('gives every schedule a next fire time', () => {

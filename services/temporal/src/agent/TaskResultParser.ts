@@ -128,11 +128,26 @@ export function withActionReceiptArtifact(
   ];
 }
 
+function generateArtifactId(): string {
+  return `artifact-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function normalizeArtifactName(name: string): string {
+  return name.trim().toLocaleLowerCase();
+}
+
+function inferArtifactType(content: string): string {
+  if (/^\s*\{[\s\S]*\}/m.test(content) && /```json/.test(content)) return 'config';
+  if (/^#\s+/m.test(content)) return 'document';
+  if (/^\s*[-*]\s+/m.test(content)) return 'list';
+  if (/\|.*\|/.test(content)) return 'table';
+  return 'document';
+}
+
 export function extractArtifacts(content: string, expected: string[]): MissionArtifact[] {
   if (expected.length === 0) return [];
   const artifacts: MissionArtifact[] = [];
   const headings = [...content.matchAll(/^##[ \t]+(.+?)[ \t]*$/gm)];
-  const normalize = (name: string) => name.trim().toLocaleLowerCase();
   for (const [index, heading] of headings.entries()) {
     const name = heading[1]?.trim();
     if (!name) continue;
@@ -140,23 +155,16 @@ export function extractArtifacts(content: string, expected: string[]): MissionAr
     const end = headings[index + 1]?.index ?? content.length;
     const section = content.slice(start, end).trim();
     if (!section) continue;
-    const matched = expected.find((artifactName) => normalize(artifactName) === normalize(name));
+    const matched = expected.find((artifactName) => normalizeArtifactName(artifactName) === normalizeArtifactName(name));
     if (expected.length > 0 && !matched) continue;
     artifacts.push({
+      id: generateArtifactId(),
       name: matched || `${name.replace(/[^a-z0-9-]/gi, '-').toLowerCase()}.md`,
-      type: inferType(section),
+      type: inferArtifactType(section),
       content: section,
       purpose: 'deliverable',
       isDeliverable: true,
     });
   }
   return artifacts;
-}
-
-export function inferType(content: string): string {
-  if (/^\s*\{[\s\S]*\}/m.test(content) && /```json/.test(content)) return 'config';
-  if (/^#\s+/m.test(content)) return 'document';
-  if (/^\s*[-*]\s+/m.test(content)) return 'list';
-  if (/\|.*\|/.test(content)) return 'table';
-  return 'document';
 }

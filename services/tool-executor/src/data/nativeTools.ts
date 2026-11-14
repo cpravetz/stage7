@@ -77,45 +77,6 @@ export const nativeTools: Tool[] = [
     isSkill: false,
   },
   {
-    id: 'search_web',
-    name: 'Search Web',
-    description: 'Search the internet for information using multiple providers (Google, LangSearch, DuckDuckGo, SearxNG). Returns ranked results with titles, URLs, and snippets.',
-    type: 'native',
-    manifest: { executor: 'search', type: 'native' },
-    inputSchema: {
-      type: 'object',
-      properties: {
-        query: { type: 'string', description: 'Search query string', required: true },
-        maxResults: { type: 'integer', minimum: 1, maximum: 50, default: 5, description: 'Maximum number of results to return (default: 5)' },
-        searchType: { type: 'string', enum: ['web', 'images', 'news'], default: 'web', description: 'Type of search to perform (default: web)' },
-        freshness: { type: 'string', enum: ['day', 'week', 'month', 'year'], description: 'Filter results by recency' },
-      },
-      required: ['query'],
-    },
-    outputSchema: {
-      type: 'object',
-      properties: {
-        success: { type: 'boolean' },
-        results: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: {
-              title: { type: 'string' },
-              url: { type: 'string' },
-              snippet: { type: 'string' },
-            },
-          },
-        },
-        count: { type: 'integer' },
-        error: { type: 'string' },
-      },
-    },
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    isSkill: false,
-  },
-  {
     id: 'api_client',
     name: 'API Client',
     description: 'Make generic REST API calls to external services. Requires the `api_base_url` credential (or API_CLIENT_BASE_URL env var) to be configured. Supports all HTTP methods, query parameters, custom headers, authentication (bearer, basic, API key), and configurable timeouts.',

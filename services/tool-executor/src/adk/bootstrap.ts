@@ -6,11 +6,13 @@
  * full capability set — goes through `buildCatalog`, so there is a single
  * definition of what ships.
  *
- * `<id>Skills` is the Assistant's complete capability set: the canonical Skills
- * that mount an Overview panel and the lower-order Tools that do not. Which is
- * which is declared per capability by `isSkill` on the Tool itself, never by
- * which array it happens to sit in — several Assistants export a combined array
- * and derive their canonical subset from that.
+ * `<id>Skills` is the Assistant's canonical capability set: the Skills that
+ * mount an Overview panel. An Assistant that keeps its lower-order Tools in a
+ * separate `<id>LowerOrderTools` export (rather than splicing them into
+ * `<id>Skills`) has both arrays combined here, so the catalog always sees the
+ * complete capability set. Which capability is canonical is declared per
+ * capability by `isSkill` on the Tool itself, never by which array it happens
+ * to sit in.
  */
 
 import * as path from 'path';
@@ -82,10 +84,19 @@ function skillsFor(id: AssistantId): Tool[] {
   if (!Array.isArray(skills)) {
     throw new Error(
       `Assistant "${id}" does not export a "${id}Skills" array. ` +
-        'Every Assistant index must export its complete capability set under that name.',
+        'Every Assistant index must export its canonical capability set under that name.',
     );
   }
-  return skills as Tool[];
+  const lowerOrder = REGISTRY[id].module[`${id}LowerOrderTools`];
+  const combined = Array.isArray(lowerOrder) ? [...(skills as Tool[]), ...(lowerOrder as Tool[])] : (skills as Tool[]);
+  // An Assistant that already splices its lower-order Tools into `<id>Skills`
+  // and also exports them separately would otherwise register each twice.
+  const seen = new Set<string>();
+  return combined.filter((tool) => {
+    if (seen.has(tool.id)) return false;
+    seen.add(tool.id);
+    return true;
+  });
 }
 
 /**

@@ -1,9 +1,9 @@
 import request from 'supertest';
 import express from 'express';
-import gatewayRoutes from '../routes/gateway';
-import messagingRoutes from '../routes/messaging';
-import { ServiceRegistry } from '../utils/serviceRegistryImpl';
-import { gatewayRegistry } from '../utils/sharedInstances';
+import gatewayRoutes from '../src/routes/gateway';
+import messagingRoutes from '../src/routes/messaging';
+import { ServiceRegistry } from '../src/utils/serviceRegistryImpl';
+import { gatewayRegistry } from '../src/utils/sharedInstances';
 
 jest.mock('http-proxy', () => {
   return function mockHttpProxy() {

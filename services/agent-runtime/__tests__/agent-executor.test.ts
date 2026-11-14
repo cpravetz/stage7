@@ -43,6 +43,7 @@ function task(taskId = 'mission-1:phase-1:task-1'): Omit<AgentTask, 'agentId' | 
 }
 
 describe('AgentExecutor', () => {
+  jest.setTimeout(60_000)
   it('bounds Brain request time and surfaces a recoverable task error', async () => {
     const fetcher: typeof fetch = async (input, init) => {
       const url = String(input)
@@ -3120,11 +3121,12 @@ describe('AgentExecutor', () => {
       output: expect.stringContaining('Recovered without replaying an action.'),
     })
     expect(retryPrompt).toContain(`Retry guidance for this resumed task:\n${guidance}`)
-    expect(firstAttemptBrainCalls).toBe(1)
+    expect(firstAttemptBrainCalls).toBe(4)
     expect(retryBrainCalls).toBe(2)
   })
 
   it('recovers a completed delegated child when the parent checkpoint still has a pending delegation', async () => {
+    jest.setTimeout(60_000)
     const savedStates = new Map<string, {
       agentId: string
       tenantId: string

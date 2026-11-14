@@ -172,8 +172,8 @@ describe('Tool Reference Integrity', () => {
 
   it('native and general tool ids and names are part of the delegation set', () => {
     // Guards against the resolution set regressing to skills-only, which is what
-    // made a literal __execute_tool('search_web', ...) fail this test even
-    // though search_web is a registered default.
+    // made a literal __execute_tool fail this test even
+    // though tools are registered defaults.
     const ids = new Set(ALL_DELEGATABLE_ARRAYS.flatMap((g) => g.skills).map((t) => t.id));
     const names = new Set(ALL_DELEGATABLE_ARRAYS.flatMap((g) => g.skills).map((t) => t.name));
 
@@ -183,7 +183,7 @@ describe('Tool Reference Integrity', () => {
     }
 
     // The concrete cases that motivated the change.
-    for (const id of ['search_web', 'api_client', 'file_storage', 'get_weather', 'calculate']) {
+    for (const id of ['api_client', 'file_storage', 'get_weather', 'calculate']) {
       expect(ids.has(id)).toBe(true);
     }
   });

@@ -61,7 +61,27 @@ export const MARKETING_CENTER = createDeclarativeCodeSkill({
     ]
   },
   handler: async function handler(input, ctx) {
-      const data = input.data || {};
+      // The request payload is what the channel is selected from. Running with
+      // nothing would silently fall through to content generation and fail on
+      // that tool's configuration instead of telling the caller what is missing.
+      const rawData = input.data;
+      if (!rawData || typeof rawData !== 'object' || Object.keys(rawData as Record<string, unknown>).length === 0) {
+        return {
+          success: false,
+          system: 'marketing',
+          delegatedTo: 'none',
+          data: null,
+          error: 'A request payload (data) is required to choose and run a marketing tool.',
+          present: [
+            ctx.render.text('notice', 'Request required', [
+              'No campaign request was supplied.',
+              'Provide the request in `data` (for example channel, recipients, or copy) and run this again.',
+            ]),
+          ],
+        };
+      }
+
+      const data = rawData;
 
       // Selection lives here, in the Skill that understands the work, rather than
       // in the input schema. The channel is read off the data the caller supplied:
