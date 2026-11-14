@@ -86,6 +86,53 @@ interface ModelRoutingSession {
 const MAX_LOG_ENTRIES = 200;
 const MODEL_ROUTING_SESSION_TTL_MS = 60 * 60 * 1000;
 const MAX_MODEL_ROUTING_SESSIONS = 1000;
+const RATE_LIMIT_COOLDOWN_MS = 60_000;
+const HARD_ERROR_COOLDOWN_MS = 300_000;
+const MODEL_COOLDOWN_MAX_MS = Number(process.env.BRAIN_MODEL_COOLDOWN_MAX_MS) > 0
+  ? Number(process.env.BRAIN_MODEL_COOLDOWN_MAX_MS)
+  : 24 * 60 * 60 * 1000;
+const MODEL_COOLDOWN_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+const MAX_MODEL_COOLDOWN_ENTRIES = 2000;
+
+interface ModelCooldownEntry {
+  until: number;
+  reason: string;
+  baseCooldownMs: number;
+  consecutiveFailures: number;
+}
+
+/**
+ * Error messages carry volatile values (timestamps, request ids, retry hints),
+ * so compare a stable signature instead of the raw string. Model ids are
+ * already part of the cooldown key, so collapsing numbers cannot merge two
+ * different models' failures.
+ */
+export function normalizeCooldownError(message: string): string {
+  return message
+    .toLowerCase()
+    .replace(/[0-9a-f]{8,}/g, '<hex>')
+    .replace(/\d+(?:\.\d+)?/g, '#')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 300);
+}
+
+/**
+ * Pure cooldown policy: the first identical failure uses the base window, and
+ * each consecutive identical failure after the window expires doubles it.
+ */
+export function nextModelCooldown(
+  previous: Pick<ModelCooldownEntry, 'reason' | 'consecutiveFailures'> | undefined,
+  reason: string,
+  baseCooldownMs: number,
+  maxCooldownMs: number,
+): { cooldownMs: number; consecutiveFailures: number } {
+  const sameError = previous !== undefined
+    && normalizeCooldownError(previous.reason) === normalizeCooldownError(reason);
+  const consecutiveFailures = sameError ? previous.consecutiveFailures + 1 : 1;
+  const cooldownMs = Math.min(baseCooldownMs * 2 ** (consecutiveFailures - 1), maxCooldownMs);
+  return { cooldownMs, consecutiveFailures };
+}
 
 function modelRoutingKey(model: Pick<ModelDefinition, 'id' | 'provider'>): string {
   return `${model.provider}:${model.id}`;
@@ -129,6 +176,11 @@ export class BrainService {
 
   // Request ID -> {provider, model} mapping for complaints
   private requestIdMap = new Map<string, { provider: string; model: string; complaintRecorded?: boolean; routingSessionKey?: string }>();
+
+  // Cross-session model cooldowns: provider:modelId -> failure history.
+  // Expired entries are retained so a repeated identical error can double the
+  // next cooldown; they are pruned by age and count.
+  private modelCooldowns = new Map<string, ModelCooldownEntry>();
 
   async initialize() {
     if (this.initialized) return;
@@ -199,6 +251,56 @@ export class BrainService {
     if (!sessionId) return;
     const session = this.getRoutingSession(sessionId);
     for (const modelId of modelIds) session.attemptedModelIds.add(modelId);
+  }
+
+  private isModelInCooldown(routingKey: string): boolean {
+    const entry = this.modelCooldowns.get(routingKey);
+    // Expired entries are kept: recordModelCooldown() reads them to detect a
+    // repeated identical failure and double the next window.
+    return entry !== undefined && Date.now() < entry.until;
+  }
+
+  private clearModelCooldown(routingKey: string): void {
+    this.modelCooldowns.delete(routingKey);
+  }
+
+  private pruneModelCooldowns(now: number): void {
+    for (const [key, entry] of this.modelCooldowns) {
+      if (now >= entry.until + MODEL_COOLDOWN_RETENTION_MS) {
+        this.modelCooldowns.delete(key);
+      }
+    }
+    if (this.modelCooldowns.size <= MAX_MODEL_COOLDOWN_ENTRIES) return;
+    const oldest = Array.from(this.modelCooldowns.entries())
+      .sort((left, right) => left[1].until - right[1].until);
+    for (const [key] of oldest.slice(0, this.modelCooldowns.size - MAX_MODEL_COOLDOWN_ENTRIES)) {
+      this.modelCooldowns.delete(key);
+    }
+  }
+
+  private recordModelCooldown(routingKey: string, reason: string, baseCooldownMs: number) {
+    const now = Date.now();
+    const previous = this.modelCooldowns.get(routingKey);
+    // Already cooling down for this failure: do not extend it on duplicate
+    // reports from the same attempt.
+    if (previous && now < previous.until) return;
+    this.pruneModelCooldowns(now);
+    const { cooldownMs, consecutiveFailures } = nextModelCooldown(
+      previous,
+      reason,
+      baseCooldownMs,
+      MODEL_COOLDOWN_MAX_MS,
+    );
+    this.modelCooldowns.set(routingKey, {
+      until: now + cooldownMs,
+      reason,
+      baseCooldownMs,
+      consecutiveFailures,
+    });
+    logger.warn(
+      { routingKey, baseCooldownMs, cooldownMs, consecutiveFailures, reason },
+      'Model cooled down; repeated identical failures extend the cooldown exponentially',
+    );
   }
 
   listProviders(): Array<{ id: string; name: string; hasApiKey: boolean; openAICompatible: boolean }> {
@@ -311,6 +413,10 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
     const eligibleCandidates = this.router.getCandidates(routingOptions);
     const session = routingSessionKey ? this.getRoutingSession(routingSessionKey) : undefined;
     const attemptedModelIds = new Set(session?.attemptedModelIds || []);
+    // Also exclude models currently in cooldown from prior failures
+    for (const [key] of this.modelCooldowns) {
+      if (this.isModelInCooldown(key)) attemptedModelIds.add(key);
+    }
     const attemptedThisCall = new Set<string>();
     const candidates = this.router.getCandidates({
       ...routingOptions,
@@ -466,6 +572,9 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
             break;
           }
           breaker.recordSuccess();
+          // A success resets the model's failure streak so a later, unrelated
+          // error starts from the base cooldown instead of an escalated one.
+          this.clearModelCooldown(routingKey);
 
           const result: CompletionResult = {
             content: response.content,
@@ -559,6 +668,7 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
             && /(your (?:api )?key|your account|your organization|your org\b|this key|not authorized|unauthorized|api key .*(?:not|invalid)|not allowed to use|permission to use)/i.test(errMsg);
           const isModelSpecific = /is not found for API version|model .* does not exist|model .* not found/i.test(errMsg)
             || /\b(404)\b/.test(errMsg)
+            || /\b(400)\b/.test(errMsg)
             || (/\b403\b/.test(errMsg) && !isProviderAccessDenied);
           // classify error: provider-key / quota issues vs transient vs rate-limit
           const isProviderFatal = /key limit exceeded|quota exceeded|no remaining credits|insufficient credits|credit balance is too low|credits? exhausted|payment required|invalid api key|incorrect api key|authentication|unauthorized|no route for that uri|object identifier is invalid|invalid account|invalid endpoint|unauthorized account/i.test(errMsg)
@@ -591,6 +701,8 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
             // turn rotates to a different eligible model instead of repeating
             // the same slow provider until the completion deadline expires. A
             // later routing session can still use this model.
+            const routingKey = modelRoutingKey(candidate.model);
+            this.recordModelCooldown(routingKey, errMsg, RATE_LIMIT_COOLDOWN_MS);
             break;
           }
           if (isProviderFatal) {
@@ -622,8 +734,11 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
             // A model-level denial confirms the provider responded; it must not
             // contribute to provider-wide health or leave a half-open circuit.
             breaker.reset();
-            // Model-specific error (e.g. 404 for a specific model). Skip this model
-            // but keep the provider active so other models on this provider can still be tried.
+            // Model-specific error (e.g. 400 invalid argument, 403 model-gated, 404 not found).
+            // Skip this model but keep the provider active so other models on this provider can still be tried.
+            // Cooldown the model across routing sessions so it is not retried immediately.
+            const routingKey = modelRoutingKey(candidate.model);
+            this.recordModelCooldown(routingKey, errMsg, HARD_ERROR_COOLDOWN_MS);
             logger.warn({ provider: provider.id, model: candidate.model.id, err: errMsg }, 'Model-specific error - skipping to next candidate');
             this.addLog({
               type: 'error',
@@ -644,6 +759,9 @@ async complete(prompt: string, options: CompletionOptions = {}): Promise<Complet
           if (isRateLimit) {
             // Rate-limited: do NOT retry the same model (backoff would just hit the
             // same limit). Move to the next candidate model immediately.
+            // Cooldown the model across routing sessions so it is not retried immediately.
+            const routingKey = modelRoutingKey(candidate.model);
+            this.recordModelCooldown(routingKey, errMsg, RATE_LIMIT_COOLDOWN_MS);
             logger.warn({ provider: provider.id, model: candidate.model.id, err: errMsg }, 'Model rate-limited - trying next candidate');
             this.addLog({
               type: 'error',

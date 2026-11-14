@@ -34,6 +34,15 @@ const Brain = () => {
   const [page, setPage] = useState(0);
   const [modalEntry, setModalEntry] = useState<BrainLogEntry | null>(null);
 
+  useEffect(() => {
+    if (!modalEntry) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setModalEntry(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [modalEntry]);
+
   const feedEvents = useFeedStore((s) => s.events);
 
   const brainErrorEvents = useMemo(
