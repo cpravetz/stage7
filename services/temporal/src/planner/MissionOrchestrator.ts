@@ -28,7 +28,6 @@ import {
   recoveryProgressSignature,
   hasRecoveryProgress,
   MAX_PHASE_RECOVERY_ROUNDS_SAFETY,
-  MAX_MISSION_RECOVERY_ROUNDS_SAFETY,
   MAX_NO_PROGRESS_RECOVERY_ATTEMPTS,
 } from '../types/workflow';
 import { PlannerProgress } from './MissionPlanner';
@@ -80,7 +79,6 @@ function agentIdentityForRole(agentRuntime: MissionAgentRuntime, role: string): 
 
 // Replaced fixed cutoffs with progress-aware limits + hard safety ceilings (Task 3).
 const MAX_PHASE_RECOVERY_ROUNDS = MAX_PHASE_RECOVERY_ROUNDS_SAFETY;
-const MAX_MISSION_RECOVERY_ROUNDS = MAX_MISSION_RECOVERY_ROUNDS_SAFETY;
 
 class MissionUserInterruptionError extends Error {
   constructor(readonly result: { plan: Plan; outputs: any; compensations: Array<{ phaseId: string; action: string }> }) {
@@ -1090,7 +1088,9 @@ agentRole: 'mission-executor',
     let lastCompletionSignature: string | undefined;
     let completionNoProgress = 0;
     let completionVerified = false;
-    for (let recoveryIndex = 1; recoveryIndex <= MAX_MISSION_RECOVERY_ROUNDS; recoveryIndex++) {
+    let recoveryIndex = 0;
+    while (true) {
+      recoveryIndex += 1;
       const completionReview = await this.evaluateMissionCompletion(ctx, plan, outputs);
       if (completionReview.satisfied) {
         completionVerified = true;
@@ -1121,19 +1121,11 @@ agentRole: 'mission-executor',
       if (!recoveryPhase) {
         await agentRuntime.emitMonologue({
           agentRole: 'mission-director',
-          thought: `Mission completion could not be routed to a recovery phase: no phase matched the unmet requirements (${gaps.join('; ')}) and there is no fallback phase. I am returning the mission with status awaiting_review so the gaps can be reviewed rather than falsely marking the mission complete.`,
-          text: `Mission awaiting review: no recovery phase for unmet requirements.`,
-          data: { decision: 'mission_awaiting_review', gaps, reason: 'no_recovery_phase' },
+          thought: `No phase matched the unmet requirements (${gaps.join('; ')}) and there is no fallback phase; continuing auto-recovery against the last phase rather than awaiting review.`,
+          text: `Continuing auto-recovery: no recovery phase matched gaps.`,
+          data: { decision: 'mission_autorecover', gaps, reason: 'no_recovery_phase' },
         });
-        return {
-          plan,
-          outputs: {
-            ...outputs,
-            status: 'awaiting_review',
-            gaps,
-          },
-          compensations,
-        };
+        continue;
       }
       let phaseOutput = (outputs.phases as MissionPhaseOutput[])
         .find((candidate) => candidate.phaseId === recoveryPhase.id);
@@ -1152,19 +1144,11 @@ agentRole: 'mission-executor',
       if (!madeProgress && completionNoProgress >= MAX_NO_PROGRESS_RECOVERY_ATTEMPTS) {
         await agentRuntime.emitMonologue({
           agentRole: 'mission-director',
-          thought: `Mission completion recovery reached the safety ceiling (${MAX_NO_PROGRESS_RECOVERY_ATTEMPTS} attempts with no observable progress) for gaps: ${gaps.join('; ')}. I am returning the mission with status awaiting_review rather than continuing to spin; these gaps require user or backend attention.`,
-          text: `Mission awaiting review: recovery safety ceiling reached.`,
-          data: { decision: 'mission_awaiting_review', gaps, reason: 'no_progress_ceiling' },
+          thought: `Mission completion recovery has made no observable progress after ${MAX_NO_PROGRESS_RECOVERY_ATTEMPTS} attempts for gaps: ${gaps.join('; ')}. Continuing auto-recovery with a different approach rather than awaiting review.`,
+          text: `Continuing auto-recovery: no progress on gaps, retrying with a new approach.`,
+          data: { decision: 'mission_autorecover', gaps, reason: 'no_progress_ceiling', completionNoProgress },
         });
-        logger.error(
-          { missionId: ctx.missionId, gaps, completionNoProgress },
-          'Mission completion recovery made no observable progress after approach changes; pausing for review (safety ceiling)',
-        );
-        return {
-          plan,
-          outputs: { ...outputs, status: 'awaiting_review', gaps },
-          compensations,
-        };
+        completionNoProgress = 0;
       }
       const noProgressGuidance = !madeProgress
         ? ' Previous attempts made no observable progress on the same gaps; use a different authorized approach and do not repeat the same recovery steps. If a required value or authorization is missing, ask the user for it and wait.'
@@ -1195,7 +1179,7 @@ agentRole: 'mission-executor',
         id: taskId,
         title: `Resolve mission completion gaps (attempt ${recoveryIndex})`,
         description: `Address the remaining mission completion gaps: ${gaps.join('; ')}`,
-        agentRole: 'assistant',
+        agentRole: 'mission-executor',
         systemPrompt: `Resolve the mission completion gaps below for the mission goal "${ctx.prompt}" and phase "${recoveryPhase.name}". Use the recorded outputs from tasks ${taskIds.join(', ') || 'none'} as authoritative context. Focus only on accomplishing the requested mission outcome and return concrete evidence that the mission outcome is satisfied. Produce only deliverable files explicitly required by the mission goal${expectedArtifacts.length ? ` (${expectedArtifacts.join(', ')})` : ''}; if no such deliverables were requested, do not create design documents, plans, or substitute artifacts. Never create a receipt or evidence document to stand in for an action; actual tool results are recorded internally. Check the live tool catalog, execute a suitable tool, and use capability resolution to find or create one when permitted. If required credentials or configuration are missing, ask the user to provide them through the secure tool configuration form and wait. If required input from an earlier task is missing, ask that task's Agent to provide the needed result or rerun the source task. Do not repeat successfully completed or uncertain side effects; use another authorized approach if one path is blocked. If an execution or system error occurred, treat it as a blocker to resolve or report accurately, not as a request to produce unrelated documentation.${noProgressGuidance}\n\nGaps:\n${gaps.join('\n')}`,
         dependsOnTaskIds: taskIds,
         expectedArtifacts,
@@ -1381,36 +1365,11 @@ agentRole: 'mission-executor',
         const review = await this.evaluateMissionCompletion(ctx, plan, outputs);
         await agentRuntime.emitMonologue({
           agentRole: 'mission-director',
-          thought: `The mission recovery task "${recoveryTask.id}" did not complete successfully (status: ${recoveryTask.status}). The final completion review found ${review.gaps.length} unmet requirement(s): ${review.gaps.join('; ')}. I am returning the mission with status awaiting_review because recovery did not resolve the completion gaps.`,
-          text: `Mission awaiting review: recovery task did not complete.`,
-          data: { decision: 'mission_awaiting_review', gaps: review.gaps, reason: 'recovery_failed', recoveryTaskId: recoveryTask.id },
+          thought: `The mission recovery task "${recoveryTask.id}" did not complete successfully (status: ${recoveryTask.status}). Continuing auto-recovery with another approach rather than awaiting review.`,
+          text: `Continuing auto-recovery: recovery task did not complete.`,
+          data: { decision: 'mission_autorecover', gaps: review.gaps, reason: 'recovery_failed', recoveryTaskId: recoveryTask.id },
         });
-        return {
-          plan,
-          outputs: {
-            ...outputs,
-            status: 'awaiting_review',
-            gaps: review.gaps.length ? review.gaps : ['Mission recovery did not complete successfully.'],
-          },
-          compensations,
-        };
-      }
-    }
-
-    if (!completionVerified) {
-      const finalCompletionReview = await this.evaluateMissionCompletion(ctx, plan, outputs);
-      if (!finalCompletionReview.satisfied) {
-        await agentRuntime.emitMonologue({
-          agentRole: 'mission-director',
-          thought: `The final mission completion review is not satisfied: ${finalCompletionReview.gaps.length} unmet requirement(s) remain: ${finalCompletionReview.gaps.join('; ')}. I am returning the mission with status awaiting_review rather than marking it complete.`,
-          text: `Mission awaiting review: final completion review not satisfied.`,
-          data: { decision: 'mission_awaiting_review', gaps: finalCompletionReview.gaps, reason: 'final_review_not_satisfied' },
-        });
-        return {
-          plan,
-          outputs: { ...outputs, status: 'awaiting_review', gaps: finalCompletionReview.gaps },
-          compensations,
-        };
+        continue;
       }
     }
     await agentRuntime.emitMonologue({

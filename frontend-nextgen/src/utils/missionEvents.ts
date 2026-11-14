@@ -241,19 +241,58 @@ function eventTaskId(event: FeedEvent): string | undefined {
   return typeof taskId === 'string' ? taskId : undefined;
 }
 
+/**
+ * "assistant" is reserved for Assistants built on the ADK. Mission Agents must
+ * never be labelled "assistant", so that role is canonicalized to the mission
+ * executor and known mission roles map to human-readable names.
+ */
+const RESERVED_AGENT_ROLE_ALIASES: Record<string, string> = {
+  assistant: 'mission-executor',
+};
+
+const MISSION_AGENT_ROLE_LABELS: Record<string, string> = {
+  planner: 'Mission Planner',
+  'mission-director': 'Mission Director',
+  director: 'Mission Director',
+  'phase-reviewer': 'Phase Reviewer',
+  'phase-review': 'Phase Reviewer',
+  'mission-evaluator': 'Mission Evaluator',
+  'mission-executor': 'Mission Executor',
+  executor: 'Mission Executor',
+};
+
+export function canonicalAgentRoleKey(role: string): string {
+  return role
+    .replace(/[_-]+/g, ' ')
+    .replace(/(?:\s+Agent)+$/i, '')
+    .trim()
+    .toLocaleLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+export function missionAgentRoleLabel(role: string): string {
+  const key = canonicalAgentRoleKey(role);
+  const canonical = RESERVED_AGENT_ROLE_ALIASES[key] || key;
+  if (MISSION_AGENT_ROLE_LABELS[canonical]) return MISSION_AGENT_ROLE_LABELS[canonical];
+  const stripped = role.replace(/[_-]+/g, ' ').replace(/(?:\s+Agent)+$/i, '').trim();
+  if (!stripped) return 'Agent';
+  return `${stripped.replace(/\b\w/g, (letter) => letter.toLocaleUpperCase())} Agent`;
+}
+
+export function agentDisplayName(name: string): string {
+  const key = canonicalAgentRoleKey(name);
+  const alias = RESERVED_AGENT_ROLE_ALIASES[key];
+  if (alias) return MISSION_AGENT_ROLE_LABELS[alias];
+  return name.trim();
+}
+
 function agentLabel(metadata: Record<string, unknown>): string | undefined {
   if (typeof metadata.agentName === 'string' && metadata.agentName.trim()) {
-    return metadata.agentName.trim();
+    return agentDisplayName(metadata.agentName.trim());
   }
   if (typeof metadata.agentRole === 'string' && metadata.agentRole.trim()) {
-    const raw = metadata.agentRole.trim();
-    const norm = raw.toLowerCase().replace(/[_\s]+/g, '-');
-    if (norm === 'planner') return 'Mission Planner';
-    if (norm === 'mission-director' || norm === 'director') return 'Mission Director';
-    if (norm === 'phase-reviewer' || norm === 'phase-review') return 'Phase Reviewer';
-    if (norm === 'mission-evaluator') return 'Mission Evaluator';
-    const role = raw.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ');
-    return `${role.replace(/\b\w/g, (letter) => letter.toLocaleUpperCase())} Agent`;
+    return missionAgentRoleLabel(metadata.agentRole.trim());
   }
   return undefined;
 }

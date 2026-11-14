@@ -347,22 +347,22 @@ describe('generateValidPlan', () => {
     expect(complete).toHaveBeenCalledTimes(1)
   })
 
-  it('stops after repeated failed plan repairs', async () => {
-    const invalidPlan = validPlan(1)
-    invalidPlan.phases[0]!.tasks[0]!.expectedArtifacts = [{ name: 'result.md' }] as any
+  it('keeps repairing until a valid plan is produced', async () => {
     const requests: PlannerCompletionRequest[] = []
+    let callCount = 0
     const complete = async (request: PlannerCompletionRequest): Promise<string> => {
       requests.push(request)
-      return request.attempt === 1
-        ? JSON.stringify(invalidPlan)
+      callCount++
+      // With no repair-attempt ceiling, the planner keeps going past
+      // the old 5-attempt limit until a valid plan is produced.
+      return callCount >= 7
+        ? JSON.stringify(validPlan())
         : 'not valid JSON'
     }
 
-    await expect(generateValidPlan('Send the requested message', {}, 'mission-bounded-repair', complete))
-      .rejects.toThrow('could not produce a valid plan after 5 repair attempts')
-
-    expect(requests).toHaveLength(6)
-    expect(requests.slice(1).every((request) => !request.prompt.includes('"phases"'))).toBe(true)
+    const plan = await generateValidPlan('Send the requested message', {}, 'mission-unbounded-repair', complete)
+    expect(plan).toBeDefined()
+    expect(requests).toHaveLength(7)
   })
 
   it('repairs plans that assign executable work to a human role', async () => {

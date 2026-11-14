@@ -81,15 +81,54 @@ export function parseMissionAgentToolPolicies(value: unknown): Map<string, Missi
   return policies;
 }
 
+/**
+ * "assistant" is reserved for Assistants built on the ADK. A mission Agent
+ * must never be created or displayed under that name, so any role that
+ * normalizes to it is canonicalized to the mission executor role.
+ */
+const RESERVED_AGENT_ROLE_ALIASES: Record<string, string> = {
+  assistant: 'mission-executor',
+};
+
+function rawMissionAgentRoleKey(role: string): string {
+  return role
+    .trim()
+    .replace(/[_-]+/g, ' ')
+    .replace(/(?:\s+Agent)+$/i, '')
+    .trim()
+    .toLocaleLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function titleCaseRoleKey(key: string): string {
+  return key
+    .split('-')
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toLocaleUpperCase() + word.slice(1))
+    .join(' ');
+}
+
 export function missionAgentRoleLabel(role: string): string {
+  const key = rawMissionAgentRoleKey(role);
+  const alias = RESERVED_AGENT_ROLE_ALIASES[key];
+  if (alias) return titleCaseRoleKey(alias);
   return role.trim().replace(/[_-]+/g, ' ').replace(/(?:\s+Agent)+$/i, '').trim() || 'Agent';
 }
 
 export function missionAgentRoleKey(role: string): string {
-  return missionAgentRoleLabel(role)
-    .toLocaleLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '') || 'agent';
+  const key = rawMissionAgentRoleKey(role) || 'agent';
+  return RESERVED_AGENT_ROLE_ALIASES[key] || key;
+}
+
+/**
+ * Return the role unchanged unless it is a reserved alias, in which case the
+ * canonical replacement role is returned. Used when persisting plan tasks so
+ * the reserved name never reaches the UI or the Agent runtime.
+ */
+export function canonicalMissionAgentRole(role: string): string {
+  const key = rawMissionAgentRoleKey(role);
+  return RESERVED_AGENT_ROLE_ALIASES[key] || role;
 }
 
 export function extractMissionAgents(value: unknown): AgentDefinition[] {

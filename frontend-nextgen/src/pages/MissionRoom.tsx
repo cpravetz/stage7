@@ -17,6 +17,7 @@ import {
   buildTranscript,
   CONVERSATION_EVENT_TYPES,
   friendlyMissionError,
+  missionAgentRoleLabel,
   summarizeModelUsage,
   TIMELINE_EVENT_TYPES,
 } from '../utils/missionEvents';
@@ -989,7 +990,7 @@ const MissionRoom = () => {
                 : 'The Agent requests permission to use a discovered tool.'}
             </strong>
             <div style={{ marginTop: 6 }}>
-              Task: {pending.taskTitle} · {pending.agentRole}
+              Task: {pending.taskTitle} · {pending.agentRole ? missionAgentRoleLabel(pending.agentRole) : ''}
             </div>
             {pending.kind === 'user_input' && (
               <div style={{ marginTop: 10 }}>
@@ -1230,7 +1231,7 @@ const MissionRoom = () => {
                     <li key={task.id} style={{ padding: '8px 0', borderTop: '1px solid rgba(148,163,184,0.2)' }}>
                       <div>
                         <strong>{task.title}</strong>
-                        {task.agentRole && <span className="badge">🤖 {task.agentRole}</span>}
+                        {task.agentRole && <span className="badge">🤖 {missionAgentRoleLabel(task.agentRole)}</span>}
                         {taskStatus && <span className={`badge ${taskStatus}`}>{taskStatus}</span>}
                       </div>
                       {task.description && <p className="muted" style={{ margin: '4px 0' }}>{task.description}</p>}
@@ -1537,7 +1538,7 @@ const MissionRoom = () => {
                               </div>
                               <div className="plan-task-meta">
                                 {task.agentRole && (
-                                  <span className="badge">🤖 {task.agentRole}</span>
+                                  <span className="badge">🤖 {missionAgentRoleLabel(task.agentRole)}</span>
                                 )}
                                 {taskStatus && (
                                   <span className={`badge ${taskStatus}`}>

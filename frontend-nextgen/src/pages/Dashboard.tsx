@@ -327,7 +327,7 @@ const Dashboard = () => {
                   <span className="feed-time">
                     {new Date(evt.timestamp).toLocaleTimeString()}
                   </span>
-                  <span className="feed-source">{evt.source}</span>
+                  <span className="feed-source">{evt.sourceLabel || evt.source}</span>
                   <span className="feed-msg truncate">{evt.message}</span>
                 </div>
               ))

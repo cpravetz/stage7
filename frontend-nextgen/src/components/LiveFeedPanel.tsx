@@ -20,7 +20,7 @@ export const LiveFeedPanel = ({ events, connected, entityId }: LiveFeedPanelProp
         {filteredEvents.map((evt) => (
           <div key={evt.id} className={`feed-item ${evt.type}`}>
             <span className="feed-time">{new Date(evt.timestamp).toLocaleTimeString()}</span>
-            <span className="feed-source">{evt.source}</span>
+            <span className="feed-source">{evt.sourceLabel || evt.source}</span>
             <span className="feed-msg">{evt.message}</span>
           </div>
         ))}

@@ -218,7 +218,7 @@ describe('MissionOrchestrator checkpoint recovery', () => {
     // Missions execute with one shared Agent rather than a separate Agent per
     // task role; the checkpoint reuses that Agent instead of re-registering one.
     expect(getAgent).toHaveBeenCalledTimes(1)
-    expect(getAgent).toHaveBeenCalledWith('assistant', expect.stringContaining('mission execution agent'))
+    expect(getAgent).toHaveBeenCalledWith('mission-executor', expect.stringContaining('mission execution agent'))
     expect(reviewPhase).toHaveBeenCalledTimes(1)
     expect(reviewMissionCompletion).toHaveBeenCalledWith(
       context.prompt,

@@ -10,10 +10,10 @@ import {
 import { logger } from '@stage7-nextgen/shared';
 import { randomUUID } from 'crypto';
 import { parsePlanJson } from './planJson';
+import { canonicalMissionAgentRole } from '../agent/AgentRuntimeConfig';
 
 const MAX_PRIOR_RESPONSE_CHARS = 12_000;
 const MAX_REFINEMENT_ISSUES_PER_REQUEST = 3;
-const MAX_PLAN_REPAIR_ATTEMPTS = 5;
 const MAX_TRANSIENT_BRAIN_RETRIES = 3;
 
 interface PlannerFieldRepair {
@@ -72,6 +72,55 @@ function plannerFieldRepairPrompt(repair: PlannerFieldRepair): string {
     ? ' The object must have a string "toolId" and an "outcome" of "success", "failure", or "denied".'
     : '';
   return `I need a ${repair.expectedType} for ${path}, but you gave me a ${repair.receivedType}: ${currentValue}.${objectShape} Return only the replacement value as valid JSON.`;
+}
+
+/**
+ * Attempts a local mechanical fix for a planner field type mismatch without
+ * involving the Brain. Covers the common classes of planner mistakes:
+ *  - expected string, received object → extract a common string property
+ *  - expected array, received object → wrap in an array
+ *  - expected string, received number/boolean → coerce to string
+ * Returns undefined when no local fix applies, in which case the narrow
+ * Brain field-repair question is the correct fallback.
+ */
+function tryLocalFieldFix(
+  issues: Array<{ path: PropertyKey[]; message: string }>,
+  plan: unknown,
+): { path: PropertyKey[]; replacement: unknown } | undefined {
+  for (const issue of issues) {
+    const mismatch = issue.message.match(/expected\s+(.+?),\s+received\s+(.+)$/i);
+    if (!mismatch || issue.path.length < 2) continue;
+
+    const expectedType = mismatch[1].trim().toLowerCase();
+    const receivedType = mismatch[2].trim().toLowerCase();
+    const currentValue = getValueAtPath(plan, issue.path);
+
+    // expected string, received object: extract a common string property
+    if (expectedType === 'string' && receivedType === 'object' && currentValue && typeof currentValue === 'object' && !Array.isArray(currentValue)) {
+      const obj = currentValue as Record<string, unknown>;
+      for (const key of ['name', 'title', 'id', 'value', 'text', 'content', 'summary']) {
+        if (typeof obj[key] === 'string' && obj[key].trim().length > 0) {
+          return { path: issue.path, replacement: obj[key] };
+        }
+      }
+    }
+
+    // expected array, received single object: wrap in an array
+    if (expectedType.startsWith('array') && receivedType === 'object' && currentValue && !Array.isArray(currentValue)) {
+      return { path: issue.path, replacement: [currentValue] };
+    }
+
+    // expected string, received number or boolean: coerce to string
+    if (expectedType === 'string' && (receivedType === 'number' || receivedType === 'boolean') && currentValue !== undefined && currentValue !== null) {
+      return { path: issue.path, replacement: String(currentValue) };
+    }
+
+    // expected string, received null or undefined: use an empty string
+    if (expectedType === 'string' && (receivedType === 'null' || receivedType === 'undefined') && currentValue == null) {
+      return { path: issue.path, replacement: '' };
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -145,6 +194,9 @@ function applyPlannerDefaults(plan: any): any {
       if (task && typeof task === 'object' && !Array.isArray(task)) {
         if (task.status === undefined) task.status = 'pending';
         task.requiredActions = [];
+        if (typeof task.agentRole === 'string' && task.agentRole.trim()) {
+          task.agentRole = canonicalMissionAgentRole(task.agentRole);
+        }
       }
     }
   }
@@ -784,7 +836,6 @@ export async function generateValidPlan(
     let jsonRepairRequested = false;
     let pendingFieldRepair: PlannerFieldRepair | undefined;
     let fieldRepairBase: unknown;
-    let failedRepairAttempts = 0;
     let transientBrainRetries = 0;
     const routingSessionId = missionId ? `${missionId}:planner` : `planner:${randomUUID()}`;
     let attempt = 0;
@@ -867,13 +918,7 @@ export async function generateValidPlan(
             // against the repair ceiling, otherwise a provider that keeps
             // returning nothing retries forever without ever failing.
             lastError = 'Planner returned a completion without content';
-            failedRepairAttempts += 1;
             await (reportValidation === null || reportValidation === void 0 ? void 0 : reportValidation(lastError));
-            if (failedRepairAttempts >= MAX_PLAN_REPAIR_ATTEMPTS) {
-                throw new Error(
-                    `Planner could not produce a valid plan after ${failedRepairAttempts} attempts because the planner completion was empty. Last validation issue: ${lastError}`,
-                );
-            }
             logger.warn({ missionId, attempt, reason: lastError }, 'Planner completion was empty; requesting the plan again');
             await reportProgress?.({ attempt, status: 'retrying', reason: lastError, transient: true });
             continue;
@@ -902,6 +947,21 @@ export async function generateValidPlan(
             const parsed = PlanSchema.safeParse(sanitized);
             if (!parsed.success) {
                 lastError = formatSchemaIssues(parsed.error.issues).join('\n');
+
+                // Try local transformations before involving the Brain. Many
+                // planner mistakes are mechanical (object instead of string,
+                // single value instead of array) and can be fixed without
+                // another model call.
+                const localFix = tryLocalFieldFix(parsed.error.issues, sanitized);
+                if (localFix) {
+                    setValueAtPath(sanitized, localFix.path, localFix.replacement);
+                    content = JSON.stringify(sanitized);
+                    previousResponse = content;
+                    logger.info({ missionId, attempt, path: localFix.path.join('.'), replacement: localFix.replacement }, 'Applied local field transformation; revalidating');
+                    await reportProgress?.({ attempt, status: 'retrying', reason: `Local fix: ${localFix.path.join('.')}`, transient: true });
+                    continue;
+                }
+
                 pendingFieldRepair = findPlannerFieldRepair(parsed.error.issues, sanitized);
                 fieldRepairBase = pendingFieldRepair ? sanitized : undefined;
                 throw new Error(lastError);
@@ -964,14 +1024,6 @@ export async function generateValidPlan(
         catch (error) {
             lastError = error instanceof Error ? error.message : String(error);
             await (reportValidation === null || reportValidation === void 0 ? void 0 : reportValidation(lastError));
-            if (isJsonRepair || isFieldRepair || hasPlanToRefine) {
-                failedRepairAttempts += 1;
-                if (failedRepairAttempts >= MAX_PLAN_REPAIR_ATTEMPTS) {
-                    throw new Error(
-                        `Planner could not produce a valid plan after ${MAX_PLAN_REPAIR_ATTEMPTS} repair attempts. Last validation issue: ${lastError}`,
-                    );
-                }
-            }
             if (lastError.startsWith('Planner response did not contain')) {
                 jsonRepairRequested = true;
                 logger.warn({ missionId, attempt, reason: lastError }, 'Planner JSON is malformed; requesting a JSON-only repair');

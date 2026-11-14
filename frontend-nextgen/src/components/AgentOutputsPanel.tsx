@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFeedStore } from '../stores/feedStore';
-import { interactionQuestionText } from '../utils/missionEvents';
+import { canonicalAgentRoleKey, interactionQuestionText, missionAgentRoleLabel } from '../utils/missionEvents';
 
 interface AgentInfo {
   id: string;
@@ -47,16 +47,12 @@ type AgentLike = {
 };
 
 function displayAgentName(name: string | undefined, fallback = ''): string {
-  return (name || fallback).replace(/(?:\s+Agent)+$/i, '').trim();
+  const value = (name || fallback).trim();
+  return value ? missionAgentRoleLabel(value) : '';
 }
 
 function canonicalRole(role: string): string {
-  return role
-    .replace(/[_-]+/g, ' ')
-    .replace(/(?:\s+Agent)+$/i, '')
-    .toLocaleLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '') || 'agent';
+  return canonicalAgentRoleKey(role) || 'agent';
 }
 
 function chooseStatus(left?: string, right?: string): string | undefined {
@@ -181,6 +177,7 @@ function defaultAgentName(role: string): string {
   if (r === 'mission-director' || r === 'director') return 'Mission Director';
   if (r === 'phase-reviewer' || r === 'phase-review') return 'Phase Reviewer';
   if (r === 'mission-evaluator') return 'Mission Evaluator';
+  if (r === 'mission-executor' || r === 'assistant') return 'Mission Executor';
   return displayAgentName(role);
 }
 
