@@ -44,7 +44,7 @@ export const MISSION_AGENT_ROLES = {
   'mission-director': { agentIdPrefix: 'mission-director', agentName: 'Mission Director', agentRole: 'mission-director' },
   'phase-reviewer': { agentIdPrefix: 'phase-reviewer', agentName: 'Phase Reviewer', agentRole: 'phase-reviewer' },
   'mission-evaluator': { agentIdPrefix: 'mission-evaluator', agentName: 'Mission Evaluator', agentRole: 'mission-evaluator' },
-  executor: { agentIdPrefix: 'assistant', agentName: 'Mission Agent', agentRole: 'assistant' },
+  executor: { agentIdPrefix: 'mission-executor', agentName: 'Mission Executor', agentRole: 'mission-executor' },
 } as const;
 
 export type MissionAgentRoleKey = keyof typeof MISSION_AGENT_ROLES;

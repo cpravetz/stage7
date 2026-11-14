@@ -580,7 +580,7 @@ export class ToolExecutor {
       }
 
       const completedAt = new Date();
-      const errorMessage = String(redactSecrets(error instanceof Error ? error.message : 'Unknown error', secretValues));
+      const errorMessage = String(redactSecrets(error instanceof Error ? error.message : String(error), secretValues));
       this.events.dispatchOutcomeEvent(
         tool, 'failed', errorMessage, opts?.workspaceId, opts?.assistantId, executionId,
       );
@@ -799,7 +799,7 @@ export class ToolExecutor {
         throw error;
       }
 
-      const errorMessage = String(redactSecrets(error instanceof Error ? error.message : 'Unknown error', secretValues));
+      const errorMessage = String(redactSecrets(error instanceof Error ? error.message : String(error), secretValues));
       this.events.dispatchOutcomeEvent(
         tool, 'failed', errorMessage, opts?.workspaceId, opts?.assistantId, executionId,
       );
@@ -1250,7 +1250,7 @@ async retryExecution(executionId: string): Promise<ToolExecution | CredentialReq
         if (error instanceof ConfirmationRequiredError) {
           return { success: false, error: `Confirmation required for nested tool: ${callee.name}` };
         }
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        const errorMessage = error instanceof Error ? error.message : String(error);
         return { success: false, error: `Nested tool execution failed: ${errorMessage}` };
       } finally {
         this.nestedExecutionDepth--;

@@ -713,7 +713,7 @@ export function missionGapText(gaps: string[]): string {
 
 function friendlyMissionErrorText(error: string): string {
   const trimmed = (error || '').trim();
-  if (!trimmed) return 'Something went wrong. Please try again.';
+  if (!trimmed) return 'The mission failed with no error detail recorded. Check the mission activity or retry.';
 
   // Try to parse structured JSON error payloads for more specific messages
   if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
@@ -776,7 +776,7 @@ function friendlyMissionErrorText(error: string): string {
       }
       return `Mission agent request failed (HTTP ${runtimeFailure[1]}). Check the mission activity for details.`;
     }
-    return 'Something went wrong while running the mission. Please try again.';
+    return `Mission agent request failed. Details: ${trimmed}`;
   }
   return trimmed;
 }

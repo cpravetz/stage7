@@ -234,7 +234,7 @@ export class MissionOrchestrator {
     plan.requiresClarification = false;
     plan.clarificationQuestions = [];
 
-    const sharedMissionAgentId = await agentRuntime.getOrCreateAgent('assistant', `You are a mission execution agent. Complete each assigned task sequentially to achieve the mission goal: ${ctx.prompt}. Do not invent missing information. Try authorized alternatives first; if a specific required value is unavailable and no safe alternative can complete the outcome, ask one focused question for that value.`);
+    const sharedMissionAgentId = await agentRuntime.getOrCreateAgent('mission-executor', `You are a mission execution agent. Complete each assigned task sequentially to achieve the mission goal: ${ctx.prompt}. Do not invent missing information. Try authorized alternatives first; if a specific required value is unavailable and no safe alternative can complete the outcome, ask one focused question for that value.`);
 
     if (plan.phases.length === 0) {
       plan.summary = plan.summary.trim() || ctx.prompt;
@@ -248,7 +248,7 @@ export class MissionOrchestrator {
           id: 'phase-1-task-1',
           title: 'Complete the requested outcome',
           description: ctx.prompt,
-          agentRole: 'assistant',
+agentRole: 'mission-executor',
           systemPrompt: `Achieve the requested outcome: ${ctx.prompt}. Do not invent missing information. Try authorized alternatives first; if a specific required value is unavailable and no safe alternative can complete the outcome, ask one focused question for that value.`,
           dependsOnTaskIds: [],
           expectedArtifacts: [],
@@ -904,7 +904,7 @@ ${noProgressGuidance}`;
                 id: `${phase.id}-amendment-${amendmentIndex}`,
                 title: `Address phase gaps (review ${reviewIndex})`,
                 description: `Address remaining gaps: ${(applied.gaps || []).join('; ') || 'unspecified gaps'}`,
-                agentRole: 'assistant',
+agentRole: 'mission-executor',
                 systemPrompt: `Mission goal: ${ctx.prompt}\nPhase goal: ${phase.name} — ${phase.goal}\nResolve the following gaps using the available context and recorded task outputs: ${(applied.gaps || []).join('; ') || 'unspecified gaps'}. Focus only on accomplishing the requested mission outcome or reporting a concrete blocker. Do not invent unrelated work, and do not create or request design documents, plans, or substitute artifacts unless the mission goal explicitly requires them as deliverables.${noProgressGuidance}`,
                 dependsOnTaskIds: phase.tasks.map((t: any) => t.id),
                 expectedArtifacts: [],

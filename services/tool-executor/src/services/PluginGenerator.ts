@@ -775,7 +775,7 @@ export class PluginGenerator {
       logger.info({ toolId: tool.id, toolName: tool.name }, 'Plugin generation completed');
       return { success: true, tool };
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      const errorMessage = err instanceof Error ? err.message : String(err);
       logger.error({ error: errorMessage }, 'Plugin generation failed');
       return { success: false, error: errorMessage };
     }
@@ -903,7 +903,7 @@ export class PluginGenerator {
           );
         }
       }
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      const errorMessage = err instanceof Error ? err.message : String(err);
       logger.error({ error: errorMessage }, 'Plugin deployment failed');
       return { success: false, error: errorMessage };
     }

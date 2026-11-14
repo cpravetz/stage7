@@ -1176,35 +1176,6 @@ const MissionRoom = () => {
         );
       })()}
 
-      {showRetryDialog && (
-        <div className="error-banner" style={{ background: 'rgba(56,189,248,0.15)' }}>
-          <div>
-            <strong style={{ color: '#38bdf8' }}>Retry Mission</strong>
-            <p className="muted" style={{ margin: '4px 0' }}>
-              Provide guidance to help the agents succeed on retry. This will create a new mission with your guidance appended to the original prompt.
-            </p>
-          </div>
-          <textarea
-            placeholder="e.g., 'Focus on the API integration tests, skip the UI components' or 'Use the v2 API endpoints instead of v1'"
-            ref={retryGuidanceRef}
-            rows={3}
-            style={{ width: '100%', marginTop: 8, marginBottom: 8 }}
-          />
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={handleRetry} disabled={retrying}>
-              {retrying ? 'Retrying...' : 'Retry Mission'}
-            </button>
-            <button className="secondary" onClick={() => {
-              setShowRetryDialog(false);
-              if (retryGuidanceRef.current) retryGuidanceRef.current.value = '';
-            }}>
-              Cancel
-            </button>
-          </div>
-          {sendError && <span className="muted" style={{ color: '#ef4444', marginTop: 8 }}>{sendError}</span>}
-        </div>
-      )}
-
       {pendingApproval && (
         <div
           className="error-banner"

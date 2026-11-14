@@ -929,7 +929,7 @@ export async function generateValidPlan(
                         id: 'phase-1-task-1',
                         title: 'Complete the requested outcome',
                         description: prompt,
-                        agentRole: 'assistant',
+                        agentRole: 'mission-executor',
                         systemPrompt: `Achieve the requested outcome: ${prompt}. Do not invent missing information. Try authorized alternatives first; if a specific required value is unavailable and no safe alternative can complete the outcome, ask one focused question for that value.`,
                         dependsOnTaskIds: [],
                         expectedArtifacts: [],

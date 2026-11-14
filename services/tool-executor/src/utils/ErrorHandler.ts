@@ -48,18 +48,12 @@ export class ErrorHandler {
   /**
    * Classify an error message into a structured ClassifiedError.
    */
-  static classify(error: string | undefined | null, toolId?: string): ClassifiedError {
-    if (!error) {
-      return {
-        category: ErrorCategory.UNKNOWN,
-        severity: ErrorSeverity.PERMANENT,
-        message: 'Unknown error',
-        userMessage: 'Something went wrong. Please try again.',
-        retryable: false,
-      };
+static classify(error: string, toolId?: string): ClassifiedError {
+    const msg = String(error ?? '').trim();
+    if (!msg) {
+      // Callers must pass a real error; never reach here in practice.
+      throw new Error('ErrorHandler.classify requires a non-empty error string');
     }
-
-    const msg = String(error);
 
     // Timeout detection
     if (/timed out|timeout|TIMEOUT/i.test(msg)) {
@@ -140,7 +134,7 @@ export class ErrorHandler {
       category: ErrorCategory.UNKNOWN,
       severity: ErrorSeverity.PERMANENT,
       message: msg,
-      userMessage: 'An unexpected error occurred. Please try again or contact support.',
+      userMessage: `Tool execution failed: ${msg}`,
       retryable: false,
       originalError: msg,
     };
