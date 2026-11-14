@@ -42,7 +42,7 @@ const LiveFeeds = () => {
           <div key={evt.id} className={`feed-entry ${evt.type}`}>
             <div className="feed-entry-header">
               <span className="feed-icon">{iconForType(evt.type)}</span>
-              <span className="feed-source">{evt.source}</span>
+              <span className="feed-source">{evt.sourceLabel || evt.source}</span>
               <span className="feed-time">{new Date(evt.timestamp).toLocaleTimeString()}</span>
             </div>
             <div className="feed-entry-body">{evt.message}</div>

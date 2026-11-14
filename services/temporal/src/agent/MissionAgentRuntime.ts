@@ -23,6 +23,7 @@ import { BrainClient, BrainValidationError } from '../brain/BrainClient';
 import { extractArtifacts } from './TaskResultParser';
 import { parseInterruption as parseTaskInterruption } from './TaskInterruption';
 import { applyRuntimeTaskRequirements } from './TaskRequirements';
+import { missionAgentRoleKey, missionAgentRoleLabel } from './AgentRuntimeConfig';
 import { buildTaskPrompt } from './TaskPromptBuilder';
 import { missionExecutionEvidenceGaps } from '../types/workflow';
 import type { CompletedTaskSummary, MissionPendingInteraction } from '../types/workflow';
@@ -50,8 +51,11 @@ export const MISSION_AGENT_ROLES = {
 export type MissionAgentRoleKey = keyof typeof MISSION_AGENT_ROLES;
 
 export function resolveAgentIdentity(role: string): { agentIdPrefix: string; agentName: string; agentRole: string } {
-  const key = role.trim().toLowerCase().replace(/[_-]+/g, '-') as MissionAgentRoleKey;
-  return MISSION_AGENT_ROLES[key] || { agentIdPrefix: key, agentName: role, agentRole: role };
+  const key = missionAgentRoleKey(role);
+  const known = MISSION_AGENT_ROLES[key as MissionAgentRoleKey]
+    || Object.values(MISSION_AGENT_ROLES).find((entry) => missionAgentRoleKey(entry.agentRole) === key);
+  if (known) return { ...known };
+  return { agentIdPrefix: key, agentName: missionAgentRoleLabel(role), agentRole: key };
 }
 
 const TASK_SELECTOR_SYSTEM_PROMPT = `You are the mission task selector. Select the single best next task from the supplied ready tasks, using the mission goal, phase goal, and completed task IDs. You may not select a task that is not listed as ready, add tasks, or change task instructions. Return only JSON in the form {"taskId":"<ready-task-id>"}.`;
@@ -100,17 +104,6 @@ const INTERNAL_ACTION_RECEIPT_ARTIFACT = 'system-action-receipts.json';
 function isExecutionOutcomeReport(content: string): boolean {
   return /^\s*(?:\*\*)?Blocker(?:\*\*)?\s*:/i.test(content)
     || /^\s*(?:Execution outcome|Artifact status)\b.{0,120}\b(?:blocked|failed|not created)\b/i.test(content);
-}
-
-function missionAgentRoleLabel(role: string): string {
-  return role.trim().replace(/[_-]+/g, ' ').replace(/(?:\s+Agent)+$/i, '').trim() || 'Agent';
-}
-
-function missionAgentRoleKey(role: string): string {
-  return missionAgentRoleLabel(role)
-    .toLocaleLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '') || 'agent';
 }
 
 function extractMissionAgents(value: unknown): AgentDefinition[] {
@@ -934,7 +927,7 @@ export class MissionAgentRuntime {
         followUpTask: {
           title: textOr('title', `Resolve phase gap: ${gapText.slice(0, 100)}`),
           description: textOr('description', `Address the unmet phase outcome: ${gapText}`),
-          agentRole: textOr('agentRole', 'assistant'),
+          agentRole: textOr('agentRole', 'mission-executor'),
           systemPrompt: textOr(
             'systemPrompt',
             `Resolve the following phase gap using available context and capabilities: ${gapText}. Do not repeat successfully completed side effects. Prerequisite task evidence: ${phase.tasks.map((task) => task.id).join(', ')}.`,
@@ -988,7 +981,7 @@ export class MissionAgentRuntime {
       followUpTask: {
         title: `Regroup and resolve phase gap: ${phase.name}`,
         description: gap,
-        agentRole: 'assistant',
+        agentRole: 'mission-executor',
         systemPrompt: `Mission goal: ${missionGoal}\nPhase goal: ${phase.name} — ${phase.goal}\nReassess and resolve the phase outcome using the recorded outputs from prerequisite tasks ${phase.tasks.map((task) => task.id).join(', ')}. Do not repeat successfully completed side effects. Stay strictly within the stated mission and phase goals, and do not create or request design documents, plans, or substitute artifacts unless the mission goal explicitly requires them as deliverables. The phase remains unverified because: ${gap}`,
         expectedArtifacts: [],
         requiredActions: [],

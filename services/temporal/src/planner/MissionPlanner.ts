@@ -10,6 +10,7 @@ import {
 import { logger } from '@stage7-nextgen/shared';
 import { randomUUID } from 'crypto';
 import { parsePlanJson } from './planJson';
+import { canonicalMissionAgentRole } from '../agent/AgentRuntimeConfig';
 
 const MAX_PRIOR_RESPONSE_CHARS = 12_000;
 const MAX_REFINEMENT_ISSUES_PER_REQUEST = 3;
@@ -193,6 +194,9 @@ function applyPlannerDefaults(plan: any): any {
       if (task && typeof task === 'object' && !Array.isArray(task)) {
         if (task.status === undefined) task.status = 'pending';
         task.requiredActions = [];
+        if (typeof task.agentRole === 'string' && task.agentRole.trim()) {
+          task.agentRole = canonicalMissionAgentRole(task.agentRole);
+        }
       }
     }
   }

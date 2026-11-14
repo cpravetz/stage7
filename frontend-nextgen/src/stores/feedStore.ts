@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { friendlyMissionError, missionGapText, sanitizeAgentMessage } from '../utils/missionEvents';
+import { agentDisplayName, friendlyMissionError, missionAgentRoleLabel, missionGapText, sanitizeAgentMessage } from '../utils/missionEvents';
 
 export type FeedEventType =
   | 'log'
@@ -45,6 +45,7 @@ export interface FeedEvent {
   id: string;
   type: FeedEventType | string;
   source: string;
+  sourceLabel?: string;
   message: string;
   timestamp: number;
   missionId?: string;
@@ -82,6 +83,22 @@ function stableId(type: string, timestamp: number, data: Record<string, unknown>
     hash |= 0;
   }
   return `${timestamp}-${Math.abs(hash).toString(36)}`;
+}
+
+/**
+ * "assistant" is reserved for Assistants built on the ADK. Mission Agents must
+ * never be labelled "assistant" in the feed, so the source label is derived
+ * from the agent role/name using the shared canonical helpers.
+ */
+function feedSourceLabel(source: string, data: Record<string, unknown>): string {
+  const role = typeof data.agentRole === 'string' ? data.agentRole.trim() : '';
+  if (role) return missionAgentRoleLabel(role);
+  const agentName = typeof data.agentName === 'string' ? data.agentName.trim() : '';
+  if (agentName) return agentDisplayName(agentName);
+  if (source === 'system') return 'System';
+  if (source === 'user') return 'You';
+  if (source === 'mission' || source.startsWith('mission:')) return 'Mission';
+  return source;
 }
 
 export function normalize(raw: unknown): FeedEvent | null {
@@ -295,6 +312,7 @@ export function normalize(raw: unknown): FeedEvent | null {
     id: (r.id as string) || stableId(type, timestamp, data),
     type,
     source,
+    sourceLabel: feedSourceLabel(source, data),
     message,
     timestamp,
     missionId,
