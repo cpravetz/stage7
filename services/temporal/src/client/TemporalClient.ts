@@ -942,18 +942,14 @@ export class TemporalClient {
         }
         credentials = values;
       } else {
-        credentials = await configuredCredentialReferences(toolId, missingCredentials);
+        try {
+          credentials = await configuredCredentialReferences(toolId, missingCredentials);
+        } catch {
+          logger.warn({ toolId, toolName, missingCredentials }, 'Configured credentials not found in vault; continuing without resolved credentials');
+          credentials = {};
+        }
       }
       const toolExecutorUrl = (process.env.TOOL_EXECUTOR_URL || 'http://tool-executor:3500').replace(/\/+$/, '');
-      const response = await fetch(
-        `${toolExecutorUrl}/api/tool-executor/executions/${encodeURIComponent(credentialRequest.executionId)}/credentials`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ credentials }),
-        },
-      );
-      const bodyText = await response.text();
       let execution: {
         status?: string;
         toolId?: string;
@@ -962,24 +958,38 @@ export class TemporalClient {
         outcomeKnown?: boolean;
         reconciliation?: { outcomeKnown?: boolean };
         request?: { missingCredentials?: Array<{ label?: string; key?: string }> };
-      };
+      } | undefined;
+      try {
+        const response = await fetch(
+        `${toolExecutorUrl}/api/tool-executor/executions/${encodeURIComponent(credentialRequest.executionId)}/credentials`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ credentials }),
+        },
+      );
+      const bodyText = await response.text();
       try {
         execution = JSON.parse(bodyText) as typeof execution;
       } catch {
         throw new Error(`Tool Executor returned an invalid credential submission response (${response.status})`);
       }
-      if (!response.ok || execution.status !== 'completed') {
-        const remaining = execution.request?.missingCredentials
+      if (!execution || !response.ok || execution.status !== 'completed') {
+        const remaining = execution?.request?.missingCredentials
           ?.map((credential) => credential.label || credential.key)
           .filter((value): value is string => typeof value === 'string');
         const detail = remaining?.length
           ? ` Still missing: ${remaining.join(', ')}.`
           : '';
-        throw new Error(`${execution.error || `Credential submission failed (${response.status})`}${detail}`);
+        throw new Error(`${execution?.error || `Credential submission failed (${response.status})`}${detail}`);
       }
-      const actionReceipt = (pendingInteraction.actionReceipts || []).find(
-        (receipt) => receipt.toolId === credentialRequest.toolId && receipt.outcome === 'question_asked',
-      );
+      } catch (error) {
+        logger.warn({ executionId: credentialRequest.executionId, error: error instanceof Error ? error.message : String(error) }, 'Credential submission failed; continuing without resolved credentials');
+      }
+      if (execution) {
+        const actionReceipt = (pendingInteraction.actionReceipts || []).find(
+          (receipt) => receipt.toolId === credentialRequest.toolId && receipt.outcome === 'question_asked',
+        );
       const outcomeUnknown = execution.outcomeKnown === false || execution.reconciliation?.outcomeKnown === false;
       const failed = outcomeUnknown || failedToolOutput(execution.output);
       const completedReceipt = {
@@ -1004,6 +1014,7 @@ export class TemporalClient {
         : failed
           ? `The requested values were securely supplied, but "${credentialRequest.toolName}" returned a failure. Examine the recorded result and continue with a safe alternative.`
           : `The requested values were securely supplied. Tool Executor completed "${credentialRequest.toolName}". Use that verified result and do not repeat the action.`;
+      }
     } else if (pendingInteraction?.kind === 'mcp_permission') {
       const decision = continuation.permissionDecision;
       if (!decision || !pendingInteraction.requestId) {

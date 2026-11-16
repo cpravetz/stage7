@@ -1,6 +1,6 @@
 import { vi, beforeEach, afterEach, describe, it, expect } from 'vitest';
 
-import { useMissionsStore, type MissionRow } from './missionsStore';
+import { initMissionsStore, useMissionsStore, type MissionRow } from './missionsStore';
 import { useFeedStore, type FeedEvent } from './feedStore';
 
 const mission = (workflowId: string, missionId: string): MissionRow => ({
@@ -103,6 +103,7 @@ describe('missionsStore partial failures', () => {
       details: {},
       missionsError: null,
     });
+
     useFeedStore.setState({ events: [] });
   });
 
@@ -233,5 +234,40 @@ describe('missionsStore partial failures', () => {
     const detail = useMissionsStore.getState().details['wf-1'];
     expect(detail?.planLoadError).toBeTruthy();
     expect(detail?.artifactLoadError).toBeTruthy();
+  });
+});
+
+describe('missionsStore live status', () => {
+  it('processes new lifecycle events when the feed is full and keeps the newest status', () => {
+    vi.useFakeTimers();
+    const original = useMissionsStore.getState();
+    const feed = useFeedStore.getState();
+    useMissionsStore.setState({
+      missions: [{ ...mission('mission-m-1', 'm-1'), status: 'awaiting_review' }],
+      details: {},
+    });
+    useFeedStore.setState({ events: Array.from({ length: 500 }, (_, i) => feedEvent(`old-${i}`)) });
+    initMissionsStore();
+
+    useFeedStore.getState().addEvent({
+      ...feedEvent('resume', 'm-1'), type: 'mission_resumed', timestamp: 2,
+    });
+    expect(useFeedStore.getState().events).toHaveLength(500);
+    expect(useMissionsStore.getState().missions[0].status).toBe('running');
+
+    useFeedStore.getState().addEvents([
+      { ...feedEvent('new-review', 'm-1'), type: 'mission_needs_review', timestamp: 4 },
+      { ...feedEvent('older-resume', 'm-1'), type: 'mission_resumed', timestamp: 3 },
+    ]);
+    expect(useMissionsStore.getState().missions[0].status).toBe('awaiting_review');
+    useFeedStore.getState().addEvent({
+      ...feedEvent('late-old-resume', 'm-1'), type: 'mission_resumed', timestamp: 2,
+    });
+    expect(useMissionsStore.getState().missions[0].status).toBe('awaiting_review');
+
+    useMissionsStore.setState(original, true);
+    useFeedStore.setState(feed, true);
+    vi.clearAllTimers();
+    vi.useRealTimers();
   });
 });

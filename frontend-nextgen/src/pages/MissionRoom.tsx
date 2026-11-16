@@ -369,6 +369,8 @@ const MissionRoom = () => {
   const detailLoading = useMissionsStore((s) => s.detailLoading[workflowId]);
   const detailError = useMissionsStore((s) => s.detailError[workflowId]);
   const fetchMissionDetail = useMissionsStore((s) => s.fetchMissionDetail);
+  const fetchMissions = useMissionsStore((s) => s.fetchMissions);
+  const fetchPendingApprovals = useMissionsStore((s) => s.fetchPendingApprovals);
   const refreshDetail = useMissionsStore((s) => s.refreshDetail);
   const updateMissionStatus = useMissionsStore((s) => s.updateMissionStatus);
   const retryMission = useMissionsStore((s) => s.retryMission);
@@ -587,7 +589,7 @@ const MissionRoom = () => {
         `/api/artifacts/missions/${encodeURIComponent(missionId)}/phases/${encodeURIComponent(pendingApproval.phaseId)}/approve`,
         { approvedBy: 'user' },
       );
-      refreshDetail(workflowId);
+      await Promise.all([refreshDetail(workflowId), fetchPendingApprovals()]);
     } catch (err) {
       setApprovalActionError(err instanceof Error ? err.message : 'Approve failed');
     }
@@ -600,7 +602,7 @@ const MissionRoom = () => {
         `/api/artifacts/missions/${encodeURIComponent(missionId)}/phases/${encodeURIComponent(pendingApproval.phaseId)}/reject`,
         { reason: 'Rejected by user from Mission Room' },
       );
-      refreshDetail(workflowId);
+      await Promise.all([refreshDetail(workflowId), fetchPendingApprovals()]);
     } catch (err) {
       setApprovalActionError(err instanceof Error ? err.message : 'Reject failed');
     }
@@ -780,7 +782,7 @@ const MissionRoom = () => {
     setSendError(null);
 
     const pending = detail?.output?.outputs?.pendingInteraction;
-    const interactionId = pending ? getInteractionId(pending) : null;
+    const interactionId = pending?.kind === 'user_input' ? getInteractionId(pending) : null;
 
     // Optimistically render the user's message immediately instead of waiting
     // for the backend round-trip and websocket broadcast. The backend echoes
@@ -808,6 +810,9 @@ const MissionRoom = () => {
         setMessageText('');
         if (interactionId) {
           markInteractionResponded(interactionId);
+        }
+        if (result.status === 'resuming' || result.status === 'running') {
+          await Promise.all([fetchMissions(), refreshDetail(workflowId)]);
         }
       }
     } catch (err) {

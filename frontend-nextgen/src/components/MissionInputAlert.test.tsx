@@ -131,4 +131,30 @@ describe('MissionInputAlert', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('Which recipient number?');
     expect(screen.getByRole('alert')).not.toHaveTextContent('Which account?');
   });
+
+  it('does not resurrect a cached question when only a later resume remains in the feed', () => {
+    useFeedStore.setState({ events: [event('resume', 'mission_resumed', 2)] });
+    useMissionsStore.setState({ details: {
+      'mission-need-config': {
+        missionId: 'need-config', status: 'running',
+        output: { outputs: { pendingInteraction: {
+          kind: 'user_input', phaseId: 'phase-1', taskId: 'task-1', taskTitle: 'Configure',
+          agentRole: 'executor', question: 'Which account?',
+        } } },
+      },
+    } });
+
+    render(<MemoryRouter><MissionInputAlert /></MemoryRouter>);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('keeps a permission request after a chat message without a decision', () => {
+    useFeedStore.setState({ events: [
+      event('permission', 'permission_required', 1, { taskId: 'task-1' }),
+      event('chat', 'user', 2),
+    ] });
+
+    render(<MemoryRouter><MissionInputAlert /></MemoryRouter>);
+    expect(screen.getByRole('alert')).toHaveTextContent('Tool permission requested');
+  });
 });

@@ -96,10 +96,12 @@ function missionKeyPrefix(missionId: string): string {
 function getPendingInputAlerts(events: FeedEvent[], details: Record<string, MissionDetail>): PendingInputAlert[] {
   const pending = new Map<string, PendingInputAlert>();
   const resolved = new Set<string>();
+  const resolvedMissions = new Set<string>();
 
   for (const event of [...events].sort((a, b) => a.timestamp - b.timestamp)) {
     if (RESOLVING_EVENT_TYPES.has(String(event.type)) && event.missionId) {
       const taskId = typeof event.metadata?.taskId === 'string' ? event.metadata.taskId : undefined;
+      if (!taskId) resolvedMissions.add(normalizeMissionId(event.missionId));
       const keys = taskId
         ? [interactionKey(event.missionId, taskId)]
         : [...pending.keys()].filter((key) => key.startsWith(missionKeyPrefix(event.missionId!)));
@@ -113,13 +115,14 @@ function getPendingInputAlerts(events: FeedEvent[], details: Record<string, Miss
     const alert = questionFromEvent(event);
     if (alert) {
       resolved.delete(alert.key);
+      resolvedMissions.delete(alert.missionId);
       pending.set(alert.key, alert);
     }
   }
 
   for (const [workflowId, detail] of Object.entries(details)) {
     const alert = questionFromDetail(workflowId, detail);
-    if (alert && !resolved.has(alert.key)) pending.set(alert.key, alert);
+    if (alert && !resolved.has(alert.key) && !resolvedMissions.has(alert.missionId)) pending.set(alert.key, alert);
   }
 
   const byMission = new Map<string, PendingInputAlert>();

@@ -184,7 +184,6 @@ const REFRESH_DEBOUNCE = 2000;
 
 let pollTimer: ReturnType<typeof setInterval> | null = null;
 let feedUnsub: (() => void) | null = null;
-let processedCount = 0;
 const lastRefreshByMission = new Map<string, number>();
 
 function startPolling() {
@@ -212,8 +211,9 @@ function processFeedEvents(newEvents: FeedEvent[]) {
     status: string;
     extra?: Partial<MissionRow>;
   }> = [];
+  const updatedMissions = new Set<string>();
 
-  for (const evt of newEvents) {
+  for (const evt of [...newEvents].sort((a, b) => b.timestamp - a.timestamp)) {
     const newStatus = STATUS_EVENT_MAP[evt.type as string];
     if (!newStatus) continue;
 
@@ -224,7 +224,9 @@ function processFeedEvents(newEvents: FeedEvent[]) {
       (m) => m.missionId === eventMissionId || m.workflowId === eventMissionId
     );
 
-    if (existing && existing.status !== newStatus) {
+    if (existing && !updatedMissions.has(existing.workflowId)) {
+      updatedMissions.add(existing.workflowId);
+      if (existing.status === newStatus) continue;
       const extra: Partial<MissionRow> = {};
       if (
         newStatus === 'completed' ||
@@ -290,23 +292,21 @@ function processFeedEvents(newEvents: FeedEvent[]) {
 
 function subscribeToFeed() {
   if (feedUnsub) feedUnsub();
-  feedUnsub = useFeedStore.subscribe((state, _prevState) => {
-    if (state.events.length === 0) {
-      processedCount = 0;
-      return;
+  feedUnsub = useFeedStore.subscribe((state, previous) => {
+    if (state.events === previous.events) return;
+    const previousIds = new Set(previous.events.map((event) => event.id));
+    const latestStatusByMission = new Map<string, number>();
+    for (const event of previous.events) {
+      if (!event.missionId || !STATUS_EVENT_MAP[event.type]) continue;
+      const missionId = event.missionId.replace(/^mission-/, '');
+      latestStatusByMission.set(missionId, Math.max(latestStatusByMission.get(missionId) ?? 0, event.timestamp));
     }
-    if (state.events.length > processedCount) {
-      const newEvents = state.events.slice(
-        0,
-        state.events.length - processedCount
-      );
-      processedCount = state.events.length;
-      if (newEvents.length > 0) {
-        processFeedEvents(newEvents);
-      }
-    } else if (state.events.length < processedCount) {
-      processedCount = state.events.length;
-    }
+    const newEvents = state.events.filter((event) => {
+      if (previousIds.has(event.id)) return false;
+      if (!event.missionId || !STATUS_EVENT_MAP[event.type]) return true;
+      return event.timestamp >= (latestStatusByMission.get(event.missionId.replace(/^mission-/, '')) ?? 0);
+    });
+    if (newEvents.length > 0) processFeedEvents(newEvents);
   });
 }
 
