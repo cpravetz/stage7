@@ -18,6 +18,7 @@ import {
   CONVERSATION_EVENT_TYPES,
   friendlyMissionError,
   missionAgentRoleLabel,
+  missionReviewMessage,
   summarizeModelUsage,
   TIMELINE_EVENT_TYPES,
 } from '../utils/missionEvents';
@@ -481,7 +482,7 @@ const MissionRoom = () => {
   const missionEvents = useMemo<FeedEvent[]>(() => {
     return buildMissionEvents({
       missionId,
-      liveEvents: events,
+      liveEvents: [...events, ...(detail?.persistedEvents || [])],
       detail: detail
         ? {
             status: detail.status,
@@ -906,9 +907,28 @@ const MissionRoom = () => {
       </div>
 
       {detailError && <div className="error-banner">{detailError}</div>}
+      {detail?.eventsLoadError && (
+        <div className="error-banner">Could not load mission history: {detail.eventsLoadError}</div>
+      )}
       {detail?.status === 'failed' && detail?.error && (
         <div className="error-banner">Mission failed: {friendlyMissionError(detail.error)}</div>
       )}
+
+      {detail?.status === 'awaiting_review'
+        && !pendingInteraction
+        && !(detail.output?.outputs?.status === 'awaiting_clarification' && plan?.requiresClarification)
+        && (
+          <section className="warning-banner" aria-label="Mission review">
+            <strong>Mission needs review</strong>
+            <p style={{ whiteSpace: 'pre-wrap' }}>
+              {missionReviewMessage({
+                gaps: detail.output?.outputs?.gaps,
+                reason: detail.output?.outputs?.reason,
+                reviewStatus: detail.output?.outputs?.status,
+              })}
+            </p>
+          </section>
+        )}
 
       {detail?.output?.outputs?.status === 'awaiting_clarification' && plan?.requiresClarification && (
         <div className="error-banner" style={{ background: 'rgba(245,158,11,0.15)' }}>
@@ -1176,6 +1196,35 @@ const MissionRoom = () => {
           </section>
         );
       })()}
+
+      {showRetryDialog && (
+        <div className="error-banner" style={{ background: 'rgba(56,189,248,0.15)' }}>
+          <div>
+            <strong style={{ color: '#38bdf8' }}>Retry Mission</strong>
+            <p className="muted" style={{ margin: '4px 0' }}>
+              Provide guidance to help the agents succeed on retry. This will create a new mission with your guidance appended to the original prompt.
+            </p>
+          </div>
+          <textarea
+            placeholder="e.g., 'Focus on the API integration tests, skip the UI components' or 'Use the v2 API endpoints instead of v1'"
+            ref={retryGuidanceRef}
+            rows={3}
+            style={{ width: '100%', marginTop: 8, marginBottom: 8 }}
+          />
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={() => void handleRetry()} disabled={retrying}>
+              {retrying ? 'Retrying...' : 'Retry Mission'}
+            </button>
+            <button className="secondary" onClick={() => {
+              setShowRetryDialog(false);
+              if (retryGuidanceRef.current) retryGuidanceRef.current.value = '';
+            }}>
+              Cancel
+            </button>
+          </div>
+          {sendError && <span className="muted" style={{ color: '#ef4444', marginTop: 8 }}>{sendError}</span>}
+        </div>
+      )}
 
       {pendingApproval && (
         <div
@@ -1464,12 +1513,25 @@ const MissionRoom = () => {
           <h3>Plan</h3>
           {!plan ? (
             <div className="empty-state">
-              {detail?.status === 'running' || (
-                !['failed', 'completed', 'incomplete', 'canceled'].includes(detail?.status || '') &&
-                missionEvents.some((event) => event.type === 'planner_started')
-              )
-                ? 'The planning agent is developing a plan for this mission. This can take a little while while providers respond.'
-                : 'No plan recorded for this mission.'}
+              {detail?.planLoadError ? (
+                <>
+                  <p>Could not load the mission plan.</p>
+                  <p className="muted" style={{ marginTop: 4 }}>{detail.planLoadError}</p>
+                  <button
+                    onClick={() => void refreshDetail(workflowId)}
+                    style={{ marginTop: 8 }}
+                  >
+                    Refresh plan
+                  </button>
+                </>
+              ) : (
+                detail?.status === 'running' || (
+                  !['failed', 'completed', 'incomplete', 'canceled'].includes(detail?.status || '') &&
+                  missionEvents.some((event) => event.type === 'planner_started')
+                )
+                  ? 'The planning agent is developing a plan for this mission. This can take a little while while providers respond.'
+                  : 'No plan recorded for this mission.'
+              )}
             </div>
           ) : (
             <div className="plan-view">

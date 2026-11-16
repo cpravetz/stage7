@@ -122,14 +122,25 @@ async function executeMissionActivity(
   const broadcast = async (event: { type: string; missionId: string; timestamp: number; data?: any }) => {
     const gatewayUrl = process.env.GATEWAY_URL;
     const persistenceUrl = process.env.ARTIFACTS_URL;
-    // Persist event to persistence for replay/audit
+    let persistedEvent: Record<string, unknown> | undefined;
+    // Persist event to persistence for replay/audit. The persisted copy carries
+    // the single event id, and the gateway broadcast reuses it so the live
+    // feed and the event log never diverge into two ids for one event.
     if (persistenceUrl) {
       try {
-        await fetch(`${persistenceUrl}/api/artifacts/missions/${input.missionId}/events`, {
+        const response = await fetch(`${persistenceUrl}/api/artifacts/missions/${input.missionId}/events`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(event),
         });
+        if (response.ok) {
+          try {
+            const persisted = (await response.json()) as Record<string, unknown> | undefined;
+            if (persisted?.id) persistedEvent = persisted;
+          } catch {}
+        } else {
+          logger.warn({ missionId: input.missionId, status: response.status }, 'Event persist failed');
+        }
       } catch (err) {
         logger.warn({ missionId: input.missionId, err: (err as Error).message }, 'Event persist failed');
       }
@@ -140,7 +151,7 @@ async function executeMissionActivity(
       await fetch(`${gatewayUrl}/api/gateway/broadcast/mission/${input.missionId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(event),
+        body: JSON.stringify(persistedEvent ?? event),
       });
     } catch (err) {
       logger.warn({ missionId: input.missionId, err: (err as Error).message }, 'Broadcast failed');

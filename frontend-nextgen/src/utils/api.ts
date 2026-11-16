@@ -23,10 +23,23 @@ export async function fetchJSON<T>(path: string, init?: RequestInit): Promise<T>
   // and caused a save that persisted an empty tools array.
   const defaultInit: RequestInit = { cache: 'no-store' };
   const response = await fetch(`${API_BASE}${path}`, { ...defaultInit, ...(init || {}) });
-  if (!response.ok) {
-    throw new Error(`API error: ${response.status} ${response.statusText}`);
+  if (response.status === 304) {
+    // A conditional GET should never happen with no-store; treat it as a
+    // specific, diagnosable failure instead of fabricating stale data.
+    throw new Error(`API error: 304 Not Modified for ${path}`);
   }
-  return response.json();
+  if (!response.ok) {
+    throw new Error(`API error: ${response.status} ${response.statusText} for ${path}`);
+  }
+  const text = await response.text();
+  if (!text) {
+    throw new Error(`API error: ${response.status} empty response body for ${path}`);
+  }
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error(`API error: ${response.status} invalid JSON response for ${path}`);
+  }
 }
 
 export async function postJSON<T>(path: string, body: unknown, init?: RequestInit): Promise<T> {

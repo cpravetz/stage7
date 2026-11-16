@@ -1,5 +1,5 @@
 import { ToolConfigResolver } from '../src/services/ToolConfig';
-import { Tool } from '../src/types';
+import { Tool, CredentialRequiredError } from '../src/types';
 import { PluginGenerator } from '../src/services/PluginGenerator';
 import { ToolDiscovery } from '../src/services/ToolDiscovery';
 import { CodeExecutor } from '../src/executors/CodeExecutor';
@@ -35,8 +35,17 @@ describe('mission tool configuration', () => {
     // Credential-backed fields are resolved dynamically, so the static gate must
     // not reject the run merely because the mapped value is absent.
     await expect(config.validateConfigSchema(tool, {}, 'exec-1')).resolves.toBeNull();
-    const resolved = await config.resolveCredentials(tool, {}, 'exec-1');
-    expect(resolved.resolved.account_id).toBeUndefined();
+    // But resolveCredentials will throw CredentialRequiredError for missing required credential-backed fields
+    try {
+      await config.resolveCredentials(tool, {}, 'exec-1');
+    } catch (e) {
+      expect(e).toBeInstanceOf(CredentialRequiredError);
+      if (e instanceof CredentialRequiredError) {
+        expect(e.request.missingCredentials).toHaveLength(1);
+        expect(e.request.missingCredentials[0].key).toBe('account_id');
+        expect(e.request.missingCredentials[0].label).toBe('Account ID');
+      }
+    }
   });
 
   it('uses deterministic provider configuration in initial and repair acceptance tests', async () => {

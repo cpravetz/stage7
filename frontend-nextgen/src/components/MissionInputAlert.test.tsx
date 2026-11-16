@@ -66,4 +66,69 @@ describe('MissionInputAlert', () => {
 
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
+
+  it('clears the alert for a mission that resumed without a recorded answer', () => {
+    useFeedStore.setState({
+      events: [
+        event('question-1', 'question_asked', 1, {
+          taskId: 'task-1',
+          question: 'Please provide the SMS provider and its API token.',
+        }),
+        event('resumed-1', 'mission_resumed', 2),
+      ],
+    });
+
+    render(
+      <MemoryRouter>
+        <MissionInputAlert />
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('clears the alert for a mission that failed or completed after the question', () => {
+    useFeedStore.setState({
+      events: [
+        event('question-1', 'question_asked', 1, {
+          taskId: 'task-1',
+          question: 'Please provide the SMS provider and its API token.',
+        }),
+        event('failed-1', 'mission_failed', 2),
+      ],
+    });
+
+    render(
+      <MemoryRouter>
+        <MissionInputAlert />
+      </MemoryRouter>,
+    );
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('keeps a newer question asked after the mission resumed', () => {
+    useFeedStore.setState({
+      events: [
+        event('question-1', 'question_asked', 1, {
+          taskId: 'task-1',
+          question: 'Which account?',
+        }),
+        event('resumed-1', 'mission_resumed', 2),
+        event('question-2', 'question_asked', 3, {
+          taskId: 'task-2',
+          question: 'Which recipient number?',
+        }),
+      ],
+    });
+
+    render(
+      <MemoryRouter>
+        <MissionInputAlert />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Which recipient number?');
+    expect(screen.getByRole('alert')).not.toHaveTextContent('Which account?');
+  });
 });

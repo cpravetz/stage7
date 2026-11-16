@@ -1,5 +1,11 @@
 import type { BrainClient } from './BrainClient'
-import { asksUserToManageTools, extractAskUserQuestion } from './askUser'
+import {
+  asksForProviderSetup,
+  asksUserToManageTools,
+  CAPABILITY_RESOLUTION_GUIDANCE,
+  extractAskUserQuestion,
+  hasTriedToolAfterResolution,
+} from './askUser'
 import { containsToolAction } from './actionParser'
 import { ASK_USER_MARKER, MAX_ARTIFACT_CORRECTION_ATTEMPTS } from './constants'
 import { assessCompletion, composeCorrection, type CompletionGaps } from './requirements'
@@ -54,6 +60,13 @@ export async function replayFinishedCheckpoint(rc: RunContext): Promise<AgentExe
   if (state.incompleteReason) {
     return state.result(finalOutput, { incompleteReason: state.incompleteReason })
   }
+  if (containsToolAction(finalOutput)) {
+    await deps.brain.reportComplaint(state.lastRequestId, 'Agent response validation failed: checkpoint contains an unexecuted tool-action-shaped response.', context.missionId)
+    state.tell('The previous response described a tool action but was not executed. Return exactly one raw JSON action with "tool" and "args", or a verified final answer. Do not claim that the proposed action succeeded.')
+    state.finalOutput = undefined
+    await state.save()
+    return undefined
+  }
   const gaps = assessCompletion(spec, finalOutput, state.actionReceipts)
   if (gaps.complete) return state.result(finalOutput, { reasoning: undefined })
 
@@ -92,8 +105,10 @@ async function handleAskUserReply(rc: RunContext, { content, reasoning }: BrainR
     await state.save()
     return NEXT_TURN
   }
-  if (asksUserToManageTools(relevant.slice(ASK_USER_MARKER.length))) {
-    state.tell('Do not ask the user to register, install, create, or configure a tool, or select a tool ID. You are responsible for discovery and capability resolution. Re-read the original mission, complete independent work, and use the live catalog and __create_tool for missing capabilities. Ask only for a specific missing value or an actual authorization or service decision.')
+  const question = relevant.slice(ASK_USER_MARKER.length)
+  const triedResolvedTool = hasTriedToolAfterResolution(state.actionReceipts.map((receipt) => receipt.toolId))
+  if (asksUserToManageTools(question) || (!triedResolvedTool && asksForProviderSetup(question))) {
+    state.tell(CAPABILITY_RESOLUTION_GUIDANCE)
     await state.save()
     return NEXT_TURN
   }

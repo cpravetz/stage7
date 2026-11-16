@@ -10,7 +10,7 @@ import {
   MissionTaskCheckpoint,
   WorkflowInput,
   WorkflowResult,
-  completedTaskIdsWithSummaries,
+  recoveryTaskDependencies,
   isConfigurationBlocker,
   missionConfigurationQuestion,
   recoveryGapFingerprint,
@@ -682,7 +682,7 @@ agentRole: 'mission-executor',
           .map((task) => task.id),
       )];
 
-      if (!madeProgress && completionNoProgress >= MAX_NO_PROGRESS_RECOVERY_ATTEMPTS) {
+      if (completionNoProgress >= MAX_NO_PROGRESS_RECOVERY_ATTEMPTS) {
         logger.error(
           { missionId: input.missionId, gaps, completionNoProgress },
           'Mission completion recovery made no observable progress after approach changes; pausing for review (safety ceiling)',
@@ -698,7 +698,7 @@ agentRole: 'mission-executor',
           completedAt: Date.now(),
         };
       }
-      const noProgressGuidance = !madeProgress
+      const noProgressGuidance = !madeProgress || stagnantGap
         ? ' Previous attempts made no observable progress on the same gaps; use a different authorized approach and do not repeat the same recovery steps. If a required value or authorization is missing, ask the user for it and wait.'
         : '';
 
@@ -707,12 +707,16 @@ agentRole: 'mission-executor',
       ));
       const expectedArtifacts = [...new Set(recoveryPhase.tasks.flatMap((task) => task.expectedArtifacts || []))]
         .filter((name) => !availableArtifacts.has(name.toLocaleLowerCase()));
-      const taskIds = completedTaskIdsWithSummaries(
-        recoveryPhase.tasks.map((task) => task.id),
+      const taskIds = recoveryTaskDependencies(
+        recoveryPhase.tasks,
         completedTaskSummaries.values(),
+        targetTaskIds,
       );
+      const existingTaskIds = new Set(plan.phases.flatMap((phase) => phase.tasks.map((task) => task.id)));
+      let taskNumber = recoveryIndex;
+      while (existingTaskIds.has(`${recoveryPhase.id}-mission-recovery-${taskNumber}`)) taskNumber++;
       const recoveryTask: any = {
-        id: `${recoveryPhase.id}-mission-recovery-${recoveryIndex}`,
+        id: `${recoveryPhase.id}-mission-recovery-${taskNumber}`,
         title: `Resolve mission completion gaps (attempt ${recoveryIndex})`,
         description: `Address the remaining mission completion gaps: ${gaps.join('; ')}`,
         agentRole: 'mission-executor',

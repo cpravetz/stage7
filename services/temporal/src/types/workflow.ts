@@ -75,6 +75,7 @@ export interface MissionPendingInteraction {
 
 export interface CompletedTaskSummary {
   taskId: string;
+  status?: string;
   output: string;
   artifactNames: string[];
   artifacts?: MissionArtifact[];
@@ -92,6 +93,20 @@ export function completedTaskIdsWithSummaries(
 ): string[] {
   const summarizedTaskIds = new Set(Array.from(summaries, (summary) => summary.taskId));
   return taskIds.filter((taskId) => summarizedTaskIds.has(taskId));
+}
+
+export function recoveryTaskDependencies(
+  tasks: Task[],
+  summaries: Iterable<Pick<CompletedTaskSummary, 'taskId'>>,
+  targetTaskIds: string[],
+): string[] {
+  const summarized = new Set(Array.from(summaries, (summary) => summary.taskId));
+  const completed = tasks.filter((task) => task.status === 'completed' && summarized.has(task.id));
+  const original = completed.filter((task) => !/-mission-recovery-\d+/i.test(task.id));
+  const targets = new Set(targetTaskIds);
+  const prioritized = [...original.filter((task) => targets.has(task.id)), ...original.filter((task) => !targets.has(task.id))];
+  const recentRecovery = completed.filter((task) => /-mission-recovery-\d+/i.test(task.id)).slice(-6);
+  return [...prioritized.slice(0, 12 - recentRecovery.length), ...recentRecovery].map((task) => task.id);
 }
 
 export interface MissionPhaseEvidence {
@@ -274,8 +289,40 @@ export function missionExecutionEvidenceGaps(plan: Plan, phases: MissionPhaseEvi
         gaps.push(`Phase "${plannedPhase.name}" returned unplanned task "${task.taskId}".`);
       }
     }
+    let hasLaterCompletedRecovery = false;
+    const laterCompletedRecovery = new Set<string>();
+    for (const candidate of [...plannedPhase.tasks].reverse()) {
+      if (hasLaterCompletedRecovery) laterCompletedRecovery.add(candidate.id);
+      if (/-mission-recovery-\d+/i.test(candidate.id) && tasksById.get(candidate.id)?.status === 'completed') {
+        hasLaterCompletedRecovery = true;
+      }
+    }
     for (const plannedTask of plannedPhase.tasks) {
       const task = tasksById.get(plannedTask.id);
+      if (/-mission-recovery-\d+/i.test(plannedTask.id)
+        && laterCompletedRecovery.has(plannedTask.id)
+        && (task?.status === 'failed' || task?.status === 'incomplete')
+        && !plannedTask.requiresExternalAction
+        && !(plannedTask.requiredActions || []).length
+        && !(plannedTask.expectedArtifacts || []).length) {
+        const receiptArtifact = task?.artifacts.find((artifact) =>
+          artifact.name.toLocaleLowerCase() === 'system-action-receipts.json',
+        );
+        let uncertainRecovery = /\b(?:unknown outcome|outcome unknown|outcome uncertain)\b/i.test(task?.output || '');
+        if (typeof receiptArtifact?.content === 'string') {
+          try {
+            const receipts: unknown = JSON.parse(receiptArtifact.content);
+            uncertainRecovery ||= !Array.isArray(receipts) || receipts.some((value: unknown) =>
+              !isActionReceiptLike(value) || value.outcomeKnown === false || /outcome.?unknown/i.test(value.content || ''),
+            );
+          } catch {
+            uncertainRecovery = true;
+          }
+        } else if (receiptArtifact) {
+          uncertainRecovery = true;
+        }
+        if (!uncertainRecovery) continue;
+      }
       if (!task) {
         phaseHadTaskGap = true;
         gaps.push(`Task "${plannedTask.title}" (${plannedTask.id}) has no execution result in phase "${plannedPhase.name}".`);

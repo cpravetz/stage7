@@ -13,7 +13,12 @@ import {
 } from '../src/types';
 import { AssistantDefinition, AssistantTemplate, AssistantRuntimeConfig } from '@stage7-nextgen/shared';
 import { logger } from '@stage7-nextgen/shared';
+import { createHash } from 'node:crypto';
 import { preserveCompletedMissionTaskResults } from '../src/services/missionPlanPersistence';
+
+// Mirrors MongoStore.EVENT_DEDUP_WINDOW_MS: identical logical events re-emitted
+// within this window (retry, resume replay, double broadcast) coalesce into one.
+const EVENT_DEDUP_WINDOW_MS = 10 * 60 * 1000;
 
 export class InMemoryStore {
   private documents: Map<string, PersistenceDocument> = new Map();
@@ -414,14 +419,30 @@ export class InMemoryStore {
     return Promise.resolve(this.missionTasks.get(missionId)?.get(taskId));
   }
   appendMissionEvent(missionId: string, event: any): Promise<any> {
-    const existing = this.missionEvents.get(missionId) || [];
-    const e = { ...event, timestamp: event.timestamp || Date.now() };
-    existing.push(e);
-    this.missionEvents.set(missionId, existing);
+    const now = event.timestamp || Date.now();
+    const fingerprint = missionEventFingerprint(missionId, event);
+    const id = event.id || `event:${missionId}|${fingerprint}|${now}`;
+    const existing = (this.missionEvents.get(missionId) || []).find((stored) => {
+      if (stored.fingerprint !== fingerprint) return false;
+      const storedAt = typeof stored.timestamp === 'number' ? stored.timestamp : new Date(stored.timestamp).getTime();
+      return now - storedAt <= EVENT_DEDUP_WINDOW_MS;
+    });
+    if (existing) return Promise.resolve(existing);
+    const e = { ...event, id, fingerprint, timestamp: now, missionId };
+    const list = this.missionEvents.get(missionId) || [];
+    list.push(e);
+    this.missionEvents.set(missionId, list);
     return Promise.resolve(e);
   }
-  listMissionEvents(missionId: string): Promise<any[]> {
-    return Promise.resolve(this.missionEvents.get(missionId) || []);
+  listMissionEvents(missionId: string, options?: { type?: string; omitAmendmentPlan?: boolean }): Promise<any[]> {
+    const events = (this.missionEvents.get(missionId) || [])
+      .filter((event) => !options?.type || event.type === options.type)
+      .map((event) => {
+        if (!options?.omitAmendmentPlan || event.type !== 'phase_plan_amended' || !event.data) return event;
+        const { plan: _plan, ...data } = event.data;
+        return { ...event, data };
+      });
+    return Promise.resolve(events);
   }
   private cosineSimilarity(a: number[], b: number[]): number {
     if (a.length !== b.length) return 0;
@@ -443,4 +464,37 @@ export class InMemoryStore {
       return JSON.stringify(docValue) === JSON.stringify(value);
     });
   }
+}
+
+function stableStringify(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  if (typeof value === 'object') {
+    const keys = Object.keys(value).sort();
+    return `{${keys.map((key) => `${key}:${stableStringify((value as Record<string, unknown>)[key])}`).join(',')}}`;
+  }
+  return String(value);
+}
+
+function missionEventFingerprint(missionId: string, event: any): string {
+  const data = event && typeof event.data === 'object' && !Array.isArray(event.data) ? event.data : {};
+  const content = {
+    message: data.message,
+    content: data.content,
+    question: data.question,
+    response: data.response,
+    error: data.error,
+    reason: data.reason,
+    output: data.output,
+  };
+  const payload = [
+    missionId,
+    String(event.type || ''),
+    String(data.phaseId || ''),
+    String(data.taskId || ''),
+    String(data.correlationId || ''),
+    stableStringify(content),
+  ].join('|');
+  return createHash('sha256').update(payload).digest('hex');
 }

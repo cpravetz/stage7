@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { agentDisplayName, friendlyMissionError, missionAgentRoleLabel, missionGapText, sanitizeAgentMessage } from '../utils/missionEvents';
+import { agentDisplayName, friendlyMissionError, missionAgentRoleLabel, missionGapText, missionReviewMessage, sanitizeAgentMessage } from '../utils/missionEvents';
 
 export type FeedEventType =
   | 'log'
@@ -242,6 +242,9 @@ export function normalize(raw: unknown): FeedEvent | null {
           : 'Mission incomplete';
         break;
       }
+      case 'mission_needs_review':
+        message = missionReviewMessage(data);
+        break;
       case 'agent_delegation': {
         const to = typeof data.to === 'string' ? data.to : typeof data.agentId === 'string' ? data.agentId : '';
         const content = typeof data.content === 'string' ? data.content : typeof data.message === 'string' ? data.message : '';

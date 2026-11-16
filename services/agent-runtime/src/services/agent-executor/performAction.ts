@@ -3,7 +3,7 @@ import { recoverFromToolFailure } from './capabilityRecovery'
 import { receiptFromResult } from './receipts'
 import { returnWith, type ActionTurn, type RunContext, type TurnEnd } from './RunContext'
 import { findTool } from './toolCatalog'
-import { getMissingRuntimeModule, isConfigurationFailure } from './toolFailures'
+import { getMissingRuntimeModule, isConfigurationFailure, classifyFailure, FAILURE_CODES } from './toolFailures'
 import type { ToolResult } from './types'
 import { boundedActionResult } from './util'
 
@@ -35,9 +35,23 @@ export async function performAction(rc: RunContext, turn: ActionTurn): Promise<T
     ...(state.fallbackToolIds.has(action.tool) ? { fallbackForToolId: state.fallbackToolIds.get(action.tool) } : {}),
   }))
 
+  if (result.isError && (result.outcomeKnown === false || classifyFailure(result.content).code === FAILURE_CODES.OUTCOME_UNKNOWN)) {
+    const reason = `The outcome of tool "${action.tool}" is uncertain; reconcile the recorded action before attempting another operation. ${boundedActionResult(result.content)}`
+    state.finalOutput = reason
+    state.incompleteReason = reason
+    await state.save()
+    return returnWith(state.result(reason, { incompleteReason: reason, reasoning: reply.reasoning }))
+  }
+
   // A failure may be fixable by resolving a different capability.
   const missingModule = result.isError ? getMissingRuntimeModule(result.content) : undefined
   const failedTool = findTool(tools, action.tool)
+  const knownFailure = result.isError
+    && (!result.outcome || result.outcome === 'failure')
+    && result.outcomeKnown !== false
+    && classifyFailure(result.content).code !== FAILURE_CODES.OUTCOME_UNKNOWN
+  const configurationFailure = knownFailure && isConfigurationFailure(result.content)
+  if (configurationFailure) state.configurationFailures.set(action.tool, result.content)
   const failedToolId = failedTool?.id || action.tool
   const failedCallsForTool = state.actionReceipts.filter(
     (receipt) => receipt.isError
@@ -45,9 +59,7 @@ export async function performAction(rc: RunContext, turn: ActionTurn): Promise<T
       && (receipt.toolId === action.tool || receipt.toolId === failedToolId),
   ).length
   const repeatedToolFailure = Boolean(
-    result.isError
-    && result.outcome !== 'denied'
-    && result.outcome !== 'question_asked'
+    knownFailure
     && !isConfigurationFailure(result.content)
     && failedTool
     && failedCallsForTool >= 2,
@@ -55,12 +67,13 @@ export async function performAction(rc: RunContext, turn: ActionTurn): Promise<T
   const unavailableRequestedTool = result.isError
     && !failedTool
     && result.content.includes(`Tool '${action.tool}' is not in the live system catalog.`)
-  const recovery = await recoverFromToolFailure(rc, turn, {
+  const recovery = knownFailure ? await recoverFromToolFailure(rc, turn, {
     missingModule,
     repeatedToolFailure,
     unavailableRequestedTool,
+    configurationFailure,
     failedTool,
-  })
+  }) : undefined
   if (recovery && 'end' in recovery) return recovery.end
   if (recovery) result = recovery.result
 
@@ -68,14 +81,23 @@ export async function performAction(rc: RunContext, turn: ActionTurn): Promise<T
     await state.save()
     return returnWith(state.result(result.content, { reasoning: reply.reasoning }))
   }
-  if (result.isError && isConfigurationFailure(result.content)) {
+  if (result.isError && result.outcomeKnown !== false && result.outcome === 'failure'
+    && classifyFailure(result.content).code !== FAILURE_CODES.OUTCOME_UNKNOWN && isConfigurationFailure(result.content)) {
     state.configurationFailures.set(action.tool, result.content)
   }
   const ignoredNarration = shape === 'exact'
     ? ''
     : 'Only the leading action object was considered; all trailing response text was ignored.\n'
+
+  // Propagate structured failure classification for downstream recovery paths.
+  // Never repeat the identical failing call without changed conditions.
+  const classified = result.isError ? classifyFailure(result.content) : null
+  const failureContext = classified
+    ? `\n[Failure code: ${classified.code}; retryable: ${classified.retryable}; adaptation: ${classified.adaptation}]`
+    : ''
+
   state.tell(result.isError
-    ? `${ignoredNarration}Action failed: ${boundedActionResult(result.content)}\nDo not repeat the failed call. Re-read the mission for provided values, then check existing configuration, the tool catalog and capability resolution. A missing runtime module is not a credential and must not be installed. Only as a last resort, reply with one line: ${ASK_USER_MARKER} <question naming the exact value, the tool needing it, and why>.`
+    ? `${ignoredNarration}Action failed: ${boundedActionResult(result.content)}${failureContext}\nDo not repeat the failed call. Re-read the mission for provided values, then check existing configuration, the tool catalog and capability resolution. A missing runtime module is not a credential and must not be installed. Only as a last resort, reply with one line: ${ASK_USER_MARKER} <question naming the exact value, the tool needing it, and why>.`
     : `${ignoredNarration}Action result: ${boundedActionResult(result.content)}\nContinue toward the task goal. If complete, return the final answer as plain text.`)
   await state.save()
   return undefined

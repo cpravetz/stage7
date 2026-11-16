@@ -76,7 +76,7 @@ const PHASE_REVIEW_EXECUTION_POLICY: AgentExecutionPolicy = {
   maxCompletionTokensPerCall: 2_048,
   maxDelegations: 0,
 };
-const MISSION_COMPLETION_REVIEWER_SYSTEM_PROMPT = `You are an objective mission-completion reviewer. Determine whether the observed task outputs and artifacts satisfy the original mission goal. Treat each task's requiredActions and requiresExternalAction flag as evidence requirements; system-action-receipts.json is the internal record of actual tool results and is not a user deliverable. Every required action must have a matching receipt with its required outcome, and an external operation requires a successful receipt from an actual tool invocation. Failed receipts do not support success, and claimed results that contradict receipts are gaps. A receipt whose toolId is "__list_tools" proves only that the tool catalog was inspected; a tool name appearing in its content does not prove that tool was invoked or that its action succeeded. For every unmet requirement, name the exact task ID, state the missing/failed requirement, and cite observed receipt or artifact evidence, not prior Agent claims. Never ask an Agent to fabricate a receipt artifact to stand in for a missing tool result. Never use generic gaps or repeat the mission goal as the reason. Return exactly one JSON object with {"satisfied":true,"gaps":[]} or {"satisfied":false,"gaps":["task-specific explanation"]}. Never infer success from a task merely being marked complete. Do not include explanations, Markdown fences, or any text outside the JSON object.`;
+const MISSION_COMPLETION_REVIEWER_SYSTEM_PROMPT = `You are an objective mission-completion reviewer. Determine whether the observed task outputs and artifacts satisfy the original mission goal. Treat each task's requiredActions and requiresExternalAction flag as evidence requirements; system-action-receipts.json is the internal record of actual tool results and is not a user deliverable. Every required action must have a matching receipt with its required outcome, and an external operation requires a successful receipt from an actual tool invocation. Failed receipts do not support success, and claimed results that contradict receipts are gaps. Later verified recovery evidence can satisfy an original requirement despite an earlier failed attempt; do not report an earlier failure as an outstanding gap when the same requirement has subsequently been verified. An uncertain side effect remains a blocker until reconciled, and a completed status alone is not proof. A receipt whose toolId is "__list_tools" proves only that the tool catalog was inspected; a tool name appearing in its content does not prove that tool was invoked or that its action succeeded. For every unmet requirement, name the exact task ID, state the missing/failed requirement, and cite observed receipt or artifact evidence, not prior Agent claims. Never ask an Agent to fabricate a receipt artifact to stand in for a missing tool result. Never use generic gaps or repeat the mission goal as the reason. Return exactly one JSON object with {"satisfied":true,"gaps":[]} or {"satisfied":false,"gaps":["task-specific explanation"]}. Never infer success from a task merely being marked complete. Do not include explanations, Markdown fences, or any text outside the JSON object.`;
 const MISSION_COMPLETION_REVIEW_EXECUTION_POLICY: AgentExecutionPolicy = {
   ...DEFAULT_AGENT_EXECUTION_POLICY,
   maxBrainCalls: 3,
@@ -371,9 +371,20 @@ export interface PromptTaskRequest {
 }
 
 class MissionAgentRuntimeApiError extends Error {
+  readonly failureCode?: string;
+
   constructor(readonly path: string, readonly status: number, details: string) {
     super(`Agent Runtime API ${path} failed (${status}): ${details.slice(0, 200)}`);
     this.name = 'MissionAgentRuntimeApiError';
+    try {
+      const body: unknown = JSON.parse(details);
+      if (body && typeof body === 'object' && 'failureCode' in body
+        && typeof body.failureCode === 'string' && /^[A-Z_]+$/.test(body.failureCode)) {
+        this.failureCode = body.failureCode;
+      }
+    } catch (error) {
+      if (!(error instanceof SyntaxError)) throw error;
+    }
   }
 }
 
@@ -999,16 +1010,47 @@ export class MissionAgentRuntime {
       'mission-evaluator',
       MISSION_COMPLETION_REVIEWER_SYSTEM_PROMPT,
     );
+    const isUnexecutedProposal = (output: string): boolean => {
+      try {
+        const value: unknown = JSON.parse(output.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, ''));
+        return !!value && typeof value === 'object' && 'action' in value && value.action === 'tool_use'
+          && 'toolId' in value && typeof value.toolId === 'string'
+          && 'parameters' in value && !!value.parameters && typeof value.parameters === 'object'
+          && !Array.isArray(value.parameters);
+      } catch (error) {
+        if (!(error instanceof SyntaxError)) throw error;
+        return false;
+      }
+    };
+    const removableFailures = completedTaskSummaries.filter((summary) =>
+      /-mission-recovery-\d+(?:-\d+)*$/i.test(summary.taskId)
+      && (summary.status === 'failed' || summary.status === 'incomplete'
+        || (summary.status === 'completed' && isUnexecutedProposal(summary.output)))
+      && !(summary.artifacts || []).length
+      && !(summary.artifactNames || []).length
+      && !(summary.requiredActions || []).length
+      && !(summary.expectedArtifacts || []).length
+      && !summary.requiresExternalAction
+      && !/\b(?:unknown outcome|outcome unknown|outcome uncertain|uncertain)\b|outcome.?unknown/i.test(summary.output),
+    );
+    const omittedFailures = new Set(removableFailures.slice(0, -6));
     const reviewContext = JSON.stringify({
       missionGoal,
       planSummary,
-      completedTaskSummaries: completedTaskSummaries.map((summary) => ({
+      omittedHistoricalRecoveryFailures: omittedFailures.size,
+      completedTaskSummaries: completedTaskSummaries.filter((summary) => !omittedFailures.has(summary)).map((summary) => ({
         ...summary,
         requiredActions: (summary.requiredActions || []).filter((action) => action.toolId !== '__external_action__'),
         requiresExternalAction: summary.requiresExternalAction
           || (summary.requiredActions || []).some((action) => action.toolId === '__external_action__'),
       })),
     });
+    if (Buffer.byteLength(JSON.stringify(reviewContext), 'utf8') > 120_000) {
+      return {
+        satisfied: false,
+        gaps: ['Mission completion review requires too much recorded evidence for a safe review; the mission needs human review.'],
+      };
+    }
     let previousResponse = '';
     let validationIssue = '';
 
@@ -1392,6 +1434,7 @@ export class MissionAgentRuntime {
           || !(error instanceof MissionAgentRuntimeApiError)
           || error.path !== executePath
           || error.status < 500
+          || (error.failureCode !== undefined && error.failureCode !== 'TRANSIENT_SERVICE_ERROR')
         ) {
           throw error;
         }

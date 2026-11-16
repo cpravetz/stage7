@@ -38,7 +38,7 @@ describe('Integration: Agent Runtime Collaboration & Specialization', () => {
         .send({ missionId: 'mission-collab-1' });
 
       expect(startRes.status).toBe(201);
-      expect(startRes.body.status).toBe('running');
+      expect(startRes.body.status).toBe('waiting');
 
       const taskRes = await request(app)
         .post('/api/agents/agents/collab-agent-1/tasks')
@@ -85,7 +85,7 @@ describe('Integration: Agent Runtime Collaboration & Specialization', () => {
 
       const stateRes = await request(app).get('/api/agents/agents/state-agent-1/state');
       expect(stateRes.status).toBe(200);
-      expect(stateRes.body.status).toBe('running');
+      expect(stateRes.body.status).toBe('waiting');
       expect(stateRes.body.missionId).toBe('mission-state-1');
     });
   });

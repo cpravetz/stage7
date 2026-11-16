@@ -35,6 +35,9 @@ export interface MissionDetail {
   status: string;
   artifacts?: unknown[];
   artifactLoadError?: string;
+  planLoadError?: string;
+  eventsLoadError?: string;
+  persistedEvents?: FeedEvent[];
   output?: {
     plan?: unknown;
     outputs?: {
@@ -42,6 +45,7 @@ export interface MissionDetail {
       status?: string;
       phaseId?: string;
       reason?: string;
+      gaps?: string[];
       pendingInteraction?: {
         kind: 'user_input' | 'mcp_permission';
         phaseId: string;
@@ -306,7 +310,7 @@ function subscribeToFeed() {
   });
 }
 
-async function loadSupplementary(workflowId: string, data: MissionDetail): Promise<MissionDetail> {
+async function loadSupplementary(workflowId: string, data: MissionDetail, previous?: MissionDetail): Promise<MissionDetail> {
   const missionId = data.missionId || workflowId.replace(/^mission-/, '');
   let enriched = data;
 
@@ -318,9 +322,14 @@ async function loadSupplementary(workflowId: string, data: MissionDetail): Promi
     const normalized = raw
       .map((e) => normalize(e))
       .filter((e): e is FeedEvent => e !== null);
+    enriched = { ...enriched, persistedEvents: normalized, eventsLoadError: undefined };
     useFeedStore.getState().addEvents(normalized);
-  } catch {
-    // Events are supplementary; the mission detail remains usable if they are unavailable.
+  } catch (err) {
+    enriched = {
+      ...enriched,
+      persistedEvents: previous?.persistedEvents,
+      eventsLoadError: err instanceof Error ? err.message : 'Failed to load mission events',
+    };
   }
 
   try {
@@ -334,10 +343,14 @@ async function loadSupplementary(workflowId: string, data: MissionDetail): Promi
           ...(enriched.output || {}),
           plan,
         },
+        planLoadError: undefined,
       };
     }
-  } catch {
-    // A plan may not have been generated yet.
+  } catch (err) {
+    enriched = {
+      ...enriched,
+      planLoadError: err instanceof Error ? err.message : 'Failed to load mission plan',
+    };
   }
 
   try {
@@ -348,11 +361,13 @@ async function loadSupplementary(workflowId: string, data: MissionDetail): Promi
       ...enriched,
       artifacts: result.artifacts || [],
       artifactLoadError: undefined,
+      planLoadError: enriched.planLoadError,
     };
   } catch (err) {
     enriched = {
       ...enriched,
       artifactLoadError: err instanceof Error ? err.message : 'Failed to load mission artifacts',
+      planLoadError: enriched.planLoadError,
     };
   }
 
@@ -426,7 +441,7 @@ export const useMissionsStore = create<MissionsState>((set, get) => ({
       const data = await fetchJSON<MissionDetail>(
         `/api/temporal/missions/${encodeURIComponent(workflowId)}`
       );
-      const enriched = await loadSupplementary(workflowId, data);
+      const enriched = await loadSupplementary(workflowId, data, get().details[workflowId]);
       set((s) => ({
         details: { ...s.details, [workflowId]: enriched },
         detailLoading: { ...s.detailLoading, [workflowId]: false },
@@ -459,7 +474,7 @@ export const useMissionsStore = create<MissionsState>((set, get) => ({
       const data = await fetchJSON<MissionDetail>(
         `/api/temporal/missions/${encodeURIComponent(workflowId)}`
       );
-      const enriched = await loadSupplementary(workflowId, data);
+      const enriched = await loadSupplementary(workflowId, data, get().details[workflowId]);
       set((s) => ({
         details: { ...s.details, [workflowId]: enriched },
         detailLoading: { ...s.detailLoading, [workflowId]: false },

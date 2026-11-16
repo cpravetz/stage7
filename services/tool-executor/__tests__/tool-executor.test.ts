@@ -617,12 +617,15 @@ describe('ToolExecutor', () => {
     };
 
     const result = await executor.executeOrRequestCredentials(configTool, {});
-    // Credential-backed fields (configKey) are resolved dynamically, not
-    // statically required. Execution proceeds; the tool source doesn't use
-    // apiKey so it succeeds without it.
-    expect(result).not.toBeInstanceOf(CredentialRequiredError);
-    const exec = result as { status: string };
-    expect(exec.status).toBe('completed');
+    // Credential-backed required fields that cannot be resolved now gate execution
+    // and return a CredentialRequiredError with the missing credential details.
+    expect(result).toBeInstanceOf(CredentialRequiredError);
+    if (result instanceof CredentialRequiredError) {
+      expect(result.request.missingCredentials).toHaveLength(1);
+      expect(result.request.missingCredentials[0].key).toBe('apiKey');
+      expect(result.request.missingCredentials[0].label).toBe('Provider API key');
+      expect(result.request.toolName).toBe('Runtime Config Tool');
+    }
   });
 
   it('should report JSON error output from a code tool as failed execution', async () => {
@@ -1368,10 +1371,13 @@ describe('REST endpoints', () => {
       .post('/api/tools/cred-tool-1/execute')
       .send({ input: { projectKey: 'TEST' } })
 
-    // Credential-backed fields (vaultSecretId / envVar) are resolved
-    // dynamically, not statically required. Execution proceeds instead of
-    // returning 428.
-    expect(res.status).not.toBe(428)
+    // Credential-backed required fields that cannot be resolved now gate execution
+    // and return 428 with a credential request.
+    expect(res.status).toBe(428)
+    expect(res.body.request).toBeDefined()
+    expect(res.body.request.missingCredentials).toHaveLength(1)
+    expect(res.body.request.missingCredentials[0].key).toBe('jiraToken')
+    expect(res.body.request.toolName).toBe('Jira Tool')
   })
 
   it('reports unavailable MCP integration honestly without a credential gate', async () => {
@@ -1399,15 +1405,13 @@ describe('REST endpoints', () => {
       .post('/api/tools/cred-tool-2/execute')
       .send({ input: { channel: '#general', text: 'hello' } })
 
-    // Credential-backed fields are resolved dynamically, so the run is not
-    // gated on them. With no MCP server behind the tool, execution must still
-    // report the integration as unavailable rather than fabricating a result.
-    expect(execRes.status).not.toBe(428)
-    // The native/MCP executor produced its own error payload; the run itself
-    // completed, so the failure is reported in `error` rather than as a
-    // rejected execution.
-    expect(execRes.body.status).toBe('completed')
-    expect(String(execRes.body.error ?? '')).toMatch(/credentials|missing|required|unavailable|not connected/i)
+    // Credential-backed required fields that cannot be resolved now gate execution
+    // and return 428 with a credential request.
+    expect(execRes.status).toBe(428)
+    expect(execRes.body.request).toBeDefined()
+    expect(execRes.body.request.missingCredentials).toHaveLength(1)
+    expect(execRes.body.request.missingCredentials[0].key).toBe('slackToken')
+    expect(execRes.body.request.toolName).toBe('Slack Tool')
   })
 
   describe('POST /api/tools/execute - flat payload support', () => {
@@ -1772,14 +1776,17 @@ console.log(JSON.stringify({ success: true, data: cfg }));`,
 
       await request(app).post('/api/tools').send(missingCredTool);
 
-      // Credential-backed fields (envVar) are resolved dynamically, not
-      // statically required. Execution proceeds without credentials.
+      // Credential-backed required fields that cannot be resolved now gate execution
+      // and return 428 with a credential request.
       const execRes = await request(app)
         .post('/api/tools/missing-cred-1/execute')
         .send({ input: {} });
 
-      expect(execRes.status).toBe(200);
-      expect(execRes.body.status).toBe('completed');
+      expect(execRes.status).toBe(428);
+      expect(execRes.body.request).toBeDefined();
+      expect(execRes.body.request.missingCredentials).toHaveLength(1);
+      expect(execRes.body.request.missingCredentials[0].key).toBe('missingToken');
+      expect(execRes.body.request.toolName).toBe('Missing Credential Tool');
     });
 
     it('resolves a Vault-stored credential bundle when resuming a missing-credential request', async () => {
@@ -1825,12 +1832,23 @@ console.log(JSON.stringify({ success: true, data: cfg }));`,
 
       try {
         await request(app).post('/api/tools').send(credentialTool);
+        // First execution should return 428 with missing credentials
         const executeResponse = await request(app)
           .post('/api/tools/cred-vault-bundle-1/execute')
           .send({ input: {} });
-        // Credential-backed fields (envVar) are resolved dynamically, not
-        // statically required. Execution proceeds instead of returning 428.
-        expect(executeResponse.status).not.toBe(428);
+        expect(executeResponse.status).toBe(428);
+        expect(executeResponse.body.request).toBeDefined();
+        expect(executeResponse.body.request.missingCredentials).toHaveLength(2);
+        expect(executeResponse.body.request.missingCredentials.map((c: any) => c.key).sort()).toEqual(['endpoint', 'token']);
+        expect(executeResponse.body.request.toolName).toBe('Vault Bundle Tool');
+
+        // Now submit credentials to resume
+        const executionId = executeResponse.body.request.executionId;
+        const resumeResponse = await request(app)
+          .post(`/api/executions/${executionId}/credentials`)
+          .send({ credentials: { token: 'token-value', endpoint: 'https://service.test' } });
+        expect(resumeResponse.status).toBe(200);
+        expect(resumeResponse.body.status).toBe('completed');
       } finally {
         fetchMock.mockRestore();
         if (previousVaultUrl === undefined) delete process.env.VAULT_URL;

@@ -4,6 +4,7 @@ import { maxTokensForCall } from './policy'
 import { buildSystemPrompt } from './prompt'
 import { NEXT_TURN, type RunContext, type TurnEnd } from './RunContext'
 import { visibleTools } from './toolCatalog'
+import { classifyFailure } from './toolFailures'
 import type { BrainReply, BrainResponse, ToolDescriptor } from './types'
 
 export interface PreparedTurn {
@@ -40,7 +41,7 @@ export async function prepareTurn(rc: RunContext): Promise<PreparedTurn> {
 /**
  * Asks the Brain for the agent's next reply and books the spend. Ends the turn
  * (without a reply) when the Brain asks to be retried with another model, or when its reply is empty.
- * Other Brain failures are recorded in the conversation and rethrown.
+ * Other Brain failures are recorded in the conversation and rethrown with structured classification.
  */
 export async function askBrain(
   rc: RunContext,
@@ -64,12 +65,19 @@ export async function askBrain(
       await retryWithRemainingModels(rc, error, message)
       return { end: NEXT_TURN }
     }
+    // Classify the Brain failure for structured downstream recovery.
+    const classified = classifyFailure(message)
+    const classifiedMessage = `[${classified.code}] ${message}`
     state.history = [...state.history, {
       role: 'user',
-      content: `Brain could not complete this turn: ${message}. Reassess the task and continue safely without repeating any action whose outcome is uncertain.`,
+      content: `Brain could not complete this turn: ${classifiedMessage}. Reassess the task and continue safely without repeating any action whose outcome is uncertain.`,
     }]
     await state.save()
-    throw error
+    // Propagate the classified error so the orchestrator can adapt.
+    const classifiedError = new Error(classifiedMessage) as Error & { failureCode?: string; failureAdaptation?: string }
+    classifiedError.failureCode = classified.code
+    classifiedError.failureAdaptation = classified.adaptation
+    throw classifiedError
   }
 
   state.brainCalls++

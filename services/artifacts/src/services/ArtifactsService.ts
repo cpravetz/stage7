@@ -257,8 +257,8 @@ export class ArtifactsService {
   async appendMissionEvent(missionId: string, event: any): Promise<any> {
     return this.useStore((store) => store.appendMissionEvent(missionId, event));
   }
-  async listMissionEvents(missionId: string): Promise<any[]> {
-    return this.useStore((store) => store.listMissionEvents(missionId));
+  async listMissionEvents(missionId: string, options?: { type?: string; omitAmendmentPlan?: boolean }): Promise<any[]> {
+    return this.useStore((store) => store.listMissionEvents(missionId, options));
   }
 
   async listPendingApprovals(): Promise<Array<{ missionId: string; phaseId: string; phaseName: string; question: string; assistantId?: string }>> {

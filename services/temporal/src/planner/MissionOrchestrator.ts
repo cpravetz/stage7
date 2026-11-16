@@ -22,12 +22,13 @@ import {
   MissionActivityCheckpoint,
   MissionPendingInteraction,
   MissionTaskCheckpoint,
-  completedTaskIdsWithSummaries,
+  recoveryTaskDependencies,
   missionExecutionEvidenceGaps,
   recoveryGapFingerprint,
   recoveryProgressSignature,
   hasRecoveryProgress,
   MAX_PHASE_RECOVERY_ROUNDS_SAFETY,
+  MAX_MISSION_RECOVERY_ROUNDS_SAFETY,
   MAX_NO_PROGRESS_RECOVERY_ATTEMPTS,
 } from '../types/workflow';
 import { PlannerProgress } from './MissionPlanner';
@@ -36,10 +37,38 @@ import type { WorkflowInput } from '../types/workflow';
 import { MissionCompletedListener } from '../listeners/MissionCompletedListener';
 import { MissionStageCompletedListener } from '../listeners/MissionStageCompletedListener';
 
+/** Structured failure codes propagated from the agent runtime. */
+const FAILURE_CODES = {
+  REQUEST_TOO_LARGE: 'REQUEST_TOO_LARGE',
+  MODEL_EXHAUSTED: 'MODEL_EXHAUSTED',
+  TOOL_MISSING: 'TOOL_MISSING',
+  CREDENTIAL_REQUIRED: 'CREDENTIAL_REQUIRED',
+  OUTCOME_UNKNOWN: 'OUTCOME_UNKNOWN',
+  TRANSIENT_SERVICE_ERROR: 'TRANSIENT_SERVICE_ERROR',
+  UNKNOWN_FAILURE: 'UNKNOWN_FAILURE',
+} as const;
+
+/**
+ * Extracts a structured failure code from an error, if present.
+ * The agent runtime tags errors with `failureCode` and `failureAdaptation`.
+ */
+function extractFailureCode(error: unknown): string | undefined {
+  if (error instanceof Error) {
+    const code = (error as any).failureCode
+    if (typeof code === 'string') return code
+  }
+  const message = error instanceof Error ? error.message : String(error)
+  const match = message.match(/\[Failure code: (\w+);/i) || message.match(/\[([A-Z_]+)\]/)
+  return match?.[1]
+}
+
 function isFatalServiceError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   const message = error.message || String(error);
   const lower = message.toLowerCase();
+  const code = extractFailureCode(error)
+  if (code === FAILURE_CODES.MODEL_EXHAUSTED) return true
+  if (code === FAILURE_CODES.OUTCOME_UNKNOWN) return true
   if (lower.includes('brain') && (
     lower.includes('exhausted every eligible model')
     || lower.includes('all models unavailable')
@@ -1088,6 +1117,9 @@ agentRole: 'mission-executor',
     let lastCompletionSignature: string | undefined;
     let completionNoProgress = 0;
     let completionVerified = false;
+    let completionGaps: string[] = [];
+    let reviewReason = '';
+    let lastRecoveryIssue = '';
     let recoveryIndex = 0;
     while (true) {
       recoveryIndex += 1;
@@ -1100,6 +1132,17 @@ agentRole: 'mission-executor',
       const gaps = completionReview.gaps.length
         ? completionReview.gaps
         : ['Mission completion has not been verified from the recorded task evidence.'];
+      completionGaps = gaps;
+      if (recoveryIndex > MAX_MISSION_RECOVERY_ROUNDS_SAFETY) {
+        reviewReason = 'Automatic recovery reached its safety limit.';
+        await agentRuntime.emitMonologue({
+          agentRole: 'mission-director',
+          thought: `Mission completion recovery reached its safety limit with unresolved gaps: ${gaps.join('; ')}. The mission needs review.`,
+          text: 'Mission needs review: recovery reached its safety limit.',
+          data: { decision: 'mission_needs_review', gaps, reason: 'recovery_safety_ceiling' },
+        });
+        break;
+      }
       const allEvidenceTasks = (outputs.phases as MissionPhaseOutput[]).flatMap((output) => output.tasks);
       const completionSignature = recoveryProgressSignature({
         gaps,
@@ -1109,8 +1152,10 @@ agentRole: 'mission-executor',
         outputs: allEvidenceTasks.map((t) => t.output || ''),
       });
       const madeProgress = hasRecoveryProgress(lastCompletionSignature, completionSignature);
+      const stagnantGap = !!lastCompletionSignature
+        && recoveryGapFingerprint(gaps) === lastCompletionSignature.split('::')[0];
       lastCompletionSignature = completionSignature;
-      completionNoProgress = madeProgress ? 0 : completionNoProgress + 1;
+      completionNoProgress = madeProgress && !stagnantGap ? 0 : completionNoProgress + 1;
       const recoveryPhase = plan.phases.find((phase) =>
         gaps.some((gap) =>
           gap.includes(phase.id)
@@ -1119,13 +1164,14 @@ agentRole: 'mission-executor',
         ),
       ) || plan.phases.at(-1);
       if (!recoveryPhase) {
+        reviewReason = 'No phase is available to address the remaining issues.';
         await agentRuntime.emitMonologue({
           agentRole: 'mission-director',
-          thought: `No phase matched the unmet requirements (${gaps.join('; ')}) and there is no fallback phase; continuing auto-recovery against the last phase rather than awaiting review.`,
-          text: `Continuing auto-recovery: no recovery phase matched gaps.`,
-          data: { decision: 'mission_autorecover', gaps, reason: 'no_recovery_phase' },
+          thought: `No phase is available to address the unmet requirements (${gaps.join('; ')}). The mission needs review.`,
+          text: 'Mission needs review: no recovery phase is available.',
+          data: { decision: 'mission_needs_review', gaps, reason: 'no_recovery_phase' },
         });
-        continue;
+        break;
       }
       let phaseOutput = (outputs.phases as MissionPhaseOutput[])
         .find((candidate) => candidate.phaseId === recoveryPhase.id);
@@ -1141,31 +1187,37 @@ agentRole: 'mission-executor',
           .map((task) => task.id),
       )];
 
-      if (!madeProgress && completionNoProgress >= MAX_NO_PROGRESS_RECOVERY_ATTEMPTS) {
+      if (completionNoProgress >= MAX_NO_PROGRESS_RECOVERY_ATTEMPTS) {
+        reviewReason = 'Automatic recovery could not resolve the issues after several approaches.';
         await agentRuntime.emitMonologue({
           agentRole: 'mission-director',
-          thought: `Mission completion recovery has made no observable progress after ${MAX_NO_PROGRESS_RECOVERY_ATTEMPTS} attempts for gaps: ${gaps.join('; ')}. Continuing auto-recovery with a different approach rather than awaiting review.`,
-          text: `Continuing auto-recovery: no progress on gaps, retrying with a new approach.`,
-          data: { decision: 'mission_autorecover', gaps, reason: 'no_progress_ceiling', completionNoProgress },
+          thought: `Mission completion recovery has not resolved the gaps after ${MAX_NO_PROGRESS_RECOVERY_ATTEMPTS} attempts: ${gaps.join('; ')}. The mission needs review.`,
+          text: 'Mission needs review: recovery has not resolved the remaining gaps.',
+          data: { decision: 'mission_needs_review', gaps, reason: 'no_progress_ceiling', completionNoProgress },
         });
-        completionNoProgress = 0;
+        break;
       }
-      const noProgressGuidance = !madeProgress
-        ? ' Previous attempts made no observable progress on the same gaps; use a different authorized approach and do not repeat the same recovery steps. If a required value or authorization is missing, ask the user for it and wait.'
-        : '';
+      const noProgressGuidance = [
+        !madeProgress || stagnantGap
+          ? ' Previous attempts made no observable progress on the same gaps; use a different authorized approach and do not repeat the same recovery steps. If a required value or authorization is missing, ask the user for it and wait.'
+          : '',
+        lastRecoveryIssue ? ` The previous recovery attempt reported: ${lastRecoveryIssue.slice(0, 1000)}. Address that specific blocker; do not repeat a failed tool call unchanged.` : '',
+      ].join('');
 
       const availableArtifacts = new Set(phaseOutput.tasks.flatMap((task) =>
         task.artifacts.map((artifact) => artifact.name.toLocaleLowerCase()),
       ));
       const expectedArtifacts = [...new Set(recoveryPhase.tasks.flatMap((task) => task.expectedArtifacts || []))]
         .filter((name) => !availableArtifacts.has(name.toLocaleLowerCase()));
-      const taskIds = completedTaskIdsWithSummaries(
-        recoveryPhase.tasks.map((task) => task.id),
+      const taskIds = recoveryTaskDependencies(
+        recoveryPhase.tasks,
         completedTaskSummaries.values(),
+        targetTaskIds,
       );
-      let taskId = `${recoveryPhase.id}-mission-recovery-${recoveryIndex}`;
       const existingTaskIds = new Set(plan.phases.flatMap((phase) => phase.tasks.map((task) => task.id)));
-      while (existingTaskIds.has(taskId)) taskId = `${taskId}-${recoveryIndex}`;
+      let taskNumber = recoveryIndex;
+      while (existingTaskIds.has(`${recoveryPhase.id}-mission-recovery-${taskNumber}`)) taskNumber++;
+      const taskId = `${recoveryPhase.id}-mission-recovery-${taskNumber}`;
       // The Mission Director decides to create a recovery task with visible
       // rationale: the Mission Evaluator reported unmet requirements.
       await agentRuntime.emitMonologue({
@@ -1216,6 +1268,8 @@ agentRole: 'mission-executor',
       await this.updateTask(ctx, recoveryPhase.id, recoveryTask.id, { status: 'in_progress', startedAt });
       let result: TaskExecutionResult | undefined;
       let failure = '';
+      let failureCode: string | undefined;
+      let recoveryAttempted = false;
       try {
         const agentId = sharedMissionAgentId;
         const args: [
@@ -1238,18 +1292,36 @@ agentRole: 'mission-executor',
         try {
           result = await agentRuntime.executeTask(...args, undefined, undefined, ctx.prompt, ctx.userMessages);
         } catch (error) {
+          failureCode = extractFailureCode(error) || undefined;
+          if (failureCode === FAILURE_CODES.OUTCOME_UNKNOWN || failureCode === FAILURE_CODES.MODEL_EXHAUSTED
+            || failureCode === FAILURE_CODES.CREDENTIAL_REQUIRED) throw error;
           if (isFatalServiceError(error)) throw error;
           const firstError = error instanceof Error ? error.message : String(error);
+          // Adapt recovery guidance based on failure classification.
+          const retryGuidance = failureCode === FAILURE_CODES.REQUEST_TOO_LARGE
+            ? `The previous attempt failed: ${firstError}. Reduce the task scope and context size; do not repeat the full request. Continue from recorded outputs, do not repeat successful or uncertain side effects, and use a smaller, more focused approach.`
+            : failureCode === FAILURE_CODES.TOOL_MISSING
+              ? `The previous attempt failed: ${firstError}. A required tool or capability is missing. Search the live tool catalog, use an authorized alternative, or create a compatible tool. Do not repeat the exact same failing call.`
+              : failureCode === FAILURE_CODES.CREDENTIAL_REQUIRED
+                ? `The previous attempt failed: ${firstError}. Required credentials or configuration are missing. Ask the user to provide the exact missing values through the secure tool configuration form and wait.`
+                : failureCode === FAILURE_CODES.OUTCOME_UNKNOWN
+                  ? `The previous attempt failed: ${firstError}. The outcome of a side effect is unknown and must not be repeated. Use recorded receipts to verify what happened, and use another authorized approach if one path is blocked.`
+                  : failureCode === FAILURE_CODES.TRANSIENT_SERVICE_ERROR
+                    ? `The previous attempt failed: ${firstError}. A transient service error occurred. Retry with a different approach after a brief delay; do not repeat the identical failing call.`
+                    : `The previous attempt failed: ${firstError}. Continue from recorded outputs, do not repeat successful or uncertain side effects, and use another authorized approach.`;
           result = await agentRuntime.executeTask(
             ...args,
-            `The previous attempt failed: ${firstError}. Continue from recorded outputs, do not repeat successful or uncertain side effects, and use another authorized approach.`,
+            retryGuidance,
             undefined,
             ctx.prompt,
             ctx.userMessages,
           );
+          recoveryAttempted = true;
         };
       } catch (error) {
-        if (isFatalServiceError(error)) throw error;
+        failureCode = extractFailureCode(error) || failureCode;
+        if (isFatalServiceError(error) && failureCode !== FAILURE_CODES.OUTCOME_UNKNOWN
+          && failureCode !== FAILURE_CODES.MODEL_EXHAUSTED && failureCode !== FAILURE_CODES.CREDENTIAL_REQUIRED) throw error;
         failure = error instanceof Error ? error.message : String(error);
       }
 
@@ -1291,8 +1363,8 @@ agentRole: 'mission-executor',
             taskTitle: recoveryTask.title,
             agentRole: recoveryTask.agentRole,
             ...(interruption.question ? { question: interruption.question } : {}),
-            ...(interruption.credentialRequest ? { credentialRequest: interruption.credentialRequest } : {}),
             ...(interruption.requestId ? { requestId: interruption.requestId } : {}),
+            ...(interruption.credentialRequest ? { credentialRequest: interruption.credentialRequest } : {}),
             ...(interruption.permission ? { permission: interruption.permission } : {}),
           },
         });
@@ -1311,6 +1383,7 @@ agentRole: 'mission-executor',
       recoveryTask.status = result ? (result.incompleteReason ? 'incomplete' : 'completed') : 'failed';
       recoveryTask.completedAt = completedAt;
       recoveryTask.output = result?.output || failure;
+      lastRecoveryIssue = failure || result?.incompleteReason || '';
       recoveryTask.artifacts = result?.artifacts || [];
       await this.updateTask(ctx, recoveryPhase.id, recoveryTask.id, {
         status: recoveryTask.status,
@@ -1361,6 +1434,19 @@ agentRole: 'mission-executor',
         },
       });
       await ctx.controlCheckpoint?.();
+      if (failureCode === FAILURE_CODES.OUTCOME_UNKNOWN || failureCode === FAILURE_CODES.MODEL_EXHAUSTED
+        || failureCode === FAILURE_CODES.CREDENTIAL_REQUIRED
+        || (result?.incompleteReason && /\buncertain\b|outcome.?unknown/i.test(result.incompleteReason))) {
+        reviewReason = 'Automatic recovery stopped because a blocker needs attention.';
+        completionGaps = [...gaps, `Recovery task "${recoveryTask.id}" requires review: ${lastRecoveryIssue}`];
+        await agentRuntime.emitMonologue({
+          agentRole: 'mission-director',
+          thought: `Recovery cannot safely continue: ${lastRecoveryIssue}`,
+          text: 'Mission needs review: recovery is blocked.',
+          data: { decision: 'mission_needs_review', gaps: completionGaps, failureCode },
+        });
+        break;
+      }
       if (recoveryTask.status !== 'completed') {
         const review = await this.evaluateMissionCompletion(ctx, plan, outputs);
         await agentRuntime.emitMonologue({
@@ -1372,18 +1458,24 @@ agentRole: 'mission-executor',
         continue;
       }
     }
-    await agentRuntime.emitMonologue({
-      agentRole: 'mission-director',
-      thought: `Mission completion is verified: all completion criteria are met and no gaps remain. I am marking the mission status as completed.`,
-      text: `Mission completed: all criteria met.`,
-      data: { decision: 'mission_completed' },
-    });
-    outputs.status = 'completed';
-    await new MissionCompletedListener().onMissionCompleted(
-      workflowInput,
-      plan,
-      outputs.phases as MissionPhaseOutput[],
-    );
+    if (completionVerified) {
+      await agentRuntime.emitMonologue({
+        agentRole: 'mission-director',
+        thought: `Mission completion is verified: all completion criteria are met and no gaps remain. I am marking the mission status as completed.`,
+        text: `Mission completed: all criteria met.`,
+        data: { decision: 'mission_completed' },
+      });
+      outputs.status = 'completed';
+      await new MissionCompletedListener().onMissionCompleted(
+        workflowInput,
+        plan,
+        outputs.phases as MissionPhaseOutput[],
+      );
+    } else {
+      outputs.status = 'awaiting_review';
+      outputs.gaps = completionGaps;
+      outputs.reason = reviewReason;
+    }
 
     // Stop all mission agents when mission completes (success or incomplete)
     try {
@@ -1658,6 +1750,7 @@ agentRole: 'mission-executor',
         const taskId = task.taskId || `phase-${phaseIndex + 1}-task-${taskIndex + 1}`;
         return {
           taskId,
+          status: task.status,
           output: task.output || '',
           artifactNames: artifacts.map((artifact) => artifact.name),
           artifacts,

@@ -71,11 +71,19 @@ describe('mission Agent acceptance across Temporal task retry', () => {
       updatedAt: Date;
     };
     const savedStates = new Map<string, SavedAgentState>();
+    const savedCheckpoints = new Map<string, any>();
     const persistence = {
       ready: async () => {},
       getAgentState: async (agentId: string) => savedStates.get(agentId),
       saveAgentState: async (state: SavedAgentState) => {
         savedStates.set(state.agentId, structuredClone(state));
+      },
+      getExecutionCheckpoint: async (agentId: string, taskId: string) => savedCheckpoints.get(`${agentId}:${taskId}`),
+      saveExecutionCheckpoint: async (checkpoint: any) => {
+        savedCheckpoints.set(`${checkpoint.agentId}:${checkpoint.taskId}`, structuredClone(checkpoint));
+      },
+      deleteExecutionCheckpoint: async (agentId: string, taskId: string) => {
+        savedCheckpoints.delete(`${agentId}:${taskId}`);
       },
       queryDocuments: async () => ({ documents: [] }),
     } as unknown as ArtifactsService;

@@ -338,12 +338,12 @@ export class ToolConfigResolver {
 
     const overrides = this.pendingCredentialOverrides.get(tool.id) || {};
     const merged = { ...resolved, ...overrides };
-    // Credential-backed fields (envVar / vaultSecretId / configKey) are resolved
-    // dynamically at execution time; they must not be treated as statically
-    // required config values. Only non-credential required fields can block
-    // execution. Consistent with validateConfigSchema().
+    // All required credential fields (including those backed by envVar / vaultSecretId / configKey)
+    // must be resolved before execution can proceed. If any required credential is missing,
+    // we throw CredentialRequiredError with the exact missing keys. This is now consistent
+    // with validateConfigSchema() which also gates on all required fields.
     const missing = credentialEntries
-      .filter((c) => c.required && !merged[c.logicalKey] && !c.source.envVar && !c.source.vaultSecretId && !c.source.configKey)
+      .filter((c) => c.required && !merged[c.logicalKey])
       .map((c) => ({
         key: c.logicalKey,
         label: c.label || c.logicalKey,

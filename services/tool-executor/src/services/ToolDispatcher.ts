@@ -2,7 +2,6 @@ import { Tool } from '../types';
 import logger from '../utils/logger';
 import { ErrorHandler } from '../utils/ErrorHandler';
 import path from 'path';
-import { createRequire } from 'module';
 import type { CodeExecutorCredentials } from '../executors/CodeExecutor';
 import { DockerLocalDriver } from '../runners/DockerLocalDriver';
 import type { SandboxExecutionDriver } from '../runners/SandboxExecutionDriver';
@@ -14,7 +13,7 @@ import { MCPClient, MCPHTTPClient } from '../services/MCPClient';
 import { validateAgainstOutputSchema, parseToolOutputJson } from '../utils/schemaValidator';
 import { schemaRecord, type ToolConfigResolver } from './ToolConfig';
 
-const req = createRequire(__filename);
+const DEFAULT_CODES_DIR = path.resolve(__dirname, '..', '..', 'codes');
 
 const BRAIN_URL = process.env.BRAIN_URL || 'http://brain:3100';
 const HEALING_SYSTEM_PROMPT = `You are a senior engineer debugging a failed code execution. Given the error message, source code, and input that caused the failure, provide a corrected version of the code. Output ONLY a single JSON object with this exact shape: { "sourceCode": "corrected code string", "explanation": "brief explanation of the fix" }`;
@@ -76,7 +75,7 @@ export class ToolDispatcher {
     private readonly nestedExecutor: NestedExecutor,
     codesDir?: string,
   ) {
-    this.codesDir = codesDir || process.env.TOOL_CODES_DIR || path.join(process.cwd(), 'codes');
+    this.codesDir = codesDir || process.env.TOOL_CODES_DIR || DEFAULT_CODES_DIR;
   }
 
   async generatePlugin(request: {
@@ -143,7 +142,7 @@ export class ToolDispatcher {
     }
     let mod: any;
     try {
-      mod = req(codeFile);
+      mod = require(codeFile);
     } catch (err) {
       throw new Error(`Failed to load code module '${codeFile}': ${err instanceof Error ? err.message : String(err)}`);
     }

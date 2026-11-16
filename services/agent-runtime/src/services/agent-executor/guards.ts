@@ -1,4 +1,9 @@
-import { asksUserToManageTools } from './askUser'
+import {
+  asksForProviderSetup,
+  asksUserToManageTools,
+  CAPABILITY_RESOLUTION_GUIDANCE,
+  hasTriedToolAfterResolution,
+} from './askUser'
 import { ASK_USER_NAME, CREATE_TOOL_ACTION, DELEGATE_ACTION } from './constants'
 import { recoverFromRepeatedAction } from './capabilityRecovery'
 import { enrichReceipt } from './receipts'
@@ -15,12 +20,16 @@ const BLOCKER_SUFFIX = 'The phase reviewer should use this blocker to regroup th
 
 /** The agent must find missing capabilities itself, not delegate that work to the user. */
 const refuseToolManagementQuestion: ActionGuard = async ({ state }, { action }) => {
+  const triedResolvedTool = hasTriedToolAfterResolution(state.actionReceipts.map((receipt) => receipt.toolId))
   if (
     (action.tool === ASK_USER_NAME || action.tool === 'ask_user')
     && typeof action.args.question === 'string'
-    && asksUserToManageTools(action.args.question)
+    && (
+      asksUserToManageTools(action.args.question)
+      || (!triedResolvedTool && asksForProviderSetup(action.args.question))
+    )
   ) {
-    state.tell('Do not ask the user to manage or select tools. Inspect the catalog and resolve missing capabilities yourself; ask only for specific information or a necessary decision.')
+    state.tell(CAPABILITY_RESOLUTION_GUIDANCE)
     await state.save()
     return NEXT_TURN
   }

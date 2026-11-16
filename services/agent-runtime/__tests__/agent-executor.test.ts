@@ -766,6 +766,10 @@ describe('AgentExecutor', () => {
       'a nested action object embedded in prose',
       'The calculation request is {"product":{"tool":"calculate","args":{"expression":"17 + 25"}}}.',
     ],
+    [
+      'an alternative tool-use schema',
+      '```json\n{"action":"tool_use","toolId":"calculate","parameters":{"expression":"17 + 25"}}\n```',
+    ],
   ])('corrects %s instead of executing or returning it as a completed task', async (_description, malformedResponse) => {
     const brainResponses = [
       malformedResponse,
@@ -806,6 +810,44 @@ describe('AgentExecutor', () => {
     expect(result.toolCalls).toBe(1)
     expect(toolExecutions).toBe(1)
     expect(prompts[1]).toContain('was not executed')
+  })
+
+  it('corrects an unexecuted tool-use response recovered from a checkpoint', async () => {
+    const prompts: string[] = []
+    let turns = 0
+    let executions = 0
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) return jsonResponse({
+        tools: [{ id: 'calculate', name: 'Calculate', description: 'Calculate', type: 'code' }],
+      })
+      if (url.endsWith('/api/brain/complaint')) return jsonResponse({ recorded: true })
+      if (url.endsWith('/api/brain/complete')) {
+        prompts.push((JSON.parse(String(init?.body)) as { prompt: string }).prompt)
+        return jsonResponse({ content: turns++ === 0 ? '{"tool":"calculate","args":{"expression":"17 + 25"}}' : '42' })
+      }
+      if (url.endsWith('/api/tool-executor/tools/execute')) {
+        executions++
+        return jsonResponse({ status: 'completed', output: { result: 42 } })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+    const result = await new AgentExecutor({ fetcher }).execute(
+      { ...definition, tools: ['calculate'], toolPolicy: { mode: 'allowlist' } },
+      task() as AgentTask,
+      {
+        missionId: 'mission-1', delegationDepth: 0,
+        resumeCheckpoint: {
+          version: 2, history: [{ role: 'user', content: 'Calculate 17 + 25' }],
+          finalOutput: '{"action":"tool_use","toolId":"calculate","parameters":{"expression":"17 + 25"}}',
+          tokensUsed: 0, toolCalls: 0, brainCalls: 0, completionTokensReserved: 0,
+          delegations: 0, lastAction: '', repeatedActionCount: 0, actionReceipts: [],
+        },
+      },
+    )
+    expect(prompts[0]).toContain('was not executed')
+    expect(executions).toBe(1)
+    expect(result.output).toBe('42')
   })
 
   it('executes a single unambiguous action inside a JSON-only wrapper', async () => {
@@ -1933,15 +1975,36 @@ describe('AgentExecutor', () => {
   it.each([
     '__ASK_USER__:The multi-channel-publishing skill is not registered. Please register it to proceed.',
     '{"tool":"ask_user","args":{"question":"Please install the missing tool."}}',
+    '__ASK_USER__:No SMS-capable tool exists. Please provide the SMS provider name and API credentials.',
+    '{"tool":"ask_user","args":{"question":"Which SMS provider account should I use?"}}',
   ])('redirects operational requests back to the agent: %s', async (firstResponse) => {
     let turn = 0
+    let smsRegistered = false
+    let resolveCalls = 0
     const prompts: string[] = []
     const fetcher: typeof fetch = async (input, init) => {
       const url = String(input)
-      if (url.endsWith('/api/tool-executor/tools')) return jsonResponse({ tools: [] })
+      if (url.endsWith('/api/tool-executor/tools')) return jsonResponse({
+        tools: smsRegistered ? [{ id: 'sms_sender', name: 'SMS Sender', description: 'Send SMS', type: 'code' }] : [],
+      })
       if (url.endsWith('/api/brain/complete')) {
         prompts.push(String((JSON.parse(String(init?.body)) as { prompt: string }).prompt))
-        return jsonResponse({ content: turn++ === 0 ? firstResponse : '__ASK_USER__:Which SMS provider account should I use?' })
+        return jsonResponse({ content: [
+          firstResponse,
+          '__ASK_USER__:Which SMS provider account should I use?',
+          '{"tool":"__create_tool","args":{"capability":"send SMS","description":"Send an SMS","requirements":[]}}',
+          '__ASK_USER__:Which SMS provider account should I use?',
+          '{"tool":"sms_sender","args":{"to":"347-772-8389","body":"Watson, come here."}}',
+          'The SMS capability is ready.',
+        ][turn++] })
+      }
+      if (url.endsWith('/api/tool-executor/tools/resolve')) {
+        resolveCalls++
+        smsRegistered = true
+        return jsonResponse({ success: true, tool: { id: 'sms_sender', name: 'SMS Sender', manifest: {} } })
+      }
+      if (url.endsWith('/api/tool-executor/tools/execute')) {
+        return jsonResponse({ status: 'completed', output: { success: true, messageId: 'sms-test' } })
       }
       throw new Error(`Unexpected request: ${url}`)
     }
@@ -1949,8 +2012,10 @@ describe('AgentExecutor', () => {
       missionId: 'mission-1',
       delegationDepth: 0,
     })
-    expect(result.output).toContain('Which SMS provider account')
-    expect(prompts[1]).toContain('Do not ask the user')
+    expect(result.output).toBe('The SMS capability is ready.')
+    expect(result.output).not.toContain('Which SMS provider account')
+    expect(prompts[1]).toContain('Do not ask the user to choose a provider')
+    expect(resolveCalls).toBe(1)
   })
 
   it('executes the requested email and resolves SMS without losing mission values', async () => {
@@ -2299,7 +2364,9 @@ describe('AgentExecutor', () => {
     expect(result.output).toBe('The task is complete.')
     expect(brainCalls).toBe(2)
     expect(Buffer.byteLength(brainRequest)).toBeLessThan(192 * 1024)
-    expect(request.prompt).toContain('[Tool output truncated; request a targeted result for more detail.]')
+    expect(request.prompt).toContain('Tool output truncated')
+    expect(request.prompt).toContain('omitted')
+    expect(request.prompt).toContain('kept head/tail')
   })
 
   it('keeps a large live tool catalog below Brain request limits', async () => {
@@ -2712,6 +2779,92 @@ describe('AgentExecutor', () => {
     })
   })
 
+  it('resolves an alternative after missing tool configuration without repeating the failed call', async () => {
+      let brainCalls = 0
+      let originalCalls = 0
+      let resolutionBody: Record<string, unknown> | undefined
+      let resolved = false
+      const fetcher: typeof fetch = async (input, init) => {
+        const url = String(input)
+        const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined
+        if (url.endsWith('/api/tool-executor/tools')) return jsonResponse({
+          tools: [
+            { id: 'lookup', name: 'Lookup', description: 'Look up a record', type: 'code' },
+            ...(resolved ? [{ id: 'lookup-alt', name: 'Alternative Lookup', description: 'Look up a record', type: 'code' }] : []),
+          ],
+        })
+        if (url.endsWith('/api/brain/complete')) {
+          return jsonResponse({ content: [
+            '{"tool":"lookup","args":{"query":"record"}}',
+            '{"tool":"lookup-alt","args":{"query":"record"}}',
+            'The record was found.',
+          ][brainCalls++] })
+        }
+        if (url.endsWith('/api/tool-executor/tools/execute')) {
+          if (body?.id === 'lookup') {
+            originalCalls++
+            return jsonResponse({ status: 'completed', output: { error: 'Missing endpoint configuration' } })
+          }
+          expect(body?.id).toBe('lookup-alt')
+          return jsonResponse({ status: 'completed', output: { record: 'found' } })
+        }
+        if (url.endsWith('/api/tool-executor/tools/resolve')) {
+          resolutionBody = body
+          resolved = true
+          return jsonResponse({ success: true, tool: { id: 'lookup-alt', name: 'Alternative Lookup', manifest: {} } }, 201)
+        }
+        if (url.endsWith('/api/brain/complaint')) return jsonResponse({ success: true })
+        throw new Error(`Unexpected request: ${url}`)
+      }
+
+      const result = await new AgentExecutor({ fetcher }).execute(definition, task() as AgentTask, {
+        missionId: 'mission-1', delegationDepth: 0,
+      })
+      expect(result.output).toBe('The record was found.')
+      expect(originalCalls).toBe(1)
+      expect(resolutionBody?.excludeToolIds).toEqual(['lookup'])
+      expect(result.actionReceipts).toEqual(expect.arrayContaining([
+        expect.objectContaining({ toolId: 'lookup', outcome: 'failure' }),
+        expect.objectContaining({ toolId: 'lookup-alt', outcome: 'success' }),
+      ]))
+  })
+
+  it('stops rather than resolving or executing alternatives for an uncertain outcome', async () => {
+    let brainCalls = 0
+    let resolutions = 0
+    let executions = 0
+    const fetcher: typeof fetch = async (input) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) return jsonResponse({
+        tools: [{ id: 'send', name: 'Send', description: 'Send message', type: 'code' }],
+      })
+      if (url.endsWith('/api/brain/complete')) {
+        brainCalls++
+        return jsonResponse({ content: '{"tool":"send","args":{"message":"hello"}}' })
+      }
+      if (url.endsWith('/api/tool-executor/tools/execute')) {
+        executions++
+        return jsonResponse({ status: 'completed', outcomeKnown: false, output: { error: 'Missing endpoint configuration' } })
+      }
+      if (url.endsWith('/api/tool-executor/tools/resolve')) {
+        resolutions++
+        return jsonResponse({ success: true })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+    const result = await new AgentExecutor({ fetcher }).execute(definition, task() as AgentTask, {
+      missionId: 'mission-1', delegationDepth: 0,
+    })
+    expect(result.incompleteReason).toContain('outcome')
+    expect(result.incompleteReason).toContain('uncertain')
+    expect(executions).toBe(1)
+    expect(brainCalls).toBe(1)
+    expect(resolutions).toBe(0)
+    expect(result.actionReceipts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ toolId: 'send', outcomeKnown: false }),
+    ]))
+  })
+
   it('completes a bounded mission task through delegation, tool repair, and receipt replay after runtime recreation', async () => {
     type SavedAgentState = {
       agentId: string
@@ -2911,6 +3064,8 @@ describe('AgentExecutor', () => {
 
   it('returns a completed task for duplicate execute requests and rejects concurrent duplicates', async () => {
     let resolveCompletion: ((response: Response) => void) | undefined
+    let markRequestStarted: () => void = () => undefined
+    const requestStarted = new Promise<void>((resolve) => { markRequestStarted = resolve })
     let requestCount = 0
     const fetcher: typeof fetch = async (input) => {
       const url = String(input)
@@ -2918,7 +3073,7 @@ describe('AgentExecutor', () => {
       if (!url.endsWith('/api/brain/complete')) throw new Error(`Unexpected request: ${url}`)
       requestCount++
       if (requestCount === 1) {
-        return new Promise<Response>((resolve) => { resolveCompletion = resolve })
+        return new Promise<Response>((resolve) => { resolveCompletion = resolve; markRequestStarted() })
       }
       return jsonResponse({ content: 'Done.' })
     }
@@ -2928,7 +3083,7 @@ describe('AgentExecutor', () => {
     const submitted = runtime.submitTask(definition.id, task())
 
     const first = runtime.executeTask(definition.id, submitted.taskId)
-    await Promise.resolve()
+    await requestStarted
     await expect(runtime.executeTask(definition.id, submitted.taskId)).rejects.toThrow('already running')
     resolveCompletion?.(jsonResponse({ content: 'Done.' }))
     const result = await first
@@ -3329,3 +3484,148 @@ describe('AgentExecutor', () => {
     expect(result.actionReceipts.at(-1)).toMatchObject({ toolId: 'tool-39', outcome: 'success' })
   })
 })
+
+  it('compacts a single oversized Brain request message under the service limit while preserving goal and latest context', async () => {
+    let brainRequest = ''
+    const goal = 'Mission goal: deliver the final report with citations.'
+    const latestUserReply = 'Latest user reply: approved to continue with option B.'
+    const latestReceipt = 'Action result: {"receiptId":"r-123","status":"stored","bytes":42}'
+    const credentialQuestion = 'System feedback: __ASK_USER__{"question":"Provide API key","credentialRequest":{"key":"api_key"}}'
+    const hugeHistory = [
+      { role: 'user' as const, content: `${goal}\n\n${'context '.repeat(120_000)}` },
+      { role: 'assistant' as const, content: `Working...\n${'assistant-history '.repeat(30_000)}` },
+      { role: 'user' as const, content: `Old feedback ${'middle '.repeat(30_000)}` },
+      { role: 'assistant' as const, content: `Previous reply ${'tail-a '.repeat(10_000)}` },
+      { role: 'user' as const, content: credentialQuestion },
+      { role: 'user' as const, content: latestReceipt },
+      { role: 'user' as const, content: latestUserReply },
+    ]
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) return jsonResponse({ tools: [] })
+      if (url.endsWith('/api/brain/complete')) {
+        brainRequest = String(init?.body)
+        return jsonResponse({ content: 'Done.' })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+
+    const result = await new AgentExecutor({ fetcher }).execute(definition, task() as AgentTask, {
+      missionId: 'mission-1',
+      delegationDepth: 0,
+      resumeCheckpoint: {
+        version: 2,
+        history: hugeHistory,
+        tokensUsed: 0,
+        toolCalls: 0,
+        brainCalls: 0,
+        completionTokensReserved: 0,
+        delegations: 0,
+        lastAction: '',
+        repeatedActionCount: 0,
+        actionReceipts: [],
+      },
+    })
+
+    const request = JSON.parse(brainRequest) as { prompt: string }
+    expect(result.output).toBe('Done.')
+    expect(Buffer.byteLength(brainRequest, 'utf8')).toBeLessThanOrEqual(192 * 1024)
+    expect(request.prompt).toContain('Mission goal: deliver the final report')
+    expect(request.prompt).toContain(latestUserReply)
+    expect(request.prompt).toContain('"receiptId":"r-123"')
+    expect(request.prompt).toContain('__ASK_USER__')
+    expect(request.prompt).toMatch(/truncated|compacted|omitted/)
+  })
+
+  it('drops old failure feedback before truncating the task or recent action evidence', async () => {
+      const { compactBrainRequest } = await import('../src/services/agent-executor/requestCompaction')
+      const goal = `GOAL: ${'important user context '.repeat(400)}`
+      const latest = 'Action result: {"executionId":"safe-result","status":"complete"}'
+      const history = [
+        { role: 'user' as const, content: goal },
+        ...Array.from({ length: 60 }, (_, i) => ({
+          role: 'user' as const, content: `Brain could not complete this turn: old failure ${i} ${'x'.repeat(500)}`,
+        })),
+        { role: 'user' as const, content: latest },
+      ]
+      const result = compactBrainRequest({ systemPrompt: 'Keep user input.', history, base: {}, maxBytes: 15_000 })
+      const prompt = (JSON.parse(result.requestBody) as { prompt: string }).prompt
+      expect(Buffer.byteLength(result.requestBody)).toBeLessThanOrEqual(15_000)
+      expect(prompt).toContain(goal)
+      expect(prompt).toContain(latest)
+      expect(prompt).not.toContain('old failure 0')
+      expect(history).toHaveLength(62)
+  })
+
+  it('compacts oversized system prompt plus large history under the service limit', async () => {
+    let brainRequest = ''
+    const largeSystem = `SYSTEM ${'policy '.repeat(120_000)} KEEP-TAIL`
+    const largeHistory = [
+      { role: 'user' as const, content: `GOAL: keep this intent ${'ctx '.repeat(80_000)}` },
+      { role: 'assistant' as const, content: `analysis ${'a '.repeat(40_000)}` },
+      { role: 'user' as const, content: `Action result: ${'r '.repeat(40_000)} FINAL-RECEIPT` },
+      { role: 'user' as const, content: 'LATEST: user confirmed values' },
+    ]
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) return jsonResponse({ tools: [] })
+      if (url.endsWith('/api/brain/complete')) {
+        brainRequest = String(init?.body)
+        return jsonResponse({ content: 'Compacted OK' })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+
+    const result = await new AgentExecutor({ fetcher }).execute(
+      { ...definition, systemPrompt: largeSystem },
+      task() as AgentTask,
+      {
+        missionId: 'mission-1',
+        delegationDepth: 0,
+        resumeCheckpoint: {
+          version: 2,
+          history: largeHistory,
+          tokensUsed: 0, toolCalls: 0, brainCalls: 0, completionTokensReserved: 0, delegations: 0, lastAction: '', repeatedActionCount: 0, actionReceipts: [],
+        },
+      },
+    )
+    const request = JSON.parse(brainRequest) as { prompt: string; systemPrompt: string }
+    expect(result.output).toBe('Compacted OK')
+    expect(Buffer.byteLength(brainRequest, 'utf8')).toBeLessThanOrEqual(192 * 1024)
+    expect(request.prompt).toContain('GOAL: keep this intent')
+    expect(request.prompt).toContain('LATEST: user confirmed values')
+    expect(request.prompt).toContain('Action result:')
+    expect(request.systemPrompt.length).toBeGreaterThan(0)
+  })
+
+  it('fails with a specific irreducible Brain request error when preserved context cannot fit', async () => {
+    const { compactBrainRequest, BrainRequestIrreducibleError } = await import('../src/services/agent-executor/requestCompaction')
+    const oversizedGoal = `GOAL ${'g'.repeat(10_000)}`
+    expect(() => compactBrainRequest({
+      systemPrompt: 's'.repeat(10_000),
+      history: [{ role: 'user', content: oversizedGoal }],
+      base: { options: { optimizeFor: 'accuracy' }, metadata: 'm'.repeat(10_000) },
+      maxBytes: 256,
+    })).toThrow(BrainRequestIrreducibleError)
+    try {
+      compactBrainRequest({
+        systemPrompt: 's'.repeat(10_000),
+        history: [{ role: 'user', content: oversizedGoal }],
+        base: { options: { optimizeFor: 'accuracy' }, metadata: 'm'.repeat(10_000) },
+        maxBytes: 256,
+      })
+    } catch (error) {
+      expect(error).toMatchObject({
+        name: 'BrainRequestIrreducibleError',
+        code: 'BRAIN_REQUEST_IRREDUCIBLE',
+        irreducible: expect.objectContaining({
+          limitBytes: 256,
+          requestBytes: expect.any(Number),
+          systemPromptBytes: expect.any(Number),
+          transcriptBytes: expect.any(Number),
+          preservedMessageIndexes: expect.any(Array),
+        }),
+      })
+      expect((error as Error).message).toMatch(/irreducible preserved context/i)
+    }
+  })

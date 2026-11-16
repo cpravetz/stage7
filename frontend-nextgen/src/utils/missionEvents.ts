@@ -119,7 +119,13 @@ export interface MissionEventDetail {
   startedAt?: string | number;
   completedAt?: string | number;
   input?: { prompt?: string };
-  output?: { outputs?: { phases?: MissionEventPhaseOutput[]; gaps?: string[] } };
+  output?: { outputs?: {
+    status?: string;
+    phases?: MissionEventPhaseOutput[];
+    gaps?: string[];
+    reason?: string;
+    pendingInteraction?: { taskTitle?: string; permission?: { toolName?: string } };
+  } };
 }
 
 export const CONVERSATION_EVENT_TYPES = new Set([
@@ -516,17 +522,22 @@ export function buildMissionEvents(options: {
     const completedAt = toTimestamp(detail.completedAt) ?? startedAt + 1000;
     if (!hasLive(['mission_needs_review'])) {
       const gaps = Array.from(new Set(detail.output?.outputs?.gaps || []));
-      const gapText = missionGapText(gaps);
+      const outputs = detail.output?.outputs;
+      const reviewData = {
+        gaps,
+        reviewStatus: outputs?.status,
+        reason: outputs?.reason,
+        taskTitle: outputs?.pendingInteraction?.taskTitle,
+        toolName: outputs?.pendingInteraction?.permission?.toolName,
+      };
       derived.push({
         id: `derived-mission-needs-review-${completedAt}`,
         type: 'mission_needs_review',
         source: 'orchestrator',
-        message: gapText
-          ? `Mission needs review: ${gapText}`
-          : 'Mission needs review before it can be completed.',
+        message: missionReviewMessage(reviewData),
         timestamp: completedAt,
         missionId,
-        metadata: gaps.length > 0 ? { gaps } : undefined,
+        metadata: reviewData,
       });
     }
   } else if (detail?.status === 'incomplete') {
@@ -557,6 +568,8 @@ export function buildMissionEvents(options: {
   events = dedupePlannerProgress(events);
   events = dedupePlannerAndReasoningEvents(events);
   events = dedupeQuestionAsked(events);
+  events = dedupeUserInputResolved(events);
+  events.sort((left, right) => left.timestamp - right.timestamp);
   events = listMilestonesOnce(events);
   events = dedupeTerminalAndApprovalEvents(events, detail?.status);
 
@@ -572,6 +585,28 @@ export function buildMissionEvents(options: {
 
   // Strict chronological order: oldest first, newest at the bottom.
   events.sort((left, right) => left.timestamp - right.timestamp);
+  if (detail?.status === 'awaiting_review') {
+    let index = -1;
+    for (let i = events.length - 1; i >= 0; i--) {
+      if (events[i].type === 'mission_needs_review') {
+        index = i;
+        break;
+      }
+    }
+    const event = events[index];
+    if (event && !Array.isArray(event.metadata?.gaps)) {
+      const outputs = detail.output?.outputs;
+      const reviewData = {
+        ...event.metadata,
+        gaps: outputs?.gaps || [],
+        reviewStatus: outputs?.status,
+        reason: outputs?.reason || event.metadata?.reason,
+        taskTitle: outputs?.pendingInteraction?.taskTitle,
+        toolName: outputs?.pendingInteraction?.permission?.toolName,
+      };
+      events[index] = { ...event, message: missionReviewMessage(reviewData), metadata: reviewData };
+    }
+  }
   return applyMissionError(events, detail?.error);
 }
 
@@ -644,10 +679,10 @@ function dedupeTerminalAndApprovalEvents(events: FeedEvent[], status?: string): 
     }
 
     // Drop conflicting terminal events.
-    if (terminalTypes.has(type)) {
+    if (terminalTypes.has(type) && type !== 'mission_needs_review') {
       if (preferredTerminal && type !== preferredTerminal) continue;
       // If no preferred, keep only the first terminal encountered.
-      if (!preferredTerminal && result.some((e) => terminalTypes.has(String(e.type)))) continue;
+      if (!preferredTerminal && result.some((e) => terminalTypes.has(String(e.type)) && e.type !== 'mission_needs_review')) continue;
     }
 
     result.push(event);
@@ -716,17 +751,51 @@ function dedupeQuestionAsked(events: FeedEvent[]): FeedEvent[] {
 }
 
 /**
+ * A pending interaction is resolved once: drop repeated user_input_resolved
+ * announcements for the same mission, phase, task, and response (e.g. a
+ * resume/retry that re-emits the resolution alongside the orchestrator's own).
+ */
+function dedupeUserInputResolved(events: FeedEvent[]): FeedEvent[] {
+  const seen = new Set<string>();
+  return events.filter((event) => {
+    if (String(event.type) !== 'user_input_resolved') return true;
+    const data = event.metadata || {};
+    const response = typeof data.response === 'string' ? data.response : '';
+    const key = `user_input_resolved|${event.missionId ?? ''}|${data.phaseId ?? ''}|${data.taskId ?? ''}|${response}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/**
  * Keeps the first announcement of every mission milestone.
  */
 function listMilestonesOnce(events: FeedEvent[]): FeedEvent[] {
   const listed = new Set<string>();
-  return events.filter((event) => {
+  const result: FeedEvent[] = [];
+  let reviewIndex: number | undefined;
+  for (const event of events) {
     const type = String(event.type);
-    if (!MILESTONE_EVENT_TYPES.has(type)) return true;
-    if (listed.has(type)) return false;
+    if (type === 'mission_resumed') reviewIndex = undefined;
+    if (type === 'mission_needs_review') {
+      if (reviewIndex === undefined) {
+        reviewIndex = result.length;
+        result.push(event);
+      } else {
+        result[reviewIndex] = event;
+      }
+      continue;
+    }
+    if (!MILESTONE_EVENT_TYPES.has(type)) {
+      result.push(event);
+      continue;
+    }
+    if (listed.has(type)) continue;
     listed.add(type);
-    return true;
-  });
+    result.push(event);
+  }
+  return result;
 }
 
 /**
@@ -748,6 +817,54 @@ export function missionGapText(gaps: string[]): string {
     .map((gap) => sanitizeAgentMessage(gap, '').text)
     .filter((gap) => gap.length > 0 && !isInternalReasoning(gap))
     .join('; ');
+}
+
+export function missionReviewMessage(data: Record<string, unknown>): string {
+  const gaps = Array.isArray(data.gaps)
+    ? data.gaps.filter((gap): gap is string => typeof gap === 'string' && gap.trim().length > 0)
+    : [];
+  const friendlyGaps = gaps.map((gap) => {
+    const friendly = gap.replace(/\baction receipt(s?)\b/gi, 'recorded result$1');
+    return sanitizeAgentMessage(friendly, '').text
+      || sanitizeAgentMessage(friendly.split(/(?<=[.!?])\s+/)[0], '').text;
+  }).filter(Boolean);
+  const gapText = missionGapText(friendlyGaps.slice(0, 8));
+  if (gapText) {
+    const reason = typeof data.reason === 'string' ? sanitizeAgentMessage(data.reason, '').text : '';
+    const introduction = reason ? `${reason}${/[.!?]$/.test(reason) ? '' : '.'} ` : '';
+    const extra = (typeof data.omittedGapCount === 'number' && data.omittedGapCount > 0) || friendlyGaps.length > 8
+      ? ` Additional issues are available in the mission details.`
+      : '';
+    const caution = data.outcomeUncertain === true || /\buncertain\b|outcome.?unknown/i.test(gapText)
+      ? ' Verify the uncertain outcome before resuming; do not repeat the action.'
+      : '';
+    const punctuation = /[.!?]$/.test(gapText) ? '' : '.';
+    return `Mission needs review: ${introduction}${gapText}${punctuation}${extra}${caution} Review the issue, then send guidance or select Resume.`;
+  }
+  const task = typeof data.taskTitle === 'string' && data.taskTitle.trim()
+    ? ` for "${data.taskTitle.trim()}"`
+    : '';
+  if (data.reviewStatus === 'awaiting_user_input') {
+    return `Mission needs review: an Agent needs information${task}. Answer the question to continue.`;
+  }
+  if (data.reviewStatus === 'awaiting_permission') {
+    const tool = typeof data.toolName === 'string' && data.toolName.trim() ? ` "${data.toolName.trim()}"` : '';
+    return `Mission needs review: an Agent needs permission to use a tool${tool}${task}. Review the request to continue.`;
+  }
+  if (data.reviewStatus === 'awaiting_clarification') {
+    return 'Mission needs review: the planner needs clarification. Answer the questions to continue.';
+  }
+  const reason = typeof data.reason === 'string' ? sanitizeAgentMessage(data.reason, '').text : '';
+  if (reason) {
+    const punctuation = /[.!?]$/.test(reason) ? '' : '.';
+    return `Mission needs review: ${reason}${punctuation} Review the issue, then send guidance or select Resume.`;
+  }
+  if (data.outcomeUncertain === true) {
+    return 'Mission needs review: an action outcome is uncertain. Verify what happened before resuming; do not repeat the action.';
+  }
+  return typeof data.omittedGapCount === 'number' && data.omittedGapCount > 0
+    ? 'Mission needs review: the issues require further inspection. Check the timeline and mission details before sending guidance or selecting Resume.'
+    : 'Mission needs review, but no specific issue was recorded. Check the timeline and plan before sending guidance or selecting Resume.';
 }
 
 function friendlyMissionErrorText(error: string): string {

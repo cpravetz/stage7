@@ -27,6 +27,8 @@ export function receiptFromResult(
     isError: result.isError,
     content: result.content.slice(0, MAX_ACTION_RECEIPT_CHARS),
     outcome: result.outcome || (result.isError ? 'failure' : 'success'),
+    ...(result.outcomeKnown !== undefined ? { outcomeKnown: result.outcomeKnown } : {}),
+    ...(result.reconciliation !== undefined ? { reconciliation: result.reconciliation } : {}),
     actionKey,
     ...extra,
   })

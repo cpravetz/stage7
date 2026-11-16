@@ -80,6 +80,7 @@ import {
   recoveryProgressSignature,
   hasRecoveryProgress,
   missionExecutionEvidenceGaps,
+  recoveryTaskDependencies,
   MAX_PHASE_RECOVERY_ROUNDS_SAFETY,
   MAX_NO_PROGRESS_RECOVERY_ATTEMPTS,
   type MissionPhaseEvidence,
@@ -155,6 +156,74 @@ describe('progress-aware recovery (Tasks 3/7)', () => {
     phases[0].tasks[1].artifacts[0].content = JSON.stringify([{ toolId: 'email', outcome: 'success', content: '{"ok":true}' }]);
     expect(missionExecutionEvidenceGaps(plan, phases)).toEqual(expect.arrayContaining([
       expect.stringContaining('Task "Send text" (task-1)'),
+    ]));
+  });
+
+  it('bounds recovery dependencies while keeping original and recent completed evidence', () => {
+    const makeTask = (id: string, status: 'completed' | 'failed') => ({
+      id, title: id, description: id, agentRole: 'worker', systemPrompt: id,
+      status, artifacts: [],
+    });
+    const tasks = [
+      makeTask('source', 'completed'),
+      makeTask('failed-source', 'failed'),
+      ...Array.from({ length: 700 }, (_, i) => makeTask(`phase-1-mission-recovery-${i + 1}`, 'completed')),
+    ];
+    const selected = recoveryTaskDependencies(tasks, tasks.map((task) => ({ taskId: task.id })), ['source']);
+    expect(selected).toHaveLength(7);
+    expect(selected).toContain('source');
+    expect(selected).not.toContain('failed-source');
+    expect(selected).not.toContain('phase-1-mission-recovery-1');
+    expect(selected).toContain('phase-1-mission-recovery-700');
+  });
+
+  it('ignores superseded recovery failures but retains unresolved and uncertain outcomes', () => {
+    const makeTask = (id: string, status: 'completed' | 'failed') => ({
+      id, title: id, description: id, agentRole: 'worker', systemPrompt: id,
+      status, artifacts: [],
+    });
+    const original = makeTask('task-1', 'completed');
+    const failed = makeTask('phase-1-mission-recovery-1', 'failed');
+    const recovered = makeTask('phase-1-mission-recovery-2', 'completed');
+    const plan: Plan = {
+      summary: 'Work', estimatedDuration: 'short', estimatedCost: 'low',
+      requiresClarification: false, clarificationQuestions: [], clarificationAnswers: [],
+      phases: [{ id: 'phase-1', name: 'Work', goal: 'Work', requiresApproval: false,
+        status: 'completed', tasks: [original, failed, recovered] }],
+    };
+    const phases: MissionPhaseEvidence[] = [{
+      phaseId: 'phase-1', status: 'completed', tasks: [
+        { taskId: original.id, status: 'completed', artifacts: [] },
+        { taskId: failed.id, status: 'failed', artifacts: [], output: 'Tool unavailable' },
+        { taskId: recovered.id, status: 'completed', artifacts: [] },
+      ],
+    }];
+    expect(missionExecutionEvidenceGaps(plan, phases)).toEqual([]);
+    phases[0].tasks[1].output = 'Outcome unknown';
+    expect(missionExecutionEvidenceGaps(plan, phases)).toEqual(expect.arrayContaining([
+      expect.stringContaining(failed.id),
+    ]));
+    phases[0].tasks[1].output = 'Tool unavailable';
+    phases[0].tasks[1].artifacts = [{
+      name: 'system-action-receipts.json', type: 'evidence',
+      content: JSON.stringify([{ toolId: 'send', outcome: 'failure', outcomeKnown: false }]),
+    }];
+    expect(missionExecutionEvidenceGaps(plan, phases)).toEqual(expect.arrayContaining([
+      expect.stringContaining(failed.id),
+    ]));
+    phases[0].tasks[1].artifacts = [{ name: 'system-action-receipts.json', type: 'evidence', content: '{' }];
+    expect(missionExecutionEvidenceGaps(plan, phases)).toEqual(expect.arrayContaining([
+      expect.stringContaining(failed.id),
+    ]));
+    phases[0].tasks[1].artifacts = [];
+    plan.phases[0].tasks[1].expectedArtifacts = ['required-report'];
+    expect(missionExecutionEvidenceGaps(plan, phases)).toEqual(expect.arrayContaining([
+      expect.stringContaining('required-report'),
+    ]));
+    plan.phases[0].tasks[1].expectedArtifacts = [];
+    phases[0].tasks[2].status = 'failed';
+    expect(missionExecutionEvidenceGaps(plan, phases)).toEqual(expect.arrayContaining([
+      expect.stringContaining(failed.id),
     ]));
   });
 

@@ -447,6 +447,27 @@ describe('MissionAgentRuntime', () => {
         type: 'evidence',
         content: '[{"toolId":"calculate","isError":false,"content":"{\\"result\\":4}"}]',
       }],
+    }, ...Array.from({ length: 10 }, (_, i) => ({
+      taskId: `phase-1-mission-recovery-${i + 1}`,
+      status: 'failed',
+      output: `Old failure ${i + 1}`,
+      artifactNames: [],
+    })), ...Array.from({ length: 700 }, (_, i) => ({
+      taskId: `phase-2-mission-recovery-${i + 1}`,
+      status: 'completed',
+      output: `\`\`\`json\n{"action":"tool_use","toolId":"lookup","parameters":{"query":"attempt-${i + 1}"}}\n\`\`\``,
+      artifactNames: [],
+    })), {
+      taskId: 'phase-1-mission-recovery-11',
+      status: 'failed',
+      output: 'Outcome unknown',
+      artifactNames: [],
+    }, {
+      taskId: 'phase-1-mission-recovery-12',
+      status: 'failed',
+      output: 'Failed with recorded receipt',
+      artifactNames: ['system-action-receipts.json'],
+      artifacts: [{ name: 'system-action-receipts.json', type: 'evidence', content: '[]' }],
     }])
 
     expect(result).toEqual({ satisfied: true, gaps: [] })
@@ -478,6 +499,12 @@ describe('MissionAgentRuntime', () => {
     ])
     expect(prompts[1]).toContain('Previous response: No.')
     expect(prompts[2]).toContain('Do not return generic gap text')
+    expect(prompts[0]).toContain('"omittedHistoricalRecoveryFailures":704')
+    expect(prompts[0]).not.toContain('Old failure 1"')
+    expect(prompts[0]).not.toContain('attempt-1\\"')
+    expect(prompts[0]).toContain('attempt-700')
+    expect(prompts[0]).toContain('Outcome unknown')
+    expect(prompts[0]).toContain('Failed with recorded receipt')
   })
 
   it('executes a dependent task and instructs recovery when completed dependency output is unavailable', async () => {
@@ -639,6 +666,32 @@ describe('MissionAgentRuntime', () => {
     expect(result.output).toBe('## research.md\nRecovered from the saved checkpoint.')
     expect(executedPaths).toHaveLength(2)
     expect(executedPaths[0]).toBe(executedPaths[1])
+  })
+
+  it('does not blindly retry a classified non-transient Agent execution failure', async () => {
+      let executes = 0
+      jest.spyOn(global, 'fetch').mockImplementation(async (input, init) => {
+        const url = String(input)
+        const method = init?.method || 'GET'
+        if (url.endsWith(`/missions/mission-1/agents/${agent.id}`) && method === 'GET') return jsonResponse(agent)
+        if (url.endsWith(`/missions/mission-1/agents/${agent.id}/start`)) return jsonResponse({})
+        if (url.endsWith('/tasks') && method === 'POST') return jsonResponse({
+          agentId: agent.id, taskId: 'mission-1:phase-1:task-1', type: 'researcher',
+          input: {}, priority: 1, status: 'pending', createdAt: new Date().toISOString(),
+        })
+        if (url.endsWith('/tasks/mission-1:phase-1:task-1/execute')) {
+          executes++
+          return jsonResponse({ error: 'Request is irreducible', failureCode: 'REQUEST_TOO_LARGE' }, 500)
+        }
+        throw new Error(`Unexpected request: ${method} ${url}`)
+      })
+      const runtime = new MissionAgentRuntime({
+        missionId: 'mission-1', tenantId: 'tenant-1', agentRuntimeUrl: 'http://agent-runtime:3400',
+      })
+      await expect(runtime.executeTask(agent.id, task, phase, plan)).rejects.toMatchObject({
+        failureCode: 'REQUEST_TOO_LARGE',
+      })
+      expect(executes).toBe(1)
   })
 
   it('receives an already-running persisted Agent task result through its event stream', async () => {

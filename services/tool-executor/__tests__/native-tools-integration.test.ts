@@ -38,6 +38,12 @@ const FORECAST_BODY = {
 const SEARCH_BODY = {
   results: [{ title: 'Stage7', url: 'https://stage7.test/', content: 'Deterministic offline result' }],
 };
+const DUCKDUCKGO_BODY = {
+  AbstractURL: 'https://stage7.test/',
+  AbstractText: 'Deterministic offline result',
+  Heading: 'Stage7',
+  RelatedTopics: [],
+};
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -65,6 +71,7 @@ function defaultFetchImpl(input: unknown): Response {
   const url = requestUrl(input);
   if (matchHostname(url, 'geocoding-api.open-meteo.com')) return jsonResponse(GEOCODE_BODY);
   if (matchHostname(url, 'api.open-meteo.com')) return jsonResponse(FORECAST_BODY);
+  if (matchHostname(url, 'api.duckduckgo.com')) return jsonResponse(DUCKDUCKGO_BODY);
   return jsonResponse(SEARCH_BODY);
 }
 
@@ -377,17 +384,18 @@ describe('native tool integration: every advertised tool is reachable', () => {
   // Group 4 - credential-gated tools fail honestly
   // -------------------------------------------------------------------------
 
-  it('email_sender proceeds to execution when SMTP credentials have vault sources', async () => {
+  it('email_sender returns CredentialRequiredError with exact missing keys when SMTP credentials cannot be resolved', async () => {
     const tool = byId('email_sender');
     const executor = new ToolExecutor();
     const result = await executor.executeOrRequestCredentials(tool, { to: 'someone@example.org', subject: 'hi' });
-    // Credential-backed fields (vaultSecretId) are resolved dynamically, not
-    // statically required. Execution proceeds and fails gracefully if credentials
-    // cannot be resolved (no vault in test environment).
-    expect(result).not.toBeInstanceOf(CredentialRequiredError);
-    const exec = result as { status: string; error?: string };
-    expect(exec.status).toBe('completed');
-    expect(exec.error).toContain('Missing SMTP credentials');
+    // Credential-backed required fields that cannot be resolved now gate execution
+    // and return CredentialRequiredError with the exact missing credential details.
+    expect(result).toBeInstanceOf(CredentialRequiredError);
+    if (result instanceof CredentialRequiredError) {
+      expect(result.request.missingCredentials).toHaveLength(3);
+      expect(result.request.missingCredentials.map(c => c.key).sort()).toEqual(['smtp_host', 'smtp_pass', 'smtp_user']);
+      expect(result.request.toolName).toBe('Email Sender');
+    }
   });
 
   it.each([
@@ -434,9 +442,14 @@ describe('native tool integration: every advertised tool is reachable', () => {
     expect(legacySearchTool.manifest.executor).toBeUndefined();
 
     fetchMock.mockReset();
+    // DuckDuckGo provider is tried first (no credentials needed, high performance score).
+    // It expects a response with AbstractURL and AbstractText.
     fetchMock.mockResolvedValue(
       jsonResponse({
-        results: [{ title: 'Legacy hit', url: 'https://legacy.test/1', content: 'via name heuristic' }],
+        AbstractURL: 'https://legacy.test/1',
+        AbstractText: 'via name heuristic',
+        Heading: 'Legacy hit',
+        RelatedTopics: [],
       })
     );
 
@@ -450,7 +463,9 @@ describe('native tool integration: every advertised tool is reachable', () => {
     expect(results[0].url).toBe('https://legacy.test/1');
     expect(results[0].snippet).toBe('via name heuristic');
     expect(outputOf(result).count).toBe(1);
-    expect(String(fetchMock.mock.calls[0][0])).toContain('/search?q=legacy+path');
+    // The fetch call should have been made to DuckDuckGo
+    const callUrl = String(fetchMock.mock.calls[0][0]);
+    expect(callUrl).toContain('api.duckduckgo.com');
   });
 
   it('the suite never issues a real network request', () => {

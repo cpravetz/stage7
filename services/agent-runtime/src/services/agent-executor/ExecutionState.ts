@@ -1,6 +1,6 @@
 import { compactCheckpointForStorage } from './checkpoint'
 import { CREATE_TOOL_ACTION } from './constants'
-import { isConfigurationFailure } from './toolFailures'
+import { classifyFailure, FAILURE_CODES, isConfigurationFailure, type ClassifiedFailure } from './toolFailures'
 import type {
   AgentActionReceipt,
   AgentExecutionCheckpoint,
@@ -49,6 +49,9 @@ export class ExecutionState {
   previousRemainingModelCount: number | undefined
   artifactCorrectionAttempts = 0
 
+  /** Most recent classified failure, if any, for downstream adaptation decisions. */
+  lastClassifiedFailure: ClassifiedFailure | undefined
+
   private readonly persist?: (checkpoint: AgentExecutionCheckpoint) => Promise<void>
 
   constructor({ history, checkpoint, priorActionReceipts, persist }: ExecutionStateInit) {
@@ -78,10 +81,16 @@ export class ExecutionState {
         : []),
     )
     for (const receipt of this.actionReceipts) {
-      if (receipt.outcome === 'failure' && isConfigurationFailure(receipt.content)) {
+      if (receipt.outcome === 'failure' && receipt.outcomeKnown !== false
+        && classifyFailure(receipt.content).code !== FAILURE_CODES.OUTCOME_UNKNOWN && isConfigurationFailure(receipt.content)) {
         this.configurationFailures.set(receipt.toolId, receipt.content)
       }
     }
+  }
+
+  /** Records a classified failure for downstream recovery decisions. */
+  recordFailure(classified: ClassifiedFailure): void {
+    this.lastClassifiedFailure = classified
   }
 
   /** Adds a message from the runtime (feedback, correction, result) to the conversation. */

@@ -599,12 +599,17 @@ export async function executeMissionTaskActivity({
     return result;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    // Extract structured failure code if present for downstream recovery decisions.
+    const failureCode = error instanceof Error
+      ? (error as any).failureCode || message.match(/\[Failure code: (\w+);/i)?.[1]
+      : undefined;
     try {
       await persistUpdate(input, 'tasks', task.id, {
         phaseId: phase.id,
         status: 'failed',
         completedAt: Date.now(),
         output: message,
+        ...(failureCode ? { failureCode } : {}),
       });
     } catch (persistenceError) {
       logger.error(
@@ -628,6 +633,7 @@ export async function executeMissionTaskActivity({
         agentName: `${task.agentRole.replace(/\s+Agent$/i, '')} Agent`,
         agentRole: task.agentRole,
         error: message,
+        ...(failureCode ? { failureCode } : {}),
       },
     });
     throw error;
@@ -793,6 +799,7 @@ export async function completeMissionActivity({
         const artifacts = task.artifacts || [];
         return {
           taskId: task.taskId,
+          status: task.status,
           output: task.output || '',
           artifactNames: artifacts.map((artifact) => artifact.name),
           artifacts,

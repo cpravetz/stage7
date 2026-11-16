@@ -1,9 +1,32 @@
-import { ASK_USER_MARKER, MAX_ASK_USER_QUESTION_LENGTH } from './constants'
+import {
+  ASK_USER_MARKER,
+  ASK_USER_NAME,
+  CREATE_TOOL_ACTION,
+  DELEGATE_ACTION,
+  LIST_TOOLS_ACTION,
+  MAX_ASK_USER_QUESTION_LENGTH,
+} from './constants'
+
+export const CAPABILITY_RESOLUTION_GUIDANCE =
+  'Do not ask the user to choose a provider or provide tool credentials before checking available integrations. Re-read the mission, inspect the live catalog, and use __create_tool to resolve the capability so configured integrations and credentials can be used. Ask only for a specific missing value or an actual authorization or service decision.'
 
 export function asksUserToManageTools(question: string): boolean {
   return /\b(?:please\s+)?(?:register|install|create|build|develop|configure|set up|enable)\b.{0,100}\b(?:tool|skill|plugin|integration|mcp|service)\b/i.test(question)
     || /\b(?:tool|skill|plugin|integration|mcp)\b.{0,100}\b(?:register|install|create|configure|set up)\s+(?:it|the tool|the skill)\b/i.test(question)
     || /\b(?:choose|select|pick)\b.{0,100}\b(?:tool id|tools? from (?:the )?list|from (?:the )?(?:list|available|following).{0,30}tools?)\b/i.test(question)
+}
+
+export function asksForProviderSetup(question: string): boolean {
+  return /\b(?:which|what|choose|select|pick|provide|tell me|share)\b.{0,100}\b(?:provider|integration)\b/i.test(question)
+    || /\b(?:provider|integration)\b.{0,100}\b(?:account|name|credentials?|api key|auth token)\b/i.test(question)
+    || /\b(?:account|credentials?|api key|auth token)\b.{0,100}\b(?:provider|integration)\b/i.test(question)
+}
+
+export function hasTriedToolAfterResolution(toolIds: readonly string[]): boolean {
+  const lastResolutionIndex = toolIds.lastIndexOf(CREATE_TOOL_ACTION)
+  return lastResolutionIndex >= 0 && toolIds.slice(lastResolutionIndex + 1).some(
+    (toolId) => ![ASK_USER_NAME, 'ask_user', CREATE_TOOL_ACTION, DELEGATE_ACTION, LIST_TOOLS_ACTION].includes(toolId),
+  )
 }
 
 // Models sometimes echo the system instructions or their own reasoning after the marker.

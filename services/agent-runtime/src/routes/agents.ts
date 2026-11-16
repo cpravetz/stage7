@@ -303,10 +303,15 @@ router.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => 
   const appError = err instanceof AppError
     ? err
     : new AppError(500, err instanceof Error ? err.message : 'Internal server error', false)
+  const failureCode = err && typeof err === 'object' && 'failureCode' in err
+    && typeof err.failureCode === 'string' && /^[A-Z_]+$/.test(err.failureCode)
+    ? err.failureCode
+    : undefined
   res.status(appError.statusCode).json({
     success: false,
     error: appError.message,
     statusCode: appError.statusCode,
+    ...(failureCode ? { failureCode } : {}),
   })
 })
 

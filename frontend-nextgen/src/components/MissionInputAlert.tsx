@@ -75,20 +75,38 @@ function questionFromDetail(workflowId: string, detail: MissionDetail): PendingI
   };
 }
 
+/**
+ * Events that prove a mission is no longer waiting on the operator. A question is
+ * resolved as soon as the mission moves on (resume, completion, failure), so a
+ * `question_asked` event must not keep the alert alive after any of these.
+ */
+const RESOLVING_EVENT_TYPES = new Set([
+  'user_input_resolved',
+  'mission_resumed',
+  'mission_completed',
+  'mission_failed',
+  'mission_canceled',
+  'mission_incomplete',
+]);
+
+function missionKeyPrefix(missionId: string): string {
+  return `${normalizeMissionId(missionId)}:`;
+}
+
 function getPendingInputAlerts(events: FeedEvent[], details: Record<string, MissionDetail>): PendingInputAlert[] {
   const pending = new Map<string, PendingInputAlert>();
   const resolved = new Set<string>();
 
   for (const event of [...events].sort((a, b) => a.timestamp - b.timestamp)) {
-    if (event.type === 'user_input_resolved' && event.missionId) {
+    if (RESOLVING_EVENT_TYPES.has(String(event.type)) && event.missionId) {
       const taskId = typeof event.metadata?.taskId === 'string' ? event.metadata.taskId : undefined;
-      if (taskId) resolved.add(interactionKey(event.missionId, taskId));
-      else {
-        for (const key of pending.keys()) {
-          if (key.startsWith(`${event.missionId}:`)) resolved.add(key);
-        }
+      const keys = taskId
+        ? [interactionKey(event.missionId, taskId)]
+        : [...pending.keys()].filter((key) => key.startsWith(missionKeyPrefix(event.missionId!)));
+      for (const key of keys) {
+        resolved.add(key);
+        pending.delete(key);
       }
-      if (taskId) pending.delete(interactionKey(event.missionId, taskId));
       continue;
     }
 
