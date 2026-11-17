@@ -1,7 +1,7 @@
 import { ActionExecutor } from '../services/agent-executor/ActionExecutor'
 import { ASK_USER_MARKER } from '../services/agent-executor/constants'
 import { isAskUserTool } from '../services/agent-executor/constants'
-import { asksUserToManageTools } from '../services/agent-executor/askUser'
+import { asksUserToManageTools, extractAskUserQuestion } from '../services/agent-executor/askUser'
 
 const ctx = { missionId: 'm1' } as any
 const def = { id: 'agent-x' } as any
@@ -58,5 +58,17 @@ describe('ask-user intent handling', () => {
 
   it('does not classify a pure named-secret ask as tool setup', () => {
     expect(asksUserToManageTools('Please provide the SMS service API token.')).toBe(false)
+  })
+
+  it('strips a trailing </your_previous_reply> transcript tag from an extracted question', () => {
+    const content = `${ASK_USER_MARKER}Please provide the SMS service API token for this tool.\n</your_previous_reply>`
+    expect(extractAskUserQuestion(content)).toBe(
+      `${ASK_USER_MARKER}Please provide the SMS service API token for this tool.`,
+    )
+  })
+
+  it('drops content that follows an echoed transcript tag', () => {
+    const content = `${ASK_USER_MARKER}Please provide the API token.</your_previous_reply>\n<system_feedback>some feedback</system_feedback>`
+    expect(extractAskUserQuestion(content)).toBe(`${ASK_USER_MARKER}Please provide the API token.`)
   })
 })

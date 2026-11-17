@@ -7,6 +7,10 @@ import {
   isAskUserTool,
 } from './constants'
 
+// Transcript scaffolding the model sometimes echoes back after its question.
+// These are internal prompt markers, never part of a real user-facing question.
+const TRANSCRIPT_TAG_PATTERN = /<\/?(?:your_previous_reply|system_feedback|task)>/gi;
+
 export const CAPABILITY_RESOLUTION_GUIDANCE =
   'Do not ask the user to choose a provider or provide tool credentials before checking available integrations. Re-read the mission, inspect the live catalog, and use __create_tool to resolve the capability so configured integrations and credentials can be used. Ask only for a specific missing value or an actual authorization or service decision.'
 
@@ -43,9 +47,9 @@ export function extractAskUserQuestion(content: string): string | undefined {
     if (idx < 0) return undefined
     from = idx + ASK_USER_MARKER.length
     let candidate = content.slice(from)
-    const cut = candidate.search(/\n\s*\n|\n\s*(?:Agent|System|User|Assistant)\s*:|\[action_receipt|\n\s*(?:```|\{)/i)
+    const cut = candidate.search(/\n\s*\n|\n\s*(?:Agent|System|User|Assistant)\s*:|\[action_receipt|\n\s*(?:```|\{)|<\/?(?:your_previous_reply|system_feedback|task)>/i)
     if (cut >= 0) candidate = candidate.slice(0, cut)
-    candidate = candidate.replace(/\s+/g, ' ').trim()
+    candidate = candidate.replace(TRANSCRIPT_TAG_PATTERN, ' ').replace(/\s+/g, ' ').trim()
     if (candidate.startsWith('{')) return `${ASK_USER_MARKER}${content.slice(from).trim()}`
     if (candidate.length < 8 || /^followed by\b|^<question>|\bmark secret values with\b|\bDo not emit JSON\b/i.test(candidate)) continue
     if (candidate.length > MAX_ASK_USER_QUESTION_LENGTH) {

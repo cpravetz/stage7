@@ -1161,7 +1161,10 @@ export function interactionQuestionText(event: Pick<FeedEvent, 'type' | 'message
       }
     }
     if (/"question"\s*:/.test(question)) question = '';
-    question = stripSecretPrefix(question).replace(/\s+/g, ' ').trim();
+    question = stripSecretPrefix(question)
+      .replace(/<\/?(?:your_previous_reply|system_feedback|task)>/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
     if (question && !/^(?:\{|\[)/.test(question)) return question;
   }
   if (event.type === 'permission_required') {

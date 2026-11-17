@@ -22,6 +22,9 @@ function sanitizeQuestionText(question: string): string {
   // Remove markers, JSON-looking wrappers, and fences
   cleaned = cleaned.replace(/__ASK_USER__:\s*/g, '\n');
   cleaned = cleaned.replace(/__MISSION_PERMISSION__:\s*/g, '\n');
+  // Strip internal transcript scaffolding the model sometimes echoes after its
+  // question (e.g. a trailing </your_previous_reply>); it must never reach the user.
+  cleaned = cleaned.replace(/<\/?(?:your_previous_reply|system_feedback|task)>/gi, ' ');
   cleaned = cleaned.replace(/```[\s\S]*?```/g, ' ');
   // Strip leading/trailing or embedded JSON object fragments like {"question":"..."}
   cleaned = cleaned.replace(/\{[\s\S]*?"question"\s*:\s*"(?:[^"\\]|\\.)*"\s*\}/gi, ' ');

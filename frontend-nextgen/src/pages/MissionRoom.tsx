@@ -123,6 +123,7 @@ function displayInteractionQuestion(pending: PendingInteraction): string {
   }
   const secret = text.match(/^\s*\[secret:([a-z0-9_-]+)\]\s*(.*)$/i);
   if (secret) text = secret[2] || text;
+  text = text.replace(/<\/?(?:your_previous_reply|system_feedback|task)>/gi, ' ');
   text = text.replace(/__ASK_USER__:\s*/g, '');
   text = text.replace(/\{[\s\S]*?"question"\s*:\s*"((?:[^"\\]|\\.)*)"\s*\}/gi, '$1');
   text = text.replace(/"\s*question"\s*:\s*"\.\.\."?/gi, '');
