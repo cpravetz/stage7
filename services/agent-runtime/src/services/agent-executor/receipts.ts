@@ -54,7 +54,7 @@ export function compactReceiptForPersistence(receipt: AgentActionReceipt): Agent
   // `fallbackForToolId`/`resolvedToolId` are read back at resume time to rebuild
   // the tool-creation dedup map, so they survive compaction even though they are
   // transient during an active run.
-  const keepToolLink = receipt.fallbackForToolId || receipt.resolvedToolId
+  const binding = extractReceiptBinding(receipt)
   const trimmedReconciliation = receipt.reconciliation
     ? {
       ...(receipt.reconciliation.provider !== undefined ? { provider: receipt.reconciliation.provider } : {}),
@@ -62,17 +62,20 @@ export function compactReceiptForPersistence(receipt: AgentActionReceipt): Agent
       ...(receipt.reconciliation.providerRequestId !== undefined ? { providerRequestId: receipt.reconciliation.providerRequestId } : {}),
     }
     : undefined
-  const trimmedBinding = receipt.binding
-    ? {
-      ...(receipt.binding.operation !== undefined ? { operation: receipt.binding.operation } : {}),
-      ...(receipt.binding.providerRequestId !== undefined ? { providerRequestId: receipt.binding.providerRequestId } : {}),
-    }
-    : undefined
   return {
-    ...receipt,
-    ...(keepToolLink ? {} : { fallbackForToolId: undefined, resolvedToolId: undefined }),
+    toolId: receipt.toolId,
+    isError: receipt.isError,
+    content: receipt.content,
+    outcome: receipt.outcome,
+    ...(receipt.actionKey ? { actionKey: receipt.actionKey } : {}),
+    ...(receipt.executionId ? { executionId: receipt.executionId } : {}),
+    ...(receipt.operation ? { operation: receipt.operation } : {}),
+    ...(receipt.providerRequestId ? { providerRequestId: receipt.providerRequestId } : {}),
+    ...(receipt.outcomeKnown !== undefined ? { outcomeKnown: receipt.outcomeKnown } : {}),
+    ...(receipt.fallbackForToolId ? { fallbackForToolId: receipt.fallbackForToolId } : {}),
+    ...(receipt.resolvedToolId ? { resolvedToolId: receipt.resolvedToolId } : {}),
     ...(trimmedReconciliation ? { reconciliation: trimmedReconciliation } : {}),
-    ...(trimmedBinding ? { binding: trimmedBinding } : {}),
+    ...(Object.values(binding).some((value) => value !== undefined) ? { binding } : {}),
   }
 }
 

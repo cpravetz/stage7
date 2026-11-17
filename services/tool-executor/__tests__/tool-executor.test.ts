@@ -1,5 +1,6 @@
 import request from 'supertest'
 import express, { Application } from 'express'
+import fs from 'fs'
 import { ToolRegistry } from '../src/services/ToolRegistry'
 import { ToolExecutor } from '../src/services/ToolExecutor'
 import { PluginGenerator } from '../src/services/PluginGenerator'
@@ -68,11 +69,11 @@ beforeAll(() => {
           content: JSON.stringify({
             id: `plugin_${Date.now()}`,
             name: 'calculator',
-            description: body.prompt,
+            description: typeof body.prompt === 'string' ? body.prompt.slice(0, 1000) : '',
             type: 'code',
             language: 'python',
             entrypoint: 'main.py',
-            sourceCode: body.prompt.includes('The previous generated code was rejected')
+            sourceCode: body.prompt.includes('could not be used as the plugin JSON object')
               ? repairedSourceCode
               : generatedSourceCode,
             requirements: [],
@@ -918,6 +919,70 @@ print(json.dumps({"blocked": blocked, "secret": os.environ.get("STAGE7_PLUGIN_TE
     }
   })
 
+  it('fails closed when the isolation runtime is unavailable', async () => {
+    const originalExists = fs.existsSync
+    const exists = jest.spyOn(fs, 'existsSync').mockImplementation((path) =>
+      path === '/usr/bin/bwrap' ? false : originalExists(path))
+    try {
+      for (const language of ['javascript', 'python'] as const) {
+        const result = await new CodeExecutor().execute({
+          language,
+          isolated: true,
+          code: language === 'python' ? 'print("unsafe fallback")' : 'console.log("unsafe fallback")',
+        })
+        expect(result.success).toBe(false)
+        expect(result.error).toContain('refusing to run')
+      }
+    } finally {
+      exists.mockRestore()
+    }
+  })
+
+  it('does not retry outside isolation after a namespace failure', async () => {
+    const executor = new CodeExecutor()
+    const prototype = Object.getPrototypeOf(executor) as {
+      executeJavaScript: () => Promise<{ success: boolean; error: string }>
+      executePython: () => Promise<{ success: boolean; error: string }>
+    }
+    for (const [language, method] of [['javascript', 'executeJavaScript'], ['python', 'executePython']] as const) {
+      const run = jest.spyOn(prototype, method).mockResolvedValue({
+        success: false, error: 'bwrap: Creating new namespace failed: Operation not permitted',
+      })
+      try {
+        const result = await executor.execute({ language, isolated: true, code: '' })
+        expect(result.success).toBe(false)
+        expect(run).toHaveBeenCalledTimes(1)
+      } finally {
+        run.mockRestore()
+      }
+    }
+  })
+
+  it('does not allow test credentials to bypass isolated execution restrictions', async () => {
+    const credentials = { token: 'dummy-token' }
+    const result = await new CodeExecutor().execute({
+      language: 'python',
+      isolated: true,
+      testCredentials: credentials,
+      executorCallback: async () => ({}),
+      code: 'print("unsafe")',
+    }, credentials)
+    expect(result.success).toBe(false)
+    expect(result.error).toContain('cannot receive callbacks')
+  })
+
+  it('exposes dummy acceptance credentials to JavaScript credential helpers', async () => {
+    const credentials = { token: 'dummy-token' }
+    const result = await new CodeExecutor().execute({
+      language: 'javascript',
+      isolated: true,
+      testCredentials: credentials,
+      code: 'console.log(JSON.stringify({ found: __getCredential("token") === "dummy-token" }))',
+    }, credentials)
+    expect(result.success).toBe(true)
+    expect(JSON.parse(result.output || 'null')).toEqual({ found: true })
+  })
+
   it('satisfies HTTP integration cases through local fixtures in both languages', async () => {
     const httpMocks = [{
       method: 'POST' as const,
@@ -961,6 +1026,32 @@ print(json.dumps({"id": result["id"], "status": result["status"]}))`,
     })
     expect(python.success).toBe(true)
     expect(JSON.parse(python.output || 'null')).toEqual({ id: 'message-123', status: 'queued' })
+  })
+
+  it('handles optional request bodies and JSON values in Python fixtures and inputs', async () => {
+    const result = await new CodeExecutor().execute({
+      language: 'python',
+      isolated: true,
+      input: { enabled: true, extra: null },
+      httpMocks: [{
+        method: 'POST',
+        urlPattern: 'https://api.example.test/messages',
+        responseStatus: 200,
+        responseBody: { accepted: true, error: null },
+      }],
+      timeoutMs: 5_000,
+      code: `import json
+import urllib.request
+request = urllib.request.Request('https://api.example.test/messages', data=b'test', method='POST')
+with urllib.request.urlopen(request) as response:
+    result = json.loads(response.read().decode())
+print(json.dumps({"input": __tool_input, "response": result}))`,
+    })
+    expect(result.success).toBe(true)
+    expect(JSON.parse(result.output || 'null')).toEqual({
+      input: { enabled: true, extra: null },
+      response: { accepted: true, error: null },
+    })
   })
 
   it('repairs generated code that does not satisfy its independent contract', async () => {
@@ -1064,7 +1155,7 @@ print(json.dumps({"sum": os.environ.get("PROVIDER_API_KEY", "")}))`;
       expect(completionRequests[0]?.body?.systemPrompt)
         .toContain('independently derive a deterministic acceptance contract');
       expect(completionRequests[2]?.body?.prompt)
-        .toContain('previous generated code was rejected');
+        .toContain('could not be used as the plugin JSON object');
       expect(String(completionRequests[2]?.body?.prompt)).toMatch(/configSchema/i);
       expect(String(completionRequests[2]?.body?.prompt)).toMatch(/required|expected/i);
       expect(completionRequests[1]?.body?.systemPrompt)

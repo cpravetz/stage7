@@ -56,8 +56,8 @@ export class VendorApiExecutor {
         error: `Missing ${vendor} credentials: baseUrl and apiToken are required`,
         durationMs: Date.now() - startTime,
         idempotencyKey,
-        outcomeKnown: false,
-        reconciliation: { provider: vendor, outcomeKnown: false, note: 'Cannot execute or reconcile without vendor credentials.' },
+        outcomeKnown: true,
+        reconciliation: { provider: vendor, outcomeKnown: true, note: 'Cannot execute without vendor credentials; no request was sent.' },
       };
     }
 
@@ -77,7 +77,7 @@ export class VendorApiExecutor {
           result = await this.executeGithub(token, operation, input, idempotencyKey);
           break;
         default:
-          return { success: false, error: `Unsupported vendor: ${vendor}`, durationMs: Date.now() - startTime, idempotencyKey, outcomeKnown: false };
+          return { success: false, error: `Unsupported vendor: ${vendor}`, durationMs: Date.now() - startTime, idempotencyKey, outcomeKnown: true };
       }
 
       const providerRequestId = this.extractProviderRequestId(vendor, result);

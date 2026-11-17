@@ -52,21 +52,62 @@ export class SecretStore {
   }
 
   async createSecret(name: string, plaintext: string, tenantId: string): Promise<SecretMetadata> {
+    const secret = await this.createSecretRecord(name, plaintext, tenantId);
+    await this.ensureMongo();
+    if (this.mongoStore) {
+      const persisted = await this.mongoStore.createSecret(secret);
+      return this.toMetadata(persisted);
+    }
+    const existing = this.findInMemoryByName(name, tenantId);
+    if (existing) return this.toMetadata(existing);
+    this.secrets.set(secret.id, secret);
+    return this.toMetadata(secret);
+  }
+
+  async ensureSecret(name: string, plaintext: string | undefined, tenantId: string): Promise<{ secret: SecretMetadata; existed: boolean; created: boolean }> {
+    await this.ensureMongo();
+    if (this.mongoStore) {
+      const existing = await this.mongoStore.getSecretByName(name, tenantId);
+      if (existing) {
+        return { secret: this.toMetadata(existing), existed: true, created: false };
+      }
+      if (typeof plaintext !== 'string') {
+        return { secret: undefined as any, existed: false, created: false };
+      }
+      const record = await this.createSecretRecord(name, plaintext, tenantId);
+      const result = await this.mongoStore.ensureSecret(record);
+      return { secret: this.toMetadata(result.secret), existed: result.existed, created: !result.existed };
+    }
+
+    const existing = this.findInMemoryByName(name, tenantId);
+    if (existing) {
+      return { secret: this.toMetadata(existing), existed: true, created: false };
+    }
+    if (typeof plaintext !== 'string') {
+      return { secret: undefined as any, existed: false, created: false };
+    }
+    const record = await this.createSecretRecord(name, plaintext, tenantId);
+    this.secrets.set(record.id, record);
+    return { secret: this.toMetadata(record), existed: false, created: true };
+  }
+
+  private async createSecretRecord(name: string, plaintext: string, tenantId: string): Promise<StoredSecret> {
     const now = new Date().toISOString();
-    const encrypted = this.encryption.encrypt(plaintext);
-    const secret: StoredSecret = {
+    return {
       id: randomUUID(),
       name,
-      encrypted,
+      encrypted: this.encryption.encrypt(plaintext),
       tenantId,
       createdAt: now,
       updatedAt: now,
     };
+  }
 
-    await this.ensureMongo();
-    if (this.mongoStore) await this.mongoStore.createSecret(secret);
-    else this.secrets.set(secret.id, secret);
-    return this.toMetadata(secret);
+  private findInMemoryByName(name: string, tenantId: string): StoredSecret | undefined {
+    for (const secret of this.secrets.values()) {
+      if (secret.name === name && secret.tenantId === tenantId) return secret;
+    }
+    return undefined;
   }
 
   async updateSecret(id: string, plaintext: string): Promise<SecretMetadata | undefined> {
@@ -87,34 +128,51 @@ export class SecretStore {
     return this.toMetadata(updated);
   }
 
-  async getSecret(id: string): Promise<StoredSecret | undefined> {
+  async getSecret(id: string, tenantId?: string): Promise<StoredSecret | undefined> {
     await this.ensureMongo();
     if (this.mongoStore) {
-      return this.mongoStore.getSecret(id);
+      if (tenantId && (this.mongoStore as any).getSecretForTenant) {
+        return (this.mongoStore as any).getSecretForTenant(id, tenantId);
+      }
+      const secret = await this.mongoStore.getSecret(id);
+      if (secret && tenantId && secret.tenantId !== tenantId) return undefined;
+      return secret;
     }
-    return this.secrets.get(id);
+    const secret = this.secrets.get(id);
+    if (secret && tenantId && secret.tenantId !== tenantId) return undefined;
+    return secret;
   }
 
-  async listSecrets(): Promise<SecretMetadata[]> {
+  async listSecrets(tenantId?: string): Promise<SecretMetadata[]> {
     await this.ensureMongo();
     if (this.mongoStore) {
-      const tenantId = this.getTenantIdFromContext();
       return this.mongoStore.listSecrets(tenantId);
     }
-    return Array.from(this.secrets.values()).map((s) => this.toMetadata(s));
+    const values = Array.from(this.secrets.values());
+    const scoped = tenantId ? values.filter((s) => s.tenantId === tenantId) : values;
+    return scoped.map((s) => this.toMetadata(s));
   }
 
-  async deleteSecret(id: string): Promise<boolean> {
+  async deleteSecret(id: string, tenantId?: string): Promise<boolean> {
     await this.ensureMongo();
     if (this.mongoStore) {
-      const deleted = await this.mongoStore.deleteSecret(id);
-      if (deleted) {
-        this.secrets.delete(id);
+      if (tenantId && (this.mongoStore as any).deleteSecretForTenant) {
+        const deleted = await (this.mongoStore as any).deleteSecretForTenant(id, tenantId);
+        if (deleted) this.secrets.delete(id);
+        return deleted;
       }
+      if (tenantId) {
+        const existing = await this.mongoStore.getSecret(id);
+        if (!existing || existing.tenantId !== tenantId) return false;
+      }
+      const deleted = await this.mongoStore.deleteSecret(id);
+      if (deleted) this.secrets.delete(id);
       return deleted;
     }
-    const existed = this.secrets.delete(id);
-    return existed;
+    const existing = this.secrets.get(id);
+    if (!existing) return false;
+    if (tenantId && existing.tenantId !== tenantId) return false;
+    return this.secrets.delete(id);
   }
 
   async getSecretByName(name: string, tenantId?: string): Promise<StoredSecret | undefined> {
@@ -130,8 +188,8 @@ export class SecretStore {
     return undefined;
   }
 
-  async decryptSecret(id: string): Promise<string | undefined> {
-    const secret = await this.getSecret(id);
+  async decryptSecret(id: string, tenantId?: string): Promise<string | undefined> {
+    const secret = await this.getSecret(id, tenantId);
     if (!secret) return undefined;
     return this.encryption.decrypt(secret.encrypted);
   }
@@ -146,7 +204,7 @@ export class SecretStore {
     };
   }
 
-  private getTenantIdFromContext(): string | undefined {
+  getTenantIdFromContext(): string | undefined {
     return undefined;
   }
 }

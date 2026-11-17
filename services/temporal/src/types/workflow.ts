@@ -120,6 +120,25 @@ export interface MissionPhaseEvidence {
   }>;
 }
 
+export function phaseRequirementEvidenceGaps(
+  plan: Plan,
+  phaseId: string,
+  phaseOutput: MissionPhaseEvidence,
+): string[] {
+  const phase = plan.phases.find((candidate) => candidate.id === phaseId);
+  if (!phase) return [`Phase ${phaseId} is missing from the plan.`];
+  const requiredTasks = phase.tasks.filter((task) =>
+    task.requiresExternalAction
+    || (task.requiredActions || []).length > 0
+    || (task.expectedArtifacts || []).some((name) => name.toLocaleLowerCase() !== 'system-action-receipts.json'),
+  );
+  if (requiredTasks.length === 0) return [];
+  return missionExecutionEvidenceGaps(
+    { ...plan, phases: [phase] },
+    [{ ...phaseOutput, status: 'completed' }],
+  ).filter((gap) => requiredTasks.some((task) => gap.includes(`(${task.id})`)));
+}
+
 export function recoveryGapFingerprint(gaps: string[]): string {
   return [...new Set(gaps.map((gap) =>
     gap
@@ -146,6 +165,31 @@ export interface RecoveryProgressObservation {
   outputs?: string[];
 }
 
+export function recoveryEvidenceState(
+  tasks: MissionPhaseEvidence['tasks'],
+  expectedArtifacts: string[],
+): Pick<RecoveryProgressObservation, 'artifactNames' | 'receiptOps'> {
+  const expected = new Set(expectedArtifacts.map((name) => name.trim().toLocaleLowerCase()));
+  const artifactNames: string[] = [];
+  const receiptOps: string[] = [];
+  for (const task of tasks) {
+    for (const artifact of task.artifacts || []) {
+      const name = artifact.name.trim().toLocaleLowerCase();
+      if (name === 'system-action-receipts.json') {
+        for (const receipt of receiptsFromArtifact(artifact)) {
+          if (receipt.outcome !== 'success' || receipt.isError || receipt.outcomeKnown === false
+            || receipt.toolId === '__list_tools' || receipt.toolId === '__delegate') continue;
+          receiptOps.push(JSON.stringify([receipt.toolId, receipt.operation, receipt.providerRequestId, receipt.executionId]));
+        }
+      } else if (expected.has(name) && artifact.status !== 'blocked' && artifact.purpose !== 'execution-outcome'
+        && ((typeof artifact.content === 'string' && artifact.content.trim()) || artifact.url !== undefined || artifact.data !== undefined)) {
+        artifactNames.push(name);
+      }
+    }
+  }
+  return { artifactNames: [...new Set(artifactNames)], receiptOps: [...new Set(receiptOps)] };
+}
+
 export function recoveryProgressSignature(obs: RecoveryProgressObservation): string {
   const gapFp = recoveryGapFingerprint(obs.gaps);
   // Exclude recovery/amendment/config scaffolding so adding a recovery task that
@@ -167,26 +211,73 @@ export function hasRecoveryProgress(previous: string | undefined, current: strin
   return !previous || previous !== current;
 }
 
+export function hasEvidenceRecoveryProgress(previous: string | undefined, current: string): boolean {
+  return !previous || previous.split('::')[1] !== current.split('::')[1];
+}
+
 // Hard safety ceilings (anti-runaway). Blind count cutoffs replaced by progress-aware logic + ceilings.
 export const MAX_PHASE_RECOVERY_ROUNDS_SAFETY = 12;
 export const MAX_MISSION_RECOVERY_ROUNDS_SAFETY = 12;
 export const MAX_NO_PROGRESS_RECOVERY_ATTEMPTS = 3;
 
+/** Bounded reruns of a dependency whose completion did not produce its declared artifact (a missing input). */
+export const MAX_DEPENDENCY_INPUT_RERUNS = 2;
+
+/** A recovery/amendment/configuration-scaffold task id (not a normally-planned task). */
+export function isRecoveryTask(taskId: string): boolean {
+  return /-mission-recovery-\d+|-amendment-\d+|-configuration-request-\d+/i.test(taskId);
+}
+
 
 export function isConfigurationBlocker(evidence: string[]): boolean {
   const text = evidence.join('\n');
-  // A blocker is a configuration blocker when the evidence says something the
-  // operator has to supply is absent (credentials, configuration, or a
-  // capability that is not available in the live catalog). Missing deliverables
-  // or task outputs are execution failures, not configuration blockers, so the
-  // subject has to be a capability/service/configuration term.
-  const missingSignal = /\b(?:missing|required|needed|not provided|not supplied|unavailable|not found|not registered|not configured|not available|isn't available|isn't configured)\b|\bnot in the live system catalog\b/i;
-  const subjectSignal = /\b(?:api ?key|access ?key|secret|token|password|credential|authentication|authorization|service|configuration|provider|tool|catalog|capability|integration|connector|plugin|subscription|license|account)\b/i;
-  return missingSignal.test(text) && subjectSignal.test(text);
+  // Only a missing secret or an authorization decision is a user blocker. A
+  // missing tool/capability is self-service: the system must discover, compose,
+  // or create and verify it, so tool/catalog/provider/configuration subjects are
+  // deliberately excluded here.
+  const missingSignal = /\b(?:missing|required|needed|not provided|not supplied|denied|forbidden|not authorized)\b/i;
+  const secretSignal = /\b(?:api ?key|access ?key|secret|token|password|credential|authentication|authorization|permission)\b/i;
+  return missingSignal.test(text) && secretSignal.test(text);
 }
 
 export function missionConfigurationQuestion(missionGoal: string): string {
-  return `I could not complete "${missionGoal}" because a required service or configuration is missing. I have already tried to discover, resolve, or create the needed capability automatically. Open Tools configuration, fill in the secure form for the relevant tool or provider, and continue after you save — then reply here so I can resume.`;
+  return `I could not complete "${missionGoal}" because a required secret or authorization is missing. I have already tried to discover, resolve, or create the needed capability automatically. Provide the specific requested value (for example an API key or token) or grant the required permission, then reply here so I can resume.`;
+}
+
+function gapRequiresUserInput(gap: string): boolean {
+  return /\b(?:ask(?:ing)? (?:you|the user)|user (?:must|needs to|should)|provide (?:your|a) (?:value|answer|decision|approval)|approval required|requires? (?:your|user) (?:approval|decision|input|response)|question requiring|waiting for (?:your|user))\b/i.test(gap);
+}
+
+export function classifyMissionCompletionGaps(
+  missionGoal: string,
+  gaps: string[],
+  options?: { pendingUserInteraction?: boolean; failureCode?: string },
+): { status: 'awaiting_review' | 'incomplete'; reason: string; question?: string } {
+  const evidence = gaps.filter(Boolean);
+  if (options?.pendingUserInteraction || evidence.some(gapRequiresUserInput)) {
+    return {
+      status: 'awaiting_review',
+      reason: evidence[0] || 'User input is required before the mission can continue.',
+      question: evidence.find(gapRequiresUserInput) || evidence[0],
+    };
+  }
+
+  const configFailure = options?.failureCode === 'CREDENTIAL_REQUIRED'
+    || options?.failureCode === 'CONFIGURATION_REQUIRED'
+    || isConfigurationBlocker(evidence);
+  if (configFailure) {
+    return {
+      status: 'awaiting_review',
+      reason: evidence[0] || 'Required configuration is missing.',
+      question: missionConfigurationQuestion(missionGoal),
+    };
+  }
+
+  const detail = evidence.slice(0, 8).join(' ');
+  return {
+    status: 'incomplete',
+    reason: detail || 'The mission could not be completed automatically because required work or deliverables remain unresolved.',
+  };
 }
 
 const NON_ACTION_RECEIPT_TOOL_IDS = new Set([

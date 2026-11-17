@@ -1,8 +1,16 @@
+/**
+ * DEPRECATED / NOT WIRED: the runtime executes missions in-process through
+ * MissionOrchestrator (runMissionDirect), which checkpoints to Artifacts.
+ * This workflow and the per-step activities it proxies are retained only for
+ * the workflow-boundary tests; TemporalClient does not start them on this
+ * branch. Do not add new behavior here; change MissionOrchestrator instead.
+ */
 import { patched, proxyActivities, sleep } from '@temporalio/workflow';
-import { logger } from '@stage7-nextgen/shared';
+import { logger, type Task } from '@stage7-nextgen/shared';
 import type { MissionActivities } from '../activities/missionActivity';
 import type { MissionPhaseOutput } from '../activities/missionWorkflowActivities';
 import { applyRuntimeTaskRequirements } from '../agent/TaskRequirements';
+import { dependencyArtifactGaps, missingDependencyInputs } from '../agent/TaskResultParser';
 import {
   CompletedTaskSummary,
   createCompletedTaskSummary,
@@ -13,9 +21,14 @@ import {
   recoveryTaskDependencies,
   isConfigurationBlocker,
   missionConfigurationQuestion,
+  phaseRequirementEvidenceGaps,
   recoveryGapFingerprint,
   recoveryProgressSignature,
+  recoveryEvidenceState,
   hasRecoveryProgress,
+  hasEvidenceRecoveryProgress,
+  isRecoveryTask,
+  MAX_DEPENDENCY_INPUT_RERUNS,
   MAX_PHASE_RECOVERY_ROUNDS_SAFETY,
   MAX_MISSION_RECOVERY_ROUNDS_SAFETY,
   MAX_NO_PROGRESS_RECOVERY_ATTEMPTS,
@@ -181,9 +194,16 @@ agentRole: 'mission-executor',
     const compensations: Array<{ phaseId: string; action: string }> = [];
     const useAgentTaskSelection = patched('agent-owned-task-selection-v1');
     const useAgentPhaseAmendments = true;
-    const completedTaskIds = new Set((input.completedTasks || []).map((task) => task.taskId));
+    const dependencySuccessRequired = patched('dependency-success-required-v1');
+    const terminalTaskIds = new Set((input.completedTasks || []).map((task) => task.taskId));
+    const completedTaskIds = new Set((input.completedTasks || []).filter((checkpoint) =>
+      !dependencySuccessRequired || plan.phases.some((phase) =>
+        phase.tasks.some((task) => task.id === checkpoint.taskId && task.status === 'completed'),
+      ),
+    ).map((task) => task.taskId));
     const completedTaskSummaries = new Map<string, CompletedTaskSummary>();
     let pendingInteraction: MissionPendingInteraction | undefined;
+    let uncertainActionIssue = '';
     for (const savedPhase of plan.phases) {
       for (const savedTask of savedPhase.tasks) {
         if (
@@ -231,14 +251,67 @@ agentRole: 'mission-executor',
       const completedInPhase = new Set(phase.tasks
         .filter((task) => shouldSkipTask(task.id, phase.id, input.completedTasks))
         .map((task) => task.id));
+      // Guidance injected when a completed task is reopened for a bounded rerun
+      // because it did not produce a declared artifact (a missing input), and the
+      // per-phase count of those reruns (anti-runaway).
+      const taskRerunGuidance = new Map<string, string>();
+      const dependencyRerunCounts = new Map<string, number>();
 
       const executePendingTasks = async () => {
+        // A pending task is blocked by a completed dependency that is missing a
+        // declared artifact, and that dependency lives in this phase and still has
+        // rerun budget left → reopen it so it can produce the artifact.
+        const findMissingInputRerun = (taskById: Map<string, Task>): Task | undefined => {
+          for (const candidate of phase.tasks) {
+            if (completedInPhase.has(candidate.id) || isRecoveryTask(candidate.id)) continue;
+            for (const dependencyId of candidate.dependsOnTaskIds || []) {
+              const dependency = taskById.get(dependencyId);
+              if (!dependency || dependency.status !== 'completed') continue;
+              if (!phase.tasks.includes(dependency)) continue;
+              if ((dependencyRerunCounts.get(dependency.id) || 0) >= MAX_DEPENDENCY_INPUT_RERUNS) continue;
+              if (dependencyArtifactGaps(dependency).length > 0) return dependency;
+            }
+          }
+          return undefined;
+        };
         while (completedInPhase.size < phase.tasks.length) {
+          const taskById = new Map<string, Task>(
+            plan.phases.flatMap((entry) => entry.tasks.map((candidate) => [candidate.id, candidate] as [string, Task])),
+          );
           const pendingTasks = phase.tasks.filter((task) => !completedInPhase.has(task.id));
           const readyTasks = pendingTasks.filter((task) =>
-            (task.dependsOnTaskIds || []).every((dependencyId) => completedTaskIds.has(dependencyId)),
+            (task.dependsOnTaskIds || []).every((dependencyId) =>
+              dependencySuccessRequired && task.id.startsWith(`${phase.id}-amendment-`)
+                ? terminalTaskIds.has(dependencyId)
+                : completedTaskIds.has(dependencyId),
+            )
+            // A task is not ready while a dependency that completed without
+            // producing its declared artifact is a missing input (recovery/amendment
+            // tasks are exempt: they exist to repair gaps and run after all tasks).
+            && (!dependencySuccessRequired || isRecoveryTask(task.id) || missingDependencyInputs(task, taskById).length === 0),
           );
           if (readyTasks.length === 0) {
+            const rerunDependency = dependencySuccessRequired ? findMissingInputRerun(taskById) : undefined;
+            if (rerunDependency) {
+              const missing = dependencyArtifactGaps(rerunDependency);
+              const attempt = (dependencyRerunCounts.get(rerunDependency.id) || 0) + 1;
+              dependencyRerunCounts.set(rerunDependency.id, attempt);
+              completedInPhase.delete(rerunDependency.id);
+              completedTaskIds.delete(rerunDependency.id);
+              terminalTaskIds.delete(rerunDependency.id);
+              completedTaskSummaries.delete(rerunDependency.id);
+              phaseOutput.tasks = phaseOutput.tasks.filter((entry) => entry.taskId !== rerunDependency.id);
+              rerunDependency.status = 'pending';
+              taskRerunGuidance.set(
+                rerunDependency.id,
+                `This task was reopened because a previous run completed without producing required artifact(s): ${missing.join(', ')}. Produce the missing artifact(s) with real content and return them. Do not repeat side-effect actions whose outcome is already recorded; if you cannot produce them, explain the specific blocker.`,
+              );
+              logger.warn(
+                { missionId: input.missionId, phaseId: phase.id, taskId: rerunDependency.id, missing, attempt, max: MAX_DEPENDENCY_INPUT_RERUNS },
+                'Reopening a dependency with a missing input for a bounded rerun',
+              );
+              continue;
+            }
             logger.error({ missionId: input.missionId, phaseId: phase.id }, 'Mission phase has pending tasks but no dependency-ready task');
             for (const pendingTask of pendingTasks) {
               if (!completedInPhase.has(pendingTask.id)) {
@@ -251,6 +324,7 @@ agentRole: 'mission-executor',
                   output: pendingTask.output,
                 });
                 completedInPhase.add(pendingTask.id);
+                terminalTaskIds.add(pendingTask.id);
               }
             }
             break;
@@ -305,13 +379,16 @@ agentRole: 'mission-executor',
                   output: pendingTask.output,
                 });
                 completedInPhase.add(pendingTask.id);
-                completedTaskIds.add(pendingTask.id);
+                terminalTaskIds.add(pendingTask.id);
+                if (!dependencySuccessRequired) completedTaskIds.add(pendingTask.id);
               }
             }
             break;
           }
+          const dependencySet = dependencySuccessRequired && task.id.startsWith(`${phase.id}-amendment-`)
+            ? terminalTaskIds : completedTaskIds;
           const unmetDependency = (task.dependsOnTaskIds || [])
-            .find((dependencyId: string) => !completedTaskIds.has(dependencyId));
+            .find((dependencyId: string) => !dependencySet.has(dependencyId));
           if (unmetDependency) {
             logger.error({ missionId: input.missionId, phaseId: phase.id, taskId: task.id, unmetDependency }, 'Mission task selector chose task before dependency completed');
             // try to pick a dependency-ready task instead
@@ -328,7 +405,8 @@ agentRole: 'mission-executor',
                 output: task.output,
               });
               completedInPhase.add(task.id);
-              completedTaskIds.add(task.id);
+              terminalTaskIds.add(task.id);
+              if (!dependencySuccessRequired) completedTaskIds.add(task.id);
               continue;
             }
           }
@@ -341,6 +419,7 @@ agentRole: 'mission-executor',
               phase,
               task,
               completedTaskSummaries: [...completedTaskSummaries.values()],
+              ...(taskRerunGuidance.has(task.id) ? { taskRetryGuidance: taskRerunGuidance.get(task.id) } : {}),
             });
             if (result.interruption) {
               const interruption = result.interruption;
@@ -370,21 +449,27 @@ agentRole: 'mission-executor',
             }
             const taskStatus = result.incompleteReason ? 'incomplete' : 'completed';
             task.status = taskStatus;
-            task.output = result.output;
+            task.output = dependencySuccessRequired && result.incompleteReason && /\buncertain\b|outcome.?unknown/i.test(result.incompleteReason)
+              ? result.incompleteReason : result.output;
             task.artifacts = result.artifacts;
             phaseOutput.tasks.push({
               taskId: task.id,
               status: taskStatus,
               artifacts: result.artifacts,
-              output: result.output,
+              output: task.output,
             });
             compensations.push({ phaseId: phase.id, action: `revert-phase-${phase.id}` });
             completedInPhase.add(task.id);
-            completedTaskIds.add(task.id);
+            terminalTaskIds.add(task.id);
+            if (!dependencySuccessRequired || taskStatus === 'completed') completedTaskIds.add(task.id);
             completedTaskSummaries.set(
               task.id,
               createCompletedTaskSummary(task.id, result.output, result.artifacts, task.requiredActions, task.requiresExternalAction),
             );
+            if (dependencySuccessRequired && taskStatus !== 'completed' && /\buncertain\b|outcome.?unknown/i.test(task.output || '')) {
+              uncertainActionIssue = task.output;
+              break;
+            }
           } catch (err) {
             if (isFatalServiceError(err)) throw err;
             if (!task) break;
@@ -400,7 +485,8 @@ agentRole: 'mission-executor',
             });
             compensations.push({ phaseId: phase.id, action: `revert-phase-${phase.id}` });
             completedInPhase.add(task.id);
-            completedTaskIds.add(task.id);
+            terminalTaskIds.add(task.id);
+            if (!dependencySuccessRequired) completedTaskIds.add(task.id);
             completedTaskSummaries.set(
               task.id,
               createCompletedTaskSummary(task.id, task.output, task.artifacts, task.requiredActions, task.requiresExternalAction),
@@ -433,6 +519,13 @@ agentRole: 'mission-executor',
           completedAt: Date.now(),
         };
       }
+      if (uncertainActionIssue) {
+        phaseOutput.status = 'incomplete';
+        phase.status = 'in_progress';
+        await phaseActivities.finishMissionPhaseActivity({ input, phase, tasks: phaseOutput.tasks });
+        phases.push(phaseOutput);
+        break;
+      }
       let phaseReviewSatisfied = !useAgentPhaseAmendments
         && phaseOutput.tasks.every((task) => task.status === 'completed');
       if (useAgentPhaseAmendments) {
@@ -451,17 +544,31 @@ agentRole: 'mission-executor',
             phase = review.phase;
             for (const amendedTask of phase.tasks) applyRuntimeTaskRequirements(amendedTask, input.prompt);
             if (review.satisfied) {
-              phaseReviewSatisfied = true;
-              break;
+              const evidenceGaps = dependencySuccessRequired
+                ? phaseRequirementEvidenceGaps(plan, phase.id, phaseOutput)
+                : [];
+              if (evidenceGaps.length > 0) {
+                logger.warn({ missionId: input.missionId, phaseId: phase.id, gaps: evidenceGaps }, 'Phase review contradicted required execution evidence');
+                review.satisfied = false;
+                review.gaps = evidenceGaps;
+              } else {
+                phaseReviewSatisfied = true;
+                break;
+              }
             }
             const reviewSignature = recoveryProgressSignature({
               gaps: review.gaps,
               completedTaskIds: phase.tasks.filter((t) => t.status === 'completed').map((t) => t.id),
               completedTaskStatuses: phase.tasks.map((t) => `${t.id}:${t.status}`),
-              artifactNames: phase.tasks.flatMap((t) => (t.artifacts || []).map((a) => a.name)),
+              ...(dependencySuccessRequired
+                ? recoveryEvidenceState(phaseOutput.tasks, phase.tasks.filter((t) => !t.id.includes('-amendment-'))
+                  .flatMap((t) => t.expectedArtifacts || []))
+                : { artifactNames: phase.tasks.flatMap((t) => (t.artifacts || []).map((a) => a.name)) }),
               outputs: [...completedTaskSummaries.values()].map((s) => s.output),
             });
-            const madeProgress = hasRecoveryProgress(lastReviewSignature, reviewSignature);
+            const madeProgress = dependencySuccessRequired
+              ? hasEvidenceRecoveryProgress(lastReviewSignature, reviewSignature)
+              : hasRecoveryProgress(lastReviewSignature, reviewSignature);
             lastReviewSignature = reviewSignature;
             noProgressCount = madeProgress ? 0 : noProgressCount + 1;
             const noProgressGuidance = !madeProgress
@@ -474,16 +581,16 @@ agentRole: 'mission-executor',
               );
               break;
             }
-            // A repeated capability/configuration blocker cannot be resolved by
-            // replanning: the operator has to supply the missing service or
-            // configuration. Pause visibly instead of looping on the same gap.
+            // A repeated secret/authorization blocker cannot be resolved by
+            // replanning: the user has to supply the named value or grant the
+            // permission. Pause visibly instead of looping on the same gap.
             if (!madeProgress && isConfigurationBlocker(review.gaps)) {
               const blockingTask = review.amendment || phase.tasks.at(-1);
               if (blockingTask) {
                 const question = missionConfigurationQuestion(input.prompt);
                 logger.warn(
                   { missionId: input.missionId, phaseId: phase.id, taskId: blockingTask.id, gaps: review.gaps },
-                  'Mission phase is blocked on missing provider configuration; pausing for the user to configure it',
+                  'Mission phase is blocked on a missing secret or authorization; pausing for the user',
                 );
                 await phaseActivities.requestMissionUserInputActivity({ input, plan, phase, task: blockingTask, question });
                 const pendingInteraction: MissionPendingInteraction = {
@@ -541,6 +648,7 @@ agentRole: 'mission-executor',
               plan.phases = plan.phases.map((p: any) => p.id === phase.id ? phase : p);
             }
             await executePendingTasks();
+            if (uncertainActionIssue) break;
             await sleep(Math.min(60_000, 1_000 * 2 ** Math.min(reviewIndex - 1, 6)));
           } catch (err) {
             if (isFatalServiceError(err)) throw err;
@@ -601,6 +709,15 @@ agentRole: 'mission-executor',
       }
     }
 
+    if (uncertainActionIssue) {
+      return {
+        missionId: input.missionId,
+        status: 'incomplete',
+        output: { plan, outputs: { phases, status: 'incomplete', gaps: [uncertainActionIssue], reason: 'An action outcome is uncertain and must be reconciled before retrying.' }, compensations },
+        startedAt,
+        completedAt: Date.now(),
+      };
+    }
     let result = await completionActivities.completeMissionActivity({
       input,
       plan,
@@ -635,13 +752,19 @@ agentRole: 'mission-executor',
         gaps,
         completedTaskIds: phases.flatMap((p) => p.tasks.filter((t) => t.status === 'completed').map((t) => t.taskId)),
         completedTaskStatuses: phases.flatMap((p) => p.tasks.map((t) => `${t.taskId}:${t.status}`)),
-        artifactNames: phases.flatMap((p) => p.tasks.flatMap((t) => (t.artifacts || []).map((a) => a.name))),
+        ...(dependencySuccessRequired
+          ? recoveryEvidenceState(phases.flatMap((p) => p.tasks), plan.phases.flatMap((phase) =>
+            phase.tasks.filter((task) => !/-amendment-\d+|-mission-recovery-\d+/i.test(task.id))
+              .flatMap((task) => task.expectedArtifacts || [])))
+          : { artifactNames: phases.flatMap((p) => p.tasks.flatMap((t) => (t.artifacts || []).map((a) => a.name))) }),
         outputs: phases.flatMap((p) => p.tasks.map((t) => t.output || '')),
       });
       const stagnantGap = gapFingerprint === (lastCompletionSignature?.split('::')[0] || '') && !!lastCompletionSignature;
-      const madeProgress = hasRecoveryProgress(lastCompletionSignature, completionSignature);
+      const madeProgress = dependencySuccessRequired
+        ? hasEvidenceRecoveryProgress(lastCompletionSignature, completionSignature)
+        : hasRecoveryProgress(lastCompletionSignature, completionSignature);
       lastCompletionSignature = completionSignature;
-      completionNoProgress = madeProgress && !stagnantGap ? 0 : completionNoProgress + 1;
+      completionNoProgress = madeProgress && (dependencySuccessRequired || !stagnantGap) ? 0 : completionNoProgress + 1;
       const recoveryPhase = plan.phases.find((candidate) =>
         gaps.some((gap) =>
           gap.includes(candidate.id)
@@ -720,7 +843,7 @@ agentRole: 'mission-executor',
         title: `Resolve mission completion gaps (attempt ${recoveryIndex})`,
         description: `Address the remaining mission completion gaps: ${gaps.join('; ')}`,
         agentRole: 'mission-executor',
-        systemPrompt: `Resolve the mission completion gaps below for the mission goal "${input.prompt}" and phase "${recoveryPhase.name}". Use the recorded outputs from tasks ${taskIds.join(', ') || 'none'} as authoritative context. Produce any missing user deliverables named ${expectedArtifacts.join(', ') || 'by the gaps'} and return concrete evidence that the mission outcome is satisfied. Never create a receipt or evidence document to stand in for an action; actual tool results are recorded internally. Check the live tool catalog, execute a suitable tool, and use capability resolution to find or create one when permitted. If required credentials or configuration are missing, ask the user to provide them through the secure tool configuration form and wait. If required input from an earlier task is missing, ask that task's Agent to provide the artifact or rerun the source task. Do not repeat successfully completed or uncertain side effects; use another authorized approach if one is blocked.${noProgressGuidance}\n\nOriginal unmet requirements to resolve (link evidence to these): ${targetTaskIds.join(', ') || 'see gaps'}\n\nGaps:\n${gaps.join('\n')}`,
+        systemPrompt: `Resolve the mission completion gaps below for the mission goal "${input.prompt}" and phase "${recoveryPhase.name}". Use the recorded outputs from tasks ${taskIds.join(', ') || 'none'} as authoritative context. Produce any missing user deliverables named ${expectedArtifacts.join(', ') || 'by the gaps'} and return concrete evidence that the mission outcome is satisfied. Never create a receipt or evidence document to stand in for an action; actual tool results are recorded internally. Check the live tool catalog, execute a suitable tool, and use capability resolution to find or create one when permitted. If a required secret or authorization is missing, ask the user for that specific named value or permission and wait; never ask the user to choose, install, or configure tools. If required input from an earlier task is missing, ask that task's Agent to provide the artifact or rerun the source task. Do not repeat successfully completed or uncertain side effects; use another authorized approach if one is blocked.${noProgressGuidance}\n\nOriginal unmet requirements to resolve (link evidence to these): ${targetTaskIds.join(', ') || 'see gaps'}\n\nGaps:\n${gaps.join('\n')}`,
         expectedArtifacts,
         requiredActions: [],
         dependsOnTaskIds: taskIds,

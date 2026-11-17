@@ -71,7 +71,13 @@ export class CapabilityResolver {
         resolvedToolId: registered.id,
       }
     } catch (error) {
-      return { isError: true, content: error instanceof Error ? error.message : String(error) }
+      const detail = error instanceof Error ? error.message : String(error)
+      return {
+        isError: true,
+        outcome: 'failure',
+        outcomeKnown: false,
+        content: `Tool resolution outcome is uncertain after a lost response: ${detail}. Check the tool catalog and the original operation before retrying.`,
+      }
     }
   }
 }

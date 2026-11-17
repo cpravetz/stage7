@@ -114,6 +114,12 @@ export async function recoverFromRepeatedAction(rc: RunContext, turn: ActionTurn
       await state.save()
       return returnWith(state.result(resolution.content, { reasoning: reply.reasoning }))
     }
+    if (resolution.isError && resolution.outcomeKnown === false) {
+      state.incompleteReason = `Tool resolution outcome is uncertain; reconcile it before retrying. ${resolution.content}`
+      state.finalOutput = state.incompleteReason
+      await state.save()
+      return returnWith(state.result(state.finalOutput, { incompleteReason: state.incompleteReason, reasoning: reply.reasoning }))
+    }
     if (!resolution.isError && resolution.resolvedToolId) {
       state.fallbackToolIds.set(resolution.resolvedToolId, failedToolId)
       state.tell(`Capability resolution registered "${resolution.resolvedToolId}". Use that tool to satisfy the task instead of repeating "${action.tool}".`)

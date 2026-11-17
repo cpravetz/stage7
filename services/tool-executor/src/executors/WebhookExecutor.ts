@@ -44,7 +44,7 @@ export class WebhookExecutor {
     const idempotencyKey = options.idempotencyKey || options.executionId;
 
     if (!url) {
-      return { success: false, error: 'Webhook URL is required', durationMs: Date.now() - startTime, idempotencyKey, outcomeKnown: false, reconciliation: { provider: 'webhook', outcomeKnown: false, note: 'No URL provided.' } };
+      return { success: false, error: 'Webhook URL is required', durationMs: Date.now() - startTime, idempotencyKey, outcomeKnown: true, reconciliation: { provider: 'webhook', outcomeKnown: true, note: 'No URL provided; no request was sent.' } };
     }
 
     if (options.lookupUrl) {

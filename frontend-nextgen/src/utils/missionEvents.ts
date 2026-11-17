@@ -1019,11 +1019,53 @@ function friendlyTaskOutput(value: string): string {
 }
 
 function friendlyToolMessage(value: string): string {
-  if (!isMachineReadable(value)) return value;
+  const raw = (value || '').trim();
+  const uncertain = /The outcome of tool "([^"]+)" is uncertain; reconcile the recorded action before attempting another operation\.?/i;
+  const uncertainMatch = raw.match(uncertain);
+  const jsonStart = raw.search(/[\[{]/);
+  const jsonCandidate = jsonStart >= 0 ? raw.slice(jsonStart) : raw;
+  let parsed: unknown;
+  if (isMachineReadable(jsonCandidate)) {
+    try {
+      parsed = JSON.parse(jsonCandidate);
+    } catch {
+      // ignore
+    }
+  }
+
+  if (uncertainMatch || (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && (parsed as Record<string, unknown>).outcomeUnknown === true)) {
+    const record = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : undefined;
+    const nested = (v: unknown): Record<string, unknown> | undefined =>
+      v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : undefined;
+    const tool = uncertainMatch?.[1]
+      || (typeof record?.tool === 'string' ? record.tool : 'tool');
+    const detailCandidates = [
+      nested(nested(record?.output)?.output)?.error,
+      nested(record?.output)?.error,
+      record?.error,
+      record?.message,
+      record?.reason,
+      nested(record?.output)?.message,
+    ];
+    let detail = '';
+    for (const candidate of detailCandidates) {
+      if (typeof candidate === 'string' && candidate.trim() && !/^\s*[\[{]/.test(candidate)) {
+        detail = candidate.trim();
+        break;
+      }
+    }
+    return detail
+      ? `The outcome of tool "${tool}" is uncertain; reconcile the recorded action before retrying. ${detail}`
+      : `The outcome of tool "${tool}" is uncertain; reconcile the recorded action before retrying.`;
+  }
+
+  if (!isMachineReadable(raw)) return value;
   try {
-    const parsed: unknown = JSON.parse(value);
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      const tool = (parsed as Record<string, unknown>).tool;
+    const parsedValue: unknown = JSON.parse(raw);
+    if (parsedValue && typeof parsedValue === 'object' && !Array.isArray(parsedValue)) {
+      const tool = (parsedValue as Record<string, unknown>).tool;
       if (tool === '__list_tools') return 'Checking which services are available.';
       if (tool === '__create_tool') return 'Setting up a service for this task.';
       if (typeof tool === 'string' && tool.trim()) return 'Using a configured service to complete the requested step.';

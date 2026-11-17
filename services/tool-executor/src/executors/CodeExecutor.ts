@@ -207,7 +207,7 @@ function pythonHttpMockPrelude(mocks: IsolatedHttpMock[]): string {
 import io
 import urllib.request
 
-__stage7_http_mocks = ${JSON.stringify(mocks)}
+__stage7_http_mocks = json.loads(base64.b64decode('${Buffer.from(JSON.stringify(mocks)).toString('base64')}'))
 __stage7_http_mock_uses = [0 for _ in __stage7_http_mocks]
 
 class __Stage7MockResponse(io.BytesIO):
@@ -240,12 +240,12 @@ def __stage7_mock_urlopen(request, *args, **kwargs):
             expectedStr = expected if isinstance(expected, str) else json.dumps(expected)
             if body != expectedStr:
                 raise RuntimeError('HTTP request body did not match the test fixture for ' + method + ' ' + url)
-            __stage7_http_mock_uses[index] += 1
-            response_body = b'' if fixture['responseStatus'] == 204 else json.dumps(fixture['responseBody']).encode()
-            response = __Stage7MockResponse(response_body, fixture['responseStatus'], fixture.get('responseHeaders', {}))
-            if fixture['responseStatus'] >= 400:
-                raise urllib.error.HTTPError(url, fixture['responseStatus'], 'Mock HTTP error', response.headers, response)
-            return response
+        __stage7_http_mock_uses[index] += 1
+        response_body = b'' if fixture['responseStatus'] == 204 else json.dumps(fixture['responseBody']).encode()
+        response = __Stage7MockResponse(response_body, fixture['responseStatus'], fixture.get('responseHeaders', {}))
+        if fixture['responseStatus'] >= 400:
+            raise urllib.error.HTTPError(url, fixture['responseStatus'], 'Mock HTTP error', response.headers, response)
+        return response
     raise RuntimeError('Unmatched HTTP request blocked by the isolated test harness: ' + method + ' ' + url)
 
 urllib.request.urlopen = __stage7_mock_urlopen
@@ -271,15 +271,18 @@ export class CodeExecutor {
     const sourceMappings: NamedCredentialSource[] =
       (credentials as CodeExecutorCredentials)?.sources ?? [];
 
+    const isolatedCredentialsMatch = Object.entries(resolvedCreds).every(
+      ([key, value]) => value === options.testCredentials?.[key],
+    ) && Object.keys(resolvedCreds).length === Object.keys(options.testCredentials || {}).length;
     if (options.isolated && (
       options.executorCallback
       || options.persistenceEnvVar
       || options.config
       || options.credentials
       || (options.httpMocks && !Array.isArray(options.httpMocks))
-      || Object.keys(resolvedCreds).length > 0
       || sourceMappings.length > 0
-    ) && !options.testCredentials) {
+      || !isolatedCredentialsMatch
+    )) {
       return {
         success: false,
         error: 'Isolated plugin tests cannot receive callbacks, persistence, configuration, or credentials.',
@@ -295,23 +298,11 @@ export class CodeExecutor {
     }
 
     if (options.language === 'javascript' || options.language === 'typescript') {
-      const result = await this.executeJavaScript(options, timeoutMs, startTime, resolvedCreds, sourceMappings);
-      // bubblewrap namespace creation can fail in restricted containers even
-      // when bwrap is installed (e.g. "Creating new namespace failed: Operation
-      // not permitted"). Fall back to a non-isolated run that still applies the
-      // HTTP mock prelude, so generated plugins can still be validated.
-      if (options.isolated && !result.success && /bwrap|namespace|unshare/i.test(result.error || '')) {
-        return this.executeJavaScript({ ...options, isolated: false }, timeoutMs, startTime, resolvedCreds, sourceMappings);
-      }
-      return result;
+      return this.executeJavaScript(options, timeoutMs, startTime, resolvedCreds, sourceMappings);
     }
 
     if (options.language === 'python') {
-      const result = await this.executePython(options, timeoutMs, startTime, resolvedCreds, sourceMappings);
-      if (options.isolated && !result.success && /bwrap|namespace|unshare/i.test(result.error || '')) {
-        return this.executePython({ ...options, isolated: false }, timeoutMs, startTime, resolvedCreds, sourceMappings);
-      }
-      return result;
+      return this.executePython(options, timeoutMs, startTime, resolvedCreds, sourceMappings);
     }
 
     return {
@@ -401,7 +392,7 @@ const code = options.code;
   const prelude =
     'const __tool_input = ' + JSON.stringify(options.input || {}) + ';\n' +
     'const __skill_config = ' + JSON.stringify(options.config || {}) + ';\n' +
-    'const __skill_credentials = ' + JSON.stringify(options.credentials || {}) + ';\n' +
+    'const __skill_credentials = ' + JSON.stringify({ ...resolvedCreds, ...options.credentials }) + ';\n' +
     'const __credential_sources = ' + sourceMapJson + ';\n' +
     'function __getCredential(logicalKey) {\n' +
     '  return __skill_credentials[logicalKey] || \'\';\n' +
@@ -641,13 +632,13 @@ import os
 import base64
 import urllib.request
 
-__tool_input = ${JSON.stringify(options.input || {})}
+__tool_input = json.loads(base64.b64decode('${Buffer.from(JSON.stringify(options.input || {})).toString('base64')}'))
 
-__skill_config = ${JSON.stringify(options.config || {})}
+__skill_config = json.loads(base64.b64decode('${Buffer.from(JSON.stringify(options.config || {})).toString('base64')}'))
 
-__skill_credentials = ${JSON.stringify(options.credentials || {})}
+__skill_credentials = json.loads(base64.b64decode('${Buffer.from(JSON.stringify({ ...resolvedCreds, ...options.credentials })).toString('base64')}'))
 
-__credential_sources = ${JSON.stringify(sourceMappings)}
+__credential_sources = json.loads(base64.b64decode('${Buffer.from(JSON.stringify(sourceMappings)).toString('base64')}'))
 
 def __get_credential(logical_key):
     return __skill_credentials.get(logical_key, '')

@@ -97,6 +97,19 @@ export async function askBrain(
     return { end: NEXT_TURN }
   }
 
+  const previousAssistant = [...state.history].reverse().find((m) => m.role === 'assistant')?.content?.trim()
+  if (previousAssistant && previousAssistant === content) {
+    await deps.brain.reportComplaint(
+      completion.requestId,
+      'Agent response validation failed: Brain returned the same response as the previous turn with no progress.',
+      context.missionId,
+    )
+    state.history = [...state.history, { role: 'assistant', content }]
+    state.tell('Your previous response was identical to the one before it and did not make progress. Do not repeat it. Re-read the latest feedback, corrections, and action results in this conversation, then take a different concrete next step: return exactly one raw JSON action with "tool" and "args", or a corrected final answer. Respond with only that new response.')
+    await state.save()
+    return { end: NEXT_TURN }
+  }
+
   state.history = [...state.history, { role: 'assistant', content }]
   return { reply: { completion, content, reasoning } }
 }

@@ -3,11 +3,13 @@ import { AgentDefinition, AgentExecutionPolicy, AgentTask, DEFAULT_AGENT_EXECUTI
 import { AgentExecutor, AgentExecutionCheckpoint as ExecutorCheckpoint } from '../src/services/AgentExecutor'
 import { AgentRuntime } from '../src/services/AgentRuntime'
 import { PersistentAgentRuntime } from '../src/services/PersistentAgentRuntime'
+import { compactCheckpointForStorage } from '../src/services/agent-executor/checkpoint'
 import { ArtifactsService } from '@stage7-nextgen/artifacts'
 import { AgentExecutionCheckpoint as ArtifactsCheckpoint } from '@stage7-nextgen/artifacts'
 import {
   BRAIN_MODEL_SELECTION_RETRY,
   BRAIN_ROUTING_SESSION_CONTEXT_KEY,
+  receiptMatchesRequiredAction,
 } from '@stage7-nextgen/shared'
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -44,6 +46,26 @@ function task(taskId = 'mission-1:phase-1:task-1'): Omit<AgentTask, 'agentId' | 
 
 describe('AgentExecutor', () => {
   jest.setTimeout(60_000)
+  it('discards oversized transient receipt data while preserving action binding', () => {
+    const checkpoint: ExecutorCheckpoint = {
+      version: 2, history: [{ role: 'user', content: 'Send a message' }],
+      tokensUsed: 0, toolCalls: 1, brainCalls: 1, completionTokensReserved: 0,
+      delegations: 0, lastAction: '', repeatedActionCount: 0,
+      actionReceipts: [{
+        toolId: 'sms_sender', isError: false, outcome: 'success', content: '{}',
+        actionKey: 'a'.repeat(64), outcomeKnown: true,
+        binding: { operation: 'send_sms', recipients: ['+15555550100'], message: 'Hello', providerRequestId: 'msg-1' },
+        transientData: 'x'.repeat(600_000),
+      }],
+    }
+    const saved = compactCheckpointForStorage(checkpoint)
+    expect(Buffer.byteLength(JSON.stringify(saved))).toBeLessThan(512 * 1024)
+    expect(saved.actionReceipts?.[0]).not.toHaveProperty('transientData')
+    expect(receiptMatchesRequiredAction(saved.actionReceipts![0], {
+      toolId: 'sms_sender', outcome: 'success', recipient: '+15555550100', message: 'Hello',
+    })).toBe(true)
+  })
+
   it('bounds Brain request time and surfaces a recoverable task error', async () => {
     const fetcher: typeof fetch = async (input, init) => {
       const url = String(input)
@@ -1046,7 +1068,7 @@ describe('AgentExecutor', () => {
       { missionId: 'mission-1', delegationDepth: 0, saveCheckpoint: async (value) => { checkpoint = value } },
     )
     const result = await run()
-    expect(result.output).toContain('outcomeUnknown')
+    expect(result.output).toContain('uncertain')
     await executor.execute(
       { ...definition, tools: ['email_sender'] }, task() as AgentTask,
       { missionId: 'mission-1', delegationDepth: 0, resumeCheckpoint: checkpoint },
@@ -2016,6 +2038,33 @@ describe('AgentExecutor', () => {
     expect(result.output).not.toContain('Which SMS provider account')
     expect(prompts[1]).toContain('Do not ask the user to choose a provider')
     expect(resolveCalls).toBe(1)
+  })
+
+  it('stops after losing a tool-creation response instead of creating another tool', async () => {
+    let resolveCalls = 0
+    let brainCalls = 0
+    const fetcher: typeof fetch = async (input) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) return jsonResponse({ tools: [] })
+      if (url.endsWith('/api/brain/complete')) {
+        brainCalls++
+        return jsonResponse({ content: '{"tool":"__create_tool","args":{"description":"Send an SMS","requirements":[]}}' })
+      }
+      if (url.endsWith('/api/tool-executor/tools/resolve')) {
+        resolveCalls++
+        throw new Error('fetch failed')
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+    const result = await new AgentExecutor({ fetcher }).execute(definition, task() as AgentTask, {
+      missionId: 'mission-1', delegationDepth: 0,
+    })
+    expect(resolveCalls).toBe(1)
+    expect(brainCalls).toBe(1)
+    expect(result.incompleteReason).toMatch(/uncertain/i)
+    expect(result.actionReceipts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ toolId: '__create_tool', outcomeKnown: false }),
+    ]))
   })
 
   it('executes the requested email and resolves SMS without losing mission values', async () => {

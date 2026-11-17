@@ -79,7 +79,10 @@ describe('mission resume progress', () => {
 import {
   recoveryProgressSignature,
   hasRecoveryProgress,
+  hasEvidenceRecoveryProgress,
+  recoveryEvidenceState,
   missionExecutionEvidenceGaps,
+  phaseRequirementEvidenceGaps,
   recoveryTaskDependencies,
   MAX_PHASE_RECOVERY_ROUNDS_SAFETY,
   MAX_NO_PROGRESS_RECOVERY_ATTEMPTS,
@@ -87,6 +90,44 @@ import {
 } from '../src/types/workflow';
 
 describe('progress-aware recovery (Tasks 3/7)', () => {
+  it('counts relevant evidence, not changing gap wording or unrelated artifacts, as recovery progress', () => {
+    const before = recoveryProgressSignature({ gaps: ['First wording'], artifactNames: [] });
+    const evidence = recoveryEvidenceState([{
+      taskId: 'task-1', status: 'completed',
+      artifacts: [{ name: 'unrelated.txt', type: 'text', content: 'text' }],
+    }], ['required.txt']);
+    const unchanged = recoveryProgressSignature({ gaps: ['Different wording'], ...evidence });
+    expect(hasEvidenceRecoveryProgress(before, unchanged)).toBe(false);
+    const resolved = recoveryEvidenceState([{
+      taskId: 'task-1', status: 'completed',
+      artifacts: [{ name: 'required.txt', type: 'text', content: 'result' }],
+    }], ['required.txt']);
+    expect(hasEvidenceRecoveryProgress(unchanged, recoveryProgressSignature({ gaps: ['Different wording'], ...resolved }))).toBe(true);
+  });
+
+  it('requires phase artifacts to exist even if a reviewer claims success', () => {
+    const plan: Plan = {
+      summary: 'Create a tool', estimatedDuration: 'short', estimatedCost: 'low',
+      requiresClarification: false, clarificationQuestions: [], clarificationAnswers: [],
+      phases: [{
+        id: 'phase-1', name: 'Create', goal: 'Create a tool', requiresApproval: false, status: 'in_progress',
+        tasks: [{
+          id: 'task-1', title: 'Create', description: 'Create the tool', agentRole: 'worker',
+          systemPrompt: 'Create', expectedArtifacts: ['tool.json'], status: 'completed', artifacts: [],
+        }],
+      }],
+    };
+    const output: MissionPhaseEvidence = {
+      phaseId: 'phase-1', status: 'in_progress',
+      tasks: [{ taskId: 'task-1', status: 'completed', artifacts: [], output: 'Done' }],
+    };
+    expect(phaseRequirementEvidenceGaps(plan, 'phase-1', output)).toEqual([
+      expect.stringContaining('missing expected artifact "tool.json"'),
+    ]);
+    output.tasks[0].artifacts = [{ name: 'tool.json', type: 'text', content: '{"created":true}' }];
+    expect(phaseRequirementEvidenceGaps(plan, 'phase-1', output)).toEqual([]);
+  });
+
   it('detects no-progress when gaps and evidence state are unchanged, and progress when state changes', () => {
     const base = {
       gaps: ['Task "Send" (task-1) did not complete the required step "sms".'],

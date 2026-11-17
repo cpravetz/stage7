@@ -41,21 +41,23 @@ const plan: Plan = {
 }
 
 describe('runtime task requirements', () => {
-  it('recognizes repeated provider/configuration blockers without depending on attempt numbers', () => {
-    const first = 'Tool "email_sender" is not in the live system catalog (attempt 1).'
-    const second = 'Tool "email_sender" is not in the live system catalog (attempt 4).'
+  it('treats only secret/authorization gaps as configuration blockers, independent of attempt numbers', () => {
+    const first = 'The email_sender API key is missing (attempt 1).'
+    const second = 'The email_sender API key is missing (attempt 4).'
 
     expect(isConfigurationBlocker([first])).toBe(true)
     expect(recoveryGapFingerprint([first])).toBe(recoveryGapFingerprint([second]))
+    // A missing tool/capability is self-service, not a user blocker.
+    expect(isConfigurationBlocker(['Tool "email_sender" is not in the live system catalog.'])).toBe(false)
     expect(isConfigurationBlocker(['The output file has not been produced.'])).toBe(false)
   })
 
-  it('directs the user to configure a service and wait for secure credential prompts', () => {
+  it('asks only for the specific secret or authorization, not tool setup', () => {
     const question = missionConfigurationQuestion('Send an SMS and email.')
 
-    expect(question).toContain('Tools configuration')
-    expect(question).toContain('secure form')
-    expect(question).toContain('continue after you save')
+    expect(question).toContain('secret or authorization')
+    expect(question).toContain('reply here so I can resume')
+    expect(question).not.toContain('Tools configuration')
   })
 
   it('gives task agents a recovery path for missing tools, configuration, and dependency inputs', () => {
@@ -68,7 +70,8 @@ describe('runtime task requirements', () => {
 
     expect(prompt).toContain('Check the live tool catalog')
     expect(prompt).toContain('use capability resolution to find or create one')
-    expect(prompt).toContain('secure tool configuration form and wait')
+    expect(prompt).toContain('specific named value or permission and wait')
+    expect(prompt).toContain('never ask the user to choose, install, or configure tools')
     expect(prompt).toContain('never ask the user to retrieve or provide them')
     expect(prompt).toContain('name its task ID as an internal blocker')
     expect(prompt).not.toContain('request its Agent to provide the artifact')

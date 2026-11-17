@@ -88,8 +88,8 @@ export class EmailExecutor {
         success: false,
         error: 'Missing SMTP credentials. Provide smtp_host, smtp_user, and smtp_pass.',
         idempotencyKey,
-        outcomeKnown: false,
-        reconciliation: { provider: 'smtp', outcomeKnown: false, note: 'Cannot send or reconcile without SMTP credentials.' },
+        outcomeKnown: true,
+        reconciliation: { provider: 'smtp', outcomeKnown: true, note: 'Cannot send without SMTP credentials; no message was sent.' },
       };
     }
 

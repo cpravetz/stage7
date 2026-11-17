@@ -18,6 +18,14 @@ export class VaultError extends NextGenError {
     return new VaultError(404, message);
   }
 
+  static unauthorized(message = 'Unauthorized', details?: any): VaultError {
+    return new VaultError(401, message, details);
+  }
+
+  static forbidden(message = 'Forbidden', details?: any): VaultError {
+    return new VaultError(403, message, details);
+  }
+
   static encryptionError(message = 'Encryption error', details?: any): VaultError {
     return new VaultError(500, message, details);
   }

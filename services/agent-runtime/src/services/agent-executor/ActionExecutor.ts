@@ -2,7 +2,7 @@ import type { AgentDefinition, AgentToolPolicy } from '../../types'
 import type { BrainClient } from './BrainClient'
 import type { CapabilityResolver } from './CapabilityResolver'
 import type { SystemToolClient } from './SystemToolClient'
-import { ASK_USER_MARKER, ASK_USER_NAME, CREATE_TOOL_ACTION, DELEGATE_ACTION, LIST_TOOLS_ACTION } from './constants'
+import { ASK_USER_MARKER, CREATE_TOOL_ACTION, DELEGATE_ACTION, LIST_TOOLS_ACTION, isAskUserTool } from './constants'
 import { delegateSubtask } from './delegation'
 import { findTool, searchTools } from './toolCatalog'
 import type { AgentAction, AgentExecutionContext, ToolDescriptor, ToolResult } from './types'
@@ -38,7 +38,7 @@ export class ActionExecutor {
         )
         return {
           isError: true,
-          content: 'Tool creation is disabled for Agents with an allowlist policy. Ask the user to authorize an approved provider in Tools configuration.',
+          content: 'Tool creation is disabled for Agents with an allowlist policy. Ask the user to authorize an approved provider (a permission decision); do not ask them to configure or install tools.',
           outcome: 'denied',
         }
       }
@@ -48,7 +48,7 @@ export class ActionExecutor {
       return delegateSubtask(action.args, context)
     }
 
-    if (action.tool === ASK_USER_NAME || action.tool === 'ask_user') {
+    if (isAskUserTool(action.tool)) {
       const question = typeof action.args?.question === 'string' && action.args.question.trim().length > 0
         ? action.args.question.trim()
         : 'I need more information to continue. Please provide the missing value.'

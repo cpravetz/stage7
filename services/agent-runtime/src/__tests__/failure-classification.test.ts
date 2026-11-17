@@ -21,7 +21,8 @@ describe('Failure classification', () => {
     expect(result.code).toBe(FAILURE_CODES.TOOL_MISSING)
     expect(result.retryable).toBe(true)
     expect(result.adaptation).toBe('select_alternative_tool')
-    expect(result.needsUserInput).toBe(true)
+    // A missing tool is self-service: the system must discover/compose/create it.
+    expect(result.needsUserInput).toBe(false)
   })
 
   it('classifies credential required errors', () => {

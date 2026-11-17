@@ -820,7 +820,10 @@ describe('ApiClientExecutor', () => {
   it('requires a path', async () => {
     const result = await executor.execute({ path: '  ' }, creds());
     expect(result.success).toBe(false);
-    expect(result.error).toBe('path is required');
+    expect(result.error).toContain("'path' argument is required");
+    // Pre-flight validation: no request was sent, so the outcome is known and
+    // the agent can correct the arguments instead of blocking on an uncertain action.
+    expect(result.outcomeKnown).toBe(true);
   });
 
   it('rejects an unsupported method and missing auth credentials', async () => {

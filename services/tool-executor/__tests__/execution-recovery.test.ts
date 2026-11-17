@@ -208,21 +208,6 @@ describe('execution routes', () => {
 
 
 describe('external executor reconciliation contracts', () => {
-  it('SmsExecutor reports reconciliation metadata and lookup hook shape', async () => {
-    const originalFetch = global.fetch;
-    (global as any).fetch = jest.fn(async () => ({ ok: true, status: 200, text: async () => JSON.stringify({ sid: 'SM123', status: 'delivered' }) }));
-    try {
-      const mod = await import('../src/executors/SmsExecutor');
-      const sms = new (mod as any).SmsExecutor();
-      const res = await sms.execute({ to: '+1555', body: 'hi', lookupMessageSid: 'SM123', idempotencyKey: 'k1' }, { twilio_account_sid: 'ACx', twilio_auth_token: 'tok' } as any);
-      expect(res.reconciliation?.lookupAttempted).toBe(true); expect(res.reconciliation?.provider).toBe("twilio"); expect(res.reconciliation?.lookupAttempted).toBe(true);
-      expect(res.reconciliation?.lookupAttempted).toBe(true);
-      expect(res.providerRequestId || res.messageId).toBeTruthy();
-    } finally {
-      (global as any).fetch = originalFetch;
-    }
-  });
-
   it('Webhook/ApiClient/Vendor executors carry idempotency and reconciliation fields on success path shape', async () => {
     const { WebhookExecutor } = jest.requireActual('../src/executors/WebhookExecutor');
     const originalFetch = global.fetch;

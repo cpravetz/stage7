@@ -1,10 +1,10 @@
 import {
   ASK_USER_MARKER,
-  ASK_USER_NAME,
   CREATE_TOOL_ACTION,
   DELEGATE_ACTION,
   LIST_TOOLS_ACTION,
   MAX_ASK_USER_QUESTION_LENGTH,
+  isAskUserTool,
 } from './constants'
 
 export const CAPABILITY_RESOLUTION_GUIDANCE =
@@ -14,6 +14,11 @@ export function asksUserToManageTools(question: string): boolean {
   return /\b(?:please\s+)?(?:register|install|create|build|develop|configure|set up|enable)\b.{0,100}\b(?:tool|skill|plugin|integration|mcp|service)\b/i.test(question)
     || /\b(?:tool|skill|plugin|integration|mcp)\b.{0,100}\b(?:register|install|create|configure|set up)\s+(?:it|the tool|the skill)\b/i.test(question)
     || /\b(?:choose|select|pick)\b.{0,100}\b(?:tool id|tools? from (?:the )?list|from (?:the )?(?:list|available|following).{0,30}tools?)\b/i.test(question)
+    // Asking the user to supply tool *configuration* (base URL, endpoint, host,
+    // port, provider name, domain) is a setup task the agent must resolve itself.
+    // Pure secret asks (api key, token, password, credentials) are intentionally
+    // excluded here — those are legitimate named-secret questions.
+    || /\b(?:provide|enter|give|share|paste|supply|input|specify|set)\b.{0,80}\b(?:base\s*urls?|endpoints?|hosts?|servers?|ports?|config(?:uration)?|provider\s+name|account\s+name|domains?)\b/i.test(question)
 }
 
 export function asksForProviderSetup(question: string): boolean {
@@ -25,7 +30,7 @@ export function asksForProviderSetup(question: string): boolean {
 export function hasTriedToolAfterResolution(toolIds: readonly string[]): boolean {
   const lastResolutionIndex = toolIds.lastIndexOf(CREATE_TOOL_ACTION)
   return lastResolutionIndex >= 0 && toolIds.slice(lastResolutionIndex + 1).some(
-    (toolId) => ![ASK_USER_NAME, 'ask_user', CREATE_TOOL_ACTION, DELEGATE_ACTION, LIST_TOOLS_ACTION].includes(toolId),
+    (toolId) => !isAskUserTool(toolId) && ![CREATE_TOOL_ACTION, DELEGATE_ACTION, LIST_TOOLS_ACTION].includes(toolId),
   )
 }
 

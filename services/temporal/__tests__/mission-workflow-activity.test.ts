@@ -891,7 +891,11 @@ describe('missionWorkflow activity boundary', () => {
     mockActivities.prepareMissionActivity.mockResolvedValue(initialPlan)
     mockActivities.executeMissionTaskActivity.mockImplementation(async ({ task }) => ({
       output: `Completed ${task.id}`,
-      artifacts: [],
+      artifacts: [{
+        name: task.id === 'task-1' ? 'deliverable.md' : 'verification.md',
+        type: 'document',
+        content: 'Completed evidence',
+      }],
       tokensUsed: 1,
     }))
     mockActivities.reviewAndAmendMissionPhaseActivity
@@ -1163,7 +1167,7 @@ describe('missionWorkflow activity boundary', () => {
     expect(mockActivities.completeMissionActivity).not.toHaveBeenCalled()
   })
 
-  it('pauses visibly for provider configuration when a catalog blocker repeats', async () => {
+  it('pauses visibly for a missing secret/authorization when the blocker repeats', async () => {
     (patched as jest.Mock).mockReturnValue(true)
     const task = {
       id: 'task-send-email',
@@ -1227,14 +1231,14 @@ describe('missionWorkflow activity boundary', () => {
         plan: planWithAmendmentOne,
         phase: planWithAmendmentOne.phases[0]!,
         satisfied: false,
-        gaps: ["Tool 'email_sender' is not in the live system catalog."],
+        gaps: ["The email_sender API key is missing."],
         amendment: amendmentOne,
       })
       .mockResolvedValueOnce({
         plan: planWithAmendmentTwo,
         phase: planWithAmendmentTwo.phases[0]!,
         satisfied: false,
-        gaps: ["Tool 'email_sender' is not in the live system catalog."],
+        gaps: ["The email_sender API key is missing."],
         amendment: amendmentTwo,
       })
 
@@ -1251,7 +1255,7 @@ describe('missionWorkflow activity boundary', () => {
       pendingInteraction: {
         kind: 'user_input',
         taskId: amendmentTwo.id,
-        question: expect.stringContaining('service or configuration is missing'),
+        question: expect.stringContaining('secret or authorization is missing'),
       },
     })
     expect(mockActivities.requestMissionUserInputActivity).toHaveBeenCalledWith(
@@ -1259,5 +1263,72 @@ describe('missionWorkflow activity boundary', () => {
     )
     expect(mockActivities.reviewAndAmendMissionPhaseActivity).toHaveBeenCalledTimes(2)
     expect(mockActivities.completeMissionActivity).not.toHaveBeenCalled()
+  })
+
+  it('reruns a dependency that completed without its declared artifact before running the dependent task', async () => {
+    (patched as jest.Mock).mockReturnValue(true)
+    const phase = {
+      id: 'phase-1',
+      name: 'Execution',
+      goal: 'Produce and consume a report',
+      requiresApproval: false,
+      status: 'pending' as const,
+      tasks: [
+        {
+          id: 'task-1', title: 'Produce report', description: 'Produce report.md.',
+          agentRole: 'worker', systemPrompt: 'Produce the report.',
+          expectedArtifacts: ['report.md'], status: 'pending' as const, artifacts: [],
+        },
+        {
+          id: 'task-2', title: 'Consume report', description: 'Consume report.md.',
+          agentRole: 'worker', systemPrompt: 'Consume the report.',
+          dependsOnTaskIds: ['task-1'], expectedArtifacts: [], status: 'pending' as const, artifacts: [],
+        },
+      ],
+    }
+    const plan: Plan = {
+      summary: 'Produce and consume a report',
+      estimatedDuration: 'short',
+      estimatedCost: 'low',
+      requiresClarification: false,
+      clarificationQuestions: [],
+      clarificationAnswers: [],
+      phases: [phase],
+    }
+    let task1Runs = 0
+    mockActivities.prepareMissionActivity.mockResolvedValue(plan)
+    mockActivities.executeMissionTaskActivity.mockImplementation(async ({ task }: any) => {
+      if (task.id === 'task-1') {
+        task1Runs++
+        // First run completes without the declared artifact; the rerun produces it.
+        return task1Runs === 1
+          ? { output: 'Done', artifacts: [{ name: 'notes.txt', type: 'document', content: 'notes' }], tokensUsed: 1 }
+          : { output: 'Done', artifacts: [{ name: 'report.md', type: 'document', content: 'the full report' }], tokensUsed: 1 }
+      }
+      return { output: 'Consumed', artifacts: [], tokensUsed: 1 }
+    })
+    mockActivities.reviewAndAmendMissionPhaseActivity.mockResolvedValue({
+      plan, phase, satisfied: true, gaps: [],
+    })
+    mockActivities.completeMissionActivity.mockResolvedValue({
+      plan, outputs: { phases: [], status: 'completed' }, compensations: [],
+    })
+
+    const result = await missionWorkflow({
+      missionId: 'missing-input',
+      tenantId: 'tenant-1',
+      assistantId: 'assistant-1',
+      prompt: 'Produce and consume a report',
+    })
+
+    expect(task1Runs).toBe(2)
+    const task1Calls = mockActivities.executeMissionTaskActivity.mock.calls
+      .filter((call) => call[0].task.id === 'task-1')
+    expect(task1Calls[0]?.[0].taskRetryGuidance).toBeUndefined()
+    expect(task1Calls[1]?.[0].taskRetryGuidance).toEqual(expect.stringContaining('report.md'))
+    // The dependent ran exactly once, only after the artifact existed.
+    expect(mockActivities.executeMissionTaskActivity.mock.calls
+      .filter((call) => call[0].task.id === 'task-2')).toHaveLength(1)
+    expect(result.status).toBe('completed')
   })
 })

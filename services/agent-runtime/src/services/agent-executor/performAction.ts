@@ -7,6 +7,39 @@ import { getMissingRuntimeModule, isConfigurationFailure, classifyFailure, FAILU
 import type { ToolResult } from './types'
 import { boundedActionResult } from './util'
 
+function summarizeToolContent(content: string): string {
+  const raw = (content || '').trim()
+  if (!raw) return ''
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    const record = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : undefined
+    if (!record) return ''
+    const nested = (value: unknown): Record<string, unknown> | undefined =>
+      value && typeof value === 'object' && !Array.isArray(value)
+        ? value as Record<string, unknown>
+        : undefined
+    const candidates = [
+      nested(nested(record.output)?.output)?.error,
+      nested(record.output)?.error,
+      record.error,
+      record.message,
+      record.reason,
+      nested(record.output)?.message,
+    ]
+    for (const candidate of candidates) {
+      if (typeof candidate === 'string' && candidate.trim() && !/^\s*[\[{]/.test(candidate)) {
+        return candidate.trim()
+      }
+    }
+  } catch {
+    // Fall through to bounded plain-text content.
+  }
+  if (/^\s*[\[{]/.test(raw)) return ''
+  return boundedActionResult(raw)
+}
+
 const isHandoffToUser = (result: ToolResult): boolean =>
   result.outcome === 'permission_required' || result.outcome === 'question_asked'
 
@@ -18,6 +51,18 @@ const isHandoffToUser = (result: ToolResult): boolean =>
 export async function performAction(rc: RunContext, turn: ActionTurn): Promise<TurnEnd | undefined> {
   const { state, deps, definition, context, toolPolicy } = rc
   const { action, tools, reply, fingerprint, shape } = turn
+
+  const stopOnUncertain = async (result: ToolResult): Promise<TurnEnd | undefined> => {
+    if (!result.isError || (result.outcomeKnown !== false && classifyFailure(result.content).code !== FAILURE_CODES.OUTCOME_UNKNOWN)) return undefined
+    const detail = summarizeToolContent(result.content)
+    const reason = detail
+      ? `The outcome of tool "${action.tool}" is uncertain; reconcile the recorded action before attempting another operation. ${detail}`
+      : `The outcome of tool "${action.tool}" is uncertain; reconcile the recorded action before attempting another operation.`
+    state.finalOutput = reason
+    state.incompleteReason = reason
+    await state.save()
+    return returnWith(state.result(reason, { incompleteReason: reason, reasoning: reply.reasoning }))
+  }
 
   state.toolCalls++
   if (action.tool === DELEGATE_ACTION) state.delegations++
@@ -35,13 +80,8 @@ export async function performAction(rc: RunContext, turn: ActionTurn): Promise<T
     ...(state.fallbackToolIds.has(action.tool) ? { fallbackForToolId: state.fallbackToolIds.get(action.tool) } : {}),
   }))
 
-  if (result.isError && (result.outcomeKnown === false || classifyFailure(result.content).code === FAILURE_CODES.OUTCOME_UNKNOWN)) {
-    const reason = `The outcome of tool "${action.tool}" is uncertain; reconcile the recorded action before attempting another operation. ${boundedActionResult(result.content)}`
-    state.finalOutput = reason
-    state.incompleteReason = reason
-    await state.save()
-    return returnWith(state.result(reason, { incompleteReason: reason, reasoning: reply.reasoning }))
-  }
+  const uncertainAction = await stopOnUncertain(result)
+  if (uncertainAction) return uncertainAction
 
   // A failure may be fixable by resolving a different capability.
   const missingModule = result.isError ? getMissingRuntimeModule(result.content) : undefined
@@ -76,6 +116,8 @@ export async function performAction(rc: RunContext, turn: ActionTurn): Promise<T
   }) : undefined
   if (recovery && 'end' in recovery) return recovery.end
   if (recovery) result = recovery.result
+  const uncertainRecovery = await stopOnUncertain(result)
+  if (uncertainRecovery) return uncertainRecovery
 
   if (isHandoffToUser(result)) {
     await state.save()

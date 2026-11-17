@@ -1,3 +1,9 @@
+/**
+ * The per-step activities in this file are invoked only by the deprecated,
+ * unwired missionWorkflow. The live engine is MissionOrchestrator
+ * (runMissionDirect), which calls MissionAgentRuntime directly. Types and the
+ * missionActivities bundle remain exported for compatibility.
+ */
 import { Context } from '@temporalio/activity';
 import {
   DEFAULT_AGENT_EXECUTION_POLICY,
@@ -30,6 +36,12 @@ export interface MissionTaskActivityInput {
   phase: Phase;
   task: Task;
   completedTaskSummaries?: CompletedTaskSummary[];
+  /**
+   * Guidance injected when the workflow reopens a completed task for a bounded
+   * rerun because it did not produce a declared artifact (a missing input).
+   * Takes precedence over the mission-level `input.retryGuidance`.
+   */
+  taskRetryGuidance?: string;
 }
 
 export interface MissionUserInputActivityInput extends MissionTaskActivityInput {
@@ -484,13 +496,15 @@ export async function executeMissionTaskActivity({
   phase,
   task,
   completedTaskSummaries = [],
+  taskRetryGuidance,
 }: MissionTaskActivityInput): Promise<TaskExecutionResult> {
   const activityContext = Context.current();
   const retrying = activityContext.info.attempt > 1;
-  const retryGuidance = retrying
-    ? input.retryGuidance || 'Continue from the work saved so far. Do not repeat actions outside the system when their outcome is already recorded or uncertain.'
-
-    : input.retryGuidance;
+  const retryGuidance = taskRetryGuidance
+    ? taskRetryGuidance
+    : retrying
+      ? input.retryGuidance || 'Continue from the work saved so far. Do not repeat actions outside the system when their outcome is already recorded or uncertain.'
+      : input.retryGuidance;
   const agentRuntime = new MissionAgentRuntime({
     missionId: input.missionId,
     tenantId: input.tenantId || 'tenant-1',

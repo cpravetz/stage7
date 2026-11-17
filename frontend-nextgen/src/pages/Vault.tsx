@@ -46,7 +46,7 @@ const Vault = () => {
     setLoading(true);
     setError(null);
     try {
-      await putJSON(`/api/vault/secrets/name/${encodeURIComponent(name)}`, { plaintext, tenantId: 'system' });
+      await putJSON(`/api/vault/secrets/name/${encodeURIComponent(name)}`, { plaintext });
       setName('');
       setPlaintext('');
       await loadSecrets();

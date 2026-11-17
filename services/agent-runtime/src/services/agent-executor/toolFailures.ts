@@ -75,7 +75,10 @@ export function classifyFailure(error: unknown): ClassifiedFailure {
     return { code: FAILURE_CODES.CREDENTIAL_REQUIRED, message, retryable: false, needsUserInput: true, adaptation: 'request_user_input' }
   }
   if (lower.includes('not configured') || lower.includes('missing credential') || lower.includes('requires credential') || lower.includes('credential missing') || lower.includes('not found') || lower.includes('module not found') || lower.includes('cannot find module') || lower.includes('tool not found') || lower.includes('not in the live system catalog')) {
-    return { code: FAILURE_CODES.TOOL_MISSING, message, retryable: true, needsUserInput: true, adaptation: 'select_alternative_tool' }
+    // A missing tool is not a user task: the system must discover, compose, or
+    // create and verify a capability itself. Only secrets/authorization (handled
+    // above as CREDENTIAL_REQUIRED) may be requested from the user.
+    return { code: FAILURE_CODES.TOOL_MISSING, message, retryable: true, needsUserInput: false, adaptation: 'select_alternative_tool' }
   }
   return { code: FAILURE_CODES.UNKNOWN_FAILURE, message, retryable: false, needsUserInput: false, adaptation: 'stop_with_blocker' }
 }

@@ -94,6 +94,95 @@ describe('mission tool configuration', () => {
       }
   });
 
+  it('repairs a schema-invalid acceptance contract before generating the plugin', async () => {
+    jest.spyOn(ToolDiscovery.prototype, 'discoverAndRegister').mockResolvedValue(undefined);
+    const validContract = {
+      description: 'Verify SMS submission',
+      cases: [{
+        name: 'sends SMS',
+        input: {},
+        expectedOutput: { success: true },
+        httpMocks: [{ method: 'POST', urlPattern: 'https://api.example.test/messages', responseStatus: 200, responseBody: {} }],
+      }],
+    };
+    const invalidContract = structuredClone(validContract);
+    (invalidContract.cases[0].httpMocks[0] as { responseBody: unknown }).responseBody = 'invalid';
+    const plugin = {
+      id: 'sms-probe', name: 'SMS probe', description: 'Send SMS', type: 'code',
+      language: 'python', entrypoint: 'main.py', sourceCode: 'print("{}")', requirements: [],
+      configSchema: { type: 'object', properties: {} },
+      inputs: { type: 'object', properties: {} }, outputs: { type: 'object', properties: {} },
+    };
+    const prompts: string[] = [];
+    let brainCall = 0;
+    jest.spyOn(global, 'fetch').mockImplementation(async (_input, init) => {
+      const body = JSON.parse(String(init?.body)) as { prompt: string };
+      prompts.push(body.prompt);
+      return {
+        ok: true, status: 200,
+        json: async () => ({ content: JSON.stringify([invalidContract, validContract, plugin][brainCall++]) }),
+      } as Response;
+    });
+
+    jest.spyOn(CodeExecutor.prototype, 'execute').mockResolvedValue({ success: true, output: '{"success":true}' });
+
+    const result = await new PluginGenerator().generate({ description: 'Send SMS', requirements: [] });
+    expect(result.success).toBe(true);
+    expect(prompts[1]).toContain('cases.0.httpMocks.0.responseBody');
+  });
+
+  it('validates a generated SMS tool with dummy credentials and an isolated provider fixture', async () => {
+      jest.spyOn(ToolDiscovery.prototype, 'discoverAndRegister').mockResolvedValue(undefined);
+      const contract = {
+        description: 'Verify SMS submission',
+        cases: [{
+          name: 'sends SMS',
+          input: { to: '+15555550100', body: 'Hello' },
+          credentials: { account_id: 'ACtest', auth_token: 'dummy-token' },
+          expectedOutput: { success: true, messageId: 'message-test' },
+          httpMocks: [{
+            method: 'POST', urlPattern: 'https://api.twilio.com/2010-04-01/Accounts/*/Messages.json',
+            expectedRequestBody: 'To=%2B15555550100&Body=Hello',
+            responseStatus: 201, responseBody: { sid: 'message-test' },
+          }],
+        }],
+      };
+      const plugin = {
+        id: 'sms-probe', name: 'SMS probe', description: 'Send SMS', type: 'code',
+        language: 'python', entrypoint: 'main.py', requirements: [],
+        sourceCode: `import json
+import urllib.request
+import urllib.parse
+account = __get_credential('account_id')
+token = __get_credential('auth_token')
+if not account or not token:
+      raise ValueError('missing credentials')
+data = urllib.parse.urlencode({'To': __tool_input['to'], 'Body': __tool_input['body']}).encode()
+request = urllib.request.Request('https://api.twilio.com/2010-04-01/Accounts/' + account + '/Messages.json', data=data, method='POST')
+with urllib.request.urlopen(request) as response:
+      result = json.loads(response.read().decode())
+print(json.dumps({'success': True, 'messageId': result['sid']}))`,
+        configSchema: {
+          type: 'object',
+          properties: {
+            account_id: { type: 'string', vaultSecretId: 'account-id' },
+            auth_token: { type: 'string', vaultSecretId: 'auth-token', sensitive: true },
+          },
+          required: ['account_id', 'auth_token'],
+        },
+        inputs: { type: 'object', properties: {} }, outputs: { type: 'object', properties: {} },
+      };
+      let brainCall = 0;
+      jest.spyOn(global, 'fetch').mockImplementation(async () => ({
+        ok: true, status: 200,
+        json: async () => ({ content: JSON.stringify(brainCall++ === 0 ? contract : plugin) }),
+      } as Response));
+
+      const result = await new PluginGenerator().generate({ description: 'Send SMS', requirements: [] });
+      expect(result.success).toBe(true);
+      expect(result.tool?.manifest?.validation).toMatchObject({ passed: true, testCount: 1 });
+  });
+
   it('resolves previously supplied values from the tool-specific vault entry', async () => {
     const fetcher = jest.spyOn(global, 'fetch').mockResolvedValue({
       ok: true,

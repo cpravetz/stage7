@@ -1,4 +1,4 @@
-import { MissionArtifact, MissionArtifactSchema } from '@stage7-nextgen/shared';
+import { MissionArtifact, MissionArtifactSchema, type Task } from '@stage7-nextgen/shared';
 import type { TaskExecutionResult } from './TaskExecutionResult';
 
 const ASK_USER_MARKER = '__ASK_USER__:';
@@ -52,15 +52,7 @@ export function assertExpectedArtifacts(
   expected: string[],
   taskId: string,
 ): void {
-  const normalize = (value: string) => value.trim().toLocaleLowerCase();
-  const missing = expected.filter((name) => {
-    const artifact = artifacts.find((candidate) => normalize(candidate.name) === normalize(name));
-    if (!artifact || artifact.purpose === 'execution-outcome' || artifact.status === 'blocked') return true;
-    if (typeof artifact.content === 'string') {
-      return !artifact.content.trim() || isExecutionOutcomeReport(artifact.content);
-    }
-    return artifact.url === undefined && artifact.data === undefined;
-  });
+  const missing = missingExpectedArtifacts(artifacts, expected);
   if (missing.length === 0) return;
 
   const blocker = artifacts.find((artifact) =>
@@ -73,6 +65,54 @@ export function assertExpectedArtifacts(
   throw new Error(
     `Task "${taskId}" did not produce the expected deliverable${missing.length === 1 ? '' : 's'}: ${missing.join(', ')}.${reason}`,
   );
+}
+
+/**
+ * The subset of `expected` deliverable names that `artifacts` does NOT satisfy.
+ * A name is satisfied only by an artifact that carries real, retrievable content:
+ * present, not an internal execution-outcome report, not blocked, and either has
+ * non-empty textual content, a URL, or data. This is the single authoritative
+ * definition of "did the task produce its declared deliverable", shared by the
+ * completion assertion and by dependency/readiness checks.
+ */
+export function missingExpectedArtifacts(artifacts: MissionArtifact[], expected: string[]): string[] {
+  const normalize = (value: string) => value.trim().toLocaleLowerCase();
+  return expected.filter((name) => {
+    const artifact = artifacts.find((candidate) => normalize(candidate.name) === normalize(name));
+    if (!artifact || artifact.purpose === 'execution-outcome' || artifact.status === 'blocked') return true;
+    if (typeof artifact.content === 'string') {
+      return !artifact.content.trim() || isExecutionOutcomeReport(artifact.content);
+    }
+    return artifact.url === undefined && artifact.data === undefined;
+  });
+}
+
+/**
+ * Names from a dependency task's `expectedArtifacts` that the dependency did NOT
+ * actually produce with usable content. Empty when the dependency produced every
+ * declared deliverable, or declared none (e.g. an action-only task).
+ */
+export function dependencyArtifactGaps(dependency: Task): string[] {
+  return missingExpectedArtifacts(dependency.artifacts || [], dependency.expectedArtifacts || []);
+}
+
+/**
+ * For a pending task, the completed dependencies that are missing a declared
+ * artifact. A non-empty result means the task has a *missing input* and must not
+ * start until the deficient dependency produces the artifact.
+ */
+export function missingDependencyInputs(
+  task: Task,
+  taskById: Map<string, Task>,
+): Array<{ dependencyTaskId: string; missingArtifacts: string[] }> {
+  const gaps: Array<{ dependencyTaskId: string; missingArtifacts: string[] }> = [];
+  for (const dependencyId of task.dependsOnTaskIds || []) {
+    const dependency = taskById.get(dependencyId);
+    if (!dependency || dependency.status !== 'completed') continue;
+    const missing = dependencyArtifactGaps(dependency);
+    if (missing.length > 0) gaps.push({ dependencyTaskId: dependencyId, missingArtifacts: missing });
+  }
+  return gaps;
 }
 
 export function parseActionReceipts(
