@@ -16,7 +16,7 @@ import {
   resolveAgentIdentity,
 } from '../agent/MissionAgentRuntime';
 import { applyRuntimeTaskRequirements } from '../agent/TaskRequirements';
-import { dependencyArtifactGaps, missingDependencyInputs } from '../agent/TaskResultParser';
+import { dependencyArtifactGaps, missingDependencyInputs, missingExpectedArtifacts } from '../agent/TaskResultParser';
 import {
   CompletedTaskSummary,
   classifyMissionCompletionGaps,
@@ -1582,9 +1582,9 @@ agentRole: 'mission-executor',
         lastRecoveryIssue ? ` The previous recovery attempt reported: ${lastRecoveryIssue.slice(0, 1000)}. Address that specific blocker; do not repeat a failed tool call unchanged.` : '',
       ].join('');
 
-      const availableArtifacts = new Set(phaseOutput.tasks.flatMap((task) =>
-        task.artifacts.map((artifact) => artifact.name.toLocaleLowerCase()),
-      ));
+      const availableArtifacts = phaseOutput.tasks
+        .filter((task) => task.status === 'completed')
+        .flatMap((task) => task.artifacts);
       const gapArtifactNames = [...new Set(gaps.flatMap((gap) => {
         const matches = gap.match(/"([^"]+\.(?:json|md|txt|csv|ya?ml|html))"/gi) || [];
         return matches.map((m) => m.replace(/"/g, '')).filter((name) => name.toLocaleLowerCase() !== 'system-action-receipts.json');
@@ -1594,7 +1594,7 @@ agentRole: 'mission-executor',
           .filter((task) => targetTaskIds.includes(task.id))
           .flatMap((task) => task.expectedArtifacts || []),
         ...gapArtifactNames,
-      ])].filter((name) => !availableArtifacts.has(name.toLocaleLowerCase()));
+      ])].filter((name) => !availableArtifacts.some((artifact) => missingExpectedArtifacts([artifact], [name]).length === 0));
       const expectedArtifacts = targetedExpectedArtifacts.length > 0
         ? targetedExpectedArtifacts.slice(0, 5)
         : [];
@@ -1621,7 +1621,7 @@ agentRole: 'mission-executor',
         title: `Resolve mission completion gaps (attempt ${recoveryIndex})`,
         description: `Resolve missing deliverables: ${expectedArtifacts.join(', ') || 'required artifacts'}.`,
         agentRole: 'mission-executor',
-        systemPrompt: `Resolve missing deliverables for mission goal "${ctx.prompt}" in phase "${recoveryPhase.name}". Produce ${expectedArtifacts.join(', ') || 'the required artifacts'}. Use recorded task outputs as context. Execute tools, not plans.${noProgressGuidance}`,
+        systemPrompt: `Resolve the remaining gaps for tasks: ${targetTaskIds.join(', ') || 'none identified'}. Mission goal: "${ctx.prompt}". Phase: "${recoveryPhase.name}". Produce ${expectedArtifacts.join(', ') || 'the required results'}. Use recorded task outputs as context. Perform the work yourself; use tools when needed, but do not substitute a plan or ask the user to produce the deliverable.${noProgressGuidance}`,
         dependsOnTaskIds: taskIds,
         expectedArtifacts,
         requiredActions: [],

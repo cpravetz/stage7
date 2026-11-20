@@ -1645,7 +1645,7 @@ export class MissionAgentRuntime {
       'Return a JSON object: {"accepted":["artifact-name-1"],"rejected":["artifact-name-2"],"reason":"explanation if any rejected"}',
       'An artifact is rejected if it does not fulfill the task intent, is incomplete, or is a placeholder/boilerplate.',
       'Artifacts to review:',
-      ...reviewArtifacts.map((artifact) => `- ${artifact.name} (${artifact.type}): ${typeof artifact.content === 'string' ? artifact.content.slice(0, 1_000) : artifact.url || '(no content)'}`),
+      ...reviewArtifacts.map((artifact) => `- ${artifact.name} (${artifact.type}): ${typeof artifact.content === 'string' ? artifact.content.slice(0, 20_000) : artifact.url || '(no content)'}${typeof artifact.content === 'string' && artifact.content.length > 20_000 ? '\n[Content truncated for review; do not conclude that requirements are missing from the unseen portion.]' : ''}`),
     ].join('\n');
     const schema = z.object({
       accepted: z.array(z.string()),

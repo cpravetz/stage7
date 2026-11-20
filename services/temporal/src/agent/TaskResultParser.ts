@@ -222,7 +222,8 @@ function inferArtifactType(content: string): string {
 export function extractArtifacts(content: string, expected: string[]): MissionArtifact[] {
   if (expected.length === 0) return [];
   const artifacts: MissionArtifact[] = [];
-  const headings = [...content.matchAll(/^##[ \t]+(.+?)[ \t]*$/gm)];
+  const headings = [...content.matchAll(/^##[ \t]+(.+?)[ \t]*$/gm)]
+    .filter((heading) => expected.some((name) => normalizeArtifactName(name) === normalizeArtifactName(heading[1] || '')));
   for (const [index, heading] of headings.entries()) {
     const name = heading[1]?.trim();
     if (!name) continue;

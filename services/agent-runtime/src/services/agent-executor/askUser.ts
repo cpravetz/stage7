@@ -14,6 +14,13 @@ const TRANSCRIPT_TAG_PATTERN = /<\/?(?:your_previous_reply|system_feedback|task)
 export const CAPABILITY_RESOLUTION_GUIDANCE =
   'Do not ask the user to choose a provider or provide tool credentials before checking available integrations. Re-read the mission, inspect the live catalog, and use __create_tool to resolve the capability so configured integrations and credentials can be used. Ask only for a specific missing value or an actual authorization or service decision.'
 
+export const DELIVERABLE_GUIDANCE =
+  'Do not ask the user to create the assigned deliverable. Produce it yourself from the mission context and available evidence. Ask only for a specific necessary fact, decision, credential, or permission that is unavailable.'
+
+export function asksUserToProduceDeliverable(question: string): boolean {
+  return /\b(?:please\s+)?(?:create|write|draft|produce|prepare|complete|generate)\b.{0,100}\b(?:deliverable|artifact|report|brief|analysis|document)\b/i.test(question)
+}
+
 export function asksUserToManageTools(question: string): boolean {
   return /\b(?:please\s+)?(?:register|install|create|build|develop|configure|set up|enable)\b.{0,100}\b(?:tool|skill|plugin|integration|mcp|service)\b/i.test(question)
     || /\b(?:tool|skill|plugin|integration|mcp)\b.{0,100}\b(?:register|install|create|configure|set up)\s+(?:it|the tool|the skill)\b/i.test(question)

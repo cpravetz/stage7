@@ -7,6 +7,7 @@ import {
   buildTranscript,
   CONVERSATION_EVENT_TYPES,
   friendlyMissionError,
+  missionReviewMessage,
   summarizeModelUsage,
   TIMELINE_EVENT_TYPES,
 } from './missionEvents';
@@ -29,6 +30,20 @@ describe('friendlyMissionError', () => {
     expect(friendlyMissionError(
       'Agent Runtime API /missions/Oct30-2/agents/agent-Oct30-2-planner failed (500): Request timed out after 1860000ms',
     )).toBe('Mission agent request timed out after 31 minute(s). The planner did not finish generating a plan.');
+  });
+  describe('missionReviewMessage', () => {
+    it('summarizes missing deliverables without dumping escaped task output', () => {
+      const message = missionReviewMessage({ gaps: [
+        'Task "Research" (task-1) has no execution result.',
+        'Task "Recovery" (task-2) is incomplete. Reason: \\nDraft\\nContent',
+        'Task "Recovery" (task-2) is missing expected artifact "brief.txt". No content.',
+        'Task "Retry" (task-3) is missing expected artifact "brief.txt". No content.',
+      ] });
+      expect(message).toContain('the agents could not complete brief.txt');
+      expect(message).not.toContain('\\n');
+      expect(message).not.toContain('Draft');
+      expect(message).not.toContain('task-2');
+    });
   });
 
   it('explains when no eligible model provider is available', () => {

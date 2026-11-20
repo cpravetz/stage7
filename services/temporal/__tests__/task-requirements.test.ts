@@ -1,5 +1,5 @@
 import { Phase, Plan, Task } from '@stage7-nextgen/shared'
-import { buildTaskPrompt } from '../src/agent/TaskPromptBuilder'
+import { buildTaskPrompt, recoveryDeliverableInstructions } from '../src/agent/TaskPromptBuilder'
 import { applyRuntimeTaskRequirements } from '../src/agent/TaskRequirements'
 import {
   CompletedTaskSummary,
@@ -41,6 +41,18 @@ const plan: Plan = {
 }
 
 describe('runtime task requirements', () => {
+  it('includes the original requirements for the missing recovery deliverable', () => {
+    const original = { ...task, id: 'phase-1-task-1', description: 'Research five concepts', systemPrompt: 'Include costs for each concept', expectedArtifacts: ['brief.txt'] }
+    const recovery = { ...task, id: 'phase-1-mission-recovery-1', systemPrompt: 'Obsolete recovery instructions', expectedArtifacts: ['brief.txt'] }
+    expect(recoveryDeliverableInstructions([original, recovery], ['BRIEF.TXT']))
+      .toContain('Research five concepts\nInclude costs for each concept')
+    expect(recoveryDeliverableInstructions([original, recovery], ['brief.txt']))
+      .not.toContain('Obsolete recovery instructions')
+    expect(buildTaskPrompt(original, phase, plan, [])).toContain('Produce each expected deliverable')
+    const recoveryPlan = { ...plan, phases: [{ ...phase, tasks: [original, recovery] }] }
+    expect(buildTaskPrompt(recovery, phase, recoveryPlan, [])).toContain('Include costs for each concept')
+  })
+
   it('treats only secret/authorization gaps as configuration blockers, independent of attempt numbers', () => {
     const first = 'The email_sender API key is missing (attempt 1).'
     const second = 'The email_sender API key is missing (attempt 4).'

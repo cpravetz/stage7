@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { fetchJSON, postJSON, putJSON, deleteResource } from '../utils/api';
 import { SchemaFields } from '../components/SchemaFields';
 import OutputTemplate from '../components/OutputTemplate';
@@ -97,6 +97,7 @@ const safeParseJsonAny = (text: string): { ok: true; value: unknown } | { ok: fa
 
 const Tools = () => {
   const [searchParams] = useSearchParams();
+  const { toolId: routeToolId } = useParams<{ toolId?: string }>();
   const [tools, setTools] = useState<Tool[]>([]);
   const [assistants, setAssistants] = useState<AssistantWithTools[]>([]);
   const [assignSelection, setAssignSelection] = useState<Record<string, string>>({});
@@ -143,8 +144,8 @@ const Tools = () => {
     error?: string;
     [key: string]: unknown;
   } | null>(null);
-  const requestedToolId = searchParams.get('tool');
-  const requestedTab = searchParams.get('tab');
+  const requestedToolId = routeToolId || searchParams.get('tool');
+  const requestedTab = routeToolId ? 'configure' : searchParams.get('tab');
 
   const loadTools = async () => {
     setLoading(true);

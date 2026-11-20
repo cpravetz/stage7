@@ -2,7 +2,9 @@ import type { BrainClient } from './BrainClient'
 import {
   asksForProviderSetup,
   asksUserToManageTools,
+  asksUserToProduceDeliverable,
   CAPABILITY_RESOLUTION_GUIDANCE,
+  DELIVERABLE_GUIDANCE,
   extractAskUserQuestion,
   hasTriedToolAfterResolution,
   isVagueQuestion,
@@ -106,7 +108,22 @@ async function handleAskUserReply(rc: RunContext, { content, reasoning }: BrainR
     await state.save()
     return NEXT_TURN
   }
-  const question = relevant.slice(ASK_USER_MARKER.length)
+  let question = relevant.slice(ASK_USER_MARKER.length)
+  if (question.startsWith('{')) {
+    try {
+      const payload: unknown = JSON.parse(question)
+      if (payload && typeof payload === 'object' && 'question' in payload && typeof payload.question === 'string') {
+        question = payload.question
+      }
+    } catch {
+      // The interruption parser reports malformed structured requests.
+    }
+  }
+  if (asksUserToProduceDeliverable(question)) {
+    state.tell(DELIVERABLE_GUIDANCE)
+    await state.save()
+    return NEXT_TURN
+  }
   if (isVagueQuestion(question)) {
     state.tell(`Your question is too vague. You must name the exact missing value, the tool or service that needs it, and why it is required. Bad: "Please provide the missing value." Good: "Please provide the API key for the SMS Sender tool so I can send the message."`)
     await state.save()

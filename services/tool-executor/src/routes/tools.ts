@@ -39,8 +39,23 @@ router.post(
       createdAt: new Date(),
       updatedAt: new Date(),
     }
-    registry.register(tool)
+    registry.registerOrReplace(tool)
     res.status(201).json(tool)
+  })
+)
+
+router.put(
+  '/tools/:id',
+  asyncHandler(async (req: Request, res: Response) => {
+    const data = toolSchema.parse({ ...req.body, id: req.params.id })
+    const existing = registry.get(req.params.id)
+    const tool: Tool = {
+      ...data,
+      createdAt: existing?.createdAt || new Date(),
+      updatedAt: new Date(),
+    }
+    registry.registerOrReplace(tool)
+    res.json(tool)
   })
 )
 

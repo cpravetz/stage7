@@ -282,6 +282,30 @@ describe('AgentExecutor', () => {
     ])
   })
 
+  it.each([
+    '__ASK_USER__:Please write the research brief for this task.',
+    '__ASK_USER__:{"question":"Please create the research brief for this task."}',
+    '{"tool":"ask_user","args":{"question":"Please draft the research brief for this task."}}',
+  ])('redirects requests for the user to produce an assigned deliverable', async (firstResponse) => {
+    let turn = 0
+    const prompts: string[] = []
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) return jsonResponse({ tools: [] })
+      if (url.endsWith('/api/brain/complete')) {
+        prompts.push(String((JSON.parse(String(init?.body)) as { prompt: string }).prompt))
+        return jsonResponse({ content: turn++ === 0 ? firstResponse : '## brief.txt\n## Findings\nResearch findings.' })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+    const result = await new AgentExecutor({ fetcher }).execute(definition, {
+      ...task(), agentId: definition.id, createdAt: new Date().toISOString(),
+      input: { prompt: 'Research and write a brief.', context: { expectedArtifacts: ['brief.txt'] } },
+    } as AgentTask, { missionId: 'mission-1', delegationDepth: 0 })
+    expect(result.output).toBe('## brief.txt\n## Findings\nResearch findings.')
+    expect(prompts[1]).toContain('Do not ask the user to create the assigned deliverable')
+  })
+
   it('executes required tool actions before accepting an otherwise complete answer', async () => {
     const prompts: string[] = []
     const complaints: Array<{ requestId: string; reason: string; missionId: string }> = []

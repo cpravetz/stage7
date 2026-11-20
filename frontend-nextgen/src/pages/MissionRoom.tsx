@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import { useFeedStore, FeedEvent } from '../stores/feedStore';
 import AgentOutputsPanel from '../components/AgentOutputsPanel';
 import { MissionDetail, useMissionsStore } from '../stores/missionsStore';
-import { postFormData, postJSON, putJSON } from '../utils/api';
+import { fetchJSON, postFormData, postJSON, putJSON } from '../utils/api';
 import MissionArtifactContent from '../components/MissionArtifactContent';
 import {
   getArtifactMediaCategory,
@@ -421,7 +421,25 @@ const MissionRoom = () => {
   const [interactionConfigurationReady, setInteractionConfigurationReady] = useState(false);
   const [interactionCredentials, setInteractionCredentials] = useState<Record<string, string>>({});
   const [interactionResponse, setInteractionResponse] = useState('');
+  const [dismissedInteractionKey, setDismissedInteractionKey] = useState<string | null>(null);
   const [permissionScope, setPermissionScope] = useState('');
+  const [tools, setTools] = useState<Array<{ id: string; name: string }>>([]);
+  const [toolsLoaded, setToolsLoaded] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await fetchJSON<{ tools: Array<{ id: string; name: string }> }>('/api/tool-executor/tools');
+        if (!cancelled) setTools((data.tools || []).filter((t) => !t.id.startsWith('skill-')));
+      } catch {
+        if (!cancelled) setTools([]);
+      } finally {
+        if (!cancelled) setToolsLoaded(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const [messageText, setMessageText] = useState('');
   const transcriptRef = useRef<HTMLDivElement>(null);
@@ -460,6 +478,9 @@ const MissionRoom = () => {
   }, [ensureConnected]);
 
   const pendingInteraction = detail?.output?.outputs?.pendingInteraction;
+  const pendingInteractionKey = pendingInteraction
+    ? `${pendingInteraction.phaseId || ''}:${pendingInteraction.taskId || ''}:${pendingInteraction.requestId || ''}:${pendingInteraction.question || ''}`
+    : null;
   useEffect(() => {
     setInteractionConfigurationReady(false);
     setInteractionCredentials({});
@@ -729,6 +750,9 @@ const MissionRoom = () => {
       : configureInSettings || configurationProvided
         ? 'The requested values were provided securely.'
         : responseText;
+    setDismissedInteractionKey(
+      `${pending.phaseId || ''}:${pending.taskId || ''}:${pending.requestId || ''}:${pending.question || ''}`,
+    );
     setInteractionSubmitting(true);
     setControlError(null);
     appendOptimisticUserResponse(responseMessage, 'user', pending.phaseId, pending.taskId);
@@ -924,7 +948,6 @@ const MissionRoom = () => {
         && !(detail.output?.outputs?.status === 'awaiting_clarification' && plan?.requiresClarification)
         && (
           <section className="warning-banner" aria-label="Mission review">
-            <strong>Mission needs review</strong>
             <p style={{ whiteSpace: 'pre-wrap' }}>
               {missionReviewMessage({
                 gaps: detail.output?.outputs?.gaps,
@@ -979,7 +1002,9 @@ const MissionRoom = () => {
         </div>
       )}
 
-      {detail?.output?.outputs?.pendingInteraction && !interactionSubmitting && (() => {
+      {detail?.output?.outputs?.pendingInteraction
+        && pendingInteractionKey !== dismissedInteractionKey
+        && !interactionSubmitting && (() => {
         const pending = detail.output.outputs.pendingInteraction;
         const secretKeys = pending.kind === 'user_input' ? secretKeysForInteraction(pending) : [];
         const secretQuestion = pending.kind === 'user_input'
@@ -993,13 +1018,21 @@ const MissionRoom = () => {
         const hasProvidedCredentials = Boolean(pending.credentialRequest)
           && secretKeys.every((key) => interactionCredentials[key]?.trim());
         const hasSmtpCredentials = secretKeys.some((key) => key.startsWith('smtp_'));
+        const questionText = (pending.question || pending.permission?.explanation || '').toLowerCase();
+        const matchedTool = toolsLoaded
+          ? tools.find((t) => questionText.includes(t.name.toLowerCase()) || questionText.includes(t.id.toLowerCase()))
+          : undefined;
+        const matchedToolId = matchedTool?.id;
+        const matchedToolLabel = matchedTool?.name || 'tool';
         const configureToolId = pending.credentialRequest?.toolId
-          || (hasSmtpCredentials ? 'email_sender' : undefined);
+          || (hasSmtpCredentials ? 'email_sender' : undefined)
+          || matchedToolId;
         const configureToolLabel = pending.credentialRequest?.toolName
-          || (hasSmtpCredentials ? 'Email Sender' : 'tool');
+          || matchedToolLabel
+          || (hasSmtpCredentials ? 'Email Sender' : 'Tool');
         const credentialToolId = pending.credentialRequest?.toolId;
         const toolSettingsUrl = configureToolId
-          ? `/tools?tool=${encodeURIComponent(configureToolId)}&tab=configure`
+          ? `/tools/${encodeURIComponent(configureToolId)}/config`
           : '/tools';
         const permission = pending.permission;
         return (
@@ -1437,28 +1470,30 @@ const MissionRoom = () => {
               </div>
             </div>
           </div>
-          <div className="composer">
-            {sendError && <div className="error-banner">{sendError}</div>}
-            <textarea
-              ref={inputRef}
-              value={messageText}
-              onChange={(e) => setMessageText(e.target.value)}
-              placeholder="Send messages to the mission (agent outputs stream here)..."
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                  e.preventDefault();
-                  sendMessage();
-                }
-              }}
-              rows={3}
-            />
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span className="muted">Cmd/Ctrl+Enter to send</span>
-              <button onClick={sendMessage} disabled={sending}>
-                {sending ? 'Sending...' : 'Send'}
-              </button>
+          {!detail?.output?.outputs?.pendingInteraction && (
+            <div className="composer">
+              {sendError && <div className="error-banner">{sendError}</div>}
+              <textarea
+                ref={inputRef}
+                value={messageText}
+                onChange={(e) => setMessageText(e.target.value)}
+                placeholder="Send messages to the mission (agent outputs stream here)..."
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                    e.preventDefault();
+                    sendMessage();
+                  }
+                }}
+                rows={3}
+              />
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span className="muted">Cmd/Ctrl+Enter to send</span>
+                <button onClick={sendMessage} disabled={sending || Boolean(detail?.output?.outputs?.pendingInteraction)}>
+                  {sending ? 'Sending...' : 'Send'}
+                </button>
+              </div>
             </div>
-          </div>
+          )}
         </div>
       )}
 

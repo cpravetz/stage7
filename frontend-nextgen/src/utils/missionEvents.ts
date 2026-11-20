@@ -884,16 +884,32 @@ export function missionReviewMessage(data: Record<string, unknown>): string {
   const gaps = Array.isArray(data.gaps)
     ? data.gaps.filter((gap): gap is string => typeof gap === 'string' && gap.trim().length > 0)
     : [];
+  const missingArtifacts = [...new Set(gaps.flatMap((gap) => {
+    const match = gap.match(/missing expected artifact "([^"\r\n]+)"/i);
+    return match ? [match[1]] : [];
+  }))];
+  if (missingArtifacts.length > 0) {
+    const names = missingArtifacts.slice(0, 3).join(', ');
+    const extra = gaps.length > missingArtifacts.length || missingArtifacts.length > 3
+      ? ' More details are available in the mission timeline.'
+      : '';
+    const caution = data.outcomeUncertain === true || gaps.some((gap) => /\buncertain\b|outcome.?unknown/i.test(gap))
+      ? ' Verify the uncertain outcome before resuming; do not repeat the action.'
+      : '';
+    return `Mission needs review: the agents could not complete ${names}.${extra}${caution} Select Resume to retry or send guidance.`;
+  }
   const friendlyGaps = gaps.map((gap) => {
-    const friendly = gap.replace(/\baction receipt(s?)\b/gi, 'recorded result$1');
+    const friendly = gap.split(/\s+Reason:\s*/i)[0]
+      .replace(/\\r\\n|\\n/g, '\n')
+      .replace(/\baction receipt(s?)\b/gi, 'recorded result$1');
     return sanitizeAgentMessage(friendly, '').text
       || sanitizeAgentMessage(friendly.split(/(?<=[.!?])\s+/)[0], '').text;
   }).filter(Boolean);
-  const gapText = missionGapText(friendlyGaps.slice(0, 8));
+  const gapText = missionGapText(friendlyGaps.slice(0, 3));
   if (gapText) {
     const reason = typeof data.reason === 'string' ? sanitizeAgentMessage(data.reason, '').text : '';
     const introduction = reason ? `${reason}${/[.!?]$/.test(reason) ? '' : '.'} ` : '';
-    const extra = (typeof data.omittedGapCount === 'number' && data.omittedGapCount > 0) || friendlyGaps.length > 8
+    const extra = (typeof data.omittedGapCount === 'number' && data.omittedGapCount > 0) || friendlyGaps.length > 3
       ? ` Additional issues are available in the mission details.`
       : '';
     const caution = data.outcomeUncertain === true || /\buncertain\b|outcome.?unknown/i.test(gapText)

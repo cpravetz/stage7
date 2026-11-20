@@ -182,6 +182,7 @@ export function hasExternalActionReceipt(receipts: AgentActionReceipt[], require
 export function missingExpectedArtifactSections(content: string, expected: string[]): string[] {
   if (expected.length === 0) return []
   const headings = [...content.matchAll(/^##[ \t]+(.+?)[ \t]*$/gm)]
+    .filter((heading) => expected.some((name) => name.toLocaleLowerCase() === heading[1]?.trim().toLocaleLowerCase()))
   const sectionNames = new Set<string>()
   headings.forEach((heading, index) => {
     const name = heading[1]?.trim().toLocaleLowerCase()

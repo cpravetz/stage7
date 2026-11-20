@@ -4,7 +4,7 @@ import { Plan } from '@stage7-nextgen/shared'
 import { MISSION_TASK_EXECUTION_POLICY, MissionAgentRuntime } from '../src/agent/MissionAgentRuntime'
 import type { MissionActivityCheckpoint } from '../src/types/workflow'
 import { completedTaskIdsWithSummaries } from '../src/types/workflow'
-import { dependencyArtifactGaps, missingDependencyInputs, missingExpectedArtifacts } from '../src/agent/TaskResultParser'
+import { dependencyArtifactGaps, extractArtifacts, missingDependencyInputs, missingExpectedArtifacts } from '../src/agent/TaskResultParser'
 import { MissionCompletedListener } from '../src/listeners/MissionCompletedListener'
 
 function jsonResponse(body: unknown = {}): Response {
@@ -18,6 +18,17 @@ function jsonResponse(body: unknown = {}): Response {
 }
 
 describe('MissionOrchestrator checkpoint recovery', () => {
+  it('retains internal headings within each named deliverable', () => {
+    const artifacts = extractArtifacts(
+      '## brief.txt\nSummary\n## Findings\nFive concepts.\n## analysis.txt\n## Ranking\nThree candidates.',
+      ['brief.txt', 'analysis.txt'],
+    )
+    expect(artifacts.map(({ name, content }) => ({ name, content }))).toEqual([
+      { name: 'brief.txt', content: 'Summary\n## Findings\nFive concepts.' },
+      { name: 'analysis.txt', content: '## Ranking\nThree candidates.' },
+    ])
+  })
+
   afterEach(() => {
     jest.restoreAllMocks()
   })

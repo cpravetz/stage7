@@ -12,6 +12,19 @@ function visibleTaskText(value: string): string {
   return value.replaceAll(INTERNAL_ACTION_REQUIREMENT, 'an actual registered tool');
 }
 
+export function recoveryDeliverableInstructions(tasks: Task[], expectedArtifacts: string[]): string {
+  const names = new Set(expectedArtifacts.map((name) => name.trim().toLocaleLowerCase()));
+  const sources = tasks.filter((task) =>
+    !/-amendment-\d+|-mission-recovery-\d+/i.test(task.id)
+    && (task.expectedArtifacts || []).some((name) => names.has(name.trim().toLocaleLowerCase())),
+  );
+  return sources.length
+    ? `Original deliverable requirements:\n${sources.map((task) =>
+      `Task ${task.id}: ${task.description}\n${task.systemPrompt}`,
+    ).join('\n\n')}`
+    : '';
+}
+
 function taskInstructions(task: Task, plan: Plan): string {
   const taskIds = new Set(plan.phases.flatMap((phase) => phase.tasks.map((candidate) => candidate.id)));
   return task.systemPrompt.replace(
@@ -66,16 +79,23 @@ export function buildTaskPrompt(
   missionGoal?: string,
 ): string {
   const expectedArtifacts = task.expectedArtifacts || [];
+  const recoveryRequirements = /-amendment-\d+|-mission-recovery-\d+/i.test(task.id)
+    ? recoveryDeliverableInstructions(plan.phases.flatMap((candidate) => candidate.tasks), expectedArtifacts)
+    : '';
   const artifactOutputContract = expectedArtifacts.length > 0
-    ? `Report verified results for each expected deliverable (${expectedArtifacts.join(', ')}). Include each deliverable's actual result under a clear heading using its exact name. If the work cannot be completed with available tools or context, explain the specific blocker instead — do not fabricate results or claim actions that were not completed.`
+    ? `Produce each expected deliverable (${expectedArtifacts.join(', ')}) yourself, using available evidence and tools. Put the complete content under a Markdown heading exactly "## <deliverable name>" on its own line, not in JSON or a code fence. Do not ask the user to create or supply a deliverable assigned to an agent. If essential information or authorization is unavailable, explain the specific blocker instead; do not fabricate results or claim actions that were not completed.`
     : 'Return only the verified result for this task. Unless the user requested a formatted document, use plain text without Markdown headings, lists, or code fences. For email and text-message tasks, report the exact requested message and verified delivery status; do not invent samples or placeholders.';
   return (
     `Task: ${visibleTaskText(task.title)}\n\n` +
     `Description: ${visibleTaskText(task.description)}\n\n` +
+    (recoveryRequirements ? `${visibleTaskText(recoveryRequirements)}\n\n` : '') +
     `Task Instructions: ${visibleTaskText(taskInstructions(task, plan))}\n\n` +
     (missionGoal ? `Original mission goal: ${missionGoal}\n\n` : '') +
     (completedDependencies.length > 0
     ? `Completed dependency results (authoritative persisted outputs and artifacts; do not infer results from task IDs): ${JSON.stringify(compactDependencySummaries(task, completedDependencies))}\n\n`
+      : '') +
+    ((task.dependsOnTaskIds || []).length > 0
+      ? 'Use the recorded dependency results; never ask the user to retrieve or provide them. If a necessary dependency result is unavailable, recreate it from available context and evidence, or name its task ID as an internal blocker if it cannot be recovered.\n\n'
       : '') +
     `Phase: ${phase.name} (${phase.goal})\n` +
     `Plan Summary: ${plan.summary}\n` +

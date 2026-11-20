@@ -1,7 +1,9 @@
 import {
   asksForProviderSetup,
   asksUserToManageTools,
+  asksUserToProduceDeliverable,
   CAPABILITY_RESOLUTION_GUIDANCE,
+  DELIVERABLE_GUIDANCE,
   hasTriedToolAfterResolution,
 } from './askUser'
 import { CREATE_TOOL_ACTION, DELEGATE_ACTION, isAskUserTool } from './constants'
@@ -21,6 +23,12 @@ const BLOCKER_SUFFIX = 'The phase reviewer should use this blocker to regroup th
 /** The agent must find missing capabilities itself, not delegate that work to the user. */
 const refuseToolManagementQuestion: ActionGuard = async ({ state }, { action }) => {
   const triedResolvedTool = hasTriedToolAfterResolution(state.actionReceipts.map((receipt) => receipt.toolId))
+  if (isAskUserTool(action.tool) && typeof action.args.question === 'string'
+    && asksUserToProduceDeliverable(action.args.question)) {
+    state.tell(DELIVERABLE_GUIDANCE)
+    await state.save()
+    return NEXT_TURN
+  }
   if (
     isAskUserTool(action.tool)
     && typeof action.args.question === 'string'

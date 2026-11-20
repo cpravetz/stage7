@@ -7,6 +7,7 @@ import {
 } from '@stage7-nextgen/shared'
 import { Plan, Phase, Task } from '@stage7-nextgen/shared'
 import { createCompletedTaskSummary } from '../src/types/workflow'
+import { BrainClient } from '../src/brain/BrainClient'
 
 function jsonResponse(body: unknown, status = 200): Response {
   return {
@@ -65,6 +66,26 @@ const plan: Plan = {
 describe('MissionAgentRuntime', () => {
   afterEach(() => {
     jest.restoreAllMocks()
+  })
+
+  it('gives the acceptance reviewer the later sections of a substantive deliverable', async () => {
+    const review = jest.spyOn(BrainClient.prototype, 'complete')
+      .mockResolvedValue({ value: { accepted: ['research.md'], rejected: [] } })
+    const content = `${'Introduction. '.repeat(120)}\n## Fifth concept\nDetails for the fifth concept.`
+    jest.spyOn(global, 'fetch').mockImplementation(async (input) => {
+      const url = String(input)
+      if (url.endsWith('/tasks')) return jsonResponse({ taskId: 'research' })
+      if (url.endsWith('/execute')) return jsonResponse({
+        status: 'completed', result: { output: `## research.md\n${content}` },
+      })
+      throw new Error(`Unexpected request: ${url}`)
+    })
+    const runtime = new MissionAgentRuntime({ missionId: 'mission-1', tenantId: 'tenant-1' })
+    const result = await runtime.executePromptTask(agent.id, {
+      taskId: 'research', type: 'researcher', prompt: 'List five concepts.', expectedArtifacts: ['research.md'],
+    })
+    expect(result.artifacts[0].content).toBe(content)
+    expect(review.mock.calls[0][0].prompt).toContain('Details for the fifth concept.')
   })
 
   it('includes earlier user messages in the task prompt without replacing the original goal', async () => {

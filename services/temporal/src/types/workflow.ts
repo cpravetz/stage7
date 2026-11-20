@@ -452,7 +452,14 @@ export function missionExecutionEvidenceGaps(plan: Plan, phases: MissionPhaseEvi
     }
     for (const plannedTask of plannedPhase.tasks) {
       const task = tasksById.get(plannedTask.id) ?? plannedTaskOutcome(plannedTask);
-      if (/-mission-recovery-\d+/i.test(plannedTask.id)
+      const supersededAmendment = /-amendment-\d+/i.test(plannedTask.id)
+        && plannedPhase.tasks.some((candidate) =>
+          /-mission-recovery-\d+/i.test(candidate.id)
+          && tasksById.get(candidate.id)?.status === 'completed'
+          && candidate.systemPrompt.includes(plannedTask.id)
+          && plannedPhase.tasks.indexOf(candidate) > plannedPhase.tasks.indexOf(plannedTask),
+        );
+      if ((/-mission-recovery-\d+/i.test(plannedTask.id) || supersededAmendment)
         && laterCompletedRecovery.has(plannedTask.id)
         && (task?.status === 'failed' || task?.status === 'incomplete')
         && !plannedTask.requiresExternalAction
@@ -477,8 +484,28 @@ export function missionExecutionEvidenceGaps(plan: Plan, phases: MissionPhaseEvi
         if (!uncertainRecovery) continue;
       }
       if (!task) {
-        phaseHadTaskGap = true;
-        gaps.push(`Task "${plannedTask.title}" (${plannedTask.id}) has no execution result in phase "${plannedPhase.name}".`);
+        const names = (plannedTask.expectedArtifacts || []).filter((name) =>
+          name.trim().toLocaleLowerCase() !== 'system-action-receipts.json',
+        );
+        const recovered = names.length > 0
+          && !plannedTask.requiresExternalAction
+          && !(plannedTask.requiredActions || []).length
+          && names.every((name) => phases.some((evidencePhase) => evidencePhase.tasks.some((evidenceTask) =>
+            evidenceTask.status === 'completed' && evidenceTask.artifacts.some((artifact) =>
+              artifact.name.trim().toLocaleLowerCase() === name.trim().toLocaleLowerCase()
+              && artifact.purpose !== 'execution-outcome'
+              && artifact.status !== 'blocked'
+              && ((typeof artifact.content === 'string' && artifact.content.trim().length > 0
+                && !/^\s*(?:\*\*)?Blocker(?:\*\*)?\s*:/i.test(artifact.content)
+                && !/^\s*(?:Execution outcome|Artifact status)\b.{0,120}\b(?:blocked|failed|not created)\b/i.test(artifact.content))
+                || (typeof artifact.url === 'string' && artifact.url.trim().length > 0)
+                || artifact.data !== undefined),
+            ),
+          )));
+        if (!recovered) {
+          phaseHadTaskGap = true;
+          gaps.push(`Task "${plannedTask.title}" (${plannedTask.id}) has no execution result in phase "${plannedPhase.name}".`);
+        }
         continue;
       }
 

@@ -181,9 +181,9 @@ describe('Mission Room message attention', () => {
       } } },
     };
     const room = renderRoom(detail);
-    fireEvent.change(screen.getByPlaceholderText(/Send messages to the mission/), { target: { value: 'Please continue' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
-    await waitFor(() => expect(screen.getByPlaceholderText(/Send messages to the mission/)).toHaveValue(''));
+    // The regular message composer is hidden when a pending interaction exists;
+    // users must use the interaction panel above instead.
+    expect(screen.queryByPlaceholderText(/Send messages to the mission/)).not.toBeInTheDocument();
     room.unmount();
     renderRoom(detail);
     expect(screen.getByText('The Agent requests permission to use a discovered tool.')).toBeInTheDocument();
