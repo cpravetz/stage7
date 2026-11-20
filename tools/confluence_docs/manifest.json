@@ -1,0 +1,41 @@
+{
+  "id": "confluence_docs",
+  "name": "Confluence Documentation",
+  "description": "Create pages and search Confluence content via the Confluence Cloud REST API v2. Requires the `confluenceUrl` credential (Confluence base URL, e.g. confluence_url) and a `confluenceToken` API token (or `apiToken`) for HTTP Basic auth. Supports create_page and search operations.",
+  "type": "native",
+  "manifest": {
+    "executor": "vendor",
+    "codeFile": "vendor.js",
+    "vendor": "confluence",
+    "configSchema": {
+      "type": "object",
+      "properties": {
+        "confluenceUrl": { "type": "string", "title": "Confluence URL", "description": "Confluence base URL (e.g. confluence_url)", "required": false, "configKey": "confluence.url", "label": "Confluence URL" },
+        "confluenceToken": { "type": "string", "title": "Confluence Token", "description": "Confluence API token (or apiToken)", "sensitive": true, "required": false, "envVar": "CONFLUENCE_TOKEN", "label": "Confluence Token" }
+      },
+      "required": []
+    }
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "operation": { "type": "string", "enum": ["create_page", "search"], "description": "Confluence REST operation to perform" },
+      "spaceId": { "type": "string", "description": "Space ID or key (required for create_page)" },
+      "title": { "type": "string", "description": "Page title (required for create_page)" },
+      "content": { "type": "string", "description": "Page body in Confluence storage/wiki format (for create_page)" },
+      "cql": { "type": "string", "description": "Confluence Query Language statement (for search; defaults to \"type=page\")" },
+      "limit": { "type": "integer", "minimum": 1, "description": "Maximum pages to return (for search; default 25)" }
+    },
+    "required": ["operation"]
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "page": { "type": "object", "description": "Created page object (for create_page)" },
+      "pages": { "type": "array", "description": "Search results (for search)" },
+      "error": { "type": "string" }
+    },
+    "required": ["success"]
+  },
+  "isSkill": false
+}

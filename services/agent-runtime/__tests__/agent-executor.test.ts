@@ -2124,6 +2124,72 @@ describe('AgentExecutor', () => {
     ]))
   })
 
+  it('does not retry a tool that previously prompted for credentials after resume', async () => {
+    const actionKey = createHash('sha256').update('sms_sender:{"to":"347-772-8389","body":"Watson, come here."}').digest('hex')
+    const checkpoint: ExecutorCheckpoint = {
+      version: 2,
+      history: [
+        { role: 'user', content: 'Send an SMS to 347-772-8389.' },
+        { role: 'assistant', content: '{"tool":"sms_sender","args":{"to":"347-772-8389","body":"Watson, come here."}}' },
+        { role: 'user', content: '__ASK_USER__:{"question":"Please provide SMS account, SMS token for SMS Sender in the secure form below so I can continue.","credentialRequest":{"executionId":"exec-sms-1","toolId":"sms_sender","toolName":"SMS Sender","missingCredentials":[{"key":"account","label":"SMS account"},{"key":"token","label":"SMS token"}]}}' },
+      ],
+      tokensUsed: 0,
+      toolCalls: 1,
+      brainCalls: 1,
+      completionTokensReserved: 0,
+      delegations: 0,
+      lastAction: `sms_sender:${JSON.stringify({ to: '347-772-8389', body: 'Watson, come here.' })}`,
+      repeatedActionCount: 0,
+      actionReceipts: [{
+        toolId: 'sms_sender',
+        isError: true,
+        outcome: 'question_asked',
+        content: '__ASK_USER__:{"question":"Please provide SMS account, SMS token for SMS Sender in the secure form below so I can continue.","credentialRequest":{"executionId":"exec-sms-1","toolId":"sms_sender","toolName":"SMS Sender","missingCredentials":[{"key":"account","label":"SMS account"},{"key":"token","label":"SMS token"}]}}',
+        actionKey,
+      }],
+    }
+
+    let brainCalls = 0
+    let toolExecutions = 0
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) {
+        return jsonResponse({
+          tools: [{ id: 'sms_sender', name: 'SMS Sender', description: 'Send SMS', type: 'code' }],
+        })
+      }
+      if (url.endsWith('/api/brain/complaint')) return jsonResponse({ recorded: true })
+      if (url.endsWith('/api/brain/complete')) {
+        brainCalls++
+        const body = JSON.parse(String(init?.body)) as { prompt: string }
+        return jsonResponse({
+          content: brainCalls === 1
+            ? '{"tool":"sms_sender","args":{"to":"555-0100","body":"Hello again"}}'
+            : 'This is an SMS task but no text-messaging provider credentials are configured; I cannot send without them.',
+          requestId: `brain-call-${brainCalls}`,
+        })
+      }
+      if (url.endsWith('/api/tool-executor/tools/execute')) {
+        toolExecutions++
+        throw new Error('should not execute: credential-requested tool must not be retried')
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+
+    const result = await new AgentExecutor({ fetcher }).execute(
+      { ...definition, tools: ['sms_sender'] },
+      { ...task(), agentId: definition.id, createdAt: new Date().toISOString(),
+        input: { prompt: 'Send an SMS to 347-772-8389.' } },
+      { missionId: 'mission-1', delegationDepth: 0, resumeCheckpoint: checkpoint },
+    )
+
+    expect(result.output).toContain('no text-messaging provider credentials')
+    expect(toolExecutions).toBe(0)
+    expect(result.actionReceipts.some(
+      (r) => r.toolId === 'sms_sender' && r.outcome === 'denied' && r.isError,
+    )).toBe(true)
+  })
+
   it('does not replay a successful action already recorded before a mission interruption', async () => {
     const action = { tool: 'send-message', args: { recipient: 'user-42', body: 'Hello' } }
     const actionKey = createHash('sha256')

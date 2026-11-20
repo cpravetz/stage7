@@ -408,13 +408,18 @@ describe('ToolExecutor normalizes non-skill callee payloads', () => {
     };
   }
 
+  const NATIVE_TOOL_CODE_FILES: Partial<Record<NativeExecutorKey, string>> = {
+    files: path.resolve(__dirname, '../../../tools/file_storage/files.js'),
+  };
+
   function makeNativeTool(id: string, executorKey: NativeExecutorKey): Tool {
+    const codeFile = NATIVE_TOOL_CODE_FILES[executorKey];
     return {
       id,
       name: `Native ${id}`,
       description: 'A native executor tool',
       type: 'native',
-      manifest: { executor: executorKey, basePath: os.tmpdir() },
+      manifest: { executor: executorKey, basePath: os.tmpdir(), ...(codeFile ? { codeFile } : {}) },
       createdAt: new Date(),
       updatedAt: new Date(),
       isSkill: false,

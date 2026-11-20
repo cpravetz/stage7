@@ -35,6 +35,7 @@ import {
   MAX_PHASE_RECOVERY_ROUNDS_SAFETY,
   MAX_MISSION_RECOVERY_ROUNDS_SAFETY,
   MAX_NO_PROGRESS_RECOVERY_ATTEMPTS,
+  MAX_COMPLETION_VERIFICATION_RETRIES,
 } from '../types/workflow';
 import { PlannerProgress } from './MissionPlanner';
 import type { MissionPhaseOutput } from '../activities/missionWorkflowActivities';
@@ -159,6 +160,10 @@ export class MissionOrchestrator {
   static unregister(missionId: string) { this.active.delete(missionId); }
   static getActive(missionId: string) { return this.active.get(missionId); }
   private lastPlannerProgress: { key: string; at: number } | null = null;
+  /** The current plan, accessible to handleUserMessage while the mission runs. */
+  private currentPlan: Plan | null = null;
+  /** Completed task summaries, accessible to handleUserMessage while the mission runs. */
+  private completedTaskSummaries: CompletedTaskSummary[] = [];
 
   async run(ctx: MissionContext): Promise<{ plan: Plan; outputs: any; compensations: Array<{ phaseId: string; action: string }> }> {
     const compensations: Array<{ phaseId: string; action: string }> = [];
@@ -208,11 +213,19 @@ export class MissionOrchestrator {
     // a persisted/resume/checkpoint plan; evaluate it and emit the reasoning.
     let planSource: 'loaded' | 'generated' = 'generated';
     let plan: Plan;
-    if (pendingInteraction && ctx.resumeCheckpoint?.plan) {
-      // The pending task and its receipts must survive until its response is consumed.
+    const hasInteractionResponse = Boolean(ctx.interactionResponse && ctx.interactionResponse.trim().length > 0);
+
+    if (pendingInteraction && ctx.resumeCheckpoint?.plan && !hasInteractionResponse) {
+      // No interaction response - the pending task and its receipts must survive until its response is consumed.
+      plan = ctx.resumeCheckpoint.plan;
+      planSource = 'loaded';
+    } else if (pendingInteraction && ctx.resumeCheckpoint?.plan && hasInteractionResponse) {
+      // User provided a direct answer to the pending question - continue with existing plan
       plan = ctx.resumeCheckpoint.plan;
       planSource = 'loaded';
     } else {
+      // User provided feedback (userMessages without interactionResponse) or there's no pending interaction
+      // let the planner decide whether to load the existing plan or generate a new one.
       const evaluation = await this.agentRuntime!.evaluatePlanLoad({
         missionId: ctx.missionId,
         prompt: missionPromptWithMessages(ctx),
@@ -228,6 +241,7 @@ export class MissionOrchestrator {
       }
     }
     activePlan = plan;
+    this.currentPlan = plan;
     const completedTasks = new Map<string, MissionTaskCheckpoint>(
       (ctx.resumeCheckpoint?.completedTasks || []).map((checkpoint) => [
         JSON.stringify([checkpoint.phaseId, checkpoint.taskId]),
@@ -254,6 +268,7 @@ export class MissionOrchestrator {
         }
       }
     }
+    this.completedTaskSummaries = [...completedTaskSummaries.values()];
     const completedPhases = new Set(ctx.resumeCheckpoint?.completedPhases || []);
     // The Mission Director owns the decision to normalize an adopted plan for
     // execution. This is visible reasoning, not silent surgery.
@@ -314,6 +329,7 @@ agentRole: 'mission-executor',
     });
     saveCheckpoint();
     activePlan = plan;
+    this.currentPlan = plan;
     await ctx.broadcast({
       type: 'plan_generated',
       missionId: ctx.missionId,
@@ -523,6 +539,7 @@ const executeTask = async (task: Task, savedTask: MissionTaskCheckpoint | undefi
               task.id,
               createCompletedTaskSummary(task.id, task.output || error, task.artifacts || [], task.requiredActions, task.requiresExternalAction),
             );
+            this.completedTaskSummaries = [...completedTaskSummaries.values()];
             return;
           }
           throw err;
@@ -552,6 +569,10 @@ const executeTask = async (task: Task, savedTask: MissionTaskCheckpoint | undefi
             output: task.output,
           });
           saveCheckpoint();
+          // Persist mission state with pendingInteraction BEFORE broadcasting the question,
+          // so the frontend can immediately fetch the interaction details.
+          const missionStartedAt = task.startedAt || Date.now();
+          await this.persistMissionStateOnInterruption(ctx, plan, outputs, pendingInteraction, missionStartedAt);
           await ctx.broadcast({
             type: interruption.kind === 'user_input' ? 'question_asked' : 'permission_required',
             missionId: ctx.missionId,
@@ -651,6 +672,7 @@ const executeTask = async (task: Task, savedTask: MissionTaskCheckpoint | undefi
           task.id,
           createCompletedTaskSummary(task.id, result.output, result.artifacts, task.requiredActions, task.requiresExternalAction),
         );
+        this.completedTaskSummaries = [...completedTaskSummaries.values()];
         ctx.heartbeat?.();
       };
 
@@ -690,6 +712,7 @@ const executeTask = async (task: Task, savedTask: MissionTaskCheckpoint | undefi
           plan.phases.some((entry) => entry.tasks.some((candidate) => candidate.id === id && candidate.status === 'completed')),
         );
         const pendingTasks = phase.tasks.filter((task) => !completedInPhase.has(task.id));
+        const rerunDependency = findMissingInputRerun(taskById);
         const readyTasks = phase.tasks.filter((task) =>
           !completedInPhase.has(task.id)
           && (task.dependsOnTaskIds || []).every((dependencyId) =>
@@ -701,7 +724,6 @@ const executeTask = async (task: Task, savedTask: MissionTaskCheckpoint | undefi
           && (isRecoveryTask(task.id) || missingDependencyInputs(task, taskById).length === 0),
         );
         if (readyTasks.length === 0) {
-          const rerunDependency = findMissingInputRerun(taskById);
           if (rerunDependency) {
             const missing = dependencyArtifactGaps(rerunDependency);
             const attempt = (dependencyRerunCounts.get(rerunDependency.id) || 0) + 1;
@@ -984,6 +1006,7 @@ const executeTask = async (task: Task, savedTask: MissionTaskCheckpoint | undefi
             const applied = applyPhaseReview(plan, phase.id, review);
             plan = applied.plan;
                   activePlan = plan;
+                  this.currentPlan = plan;
             phase = applied.phase;
             if (applied.satisfied) {
               phaseReviewSatisfied = true;
@@ -1051,6 +1074,7 @@ agentRole: 'mission-executor',
               phase.tasks.push(amendmentTask);
               plan.phases = plan.phases.map((p: any) => p.id === phase.id ? phase : p);
               activePlan = plan;
+              this.currentPlan = plan;
               saveCheckpoint();
               try {
                 await this.persistPlan(ctx, plan);
@@ -1233,6 +1257,8 @@ agentRole: 'mission-executor',
     let reviewReason = '';
     let lastRecoveryIssue = '';
     let recoveryIndex = 0;
+    let completionVerificationRetries = 0;
+    let completionVerificationFailed = false;
     while (true) {
       if (uncertainActionIssue) {
         completionGaps = [uncertainActionIssue];
@@ -1244,6 +1270,35 @@ agentRole: 'mission-executor',
       const completionReview = await this.evaluateMissionCompletion(ctx, plan, outputs);
       if (completionReview.satisfied) {
         completionVerified = true;
+        break;
+      }
+
+      // A verification failure means the reviewer could not produce a valid
+      // verdict (e.g. malformed output after its own retries) — not that the
+      // mission is incomplete. This is recoverable: retry the review with a
+      // fresh routing session instead of spawning a futile recovery task or
+      // aborting the mission.
+      if (completionReview.verificationFailed) {
+        completionVerificationFailed = true;
+        if (completionVerificationRetries < MAX_COMPLETION_VERIFICATION_RETRIES) {
+          completionVerificationRetries += 1;
+          logger.warn(
+            { missionId: ctx.missionId, attempt: completionVerificationRetries, gaps: completionReview.gaps },
+            'Mission completion review could not produce a valid verdict; retrying the review',
+          );
+          await new Promise((resolve) => setTimeout(resolve, 1_000 * completionVerificationRetries));
+          continue;
+        }
+        completionGaps = completionReview.gaps.length
+          ? completionReview.gaps
+          : ['Mission completion could not be automatically verified.'];
+        reviewReason = 'Mission completion could not be automatically verified after repeated review attempts; it needs review rather than being marked incomplete.';
+        await agentRuntime.emitMonologue({
+          agentRole: 'mission-director',
+          thought: `Mission completion could not be automatically verified after ${MAX_COMPLETION_VERIFICATION_RETRIES + 1} review attempts: ${completionGaps.join('; ')}. The mission needs review rather than being marked incomplete.`,
+          text: 'Mission needs review: completion could not be automatically verified.',
+          data: { decision: 'mission_needs_review', gaps: completionGaps, reason: 'completion_verification_failed' },
+        });
         break;
       }
 
@@ -1374,6 +1429,7 @@ agentRole: 'mission-executor',
       completedPhases.delete(recoveryPhase.id);
       phaseOutput.status = 'incomplete';
       activePlan = plan;
+      this.currentPlan = plan;
       saveCheckpoint();
       await this.updatePhase(ctx, recoveryPhase.id, { status: 'in_progress' });
       await this.persistPlan(ctx, plan);
@@ -1482,6 +1538,10 @@ agentRole: 'mission-executor',
           output: recoveryTask.output,
         });
         saveCheckpoint();
+        // Persist mission state with pendingInteraction BEFORE broadcasting the question,
+        // so the frontend can immediately fetch the interaction details.
+        const missionStartedAt = recoveryTask.startedAt || Date.now();
+        await this.persistMissionStateOnInterruption(ctx, plan, outputs, pendingInteraction, missionStartedAt);
         await ctx.broadcast({
           type: interruption.kind === 'user_input' ? 'question_asked' : 'permission_required',
           missionId: ctx.missionId,
@@ -1606,7 +1666,16 @@ agentRole: 'mission-executor',
         outputs.phases as MissionPhaseOutput[],
       );
     } else {
-      const terminal = classifyMissionCompletionGaps(ctx.prompt, completionGaps, { failureCode: extractFailureCode(lastRecoveryIssue) });
+      // A completion-review verification failure is recoverable, not a
+      // mission-incomplete: route it to a resumable review state instead of
+      // aborting the mission.
+      const terminal = completionVerificationFailed
+        ? {
+          status: 'awaiting_review' as const,
+          reason: reviewReason || 'Mission completion could not be automatically verified; the mission needs review.',
+          question: undefined as string | undefined,
+        }
+        : classifyMissionCompletionGaps(ctx.prompt, completionGaps, { failureCode: extractFailureCode(lastRecoveryIssue) });
       outputs.status = terminal.status;
       outputs.gaps = completionGaps;
       outputs.reason = reviewReason || terminal.reason;
@@ -1661,11 +1730,6 @@ agentRole: 'mission-executor',
     });
   }
 
-  /**
-   * Shares the planner's progress with the user. A planning run can take a
-   * long time while a provider is slow, and a silent mission is
-   * indistinguishable from a stalled one.
-   */
   private async reportPlannerProgress(ctx: MissionContext, progress: PlannerProgress): Promise<void> {
     // The report repeats the request path and the attempt number, so the
     // numbers are masked to recognize an update that says the same thing.
@@ -1782,6 +1846,66 @@ agentRole: 'mission-executor',
     }
   }
 
+  private async persistMissionStateOnInterruption(
+    ctx: MissionContext,
+    plan: Plan,
+    outputs: any,
+    pendingInteraction: any,
+    startedAt: number,
+  ): Promise<void> {
+    const url = `${ctx.persistenceUrl}/api/artifacts/missions/${encodeURIComponent(ctx.missionId)}`;
+    const state = {
+      missionId: ctx.missionId,
+      tenantId: ctx.tenantId || '',
+      assistantId: ctx.assistantId || '',
+      status: 'awaiting_review',
+      controlState: 'running',
+      currentStep: 1,
+      totalSteps: 1,
+      history: [
+        {
+          step: 0,
+          status: 'awaiting_review',
+          startedAt,
+          completedAt: Date.now(),
+        },
+      ],
+      input: {
+        missionId: ctx.missionId,
+        tenantId: ctx.tenantId || '',
+        assistantId: ctx.assistantId || '',
+        prompt: ctx.prompt,
+        metadata: ctx.metadata,
+        clarificationAnswers: ctx.clarificationAnswers,
+        interactionResponse: ctx.interactionResponse,
+        userMessages: ctx.userMessages,
+      },
+      output: {
+        plan,
+        outputs: {
+          ...outputs,
+          pendingInteraction,
+        },
+      },
+      startedAt,
+      completedAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(state),
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        logger.warn({ missionId: ctx.missionId, status: res.status, text: text.slice(0, 500) }, 'Failed to persist mission state on interruption');
+      }
+    } catch (err) {
+      logger.warn({ missionId: ctx.missionId, err: err instanceof Error ? err.message : String(err) }, 'Error persisting mission state on interruption');
+    }
+  }
+
   async handleUserMessage(ctx: MissionContext, content: string): Promise<{ acknowledgement: string; response: string }> {
     (ctx.userMessages ||= []).push(content);
     if (!this.agentRuntime) {
@@ -1795,15 +1919,49 @@ agentRole: 'mission-executor',
       this.agentRuntime = rt;
     }
     const agentRuntime = this.agentRuntime!;
-    const directorAgentId = agentRuntime.getAgentIdForRole('mission-director');
-    const directorIdentity = { agentId: directorAgentId, agentName: 'Mission Director', agentRole: 'mission-director' };
-    const agentId = await agentRuntime.getOrCreateAgent('mission-director', 'You are the mission primary agent. Process user messages during a mission. The message is available to subsequent mission tasks. Acknowledge it without claiming to have forwarded it to an agent or completed an action. Return JSON {"acknowledgement":"...","response":"..."}.');
+    const directorIdentity = { agentId: '', agentName: 'Mission Director', agentRole: 'mission-director' };
+
+    const directorSystemPrompt = [
+      'You are the mission director: the conversational link between the user and the mission.',
+      'You do not run tools or perform actions yourself. The mission\'s task agents create any required tools through the tool executor and carry out actions during task execution.',
+      '',
+      'Classify the user message and respond appropriately:',
+      '1. If the user is ASKING A QUESTION (e.g. "what\'s the status?", "what have you done?", "why did X happen?"), answer it directly from the mission context provided in the task. Be specific and factual.',
+      '2. If the user is PROVIDING A FACT OR VALUE (e.g. "send it to john@example.com", "the budget is $500"), acknowledge it, confirm it is recorded, and note it will be available to subsequent mission tasks.',
+      '3. If the user is CHANGING THE GOAL OR SCOPE (e.g. "actually, also include a PDF", "change the recipient to jane"), acknowledge the change, explain what will be different, and note it will be incorporated into the mission plan.',
+      '4. Only ask a clarifying question if a required value is genuinely missing (e.g. an email address with no recipient). Never ask the user to choose a tool, configure a provider, or perform setup.',
+      '',
+      'Never mention execution limits, action or tool "budgets", remaining actions, or claim that you are unable to create or use tools: that is an internal detail of your relay role and is not a mission-wide restriction.',
+      '',
+      'Return JSON {"acknowledgement":"...","response":"..."}. The response should directly address what the user asked or said.',
+    ].join('\n');
+
+    const agentId = await agentRuntime.getOrCreateAgent('mission-director', directorSystemPrompt);
+    directorIdentity.agentId = agentId;
+
+    // Build mission context so the director can answer questions directly
+    const plan = this.currentPlan;
+    const phaseSummary = plan?.phases
+      ?.map((p) => `${p.name || p.id}: ${p.status || 'unknown'}`)
+      .join('; ') || 'No plan loaded yet';
+    const completedTaskCount = this.completedTaskSummaries.length;
+    const totalTaskCount = plan?.phases?.reduce((sum, p) => sum + (p.tasks?.length || 0), 0) || 0;
+    const recentMessages = (ctx.userMessages || []).slice(-5).join('\n');
+
+    const taskPrompt = [
+      `User message: ${content}`,
+      '',
+      `Mission goal: ${ctx.prompt}`,
+      `Plan progress: ${completedTaskCount}/${totalTaskCount} tasks completed. Phases: ${phaseSummary}`,
+      recentMessages ? `Recent conversation:\n${recentMessages}` : '',
+    ].filter(Boolean).join('\n');
+
     let result: { output: string };
     try {
       result = await agentRuntime.executePromptTask(agentId, {
         taskId: `${ctx.missionId}:user-message:${Date.now()}`,
         type: 'user-message',
-        prompt: `User message during mission: ${content}\n\nMission goal: ${ctx.prompt}\n\nProcess and respond.`,
+        prompt: taskPrompt,
         phaseId: 'user-message',
         context: { [ 'missionId' ]: ctx.missionId },
         executionPolicy: { ...DEFAULT_AGENT_EXECUTION_POLICY, maxActions: 0, maxCompletionTokens: 1024, maxCompletionTokensPerCall: 512, maxDelegations: 0 },
@@ -1844,7 +2002,7 @@ agentRole: 'mission-executor',
         }>;
       }>;
     },
-  ): Promise<{ satisfied: boolean; gaps: string[] }> {
+  ): Promise<{ satisfied: boolean; gaps: string[]; verificationFailed?: boolean }> {
     const phases = outputs?.phases || [];
     if (!plan.phases.length) {
       return { satisfied: false, gaps: ['The mission plan contains no phases.'] };

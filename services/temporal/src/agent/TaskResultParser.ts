@@ -88,10 +88,45 @@ export function missingExpectedArtifacts(artifacts: MissionArtifact[], expected:
 }
 
 /**
- * Names from a dependency task's `expectedArtifacts` that the dependency did NOT
- * actually produce with usable content. Empty when the dependency produced every
- * declared deliverable, or declared none (e.g. an action-only task).
+ * Determine whether an artifact carries substantive content. An artifact
+ * passes when it has non-empty text that is not merely a heading, comment, or
+ * placeholder. This is stricter than `missingExpectedArtifacts`, which only
+ * checks for non-empty content; it is used to catch deliverables that are
+ * structurally present but substantively empty.
  */
+export function validateArtifactContent(artifact: MissionArtifact): boolean {
+  if (artifact.url !== undefined && artifact.url.trim().length > 0) return true;
+  if (artifact.data !== undefined) return true;
+  if (typeof artifact.content !== 'string') return false;
+  const content = artifact.content.trim();
+  if (content.length === 0) return false;
+  // Reject content that is only headings, comments, or placeholder markers.
+  const stripped = content
+    .replace(/^#{1,6}\s.*$/gm, '') // headings
+    .replace(/<!--[\s\S]*?-->/g, '') // HTML comments
+    .replace(/\/\/.*$/gm, '') // line comments
+    .replace(/\/\*[\s\S]*?\*\//g, '') // block comments
+    .replace(/^\s*>\s.*$/gm, '') // blockquotes
+    .replace(/```[\s\S]*?```/g, '') // code fences (keep? code may be substantive)
+    .trim();
+  if (stripped.length === 0) return false;
+  // Reject placeholder-like content.
+  if (/^(?:todo|tbd|placeholder|lorem ipsum|coming soon|under construction)$/i.test(stripped)) return false;
+  return true;
+}
+
+/**
+ * Names from `expected` that are present as artifacts but whose content fails
+ * `validateArtifactContent`. Used to trigger Brain remediation.
+ */
+export function invalidExpectedArtifacts(artifacts: MissionArtifact[], expected: string[]): string[] {
+  const normalize = (value: string) => value.trim().toLocaleLowerCase();
+  return expected.filter((name) => {
+    const artifact = artifacts.find((candidate) => normalize(candidate.name) === normalize(name));
+    if (!artifact) return false;
+    return !validateArtifactContent(artifact);
+  });
+}
 export function dependencyArtifactGaps(dependency: Task): string[] {
   return missingExpectedArtifacts(dependency.artifacts || [], dependency.expectedArtifacts || []);
 }

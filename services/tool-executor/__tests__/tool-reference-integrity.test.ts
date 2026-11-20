@@ -31,10 +31,19 @@ import {
   careerCanonicalExtendedSkills,
   careerCanonicalInternalTools,
 } from '../src/adk/career-canonical-extended';
-import { nativeTools } from '../src/data/nativeTools';
-import { legacyGeneralTools } from '../src/data/generalTools';
+import { ToolManifestLoader } from '../src/services/ToolManifestLoader';
 import * as fs from 'fs';
 import * as path from 'path';
+
+/**
+ * Native tools are discovered from the colocated manifests under the root
+ * `tools/` folder — the same source of truth the runtime loader uses.
+ */
+const NATIVE_TOOLS: Tool[] = new ToolManifestLoader([
+  path.resolve(__dirname, '../../../tools'),
+])
+  .loadAll()
+  .map(({ tool }) => tool);
 
 /**
  * Every assistant's skill array. Used to verify that all referenced
@@ -69,8 +78,8 @@ const ALL_SKILL_ARRAYS: { name: string; skills: Tool[] }[] = [
  * registered as defaults and are therefore legitimate delegation targets for
  * any skill's `__execute_tool('<id>')`:
  *
- *  - nativeTools / legacyGeneralTools (src/data/nativeTools.ts, generalTools.ts):
- *    search_web, api_client, file_storage, data_analysis, email_sender, ...
+ *  - native tools discovered from the root `tools/` folder:
+ *    search, api_client, file_storage, data_analysis, email_sender, ...
  *  - the canonical skill arrays: a subset of the domain arrays above today, but
  *    src/index.ts registers them from a separate list, so they are named
  *    explicitly here rather than relied on to stay that way.
@@ -92,8 +101,7 @@ const ALL_CANONICAL_ARRAYS: { name: string; skills: Tool[] }[] = [
 ];
 
 const ALL_CORE_TOOL_ARRAYS: { name: string; skills: Tool[] }[] = [
-  { name: 'native', skills: nativeTools },
-  { name: 'general', skills: legacyGeneralTools },
+  { name: 'native', skills: NATIVE_TOOLS },
   { name: 'career-canonical-internal', skills: careerCanonicalInternalTools },
   ...ALL_CANONICAL_ARRAYS,
 ];
@@ -170,14 +178,14 @@ describe('Tool Reference Integrity', () => {
     expect(unique.size).toBe(ids.length);
   });
 
-  it('native and general tool ids and names are part of the delegation set', () => {
+  it('native tool ids and names are part of the delegation set', () => {
     // Guards against the resolution set regressing to skills-only, which is what
     // made a literal __execute_tool fail this test even
     // though tools are registered defaults.
     const ids = new Set(ALL_DELEGATABLE_ARRAYS.flatMap((g) => g.skills).map((t) => t.id));
     const names = new Set(ALL_DELEGATABLE_ARRAYS.flatMap((g) => g.skills).map((t) => t.name));
 
-    for (const tool of [...nativeTools, ...legacyGeneralTools]) {
+    for (const tool of NATIVE_TOOLS) {
       expect(ids.has(tool.id)).toBe(true);
       expect(names.has(tool.name)).toBe(true);
     }
@@ -250,8 +258,6 @@ describe('Tool Reference Integrity', () => {
       .flatMap((n) => (n === 'canonicalTools' ? canonicalNames : [n]));
 
     const expected = [
-      'nativeTools',
-      'legacyGeneralTools',
       'careerCanonicalInternalTools',
       'ctoCanonicalSkills',
       'healthcareCanonicalSkills',

@@ -1,0 +1,51 @@
+{
+  "id": "search",
+  "name": "Search",
+  "description": "Search the internet using multiple providers (Google, LangSearch, DuckDuckGo, SearxNG)",
+  "type": "native",
+  "manifest": {
+    "executor": "search",
+    "codeFile": "search.js",
+    "configSchema": {
+      "type": "object",
+      "properties": {
+        "google_api_key": { "type": "string", "title": "Google API Key", "description": "Google API Key for Custom Search API", "sensitive": true, "required": false, "envVar": "GOOGLE_API_KEY", "label": "Google API Key" },
+        "google_search_engine_id": { "type": "string", "title": "Google Search Engine ID", "description": "Google Custom Search Engine ID (CX)", "required": false, "envVar": "GOOGLE_SEARCH_ENGINE_ID", "label": "Google Search Engine ID" },
+        "langsearch_api_key": { "type": "string", "title": "LangSearch API Key", "description": "LangSearch API key", "sensitive": true, "required": false, "envVar": "LANGSEARCH_API_KEY", "label": "LangSearch API Key" },
+        "searxng_url": { "type": "string", "title": "SearxNG URL", "description": "SearxNG instance URL", "required": false, "envVar": "SEARXNG_URL", "label": "SearxNG URL" }
+      },
+      "required": []
+    }
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "query": { "type": "string", "description": "Search query string" },
+      "maxResults": { "type": "integer", "minimum": 1, "maximum": 50, "default": 5, "description": "Maximum number of results to return (default: 5)" },
+      "searchType": { "type": "string", "enum": ["web", "images", "news"], "default": "web", "description": "Type of search to perform (default: web)" },
+      "freshness": { "type": "string", "enum": ["day", "week", "month", "year"], "description": "Filter results by recency" }
+    },
+    "required": ["query"]
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "success": { "type": "boolean" },
+      "results": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "title": { "type": "string" },
+            "url": { "type": "string" },
+            "snippet": { "type": "string" }
+          }
+        }
+      },
+      "count": { "type": "integer" },
+      "error": { "type": "string" }
+    },
+    "required": ["success"]
+  },
+  "isSkill": false
+}

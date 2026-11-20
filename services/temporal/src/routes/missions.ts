@@ -2,7 +2,7 @@ console.log('missions route module loaded');
 import { MissionOrchestrator } from '../planner/MissionOrchestrator';
 import { Router, Request, Response } from 'express';
 import { TemporalClient, isMissionAwaitingInputError } from '../client/TemporalClient';
-import { WorkflowInput, MissionTaskCheckpoint } from '../types/workflow';
+import { WorkflowInput, MissionTaskCheckpoint, MissionPendingInteraction } from '../types/workflow';
 import { asyncHandler, NextGenError, PlanSchema, logger } from '@stage7-nextgen/shared';
 import { getMissionResumeProgress } from '../recovery/missionProgress';
 import { missionRecurrenceSchema } from '../schedules/missionRecurrence';
@@ -399,21 +399,39 @@ router.post(
     }
 
     // A user message to a mission that is awaiting review (e.g. missing Vault /
-    // credential entries) must always restore the mission to running. Any
-    // non-empty user entry to the conversation triggers resumption — no exact
-    // string is required. The resumed mission interprets the message; if it
-    // resolves the pending problem the mission proceeds to plan, otherwise the
-    // agent requests further assistance.
+    // credential entries) must be classified first. The Mission Director interprets
+    // the message in context of the pending interaction to determine whether it's
+    // a direct answer (continue with existing plan), feedback (re-plan), or unclear.
     if (role === 'user') {
       try {
         const result = await client.getMissionResult(workflowId);
-        const pendingInteraction = (result?.output as { outputs?: { pendingInteraction?: { kind?: string; credentialRequest?: { toolId?: string; missingCredentials?: Array<{ key?: string; label?: string }> } | undefined } | undefined } | undefined } | undefined)?.outputs?.pendingInteraction;
+        const pendingInteraction = (result?.output as { outputs?: { pendingInteraction?: MissionPendingInteraction } | undefined } | undefined)?.outputs?.pendingInteraction;
         const isAwaitingInput = result?.status === 'awaiting_review' && pendingInteraction?.kind === 'user_input';
 
-        if (isAwaitingInput) {
-          await client.resumeMission(workflowId, { interactionResponse: content, continueWithMessage: true });
-          res.status(202).json({ status: 'resuming' });
-          return;
+        if (isAwaitingInput && pendingInteraction) {
+          // Classify the user message using the Brain
+          const classification = await client.classifyUserMessageForPendingInteraction(missionId, content, pendingInteraction);
+          
+          if (classification === 'ANSWER') {
+            // User directly answered the pending question - resume with interactionResponse
+            await client.resumeMission(workflowId, { interactionResponse: content, continueWithMessage: true });
+            res.status(202).json({ status: 'resuming', classification: 'answer' });
+            return;
+          } else if (classification === 'FEEDBACK') {
+            // User provided feedback/correction - resume with empty interactionResponse
+            // The user message was already broadcast and persisted; the mission will load it from artifacts
+            await client.resumeMission(workflowId, { interactionResponse: '', continueWithMessage: false });
+            res.status(202).json({ status: 'resuming', classification: 'feedback' });
+            return;
+          } else {
+            // Unclear - just acknowledge and keep waiting
+            res.status(202).json({ 
+              status: 'accepted', 
+              acknowledgement: 'Message received.',
+              response: 'I received your message. Could you please clarify or provide the requested information?'
+            });
+            return;
+          }
         }
         // Even when the persisted status is not yet awaiting_review, a user
         // message is still treated as a resume signal. resumeMission validates

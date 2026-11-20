@@ -119,7 +119,6 @@ export class ToolExecutor {
     workspaceManager?: AssistantWorkspaceManager,
     eventLog: EventLog = createInMemoryEventLog(),
     executionRecordStore: ExecutionRecordStore = createExecutionRecordStore(),
-    codesDir?: string,
   ) {
     this.toolRegistry = toolRegistry || null;
     this.workspaceManager = workspaceManager || null;
@@ -128,7 +127,7 @@ export class ToolExecutor {
     // tools registered after construction stay visible to all of them.
     const nestedExecutor = this.nestedExecutorCallback();
     this.config = new ToolConfigResolver(this.pendingCredentialOverrides);
-    this.dispatcher = new ToolDispatcher(this.toolRegistry, this.mcpClients, this.config, nestedExecutor, codesDir);
+    this.dispatcher = new ToolDispatcher(this.toolRegistry, this.mcpClients, this.config, nestedExecutor);
     this.events = new ToolEventDispatcher(this.toolRegistry, eventLog, nestedExecutor);
   }
 

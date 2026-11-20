@@ -13,8 +13,6 @@ import skillCompilationRoutes from './routes/skill-compilation';
 import batchExecutionRoutes from './routes/batch-execution';
 import { Tool, MCPToolDiscoveryRequiredError } from './types';
 import { toolRegistry, toolStore, triggerScheduler } from './utils/sharedInstance';
-import { legacyGeneralTools } from './data/generalTools';
-import { nativeTools } from './data/nativeTools';
 import logger from './utils/logger';
 import { ToolNotFoundError, ValidationError } from './utils/errors';
 import { renderPermissionPrompt } from './services/ToolPermissionService';
@@ -114,8 +112,6 @@ const skillTools = domainSkillArrays.flatMap((arr) =>
 );
 
 const allDefaults = [
-  ...nativeTools,
-  ...legacyGeneralTools,
   ...skillTools,
   ...canonicalTools,
   ...careerCanonicalInternalTools,
@@ -305,7 +301,6 @@ if (require.main === module) {
     });
 }
 
-export { legacyGeneralTools } from './data/generalTools';
 export {
   careerSkills,
   productSkills,

@@ -160,6 +160,65 @@ export function findTool(tools: ToolDescriptor[], toolIdOrName: string): ToolDes
   return tools.find((tool) => tool.id === toolIdOrName || tool.name === toolIdOrName)
 }
 
+// ---------------------------------------------------------------------------
+// Task-aware tool ranking: pre-filters the catalog so the Brain sees only the
+// most relevant tools in the prompt, not the entire catalog.
+// ---------------------------------------------------------------------------
+
+/** Maximum number of tools to include in the prompt catalog JSON. */
+export const MAX_PROMPT_TOOLS = 15;
+
+/**
+ * Scores each tool by keyword overlap with the task goal and required actions,
+ * with a bonus for action-intent alignment. Returns tools sorted by descending
+ * relevance. Tools with zero overlap are still included at the end (stable
+ * ordering) so the Brain can discover them via `__list_tools`.
+ */
+export function rankToolsForTask(
+  tools: ToolDescriptor[],
+  taskGoal: string | undefined,
+  requiredActions: Array<{ toolId: string; outcome: string }>,
+): ToolDescriptor[] {
+  if (tools.length <= MAX_PROMPT_TOOLS) return tools;
+
+  const goalTerms = new Set(
+    (taskGoal || '')
+      .toLocaleLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((term) => term.length > 1),
+  );
+  const requiredToolIds = new Set(requiredActions.map((a) => a.toolId.toLocaleLowerCase()));
+  const goalHasActionIntent = [...goalTerms].some((term) => ACTION_INTENT_TERMS.has(term));
+
+  const scored = tools.map((tool) => {
+    // Exact required-action match gets top priority
+    if (requiredToolIds.has(tool.id.toLocaleLowerCase()) || requiredToolIds.has(tool.name.toLocaleLowerCase())) {
+      return { tool, score: 1000 };
+    }
+    const metadataTerms = new Set([
+      tool.id,
+      tool.name,
+      tool.description,
+      ...(Array.isArray(tool.manifest?.capabilities) ? tool.manifest.capabilities : []),
+    ].join(' ').toLocaleLowerCase().split(/[^a-z0-9]+/).filter((term) => term.length > 1));
+    let score = [...goalTerms].reduce((total, term) => total + (metadataTerms.has(term) ? 1 : 0), 0);
+    if (goalHasActionIntent && score > 0) {
+      let actionSignal = 0;
+      let passiveSignal = 0;
+      for (const term of metadataTerms) {
+        if (ACTION_INTENT_TERMS.has(term)) actionSignal++;
+        if (PASSIVE_INTENT_TERMS.has(term)) passiveSignal++;
+      }
+      score += Math.min(actionSignal, 3) * 0.35;
+      score -= Math.min(passiveSignal, 3) * 0.25;
+    }
+    return { tool, score };
+  });
+
+  scored.sort((a, b) => b.score - a.score || a.tool.id.localeCompare(b.tool.id));
+  return scored.map((entry) => entry.tool);
+}
+
 export class ToolCatalogClient {
   constructor(
     private readonly toolExecutorUrl: string,

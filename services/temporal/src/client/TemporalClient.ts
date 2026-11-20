@@ -1884,6 +1884,61 @@ export class TemporalClient {
     }
     logger.debug({ missionId: state.missionId, status: state.status }, 'Mission state persisted');
   }
+
+  /**
+   * Classifies a user message in the context of a pending interaction.
+   * Returns how the message should be handled: ANSWER (direct answer to pending question),
+   * FEEDBACK (correction/feedback requiring re-plan), or UNCLEAR (needs clarification).
+   */
+  async classifyUserMessageForPendingInteraction(
+    missionId: string,
+    userMessage: string,
+    pendingInteraction: MissionPendingInteraction,
+  ): Promise<'ANSWER' | 'FEEDBACK' | 'UNCLEAR'> {
+    if (!pendingInteraction.question) return 'UNCLEAR';
+
+    const brainUrl = process.env.BRAIN_URL || 'http://brain:3100';
+    try {
+      const response = await fetch(`${brainUrl}/api/brain/complete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: `The mission is waiting for a user response to this question: "${pendingInteraction.question}"
+
+The user replied: "${userMessage}"
+
+Classify the user's reply:
+- ANSWER: The user directly provides the requested information (e.g., password, credential, specific value, yes/no to a direct question)
+- FEEDBACK: The user provides correction, feedback, or a different approach (e.g., "that's wrong", "use a different method", "you don't need that", "actually do X instead")
+- UNCLEAR: The user asks a question, gives an ambiguous response, or the intent cannot be determined
+
+Respond with ONLY a JSON object: {"classification": "ANSWER|FEEDBACK|UNCLEAR", "reasoning": "..."}`,
+          schema: {
+            type: 'object',
+            properties: {
+              classification: { type: 'string', enum: ['ANSWER', 'FEEDBACK', 'UNCLEAR'] },
+              reasoning: { type: 'string' }
+            },
+            required: ['classification', 'reasoning']
+          },
+          temperature: 0.1,
+          maxTokens: 200,
+        }),
+      });
+
+      if (!response.ok) {
+        logger.warn({ missionId, status: response.status }, 'Brain classification failed, defaulting to FEEDBACK');
+        return 'FEEDBACK';
+      }
+
+      const result = await response.json() as { output?: { classification?: string }; classification?: string };
+      const classification = result.output?.classification || result.classification;
+      return (classification === 'ANSWER' || classification === 'FEEDBACK' || classification === 'UNCLEAR') ? classification : 'FEEDBACK';
+    } catch (err) {
+      logger.warn({ missionId, err: err instanceof Error ? err.message : String(err) }, 'Error classifying user message, defaulting to FEEDBACK');
+      return 'FEEDBACK';
+    }
+  }
 }
 
 

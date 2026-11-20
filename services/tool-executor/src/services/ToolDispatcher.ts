@@ -13,8 +13,6 @@ import { MCPClient, MCPHTTPClient } from '../services/MCPClient';
 import { validateAgainstOutputSchema, parseToolOutputJson } from '../utils/schemaValidator';
 import { schemaRecord, type ToolConfigResolver } from './ToolConfig';
 
-const DEFAULT_CODES_DIR = path.resolve(__dirname, '..', '..', 'codes');
-
 const BRAIN_URL = process.env.BRAIN_URL || 'http://brain:3100';
 const HEALING_SYSTEM_PROMPT = `You are a senior engineer debugging a failed code execution. Given the error message, source code, and input that caused the failure, provide a corrected version of the code. Output ONLY a single JSON object with this exact shape: { "sourceCode": "corrected code string", "explanation": "brief explanation of the fix" }`;
 const MAX_HEALING_ATTEMPTS = 2;
@@ -65,7 +63,6 @@ export class ToolDispatcher {
   private pluginGenerator = new PluginGenerator();
   private toolDiscovery = new ToolDiscovery();
 
-  private readonly codesDir: string;
   private codeModuleCache = new Map<string, any>();
 
   constructor(
@@ -73,10 +70,7 @@ export class ToolDispatcher {
     private readonly mcpClients: Map<string, MCPClient | MCPHTTPClient>,
     private readonly config: ToolConfigResolver,
     private readonly nestedExecutor: NestedExecutor,
-    codesDir?: string,
-  ) {
-    this.codesDir = codesDir || process.env.TOOL_CODES_DIR || DEFAULT_CODES_DIR;
-  }
+  ) {}
 
   async generatePlugin(request: {
     description: string;
@@ -153,60 +147,8 @@ export class ToolDispatcher {
   private resolveCodeFile(tool: Tool): string | undefined {
     const manifest = tool.manifest as Record<string, unknown> | undefined;
     const declared = manifest?.codeFile as string | undefined;
-    if (declared) return path.resolve(declared);
-
-    // Fall back to deriving the code file from the executor key, so tools
-    // registered without an explicit codeFile (e.g. legacy nativeTools array)
-    // still resolve to their implementation.
-    const executor = manifest?.executor as string | undefined;
-    const executorCodeMap: Record<string, string> = {
-      weather: 'weather.js',
-      math: 'math.js',
-      search: 'search.js',
-      files: 'files.js',
-      ftp: 'ftp.js',
-      webhook: 'webhook.js',
-      database: 'database.js',
-      email: 'email.js',
-      vendor: 'vendor.js',
-      data_analysis: 'data_analysis.js',
-      calendar: 'calendar.js',
-      api_client: 'api_client.js',
-    };
-    if (executor && executorCodeMap[executor]) {
-      return path.resolve(this.codesDir, executorCodeMap[executor]);
-    }
-
-    const name = tool.name.toLowerCase();
-    const codeMap: Record<string, string> = {
-      ftp: 'ftp.js',
-      webhook: 'webhook.js',
-      database: 'database.js',
-      db: 'database.js',
-      file: 'files.js',
-      storage: 'files.js',
-      jira: 'vendor.js',
-      confluence: 'vendor.js',
-      slack: 'vendor.js',
-      github: 'vendor.js',
-      email: 'email.js',
-      search: 'search.js',
-      query: 'search.js',
-    };
-
-    for (const [key, file] of Object.entries(codeMap)) {
-      if (name.includes(key)) {
-        return path.resolve(this.codesDir, file);
-      }
-    }
-
-    const capabilities = Array.isArray(manifest?.capabilities) ? (manifest.capabilities as string[]) : [];
-    if (capabilities.includes('query')) return path.resolve(this.codesDir, 'database.js');
-    if (capabilities.includes('read') || capabilities.includes('write')) return path.resolve(this.codesDir, 'files.js');
-    if (capabilities.includes('search')) return path.resolve(this.codesDir, 'search.js');
-    if (capabilities.includes('send')) return path.resolve(this.codesDir, 'email.js');
-
-    return undefined;
+    if (!declared) return undefined;
+    return path.resolve(declared);
   }
 
   private async executeNativeModule(

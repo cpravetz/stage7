@@ -1,0 +1,43 @@
+{
+  "id": "github_integration",
+  "name": "GitHub Integration",
+  "description": "Create issues, list repository issues, and create pull requests via the GitHub REST API. Requires the `githubToken` credential (GitHub personal access token, e.g. ghp_...) for Bearer auth. Supports create_issue, list_issues, and create_pr operations.",
+  "type": "native",
+  "manifest": {
+    "executor": "vendor",
+    "codeFile": "vendor.js",
+    "vendor": "github",
+    "configSchema": {
+      "type": "object",
+      "properties": {
+        "githubToken": { "type": "string", "title": "GitHub Token", "description": "GitHub personal access token (e.g. ghp_...)", "sensitive": true, "required": false, "envVar": "GITHUB_TOKEN", "label": "GitHub Token" }
+      },
+      "required": []
+    }
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "operation": { "type": "string", "enum": ["create_issue", "list_issues", "create_pr"], "description": "GitHub REST operation to perform" },
+      "repo": { "type": "string", "description": "Repository in \"owner/repo\" format (required for all operations)" },
+      "title": { "type": "string", "description": "Issue or pull request title (required for create_issue and create_pr)" },
+      "body": { "type": "string", "description": "Issue or pull request body/description" },
+      "labels": { "type": "array", "items": { "type": "string" }, "description": "Label names to apply (for create_issue)" },
+      "assignees": { "type": "array", "items": { "type": "string" }, "description": "Assignee usernames (for create_issue)" },
+      "state": { "type": "string", "enum": ["open", "closed", "all"], "description": "Issue state filter (for list_issues; defaults to open)" },
+      "perPage": { "type": "integer", "minimum": 1, "description": "Number of issues per page (for list_issues; default 50)" },
+      "head": { "type": "string", "description": "Head branch (required for create_pr)" },
+      "base": { "type": "string", "description": "Base branch (required for create_pr)" }
+    },
+    "required": ["operation", "repo"]
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "result": { "type": "object", "description": "Created issue, issue list, or pull request object" },
+      "error": { "type": "string" }
+    },
+    "required": ["success"]
+  },
+  "isSkill": false
+}

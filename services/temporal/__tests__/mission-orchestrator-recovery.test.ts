@@ -190,6 +190,57 @@ describe('MissionOrchestrator checkpoint recovery', () => {
     expect(broadcast).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'mission_completed' }))
   })
 
+  it('does not abort a mission when the completion reviewer cannot produce a valid verdict', async () => {
+    const plan: Plan = {
+      summary: 'Complete the work',
+      estimatedDuration: 'short',
+      estimatedCost: 'low',
+      requiresClarification: false,
+      clarificationQuestions: [],
+      clarificationAnswers: [],
+      phases: [{
+        id: 'phase-1', name: 'Execution', goal: 'Complete the work',
+        requiresApproval: false, status: 'completed',
+        tasks: [{
+          id: 'task-1', title: 'Work', description: 'Work', agentRole: 'worker',
+          systemPrompt: 'Work', expectedArtifacts: [], status: 'completed', artifacts: [], output: 'Done',
+        }],
+      }],
+    }
+    jest.spyOn(global, 'fetch').mockResolvedValue(jsonResponse())
+    jest.spyOn(MissionAgentRuntime.prototype, 'getOrCreateAgent').mockResolvedValue('agent-worker')
+    const execute = jest.spyOn(MissionAgentRuntime.prototype, 'executeTask')
+      .mockResolvedValue({ output: 'No improvement', artifacts: [], tokensUsed: 0 })
+    jest.spyOn(MissionAgentRuntime.prototype, 'stopAllAgents').mockResolvedValue()
+    const completionListener = jest.spyOn(MissionCompletedListener.prototype, 'onMissionCompleted')
+    const orchestrator = new MissionOrchestrator()
+    const review = jest.spyOn(orchestrator, 'evaluateMissionCompletion').mockResolvedValue({
+      satisfied: false,
+      gaps: ['Mission completion could not be verified: the reviewer did not identify a task-specific unmet requirement after 3 attempts.'],
+      verificationFailed: true,
+    })
+    const broadcast = jest.fn().mockResolvedValue(undefined)
+
+    const result = await orchestrator.run({
+      missionId: 'verification-failed', prompt: 'Complete the work', tenantId: 'tenant-1',
+      persistenceUrl: 'http://artifacts', gatewayUrl: 'http://gateway',
+      broadcast, broadcastAll: jest.fn().mockResolvedValue(undefined), waitForApproval: jest.fn(),
+      resumeCheckpoint: {
+        version: 1, plan, completedPhases: ['phase-1'],
+        completedTasks: [{ phaseId: 'phase-1', taskId: 'task-1' }],
+      },
+    })
+
+    // Verification failure retries the review instead of spawning futile
+    // recovery tasks, and resolves to a resumable review state, not an abort.
+    const recoveryCalls = execute.mock.calls.filter((call) => call[1].id.includes('-mission-recovery-'))
+    expect(recoveryCalls).toHaveLength(0)
+    expect(review.mock.calls.length).toBeGreaterThanOrEqual(2)
+    expect(result.outputs.status).toBe('awaiting_review')
+    expect(result.outputs.reason).toContain('automatically verified')
+    expect(completionListener).not.toHaveBeenCalled()
+  })
+
   it('persists and pauses a recovery with an uncertain side effect without another attempt', async () => {
       const plan: Plan = {
         summary: 'Complete work', estimatedDuration: 'short', estimatedCost: 'low',

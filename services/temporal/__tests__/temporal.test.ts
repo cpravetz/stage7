@@ -13,6 +13,7 @@ jest.mock('../src/client/TemporalClient', () => {
     isConnected: jest.fn(),
     broadcastMissionUpdate: jest.fn(),
     resumeMission: jest.fn(),
+    classifyUserMessageForPendingInteraction: jest.fn().mockResolvedValue('ANSWER'),
     isMissionAwaitingInputError: (error: unknown) =>
       error instanceof Error && error.name === 'MissionAwaitingInputError',
   };
@@ -36,6 +37,7 @@ describe('Temporal Routes', () => {
   let getMissionResult: jest.Mock;
   let listMissions: jest.Mock;
   let isConnected: jest.Mock;
+  let classifyUserMessageForPendingInteraction: jest.Mock;
   let createMissionSchedule: jest.Mock;
   let recordScheduleMission: jest.Mock;
   let listMissionSchedules: jest.Mock;
@@ -47,6 +49,7 @@ describe('Temporal Routes', () => {
     getMissionResult = temporalMocks.getMissionResult;
     listMissions = temporalMocks.listMissions;
     isConnected = temporalMocks.isConnected;
+    classifyUserMessageForPendingInteraction = temporalMocks.classifyUserMessageForPendingInteraction;
     const scheduleMocks = require('../src/schedules/missionScheduler');
     createMissionSchedule = scheduleMocks.createMissionSchedule;
     recordScheduleMission = scheduleMocks.recordScheduleMission;

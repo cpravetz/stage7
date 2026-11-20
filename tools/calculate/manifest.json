@@ -1,0 +1,39 @@
+{
+  "id": "calculate",
+  "name": "Calculate",
+  "description": "Perform mathematical calculations safely using a secure expression parser (no eval). Supports expressions with arithmetic, functions (sqrt, sin, cos, log, etc.), constants (pi, e), and list operations (sum, mean, median, min, max, stddev).",
+  "type": "native",
+  "manifest": {
+    "executor": "math",
+    "codeFile": "math.js",
+    "configSchema": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "expression": { "type": "string", "description": "Mathematical expression to evaluate (e.g., \"2 * (3 + 4) ^ 2\", \"sqrt(16) + sin(pi/2)\")" },
+      "values": { "type": "array", "items": { "type": "number" }, "description": "Array of numbers for list operations" },
+      "operation": { "type": "string", "enum": ["sum", "mean", "median", "min", "max", "stddev"], "description": "List operation to perform on values array" }
+    },
+    "required": [],
+    "anyOf": [
+      { "required": ["expression"] },
+      { "required": ["values", "operation"] }
+    ]
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "success": { "type": "boolean" },
+      "result": { "type": "number" },
+      "expression": { "type": "string" },
+      "error": { "type": "string" }
+    },
+    "required": ["success"]
+  },
+  "isSkill": false
+}

@@ -220,6 +220,7 @@ const MILESTONE_EVENT_TYPES = new Set([
   'mission_canceled',
   'mission_incomplete',
   'mission_needs_review',
+  'mission_resumed',
 ]);
 
 const FAILURE_LABELS: Record<string, string> = {
@@ -725,7 +726,10 @@ function dedupePlannerAndReasoningEvents(events: FeedEvent[]): FeedEvent[] {
         if (seen.has(key)) return false;
         seen.add(key);
       } else {
-        const key = `${type}|${planSource}|${event.message}`;
+        const missionId = event.missionId || '';
+        const agentId = typeof data.agentId === 'string' ? data.agentId : '';
+        const agentRole = typeof data.agentRole === 'string' ? data.agentRole : '';
+        const key = `${type}|${missionId}|${agentId}|${agentRole}|${planSource}`;
         if (seen.has(key)) return false;
         seen.add(key);
       }
@@ -777,7 +781,17 @@ function listMilestonesOnce(events: FeedEvent[]): FeedEvent[] {
   let reviewIndex: number | undefined;
   for (const event of events) {
     const type = String(event.type);
-    if (type === 'mission_resumed') reviewIndex = undefined;
+    if (type === 'mission_resumed') {
+      reviewIndex = undefined;
+      if (!MILESTONE_EVENT_TYPES.has(type)) {
+        result.push(event);
+        continue;
+      }
+      if (listed.has(type)) continue;
+      listed.add(type);
+      result.push(event);
+      continue;
+    }
     if (type === 'mission_needs_review') {
       if (reviewIndex === undefined) {
         reviewIndex = result.length;

@@ -219,6 +219,10 @@ export function hasEvidenceRecoveryProgress(previous: string | undefined, curren
 export const MAX_PHASE_RECOVERY_ROUNDS_SAFETY = 12;
 export const MAX_MISSION_RECOVERY_ROUNDS_SAFETY = 12;
 export const MAX_NO_PROGRESS_RECOVERY_ATTEMPTS = 3;
+// A completion-review verification failure (the reviewer could not produce a
+// valid verdict) is recoverable, not a mission-incomplete: retry the review a
+// few times before falling back to a resumable review state instead of aborting.
+export const MAX_COMPLETION_VERIFICATION_RETRIES = 2;
 
 /** Bounded reruns of a dependency whose completion did not produce its declared artifact (a missing input). */
 export const MAX_DEPENDENCY_INPUT_RERUNS = 2;

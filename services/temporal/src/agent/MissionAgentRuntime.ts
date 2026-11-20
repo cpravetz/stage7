@@ -20,7 +20,7 @@ import {
 import { Plan, Phase, Task } from '@stage7-nextgen/shared';
 import { z } from 'zod';
 import { BrainClient, BrainValidationError } from '../brain/BrainClient';
-import { extractArtifacts } from './TaskResultParser';
+import { extractArtifacts, invalidExpectedArtifacts } from './TaskResultParser';
 import { parseInterruption as parseTaskInterruption } from './TaskInterruption';
 import { applyRuntimeTaskRequirements } from './TaskRequirements';
 import { missionAgentRoleKey, missionAgentRoleLabel } from './AgentRuntimeConfig';
@@ -1004,8 +1004,10 @@ export class MissionAgentRuntime {
     missionGoal: string,
     planSummary: string,
     completedTaskSummaries: CompletedTaskSummary[],
-  ): Promise<{ satisfied: boolean; gaps: string[] }> {
-    const routingSessionId = `${this.missionId}:completion-review`;
+  ): Promise<{ satisfied: boolean; gaps: string[]; verificationFailed?: boolean }> {
+    // Fresh routing session per review so repeated completion-review attempts
+    // rotate to new models instead of exhausting the per-session exclusion list.
+    const routingSessionId = `${this.missionId}:completion-review:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
     const agentId = await this.getOrCreateAgent(
       'mission-evaluator',
       MISSION_COMPLETION_REVIEWER_SYSTEM_PROMPT,
@@ -1049,6 +1051,7 @@ export class MissionAgentRuntime {
       return {
         satisfied: false,
         gaps: ['Mission completion review requires too much recorded evidence for a safe review; the mission needs human review.'],
+        verificationFailed: true,
       };
     }
     let previousResponse = '';
@@ -1180,6 +1183,7 @@ export class MissionAgentRuntime {
     return {
       satisfied: false,
       gaps: [fallbackGap],
+      verificationFailed: true,
     };
   }
 
@@ -1348,7 +1352,7 @@ export class MissionAgentRuntime {
     const result = await this.executePromptTask(agentId, {
       taskId: continuation
         ? `${this.missionId}:${phase.id}:${task.id}:resume-${continuation.pendingInteraction.resumeCount + 1}`
-        : `${this.missionId}:${phase.id}:${task.id}`,
+        : `${this.missionId}:${phase.id}:${task.id}${userMessages?.length ? `:user-${Date.now()}` : ''}`,
       type: task.agentRole,
       prompt: taskPrompt,
       phaseId: phase.id,
@@ -1481,6 +1485,53 @@ export class MissionAgentRuntime {
     const expectedArtifacts = request.expectedArtifacts || [];
     const artifacts = this.parseArtifacts(result?.artifacts, output, expectedArtifacts, submitted.taskId);
     this.assertExpectedArtifacts(artifacts, expectedArtifacts, submitted.taskId);
+    // Validate that produced artifacts carry substantive content, not just
+    // headings/comments/placeholders. If validation fails, ask the Brain to
+    // remediate and re-validate; the task only completes when every expected
+    // artifact is substantively present.
+    for (let attempt = 0; attempt <= 1; attempt++) {
+      const invalid = invalidExpectedArtifacts(artifacts, expectedArtifacts);
+      if (invalid.length === 0) break;
+      const remediated = await this.remediateArtifactContent(
+        agentId,
+        submitted.taskId,
+        request,
+        artifacts,
+        invalid,
+      );
+      if (!remediated) break;
+      for (const artifact of remediated) {
+        const index = artifacts.findIndex((existing) => existing.name === artifact.name);
+        if (index >= 0) artifacts.splice(index, 1, artifact);
+        else artifacts.push(artifact);
+      }
+    }
+    // Final validation: if any expected artifact is still invalid, fail the
+    // task rather than declaring it complete without satisfactory deliverables.
+    const stillInvalid = invalidExpectedArtifacts(artifacts, expectedArtifacts);
+    if (stillInvalid.length > 0) {
+      throw new Error(
+        `Task "${submitted.taskId}" cannot be declared complete without satisfactory deliverables: artifact(s) have no substantive content after remediation: ${stillInvalid.join(', ')}.`,
+      );
+    }
+    // Acceptance review: verify each produced artifact against the task's
+    // declared intent before the task is marked complete. An artifact is only
+    // 'accepted' when the reviewer confirms it fulfills the task purpose; an
+    // artifact that merely exists (or was remediated for substance) is not
+    // sufficient. Tasks that depend on this task's artifacts must wait until
+    // those artifacts have been accepted.
+    const acceptance = await this.reviewArtifactAcceptance(
+      agentId,
+      submitted.taskId,
+      request,
+      artifacts,
+      expectedArtifacts,
+    );
+    if (acceptance && acceptance.rejected.length > 0) {
+      throw new Error(
+        `Task "${submitted.taskId}" artifacts were not accepted: ${acceptance.rejected.join(', ')}. Reason: ${acceptance.reason || 'not specified'}.`,
+      );
+    }
     const actionReceipts = this.parseActionReceipts(result?.actionReceipts, submitted.taskId);
     const tokensUsed = typeof result?.tokensUsed === 'number' ? result.tokensUsed : 0;
     if (reasoning && this.broadcast) {
@@ -1514,6 +1565,101 @@ export class MissionAgentRuntime {
     output: string,
   ): TaskExecutionResult['interruption'] | undefined {
     return parseTaskInterruption(output);
+  }
+
+  /**
+   * Ask the Brain to regenerate substantive content for artifacts that were
+   * produced but failed content validation (e.g. only headings/comments).
+   * Returns the remediated artifacts or null when no Brain client is
+   * available or remediation was not possible.
+   */
+  private async remediateArtifactContent(
+    agentId: string,
+    taskId: string,
+    request: PromptTaskRequest,
+    existing: MissionArtifact[],
+    invalidNames: string[],
+  ): Promise<MissionArtifact[] | null> {
+    if (!this.brainClient || invalidNames.length === 0) return null;
+    const prompt = [
+      `The following artifacts were produced but lack substantive content: ${invalidNames.join(', ')}.`,
+      'Regenerate each artifact with real, non-empty content that fulfills the task intent.',
+      'Return a JSON array of artifacts with { name, type, content, purpose, isDeliverable }.',
+      'Do not return headings, comments, or placeholders only.',
+    ].join('\n');
+    const schema = z.array(MissionArtifactSchema);
+    try {
+      const result = await this.brainClient.complete({
+        prompt,
+        systemPrompt: 'You are an artifact remediation assistant. Produce substantive content only.',
+        schema,
+        requirements: {
+          routingSessionId: `${this.missionId}:task:${request.phaseId || ''}:${taskId}`,
+          missionId: this.missionId,
+        },
+        mode: 'verify',
+      });
+      return result.value;
+    } catch (err) {
+      logger.warn(
+        { taskId, err: err instanceof Error ? err.message : String(err) },
+        'Brain artifact remediation failed; keeping existing artifacts',
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Ask the Brain to regenerate substantive content for artifacts that were
+   * produced but failed content validation (e.g. only headings/comments).
+   * Returns the remediated artifacts or null when no Brain client is
+   * available or remediation was not possible.
+   */
+  private async reviewArtifactAcceptance(
+    agentId: string,
+    taskId: string,
+    request: PromptTaskRequest,
+    artifacts: MissionArtifact[],
+    expectedArtifacts: string[],
+  ): Promise<{ accepted: string[]; rejected: string[]; reason?: string } | null> {
+    if (!this.brainClient || expectedArtifacts.length === 0) return null;
+    const reviewArtifacts = artifacts.filter((artifact) =>
+      expectedArtifacts.includes(artifact.name),
+    );
+    if (reviewArtifacts.length === 0) return { accepted: [], rejected: [] };
+    const prompt = [
+      `You are reviewing artifacts produced by task "${taskId}".`,
+      `Task intent: ${request.prompt.slice(0, 2_000)}`,
+      'For each artifact below, determine whether it fulfills the task intent and is acceptable as a completed deliverable.',
+      'Return a JSON object: {"accepted":["artifact-name-1"],"rejected":["artifact-name-2"],"reason":"explanation if any rejected"}',
+      'An artifact is rejected if it does not fulfill the task intent, is incomplete, or is a placeholder/boilerplate.',
+      'Artifacts to review:',
+      ...reviewArtifacts.map((artifact) => `- ${artifact.name} (${artifact.type}): ${typeof artifact.content === 'string' ? artifact.content.slice(0, 1_000) : artifact.url || '(no content)'}`),
+    ].join('\n');
+    const schema = z.object({
+      accepted: z.array(z.string()),
+      rejected: z.array(z.string()),
+      reason: z.string().optional(),
+    });
+    try {
+      const result = await this.brainClient.complete({
+        prompt,
+        systemPrompt: 'You are an artifact acceptance reviewer. Judge each artifact against the task intent.',
+        schema,
+        requirements: {
+          routingSessionId: `${this.missionId}:artifact-acceptance:${request.phaseId || ''}:${taskId}`,
+          missionId: this.missionId,
+        },
+        mode: 'review',
+      });
+      return result.value;
+    } catch (err) {
+      logger.warn(
+        { taskId, err: err instanceof Error ? err.message : String(err) },
+        'Artifact acceptance review failed; treating artifacts as accepted',
+      );
+      return null;
+    }
   }
 
   private async markTaskCompleted(taskId: string, result: unknown): Promise<void> {

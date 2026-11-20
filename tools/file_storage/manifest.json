@@ -1,0 +1,36 @@
+{
+  "id": "file_storage",
+  "name": "File Storage",
+  "description": "Read, write, list, delete, check existence, and create directories in a secure sandboxed local file store rooted at FILE_STORAGE_BASE_PATH (default /tmp/stage7-filestore). Supports optional buckets for logical separation. No operator credentials required.",
+  "type": "native",
+  "manifest": {
+    "executor": "files",
+    "codeFile": "files.js",
+    "configSchema": {
+      "type": "object",
+      "properties": {},
+      "required": []
+    }
+  },
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "operation": { "type": "string", "enum": ["read", "write", "list", "delete", "exists", "mkdir"], "description": "File operation to perform (required)" },
+      "path": { "type": "string", "description": "File or directory path relative to the base path or bucket (required)" },
+      "content": { "type": "string", "description": "Content to write (for write)" },
+      "bucket": { "type": "string", "description": "Optional bucket name for logical separation" }
+    },
+    "required": ["operation", "path"]
+  },
+  "outputSchema": {
+    "type": "object",
+    "properties": {
+      "success": { "type": "boolean", "description": "Whether the operation succeeded" },
+      "data": { "type": "object", "description": "Operation result (path, bytes, listing, or exists flag)" },
+      "error": { "type": "string", "description": "Error message, if the operation failed" },
+      "durationMs": { "type": "integer", "description": "Execution time in milliseconds" }
+    },
+    "required": ["success"]
+  },
+  "isSkill": false
+}

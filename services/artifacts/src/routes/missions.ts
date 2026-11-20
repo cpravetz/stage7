@@ -274,8 +274,8 @@ router.get('/:missionId/artifacts', asyncHandler(async (req, res) => {
         || /^\s*(?:Execution outcome|Artifact status)\b.{0,120}\b(?:blocked|failed|not created)\b/i.test(artifact.content)
       );
     const phaseId = typeof artifact.phaseId === 'string' ? artifact.phaseId : context.phaseId;
-    const artifactLineageId = expected && phaseId && !isBlocker
-      ? `mission:${encodeURIComponent(missionId)}:phase:${encodeURIComponent(phaseId)}:deliverable:${encodeURIComponent(name.trim().toLocaleLowerCase())}`
+    const artifactLineageId = !isBlocker
+      ? `mission:${encodeURIComponent(missionId)}:deliverable:${encodeURIComponent(name.trim().toLocaleLowerCase())}`
       : undefined;
     const legacyLineageId = `mission:${encodeURIComponent(missionId)}:${encodeURIComponent(name.trim().toLocaleLowerCase())}`;
     const needsCanonicalLineage = artifactLineageId

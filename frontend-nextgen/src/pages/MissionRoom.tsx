@@ -275,33 +275,56 @@ function buildMissionArtifactItems(
   events: FeedEvent[],
   storedArtifacts: unknown[] = [],
 ): MissionArtifactItem[] {
-  const items = new Map<string, MissionArtifactItem>();
+  // Name-based identity: the same logical artifact (same name) is one card,
+  // regardless of which source produced it. When multiple sources provide the
+  // same-named artifact, the richest one (has content/url) wins. Expected
+  // artifacts are tracked separately from produced ones.
+  const produced = new Map<string, MissionArtifactItem>();
+  const expected = new Map<string, MissionArtifactItem>();
   const add = (value: unknown, kind: MissionArtifactItem['kind'], phaseId?: string, taskId?: string) => {
     const item = toMissionArtifactItem(value, kind, phaseId, taskId);
     if (!item) return;
-    const key = kind === 'expected'
-      ? `expected|${item.phaseId || ''}|${item.name.toLocaleLowerCase()}`
-      : [
-          kind,
-          item.artifactId || item.logicalId || item.lineageId || item.id,
-          item.version ?? '',
-          item.phaseId || '',
-          item.taskId || '',
-          item.name.toLowerCase(),
-          item.url || '',
-          typeof item.content === 'string' ? item.content : JSON.stringify(item.content ?? ''),
-        ].join('|');
-    const existing = items.get(key);
-    if (!existing || ((!existing.content && !existing.url) && (item.content || item.url))) {
-      items.set(key, item);
+    const nameKey = item.name.toLocaleLowerCase();
+    if (kind === 'expected') {
+      const key = `${item.phaseId || ''}|${nameKey}`;
+      const existing = expected.get(key);
+      if (!existing) expected.set(key, item);
+      return;
     }
+    // For produced artifacts, name is the primary identity. Merge across
+    // sources: prefer the entry that has actual content or a URL.
+    const existing = produced.get(nameKey);
+    if (!existing) {
+      produced.set(nameKey, item);
+      return;
+    }
+    const existingHasContent = Boolean(existing.content || existing.url);
+    const newHasContent = Boolean(item.content || item.url);
+    if (!existingHasContent && newHasContent) {
+      // Preserve the earliest phaseId/taskId but take the richer content
+      produced.set(nameKey, {
+        ...item,
+        phaseId: item.phaseId || existing.phaseId,
+        taskId: item.taskId || existing.taskId,
+      });
+    } else if (existingHasContent && !newHasContent) {
+      // Keep existing; enrich with phaseId/taskId if missing
+      if ((!existing.phaseId && item.phaseId) || (!existing.taskId && item.taskId)) {
+        produced.set(nameKey, {
+          ...existing,
+          phaseId: existing.phaseId || item.phaseId,
+          taskId: existing.taskId || item.taskId,
+        });
+      }
+    }
+    // Both have content or both lack content — keep first (stable ordering)
   };
 
   for (const artifact of plan?.artifacts || []) add(artifact, 'produced');
   for (const phase of plan?.phases || []) {
     for (const artifact of phase.artifacts || []) add(artifact, 'produced', phase.id);
     for (const task of phase.tasks || []) {
-      for (const expected of task.expectedArtifacts || []) add(expected, 'expected', phase.id, task.id);
+      for (const expectedArtifact of task.expectedArtifacts || []) add(expectedArtifact, 'expected', phase.id, task.id);
       for (const artifact of task.artifacts || []) add(artifact, 'produced', phase.id, task.id);
     }
   }
@@ -328,7 +351,20 @@ function buildMissionArtifactItems(
     }
   }
 
-  return Array.from(items.values());
+  // Merge expected and produced: produced artifacts take precedence so each
+  // name appears once in the list. Expected-only artifacts (declared but not
+  // yet produced) remain so the UI can show what is still pending.
+  const merged: MissionArtifactItem[] = [];
+  const producedNames = new Set<string>();
+  for (const item of produced.values()) {
+    merged.push(item);
+    producedNames.add(item.name.toLocaleLowerCase());
+  }
+  for (const item of expected.values()) {
+    if (producedNames.has(item.name.toLocaleLowerCase())) continue;
+    merged.push(item);
+  }
+  return merged;
 }
 
 export function getTaskStatus(

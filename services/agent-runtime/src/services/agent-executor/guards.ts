@@ -56,6 +56,7 @@ const refuseRepeatOfCompletedAction: ActionGuard = async ({ state, spec, deps, c
     (receipt) => receipt.toolId === action.tool && receipt.outcome === 'success',
   )
   if (!alreadySatisfied) return undefined
+  if (!alreadySatisfied) return undefined
 
   const reason = `Agent response validation failed: action "${action.tool}" already has a successful persisted receipt; the repeated action was not executed.`
   await deps.brain.reportComplaint(reply.completion.requestId, reason, context.missionId)
@@ -87,6 +88,28 @@ const reuseResultFromBeforeInterruption: ActionGuard = async ({ state }, { finge
   state.tell(`This exact action already has a persisted result from before the mission interruption and was not repeated. Previous result: ${previousReceipt?.content || 'result unavailable'}. Continue using that result or explain the blocker.`)
   state.lastAction = ''
   state.repeatedActionCount = 0
+  await state.save()
+  return NEXT_TURN
+}
+
+/** A tool that already prompted the user for credentials without success must not be retried. */
+const refuseRetryOfCredentialRequestedTool: ActionGuard = async ({ state, deps, context }, { action, reply, tools }) => {
+  const selectedToolId = findTool(tools, action.tool)?.id || action.tool
+  const earlierCredentialRequest = [...state.actionReceipts].reverse().find(
+    (receipt) => (receipt.toolId === action.tool || receipt.toolId === selectedToolId)
+      && receipt.outcome === 'question_asked',
+  )
+  if (!earlierCredentialRequest) return undefined
+
+  const reason = `Tool '${selectedToolId}' already prompted the user for credentials and the mission resumed without those credentials. Do not retry it; choose a different capability, resolve a replacement tool, or explain the blocker.`
+  await deps.brain.reportComplaint(reply.completion.requestId, reason, context.missionId)
+  state.actionReceipts.push(enrichReceipt({
+    toolId: action.tool,
+    isError: true,
+    content: reason,
+    outcome: 'denied',
+  }))
+  state.tell(`${reason} The prior credential request did not produce usable credentials. Use another tool or report the exact blocker.`)
   await state.save()
   return NEXT_TURN
 }
@@ -145,5 +168,6 @@ export const ACTION_GUARDS: readonly ActionGuard[] = [
   detectNoProgress,
   reuseResultFromBeforeInterruption,
   refuseToolThatFailedAfterResolution,
+  refuseRetryOfCredentialRequestedTool,
   enforceActionBudget,
 ]

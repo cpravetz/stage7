@@ -32,5 +32,6 @@
         "command": true,
         "true": true
     },
-    "terminal.integrated.shellIntegration.environmentReporting": true
+    "terminal.integrated.shellIntegration.environmentReporting": true,
+    "CodeGPT.apiKey": "CodeGPT Plus Beta"
 }

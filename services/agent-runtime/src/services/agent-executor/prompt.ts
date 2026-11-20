@@ -23,7 +23,10 @@ export function renderBrainTranscript(history: ChatMessage[]): string {
 export interface SystemPromptInput {
   /** The agent definition's own system prompt. */
   base: string
+  /** The top-ranked tool descriptors to include in the prompt catalog. */
   tools: ToolDescriptor[]
+  /** Total number of visible tools (may exceed tools.length when pre-filtered). */
+  totalToolCount?: number
   requiredActions: RequiredAction[]
   requiresExternalAction: boolean
   delegationDepth: number
@@ -39,6 +42,7 @@ export interface SystemPromptInput {
 export function buildSystemPrompt({
   base,
   tools,
+  totalToolCount,
   requiredActions,
   requiresExternalAction,
   delegationDepth,
@@ -52,19 +56,23 @@ export function buildSystemPrompt({
 }: SystemPromptInput): string {
   const catalog = describeTools(tools)
   const canTakeAction = remainingActions > 0
+  const isTruncated = totalToolCount !== undefined && totalToolCount > tools.length
   const delegation = canTakeAction && delegationDepth < maxDelegationDepth && remainingDelegations > 0
     ? `You may delegate a bounded subtask with {"tool":"${DELEGATE_ACTION}","args":{"goal":"...","role":"...","systemPrompt":"..."}}. One delegation runs the child to completion and returns its completed result. Put the full subtask in that one request; do not delegate to discover an Agent ID or make a follow-up delegation just to retrieve its result.`
     : 'You may not delegate further in this execution.'
+  const catalogNote = isTruncated
+    ? `Showing the ${tools.length} most relevant tools out of ${totalToolCount} available. Use {"tool":"${LIST_TOOLS_ACTION}","args":{"query":"<operation and input fields>"}} to find additional tools not listed here.`
+    : `Use {"tool":"${LIST_TOOLS_ACTION}","args":{"query":"<operation and input fields>"}} to search the catalog if no listed tool matches.`
   const actionInstructions = canTakeAction
     ? [
       'To execute a registered system tool, respond with exactly one raw JSON object: {"tool":"<tool-id>","args":{...}}. Never quote, fence, nest, or describe a tool action; only a sole JSON action object is executed. Do not claim an action succeeded until you receive its result.',
-      `Available system tools (${toolPolicy.mode === 'allowlist' ? 'restricted to this Agent allowlist' : 'the live catalog; generated tools appear after registration'}): ${JSON.stringify(catalog)}`,
-      `First inspect the current visible tool catalog with {"tool":"${LIST_TOOLS_ACTION}","args":{"query":"<operation and input fields>"}}. Search by the requested capability and expected input fields, not by a guessed tool name. If a matching tool is listed, invoke it with the requested values and verify its result; do not stop after discovery or treat a catalog listing as completion.`,
+      `Available system tools (${toolPolicy.mode === 'allowlist' ? 'restricted to this Agent allowlist' : 'ranked by relevance to your task'}): ${JSON.stringify(catalog)}`,
+      catalogNote,
       'Prepare arguments from each tool’s inputSchema, configSchema and outputSchema. Tool configuration and stored credentials are supplied by the system, not by you: call the matching tool with the task inputs and the system will resolve configured secrets or request missing ones securely. Never request, invent or echo secret values. For inputs marked "x-stage7-secret": true, pass only an already-supplied vault:// reference, and never show a vault:// reference to the user.',
       'When a user identifies existing Vault secrets by name, preserve those names when requesting capability resolution and distinguish secret names from plaintext. Include other supplied configuration values in the capability requirements. Do not ask for values already supplied, and do not assume a tool supports a provider merely because its name is similar.',
       toolPolicy.mode === 'allowlist'
         ? 'Tool creation is disabled for this Agent. Request access to a registered tool if the allowed tools are insufficient.'
-        : `If no available tool can satisfy a concrete capability need, ask ToolExecutor to resolve it with {"tool":"${CREATE_TOOL_ACTION}","args":{"description":"...","requirements":["..."]}}. Describe the capability and constraints, not implementation details. ToolExecutor checks registered native tools, discovers suitable MCP tools and handles their permission flow, then creates, validates, registers, and persists a reusable plugin only if no suitable tool can be used. Never write tool code yourself or claim resolution succeeded unless the returned tool is registered and available.`,
+        : `If no available tool can satisfy a concrete capability need, proactively call ${CREATE_TOOL_ACTION} to create one: {"tool":"${CREATE_TOOL_ACTION}","args":{"description":"...","requirements":["..."]}}. Describe the capability and constraints, not implementation details. ToolExecutor checks registered native tools, discovers suitable MCP tools and handles their permission flow, then creates, validates, registers, and persists a reusable plugin only if no suitable tool can be used. Never write tool code yourself or claim resolution succeeded unless the returned tool is registered and available.`,
       'Select a tool only when its description and schemas show it performs the exact requested operation and can verify the outcome. Name similarity is not enough: drafting, queuing, storing, or recording a request is not a substitute for sending, publishing, submitting, or otherwise carrying out the requested action.',
     ]
     : [
@@ -75,13 +83,13 @@ export function buildSystemPrompt({
     base || 'You are an autonomous mission agent. Complete the assigned task and report what you did.',
     'You are a mission-scoped Agent, not the persistent domain Assistant. Use Brain and system tools as needed.',
     `Execution policy caps: ${policy.maxBrainCalls} Brain calls, ${policy.maxActions} tool/delegation actions, ${policy.maxCompletionTokens} total generated completion tokens, ${policy.maxCompletionTokensPerCall} tokens per completion, and ${policy.maxDelegations} delegated subtasks.`,
-    `Remaining budget: ${remainingBrainCalls} Brain calls, ${remainingActions} actions, ${remainingCompletionTokens} generated completion tokens, and ${remainingDelegations} delegations.`,
+    `Remaining this execution: ${remainingBrainCalls} Brain calls, ${remainingActions} actions, ${remainingCompletionTokens} generated completion tokens, and ${remainingDelegations} delegations.`,
     ...(requiredActions.length > 0
       ? [`Required completed steps before finishing: ${JSON.stringify(requiredActions)}. Complete each required step and verify its actual result. For an expected denial, make the request even if it is not listed among available tools.`]
 
       : []),
     ...(requiresExternalAction
-      ? ['This task requires an actual external operation. Do not treat tool discovery, tool creation, delegation, drafting, or a proposed action as completion evidence. Use a registered tool whose schemas show it performs the requested operation, execute it with the task’s actual values, and rely on the returned result.']
+      ? ['This task requires an actual external operation. Do not treat tool discovery, tool creation, delegation, drafting, or a proposed action as completion evidence. If a registered tool matches the operation, execute it with the task\'s actual values and rely on the returned result. If no registered tool can perform the operation, call ' + CREATE_TOOL_ACTION + ' to create one — do not return a text answer without attempting a tool or tool creation first.']
       : []),
     ...actionInstructions,
     delegation,

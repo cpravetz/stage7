@@ -3,7 +3,7 @@ import { MAX_MODEL_SELECTION_RETRIES } from './constants'
 import { maxTokensForCall } from './policy'
 import { buildSystemPrompt } from './prompt'
 import { NEXT_TURN, type RunContext, type TurnEnd } from './RunContext'
-import { visibleTools } from './toolCatalog'
+import { MAX_PROMPT_TOOLS, rankToolsForTask, visibleTools } from './toolCatalog'
 import { classifyFailure } from './toolFailures'
 import type { BrainReply, BrainResponse, ToolDescriptor } from './types'
 
@@ -17,11 +17,20 @@ export interface PreparedTurn {
 export async function prepareTurn(rc: RunContext): Promise<PreparedTurn> {
   const { state, deps, definition, context, toolPolicy, policy, spec, limits } = rc
   const catalog = policy.maxActions > 0 ? await deps.catalog.list() : []
-  const tools = visibleTools(catalog, definition, toolPolicy)
+  const allVisible = visibleTools(catalog, definition, toolPolicy)
+  // Pre-rank tools by relevance to the task goal and required actions so the
+  // Brain sees only the most relevant tools in the prompt, not the entire
+  // catalog. The full list is still available via `__list_tools` and used by
+  // guards/performAction (turn.tools).
+  const ranked = policy.maxActions > 0
+    ? rankToolsForTask(allVisible, spec.missionGoal || spec.prompt, spec.requiredActions)
+    : allVisible
+  const promptTools = ranked.slice(0, MAX_PROMPT_TOOLS)
   const remainingCompletionTokens = limits.completionTokenLimit - state.completionTokensReserved
   const systemPrompt = buildSystemPrompt({
     base: definition.systemPrompt,
-    tools,
+    tools: promptTools,
+    totalToolCount: allVisible.length,
     requiredActions: spec.requiredActions,
     requiresExternalAction: spec.requiresExternalAction,
     delegationDepth: context.delegationDepth,
@@ -35,7 +44,7 @@ export async function prepareTurn(rc: RunContext): Promise<PreparedTurn> {
   })
   const maxTokens = maxTokensForCall(policy, remainingCompletionTokens)
   await state.save()
-  return { tools, systemPrompt, maxTokens }
+  return { tools: allVisible, systemPrompt, maxTokens }
 }
 
 /**
@@ -81,6 +90,7 @@ export async function askBrain(
   }
 
   state.brainCalls++
+  const brainCallsBefore = state.brainCalls - 1
   state.completionTokensReserved += maxTokens
   state.tokensUsed += completion.tokensUsed || 0
   state.lastRequestId = completion.requestId
@@ -98,7 +108,10 @@ export async function askBrain(
   }
 
   const previousAssistant = [...state.history].reverse().find((m) => m.role === 'assistant')?.content?.trim()
-  if (previousAssistant && previousAssistant === content) {
+  const resumeCheckpoint = rc.resume.checkpoint
+  const isFirstTurnAfterResume = resumeCheckpoint !== undefined
+    && brainCallsBefore === resumeCheckpoint.brainCalls
+  if (!isFirstTurnAfterResume && previousAssistant && previousAssistant === content) {
     await deps.brain.reportComplaint(
       completion.requestId,
       'Agent response validation failed: Brain returned the same response as the previous turn with no progress.',

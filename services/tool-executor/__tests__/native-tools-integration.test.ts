@@ -2,11 +2,14 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { ToolExecutor } from '../src/services/ToolExecutor';
-import { nativeTools } from '../src/data/nativeTools';
-import { legacyGeneralTools } from '../src/data/generalTools';
+import { ToolManifestLoader } from '../src/services/ToolManifestLoader';
 import { Tool, ToolExecution, CredentialRequiredError } from '../src/types';
 
-const ALL_TOOLS: Tool[] = [...nativeTools, ...legacyGeneralTools];
+const ALL_TOOLS: Tool[] = new ToolManifestLoader([
+  path.resolve(__dirname, '../../../tools'),
+])
+  .loadAll()
+  .map(({ tool }) => tool);
 
 const byId = (id: string): Tool => {
   const found = ALL_TOOLS.find((t) => t.id === id);
@@ -175,11 +178,13 @@ describe('native tool integration: every advertised tool is reachable', () => {
     { id: 'database_query', input: { engine: 'postgres', query: 'SELECT 1' } },
     { id: 'file_storage', input: { operation: 'exists', path: 'probe.txt' } },
     { id: 'webhook_dispatcher', input: { url: 'https://hooks.acme.test/ping', event: 'probe' } },
+    { id: 'search', input: { query: 'stage7' } },
+    { id: 'ftp', input: { operation: 'list' } },
   ];
 
-  it('advertises exactly the 15 previously-unreachable tools, all natively bound', () => {
-    expect(ALL_TOOLS).toHaveLength(14);
-    expect(new Set(ALL_TOOLS.map((t) => t.id)).size).toBe(14);
+  it('advertises exactly the native tools discovered from the tools/ manifests', () => {
+    expect(ALL_TOOLS).toHaveLength(16);
+    expect(new Set(ALL_TOOLS.map((t) => t.id)).size).toBe(16);
     for (const tool of ALL_TOOLS) {
       expect(tool.type).toBe('native');
       expect(tool.manifest.executor).toBeTruthy();
@@ -264,7 +269,10 @@ describe('native tool integration: every advertised tool is reachable', () => {
     expect(events).toHaveLength(1);
     expect(events[0].summary).toBe('Integration review');
     expect(events[0].location).toBe('Room Z');
-    expect(fetchMock).not.toHaveBeenCalled();
+    // calendarPath declares a configKey, so the config resolver may probe Vault
+    // for an operator-supplied path. No external calendar API may be called.
+    const nonVaultCalls = fetchMock.mock.calls.filter(([url]) => !String(url).includes('/api/vault/'));
+    expect(nonVaultCalls).toHaveLength(0);
   });
 
   it('file_ops writes and reads back a real file under the temp base path', async () => {
@@ -424,48 +432,26 @@ describe('native tool integration: every advertised tool is reachable', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Group 5 - legacy name-heuristic path still works
+  // Group 5 - native tools resolve their code only from the manifest
   // -------------------------------------------------------------------------
 
-  it('a tool with no manifest.executor but "search" in its name still reaches SearchExecutor', async () => {
-    const legacySearchTool: Tool = {
-      id: 'legacy_search_probe',
+  it('a native tool without a manifest codeFile fails explicitly instead of routing by name', async () => {
+    const orphanedNativeTool: Tool = {
+      id: 'orphaned_native_probe',
       name: 'search',
-      description: 'Legacy skill whose name matches the historical search heuristic',
+      description: 'Native tool that was not loaded from a tools/ manifest folder',
       type: 'native',
-      manifest: {},
+      manifest: { executor: 'search' },
       inputSchema: { type: 'object', properties: {} },
       outputSchema: {},
       createdAt: new Date(),
       updatedAt: new Date(),
     };
-    expect(legacySearchTool.manifest.executor).toBeUndefined();
 
-    fetchMock.mockReset();
-    // DuckDuckGo provider is tried first (no credentials needed, high performance score).
-    // It expects a response with AbstractURL and AbstractText.
-    fetchMock.mockResolvedValue(
-      jsonResponse({
-        AbstractURL: 'https://legacy.test/1',
-        AbstractText: 'via name heuristic',
-        Heading: 'Legacy hit',
-        RelatedTopics: [],
-      })
-    );
-
-    const result = await run(legacySearchTool, { query: 'legacy path' });
+    const result = await run(orphanedNativeTool, { query: 'legacy path' });
     expect(result.status).toBe('completed');
-    expect(outputOf(result).error).toBeUndefined();
-
-    const results = outputOf(result).results as Array<{ title: string; url: string; snippet: string }>;
-    expect(results).toHaveLength(1);
-    expect(results[0].title).toBe('Legacy hit');
-    expect(results[0].url).toBe('https://legacy.test/1');
-    expect(results[0].snippet).toBe('via name heuristic');
-    expect(outputOf(result).count).toBe(1);
-    // The fetch call should have been made to DuckDuckGo
-    const callUrl = String(fetchMock.mock.calls[0][0]);
-    expect(callUrl).toContain('api.duckduckgo.com');
+    expect(errorOf(result)).toMatch(/resolved to no code file/i);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('the suite never issues a real network request', () => {
