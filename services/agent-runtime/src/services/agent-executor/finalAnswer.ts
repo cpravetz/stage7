@@ -5,6 +5,7 @@ import {
   CAPABILITY_RESOLUTION_GUIDANCE,
   extractAskUserQuestion,
   hasTriedToolAfterResolution,
+  isVagueQuestion,
 } from './askUser'
 import { containsToolAction } from './actionParser'
 import { ASK_USER_MARKER, MAX_ARTIFACT_CORRECTION_ATTEMPTS } from './constants'
@@ -106,6 +107,11 @@ async function handleAskUserReply(rc: RunContext, { content, reasoning }: BrainR
     return NEXT_TURN
   }
   const question = relevant.slice(ASK_USER_MARKER.length)
+  if (isVagueQuestion(question)) {
+    state.tell(`Your question is too vague. You must name the exact missing value, the tool or service that needs it, and why it is required. Bad: "Please provide the missing value." Good: "Please provide the API key for the SMS Sender tool so I can send the message."`)
+    await state.save()
+    return NEXT_TURN
+  }
   const triedResolvedTool = hasTriedToolAfterResolution(state.actionReceipts.map((receipt) => receipt.toolId))
   if (asksUserToManageTools(question) || (!triedResolvedTool && asksForProviderSetup(question))) {
     state.tell(CAPABILITY_RESOLUTION_GUIDANCE)

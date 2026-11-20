@@ -83,6 +83,7 @@ import {
   recoveryEvidenceState,
   missionExecutionEvidenceGaps,
   phaseRequirementEvidenceGaps,
+  classifyMissionCompletionGaps,
   recoveryTaskDependencies,
   MAX_PHASE_RECOVERY_ROUNDS_SAFETY,
   MAX_NO_PROGRESS_RECOVERY_ATTEMPTS,
@@ -268,8 +269,67 @@ describe('progress-aware recovery (Tasks 3/7)', () => {
     ]));
   });
 
-  it('does not treat incomplete prerequisites as completed dependencies', () => {
-    const resume = getMissionResumeProgress({
+  it('uses the plan-recorded outcome when a phase result entry was lost', () => {
+    const plan: Plan = {
+      summary: 'Research', estimatedDuration: 'short', estimatedCost: 'low',
+      requiresClarification: false, clarificationQuestions: [], clarificationAnswers: [],
+      phases: [{
+        id: 'phase-1', name: 'Research', goal: 'Research', requiresApproval: false, status: 'in_progress',
+        tasks: [{
+          id: 'task-1', title: 'Research', description: 'Research', agentRole: 'worker',
+          systemPrompt: 'Research', expectedArtifacts: ['research.md'], status: 'completed',
+          output: 'Research complete.',
+          artifacts: [{ name: 'research.md', type: 'text', content: '# Findings\nReal findings.' }],
+        }],
+      }],
+    };
+    // The in-memory phase evidence lost the task entry, but the plan still
+    // records that it finished and what it produced. That is a data/state
+    // problem, not evidence that the task never ran.
+    expect(missionExecutionEvidenceGaps(plan, [{ phaseId: 'phase-1', status: 'in_progress', tasks: [] }]))
+      .toEqual([]);
+  });
+
+  it('never reports a structured payload as a task failure reason', () => {
+    const structured = JSON.stringify({
+      id: 'content-performance-seo',
+      name: 'Content Performance & SEO Insight',
+      type: 'code',
+      capabilities: [],
+      inputSchema: { type: 'object', properties: {} },
+      outputs: {},
+    });
+    const plan: Plan = {
+      summary: 'Research', estimatedDuration: 'short', estimatedCost: 'low',
+      requiresClarification: false, clarificationQuestions: [], clarificationAnswers: [],
+      phases: [{
+        id: 'phase-1', name: 'Research', goal: 'Research', requiresApproval: false, status: 'in_progress',
+        tasks: [{
+          id: 'task-1', title: 'Research', description: 'Research', agentRole: 'worker',
+          systemPrompt: 'Research', expectedArtifacts: [], status: 'incomplete',
+          output: structured, artifacts: [],
+        }],
+      }],
+    };
+    const gaps = missionExecutionEvidenceGaps(plan, [{
+      phaseId: 'phase-1', status: 'in_progress',
+      tasks: [{ taskId: 'task-1', status: 'incomplete', artifacts: [], output: structured }],
+    }]);
+    expect(gaps.join(' ')).not.toContain('content-performance-seo');
+    expect(gaps.join(' ')).not.toContain('inputSchema');
+    expect(gaps).toEqual(expect.arrayContaining([expect.stringContaining('is incomplete, not completed')]));
+  });
+
+  it('classifies data/state gaps as a resumable review, never mission failure', () => {
+    expect(classifyMissionCompletionGaps('Research', [
+      'Task "Research" (task-1) has no execution result in phase "Research".',
+    ])).toMatchObject({ status: 'awaiting_review' });
+    expect(classifyMissionCompletionGaps('Research', [
+      'Task "Research" (task-1) is missing expected artifact "research.md". No non-empty deliverable content or file reference was recorded.',
+    ])).toMatchObject({ status: 'awaiting_review' });
+  });
+
+  it('does not treat incomplete prerequisites as completed dependencies', () => {    const resume = getMissionResumeProgress({
       summary: 'x', estimatedDuration: 's', estimatedCost: 'l', requiresClarification: false,
       clarificationQuestions: [], clarificationAnswers: [],
       phases: [{

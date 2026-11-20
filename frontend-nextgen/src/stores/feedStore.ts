@@ -200,12 +200,16 @@ export function normalize(raw: unknown): FeedEvent | null {
       case 'task_completed':
         message = `Task completed: ${(data.taskTitle as string) || (data.taskId as string) || ''}`.trim();
         break;
-      case 'task_incomplete':
-        message = `Task incomplete: ${(data.taskTitle as string) || (data.taskId as string) || ''} — ${friendlyMissionError((data.error as string) || '')}`.trim();
+      case 'task_incomplete': {
+        const reason = friendlyMissionError((data.error as string) || '');
+        message = `Task incomplete: ${(data.taskTitle as string) || (data.taskId as string) || ''}${reason ? ` — ${reason}` : ''}`.trim();
         break;
-      case 'task_failed':
-        message = `Task failed: ${(data.taskTitle as string) || (data.taskId as string) || ''} — ${friendlyMissionError((data.error as string) || '')}`.trim();
+      }
+      case 'task_failed': {
+        const reason = friendlyMissionError((data.error as string) || '');
+        message = `Task failed: ${(data.taskTitle as string) || (data.taskId as string) || ''}${reason ? ` — ${reason}` : ''}`.trim();
         break;
+      }
       case 'user':
       case 'user_message':
         message = (data.content as string) || (data.message as string) || '';

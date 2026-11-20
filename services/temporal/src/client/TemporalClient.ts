@@ -634,10 +634,10 @@ export class TemporalClient {
               : result.status === 'incomplete'
               ? {
                 data: {
-                  reason: incompleteGaps.length > 0
-                    ? incompleteGaps.join('; ')
+                  reason: reviewGaps.length > 0
+                    ? reviewGaps.join('; ')
                     : 'Produced outputs did not satisfy the mission goal',
-                  ...(incompleteGaps.length > 0 ? { gaps: incompleteGaps } : {}),
+                  ...(reviewGaps.length > 0 ? { gaps: reviewGaps } : {}),
                 },
               }
               : {}),
@@ -836,7 +836,7 @@ export class TemporalClient {
       const orchestratorActive = MissionOrchestrator.getActive(missionId);
       if (orchestratorActive) {
         if (pendingInteraction) {
-          throw new Error(`Cannot resume mission ${missionId}: the pending interaction is still being finalized; retry shortly`);
+          throw new MissionAwaitingInputError(pendingInteraction.question);
         }
         await this.updatePersistedMissionControl(missionId, 'running', 'running');
         return 'running';

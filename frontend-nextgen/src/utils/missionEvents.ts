@@ -22,19 +22,6 @@ const INTERNAL_REASONING_PATTERNS: RegExp[] = [
   /\btask output is incomplete\b/i,
 ];
 
-const STRUCTURED_PAYLOAD_KEYS = [
-  'tool',
-  'toolId',
-  'action',
-  'sourceCode',
-  'entrypoint',
-  'phases',
-  'tasks',
-  'artifacts',
-  'plan',
-  'satisfied',
-] as const;
-
 export function isJsonPayload(value: string): boolean {
   const trimmed = (value || '').trim();
   if (!trimmed || !/^[[{]/.test(trimmed)) return false;
@@ -46,28 +33,82 @@ export function isJsonPayload(value: string): boolean {
   }
 }
 
+/**
+ * Index of the bracket that closes the JSON value starting at `start`, or -1.
+ * String literals and escapes are skipped so braces inside strings do not
+ * confuse the scan.
+ */
+function findJsonBlockEnd(value: string, start: number): number {
+  const stack: string[] = [];
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < value.length; index++) {
+    const char = value[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+    if (char === '{' || char === '[') stack.push(char === '{' ? '}' : ']');
+    else if (char === '}' || char === ']') {
+      if (stack.pop() !== char) return -1;
+      if (stack.length === 0) return index;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Removes structured JSON payloads embedded in agent text. Agent replies are
+ * prose; a JSON object or array in a reply is internal data (a tool manifest,
+ * plan, receipt, or action), never something to show a person.
+ */
+export function stripStructuredPayloads(value: string): string {
+  if (!value) return '';
+  let result = '';
+  let index = 0;
+  while (index < value.length) {
+    const char = value[index];
+    if (char === '{' || char === '[') {
+      const end = findJsonBlockEnd(value, index);
+      if (end > index) {
+        const candidate = value.slice(index, end + 1);
+        if (isJsonPayload(candidate)) {
+          result += ' ';
+          index = end + 1;
+          continue;
+        }
+      }
+    }
+    result += char;
+    index++;
+  }
+  return result.replace(/[ \t]{2,}/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+}
+
 export function isInternalReasoning(value: string): boolean {
   return INTERNAL_REASONING_PATTERNS.some((marker) => marker.test(value));
 }
 
 /**
- * True for payloads that are only meaningful to an agent: tool manifests,
- * actions, plans, receipts, and structured reviews.
+ * True for any structured JSON payload authored by an agent. Agent-to-user
+ * conversation is prose; JSON is always internal transport (a tool manifest,
+ * plan, receipt, action, or execution record) regardless of its keys. Key
+ * sniffing previously let tool manifests named with `id`/`name`/`inputSchema`
+ * reach the conversation as raw JSON dumps.
  */
 export function isAgentConversationPayload(value: string): boolean {
-  if (!isJsonPayload(value)) return false;
-  try {
-    const parsed = JSON.parse(value.trim()) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return true;
-    const record = parsed as Record<string, unknown>;
-    return STRUCTURED_PAYLOAD_KEYS.some((key) => key in record);
-  } catch {
-    return false;
-  }
+  return isJsonPayload(value);
 }
 
 export function stripInternalReasoning(value: string): string {
-  return (value || '')
+  return stripStructuredPayloads((value || '')
+    .replace(/```(?:json|javascript|ts|typescript)?\s*[\s\S]*?```/gi, ' '))
     .replace(/\n?\s*\[\s*\{?\s*\\?"toolId\\?"[\s\S]*$/i, '')
     .replace(/\s*Looking up tools, creating tools, or handing work off to another agent does not count as completing that action\.?/gi, '')
     .replace(/\s*Steps that ran:[\s\S]*$/i, '')
@@ -818,7 +859,13 @@ function listMilestonesOnce(events: FeedEvent[]): FeedEvent[] {
  * the event itself does not carry one.
  */
 export function friendlyMissionError(error: string): string {
-  return stripInternalReasoning(friendlyMissionErrorText(error));
+  const friendly = friendlyMissionErrorText(error);
+  const sanitized = sanitizeAgentMessage(friendly, '').text;
+  if (sanitized) return sanitized;
+  // A structured payload with no readable message is internal data, not an
+  // error a person can act on. Never echo the raw object into the feed.
+  if (isJsonPayload(friendly.trim())) return 'The Agent returned internal data instead of a readable result.';
+  return stripInternalReasoning(friendly);
 }
 
 /**
@@ -1075,7 +1122,10 @@ function friendlyToolMessage(value: string): string {
       : `The outcome of tool "${tool}" is uncertain; reconcile the recorded action before retrying.`;
   }
 
-  if (!isMachineReadable(raw)) return value;
+  if (!isMachineReadable(raw)) {
+    const readable = stripInternalReasoning(raw);
+    return readable || 'Working on the requested task.';
+  }
   try {
     const parsedValue: unknown = JSON.parse(raw);
     if (parsedValue && typeof parsedValue === 'object' && !Array.isArray(parsedValue)) {

@@ -889,6 +889,51 @@ describe('TemporalClient mission start', () => {
     expect(fetcher.mock.calls.some(([url]) => String(url).includes('/credentials'))).toBe(false)
   })
 
+  it('resumes a plain pending question with the user reply as guidance', async () => {
+    process.env.ARTIFACTS_URL = 'http://artifacts'
+    delete process.env.GATEWAY_URL
+    const client = new TemporalClient()
+    const input = {
+      missionId: 'plain-question', tenantId: 'tenant-1', assistantId: 'assistant-1',
+      prompt: 'Send the customer an SMS',
+    }
+    const pendingInteraction = {
+      kind: 'user_input', phaseId: 'phase-1', taskId: 'phase-1-task-1',
+      taskTitle: 'Send SMS sending capability', agentRole: 'worker', resumeCount: 0,
+      question: 'I need the value for the HEALTHCARE_COMM_API_KEY configuration field.',
+    }
+    jest.spyOn(client, 'startMission').mockResolvedValue('mission-plain-question')
+    jest.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
+      const requestUrl = String(url)
+      if (requestUrl.endsWith('/api/artifacts/missions/plain-question') && !init?.method) {
+        return { ok: true, status: 200, json: async () => ({
+          missionId: input.missionId, status: 'awaiting_review', controlState: 'running', input,
+          output: { outputs: { pendingInteraction } },
+        }) } as Response
+      }
+      if (requestUrl.endsWith('/plan')) {
+        return { ok: true, status: 200, json: async () => ({
+          summary: '', estimatedDuration: '', estimatedCost: '', requiresClarification: false,
+          clarificationQuestions: [], clarificationAnswers: [], phases: [],
+        }) } as Response
+      }
+      if (requestUrl.endsWith('/recovery-lease')) {
+        return { ok: true, status: 200, json: async () => ({ claimed: true }) } as Response
+      }
+      return { ok: true, status: 200, json: async () => ({}) } as Response
+    })
+
+    const reply = 'You do not need that key; write an SMS tool with Twilio and the credentials I gave you.';
+    await expect(client.resumeMission('mission-plain-question', {
+      interactionResponse: reply,
+      continueWithMessage: true,
+    })).resolves.toBe('resuming')
+    expect(client.startMission).toHaveBeenCalledWith(
+      expect.objectContaining({ interactionResponse: reply }),
+      expect.objectContaining({ pendingInteraction }), true, true,
+    )
+  })
+
   it('loads the persisted plan when retrying before any phase or task completed', async () => {
     delete process.env.TEMPORAL_ADDRESS
     process.env.ARTIFACTS_URL = 'http://artifacts'

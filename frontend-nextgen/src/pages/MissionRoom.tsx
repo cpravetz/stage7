@@ -418,34 +418,11 @@ const MissionRoom = () => {
   const [controlError, setControlError] = useState<string | null>(null);
   const [clarificationSubmitting, setClarificationSubmitting] = useState(false);
   const [interactionSubmitting, setInteractionSubmitting] = useState(false);
-  const [interactionAccepted, setInteractionAccepted] = useState(false);
   const [interactionConfigurationReady, setInteractionConfigurationReady] = useState(false);
   const [interactionCredentials, setInteractionCredentials] = useState<Record<string, string>>({});
   const [interactionResponse, setInteractionResponse] = useState('');
   const [permissionScope, setPermissionScope] = useState('');
 
-  const getRespondedInteractions = (): Set<string> => {
-    try {
-      const stored = sessionStorage.getItem(`mission-responded-interactions:${workflowId}`);
-      return stored ? new Set(JSON.parse(stored)) : new Set();
-    } catch {
-      return new Set();
-    }
-  };
-
-  const markInteractionResponded = (interactionId: string) => {
-    try {
-      const responded = getRespondedInteractions();
-      responded.add(interactionId);
-      sessionStorage.setItem(`mission-responded-interactions:${workflowId}`, JSON.stringify([...responded]));
-    } catch {
-      // Ignore storage errors
-    }
-  };
-
-  const getInteractionId = (pending: NonNullable<typeof pendingInteraction>): string => {
-    return pending.requestId || `${pending.phaseId}:${pending.taskId}`;
-  };
   const [messageText, setMessageText] = useState('');
   const transcriptRef = useRef<HTMLDivElement>(null);
   const transcriptSticksToBottom = useRef(true);
@@ -484,7 +461,6 @@ const MissionRoom = () => {
 
   const pendingInteraction = detail?.output?.outputs?.pendingInteraction;
   useEffect(() => {
-    setInteractionAccepted(false);
     setInteractionConfigurationReady(false);
     setInteractionCredentials({});
     setInteractionResponse('');
@@ -790,13 +766,9 @@ const MissionRoom = () => {
           updateMissionStatus(workflowId, result.status);
         }
       }
-      setInteractionAccepted(true);
       setInteractionResponse('');
       setInteractionCredentials({});
       setPermissionScope('');
-      if (pending.requestId || (pending.phaseId && pending.taskId)) {
-        markInteractionResponded(getInteractionId(pending));
-      }
       await refreshDetail(workflowId);
     } catch (error) {
       setControlError(error instanceof Error ? error.message : 'Failed to resume the mission');
@@ -817,9 +789,6 @@ const MissionRoom = () => {
     if (!text || sending) return;
     setSending(true);
     setSendError(null);
-
-    const pending = detail?.output?.outputs?.pendingInteraction;
-    const interactionId = pending?.kind === 'user_input' ? getInteractionId(pending) : null;
 
     // Optimistically render the user's message immediately instead of waiting
     // for the backend round-trip and websocket broadcast. The backend echoes
@@ -845,9 +814,6 @@ const MissionRoom = () => {
         setSendError(result.error);
       } else {
         setMessageText('');
-        if (interactionId) {
-          markInteractionResponded(interactionId);
-        }
         if (result.status === 'resuming' || result.status === 'running') {
           await Promise.all([fetchMissions(), refreshDetail(workflowId)]);
         }
@@ -893,11 +859,8 @@ const MissionRoom = () => {
                          // was supplied outside the mission.
                          awaitsUserInput ? { useConfiguredCredentials: true } : {},
                        );
-                       updateMissionStatus(workflowId, result.status);
-                       if (pending && (pending.requestId || (pending.phaseId && pending.taskId))) {
-                         markInteractionResponded(getInteractionId(pending));
-                       }
-                       await refreshDetail(workflowId);
+                        updateMissionStatus(workflowId, result.status);
+                        await refreshDetail(workflowId);
                      } catch (error) {
                        setControlError(error instanceof Error ? error.message : 'Failed to resume mission');
                      }
@@ -1016,13 +979,8 @@ const MissionRoom = () => {
         </div>
       )}
 
-      {detail?.output?.outputs?.pendingInteraction && !(interactionSubmitting || interactionAccepted) && (() => {
+      {detail?.output?.outputs?.pendingInteraction && !interactionSubmitting && (() => {
         const pending = detail.output.outputs.pendingInteraction;
-        const interactionId = getInteractionId(pending);
-        const respondedInteractions = getRespondedInteractions();
-        if (respondedInteractions.has(interactionId)) {
-          return null;
-        }
         const secretKeys = pending.kind === 'user_input' ? secretKeysForInteraction(pending) : [];
         const secretQuestion = pending.kind === 'user_input'
           ? pending.question?.match(/^\s*\[secret:([a-z0-9_-]+)\]\s*(.*)$/i)
@@ -1074,7 +1032,7 @@ const MissionRoom = () => {
                               autoComplete="new-password"
                               value={interactionCredentials[key] || ''}
                               onChange={(event) => setInteractionCredentials((values) => ({ ...values, [key]: event.target.value }))}
-                              disabled={interactionConfigurationReady || interactionSubmitting || interactionAccepted}
+                              disabled={interactionConfigurationReady || interactionSubmitting}
                               style={{ display: 'block', width: '100%', marginTop: 4 }}
                             />
                           </label>
@@ -1137,7 +1095,7 @@ const MissionRoom = () => {
                       onChange={(event) => setInteractionResponse(event.target.value)}
                       placeholder="Provide the specific information or configuration details the agent requested..."
                       rows={3}
-                      disabled={interactionSubmitting || interactionAccepted}
+                      disabled={interactionSubmitting}
                       style={{ display: 'block', width: '100%', marginTop: 8, boxSizing: 'border-box' }}
                       onKeyDown={(event) => {
                         if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
@@ -1147,7 +1105,7 @@ const MissionRoom = () => {
                       }}
                     />
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8 }}>
-                      <Link to="/tools" className="link-button">Open Tools configuration</Link>
+                      <Link to={toolSettingsUrl} className="link-button">Open Tools configuration</Link>
                       <Link to="/vault" className="link-button">Open Vault secrets</Link>
                     </div>
                   </>
@@ -1196,12 +1154,11 @@ const MissionRoom = () => {
                   onClick={() => void handleMissionInteractionSubmit()}
                   disabled={
                     interactionSubmitting
-                    || interactionAccepted
                     || (configureInSettings && !interactionConfigurationReady && !hasProvidedCredentials)
                     || (freeTextInput && !interactionResponse.trim())
                   }
                 >
-                  {interactionSubmitting || interactionAccepted
+                  {interactionSubmitting 
                     ? 'Continuing...'
                     : configureInSettings
                       ? 'Save values and continue'
@@ -1210,7 +1167,7 @@ const MissionRoom = () => {
                 {freeTextInput && (
                   <button
                     onClick={() => void handleMissionInteractionSubmit(undefined, { configurationProvided: true })}
-                    disabled={interactionSubmitting || interactionAccepted}
+                    disabled={interactionSubmitting}
                     title="Use when the requested service or configuration was supplied in Tools or Vault"
                   >
                     I configured it — continue

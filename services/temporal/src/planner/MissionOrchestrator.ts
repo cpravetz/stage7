@@ -24,6 +24,7 @@ import {
   MissionActivityCheckpoint,
   MissionPendingInteraction,
   MissionTaskCheckpoint,
+  gapIsDataOrStateIssue,
   recoveryTaskDependencies,
   missionExecutionEvidenceGaps,
   phaseRequirementEvidenceGaps,
@@ -114,6 +115,13 @@ function agentIdentityForRole(agentRuntime: MissionAgentRuntime, role: string): 
 
 // Replaced fixed cutoffs with progress-aware limits + hard safety ceilings (Task 3).
 const MAX_PHASE_RECOVERY_ROUNDS = MAX_PHASE_RECOVERY_ROUNDS_SAFETY;
+
+/**
+ * A missing input means the source task did not actually succeed. Before a
+ * separate recovery task is created, the source task is retried with a
+ * different prompt this many times.
+ */
+const MAX_SOURCE_TASK_RERUNS = 2;
 
 class MissionUserInterruptionError extends Error {
   constructor(readonly result: { plan: Plan; outputs: any; compensations: Array<{ phaseId: string; action: string }> }) {
@@ -659,8 +667,10 @@ const executeTask = async (task: Task, savedTask: MissionTaskCheckpoint | undefi
               taskTitle: task.title,
               ...agentIdentityForRole(agentRuntime, task.agentRole),
               artifacts: result.artifacts,
-              output: result.output.slice(0, 4_000),
-              ...(result.incompleteReason ? { error: result.incompleteReason } : {}),
+              output: sanitizeAgentMessage(result.output, '').text.slice(0, 4_000),
+              ...(result.incompleteReason
+                ? { error: sanitizeAgentMessage(result.incompleteReason, 'The Agent did not produce a readable result.').text }
+                : {}),
               tokensUsed: result.tokensUsed,
             },
           });
@@ -688,18 +698,21 @@ const executeTask = async (task: Task, savedTask: MissionTaskCheckpoint | undefi
       const dependencyRerunCounts = new Map<string, number>();
       const buildTaskById = (): Map<string, Task> =>
         new Map(plan.phases.flatMap((entry) => entry.tasks.map((candidate) => [candidate.id, candidate] as [string, Task])));
-      // A pending task is blocked by a completed dependency that is missing a
-      // declared artifact, and that dependency lives in this phase and still has
-      // rerun budget left → reopen it so it can produce the artifact.
+      // A pending task is blocked by a dependency that finished without
+      // producing its declared artifact (a missing input), and that dependency
+      // lives in this phase and still has rerun budget left → reopen it so it
+      // can produce the artifact. A dependency that ended incomplete or failed
+      // is also reopened: a missing input means the source task did not succeed.
       const findMissingInputRerun = (taskById: Map<string, Task>): Task | undefined => {
+        const finished = new Set(['completed', 'incomplete', 'failed']);
         for (const candidate of phase.tasks) {
           if (completedInPhase.has(candidate.id) || isRecoveryTask(candidate.id)) continue;
           for (const dependencyId of candidate.dependsOnTaskIds || []) {
             const dependency = taskById.get(dependencyId);
-            if (!dependency || dependency.status !== 'completed') continue;
+            if (!dependency || !finished.has(String(dependency.status))) continue;
             if (!phase.tasks.includes(dependency)) continue;
             if ((dependencyRerunCounts.get(dependency.id) || 0) >= MAX_DEPENDENCY_INPUT_RERUNS) continue;
-            if (dependencyArtifactGaps(dependency).length > 0) return dependency;
+            if (dependency.status !== 'completed' || dependencyArtifactGaps(dependency).length > 0) return dependency;
           }
         }
         return undefined;
@@ -726,6 +739,7 @@ const executeTask = async (task: Task, savedTask: MissionTaskCheckpoint | undefi
         if (readyTasks.length === 0) {
           if (rerunDependency) {
             const missing = dependencyArtifactGaps(rerunDependency);
+            const previousReason = sanitizeAgentMessage(rerunDependency.output || '', '').text.trim();
             const attempt = (dependencyRerunCounts.get(rerunDependency.id) || 0) + 1;
             dependencyRerunCounts.set(rerunDependency.id, attempt);
             completedInPhase.delete(rerunDependency.id);
@@ -736,7 +750,13 @@ const executeTask = async (task: Task, savedTask: MissionTaskCheckpoint | undefi
             rerunDependency.completedAt = undefined;
             taskRerunGuidance.set(
               rerunDependency.id,
-              `This task was reopened because a previous run completed without producing required artifact(s): ${missing.join(', ')}. Produce the missing artifact(s) with real content and return them. Do not repeat side-effect actions whose outcome is already recorded; if you cannot produce them, explain the specific blocker.`,
+              [
+                missing.length > 0
+                  ? `This task was reopened because a downstream task needs required artifact(s) it did not produce: ${missing.join(', ')}.`
+                  : 'This task was reopened because it did not complete successfully and a downstream task needs its result.',
+                previousReason ? `The previous attempt reported: ${previousReason.slice(0, 500)}.` : '',
+                'Retry with a different approach. Produce the missing result with real content. Do not repeat side-effect actions whose outcome is already recorded; if you cannot produce it, explain the specific blocker.',
+              ].filter(Boolean).join(' '),
             );
             logger.warn(
               { missionId: ctx.missionId, phaseId: phase.id, taskId: rerunDependency.id, missing, attempt, max: MAX_DEPENDENCY_INPUT_RERUNS },
@@ -746,8 +766,8 @@ const executeTask = async (task: Task, savedTask: MissionTaskCheckpoint | undefi
               agentRole: 'mission-director',
               phaseId: phase.id,
               taskId: rerunDependency.id,
-              thought: `Task "${rerunDependency.title}" completed but did not produce its declared artifact(s) (${missing.join(', ')}), which a downstream task needs. I am rerunning it (attempt ${attempt}/${MAX_DEPENDENCY_INPUT_RERUNS}) to produce the missing input.`,
-              text: `Missing input from "${rerunDependency.title}"; rerunning it to produce the required artifact(s).`,
+              thought: `Task "${rerunDependency.title}" finished without providing the input a downstream task needs${missing.length > 0 ? ` (${missing.join(', ')})` : ''}. A missing input means this task did not succeed, so I am retrying it (attempt ${attempt}/${MAX_DEPENDENCY_INPUT_RERUNS}) with a different approach before any downstream task proceeds.`,
+              text: `Missing input from "${rerunDependency.title}"; retrying the source task to produce the required result.`,
               data: { rerunTaskId: rerunDependency.id, missing, attempt, reason: 'missing_dependency_input' },
             }).catch((error) => logger.warn({ missionId: ctx.missionId, taskId: rerunDependency.id, error: error instanceof Error ? error.message : String(error) }, 'Failed to broadcast missing-input rerun monologue'));
             saveCheckpoint();
@@ -1089,7 +1109,7 @@ agentRole: 'mission-executor',
                 data: {
                   phaseId: phase.id,
                   reviewIndex,
-                  gaps: applied.gaps,
+                  gaps: applied.gaps.map((gap) => sanitizeAgentMessage(gap, '').text).filter(Boolean),
                   task: amendmentTask,
                   plan,
                   agentId: agentRuntime.getAgentIdForRole('mission-director'),
@@ -1125,7 +1145,7 @@ agentRole: 'mission-executor',
               data: {
                 phaseId: phase.id,
                 reviewIndex,
-                gaps: applied.gaps,
+                gaps: applied.gaps.map((gap) => sanitizeAgentMessage(gap, '').text).filter(Boolean),
                 task: applied.amendment,
                 plan,
                 agentId: agentRuntime.getAgentIdForRole('mission-director'),
@@ -1259,6 +1279,7 @@ agentRole: 'mission-executor',
     let recoveryIndex = 0;
     let completionVerificationRetries = 0;
     let completionVerificationFailed = false;
+    const sourceTaskRerunCounts = new Map<string, number>();
     while (true) {
       if (uncertainActionIssue) {
         completionGaps = [uncertainActionIssue];
@@ -1306,6 +1327,190 @@ agentRole: 'mission-executor',
         ? completionReview.gaps
         : ['Mission completion has not been verified from the recorded task evidence.'];
       completionGaps = gaps;
+
+      // A missing input or incomplete source task means the earlier task did
+      // not actually succeed. Data/state problems are not mission failures:
+      // retry the source task itself with a different prompt before creating a
+      // separate recovery task that lacks the missing input.
+      const missingInputSource = plan.phases
+        .flatMap((candidatePhase) => candidatePhase.tasks.map((candidateTask) => ({
+          phase: candidatePhase,
+          task: candidateTask,
+        })))
+        .find(({ task }) =>
+          !/-amendment-\d+|-mission-recovery-\d+/i.test(task.id)
+          && ((sourceTaskRerunCounts.get(task.id) ?? 0) < MAX_SOURCE_TASK_RERUNS)
+          && gaps.some((gap) => gap.includes(task.id) || gap.includes(task.title))
+          && (task.status !== 'completed'
+            || gapIsDataOrStateIssue(gaps.find((gap) => gap.includes(task.id) || gap.includes(task.title)) || '')
+            || gaps.some((gap) => /is missing expected artifact/i.test(gap)
+              && (gap.includes(task.id) || gap.includes(task.title)))));
+      if (missingInputSource) {
+        const { phase: sourcePhase, task: sourceTask } = missingInputSource;
+        const attempt = (sourceTaskRerunCounts.get(sourceTask.id) || 0) + 1;
+        sourceTaskRerunCounts.set(sourceTask.id, attempt);
+        const previousReason = sanitizeAgentMessage(sourceTask.output || '', '').text.trim();
+        const sourceKey = JSON.stringify([sourcePhase.id, sourceTask.id]);
+        completedTasks.delete(sourceKey);
+        completedTaskSummaries.delete(sourceTask.id);
+        completedPhases.delete(sourcePhase.id);
+        sourceTask.status = 'pending';
+        sourceTask.completedAt = undefined;
+        sourcePhase.status = 'in_progress';
+        let sourceOutput = (outputs.phases as MissionPhaseOutput[])
+          .find((candidate) => candidate.phaseId === sourcePhase.id);
+        if (!sourceOutput) {
+          sourceOutput = { phaseId: sourcePhase.id, name: sourcePhase.name, status: 'incomplete', tasks: [] };
+          (outputs.phases as MissionPhaseOutput[]).push(sourceOutput);
+        }
+        sourceOutput.status = 'incomplete';
+        sourceOutput.tasks = sourceOutput.tasks.filter((entry) => entry.taskId !== sourceTask.id);
+        await this.updateTask(ctx, sourcePhase.id, sourceTask.id, { status: 'pending' });
+        await this.updatePhase(ctx, sourcePhase.id, { status: 'in_progress' });
+        const sourceGuidance = [
+          `This task is being retried because its earlier result did not satisfy the mission requirement and a dependent step needs its output.`,
+          previousReason ? `The previous attempt reported: ${previousReason.slice(0, 500)}.` : 'The previous attempt produced no usable result.',
+          'Use a different approach: produce the required result or deliverable with real content, or work around the obstacle.',
+          'Do not return internal data (tool manifests, plans, or receipts) as the task result; report the outcome in plain language.',
+          'Do not repeat side-effect actions whose outcome is already recorded or uncertain.',
+        ].filter(Boolean).join(' ');
+        await agentRuntime.emitMonologue({
+          agentRole: 'mission-director',
+          phaseId: sourcePhase.id,
+          taskId: sourceTask.id,
+          thought: `The mission cannot be verified because task "${sourceTask.title}" did not actually produce its result (attempt ${attempt}/${MAX_SOURCE_TASK_RERUNS}). A missing input means the earlier task was not successful, so I am retrying that source task with a different prompt rather than failing the mission.`,
+          text: `Retrying source task "${sourceTask.title}" to produce the missing result.`,
+          data: { rerunTaskId: sourceTask.id, attempt, reason: 'missing_input_retry_source_task', gaps },
+        });
+        try {
+          const rerunResult = await agentRuntime.executeTask(
+            sharedMissionAgentId,
+            sourceTask,
+            sourcePhase,
+            plan,
+            false,
+            ctx.executionPolicy || MISSION_TASK_EXECUTION_POLICY,
+            [...completedTaskSummaries.values()],
+            sourceGuidance,
+            undefined,
+            ctx.prompt,
+            ctx.userMessages,
+          );
+          if (rerunResult.interruption) {
+            const interruption = rerunResult.interruption;
+            pendingInteraction = {
+              kind: interruption.kind,
+              phaseId: sourcePhase.id,
+              taskId: sourceTask.id,
+              taskTitle: sourceTask.title,
+              agentRole: sourceTask.agentRole,
+              ...(interruption.question ? { question: interruption.question } : {}),
+              ...(interruption.credentialRequest ? { credentialRequest: interruption.credentialRequest } : {}),
+              ...(interruption.requestId ? { requestId: interruption.requestId } : {}),
+              ...(interruption.permission ? { permission: interruption.permission } : {}),
+              actionReceipts: rerunResult.actionReceipts || [],
+              resumeCount: 0,
+            };
+            sourceTask.status = 'pending';
+            sourceTask.output = interruption.question || interruption.permission?.explanation || 'Mission is waiting for your response.';
+            await this.updateTask(ctx, sourcePhase.id, sourceTask.id, {
+              status: 'pending',
+              output: sourceTask.output,
+            });
+            sourceOutput.tasks.push({
+              taskId: sourceTask.id,
+              status: 'pending',
+              artifacts: rerunResult.artifacts,
+              output: sourceTask.output,
+            });
+            await this.persistMissionStateOnInterruption(ctx, plan, outputs, pendingInteraction, sourceTask.startedAt || Date.now());
+            await ctx.broadcast({
+              type: interruption.kind === 'user_input' ? 'question_asked' : 'permission_required',
+              missionId: ctx.missionId,
+              timestamp: Date.now(),
+              data: {
+                phaseId: sourcePhase.id,
+                taskId: sourceTask.id,
+                taskTitle: sourceTask.title,
+                agentRole: sourceTask.agentRole,
+                ...(interruption.question ? { question: interruption.question } : {}),
+                ...(interruption.requestId ? { requestId: interruption.requestId } : {}),
+                ...(interruption.credentialRequest ? { credentialRequest: interruption.credentialRequest } : {}),
+                ...(interruption.permission ? { permission: interruption.permission } : {}),
+              },
+            });
+            throw new MissionUserInterruptionError({
+              plan,
+              outputs: {
+                ...outputs,
+                status: interruption.kind === 'user_input' ? 'awaiting_user_input' : 'awaiting_permission',
+                pendingInteraction,
+              },
+              compensations,
+            });
+          }
+          const rerunStatus = rerunResult.incompleteReason ? 'incomplete' : 'completed';
+          const completedAt = Date.now();
+          sourceTask.status = rerunStatus;
+          sourceTask.completedAt = completedAt;
+          sourceTask.output = rerunResult.output;
+          sourceTask.artifacts = rerunResult.artifacts;
+          await this.updateTask(ctx, sourcePhase.id, sourceTask.id, {
+            status: rerunStatus,
+            completedAt,
+            output: rerunResult.output,
+            artifacts: rerunResult.artifacts,
+          });
+          sourceOutput.tasks.push({
+            taskId: sourceTask.id,
+            status: rerunStatus,
+            artifacts: rerunResult.artifacts,
+            output: rerunResult.output,
+          });
+          completedTasks.set(sourceKey, { phaseId: sourcePhase.id, taskId: sourceTask.id });
+          if (rerunStatus === 'completed') {
+            sourcePhase.status = 'completed';
+            sourceOutput.status = 'completed';
+            completedPhases.add(sourcePhase.id);
+          }
+          completedTaskSummaries.set(
+            sourceTask.id,
+            createCompletedTaskSummary(
+              sourceTask.id,
+              rerunResult.output,
+              rerunResult.artifacts,
+              sourceTask.requiredActions,
+              sourceTask.requiresExternalAction,
+            ),
+          );
+          await ctx.broadcast({
+            type: rerunStatus === 'completed' ? 'task_completed' : 'task_incomplete',
+            missionId: ctx.missionId,
+            timestamp: completedAt,
+            data: {
+              phaseId: sourcePhase.id,
+              taskId: sourceTask.id,
+              taskTitle: sourceTask.title,
+              ...agentIdentityForRole(agentRuntime, sourceTask.agentRole),
+              artifacts: rerunResult.artifacts,
+              output: sanitizeAgentMessage(rerunResult.output, '').text.slice(0, 4_000),
+              ...(rerunResult.incompleteReason
+                ? { error: sanitizeAgentMessage(rerunResult.incompleteReason, 'The Agent did not produce a readable result.').text }
+                : {}),
+              tokensUsed: rerunResult.tokensUsed,
+            },
+          });
+          lastRecoveryIssue = rerunResult.incompleteReason || '';
+        } catch (rerunError) {
+          if (rerunError instanceof MissionUserInterruptionError) throw rerunError;
+          if (isFatalServiceError(rerunError)) throw rerunError;
+          lastRecoveryIssue = rerunError instanceof Error ? rerunError.message : String(rerunError);
+        }
+        saveCheckpoint();
+        await ctx.controlCheckpoint?.();
+        continue;
+      }
+
       if (recoveryIndex > MAX_MISSION_RECOVERY_ROUNDS_SAFETY) {
         reviewReason = 'Automatic recovery reached its safety limit.';
         await agentRuntime.emitMonologue({
@@ -1414,9 +1619,9 @@ agentRole: 'mission-executor',
       const recoveryTask: Task = {
         id: taskId,
         title: `Resolve mission completion gaps (attempt ${recoveryIndex})`,
-        description: `Address the remaining mission completion gaps: ${gaps.join('; ')}`,
+        description: `Resolve missing deliverables: ${expectedArtifacts.join(', ') || 'required artifacts'}.`,
         agentRole: 'mission-executor',
-        systemPrompt: `Resolve the mission completion gaps below for the mission goal "${ctx.prompt}" and phase "${recoveryPhase.name}". Use the recorded outputs from tasks ${taskIds.join(', ') || 'none'} as authoritative context. Focus only on accomplishing the requested mission outcome and return concrete evidence that the mission outcome is satisfied. Produce only deliverable files explicitly required by the mission goal${expectedArtifacts.length ? ` (${expectedArtifacts.join(', ')})` : ''}; if no such deliverables were requested, do not create design documents, plans, or substitute artifacts. Never create a receipt or evidence document to stand in for an action; actual tool results are recorded internally. Check the live tool catalog, execute a suitable tool, and use capability resolution to find or create one when permitted. If a required secret or authorization is missing, ask the user for that specific named value or permission and wait; never ask the user to choose, install, or configure tools. If required input from an earlier task is missing, ask that task's Agent to provide the needed result or rerun the source task. Do not repeat successfully completed or uncertain side effects; use another authorized approach if one path is blocked. If an execution or system error occurred, treat it as a blocker to resolve or report accurately, not as a request to produce unrelated documentation.${noProgressGuidance}\n\nGaps:\n${gaps.join('\n')}`,
+        systemPrompt: `Resolve missing deliverables for mission goal "${ctx.prompt}" in phase "${recoveryPhase.name}". Produce ${expectedArtifacts.join(', ') || 'the required artifacts'}. Use recorded task outputs as context. Execute tools, not plans.${noProgressGuidance}`,
         dependsOnTaskIds: taskIds,
         expectedArtifacts,
         requiredActions: [],
@@ -1440,7 +1645,7 @@ agentRole: 'mission-executor',
         data: {
           phaseId: recoveryPhase.id,
           reviewIndex: recoveryIndex,
-          gaps,
+          gaps: gaps.map((gap) => sanitizeAgentMessage(gap, '').text).filter(Boolean),
           task: recoveryTask,
           plan,
           agentId: agentRuntime.getAgentIdForRole('mission-director'),
@@ -1618,8 +1823,15 @@ agentRole: 'mission-executor',
           taskTitle: recoveryTask.title,
           ...agentIdentityForRole(agentRuntime, recoveryTask.agentRole),
           ...(result
-            ? { artifacts: result.artifacts, output: result.output.slice(0, 4_000), tokensUsed: result.tokensUsed, ...(result.incompleteReason ? { error: result.incompleteReason } : {}) }
-            : { error: failure }),
+            ? {
+              artifacts: result.artifacts,
+              output: sanitizeAgentMessage(result.output, '').text.slice(0, 4_000),
+              tokensUsed: result.tokensUsed,
+              ...(result.incompleteReason
+                ? { error: sanitizeAgentMessage(result.incompleteReason, 'The Agent did not produce a readable result.').text }
+                : {}),
+            }
+            : { error: sanitizeAgentMessage(failure, 'The Agent did not produce a readable result.').text }),
         },
       });
       await ctx.controlCheckpoint?.();
@@ -1676,11 +1888,14 @@ agentRole: 'mission-executor',
           question: undefined as string | undefined,
         }
         : classifyMissionCompletionGaps(ctx.prompt, completionGaps, { failureCode: extractFailureCode(lastRecoveryIssue) });
+      const userFacingGaps = completionGaps
+        .map((gap) => sanitizeAgentMessage(gap, '').text)
+        .filter(Boolean);
       outputs.status = terminal.status;
-      outputs.gaps = completionGaps;
-      outputs.reason = reviewReason || terminal.reason;
+      outputs.gaps = userFacingGaps.length > 0 ? userFacingGaps : completionGaps;
+      outputs.reason = sanitizeAgentMessage(reviewReason || terminal.reason, 'The mission needs review before it can finish.').text;
       if (terminal.status === 'awaiting_review' && terminal.question) {
-        (outputs as any).question = terminal.question;
+        (outputs as any).question = sanitizeAgentMessage(terminal.question, 'The mission needs your review.').text;
       }
       await agentRuntime.emitMonologue({
         agentRole: 'mission-director',

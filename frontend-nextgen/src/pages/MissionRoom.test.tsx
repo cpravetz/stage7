@@ -70,6 +70,27 @@ describe('Mission Room review card', () => {
     expect(screen.getByText('Which account?')).toBeInTheDocument();
   });
 
+  it('keeps the input card visible even when an old reply was marked responded', () => {
+    // A previous reply was recorded locally but the backend never resumed the
+    // mission, so the pending interaction is still active. The card must remain
+    // so the user can answer instead of leaving the question unreachable.
+    sessionStorage.setItem(
+      `mission-responded-interactions:${workflowId}`,
+      JSON.stringify(['phase-1:task-1']),
+    );
+    renderRoom({
+      missionId: 'test',
+      status: 'awaiting_review',
+      output: { outputs: {
+        pendingInteraction: {
+          kind: 'user_input', phaseId: 'phase-1', taskId: 'task-1', taskTitle: 'Configure', agentRole: 'executor',
+          question: 'Which account?',
+        },
+      } },
+    });
+    expect(screen.getByText('Which account?')).toBeInTheDocument();
+  });
+
   it('keeps the clarification form instead of showing a generic review card', () => {
     renderRoom({
       missionId: 'test',

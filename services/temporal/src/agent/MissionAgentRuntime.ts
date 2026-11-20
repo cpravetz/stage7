@@ -14,6 +14,7 @@ import {
   MissionArtifactSchema,
   sanitizeAgentMessage,
   sanitizeAgentMessageList,
+  isAgentConversationPayload,
   describeRequestError,
   httpRequest,
 } from '@stage7-nextgen/shared';
@@ -1344,7 +1345,7 @@ export class MissionAgentRuntime {
         ? [`Subsequent user messages (in order; use these as mission context and do not ask again for values already supplied): ${JSON.stringify(userMessages)}`]
         : []),
       ...(missingDependencies.length > 0
-        ? [`Missing completed dependency results for task ID(s): ${missingDependencies.join(', ')}. Do not treat this as mission failure. Ask the responsible agent/task to provide or recreate the missing artifact or result, or locate it if it exists under a different name; report an internal blocker only if it cannot be recovered after that coordination.`]
+        ? [`Missing completed dependency results for task ID(s): ${missingDependencies.join(', ')}. Do not treat this as mission failure and do not ask the user for another task's output. Recreate the missing input yourself from the context and available evidence, or redo the source task's work with a different approach. Report a specific internal blocker only if it cannot be recovered.`]
         : []),
       ...(retryGuidance ? [`Retry guidance for remaining work:\n${retryGuidance}`] : []),
       ...(continuationPrompt ? [continuationPrompt] : []),
@@ -1374,8 +1375,18 @@ export class MissionAgentRuntime {
       { ...plan, phases: [{ ...phase, tasks: [task] }] },
       [{ phaseId: phase.id, status: 'completed', tasks: [{ taskId: task.id, status: 'completed', artifacts: result.artifacts, output: result.output }] }],
     );
-    return evidenceGaps.length > 0
-      ? { ...result, incompleteReason: [result.incompleteReason, ...evidenceGaps].filter(Boolean).join(' ') }
+    // A structured payload (tool manifest, plan, receipt dump) is internal
+    // transport, not a task result. Treat it as an incomplete result so the
+    // orchestrator retries the task with different guidance instead of
+    // recording internal data as the deliverable or showing it to the user.
+    const structuredOutput = typeof result.output === 'string'
+      && isAgentConversationPayload(result.output);
+    const structuredGap = structuredOutput
+      ? `Task "${task.title}" (${task.id}) returned internal structured data instead of a user-facing result.`
+      : '';
+    const incompleteReason = [result.incompleteReason, ...evidenceGaps, structuredGap].filter(Boolean).join(' ');
+    return incompleteReason
+      ? { ...result, incompleteReason }
       : result;
   }
 

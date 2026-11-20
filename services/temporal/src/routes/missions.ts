@@ -304,6 +304,13 @@ router.post(
         ...(permissionScope ? { permissionScope } : {}),
       });
     } catch (error) {
+      if (error instanceof Error && /another process still owns its execution lease/i.test(error.message)) {
+        throw new NextGenError(
+          'The mission is still owned by another execution process; retry shortly',
+          409,
+          { status: 'resuming', retryable: true },
+        );
+      }
       // The mission is waiting on an answer: that is the client's to resolve, not
       // a server fault, so report it as a conflict with the pending question.
       if (isMissionAwaitingInputError(error)) {
@@ -385,54 +392,35 @@ router.post(
     // The broadcast persists the event as well, so the message is recorded once.
     await client.broadcastMissionUpdate(event, { requirePersistence: true });
 
-    const active = MissionOrchestrator.getActive(missionId);
-    if (active && role === 'user') {
-      try {
-        const result = await active.orchestrator.handleUserMessage(active.ctx, content);
-        res.status(202).json({ status: 'accepted', acknowledgement: result.acknowledgement, response: result.response });
-        return;
-      } catch (err) {
-        logger.error({ missionId, error: err instanceof Error ? err.message : String(err) }, 'Failed to process active mission message');
-        res.status(500).json({ error: 'The mission received the message but could not process it.' });
-        return;
-      }
-    }
-
-    // A user message to a mission that is awaiting review (e.g. missing Vault /
-    // credential entries) must be classified first. The Mission Director interprets
-    // the message in context of the pending interaction to determine whether it's
-    // a direct answer (continue with existing plan), feedback (re-plan), or unclear.
+    // A reply to a mission that is blocked on a question must resolve that
+    // interaction. Check the persisted state before the in-process orchestrator
+    // so a reply is never absorbed as conversation-only while a task waits.
     if (role === 'user') {
       try {
         const result = await client.getMissionResult(workflowId);
         const pendingInteraction = (result?.output as { outputs?: { pendingInteraction?: MissionPendingInteraction } | undefined } | undefined)?.outputs?.pendingInteraction;
-        const isAwaitingInput = result?.status === 'awaiting_review' && pendingInteraction?.kind === 'user_input';
+        if (result?.status === 'awaiting_review' && pendingInteraction?.kind === 'user_input') {
+          // Every reply is the continuation response, whether it answers the
+          // question, corrects the approach, or changes the goal. Classifying
+          // first previously stranded feedback and "unclear" replies.
+          await client.resumeMission(workflowId, { interactionResponse: content, continueWithMessage: true });
+          res.status(202).json({ status: 'resuming' });
+          return;
+        }
 
-        if (isAwaitingInput && pendingInteraction) {
-          // Classify the user message using the Brain
-          const classification = await client.classifyUserMessageForPendingInteraction(missionId, content, pendingInteraction);
-          
-          if (classification === 'ANSWER') {
-            // User directly answered the pending question - resume with interactionResponse
-            await client.resumeMission(workflowId, { interactionResponse: content, continueWithMessage: true });
-            res.status(202).json({ status: 'resuming', classification: 'answer' });
+        const active = MissionOrchestrator.getActive(missionId);
+        if (active) {
+          try {
+            const handled = await active.orchestrator.handleUserMessage(active.ctx, content);
+            res.status(202).json({ status: 'accepted', acknowledgement: handled.acknowledgement, response: handled.response });
             return;
-          } else if (classification === 'FEEDBACK') {
-            // User provided feedback/correction - resume with empty interactionResponse
-            // The user message was already broadcast and persisted; the mission will load it from artifacts
-            await client.resumeMission(workflowId, { interactionResponse: '', continueWithMessage: false });
-            res.status(202).json({ status: 'resuming', classification: 'feedback' });
-            return;
-          } else {
-            // Unclear - just acknowledge and keep waiting
-            res.status(202).json({ 
-              status: 'accepted', 
-              acknowledgement: 'Message received.',
-              response: 'I received your message. Could you please clarify or provide the requested information?'
-            });
+          } catch (err) {
+            logger.error({ missionId, error: err instanceof Error ? err.message : String(err) }, 'Failed to process active mission message');
+            res.status(500).json({ error: 'The mission received the message but could not process it.' });
             return;
           }
         }
+
         // Even when the persisted status is not yet awaiting_review, a user
         // message is still treated as a resume signal. resumeMission validates
         // state and throws if the mission cannot be resumed.

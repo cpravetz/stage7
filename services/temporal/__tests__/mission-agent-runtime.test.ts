@@ -256,7 +256,9 @@ describe('MissionAgentRuntime', () => {
         retryGuidance: 'Use the steps already completed; do not repeat actions with side effects.',
       })
 
-    expect(fetchMock).toHaveBeenCalledTimes(4)
+    // Submit, execute, and the artifact acceptance review of the produced
+    // deliverable; no worker/assistant discovery calls are expected.
+    expect(fetchMock).toHaveBeenCalledTimes(5)
   })
 
   it('parses structured credential questions into resumable mission interruptions', async () => {

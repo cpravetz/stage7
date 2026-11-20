@@ -1043,3 +1043,83 @@ describe('MissionOrchestrator checkpoint recovery', () => {
     expect(result.outputs.status).not.toBe('completed')
   })
 })
+describe('MissionOrchestrator missing-input recovery', () => {
+  afterEach(() => {
+    jest.restoreAllMocks()
+  })
+
+  it('retries the source task with a different prompt instead of failing the mission', async () => {
+    const plan: Plan = {
+      summary: 'Research and summarize',
+      estimatedDuration: 'short',
+      estimatedCost: 'low',
+      requiresClarification: false,
+      clarificationQuestions: [],
+      clarificationAnswers: [],
+      phases: [{
+        id: 'phase-1', name: 'Research', goal: 'Research and summarize', requiresApproval: false, status: 'pending',
+        tasks: [
+          {
+            id: 'task-1', title: 'Research the market', description: 'Produce research.',
+            agentRole: 'worker', systemPrompt: 'Research.', dependsOnTaskIds: [],
+            expectedArtifacts: ['research.md'], status: 'pending', artifacts: [],
+          },
+          {
+            id: 'task-2', title: 'Summarize the research', description: 'Summarize.',
+            agentRole: 'worker', systemPrompt: 'Summarize.', dependsOnTaskIds: ['task-1'],
+            expectedArtifacts: ['summary.md'], status: 'pending', artifacts: [],
+          },
+        ],
+      }],
+    }
+    jest.spyOn(global, 'fetch').mockResolvedValue(jsonResponse())
+    jest.spyOn(MissionAgentRuntime.prototype, 'getOrCreateAgent').mockResolvedValue('agent-worker')
+    jest.spyOn(MissionAgentRuntime.prototype, 'reviewPhase').mockResolvedValue({ satisfied: true, gaps: [] })
+    jest.spyOn(MissionAgentRuntime.prototype, 'reviewMissionCompletion').mockResolvedValue({ satisfied: true, gaps: [] })
+    jest.spyOn(MissionAgentRuntime.prototype, 'stopAllAgents').mockResolvedValue()
+    let task1Calls = 0
+    const execute = jest.spyOn(MissionAgentRuntime.prototype, 'executeTask').mockImplementation(async (_agentId, task) => {
+      if (task.id === 'task-1') {
+        task1Calls += 1
+        if (task1Calls < 3) {
+          return {
+            output: 'I could not finish the research yet.',
+            incompleteReason: 'The research did not produce its required artifact.',
+            artifacts: [],
+            tokensUsed: 0,
+          }
+        }
+        return {
+          output: 'Research complete.',
+          artifacts: [{ name: 'research.md', type: 'text', content: '# Findings\nSubstantive findings.' }],
+          tokensUsed: 0,
+        }
+      }
+      return {
+        output: 'Summary complete.',
+        artifacts: [{ name: 'summary.md', type: 'text', content: '# Summary\nSubstantive summary.' }],
+        tokensUsed: 0,
+      }
+    })
+    const broadcast = jest.fn().mockResolvedValue(undefined)
+
+    const result = await new MissionOrchestrator().run({
+      missionId: 'missing-input-recovery',
+      prompt: 'Research and summarize the market',
+      tenantId: 'tenant-1',
+      persistenceUrl: 'http://artifacts',
+      gatewayUrl: 'http://gateway',
+      broadcast,
+      broadcastAll: jest.fn().mockResolvedValue(undefined),
+      waitForApproval: jest.fn(),
+      resumePlan: plan,
+    })
+
+    const task1Executions = execute.mock.calls.filter((call) => call[1].id === 'task-1')
+    expect(task1Executions.length).toBeGreaterThanOrEqual(3)
+    expect(String(task1Executions.at(-1)?.[7] || '')).toMatch(/different approach|Reopened|reopened/i)
+    expect(execute.mock.calls.some((call) => call[1].id === 'task-2')).toBe(true)
+    expect(result.outputs.status).toBe('completed')
+    expect(broadcast).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'mission_incomplete' }))
+  })
+})

@@ -38,6 +38,22 @@ export function hasTriedToolAfterResolution(toolIds: readonly string[]): boolean
   )
 }
 
+const VAGUE_QUESTION_PATTERNS = [
+  /^i need more information\b/i,
+  /^please provide the missing value\b/i,
+  /^provide the missing value\b/i,
+  /^i need (?:some|more|additional) (?:info|information|details?)\b/i,
+  /^please (?:give|provide|supply|enter) (?:me )?(?:the )?(?:missing|required) (?:value|input|information)\b/i,
+  /^what (?:value|input|information) (?:do you want|is needed|is required)\b/i,
+  /^which (?:value|input|field) (?:should i use|is needed)\b/i,
+  /^missing (?:value|input|field)\b/i,
+]
+
+export function isVagueQuestion(question: string): boolean {
+  const normalized = question.trim().toLowerCase()
+  return VAGUE_QUESTION_PATTERNS.some((pattern) => pattern.test(normalized))
+}
+
 // Models sometimes echo the system instructions or their own reasoning after the marker.
 // Return only a genuine, concise question, or undefined when none can be recovered.
 export function extractAskUserQuestion(content: string): string | undefined {

@@ -42,8 +42,27 @@ describe('friendlyMissionError', () => {
       'Agent Runtime API /missions/Oct30-2/agents/agent-Oct30-2-planner failed (500): Brain model routing made no progress after 2 retry requests.',
     )).toBe('Planning stopped because the Brain model router repeated a candidate without advancing. Check model-provider availability before retrying.');
   });
-});
+  it('never renders a structured tool manifest as an error message', () => {
+    const manifest = JSON.stringify({
+      id: 'content-performance-seo',
+      name: 'Content Performance & SEO Insight',
+      type: 'code',
+      capabilities: [],
+      inputs: { query: 'string' },
+      inputSchema: { type: 'object', properties: {} },
+      outputs: {},
+    });
+    const message = friendlyMissionError(manifest);
+    expect(message).not.toContain('content-performance-seo');
+    expect(message).not.toContain('inputSchema');
+    expect(message).toBe('The Agent returned internal data instead of a readable result.');
+  });
 
+  it('removes an embedded JSON payload from a readable error', () => {
+    const message = friendlyMissionError('The task could not finish. {"id":"leaked","inputSchema":{}} Retry with a different approach.');
+    expect(message).toBe('The task could not finish. Retry with a different approach.');
+  });
+});
 describe('buildMissionEvents', () => {
   it('does not repeat a mission milestone that the mission already recorded', () => {
     const liveEvents: FeedEvent[] = [
@@ -387,6 +406,35 @@ describe('mission conversation', () => {
       data: { phaseId: 'phase-1', gaps: ['Delivery API unavailable'] },
     });
     expect(amended?.message).toContain('Delivery API unavailable');
+  });
+
+  it('never renders structured JSON dumps in the mission conversation', () => {
+    const manifest = JSON.stringify({
+      id: 'content-performance-seo',
+      name: 'Content Performance & SEO Insight',
+      type: 'code',
+      capabilities: [],
+      inputs: { query: 'string' },
+      inputSchema: { type: 'object', properties: {} },
+      outputs: {},
+    });
+    const taskEvent = feedEvent({
+      id: 'json-task-output',
+      type: 'task_completed',
+      message: `Task completed: Research\n${manifest}`,
+      metadata: { taskTitle: 'Research', output: manifest },
+    });
+    const toolEvent = feedEvent({
+      id: 'json-tool-output',
+      type: 'tool',
+      message: `✅${manifest}`,
+    });
+
+    const transcript = buildTranscript([taskEvent, toolEvent]);
+    const rendered = transcript.flatMap((turn) => turn.lines.map((line) => line.text)).join('\n');
+    expect(rendered).not.toContain('content-performance-seo');
+    expect(rendered).not.toContain('inputSchema');
+    expect(rendered).not.toContain('"id"');
   });
 
   it('renders JSON-wrapped input requests as plain questions in the conversation', () => {
