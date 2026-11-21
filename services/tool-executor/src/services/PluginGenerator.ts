@@ -9,12 +9,13 @@ import fs from 'fs';
 import path from 'path';
 import { z } from 'zod';
 
-const TEST_CONTRACT_SYSTEM_PROMPT = `You independently derive a deterministic acceptance contract for a requested tool capability.
-Do not write or assume an implementation. Return only one JSON object with this shape:
+const TEST_CONTRACT_SYSTEM_PROMPT = `Create small, deterministic input/output tests for the requested tool capability. Do not write an implementation.
+When a mission goal is provided, it defines the scope: the capability must be necessary for that goal and preserve its operation and medium. If it conflicts with the goal, return no cases.
+Return the tests themselves, not instructions for creating tests. Return one JSON object:
 {"description":"...","cases":[{"name":"...","input":{},"credentials":{},"expectedOutput":{},"httpMocks":[{"method":"POST","urlPattern":"https://api.example.test/path","expectedRequestBody":"...","responseStatus":200,"responseHeaders":{},"responseBody":{}}]}]}
 Requirements:
 - Provide 1-5 small, deterministic input/output examples that directly verify the stated capability.
-- Every input and expectedOutput must be a JSON object; do not include secrets, real personal data, or side effects.
+- Each case's input and expectedOutput must be JSON objects. Credentials must be an object whose values are strings. Do not include real secrets or personal data.
 - When a capability needs HTTP, include a local HTTP fixture for each expected request, with its method, URL pattern, optional exact request body, and fixed JSON-object response. Fixture URLs must match the URL the implementation will call; use the known provider hostname if the API has a fixed hostname, or a reserved .test hostname for configurable endpoints. Requests are intercepted in-process and unmatched requests are blocked, so no live request is made. Use * for variable path segments such as account IDs.
 - When a request uses persistent configuration such as an API endpoint or account ID, include dummy string values in the case's credentials object keyed by logical credential key. Use an endpoint matching the HTTP fixture. Never include real credentials.
 - Expected outputs must be exact JSON values, not prose, descriptions, or wildcards.
@@ -22,6 +23,9 @@ Requirements:
 - Return no markdown fences or text outside the JSON object.`;
 
 const PLUGIN_SYSTEM_PROMPT = `You are a senior engineer generating production-ready plugins for an AI agent platform.
+
+  The original mission goal, when provided, is authoritative. Generate only a capability
+  necessary for that goal, preserving the requested operation and medium.
 
   PREFER PYTHON. Generate deterministic, side-effect-free tools in Python whenever the task
   fits the standard library. Only fall back to JavaScript when the task genuinely needs
@@ -129,7 +133,7 @@ const pluginTestContractSchema = z.object({
       responseHeaders: z.record(z.string(), z.string()).optional(),
       responseBody: z.record(z.string(), z.unknown()),
     }).strict()).max(5).optional(),
-  }).strict()).min(1).max(5),
+  }).strict()).max(5),
 }).strict();
 const pluginValidationSchema = z.object({
   method: z.literal('isolated-contract-tests'),
@@ -296,6 +300,13 @@ export const CONTRACT_JSON_SHAPE_JSON = JSON.stringify({
   ],
 });
 
+function missionScope(context: Record<string, unknown> | undefined): string {
+  const goal = typeof context?.missionGoal === 'string' ? context.missionGoal.trim() : '';
+  const task = typeof context?.taskObjective === 'string' ? context.taskObjective.trim() : '';
+  if (!goal) return '';
+  return `Original mission goal (authoritative scope): ${goal}\n${task ? `Assigned task: ${task}\n` : ''}The capability must directly support the goal. Do not substitute another operation or medium.\n\n`;
+}
+
 export interface RemediationOptions {
   temperature: number;
   maxTokens: number;
@@ -386,8 +397,13 @@ export function buildContractRepairQuery(params: {
   reason: string;
   previousContent?: string;
 }): string {
-  const { description, requirements, reason, previousContent } = params;
-  return `Your previous response could not be used as the acceptance contract.\nReason: ${reason}${truncatedExcerpt(previousContent)}\n\nDefine deterministic acceptance tests for this capability:\n${description}\nRequirements: ${requirements.join(', ')}\n\nReturn ONLY one JSON object with exactly this shape and nothing else (no prose, no markdown fences):\n${CONTRACT_JSON_SHAPE_JSON}`;
+  const { description, requirements, reason } = params;
+  const readableReason = reason
+    .replace(/\bcases\.(\d+)/g, (_match, index: string) => `test case ${Number(index) + 1}`)
+    .replace(/\bhttpMocks\.(\d+)/g, (_match, index: string) => `HTTP fixture ${Number(index) + 1}`)
+    .replace(/Invalid input: expected record, received \w+/gi, 'must be a JSON object')
+    .replace(/Invalid input: expected string, received \w+/gi, 'must be a string');
+  return `Create deterministic tests for: ${description}${requirements.length ? `\nRequirements: ${requirements.join('; ')}` : ''}\nCorrect these problems: ${readableReason}\nReturn the test data itself as one JSON object, not a plan or instructions.`;
 }
 
 function extractFirstJsonArray(content: string): unknown | undefined {
@@ -533,7 +549,7 @@ export class PluginGenerator {
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       const nonce = `plugin-gen-${attempt}-${Date.now()}`;
-      const prompt = `${focusedQuery ?? basePrompt}\nRetry nonce: ${nonce}`;
+      const prompt = `${missionScope(context)}${focusedQuery ?? basePrompt}\nRetry nonce: ${nonce}`;
       const response = await fetch(`${brainUrl}/api/brain/complete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -740,11 +756,12 @@ export class PluginGenerator {
         : undefined;
       const contractRoutingSessionId = `contract-gen:${missionId || 'tool'}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
       const contractNonce = `contract-gen-${Date.now()}`;
+      const scope = missionScope(request.context);
       const contractResponse = await fetch(`${brainUrl}/api/brain/complete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          prompt: `Define deterministic acceptance tests for this capability:\n${request.description}\nRequirements: ${(request.requirements || []).join(', ')}\nRetry nonce: ${contractNonce}`,
+          prompt: `${scope}Create deterministic input/output tests for: ${request.description}\nRequirements: ${(request.requirements || []).join('; ')}\nRetry nonce: ${contractNonce}`,
           systemPrompt: TEST_CONTRACT_SYSTEM_PROMPT,
           options: remediationOptions({ attempt: 1, routingSessionId: contractRoutingSessionId, maxTokens: 4096, baseTemperature: 0.1 }),
           missionId,
@@ -784,13 +801,12 @@ export class PluginGenerator {
             description: request.description,
             requirements: request.requirements || [],
             reason: contractRepairFeedback,
-            previousContent: typeof contractData.content === 'string' ? contractData.content : undefined,
           });
           const retryResponse = await fetch(`${brainUrl}/api/brain/complete`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              prompt: `${retryPrompt}\nRetry nonce: ${retryNonce}`,
+              prompt: `${scope}${retryPrompt}\nRetry nonce: ${retryNonce}`,
               systemPrompt: TEST_CONTRACT_SYSTEM_PROMPT,
               options: remediationOptions({ attempt: contractAttempt + 1, routingSessionId: contractRoutingSessionId, maxTokens: 4096, baseTemperature: 0.1 }),
               missionId,

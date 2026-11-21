@@ -106,7 +106,8 @@ describe('focused remediation framework', () => {
       });
       expect(q).toContain('contract.cases must be an array');
       expect(q).toContain('send an SMS');
-      expect(q).toContain('"cases"');
+      expect(q).not.toContain('{"description":"x"}');
+      expect(q).toContain('test data itself');
     });
   });
 });

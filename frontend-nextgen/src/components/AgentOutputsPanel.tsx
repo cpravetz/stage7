@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { useFeedStore } from '../stores/feedStore';
 import { canonicalAgentRoleKey, interactionQuestionText, missionAgentRoleLabel } from '../utils/missionEvents';
 
@@ -665,4 +665,4 @@ const AgentOutputsPanel = ({ missionId, missionStatus, plan }: AgentOutputsPanel
   );
 };
 
-export default AgentOutputsPanel;
+export default memo(AgentOutputsPanel);

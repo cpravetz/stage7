@@ -200,9 +200,12 @@ export async function recoverFromToolFailure(
     ? `${failedTool.name} ${failedTool.description}`
     : action.tool.replace(/[_-]+/g, ' ')
   const taskGoal = taskGoalOf(rc)
-  const capabilitySource = failedTool
-    ? `${taskGoal} ${failedTool.name} ${failedTool.description}`.slice(0, 1_500)
-    : taskGoal || capabilityDescription
+  const taskObjective = typeof rc.spec.taskContext.taskObjective === 'string'
+    ? rc.spec.taskContext.taskObjective.trim().slice(0, MAX_GOAL_CHARS)
+    : ''
+  const capabilitySource = taskObjective || (failedTool
+    ? `${taskGoal} ${capabilityDescription}`.slice(0, 1_500)
+    : taskGoal || capabilityDescription)
   const capability = capabilitySource
     .match(/[a-z0-9]+/gi)
     ?.join(' ')
@@ -214,7 +217,8 @@ export async function recoverFromToolFailure(
       failedTool
         ? `The available tool "${failedTool.name}" (${failedTool.id}) failed${missingModule ? ` because runtime package "${missingModule}" is unavailable` : configurationFailure ? ' because required configuration is missing' : repeatedToolFailure ? ' repeatedly without progress' : ''}.`
         : 'A guessed tool identifier was not registered; derive the capability from the task goal rather than that identifier.',
-      taskGoal ? `Task goal: "${taskGoal}".` : '',
+      taskGoal ? `Original mission goal (authoritative scope): "${taskGoal}".` : '',
+      taskObjective ? `Assigned task: "${taskObjective}".` : '',
       'Check registered and approved integrations first; create a compatible implementation only if none is suitable. The replacement must perform the exact task operation, not a similarly named draft, queue, or storage operation.',
       'Do not install unavailable runtime packages or claim success without verified execution.',
     ].filter(Boolean).join(' '),

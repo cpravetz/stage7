@@ -23,7 +23,11 @@ export async function prepareTurn(rc: RunContext): Promise<PreparedTurn> {
   // catalog. The full list is still available via `__list_tools` and used by
   // guards/performAction (turn.tools).
   const ranked = policy.maxActions > 0
-    ? rankToolsForTask(allVisible, spec.missionGoal || spec.prompt, spec.requiredActions)
+    ? rankToolsForTask(
+      allVisible,
+      typeof spec.taskContext.taskObjective === 'string' ? spec.taskContext.taskObjective : spec.missionGoal || spec.prompt,
+      spec.requiredActions,
+    )
     : allVisible
   const promptTools = ranked.slice(0, MAX_PROMPT_TOOLS)
   const remainingCompletionTokens = limits.completionTokenLimit - state.completionTokensReserved

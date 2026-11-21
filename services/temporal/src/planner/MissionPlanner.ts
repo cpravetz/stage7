@@ -505,35 +505,6 @@ function requestedOperationVerb(missionGoal: string): string | undefined {
         .exec(missionGoal)?.[1]?.toLocaleLowerCase();
 }
 const LEADING_PLANNING_VERB = /^(?:design|plan|generate|draft|write|compose|prepare|produce|create)\b/i;
-const PLANNING_ARTIFACT_WORDS = /\b(?:content|copy|draft|artifact|delivery|service|tool|plugin|connector|integration)\b/gi;
-const CHANNEL_KEYWORDS = ['text message', 'sms', 'email', 'text', 'message', 'notification'];
-function channelKey(subject: string): string {
-    const lower = subject.toLowerCase();
-    for (const keyword of CHANNEL_KEYWORDS) {
-        if (lower.includes(keyword)) return keyword;
-    }
-    return lower;
-}
-function deriveActionSubject(task: Task): string | undefined {
-    const title = task.title.trim();
-    if (!LEADING_PLANNING_VERB.test(title)) return undefined;
-    const subject = title
-        .replace(LEADING_PLANNING_VERB, '')
-        .replace(PLANNING_ARTIFACT_WORDS, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-    return subject || undefined;
-}
-function preparationTaskSubject(task: Task): string | undefined {
-    if (!/^(?:generate|draft|write|compose|prepare|produce|create)\b/i.test(task.title.trim())) return undefined;
-    const subject = task.title
-        .trim()
-        .replace(/^(?:generate|draft|write|compose|prepare|produce|create)\s+/i, '')
-        .replace(/\b(?:content|copy|draft|artifact)\b/gi, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-    return subject || undefined;
-}
 function normalizeCapabilitySetupTasks(plan: Plan, missionGoal: string): number {
     if (explicitlyRequestsReusableCapability(missionGoal)) return 0;
 
@@ -562,54 +533,37 @@ function normalizeCapabilitySetupTasks(plan: Plan, missionGoal: string): number 
                     candidates.push(setupTask);
             }
         }
-        const groups: Array<{ subject: string; task: Task }> = [];
-        const seenSubjects = new Set<string>();
-        for (const task of candidates) {
-            const subject = deriveActionSubject(task);
-            if (!subject) continue;
-            const key = channelKey(subject);
-            if (seenSubjects.has(key)) continue;
-            seenSubjects.add(key);
-            groups.push({ subject, task });
-        }
-        if (groups.length === 0) return 0;
-
-        const verbCapitalized = operationVerb.charAt(0).toLocaleUpperCase() + operationVerb.slice(1);
-        for (const { subject, task } of groups) {
-            const displaySubject = subject.charAt(0).toLocaleUpperCase() + subject.slice(1);
-            task.title = `${verbCapitalized} ${subject}`;
-            task.description = `Perform the ${subject} operation requested by the mission goal and verify its actual result.`;
-            task.agentRole = `${displaySubject} Action Agent`;
-            task.systemPrompt = [
-                `Mission goal: ${missionGoal}`,
-                `Perform the ${subject} operation requested by the mission goal. ${outcomeInstruction}`,
-            ].join(' ');
-            task.dependsOnTaskIds = [];
-            task.expectedArtifacts = [];
-            task.requiredActions = [];
-            task.artifacts = [];
-            task.status = 'pending';
-        }
-
-        const keptTaskIds = new Set(groups.map((group) => group.task.id));
+        if (candidates.length === 0) return 0;
+        // A planner-invented subject is not evidence that the user requested
+        // another operation. Carry the original goal, not those subjects.
+        const task = candidates[0]!;
+        task.title = 'Complete the requested outcome';
+        task.description = missionGoal;
+        task.agentRole = 'mission-executor';
+        task.systemPrompt = outcomeInstruction;
+        task.dependsOnTaskIds = [];
+        task.expectedArtifacts = [];
+        task.requiredActions = [];
+        task.artifacts = [];
+        task.status = 'pending';
+        const keptTaskIds = new Set([task.id]);
         for (const phase of plan.phases) {
             phase.tasks = phase.tasks.filter((task) => keptTaskIds.has(task.id));
         }
         plan.phases = plan.phases.filter((phase) => phase.tasks.length > 0);
         for (const phase of plan.phases) {
-            phase.name = removeCapabilityReferences(phase.name);
-            phase.goal = removeCapabilityReferences(phase.goal);
+            phase.name = 'Complete requested outcome';
+            phase.goal = missionGoal;
         }
-        plan.summary = groups.map((group) => `${verbCapitalized} ${group.subject}`).join('; ');
+        plan.summary = missionGoal;
         logger.info(
             {
                 removedTaskIds: [...setupTaskIds].filter((id) => !keptTaskIds.has(id)),
-                updatedTaskIds: groups.map((group) => group.task.id),
-                subjects: groups.map((group) => group.subject),
+                updatedTaskIds: [task.id],
             },
             'Normalized intermediate setup tasks into requested outcome tasks',
         );
-        return setupTaskIds.size + candidates.length - groups.length;
+        return tasks.length - 1;
     }
 
     const removedSetupTaskIds = new Set(

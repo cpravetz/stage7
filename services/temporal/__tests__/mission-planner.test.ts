@@ -134,12 +134,12 @@ describe('generateValidPlan', () => {
     )
     const tasks = generated.phases.flatMap((phase) => phase.tasks)
 
-    expect(tasks).toHaveLength(2)
-    expect(tasks.map((task) => task.title)).toEqual(['Send text', 'Send email'])
+    expect(tasks).toHaveLength(1)
+    expect(tasks[0]?.description).toContain('Send the same message as an email')
     expect(tasks.every((task) => (task.expectedArtifacts || []).length === 0)).toBe(true)
     expect(tasks.every((task) => (task.dependsOnTaskIds || []).length === 0)).toBe(true)
     expect(tasks.every((task) => !/\btool\b|\bprovider\b|\bapi\b/i.test(task.systemPrompt))).toBe(true)
-    expect(tasks.every((task) => task.systemPrompt.includes('Watson, come here.'))).toBe(true)
+    expect(tasks[0]?.description).toContain('Watson, come here.')
     expect(tasks.some((task) => /create (?:text|email) service/i.test(task.title))).toBe(false)
   })
 
@@ -166,11 +166,11 @@ describe('generateValidPlan', () => {
     const generated = await generateValidPlan(missionGoal, {}, 'mission-delivery-plan-artifacts', complete)
     const tasks = generated.phases.flatMap((phase) => phase.tasks)
 
-    expect(tasks.map((task) => task.title)).toEqual(['Send text message', 'Send email'])
+    expect(tasks).toHaveLength(1)
     expect(tasks.every((task) => (task.expectedArtifacts || []).length === 0)).toBe(true)
-    expect(tasks.map((task) => task.requiredActions)).toEqual([[], []])
-    expect(tasks.every((task) => task.systemPrompt.includes('347-772-8389'))).toBe(true)
-    expect(tasks.every((task) => task.systemPrompt.includes('chris@pravetz.net'))).toBe(true)
+    expect(tasks.map((task) => task.requiredActions)).toEqual([[]])
+    expect(tasks[0]?.description).toContain('347-772-8389')
+    expect(tasks[0]?.description).toContain('chris@pravetz.net')
     expect(tasks.every((task) => !/\btool\b|\bprovider\b|\bapi\b/i.test(task.systemPrompt))).toBe(true)
   })
 
@@ -220,9 +220,21 @@ describe('generateValidPlan', () => {
     )
     const tasks = generated.phases.flatMap((phase) => phase.tasks)
 
-    expect(tasks.map((task) => task.title)).toEqual(['Send Text', 'Send Email'])
+    expect(tasks).toHaveLength(1)
+    expect(tasks[0]?.description).toContain('Send the same message as an email')
     expect(tasks.every((task) => (task.requiredActions || []).length === 0)).toBe(true)
     expect(tasks.every((task) => (task.expectedArtifacts || []).length === 0)).toBe(true)
+  })
+
+  it('does not turn invented planning subjects into additional mission actions', async () => {
+    const plan = validPlan(2)
+    plan.phases[0]!.tasks[0]!.title = 'Plan text message delivery'
+    plan.phases[1]!.tasks[0]!.title = 'Plan email delivery'
+    const goal = 'Send a text message to +15555550100 saying hello.'
+    const generated = await generateValidPlan(goal, {}, 'mission-text-only', async () => JSON.stringify(plan))
+    expect(generated.phases.flatMap((phase) => phase.tasks)).toHaveLength(1)
+    expect(JSON.stringify(generated)).not.toMatch(/email/i)
+    expect(generated.phases[0]?.tasks[0]?.description).toBe(goal)
   })
 
   it('preserves a capability setup task when the user explicitly requests a reusable deliverable', async () => {

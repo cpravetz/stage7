@@ -1364,6 +1364,7 @@ export class MissionAgentRuntime {
       requiredActions: task.requiredActions || [],
       requiresExternalAction: task.requiresExternalAction === true,
       context: {
+        ...(missionGoal ? { missionGoal, taskObjective: `${task.title}\n${task.description}` } : {}),
         [BRAIN_ROUTING_SESSION_CONTEXT_KEY]: `${this.missionId}:task:${phase.id}:${task.id}`,
         ...(continuation?.pendingInteraction.question
           ? {

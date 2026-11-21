@@ -126,9 +126,26 @@ describe('mission tool configuration', () => {
 
     jest.spyOn(CodeExecutor.prototype, 'execute').mockResolvedValue({ success: true, output: '{"success":true}' });
 
-    const result = await new PluginGenerator().generate({ description: 'Send SMS', requirements: [] });
+    const result = await new PluginGenerator().generate({
+      description: 'Send SMS', requirements: [],
+      context: { missionGoal: 'Send a text message', taskObjective: 'Send the requested text' },
+    });
     expect(result.success).toBe(true);
-    expect(prompts[1]).toContain('cases.0.httpMocks.0.responseBody');
+    expect(prompts[0]).toContain('Original mission goal (authoritative scope): Send a text message');
+    expect(prompts[1]).toContain('test case 1.HTTP fixture 1.responseBody must be a JSON object');
+    expect(prompts[1]).not.toContain(JSON.stringify(invalidContract));
+  });
+
+  it('stops without generating a tool when no relevant deterministic tests can be supplied', async () => {
+    jest.spyOn(ToolDiscovery.prototype, 'discoverAndRegister').mockResolvedValue(undefined);
+    const fetch = jest.spyOn(global, 'fetch').mockResolvedValue({
+      ok: true, status: 200,
+      json: async () => ({ content: JSON.stringify({ description: 'No suitable tests', cases: [] }) }),
+    } as Response);
+    const result = await new PluginGenerator().generate({ description: 'Send a message', requirements: [] });
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('no deterministic test cases');
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 
   it('validates a generated SMS tool with dummy credentials and an isolated provider fixture', async () => {

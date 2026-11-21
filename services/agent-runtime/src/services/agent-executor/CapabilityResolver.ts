@@ -34,7 +34,12 @@ export class CapabilityResolver {
           description,
           requirements,
           excludeToolIds,
-          context: { missionId: context.missionId, agentId },
+          context: {
+            missionId: context.missionId,
+            agentId,
+            ...(context.missionGoal ? { missionGoal: context.missionGoal } : {}),
+            ...(context.taskObjective ? { taskObjective: context.taskObjective } : {}),
+          },
         }),
       })
       const result = await response.json() as PluginGenerationResponse & {

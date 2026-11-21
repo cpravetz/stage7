@@ -140,6 +140,8 @@ User goal
 
 **Handoff to Brain:** plan generation, plan repair, and task-requirement normalization.
 
+When a plan only describes intermediate setup instead of the requested action, normalization carries the original goal forward as the outcome rather than turning invented setup subjects into additional actions. Capability requests also carry the original goal and assigned task as context. These prompts guide relevance; they are not a semantic guarantee that a model will never propose unrelated work.
+
 ---
 
 ## Phase 2 — Phase and task selection
@@ -192,6 +194,8 @@ One execution = one bounded agent loop. Each turn:
 - **Budgets exhausted** (actions, Brain calls, tokens) → task ends *incomplete*, not failed.
 
 Every proposed action is validated before execution; every executed action is recorded as a receipt.
+
+Tool-generation test requests are independent Brain completions, not a shared chat session. Each request includes the capability, applicable mission scope, and test-data format; retries request fresh test data with concise validation feedback rather than replaying a truncated earlier response.
 
 **When the Brain's reply is bad or unusable** (this is *not* a service outage — the Brain responded):
 

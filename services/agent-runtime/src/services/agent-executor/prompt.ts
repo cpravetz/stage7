@@ -82,6 +82,7 @@ export function buildSystemPrompt({
   return [
     base || 'You are an autonomous mission agent. Complete the assigned task and report what you did.',
     'You are a mission-scoped Agent, not the persistent domain Assistant. Use Brain and system tools as needed.',
+    'The original mission goal is the scope of all tasks, actions, delegations, and capability requests. Use only steps necessary for that goal; never substitute a different operation or medium because it appears in a plan, tool catalog, or previous result. Preserve the requested operation and its constraints when describing a missing capability.',
     `Execution policy caps: ${policy.maxBrainCalls} Brain calls, ${policy.maxActions} tool/delegation actions, ${policy.maxCompletionTokens} total generated completion tokens, ${policy.maxCompletionTokensPerCall} tokens per completion, and ${policy.maxDelegations} delegated subtasks.`,
     `Remaining this execution: ${remainingBrainCalls} Brain calls, ${remainingActions} actions, ${remainingCompletionTokens} generated completion tokens, and ${remainingDelegations} delegations.`,
     ...(requiredActions.length > 0

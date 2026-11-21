@@ -1796,6 +1796,7 @@ describe('AgentExecutor', () => {
             'The archive search completed.',
           ][brainTurn - 1],
         })
+
       }
 
       if (url.endsWith('/api/tool-executor/tools') && init?.method !== 'POST') {
@@ -1848,6 +1849,38 @@ describe('AgentExecutor', () => {
     expect(resolution?.body?.excludeToolIds).toEqual(['archive_search'])
     await fetcher('http://tool-executor:3500/api/tool-executor/tools/archive-search', {
       method: 'DELETE',
+    })
+  })
+
+  it('passes the original mission and assigned outcome to capability resolution', async () => {
+    let turn = 0
+    let resolutionBody: Record<string, unknown> | undefined
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) return jsonResponse({ tools: [] })
+      if (url.endsWith('/api/brain/complete')) {
+        return jsonResponse({ content: turn++ === 0
+          ? '{"tool":"__create_tool","args":{"description":"Send a text message","requirements":[]}}'
+          : 'Unable to resolve the requested capability.' })
+      }
+      if (url.endsWith('/api/tool-executor/tools/resolve')) {
+        resolutionBody = JSON.parse(String(init?.body)) as Record<string, unknown>
+        return jsonResponse({ success: false, error: 'Capability unavailable' }, 400)
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+    const scopedTask = task() as AgentTask
+    scopedTask.input.prompt = 'Expanded task instructions with unrelated plan context'
+    scopedTask.input.context = {
+      missionGoal: 'Send a text message to +15555550100 saying hello.',
+      taskObjective: 'Send the requested text message',
+    }
+    await new AgentExecutor({ fetcher }).execute(definition, scopedTask, {
+      missionId: 'mission-1', delegationDepth: 0,
+    })
+    expect(resolutionBody?.context).toMatchObject({
+      missionGoal: 'Send a text message to +15555550100 saying hello.',
+      taskObjective: 'Send the requested text message',
     })
   })
 

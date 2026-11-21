@@ -19,7 +19,7 @@ export interface AgentLearning {
 export interface TaskSpec {
   /** The text shown to the Brain as the task. */
   prompt: string
-  /** The raw `input.prompt` string when one was supplied; used as the "mission goal" in corrections. */
+  /** The original mission goal, when supplied, otherwise the task prompt. */
   missionGoal?: string
   taskContext: Record<string, unknown>
   /** `taskContext` minus private fields, as echoed into the first Brain message. */
@@ -113,6 +113,8 @@ export function parseTaskSpec(taskInputValue: unknown): TaskSpec {
   const {
     agentLearnings: rawAgentLearnings,
     requiredActions: _unfilteredRequiredActions,
+    missionGoal: _missionGoal,
+    taskObjective: _taskObjective,
     ...publicTaskContextFields
   } = taskContext
   const publicTaskContext = {
@@ -123,7 +125,9 @@ export function parseTaskSpec(taskInputValue: unknown): TaskSpec {
   const routingSessionId = taskContext[BRAIN_ROUTING_SESSION_CONTEXT_KEY]
   return {
     prompt,
-    missionGoal: typeof taskInput.prompt === 'string' ? taskInput.prompt : undefined,
+    missionGoal: typeof taskContext.missionGoal === 'string' && taskContext.missionGoal.trim()
+      ? taskContext.missionGoal
+      : typeof taskInput.prompt === 'string' ? taskInput.prompt : undefined,
     taskContext,
     publicTaskContext,
     expectedArtifacts,
