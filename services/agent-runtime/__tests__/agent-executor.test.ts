@@ -1851,12 +1851,47 @@ describe('AgentExecutor', () => {
     })
   })
 
-  it('returns a structured user-input request so the mission can pause for an answer', async () => {
-    const fetcher: typeof fetch = async (input) => {
+  it('creates and registers a tool before requesting its credentials through the secure form', async () => {
+    let turn = 0
+    let smsRegistered = false
+    let resolveCalls = 0
+    const prompts: string[] = []
+    const fetcher: typeof fetch = async (input, init) => {
       const url = String(input)
-      if (url.endsWith('/api/tool-executor/tools')) return jsonResponse({ tools: [] })
+      if (url.endsWith('/api/tool-executor/tools')) {
+        return jsonResponse({
+          tools: smsRegistered
+            ? [{ id: 'sms_sender', name: 'SMS Sender', description: 'Send SMS messages', type: 'code' }]
+            : [],
+        })
+      }
       if (url.endsWith('/api/brain/complete')) {
-        return jsonResponse({ content: '__ASK_USER__:{"question":"[secret:service_token] Provide the service token."}' })
+        prompts.push(String((JSON.parse(String(init?.body)) as { prompt: string }).prompt))
+        return jsonResponse({ content: [
+          '__ASK_USER__:Please provide the API key for the SMS Sender tool so I can send the message.',
+          '{"tool":"__create_tool","args":{"capability":"send SMS","description":"Send an SMS message","requirements":[]}}',
+          '{"tool":"sms_sender","args":{"to":"+15555550100","body":"Test message"}}',
+        ][turn++] })
+      }
+      if (url.endsWith('/api/tool-executor/tools/resolve')) {
+        resolveCalls++
+        smsRegistered = true
+        return jsonResponse({
+          success: true,
+          tool: { id: 'sms_sender', name: 'SMS Sender', manifest: {} },
+        })
+      }
+      if (url.endsWith('/api/tool-executor/tools/execute')) {
+        expect(JSON.parse(String(init?.body))).toMatchObject({ id: 'sms_sender' })
+        return jsonResponse({
+          error: 'SMS Sender requires an API key.',
+          request: {
+            executionId: 'exec-sms-credential',
+            toolId: 'sms_sender',
+            toolName: 'SMS Sender',
+            missingCredentials: [{ key: 'api_key', label: 'SMS provider API key' }],
+          },
+        }, 428)
       }
       throw new Error(`Unexpected request: ${url}`)
     }
@@ -1866,8 +1901,109 @@ describe('AgentExecutor', () => {
       delegationDepth: 0,
     })
 
-    expect(result.output).toBe('__ASK_USER__:{"question":"[secret:service_token] Provide the service token."}')
+    expect(result.output).toContain('"toolId":"sms_sender"')
+    expect(result.output).toContain('"executionId":"exec-sms-credential"')
+    expect(result.output).toContain('secure form below')
+    expect(result.brainCalls).toBe(3)
+    expect(resolveCalls).toBe(1)
+    expect(prompts[1]).toContain('Do not request API keys, tokens, passwords, or other secrets in a free-text question')
+    expect(result.actionReceipts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ toolId: '__create_tool', outcome: 'success' }),
+      expect.objectContaining({ toolId: 'sms_sender', outcome: 'question_asked' }),
+    ]))
+  })
+
+  it('chooses a defensible business default without asking the user for preferences', async () => {
+    const prompts: string[] = []
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) return jsonResponse({ tools: [] })
+      if (url.endsWith('/api/brain/complete')) {
+        const request = JSON.parse(String(init?.body)) as { prompt: string; systemPrompt: string }
+        prompts.push(`${request.systemPrompt}\n${request.prompt}`)
+        return jsonResponse({ content: 'I recommend a focused subscription SaaS for a well-defined business workflow because it has recurring revenue potential and low initial operating costs.' })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+
+    const missionTask = task() as AgentTask
+    missionTask.input.prompt = 'Choose the business most likely to succeed with minimal startup costs. The user said: "You should decide what makes sense."'
+    const result = await new AgentExecutor({ fetcher }).execute(definition, missionTask, {
+      missionId: 'mission-1',
+      delegationDepth: 0,
+    })
+
+    expect(result.output).toContain('I recommend a focused subscription SaaS')
+    expect(result.output).not.toContain('__ASK_USER__')
     expect(result.brainCalls).toBe(1)
+    expect(prompts[0]).toContain('if preferences are unstated, select a defensible default')
+    expect(prompts[0]).toContain('compare candidates against the mission goals, constraints, and user context')
+    expect(prompts[0]).toContain('You should decide what makes sense')
+  })
+
+  it('diagnoses a tool issue and decides on alternatives without asking the user', async () => {
+    const prompts: string[] = []
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) {
+        return jsonResponse({
+          tools: [{ id: 'healthcare-patient-communication', name: 'Patient Communication', description: 'Send patient communications by SMS, email, or portal', type: 'native' }],
+        })
+      }
+      if (url.endsWith('/api/brain/complete')) {
+        const request = JSON.parse(String(init?.body)) as { prompt: string; systemPrompt: string }
+        prompts.push(`${request.systemPrompt}\n${request.prompt}`)
+        return jsonResponse({ content: 'The catalog lists Patient Communication as supporting SMS, and there is no recorded execution error. There is no evidence it is failing or that a replacement is needed.' })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+
+    const diagnosticTask = task() as AgentTask
+    diagnosticTask.input.prompt = 'Determine whether the healthcare-patient-communication tool is suitable for SMS, and whether an alternative is warranted.'
+    const result = await new AgentExecutor({ fetcher }).execute(definition, diagnosticTask, {
+      missionId: 'mission-1',
+      delegationDepth: 0,
+    })
+
+    expect(result.output).toContain('There is no evidence it is failing or that a replacement is needed')
+    expect(result.output).not.toContain('__ASK_USER__')
+    expect(result.brainCalls).toBe(1)
+    expect(prompts[0]).toContain('inspect its live catalog entry, schemas, and recorded action results/errors')
+    expect(prompts[0]).toContain('Never ask the user to diagnose a tool')
+    expect(prompts[0]).toContain('Patient Communication')
+  })
+
+  it('does not ask again for a question whose response is already in task context', async () => {
+    let turn = 0
+    const prompts: string[] = []
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) return jsonResponse({ tools: [] })
+      if (url.endsWith('/api/brain/complete')) {
+        prompts.push(String((JSON.parse(String(init?.body)) as { prompt: string }).prompt))
+        return jsonResponse({ content: [
+          '__ASK_USER__:What is your startup budget?',
+          'I will proceed with a low-cost setup and state the budget assumption in the proposal.',
+        ][turn++] })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+
+    const missionTask = task() as AgentTask
+    missionTask.input.context = {
+      priorUserQuestion: 'What is your startup budget?',
+      priorUserResponse: 'Use your judgment and keep the startup costs minimal.',
+    }
+    const result = await new AgentExecutor({ fetcher }).execute(definition, missionTask, {
+      missionId: 'mission-1',
+      delegationDepth: 0,
+    })
+
+    expect(result.output).toContain('I will proceed with a low-cost setup')
+    expect(result.output).not.toContain('__ASK_USER__')
+    expect(result.brainCalls).toBe(2)
+    expect(prompts[1]).toContain('Do not repeat or rephrase the same question')
+    expect(prompts[1]).toContain('Use your judgment and keep the startup costs minimal')
   })
 
   it('handles an agent that mistakenly calls ask_user as a tool instead of using the native marker', async () => {

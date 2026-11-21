@@ -402,7 +402,12 @@ const MissionRoom = () => {
   const connected = useFeedStore((s) => s.connected);
   const ensureConnected = useFeedStore((s) => s.ensureConnected);
 
-  const detail = useMissionsStore((s) => s.details[workflowId]);
+  const storedDetail = useMissionsStore((s) => s.details[workflowId]);
+  const detailMatchesMission = storedDetail
+    ? missionIdFromWorkflowId(storedDetail.missionId) === missionId
+    : false;
+  const detail = detailMatchesMission ? storedDetail : undefined;
+  const detailIdentityMismatch = Boolean(storedDetail && !detailMatchesMission);
   const detailLoading = useMissionsStore((s) => s.detailLoading[workflowId]);
   const detailError = useMissionsStore((s) => s.detailError[workflowId]);
   const fetchMissionDetail = useMissionsStore((s) => s.fetchMissionDetail);
@@ -790,11 +795,9 @@ const MissionRoom = () => {
           updateMissionStatus(workflowId, result.status);
         }
       }
-      setInteractionResponse('');
-      setInteractionCredentials({});
-      setPermissionScope('');
       await refreshDetail(workflowId);
     } catch (error) {
+      setDismissedInteractionKey(null);
       setControlError(error instanceof Error ? error.message : 'Failed to resume the mission');
     } finally {
       setInteractionSubmitting(false);
@@ -936,6 +939,9 @@ const MissionRoom = () => {
       </div>
 
       {detailError && <div className="error-banner">{detailError}</div>}
+      {detailIdentityMismatch && (
+        <div className="error-banner">Mission details did not match this room. Refresh the room to retry.</div>
+      )}
       {detail?.eventsLoadError && (
         <div className="error-banner">Could not load mission history: {detail.eventsLoadError}</div>
       )}

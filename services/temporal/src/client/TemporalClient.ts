@@ -1060,6 +1060,16 @@ export class TemporalClient {
       ...(interactionResponse && !canResumeFromTerminal ? { interactionResponse } : {}),
       ...(userMessage && canResumeFromTerminal ? { userMessages: [userMessage] } : {}),
     };
+    const resumedOutput = pendingInteraction && record.output
+      ? {
+          ...record.output,
+          outputs: {
+            ...record.output.outputs,
+            status: 'running',
+            pendingInteraction: undefined,
+          },
+        }
+      : undefined;
     const awaitingClarification = record.output?.outputs?.status === 'awaiting_clarification'
       && Boolean(continuation.clarificationAnswers?.length);
     const checkpoint = (record.status === 'pending' || awaitingClarification) && !canResumeFromTerminal
@@ -1072,7 +1082,7 @@ export class TemporalClient {
       throw new Error(`Cannot resume mission ${missionId}: another process still owns its execution lease`);
     }
     try {
-      await this.updatePersistedMissionControl(missionId, 'running', 'running', resumeInput);
+      await this.updatePersistedMissionControl(missionId, 'running', 'running', resumeInput, resumedOutput);
     } catch (error) {
       if (leaseClaimed) await this.releaseDirectRecoveryLease(missionId);
       throw error;
@@ -1588,6 +1598,7 @@ export class TemporalClient {
     status: string,
     controlState: NonNullable<PersistedMissionControlRecord['controlState']>,
     input?: WorkflowInput,
+    output?: PersistedMissionControlRecord['output'],
   ): Promise<void> {
     const persistenceUrl = process.env.ARTIFACTS_URL;
     if (!persistenceUrl) {
@@ -1596,7 +1607,13 @@ export class TemporalClient {
     const response = await fetch(`${persistenceUrl}/api/artifacts/missions/${encodeURIComponent(missionId)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status, controlState, ...(input ? { input } : {}), updatedAt: Date.now() }),
+      body: JSON.stringify({
+        status,
+        controlState,
+        ...(input ? { input } : {}),
+        ...(output ? { output } : {}),
+        updatedAt: Date.now(),
+      }),
     });
     if (!response.ok) {
       const details = (await response.text()).slice(0, 500);

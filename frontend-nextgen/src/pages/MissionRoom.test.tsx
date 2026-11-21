@@ -70,6 +70,47 @@ describe('Mission Room review card', () => {
     expect(screen.getByText('Which account?')).toBeInTheDocument();
   });
 
+  it('does not show a pending interaction belonging to a different mission', () => {
+    renderRoom({
+      missionId: 'SMS112003',
+      status: 'awaiting_review',
+      output: { outputs: {
+        pendingInteraction: {
+          kind: 'user_input', phaseId: 'phase-1', taskId: 'task-1', taskTitle: 'Send SMS', agentRole: 'executor',
+          question: 'Please provide the SMS Sender API key.',
+        },
+      } },
+    });
+
+    expect(screen.queryByText('Please provide the SMS Sender API key.')).not.toBeInTheDocument();
+    expect(screen.queryByText('The Agent needs your input to continue.')).not.toBeInTheDocument();
+  });
+
+  it('links an SMS Sender question directly to that tool configuration', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      text: async () => JSON.stringify({
+        tools: [{ id: 'sms_sender', name: 'SMS Sender' }],
+      }),
+    })));
+
+    renderRoom({
+      missionId: 'test',
+      status: 'awaiting_review',
+      output: { outputs: {
+        pendingInteraction: {
+          kind: 'user_input', phaseId: 'phase-1', taskId: 'task-1', taskTitle: 'Send SMS', agentRole: 'executor',
+          question: 'Please provide the API key for the SMS Sender tool.',
+        },
+      } },
+    });
+
+    const configLink = await screen.findByRole('link', { name: 'Open Tools configuration' });
+    expect(configLink).toHaveAttribute('href', '/tools/sms_sender/config');
+  });
+
   it('keeps the input card visible even when an old reply was marked responded', () => {
     // A previous reply was recorded locally but the backend never resumed the
     // mission, so the pending interaction is still active. The card must remain

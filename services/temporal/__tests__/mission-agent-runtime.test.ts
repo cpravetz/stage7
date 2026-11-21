@@ -100,6 +100,50 @@ describe('MissionAgentRuntime', () => {
     expect(execute.mock.calls[0][1].prompt).toContain('The setting is already configured.')
   })
 
+  it('resumes with the original user question and answer so the agent can continue without repeating it', async () => {
+    const runtime = new MissionAgentRuntime({ missionId: 'mission-1', tenantId: 'tenant-1' })
+    const execute = jest.spyOn(runtime, 'executePromptTask').mockResolvedValue({
+      output: 'I recommend the strongest option based on the stated goals.',
+      artifacts: [],
+      tokensUsed: 1,
+    })
+    const previousQuestion = 'What type of online service business are you interested in?'
+    const userResponse = 'You should decide what makes sense and choose what is most likely to succeed.'
+
+    await runtime.executeTask(
+      agent.id,
+      { ...task },
+      phase,
+      plan,
+      false,
+      undefined,
+      [],
+      undefined,
+      {
+        response: userResponse,
+        pendingInteraction: {
+          kind: 'user_input',
+          phaseId: phase.id,
+          taskId: task.id,
+          taskTitle: task.title,
+          agentRole: task.agentRole,
+          question: previousQuestion,
+          resumeCount: 0,
+        },
+      },
+      'Choose a business likely to succeed with minimal startup costs.',
+    )
+
+    const request = execute.mock.calls[0][1]
+    expect(request.prompt).toContain(`The question you previously asked was: ${previousQuestion}`)
+    expect(request.prompt).toContain(`The user's response to that interruption is: ${userResponse}`)
+    expect(request.prompt).toContain('Do not repeat or rephrase the same question')
+    expect(request.context).toMatchObject({
+      priorUserQuestion: previousQuestion,
+      priorUserResponse: userResponse,
+    })
+  })
+
   it.each([false, true])('preserves incomplete results and receipts after recovery=%s', async (recover) => {
     const receipt = { toolId: 'email_sender', isError: false, outcome: 'success', content: '{"id":"email-1"}' }
     const completed = {

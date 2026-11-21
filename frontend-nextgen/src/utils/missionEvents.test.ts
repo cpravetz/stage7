@@ -299,8 +299,10 @@ describe('buildMissionEvents', () => {
       ],
       detail: { status: 'awaiting_review', startedAt: 1, completedAt: 4 },
     });
-    expect(events.filter((event) => event.type === 'mission_needs_review').map((event) => event.message))
-      .toEqual([expect.stringContaining('endpoint'), expect.stringContaining('request was rejected')]);
+    const advice = events.filter((event) => event.type === 'mission_needs_review').map((event) => event.message);
+    expect(advice).toHaveLength(2);
+    expect(advice[0]).toContain('endpoint');
+    expect(advice[1]).toContain('request was rejected');
   });
 
   it('keeps the review conversation after the mission completes', () => {
@@ -686,6 +688,53 @@ describe('mission conversation', () => {
     expect(summarizeModelUsage(liveEvents)).toEqual({ calls: 2, tokens: 350, estimatedCost: 0.03 });
   });
 
+  it('does not announce resume, planning, and plan generated after a user reply', () => {
+    const plan = { phases: [{ id: 'phase-1', tasks: [{ id: 'task-1' }] }] };
+    const liveEvents: FeedEvent[] = [
+      feedEvent({ id: 'e1', type: 'mission_started', timestamp: 1 }),
+      feedEvent({ id: 'e2', type: 'planner_started', timestamp: 2, message: 'Planning: ship it' }),
+      normalize({
+        id: 'e3', type: 'plan_generated', missionId: MISSION_ID, timestamp: 3,
+        data: { plan, agentRole: 'planner' },
+      })!,
+      normalize({
+        id: 'answer', type: 'user_input_resolved', missionId: MISSION_ID, timestamp: 4,
+        data: { phaseId: 'phase-1', taskId: 'task-1', response: 'smtp.example.com' },
+      })!,
+      feedEvent({ id: 'e4', type: 'mission_resumed', timestamp: 5, message: 'Mission resumed' }),
+      normalize({
+        id: 'e5', type: 'plan_generated', missionId: MISSION_ID, timestamp: 6,
+        data: { source: 'loaded', plan: { phases: [{ id: 'phase-1', tasks: [] }] } },
+      })!,
+      feedEvent({ id: 'e6', type: 'task_started', timestamp: 7, metadata: { phaseId: 'phase-1', taskId: 'task-1' } }),
+    ];
+    const events = buildMissionEvents({
+      missionId: MISSION_ID,
+      liveEvents,
+      detail: { status: 'running', startedAt: 1 },
+    });
+
+    const conversation = events.filter((event) => CONVERSATION_EVENT_TYPES.has(String(event.type)));
+    expect(conversation.map((event) => event.type)).toEqual([
+      'mission_started',
+      'planner_started',
+      'plan_generated',
+      'user_input_resolved',
+      'task_started',
+    ]);
+    expect(events.some((event) => event.type === 'plan_generated' && event.metadata?.plan)).toBe(true);
+
+    const transcript = buildTranscript(conversation);
+    expect(transcript.flatMap((turn) => turn.lines).map((line) => line.type)).toEqual([
+      'mission_started',
+      'planner_started',
+      'plan_generated',
+      'user_input_resolved',
+      'task_started',
+    ]);
+    expect(transcript.at(-1)?.lines[0]?.type).toBe('task_started');
+  });
+
   it('renders each resolved user reply once across resume and recovery', () => {
     const resolved = feedEvent({
       id: 'resolved-1',
@@ -705,6 +754,7 @@ describe('mission conversation', () => {
     });
     const transcript = buildTranscript(events);
 
+    expect(transcript.some((turn) => turn.lines.some((line) => line.type === 'mission_resumed'))).toBe(false);
     const userTurns = transcript.filter((turn) => turn.role === 'user');
     expect(userTurns).toHaveLength(1);
     expect(userTurns[0]?.lines[0]?.text).toBe('smtp_host: smtp.example.com');

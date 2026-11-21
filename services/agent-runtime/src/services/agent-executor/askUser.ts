@@ -14,8 +14,63 @@ const TRANSCRIPT_TAG_PATTERN = /<\/?(?:your_previous_reply|system_feedback|task)
 export const CAPABILITY_RESOLUTION_GUIDANCE =
   'Do not ask the user to choose a provider or provide tool credentials before checking available integrations. Re-read the mission, inspect the live catalog, and use __create_tool to resolve the capability so configured integrations and credentials can be used. Ask only for a specific missing value or an actual authorization or service decision.'
 
+export const CREDENTIAL_REQUEST_GUIDANCE =
+  'Before asking the user for an API key, token, password, or other secret, first check the vault and secure credential flow and the mission context for an existing value. If a secret is genuinely unavailable and cannot be resolved by you, ask the user for that specific secret. Do not invent or guess secrets.'
+
+export const AUTONOMY_GUIDANCE =
+  'You are responsible for getting the task complete. Before asking the user anything, determine whether the question is genuinely something only the user can answer or an abdication of your responsibility. Resolve preferences, choices, tool setup, diagnosis, and deliverable production yourself from mission context, available evidence, and reasonable assumptions; state those assumptions. Ask only for an essential fact or explicit authorization that cannot be inferred.'
+
+export const REPEATED_QUESTION_GUIDANCE =
+  'You already asked this question and received a response. Do not repeat or rephrase the same question. Interpret the response in the context of the original question, make a reasonable assumption or delegated decision when possible, and proceed. Ask a follow-up only for a specific essential fact that remains unresolved, explaining what is still missing.'
+
 export const DELIVERABLE_GUIDANCE =
-  'Do not ask the user to create the assigned deliverable. Produce it yourself from the mission context and available evidence. Ask only for a specific necessary fact, decision, credential, or permission that is unavailable.'
+  'Do not ask the user to create the assigned deliverable. Produce it yourself from the mission context and available evidence. Ask only for a specific necessary non-secret fact, decision, or permission that is unavailable.'
+
+const QUESTION_STOP_WORDS = new Set([
+  'a', 'about', 'an', 'and', 'are', 'as', 'at', 'be', 'can', 'category', 'could',
+  'do', 'does', 'for', 'from', 'have', 'how', 'i', 'in', 'interested', 'is', 'it',
+  'kind', 'like', 'me', 'of', 'on', 'option', 'or', 'other', 'others', 'please',
+  'prefer', 'provide', 'question', 'should', 'specific', 'such', 'tell', 'that',
+  'the', 'there', 'these', 'this', 'those', 'to', 'type', 'want', 'we', 'what',
+  'which', 'who', 'why', 'with', 'would', 'you', 'your',
+])
+
+function questionTerms(question: string): Set<string> {
+  return new Set(
+    question.toLocaleLowerCase().split(/[^a-z0-9]+/)
+      .filter((term) => term.length > 2 && !QUESTION_STOP_WORDS.has(term)),
+  )
+}
+
+export function asksUserToRepeatQuestion(question: string, previousQuestion: unknown): boolean {
+  if (typeof previousQuestion !== 'string' || !previousQuestion.trim()) return false
+  const previous = previousQuestion.trim().toLocaleLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+  const current = question.trim().toLocaleLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+  if (previous === current) return true
+
+  const previousTerms = questionTerms(previous)
+  const currentTerms = questionTerms(current)
+  if (previousTerms.size === 0 || currentTerms.size === 0) return false
+  const overlap = [...previousTerms].filter((term) => currentTerms.has(term)).length
+  const unionSize = previousTerms.size + currentTerms.size - overlap
+  return overlap >= 2 && overlap / unionSize >= 0.8
+}
+
+export function asksUserToChoosePreference(question: string): boolean {
+  return /\b(?:what|which)\b.{0,140}\b(?:type|kind|category|approach|option|business|service|strategy|model)\b.{0,140}\b(?:interested|prefer|like|want)\b/i.test(question)
+    || /\b(?:what|which)\s+(?:would you\s+)?(?:prefer|like|want)\b/i.test(question)
+    || /\b(?:what are your|do you have any)\s+preferences?\b/i.test(question)
+    || /\bwhich option should i (?:choose|select|pick)\b/i.test(question)
+}
+
+export function asksUserToDiagnoseToolOrChooseAlternative(question: string): boolean {
+  return /\b(?:what|why|how)\b.{0,100}\b(?:issue|problem|wrong|error|failure|failing|broken|unavailable)\b.{0,100}\b(?:tool|integration|provider|service)\b/i.test(question)
+    || /\b(?:do we|should we|do i|should i)\b.{0,80}\b(?:need to\s+)?(?:consider|use|switch to|try|find|choose|select)\b.{0,80}\b(?:different|another|alternative|replacement|other)\b.{0,50}\b(?:tool|integration|provider|service)\b/i.test(question)
+}
+
+export function asksUserForRawCredential(question: string): boolean {
+  return /\b(?:api[\s_-]*keys?|tokens?|passwords?|passphrases?|credentials?|secrets?|private[\s_-]*keys?|authorization(?:\s+headers?)?)\b/i.test(question)
+}
 
 export function asksUserToProduceDeliverable(question: string): boolean {
   return /\b(?:please\s+)?(?:create|write|draft|produce|prepare|complete|generate)\b.{0,100}\b(?:deliverable|artifact|report|brief|analysis|document)\b/i.test(question)

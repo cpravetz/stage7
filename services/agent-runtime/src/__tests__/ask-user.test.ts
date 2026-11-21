@@ -1,7 +1,14 @@
 import { ActionExecutor } from '../services/agent-executor/ActionExecutor'
 import { ASK_USER_MARKER } from '../services/agent-executor/constants'
 import { isAskUserTool } from '../services/agent-executor/constants'
-import { asksUserToManageTools, extractAskUserQuestion } from '../services/agent-executor/askUser'
+import {
+  asksUserForRawCredential,
+  asksUserToChoosePreference,
+  asksUserToDiagnoseToolOrChooseAlternative,
+  asksUserToRepeatQuestion,
+  asksUserToManageTools,
+  extractAskUserQuestion,
+} from '../services/agent-executor/askUser'
 
 const ctx = { missionId: 'm1' } as any
 const def = { id: 'agent-x' } as any
@@ -58,6 +65,41 @@ describe('ask-user intent handling', () => {
 
   it('does not classify a pure named-secret ask as tool setup', () => {
     expect(asksUserToManageTools('Please provide the SMS service API token.')).toBe(false)
+  })
+
+  it('recognizes free-text requests for secrets', () => {
+    expect(asksUserForRawCredential('Please provide the API key for the SMS Sender tool.')).toBe(true)
+    expect(asksUserForRawCredential('Please provide the service token.')).toBe(true)
+    expect(asksUserForRawCredential('Which sender number should I use?')).toBe(false)
+  })
+
+  it('recognizes preference questions that ask the agent to make the decision', () => {
+    expect(asksUserToChoosePreference(
+      'What specific type of automated online service business are you interested in exploring, such as SaaS or digital content?',
+    )).toBe(true)
+    expect(asksUserToChoosePreference('Which option do you prefer?')).toBe(true)
+    expect(asksUserToChoosePreference('What is the recipient email address?')).toBe(false)
+  })
+
+  it('recognizes tool-diagnosis and tool-alternative questions the agent should resolve', () => {
+    expect(asksUserToDiagnoseToolOrChooseAlternative(
+      "What is the issue with the 'healthcare-patient-communication' tool, and do we need to consider a different tool for sending SMS?",
+    )).toBe(true)
+    expect(asksUserToDiagnoseToolOrChooseAlternative(
+      'Should we switch to another integration after this tool failed?',
+    )).toBe(true)
+    expect(asksUserToDiagnoseToolOrChooseAlternative(
+      'Which phone number should receive the SMS?',
+    )).toBe(false)
+  })
+
+  it('recognizes repeated questions while allowing a focused follow-up', () => {
+    const previous = 'What is your startup budget?'
+    expect(asksUserToRepeatQuestion('What is your startup budget?', previous)).toBe(true)
+    expect(asksUserToRepeatQuestion('Please tell me about your startup budget.', previous)).toBe(true)
+    expect(asksUserToRepeatQuestion('Could you clarify your startup budget?', previous)).toBe(false)
+    expect(asksUserToRepeatQuestion('What is the recipient email address?', previous)).toBe(false)
+    expect(asksUserToRepeatQuestion('What is your startup budget?', undefined)).toBe(false)
   })
 
   it('strips a trailing </your_previous_reply> transcript tag from an extracted question', () => {

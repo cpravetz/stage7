@@ -121,16 +121,9 @@ const Tools = () => {
   const [configSuccess, setConfigSuccess] = useState<string | null>(null);
 
   // Add/Edit tool form state
-  const [addName, setAddName] = useState('');
-  const [addDescription, setAddDescription] = useState('');
-  const [addType, setAddType] = useState<'code' | 'openapi' | 'mcp' | 'native' | 'reasoning'>('code');
-  const [addInputSchemaText, setAddInputSchemaText] = useState(JSON.stringify(DEFAULT_SCHEMA, null, 2));
-  const [addConfigSchemaText, setAddConfigSchemaText] = useState(JSON.stringify(DEFAULT_SCHEMA, null, 2));
-  const [addOutputSchemaText, setAddOutputSchemaText] = useState(JSON.stringify(DEFAULT_SCHEMA, null, 2));
-  const [addManifestText, setAddManifestText] = useState('{}');
-  const [addSourceCode, setAddSourceCode] = useState('');
-  const [addLanguage, setAddLanguage] = useState('javascript');
-  const [addFiles, setAddFiles] = useState<File[]>([]);
+  const [form, setForm] = useState<ToolFormState>(makeDefaultToolForm);
+  const setField = <K extends keyof ToolFormState>(key: K, value: ToolFormState[K]) =>
+    setForm((prev) => ({ ...prev, [key]: value }));
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
 
@@ -203,10 +196,10 @@ const Tools = () => {
     }
   }, [activeTab]);
 
-  const addInputSchemaParse = useMemo(() => safeParseJson(addInputSchemaText), [addInputSchemaText]);
-  const addConfigSchemaParse = useMemo(() => safeParseJson(addConfigSchemaText), [addConfigSchemaText]);
-  const addOutputSchemaParse = useMemo(() => safeParseJson(addOutputSchemaText), [addOutputSchemaText]);
-  const addManifestParse = useMemo(() => safeParseJsonAny(addManifestText), [addManifestText]);
+  const addInputSchemaParse = useMemo(() => safeParseJson(form.inputSchemaText), [form.inputSchemaText]);
+  const addConfigSchemaParse = useMemo(() => safeParseJson(form.configSchemaText), [form.configSchemaText]);
+  const addOutputSchemaParse = useMemo(() => safeParseJson(form.outputSchemaText), [form.outputSchemaText]);
+  const addManifestParse = useMemo(() => safeParseJsonAny(form.manifestText), [form.manifestText]);
 
   const filteredTools = useMemo(() => {
     const q = search.toLowerCase().trim();
@@ -215,16 +208,7 @@ const Tools = () => {
   }, [tools, search]);
 
   const resetForm = () => {
-    setAddName('');
-    setAddDescription('');
-    setAddType('code');
-    setAddInputSchemaText(JSON.stringify(DEFAULT_SCHEMA, null, 2));
-    setAddConfigSchemaText(JSON.stringify(DEFAULT_SCHEMA, null, 2));
-    setAddOutputSchemaText(JSON.stringify(DEFAULT_SCHEMA, null, 2));
-    setAddManifestText('{}');
-    setAddSourceCode('');
-    setAddLanguage('javascript');
-    setAddFiles([]);
+    setForm(makeDefaultToolForm());
     setAddError(null);
     setMcpResult(null);
     setMcpCapability('');
@@ -254,19 +238,19 @@ const Tools = () => {
     setAdding(true);
     try {
       const manifest: Record<string, unknown> = { ...(addManifestParse.value as Record<string, unknown>) };
-      if (addType === 'code') {
-        if (addLanguage) manifest.language = addLanguage;
-        if (addSourceCode) manifest.sourceCode = addSourceCode;
-        if (addFiles.length > 0) {
-          manifest.files = addFiles.map((f) => ({ name: f.name, size: f.size }));
+      if (form.type === 'code') {
+        if (form.language) manifest.language = form.language;
+        if (form.sourceCode) manifest.sourceCode = form.sourceCode;
+        if (form.files.length > 0) {
+          manifest.files = form.files.map((f) => ({ name: f.name, size: f.size }));
         }
       }
 
       const payload = {
         id: `tool-${Date.now()}`,
-        name: addName,
-        description: addDescription,
-        type: addType,
+        name: form.name,
+        description: form.description,
+        type: form.type,
         manifest,
         inputSchema: addInputSchemaParse.value,
         configSchema: addConfigSchemaParse.value,
@@ -309,19 +293,19 @@ const Tools = () => {
     setAdding(true);
     try {
       const manifest: Record<string, unknown> = { ...(addManifestParse.value as Record<string, unknown>) };
-      if (addType === 'code') {
-        if (addLanguage) manifest.language = addLanguage;
-        if (addSourceCode) manifest.sourceCode = addSourceCode;
-        if (addFiles.length > 0) {
-          manifest.files = addFiles.map((f) => ({ name: f.name, size: f.size }));
+      if (form.type === 'code') {
+        if (form.language) manifest.language = form.language;
+        if (form.sourceCode) manifest.sourceCode = form.sourceCode;
+        if (form.files.length > 0) {
+          manifest.files = form.files.map((f) => ({ name: f.name, size: f.size }));
         }
       }
 
       const payload = {
         ...selectedTool,
-        name: addName,
-        description: addDescription,
-        type: addType,
+        name: form.name,
+        description: form.description,
+        type: form.type,
         manifest,
         inputSchema: addInputSchemaParse.value,
         configSchema: addConfigSchemaParse.value,
@@ -355,16 +339,18 @@ const Tools = () => {
 
   const startEdit = () => {
     if (!selectedTool) return;
-    setAddName(selectedTool.name);
-    setAddDescription(selectedTool.description || '');
-    setAddType(selectedTool.type);
-    setAddInputSchemaText(JSON.stringify(selectedTool.inputSchema || DEFAULT_SCHEMA, null, 2));
-    setAddConfigSchemaText(JSON.stringify(selectedTool.configSchema || selectedTool.manifest?.configSchema || DEFAULT_SCHEMA, null, 2));
-    setAddOutputSchemaText(JSON.stringify(selectedTool.outputSchema || DEFAULT_SCHEMA, null, 2));
-    setAddManifestText(JSON.stringify(selectedTool.manifest || {}, null, 2));
-    setAddSourceCode((selectedTool.manifest?.sourceCode as string) || '');
-    setAddLanguage((selectedTool.manifest?.language as string) || 'javascript');
-    setAddFiles([]);
+    setForm({
+      name: selectedTool.name,
+      description: selectedTool.description || '',
+      type: selectedTool.type,
+      language: (selectedTool.manifest?.language as string) || 'javascript',
+      sourceCode: (selectedTool.manifest?.sourceCode as string) || '',
+      manifestText: JSON.stringify(selectedTool.manifest || {}, null, 2),
+      inputSchemaText: JSON.stringify(selectedTool.inputSchema || DEFAULT_SCHEMA, null, 2),
+      configSchemaText: JSON.stringify(selectedTool.configSchema || selectedTool.manifest?.configSchema || DEFAULT_SCHEMA, null, 2),
+      outputSchemaText: JSON.stringify(selectedTool.outputSchema || DEFAULT_SCHEMA, null, 2),
+      files: [],
+    });
     setAddError(null);
     setEditMode(true);
     setAddMode(false);
@@ -386,13 +372,18 @@ const Tools = () => {
       setMcpResult(res);
       if (res?.tool) {
         const t = res.tool;
-        setAddName(t.name || '');
-        setAddDescription(t.description || '');
-        setAddType('mcp');
-        setAddInputSchemaText(JSON.stringify(t.inputSchema || DEFAULT_SCHEMA, null, 2));
-        setAddConfigSchemaText(JSON.stringify(t.configSchema || DEFAULT_SCHEMA, null, 2));
-        setAddOutputSchemaText(JSON.stringify(t.outputSchema || DEFAULT_SCHEMA, null, 2));
-        setAddManifestText(JSON.stringify({ ...(t.manifest || {}), server: t.manifest?.server || t.server }, null, 2));
+        setForm({
+          name: t.name || '',
+          description: t.description || '',
+          type: 'mcp',
+          language: form.language,
+          sourceCode: '',
+          inputSchemaText: JSON.stringify(t.inputSchema || DEFAULT_SCHEMA, null, 2),
+          configSchemaText: JSON.stringify(t.configSchema || DEFAULT_SCHEMA, null, 2),
+          outputSchemaText: JSON.stringify(t.outputSchema || DEFAULT_SCHEMA, null, 2),
+          manifestText: JSON.stringify({ ...(t.manifest || {}), server: t.manifest?.server || t.server }, null, 2),
+          files: [],
+        });
       }
     } catch (err) {
       setAddError(err instanceof Error ? err.message : 'MCP discovery failed');
@@ -607,7 +598,6 @@ const Tools = () => {
                       <td>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                           <span style={{ fontWeight: selectedTool?.id === t.id && !addMode && !editMode ? 600 : 400 }}>{t.name}</span>
-                          <span className={`badge badge-${t.type}`}>{t.type}</span>
                           {t.isSkill && <span className="badge" style={{ background: '#6366f1' }}>skill</span>}
                         </div>
                       </td>
@@ -650,151 +640,15 @@ const Tools = () => {
                 )}
               </div>
               <form onSubmit={handleAddTool} className="form">
-                <input type="text" placeholder="Name" value={addName} onChange={(e) => setAddName(e.target.value)} required />
-                <textarea placeholder="Description" value={addDescription} onChange={(e) => setAddDescription(e.target.value)} required rows={2} />
-                <select value={addType} onChange={(e) => setAddType(e.target.value as Tool['type'])}>
-                  <option value="code">Code</option>
-                  <option value="openapi">OpenAPI</option>
-                  <option value="mcp">MCP</option>
-                  <option value="native">Native</option>
-                  <option value="reasoning">Reasoning</option>
-                </select>
-
-                {addType === 'code' && (
-                  <>
-                    <label className="field-label" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
-                      Language
-                      <select value={addLanguage} onChange={(e) => setAddLanguage(e.target.value)}>
-                        <option value="javascript">javascript</option>
-                        <option value="typescript">typescript</option>
-                        <option value="python">python</option>
-                        <option value="json">json</option>
-                      </select>
-                    </label>
-                    <label className="field-label" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
-                      Source Code
-                      <textarea
-                        rows={10}
-                        value={addSourceCode}
-                        onChange={(e) => setAddSourceCode(e.target.value)}
-                        spellCheck={false}
-                        placeholder="Paste or write tool code here"
-                        style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace' }}
-                      />
-                    </label>
-                    <label className="field-label" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
-                      Upload Files (optional)
-                      <input
-                        type="file"
-                        multiple
-                        onChange={(e) => {
-                          const files = e.target.files ? Array.from(e.target.files) : [];
-                          setAddFiles(files);
-                        }}
-                        style={{ width: '100%' }}
-                      />
-                      {addFiles.length > 0 && (
-                        <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: 4 }}>
-                          {addFiles.map((f) => f.name).join(', ')}
-                        </div>
-                      )}
-                    </label>
-                  </>
-                )}
-
-                {addType === 'openapi' && (
-                  <label className="field-label" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
-                    Manifest (OpenAPI/urlTemplate)
-                    <textarea
-                      rows={4}
-                      value={addManifestText}
-                      onChange={(e) => setAddManifestText(e.target.value)}
-                      spellCheck={false}
-                      placeholder='{"urlTemplate": "...", ...}'
-                      style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace' }}
-                    />
-                  </label>
-                )}
-
-                {addType === 'mcp' && (
-                  <label className="field-label" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
-                    Manifest (MCP server)
-                    <textarea
-                      rows={4}
-                      value={addManifestText}
-                      onChange={(e) => setAddManifestText(e.target.value)}
-                      spellCheck={false}
-                      placeholder='{"server": "...", ...}'
-                      style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace' }}
-                    />
-                  </label>
-                )}
-
-                {addType === 'native' && (
-                  <label className="field-label" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
-                    Manifest (Native executor)
-                    <textarea
-                      rows={4}
-                      value={addManifestText}
-                      onChange={(e) => setAddManifestText(e.target.value)}
-                      spellCheck={false}
-                      placeholder='{"executor": "...", "vendor": "..."}'
-                      style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace' }}
-                    />
-                  </label>
-                )}
-
-                <label className="field-label" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
-                  Manifest (JSON)
-                  <textarea
-                    rows={4}
-                    value={addManifestText}
-                    onChange={(e) => setAddManifestText(e.target.value)}
-                    spellCheck={false}
-                    className={addManifestParse.ok ? '' : 'invalid'}
-                    style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace' }}
-                  />
-                  {!addManifestParse.ok && <span className="field-error">{addManifestParse.error}</span>}
-                </label>
-
-                <label className="field-label" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
-                  Input Schema (JSON)
-                  <textarea
-                    rows={6}
-                    value={addInputSchemaText}
-                    onChange={(e) => setAddInputSchemaText(e.target.value)}
-                    spellCheck={false}
-                    className={addInputSchemaParse.ok ? '' : 'invalid'}
-                    style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace' }}
-                  />
-                  {!addInputSchemaParse.ok && <span className="field-error">{addInputSchemaParse.error}</span>}
-                </label>
-
-                <label className="field-label" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
-                  Config Schema (JSON)
-                  <textarea
-                    rows={6}
-                    value={addConfigSchemaText}
-                    onChange={(e) => setAddConfigSchemaText(e.target.value)}
-                    spellCheck={false}
-                    className={addConfigSchemaParse.ok ? '' : 'invalid'}
-                    style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace' }}
-                  />
-                  {!addConfigSchemaParse.ok && <span className="field-error">{addConfigSchemaParse.error}</span>}
-                </label>
-
-                <label className="field-label" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
-                  Output Schema (JSON)
-                  <textarea
-                    rows={6}
-                    value={addOutputSchemaText}
-                    onChange={(e) => setAddOutputSchemaText(e.target.value)}
-                    spellCheck={false}
-                    className={addOutputSchemaParse.ok ? '' : 'invalid'}
-                    style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace' }}
-                  />
-                  {!addOutputSchemaParse.ok && <span className="field-error">{addOutputSchemaParse.error}</span>}
-                </label>
+                <ToolFormFields
+                  form={form}
+                  onChange={setField}
+                  inputSchemaParse={addInputSchemaParse}
+                  configSchemaParse={addConfigSchemaParse}
+                  outputSchemaParse={addOutputSchemaParse}
+                  manifestParse={addManifestParse}
+                  withFileUpload
+                />
 
                 {addError && <div className="error-banner">{addError}</div>}
 
@@ -810,91 +664,14 @@ const Tools = () => {
                 <button onClick={() => setEditMode(false)} aria-label="Close edit" style={{ background: 'transparent', border: 'none', color: '#94a3b8', fontSize: 18, cursor: 'pointer', padding: '2px 6px' }}>×</button>
               </div>
               <form onSubmit={handleUpdateTool} className="form">
-                <input type="text" placeholder="Name" value={addName} onChange={(e) => setAddName(e.target.value)} required />
-                <textarea placeholder="Description" value={addDescription} onChange={(e) => setAddDescription(e.target.value)} required rows={2} />
-                <select value={addType} onChange={(e) => setAddType(e.target.value as Tool['type'])}>
-                  <option value="code">Code</option>
-                  <option value="openapi">OpenAPI</option>
-                  <option value="mcp">MCP</option>
-                  <option value="native">Native</option>
-                  <option value="reasoning">Reasoning</option>
-                </select>
-
-                {addType === 'code' && (
-                  <>
-                    <label className="field-label" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
-                      Language
-                      <select value={addLanguage} onChange={(e) => setAddLanguage(e.target.value)}>
-                        <option value="javascript">javascript</option>
-                        <option value="typescript">typescript</option>
-                        <option value="python">python</option>
-                        <option value="json">json</option>
-                      </select>
-                    </label>
-                    <label className="field-label" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
-                      Source Code
-                      <textarea
-                        rows={10}
-                        value={addSourceCode}
-                        onChange={(e) => setAddSourceCode(e.target.value)}
-                        spellCheck={false}
-                        style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace' }}
-                      />
-                    </label>
-                  </>
-                )}
-
-                <label className="field-label" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
-                  Manifest (JSON)
-                  <textarea
-                    rows={4}
-                    value={addManifestText}
-                    onChange={(e) => setAddManifestText(e.target.value)}
-                    spellCheck={false}
-                    className={addManifestParse.ok ? '' : 'invalid'}
-                    style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace' }}
-                  />
-                  {!addManifestParse.ok && <span className="field-error">{addManifestParse.error}</span>}
-                </label>
-
-                <label className="field-label" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
-                  Input Schema (JSON)
-                  <textarea
-                    rows={6}
-                    value={addInputSchemaText}
-                    onChange={(e) => setAddInputSchemaText(e.target.value)}
-                    spellCheck={false}
-                    className={addInputSchemaParse.ok ? '' : 'invalid'}
-                    style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace' }}
-                  />
-                  {!addInputSchemaParse.ok && <span className="field-error">{addInputSchemaParse.error}</span>}
-                </label>
-
-                <label className="field-label" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
-                  Config Schema (JSON)
-                  <textarea
-                    rows={6}
-                    value={addConfigSchemaText}
-                    onChange={(e) => setAddConfigSchemaText(e.target.value)}
-                    spellCheck={false}
-                    className={addConfigSchemaParse.ok ? '' : 'invalid'}
-                    style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace' }}
-                  />
-                  {!addConfigSchemaParse.ok && <span className="field-error">{addConfigSchemaParse.error}</span>}
-                </label>
-
-                <label className="field-label" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
-                  Output Schema (JSON)
-                  <textarea
-                    rows={6}
-                    value={addOutputSchemaText}
-                    onChange={(e) => setAddOutputSchemaText(e.target.value)}
-                    spellCheck={false}
-                    className={addOutputSchemaParse.ok ? '' : 'invalid'}
-                    style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace' }}
-                  />
-                  {!addOutputSchemaParse.ok && <span className="field-error">{addOutputSchemaParse.error}</span>}
-                </label>
+                <ToolFormFields
+                  form={form}
+                  onChange={setField}
+                  inputSchemaParse={addInputSchemaParse}
+                  configSchemaParse={addConfigSchemaParse}
+                  outputSchemaParse={addOutputSchemaParse}
+                  manifestParse={addManifestParse}
+                />
 
                 {addError && <div className="error-banner">{addError}</div>}
 
@@ -1071,6 +848,144 @@ const Tools = () => {
     </div>
   );
 };
+
+type ParseResult = { ok: boolean; error?: string };
+
+type ToolFormState = {
+  name: string;
+  description: string;
+  type: Tool['type'];
+  language: string;
+  sourceCode: string;
+  manifestText: string;
+  inputSchemaText: string;
+  configSchemaText: string;
+  outputSchemaText: string;
+  files: File[];
+};
+
+const makeDefaultToolForm = (): ToolFormState => ({
+  name: '',
+  description: '',
+  type: 'code',
+  language: 'javascript',
+  sourceCode: '',
+  manifestText: '{}',
+  inputSchemaText: JSON.stringify(DEFAULT_SCHEMA, null, 2),
+  configSchemaText: JSON.stringify(DEFAULT_SCHEMA, null, 2),
+  outputSchemaText: JSON.stringify(DEFAULT_SCHEMA, null, 2),
+  files: [],
+});
+
+type ToolFormFieldsProps = {
+  form: ToolFormState;
+  onChange: <K extends keyof ToolFormState>(key: K, value: ToolFormState[K]) => void;
+  inputSchemaParse: ParseResult;
+  configSchemaParse: ParseResult;
+  outputSchemaParse: ParseResult;
+  manifestParse: ParseResult;
+  withFileUpload?: boolean;
+};
+
+const ToolFormFields = ({ form, onChange, inputSchemaParse, configSchemaParse, outputSchemaParse, manifestParse, withFileUpload }: ToolFormFieldsProps) => (
+  <>
+    <input type="text" placeholder="Name" value={form.name} onChange={(e) => onChange('name', e.target.value)} required />
+    <textarea placeholder="Description" value={form.description} onChange={(e) => onChange('description', e.target.value)} required rows={2} />
+    <select value={form.type} onChange={(e) => onChange('type', e.target.value as Tool['type'])}>
+      <option value="code">Code</option>
+      <option value="openapi">OpenAPI</option>
+      <option value="mcp">MCP</option>
+      <option value="native">Native</option>
+      <option value="reasoning">Reasoning</option>
+    </select>
+
+    {form.type === 'code' && (
+      <>
+        <label className="field-label" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
+          Language
+          <select value={form.language} onChange={(e) => onChange('language', e.target.value)}>
+            <option value="javascript">javascript</option>
+            <option value="typescript">typescript</option>
+            <option value="python">python</option>
+            <option value="json">json</option>
+          </select>
+        </label>
+        <label className="field-label" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
+          Source Code
+          <textarea
+            rows={10}
+            value={form.sourceCode}
+            onChange={(e) => onChange('sourceCode', e.target.value)}
+            spellCheck={false}
+            placeholder="Paste or write tool code here"
+            style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace' }}
+          />
+        </label>
+        {withFileUpload && (
+          <label className="field-label" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
+            Upload Files (optional)
+            <input
+              type="file"
+              multiple
+              onChange={(e) => onChange('files', e.target.files ? Array.from(e.target.files) : [])}
+              style={{ width: '100%' }}
+            />
+            {form.files.length > 0 && (
+              <div style={{ fontSize: '12px', color: '#94a3b8', marginTop: 4 }}>
+                {form.files.map((f) => f.name).join(', ')}
+              </div>
+            )}
+          </label>
+        )}
+      </>
+    )}
+
+    {form.type === 'openapi' && (
+      <label className="field-label" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
+        Manifest (OpenAPI/urlTemplate)
+        <textarea rows={4} value={form.manifestText} onChange={(e) => onChange('manifestText', e.target.value)} spellCheck={false} placeholder='{"urlTemplate": "...", ...}' style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace' }} />
+      </label>
+    )}
+
+    {form.type === 'mcp' && (
+      <label className="field-label" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
+        Manifest (MCP server)
+        <textarea rows={4} value={form.manifestText} onChange={(e) => onChange('manifestText', e.target.value)} spellCheck={false} placeholder='{"server": "...", ...}' style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace' }} />
+      </label>
+    )}
+
+    {form.type === 'native' && (
+      <label className="field-label" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
+        Manifest (Native executor)
+        <textarea rows={4} value={form.manifestText} onChange={(e) => onChange('manifestText', e.target.value)} spellCheck={false} placeholder='{"executor": "...", "vendor": "..."}' style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace' }} />
+      </label>
+    )}
+
+    <label className="field-label" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
+      Manifest (JSON)
+      <textarea rows={4} value={form.manifestText} onChange={(e) => onChange('manifestText', e.target.value)} spellCheck={false} className={manifestParse.ok ? '' : 'invalid'} style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace' }} />
+      {!manifestParse.ok && <span className="field-error">{manifestParse.error}</span>}
+    </label>
+
+    <label className="field-label" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
+      Input Schema (JSON)
+      <textarea rows={6} value={form.inputSchemaText} onChange={(e) => onChange('inputSchemaText', e.target.value)} spellCheck={false} className={inputSchemaParse.ok ? '' : 'invalid'} style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace' }} />
+      {!inputSchemaParse.ok && <span className="field-error">{inputSchemaParse.error}</span>}
+    </label>
+
+    <label className="field-label" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
+      Config Schema (JSON)
+      <textarea rows={6} value={form.configSchemaText} onChange={(e) => onChange('configSchemaText', e.target.value)} spellCheck={false} className={configSchemaParse.ok ? '' : 'invalid'} style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace' }} />
+      {!configSchemaParse.ok && <span className="field-error">{configSchemaParse.error}</span>}
+    </label>
+
+    <label className="field-label" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch' }}>
+      Output Schema (JSON)
+      <textarea rows={6} value={form.outputSchemaText} onChange={(e) => onChange('outputSchemaText', e.target.value)} spellCheck={false} className={outputSchemaParse.ok ? '' : 'invalid'} style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace' }} />
+      {!outputSchemaParse.ok && <span className="field-error">{outputSchemaParse.error}</span>}
+    </label>
+  </>
+);
 
 const ConfigFieldRow = ({ field, description, value, required, onChange }: { field: string; description?: string; value: string; required?: boolean; onChange: (val: string) => void }) => {
   const [show, setShow] = useState(false);

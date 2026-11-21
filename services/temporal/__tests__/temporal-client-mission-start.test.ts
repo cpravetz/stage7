@@ -903,7 +903,7 @@ describe('TemporalClient mission start', () => {
       question: 'I need the value for the HEALTHCARE_COMM_API_KEY configuration field.',
     }
     jest.spyOn(client, 'startMission').mockResolvedValue('mission-plain-question')
-    jest.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
+    const fetcher = jest.spyOn(global, 'fetch').mockImplementation(async (url, init) => {
       const requestUrl = String(url)
       if (requestUrl.endsWith('/api/artifacts/missions/plain-question') && !init?.method) {
         return { ok: true, status: 200, json: async () => ({
@@ -932,6 +932,13 @@ describe('TemporalClient mission start', () => {
       expect.objectContaining({ interactionResponse: reply }),
       expect.objectContaining({ pendingInteraction }), true, true,
     )
+    const missionUpdate = fetcher.mock.calls.find(([url, init]) =>
+      String(url).endsWith('/api/artifacts/missions/plain-question') && init?.method === 'PUT')
+    expect(missionUpdate).toBeDefined()
+    const persistedUpdate = JSON.parse(String(missionUpdate?.[1]?.body))
+    expect(persistedUpdate.status).toBe('running')
+    expect(persistedUpdate.output.outputs.status).toBe('running')
+    expect(persistedUpdate.output.outputs).not.toHaveProperty('pendingInteraction')
   })
 
   it('loads the persisted plan when retrying before any phase or task completed', async () => {

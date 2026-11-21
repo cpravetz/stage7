@@ -612,6 +612,7 @@ export function buildMissionEvents(options: {
   events = dedupeQuestionAsked(events);
   events = dedupeUserInputResolved(events);
   events.sort((left, right) => left.timestamp - right.timestamp);
+  events = mergeResumeMilestones(events, detail?.status);
   events = listMilestonesOnce(events);
   events = dedupeTerminalAndApprovalEvents(events, detail?.status);
 
@@ -732,6 +733,106 @@ function dedupeTerminalAndApprovalEvents(events: FeedEvent[], status?: string): 
   return result;
 }
 
+const RESUME_ANNOUNCEMENT_TYPES = ['planner_started', 'plan_generated'];
+
+const BARE_PLANNER_STARTED = /^planning mission\.{0,3}(?: (?:⋯|\.\.\.))?$/i;
+
+const DERIVED_PLANNING_STATUSES = new Set(['running', 'paused', 'awaiting_review']);
+
+function planSourceOf(event: FeedEvent): string {
+  const data = event.metadata || {};
+  const nested = data.data && typeof data.data === 'object' && !Array.isArray(data.data)
+    ? (data.data as Record<string, unknown>)
+    : undefined;
+  if (typeof data.planSource === 'string') return data.planSource;
+  if (typeof data.source === 'string') return data.source;
+  return typeof nested?.planSource === 'string' ? nested.planSource : '';
+}
+
+/**
+ * True for the planner announcements that say nothing new about a mission
+ * which already has its plan: the bare "Planning mission" announcement and the
+ * "Plan generated" announcement for a plan that was loaded rather than
+ * generated.
+ */
+function isResumeAnnouncement(event: FeedEvent): boolean {
+  const type = String(event.type);
+  if (!RESUME_ANNOUNCEMENT_TYPES.includes(type)) return false;
+  if (type === 'planner_started') {
+    return BARE_PLANNER_STARTED.test(String(event.message || '').trim());
+  }
+  return planSourceOf(event).toLowerCase() === 'loaded';
+}
+
+/**
+ * After the user answers an interaction the mission resumes with the plan it
+ * already has, yet the agents announce "Mission resumed", "Planning mission"
+ * and "Plan generated" again, which pushes the user's answer up the thread and
+ * out of view. Once a mission has already started, re-planning it is silent:
+ * the conversation never gains those announcements, and a turn that only
+ * repeats them is tagged so buildTranscript can drop it. A mission that never
+ * produced a plan still reports that the planner is working on it.
+ *
+ * A resumed milestone is kept only until the mission carries on, so an earlier
+ * review issue is not resurrected by its removal.
+ */
+function mergeResumeMilestones(events: FeedEvent[], status?: string): FeedEvent[] {
+  const missionStartedBefore = new Set<string>();
+  const resumable = status === undefined || DERIVED_PLANNING_STATUSES.has(status);
+  const result: FeedEvent[] = [];
+  // A resumed milestone waits for the mission to carry on: keeping it until
+  // then stops its removal from resurrecting an earlier review issue. If no
+  // further event follows, the bare "Mission resumed" line is kept so the
+  // outcome still has its context.
+  let heldResume: FeedEvent | null = null;
+  const release = (keep: boolean) => {
+    if (keep && heldResume) result.push(heldResume);
+    heldResume = null;
+  };
+  for (const event of events) {
+    const missionId = event.missionId || '';
+    const isOwn = (candidate: FeedEvent | null) => Boolean(candidate && candidate.missionId === missionId);
+    if (event.type === 'mission_started') {
+      missionStartedBefore.add(missionId);
+      release(isOwn(heldResume));
+      result.push(event);
+      continue;
+    }
+    if (resumable && missionStartedBefore.has(missionId) && event.type === 'mission_resumed') {
+      // Each resume gets a marker so the milestone de-duplication can tell one
+      // cycle from the next. It is dropped once real content follows.
+      const markedResume: FeedEvent = {
+        ...event,
+        metadata: { ...(event.metadata || {}), resumeAnnouncement: true },
+      };
+      release(true);
+      heldResume = markedResume;
+      continue;
+    }
+    if (resumable && missionStartedBefore.has(missionId) && isResumeAnnouncement(event)) continue;
+    // Any later event of the same mission is the mission carrying on after the
+    // reply and replaces the bare "Mission resumed" line.
+    release(!isOwn(heldResume));
+    result.push(event);
+  }
+  release(true);
+  return result;
+}
+
+/**
+ * The resume milestone stays in the event list so an earlier review issue is
+ * not resurrected, but it is not conversation: drop a resumed turn that only
+ * repeats the resume/planning announcement. A resumed turn that carries real
+ * content (an agent reply) is kept. Missions still running (older records have
+ * no marker) lose the bare milestone only; the planning chatter is dropped by
+ * mergeResumeMilestones.
+ */
+function isResumeOnlyTurn(turn: TranscriptTurn): boolean {
+  const line = turn.lines[0];
+  if (turn.role !== 'system' || turn.lines.length !== 1 || !line) return false;
+  return line.type === 'mission_resumed' && line.metadata?.resumeAnnouncement === true;
+}
+
 /**
  * Keeps only the first occurrence of planner_started and plan_generated per
  * mission, and the first occurrence of each distinct monologue message. This
@@ -813,6 +914,12 @@ function dedupeUserInputResolved(events: FeedEvent[]): FeedEvent[] {
   });
 }
 
+function reviewSignature(event: FeedEvent | undefined): string {
+  if (!event) return '';
+  const gaps = Array.isArray(event.metadata?.gaps) ? event.metadata.gaps.join('|') : '';
+  return `${event.message}|${gaps}`;
+}
+
 /**
  * Keeps the first announcement of every mission milestone.
  */
@@ -820,26 +927,32 @@ function listMilestonesOnce(events: FeedEvent[]): FeedEvent[] {
   const listed = new Set<string>();
   const result: FeedEvent[] = [];
   let reviewIndex: number | undefined;
+  let reviewSignatures = new Set<string>();
   for (const event of events) {
     const type = String(event.type);
     if (type === 'mission_resumed') {
       reviewIndex = undefined;
+      reviewSignatures = new Set<string>();
       if (!MILESTONE_EVENT_TYPES.has(type)) {
         result.push(event);
         continue;
       }
-      if (listed.has(type)) continue;
+      if (event.metadata?.resumeAnnouncement === true) continue;
       listed.add(type);
       result.push(event);
       continue;
     }
     if (type === 'mission_needs_review') {
-      if (reviewIndex === undefined) {
-        reviewIndex = result.length;
-        result.push(event);
-      } else {
+      // One review cycle lists one review issue; a repeat of the same issue is
+      // not a new outcome.
+      const signature = reviewSignature(event);
+      if (reviewIndex !== undefined && reviewSignatures.has(signature)) {
         result[reviewIndex] = event;
+        continue;
       }
+      reviewIndex = result.length;
+      reviewSignatures.add(signature);
+      result.push(event);
       continue;
     }
     if (!MILESTONE_EVENT_TYPES.has(type)) {
@@ -1034,6 +1147,7 @@ export interface TranscriptLine {
   type: string;
   text: string;
   approval?: { phaseId: string; question: string };
+  metadata?: Record<string, unknown>;
 }
 
 export interface TranscriptTurn {
@@ -1380,6 +1494,9 @@ export function buildTranscript(events: FeedEvent[]): TranscriptTurn[] {
     ) {
       current = startTurn('system', 'Mission', ts, evt.id);
       const line: TranscriptLine = { kind: 'text', type, text: evt.message };
+      if (type === 'mission_resumed' && data.resumeAnnouncement === true) {
+        line.metadata = { resumeAnnouncement: true };
+      }
       if (type === 'approval_requested') {
         line.approval = {
           phaseId: (data.phaseId as string) || '',
@@ -1399,7 +1516,7 @@ export function buildTranscript(events: FeedEvent[]): TranscriptTurn[] {
     current.lines.push({ kind: 'text', type, text });
   }
 
-  return collapsePlannerProgress(turns);
+  return collapsePlannerProgress(turns.filter((turn) => !isResumeOnlyTurn(turn)));
 }
 
 export interface ModelUsageSummary {

@@ -1,10 +1,15 @@
 import {
   asksForProviderSetup,
+  asksUserToChoosePreference,
+  asksUserToDiagnoseToolOrChooseAlternative,
+  asksUserToRepeatQuestion,
   asksUserToManageTools,
   asksUserToProduceDeliverable,
+  AUTONOMY_GUIDANCE,
   CAPABILITY_RESOLUTION_GUIDANCE,
   DELIVERABLE_GUIDANCE,
   hasTriedToolAfterResolution,
+  REPEATED_QUESTION_GUIDANCE,
 } from './askUser'
 import { CREATE_TOOL_ACTION, DELEGATE_ACTION, isAskUserTool } from './constants'
 import { recoverFromRepeatedAction } from './capabilityRecovery'
@@ -21,23 +26,17 @@ export type ActionGuard = (rc: RunContext, turn: ActionTurn) => Promise<TurnEnd 
 const BLOCKER_SUFFIX = 'The phase reviewer should use this blocker to regroup the task.'
 
 /** The agent must find missing capabilities itself, not delegate that work to the user. */
-const refuseToolManagementQuestion: ActionGuard = async ({ state }, { action }) => {
+const refuseToolManagementQuestion: ActionGuard = async ({ state, spec }, { action }) => {
   const triedResolvedTool = hasTriedToolAfterResolution(state.actionReceipts.map((receipt) => receipt.toolId))
-  if (isAskUserTool(action.tool) && typeof action.args.question === 'string'
-    && asksUserToProduceDeliverable(action.args.question)) {
-    state.tell(DELIVERABLE_GUIDANCE)
-    await state.save()
-    return NEXT_TURN
-  }
   if (
     isAskUserTool(action.tool)
     && typeof action.args.question === 'string'
-    && (
-      asksUserToManageTools(action.args.question)
-      || (!triedResolvedTool && asksForProviderSetup(action.args.question))
-    )
+    && asksUserToRepeatQuestion(action.args.question, spec.taskContext.priorUserQuestion)
   ) {
-    state.tell(CAPABILITY_RESOLUTION_GUIDANCE)
+    const previousResponse = typeof spec.taskContext.priorUserResponse === 'string'
+      ? `\nThe user's response was: ${spec.taskContext.priorUserResponse}`
+      : ''
+    state.tell(`${REPEATED_QUESTION_GUIDANCE}\nThe question already asked was: ${spec.taskContext.priorUserQuestion}${previousResponse}`)
     await state.save()
     return NEXT_TURN
   }

@@ -1,13 +1,18 @@
 import type { BrainClient } from './BrainClient'
 import {
   asksForProviderSetup,
+  asksUserToChoosePreference,
+  asksUserToDiagnoseToolOrChooseAlternative,
   asksUserToManageTools,
   asksUserToProduceDeliverable,
+  asksUserToRepeatQuestion,
+  extractAskUserQuestion,
+  AUTONOMY_GUIDANCE,
   CAPABILITY_RESOLUTION_GUIDANCE,
   DELIVERABLE_GUIDANCE,
-  extractAskUserQuestion,
   hasTriedToolAfterResolution,
   isVagueQuestion,
+  REPEATED_QUESTION_GUIDANCE,
 } from './askUser'
 import { containsToolAction } from './actionParser'
 import { ASK_USER_MARKER, MAX_ARTIFACT_CORRECTION_ATTEMPTS } from './constants'
@@ -101,7 +106,7 @@ export async function handleReplyWithoutAction(rc: RunContext, reply: BrainReply
 }
 
 async function handleAskUserReply(rc: RunContext, { content, reasoning }: BrainReply): Promise<TurnEnd> {
-  const { state } = rc
+  const { state, spec } = rc
   const relevant = extractAskUserQuestion(content)
   if (!relevant) {
     state.tell(`Your response contained no usable question. If you are blocked, reply with exactly one line: ${ASK_USER_MARKER} <your question about one specific missing value>. Otherwise continue the task with a single JSON action. Do not repeat instructions or write your own receipts.`)
@@ -119,19 +124,17 @@ async function handleAskUserReply(rc: RunContext, { content, reasoning }: BrainR
       // The interruption parser reports malformed structured requests.
     }
   }
-  if (asksUserToProduceDeliverable(question)) {
-    state.tell(DELIVERABLE_GUIDANCE)
-    await state.save()
-    return NEXT_TURN
-  }
   if (isVagueQuestion(question)) {
-    state.tell(`Your question is too vague. You must name the exact missing value, the tool or service that needs it, and why it is required. Bad: "Please provide the missing value." Good: "Please provide the API key for the SMS Sender tool so I can send the message."`)
+    state.tell(`Your question is too vague. You must name the exact missing factual value or authorization and why it is required. Bad: "Please provide the missing value." Good: "Please provide the recipient's email address so I can send the report."`)
     await state.save()
     return NEXT_TURN
   }
-  const triedResolvedTool = hasTriedToolAfterResolution(state.actionReceipts.map((receipt) => receipt.toolId))
-  if (asksUserToManageTools(question) || (!triedResolvedTool && asksForProviderSetup(question))) {
-    state.tell(CAPABILITY_RESOLUTION_GUIDANCE)
+  if (asksUserToRepeatQuestion(question, spec.taskContext.priorUserQuestion)) {
+
+    const previousResponse = typeof spec.taskContext.priorUserResponse === 'string'
+      ? `\nThe user's response was: ${spec.taskContext.priorUserResponse}`
+      : ''
+    state.tell(`${REPEATED_QUESTION_GUIDANCE}\nThe question already asked was: ${spec.taskContext.priorUserQuestion}${previousResponse}`)
     await state.save()
     return NEXT_TURN
   }

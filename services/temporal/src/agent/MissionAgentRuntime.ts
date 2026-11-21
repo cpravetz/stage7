@@ -1331,12 +1331,15 @@ export class MissionAgentRuntime {
     const continuationPrompt = continuation
       ? [
         `This task is resuming after a ${continuation.pendingInteraction.kind === 'user_input' ? 'user question' : 'tool permission'} interruption.`,
-        `The user's response or permission decision is: ${continuation.response}`,
+        ...(continuation.pendingInteraction.question
+          ? [`The question you previously asked was: ${continuation.pendingInteraction.question}`]
+          : []),
+        `The user's response to that interruption is: ${continuation.response}`,
         continuation.pendingInteraction.actionReceipts?.length
           ? `Steps completed before the interruption (do not repeat actions that already succeeded or may have had side effects): ${JSON.stringify(continuation.pendingInteraction.actionReceipts)}`
 
           : '',
-        'Continue the same task from this evidence. Do not repeat completed actions.',
+        'Interpret the response against the question above. Do not repeat or rephrase the same question. Use the response, mission context, and reasonable assumptions to continue; ask a follow-up only for a specific essential fact that remains unresolved.',
       ].filter(Boolean).join('\n')
       : '';
     const taskPrompt = [
@@ -1362,6 +1365,12 @@ export class MissionAgentRuntime {
       requiresExternalAction: task.requiresExternalAction === true,
       context: {
         [BRAIN_ROUTING_SESSION_CONTEXT_KEY]: `${this.missionId}:task:${phase.id}:${task.id}`,
+        ...(continuation?.pendingInteraction.question
+          ? {
+              priorUserQuestion: continuation.pendingInteraction.question,
+              priorUserResponse: continuation.response,
+            }
+          : {}),
         ...(continuation?.pendingInteraction.actionReceipts
           ? { priorActionReceipts: continuation.pendingInteraction.actionReceipts }
           : {}),
