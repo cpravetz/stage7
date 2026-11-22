@@ -36,6 +36,14 @@ const refuseToolManagementQuestion: ActionGuard = async ({ state, spec }, { acti
     const previousResponse = typeof spec.taskContext.priorUserResponse === 'string'
       ? `\nThe user's response was: ${spec.taskContext.priorUserResponse}`
       : ''
+    // The user already answered this question. Do not loop by returning NEXT_TURN
+    // (which hands the Brain another turn to ask again). Stop the loop with a
+    // clear finalOutput so the orchestrator can proceed without re-asking.
+    if (previousResponse) {
+      state.finalOutput = `The user already answered this question: "${spec.taskContext.priorUserResponse}". Do not ask again; proceed with the authorized action or report the blocker.`
+      await state.save()
+      return STOP_LOOP
+    }
     state.tell(`${REPEATED_QUESTION_GUIDANCE}\nThe question already asked was: ${spec.taskContext.priorUserQuestion}${previousResponse}`)
     await state.save()
     return NEXT_TURN

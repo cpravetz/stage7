@@ -17,7 +17,7 @@ import {
 import { containsToolAction } from './actionParser'
 import { ASK_USER_MARKER, MAX_ARTIFACT_CORRECTION_ATTEMPTS } from './constants'
 import { assessCompletion, composeCorrection, type CompletionGaps } from './requirements'
-import { NEXT_TURN, returnWith, type RunContext, type TurnEnd } from './RunContext'
+import { NEXT_TURN, STOP_LOOP, returnWith, type RunContext, type TurnEnd } from './RunContext'
 import type { AgentExecutionResult, BrainReply } from './types'
 
 function artifactBlocker(missingArtifacts: string[]): string {
@@ -134,6 +134,14 @@ async function handleAskUserReply(rc: RunContext, { content, reasoning }: BrainR
     const previousResponse = typeof spec.taskContext.priorUserResponse === 'string'
       ? `\nThe user's response was: ${spec.taskContext.priorUserResponse}`
       : ''
+    // The user already answered this question. Do not loop by returning NEXT_TURN
+    // (which hands the Brain another turn to ask again). Stop the loop with a
+    // clear finalOutput so the orchestrator can proceed without re-asking.
+    if (previousResponse) {
+      state.finalOutput = `The user already answered this question: "${spec.taskContext.priorUserResponse}". Do not ask again; proceed with the authorized action or report the blocker.`
+      await state.save()
+      return STOP_LOOP
+    }
     state.tell(`${REPEATED_QUESTION_GUIDANCE}\nThe question already asked was: ${spec.taskContext.priorUserQuestion}${previousResponse}`)
     await state.save()
     return NEXT_TURN
