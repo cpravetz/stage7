@@ -95,7 +95,7 @@ describe('MissionAgentRuntime', () => {
     })
     await runtime.executeTask(agent.id, task, phase, plan, false, undefined, [], undefined, undefined,
       'Original goal', ['Use secret:service_key.', 'The setting is already configured.'])
-    expect(execute.mock.calls[0][1].prompt).toContain('Original mission goal: Original goal')
+    expect(execute.mock.calls[0][1].prompt).toContain('Original mission goal (authoritative scope): Original goal')
     expect(execute.mock.calls[0][1].prompt).toContain('Use secret:service_key.')
     expect(execute.mock.calls[0][1].prompt).toContain('The setting is already configured.')
   })
@@ -303,7 +303,7 @@ describe('MissionAgentRuntime', () => {
 
     const submittedInput = requests.find((request) => request.url.endsWith('/tasks'))?.body?.input as Record<string, unknown>
     expect(submittedInput.prompt).toContain(`Task Instructions: ${task.systemPrompt}`)
-    expect(submittedInput.prompt).toContain('Original mission goal: Research the topic and produce research.md.')
+    expect(submittedInput.prompt).toContain('Original mission goal (authoritative scope): Research the topic and produce research.md.')
     expect(submittedInput.prompt).toContain('Completed dependency results')
     expect(submittedInput.prompt).toContain('The source task calculated 42.')
     expect(submittedInput.prompt).toContain('answer.json')

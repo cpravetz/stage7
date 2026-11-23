@@ -69,6 +69,53 @@ function extractFailureCode(error: unknown): string | undefined {
   return match?.[1]
 }
 
+const DELIVERABLE_FILE_FOR_KIND: Record<string, string> = {
+  html_file: 'index.html',
+  html: 'index.html',
+  css_file: 'styles.css',
+  css: 'styles.css',
+  javascript_file: 'script.js',
+  js_file: 'script.js',
+  javascript: 'script.js',
+};
+
+/** Concrete file an artifact id maps to, so recovery instructions name a real file. */
+function describeDeliverableFile(name: string): string {
+  const trimmed = name.trim();
+  const alias = DELIVERABLE_FILE_FOR_KIND[trimmed.toLocaleLowerCase()];
+  if (alias) return alias;
+  return /^[^\s/]+\.[a-z0-9]{1,8}$/i.test(trimmed)
+    ? trimmed
+    : `${trimmed.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}.md`;
+}
+
+/** Distinct artifact names quoted in completion gaps, in the order they are reported. */
+function artifactNamesFromGaps(gaps: string[]): string[] {
+  return [...new Set(gaps.flatMap((gap) => {
+    const matches = gap.match(/"([^"]+\.(?:json|md|txt|csv|ya?ml|html|css|js|ts|tsx|jsx|sql|py|sh))"|"([a-z0-9_-]+_file)"/gi) || [];
+    return matches
+      .map((match) => match.replace(/"/g, ''))
+      .filter((name) => name.toLocaleLowerCase() !== 'system-action-receipts.json');
+  }))];
+}
+
+/**
+ * Recovery for one deliverable escalates its method instead of repeating the same request:
+ * attempt 1 returns the section, attempt 2 writes the actual file, attempt 3 produces only
+ * the still-missing piece. Instructions for different artifacts are never identical.
+ */
+function artifactRecoveryInstruction(name: string, attempt: number, stillMissing: boolean): string {
+  const file = describeDeliverableFile(name);
+  const step = (Math.max(attempt, 1) - 1) % 3;
+  if (step === 1) {
+    return `"${name}" — write the complete ${file} file with the file tool ({ "tool": "file_ops", "args": { "operation": "write", "path": "${file}", "content": "<complete file content>" } }) and then confirm the file name and its contents in one line.`;
+  }
+  if (step === 2) {
+    return `"${name}" — in this attempt produce only this deliverable, returning its complete content under the heading exactly ## ${name}.`;
+  }
+  return `"${name}" (${stillMissing ? 'still missing — produce only this one' : file}) — return its complete content under the heading exactly ## ${name}.`;
+}
+
 function isFatalServiceError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   const message = error.message || String(error);
@@ -994,6 +1041,9 @@ const executeTask = async (task: Task, savedTask: MissionTaskCheckpoint | undefi
         ).length;
         let lastReviewSignature: string | undefined;
         let noProgressCount = 0;
+        /** Artifacts still missing after the previous amendment round (incremental retries). */
+        let amendedPendingArtifacts: string[] = [];
+        const amendedArtifactAttempts = new Map<string, number>();
         for (
           let reviewIndex = existingAmendmentCount + 1;
           reviewIndex <= existingAmendmentCount + MAX_PHASE_RECOVERY_ROUNDS;
@@ -1053,17 +1103,29 @@ const executeTask = async (task: Task, savedTask: MissionTaskCheckpoint | undefi
             const noProgressGuidance = !madeProgress
               ? ' Previous attempts made no observable progress on the same gaps; use a different authorized approach and do not repeat the same recovery steps. If a required value or authorization is missing, ask the user for it and wait.'
               : '';
-            if (applied.amendment && noProgressGuidance) {
-              // Director decision: amend system prompt with no-progress guidance
+            // Incremental phase recovery: reuse the same gap list but retry each still-missing
+            // deliverable with the next escalation strategy, so no round repeats another verbatim.
+            const amendedGapArtifacts = artifactNamesFromGaps(applied.gaps || [])
+              .filter((name) => !amendedPendingArtifacts.includes(name));
+            amendedPendingArtifacts = [...new Set([...amendedPendingArtifacts, ...amendedGapArtifacts])];
+            const amendmentArtifactGuidance = amendedPendingArtifacts.map((name) => {
+              const attempt = (amendedArtifactAttempts.get(name) || 0) + 1;
+              amendedArtifactAttempts.set(name, attempt);
+              return artifactRecoveryInstruction(name, attempt, attempt > 1);
+            });
+            const incrementalGuidance = amendmentArtifactGuidance.length > 0
+              ? ` Deliverables still missing (use the method given for each): ${amendmentArtifactGuidance.join(' ')}`
+              : '';
+            if (applied.amendment && (noProgressGuidance || incrementalGuidance)) {
+              // Director decision: amend system prompt with escalating recovery guidance
               await agentRuntime.emitMonologue({
                 agentRole: 'mission-director',
                 phaseId: phase.id,
-                thought: `No observable progress was made on the same gaps in review ${reviewIndex}. I am updating the recovery task's system prompt with no-progress guidance to require a different authorized approach.`,
-                text: `Adding no-progress guidance to recovery task.`,
-                data: { reviewIndex, gaps: applied.gaps, reason: 'no_progress_guidance' },
+                thought: `No observable progress was made on the same gaps in review ${reviewIndex}. I am updating the recovery task's system prompt with guidance requiring a different authorized approach for each deliverable still missing.`,
+                text: `Adding escalating recovery guidance to recovery task.`,
+                data: { reviewIndex, gaps: applied.gaps, reason: 'no_progress_guidance', pendingArtifacts: amendedPendingArtifacts },
               });
-              applied.amendment.systemPrompt = `${applied.amendment.systemPrompt}
-${noProgressGuidance}`;
+              applied.amendment.systemPrompt = `${applied.amendment.systemPrompt}\n${noProgressGuidance}${incrementalGuidance}`;
               plan = { ...plan, phases: plan.phases.map((p) => p.id === phase.id ? { ...phase, tasks: [...phase.tasks] } : p) };
             }
             if (!applied.amendment) {
@@ -1083,9 +1145,9 @@ ${noProgressGuidance}`;
                 title: `Address phase gaps (review ${reviewIndex})`,
                 description: `Address remaining gaps: ${(applied.gaps || []).join('; ') || 'unspecified gaps'}`,
 agentRole: 'mission-executor',
-                systemPrompt: `Mission goal: ${ctx.prompt}\nPhase goal: ${phase.name} — ${phase.goal}\nResolve the following gaps using the available context and recorded task outputs: ${(applied.gaps || []).join('; ') || 'unspecified gaps'}. Focus only on accomplishing the requested mission outcome or reporting a concrete blocker. Do not invent unrelated work, and do not create or request design documents, plans, or substitute artifacts unless the mission goal explicitly requires them as deliverables.${noProgressGuidance}`,
+                systemPrompt: `Mission goal: ${ctx.prompt}\nPhase goal: ${phase.name} — ${phase.goal}\nResolve the following gaps using the available context and recorded task outputs: ${(applied.gaps || []).join('; ') || 'unspecified gaps'}. Focus only on accomplishing the requested mission outcome or reporting a concrete blocker. Do not invent unrelated work, and do not create or request design documents, plans, or substitute artifacts unless the mission goal explicitly requires them as deliverables.${incrementalGuidance}${noProgressGuidance}`,
                 dependsOnTaskIds: phase.tasks.map((t: any) => t.id),
-                expectedArtifacts: [],
+                expectedArtifacts: amendedPendingArtifacts,
                 requiredActions: [],
                 status: 'pending',
                 artifacts: [],
@@ -1123,6 +1185,12 @@ agentRole: 'mission-executor',
               if (uncertainActionIssue) break;
               continue;
             }
+            const stillMissing = new Set(missingExpectedArtifacts(
+              phase.tasks.flatMap((t) => t.status === 'completed' ? (t.artifacts || []) : []),
+              amendedPendingArtifacts,
+            ));
+            amendedPendingArtifacts = amendedPendingArtifacts.filter((name) => stillMissing.has(name));
+            if (stillMissing.size === 0) amendedArtifactAttempts.clear();
             saveCheckpoint();
             try {
               await this.persistPlan(ctx, plan);
@@ -1277,6 +1345,10 @@ agentRole: 'mission-executor',
     let reviewReason = '';
     let lastRecoveryIssue = '';
     let recoveryIndex = 0;
+    /** Artifacts still missing after the previous recovery round (drives incremental retries). */
+    let pendingArtifactNames: string[] = [];
+    /** Per-artifact attempt counter, so each round retries that artifact differently. */
+    const artifactAttempts = new Map<string, number>();
     let completionVerificationRetries = 0;
     let completionVerificationFailed = false;
     const sourceTaskRerunCounts = new Map<string, number>();
@@ -1582,13 +1654,25 @@ agentRole: 'mission-executor',
         lastRecoveryIssue ? ` The previous recovery attempt reported: ${lastRecoveryIssue.slice(0, 1000)}. Address that specific blocker; do not repeat a failed tool call unchanged.` : '',
       ].join('');
 
+      // Incremental recovery: retry only the artifacts still missing, each with the next
+      // strategy in its escalation, instead of re-asking for the whole deliverable set.
+      const gapArtifactCandidates = artifactNamesFromGaps(gaps)
+        .filter((name) => !pendingArtifactNames.includes(name));
+      for (const name of [...pendingArtifactNames, ...gapArtifactCandidates]) {
+        if (!artifactAttempts.has(name)) artifactAttempts.set(name, 0);
+        artifactAttempts.set(name, (artifactAttempts.get(name) || 0) + 1);
+      }
+      pendingArtifactNames = [...new Set([...pendingArtifactNames, ...gapArtifactCandidates])];
+      const artifactInstructions = pendingArtifactNames.map((name) =>
+        artifactRecoveryInstruction(name, artifactAttempts.get(name) || 1, true));
+      const incrementalGuidance = artifactInstructions.length > 0
+        ? ` Produce only the artifacts that are still missing, one deliverable per attempt, using the method given for each: ${artifactInstructions.join(' ')}`
+        : '';
+
       const availableArtifacts = phaseOutput.tasks
         .filter((task) => task.status === 'completed')
         .flatMap((task) => task.artifacts);
-      const gapArtifactNames = [...new Set(gaps.flatMap((gap) => {
-        const matches = gap.match(/"([^"]+\.(?:json|md|txt|csv|ya?ml|html))"/gi) || [];
-        return matches.map((m) => m.replace(/"/g, '')).filter((name) => name.toLocaleLowerCase() !== 'system-action-receipts.json');
-      }))];
+      const gapArtifactNames = artifactNamesFromGaps(gaps);
       const targetedExpectedArtifacts = [...new Set([
         ...recoveryPhase.tasks
           .filter((task) => targetTaskIds.includes(task.id))
@@ -1621,7 +1705,7 @@ agentRole: 'mission-executor',
         title: `Resolve mission completion gaps (attempt ${recoveryIndex})`,
         description: `Resolve missing deliverables: ${expectedArtifacts.join(', ') || 'required artifacts'}.`,
         agentRole: 'mission-executor',
-        systemPrompt: `Resolve the remaining gaps for tasks: ${targetTaskIds.join(', ') || 'none identified'}. Mission goal: "${ctx.prompt}". Phase: "${recoveryPhase.name}". Produce ${expectedArtifacts.join(', ') || 'the required results'}. Use recorded task outputs as context. Perform the work yourself; use tools when needed, but do not substitute a plan or ask the user to produce the deliverable.${noProgressGuidance}`,
+        systemPrompt: `Resolve the remaining gaps for tasks: ${targetTaskIds.join(', ') || 'none identified'}. Mission goal: "${ctx.prompt}". Phase: "${recoveryPhase.name}". Produce ${expectedArtifacts.join(', ') || 'the required results'}. Use recorded task outputs as context. Perform the work yourself; use tools when needed, but do not substitute a plan or ask the user to produce the deliverable.${incrementalGuidance}${noProgressGuidance}`,
         dependsOnTaskIds: taskIds,
         expectedArtifacts,
         requiredActions: [],
@@ -1779,6 +1863,11 @@ agentRole: 'mission-executor',
       recoveryTask.output = result?.output || failure;
       lastRecoveryIssue = failure || result?.incompleteReason || '';
       recoveryTask.artifacts = result?.artifacts || [];
+      // Track which artifacts the attempt actually produced so the next round is
+      // incremental: resolved artifacts drop out, the rest escalate their method.
+      const stillMissing = new Set(missingExpectedArtifacts(recoveryTask.artifacts, expectedArtifacts));
+      pendingArtifactNames = pendingArtifactNames.filter((name) => stillMissing.has(name));
+      if (stillMissing.size === 0) artifactAttempts.clear();
       await this.updateTask(ctx, recoveryPhase.id, recoveryTask.id, {
         status: recoveryTask.status,
         completedAt,

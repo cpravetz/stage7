@@ -56,17 +56,32 @@ async function runTurn(rc: RunContext): Promise<TurnEnd | undefined> {
   return performAction(rc, turn)
 }
 
-/** The loop ran out of budget (or was stopped with a blocker): hand back what was achieved. */
+/**
+ * The loop ran out of budget (or was stopped with a blocker): hand back what was achieved.
+ * When nothing was produced at all, this is a transport/budget failure rather than a
+ * deliverable-format failure, so it is reported as an error: the orchestrator must retry it
+ * instead of recording an empty task result.
+ */
 async function finishIncomplete(rc: RunContext): Promise<AgentExecutionResult> {
   const { state, limits, spec, definition, context } = rc
   const exhaustedBudget = state.brainCalls >= limits.brainCallLimit
     ? `${limits.brainCallLimit}-call Brain execution budget`
     : `${limits.completionTokenLimit}-token Brain completion budget`
+  await state.save()
+  const producedNothing = !state.finalOutput?.trim()
+    && state.toolCalls === 0
+    && state.actionReceipts.length === 0
+  if (producedNothing) {
+    logger.warn(
+      { agentId: definition.id, missionId: context.missionId, brainCalls: state.brainCalls, toolCalls: state.toolCalls },
+      'Agent exhausted its budget before producing any output or action; reporting a retryable failure',
+    )
+    throw new Error(`Agent ${definition.id} exhausted its ${exhaustedBudget} without producing any output or action for this task.`)
+  }
   const output = state.finalOutput
     || `Agent ${definition.id} exhausted its ${exhaustedBudget} before completing the task. The phase reviewer should use the recorded results to continue the remaining work.`
   state.finalOutput = output
   state.incompleteReason = 'The agent could not verify all required task results.'
-  await state.save()
   logger.warn(
     {
       agentId: definition.id,

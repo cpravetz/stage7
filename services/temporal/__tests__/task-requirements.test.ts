@@ -48,7 +48,7 @@ describe('runtime task requirements', () => {
       .toContain('Research five concepts\nInclude costs for each concept')
     expect(recoveryDeliverableInstructions([original, recovery], ['brief.txt']))
       .not.toContain('Obsolete recovery instructions')
-    expect(buildTaskPrompt(original, phase, plan, [])).toContain('Produce each expected deliverable')
+    expect(buildTaskPrompt(original, phase, plan, [])).toContain('Produce each deliverable')
     const recoveryPlan = { ...plan, phases: [{ ...phase, tasks: [original, recovery] }] }
     expect(buildTaskPrompt(recovery, phase, recoveryPlan, [])).toContain('Include costs for each concept')
   })
@@ -85,11 +85,8 @@ describe('runtime task requirements', () => {
     expect(prompt).toContain('If explicit authorization is missing, ask the user for that specific permission and wait')
     expect(prompt).toContain('execute the registered tool so Tool Executor can present its secure credential request')
     expect(prompt).toContain('Never ask the user to choose, install, or configure tools')
-    expect(prompt).toContain('Do not ask the user which category, approach, or option they prefer')
-    expect(prompt).toContain('If preferences are unstated, select a defensible default')
-    expect(prompt).toContain('inspect its catalog entry, schemas, and action results/errors')
-    expect(prompt).toContain('Never ask the user to diagnose a tool or decide whether to switch')
     expect(prompt).toContain('never ask the user to retrieve or provide them')
+    expect(prompt).not.toContain('request its Agent to provide the artifact')
     expect(prompt).toContain('name its task ID as an internal blocker')
     expect(prompt).not.toContain('request its Agent to provide the artifact')
     expect(prompt).toContain('Do not expose internal JSON')
@@ -124,7 +121,7 @@ describe('runtime task requirements', () => {
 
     expect(plannedTask.requiresExternalAction).toBe(true)
     expect(buildTaskPrompt(plannedTask, phase, plan, [], 'Send the requested text message.'))
-      .toContain('Original mission goal: Send the requested text message.')
+      .toContain('Original mission goal (authoritative scope): Send the requested text message.')
   })
 
   it('migrates the former synthetic tool requirement without exposing it as an action', () => {
@@ -178,8 +175,9 @@ describe('runtime task requirements', () => {
     const prompt = buildTaskPrompt(dependentTask, phase, plan, [sourceSummary, ...recoverySummaries])
 
     expect(prompt).toContain('"taskId":"source-task"')
-    expect(prompt).toContain('"taskId":"task-mission-recovery-19"')
+    // Recovery tasks are internal bookkeeping and are deliberately kept out of task prompts.
     expect(prompt).not.toContain('"taskId":"task-mission-recovery-0"')
+    expect(prompt).not.toContain('"taskId":"task-mission-recovery-19"')
   })
 })
 

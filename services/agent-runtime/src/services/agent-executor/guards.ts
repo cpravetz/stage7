@@ -1,13 +1,5 @@
 import {
-  asksForProviderSetup,
-  asksUserToChoosePreference,
-  asksUserToDiagnoseToolOrChooseAlternative,
   asksUserToRepeatQuestion,
-  asksUserToManageTools,
-  asksUserToProduceDeliverable,
-  AUTONOMY_GUIDANCE,
-  CAPABILITY_RESOLUTION_GUIDANCE,
-  DELIVERABLE_GUIDANCE,
   hasTriedToolAfterResolution,
   REPEATED_QUESTION_GUIDANCE,
 } from './askUser'

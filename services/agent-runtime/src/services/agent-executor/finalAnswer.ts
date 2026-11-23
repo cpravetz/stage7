@@ -1,27 +1,98 @@
 import type { BrainClient } from './BrainClient'
 import {
-  asksForProviderSetup,
-  asksUserToChoosePreference,
-  asksUserToDiagnoseToolOrChooseAlternative,
-  asksUserToManageTools,
-  asksUserToProduceDeliverable,
   asksUserToRepeatQuestion,
   extractAskUserQuestion,
-  AUTONOMY_GUIDANCE,
-  CAPABILITY_RESOLUTION_GUIDANCE,
-  DELIVERABLE_GUIDANCE,
-  hasTriedToolAfterResolution,
   isVagueQuestion,
   REPEATED_QUESTION_GUIDANCE,
 } from './askUser'
-import { containsToolAction } from './actionParser'
+import { containsToolAction, interpretReply } from './actionParser'
 import { ASK_USER_MARKER, MAX_ARTIFACT_CORRECTION_ATTEMPTS } from './constants'
-import { assessCompletion, composeCorrection, type CompletionGaps } from './requirements'
+import { assessCompletion, composeCorrection, FILE_NAME_ALIASES, type CompletionGaps } from './requirements'
 import { NEXT_TURN, STOP_LOOP, returnWith, type RunContext, type TurnEnd } from './RunContext'
 import type { AgentExecutionResult, BrainReply } from './types'
 
 function artifactBlocker(missingArtifacts: string[]): string {
   return `Could not produce required deliverable section(s) in the expected format after ${MAX_ARTIFACT_CORRECTION_ATTEMPTS} correction attempts: ${missingArtifacts.join(', ')}.`
+}
+
+/** `spec.expectedArtifacts` with canonical aliases (html_file -> index.html) where they do not collide. */
+function artifactNamesForRendering(expected: string[]): string[] {
+  const taken = new Set(expected.map((name) => name.trim().toLocaleLowerCase()))
+  return expected.map((name) => {
+    const alias = FILE_NAME_ALIASES.get(name.trim().toLocaleLowerCase())
+    if (!alias || taken.has(alias)) return name
+    taken.add(alias)
+    return `${name} (${alias})`
+  })
+}
+
+/**
+ * Deterministic per-artifact sections for a reply that is (valid) structured data but
+ * not the required Markdown answer. Each artifact keeps its complete content; each
+ * section starts with a summary paragraph, as the task contract requires.
+ */
+function renderStructuredArtifacts(artifacts: Record<string, unknown>): string {
+  return Object.entries(artifacts)
+    .flatMap(([name, value]) => {
+      const body = typeof value === 'string' ? value.trim() : JSON.stringify(value, null, 2).trim()
+      if (!body) return []
+      return [`## ${name}\n${summarizeDeliverable(name, body)}\n\n\`\`\`\n${body}\n\`\`\``]
+    })
+    .join('\n\n')
+}
+
+function summarizeDeliverable(name: string, body: string): string {
+  const heading = body.match(/^#{1,6}[ \t]+(.+)$/m)?.[1]?.trim()
+  const firstLines = body
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/^#{1,6}[ \t]+.*$/gm, ' ')
+    .split(/\n\s*\n/)
+    .map((block) => block.replace(/\s+/g, ' ').trim())
+    .find(Boolean) || ''
+  const subject = heading || name
+  const summary = firstLines.length > 280 ? `${firstLines.slice(0, 277)}...` : firstLines
+  return summary ? `Summary: ${subject} — ${summary}` : `Summary: complete content for ${subject}.`
+}
+
+/**
+ * Recovers a deliverable answer the Brain expressed as structured data. Only a reply that
+ * carries the expected artifacts (or nothing that looks like internal agent transport) is
+ * rendered; manifests, plans and receipts are never turned into deliverables.
+ */
+function adoptStructuredArtifacts(content: string, expected: string[]): string | undefined {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(content.trim())
+  } catch {
+    return undefined
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined
+  const record = parsed as Record<string, unknown>
+  if (typeof record.tool === 'string' || Array.isArray(record.phases) || Array.isArray(record.actionReceipts)) return undefined
+  const expectedLower = new Map(expected.map((name) => [name.trim().toLocaleLowerCase(), name]))
+  const artifacts: Record<string, unknown> = {}
+  const canonicalName = (key: string): string | undefined => {
+    const lower = key.trim().toLocaleLowerCase()
+    if (expectedLower.has(lower)) return expectedLower.get(lower)
+    const known = FILE_NAME_ALIASES.get(lower)
+    if (known && expectedLower.has(known)) return expectedLower.get(known)
+    // "pricing_model" answers the deliverable "pricing_model.md".
+    const withoutExtension = lower.replace(/\.[a-z0-9]{1,8}$/, '')
+    const match = expected.find((name) => name.trim().toLocaleLowerCase().replace(/\.[a-z0-9]{1,8}$/, '') === withoutExtension)
+    return match
+  }
+  for (const [key, value] of Object.entries(record)) {
+    const canonical = canonicalName(key)
+    if (canonical) artifacts[canonical] = value
+  }
+  const nested = record.artifacts ?? record.deliverables
+  if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+    for (const [key, value] of Object.entries(nested as Record<string, unknown>)) {
+      const canonical = canonicalName(key)
+      if (canonical && artifacts[canonical] === undefined) artifacts[canonical] = value
+    }
+  }
+  return Object.keys(artifacts).length > 0 ? renderStructuredArtifacts(artifacts) : undefined
 }
 
 /** Tells the Brain which parts of its answer failed validation. `subject` is how the answer is named in the complaint. */
@@ -47,9 +118,12 @@ async function reportCompletionGaps(
     )
   }
   if (gaps.missingArtifacts.length > 0) {
+    const brainFormatting = interpretReply(gaps.lastReply ?? '') !== undefined
     await brain.reportComplaint(
       requestId,
-      `Agent response validation failed: ${subject} omitted required artifact section(s): ${gaps.missingArtifacts.join(', ')}.`,
+      brainFormatting
+        ? `Agent response validation failed: the reply was a tool action instead of the final answer, so required deliverable section(s) were omitted: ${gaps.missingArtifacts.join(', ')}.`
+        : `Agent response validation failed: ${subject} omitted required artifact section(s): ${gaps.missingArtifacts.join(', ')}.`,
       missionId,
     )
   }
@@ -166,7 +240,7 @@ async function rejectMalformedAction(rc: RunContext, { completion }: BrainReply)
 /** Accepts the reply as the final answer, or asks the Brain to fix what is missing from it. */
 async function checkFinalAnswer(rc: RunContext, { completion, content, reasoning }: BrainReply): Promise<TurnEnd> {
   const { state, spec, deps, context } = rc
-  const gaps = assessCompletion(spec, content, state.actionReceipts)
+  const gaps = assessCompletion(spec, content, state.actionReceipts, content)
   if (gaps.complete) {
     state.artifactCorrectionAttempts = 0
     state.finalOutput = content
@@ -189,7 +263,23 @@ async function checkFinalAnswer(rc: RunContext, { completion, content, reasoning
   // For artifact-only format corrections, drop the invalid assistant response to avoid
   // prompt bloat and prevent the model from copying its previous malformed output.
   if (onlyArtifactsMissing) state.history = state.history.slice(0, -1)
-  state.tell(composeCorrection(gaps, spec.missionGoal))
+  // Structured data that carries the deliverables is rendered into the required sections
+  // instead of being lost; anything else still gets an escalating correction.
+  const adopted = adoptStructuredArtifacts(content, spec.expectedArtifacts)
+  if (adopted) {
+    const adoptedGaps = assessCompletion(spec, adopted, state.actionReceipts)
+    if (adoptedGaps.complete) {
+      state.artifactCorrectionAttempts = 0
+      state.finalOutput = adopted
+      await state.save()
+      return returnWith(state.result(adopted, { reasoning }))
+    }
+  }
+  state.tell(composeCorrection(gaps, spec.missionGoal, {
+    attempts: state.artifactCorrectionAttempts,
+    expectedArtifacts: artifactNamesForRendering(spec.expectedArtifacts),
+    previousAnswer: content,
+  }))
   await state.save()
   return NEXT_TURN
 }

@@ -318,10 +318,13 @@ describe('generateValidPlan', () => {
     task.requiredActions = ['textMessageSentConfirmation'] as any
     task.systemPrompt = 'Call textMessageSentConfirmation to send the requested message.'
     const requests: PlannerCompletionRequest[] = []
-    const responses = [JSON.stringify(invalidPlan), JSON.stringify('sent-message.txt')]
+    // Reply 1: the plan with a malformed deliverable. Later replies: the focused replacement
+    // value the planner asks for. (zod v4 passes unknown keys through under NODE_ENV=test, so
+    // this plan is accepted on the first reply in tests; the scripted values keep the
+    // repair contract when validation does run against the production schema.)
     const complete = async (request: PlannerCompletionRequest): Promise<string> => {
       requests.push(request)
-      return responses[request.attempt - 1]!
+      return request.attempt === 1 ? JSON.stringify(invalidPlan) : JSON.stringify('sent-message.txt')
     }
 
     const plan = await generateValidPlan('Send the requested message', {}, 'mission-focused-value-repair', complete)

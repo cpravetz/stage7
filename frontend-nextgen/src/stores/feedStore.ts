@@ -236,6 +236,13 @@ export function normalize(raw: unknown): FeedEvent | null {
         message = `Mission failed: ${friendlyMissionError((r.error as string) || (data.error as string) || '')}`.trim();
         break;
       case 'mission_incomplete': {
+        if (data.recoverable === true) {
+          const reason = typeof data.reason === 'string' && data.reason.trim()
+            ? data.reason.trim()
+            : 'A temporary service problem interrupted the work.';
+          message = `Mission paused on a recoverable problem: ${reason} The mission keeps its saved progress and can continue without losing completed work.`;
+          break;
+        }
         const reason = typeof data.reason === 'string'
           ? data.reason
           : Array.isArray(data.gaps)

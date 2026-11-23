@@ -15,6 +15,11 @@ import { canonicalMissionAgentRole } from '../agent/AgentRuntimeConfig';
 const MAX_PRIOR_RESPONSE_CHARS = 12_000;
 const MAX_REFINEMENT_ISSUES_PER_REQUEST = 3;
 const MAX_TRANSIENT_BRAIN_RETRIES = 3;
+/** Bound on plan repairs (local fixes, JSON repairs, field repairs and re-plans) so a stuck
+ *  generator fails the attempt instead of looping forever. */
+const MAX_PLANNER_REPAIR_ATTEMPTS = 25;
+/** Consecutive empty completions tolerated before the planner gives up. */
+const MAX_CONSECUTIVE_EMPTY_PLANNER_COMPLETIONS = 3;
 
 interface PlannerFieldRepair {
   path: PropertyKey[];
@@ -74,14 +79,22 @@ function plannerFieldRepairPrompt(repair: PlannerFieldRepair): string {
   return `I need a ${repair.expectedType} for ${path}, but you gave me a ${repair.receivedType}: ${currentValue}.${objectShape} Return only the replacement value as valid JSON.`;
 }
 
+function isPlannerDeliverableIssue(path: PropertyKey[]): boolean {
+  return path.some((part, index) => typeof part === 'string'
+    && part === 'expectedArtifacts'
+    && typeof path[index + 1] === 'number');
+}
+
 /**
  * Attempts a local mechanical fix for a planner field type mismatch without
  * involving the Brain. Covers the common classes of planner mistakes:
  *  - expected string, received object → extract a common string property
  *  - expected array, received object → wrap in an array
  *  - expected string, received number/boolean → coerce to string
- * Returns undefined when no local fix applies, in which case the narrow
- * Brain field-repair question is the correct fallback.
+ * Nested element fields (for example `expectedArtifacts[0]`, a deliverable name) are never
+ * guessed from an object: they are the values the mission is graded on, so the Brain is
+ * asked for the exact replacement instead. Returns undefined when no local fix applies, in
+ * which case the narrow Brain field-repair question is the correct fallback.
  */
 function tryLocalFieldFix(
   issues: Array<{ path: PropertyKey[]; message: string }>,
@@ -90,6 +103,8 @@ function tryLocalFieldFix(
   for (const issue of issues) {
     const mismatch = issue.message.match(/expected\s+(.+?),\s+received\s+(.+)$/i);
     if (!mismatch || issue.path.length < 2) continue;
+    // An array element's own content cannot be derived locally.
+    if (issue.path.some((part) => typeof part === 'number')) continue;
 
     const expectedType = mismatch[1].trim().toLowerCase();
     const receivedType = mismatch[2].trim().toLowerCase();
@@ -97,10 +112,10 @@ function tryLocalFieldFix(
 
     // expected string, received object: extract a common string property
     if (expectedType === 'string' && receivedType === 'object' && currentValue && typeof currentValue === 'object' && !Array.isArray(currentValue)) {
-      const obj = currentValue as Record<string, unknown>;
+      const obj = currentValue as Record<string, unknown>
       for (const key of ['name', 'title', 'id', 'value', 'text', 'content', 'summary']) {
         if (typeof obj[key] === 'string' && obj[key].trim().length > 0) {
-          return { path: issue.path, replacement: obj[key] };
+          return { path: issue.path, replacement: obj[key] }
         }
       }
     }
@@ -119,6 +134,7 @@ function tryLocalFieldFix(
     if (expectedType === 'string' && (receivedType === 'null' || receivedType === 'undefined') && currentValue == null) {
       return { path: issue.path, replacement: '' };
     }
+
   }
   return undefined;
 }
@@ -786,15 +802,95 @@ export async function generateValidPlan(
   reportValidation?: PlannerValidationReporter,
   reportProgress?: PlannerProgressReporter,
 ): Promise<Plan> {
+    // Every turn starts from a clean repair state. A field repair pending when the
+    // previous turn failed must not be applied to unrelated later content.
+    const resetTurnState = () => {
+        pendingFieldRepair = undefined;
+        fieldRepairBase = undefined;
+        jsonRepairRequested = false;
+    };
     let lastError = '';
     let previousResponse = '';
     let jsonRepairRequested = false;
+    let candidatePlanJson: string | undefined;
+    /** Issues left by a partial local fix, carried into the next turn's validation. */
+    let pendingIssues: string | undefined;
     let pendingFieldRepair: PlannerFieldRepair | undefined;
     let fieldRepairBase: unknown;
     let transientBrainRetries = 0;
+    // Repair ceilings. Without them a provider that keeps returning something
+    // unparseable (or a plan that a local fix cannot repair) retries forever.
+    let consecutiveEmptyCompletions = 0;
+    let repairAttempts = 0;
     const routingSessionId = missionId ? `${missionId}:planner` : `planner:${randomUUID()}`;
+    /**
+     * Applies the finish rules to an already-validated plan. Shared by the normal path and
+     * the local-fix fast path so both produce an identical plan.
+     */
+    const finishPlan = (plan: Plan, turn: number): Plan => {
+        previousResponse = JSON.stringify(plan);
+        const dependencyRepairs = repairDeclaredDependencyInstructions(plan);
+        if (dependencyRepairs > 0) {
+            logger.info({ missionId, attempt: turn, dependencyRepairs }, 'Repaired declared task dependencies locally');
+        }
+        normalizeCapabilitySetupTasks(plan, prompt);
+        plan.requiresClarification = false;
+        plan.clarificationQuestions = [];
+        if (plan.phases.length === 0) {
+            plan.summary = plan.summary.trim() || prompt;
+            plan.phases = [{
+                id: 'phase-1',
+                name: 'Complete requested outcome',
+                goal: prompt,
+                requiresApproval: false,
+                status: 'pending',
+                tasks: [{
+                    id: 'phase-1-task-1',
+                    title: 'Complete the requested outcome',
+                    description: prompt,
+                    agentRole: 'mission-executor',
+                    systemPrompt: `Achieve the requested outcome: ${prompt}. Do not invent missing information. Try authorized alternatives first; if a specific required value is unavailable and no safe alternative can complete the outcome, ask one focused question for that value.`,
+                    dependsOnTaskIds: [],
+                    expectedArtifacts: [],
+                    requiredActions: [],
+                    status: 'pending',
+                    artifacts: [],
+                }],
+            }];
+        }
+        for (const phase of plan.phases) {
+            phase.requiresApproval = false;
+            phase.approvalQuestion = undefined;
+            for (const task of phase.tasks) {
+                if (!/\b(?:message|delivery)[-_ ]?(?:message[-_ ]?)?(?:id|status)\b/i.test(prompt)) {
+                    task.expectedArtifacts = (task.expectedArtifacts || []).filter((artifact) =>
+                        !/\b(?:sms|text|email|message|delivery)[-_ ]?(?:message[-_ ]?)?(?:id|status)\b/i.test(
+                            artifact.replace(/[_-]+/g, ' '),
+                        ),
+                    );
+                }
+                task.requiredActions = [];
+            }
+        }
+        const standardsIssues = planStandardIssues(plan);
+        if (standardsIssues.length) {
+            lastError = standardsIssues.join('\n');
+            throw new Error(lastError);
+        }
+        logger.info({ missionId, missionGoal: prompt.slice(0, 50), phases: (plan as any).phases.length, attempt: turn }, 'Plan generated');
+        pendingFieldRepair = undefined;
+        fieldRepairBase = undefined;
+        // Repair state is scoped to the turn that produced this candidate.
+        jsonRepairRequested = false;
+        return plan;
+    };
     let attempt = 0;
     while (true) {
+        if (repairAttempts > MAX_PLANNER_REPAIR_ATTEMPTS) {
+            throw new Error(
+                `Unable to generate a valid mission plan after ${MAX_PLANNER_REPAIR_ATTEMPTS} repair attempts. Last plan validation issue: ${lastError || 'none'}`,
+            );
+        }
         attempt++;
         const isJsonRepair = jsonRepairRequested;
         jsonRepairRequested = false;
@@ -820,6 +916,10 @@ export async function generateValidPlan(
                 'Plan:',
                 previousResponse.slice(0, MAX_PRIOR_RESPONSE_CHARS),
             ].join('\n');
+        // The previous candidate only feeds refinement prompts (it is never validated
+        // directly once a new turn begins). Repair flags are one-shot; they must not
+        // leak into the next turn.
+        resetTurnState();
         let content;
         try {
             content = await complete({
@@ -869,16 +969,31 @@ export async function generateValidPlan(
         }
         previousResponse = content;
         if (typeof content !== 'string' || content.trim().length === 0) {
-            // A completion without content is not a plan. It has to count
-            // against the repair ceiling, otherwise a provider that keeps
-            // returning nothing retries forever without ever failing.
+            // A completion without content is not a plan. It counts against a
+            // bounded ceiling, so a provider that keeps returning nothing fails
+            // the plan attempt instead of retrying forever.
+            consecutiveEmptyCompletions++;
             lastError = 'Planner returned a completion without content';
+            previousResponse = candidatePlanJson ?? '';
             await (reportValidation === null || reportValidation === void 0 ? void 0 : reportValidation(lastError));
+            if (consecutiveEmptyCompletions > MAX_CONSECUTIVE_EMPTY_PLANNER_COMPLETIONS) {
+                throw new Error(
+                    `Unable to generate a valid mission plan: Brain returned ${consecutiveEmptyCompletions} consecutive empty completions. Last plan validation issue: ${lastError}`,
+                );
+            }
             logger.warn({ missionId, attempt, reason: lastError }, 'Planner completion was empty; requesting the plan again');
             await reportProgress?.({ attempt, status: 'retrying', reason: lastError, transient: true });
             continue;
         }
+        consecutiveEmptyCompletions = 0;
+        // A new candidate plan replaces the old one entirely: root-level errors from the
+        // previous candidate (for example a missing phases array) must not be re-validated
+        // against content that has replaced it. JSON repairs keep their original error.
+        if (!isJsonRepair) lastError = pendingIssues ?? '';
+        pendingIssues = undefined;
         try {
+            // A field-repair answer is a single value (a quoted string, a number, an object),
+            // not a plan: merge it into the candidate plan and validate the merged plan.
             if (activeFieldRepair) {
                 let replacement: unknown;
                 try {
@@ -894,24 +1009,56 @@ export async function generateValidPlan(
                 pendingFieldRepair = undefined;
                 fieldRepairBase = undefined;
             }
+            // A merged field repair produced a complete candidate; otherwise the provider's
+            // text is the candidate itself.
             const parsedPlan = parsePlanJson(content);
+            // A plan is always a JSON object. A bare value (a replacement answer, a stray
+            // JSON scalar) is not a plan; report that so the loop retries/refines instead of
+            // validating a scalar as the root of the plan.
+            if (!parsedPlan.value || typeof parsedPlan.value !== 'object' || Array.isArray(parsedPlan.value)) {
+                throw new Error('Planner response did not contain a JSON plan object');
+            }
             if (parsedPlan.repaired) {
                 logger.info({ missionId, attempt, repairs: parsedPlan.repairs }, 'Repaired structurally invalid planner JSON');
+            }
+            // Remember the last complete candidate, so any failed repair can refine it.
+            try {
+                candidatePlanJson = JSON.stringify(parsedPlan.value);
+            } catch {
+                candidatePlanJson = undefined;
             }
             const sanitized = applyPlannerDefaults(sanitizePlan(parsedPlan.value));
             const parsed = PlanSchema.safeParse(sanitized);
             if (!parsed.success) {
                 lastError = formatSchemaIssues(parsed.error.issues).join('\n');
+                // A merged field repair was the best available candidate: validate the result
+                // and, if it still fails, refine it instead of re-asking for the same field.
+                if (activeFieldRepair) {
+                    candidatePlanJson = JSON.stringify(sanitized);
+                    throw new Error(lastError);
+                }
 
                 // Try local transformations before involving the Brain. Many
                 // planner mistakes are mechanical (object instead of string,
                 // single value instead of array) and can be fixed without
                 // another model call.
                 const localFix = tryLocalFieldFix(parsed.error.issues, sanitized);
-                if (localFix) {
+                if (localFix && !isPlannerDeliverableIssue(localFix.path)) {
                     setValueAtPath(sanitized, localFix.path, localFix.replacement);
+                    const fixed = PlanSchema.safeParse(sanitized);
+                    if (fixed.success) {
+                        // The local fix fully repaired the plan. Only now does the plan get
+                        // the finish normalizations (which clear requiredActions), so the
+                        // repaired value is never re-validated against mutated content.
+                        await reportProgress?.({ attempt, status: 'retrying', reason: `Local fix: ${localFix.path.join('.')}`, transient: true });
+                        return finishPlan(fixed.data, attempt);
+                    }
+                    // Partial fix: carry the remaining issues into the next turn so they are
+                    // not lost when the next candidate is validated.
+                    pendingIssues = formatSchemaIssues(fixed.error.issues).join('\n');
                     content = JSON.stringify(sanitized);
                     previousResponse = content;
+                    repairAttempts++;
                     logger.info({ missionId, attempt, path: localFix.path.join('.'), replacement: localFix.replacement }, 'Applied local field transformation; revalidating');
                     await reportProgress?.({ attempt, status: 'retrying', reason: `Local fix: ${localFix.path.join('.')}`, transient: true });
                     continue;
@@ -919,72 +1066,37 @@ export async function generateValidPlan(
 
                 pendingFieldRepair = findPlannerFieldRepair(parsed.error.issues, sanitized);
                 fieldRepairBase = pendingFieldRepair ? sanitized : undefined;
+                if (!pendingFieldRepair) {
+                    // Nothing is repairable field-by-field: refine the best candidate plan.
+                    candidatePlanJson = JSON.stringify(sanitized);
+                }
                 throw new Error(lastError);
             }
             pendingFieldRepair = undefined;
             fieldRepairBase = undefined;
-            const plan = parsed.data;
-            previousResponse = JSON.stringify(plan);
-            const dependencyRepairs = repairDeclaredDependencyInstructions(plan);
-            if (dependencyRepairs > 0) {
-                logger.info({ missionId, attempt, dependencyRepairs }, 'Repaired declared task dependencies locally');
-            }
-            normalizeCapabilitySetupTasks(plan, prompt);
-            plan.requiresClarification = false;
-            plan.clarificationQuestions = [];
-            if (plan.phases.length === 0) {
-                plan.summary = plan.summary.trim() || prompt;
-                plan.phases = [{
-                    id: 'phase-1',
-                    name: 'Complete requested outcome',
-                    goal: prompt,
-                    requiresApproval: false,
-                    status: 'pending',
-                    tasks: [{
-                        id: 'phase-1-task-1',
-                        title: 'Complete the requested outcome',
-                        description: prompt,
-                        agentRole: 'mission-executor',
-                        systemPrompt: `Achieve the requested outcome: ${prompt}. Do not invent missing information. Try authorized alternatives first; if a specific required value is unavailable and no safe alternative can complete the outcome, ask one focused question for that value.`,
-                        dependsOnTaskIds: [],
-                        expectedArtifacts: [],
-                        requiredActions: [],
-                        status: 'pending',
-                        artifacts: [],
-                    }],
-                }];
-            }
-            for (const phase of plan.phases) {
-                phase.requiresApproval = false;
-                phase.approvalQuestion = undefined;
-                for (const task of phase.tasks) {
-                    if (!/\b(?:message|delivery)[-_ ]?(?:message[-_ ]?)?(?:id|status)\b/i.test(prompt)) {
-                        task.expectedArtifacts = (task.expectedArtifacts || []).filter((artifact) =>
-                            !/\b(?:sms|text|email|message|delivery)[-_ ]?(?:message[-_ ]?)?(?:id|status)\b/i.test(
-                                artifact.replace(/[_-]+/g, ' '),
-                            ),
-                        );
-                    }
-                    task.requiredActions = [];
-                }
-            }
-            const standardsIssues = planStandardIssues(plan);
-            if (standardsIssues.length) {
-                lastError = standardsIssues.join('\n');
-                throw new Error(lastError);
-            }
-            logger.info({ missionId, missionGoal: prompt.slice(0, 50), phases: (plan as any).phases.length, attempt }, 'Plan generated');
-            return plan;
+            return finishPlan(parsed.data, attempt);
         }
         catch (error) {
             lastError = error instanceof Error ? error.message : String(error);
             await (reportValidation === null || reportValidation === void 0 ? void 0 : reportValidation(lastError));
+            // A repair that cannot be applied falls back to refining the last complete
+            // candidate plan, so the next request carries the plan instead of restarting
+            // from an empty prompt (which only repeats the same failure).
+            if (candidatePlanJson) previousResponse = candidatePlanJson;
+            // A failed field repair must not be re-asked for the same field on the next turn:
+            // fall back to refining the candidate plan instead.
+            if (pendingFieldRepair) {
+                pendingFieldRepair = undefined;
+                fieldRepairBase = undefined;
+            }
             if (lastError.startsWith('Planner response did not contain')) {
                 jsonRepairRequested = true;
+                repairAttempts++;
                 logger.warn({ missionId, attempt, reason: lastError }, 'Planner JSON is malformed; requesting a JSON-only repair');
                 await reportProgress?.({ attempt, status: 'retrying', reason: lastError, transient: false });
                 continue;
             }
+            repairAttempts++;
             logger.warn({ missionId, attempt, reason: lastError }, 'Planner response rejected; requesting a corrected plan');
             await reportProgress?.({ attempt, status: 'rejected', reason: lastError, transient: false });
         }

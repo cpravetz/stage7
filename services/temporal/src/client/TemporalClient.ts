@@ -35,6 +35,31 @@ function missionIdFromWorkflowId(workflowId: string): string {
   return workflowId.startsWith('mission-') ? workflowId.slice(8) : workflowId;
 }
 
+/**
+ * A mission is only failed when no LLM remains able to process prompts. Everything
+ * else — service hiccups, fetch failures/timeouts, malformed agent responses, HTTP 5xx
+ * from the agent runtime, tool/transport errors — is recoverable and must leave the
+ * mission runnable so the orchestrator can retry incrementally.
+ */
+const LLM_EXHAUSTION_PATTERNS: RegExp[] = [
+  /MODEL_SELECTION_EXHAUSTED/i,
+  /\bMODEL_EXHAUSTED\b/,
+  /exhausted every eligible model/i,
+  /no (?:eligible|available) (?:llm|model|provider)/i,
+  /all models (?:are )?unavailable/i,
+  /no llm (?:provider )?(?:available|configured)/i,
+  /model routing made no progress/i,
+  /every eligible model was attempted/i,
+];
+
+function missionFailureEndState(error: unknown, message: string): 'failed' | 'recoverable' {
+  const failureCode = typeof (error as { failureCode?: unknown })?.failureCode === 'string'
+    ? (error as { failureCode: string }).failureCode
+    : undefined;
+  if (failureCode === 'MODEL_EXHAUSTED') return 'failed';
+  return LLM_EXHAUSTION_PATTERNS.some((pattern) => pattern.test(message)) ? 'failed' : 'recoverable';
+}
+
 function visibleMissionStatus(record: PersistedMissionControlRecord): string {
   if (record.controlState === 'pause_requested') return 'pausing';
   if (record.controlState === 'terminate_requested') return 'canceling';
@@ -716,6 +741,15 @@ export class TemporalClient {
             return;
           }
           const error = err instanceof Error ? err.message : String(err);
+          if (missionFailureEndState(err, error) === 'recoverable') {
+            // A mission is only ever failed when no LLMs remain to process prompts.
+            // Service hiccups, timeouts, connectivity loss and malformed agent
+            // responses are recoverable: keep the mission resumable so it retries
+            // on its own instead of terminating.
+            logger.warn({ missionId: input.missionId, error }, 'Mission stopped on a recoverable error; leaving it resumable instead of failing it');
+            await this.recordRecoverableStop(input, workflowId, error, startTime);
+            return;
+          }
           logger.error({ missionId: input.missionId, error }, 'Mission workflow failed');
           await this.persistMissionState({
             missionId: input.missionId,
@@ -761,6 +795,47 @@ export class TemporalClient {
       this.directMissionRuns.delete(input.missionId);
       throw error;
     }
+  }
+
+  /**
+   * Persists a stop that is NOT a mission failure: the mission stays resumable (status
+   * `incomplete`) so it can continue from its saved progress once the transient cause is
+   * gone. Used for every failure except LLM exhaustion.
+   */
+  private async recordRecoverableStop(
+    input: WorkflowInput,
+    workflowId: string,
+    error: string,
+    startTime: number,
+  ): Promise<void> {
+    await this.persistMissionState({
+      missionId: input.missionId,
+      tenantId: input.tenantId || '',
+      assistantId: input.assistantId || '',
+      status: 'incomplete',
+      controlState: 'running',
+      currentStep: 0,
+      totalSteps: 1,
+      history: [{ step: 0, status: 'incomplete' as const, startedAt: startTime, completedAt: Date.now(), error }],
+      input,
+      error,
+      startedAt: startTime,
+      completedAt: Date.now(),
+      createdAt: startTime,
+      updatedAt: Date.now(),
+    });
+    await this.broadcastMissionUpdate({
+      type: 'mission_incomplete',
+      missionId: input.missionId,
+      workflowId,
+      status: 'incomplete',
+      error,
+      data: {
+        reason: sanitizeAgentMessage(error, '').text
+          || 'A temporary service problem interrupted the mission. It can continue from its saved progress.',
+        recoverable: true,
+      },
+    });
   }
 
   async pauseMission(workflowId: string): Promise<'pausing' | 'paused'> {

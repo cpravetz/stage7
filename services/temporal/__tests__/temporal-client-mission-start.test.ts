@@ -237,7 +237,9 @@ describe('TemporalClient mission start', () => {
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Mission state was not finalized')), 5_000)),
     ])
 
-    expect(missionWrites.map((write) => write.status)).toEqual(['running', 'incomplete', 'failed'])
+    // A failed terminal-state write is infrastructure loss, not LLM loss: the mission stays
+    // resumable ('incomplete') instead of being failed.
+    expect(missionWrites.map((write) => write.status)).toEqual(['running', 'incomplete', 'incomplete'])
     expect(missionWrites[2]?.error).toContain('413')
   })
 

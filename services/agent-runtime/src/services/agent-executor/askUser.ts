@@ -14,9 +14,6 @@ const TRANSCRIPT_TAG_PATTERN = /<\/?(?:your_previous_reply|system_feedback|task)
 export const CAPABILITY_RESOLUTION_GUIDANCE =
   'Do not ask the user to choose a provider or provide tool credentials before checking available integrations. Re-read the mission, inspect the live catalog, and use __create_tool to resolve the capability so configured integrations and credentials can be used. Ask only for a specific missing value or an actual authorization or service decision.'
 
-export const CREDENTIAL_REQUEST_GUIDANCE =
-  'Before asking the user for an API key, token, password, or other secret, first check the vault and secure credential flow and the mission context for an existing value. If a secret is genuinely unavailable and cannot be resolved by you, ask the user for that specific secret. Do not invent or guess secrets.'
-
 export const AUTONOMY_GUIDANCE =
   'You are responsible for getting the task complete. Before asking the user anything, determine whether the question is genuinely something only the user can answer or an abdication of your responsibility. Resolve preferences, choices, tool setup, diagnosis, and deliverable production yourself from mission context, available evidence, and reasonable assumptions; state those assumptions. Ask only for an essential fact or explicit authorization that cannot be inferred.'
 
@@ -56,41 +53,8 @@ export function asksUserToRepeatQuestion(question: string, previousQuestion: unk
   return overlap >= 2 && overlap / unionSize >= 0.8
 }
 
-export function asksUserToChoosePreference(question: string): boolean {
-  return /\b(?:what|which)\b.{0,140}\b(?:type|kind|category|approach|option|business|service|strategy|model)\b.{0,140}\b(?:interested|prefer|like|want)\b/i.test(question)
-    || /\b(?:what|which)\s+(?:would you\s+)?(?:prefer|like|want)\b/i.test(question)
-    || /\b(?:what are your|do you have any)\s+preferences?\b/i.test(question)
-    || /\bwhich option should i (?:choose|select|pick)\b/i.test(question)
-}
-
-export function asksUserToDiagnoseToolOrChooseAlternative(question: string): boolean {
-  return /\b(?:what|why|how)\b.{0,100}\b(?:issue|problem|wrong|error|failure|failing|broken|unavailable)\b.{0,100}\b(?:tool|integration|provider|service)\b/i.test(question)
-    || /\b(?:do we|should we|do i|should i)\b.{0,80}\b(?:need to\s+)?(?:consider|use|switch to|try|find|choose|select)\b.{0,80}\b(?:different|another|alternative|replacement|other)\b.{0,50}\b(?:tool|integration|provider|service)\b/i.test(question)
-}
-
 export function asksUserForRawCredential(question: string): boolean {
   return /\b(?:api[\s_-]*keys?|tokens?|passwords?|passphrases?|credentials?|secrets?|private[\s_-]*keys?|authorization(?:\s+headers?)?)\b/i.test(question)
-}
-
-export function asksUserToProduceDeliverable(question: string): boolean {
-  return /\b(?:please\s+)?(?:create|write|draft|produce|prepare|complete|generate)\b.{0,100}\b(?:deliverable|artifact|report|brief|analysis|document)\b/i.test(question)
-}
-
-export function asksUserToManageTools(question: string): boolean {
-  return /\b(?:please\s+)?(?:register|install|create|build|develop|configure|set up|enable)\b.{0,100}\b(?:tool|skill|plugin|integration|mcp|service)\b/i.test(question)
-    || /\b(?:tool|skill|plugin|integration|mcp)\b.{0,100}\b(?:register|install|create|configure|set up)\s+(?:it|the tool|the skill)\b/i.test(question)
-    || /\b(?:choose|select|pick)\b.{0,100}\b(?:tool id|tools? from (?:the )?list|from (?:the )?(?:list|available|following).{0,30}tools?)\b/i.test(question)
-    // Asking the user to supply tool *configuration* (base URL, endpoint, host,
-    // port, provider name, domain) is a setup task the agent must resolve itself.
-    // Pure secret asks (api key, token, password, credentials) are intentionally
-    // excluded here — those are legitimate named-secret questions.
-    || /\b(?:provide|enter|give|share|paste|supply|input|specify|set)\b.{0,80}\b(?:base\s*urls?|endpoints?|hosts?|servers?|ports?|config(?:uration)?|provider\s+name|account\s+name|domains?)\b/i.test(question)
-}
-
-export function asksForProviderSetup(question: string): boolean {
-  return /\b(?:which|what|choose|select|pick|provide|tell me|share)\b.{0,100}\b(?:provider|integration)\b/i.test(question)
-    || /\b(?:provider|integration)\b.{0,100}\b(?:account|name|credentials?|api key|auth token)\b/i.test(question)
-    || /\b(?:account|credentials?|api key|auth token)\b.{0,100}\b(?:provider|integration)\b/i.test(question)
 }
 
 export function hasTriedToolAfterResolution(toolIds: readonly string[]): boolean {

@@ -12,6 +12,27 @@ function visibleTaskText(value: string): string {
   return value.replaceAll(INTERNAL_ACTION_REQUIREMENT, 'an actual registered tool');
 }
 
+/**
+ * Artifact ids are sometimes file-kind labels ("html_file", "css_file") rather than file
+ * names. Give the agent the concrete file each deliverable must become.
+ */
+const DELIVERABLE_FILE_ALIASES: Record<string, string> = {
+  html_file: 'index.html',
+  html: 'index.html',
+  css_file: 'styles.css',
+  css: 'styles.css',
+  javascript_file: 'script.js',
+  js_file: 'script.js',
+  javascript: 'script.js',
+};
+
+function describeDeliverables(expectedArtifacts: string[]): string {
+  return expectedArtifacts.map((name) => {
+    const file = DELIVERABLE_FILE_ALIASES[name.trim().toLocaleLowerCase()];
+    return file && file !== name ? `${name} (the complete ${file} file)` : name;
+  }).join(', ');
+}
+
 export function recoveryDeliverableInstructions(tasks: Task[], expectedArtifacts: string[]): string {
   const names = new Set(expectedArtifacts.map((name) => name.trim().toLocaleLowerCase()));
   const sources = tasks.filter((task) =>
@@ -79,7 +100,7 @@ export function buildTaskPrompt(
     ? recoveryDeliverableInstructions(plan.phases.flatMap((candidate) => candidate.tasks), expectedArtifacts)
     : '';
   const artifactOutputContract = expectedArtifacts.length > 0
-    ? `Produce each deliverable (${expectedArtifacts.join(', ')}) yourself. Put its complete content under a Markdown heading exactly "## <deliverable name>", not in JSON or a code fence.`
+    ? `Produce each deliverable (${expectedArtifacts.join(', ')}) yourself. Put its complete content under a Markdown heading exactly "## <deliverable name>", not in JSON or a code fence. Write it down at once: do not first plan, research further, or describe what you will produce. The final response must be the deliverable content itself, not a tool action, plan, or progress report.`
     : 'Return only the verified result for this task. Unless the user requested a formatted document, use plain text without Markdown headings, lists, or code fences. For email and text-message tasks, report the exact requested message and verified delivery status; do not invent samples or placeholders.';
   return (
     (missionGoal ? `Original mission goal (authoritative scope): ${missionGoal}\n\nDo only work necessary for this goal. If the task or plan conflicts with it, follow the goal; do not substitute a different operation or medium.\n\n` : '') +
@@ -95,7 +116,7 @@ export function buildTaskPrompt(
       : '') +
     `Phase: ${phase.name} (${phase.goal})\n` +
     `Plan Summary: ${plan.summary}\n` +
-  `Expected deliverables: ${expectedArtifacts.join(', ')}\n` +
+    `Expected deliverables: ${expectedArtifacts.length > 0 ? describeDeliverables(expectedArtifacts) : 'none'}\n` +
 
     `Required Actions: ${JSON.stringify(visibleRequiredActions(task))}\n` +
     (task.requiresExternalAction

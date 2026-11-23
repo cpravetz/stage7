@@ -306,6 +306,70 @@ describe('AgentExecutor', () => {
     expect(prompts[1]).toContain('Do not ask the user to create the assigned deliverable')
   })
 
+  it('escalates each artifact correction instead of repeating the same request', async () => {
+    const prompts: string[] = []
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) return jsonResponse({ tools: [] })
+      if (url.endsWith('/api/brain/complaint')) return jsonResponse({ recorded: true })
+      if (url.endsWith('/api/brain/complete')) {
+        prompts.push((JSON.parse(String(init?.body)) as { prompt: string }).prompt)
+        return jsonResponse({ content: 'I have finished the work.', requestId: `escalate-${prompts.length}` })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+
+    const result = await new AgentExecutor({ fetcher }).execute(definition, {
+      ...task(),
+      agentId: definition.id,
+      createdAt: new Date().toISOString(),
+      input: { prompt: 'Build the landing page.', context: { expectedArtifacts: ['html_file', 'css_file'] } },
+    } as AgentTask, { missionId: 'mission-1', delegationDepth: 0 })
+
+    expect(result.incompleteReason).toContain('html_file')
+    const corrections = prompts.slice(1)
+    expect(corrections.length).toBeGreaterThanOrEqual(2)
+    // Attempt 1 asks for the sections; the next attempt must use a different method.
+    expect(corrections[0]).toContain('Attempt 1 of 3')
+    expect(corrections[1]).toContain('Attempt 2 of 3')
+    expect(corrections[1]).toContain('file_ops')
+    expect(corrections[1]).toContain('index.html')
+    expect(corrections[1]).toContain('styles.css')
+    expect(corrections[1]).not.toBe(corrections[0])
+  })
+
+  it('renders structured artifact content instead of discarding it when the final answer is required in sections', async () => {
+    let brainTurn = 0
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/api/tool-executor/tools')) return jsonResponse({ tools: [] })
+      if (url.endsWith('/api/brain/complaint')) return jsonResponse({ recorded: true })
+      if (url.endsWith('/api/brain/complete')) {
+        brainTurn++
+        return jsonResponse({
+          content: JSON.stringify({
+            pricing_model: { tiers: [{ name: 'Starter', price: 19 }] },
+            stripe_configuration: { mode: 'test', products: ['starter'] },
+          }),
+          requestId: `structured-${brainTurn}`,
+        })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }
+
+    const result = await new AgentExecutor({ fetcher }).execute(definition, {
+      ...task(),
+      agentId: definition.id,
+      createdAt: new Date().toISOString(),
+      input: { prompt: 'Define pricing and Stripe setup.', context: { expectedArtifacts: ['pricing_model.md', 'stripe_configuration.md'] } },
+    } as AgentTask, { missionId: 'mission-1', delegationDepth: 0 })
+
+    expect(result.incompleteReason).toBeUndefined()
+    expect(result.output).toContain('## pricing_model.md')
+    expect(result.output).toContain('## stripe_configuration.md')
+    expect(result.output).toContain('Starter')
+  })
+
   it('executes required tool actions before accepting an otherwise complete answer', async () => {
     const prompts: string[] = []
     const complaints: Array<{ requestId: string; reason: string; missionId: string }> = []
