@@ -4,6 +4,7 @@ import {
   StoredKnowledgeEntry,
   logger,
 } from '@stage7-nextgen/shared';
+import type { KnowledgeEntryWithMeta } from './knowledgeBudget';
 
 const COLLECTION = 'knowledge';
 
@@ -65,11 +66,10 @@ export class KnowledgeService {
   }
 
   /**
-   * Everything `assistantId` should be told: its own entries plus shared ones.
-   * Shared entries are included for every assistant so that knowledge recorded
-   * once is available to all of them.
+   * Everything `assistantId` should be told, with store timestamps for
+   * recency ranking. Own entries come first, then shared ones.
    */
-  async listForAssistant(assistantId: string): Promise<StoredKnowledgeEntry[]> {
+  async listForAssistantWithMeta(assistantId: string): Promise<KnowledgeEntryWithMeta[]> {
     await this.artifacts.ready();
     const { documents } = await this.artifacts.queryDocuments({
       collection: COLLECTION,
@@ -83,7 +83,20 @@ export class KnowledgeService {
       limit: 500,
     });
 
-    return [...own.documents, ...documents].map((d) => d.data as unknown as StoredKnowledgeEntry);
+    return [...own.documents, ...documents].map((d) => ({
+      entry: d.data as unknown as StoredKnowledgeEntry,
+      updatedAt: d.updatedAt ? new Date(d.updatedAt).getTime() : 0,
+    }));
+  }
+
+  /**
+   * Everything `assistantId` should be told: its own entries plus shared ones.
+   * Shared entries are included for every assistant so that knowledge recorded
+   * once is available to all of them.
+   */
+  async listForAssistant(assistantId: string): Promise<StoredKnowledgeEntry[]> {
+    const records = await this.listForAssistantWithMeta(assistantId);
+    return records.map((r) => r.entry);
   }
 
   /** All entries in the store, for inspection by operators and the Canvas UI. */
