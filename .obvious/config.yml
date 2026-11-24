@@ -1,0 +1,5 @@
+branches:
+  defaultBase: main
+pr:
+  merge:
+    method: squash
