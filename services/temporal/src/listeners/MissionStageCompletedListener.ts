@@ -1,5 +1,5 @@
 import { logger } from '@stage7-nextgen/shared';
-import type { MissionPhaseOutput } from '../activities/missionWorkflowActivities';
+import type { MissionPhaseOutput } from '../types/workflow';
 import type { Plan } from '@stage7-nextgen/shared';
 import type { WorkflowInput } from '../types/workflow';
 

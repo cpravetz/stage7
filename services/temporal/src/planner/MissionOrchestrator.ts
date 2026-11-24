@@ -1,6 +1,8 @@
 import {
   DEFAULT_AGENT_EXECUTION_POLICY,
   AgentExecutionPolicy,
+  BRAIN_MODEL_SELECTION_EXHAUSTED,
+  BRAIN_MODEL_SELECTION_RETRY,
   MissionArtifact,
   sanitizeAgentMessage,
   Plan,
@@ -39,7 +41,7 @@ import {
   MAX_COMPLETION_VERIFICATION_RETRIES,
 } from '../types/workflow';
 import { PlannerProgress } from './MissionPlanner';
-import type { MissionPhaseOutput } from '../activities/missionWorkflowActivities';
+import type { MissionPhaseOutput } from '../types/workflow';
 import type { WorkflowInput } from '../types/workflow';
 import { MissionCompletedListener } from '../listeners/MissionCompletedListener';
 import { MissionStageCompletedListener } from '../listeners/MissionStageCompletedListener';
@@ -116,6 +118,42 @@ function artifactRecoveryInstruction(name: string, attempt: number, stillMissing
   return `"${name}" (${stillMissing ? 'still missing — produce only this one' : file}) — return its complete content under the heading exactly ## ${name}.`;
 }
 
+/** Structured, per-round phase-recovery context rendered into one prompt fragment. */
+interface PhaseRecoveryContext {
+  gaps: string[];
+  attemptNumber: number;
+  pendingArtifacts: string[];
+  artifactAttempts: Map<string, number>;
+  madeProgress: boolean;
+}
+
+/**
+ * The single renderer for phase-recovery context. It replaces the previous free-text blob
+ * (noProgressGuidance + incrementalGuidance) and additionally lists the approaches that have
+ * already failed for each still-missing deliverable, while keeping artifactRecoveryInstruction
+ * and its escalation semantics.
+ */
+function renderRecoveryContext(context: PhaseRecoveryContext): string {
+  const parts: string[] = [];
+  const gaps = context.gaps.length > 0 ? context.gaps.slice(0, 5).join('; ') : 'unspecified gaps';
+  parts.push(`Recovery attempt ${context.attemptNumber} for the remaining gaps: ${gaps}.`);
+  if (!context.madeProgress) {
+    parts.push('Previous attempts made no observable progress on the same gaps; use a different authorized approach and do not repeat the same recovery steps. If a required value or authorization is missing, ask the user for it and wait.');
+  }
+  if (context.pendingArtifacts.length > 0) {
+    const instructions = context.pendingArtifacts.map((name) => {
+      const attempt = Math.max(context.artifactAttempts.get(name) || 1, 1);
+      return artifactRecoveryInstruction(name, attempt, attempt > 1);
+    });
+    parts.push(`Deliverables still missing (use the method given for each): ${instructions.join(' ')}`);
+    const failed = context.pendingArtifacts.filter((name) => (context.artifactAttempts.get(name) || 0) > 1);
+    if (failed.length > 0) {
+      parts.push(`Approaches already tried and failed for: ${failed.join(', ')}; use an authorized alternative rather than repeating them.`);
+    }
+  }
+  return parts.join(' ');
+}
+
 function isFatalServiceError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   const message = error.message || String(error);
@@ -137,6 +175,18 @@ function isFatalServiceError(error: unknown): boolean {
     return true;
   }
   return false;
+}
+
+/**
+ * A terminal Brain model-selection failure. `EXHAUSTED` means every eligible model was tried and
+ * failed; `RETRY` means the Agent Runtime already exhausted its in-task routing retries. Both must
+ * propagate as a mission-cancelling signal rather than being retried here, because there are no
+ * further models to route to.
+ */
+function isBrainExhaustionError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes(BRAIN_MODEL_SELECTION_EXHAUSTED)
+    || message.includes(BRAIN_MODEL_SELECTION_RETRY);
 }
 
 
@@ -613,8 +663,13 @@ const executeTask = async (task: Task, savedTask: MissionTaskCheckpoint | undefi
             ...(interruption.requestId ? { requestId: interruption.requestId } : {}),
             ...(interruption.permission ? { permission: interruption.permission } : {}),
             actionReceipts: result.actionReceipts || [],
-            resumeCount: continuation?.pendingInteraction.resumeCount
-              ? continuation.pendingInteraction.resumeCount + 1
+            // Each resume must get a strictly increasing count. Using a truthy
+            // check here treated an initial count of 0 as "unset" and reset it
+            // to 0, so every resume reused the same `...:resume-1` task id. Once
+            // that id completed with a question, the cached "completed" receipt was
+            // replayed on later resumes and the Brain was never consulted again.
+            resumeCount: continuation
+              ? (continuation.pendingInteraction.resumeCount || 0) + 1
               : 0,
           };
           task.status = 'pending';
@@ -1026,6 +1081,55 @@ const executeTask = async (task: Task, savedTask: MissionTaskCheckpoint | undefi
         .filter((task: { status: string }) => task.status !== 'completed')
         .map((task: { output?: string }) => task.output || '')
         .find((output: string) => /\buncertain\b|outcome.?unknown/i.test(output)) || '';
+
+      /**
+       * Schedules a recovery/amendment task for the current phase: ensures it is in the phase,
+       * updates plan/activePlan/currentPlan, persists a checkpoint and the plan (fatal errors
+       * rethrow), emits the Mission Director monologue, broadcasts 'phase_plan_amended', runs any
+       * pending tasks, checks the control checkpoint, and records an uncertain-action issue.
+       * Shared by the reviewer-follow-up path and the Director fallback path so their behavior and
+       * event payloads stay identical.
+       */
+      const scheduleRecoveryTask = async (task: Task, gaps: string[], recoveryReviewIndex: number): Promise<void> => {
+        if (!phase.tasks.some((existing: Task) => existing.id === task.id)) {
+          phase.tasks.push(task);
+        }
+        plan.phases = plan.phases.map((p: any) => (p.id === phase.id ? phase : p));
+        activePlan = plan;
+        this.currentPlan = plan;
+        saveCheckpoint();
+        try {
+          await this.persistPlan(ctx, plan);
+        } catch (err) {
+          if (isFatalServiceError(err)) throw err;
+          logger.error({ missionId: ctx.missionId, err: err instanceof Error ? err.message : String(err) }, 'Failed to persist amended plan');
+        }
+        await agentRuntime.emitMonologue({
+          agentRole: 'mission-director',
+          phaseId: phase.id,
+          thought: `I am scheduling a recovery task "${task.title}" to address the remaining gaps for phase "${phase.name}": ${gaps.slice(0, 5).join('; ')}.`,
+          text: `Scheduling recovery task "${task.title}".`,
+          data: { reviewIndex: recoveryReviewIndex, taskId: task.id, gaps, reason: 'schedule_recovery_task' },
+        });
+        await ctx.broadcast({
+          type: 'phase_plan_amended',
+          missionId: ctx.missionId,
+          timestamp: Date.now(),
+          data: {
+            phaseId: phase.id,
+            reviewIndex: recoveryReviewIndex,
+            gaps: gaps.map((gap) => sanitizeAgentMessage(gap, '').text).filter(Boolean),
+            task,
+            plan,
+            agentId: agentRuntime.getAgentIdForRole('mission-director'),
+            agentName: 'Mission Director',
+            agentRole: 'mission-director',
+          },
+        });
+        await executePendingTasks();
+        await ctx.controlCheckpoint?.();
+        uncertainActionIssue = findUncertainAction();
+      };
       await executePendingTasks();
       await ctx.controlCheckpoint?.();
       uncertainActionIssue = findUncertainAction();
@@ -1050,13 +1154,32 @@ const executeTask = async (task: Task, savedTask: MissionTaskCheckpoint | undefi
           reviewIndex++
         ) {
           try {
-            let review = await agentRuntime.reviewPhase(
-              missionPromptWithMessages(ctx),
-              plan,
-              phase,
-              [...completedTaskSummaries.values()],
-              reviewIndex,
-            );
+            // Inner retry-with-backoff for the phase review itself. A transient review failure
+            // is retried at the SAME reviewIndex (it must not consume a recovery round); only a
+            // terminal Brain model-selection failure or a fatal service error escapes. There is
+            // no attempt cap — retries continue until the review succeeds or the Brain is
+            // exhausted.
+            let review;
+            for (;;) {
+              try {
+                review = await agentRuntime.reviewPhase(
+                  missionPromptWithMessages(ctx),
+                  plan,
+                  phase,
+                  [...completedTaskSummaries.values()],
+                  reviewIndex,
+                );
+                break;
+              } catch (reviewErr) {
+                if (isBrainExhaustionError(reviewErr) || isFatalServiceError(reviewErr)) throw reviewErr;
+                logger.error({ missionId: ctx.missionId, phaseId: phase.id, reviewIndex, err: reviewErr instanceof Error ? reviewErr.message : String(reviewErr) }, 'Phase review failed; retrying at the same review index');
+                await new Promise((resolve) => setTimeout(
+                  resolve,
+                  Math.min(60_000, 1_000 * 2 ** Math.min(reviewIndex - 1, 6)),
+                ));
+                await ctx.controlCheckpoint?.();
+              }
+            }
             if (review.satisfied) {
               const evidenceGaps = phaseRequirementEvidenceGaps(plan, phase.id, phaseOutput);
               if (evidenceGaps.length > 0) {
@@ -1100,88 +1223,73 @@ const executeTask = async (task: Task, savedTask: MissionTaskCheckpoint | undefi
               );
               break;
             }
-            const noProgressGuidance = !madeProgress
-              ? ' Previous attempts made no observable progress on the same gaps; use a different authorized approach and do not repeat the same recovery steps. If a required value or authorization is missing, ask the user for it and wait.'
-              : '';
-            // Incremental phase recovery: reuse the same gap list but retry each still-missing
-            // deliverable with the next escalation strategy, so no round repeats another verbatim.
+            // Incremental phase recovery: register newly surfaced deliverables and advance each
+            // still-missing deliverable's escalation attempt, then render ONE structured recovery
+            // context (replaces the previous free-text noProgressGuidance + incrementalGuidance).
             const amendedGapArtifacts = artifactNamesFromGaps(applied.gaps || [])
               .filter((name) => !amendedPendingArtifacts.includes(name));
             amendedPendingArtifacts = [...new Set([...amendedPendingArtifacts, ...amendedGapArtifacts])];
-            const amendmentArtifactGuidance = amendedPendingArtifacts.map((name) => {
-              const attempt = (amendedArtifactAttempts.get(name) || 0) + 1;
-              amendedArtifactAttempts.set(name, attempt);
-              return artifactRecoveryInstruction(name, attempt, attempt > 1);
+            amendedPendingArtifacts.forEach((name) => {
+              amendedArtifactAttempts.set(name, (amendedArtifactAttempts.get(name) || 0) + 1);
             });
-            const incrementalGuidance = amendmentArtifactGuidance.length > 0
-              ? ` Deliverables still missing (use the method given for each): ${amendmentArtifactGuidance.join(' ')}`
-              : '';
-            if (applied.amendment && (noProgressGuidance || incrementalGuidance)) {
-              // Director decision: amend system prompt with escalating recovery guidance
+            const recoveryContext = renderRecoveryContext({
+              gaps: applied.gaps || [],
+              attemptNumber: reviewIndex,
+              pendingArtifacts: amendedPendingArtifacts,
+              artifactAttempts: amendedArtifactAttempts,
+              madeProgress,
+            });
+            if (applied.amendment && recoveryContext) {
+              // Director decision: amend the reviewer's system prompt with escalating recovery guidance
               await agentRuntime.emitMonologue({
                 agentRole: 'mission-director',
                 phaseId: phase.id,
-                thought: `No observable progress was made on the same gaps in review ${reviewIndex}. I am updating the recovery task's system prompt with guidance requiring a different authorized approach for each deliverable still missing.`,
+                thought: `I am updating the recovery task's system prompt with structured guidance for the deliverables still missing after review ${reviewIndex}${madeProgress ? '' : ' (no observable progress last round)'}.`,
                 text: `Adding escalating recovery guidance to recovery task.`,
-                data: { reviewIndex, gaps: applied.gaps, reason: 'no_progress_guidance', pendingArtifacts: amendedPendingArtifacts },
+                data: { reviewIndex, gaps: applied.gaps, reason: 'recovery_context_updated', pendingArtifacts: amendedPendingArtifacts },
               });
-              applied.amendment.systemPrompt = `${applied.amendment.systemPrompt}\n${noProgressGuidance}${incrementalGuidance}`;
+              applied.amendment.systemPrompt = `${applied.amendment.systemPrompt}\n${recoveryContext}`;
               plan = { ...plan, phases: plan.phases.map((p) => p.id === phase.id ? { ...phase, tasks: [...phase.tasks] } : p) };
             }
             if (!applied.amendment) {
-              // The Mission Director creates a recovery task when the Phase
-              // Reviewer did not propose one, with visible rationale.
-              await agentRuntime.emitMonologue({
-                agentRole: 'mission-director',
-                phaseId: phase.id,
-                thought: `The Phase Reviewer reported ${applied.gaps.length} gap(s) for phase "${phase.name}" but did not propose an actionable follow-up task. I am creating a recovery task to address the gaps: ${applied.gaps.slice(0, 5).join('; ')}.`,
-                text: `Creating recovery task for unresolved phase gaps.`,
-                data: { reviewIndex, gaps: applied.gaps, reason: 'reviewer_no_followup' },
-              });
+              // The Mission Director creates one recovery task PER gap when the Phase Reviewer did
+              // not propose an actionable follow-up. Each task is independent (its own description,
+              // system prompt, and expected artifacts) so one blocker cannot stall the others.
               logger.error({ missionId: ctx.missionId, phaseId: phase.id, gaps: applied.gaps }, 'Mission phase remains incomplete and reviewer provided no actionable follow-up task');
-              const amendmentIndex = phase.tasks.filter((t: any) => t.id.startsWith(`${phase.id}-amendment-`)).length + 1;
-              const amendmentTask: Task = {
-                id: `${phase.id}-amendment-${amendmentIndex}`,
-                title: `Address phase gaps (review ${reviewIndex})`,
-                description: `Address remaining gaps: ${(applied.gaps || []).join('; ') || 'unspecified gaps'}`,
-agentRole: 'mission-executor',
-                systemPrompt: `Mission goal: ${ctx.prompt}\nPhase goal: ${phase.name} — ${phase.goal}\nResolve the following gaps using the available context and recorded task outputs: ${(applied.gaps || []).join('; ') || 'unspecified gaps'}. Focus only on accomplishing the requested mission outcome or reporting a concrete blocker. Do not invent unrelated work, and do not create or request design documents, plans, or substitute artifacts unless the mission goal explicitly requires them as deliverables.${incrementalGuidance}${noProgressGuidance}`,
-                dependsOnTaskIds: phase.tasks.map((t: any) => t.id),
-                expectedArtifacts: amendedPendingArtifacts,
-                requiredActions: [],
-                status: 'pending',
-                artifacts: [],
-              } as Task;
-              applyRuntimeTaskRequirements(amendmentTask, ctx.prompt);
-              phase.tasks.push(amendmentTask);
-              plan.phases = plan.phases.map((p: any) => p.id === phase.id ? phase : p);
-              activePlan = plan;
-              this.currentPlan = plan;
-              saveCheckpoint();
-              try {
-                await this.persistPlan(ctx, plan);
-              } catch (err) {
-                if (isFatalServiceError(err)) throw err;
-                logger.error({ missionId: ctx.missionId, err: err instanceof Error ? err.message : String(err) }, 'Failed to persist amended plan');
-              }
-              await ctx.broadcast({
-                type: 'phase_plan_amended',
-                missionId: ctx.missionId,
-                timestamp: Date.now(),
-                data: {
-                  phaseId: phase.id,
-                  reviewIndex,
-                  gaps: applied.gaps.map((gap) => sanitizeAgentMessage(gap, '').text).filter(Boolean),
-                  task: amendmentTask,
-                  plan,
-                  agentId: agentRuntime.getAgentIdForRole('mission-director'),
-                  agentName: 'Mission Director',
+              const gapsToRecover = (applied.gaps || []).length > 0 ? applied.gaps : ['unspecified gaps'];
+              for (const [gapOffset, gap] of gapsToRecover.entries()) {
+                const gapArtifacts = artifactNamesFromGaps([gap]);
+                const amendmentIndex = phase.tasks.filter((t: any) => t.id.startsWith(`${phase.id}-amendment-`)).length + 1;
+                const gapRecoveryContext = renderRecoveryContext({
+                  gaps: [gap],
+                  attemptNumber: reviewIndex,
+                  pendingArtifacts: gapArtifacts,
+                  artifactAttempts: amendedArtifactAttempts,
+                  madeProgress,
+                });
+                await agentRuntime.emitMonologue({
                   agentRole: 'mission-director',
-                },
-              });
-              await executePendingTasks();
-              await ctx.controlCheckpoint?.();
-              uncertainActionIssue = findUncertainAction();
+                  phaseId: phase.id,
+                  thought: `The Phase Reviewer reported ${applied.gaps.length} gap(s) for phase "${phase.name}" but did not propose an actionable follow-up task. I am creating recovery task ${gapOffset + 1} of ${gapsToRecover.length} to address the gap: ${gap}.`,
+                  text: `Creating recovery task for unresolved phase gap ${gapOffset + 1}/${gapsToRecover.length}.`,
+                  data: { reviewIndex, gap, reason: 'reviewer_no_followup' },
+                });
+                const amendmentTask: Task = {
+                  id: `${phase.id}-amendment-${amendmentIndex}`,
+                  title: `Address phase gap (review ${reviewIndex})`,
+                  description: `Address remaining gap: ${gap}`,
+                  agentRole: 'mission-executor',
+                  systemPrompt: `Mission goal: ${ctx.prompt}\nPhase goal: ${phase.name} — ${phase.goal}\nResolve the following gap using the available context and recorded task outputs: ${gap}. Focus only on accomplishing the requested mission outcome or reporting a concrete blocker. Do not invent unrelated work, and do not create or request design documents, plans, or substitute artifacts unless the mission goal explicitly requires them as deliverables.\n${gapRecoveryContext}`,
+                  dependsOnTaskIds: phase.tasks.map((t: any) => t.id),
+                  expectedArtifacts: gapArtifacts,
+                  requiredActions: [],
+                  status: 'pending',
+                  artifacts: [],
+                } as Task;
+                applyRuntimeTaskRequirements(amendmentTask, ctx.prompt);
+                await scheduleRecoveryTask(amendmentTask, [gap], reviewIndex);
+                if (uncertainActionIssue) break;
+              }
               if (uncertainActionIssue) break;
               continue;
             }
@@ -1191,14 +1299,7 @@ agentRole: 'mission-executor',
             ));
             amendedPendingArtifacts = amendedPendingArtifacts.filter((name) => stillMissing.has(name));
             if (stillMissing.size === 0) amendedArtifactAttempts.clear();
-            saveCheckpoint();
-            try {
-              await this.persistPlan(ctx, plan);
-            } catch (err) {
-              if (isFatalServiceError(err)) throw err;
-              logger.error({ missionId: ctx.missionId, err: err instanceof Error ? err.message : String(err) }, 'Failed to persist amended plan');
-            }
-            // Director decision: adopt reviewer's proposed amendment
+            // Director decision: adopt the reviewer's proposed amendment and schedule it.
             await agentRuntime.emitMonologue({
               agentRole: 'mission-director',
               phaseId: phase.id,
@@ -1206,27 +1307,10 @@ agentRole: 'mission-executor',
               text: `Adopting reviewer's follow-up task "${applied.amendment.title}".`,
               data: { reviewIndex, amendmentId: applied.amendment.id, amendmentTitle: applied.amendment.title, gaps: applied.gaps, reason: 'reviewer_followup_adopted' },
             });
-            await ctx.broadcast({
-              type: 'phase_plan_amended',
-              missionId: ctx.missionId,
-              timestamp: Date.now(),
-              data: {
-                phaseId: phase.id,
-                reviewIndex,
-                gaps: applied.gaps.map((gap) => sanitizeAgentMessage(gap, '').text).filter(Boolean),
-                task: applied.amendment,
-                plan,
-                agentId: agentRuntime.getAgentIdForRole('mission-director'),
-                agentName: 'Mission Director',
-                agentRole: 'mission-director',
-              },
-            });
-            await executePendingTasks();
-            await ctx.controlCheckpoint?.();
-            uncertainActionIssue = findUncertainAction();
+            await scheduleRecoveryTask(applied.amendment, applied.gaps || [], reviewIndex);
             if (uncertainActionIssue) break;
           } catch (err) {
-            if (isFatalServiceError(err)) throw err;
+            if (isBrainExhaustionError(err) || isFatalServiceError(err)) throw err;
             logger.error({ missionId: ctx.missionId, phaseId: phase.id, err: err instanceof Error ? err.message : String(err) }, 'Phase review failed');
             await new Promise((resolve) => setTimeout(
               resolve,

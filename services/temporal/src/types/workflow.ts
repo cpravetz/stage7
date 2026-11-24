@@ -34,6 +34,22 @@ export interface MissionTaskCheckpoint {
   taskId: string;
 }
 
+/**
+ * Per-phase mission result shape shared by the in-process mission engine
+ * (MissionOrchestrator) and the completion/stage listeners.
+ */
+export interface MissionPhaseOutput {
+  phaseId: string;
+  name: string;
+  status: 'completed' | 'incomplete';
+  tasks: Array<{
+    taskId: string;
+    status: 'completed' | 'incomplete' | 'failed' | 'pending';
+    artifacts: MissionArtifact[];
+    output?: string;
+  }>;
+}
+
 export interface MissionCredentialRequest {
   executionId: string;
   toolId: string;

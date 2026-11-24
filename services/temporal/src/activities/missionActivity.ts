@@ -1,109 +1,11 @@
-import { Context } from '@temporalio/activity';
 import { logger } from '@stage7-nextgen/shared';
-import { PlanSchema } from '@stage7-nextgen/shared';
-import type { Plan } from '@stage7-nextgen/shared';
 import { MissionOrchestrator } from '../planner/MissionOrchestrator';
-import { MissionActivityCheckpoint, MissionPendingInteraction, MissionTaskCheckpoint, WorkflowInput } from '../types/workflow';
-import {
-  awaitMissionPhaseApprovalActivity,
-  completeMissionActivity,
-  executeMissionTaskActivity,
-  finishMissionPhaseActivity,
-  prepareMissionActivity,
-  recordMissionPhaseApprovalActivity,
-  requestMissionUserInputActivity,
-  reviewAndAmendMissionPhaseActivity,
-  selectNextMissionTaskActivity,
-  startMissionPhaseActivity,
-  MissionPhaseOutput,
-} from './missionWorkflowActivities';
-import { MissionCompletedListener } from '../listeners/MissionCompletedListener';
-import { MissionStageCompletedListener } from '../listeners/MissionStageCompletedListener';
+import { MissionActivityCheckpoint, WorkflowInput } from '../types/workflow';
 
 interface MissionExecutionOptions {
   checkpoint?: MissionActivityCheckpoint;
   heartbeat?: (checkpoint: MissionActivityCheckpoint) => void;
   controlCheckpoint?: () => Promise<void>;
-}
-
-function parseCheckpoint(value: unknown): MissionActivityCheckpoint | undefined {
-  if (value === undefined || value === null) return undefined;
-  if (!value || typeof value !== 'object' || (value as { version?: unknown }).version !== 1) {
-    throw new Error('Mission activity received an unsupported heartbeat checkpoint');
-  }
-  const checkpoint = value as { version: 1; plan?: unknown };
-  const plan = checkpoint.plan === undefined ? undefined : PlanSchema.parse(checkpoint.plan);
-  const completedTasksValue = (value as { completedTasks?: unknown }).completedTasks;
-  if (completedTasksValue !== undefined && !Array.isArray(completedTasksValue)) {
-    throw new Error('Mission activity checkpoint contains invalid completed task data');
-  }
-  const completedTasks = (completedTasksValue || []).map((task): MissionTaskCheckpoint => {
-    if (!task || typeof task !== 'object') {
-      throw new Error('Mission activity checkpoint contains an invalid task entry');
-    }
-    const entry = task as Record<string, unknown>;
-    if (typeof entry.phaseId !== 'string' || typeof entry.taskId !== 'string') {
-      throw new Error('Mission activity checkpoint contains an invalid completed task reference');
-    }
-    return {
-      phaseId: entry.phaseId,
-      taskId: entry.taskId,
-    };
-  });
-  const completedPhasesValue = (value as { completedPhases?: unknown }).completedPhases;
-  const pendingInteractionValue = (value as { pendingInteraction?: unknown }).pendingInteraction;
-  if (
-    pendingInteractionValue !== undefined
-    && (!pendingInteractionValue
-      || typeof pendingInteractionValue !== 'object'
-      || !['user_input', 'mcp_permission'].includes(String((pendingInteractionValue as { kind?: unknown }).kind))
-      || typeof (pendingInteractionValue as { phaseId?: unknown }).phaseId !== 'string'
-      || typeof (pendingInteractionValue as { taskId?: unknown }).taskId !== 'string')
-  ) {
-    throw new Error('Mission activity checkpoint contains invalid pending interaction data');
-  }
-  if (
-    completedPhasesValue !== undefined
-    && (!Array.isArray(completedPhasesValue) || !completedPhasesValue.every((id) => typeof id === 'string'))
-  ) {
-    throw new Error('Mission activity checkpoint contains invalid completed phase data');
-  }
-  if (!plan && (completedTasks.length > 0 || (completedPhasesValue as unknown[] | undefined)?.length)) {
-    throw new Error('Mission activity checkpoint contains progress without a plan');
-  }
-  if (plan) {
-    const taskKeys = new Set<string>();
-    for (const completedTask of completedTasks) {
-      const taskKey = JSON.stringify([completedTask.phaseId, completedTask.taskId]);
-      if (taskKeys.has(taskKey)) {
-        throw new Error(`Mission activity checkpoint duplicates task ${completedTask.taskId}`);
-      }
-      taskKeys.add(taskKey);
-      if (!plan.phases.some((phase) =>
-        phase.id === completedTask.phaseId && phase.tasks.some((task) => task.id === completedTask.taskId),
-      )) {
-        throw new Error(`Mission activity checkpoint references unknown task ${completedTask.taskId}`);
-      }
-    }
-    const phaseIds = new Set<string>();
-    for (const phaseId of (completedPhasesValue || []) as string[]) {
-      const phase = plan.phases.find((entry) => entry.id === phaseId);
-      if (phaseIds.has(phaseId) || !phase) {
-        throw new Error(`Mission activity checkpoint references invalid phase ${phaseId}`);
-      }
-      phaseIds.add(phaseId);
-      if (phase.tasks.some((task) => !taskKeys.has(JSON.stringify([phaseId, task.id])))) {
-        throw new Error(`Mission activity checkpoint marks incomplete phase ${phaseId} complete`);
-      }
-    }
-  }
-  return {
-    version: 1,
-    ...(plan ? { plan } : {}),
-    completedTasks,
-    completedPhases: (completedPhasesValue || []) as string[],
-    ...(pendingInteractionValue ? { pendingInteraction: pendingInteractionValue as MissionPendingInteraction } : {}),
-  };
 }
 
 async function executeMissionActivity(
@@ -240,15 +142,6 @@ const orchestrator = new MissionOrchestrator();
   return result;
 }
 
-export async function runMissionActivity(input: WorkflowInput): Promise<any> {
-  const activityContext = Context.current();
-  const checkpoint = parseCheckpoint(activityContext.info.heartbeatDetails);
-  return executeMissionActivity(input, {
-    checkpoint,
-    heartbeat: (details) => activityContext.heartbeat(details),
-  });
-}
-
 export async function runMissionDirect(
   input: WorkflowInput,
   checkpoint?: MissionActivityCheckpoint,
@@ -276,39 +169,6 @@ export async function runMissionDirect(
   });
   return executeMissionActivity({ ...input, userMessages }, { checkpoint, controlCheckpoint });
 }
-
-async function notifyMissionCompletedActivity(
-  input: WorkflowInput,
-  plan: Plan,
-  phases: MissionPhaseOutput[],
-): Promise<void> {
-  await new MissionCompletedListener().onMissionCompleted(input, plan, phases);
-}
-
-async function rollupEntityMemoryActivity(
-  input: WorkflowInput,
-  plan: Plan,
-  phase: MissionPhaseOutput,
-): Promise<void> {
-  await new MissionStageCompletedListener().onStageCompleted(input, plan, phase);
-}
-
-export const missionActivities = {
-  runMissionActivity,
-  prepareMissionActivity,
-  startMissionPhaseActivity,
-  selectNextMissionTaskActivity,
-  reviewAndAmendMissionPhaseActivity,
-  executeMissionTaskActivity,
-  finishMissionPhaseActivity,
-  requestMissionUserInputActivity,
-  awaitMissionPhaseApprovalActivity,
-  recordMissionPhaseApprovalActivity,
-  completeMissionActivity,
-  notifyMissionCompletedActivity,
-  rollupEntityMemoryActivity,
-};
-export type MissionActivities = typeof missionActivities;
 
 export async function recordActivityMetrics(missionId: string): Promise<void> {
   logger.info({ missionId }, 'Recording activity metrics');

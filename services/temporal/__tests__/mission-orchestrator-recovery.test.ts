@@ -1133,4 +1133,96 @@ describe('MissionOrchestrator missing-input recovery', () => {
     expect(result.outputs.status).toBe('completed')
     expect(broadcast).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'mission_incomplete' }))
   })
+
+  it('retries a transient phase-review failure at the same review index without consuming a recovery round', async () => {
+    const plan: Plan = {
+      summary: 'Complete and verify the requested work',
+      estimatedDuration: 'short', estimatedCost: 'low',
+      requiresClarification: false, clarificationQuestions: [], clarificationAnswers: [],
+      phases: [{
+        id: 'phase-1', name: 'Execution', goal: 'Complete and verify the requested work',
+        requiresApproval: false, status: 'pending',
+        tasks: [{
+          id: 'phase-1-task-1', title: 'Complete and verify the requested work',
+          description: 'Complete and verify the requested work.', agentRole: 'assistant',
+          systemPrompt: 'Complete and verify the requested work.', dependsOnTaskIds: [],
+          expectedArtifacts: [], requiredActions: [], status: 'pending', artifacts: [],
+        }],
+      }],
+    }
+    jest.spyOn(global, 'fetch').mockResolvedValue(jsonResponse())
+    jest.spyOn(MissionAgentRuntime.prototype, 'getOrCreateAgent').mockResolvedValue('agent-assistant')
+    jest.spyOn(MissionAgentRuntime.prototype, 'executeTask').mockResolvedValue({
+      output: 'The work is complete.', artifacts: [], tokensUsed: 1,
+    })
+    // First review call fails transiently; the retry must reuse the SAME reviewIndex (1), not 2.
+    const reviewIndexes: number[] = []
+    const reviewPhase = jest.spyOn(MissionAgentRuntime.prototype, 'reviewPhase')
+      .mockRejectedValueOnce(new Error('review service unavailable'))
+      .mockImplementation(async (...args: any[]) => {
+        reviewIndexes.push(args[4] as number)
+        return { satisfied: true, gaps: [] }
+      })
+    jest.spyOn(MissionAgentRuntime.prototype, 'reviewMissionCompletion')
+      .mockResolvedValue({ satisfied: true, gaps: [] })
+    const broadcast = jest.fn().mockResolvedValue(undefined)
+
+    const result = await new MissionOrchestrator().run({
+      missionId: 'review-retry-index', prompt: 'Complete and verify the requested work',
+      tenantId: 'tenant-1', persistenceUrl: 'http://artifacts', gatewayUrl: 'http://gateway',
+      broadcast, broadcastAll: jest.fn().mockResolvedValue(undefined), waitForApproval: jest.fn(),
+      resumePlan: plan,
+    })
+
+    expect(result.outputs.status).toBe('completed')
+    // The transient failure did not advance the review index: the successful retry ran at index 1.
+    expect(reviewIndexes).toEqual([1])
+    expect(reviewPhase).toHaveBeenCalledTimes(2)
+    expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({ type: 'phase_completed' }))
+  })
+
+  it('creates one fallback recovery task per gap when the reviewer proposes no follow-up', async () => {
+    const plan: Plan = {
+      summary: 'Complete the work',
+      estimatedDuration: 'short', estimatedCost: 'low',
+      requiresClarification: false, clarificationQuestions: [], clarificationAnswers: [],
+      phases: [{
+        id: 'phase-1', name: 'Execution', goal: 'Complete the work',
+        requiresApproval: false, status: 'pending',
+        tasks: [{
+          id: 'task-1', title: 'Work', description: 'Work', agentRole: 'worker',
+          systemPrompt: 'Work', dependsOnTaskIds: [], expectedArtifacts: [],
+          requiredActions: [], status: 'pending', artifacts: [],
+        }],
+      }],
+    }
+    jest.spyOn(global, 'fetch').mockResolvedValue(jsonResponse())
+    jest.spyOn(MissionAgentRuntime.prototype, 'getOrCreateAgent').mockResolvedValue('agent-worker')
+    const execute = jest.spyOn(MissionAgentRuntime.prototype, 'executeTask')
+      .mockResolvedValue({ output: 'Still incomplete', artifacts: [], tokensUsed: 0 })
+    // Reviewer reports two gaps but no actionable follow-up task each round, so the Director must
+    // synthesize one recovery task per gap.
+    jest.spyOn(MissionAgentRuntime.prototype, 'reviewPhase')
+      .mockResolvedValue({ satisfied: false, gaps: ['the report is missing', 'the summary is missing'] })
+    jest.spyOn(MissionAgentRuntime.prototype, 'reviewMissionCompletion')
+      .mockResolvedValue({ satisfied: false, gaps: ['the report is missing', 'the summary is missing'] })
+    const amendedTasks: any[] = []
+    const broadcast = jest.fn(async (event: { type: string; data?: any }) => {
+      if (event.type === 'phase_plan_amended' && event.data?.task) amendedTasks.push(event.data.task)
+    })
+
+    const result = await new MissionOrchestrator().run({
+      missionId: 'per-gap-fallback', prompt: 'Complete the work', tenantId: 'tenant-1',
+      persistenceUrl: 'http://artifacts', gatewayUrl: 'http://gateway',
+      broadcast, broadcastAll: jest.fn().mockResolvedValue(undefined), waitForApproval: jest.fn(),
+      resumePlan: plan,
+    })
+
+    // At least two distinct fallback tasks were scheduled, one per reported gap.
+    const firstRound = amendedTasks.filter((task) => String(task.id).includes('-amendment-'))
+    expect(firstRound.length).toBeGreaterThanOrEqual(2)
+    const ids = new Set(firstRound.slice(0, 2).map((task) => task.id))
+    expect(ids.size).toBe(2)
+    expect(result.outputs.status).not.toBe('completed')
+  })
 })
