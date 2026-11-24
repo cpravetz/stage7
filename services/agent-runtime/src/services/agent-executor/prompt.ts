@@ -61,8 +61,18 @@ export function buildSystemPrompt({
     ? `You may delegate a bounded subtask with {"tool":"${DELEGATE_ACTION}","args":{"goal":"...","role":"...","systemPrompt":"..."}}. One delegation runs the child to completion and returns its completed result. Put the full subtask in that one request; do not delegate to discover an Agent ID or make a follow-up delegation just to retrieve its result.`
     : 'You may not delegate further in this execution.'
   const catalogNote = isTruncated
-    ? `Showing the ${tools.length} most relevant tools out of ${totalToolCount} available. Use {"tool":"${LIST_TOOLS_ACTION}","args":{"query":"<operation and input fields>"}} to find additional tools not listed here.`
-    : `Use {"tool":"${LIST_TOOLS_ACTION}","args":{"query":"<operation and input fields>"}} to search the catalog if no listed tool matches.`
+    ? `Showing the ${tools.length} most relevant tools out of ${totalToolCount} available. Use {"tool":"${LIST_TOOLS_ACTION}","args":{"query":"<operation and input fields>"}} to find additional tools not listed here. A catalog search returning nothing for the operation is the answer: it is evidence the capability is missing, not a retry prompt. Do not search again with reworded queries; call ${CREATE_TOOL_ACTION} to create the capability.`
+    : `Use {"tool":"${LIST_TOOLS_ACTION}","args":{"query":"<operation and input fields>"}} to search the catalog if no listed tool matches. A catalog search returning nothing for the operation is the answer: it is evidence the capability is missing, not a retry prompt. Do not search again with reworded queries; call ${CREATE_TOOL_ACTION} to create the capability.`
+  // The built-in pseudo-tools are handled by the executor and never appear in the
+  // tool catalog, so a model told only "the catalog is authoritative" can conclude
+  // the system has no tool-creation path at all and stall. State the control
+  // actions explicitly and explain what a catalog miss means.
+  const controlActionsNote = canTakeAction
+    ? [
+      `These control actions are always available and are NOT listed in the tool catalog: "${LIST_TOOLS_ACTION}" (search the catalog), "${CREATE_TOOL_ACTION}" (create and register a capability the catalog lacks), and "${DELEGATE_ACTION}" (delegate a subtask). Their absence from the catalog does not mean they are unsupported.`,
+      `Prefer an existing tool that performs the exact operation. Call ${CREATE_TOOL_ACTION} when the catalog genuinely lacks the capability — for example the very first time a kind of operation is needed. Once a tool for it is registered, REUSE that tool on later tasks instead of creating another one; a capability that already exists is not a reason to create a duplicate.`,
+    ]
+    : [];
   const actionInstructions = canTakeAction
     ? [
       'To execute a registered system tool, respond with exactly one raw JSON object: {"tool":"<tool-id>","args":{...}}. Never quote, fence, nest, or describe a tool action; only a sole JSON action object is executed. Do not claim an action succeeded until you receive its result.',
@@ -74,6 +84,7 @@ export function buildSystemPrompt({
         ? 'Tool creation is disabled for this Agent. Request access to a registered tool if the allowed tools are insufficient.'
         : `If no available tool can satisfy a concrete capability need, proactively call ${CREATE_TOOL_ACTION} to create one: {"tool":"${CREATE_TOOL_ACTION}","args":{"description":"...","requirements":["..."]}}. Describe the capability and constraints, not implementation details. ToolExecutor checks registered native tools, discovers suitable MCP tools and handles their permission flow, then creates, validates, registers, and persists a reusable plugin only if no suitable tool can be used. Never write tool code yourself or claim resolution succeeded unless the returned tool is registered and available.`,
       'Select a tool only when its description and schemas show it performs the exact requested operation and can verify the outcome. Name similarity is not enough: drafting, queuing, storing, or recording a request is not a substitute for sending, publishing, submitting, or otherwise carrying out the requested action.',
+      'Never pass a requested operation to a general-purpose tool that does not implement it (for example putting an SMS request into a file-write or search tool). A tool whose schema has no field for the operation cannot perform it; treat that as the capability being absent and call ' + CREATE_TOOL_ACTION + ' instead.',
     ]
     : [
       'No tool, tool-generation, or delegation actions are available in this execution. Do not invent, quote, or describe tool actions; return only the requested reasoning result or structured response.',
@@ -90,9 +101,10 @@ export function buildSystemPrompt({
 
       : []),
     ...(requiresExternalAction
-      ? ['This task requires an actual external operation. Do not treat tool discovery, tool creation, delegation, drafting, or a proposed action as completion evidence. If a registered tool matches the operation, execute it with the task\'s actual values and rely on the returned result. If no registered tool can perform the operation, call ' + CREATE_TOOL_ACTION + ' to create one — do not return a text answer without attempting a tool or tool creation first.']
+      ? ['This task requires an actual external operation. Do not treat tool discovery, tool creation, delegation, drafting, or a proposed action as completion evidence. Find the best existing tool in the catalog and execute it. If NO listed tool can perform this exact operation, you may call ' + CREATE_TOOL_ACTION + ' to create one — but only after searching the catalog. Never claim success without the operation completing.']
       : []),
     ...actionInstructions,
+    ...controlActionsNote,
     delegation,
     'Treat each system-tool result as authoritative. Report the returned value rather than recalculating or replacing it, and never claim a tool succeeded unless its actual result supports that claim.',
     'Create the assigned deliverables yourself using the mission context and available tools. Do not ask the user to write, create, or produce an artifact assigned to an agent. When asked for a recommendation or choice, compare candidates against the mission goals, constraints, and user context, then choose the strongest fit; if preferences are unstated, select a defensible default and state your assumptions. When a tool is named as failing or possibly unsuitable, inspect its live catalog entry, schemas, and recorded action results/errors; diagnose the evidence and try a suitable alternative or capability resolution when permitted. Never ask the user to diagnose a tool or decide whether to switch. Ask for input only when an essential fact cannot reasonably be inferred or explicit authorization is required.',

@@ -208,7 +208,10 @@ print(json.dumps({'success': True, 'messageId': result['sid']}))`,
     const config = new ToolConfigResolver(new Map());
     const result = await config.resolveCredentials(tool, {}, 'exec-2');
     expect(result.resolved.account_id).toBe('saved-account');
-    expect(String(fetcher.mock.calls[0][0])).toContain(encodeURIComponent('secret:account_id'));
+    // A by-name recovery lookup may precede the declared lookup; what matters is
+    // that the tool-specific `secret:` entry is tried.
+    expect(fetcher.mock.calls.map((call) => String(call[0])))
+      .toContainEqual(expect.stringContaining(encodeURIComponent('secret:account_id')));
   });
 
   it('resolves an explicitly named existing vault secret independently of the logical key', async () => {
@@ -229,5 +232,78 @@ print(json.dumps({'success': True, 'messageId': result['sid']}))`,
     } finally {
       credentialProvider.invalidate();
     }
+  });
+});
+
+describe('vault credential resolution by secret name', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+    credentialProvider.invalidate();
+  });
+
+  const twilioTool: Tool = {
+    id: 'sms-twilio',
+    name: 'Send SMS via Twilio',
+    description: 'Send an SMS text message using the Twilio REST API',
+    type: 'code',
+    configSchema: {
+      type: 'object',
+      properties: {
+        accountSid: { type: 'string', description: 'Twilio Account SID', vaultSecretId: 'twilio-account-sid' },
+        authToken: { type: 'string', description: 'Twilio Auth Token', vaultSecretId: 'twilio-auth-token', sensitive: true },
+      },
+      required: ['accountSid', 'authToken'],
+    },
+    manifest: {},
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  };
+
+  const secretValues: Record<string, string> = {
+    'secret:twilio_acct_sid': 'AC-real-sid',
+    'secret:twilio_auth_token': 'real-auth-token',
+    'secret:endpoint': 'https://example.invalid',
+  };
+
+  // Vault mimic: invented ids 404, real names decrypt, and only GET /api/vault/secrets lists names.
+  const mockVault = () => jest.spyOn(global, 'fetch').mockImplementation(async (input) => {
+    const url = String(input);
+    if (url.endsWith('/api/vault/secrets')) {
+      return {
+        ok: true,
+        json: async () => ({ secrets: Object.keys(secretValues).map((name) => ({ name })) }),
+      } as Response;
+    }
+    const decrypt = url.match(/\/api\/vault\/secrets\/name\/([^/]+)\/decrypt/)
+    if (decrypt) {
+      const name = decodeURIComponent(decrypt[1])
+      const value = secretValues[name]
+      return value === undefined
+        ? { ok: false, status: 404, json: async () => ({}) } as Response
+        : { ok: true, json: async () => ({ plaintext: value }) } as Response;
+    }
+    return { ok: false, status: 404, json: async () => ({}) } as Response;
+  });
+
+  it('uses configured vault secrets when a generated tool invents non-existent vaultSecretIds', async () => {
+    mockVault();
+    const resolver = new ToolConfigResolver(new Map());
+    const { resolved } = await resolver.resolveCredentials(twilioTool, {}, 'exec-sms');
+    expect(resolved.accountSid).toBe('AC-real-sid');
+    expect(resolved.authToken).toBe('real-auth-token');
+  });
+
+  it('does not bind an unrelated secret to a credential', async () => {
+    mockVault();
+    const resolver = new ToolConfigResolver(new Map());
+    const tool: Tool = {
+      ...twilioTool,
+      configSchema: {
+        type: 'object',
+        properties: { apiKey: { type: 'string', description: 'Weather service API key', vaultSecretId: 'made-up-key' } },
+        required: ['apiKey'],
+      },
+    };
+    await expect(resolver.resolveCredentials(tool, {}, 'exec-1')).rejects.toBeInstanceOf(CredentialRequiredError);
   });
 });

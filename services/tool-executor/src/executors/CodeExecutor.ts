@@ -98,12 +98,23 @@ function isolatedCommand(
   const runtimeArgs = args.map((arg) => arg.startsWith(`${sandboxDir}${path.sep}`)
     ? path.posix.join('/work', path.relative(sandboxDir, arg).split(path.sep).join(path.posix.sep))
     : arg);
+  // Without a mount at /bin, working-directory-relative lookups through PATH
+  // still work because the interpreter is invoked by its resolved absolute
+  // path; but dynamic loaders that hard-code /bin (some shebangs) need it. Mount
+  // /usr and /lib where present, and recreate /bin as a symlink to /usr/bin so
+  // the image layout survives regardless of whether /bin is a real directory or
+  // a symlink (Alpine keeps it a symlink; Debian does not).
   const libraryMounts = ['/lib', '/lib64'].flatMap((directory) =>
     fs.existsSync(directory) ? ['--ro-bind', directory, directory] : [],
   );
+  // The loader cache is optional: Alpine has none, and hardcoding a nonexistent
+  // source path made bwrap abort before the sandboxed process ever started.
   const loaderCacheMount = fs.existsSync('/etc/ld.so.cache')
     ? ['--ro-bind', '/etc/ld.so.cache', '/etc/ld.so.cache']
     : [];
+  const binMount = fs.existsSync('/bin') && fs.lstatSync('/bin').isSymbolicLink()
+    ? ['--symlink', '/usr/bin', '/bin']
+    : ['--ro-bind', '/bin', '/bin'];
   const bubblewrapArgs = [
     '--unshare-net',
     '--unshare-pid',
@@ -111,6 +122,7 @@ function isolatedCommand(
     '--new-session',
     '--ro-bind', '/usr', '/usr',
     ...libraryMounts,
+    ...binMount,
     '--dev', '/dev',
     '--proc', '/proc',
     '--dir', '/etc',
@@ -121,7 +133,7 @@ function isolatedCommand(
     '--bind', sandboxDir, '/work',
     '--chdir', '/work',
     '--clearenv',
-    '--setenv', 'PATH', '/usr/bin:/usr/local/bin:/runtime',
+    '--setenv', 'PATH', '/usr/bin:/bin:/usr/local/bin:/runtime',
     '--setenv', 'HOME', '/tmp',
     '--setenv', 'NODE_ENV', 'test',
     '--setenv', 'PYTHONNOUSERSITE', '1',

@@ -187,12 +187,16 @@ logger.info({ count: toolRegistry.list().length }, 'Registered default tools');
   for (const plugin of deployed) {
     if (toolRegistry.get(plugin.id)) {
       skippedPlugins++;
+      // Already registered (e.g. hydrated from the tool store) but the plugin
+      // directory is still ours to manage, so undeploying removes its files.
+      toolRegistry.markDeployedPlugin(plugin.id);
       continue;
     }
     try {
       const tool = PluginGenerator.loadDeployed(plugin.id);
       if (!tool) continue;
       toolRegistry.registerOrReplace(tool);
+      toolRegistry.markDeployedPlugin(plugin.id);
       adopted++;
     } catch (err) {
       logger.warn({ pluginId: plugin.id, err: err instanceof Error ? err.message : String(err) }, 'Failed to adopt deployed plugin');

@@ -91,9 +91,20 @@ export function compactCheckpointForStorage(next: AgentExecutionCheckpoint): Age
   // the full reconciliation/binding objects are transient runtime metadata
   // that only the active executor needs, and they were the vector that pushed
   // checkpoints past the storage limit across repeated failed task retries.
-  const compactedReceipts = (next.actionReceipts ?? []).map(compactReceiptForPersistence)
+  let compactedReceipts = (next.actionReceipts ?? []).map(compactReceiptForPersistence)
+  // Receipts are also a bloat vector: a large catalog dump (e.g. repeated
+  // `__list_tools` results near the 4 KB receipt cap) multiplied across dozens
+  // of tool calls can consume the whole budget on its own. Reserve at most half
+  // of the limit for receipts, keeping the most recent ones that the executor
+  // actually reads for dedupe and required-action evidence.
+  const RECEIPTS_BUDGET = Math.floor(MAX_AGENT_CHECKPOINT_BYTES / 2)
+  let receiptsSize = Buffer.byteLength(JSON.stringify(compactedReceipts), 'utf8')
+  while (receiptsSize > RECEIPTS_BUDGET && compactedReceipts.length > 1) {
+    compactedReceipts = compactedReceipts.slice(1)
+    receiptsSize = Buffer.byteLength(JSON.stringify(compactedReceipts), 'utf8')
+  }
   let checkpointHistory = next.history
-  const receiptsBudget = Buffer.byteLength(JSON.stringify(compactedReceipts), 'utf8')
+  const receiptsBudget = receiptsSize
   const overhead = Buffer.byteLength(JSON.stringify({ ...next, history: [], actionReceipts: [] }), 'utf8')
   const historyBudget = Math.max(0, MAX_AGENT_CHECKPOINT_BYTES - receiptsBudget - overhead - 256)
   let currentSize = checkpointHistory.reduce((sum, m) => sum + Buffer.byteLength(m.content, 'utf8') + 12, 0)
@@ -102,6 +113,23 @@ export function compactCheckpointForStorage(next: AgentExecutionCheckpoint): Age
     const dropped = checkpointHistory[dropIndex]!
     currentSize -= Buffer.byteLength(dropped.content, 'utf8') + 12
     checkpointHistory = [checkpointHistory[0]!, ...checkpointHistory.slice(dropIndex + 1)]
+  }
+  // Last resort: if even the first prompt plus the final turn exceed the budget
+  // (a very long first user message), truncate the retained turns instead of
+  // failing the save outright.
+  while (
+    currentSize > historyBudget
+    && checkpointHistory.some((message) => message.content.length > 512)
+  ) {
+    const longest = checkpointHistory.reduce((best, message, index) => (
+      message.content.length > (checkpointHistory[best]?.content.length ?? 0) ? index : best
+    ), 0)
+    const message = checkpointHistory[longest]!
+    const keep = Math.max(512, Math.floor(message.content.length / 2))
+    currentSize -= Buffer.byteLength(message.content, 'utf8') - keep
+    checkpointHistory = checkpointHistory.map((entry, index) => (
+      index === longest ? { ...entry, content: `${entry.content.slice(0, keep)}\n[truncated to fit saved-progress limit]` } : entry
+    ))
   }
   const compacted = { ...next, history: checkpointHistory, actionReceipts: compactedReceipts }
   const size = Buffer.byteLength(JSON.stringify(compacted), 'utf8')

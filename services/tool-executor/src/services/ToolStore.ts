@@ -86,16 +86,38 @@ export class ToolStore {
   }
 
   save(tool: Tool): void {
-    const others = this.loadAll().filter((existing) => existing.id !== tool.id);
+    const others = this.readForRewrite().filter((existing) => existing.id !== tool.id);
     this.writeAll([...others, tool]);
   }
 
   remove(id: string): boolean {
-    const existing = this.loadAll();
+    const existing = this.readForRewrite();
     const remaining = existing.filter((tool) => tool.id !== id);
     if (remaining.length === existing.length) return false;
     this.writeAll(remaining);
     return true;
+  }
+
+  /**
+   * Read the store for a rewrite. `loadAll` treats a corrupt file as empty so the
+   * service can still boot, but a read-modify-write built on that would silently
+   * persist an empty list and destroy every stored tool. A rewrite must therefore
+   * refuse to proceed when the file exists but cannot be parsed.
+   */
+  private readForRewrite(): Tool[] {
+    if (fs.existsSync(this.file)) {
+      try {
+        const parsed: unknown = JSON.parse(fs.readFileSync(this.file, 'utf-8'))
+        if (!Array.isArray(parsed)) throw new Error('store payload is not an array')
+      } catch (err) {
+        logger.error(
+          { err: err instanceof Error ? err.message : String(err), file: this.file },
+          'Refusing to rewrite an unreadable tool store; existing entries are left untouched',
+        )
+        throw new Error('Tool store is unreadable; refusing to overwrite it')
+      }
+    }
+    return this.loadAll()
   }
 
   private writeAll(tools: Tool[]): void {

@@ -242,6 +242,8 @@ export interface ToolRegistry {
 
 export interface PluginGenerationRequest {
   description: string;
+  /** The capability phrase the agent asked for, when supplied separately from the description. */
+  capability?: string;
   requirements?: string[];
   context?: Record<string, unknown>;
 }

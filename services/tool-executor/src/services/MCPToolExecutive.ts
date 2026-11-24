@@ -412,15 +412,27 @@ export class MCPToolExecutive {
     const needle = capability.toLowerCase();
     if (haystack.includes(needle)) return true;
 
+    // A capability is usually a task objective ("Send an SMS text message to ..."),
+    // not a tool name. Requiring EVERY word to appear means an already-registered
+    // tool is never recognised, so resolution creates a renamed duplicate of it on
+    // every task. Require the distinctive terms (the operation and the medium) and
+    // let incidental task words through.
     const genericWords = new Set([
-      'a', 'an', 'and', 'available', 'capability', 'create', 'do', 'for', 'from', 'in',
-      'into', 'message', 'of', 'or', 'provide', 'registered', 'same', 'send', 'service',
-      'the', 'through', 'to', 'tool', 'use', 'using', 'via', 'with',
+      'a', 'an', 'and', 'are', 'available', 'be', 'capability', 'create', 'do', 'for',
+      'from', 'in', 'into', 'is', 'it', 'message', 'of', 'or', 'please', 'provide',
+      'registered', 'same', 'send', 'service', 'should', 'that', 'the', 'then',
+      'through', 'to', 'tool', 'use', 'using', 'via', 'with', 'you', 'your',
     ]);
-    const terms = needle
-      .match(/[a-z0-9]+/g)
-      ?.filter((term) => term.length > 1 && !genericWords.has(term)) || [];
-    return terms.length > 0 && terms.every((term) => haystack.includes(term));
+    const terms = [...new Set(
+      needle
+        .match(/[a-z0-9]+/g)
+        ?.filter((term) => term.length > 1 && !genericWords.has(term)) || [],
+    )];
+    if (terms.length === 0) return false;
+    const matched = terms.filter((term) => haystack.includes(term)).length;
+    // A single distinctive term among one-three must all match; for longer
+    // objectives, the operation/medium words are enough to recognise the tool.
+    return terms.length <= 3 ? matched === terms.length : matched >= Math.ceil(terms.length / 2);
   }
 }
 

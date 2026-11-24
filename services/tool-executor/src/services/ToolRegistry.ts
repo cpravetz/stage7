@@ -8,6 +8,8 @@ const PLUGIN_DEPLOY_DIR = process.env.PLUGIN_DEPLOY_DIR || '/tmp/stage7-plugins'
 export class ToolRegistry {
   private tools: Map<string, Tool> = new Map()
   private store: ToolStore | undefined
+  /** Ids whose files this registry deployed, and may therefore remove on unregister. */
+  private pluginDirs: Set<string> = new Set()
 
   constructor(store?: ToolStore) {
     this.store = store
@@ -96,12 +98,21 @@ export class ToolRegistry {
     this.tools.set(tool.id, tool)
   }
 
+  /** Records that this registry deployed `id` as a plugin directory (so it may remove it). */
+  markDeployedPlugin(id: string): void {
+    this.pluginDirs.add(id)
+  }
+
   unregister(id: string): boolean {
     const removed = this.tools.delete(id)
     if (removed && this.store) {
       this.store.remove(id)
     }
-    if (removed) {
+    if (removed && this.pluginDirs.has(id)) {
+      // Only a plugin this registry deployed may have its files removed. A built-in
+      // or skill tool that happens to share an id with a plugin directory name must
+      // not delete someone else's plugin.
+      this.pluginDirs.delete(id)
       try {
         const pluginDir = path.resolve(PLUGIN_DEPLOY_DIR, id)
         fs.rmSync(pluginDir, { recursive: true, force: true })

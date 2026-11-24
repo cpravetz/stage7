@@ -11,6 +11,7 @@ import { readFile } from 'fs/promises'
 import { join, basename } from 'path'
 import { mcpToolExecutive } from '../services/MCPToolExecutive'
 import { renderPermissionPrompt } from '../services/ToolPermissionService'
+import { listVaultSecretNames } from '../services/PluginGenerator'
 
 const router: Router = Router()
 
@@ -297,8 +298,14 @@ router.post(
 
     const generated = await generator.generate({
       description: data.description,
+      capability,
       requirements: data.requirements,
-      context: data.context,
+      context: {
+        ...(data.context || {}),
+        // Handed to the generator as prompt input. Reading the Vault here, at the
+        // route, keeps generation itself free of extra network dependencies.
+        vaultSecretNames: await listVaultSecretNames(),
+      },
     })
     if (!generated.success || !generated.tool) {
       res.status(400).json({ success: false, error: generated.error || 'Tool capability could not be resolved or created.' })

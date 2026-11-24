@@ -18,6 +18,7 @@ Requirements:
 - Each case's input and expectedOutput must be JSON objects. Credentials must be an object whose values are strings. Do not include real secrets or personal data.
 - When a capability needs HTTP, include a local HTTP fixture for each expected request, with its method, URL pattern, optional exact request body, and fixed JSON-object response. Fixture URLs must match the URL the implementation will call; use the known provider hostname if the API has a fixed hostname, or a reserved .test hostname for configurable endpoints. Requests are intercepted in-process and unmatched requests are blocked, so no live request is made. Use * for variable path segments such as account IDs.
 - When a request uses persistent configuration such as an API endpoint or account ID, include dummy string values in the case's credentials object keyed by logical credential key. Use an endpoint matching the HTTP fixture. Never include real credentials.
+- Key credentials by the provider's own vocabulary, using the exact names the provider documents for them (for example a Twilio account SID and auth token, or an API key). Do not invent generic keys such as "endpoint" or "token" when the provider has specific configuration, and do not omit the provider's account identifier. The generated tool is required to read these exact keys.
 - Expected outputs must be exact JSON values, not prose, descriptions, or wildcards.
 - If the requested capability cannot be tested with deterministic inputs and outputs, return {"description":"...","cases":[]} so the tool is not deployed without a verifiable contract.
 - Return no markdown fences or text outside the JSON object.`;
@@ -68,6 +69,19 @@ const PLUGIN_SYSTEM_PROMPT = `You are a senior engineer generating production-re
     requested by the user prompt.
   - Implement the supplied independent acceptance contract exactly; it will be executed
     with network access and credentials disabled before deployment.
+  - Implement HTTP authentication the way the provider documents it. Do not pass a
+    provider credential somewhere the provider does not read it: for HTTP Basic
+    authentication build the header from BOTH the username and password
+    (base64 of "user:pass"), not one of them alone, and never send a token as a
+    bare header value when the provider expects a scheme. A credential that is read
+    but not actually used to authenticate is a defect even if the test fixture
+    passes, so make the auth exactly match the real API.
+  - Use the acceptance contract's OWN names for inputs and credentials. Read each
+    credential with the exact key the contract's credentials object uses, and each
+    input with the exact key its input object uses. Do not rename them, and do not
+    read a value (such as an endpoint URL) from a different key than the contract
+    supplies. If the contract provides an endpoint URL, build the request URL from
+    that value; if it does not, use the provider's fixed, documented URL.
   - Include configSchema in every response; use {"type":"object","properties":{}} when no
     configuration is needed.
   - Never read configuration, credentials, or secrets from process.env, os.environ,
@@ -103,6 +117,12 @@ const PLUGIN_SYSTEM_PROMPT = `You are a senior engineer generating production-re
     guessed logical key or request the secret value.
   - Never put secrets in config defaults, source code, logs, outputs, or acceptance-test
     fixtures; acceptance tests must use dummy values and must not make live requests.
+  - Do not silently convert provider failures into an "accepted": false style result.
+    On an HTTP error, capture the response status and the provider's parsed JSON body
+    (code and message) and include them in the JSON result so the caller can see the
+    exact rejection (for example a trial-account unverified-recipient error). Raise
+    only when no structured result can be produced; prefer a result object carrying
+    the error text over an unhandled exception.
   - If the tool must return a secret value, mark that output property with
     "x-stage7-secret": true. ToolExecutor stores it in Vault and returns only a
     vault:// reference to the Agent; never include real secret values in acceptance tests.
@@ -307,6 +327,44 @@ function missionScope(context: Record<string, unknown> | undefined): string {
   return `Original mission goal (authoritative scope): ${goal}\n${task ? `Assigned task: ${task}\n` : ''}The capability must directly support the goal. Do not substitute another operation or medium.\n\n`;
 }
 
+/**
+ * Names of secrets already stored in the Vault, so generated tools can bind to
+ * real, configured credentials instead of inventing identifiers that resolve to
+ * nothing and force a fresh credential prompt for a value the operator already
+ * supplied.
+ */
+export async function listVaultSecretNames(): Promise<string[]> {
+  const vaultUrl = process.env.VAULT_URL || 'http://vault:4000';
+  try {
+    // A short deadline keeps a slow or absent Vault from delaying generation: the
+    // secret list only sharpens the prompt, and generation must not depend on it.
+    const response = await fetch(`${vaultUrl}/api/vault/secrets`, {
+      headers: { 'X-Tenant-Id': 'system' },
+      signal: AbortSignal.timeout(3_000),
+    });
+    if (!response.ok) return [];
+    const data = await response.json() as unknown;
+    const list = Array.isArray(data)
+      ? data
+      : (data && typeof data === 'object' && Array.isArray((data as { secrets?: unknown[] }).secrets)
+        ? (data as { secrets: unknown[] }).secrets
+        : []);
+    return list
+      .map((entry) => (entry && typeof entry === 'object' ? (entry as { name?: unknown }).name : undefined))
+      .filter((name): name is string => typeof name === 'string' && name.length > 0);
+  } catch (err) {
+    logger.warn({ err: err instanceof Error ? err.message : String(err) }, 'Vault secret listing failed for plugin generation');
+    return [];
+  }
+}
+
+/** Credential-related vault names worth showing the generator, bounded to keep the prompt small. */
+export function credentialSecretHint(names: string[], max = 40): string {
+  const credentialLike = names.filter((name) => !/^(tool:[^:]+:searxng|eventTypes)/i.test(name));
+  if (credentialLike.length === 0) return '';
+  return `\nCredentials already stored in the Vault (use these exact names as vaultSecretId when the tool needs them; do not invent new names):\n${credentialLike.slice(0, max).map((name) => `- ${name}`).join('\n')}\n`;
+}
+
 export interface RemediationOptions {
   temperature: number;
   maxTokens: number;
@@ -387,7 +445,7 @@ export function buildPluginTestFailureRepairQuery(params: {
   failedCases: string[];
 }): string {
   const { description, testContract, sourceCode, failedCases } = params;
-  return `Your tool's code failed its isolated acceptance tests. Fix ONLY the code so the cases below pass; do not change the acceptance contract.\n\nCapability: ${description}\nAcceptance contract:\n${JSON.stringify(testContract)}\n\nFailing cases:\n${failedCases.map((c) => `- ${c}`).join('\n')}\n\nCurrent sourceCode:\n${sourceCode}\n\nReturn ONLY one JSON object with exactly this shape and nothing else (no prose, no markdown fences):\n${PLUGIN_JSON_SHAPE_JSON}`;
+  return `Your tool's code failed its isolated acceptance tests. Fix ONLY the code so the cases below pass; do not change the acceptance contract.\n\nCapability: ${description}\nAcceptance contract:\n${JSON.stringify(testContract)}\n\nFailing cases:\n${failedCases.map((c) => `- ${c}`).join('\n')}\n\nCurrent sourceCode:\n${sourceCode}\n\nWhen a case reports a credential or output mismatch, do not weaken or mock the real provider call. Align the implementation with the contract: read credentials through __get_credential using the configSchema logical keys the contract supplies, call the real provider endpoint the fixture stands in for, and return exactly the JSON keys and values the case expects. Never make the tool report success without performing the provider request.\n\nReturn ONLY one JSON object with exactly this shape and nothing else (no prose, no markdown fences):\n${PLUGIN_JSON_SHAPE_JSON}`;
 }
 
 // Acceptance-contract defect: focused query about the contract only.
@@ -526,6 +584,10 @@ export class PluginGenerator {
     missionId?: string;
     repairFeedback?: string;
     maxAttempts?: number;
+    secretHint?: string;
+    capabilityRequest?: Record<string, unknown>;
+    /** The capability phrase the agent asked for, used to record what the tool was created for. */
+    capability?: string;
   }): Promise<PluginGenerationResult> {
     const {
       description,
@@ -534,8 +596,17 @@ export class PluginGenerator {
       testContract,
       brainUrl,
       missionId,
+      secretHint = '',
+      capability,
     } = options;
-    const basePrompt = `Generate an executable plugin for this capability:\n${description}\nRequirements: ${requirements.join(', ')}\nContext: ${JSON.stringify(context)}\n\nIndependent acceptance contract to implement exactly:\n${JSON.stringify(testContract)}`;
+    const capabilityRequest = options.capabilityRequest ?? {
+      ...(typeof capability === 'string' ? { capability } : {}),
+      description,
+      requirements,
+      ...(missionId ? { missionId } : {}),
+      ...(typeof context.missionGoal === 'string' ? { missionGoal: context.missionGoal } : {}),
+    };
+    const basePrompt = `Generate an executable plugin for this capability:\n${description}\nRequirements: ${requirements.join(', ')}\nContext: ${JSON.stringify(context)}\n${secretHint}\nIndependent acceptance contract to implement exactly:\n${JSON.stringify(testContract)}`;
     const maxAttempts = options.maxAttempts || MAX_PLUGIN_GENERATION_ATTEMPTS;
     // Stable per-generation routing session: every attempt below shares it so
     // the Brain excludes models that already failed and rotates to a new one.
@@ -830,16 +901,31 @@ export class PluginGenerator {
         await this.reportBrainComplaint(contractData.requestId, error, missionId);
         return { success: false, error };
       }
+      const secretHint = credentialSecretHint(
+        Array.isArray(request.context?.vaultSecretNames)
+          ? request.context.vaultSecretNames.filter((name): name is string => typeof name === 'string')
+          : [],
+      );
+      const pluginCapabilityRequest = {
+        capability: typeof request.capability === 'string' ? request.capability : undefined,
+        description: request.description,
+        requirements: request.requirements || [],
+        ...(missionId ? { missionId } : {}),
+        ...(typeof request.context?.missionGoal === 'string' ? { missionGoal: request.context.missionGoal } : {}),
+      };
       const repairRejectedPlugin = async (reason: string): Promise<PluginGenerationResult> => {
         const repaired = await this.generateContractTestedTool({
           description: request.description,
           requirements: request.requirements || [],
           context: request.context || {},
+          capability: request.capability,
           testContract,
           brainUrl,
           missionId,
           repairFeedback: reason,
           maxAttempts: 1,
+          secretHint,
+          capabilityRequest: pluginCapabilityRequest,
         });
         return repaired.success
           ? repaired
@@ -847,7 +933,7 @@ export class PluginGenerator {
       };
 
       const userPromptNonce = `plugin-user-${Date.now()}`;
-      const userPrompt = `Generate an executable plugin for this capability:\n${request.description}\nRequirements: ${(request.requirements || []).join(', ')}\nContext: ${JSON.stringify(request.context || {})}\n\nIndependent acceptance contract to implement exactly:\n${JSON.stringify(testContract)}\nRetry nonce: ${userPromptNonce}`;
+      const userPrompt = `Generate an executable plugin for this capability:\n${request.description}\nRequirements: ${(request.requirements || []).join(', ')}\nContext: ${JSON.stringify(request.context || {})}\n${secretHint}\nIndependent acceptance contract to implement exactly:\n${JSON.stringify(testContract)}\nRetry nonce: ${userPromptNonce}`;
       const pluginRoutingSessionId = `plugin-user:${missionId || 'tool'}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
 
       const response = await fetch(`${brainUrl}/api/brain/complete`, {
@@ -938,6 +1024,7 @@ export class PluginGenerator {
           inputs: parsed.inputs || {},
           outputs: parsed.outputs || {},
           testContract,
+          ...(pluginCapabilityRequest ? { capabilityRequest: pluginCapabilityRequest } : {}),
         },
         inputSchema: parsed.inputs || { type: 'object', properties: {} },
         configSchema: parsed.configSchema || { type: 'object', properties: {} },
@@ -1054,6 +1141,13 @@ export class PluginGenerator {
         return { success: false, error: 'Plugin id resolves outside the deployment directory' };
       }
       if (this.registry?.get(tool.id) || fs.existsSync(pluginDir)) {
+        // A tool that is already registered is live and usable; a new-generation
+        // attempt for the same capability must never take it out of service.
+        // Report the existing tool so the caller keeps a working capability.
+        const live = this.registry?.get(tool.id);
+        if (live) {
+          return { success: true, deployPath: fs.existsSync(pluginDir) ? pluginDir : undefined };
+        }
         return { success: false, error: `Plugin id '${tool.id}' is already registered or deployed` };
       }
 
@@ -1104,6 +1198,7 @@ export class PluginGenerator {
       if (this.registry) {
         try {
           this.registry.register(tool);
+          this.registry.markDeployedPlugin?.(tool.id);
         } catch (error) {
           try {
             fs.rmSync(pluginDir, { recursive: true, force: true });

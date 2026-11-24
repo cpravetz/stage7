@@ -237,7 +237,7 @@ export function requiredActionCorrection(
   const pending = actions.map((action) => `${action.toolId} (${action.outcome})`)
   const parts = [
     ...(pending.length > 0 ? [`Still required: ${pending.join(', ')}.`] : []),
-    ...(requiresExternalAction ? [`A verified external operation has not been performed. Discovery, tool creation, delegation and drafting do not count. If a registered tool can perform the operation, call it now with the task's actual values. If no registered tool matches, call ${CREATE_TOOL_ACTION} to create one — do not return a text answer without attempting a tool or tool creation.`] : []),
+    ...(requiresExternalAction ? [`A verified external operation has not been performed. Discovery, tool creation, delegation and drafting do not count. If a registered tool implements this exact operation, call it now with the task's actual values. If none does — do not bend an unrelated general-purpose tool to it — call ${CREATE_TOOL_ACTION} to create the capability.`] : []),
   ]
   return `${parts.join(' ')} Reply with the single next JSON action that makes progress.`
 }
