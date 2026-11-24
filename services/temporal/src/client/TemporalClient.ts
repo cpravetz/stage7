@@ -3,11 +3,12 @@ import { runWatchActivity } from '../activities/watchActivity';
 import { fetchWatchActivity } from '../activities/watchActivity';
 import { runMissionDirect } from '../activities/missionActivity';
 import { runWatchLoop } from '../workflows/watchLoop';
-import { logger, Plan, PlanSchema, sanitizeAgentMessage } from '@stage7-nextgen/shared';
+import { logger, Plan, PlanSchema, sanitizeAgentMessage, HeuristicEntry } from '@stage7-nextgen/shared';
 import { MissionActivityCheckpoint, MissionPendingInteraction, WorkflowInput, WorkflowResult } from '../types/workflow';
 import { getMissionResumeProgress } from '../recovery/missionProgress';
 import { MissionTerminationRequestedError } from '../types/missionControl';
 import { MissionOrchestrator } from '../planner/MissionOrchestrator';
+import { DistillationKnowledgeStore } from '../services/DistillationKnowledgeStore';
 
 const DIRECT_RECOVERY_LEASE_DURATION_MS = 90_000;
 const DIRECT_RECOVERY_LEASE_RENEWAL_MS = 30_000;
@@ -677,8 +678,10 @@ export class TemporalClient {
               .then(async (res) => {
                 if (!res.ok) return;
                 const assistant = await res.json();
-                // Ask brain to distill and we can re-save via artifacts; brain service has distillation route
-                await fetch(`${brainUrl}/api/brain/distillation/trigger`, {
+                // Ask brain to distill and persist whatever it returns so the
+                // learning survives mission completion; prompt assembly reads
+                // these entries through the knowledge store.
+                const distillRes = await fetch(`${brainUrl}/api/brain/distillation/trigger`, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
@@ -687,9 +690,17 @@ export class TemporalClient {
                     missionId: input.missionId,
                   }),
                 });
-                // Optionally re-fetch updated assistant from brain if it persists; brain persists via its own flow? 
-                // Brain's distillation service can be extended to persist via artifacts - but easier: call artifacts to save after brain returns? 
-                // For now trigger only; brain service can be enhanced to persist
+                if (distillRes.ok && input.assistantId) {
+                  const { heuristics } = (await distillRes.json()) as { heuristics?: unknown };
+                  if (Array.isArray(heuristics) && heuristics.length) {
+                    await DistillationKnowledgeStore.getInstance().persist({
+                      assistantId: input.assistantId,
+                      tenantId: input.tenantId,
+                      missionId: input.missionId,
+                      heuristics: heuristics as HeuristicEntry[],
+                    });
+                  }
+                }
               })
               .catch(() => {});
           } catch (e) {
