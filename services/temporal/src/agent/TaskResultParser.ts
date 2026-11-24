@@ -101,9 +101,14 @@ export function validateArtifactContent(artifact: MissionArtifact): boolean {
   const content = artifact.content.trim();
   if (content.length === 0) return false;
   // Reject content that is only headings, comments, or placeholder markers.
-  const stripped = content
+  let withoutHtmlComments = content;
+  let previousWithoutHtmlComments: string;
+  do {
+    previousWithoutHtmlComments = withoutHtmlComments;
+    withoutHtmlComments = withoutHtmlComments.replace(/<!--[\s\S]*?-->/g, '');
+  } while (withoutHtmlComments !== previousWithoutHtmlComments);
+  const stripped = withoutHtmlComments
     .replace(/^#{1,6}\s.*$/gm, '') // headings
-    .replace(/<!--[\s\S]*?-->/g, '') // HTML comments
     .replace(/\/\/.*$/gm, '') // line comments
     .replace(/\/\*[\s\S]*?\*\//g, '') // block comments
     .replace(/^\s*>\s.*$/gm, '') // blockquotes
